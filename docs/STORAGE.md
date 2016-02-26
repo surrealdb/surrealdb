@@ -31,6 +31,7 @@ Each view, table, and index is assigned a unique id, which is used instead of th
 Each data type is stored using a different symbol in the key:value pair.
 
 ```bash
+! # Used to store Surreal config data
 ¤ # Used to store view and index data
 « # Used to store in edges
 » # Used to store out edges
@@ -100,7 +101,7 @@ Each data type is stored using a different symbol in the key:value pair.
 ```
 
 ```bash
-/{$base}/{$auth}/{$db}/¤/{$viewid}/COLUMNS "{$id}"
+/{$base}/{$auth}/{$db}/¤/{$viewid}/[{$columns}] "{$id}"
 # e.g
 /{$base}/{$auth}/{$db}/¤/{$viewid}/[lastname,firstname] "@person:1342"
 ```
@@ -109,14 +110,22 @@ Each data type is stored using a different symbol in the key:value pair.
 
 ```bash
 /{$base}/{$auth}/{$db}/{$tableid}/!/index/{$index} "{$indexid}"
-/{$base}/{$auth}/{$db}/{$tableid}/!/index/{$index}/col "COLUMNS"
+/{$base}/{$auth}/{$db}/{$tableid}/!/index/{$index}/col "{$columns}"
 # e.g
 /{$base}/{$auth}/{$db}/{$tableid}/!/index/names "5gbq3hm5"
 /{$base}/{$auth}/{$db}/1bd7ajq8/!/index/names/col "lastname|firstname|emails.0.value"
 ```
 
+**Unique index**
 ```bash
-/{$base}/{$auth}/{$db}/{$tableid}/¤/{$indexid}/COLUMNS "{$id}"
+/{$base}/{$auth}/{$db}/{$tableid}/¤/{$indexid}/[{$columns}]/{$id} ""
+# e.g
+/{$base}/{$auth}/{$db}/{$tableid}/¤/{$indexid}/[lastname,firstname]/{$id} ""
+```
+
+**Non-unique index**
+```bash
+/{$base}/{$auth}/{$db}/{$tableid}/¤/{$indexid}/[{$columns}] "{$id}"
 # e.g
 /{$base}/{$auth}/{$db}/{$tableid}/¤/{$indexid}/[lastname,firstname] "@person:1342"
 ```
