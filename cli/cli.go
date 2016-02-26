@@ -33,7 +33,8 @@ import (
 )
 
 var mainCmd = &cobra.Command{
-	Use: "surreal",
+	Use:   "surreal",
+	Short: "SurrealDB command-line interface and server",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return stores.Setup(Config.Context)
 	},
