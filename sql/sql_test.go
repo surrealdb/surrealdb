@@ -306,7 +306,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		},
 		{
 			sql: "SELECT * FROM person WHERE id",
-			err: "found `` but expected `IN, =, !=, >, <, >=, <=, =~, !~`",
+			err: "found `` but expected `IN, =, !=, >, <, >=, <=, =~, !~, ∋, ∌`",
 		},
 		{
 			sql: "SELECT * FROM person WHERE id =",

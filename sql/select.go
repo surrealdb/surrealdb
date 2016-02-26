@@ -90,7 +90,7 @@ func (p *Parser) parseWhere() (Expr, error) {
 		}
 		w.LHS = declare(tok, lit)
 
-		tok, lit, err = p.shouldBe(IN, EQ, NEQ, GT, LT, GTE, LTE, EQR, NER)
+		tok, lit, err = p.shouldBe(IN, EQ, NEQ, GT, LT, GTE, LTE, EQR, NER, SEQ, SNE)
 		if err != nil {
 			return nil, err
 		}

@@ -73,6 +73,8 @@ const (
 	GTE // >=
 	EQR // =~
 	NER // !~
+	SEQ // ∋
+	SNE // ∌
 
 	operatorEnd
 
@@ -176,6 +178,8 @@ var tokens = [...]string{
 	GTE: ">=",
 	EQR: "=~",
 	NER: "!~",
+	SEQ: "∋",
+	SNE: "∌",
 
 	// keywords
 
