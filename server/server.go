@@ -22,7 +22,10 @@ import (
 	"github.com/abcum/surreal/server/api"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
+	"github.com/thoas/stats"
 )
+
+var stat *stats.Stats
 
 // Setup sets up the server for remote connections
 func Setup(ctx cnf.Context) (e error) {
@@ -43,6 +46,7 @@ func Setup(ctx cnf.Context) (e error) {
 	r.AutoIndex(false)
 	r.SetHTTPErrorHandler(errors)
 
+	r.Use(stat.Handler)
 	r.Use(middleware.Gzip())
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recover())
@@ -69,6 +73,7 @@ func Setup(ctx cnf.Context) (e error) {
 	s.AutoIndex(false)
 	s.SetHTTPErrorHandler(errors)
 
+	s.Use(stat.Handler)
 	s.Use(middleware.Gzip())
 	s.Use(middleware.Logger())
 	s.Use(middleware.Recover())
