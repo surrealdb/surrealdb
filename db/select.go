@@ -12,25 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package db
 
 import (
-	"github.com/abcum/surreal/db"
-	"github.com/labstack/echo"
+	"github.com/abcum/surreal/sql"
 )
 
-func crud(c *echo.Context) error {
-
-	s, e := db.ExecuteBuffer(c.Request().Body)
-
-	if e == nil {
-		return c.JSON(200, show(s))
-	}
-
-	if e != nil {
-		return c.JSON(422, oops(e))
-	}
-
-	return nil
-
+func executeSelectStatement(stmt sql.Statement) interface{} {
+	return stmt
 }

@@ -15,7 +15,7 @@
 package server
 
 import (
-	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/db"
 	"github.com/labstack/echo"
 	"golang.org/x/net/websocket"
 )
@@ -32,7 +32,7 @@ func sock(c *echo.Context) error {
 			break
 		}
 
-		s, e := sql.Parse(msg)
+		s, e := db.ExecuteString(msg)
 
 		if e == nil {
 			if err := websocket.Message.Send(ws, encode(show(s))); err != nil {
