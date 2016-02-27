@@ -109,23 +109,23 @@ func Test_Parse_Queries_Malformed(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: "SELECT ` FROM person",
-			err: "found ` FROM person` but expected `field name`",
+			err: "Found ` FROM person` but expected `field name`",
 		},
 		{
 			sql: `SELECT ' FROM person`,
-			err: "found ` FROM person` but expected `field name`",
+			err: "Found ` FROM person` but expected `field name`",
 		},
 		{
 			sql: `SELECT " FROM person`,
-			err: "found ` FROM person` but expected `field name`",
+			err: "Found ` FROM person` but expected `field name`",
 		},
 		{
 			sql: `SELECT "\" FROM person`,
-			err: "found `\" FROM person` but expected `field name`",
+			err: "Found `\" FROM person` but expected `field name`",
 		},
 		{
 			sql: `SELECT "\q" FROM person`,
-			err: "found `` but expected `field name`",
+			err: "Found `` but expected `field name`",
 		},
 	}
 
@@ -140,27 +140,27 @@ func Test_Parse_Queries_Select(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `!`,
-			err: "found `!` but expected `SELECT, INSERT, UPSERT, UPDATE, MODIFY, DELETE, RELATE, RECORD, DEFINE, RESYNC, REMOVE`",
+			err: "Found `!` but expected `SELECT, INSERT, UPSERT, UPDATE, MODIFY, DELETE, RELATE, RECORD, DEFINE, RESYNC, REMOVE`",
 		},
 		{
 			sql: `SELECT`,
-			err: "found `` but expected `field name`",
+			err: "Found `` but expected `field name`",
 		},
 		{
 			sql: `SELECT FROM`,
-			err: "found `FROM` but expected `field name`",
+			err: "Found `FROM` but expected `field name`",
 		},
 		{
 			sql: `SELECT *`,
-			err: "found `` but expected `FROM`",
+			err: "Found `` but expected `FROM`",
 		},
 		{
 			sql: `SELECT * FROM`,
-			err: "found `` but expected `table name`",
+			err: "Found `` but expected `table name`",
 		},
 		{
 			sql: `SELECT * FROM per!son`,
-			err: "found `!` but expected `EOF, ;`",
+			err: "Found `!` but expected `EOF, ;`",
 		},
 		{
 			sql: `SELECT * FROM person;`,
@@ -178,23 +178,23 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		},
 		{
 			sql: `SELECT * FROM person;;;`,
-			err: "found `;` but expected `SELECT, INSERT, UPSERT, UPDATE, MODIFY, DELETE, RELATE, RECORD, DEFINE, RESYNC, REMOVE`",
+			err: "Found `;` but expected `SELECT, INSERT, UPSERT, UPDATE, MODIFY, DELETE, RELATE, RECORD, DEFINE, RESYNC, REMOVE`",
 		},
 		{
 			sql: `SELECT * FROM @`,
-			err: "found `` but expected `table name`",
+			err: "Found `` but expected `table name`",
 		},
 		{
 			sql: `SELECT * FROM person:uuid`,
-			err: "found `:` but expected `EOF, ;`",
+			err: "Found `:` but expected `EOF, ;`",
 		},
 		{
 			sql: `SELECT * FROM @person`,
-			err: "found `` but expected `:`",
+			err: "Found `` but expected `:`",
 		},
 		{
 			sql: `SELECT * FROM @person:`,
-			err: "found `` but expected `table id`",
+			err: "Found `` but expected `table id`",
 		},
 		{
 			sql: `SELECT * FROM person`,
@@ -219,7 +219,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		},
 		{
 			sql: `SELECT * FROM @person:123.456`,
-			err: "found `123.456` but expected `table id`",
+			err: "Found `123.456` but expected `table id`",
 		},
 		{
 			sql: `SELECT * FROM @person:123.456.789.012`,
@@ -266,11 +266,11 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		},
 		{
 			sql: `SELECT * FROM @{email addresses}:{this\nis\nodd}`,
-			err: "found `this\nis\nodd` but expected `table id`",
+			err: "Found `this\nis\nodd` but expected `table id`",
 		},
 		{
 			sql: `SELECT * FROM @{email addresses}:{this\qis\nodd}`,
-			err: "found `is` but expected `EOF, ;`",
+			err: "Found `is` but expected `EOF, ;`",
 		},
 		{
 			sql: `SELECT *, temp AS test FROM person`,
@@ -302,15 +302,15 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		},
 		{
 			sql: "SELECT * FROM person WHERE",
-			err: "found `` but expected `field name`",
+			err: "Found `` but expected `field name`",
 		},
 		{
 			sql: "SELECT * FROM person WHERE id",
-			err: "found `` but expected `IN, =, !=, >, <, >=, <=, =~, !~, ∋, ∌`",
+			err: "Found `` but expected `IN, =, !=, >, <, >=, <=, =~, !~, ∋, ∌`",
 		},
 		{
 			sql: "SELECT * FROM person WHERE id =",
-			err: "found `` but expected `field value`",
+			err: "Found `` but expected `field value`",
 		},
 		{
 			sql: "SELECT * FROM person WHERE id = 1",
@@ -369,19 +369,19 @@ func Test_Parse_Queries_Create(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `CREATE`,
-			err: "found `` but expected `table name`",
+			err: "Found `` but expected `table name`",
 		},
 		{
 			sql: `CREATE INTO`,
-			err: "found `` but expected `table name`",
+			err: "Found `` but expected `table name`",
 		},
 		{
 			sql: `CREATE person`,
-			err: "found `` but expected `SET`",
+			err: "Found `` but expected `SET`",
 		},
 		{
 			sql: `CREATE person SET firstname`,
-			err: "found `` but expected `=, +=, -=`",
+			err: "Found `` but expected `=, +=, -=`",
 		},
 		{
 			sql: `CREATE person SET firstname = "Tobie"`,
@@ -394,7 +394,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		},
 		{
 			sql: `CREATE person SET firstname = "Tobie" something`,
-			err: "found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ;`",
 		},
 	}
 
@@ -409,19 +409,19 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `INSERT`,
-			err: "found `` but expected `table name`",
+			err: "Found `` but expected `table name`",
 		},
 		{
 			sql: `INSERT INTO`,
-			err: "found `` but expected `table name`",
+			err: "Found `` but expected `table name`",
 		},
 		{
 			sql: `INSERT INTO person`,
-			err: "found `` but expected `SET`",
+			err: "Found `` but expected `SET`",
 		},
 		{
 			sql: `INSERT INTO person SET firstname`,
-			err: "found `` but expected `=, +=, -=`",
+			err: "Found `` but expected `=, +=, -=`",
 		},
 		{
 			sql: `INSERT INTO person SET firstname = "Tobie"`,
@@ -434,7 +434,7 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 		},
 		{
 			sql: `INSERT INTO person SET firstname = "Tobie" something`,
-			err: "found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ;`",
 		},
 	}
 
@@ -500,30 +500,30 @@ func Test_Parse_Queries_Define(t *testing.T) {
 
 		{
 			sql: `DEFINE`,
-			err: "found `` but expected `INDEX, VIEW`",
+			err: "Found `` but expected `INDEX, VIEW`",
 		},
 
 		// VIEW
 
 		{
 			sql: `DEFINE VIEW`,
-			err: "found `` but expected `name`",
+			err: "Found `` but expected `name`",
 		},
 		{
 			sql: `DEFINE VIEW temp`,
-			err: "found `` but expected `MAP`",
+			err: "Found `` but expected `MAP`",
 		},
 		{
 			sql: `DEFINE VIEW temp MAP`,
-			err: "found `` but expected `string`",
+			err: "Found `` but expected `string`",
 		},
 		{
 			sql: "DEFINE VIEW temp MAP ``",
-			err: "found `` but expected `REDUCE`",
+			err: "Found `` but expected `REDUCE`",
 		},
 		{
 			sql: "DEFINE VIEW temp MAP `` REDUCE",
-			err: "found `` but expected `string`",
+			err: "Found `` but expected `string`",
 		},
 		{
 			sql: "DEFINE VIEW temp MAP `` REDUCE ``",
@@ -561,30 +561,30 @@ return sum()
 		},
 		{
 			sql: "DEFINE VIEW temp MAP `` REDUCE `` something",
-			err: "found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ;`",
 		},
 
 		// INDEX
 
 		{
 			sql: `DEFINE INDEX`,
-			err: "found `` but expected `name`",
+			err: "Found `` but expected `name`",
 		},
 		{
 			sql: `DEFINE INDEX temp`,
-			err: "found `` but expected `ON`",
+			err: "Found `` but expected `ON`",
 		},
 		{
 			sql: `DEFINE INDEX temp ON`,
-			err: "found `` but expected `table name`",
+			err: "Found `` but expected `table name`",
 		},
 		{
 			sql: `DEFINE INDEX temp ON person`,
-			err: "found `` but expected `COLUMNS`",
+			err: "Found `` but expected `COLUMNS`",
 		},
 		{
 			sql: `DEFINE INDEX temp ON person COLUMNS`,
-			err: "found `` but expected `field name`",
+			err: "Found `` but expected `field name`",
 		},
 		{
 			sql: `DEFINE INDEX temp ON person COLUMNS firstname, lastname`,
@@ -612,11 +612,11 @@ return sum()
 		},
 		{
 			sql: `DEFINE INDEX temp ON person COLUMNS firstname, lastname something UNIQUE`,
-			err: "found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ;`",
 		},
 		{
 			sql: `DEFINE INDEX temp ON person COLUMNS firstname, lastname UNIQUE something`,
-			err: "found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ;`",
 		},
 	}
 
@@ -632,14 +632,14 @@ func Test_Parse_Queries_Resync(t *testing.T) {
 
 		{
 			sql: `RESYNC`,
-			err: "found `` but expected `INDEX, VIEW`",
+			err: "Found `` but expected `INDEX, VIEW`",
 		},
 
 		// VIEW
 
 		{
 			sql: `RESYNC VIEW`,
-			err: "found `` but expected `name`",
+			err: "Found `` but expected `name`",
 		},
 		{
 			sql: `RESYNC VIEW temp`,
@@ -649,22 +649,22 @@ func Test_Parse_Queries_Resync(t *testing.T) {
 		},
 		{
 			sql: `RESYNC VIEW temp something`,
-			err: "found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ;`",
 		},
 
 		// INDEX
 
 		{
 			sql: `RESYNC INDEX`,
-			err: "found `` but expected `name`",
+			err: "Found `` but expected `name`",
 		},
 		{
 			sql: `RESYNC INDEX temp`,
-			err: "found `` but expected `ON`",
+			err: "Found `` but expected `ON`",
 		},
 		{
 			sql: `RESYNC INDEX temp ON`,
-			err: "found `` but expected `table name`",
+			err: "Found `` but expected `table name`",
 		},
 		{
 			sql: `RESYNC INDEX temp ON person`,
@@ -675,7 +675,7 @@ func Test_Parse_Queries_Resync(t *testing.T) {
 		},
 		{
 			sql: `RESYNC INDEX temp ON person something`,
-			err: "found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ;`",
 		},
 	}
 
@@ -691,14 +691,14 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 
 		{
 			sql: `REMOVE`,
-			err: "found `` but expected `INDEX, VIEW`",
+			err: "Found `` but expected `INDEX, VIEW`",
 		},
 
 		// VIEW
 
 		{
 			sql: `REMOVE VIEW`,
-			err: "found `` but expected `name`",
+			err: "Found `` but expected `name`",
 		},
 		{
 			sql: `REMOVE VIEW temp`,
@@ -708,22 +708,22 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		},
 		{
 			sql: `REMOVE VIEW temp something`,
-			err: "found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ;`",
 		},
 
 		// INDEX
 
 		{
 			sql: `REMOVE INDEX`,
-			err: "found `` but expected `name`",
+			err: "Found `` but expected `name`",
 		},
 		{
 			sql: `REMOVE INDEX temp`,
-			err: "found `` but expected `ON`",
+			err: "Found `` but expected `ON`",
 		},
 		{
 			sql: `REMOVE INDEX temp ON`,
-			err: "found `` but expected `table name`",
+			err: "Found `` but expected `table name`",
 		},
 		{
 			sql: `REMOVE INDEX temp ON person`,
@@ -734,7 +734,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		},
 		{
 			sql: `RESYNC INDEX temp ON person something`,
-			err: "found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ;`",
 		},
 	}
 

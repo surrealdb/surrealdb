@@ -27,5 +27,5 @@ type ParseError struct {
 
 // Error returns the string representation of the error.
 func (e *ParseError) Error() string {
-	return fmt.Sprintf("found `%s` but expected `%s`", e.Found, strings.Join(e.Expected, ", "))
+	return fmt.Sprintf("Found `%s` but expected `%s`", e.Found, strings.Join(e.Expected, ", "))
 }
