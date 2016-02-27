@@ -29,9 +29,15 @@ type Parser struct {
 	}
 }
 
-// Parse parses a string.
-func Parse(s string) (*Query, error) {
-	r := strings.NewReader(s)
+// ParseString parses a string.
+func ParseString(i string) (*Query, error) {
+	r := strings.NewReader(i)
+	p := &Parser{s: NewScanner(r)}
+	return p.Parse()
+}
+
+// ParseBuffer parses a buffer.
+func ParseBuffer(r io.Reader) (*Query, error) {
 	p := &Parser{s: NewScanner(r)}
 	return p.Parse()
 }

@@ -73,9 +73,9 @@ func Execute(ast *sql.Query, err error) (interface{}, error) {
 }
 
 func ExecuteString(input string) (interface{}, error) {
-	return Execute(sql.Parse(input))
+	return Execute(sql.ParseString(input))
 }
 
 func ExecuteBuffer(input io.Reader) (interface{}, error) {
-	return Execute(sql.NewParser(input).Parse())
+	return Execute(sql.ParseBuffer(input))
 }
