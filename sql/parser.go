@@ -82,10 +82,6 @@ func (p *Parser) ParseSingle() (Statement, error) {
 		return p.parseSelectStatement()
 	case CREATE:
 		return p.parseCreateStatement()
-	case INSERT:
-		return p.parseInsertStatement()
-	case UPSERT:
-		return p.parseUpsertStatement()
 	case UPDATE:
 		return p.parseUpdateStatement()
 	case MODIFY:
@@ -110,8 +106,7 @@ func (p *Parser) ParseSingle() (Statement, error) {
 			Found: lit,
 			Expected: []string{
 				"SELECT",
-				"INSERT",
-				"UPSERT",
+				"CREATE",
 				"UPDATE",
 				"MODIFY",
 				"DELETE",

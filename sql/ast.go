@@ -83,6 +83,13 @@ type UpdateStatement struct {
 	Where Expr
 }
 
+// ModifyStatement represents a SQL UPDATE statement.
+// MODIFY @person:123 WITH {}
+type ModifyStatement struct {
+	Thing Expr
+	Diff  Expr
+}
+
 // DeleteStatement represents a SQL DELETE statement.
 // DELETE FROMn person
 type DeleteStatement struct {
