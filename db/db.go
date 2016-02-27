@@ -20,50 +20,55 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func Execute(query *sql.Query, err error) (interface{}, error) {
+func Execute(ast *sql.Query, err error) (interface{}, error) {
 
 	if err != nil {
 		return nil, err
 	}
+
+	var res []interface{}
+	var stm interface{}
 
 	for _, s := range ast.Statements {
 
 		switch s.(type) {
 
 		case *sql.SelectStatement:
-			return executeSelectStatement(s), err
+			stm = executeSelectStatement(s)
 		case *sql.CreateStatement:
-			return executeCreateStatement(s), err
+			stm = executeCreateStatement(s)
 		case *sql.UpdateStatement:
-			return executeUpdateStatement(s), err
+			stm = executeUpdateStatement(s)
 		case *sql.ModifyStatement:
-			return executeModifyStatement(s), err
+			stm = executeModifyStatement(s)
 		case *sql.DeleteStatement:
-			return executeDeleteStatement(s), err
+			stm = executeDeleteStatement(s)
 		case *sql.RelateStatement:
-			return executeRelateStatement(s), err
+			stm = executeRelateStatement(s)
 		case *sql.RecordStatement:
-			return executeRecordStatement(s), err
+			stm = executeRecordStatement(s)
 
 		case *sql.DefineViewStatement:
-			return executeDefineStatement(s), err
+			stm = executeDefineStatement(s)
 		case *sql.ResyncViewStatement:
-			return executeResyncStatement(s), err
+			stm = executeResyncStatement(s)
 		case *sql.RemoveViewStatement:
-			return executeRemoveStatement(s), err
+			stm = executeRemoveStatement(s)
 
 		case *sql.DefineIndexStatement:
-			return executeDefineStatement(s), err
+			stm = executeDefineStatement(s)
 		case *sql.ResyncIndexStatement:
-			return executeResyncStatement(s), err
+			stm = executeResyncStatement(s)
 		case *sql.RemoveIndexStatement:
-			return executeRemoveStatement(s), err
+			stm = executeRemoveStatement(s)
 
 		}
 
+		res = append(res, stm)
+
 	}
 
-	return query, err
+	return res, err
 
 }
 
