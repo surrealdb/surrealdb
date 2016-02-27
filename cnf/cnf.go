@@ -19,8 +19,12 @@ type Context struct {
 	DbPath string
 	DbName string
 
+	Auth string
+
+	Port string
 	Http string
 	Sock string
+
 	Base string
 
 	Verbose bool

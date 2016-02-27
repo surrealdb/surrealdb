@@ -53,11 +53,13 @@ func init() {
 		versionCmd,
 	)
 
+	mainCmd.PersistentFlags().StringVarP(&Config.Auth, "auth", "a", "", "Set master authentication details using user:pass format")
 	mainCmd.PersistentFlags().StringVarP(&Config.Db, "db", "d", "memory", "Set backend datastore")
 	mainCmd.PersistentFlags().StringVarP(&Config.DbPath, "dbpath", "", "", "Set path to boltdb/leveldb datastore file")
 	mainCmd.PersistentFlags().StringVarP(&Config.DbName, "dbname", "", "", "Set name of mongodb/rethinkdb database table")
-	mainCmd.PersistentFlags().StringVarP(&Config.Http, "http", "", ":33693", "Host to listen for http connections on")
-	mainCmd.PersistentFlags().StringVarP(&Config.Sock, "sock", "", ":33793", "Port to listen for sock connections on")
+	mainCmd.PersistentFlags().StringVarP(&Config.Port, "port", "", ":8000", "The host:port on which to serve the web interface")
+	mainCmd.PersistentFlags().StringVarP(&Config.Http, "port-http", "", ":33693", "The host:port on which to serve the http sql server")
+	mainCmd.PersistentFlags().StringVarP(&Config.Sock, "port-sock", "", ":33793", "The host:port on which to serve the sock sql server")
 	mainCmd.PersistentFlags().StringVarP(&Config.Base, "base", "b", "surreal", "Name of the root database key")
 	mainCmd.PersistentFlags().BoolVarP(&Config.Verbose, "verbose", "v", false, "Enable verbose output")
 

@@ -16,6 +16,7 @@ package server
 
 import (
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/abcum/surreal/cnf"
@@ -32,7 +33,44 @@ func Setup(ctx cnf.Context) (e error) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(2)
+	wg.Add(3)
+
+	// -------------------------------------------------------
+	// Stats
+	// -------------------------------------------------------
+
+	stat = stats.New()
+
+	// -------------------------------------------------------
+	// GUI handler
+	// -------------------------------------------------------
+
+	w := echo.New()
+
+	w.Get("/info", info)
+	w.Static("/", "tpl")
+
+	w.SetDebug(ctx.Verbose)
+	w.AutoIndex(false)
+	w.SetHTTPErrorHandler(errors)
+
+	w.Use(stat.Handler)
+	w.Use(middleware.Gzip())
+	w.Use(middleware.Logger())
+	w.Use(middleware.Recover())
+	w.Use(api.Head(&api.HeadOpts{}))
+	w.Use(api.Type(&api.TypeOpts{}))
+	w.Use(api.Cors(&api.CorsOpts{}))
+	w.Use(api.Auth(&api.AuthOpts{}))
+
+	w.Use(middleware.BasicAuth(func(u, p string) bool {
+		log.Println(ctx.Auth)
+		if ctx.Auth != "" {
+			a := strings.SplitN(ctx.Auth, ":", 2)
+			return a[0] == u && a[1] == p
+		}
+		return true
+	}))
 
 	// -------------------------------------------------------
 	// REST handler
@@ -55,12 +93,6 @@ func Setup(ctx cnf.Context) (e error) {
 	r.Use(api.Cors(&api.CorsOpts{}))
 	r.Use(api.Auth(&api.AuthOpts{}))
 
-	go func() {
-		defer wg.Done()
-		log.Printf("Starting HTTP server on %s", ctx.Http)
-		r.Run(ctx.Http)
-	}()
-
 	// -------------------------------------------------------
 	// SOCK handler
 	// -------------------------------------------------------
@@ -81,6 +113,22 @@ func Setup(ctx cnf.Context) (e error) {
 	s.Use(api.Type(&api.TypeOpts{}))
 	s.Use(api.Cors(&api.CorsOpts{}))
 	s.Use(api.Auth(&api.AuthOpts{}))
+
+	// -------------------------------------------------------
+	// Start servers
+	// -------------------------------------------------------
+
+	go func() {
+		defer wg.Done()
+		log.Printf("Starting Web server on %s", ctx.Port)
+		w.Run(ctx.Port)
+	}()
+
+	go func() {
+		defer wg.Done()
+		log.Printf("Starting HTTP server on %s", ctx.Http)
+		r.Run(ctx.Http)
+	}()
 
 	go func() {
 		defer wg.Done()
