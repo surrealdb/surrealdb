@@ -22,7 +22,11 @@ import (
 
 func Execute(query *sql.Query, err error) (interface{}, error) {
 
-	for _, s := range query.Statements {
+	if err != nil {
+		return nil, err
+	}
+
+	for _, s := range ast.Statements {
 
 		switch s.(type) {
 

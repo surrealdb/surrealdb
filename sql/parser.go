@@ -50,14 +50,20 @@ func (p *Parser) Parse() (*Query, error) {
 func (p *Parser) ParseMulti() (*Query, error) {
 
 	var statements Statements
+
 	var semi bool
+	var text bool
 
 	for {
 		if tok, _ := p.scanIgnoreWhitespace(); tok == EOF {
+			if !text {
+				return nil, &EmptyError{}
+			}
 			return &Query{Statements: statements}, nil
 		} else if !semi && tok == SEMICOLON {
 			semi = true
 		} else {
+			text = true
 			p.unscan()
 			s, err := p.ParseSingle()
 			if err != nil {
