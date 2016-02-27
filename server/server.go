@@ -24,7 +24,7 @@ import (
 	"github.com/labstack/echo/middleware"
 )
 
-// Setup sets up the server for rest and websockets
+// Setup sets up the server for remote connections
 func Setup(ctx cnf.Context) (e error) {
 
 	var wg sync.WaitGroup
