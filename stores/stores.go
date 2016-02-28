@@ -23,8 +23,6 @@ var store Store
 
 var stores = make(map[string]Storer)
 
-const DBRegex = `(((([^:]+):\/\/)?((([^:]+):([^@]+)@)?([^:]+):([^\/]+)))\/(.+))$`
-
 // Setup initialises the selected backend for the database
 func Setup(opts *cnf.Context) (e error) {
 
