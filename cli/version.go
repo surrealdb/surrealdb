@@ -19,7 +19,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/abcum/surreal/util/vers"
+	"github.com/abcum/surreal/util/build"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +28,7 @@ var versionCmd = &cobra.Command{
 	Short: "Output version information",
 	Run: func(cmd *cobra.Command, args []string) {
 
-		info := vers.GetInfo()
+		info := build.GetInfo()
 
 		tw := tabwriter.NewWriter(os.Stdout, 2, 1, 2, ' ', 0)
 		fmt.Fprintf(tw, "Build Go:    %s\n", info.Go)
