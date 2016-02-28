@@ -24,7 +24,7 @@ type EmptyError struct{}
 
 // Error returns the string representation of the error.
 func (e *EmptyError) Error() string {
-	return fmt.Sprint("Your SQL query is empty.")
+	return fmt.Sprint("Your SQL query is empty")
 }
 
 // ParseError represents an error that occurred during parsing.

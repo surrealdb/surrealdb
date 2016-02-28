@@ -139,8 +139,12 @@ func Test_Parse_Queries_Select(t *testing.T) {
 
 	var tests = []tester{
 		{
+			sql: ``,
+			err: "`",
+		},
+		{
 			sql: `!`,
-			err: "Found `!` but expected `SELECT, INSERT, UPSERT, UPDATE, MODIFY, DELETE, RELATE, RECORD, DEFINE, RESYNC, REMOVE`",
+			err: "Your SQL query is empty",
 		},
 		{
 			sql: `SELECT`,
