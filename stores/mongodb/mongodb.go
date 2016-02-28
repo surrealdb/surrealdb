@@ -25,11 +25,11 @@ func init() {
 }
 
 type Store struct {
-	ctx cnf.Context
+	ctx *cnf.Context
 	db  m.Session
 }
 
-func New(ctx cnf.Context) (stores.Store, error) {
+func New(ctx *cnf.Context) (stores.Store, error) {
 
 	db, err := m.Dial(ctx.DbPath)
 

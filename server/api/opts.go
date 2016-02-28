@@ -12,12 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cli
+package api
 
 import (
 	"github.com/abcum/surreal/cnf"
+	"github.com/labstack/echo"
 )
 
-var Config struct {
-	cnf.Context
+// Opts defines middleware for storing Surreal server options in the context
+func Opts(opts *cnf.Context) echo.MiddlewareFunc {
+	return func(h echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+
+			c.Set("opts", opts)
+
+			return h(c)
+
+		}
+	}
 }

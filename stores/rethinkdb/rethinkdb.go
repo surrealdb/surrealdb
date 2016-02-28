@@ -25,11 +25,11 @@ func init() {
 }
 
 type Store struct {
-	ctx cnf.Context
+	ctx *cnf.Context
 	db  r.Session
 }
 
-func New(ctx cnf.Context) (stores.Store, error) {
+func New(ctx *cnf.Context) (stores.Store, error) {
 
 	db, err := r.Connect(r.ConnectOpts{
 		Address:  ctx.DbPath,

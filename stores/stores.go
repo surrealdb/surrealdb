@@ -26,15 +26,15 @@ var stores = make(map[string]Storer)
 const DBRegex = `(((([^:]+):\/\/)?((([^:]+):([^@]+)@)?([^:]+):([^\/]+)))\/(.+))$`
 
 // Setup initialises the selected backend for the database
-func Setup(ctx cnf.Context) (e error) {
+func Setup(opts *cnf.Context) (e error) {
 
-	_, exists := stores[ctx.Db]
+	_, exists := stores[opts.Db]
 
 	if !exists {
-		return errors.New("Store '" + ctx.Db + "' is not registered")
+		return errors.New("Store '" + opts.Db + "' is not registered")
 	}
 
-	store, e = stores[ctx.Db](ctx)
+	store, e = stores[opts.Db](opts)
 
 	return e
 

@@ -25,11 +25,11 @@ func init() {
 }
 
 type Store struct {
-	ctx cnf.Context
+	ctx *cnf.Context
 	db  gkvlite.Collection
 }
 
-func New(ctx cnf.Context) (stores.Store, error) {
+func New(ctx *cnf.Context) (stores.Store, error) {
 
 	db, err := gkvlite.NewStore(nil)
 

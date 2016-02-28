@@ -29,7 +29,7 @@ import (
 var stat *stats.Stats
 
 // Setup sets up the server for remote connections
-func Setup(ctx cnf.Context) (e error) {
+func Setup(opts *cnf.Context) (e error) {
 
 	var wg sync.WaitGroup
 
@@ -50,7 +50,7 @@ func Setup(ctx cnf.Context) (e error) {
 	w.Get("/info", info)
 	w.Static("/", "tpl")
 
-	w.SetDebug(ctx.Verbose)
+	w.SetDebug(opts.Verbose)
 	w.AutoIndex(false)
 	w.SetHTTPErrorHandler(errors)
 
@@ -58,6 +58,7 @@ func Setup(ctx cnf.Context) (e error) {
 	w.Use(middleware.Gzip())
 	w.Use(middleware.Logger())
 	w.Use(middleware.Recover())
+	w.Use(api.Opts(opts))
 	w.Use(api.Head(&api.HeadOpts{}))
 	w.Use(api.Type(&api.TypeOpts{}))
 	w.Use(api.Cors(&api.CorsOpts{}))
@@ -80,7 +81,7 @@ func Setup(ctx cnf.Context) (e error) {
 
 	r.Any("/", crud)
 
-	r.SetDebug(ctx.Verbose)
+	r.SetDebug(opts.Verbose)
 	r.AutoIndex(false)
 	r.SetHTTPErrorHandler(errors)
 
@@ -88,6 +89,7 @@ func Setup(ctx cnf.Context) (e error) {
 	r.Use(middleware.Gzip())
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recover())
+	r.Use(api.Opts(opts))
 	r.Use(api.Head(&api.HeadOpts{}))
 	r.Use(api.Type(&api.TypeOpts{}))
 	r.Use(api.Cors(&api.CorsOpts{}))
@@ -101,7 +103,7 @@ func Setup(ctx cnf.Context) (e error) {
 
 	s.WebSocket("/", sock)
 
-	r.SetDebug(ctx.Verbose)
+	r.SetDebug(opts.Verbose)
 	s.AutoIndex(false)
 	s.SetHTTPErrorHandler(errors)
 
@@ -109,6 +111,7 @@ func Setup(ctx cnf.Context) (e error) {
 	s.Use(middleware.Gzip())
 	s.Use(middleware.Logger())
 	s.Use(middleware.Recover())
+	s.Use(api.Opts(opts))
 	s.Use(api.Head(&api.HeadOpts{}))
 	s.Use(api.Type(&api.TypeOpts{}))
 	s.Use(api.Cors(&api.CorsOpts{}))
@@ -120,20 +123,20 @@ func Setup(ctx cnf.Context) (e error) {
 
 	go func() {
 		defer wg.Done()
-		log.Printf("Starting Web server on %s", ctx.Port)
-		w.Run(ctx.Port)
+		log.Printf("Starting Web server on %s", opts.Port)
+		w.Run(opts.Port)
 	}()
 
 	go func() {
 		defer wg.Done()
-		log.Printf("Starting HTTP server on %s", ctx.Http)
-		r.Run(ctx.Http)
+		log.Printf("Starting HTTP server on %s", opts.Http)
+		r.Run(opts.Http)
 	}()
 
 	go func() {
 		defer wg.Done()
-		log.Printf("Starting SOCK server on %s", ctx.Sock)
-		s.Run(ctx.Sock)
+		log.Printf("Starting SOCK server on %s", opts.Sock)
+		s.Run(opts.Sock)
 	}()
 
 	// -------------------------------------------------------

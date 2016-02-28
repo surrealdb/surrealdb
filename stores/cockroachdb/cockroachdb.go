@@ -26,11 +26,11 @@ func init() {
 }
 
 type Store struct {
-	ctx cnf.Context
+	ctx *cnf.Context
 	db  client.DB
 }
 
-func New(ctx cnf.Context) (stores.Store, error) {
+func New(ctx *cnf.Context) (stores.Store, error) {
 
 	stopper := stop.NewStopper()
 

@@ -25,11 +25,11 @@ func init() {
 }
 
 type Store struct {
-	ctx cnf.Context
+	ctx *cnf.Context
 	db  bolt.DB
 }
 
-func New(ctx cnf.Context) (stores.Store, error) {
+func New(ctx *cnf.Context) (stores.Store, error) {
 
 	if ctx.DbPath == "" {
 		ctx.DbPath = "data/bolt.db"

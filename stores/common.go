@@ -31,4 +31,4 @@ type Store interface {
 	Scan(beg, end interface{}, max int64) []KeyValue
 }
 
-type Storer func(ctx cnf.Context) (Store, error)
+type Storer func(*cnf.Context) (Store, error)
