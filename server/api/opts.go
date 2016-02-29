@@ -26,6 +26,18 @@ func Opts(opts *cnf.Context) echo.MiddlewareFunc {
 
 			c.Set("opts", opts)
 
+			c.Set("opts.db", opts.Db)
+
+			c.Set("opts.base", opts.Base)
+
+			c.Set("opts.auth", opts.Auth)
+			c.Set("opts.user", opts.User)
+			c.Set("opts.pass", opts.Pass)
+
+			c.Set("opts.port", opts.Port)
+			c.Set("opts.http", opts.Http)
+			c.Set("opts.sock", opts.Sock)
+
 			return h(c)
 
 		}
