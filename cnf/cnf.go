@@ -20,6 +20,8 @@ type Context struct {
 	DbName string
 
 	Auth string
+	User string
+	Pass string
 
 	Port string
 	Http string
