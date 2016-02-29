@@ -16,7 +16,7 @@ package server
 
 import (
 	"log"
-	"strings"
+	// "strings"
 	"sync"
 
 	"github.com/abcum/surreal/cnf"
@@ -63,15 +63,6 @@ func Setup(opts *cnf.Context) (e error) {
 	w.Use(api.Type(&api.TypeOpts{}))
 	w.Use(api.Cors(&api.CorsOpts{}))
 	w.Use(api.Auth(&api.AuthOpts{}))
-
-	w.Use(middleware.BasicAuth(func(u, p string) bool {
-		log.Println(ctx.Auth)
-		if ctx.Auth != "" {
-			a := strings.SplitN(ctx.Auth, ":", 2)
-			return a[0] == u && a[1] == p
-		}
-		return true
-	}))
 
 	// -------------------------------------------------------
 	// REST handler

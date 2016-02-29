@@ -15,6 +15,9 @@
 package api
 
 import (
+	"encoding/base64"
+	"strings"
+
 	"github.com/labstack/echo"
 )
 
@@ -26,7 +29,31 @@ type AuthOpts struct {
 func Auth(opts *AuthOpts) echo.MiddlewareFunc {
 	return func(h echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			return h(c)
+
+			head := c.Request().Header.Get("Authorization")
+
+			auth := c.Get("opts.auth").(string)
+			user := c.Get("opts.user").(string)
+			pass := c.Get("opts.pass").(string)
+
+			if auth == "" {
+				return h(c)
+			}
+
+			if head != "" && head[:5] == "Basic" {
+
+				base, _ := base64.StdEncoding.DecodeString(head[6:])
+
+				cred := strings.SplitN(string(base), ":", 2)
+
+				if len(cred) == 2 && cred[0] == user && cred[1] == pass {
+					return h(c)
+				}
+
+			}
+
+			return echo.NewHTTPError(401)
+
 		}
 	}
 }
