@@ -32,7 +32,7 @@ func sock(c *echo.Context) error {
 			break
 		}
 
-		s, e := db.ExecuteString(msg)
+		s, e := db.Execute(c, msg)
 
 		if e == nil {
 			if err := websocket.Message.Send(ws, encode(show(s))); err != nil {

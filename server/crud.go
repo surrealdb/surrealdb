@@ -21,7 +21,7 @@ import (
 
 func crud(c *echo.Context) error {
 
-	s, e := db.ExecuteBuffer(c.Request().Body)
+	s, e := db.Execute(c, c.Request().Body)
 
 	if e == nil {
 		return c.JSON(200, show(s))

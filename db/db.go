@@ -20,14 +20,22 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func Execute(ast *sql.Query, err error) (interface{}, error) {
+// Execute parses the query and executes it against the data layer
+func Execute(c *echo.Context, input interface{}) (res []interface{}, err error) {
+
+	var ast *sql.Query
+	var stm interface{}
+
+	switch input.(type) {
+	case string:
+		ast, err = sql.ParseString(input.(string))
+	case io.Reader:
+		ast, err = sql.ParseBuffer(input.(io.Reader))
+	}
 
 	if err != nil {
 		return nil, err
 	}
-
-	var res []interface{}
-	var stm interface{}
 
 	for _, s := range ast.Statements {
 
@@ -70,12 +78,4 @@ func Execute(ast *sql.Query, err error) (interface{}, error) {
 
 	return res, err
 
-}
-
-func ExecuteString(input string) (interface{}, error) {
-	return Execute(sql.ParseString(input))
-}
-
-func ExecuteBuffer(input io.Reader) (interface{}, error) {
-	return Execute(sql.ParseBuffer(input))
 }
