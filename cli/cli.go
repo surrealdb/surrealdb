@@ -68,6 +68,8 @@ func init() {
 	mainCmd.PersistentFlags().StringVarP(&opts.Base, "base", "b", "surreal", "Name of the root database key")
 	mainCmd.PersistentFlags().BoolVarP(&opts.Verbose, "verbose", "v", false, "Enable verbose output")
 
+	cobra.OnInitialize(setup)
+
 }
 
 // Run runs the cli app
