@@ -28,7 +28,7 @@ func crud(c *echo.Context) error {
 	}
 
 	if e != nil {
-		return c.JSON(422, oops(e))
+		return c.JSON(400, oops(e))
 	}
 
 	return nil

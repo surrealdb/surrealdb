@@ -24,7 +24,7 @@ func show(i interface{}) interface{} {
 
 func oops(e error) interface{} {
 	return map[string]interface{}{
-		"code":          422,
+		"code":          400,
 		"details":       "Request problems detected",
 		"documentation": docs,
 		"information":   e.Error(),
@@ -52,6 +52,13 @@ var errs = map[int]interface{}{
 		"details":       "Information",
 		"documentation": docs,
 		"information":   "Visit the documentation for details on accessing the api.",
+	},
+
+	400: map[string]interface{}{
+		"code":          400,
+		"details":       "Request problems detected",
+		"documentation": docs,
+		"information":   "There is a problem with your request. The request needs to adhere to certain constraints.",
 	},
 
 	401: map[string]interface{}{
@@ -82,18 +89,18 @@ var errs = map[int]interface{}{
 		"information":   "The requested http method is not allowed for this resource. Refer to the documentation for allowed methods.",
 	},
 
+	409: map[string]interface{}{
+		"code":          409,
+		"details":       "Request conflict detected",
+		"documentation": docs,
+		"information":   "The request could not be processed because of a conflict in the request.",
+	},
+
 	415: map[string]interface{}{
 		"code":          415,
 		"details":       "Unsupported content type requested",
 		"documentation": docs,
 		"information":   "Requests to the api must use the 'Content-Type: application/json' header. Check your request settings and try again.",
-	},
-
-	422: map[string]interface{}{
-		"code":          422,
-		"details":       "Request problems detected",
-		"documentation": docs,
-		"information":   "There is a problem with your request. The request needs to adhere to certain constraints.",
 	},
 
 	500: map[string]interface{}{
