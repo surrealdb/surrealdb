@@ -96,6 +96,13 @@ var errs = map[int]interface{}{
 		"information":   "The request could not be processed because of a conflict in the request.",
 	},
 
+	413: map[string]interface{}{
+		"code":          413,
+		"details":       "Request content length too large",
+		"documentation": docs,
+		"information":   "All SQL requests to the database must not exceed the predefined content length.",
+	},
+
 	415: map[string]interface{}{
 		"code":          415,
 		"details":       "Unsupported content type requested",
