@@ -21,6 +21,10 @@ PKG := ./...
 .PHONY: default
 default: clean test build install
 
+.PHONY: doc
+doc:
+	godoc -http=:9000
+
 .PHONY: dev
 dev:
 	gin -p 3000 -a 33693
