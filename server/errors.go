@@ -107,7 +107,7 @@ var errs = map[int]interface{}{
 		"code":          415,
 		"details":       "Unsupported content type requested",
 		"documentation": docs,
-		"information":   "Requests to the api must use the 'Content-Type: application/json' header. Check your request settings and try again.",
+		"information":   "Requests to the database must use the 'Content-Type: application/json' header. Check your request settings and try again.",
 	},
 
 	500: map[string]interface{}{
