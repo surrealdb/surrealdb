@@ -18,7 +18,7 @@ import (
 	"github.com/labstack/echo"
 )
 
-// InfoOpts defines options for the Head middleward
+// InfoOpts defines options for the Info middleware
 type InfoOpts struct {
 	PoweredBy string
 }
