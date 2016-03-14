@@ -21,16 +21,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/server"
-	"github.com/abcum/surreal/stores"
-
-	// Load all backend stores
-	_ "github.com/abcum/surreal/stores/boltdb"
-	_ "github.com/abcum/surreal/stores/cockroachdb"
-	_ "github.com/abcum/surreal/stores/leveldb"
-	_ "github.com/abcum/surreal/stores/memory"
-	_ "github.com/abcum/surreal/stores/mongodb"
-	_ "github.com/abcum/surreal/stores/rethinkdb"
 )
 
 var opts *cnf.Context
@@ -39,7 +31,7 @@ var mainCmd = &cobra.Command{
 	Use:   "surreal",
 	Short: "SurrealDB command-line interface and server",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return stores.Setup(opts)
+		return db.Setup(opts)
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return server.Setup(opts)
@@ -58,9 +50,7 @@ func init() {
 	opts = &cnf.Context{}
 
 	mainCmd.PersistentFlags().StringVarP(&opts.Auth, "auth", "a", "", "Set master authentication details using user:pass format")
-	mainCmd.PersistentFlags().StringVarP(&opts.Db, "db", "d", "memory", "Set backend datastore")
-	mainCmd.PersistentFlags().StringVarP(&opts.DbPath, "dbpath", "", "", "Set path to boltdb/leveldb datastore file")
-	mainCmd.PersistentFlags().StringVarP(&opts.DbName, "dbname", "", "", "Set name of mongodb/rethinkdb database table")
+	mainCmd.PersistentFlags().StringVarP(&opts.Db, "db", "d", "rpc://node@127.0.0.1:26257", "Set backend datastore")
 	mainCmd.PersistentFlags().StringVarP(&opts.Port, "port", "", ":8000", "The host:port on which to serve the web interface")
 	mainCmd.PersistentFlags().StringVarP(&opts.Http, "port-http", "", ":33693", "The host:port on which to serve the http sql server")
 	mainCmd.PersistentFlags().StringVarP(&opts.Sock, "port-sock", "", ":33793", "The host:port on which to serve the sock sql server")

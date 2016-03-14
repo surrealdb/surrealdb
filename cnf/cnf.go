@@ -15,9 +15,7 @@
 package cnf
 
 type Context struct {
-	Db     string
-	DbPath string
-	DbName string
+	Db string
 
 	Auth string
 	User string
