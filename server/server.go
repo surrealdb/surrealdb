@@ -117,18 +117,21 @@ func Setup(opts *cnf.Context) (e error) {
 
 	go func() {
 		defer wg.Done()
+		defer db.Stop()
 		log.Printf("Starting Web server on %s", opts.Port)
 		w.Run(opts.Port)
 	}()
 
 	go func() {
 		defer wg.Done()
+		defer db.Stop()
 		log.Printf("Starting HTTP server on %s", opts.Http)
 		r.Run(opts.Http)
 	}()
 
 	go func() {
 		defer wg.Done()
+		defer db.Stop()
 		log.Printf("Starting SOCK server on %s", opts.Sock)
 		s.Run(opts.Sock)
 	}()
