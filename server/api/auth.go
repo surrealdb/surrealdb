@@ -30,6 +30,10 @@ func Auth(opts *AuthOpts) echo.MiddlewareFunc {
 	return func(h echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 
+			// TODO need to decide how users select the namespace and database
+			c.Set("NS", "abcum")
+			c.Set("DB", "onlineplatforms")
+
 			head := c.Request().Header.Get("Authorization")
 
 			auth := c.Get("opts.auth").(string)
