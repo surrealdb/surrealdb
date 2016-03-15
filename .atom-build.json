@@ -1,0 +1,8 @@
+{
+  "sh": true,
+  "cmd": "make install",
+  "cwd": "{PROJECT_PATH}",
+  "env": {
+      "GOPATH": "/Users/tobie/Repositories/go"
+  }
+}
