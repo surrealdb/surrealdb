@@ -14,7 +14,7 @@
 
 package cnf
 
-type Context struct {
+type Options struct {
 	Db string
 
 	Auth string

@@ -25,7 +25,7 @@ import (
 	"github.com/abcum/surreal/server"
 )
 
-var opts *cnf.Context
+var opts *cnf.Options
 
 var mainCmd = &cobra.Command{
 	Use:   "surreal",
@@ -47,7 +47,7 @@ func init() {
 		versionCmd,
 	)
 
-	opts = &cnf.Context{}
+	opts = &cnf.Options{}
 
 	mainCmd.PersistentFlags().StringVarP(&opts.Auth, "auth", "a", "", "Set master authentication details using user:pass format")
 	mainCmd.PersistentFlags().StringVarP(&opts.Db, "db", "d", "rpc://node@127.0.0.1:26257", "Set backend datastore")

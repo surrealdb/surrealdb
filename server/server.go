@@ -29,7 +29,7 @@ import (
 var stat *stats.Stats
 
 // Setup sets up the server for remote connections
-func Setup(opts *cnf.Context) (e error) {
+func Setup(opts *cnf.Options) (e error) {
 
 	var wg sync.WaitGroup
 

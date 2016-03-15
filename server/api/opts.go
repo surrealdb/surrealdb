@@ -20,7 +20,7 @@ import (
 )
 
 // Opts defines middleware for storing Surreal server options in the context
-func Opts(opts *cnf.Context) echo.MiddlewareFunc {
+func Opts(opts *cnf.Options) echo.MiddlewareFunc {
 	return func(h echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 
