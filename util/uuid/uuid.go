@@ -18,32 +18,43 @@ import (
 	"github.com/satori/go.uuid"
 )
 
+var (
+	NamespaceDNS  = uuid.NamespaceDNS
+	NamespaceURL  = uuid.NamespaceURL
+	NamespaceOID  = uuid.NamespaceOID
+	NamespaceX500 = uuid.NamespaceX500
+)
+
+type UUID struct {
+	uuid.UUID
+}
+
 // NewV1 returns a new UUID (Version 1) based on current timestamp and MAC address.
-func NewV1() string {
-	return uuid.NewV1().String()
+func NewV1() *UUID {
+	return &UUID{uuid.NewV1()}
 }
 
 // NewV2 returns a new DCE Security UUID (Version 2) based on POSIX UID/GID.
-func NewV2(domain byte) string {
-	return uuid.NewV2(domain).String()
+func NewV2(domain byte) *UUID {
+	return &UUID{uuid.NewV2(domain)}
 }
 
 // NewV3 returns a new UUID (Version 3) based on MD5 hash of namespace UUID and name.
-func NewV3(ns uuid.UUID, name string) string {
-	return uuid.NewV3(ns, name).String()
+func NewV3(ns uuid.UUID, name string) *UUID {
+	return &UUID{uuid.NewV3(ns, name)}
 }
 
 // NewV4 returns a new UUID (Version 4) using 16 random bytes or panics.
-func NewV4() string {
-	return uuid.NewV4().String()
+func NewV4() *UUID {
+	return &UUID{uuid.NewV4()}
 }
 
 // NewV5 returns a new UUID (Version 5) based on SHA-1 hash of namespace UUID and name.
-func NewV5(ns uuid.UUID, name string) string {
-	return uuid.NewV5(ns, name).String()
+func NewV5(ns uuid.UUID, name string) *UUID {
+	return &UUID{uuid.NewV5(ns, name)}
 }
 
 // GetUUID parses and checks for a valid UUID string, and returns Nil if not valid.
-func GetUUID(input string) string {
-	return uuid.FromStringOrNil(input).String()
+func GetUUID(input string) *UUID {
+	return &UUID{uuid.FromStringOrNil(input)}
 }
