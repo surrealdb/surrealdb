@@ -28,9 +28,10 @@ func New(l int) string {
 	}
 
 	i := 0
+	t := len(chars)
+	m := 255 - (256 % t)
 	b := make([]byte, l)
 	r := make([]byte, l+(l/4))
-	m := 255 - (256 % len(chars))
 
 	for {
 
@@ -41,7 +42,7 @@ func New(l int) string {
 			if c > m {
 				continue
 			}
-			b[i] = chars[c%m]
+			b[i] = chars[c%t]
 			i++
 			if i == l {
 				return string(b)
