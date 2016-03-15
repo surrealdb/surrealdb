@@ -16,14 +16,16 @@ package server
 
 import (
 	"log"
-	// "strings"
 	"sync"
 
-	"github.com/abcum/surreal/cnf"
-	"github.com/abcum/surreal/server/api"
+	"github.com/thoas/stats"
+
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
-	"github.com/thoas/stats"
+
+	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/db"
+	"github.com/abcum/surreal/server/api"
 )
 
 var stat *stats.Stats
