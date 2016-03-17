@@ -64,7 +64,7 @@ convey:
 
 .PHONY: get
 get:
-	$(GO) get -d ./...
+	$(GO) get -d $(PKG)
 	$(GO) get -tags=embed github.com/tecbot/gorocksdb
 
 # The `make test` command runs all
@@ -73,7 +73,7 @@ get:
 
 .PHONY: test
 test:
-	$(GO) test $(FLG) ./...
+	$(GO) test $(FLG) $(PKG)
 
 # The `make clean` command cleans
 # all object, build, and test files
@@ -81,6 +81,7 @@ test:
 
 .PHONY: clean
 clean:
+	$(GO) clean $(FLG) $(PKG)
 	$(GO) clean $(FLG) -i github.com/abcum/...
 	find . -name '*.test' -type f -exec rm -f {} \;
 
