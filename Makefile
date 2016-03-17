@@ -46,7 +46,7 @@ doc:
 
 .PHONY: dev
 dev:
-	$(GO) get -u github.com/codegangsta/gin
+	$(GO) get -u -v github.com/codegangsta/gin
 	gin -p 3000 -a 33693
 
 # The `make convey` command downloads
@@ -55,7 +55,7 @@ dev:
 
 .PHONY: convey
 convey:
-	$(GO) get -u github.com/smartystreets/goconvey
+	$(GO) get -u -v github.com/smartystreets/goconvey
 	goconvey -packages 25 -port 5000
 
 # The `make get` command ensures that
@@ -64,7 +64,7 @@ convey:
 
 .PHONY: get
 get:
-	$(GO) get -d $(PKG)
+	$(GO) get -d -a -v $(PKG)
 	$(GO) get -tags=embed github.com/tecbot/gorocksdb
 
 # The `make test` command runs all
@@ -81,8 +81,7 @@ test:
 
 .PHONY: clean
 clean:
-	$(GO) clean $(FLG) $(PKG)
-	$(GO) clean $(FLG) -i github.com/abcum/...
+	$(GO) clean $(FLG) -x -i $(PKG)
 	find . -name '*.test' -type f -exec rm -f {} \;
 
 # The `make build` command compiles
