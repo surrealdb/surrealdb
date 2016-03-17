@@ -73,7 +73,7 @@ get:
 
 .PHONY: test
 test:
-	$(GO) test -v $(FLG) ./...
+	$(GO) test $(FLG) ./...
 
 # The `make clean` command cleans
 # all object, build, and test files
