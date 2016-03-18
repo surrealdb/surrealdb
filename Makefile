@@ -91,6 +91,7 @@ clean:
 .PHONY: build
 build: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 build: get
+build: clean
 build:
 	$(GO) build -v -o surreal $(FLG) -ldflags '$(LDF)'
 
@@ -101,6 +102,7 @@ build:
 .PHONY: install
 install: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 install: get
+install: clean
 install:
 	$(GO) install -v $(FLG) -ldflags '$(LDF)'
 
