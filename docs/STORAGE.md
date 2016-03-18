@@ -32,19 +32,15 @@ Each data type is stored using a different symbol in the key:value pair.
 
 ```bash
 ! # Used to store Surreal config data
-¤ # Used to store view and index data
-‹ # Used to store in links
-› # Used to store out links
-« # Used to store in edges
-» # Used to store out edges
-• # Used to store item diffs
-‡ # Used to store item events
-◊ #
-∆ #
-Ω # Used in key queries as scan end key
-~
-≈
-≠
+* # Used to store item data
+~ # Used to store item diffs
+¤ # 
+« # Used to store item edges
+» # Used to store item edges
+• # Used to store item events
+‹ # Used to store item links
+› # Used to store item links
+∆ # Used to store index data
 ```
 
 ---
