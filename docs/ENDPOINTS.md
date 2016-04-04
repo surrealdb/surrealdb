@@ -6,105 +6,57 @@ This document describes RESTful http endpoints which can be used to query and ma
 
 ### SQL
 
-*Endpoints*
-- `POST` `https://api.surreal.io/sql` Execute SQL contained in HTTP body
+The SQL endpoint allows you to query the database using any SQL query supported by Surreal. The content body must contain the properly formatted SQL queries which should be executed by the database. It may include a batch of SQL statements separated by a semicolon.
+
+- `POST` `https://api.surreal.io/sql`
 
 ---
 
-### Tables
+### Key Value
 
-*Storage*
-- `/surreal/{id}/{db}/{table}`
+The key value endpoints allow you to manipulate the database records without needing to use SQL. It only includes a small portion of the functionality available with SQL queries. The endpoints enable you to use the database as if it were an API, using multi-tenancy separation, and multi-level authentication for preventing access to specific data within a database.
 
-*Retrieve*
-- `SCAN` `/surreal/{id}/{db}/{table}/` `/surreal/{id}/{db}/{table}/~`
+- `GET` `https://api.surreal.io/key/{table}`
+```sql
+SELECT * FROM {table}
+```
 
-*Endpoints*
-- `GET` `https://api.surreal.io/{table}` SELECT * FROM {table}
-- `POST` `https://api.surreal.io/{table}` INSERT INTO {table}
-- `DEL` `https://api.surreal.io/{table}` DELETE FROM {table}
+- `POST` `https://api.surreal.io/key/{table}`
+```sql
+CREATE {table}
+```
 
----
+- `DELETE` `https://api.surreal.io/key/{table}`
+```sql
+DELETE {table}
+```
 
-### Records
+- `GET` `https://api.surreal.io/key/{table}/{key}`
+```sql
+SELECT * FROM @{table}:{id}
+```
 
-*Storage*
-- `/surreal/{id}/{db}/{table}/{key}`
+- `PUT` `https://api.surreal.io/key/{table}/{key}`
+```sql
+UPDATE @{table}:{id} CONTENT {} RETURN AFTER
+```
 
-*Retrieve*
-- `GET` `/surreal/{id}/{db}/{table}/{key}`
+- `POST` `https://api.surreal.io/key/{table}/{key}`
+```sql
+CREATE @{table}:{id} CONTENT {} RETURN AFTER
+```
 
-*Endpoints*
-- `GET` `https://api.surreal.io/{table}/{key}` SELECT * FROM @{table}:{id}
-- `PUT` `https://api.surreal.io/{table}/{key}` UPDATE @{table}:{id} CONTENT {}
-- `POST` `https://api.surreal.io/{table}/{key}` CREATE @{table}:{id} CONTENT {}
-- `PATCH` `https://api.surreal.io/{table}/{key}` MODIFY @{table}:{id} CONTENT {}
-- `TRACE` `https://api.surreal.io/{table}/{key}` SELECT HISTORY FROM @{table}:{id}
-- `DEL` `https://api.surreal.io/{table}/{key}` DELETE @{table}:{id}
+- `PATCH` `https://api.surreal.io/key/{table}/{key}`
+```sql
+MODIFY @{table}:{id} DIFF {} RETURN AFTER
+```
 
----
+- `TRACE` `https://api.surreal.io/key/{table}/{key}`
+```sql
+SELECT HISTORY FROM @{table}:{id}
+```
 
-### History
-
-*Storage*
-- `/surreal/{id}/{db}/{table}/•/{key}/{time}`
-
-*Retrieve*
--  `SCAN` `/surreal/{id}/{db}/{table}/•/{key}/` `/surreal/{id}/{db}/{table}/•/{key}/~`
-
-*Endpoints*
-- `GET` `https://api.surreal.io/{table}/{key}?time={time}` SELECT record as it looked at {time}
-
----
-
-### Joins
-
-*Storage*
-- `/surreal/{id}/{db}/{table}/†/{key}/{type}/{foreignkey}`
-
-*Retrieve*
--  `SCAN` `/surreal/{id}/{db}/{table}/†/{key}/{type}/` `/surreal/{id}/{db}/{table}/†/{key}/{type}/~`
-
-*Endpoints*
-- `PUT` `https://api.surreal.io/{table}/{key}/join/{type}` CREATE (in|out) join of {type}
-- `GET` `https://api.surreal.io/{table}/{key}/join/{type}` SELECT (in|out|inout) joins of {type}
-- `GET` `https://api.surreal.io/{table}/{key}/join/{type}/{joinkey}` SELECT (in|out) join of {type} with id {joinkey}
-- `DEL` `https://api.surreal.io/{table}/{key}/join/{type}/{joinkey}` DELETE (in|out) join of {type} with id {joinkey}
-
----
-
-### Relations
-
-*Storage*
-- `/surreal/{id}/{db}/{table}/(«|»)/{key}/{type}/{foreignkey}`
-
-*Retrieve*
--  `SCAN` `/surreal/{id}/{db}/{table}/(«|»)/{key}/{type}/` `/surreal/{id}/{db}/{table}/(«|»)/{key}/{type}/~`
-
-*Endpoints*
-- `POST` `https://api.surreal.io/{table}/{key}/(in|out)/{type}/{vertexkey}` CREATE (in|out) relationship of {type} to {vertexkey}
-- `GET` `https://api.surreal.io/{table}/{key}/(in|out|inout)/{type}` SELECT (in|out|inout) relationships of {type}
-- `GET` `https://api.surreal.io/{table}/{key}/(in|out)/{type}/{edgekey}` SELECT (in|out) relationship of {type} with id {edgekey}
-- `DEL` `https://api.surreal.io/{table}/{key}/(in|out)/{type}/{edgekey}` DELETE (in|out) relationship of {type} with id {edgekey}
-
----
-
-### Events
-
-*Storage*
-- `/surreal/{id}/{db}/{table}/‡/{key}/{type}/{time}`
-
-*Retrieve*
--  `SCAN` `/surreal/{id}/{db}/{table}/‡/{key}/{type}/` `/surreal/{id}/{db}/{table}/‡/{key}/{type}/~`
-
-*Endpoints*
-- `GET` `https://api.surreal.io/{table}/{key}/events/{type}` SELECT events('login') ON @{table}:{id}
-- `POST` `https://api.surreal.io/{table}/{key}/events/{type}` CREATE EVENT login ON @{table}:{id} WITH CONTENT {}
-- `GET` `https://api.surreal.io/{table}/{key}/events/{type}/{time}` SELECT events('login') ON @{table}:{id} WHERE time={time}
-- `POST` `https://api.surreal.io/{table}/{key}/events/{type}/{time}` CREATE EVENT login ON @{table}:{id} WITH CONTENT {} AT TIME {time}
-- `DEL` `https://api.surreal.io/{table}/{key}/events/{type}/{time}` DELETE events('login') ON @{table}:{id} WHERE time={time}
-
----
-
-### Search
-- `GET` `https://api.surreal.io/search` Select all records in table
+- `DELETE` `https://api.surreal.io/key/{table}/{key}`
+```sql
+DELETE @{table}:{id}
+```
