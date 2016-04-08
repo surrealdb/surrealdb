@@ -22,7 +22,6 @@ import (
 )
 
 var log *Logger
-var old logrus.Level
 
 // Logger ...
 type Logger struct {
