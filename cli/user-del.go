@@ -12,10 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package cli
 
-import "github.com/abcum/surreal/cli"
+import (
+	"github.com/spf13/cobra"
+)
 
-func main() {
-	cli.Init()
+type userDelOptions struct {
+	NS string
+	DB string
+}
+
+var userDelOpt *userDelOptions
+
+var userDelCmd = &cobra.Command{
+	Use:   "del",
+	Short: "Delete a database user.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return nil
+	},
+}
+
+func init() {
+
+	userDelOpt = &userDelOptions{}
+
+	userDelCmd.PersistentFlags().StringVar(&userDelOpt.NS, "ns", "", "The path destination for the CA certificate file.")
+	userDelCmd.PersistentFlags().StringVar(&userDelOpt.DB, "db", "", "The path destination for the CA private key file.")
+
 }

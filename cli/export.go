@@ -19,9 +19,18 @@ import (
 )
 
 var exportCmd = &cobra.Command{
-	Use:   "export",
-	Short: "Export data from an existing database into a JSON file",
+	Use:     "export [options] <file>",
+	Short:   "Export data from an existing database into a JSON file",
+	Example: "  surreal export backup.zip",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Do Stuff Here
 	},
+}
+
+func init() {
+
+	exportCmd.PersistentFlags().StringVar(&opts.Auth.Auth, "auth", "root:root", "Master authentication details to use when connecting.")
+	exportCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "127.0.0.1", "Database server host to connect to.")
+	exportCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "33693", "Database server port to connect to.")
+
 }

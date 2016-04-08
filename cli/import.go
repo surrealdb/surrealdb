@@ -19,9 +19,18 @@ import (
 )
 
 var importCmd = &cobra.Command{
-	Use:   "import",
-	Short: "Import data into an existing database from a JSON file",
+	Use:     "import [options] <file>",
+	Short:   "Import data into an existing database from a JSON file",
+	Example: "  surreal import backup.zip",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Do Stuff Here
 	},
+}
+
+func init() {
+
+	importCmd.PersistentFlags().StringVar(&opts.Auth.Auth, "auth", "root:root", "Master authentication details to use when connecting.")
+	importCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "127.0.0.1", "Database server host to connect to.")
+	importCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "33693", "Database server port to connect to.")
+
 }

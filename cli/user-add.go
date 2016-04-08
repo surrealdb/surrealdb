@@ -12,10 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package cli
 
-import "github.com/abcum/surreal/cli"
+import (
+	"github.com/spf13/cobra"
+)
 
-func main() {
-	cli.Init()
+type userAddOptions struct {
+	NS string
+	DB string
+}
+
+var userAddOpt *userAddOptions
+
+var userAddCmd = &cobra.Command{
+	Use:   "add",
+	Short: "Add a new database user.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return nil
+	},
+}
+
+func init() {
+
+	userAddOpt = &userAddOptions{}
+
+	userAddCmd.PersistentFlags().StringVar(&userAddOpt.NS, "ns", "", "The path destination for the CA certificate file.")
+	userAddCmd.PersistentFlags().StringVar(&userAddOpt.DB, "db", "", "The path destination for the CA private key file.")
+
 }

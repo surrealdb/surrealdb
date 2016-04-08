@@ -19,8 +19,9 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/abcum/surreal/util/build"
 	"github.com/spf13/cobra"
+
+	"github.com/abcum/surreal/util/build"
 )
 
 var versionCmd = &cobra.Command{

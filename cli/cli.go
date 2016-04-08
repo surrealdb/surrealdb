@@ -15,14 +15,11 @@
 package cli
 
 import (
-	"log"
 	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/abcum/surreal/cnf"
-	"github.com/abcum/surreal/db"
-	"github.com/abcum/surreal/server"
 )
 
 var opts *cnf.Options
@@ -30,18 +27,14 @@ var opts *cnf.Options
 var mainCmd = &cobra.Command{
 	Use:   "surreal",
 	Short: "SurrealDB command-line interface and server",
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return db.Setup(opts)
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return server.Setup(opts)
-	},
 }
 
 func init() {
 
 	mainCmd.AddCommand(
-		sqlCmd,
+		userCmd,
+		certCmd,
+		startCmd,
 		importCmd,
 		exportCmd,
 		versionCmd,
@@ -49,22 +42,19 @@ func init() {
 
 	opts = &cnf.Options{}
 
-	mainCmd.PersistentFlags().StringVarP(&opts.Auth, "auth", "a", "", "Set master authentication details using user:pass format")
-	mainCmd.PersistentFlags().StringVarP(&opts.Db, "db", "d", "rpc://node@127.0.0.1:26257", "Set backend datastore")
-	mainCmd.PersistentFlags().StringVarP(&opts.Port, "port", "", ":8000", "The host:port on which to serve the web interface")
-	mainCmd.PersistentFlags().StringVarP(&opts.Http, "port-http", "", ":33693", "The host:port on which to serve the http sql server")
-	mainCmd.PersistentFlags().StringVarP(&opts.Sock, "port-sock", "", ":33793", "The host:port on which to serve the sock sql server")
-	mainCmd.PersistentFlags().StringVarP(&opts.Base, "base", "b", "surreal", "Name of the root database key")
-	mainCmd.PersistentFlags().BoolVarP(&opts.Verbose, "verbose", "v", false, "Enable verbose output")
+	mainCmd.PersistentFlags().StringVar(&opts.Logging.Level, "log-level", "error", "Specify log verbosity")
+	mainCmd.PersistentFlags().StringVar(&opts.Logging.Output, "log-output", "stderr", "Specify log output destination")
+	mainCmd.PersistentFlags().StringVar(&opts.Logging.Format, "log-format", "text", "Specify log output format (text, json)")
+	mainCmd.PersistentFlags().StringVar(&opts.Logging.Newrelic, "log-newrelic", "", "Log to Newrelic using the specified license key")
+	mainCmd.PersistentFlags().MarkHidden("log-newrelic")
 
 	cobra.OnInitialize(setup)
 
 }
 
-// Run runs the cli app
-func Run() {
+// Init runs the cli app
+func Init() {
 	if err := mainCmd.Execute(); err != nil {
-		log.Println(err)
 		os.Exit(-1)
 	}
 }

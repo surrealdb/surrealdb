@@ -12,10 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package cli
 
-import "github.com/abcum/surreal/cli"
+import (
+	"github.com/spf13/cobra"
+)
 
-func main() {
-	cli.Init()
+var userCmd = &cobra.Command{
+	Use:   "user",
+	Short: "Setup database users",
+}
+
+func init() {
+
+	userCmd.AddCommand(
+		userAddCmd,
+		userDelCmd,
+	)
+
 }

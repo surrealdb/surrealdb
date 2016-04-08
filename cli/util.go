@@ -12,10 +12,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package cli
 
-import "github.com/abcum/surreal/cli"
+import (
+	"strings"
 
-func main() {
-	cli.Init()
+	"github.com/kr/text"
+)
+
+func flag(n string) (s string) {
+
+	if f, ok := flags[n]; ok {
+
+		s += "\n\n"
+
+		if u, ok := usage[n]; !ok {
+
+			s += indent(8, wrap(f))
+
+			s += "\n"
+
+		} else {
+
+			s += indent(8, wrap(f+" For example:"))
+
+			s += "\n"
+
+			for _, i := range u {
+				s += "\n" + strings.Repeat(" ", 12) + i
+			}
+
+			s += "\n"
+
+		}
+
+		// Indent default values
+		s += strings.Repeat(" ", 7)
+
+	}
+
+	return
+
+}
+
+func wrap(s string) string {
+	return text.Wrap(s, 71)
+}
+
+func indent(i int, s string) string {
+	return text.Indent(s, strings.Repeat(" ", i))
 }
