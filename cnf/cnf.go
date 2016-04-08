@@ -14,18 +14,66 @@
 
 package cnf
 
+// Options defines global configuration options
 type Options struct {
-	Db string
+	Store string // The backend KV store to use
 
-	Auth string
-	User string
-	Pass string
+	DB struct {
+		Host string // Surreal host to connect to
+		Port string // Surreal port to connect to
+		Base string // Base key to use in KV stores
+	}
 
-	Port string
-	Http string
-	Sock string
+	Cert struct {
+		CA struct {
+			File string // File location of CA certificate
+			Data string // PEM encoded content of certificate
+		}
+		Crt struct {
+			File string // File location of server certificate
+			Data string // PEM encoded content of certificate
+		}
+		Key struct {
+			File string // File location of server certificate
+			Data string // PEM encoded content of certificate
+		}
+	}
 
-	Base string
+	Auth struct {
+		Auth  string // Master authentication username:password
+		User  string // Master authentication username
+		Pass  string // Master authentication password
+		Token string
+	}
 
-	Verbose bool
+	Node struct {
+		Host string   // Node hostname
+		Name string   // Name of this node
+		Uniq string   // Uniq of this node
+		UUID string   // UUID of this node
+		Attr string   // Comma separated tags for this node
+		Tags []string // Slice of tags for this node
+	}
+
+	Port struct {
+		Raft int // Raft port
+		Http int // Http port
+	}
+
+	Conn struct {
+		Raft string // Raft port
+		Http string // Http port
+	}
+
+	Cluster struct {
+		Join string   // Comma separated peers to join
+		Peer []string // Slice of peers to join
+	}
+
+	Logging struct {
+		Level    string // Stores the configured logging level
+		Output   string // Stores the configured logging output
+		Format   string // Stores the configured logging format
+		Newrelic string // Stores the configured newrelic license key
+	}
 }
