@@ -15,11 +15,10 @@
 package web
 
 import (
-	"log"
-
 	"github.com/abcum/fibre"
 	"github.com/abcum/fibre/mw"
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/log"
 	"github.com/dgrijalva/jwt-go"
 )
 
@@ -36,13 +35,17 @@ func Setup(opts *cnf.Options) (err error) {
 
 	s.SetWait(5)
 
+	// Set timeouts
+
+	s.SetName("http")
+
 	// Setup errorware
 
 	s.SetHTTPErrorHandler(errors)
 
 	// Set log level
 
-	s.Logger().SetLevel(opts.Logging.Level)
+	s.Logger().SetLogger(log.Instance())
 
 	// Setup middleware
 
@@ -104,6 +107,6 @@ func Setup(opts *cnf.Options) (err error) {
 // Exit tears down the server gracefully
 func Exit() {
 
-	log.Println("Gracefully shutting down http protocol")
+	log.WithField("prefix", "http").Println("Gracefully shutting down http protocol")
 
 }
