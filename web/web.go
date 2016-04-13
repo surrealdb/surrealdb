@@ -19,7 +19,6 @@ import (
 	"github.com/abcum/fibre/mw"
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/log"
-	"github.com/dgrijalva/jwt-go"
 )
 
 // Setup sets up the server for remote connections
@@ -81,10 +80,10 @@ func Setup(opts *cnf.Options) (err error) {
 	// Setup special authentication
 
 	s.Use(mw.Sign(&mw.SignOpts{
-		Key: []byte(opts.Auth.Key),
-		Fnc: func(c *fibre.Context, t *jwt.Token) error {
-			c.Set("NS", t.Claims["ns"])
-			c.Set("DB", t.Claims["db"])
+		Key: []byte(opts.Auth.Token),
+		Fnc: func(c *fibre.Context, h, d map[string]interface{}) error {
+			c.Set("NS", d["ns"])
+			c.Set("DB", d["db"])
 			return nil
 		},
 	}).Path("/rpc", "/sql", "/key"))
@@ -98,7 +97,13 @@ func Setup(opts *cnf.Options) (err error) {
 
 	// Run the server
 
-	s.Run(opts.Conn.Http)
+	if len(opts.Cert.Crt.File) == 0 || len(opts.Cert.Key.File) == 0 {
+		s.Run(opts.Conn.Http)
+	}
+
+	if len(opts.Cert.Crt.File) != 0 && len(opts.Cert.Key.File) != 0 {
+		s.Run(opts.Conn.Http, opts.Cert.Crt.File, opts.Cert.Key.File)
+	}
 
 	return nil
 

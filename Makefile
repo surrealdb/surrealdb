@@ -82,9 +82,10 @@ clean:
 
 .PHONY: quick
 quick: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
-quick:
+quick: 
 	@echo "Run 'make glide' before building"
-	$(GO) build
+	$(GO) clean `glide novendor`
+	$(GO) build `glide novendor`
 
 # The `make build` command compiles
 # the build flags, gets the project
