@@ -1,0 +1,25 @@
+package: github.com/abcum/surreal
+import:
+- package: github.com/Sirupsen/logrus
+- package: github.com/abcum/fibre
+  subpackages:
+  - mw
+- package: github.com/cockroachdb/cockroach
+  subpackages:
+  - base
+  - client
+  - roachpb
+  - rpc
+  - util/stop
+- package: github.com/hashicorp/serf
+  subpackages:
+  - serf
+- package: github.com/imdario/mergo
+- package: github.com/kr/text
+- package: github.com/mgutz/ansi
+- package: github.com/robertkrimen/otto
+- package: github.com/satori/go.uuid
+- package: github.com/sergi/go-diff
+  subpackages:
+  - diffmatchpatch
+- package: github.com/spf13/cobra
