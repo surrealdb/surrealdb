@@ -13,24 +13,16 @@
 # limitations under the License.
 
 GO ?= go
-FLG :=
 LDF :=
-PKG := ./...
 
 # The `make default` command cleans
 # the go build and test files and
 # then runs a build and install.
 
 .PHONY: default
-default: clean build install
-
-# The `make all` command cleans the
-# go build and test files, runs all
-# tests, and runs a build and install.
-# This is used for circleci tests.
-
-.PHONY: all
-all: clean test build install
+default:
+	@echo "Choose a Makefile target:"
+	@$(MAKE) -pRrq -f $(lastword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/^# File/,/^# Finished Make data base/ {if ($$1 !~ "^[#.]") {print "  - " $$1}}' | sort
 
 # The `make doc` command runs the godoc
 # web gui, for all golang projects in
@@ -38,16 +30,16 @@ all: clean test build install
 
 .PHONY: doc
 doc:
-	godoc -http=:9000
+	@echo "http://127.0.0.1:9000"
+	@godoc -http=:9000
 
-# The `make dev` command downloads or
-# updates 'gin', and runs an auto-updating
-# development server.
+# The `make kill` command ensures that
+# any hanging surreal processes are force
+# killed. Useful in development.
 
-.PHONY: dev
-dev:
-	$(GO) get -u -v github.com/codegangsta/gin
-	gin -p 3000 -a 33693
+.PHONY: kill
+kill:
+	pkill -9 -f surreal
 
 # The `make convey` command downloads
 # or updates 'goconvey', and runs the
@@ -58,22 +50,22 @@ convey:
 	$(GO) get -u -v github.com/smartystreets/goconvey
 	goconvey -packages 25 -port 5000
 
-# The `make get` command ensures that
-# all imported code is up-to-date,
-# and also gets and embeds c-rocksdb.
-
-.PHONY: get
-get:
-	$(GO) get -d -a -v $(PKG)
-	$(GO) get -tags=embed github.com/tecbot/gorocksdb
-
 # The `make test` command runs all
 # tests, found within all sub-folders
 # in the project folder.
 
 .PHONY: test
+test: clean
 test:
-	$(GO) test $(FLG) $(PKG)
+	$(GO) test `glide novendor`
+
+# The `make glide` command ensures that
+# all imported dependencies are synced
+# and located withint the vendor folder.
+
+.PHONY: glide
+glide:
+	glide install --delete
 
 # The `make clean` command cleans
 # all object, build, and test files
@@ -81,8 +73,18 @@ test:
 
 .PHONY: clean
 clean:
-	$(GO) clean $(FLG) -x -i $(PKG)
+	$(GO) clean -i `glide novendor`
 	find . -name '*.test' -type f -exec rm -f {} \;
+
+# The `make build` command compiles
+# the build flags, gets the project
+# dependencies, and runs a build.
+
+.PHONY: quick
+quick: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
+quick:
+	@echo "Run 'make glide' before building"
+	$(GO) build
 
 # The `make build` command compiles
 # the build flags, gets the project
@@ -90,10 +92,10 @@ clean:
 
 .PHONY: build
 build: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
-build: get
+build: glide
 build: clean
 build:
-	$(GO) build -v -o surreal $(FLG) -ldflags '$(LDF)'
+	$(GO) build -v -ldflags '$(LDF)'
 
 # The `make install` command compiles
 # the build flags, gets the project
@@ -101,13 +103,13 @@ build:
 
 .PHONY: install
 install: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
-install: get
+install: glide
 install: clean
 install:
-	$(GO) install -v $(FLG) -ldflags '$(LDF)'
+	$(GO) install -v -ldflags '$(LDF)'
 
 # The `make cockroach` command ensures
-# that cockroachdb is downloads and
+# that cockroachdb is downloaded and
 # installed, ready for testing.
 
 .PHONY: cockroach
