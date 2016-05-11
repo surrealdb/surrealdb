@@ -18,6 +18,6 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func executeSelectStatement(stmt sql.Statement) interface{} {
-	return stmt
+func executeSelectStatement(ast *sql.SelectStatement) ([]interface{}, error) {
+	return nil, nil
 }

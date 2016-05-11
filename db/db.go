@@ -15,67 +15,139 @@
 package db
 
 import (
-	"io"
+	"fmt"
+	"time"
 
+	"github.com/abcum/fibre"
+	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/err"
+	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
+	"github.com/cockroachdb/cockroach/base"
+	"github.com/cockroachdb/cockroach/client"
+	"github.com/cockroachdb/cockroach/rpc"
+	"github.com/cockroachdb/cockroach/util/stop"
 )
 
-// Execute parses the query and executes it against the data layer
-func Execute(c *echo.Context, input interface{}) (res []interface{}, err error) {
+type Response struct {
+	Time   string      `json:"time, omitempty"`
+	Status interface{} `json:"status,omitempty"`
+	Detail interface{} `json:"detail,omitempty"`
+	Result interface{} `json:"result,omitempty"`
+}
 
-	var ast *sql.Query
-	var stm interface{}
+var db *client.DB
+var st *stop.Stopper
 
-	switch input.(type) {
-	case string:
-		ast, err = sql.ParseString(input.(string))
-	case io.Reader:
-		ast, err = sql.ParseBuffer(input.(io.Reader))
-	}
+// Setup sets up the connection with the data layer
+func Setup(opts *cnf.Options) (err error) {
 
+	log.WithPrefix("db").Infof("Connecting to database at %s", opts.Store)
+
+	st = stop.NewStopper()
+
+	ct := rpc.NewContext(&base.Context{User: "node", Insecure: true}, nil, st)
+
+	se, err := client.NewSender(ct, opts.Store)
 	if err != nil {
-		return nil, err
+		st.Stop()
+		log.WithPrefix("db").Errorf("failed to initialize KV client: %s", err)
+		return
 	}
+
+	db = client.NewDB(se)
+
+	return
+
+}
+
+// Exit shuts down the connection with the data layer
+func Exit() {
+
+	log.WithPrefix("db").Infof("Disconnecting from database")
+
+	st.Stop()
+
+}
+
+func Prepare(sql string, param ...interface{}) string {
+
+	return fmt.Sprintf(sql, param...)
+
+}
+
+// Execute parses the query and executes it against the data layer
+func Execute(ctx *fibre.Context, txt interface{}) (out []interface{}, err error) {
+
+	ast, err := sql.Parse(ctx, txt)
+	if err != nil {
+		return
+	}
+
+	chn := make(chan interface{})
+
+	go execute(ctx, ast, chn)
+
+	for res := range chn {
+		out = append(out, res)
+	}
+
+	return
+
+}
+
+func execute(ctx *fibre.Context, ast *sql.Query, chn chan interface{}) {
 
 	for _, s := range ast.Statements {
 
-		switch s.(type) {
+		var res []interface{}
+		var err error
+
+		now := time.Now()
+
+		switch stm := s.(type) {
+
+		case *sql.UseStatement:
+			continue
 
 		case *sql.SelectStatement:
-			stm = executeSelectStatement(s)
+			res, err = executeSelectStatement(stm)
 		case *sql.CreateStatement:
-			stm = executeCreateStatement(s)
+			res, err = executeCreateStatement(stm)
 		case *sql.UpdateStatement:
-			stm = executeUpdateStatement(s)
+			res, err = executeUpdateStatement(stm)
 		case *sql.ModifyStatement:
-			stm = executeModifyStatement(s)
+			res, err = executeModifyStatement(stm)
 		case *sql.DeleteStatement:
-			stm = executeDeleteStatement(s)
+			res, err = executeDeleteStatement(stm)
 		case *sql.RelateStatement:
-			stm = executeRelateStatement(s)
+			res, err = executeRelateStatement(stm)
 		case *sql.RecordStatement:
-			stm = executeRecordStatement(s)
+			res, err = executeRecordStatement(stm)
 
-		case *sql.DefineViewStatement:
-			stm = executeDefineStatement(s)
-		case *sql.ResyncViewStatement:
-			stm = executeResyncStatement(s)
-		case *sql.RemoveViewStatement:
-			stm = executeRemoveStatement(s)
+		case *sql.DefineFieldStatement:
+			res, err = executeDefineFieldStatement(stm)
+		case *sql.RemoveFieldStatement:
+			res, err = executeRemoveFieldStatement(stm)
 
 		case *sql.DefineIndexStatement:
-			stm = executeDefineStatement(s)
+			res, err = executeDefineIndexStatement(stm)
 		case *sql.ResyncIndexStatement:
-			stm = executeResyncStatement(s)
+			res, err = executeResyncIndexStatement(stm)
 		case *sql.RemoveIndexStatement:
-			stm = executeRemoveStatement(s)
+			res, err = executeRemoveIndexStatement(stm)
 
 		}
 
-		res = append(res, stm)
+		chn <- &Response{
+			Time:   time.Since(now).String(),
+			Status: errors.Status(err),
+			Detail: errors.Detail(err),
+			Result: append([]interface{}{}, res...),
+		}
 
 	}
 
-	return res, err
+	close(chn)
 
 }

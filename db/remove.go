@@ -18,6 +18,10 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func executeRemoveStatement(stmt sql.Statement) interface{} {
-	return stmt
+func executeRemoveFieldStatement(ast *sql.RemoveFieldStatement) ([]interface{}, error) {
+	return nil, nil
+}
+
+func executeRemoveIndexStatement(ast *sql.RemoveIndexStatement) ([]interface{}, error) {
+	return nil, nil
 }

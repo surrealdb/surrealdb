@@ -18,6 +18,6 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func executeResyncStatement(stmt sql.Statement) interface{} {
-	return stmt
+func executeResyncIndexStatement(ast *sql.ResyncIndexStatement) ([]interface{}, error) {
+	return nil, nil
 }

@@ -18,6 +18,10 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func executeDefineStatement(stmt sql.Statement) interface{} {
-	return stmt
+func executeDefineFieldStatement(ast *sql.DefineFieldStatement) ([]interface{}, error) {
+	return nil, nil
+}
+
+func executeDefineIndexStatement(ast *sql.DefineIndexStatement) ([]interface{}, error) {
+	return nil, nil
 }

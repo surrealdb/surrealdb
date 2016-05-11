@@ -18,6 +18,6 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func executeRelateStatement(stmt sql.Statement) interface{} {
-	return stmt
+func executeRelateStatement(ast *sql.RelateStatement) ([]interface{}, error) {
+	return nil, nil
 }
