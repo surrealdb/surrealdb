@@ -33,3 +33,5 @@ surreal
 
 data/
 vendor/
+node_modules/
+bower_components/
