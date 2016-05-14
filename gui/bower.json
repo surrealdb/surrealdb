@@ -1,0 +1,9 @@
+{
+  "name": "gui",
+  "dependencies": {
+    "ember": "~2.5.0",
+    "ember-cli-shims": "0.1.1",
+    "ember-cli-test-loader": "0.2.2",
+    "ember-qunit-notifications": "0.1.0"
+  }
+}
