@@ -15,35 +15,42 @@
 package keys
 
 import (
+	"fmt"
 	"strings"
 )
 
 // Thing ...
 type Thing struct {
-	KV string // Base
-	NS string // Namespace
-	DB string // Database
-	TB string // Table
-	ID string // ID
+	KV string      // KV
+	NS string      // NS
+	DB string      // DB
+	TB string      // TB
+	TK string      // *
+	ID interface{} // ID
 }
 
 // init initialises the key
 func (k *Thing) init() *Thing {
+	if k.TK == "" {
+		k.TK = "*"
+	}
 	return k
 }
 
 // Encode encodes the key into binary
 func (k *Thing) Encode() []byte {
-	return output(k.init())
+	k.init()
+	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID)
 }
 
 // Decode decodes the key from binary
 func (k *Thing) Decode(data []byte) {
-	injest(k, data)
+	k.init()
+	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID)
 }
 
 // String returns a string representation of the key
 func (k *Thing) String() string {
 	k.init()
-	return "/" + strings.Join([]string{k.KV, k.NS, k.DB, k.TB, k.ID}, "/")
+	return "/" + strings.Join([]string{k.KV, k.NS, k.DB, k.TB, k.TK, fmt.Sprintf("%v", k.ID)}, "/")
 }

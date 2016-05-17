@@ -14,8 +14,6 @@
 
 package keys
 
-import "github.com/abcum/surreal/util/bytes"
-
 const (
 	// Prefix is the lowest char found in a key
 	Prefix = "\x00"
@@ -23,17 +21,33 @@ const (
 	Suffix = "\xff"
 )
 
+var (
+	cTERM   = uint8(0x00)
+	cPREFIX = uint8(0x01)
+	cNILL   = uint8(0x02)
+	cBOOL   = uint8(0x03)
+	cTIME   = uint8(0x04)
+	cNUMBER = uint8(0x05)
+	cSTRING = uint8(0x06)
+	cARRAY  = uint8(0x07)
+	cSUFFIX = uint8(0x08)
+)
+
+var (
+	bTERM   = []byte("\x00")
+	bPREFIX = []byte("\x01")
+	bNILL   = []byte("\x02")
+	bBOOL   = []byte("\x03")
+	bTIME   = []byte("\x04")
+	bNUMBER = []byte("\x05")
+	bSTRING = []byte("\x06")
+	bARRAY  = []byte("\x07")
+	bSUFFIX = []byte("\x08")
+)
+
 // Key ...
 type Key interface {
 	String() string
 	Encode() []byte
 	Decode(data []byte)
-}
-
-func output(k Key) []byte {
-	return bytes.Encode(k)
-}
-
-func injest(k Key, d []byte) {
-	bytes.Decode(d, k)
 }

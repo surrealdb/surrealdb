@@ -15,37 +15,41 @@
 package keys
 
 import (
+	"fmt"
 	"strings"
 )
 
 // Index ...
 type Index struct {
-	KV   string   // Base
-	NS   string   // Namespace
-	DB   string   // Database
-	TB   string   // Table
-	TK   string   // ¤
-	What []string // What
+	KV   string      // KV
+	NS   string      // NS
+	DB   string      // DB
+	TB   string      // TB
+	TK   string      // ¤
+	ID   string      // ID
+	What interface{} // What
 }
 
 // init initialises the key
 func (k *Index) init() *Index {
-	k.TK = "¤"
+	k.TK = "∆"
 	return k
 }
 
 // Encode encodes the key into binary
 func (k *Index) Encode() []byte {
-	return output(k.init())
+	k.init()
+	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.What)
 }
 
 // Decode decodes the key from binary
 func (k *Index) Decode(data []byte) {
-	injest(k, data)
+	k.init()
+	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID, &k.What)
 }
 
 // String returns a string representation of the key
 func (k *Index) String() string {
 	k.init()
-	return "/" + strings.Join([]string{k.KV, k.NS, k.DB, k.TB, k.TK, "[" + strings.Join(k.What, ",") + "]"}, "/")
+	return "/" + strings.Join([]string{k.KV, k.NS, k.DB, k.TB, k.TK, fmt.Sprintf("%v", k.What)}, "/")
 }

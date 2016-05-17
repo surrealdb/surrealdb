@@ -15,19 +15,20 @@
 package keys
 
 import (
+	"fmt"
 	"strings"
 )
 
 // Edge ...
 type Edge struct {
-	KV   string // Base
-	NS   string // Namespace
-	DB   string // Database
-	TB   string // Table
-	TK   string // «»
-	ID   string // ID
-	Type string // Type
-	Edge string // Edge
+	KV   string      // KV
+	NS   string      // NS
+	DB   string      // DB
+	TB   string      // TB
+	TK   string      // «»
+	ID   interface{} // ID
+	Type string      // Type
+	FK   interface{} // FK
 }
 
 // init initialises the key
@@ -40,16 +41,18 @@ func (k *Edge) init() *Edge {
 
 // Encode encodes the key into binary
 func (k *Edge) Encode() []byte {
-	return output(k.init())
+	k.init()
+	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.Type, k.FK)
 }
 
 // Decode decodes the key from binary
 func (k *Edge) Decode(data []byte) {
-	injest(k, data)
+	k.init()
+	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID, &k.Type, &k.FK)
 }
 
 // String returns a string representation of the key
 func (k *Edge) String() string {
 	k.init()
-	return "/" + strings.Join([]string{k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.Type, k.Edge}, "/")
+	return "/" + strings.Join([]string{k.KV, k.NS, k.DB, k.TB, k.TK, fmt.Sprintf("%v", k.ID), k.Type, fmt.Sprintf("%v", k.FK)}, "/")
 }

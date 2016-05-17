@@ -20,12 +20,12 @@ import (
 
 // IX ...
 type IX struct {
-	KV string // Base
+	KV string // KV
 	CF string // !
 	TK string // f
-	NS string // Namespace
-	DB string // Database
-	TB string // Table
+	NS string // NS
+	DB string // DB
+	TB string // TB
 	IX string // Index
 }
 
@@ -38,12 +38,14 @@ func (k *IX) init() *IX {
 
 // Encode encodes the key into binary
 func (k *IX) Encode() []byte {
-	return output(k.init())
+	k.init()
+	return encode(k.KV, k.CF, k.TK, k.NS, k.DB, k.TB, k.IX)
 }
 
 // Decode decodes the key from binary
 func (k *IX) Decode(data []byte) {
-	injest(k, data)
+	k.init()
+	decode(data, &k.KV, &k.CF, &k.TK, &k.NS, &k.DB, &k.TB, &k.IX)
 }
 
 // String returns a string representation of the key

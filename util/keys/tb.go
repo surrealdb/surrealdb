@@ -20,12 +20,12 @@ import (
 
 // TB ...
 type TB struct {
-	KV string // Base
+	KV string // KV
 	CF string // !
 	TK string // t
-	NS string // Namespace
-	DB string // Database
-	TB string // Table
+	NS string // NS
+	DB string // DB
+	TB string // TB
 }
 
 // init initialises the key
@@ -37,12 +37,14 @@ func (k *TB) init() *TB {
 
 // Encode encodes the key into binary
 func (k *TB) Encode() []byte {
-	return output(k.init())
+	k.init()
+	return encode(k.KV, k.CF, k.TK, k.NS, k.DB, k.TB)
 }
 
 // Decode decodes the key from binary
 func (k *TB) Decode(data []byte) {
-	injest(k, data)
+	k.init()
+	decode(data, &k.KV, &k.CF, &k.TK, &k.NS, &k.DB, &k.TB)
 }
 
 // String returns a string representation of the key

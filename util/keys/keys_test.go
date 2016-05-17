@@ -12,94 +12,243 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package keys_test
+package keys
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
-	"golang.org/x/text/collate"
-	"golang.org/x/text/language"
-
-	"github.com/abcum/surreal/util/keys"
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-func TestEncodeDecode(t *testing.T) {
+var sorts []Key
 
-	timer, _ := time.Parse(time.RFC3339, "1987-06-22T08:00:00.123456789Z")
+var tests []struct {
+	str string
+	obj Key
+	new Key
+}
 
-	tests := []struct {
+func TestMain(t *testing.T) {
+
+	clock, _ := time.Parse(time.RFC3339, "1987-06-22T08:00:00.123456789Z")
+
+	tests = []struct {
 		str string
-		obj keys.Key
-		new keys.Key
+		obj Key
+		new Key
 	}{
 		{
 			str: "/surreal/!/n/abcum",
-			obj: &keys.NS{KV: "surreal", NS: "abcum"},
-			new: &keys.NS{},
+			obj: &NS{KV: "surreal", NS: "abcum"},
+			new: &NS{},
 		},
 		{
 			str: "/surreal/!/d/abcum/database",
-			obj: &keys.DB{KV: "surreal", NS: "abcum", DB: "database"},
-			new: &keys.DB{},
+			obj: &DB{KV: "surreal", NS: "abcum", DB: "database"},
+			new: &DB{},
 		},
 		{
 			str: "/surreal/!/t/abcum/database/person",
-			obj: &keys.TB{KV: "surreal", NS: "abcum", DB: "database", TB: "person"},
-			new: &keys.TB{},
+			obj: &TB{KV: "surreal", NS: "abcum", DB: "database", TB: "person"},
+			new: &TB{},
 		},
 		{
 			str: "/surreal/!/f/abcum/database/person/fullname",
-			obj: &keys.FD{KV: "surreal", NS: "abcum", DB: "database", TB: "person", FD: "fullname"},
-			new: &keys.FD{},
+			obj: &FD{KV: "surreal", NS: "abcum", DB: "database", TB: "person", FD: "fullname"},
+			new: &FD{},
 		},
 		{
 			str: "/surreal/!/i/abcum/database/person/teenagers",
-			obj: &keys.IX{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "teenagers"},
-			new: &keys.IX{},
+			obj: &IX{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "teenagers"},
+			new: &IX{},
 		},
 		{
-			str: "/surreal/abcum/database/person/¤/[firstname,lastname]",
-			obj: &keys.Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", What: []string{"firstname", "lastname"}},
-			new: &keys.Index{},
+			str: "/surreal/abcum/database/person/*/\x00",
+			obj: &Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: Prefix},
+			new: &Thing{},
 		},
 		{
-			str: "/surreal/abcum/database/person/873c2f37-ea03-4c5e-843e-cf393af44155",
-			obj: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155"},
-			new: &keys.Thing{},
+			str: "/surreal/abcum/database/person/*/873c2f37-ea03-4c5e-843e-cf393af44155",
+			obj: &Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155"},
+			new: &Thing{},
 		},
 		{
-			str: "/surreal/abcum/database/person/•/873c2f37-ea03-4c5e-843e-cf393af44155/1987-06-22T08:00:00.123456789Z",
-			obj: &keys.Trail{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", Time: timer},
-			new: &keys.Trail{},
+			str: "/surreal/abcum/database/person/*/\xff",
+			obj: &Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: Suffix},
+			new: &Thing{},
 		},
 		{
-			str: "/surreal/abcum/database/person/‡/873c2f37-ea03-4c5e-843e-cf393af44155/friend/1987-06-22T08:00:00.123456789Z",
-			obj: &keys.Event{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", Type: "friend", Time: timer},
-			new: &keys.Event{},
+			str: "/surreal/abcum/database/person/~/873c2f37-ea03-4c5e-843e-cf393af44155/1987-06-22T08:00:00.123456789Z",
+			obj: &Trail{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", Time: clock},
+			new: &Trail{},
+		},
+		{
+			str: "/surreal/abcum/database/person/~/test/1987-06-22T08:00:00.123456789Z",
+			obj: &Trail{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "test", Time: clock},
+			new: &Trail{},
+		},
+		{
+			str: "/surreal/abcum/database/person/•/873c2f37-ea03-4c5e-843e-cf393af44155/friend/1987-06-22T08:00:00.123456789Z",
+			obj: &Event{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", Type: "friend", Time: clock},
+			new: &Event{},
 		},
 		{
 			str: "/surreal/abcum/database/person/«»/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &keys.Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", Type: "clicked", Edge: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
-			new: &keys.Edge{},
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", Type: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			new: &Edge{},
 		},
 		{
 			str: "/surreal/abcum/database/person/«/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &keys.Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«", Type: "clicked", Edge: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
-			new: &keys.Edge{},
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«", Type: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			new: &Edge{},
 		},
 		{
 			str: "/surreal/abcum/database/person/»/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &keys.Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "»", Type: "clicked", Edge: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
-			new: &keys.Edge{},
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "»", Type: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			new: &Edge{},
 		},
 		{
 			str: "/surreal/abcum/database/person/«»/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &keys.Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«»", Type: "clicked", Edge: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
-			new: &keys.Edge{},
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«»", Type: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			new: &Edge{},
 		},
+		{
+			str: "/surreal/abcum/database/person/∆/[lastname firstname]",
+			obj: &Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "names", What: []interface{}{"lastname", "firstname"}},
+			new: &Index{},
+		},
+		{
+			str: "/surreal/abcum/database/person/∆/[false account:1 lastname <nil> firstname]",
+			obj: &Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "names", What: []interface{}{false, "account:1", "lastname", nil, "firstname"}},
+			new: &Index{},
+		},
+		/*{
+			str: "Test key",
+			new: &Full{},
+			obj: &Full{
+				N:     nil,
+				B:     true,
+				F:     false,
+				S:     "Test",
+				T:     clock,
+				N64:   -9223372036854775807,
+				N32:   -2147483647,
+				N16:   -32767,
+				N8:    -127,
+				I:     1,
+				I8:    127,
+				I16:   32767,
+				I32:   2147483647,
+				I64:   9223372036854775807,
+				UI:    1,
+				UI8:   255,
+				UI16:  65535,
+				UI32:  4294967295,
+				UI64:  18446744073709551615,
+				NF32:  -0.00001,
+				NF64:  -0.00002,
+				F32:   0.00001,
+				F64:   0.00002,
+				AB:    []bool{true, false},
+				AS:    []string{"A", "B", "C"},
+				AI8:   []int8{127},
+				AI16:  []int16{32767},
+				AI32:  []int32{2147483647},
+				AI64:  []int64{9223372036854775807},
+				AUI8:  []uint8{127},
+				AUI16: []uint16{32767},
+				AUI32: []uint32{2147483647},
+				AUI64: []uint64{9223372036854775807},
+				AF32:  []float32{0.1, 0.2, 0.3},
+				AF64:  []float64{0.1, 0.2, 0.3},
+				IN:    "Test",
+				IB:    true,
+				IF:    false,
+				IT:    clock,
+				II:    int64(19387),
+				ID:    float64(183784.13413),
+				INA:   []interface{}{true, false, nil, "Test", clock, int64(192), 0.1, 0.2, 0.3},
+				AIN:   []interface{}{true, false, nil, "Test", clock, int64(192), int64(9223372036854775807), 0.1, 0.2, 0.3},
+			},
+		},*/
 	}
+
+	sorts = []Key{
+
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Prefix},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: nil},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: false},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: true},
+		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -9223372036854775807},
+		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -2147483647},
+		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -32767},
+		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -12},
+		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -2},
+		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -1},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 0},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 1},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 2},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 12},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 127},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(127)},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 32767},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int16(32767)},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 2147483647},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int32(2147483647)},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 9223372036854775807},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int64(9223372036854775807)},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "A"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "B"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "Bb"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "C"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "a"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "b"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "bB"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "c"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "z"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "Â"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "Ä"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "ß"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "â"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "ä"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "①"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "会"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "😀😀😀"},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Suffix},
+
+		&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), Time: time.Now()},
+		&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), Time: time.Now()},
+
+		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), Type: "friend", FK: int8(2)},
+		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), Type: "friend", FK: int8(3)},
+		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(2), Type: "friend", FK: int8(1)},
+
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: Prefix},
+
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:abcum", false, "Smith", nil, "Zoe"}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:abcum", true, "Morgan Hitchcock", nil, "Tobie"}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:abcum", true, "Rutherford", nil, "Sam"}},
+
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:tests", false, "Smith", nil, "Zoe"}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:tests", true, "Morgan Hitchcock", nil, "Tobie"}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:tests", true, "Rutherford", nil, "Sam"}},
+
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 0, 127}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 0, 127}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 1, 127}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 2, 32767}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 2, 2147483647}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 2, 9223372036854775807}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 2, 9223372036854775807}},
+
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: Suffix},
+	}
+
+}
+
+func TestDisplaying(t *testing.T) {
 
 	for _, test := range tests {
 
@@ -109,18 +258,24 @@ func TestEncodeDecode(t *testing.T) {
 				So(test.obj.String(), ShouldEqual, test.str)
 			})
 
-			Convey("String should be a string", func() {
-				So(test.obj.String(), ShouldHaveSameTypeAs, "")
-			})
+		})
 
-			Convey("Encode should be a byte slice", func() {
-				So(test.obj.Encode(), ShouldHaveSameTypeAs, []byte{})
-			})
+	}
+
+}
+
+func TestEncoding(t *testing.T) {
+
+	for _, test := range tests {
+
+		Convey(test.str, t, func() {
+
+			enc := test.obj.Encode()
+			Printf("%s\n\n%#q\n\n%v\n\n", test.str, enc, enc)
+			test.new.Decode(enc)
 
 			Convey("Key should encode and decode", func() {
-				enc := test.obj.Encode()
-				test.new.Decode(enc)
-				// So(test.new.String(), ShouldEqual, test.str)
+				So(test.new, ShouldResemble, test.obj)
 			})
 
 		})
@@ -131,122 +286,20 @@ func TestEncodeDecode(t *testing.T) {
 
 func TestSorting(t *testing.T) {
 
-	c := collate.New(language.English, collate.Force, collate.Numeric)
+	for i := 1; i < len(sorts); i++ {
 
-	tests := []struct {
-		res int
-		one keys.Key
-		two keys.Key
-	}{
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "1"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "2"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "2"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "12"},
-		},
-		{
-			res: 1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "12"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "2"},
-		},
-		{
-			res: -1, // Fullwidth is sorted as usual.
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "２"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "１２"},
-		},
-		{
-			res: 1, // Circled is not sorted as numbers.
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "②"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "①②"},
-		},
-		{
-			res: 1, // Subscript is not sorted as numbers.
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "₂"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "₁₂"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "abc"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "ABC"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "ABC"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "zbc"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "ÄBC"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "zbc"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "ÁBC"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "zbc"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "zbc"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "ZBC"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: keys.Prefix},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: keys.Suffix},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: keys.Prefix},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "a"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: keys.Prefix},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "①"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: keys.Prefix},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "会"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: keys.Prefix},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "😀"},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "a"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: keys.Suffix},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "①"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: keys.Suffix},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "会"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: keys.Suffix},
-		},
-		{
-			res: -1,
-			one: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "😀"},
-			two: &keys.Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: keys.Suffix},
-		},
-	}
+		txt := fmt.Sprintf("%#v", sorts[i-1])
 
-	for _, test := range tests {
+		Convey(txt, t, func() {
 
-		Convey("Strings should sort correctly", t, func() {
-			one := string(test.one.Encode())
-			two := string(test.two.Encode())
-			res := c.CompareString(one, two)
-			So(res, ShouldEqual, test.res)
+			one := sorts[i-1].Encode()
+			two := sorts[i].Encode()
+
+			Printf("%#v\n%#v\n------\n%#v\n%#v\n------\n%#q\n%#q", sorts[i-1], sorts[i], one, two, one, two)
+
+			Convey("Key should sort before next key", func() {
+				So(string(one), ShouldBeLessThanOrEqualTo, string(two))
+			})
 		})
 
 	}

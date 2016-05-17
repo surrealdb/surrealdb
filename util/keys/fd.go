@@ -20,12 +20,12 @@ import (
 
 // FD ...
 type FD struct {
-	KV string // Base
+	KV string // KV
 	CF string // !
 	TK string // f
-	NS string // Namespace
-	DB string // Database
-	TB string // Table
+	NS string // NS
+	DB string // DB
+	TB string // TB
 	FD string // Field
 }
 
@@ -38,12 +38,14 @@ func (k *FD) init() *FD {
 
 // Encode encodes the key into binary
 func (k *FD) Encode() []byte {
-	return output(k.init())
+	k.init()
+	return encode(k.KV, k.CF, k.TK, k.NS, k.DB, k.TB, k.FD)
 }
 
 // Decode decodes the key from binary
 func (k *FD) Decode(data []byte) {
-	injest(k, data)
+	k.init()
+	decode(data, &k.KV, &k.CF, &k.TK, &k.NS, &k.DB, &k.TB, &k.FD)
 }
 
 // String returns a string representation of the key

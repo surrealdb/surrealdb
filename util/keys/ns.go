@@ -20,10 +20,10 @@ import (
 
 // NS ...
 type NS struct {
-	KV string // Base
+	KV string // KV
 	CF string // !
 	TK string // n
-	NS string // Namespace
+	NS string // NS
 }
 
 // init initialises the key
@@ -35,12 +35,14 @@ func (k *NS) init() *NS {
 
 // Encode encodes the key into binary
 func (k *NS) Encode() []byte {
-	return output(k.init())
+	k.init()
+	return encode(k.KV, k.CF, k.TK, k.NS)
 }
 
 // Decode decodes the key from binary
 func (k *NS) Decode(data []byte) {
-	injest(k, data)
+	k.init()
+	decode(data, &k.KV, &k.CF, &k.TK, &k.NS)
 }
 
 // String returns a string representation of the key
