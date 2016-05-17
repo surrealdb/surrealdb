@@ -16,6 +16,8 @@ package kv
 
 import (
 	"bytes"
+	"math"
+
 	"github.com/boltdb/bolt"
 )
 
@@ -78,6 +80,10 @@ func (tx *Txn) PGet(pre []byte) (kvs []*KV, err error) {
 // `end` (exclusive). To return the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
 func (tx *Txn) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
+
+	if max == 0 {
+		max = math.MaxUint64
+	}
 
 	cu := tx.bu.Cursor()
 
@@ -225,6 +231,10 @@ func (tx *Txn) PDel(pre []byte) (err error) {
 // `end` (exclusive). To delete the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
 func (tx *Txn) RDel(beg, end []byte, max uint64) (err error) {
+
+	if max == 0 {
+		max = math.MaxUint64
+	}
 
 	if !tx.tx.Writable() {
 		err = &TXError{err}
