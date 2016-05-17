@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rand_test
+package rand
 
 import (
 	"testing"
 
-	"github.com/abcum/surreal/util/rand"
 	. "github.com/smartystreets/goconvey/convey"
 )
 
@@ -30,23 +29,23 @@ func TestNew(t *testing.T) {
 
 	var tests = []tester{
 		{
-			str: rand.New(0),
+			str: New(0),
 			len: 0,
 		},
 		{
-			str: rand.New(10),
+			str: New(10),
 			len: 10,
 		},
 		{
-			str: rand.New(20),
+			str: New(20),
 			len: 20,
 		},
 		{
-			str: rand.New(30),
+			str: New(30),
 			len: 30,
 		},
 		{
-			str: rand.New(99),
+			str: New(99),
 			len: 99,
 		},
 	}

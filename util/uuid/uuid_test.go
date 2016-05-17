@@ -12,24 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package uuid_test
+package uuid
 
 import (
 	"testing"
 
-	"github.com/abcum/surreal/util/uuid"
 	. "github.com/smartystreets/goconvey/convey"
 )
 
 func TestNewV1(t *testing.T) {
 
-	var str *uuid.UUID
+	var str *UUID
 
-	str = uuid.NewV1()
+	str = NewV1()
 
 	Convey(str.String(), t, func() {
 		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &uuid.UUID{})
+			So(str, ShouldHaveSameTypeAs, &UUID{})
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
@@ -46,13 +45,13 @@ func TestNewV1(t *testing.T) {
 
 func TestNewV2(t *testing.T) {
 
-	var str *uuid.UUID
+	var str *UUID
 
-	str = uuid.NewV2(0)
+	str = NewV2(0)
 
 	Convey(str.String(), t, func() {
 		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &uuid.UUID{})
+			So(str, ShouldHaveSameTypeAs, &UUID{})
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
@@ -69,13 +68,13 @@ func TestNewV2(t *testing.T) {
 
 func TestNewV3(t *testing.T) {
 
-	var str *uuid.UUID
+	var str *UUID
 
-	str = uuid.NewV3(uuid.NamespaceDNS, "abcum.com")
+	str = NewV3(NamespaceDNS, "abcum.com")
 
 	Convey(str.String(), t, func() {
 		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &uuid.UUID{})
+			So(str, ShouldHaveSameTypeAs, &UUID{})
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
@@ -88,11 +87,11 @@ func TestNewV3(t *testing.T) {
 		})
 	})
 
-	str = uuid.NewV3(uuid.NamespaceURL, "https://abcum.com")
+	str = NewV3(NamespaceURL, "https://abcum.com")
 
 	Convey(str.String(), t, func() {
 		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &uuid.UUID{})
+			So(str, ShouldHaveSameTypeAs, &UUID{})
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
@@ -109,13 +108,13 @@ func TestNewV3(t *testing.T) {
 
 func TestNewV4(t *testing.T) {
 
-	var str *uuid.UUID
+	var str *UUID
 
-	str = uuid.NewV4()
+	str = NewV4()
 
 	Convey(str.String(), t, func() {
 		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &uuid.UUID{})
+			So(str, ShouldHaveSameTypeAs, &UUID{})
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
@@ -132,13 +131,13 @@ func TestNewV4(t *testing.T) {
 
 func TestNewV5(t *testing.T) {
 
-	var str *uuid.UUID
+	var str *UUID
 
-	str = uuid.NewV5(uuid.NamespaceDNS, "abcum.com")
+	str = NewV5(NamespaceDNS, "abcum.com")
 
 	Convey(str.String(), t, func() {
 		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &uuid.UUID{})
+			So(str, ShouldHaveSameTypeAs, &UUID{})
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
@@ -151,11 +150,11 @@ func TestNewV5(t *testing.T) {
 		})
 	})
 
-	str = uuid.NewV5(uuid.NamespaceURL, "https://abcum.com")
+	str = NewV5(NamespaceURL, "https://abcum.com")
 
 	Convey(str.String(), t, func() {
 		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &uuid.UUID{})
+			So(str, ShouldHaveSameTypeAs, &UUID{})
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
@@ -172,13 +171,13 @@ func TestNewV5(t *testing.T) {
 
 func TestParsing(t *testing.T) {
 
-	var str *uuid.UUID
+	var str *UUID
 
-	str = uuid.GetUUID("thiswill-notbe-parsed-as-successful")
+	str = GetUUID("thiswill-notbe-parsed-as-successful")
 
 	Convey(str.String(), t, func() {
 		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &uuid.UUID{})
+			So(str, ShouldHaveSameTypeAs, &UUID{})
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
@@ -191,11 +190,11 @@ func TestParsing(t *testing.T) {
 		})
 	})
 
-	str = uuid.GetUUID("1400A118-2749-4605-833C-E7437488BCBF")
+	str = GetUUID("1400A118-2749-4605-833C-E7437488BCBF")
 
 	Convey(str.String(), t, func() {
 		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &uuid.UUID{})
+			So(str, ShouldHaveSameTypeAs, &UUID{})
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
