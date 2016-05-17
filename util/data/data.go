@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package json
+package data
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
+	"time"
+
+	"github.com/ugorji/go/codec"
 )
 
 // -----------------------------------------------------------------------------------------
@@ -55,24 +56,119 @@ var (
 
 // -----------------------------------------------------------------------------------------
 
-// Doc - an struct that holds a reference to the core json.
+// Doc holds a reference to the core data object, or a selected path.
 type Doc struct {
 	data interface{}
 }
 
-type Fmt struct {
-	doc *Doc
-	val string
+// -----------------------------------------------------------------------------------------
+
+// New creates a new data object.
+func New() *Doc {
+	return &Doc{map[string]interface{}{}}
 }
 
-// Data - Return the contained data as an interface{}.
+// Consume converts a GO interface into a data object.
+func Consume(input interface{}) *Doc {
+	return &Doc{input}
+}
+
+// NewFromJSON converts a JSON byte slice into a data object.
+func NewFromJSON(input []byte) *Doc {
+
+	doc := New()
+
+	var opt codec.JsonHandle
+	opt.MapType = reflect.TypeOf(map[string]interface{}(nil))
+
+	codec.NewDecoderBytes(input, &opt).Decode(doc.data)
+
+	return doc
+
+}
+
+// NewFromCBOR converts a CBOR byte slice into a data object.
+func NewFromCBOR(input []byte) *Doc {
+
+	doc := New()
+
+	var opt codec.CborHandle
+	opt.MapType = reflect.TypeOf(map[string]interface{}(nil))
+	opt.SetInterfaceExt(reflect.TypeOf(time.Time{}), 1, extTime{})
+
+	codec.NewDecoderBytes(input, &opt).Decode(doc.data)
+
+	return doc
+
+}
+
+// NewFromPACK converts a MsgPack byte slice into a data object.
+func NewFromPACK(input []byte) *Doc {
+
+	doc := New()
+
+	var opt codec.MsgpackHandle
+	opt.WriteExt = true
+	opt.RawToString = true
+	opt.MapType = reflect.TypeOf(map[string]interface{}(nil))
+	opt.SetBytesExt(reflect.TypeOf(time.Time{}), 1, extTime{})
+
+	codec.NewDecoderBytes(input, &opt).Decode(doc.data)
+
+	return doc
+
+}
+
+// Data returns the internal data object as an interface.
 func (d *Doc) Data() interface{} {
 	return d.data
 }
 
-// Data - Return the contained data as an interface{}.
+// Reset resets and empties the internal data object.
 func (d *Doc) Reset() {
 	d.data = nil
+}
+
+// ToJSON converts the data object to a JSON byte slice.
+func (d *Doc) ToJSON() (data []byte) {
+
+	var opt codec.JsonHandle
+	opt.Canonical = true
+	opt.AsSymbols = codec.AsSymbolDefault
+
+	codec.NewEncoderBytes(&data, &opt).Encode(d.data)
+
+	return
+
+}
+
+// ToCBOR converts the data object to a CBOR byte slice.
+func (d *Doc) ToCBOR() (data []byte) {
+
+	var opt codec.CborHandle
+	opt.Canonical = true
+	opt.AsSymbols = codec.AsSymbolDefault
+	opt.SetInterfaceExt(reflect.TypeOf(time.Time{}), 1, extTime{})
+
+	codec.NewEncoderBytes(&data, &opt).Encode(d.data)
+
+	return
+
+}
+
+// ToPACK converts the data object to a MsgPack byte slice.
+func (d *Doc) ToPACK() (data []byte) {
+
+	var opt codec.MsgpackHandle
+	opt.WriteExt = true
+	opt.Canonical = true
+	opt.AsSymbols = codec.AsSymbolDefault
+	opt.SetBytesExt(reflect.TypeOf(time.Time{}), 1, extTime{})
+
+	codec.NewEncoderBytes(&data, &opt).Encode(d.data)
+
+	return
+
 }
 
 // -----------------------------------------------------------------------------------------
@@ -179,19 +275,9 @@ func (d *Doc) ChildrenMap() (map[string]*Doc, error) {
 	return nil, ErrNotObj
 }
 
-func (d *Doc) Fmt(format string, vars ...interface{}) *Fmt {
-	return &Fmt{
-		doc: d,
-		val: fmt.Sprintf(format, vars...),
-	}
-}
-
-func (f *Fmt) Set(path ...string) (*Doc, error) {
-	return f.doc.Set(f.val, path...)
-}
-
 // -----------------------------------------------------------------------------------------
 
+// Set the value at the specified path if it does not exist.
 func (d *Doc) New(value interface{}, path ...string) (*Doc, error) {
 	if !d.Exists(path...) {
 		return d.Set(value, path...)
@@ -199,9 +285,7 @@ func (d *Doc) New(value interface{}, path ...string) (*Doc, error) {
 	return nil, nil
 }
 
-// Set - Set the value of a field at a JSON path, any parts of the path that do not exist will be
-// constructed, and if a collision occurs with a non object type whilst iterating the path an error is
-// returned.
+// Set the value at the specified path.
 func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 
 	path = d.path(path...)
@@ -268,16 +352,16 @@ func (d *Doc) SetIndex(value interface{}, index int) (*Doc, error) {
 	return &Doc{nil}, ErrNotArray
 }
 
-// Object - Create a new JSON object at a path. Returns an error if the path contains a collision with
-// a non object type.
-func (d *Doc) Object(path ...string) (*Doc, error) {
-	return d.Set(map[string]interface{}{}, path...)
-}
-
 // Array - Create a new JSON array at a path. Returns an error if the path contains a collision with
 // a non object type.
 func (d *Doc) Array(path ...string) (*Doc, error) {
 	return d.Set([]interface{}{}, path...)
+}
+
+// Object - Create a new JSON object at a path. Returns an error if the path contains a collision with
+// a non object type.
+func (d *Doc) Object(path ...string) (*Doc, error) {
+	return d.Set(map[string]interface{}{}, path...)
 }
 
 // -----------------------------------------------------------------------------------------
@@ -364,51 +448,4 @@ func (d *Doc) ArrayCount(path ...string) (int, error) {
 		return len(array), nil
 	}
 	return 0, ErrNotArray
-}
-
-// -----------------------------------------------------------------------------------------
-
-// Bytes - Converts the contained object back to a JSON []byte blob.
-func (d *Doc) Bytes() []byte {
-	if d.data != nil {
-		if bytes, err := json.Marshal(d.data); err == nil {
-			return bytes
-		}
-	}
-	return []byte("{}")
-}
-
-// String - Converts the contained object back to a JSON formatted string.
-func (d *Doc) String() string {
-	if d.data != nil {
-		if bytes, err := json.Marshal(d.data); err == nil {
-			return string(bytes)
-		}
-	}
-	return "{}"
-}
-
-// New - Create a new gabs JSON object.
-func New() *Doc {
-	return &Doc{map[string]interface{}{}}
-}
-
-// Consume - Gobble up an already converted JSON object, or a fresh map[string]interface{} object.
-func Consume(root interface{}) (*Doc, error) {
-	return &Doc{root}, nil
-}
-
-func Setup() (*Doc, error) {
-	return &Doc{map[string]interface{}{}}, nil
-}
-
-// ParseJSON - Convert a string into a representation of the parsed JSON.
-func Parse(sample []byte) (*Doc, error) {
-	var doc Doc
-
-	if err := json.Unmarshal(sample, &doc.data); err != nil {
-		return nil, err
-	}
-
-	return &doc, nil
 }
