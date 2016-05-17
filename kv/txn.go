@@ -95,7 +95,7 @@ func (tx *Txn) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
 	}
 
 	if bytes.Compare(beg, end) > 1 {
-		for key, val := cu.Seek(beg); key != nil && max > 0 && bytes.Compare(key, end) < 0; key, val = cu.Prev() {
+		for key, val := cu.Seek(end); key != nil && max > 0 && bytes.Compare(beg, key) < 0; key, val = cu.Prev() {
 			kvs = mul(kvs, key, val)
 			max--
 		}
@@ -254,7 +254,7 @@ func (tx *Txn) RDel(beg, end []byte, max uint64) (err error) {
 	}
 
 	if bytes.Compare(beg, end) > 1 {
-		for key, _ := cu.Seek(beg); key != nil && max > 0 && bytes.Compare(key, end) < 0; key, _ = cu.Prev() {
+		for key, _ := cu.Seek(end); key != nil && max > 0 && bytes.Compare(beg, key) < 0; key, _ = cu.Prev() {
 			if err = tx.bu.Delete(key); err != nil {
 				err = &DBError{err}
 				return
