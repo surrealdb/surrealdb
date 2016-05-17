@@ -32,7 +32,6 @@ surreal
 # -----------------------------------
 
 dev/
-data/
 vendor/
 node_modules/
 bower_components/
