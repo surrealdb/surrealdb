@@ -14,27 +14,14 @@
 
 package kv
 
+var bucket = []byte("default")
+
 // KV represents a key:value item in the database
 type KV struct {
 	// Exi is true if the key exists
-	Exi bool
+	Exi bool `json:"-"`
 	// Key is a byte slice of the key
-	Key []byte
+	Key []byte `json:"key"`
 	// Val is a byte slice of the value
-	Val []byte
-}
-
-// Exists returns a boolean depending on if the
-// key is set in the database store.
-func (kv *KV) Exists() bool {
-	return kv.Exi
-}
-
-// Actual returns the byte slice or nil if the
-// key is not set in the database store.
-func (kv *KV) Actual() interface{} {
-	if kv.Exi {
-		return kv.Val
-	}
-	return nil
+	Val []byte `json:"val"`
 }
