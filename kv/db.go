@@ -100,7 +100,7 @@ func (db *DB) PGet(pre []byte) (kvs []*KV, err error) {
 // RGet retrieves the range of `max` rows between `beg` (inclusive) and
 // `end` (exclusive). To return the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
-func (db *DB) RGet(beg, end []byte, max int64) (kvs []*KV, err error) {
+func (db *DB) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
 
 	tx, err := db.Txn(false)
 	if err != nil {
@@ -203,7 +203,7 @@ func (db *DB) PDel(pre []byte) (err error) {
 // RDel deletes the range of `max` rows between `beg` (inclusive) and
 // `end` (exclusive). To delete the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
-func (db *DB) RDel(beg, end []byte, max int64) (err error) {
+func (db *DB) RDel(beg, end []byte, max uint64) (err error) {
 
 	tx, err := db.Txn(true)
 	if err != nil {

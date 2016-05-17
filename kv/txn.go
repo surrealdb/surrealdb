@@ -77,7 +77,7 @@ func (tx *Txn) PGet(pre []byte) (kvs []*KV, err error) {
 // RGet retrieves the range of `max` rows between `beg` (inclusive) and
 // `end` (exclusive). To return the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
-func (tx *Txn) RGet(beg, end []byte, max int64) (kvs []*KV, err error) {
+func (tx *Txn) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
 
 	cu := tx.bu.Cursor()
 
@@ -224,7 +224,7 @@ func (tx *Txn) PDel(pre []byte) (err error) {
 // RDel deletes the range of `max` rows between `beg` (inclusive) and
 // `end` (exclusive). To delete the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
-func (tx *Txn) RDel(beg, end []byte, max int64) (err error) {
+func (tx *Txn) RDel(beg, end []byte, max uint64) (err error) {
 
 	if !tx.tx.Writable() {
 		err = &TXError{err}
