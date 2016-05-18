@@ -18,10 +18,27 @@ var bucket = []byte("default")
 
 // KV represents a key:value item in the database
 type KV struct {
-	// Exi is true if the key exists
-	Exi bool `json:"-"`
-	// Key is a byte slice of the key
-	Key []byte `json:"key"`
-	// Val is a byte slice of the value
-	Val []byte `json:"val"`
+	exi bool
+	key []byte
+	val []byte
 }
+
+// Exists is true if the key exists
+func (kv *KV) Exists() bool {
+	return kv.exi
+}
+
+// Key returns a byte slice of the key
+func (kv *KV) Key() []byte {
+	return kv.key
+}
+
+// Key returns a byte slice of the value
+func (kv *KV) Val() []byte {
+	return kv.val
+}
+
+/*func (kv *KV) Get(key string) val interface{} {
+	return
+}
+*/

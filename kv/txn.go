@@ -282,12 +282,12 @@ func (tx *Txn) Rollback() (err error) {
 func one(key, val []byte) (kv *KV) {
 
 	kv = &KV{
-		Exi: (val != nil),
-		Key: key,
-		Val: make([]byte, len(val)),
+		exi: (val != nil),
+		key: key,
+		val: make([]byte, len(val)),
 	}
 
-	copy(kv.Val, val)
+	copy(kv.val, val)
 
 	return
 
