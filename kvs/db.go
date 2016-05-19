@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kv
+package kvs
 
 import (
 	"os"
@@ -222,7 +222,7 @@ func (db *DB) RDel(beg, end []byte, max uint64) (err error) {
 // committed otherwise. The retryable function should have no side
 // effects which could cause problems in the event it must be run more
 // than once.
-func (db *DB) Txn(writable bool) (txn *Txn, err error) {
+func (db *DB) Txn(writable bool) (txn *TX, err error) {
 
 	tx, err := db.db.Begin(writable)
 	if err != nil {
@@ -230,7 +230,7 @@ func (db *DB) Txn(writable bool) (txn *Txn, err error) {
 		return
 	}
 
-	txn = &Txn{db: db, tx: tx, bu: tx.Bucket(bucket)}
+	txn = &TX{db: db, tx: tx, bu: tx.Bucket(bucket)}
 
 	return
 

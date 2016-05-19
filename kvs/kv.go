@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kv
+package kvs
 
 var bucket = []byte("default")
 
@@ -33,12 +33,7 @@ func (kv *KV) Key() []byte {
 	return kv.key
 }
 
-// Key returns a byte slice of the value
+// Val returns a byte slice of the value
 func (kv *KV) Val() []byte {
 	return kv.val
 }
-
-/*func (kv *KV) Get(key string) val interface{} {
-	return
-}
-*/

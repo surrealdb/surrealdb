@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kv
+package kvs
 
 import (
 	"bytes"
@@ -21,15 +21,15 @@ import (
 	"github.com/boltdb/bolt"
 )
 
-// Txn is a distributed database transaction.
-type Txn struct {
+// TX is a distributed database transaction.
+type TX struct {
 	db *DB
 	tx *bolt.Tx
 	bu *bolt.Bucket
 }
 
 // All retrieves all key:value items in the db.
-func (tx *Txn) All() (kvs []*KV, err error) {
+func (tx *TX) All() (kvs []*KV, err error) {
 
 	err = tx.bu.ForEach(func(key, val []byte) error {
 		kvs = mul(kvs, key, val)
@@ -41,7 +41,7 @@ func (tx *Txn) All() (kvs []*KV, err error) {
 }
 
 // Get retrieves a single key:value item.
-func (tx *Txn) Get(key []byte) (kv *KV, err error) {
+func (tx *TX) Get(key []byte) (kv *KV, err error) {
 
 	val := tx.bu.Get(key)
 
@@ -52,7 +52,7 @@ func (tx *Txn) Get(key []byte) (kv *KV, err error) {
 }
 
 // MGet retrieves multiple key:value items.
-func (tx *Txn) MGet(keys ...[]byte) (kvs []*KV, err error) {
+func (tx *TX) MGet(keys ...[]byte) (kvs []*KV, err error) {
 
 	for _, key := range keys {
 		val := tx.bu.Get(key)
@@ -64,7 +64,7 @@ func (tx *Txn) MGet(keys ...[]byte) (kvs []*KV, err error) {
 }
 
 // PGet retrieves the range of rows which are prefixed with `pre`.
-func (tx *Txn) PGet(pre []byte) (kvs []*KV, err error) {
+func (tx *TX) PGet(pre []byte) (kvs []*KV, err error) {
 
 	cu := tx.bu.Cursor()
 
@@ -79,7 +79,7 @@ func (tx *Txn) PGet(pre []byte) (kvs []*KV, err error) {
 // RGet retrieves the range of `max` rows between `beg` (inclusive) and
 // `end` (exclusive). To return the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
-func (tx *Txn) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
+func (tx *TX) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
 
 	if max == 0 {
 		max = math.MaxUint64
@@ -106,7 +106,7 @@ func (tx *Txn) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
 }
 
 // Put sets the value for a key.
-func (tx *Txn) Put(key, val []byte) (err error) {
+func (tx *TX) Put(key, val []byte) (err error) {
 
 	if !tx.tx.Writable() {
 		err = &TXError{err}
@@ -125,7 +125,7 @@ func (tx *Txn) Put(key, val []byte) (err error) {
 // CPut conditionally sets the value for a key if the existing value is equal
 // to the expected value. To conditionally set a value only if there is no
 // existing entry pass nil for the expected value.
-func (tx *Txn) CPut(key, val, exp []byte) (err error) {
+func (tx *TX) CPut(key, val, exp []byte) (err error) {
 
 	if !tx.tx.Writable() {
 		err = &TXError{err}
@@ -149,7 +149,7 @@ func (tx *Txn) CPut(key, val, exp []byte) (err error) {
 }
 
 // Del deletes a single key:value item.
-func (tx *Txn) Del(key []byte) (err error) {
+func (tx *TX) Del(key []byte) (err error) {
 
 	if !tx.tx.Writable() {
 		err = &TXError{err}
@@ -167,7 +167,7 @@ func (tx *Txn) Del(key []byte) (err error) {
 
 // CDel conditionally deletes a key if the existing value is equal to the
 // expected value.
-func (tx *Txn) CDel(key, exp []byte) (err error) {
+func (tx *TX) CDel(key, exp []byte) (err error) {
 
 	if !tx.tx.Writable() {
 		err = &TXError{err}
@@ -191,7 +191,7 @@ func (tx *Txn) CDel(key, exp []byte) (err error) {
 }
 
 // MDel deletes multiple key:value items.
-func (tx *Txn) MDel(keys ...[]byte) (err error) {
+func (tx *TX) MDel(keys ...[]byte) (err error) {
 
 	if !tx.tx.Writable() {
 		err = &TXError{err}
@@ -212,7 +212,7 @@ func (tx *Txn) MDel(keys ...[]byte) (err error) {
 }
 
 // PDel deletes the range of rows which are prefixed with `pre`.
-func (tx *Txn) PDel(pre []byte) (err error) {
+func (tx *TX) PDel(pre []byte) (err error) {
 
 	cu := tx.bu.Cursor()
 
@@ -230,7 +230,7 @@ func (tx *Txn) PDel(pre []byte) (err error) {
 // RDel deletes the range of `max` rows between `beg` (inclusive) and
 // `end` (exclusive). To delete the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
-func (tx *Txn) RDel(beg, end []byte, max uint64) (err error) {
+func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 
 	if max == 0 {
 		max = math.MaxUint64
@@ -267,15 +267,15 @@ func (tx *Txn) RDel(beg, end []byte, max uint64) (err error) {
 
 }
 
-func (tx *Txn) Close() (err error) {
+func (tx *TX) Close() (err error) {
 	return tx.Rollback()
 }
 
-func (tx *Txn) Commit() (err error) {
+func (tx *TX) Commit() (err error) {
 	return tx.tx.Commit()
 }
 
-func (tx *Txn) Rollback() (err error) {
+func (tx *TX) Rollback() (err error) {
 	return tx.tx.Rollback()
 }
 
