@@ -38,8 +38,8 @@ kill:
 
 .PHONY: convey
 convey:
-	$(GO) get -u -v github.com/smartystreets/goconvey
-	goconvey -packages 25 -port 5000
+	# $(GO) get -u -v github.com/smartystreets/goconvey
+	goconvey -packages 5 -port 5000 -poll 1s -excludedDirs 'build,dev,docs,gui,vendor'
 
 # The `make test` command runs all
 # tests, found within all sub-folders
