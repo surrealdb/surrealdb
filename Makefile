@@ -61,7 +61,7 @@ test:
 
 # The `make glide` command ensures that
 # all imported dependencies are synced
-# and located withint the vendor folder.
+# and located within the vendor folder.
 
 .PHONY: glide
 glide:
@@ -76,7 +76,7 @@ clean:
 	$(GO) clean -i `glide novendor`
 	find . -name '*.test' -type f -exec rm -f {} \;
 
-# The `make build` command compiles
+# The `make quick` command compiles
 # the build flags, gets the project
 # dependencies, and runs a build.
 
