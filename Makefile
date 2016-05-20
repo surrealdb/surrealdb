@@ -38,7 +38,7 @@ kill:
 
 .PHONY: convey
 convey:
-	# $(GO) get -u -v github.com/smartystreets/goconvey
+	@echo "Run 'go get -u -v github.com/smartystreets/goconvey'"
 	goconvey -packages 5 -port 5000 -poll 1s -excludedDirs 'build,dev,docs,gui,vendor'
 
 # The `make test` command runs all
