@@ -24,15 +24,6 @@ default:
 	@echo "Choose a Makefile target:"
 	@$(MAKE) -pRrq -f $(lastword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/^# File/,/^# Finished Make data base/ {if ($$1 !~ "^[#.]") {print "  - " $$1}}' | sort
 
-# The `make doc` command runs the godoc
-# web gui, for all golang projects in
-# the GO src directory
-
-.PHONY: doc
-doc:
-	@echo "http://127.0.0.1:9000"
-	@godoc -http=:9000
-
 # The `make kill` command ensures that
 # any hanging surreal processes are force
 # killed. Useful in development.
