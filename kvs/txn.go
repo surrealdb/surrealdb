@@ -19,11 +19,15 @@ import (
 	"math"
 
 	"github.com/boltdb/bolt"
+
+	"github.com/abcum/surreal/util/cryp"
+	"github.com/abcum/surreal/util/snap"
 )
 
 // TX is a distributed database transaction.
 type TX struct {
 	db *DB
+	ck []byte
 	tx *bolt.Tx
 	bu *bolt.Bucket
 }
@@ -31,9 +35,17 @@ type TX struct {
 // All retrieves all key:value items in the db.
 func (tx *TX) All() (kvs []*KV, err error) {
 
-	err = tx.bu.ForEach(func(key, val []byte) error {
-		kvs = mul(kvs, key, val)
+	err = tx.bu.ForEach(func(key, val []byte) (err error) {
+
+		kv, err := get(tx, key, val)
+		if err != nil {
+			return
+		}
+
+		kvs = append(kvs, kv)
+
 		return nil
+
 	})
 
 	return
@@ -45,9 +57,7 @@ func (tx *TX) Get(key []byte) (kv *KV, err error) {
 
 	val := tx.bu.Get(key)
 
-	kv = one(key, val)
-
-	return
+	return get(tx, key, val)
 
 }
 
@@ -55,8 +65,16 @@ func (tx *TX) Get(key []byte) (kv *KV, err error) {
 func (tx *TX) MGet(keys ...[]byte) (kvs []*KV, err error) {
 
 	for _, key := range keys {
+
 		val := tx.bu.Get(key)
-		kvs = mul(kvs, key, val)
+
+		kv, err := get(tx, key, val)
+		if err != nil {
+			return nil, err
+		}
+
+		kvs = append(kvs, kv)
+
 	}
 
 	return
@@ -69,7 +87,14 @@ func (tx *TX) PGet(pre []byte) (kvs []*KV, err error) {
 	cu := tx.bu.Cursor()
 
 	for key, val := cu.Seek(pre); bytes.HasPrefix(key, pre); key, val = cu.Next() {
-		kvs = mul(kvs, key, val)
+
+		kv, err := get(tx, key, val)
+		if err != nil {
+			return nil, err
+		}
+
+		kvs = append(kvs, kv)
+
 	}
 
 	return
@@ -89,14 +114,28 @@ func (tx *TX) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
 
 	if bytes.Compare(beg, end) < 1 {
 		for key, val := cu.Seek(beg); key != nil && max > 0 && bytes.Compare(key, end) < 0; key, val = cu.Next() {
-			kvs = mul(kvs, key, val)
+
+			kv, err := get(tx, key, val)
+			if err != nil {
+				return nil, err
+			}
+
+			kvs = append(kvs, kv)
+
 			max--
 		}
 	}
 
 	if bytes.Compare(beg, end) > 1 {
 		for key, val := cu.Seek(end); key != nil && max > 0 && bytes.Compare(beg, key) < 0; key, val = cu.Prev() {
-			kvs = mul(kvs, key, val)
+
+			kv, err := get(tx, key, val)
+			if err != nil {
+				return nil, err
+			}
+
+			kvs = append(kvs, kv)
+
 			max--
 		}
 	}
@@ -110,6 +149,16 @@ func (tx *TX) Put(key, val []byte) (err error) {
 
 	if !tx.tx.Writable() {
 		err = &TXError{err}
+		return
+	}
+
+	if val, err = snap.Encode(val); err != nil {
+		err = &DBError{err}
+		return
+	}
+
+	if val, err = cryp.Encrypt(tx.ck, val); err != nil {
+		err = &DBError{err}
 		return
 	}
 
@@ -132,10 +181,20 @@ func (tx *TX) CPut(key, val, exp []byte) (err error) {
 		return
 	}
 
-	now := tx.bu.Get(key)
+	now, _ := tx.Get(key)
 
-	if !bytes.Equal(now, exp) {
-		err = &KVError{err, key, now, exp}
+	if !bytes.Equal(now.val, exp) {
+		err = &KVError{err, key, now.val, exp}
+		return
+	}
+
+	if val, err = snap.Encode(val); err != nil {
+		err = &DBError{err}
+		return
+	}
+
+	if val, err = cryp.Encrypt(tx.ck, val); err != nil {
+		err = &DBError{err}
 		return
 	}
 
@@ -174,10 +233,10 @@ func (tx *TX) CDel(key, exp []byte) (err error) {
 		return
 	}
 
-	now := tx.bu.Get(key)
+	now, _ := tx.Get(key)
 
-	if !bytes.Equal(now, exp) {
-		err = &KVError{err, key, now, exp}
+	if !bytes.Equal(now.val, exp) {
+		err = &KVError{err, key, now.val, exp}
 		return
 	}
 
@@ -279,23 +338,25 @@ func (tx *TX) Rollback() (err error) {
 	return tx.tx.Rollback()
 }
 
-func one(key, val []byte) (kv *KV) {
+func get(tx *TX, key, val []byte) (kv *KV, err error) {
 
 	kv = &KV{
 		exi: (val != nil),
 		key: key,
-		val: make([]byte, len(val)),
+		val: val,
 	}
 
-	copy(kv.val, val)
+	kv.val, err = cryp.Decrypt(tx.ck, kv.val)
+	if err != nil {
+		err = &DBError{err}
+		return
+	}
 
-	return
-
-}
-
-func mul(mul []*KV, key, val []byte) (kvs []*KV) {
-
-	kvs = append(mul, one(key, val))
+	kv.val, err = snap.Decode(kv.val)
+	if err != nil {
+		err = &DBError{err}
+		return
+	}
 
 	return
 
