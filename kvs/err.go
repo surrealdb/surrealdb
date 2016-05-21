@@ -24,7 +24,7 @@ type DBError struct {
 
 // Error returns the string representation of the error.
 func (e *DBError) Error() string {
-	return fmt.Sprintf("Unable to write to the database")
+	return fmt.Sprintf("There was a problem performing a read or write with the database")
 }
 
 // TXError is an error which occurs when there is a
@@ -35,7 +35,7 @@ type TXError struct {
 
 // Error returns the string representation of the error.
 func (e *TXError) Error() string {
-	return fmt.Sprintf("Unable to write to the transaction")
+	return fmt.Sprintf("There was a problem performing a read or write with the transaction")
 }
 
 // KVError is an error which occurs when there is a
