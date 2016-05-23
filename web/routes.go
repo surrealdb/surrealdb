@@ -34,7 +34,7 @@ func output(c *fibre.Context, res interface{}) error {
 
 func routes(s *fibre.Fibre) {
 
-	s.Dir("/", "tpl")
+	s.Dir("/", "gui/dist/")
 
 	s.Rpc("/rpc", &rpc{})
 
