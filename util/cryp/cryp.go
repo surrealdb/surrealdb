@@ -17,8 +17,7 @@ package cryp
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
-	"io"
+	"github.com/abcum/surreal/util/rand"
 )
 
 func Encrypt(key []byte, src []byte) (dst []byte, err error) {
@@ -40,11 +39,7 @@ func Encrypt(key []byte, src []byte) (dst []byte, err error) {
 		return
 	}
 
-	// Generate new nonce
-	nonce := make([]byte, 12)
-	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
-		return
-	}
+	nonce := rand.New(12)
 
 	dst = cipher.Seal(nil, nonce, src, nil)
 
