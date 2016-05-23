@@ -124,7 +124,7 @@ func TestMain(t *testing.T) {
 			obj: &Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "names", What: []interface{}{false, "account:1", "lastname", nil, "firstname"}},
 			new: &Index{},
 		},
-		/*{
+		{
 			str: "Test key",
 			new: &Full{},
 			obj: &Full{
@@ -172,7 +172,7 @@ func TestMain(t *testing.T) {
 				INA:   []interface{}{true, false, nil, "Test", clock, int64(192), 0.1, 0.2, 0.3},
 				AIN:   []interface{}{true, false, nil, "Test", clock, int64(192), int64(9223372036854775807), 0.1, 0.2, 0.3},
 			},
-		},*/
+		},
 	}
 
 	sorts = []Key{
@@ -181,12 +181,12 @@ func TestMain(t *testing.T) {
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: nil},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: false},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: true},
-		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -9223372036854775807},
-		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -2147483647},
-		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -32767},
-		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -12},
-		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -2},
-		// &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -1},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -9223372036854775807},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -2147483647},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -32767},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -12},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -2},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: -1},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 0},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 1},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 2},
