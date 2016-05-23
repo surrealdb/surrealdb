@@ -42,6 +42,14 @@ func routes(s *fibre.Fibre) {
 	// Endpoints for submitting sql queries
 	// --------------------------------------------------
 
+	s.Get("/info", func(c *fibre.Context) error {
+		return c.Code(200)
+	})
+
+	// --------------------------------------------------
+	// Endpoints for submitting sql queries
+	// --------------------------------------------------
+
 	s.Options("/sql", func(c *fibre.Context) error {
 		return c.Code(200)
 	})
