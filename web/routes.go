@@ -76,7 +76,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Get("/key/:class", func(c *fibre.Context) error {
-		sql := db.Prepare("SELECT * FROM %v", c.Param("class"))
+		sql := db.Prepare("SELECT * FROM ⟨%v⟩", c.Param("class"))
 		res, err := db.Execute(c, sql)
 		if err != nil {
 			return fibre.NewHTTPError(400)
@@ -85,7 +85,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Post("/key/:class", func(c *fibre.Context) error {
-		sql := db.Prepare("CREATE %v CONTENT %v RETURN AFTER", c.Param("class"), string(c.Body()))
+		sql := db.Prepare("CREATE ⟨%v⟩ CONTENT %v RETURN AFTER", c.Param("class"), string(c.Body()))
 		res, err := db.Execute(c, sql)
 		if err != nil {
 			return fibre.NewHTTPError(400)
@@ -94,7 +94,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Delete("/key/:class", func(c *fibre.Context) error {
-		sql := db.Prepare("DELETE FROM %v", c.Param("class"))
+		sql := db.Prepare("DELETE FROM ⟨%v⟩", c.Param("class"))
 		res, err := db.Execute(c, sql)
 		if err != nil {
 			return fibre.NewHTTPError(400)
@@ -111,7 +111,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Get("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("SELECT * FROM @%v:%v", c.Param("class"), c.Param("id"))
+		sql := db.Prepare("SELECT * FROM @⟨%v⟩:⟨%v⟩", c.Param("class"), c.Param("id"))
 		res, err := db.Execute(c, sql)
 		if err != nil {
 			return fibre.NewHTTPError(400)
@@ -120,7 +120,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Put("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("CREATE @%v:%v CONTENT %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
+		sql := db.Prepare("CREATE @⟨%v⟩:⟨%v⟩ CONTENT %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
 		res, err := db.Execute(c, sql)
 		if err != nil {
 			return fibre.NewHTTPError(400)
@@ -129,7 +129,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Post("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("UPDATE @%v:%v CONTENT %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
+		sql := db.Prepare("UPDATE @⟨%v⟩:⟨%v⟩ CONTENT %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
 		res, err := db.Execute(c, sql)
 		if err != nil {
 			return fibre.NewHTTPError(400)
@@ -138,7 +138,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Patch("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("MODIFY @%v:%v DIFF %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
+		sql := db.Prepare("MODIFY @⟨%v⟩:⟨%v⟩ DIFF %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
 		res, err := db.Execute(c, sql)
 		if err != nil {
 			return fibre.NewHTTPError(400)
@@ -147,7 +147,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Trace("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("SELECT HISTORY FROM @%v:%v", c.Param("class"), c.Param("id"))
+		sql := db.Prepare("SELECT HISTORY FROM @⟨%v⟩:⟨%v⟩", c.Param("class"), c.Param("id"))
 		res, err := db.Execute(c, sql)
 		if err != nil {
 			return fibre.NewHTTPError(400)
@@ -156,7 +156,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Delete("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("DELETE @%v:%v", c.Param("class"), c.Param("id"))
+		sql := db.Prepare("DELETE @⟨%v⟩:⟨%v⟩", c.Param("class"), c.Param("id"))
 		res, err := db.Execute(c, sql)
 		if err != nil {
 			return fibre.NewHTTPError(400)

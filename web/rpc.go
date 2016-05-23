@@ -26,31 +26,31 @@ func (r *rpc) Sql(c *fibre.Context, sql string) (interface{}, error) {
 }
 
 func (r *rpc) List(c *fibre.Context, class string) (interface{}, error) {
-	sql := db.Prepare("SELECT * FROM %v", class)
+	sql := db.Prepare("SELECT * FROM ⟨%v⟩", class)
 	return db.Execute(c, sql)
 }
 
 func (r *rpc) Select(c *fibre.Context, class, thing string) (interface{}, error) {
-	sql := db.Prepare("SELECT * FROM @%v:%v", class, thing)
+	sql := db.Prepare("SELECT * FROM @⟨%v⟩:⟨%v⟩", class, thing)
 	return db.Execute(c, sql)
 }
 
 func (r *rpc) Create(c *fibre.Context, class, thing, data string) (interface{}, error) {
-	sql := db.Prepare("CREATE @%v:%v CONTENT %v RETURN AFTER", class, thing, data)
+	sql := db.Prepare("CREATE @⟨%v⟩:⟨%v⟩ CONTENT %v RETURN AFTER", class, thing, data)
 	return db.Execute(c, sql)
 }
 
 func (r *rpc) Update(c *fibre.Context, class, thing, data string) (interface{}, error) {
-	sql := db.Prepare("UPDATE @%v:%v CONTENT %v RETURN AFTER", class, thing, data)
+	sql := db.Prepare("UPDATE @⟨%v⟩:⟨%v⟩ CONTENT %v RETURN AFTER", class, thing, data)
 	return db.Execute(c, sql)
 }
 
 func (r *rpc) Modify(c *fibre.Context, class, thing, data string) (interface{}, error) {
-	sql := db.Prepare("MODIFY @%v:%v DIFF %v RETURN AFTER", class, thing, data)
+	sql := db.Prepare("MODIFY @⟨%v⟩:⟨%v⟩ DIFF %v RETURN DIFF", class, thing, data)
 	return db.Execute(c, sql)
 }
 
 func (r *rpc) Delete(c *fibre.Context, class, thing string) (interface{}, error) {
-	sql := db.Prepare("DELETE @%v:%v", class, thing)
+	sql := db.Prepare("DELETE @⟨%v⟩:⟨%v⟩", class, thing)
 	return db.Execute(c, sql)
 }
