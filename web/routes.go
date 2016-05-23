@@ -153,22 +153,4 @@ func routes(s *fibre.Fibre) {
 		return output(c, res[0])
 	})
 
-	s.Connect("/key/:class/:id/:type/:fk", func(c *fibre.Context) error {
-		sql := db.Prepare("RELATE %v FROM @%v:%v TO %v", c.Param("type"), c.Param("class"), c.Param("id"), c.Param("fk"))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(400)
-		}
-		return output(c, res[0])
-	})
-
-	s.Get("/key/:class/:id/:edge/:type", func(c *fibre.Context) error {
-		sql := db.Prepare("SELECT :%v/:%v @%v:%v", c.Param("edge"), c.Param("type"), c.Param("class"), c.Param("id"))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(400)
-		}
-		return output(c, res[0])
-	})
-
 }
