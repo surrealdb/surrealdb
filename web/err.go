@@ -18,15 +18,6 @@ import (
 	"github.com/abcum/fibre"
 )
 
-func oops(code int, mesg interface{}) interface{} {
-	return map[string]interface{}{
-		"code":          code,
-		"details":       "Request problems detected",
-		"documentation": "https://docs.surreal.io/",
-		"information":   mesg,
-	}
-}
-
 func errors(err error, c *fibre.Context) {
 
 	code := 500
