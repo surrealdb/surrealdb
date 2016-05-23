@@ -15,49 +15,19 @@
 package rand
 
 import (
+	"fmt"
 	"testing"
 
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-type tester struct {
-	str string
-	len int
-}
-
 func TestNew(t *testing.T) {
 
-	var tests = []tester{
-		{
-			str: New(0),
-			len: 0,
-		},
-		{
-			str: New(10),
-			len: 10,
-		},
-		{
-			str: New(20),
-			len: 20,
-		},
-		{
-			str: New(30),
-			len: 30,
-		},
-		{
-			str: New(99),
-			len: 99,
-		},
-	}
+	for i := 0; i < 100; i++ {
 
-	for _, test := range tests {
-
-		Convey(test.str, t, func() {
-			Convey("Should be a string", func() {
-				So(test.str, ShouldHaveSameTypeAs, "")
-			})
+		Convey(fmt.Sprintf("Random string of length %d", i), t, func() {
 			Convey("Should be of correct length", func() {
-				So(test.str, ShouldHaveLength, test.len)
+				So(New(i), ShouldHaveLength, i)
 			})
 		})
 
