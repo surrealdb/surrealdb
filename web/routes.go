@@ -23,14 +23,12 @@ func output(c *fibre.Context, res interface{}) error {
 	switch ret := res.(*db.Response); ret.Status {
 	case "OK":
 		return c.Send(200, ret.Result)
-	case "ERR_CODE":
-		return c.Send(500, oops(500, ret.Detail))
-	case "ERR_JSON":
-		return fibre.NewHTTPError(422)
+	case "ERR_DB":
+		return fibre.NewHTTPError(500)
 	case "ERR_EXISTS":
 		return fibre.NewHTTPError(409)
 	default:
-		return fibre.NewHTTPError(500)
+		return fibre.NewHTTPError(400)
 	}
 }
 
@@ -51,7 +49,12 @@ func routes(s *fibre.Fibre) {
 	s.Post("/sql", func(c *fibre.Context) error {
 		res, err := db.Execute(c, c.Request().Body)
 		if err != nil {
-			return fibre.NewHTTPError(400)
+			return c.Send(400, map[string]interface{}{
+				"code":          400,
+				"details":       "Request problems detected",
+				"documentation": "https://docs.surreal.io/",
+				"information":   err.Error(),
+			})
 		}
 		return c.Send(200, res)
 	})
