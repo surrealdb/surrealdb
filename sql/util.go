@@ -16,6 +16,7 @@ package sql
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 )
@@ -44,68 +45,99 @@ func is(token Token, tokens ...Token) bool {
 
 }
 
-func declare(tok Token, lit string) Expr {
+func contains(search string, strings []string) bool {
+
+	for _, str := range strings {
+		if str == search {
+			return true
+		}
+	}
+
+	return false
+
+}
+
+func declare(tok Token, lit string) (Expr, error) {
 
 	switch tok {
 
 	case NULL:
-		return &Null{}
+		return &Null{}, nil
+
+	case VOID:
+		return &Void{}, nil
+
+	case EMPTY:
+		return &Empty{}, nil
 
 	case ALL:
-		return &Wildcard{}
+		return &Wildcard{}, nil
 
 	case ASC:
-		return &DirectionLiteral{Val: true}
+		return &Asc{}, nil
 
 	case DESC:
-		return &DirectionLiteral{Val: false}
+		return &Desc{}, nil
+
+	case ID:
+		return &IdentLiteral{Val: lit}, nil
 
 	case IDENT:
-		return &IdentLiteral{Val: lit}
+		return &IdentLiteral{Val: lit}, nil
+
+	case NOW:
+		return &DatetimeLiteral{Val: time.Now()}, nil
 
 	case DATE:
-		t, _ := time.Parse("2006-01-02", lit)
-		return &DatetimeLiteral{Val: t}
+		t, err := time.Parse("2006-01-02", lit)
+		return &DatetimeLiteral{Val: t}, err
 
 	case TIME:
-		t, _ := time.Parse(time.RFC3339, lit)
-		return &DatetimeLiteral{Val: t}
-
-	case NANO:
-		t, _ := time.Parse(time.RFC3339Nano, lit)
-		return &DatetimeLiteral{Val: t}
+		t, err := time.Parse(time.RFC3339, lit)
+		return &DatetimeLiteral{Val: t}, err
 
 	case TRUE:
-		return &BooleanLiteral{Val: true}
+		return &BooleanLiteral{Val: true}, nil
 
 	case FALSE:
-		return &BooleanLiteral{Val: false}
+		return &BooleanLiteral{Val: false}, nil
 
 	case STRING:
-		return &StringLiteral{Val: lit}
+		return &StringLiteral{Val: lit}, nil
 
 	case REGION:
-		return &StringLiteral{Val: lit}
+		return &StringLiteral{Val: lit}, nil
 
 	case NUMBER:
-		i, _ := strconv.ParseInt(lit, 10, 64)
-		return &NumberLiteral{Val: i}
+		i, err := strconv.ParseInt(lit, 10, 64)
+		return &NumberLiteral{Val: i}, err
 
 	case DOUBLE:
-		f, _ := strconv.ParseFloat(lit, 64)
-		return &DoubleLiteral{Val: f}
+		f, err := strconv.ParseFloat(lit, 64)
+		return &DoubleLiteral{Val: f}, err
 
 	case DURATION:
-		return &DurationLiteral{Val: 0}
+		t, err := time.ParseDuration(lit)
+		return &DurationLiteral{Val: t}, err
+
+	case ARRAY:
+		var j ArrayLiteral
+		json.Unmarshal([]byte(lit), &j.Val)
+		if j.Val == nil {
+			return &j, fmt.Errorf("Invalid JSON: %s", lit)
+		}
+		return &j, nil
 
 	case JSON:
-		var j interface{}
-		b := []byte(lit)
-		json.Unmarshal(b, &j)
-		return &JSONLiteral{Val: j}
+		var j JSONLiteral
+		json.Unmarshal([]byte(lit), &j.Val)
+		if j.Val == nil {
+			return &j, fmt.Errorf("Invalid JSON: %s", lit)
+		}
+		return &j, nil
 
 	}
 
-	return lit
+	return lit, nil
 
 }

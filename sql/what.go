@@ -14,16 +14,36 @@
 
 package sql
 
-func (p *Parser) parseResyncStatement(explain bool) (Statement, error) {
+func (p *Parser) parseWhat() (mul []Expr, err error) {
 
-	// Inspect the next token.
-	tok, _, err := p.shouldBe(INDEX)
+	for {
 
-	switch tok {
-	case INDEX:
-		return p.parseResyncIndexStatement(explain)
-	default:
-		return nil, err
+		_, _, exi := p.mightBe(EAT)
+
+		if exi == false {
+			one, err := p.parseTable()
+			if err != nil {
+				return nil, err
+			}
+			mul = append(mul, one)
+		}
+
+		if exi == true {
+			p.unscan()
+			one, err := p.parseThing()
+			if err != nil {
+				return nil, err
+			}
+			mul = append(mul, one)
+		}
+
+		// If the next token is not a comma then break the loop.
+		if _, _, exi = p.mightBe(COMMA); !exi {
+			break
+		}
+
 	}
+
+	return
 
 }

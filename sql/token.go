@@ -31,7 +31,6 @@ const (
 
 	DATE     // 1970-01-01
 	TIME     // 1970-01-01T00:00:00+00:00
-	NANO     // 1970-01-01T00:00:00.000000000+00:00
 	PATH     // :friend
 	JSON     // {"test":true}
 	IDENT    // something
@@ -40,6 +39,7 @@ const (
 	NUMBER   // 123456
 	DOUBLE   // 123.456
 	REGEX    // /.*/
+	ARRAY    // [0,1,2]
 	DURATION // 13h
 
 	EAT       // @
@@ -82,49 +82,73 @@ const (
 
 	keywordsBeg
 
+	AFTER
 	ALL
 	AND
 	AS
 	ASC
 	AT
+	BEFORE
+	BOTH
 	BY
+	CIPHERKEY
+	CODE
 	COLUMNS
+	CONTENT
 	CREATE
+	DATABASE
+	DEFAULT
 	DEFINE
 	DELETE
 	DESC
+	DIFF
 	DISTINCT
 	EMPTY
+	EXPLAIN
 	FALSE
+	FIELD
 	FROM
+	FULL
 	GROUP
+	ID
 	IN
 	INDEX
 	INSERT
 	INTO
 	LIMIT
-	MAP
+	MANDATORY
+	MAX
+	MERGE
+	MIN
 	MODIFY
+	NAMESPACE
+	NONE
+	NOTNULL
+	NOW
 	NULL
 	OFFSET
 	ON
 	OR
 	ORDER
+	READONLY
 	RECORD
-	REDUCE
 	RELATE
 	REMOVE
 	RESYNC
+	RETURN
 	SELECT
 	SET
 	START
+	TABLE
 	TO
 	TRUE
+	TYPE
 	UNIQUE
 	UPDATE
 	UPSERT
+	USE
 	VERSION
-	VIEW
+	VOID
 	WHERE
 
 	keywordsEnd
@@ -140,7 +164,6 @@ var tokens = [...]string{
 
 	DATE:     "DATE",
 	TIME:     "TIME",
-	NANO:     "NANO",
 	PATH:     "PATH",
 	JSON:     "JSON",
 	IDENT:    "IDENT",
@@ -149,6 +172,7 @@ var tokens = [...]string{
 	NUMBER:   "NUMBER",
 	DOUBLE:   "DOUBLE",
 	REGEX:    "REGEX",
+	ARRAY:    "ARRAY",
 	DURATION: "DURATION",
 
 	EAT:       "@",
@@ -183,49 +207,73 @@ var tokens = [...]string{
 
 	// keywords
 
-	ALL:      "ALL",
-	AND:      "AND",
-	AS:       "AS",
-	ASC:      "ASC",
-	AT:       "AT",
-	BY:       "BY",
-	COLUMNS:  "COLUMNS",
-	CREATE:   "CREATE",
-	DEFINE:   "DEFINE",
-	DELETE:   "DELETE",
-	DESC:     "DESC",
-	DISTINCT: "DISTINCT",
-	EMPTY:    "EMPTY",
-	FALSE:    "FALSE",
-	FROM:     "FROM",
-	GROUP:    "GROUP",
-	IN:       "IN",
-	INDEX:    "INDEX",
-	INSERT:   "INSERT",
-	INTO:     "INTO",
-	LIMIT:    "LIMIT",
-	MAP:      "MAP",
-	MODIFY:   "MODIFY",
-	NULL:     "NULL",
-	ON:       "ON",
-	OR:       "OR",
-	ORDER:    "ORDER",
-	RECORD:   "RECORD",
-	REDUCE:   "REDUCE",
-	RELATE:   "RELATE",
-	REMOVE:   "REMOVE",
-	RESYNC:   "RESYNC",
-	SELECT:   "SELECT",
-	SET:      "SET",
-	START:    "START",
-	TO:       "TO",
-	TRUE:     "TRUE",
-	UNIQUE:   "UNIQUE",
-	UPDATE:   "UPDATE",
-	UPSERT:   "UPSERT",
-	VIEW:     "VIEW",
-	VERSION:  "VERSION",
-	WHERE:    "WHERE",
+	AFTER:     "AFTER",
+	ALL:       "ALL",
+	AND:       "AND",
+	AS:        "AS",
+	ASC:       "ASC",
+	AT:        "AT",
+	BEFORE:    "BEFORE",
+	BOTH:      "BOTH",
+	BY:        "BY",
+	CIPHERKEY: "CIPHERKEY",
+	CODE:      "CODE",
+	COLUMNS:   "COLUMNS",
+	CONTENT:   "CONTENT",
+	CREATE:    "CREATE",
+	DATABASE:  "DATABASE",
+	DEFAULT:   "DEFAULT",
+	DEFINE:    "DEFINE",
+	DELETE:    "DELETE",
+	DESC:      "DESC",
+	DIFF:      "DIFF",
+	DISTINCT:  "DISTINCT",
+	EMPTY:     "EMPTY",
+	EXPLAIN:   "EXPLAIN",
+	FALSE:     "FALSE",
+	FIELD:     "FIELD",
+	FROM:      "FROM",
+	FULL:      "FULL",
+	GROUP:     "GROUP",
+	ID:        "ID",
+	IN:        "IN",
+	INDEX:     "INDEX",
+	INSERT:    "INSERT",
+	INTO:      "INTO",
+	LIMIT:     "LIMIT",
+	MANDATORY: "MANDATORY",
+	MAX:       "MAX",
+	MERGE:     "MERGE",
+	MIN:       "MIN",
+	MODIFY:    "MODIFY",
+	NAMESPACE: "NAMESPACE",
+	NONE:      "NONE",
+	NOTNULL:   "NOTNULL",
+	NOW:       "NOW",
+	NULL:      "NULL",
+	ON:        "ON",
+	OR:        "OR",
+	ORDER:     "ORDER",
+	READONLY:  "READONLY",
+	RECORD:    "RECORD",
+	RELATE:    "RELATE",
+	REMOVE:    "REMOVE",
+	RESYNC:    "RESYNC",
+	RETURN:    "RETURN",
+	SELECT:    "SELECT",
+	SET:       "SET",
+	START:     "START",
+	TABLE:     "TABLE",
+	TO:        "TO",
+	TRUE:      "TRUE",
+	TYPE:      "TYPE",
+	UNIQUE:    "UNIQUE",
+	UPDATE:    "UPDATE",
+	UPSERT:    "UPSERT",
+	USE:       "USE",
+	VERSION:   "VERSION",
+	VOID:      "VOID",
+	WHERE:     "WHERE",
 }
 
 var literals map[string]Token

@@ -14,6 +14,34 @@
 
 package sql
 
-func (p *Parser) parseDeleteStatement() (Statement, error) {
-	return nil, nil
+func (p *Parser) parseDeleteStatement(explain bool) (stmt *DeleteStatement, err error) {
+
+	stmt = &DeleteStatement{}
+
+	stmt.EX = explain
+
+	stmt.KV = p.c.Get("KV").(string)
+	stmt.NS = p.c.Get("NS").(string)
+	stmt.DB = p.c.Get("DB").(string)
+
+	_, _, _ = p.mightBe(FROM)
+
+	if stmt.What, err = p.parseWhat(); err != nil {
+		return nil, err
+	}
+
+	if stmt.Cond, err = p.parseCond(); err != nil {
+		return nil, err
+	}
+
+	if stmt.Echo, err = p.parseEcho(); err != nil {
+		return nil, err
+	}
+
+	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
+		return nil, err
+	}
+
+	return
+
 }

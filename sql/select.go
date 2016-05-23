@@ -14,27 +14,30 @@
 
 package sql
 
-func (p *Parser) parseSelectStatement() (*SelectStatement, error) {
+func (p *Parser) parseSelectStatement(explain bool) (stmt *SelectStatement, err error) {
 
-	stmt := &SelectStatement{}
+	stmt = &SelectStatement{}
 
-	var err error
+	stmt.EX = explain
 
-	if stmt.Fields, err = p.parseFields(); err != nil {
+	stmt.KV = p.c.Get("KV").(string)
+	stmt.NS = p.c.Get("NS").(string)
+	stmt.DB = p.c.Get("DB").(string)
+
+	if stmt.Expr, err = p.parseExpr(); err != nil {
 		return nil, err
 	}
 
-	// Next token should be FROM
 	_, _, err = p.shouldBe(FROM)
 	if err != nil {
 		return nil, err
 	}
 
-	if stmt.Thing, err = p.parseThings(); err != nil {
+	if stmt.What, err = p.parseWhat(); err != nil {
 		return nil, err
 	}
 
-	if stmt.Where, err = p.parseWhere(); err != nil {
+	if stmt.Cond, err = p.parseCond(); err != nil {
 		return nil, err
 	}
 
@@ -58,60 +61,11 @@ func (p *Parser) parseSelectStatement() (*SelectStatement, error) {
 		return nil, err
 	}
 
-	// Next token should be EOF
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
 
 	return stmt, nil
-
-}
-
-func (p *Parser) parseWhere() (Expr, error) {
-
-	var ws []Expr
-
-	var tok Token
-	var lit string
-	var err error
-
-	// Remove the WHERE keyword
-	if _, _, exi := p.mightBe(WHERE); !exi {
-		return nil, nil
-	}
-
-	for {
-
-		w := &BinaryExpression{}
-
-		tok, lit, err = p.shouldBe(IDENT, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE)
-		if err != nil {
-			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
-		}
-		w.LHS = declare(tok, lit)
-
-		tok, lit, err = p.shouldBe(IN, EQ, NEQ, GT, LT, GTE, LTE, EQR, NER, SEQ, SNE)
-		if err != nil {
-			return nil, err
-		}
-		w.Op = lit
-
-		tok, lit, err = p.shouldBe(IDENT, NULL, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE, REGEX, JSON)
-		if err != nil {
-			return nil, &ParseError{Found: lit, Expected: []string{"field value"}}
-		}
-		w.RHS = declare(tok, lit)
-
-		ws = append(ws, w)
-
-		// Remove the WHERE keyword
-		if _, _, exi := p.mightBe(AND, OR); !exi {
-			break
-		}
-
-	}
-
-	return ws, nil
 
 }
 
@@ -131,13 +85,10 @@ func (p *Parser) parseGroup() ([]*Group, error) {
 
 }
 
-func (p *Parser) parseOrder() ([]*Order, error) {
-
-	var m []*Order
+func (p *Parser) parseOrder() (mul []*Order, err error) {
 
 	var tok Token
 	var lit string
-	var err error
 	var exi bool
 
 	// Remove the ORDER keyword
@@ -150,22 +101,30 @@ func (p *Parser) parseOrder() ([]*Order, error) {
 
 	for {
 
-		s := &Order{}
+		one := &Order{}
 
-		tok, lit, err = p.shouldBe(IDENT)
+		tok, lit, err = p.shouldBe(IDENT, ID)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
-		s.Expr = declare(tok, lit)
+
+		one.Expr, err = declare(tok, lit)
+		if err != nil {
+			return nil, err
+		}
 
 		tok, lit, exi = p.mightBe(ASC, DESC)
 		if !exi {
 			tok = ASC
 			lit = "ASC"
 		}
-		s.Dir = declare(tok, lit)
 
-		m = append(m, s)
+		one.Dir, err = declare(tok, lit)
+		if err != nil {
+			return nil, err
+		}
+
+		mul = append(mul, one)
 
 		// If the next token is not a comma then break the loop.
 		if _, _, exi := p.mightBe(COMMA); !exi {
@@ -174,7 +133,7 @@ func (p *Parser) parseOrder() ([]*Order, error) {
 
 	}
 
-	return m, nil
+	return mul, nil
 
 }
 
@@ -268,11 +227,11 @@ func (p *Parser) parseVersion() (Expr, error) {
 		return nil, nil
 	}
 
-	tok, lit, err := p.shouldBe(DATE, TIME, NANO)
+	tok, lit, err := p.shouldBe(DATE, TIME)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"timestamp"}}
 	}
 
-	return declare(tok, lit), nil
+	return declare(tok, lit)
 
 }

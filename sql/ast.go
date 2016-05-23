@@ -38,16 +38,31 @@ type Statements []Statement
 // Select
 // --------------------------------------------------
 
+// UseStatement represents a SQL USE statement.
+type UseStatement struct {
+	NS string // Namespace
+	DB string // Database
+	CK string // Cipherkey
+}
+
+// --------------------------------------------------
+// Select
+// --------------------------------------------------
+
 // SelectStatement represents a SQL SELECT statement.
 type SelectStatement struct {
-	Fields  []*Field
-	Thing   Expr
-	Where   Expr
-	Group   []*Group
-	Order   []*Order
-	Limit   Expr
-	Start   Expr
-	Version Expr
+	EX      bool     // Explain
+	KV      string   // Bucket
+	NS      string   // Namespace
+	DB      string   // Database
+	Expr    []*Field // Which fields
+	What    []Expr   // What to select
+	Cond    []Expr   // Select conditions
+	Group   []*Group // Group by
+	Order   []*Order // Order by
+	Limit   Expr     // Limit by
+	Start   Expr     // Start at
+	Version Expr     // Version
 }
 
 // --------------------------------------------------
@@ -55,64 +70,150 @@ type SelectStatement struct {
 // --------------------------------------------------
 
 // CreateStatement represents a SQL CREATE statement.
-// CREATE person SET column = 'value'
+//
+// CREATE person SET column = 'value' RETURN ID
 type CreateStatement struct {
-	What Expr
-	Data Expr
-}
-
-// InsertStatement represents a SQL INSERT statement.
-// INSERT person SET column = 'value'
-type InsertStatement struct {
-	What Expr
-	Data Expr
-}
-
-// UpsertStatement represents a SQL UPSERT statement.
-// UPSERT @person:123 SET column = 'value'
-type UpsertStatement struct {
-	What Expr
-	Data Expr
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	What []Expr // What to create
+	Data []Expr // Create data
+	Echo Token  // What to return
 }
 
 // UpdateStatement represents a SQL UPDATE statement.
-// UPDATE person SET column = 'value'
+//
+// UPDATE person SET column = 'value' WHERE age < 18 RETURN ID
 type UpdateStatement struct {
-	Thing Expr
-	Data  Expr
-	Where Expr
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	What []Expr // What to update
+	Data []Expr // Update data
+	Cond []Expr // Update conditions
+	Echo Token  // What to return
 }
 
 // ModifyStatement represents a SQL UPDATE statement.
-// MODIFY @person:123 WITH {}
+//
+// MODIFY @person:123 WITH {} RETURN ID
 type ModifyStatement struct {
-	Thing Expr
-	Diff  Expr
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	What []Expr // What to modify
+	Diff Expr   // Diff object
+	Echo Token  // What to return
 }
 
 // DeleteStatement represents a SQL DELETE statement.
-// DELETE FROMn person
+//
+// DELETE FROM person WHERE age < 18 RETURN ID
 type DeleteStatement struct {
-	Thing Expr
-	Where Expr
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	What []Expr // What to delete
+	Cond []Expr // Delete conditions
+	Echo Token  // What to return
 }
 
 // RelateStatement represents a SQL RELATE statement.
-// RELATE friend FROM @person:123 TO @person:456 SET column = 'value'
+//
+// RELATE friend FROM @person:123 TO @person:456 SET column = 'value' RETURN ID
 type RelateStatement struct {
-	Kind Expr
-	From *Thing
-	To   *Thing
-	Data Expr
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	Type []Expr
+	From []Expr
+	To   []Expr
+	Data []Expr
+	Echo Token // What to return
 }
 
 // RecordStatement represents a SQL CREATE EVENT statement.
+//
 // RECORD login ON @person:123 AT 2016-01-29T22:42:56.478Z SET column = true
 type RecordStatement struct {
-	Name Expr
-	ON   *Thing
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	Type []Expr
+	On   []Expr
 	At   Expr
-	Data Expr
+	Data []Expr
+	Echo Token // What to return
+}
+
+// --------------------------------------------------
+// Table
+// --------------------------------------------------
+
+// DefineTableStatement represents an SQL DEFINE TABLE statement.
+//
+// DEFINE TABLE person
+type DefineTableStatement struct {
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	What []Expr // Table names
+}
+
+// RemoveTableStatement represents an SQL REMOVE TABLE statement.
+//
+// REMOVE TABLE person
+type RemoveTableStatement struct {
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	What []Expr // Table names
+}
+
+// --------------------------------------------------
+// Field
+// --------------------------------------------------
+
+// DefineFieldStatement represents an SQL DEFINE INDEX statement.
+//
+// DEFINE FIELD name ON person TYPE string CODE {}
+// DEFINE FIELD name ON person TYPE [0,1,2,3,4,5] DEFAULT 0
+// DEFINE FIELD name ON person TYPE [0...100]number MIN 0 MAX 3 DEFAULT 0
+type DefineFieldStatement struct {
+	EX        bool   // Explain
+	KV        string // Bucket
+	NS        string // Namespace
+	DB        string // Database
+	Name      Expr   // Field name
+	What      []Expr // Table names
+	Type      Expr   // Field type
+	Code      Expr   // Field code
+	Min       *NumberLiteral
+	Max       *NumberLiteral
+	Default   Expr
+	Notnull   bool
+	Readonly  bool
+	Mandatory bool
+}
+
+// RemoveFieldStatement represents an SQL REMOVE INDEX statement.
+//
+// REMOVE FIELD name ON person
+type RemoveFieldStatement struct {
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	Name Expr   // Field name
+	What []Expr // Table names
 }
 
 // --------------------------------------------------
@@ -120,50 +221,42 @@ type RecordStatement struct {
 // --------------------------------------------------
 
 // DefineIndexStatement represents an SQL DEFINE INDEX statement.
+//
 // DEFINE INDEX name ON person COLUMNS (account, age) UNIQUE
 type DefineIndexStatement struct {
-	Index  Expr
-	Table  Expr
-	Fields []*Field
-	Unique Expr
-}
-
-// ResyncIndexStatement represents an SQL RESYNC INDEX statement.
-// RESYNC INDEX name ON person
-type ResyncIndexStatement struct {
-	Index Expr
-	Table Expr
+	EX   bool     // Explain
+	KV   string   // Bucket
+	NS   string   // Namespace
+	DB   string   // Database
+	Name Expr     // Index name
+	What []Expr   // Table names
+	Code Expr     // Index code
+	Cols []*Field // Index cols
+	Uniq bool     // Unique index
 }
 
 // RemoveIndexStatement represents an SQL REMOVE INDEX statement.
+//
 // REMOVE INDEX name ON person
 type RemoveIndexStatement struct {
-	Index Expr
-	Table Expr
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	Name Expr   // Index name
+	What []Expr // Table names
 }
 
-// --------------------------------------------------
-// Views
-// --------------------------------------------------
-
-// DefineViewStatement represents an SQL DEFINE VIEW statement.
-// DEFINE VIEW name MAP `` REDUCE ``
-type DefineViewStatement struct {
-	View   Expr
-	Map    Expr
-	Reduce Expr
-}
-
-// ResyncViewStatement represents an SQL RESYNC VIEW statement.
-// RESYNC VIEW name
-type ResyncViewStatement struct {
-	View Expr
-}
-
-// RemoveViewStatement represents an SQL REMOVE VIEW statement.
-// REMOVE VIEW name
-type RemoveViewStatement struct {
-	View Expr
+// ResyncIndexStatement represents an SQL RESYNC INDEX statement.
+//
+// RESYNC INDEX name ON person
+type ResyncIndexStatement struct {
+	EX   bool   // Explain
+	KV   string // Bucket
+	NS   string // Namespace
+	DB   string // Database
+	Name Expr   // Index name
+	What []Expr // Table names
 }
 
 // --------------------------------------------------
@@ -173,20 +266,42 @@ type RemoveViewStatement struct {
 // Expr represents a sql expression
 type Expr interface{}
 
+// Asc represents the ASC expression.
+type Asc struct{}
+
+// Desc represents the DESC expression.
+type Desc struct{}
+
 // Null represents a null expression.
 type Null struct{}
 
+// Void represents an expression which is not set.
+type Void struct{}
+
+// Empty represents an expression which is null or "".
+type Empty struct{}
+
 // Wildcard represents a wildcard expression.
 type Wildcard struct{}
+
+// JSONLiteral represents a json object.
+type JSONLiteral struct {
+	Val interface{}
+}
+
+// ArrayLiteral represents a json array.
+type ArrayLiteral struct {
+	Val []interface{}
+}
 
 // IdentLiteral represents a variable.
 type IdentLiteral struct {
 	Val string `json:"Ident"`
 }
 
-// JSONLiteral represents a regular expression.
-type JSONLiteral struct {
-	Val interface{} `json:"Json"`
+// BytesLiteral represents a null expression.
+type BytesLiteral struct {
+	Val []byte `json:"Bytes"`
 }
 
 // RegexLiteral represents a regular expression.
@@ -224,11 +339,6 @@ type DurationLiteral struct {
 	Val time.Duration `json:"Duration"`
 }
 
-// DirectionLiteral represents a duration literal.
-type DirectionLiteral struct {
-	Val bool `json:"Direction"`
-}
-
 // ClosedExpression represents a parenthesized expression.
 type ClosedExpression struct {
 	Expr Expr
@@ -239,6 +349,26 @@ type BinaryExpression struct {
 	LHS Expr
 	Op  string
 	RHS Expr
+}
+
+// CodeExpression represents js/lua CODE
+type CodeExpression struct {
+	CODE *StringLiteral
+}
+
+// DiffExpression represents a JSON DIFF PATCH
+type DiffExpression struct {
+	JSON *JSONLiteral
+}
+
+// MergeExpression represents JSON to MERGE
+type MergeExpression struct {
+	JSON *JSONLiteral
+}
+
+// ContentExpression represents JSON to REPLACE
+type ContentExpression struct {
+	JSON *JSONLiteral
 }
 
 // --------------------------------------------------
@@ -252,8 +382,9 @@ type Table struct {
 
 // Thing comment
 type Thing struct {
-	Table string `json:"Table"`
-	ID    string `json:"ID"`
+	Table string      `json:"Table"`
+	Thing string      `json:"Thing"`
+	ID    interface{} `json:"ID"`
 }
 
 // Field comment

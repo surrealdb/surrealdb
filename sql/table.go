@@ -14,9 +14,9 @@
 
 package sql
 
-func (p *Parser) parseCreateStatement(explain bool) (stmt *CreateStatement, err error) {
+func (p *Parser) parseDefineTableStatement(explain bool) (stmt *DefineTableStatement, err error) {
 
-	stmt = &CreateStatement{}
+	stmt = &DefineTableStatement{}
 
 	stmt.EX = explain
 
@@ -24,17 +24,29 @@ func (p *Parser) parseCreateStatement(explain bool) (stmt *CreateStatement, err 
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	_, _, _ = p.mightBe(INTO)
-
-	if stmt.What, err = p.parseWhat(); err != nil {
+	if stmt.What, err = p.parseTables(); err != nil {
 		return nil, err
 	}
 
-	if stmt.Data, err = p.parseData(); err != nil {
+	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
 
-	if stmt.Echo, err = p.parseEcho(); err != nil {
+	return
+
+}
+
+func (p *Parser) parseRemoveTableStatement(explain bool) (stmt *RemoveTableStatement, err error) {
+
+	stmt = &RemoveTableStatement{}
+
+	stmt.EX = explain
+
+	stmt.KV = p.c.Get("KV").(string)
+	stmt.NS = p.c.Get("NS").(string)
+	stmt.DB = p.c.Get("DB").(string)
+
+	if stmt.What, err = p.parseTables(); err != nil {
 		return nil, err
 	}
 

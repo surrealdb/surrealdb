@@ -14,18 +14,20 @@
 
 package sql
 
-func (p *Parser) parseRemoveStatement() (Statement, error) {
+func (p *Parser) parseRemoveStatement(explain bool) (Statement, error) {
 
 	// Inspect the next token.
-	tok, lit := p.scanIgnoreWhitespace()
+	tok, _, err := p.shouldBe(TABLE, FIELD, INDEX)
 
 	switch tok {
-	case VIEW:
-		return p.parseRemoveViewStatement()
+	case TABLE:
+		return p.parseRemoveTableStatement(explain)
+	case FIELD:
+		return p.parseRemoveFieldStatement(explain)
 	case INDEX:
-		return p.parseRemoveIndexStatement()
+		return p.parseRemoveIndexStatement(explain)
 	default:
-		return nil, &ParseError{Found: lit, Expected: []string{"INDEX", "VIEW"}}
+		return nil, err
 	}
 
 }

@@ -15,13 +15,17 @@
 package sql
 
 import (
+	"bytes"
 	"io"
 	"strings"
+
+	"github.com/abcum/fibre"
 )
 
 // Parser represents a parser.
 type Parser struct {
 	s   *Scanner
+	c   *fibre.Context
 	buf struct {
 		tok Token  // last read token
 		lit string // last read literal
@@ -29,22 +33,38 @@ type Parser struct {
 	}
 }
 
+// Parse parses sql from a []byte, string, or io.Reader.
+func Parse(ctx *fibre.Context, i interface{}) (*Query, error) {
+	switch v := i.(type) {
+	default:
+		return nil, &EmptyError{}
+	case []byte:
+		return ParseBytes(ctx, v)
+	case string:
+		return ParseString(ctx, v)
+	case io.Reader:
+		return ParseBuffer(ctx, v)
+	}
+}
+
+// ParseBytes parses a byte array.
+func ParseBytes(ctx *fibre.Context, i []byte) (*Query, error) {
+	r := bytes.NewReader(i)
+	p := &Parser{s: NewScanner(r), c: ctx}
+	return p.Parse()
+}
+
 // ParseString parses a string.
-func ParseString(i string) (*Query, error) {
+func ParseString(ctx *fibre.Context, i string) (*Query, error) {
 	r := strings.NewReader(i)
-	p := &Parser{s: NewScanner(r)}
+	p := &Parser{s: NewScanner(r), c: ctx}
 	return p.Parse()
 }
 
 // ParseBuffer parses a buffer.
-func ParseBuffer(r io.Reader) (*Query, error) {
-	p := &Parser{s: NewScanner(r)}
+func ParseBuffer(ctx *fibre.Context, r io.Reader) (*Query, error) {
+	p := &Parser{s: NewScanner(r), c: ctx}
 	return p.Parse()
-}
-
-// NewParser returns a new instance of Parser.
-func NewParser(r io.Reader) *Parser {
-	return &Parser{s: NewScanner(r)}
 }
 
 // Parse parses single or multiple SQL queries.
@@ -85,50 +105,43 @@ func (p *Parser) ParseMulti() (*Query, error) {
 // ParseSingle parses a single SQL SELECT statement.
 func (p *Parser) ParseSingle() (Statement, error) {
 
-	// Inspect the first token.
-	tok, lit := p.scanIgnoreWhitespace()
+	var explain bool
+
+	if _, _, exi := p.mightBe(EXPLAIN); exi {
+		explain = true
+	}
+
+	tok, _, err := p.shouldBe(USE, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, RESYNC, REMOVE)
 
 	switch tok {
 
+	case USE:
+		return p.parseUseStatement(explain)
+
 	case SELECT:
-		return p.parseSelectStatement()
-	case CREATE:
-		return p.parseCreateStatement()
-	case UPDATE:
-		return p.parseUpdateStatement()
+		return p.parseSelectStatement(explain)
+	case CREATE, INSERT:
+		return p.parseCreateStatement(explain)
+	case UPDATE, UPSERT:
+		return p.parseUpdateStatement(explain)
 	case MODIFY:
-		return p.parseModifyStatement()
+		return p.parseModifyStatement(explain)
 	case DELETE:
-		return p.parseDeleteStatement()
+		return p.parseDeleteStatement(explain)
 	case RELATE:
-		return p.parseRelateStatement()
+		return p.parseRelateStatement(explain)
 	case RECORD:
-		return p.parseRecordStatement()
+		return p.parseRecordStatement(explain)
 
 	case DEFINE:
-		return p.parseDefineStatement()
+		return p.parseDefineStatement(explain)
 	case RESYNC:
-		return p.parseResyncStatement()
+		return p.parseResyncStatement(explain)
 	case REMOVE:
-		return p.parseRemoveStatement()
+		return p.parseRemoveStatement(explain)
 
 	default:
-
-		return nil, &ParseError{
-			Found: lit,
-			Expected: []string{
-				"SELECT",
-				"CREATE",
-				"UPDATE",
-				"MODIFY",
-				"DELETE",
-				"RELATE",
-				"RECORD",
-				"DEFINE",
-				"RESYNC",
-				"REMOVE",
-			},
-		}
+		return nil, err
 
 	}
 

@@ -13,3 +13,27 @@
 // limitations under the License.
 
 package sql
+
+func (p *Parser) parseDiff() (exp *DiffExpression, err error) {
+
+	if _, _, err = p.shouldBe(DIFF); err != nil {
+		return nil, err
+	}
+
+	exp = &DiffExpression{}
+
+	tok, lit, err := p.shouldBe(JSON)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
+	}
+
+	val, err := declare(tok, lit)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
+	}
+
+	exp.JSON = val.(*JSONLiteral)
+
+	return
+
+}

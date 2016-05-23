@@ -14,9 +14,9 @@
 
 package sql
 
-func (p *Parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexStatement, err error) {
+func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldStatement, err error) {
 
-	stmt = &DefineIndexStatement{}
+	stmt = &DefineFieldStatement{}
 
 	stmt.EX = explain
 
@@ -36,10 +36,29 @@ func (p *Parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexState
 		return nil, err
 	}
 
-	if tok, _, err := p.shouldBe(CODE, COLUMNS); tok != 0 {
+	for {
 
-		if err != nil {
-			return nil, err
+		tok, _, exi := p.mightBe(MIN, MAX, TYPE, CODE, DEFAULT, NOTNULL, READONLY, MANDATORY)
+		if !exi {
+			break
+		}
+
+		if is(tok, MIN) {
+			if stmt.Min, err = p.parseNumber(); err != nil {
+				return nil, err
+			}
+		}
+
+		if is(tok, MAX) {
+			if stmt.Max, err = p.parseNumber(); err != nil {
+				return nil, err
+			}
+		}
+
+		if is(tok, TYPE) {
+			if stmt.Type, err = p.parseType(); err != nil {
+				return nil, err
+			}
 		}
 
 		if is(tok, CODE) {
@@ -48,44 +67,43 @@ func (p *Parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexState
 			}
 		}
 
-		if is(tok, COLUMNS) {
-			if stmt.Cols, err = p.parseExpr(); err != nil {
+		if is(tok, DEFAULT) {
+			if stmt.Default, err = p.parseDefault(); err != nil {
 				return nil, err
+			}
+		}
+
+		if is(tok, NOTNULL) {
+			stmt.Notnull = true
+			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
+				if tok == FALSE {
+					stmt.Notnull = false
+				}
+			}
+		}
+
+		if is(tok, READONLY) {
+			stmt.Readonly = true
+			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
+				if tok == FALSE {
+					stmt.Readonly = false
+				}
+			}
+		}
+
+		if is(tok, MANDATORY) {
+			stmt.Mandatory = true
+			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
+				if tok == FALSE {
+					stmt.Mandatory = false
+				}
 			}
 		}
 
 	}
 
-	_, _, stmt.Uniq = p.mightBe(UNIQUE)
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
-	}
-
-	return
-
-}
-
-func (p *Parser) parseResyncIndexStatement(explain bool) (stmt *ResyncIndexStatement, err error) {
-
-	stmt = &ResyncIndexStatement{}
-
-	stmt.EX = explain
-
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
-
-	if stmt.Name, err = p.parseIdent(); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(ON); err != nil {
-		return nil, err
-	}
-
-	if stmt.What, err = p.parseTables(); err != nil {
-		return nil, err
+	if stmt.Type == nil {
+		return nil, &ParseError{Found: "", Expected: []string{"TYPE"}}
 	}
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
@@ -96,9 +114,9 @@ func (p *Parser) parseResyncIndexStatement(explain bool) (stmt *ResyncIndexState
 
 }
 
-func (p *Parser) parseRemoveIndexStatement(explain bool) (stmt *RemoveIndexStatement, err error) {
+func (p *Parser) parseRemoveFieldStatement(explain bool) (stmt *RemoveFieldStatement, err error) {
 
-	stmt = &RemoveIndexStatement{}
+	stmt = &RemoveFieldStatement{}
 
 	stmt.EX = explain
 

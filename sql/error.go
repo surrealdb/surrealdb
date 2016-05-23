@@ -35,5 +35,8 @@ type ParseError struct {
 
 // Error returns the string representation of the error.
 func (e *ParseError) Error() string {
+	if len(e.Found) > 1000 {
+		return fmt.Sprintf("Found `%s...` but expected `%s`", e.Found[:1000], strings.Join(e.Expected, ", "))
+	}
 	return fmt.Sprintf("Found `%s` but expected `%s`", e.Found, strings.Join(e.Expected, ", "))
 }

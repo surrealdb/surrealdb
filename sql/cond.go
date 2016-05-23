@@ -14,41 +14,50 @@
 
 package sql
 
-func (p *Parser) parseSet() ([]Expr, error) {
-
-	var mul []Expr
+func (p *Parser) parseCond() (mul []Expr, err error) {
 
 	var tok Token
 	var lit string
-	var err error
+
+	// Remove the WHERE keyword
+	if _, _, exi := p.mightBe(WHERE); !exi {
+		return nil, nil
+	}
 
 	for {
 
 		one := &BinaryExpression{}
 
-		tok, lit, err = p.shouldBe(IDENT)
+		tok, lit, err = p.shouldBe(IDENT, ID, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
-		one.LHS = declare(tok, lit)
 
-		tok, lit, err = p.shouldBe(EQ, INC, DEC)
+		one.LHS, err = declare(tok, lit)
+		if err != nil {
+			return nil, err
+		}
+
+		tok, lit, err = p.shouldBe(IN, EQ, NEQ, GT, LT, GTE, LTE, EQR, NER, SEQ, SNE)
 		if err != nil {
 			return nil, err
 		}
 		one.Op = lit
 
-		tok, lit, err = p.shouldBe(IDENT, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE, JSON)
+		tok, lit, err = p.shouldBe(IDENT, ID, NULL, EMPTY, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, REGEX, JSON, ARRAY)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field value"}}
 		}
-		one.RHS = declare(tok, lit)
+
+		one.RHS, err = declare(tok, lit)
+		if err != nil {
+			return nil, err
+		}
 
 		mul = append(mul, one)
 
-		// If the next token is not a comma then break the loop.
-		if _, _, exi := p.mightBe(COMMA); !exi {
-			p.unscan()
+		// Remove the WHERE keyword
+		if _, _, exi := p.mightBe(AND, OR); !exi {
 			break
 		}
 

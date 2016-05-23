@@ -14,16 +14,21 @@
 
 package sql
 
-func (p *Parser) parseResyncStatement(explain bool) (Statement, error) {
+func (p *Parser) parseType() (exp Expr, err error) {
 
-	// Inspect the next token.
-	tok, _, err := p.shouldBe(INDEX)
+	allowed := []string{"any", "url", "email", "phone", "array", "object", "string", "number"}
 
-	switch tok {
-	case INDEX:
-		return p.parseResyncIndexStatement(explain)
-	default:
+	tok, lit, err := p.shouldBe(IDENT, ARRAY)
+	if err != nil {
 		return nil, err
 	}
+
+	if tok == IDENT {
+		if !contains(lit, allowed) {
+			return nil, &ParseError{Found: lit, Expected: allowed}
+		}
+	}
+
+	return declare(tok, lit)
 
 }

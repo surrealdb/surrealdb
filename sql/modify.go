@@ -14,6 +14,32 @@
 
 package sql
 
-func (p *Parser) parseModifyStatement() (Statement, error) {
-	return nil, nil
+func (p *Parser) parseModifyStatement(explain bool) (stmt *ModifyStatement, err error) {
+
+	stmt = &ModifyStatement{}
+
+	stmt.EX = explain
+
+	stmt.KV = p.c.Get("KV").(string)
+	stmt.NS = p.c.Get("NS").(string)
+	stmt.DB = p.c.Get("DB").(string)
+
+	if stmt.What, err = p.parseThings(); err != nil {
+		return nil, err
+	}
+
+	if stmt.Diff, err = p.parseDiff(); err != nil {
+		return nil, err
+	}
+
+	if stmt.Echo, err = p.parseEcho(); err != nil {
+		return nil, err
+	}
+
+	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
+		return nil, err
+	}
+
+	return
+
 }

@@ -14,63 +14,36 @@
 
 package sql
 
-func (p *Parser) parseTable() (*Table, error) {
+// --------------------------------------------------
+//
+// --------------------------------------------------
 
-	_, lit, err := p.shouldBe(IDENT)
+func (p *Parser) parseTable() (one *Table, err error) {
+
+	var lit string
+
+	one = &Table{}
+
+	_, lit, err = p.shouldBe(IDENT)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"table name"}}
 	}
+	one.Name = lit
 
-	return &Table{Name: lit}, nil
-
-}
-
-func (p *Parser) parseIdent() (*IdentLiteral, error) {
-
-	_, lit, err := p.shouldBe(IDENT)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
-	}
-
-	return &IdentLiteral{Val: lit}, nil
+	return one, err
 
 }
 
-func (p *Parser) parseString() (*StringLiteral, error) {
-
-	_, lit, err := p.shouldBe(STRING)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
-	}
-
-	return &StringLiteral{Val: lit}, nil
-
-}
-
-func (p *Parser) parseRegion() (*StringLiteral, error) {
-
-	_, lit, err := p.shouldBe(IDENT, STRING, REGION)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
-	}
-
-	return &StringLiteral{Val: lit}, nil
-
-}
-
-func (p *Parser) parseFields() ([]*Field, error) {
-
-	var m []*Field
+func (p *Parser) parseTables() (mul []Expr, err error) {
 
 	for {
 
-		s, err := p.parseField()
-
+		one, err := p.parseTable()
 		if err != nil {
 			return nil, err
 		}
 
-		m = append(m, s)
+		mul = append(mul, one)
 
 		// If the next token is not a comma then break the loop.
 		if _, _, exi := p.mightBe(COMMA); !exi {
@@ -79,60 +52,195 @@ func (p *Parser) parseFields() ([]*Field, error) {
 
 	}
 
-	return m, nil
+	return
 
 }
 
-func (p *Parser) parseField() (*Field, error) {
+// --------------------------------------------------
+//
+// --------------------------------------------------
 
-	f := &Field{}
+func (p *Parser) parseThing() (one *Thing, err error) {
 
-	expr, err := p.parseExpr()
+	var tok Token
+
+	one = &Thing{}
+
+	_, _, err = p.shouldBe(EAT)
+	if err != nil {
+		return nil, &ParseError{Found: one.Table, Expected: []string{"@"}}
+	}
+
+	tok, one.Table, err = p.shouldBe(IDENT, NUMBER)
+	if err != nil {
+		return nil, &ParseError{Found: one.Table, Expected: []string{"table name"}}
+	}
+
+	_, _, err = p.shouldBe(COLON)
 	if err != nil {
 		return nil, err
 	}
-	f.Expr = expr
 
-	switch expr.(type) {
-	case *Wildcard:
-		return f, nil
-	}
-
-	alias, err := p.parseAlias()
+	tok, one.Thing, err = p.shouldBe(IDENT, NUMBER)
 	if err != nil {
-		return nil, err
-	}
-	f.Alias = alias
-
-	return f, nil
-
-}
-
-func (p *Parser) parseExpr() (ex Expr, er error) {
-
-	tok, lit, err := p.shouldBe(IDENT, NULL, ALL, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON)
-	if err != nil {
-		er = &ParseError{Found: lit, Expected: []string{"field name"}}
+		return nil, &ParseError{Found: one.Thing, Expected: []string{"table id"}}
 	}
 
-	ex = declare(tok, lit)
+	val, err := declare(tok, one.Thing)
+
+	one.ID = val
 
 	return
 
 }
 
-func (p *Parser) parseAlias() (ex Expr, er error) {
+func (p *Parser) parseThings() (mul []Expr, err error) {
 
-	if _, _, exi := p.mightBe(AS); !exi {
-		return nil, nil
+	for {
+
+		// var one *Thing
+
+		one, err := p.parseThing()
+		if err != nil {
+			return nil, err
+		}
+
+		mul = append(mul, one)
+
+		// If the next token is not a comma then break the loop.
+		if _, _, exi := p.mightBe(COMMA); !exi {
+			break
+		}
+
 	}
+
+	return
+
+}
+
+// --------------------------------------------------
+//
+// --------------------------------------------------
+
+func (p *Parser) parseIdent() (*IdentLiteral, error) {
 
 	tok, lit, err := p.shouldBe(IDENT)
 	if err != nil {
-		er = &ParseError{Found: lit, Expected: []string{"field name"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
 	}
 
-	ex = declare(tok, lit)
+	val, err := declare(tok, lit)
+
+	return val.(*IdentLiteral), err
+
+}
+
+func (p *Parser) parseNumber() (*NumberLiteral, error) {
+
+	tok, lit, err := p.shouldBe(NUMBER)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"number"}}
+	}
+
+	val, err := declare(tok, lit)
+
+	return val.(*NumberLiteral), err
+
+}
+
+func (p *Parser) parseString() (*StringLiteral, error) {
+
+	tok, lit, err := p.shouldBe(STRING)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
+	}
+
+	val, err := declare(tok, lit)
+
+	return val.(*StringLiteral), err
+
+}
+
+func (p *Parser) parseRegion() (*StringLiteral, error) {
+
+	tok, lit, err := p.shouldBe(IDENT, STRING, REGION)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
+	}
+
+	val, err := declare(tok, lit)
+
+	return val.(*StringLiteral), err
+
+}
+
+func (p *Parser) parseBoolean() (*BooleanLiteral, error) {
+
+	tok, lit, err := p.shouldBe(TRUE, FALSE)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"boolean"}}
+	}
+
+	val, err := declare(tok, lit)
+
+	return val.(*BooleanLiteral), err
+
+}
+
+func (p *Parser) parseDefault() (Expr, error) {
+
+	tok, lit, err := p.shouldBe(TRUE, FALSE, NUMBER, STRING, REGION, ARRAY, JSON)
+	if err != nil {
+		return nil, err
+	}
+
+	return declare(tok, lit)
+
+}
+
+func (p *Parser) parseExpr() (mul []*Field, err error) {
+
+	var tok Token
+	var lit string
+	var exi bool
+
+	for {
+
+		one := &Field{}
+
+		tok, lit, err = p.shouldBe(IDENT, ID, NULL, ALL, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON)
+		if err != nil {
+			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
+		}
+
+		one.Expr, err = declare(tok, lit)
+		if err != nil {
+			return
+		}
+
+		// Next token might be AS
+		if _, _, exi = p.mightBe(AS); exi {
+
+			tok, lit, err = p.shouldBe(IDENT)
+			if err != nil {
+				return nil, &ParseError{Found: lit, Expected: []string{"field alias"}}
+			}
+
+			one.Alias, err = declare(tok, lit)
+			if err != nil {
+				return
+			}
+
+		}
+
+		mul = append(mul, one)
+
+		// If the next token is not a comma then break the loop.
+		if _, _, exi = p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
 
 	return
 

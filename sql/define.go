@@ -14,18 +14,20 @@
 
 package sql
 
-func (p *Parser) parseDefineStatement() (Statement, error) {
+func (p *Parser) parseDefineStatement(explain bool) (Statement, error) {
 
 	// Inspect the next token.
-	tok, lit := p.scanIgnoreWhitespace()
+	tok, _, err := p.shouldBe(TABLE, FIELD, INDEX)
 
 	switch tok {
-	case VIEW:
-		return p.parseDefineViewStatement()
+	case TABLE:
+		return p.parseDefineTableStatement(explain)
+	case FIELD:
+		return p.parseDefineFieldStatement(explain)
 	case INDEX:
-		return p.parseDefineIndexStatement()
+		return p.parseDefineIndexStatement(explain)
 	default:
-		return nil, &ParseError{Found: lit, Expected: []string{"INDEX", "VIEW"}}
+		return nil, err
 	}
 
 }

@@ -17,7 +17,6 @@ package sql
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"io"
 	"strconv"
 	"strings"
@@ -70,11 +69,6 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 	case ',':
 		return COMMA, string(ch)
 	case '.':
-		chn := s.read()
-		s.unread()
-		if isNumber(chn) {
-			return s.scanNumber()
-		}
 		return DOT, string(ch)
 	case '"':
 		s.unread()
@@ -85,12 +79,15 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 	case '`':
 		s.unread()
 		return s.scanQuoted()
+	case '⟨':
+		s.unread()
+		return s.scanQuoted()
 	case '{':
 		s.unread()
-		return s.scanSpecial()
+		return s.scanObject()
 	case '[':
 		s.unread()
-		return s.scanSpecial()
+		return s.scanObject()
 	case ':':
 		return COLON, string(ch)
 	case ';':
@@ -186,8 +183,48 @@ func (s *Scanner) scanIdent() (tok Token, lit string) {
 		return tok, buf.String()
 	}
 
+	if _, err := time.ParseDuration(buf.String()); err == nil {
+		return DURATION, buf.String()
+	}
+
 	// Otherwise return as a regular identifier.
 	return IDENT, buf.String()
+
+}
+
+func (s *Scanner) scanNumber() (tok Token, lit string) {
+
+	tok = NUMBER
+
+	// Create a buffer and read the current character into it.
+	var buf bytes.Buffer
+	buf.WriteRune(s.read())
+
+	// Read every subsequent ident character into the buffer.
+	// Non-ident characters and EOF will cause the loop to exit.
+	for {
+		if ch := s.read(); ch == eof {
+			break
+		} else if isNumber(ch) {
+			buf.WriteRune(ch)
+		} else if isLetter(ch) {
+			tok = IDENT
+			buf.WriteRune(ch)
+		} else if ch == '.' {
+			if tok == DOUBLE {
+				tok = IDENT
+			}
+			if tok == NUMBER {
+				tok = DOUBLE
+			}
+			buf.WriteRune(ch)
+		} else {
+			s.unread()
+			break
+		}
+	}
+
+	return tok, buf.String()
 
 }
 
@@ -209,111 +246,19 @@ func (s *Scanner) scanString() (tok Token, lit string) {
 
 	var buf bytes.Buffer
 
-	char := s.read()
-
-	for {
-		if ch := s.read(); ch == char {
-			break
-		} else if ch == eof {
-			return ILLEGAL, buf.String()
-		} else if ch == '\n' {
-			tok = REGION
-			buf.WriteRune(ch)
-		} else if ch == '\\' {
-			chn := s.read()
-			if chn == 'n' {
-				buf.WriteRune('\n')
-			} else if chn == '\\' {
-				buf.WriteRune('\\')
-			} else if chn == '"' {
-				buf.WriteRune('"')
-			} else if chn == '\'' {
-				buf.WriteRune('\'')
-			} else if chn == '`' {
-				buf.WriteRune('`')
-			} else {
-				return ILLEGAL, buf.String()
-			}
-		} else {
-			buf.WriteRune(ch)
-		}
-	}
-
-	return tok, buf.String()
-
-}
-
-func (s *Scanner) scanNumber() (tok Token, lit string) {
-
-	tok = NUMBER
-
-	// Create a buffer and read the current character into it.
-	var buf bytes.Buffer
-	buf.WriteRune(s.read())
-
-	// Read every subsequent ident character into the buffer.
-	// Non-ident characters and EOF will cause the loop to exit.
-	for {
-		if ch := s.read(); ch == eof {
-			break
-		} else if ch == '.' {
-			if tok == DOUBLE {
-				tok = IDENT
-			}
-			if tok == NUMBER {
-				tok = DOUBLE
-			}
-			buf.WriteRune(ch)
-		} else if ch == '+' {
-			buf.WriteRune(ch)
-		} else if ch == '-' {
-			buf.WriteRune(ch)
-		} else if ch == ':' {
-			buf.WriteRune(ch)
-		} else if ch == 'T' {
-			buf.WriteRune(ch)
-		} else if isLetter(ch) {
-			tok = IDENT
-			buf.WriteRune(ch)
-		} else if !isNumber(ch) {
-			s.unread()
-			break
-		} else {
-			buf.WriteRune(ch)
-		}
-	}
-
-	if _, err := time.Parse("2006-01-02", buf.String()); err == nil {
-		return DATE, buf.String()
-	}
-
-	if _, err := time.Parse(time.RFC3339, buf.String()); err == nil {
-		return TIME, buf.String()
-	}
-
-	if _, err := time.Parse(time.RFC3339Nano, buf.String()); err == nil {
-		return NANO, buf.String()
-	}
-
-	return tok, buf.String()
-
-}
-
-func (s *Scanner) scanSpecial() (tok Token, lit string) {
-
-	tok = IDENT
-
-	var buf bytes.Buffer
-
 	beg := s.read()
 	end := beg
 
-	if beg == '{' {
-		end = '}'
+	if beg == '"' {
+		end = '"'
 	}
 
-	if beg == '[' {
-		end = ']'
+	if beg == '`' {
+		end = '`'
+	}
+
+	if beg == '⟨' {
+		end = '⟩'
 	}
 
 	for {
@@ -324,35 +269,105 @@ func (s *Scanner) scanSpecial() (tok Token, lit string) {
 		} else if ch == '\n' {
 			tok = REGION
 			buf.WriteRune(ch)
+		} else if ch == '\r' {
+			tok = REGION
+			buf.WriteRune(ch)
 		} else if ch == '\\' {
 			chn := s.read()
-			if chn == 'n' {
+			switch chn {
+			default:
+				buf.WriteRune(chn)
+			case 'b':
+				continue
+			case 't':
+				buf.WriteRune('\t')
+			case 'r':
+				tok = REGION
+				buf.WriteRune('\r')
+			case 'n':
 				tok = REGION
 				buf.WriteRune('\n')
-			} else if chn == '\\' {
-				buf.WriteRune('\\')
-			} else if chn == '"' {
-				buf.WriteRune('"')
-			} else if chn == '\'' {
-				buf.WriteRune('\'')
-			} else if chn == '`' {
-				buf.WriteRune('`')
-			} else {
-				break
 			}
 		} else {
 			buf.WriteRune(ch)
 		}
 	}
 
-	var f interface{}
-	j := []byte(string(beg) + buf.String() + string(end))
-	err := json.Unmarshal(j, &f)
-	if err == nil {
-		return JSON, string(beg) + buf.String() + string(end)
+	if _, err := time.ParseDuration(buf.String()); err == nil {
+		return DURATION, buf.String()
+	}
+
+	if _, err := time.Parse("2006-01-02", buf.String()); err == nil {
+		return DATE, buf.String()
+	}
+
+	if _, err := time.Parse(time.RFC3339, buf.String()); err == nil {
+		return TIME, buf.String()
 	}
 
 	return tok, buf.String()
+
+}
+
+func (s *Scanner) scanObject() (tok Token, lit string) {
+
+	tok = IDENT
+
+	var buf bytes.Buffer
+
+	beg := s.read()
+	end := beg
+	sub := 0
+
+	if beg == '{' {
+		end = '}'
+	}
+
+	if beg == '[' {
+		end = ']'
+	}
+
+	for {
+		if ch := s.read(); ch == end && sub == 0 {
+			break
+		} else if ch == beg {
+			sub++
+			buf.WriteRune(ch)
+		} else if ch == end {
+			sub--
+			buf.WriteRune(ch)
+		} else if ch == eof {
+			return ILLEGAL, buf.String()
+		} else if ch == '\\' {
+			chn := s.read()
+			switch chn {
+			default:
+				return ILLEGAL, buf.String()
+			case 'b', 't', 'r', 'n', 'f', '"', '\\':
+				buf.WriteRune(ch)
+				buf.WriteRune(chn)
+			}
+		} else {
+			buf.WriteRune(ch)
+		}
+	}
+
+	str := buf.String()
+
+	str = strings.Replace(str, "\n", "", -1)
+	str = strings.Replace(str, "\r", "", -1)
+
+	if beg == '[' {
+		return ARRAY, string(beg) + str + string(end)
+	}
+
+	if beg == '{' {
+		if strings.Trim(str, " ")[0] == '"' {
+			return JSON, string(beg) + str + string(end)
+		}
+	}
+
+	return tok, str
 
 }
 
@@ -378,7 +393,7 @@ func number(lit string) (i int64) {
 
 // isWhitespace returns true if the rune is a space, tab, or newline.
 func isWhitespace(ch rune) bool {
-	return ch == ' ' || ch == '\t' || ch == '\n'
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
 }
 
 // isLetter returns true if the rune is a letter.

@@ -14,16 +14,18 @@
 
 package sql
 
-func (p *Parser) parseResyncStatement(explain bool) (Statement, error) {
+func (p *Parser) parseEcho() (exp Token, err error) {
 
-	// Inspect the next token.
-	tok, _, err := p.shouldBe(INDEX)
+	// Next token might be RETURN
+	if _, _, exi := p.mightBe(RETURN); exi {
 
-	switch tok {
-	case INDEX:
-		return p.parseResyncIndexStatement(explain)
-	default:
-		return nil, err
+		exp, _, err = p.shouldBe(ID, NONE, FULL, BOTH, DIFF, BEFORE, AFTER)
+		if err != nil {
+			return 0, err
+		}
+
 	}
+
+	return
 
 }

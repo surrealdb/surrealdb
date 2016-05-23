@@ -14,16 +14,22 @@
 
 package sql
 
-func (p *Parser) parseResyncStatement(explain bool) (Statement, error) {
+func (p *Parser) parseCode() (exp *CodeExpression, err error) {
 
-	// Inspect the next token.
-	tok, _, err := p.shouldBe(INDEX)
+	exp = &CodeExpression{}
 
-	switch tok {
-	case INDEX:
-		return p.parseResyncIndexStatement(explain)
-	default:
-		return nil, err
+	tok, lit, err := p.shouldBe(STRING, REGION)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"LUA script"}}
 	}
+
+	val, err := declare(tok, lit)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"LUA script"}}
+	}
+
+	exp.CODE = val.(*StringLiteral)
+
+	return
 
 }

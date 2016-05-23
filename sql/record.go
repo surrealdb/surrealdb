@@ -14,6 +14,16 @@
 
 package sql
 
-func (p *Parser) parseRecordStatement() (Statement, error) {
-	return nil, nil
+func (p *Parser) parseRecordStatement(explain bool) (stmt *RecordStatement, err error) {
+
+	stmt = &RecordStatement{}
+
+	stmt.EX = explain
+
+	stmt.KV = p.c.Get("KV").(string)
+	stmt.NS = p.c.Get("NS").(string)
+	stmt.DB = p.c.Get("DB").(string)
+
+	return
+
 }
