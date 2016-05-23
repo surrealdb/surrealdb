@@ -21,10 +21,10 @@ import (
 var chars = []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
 
 // New produces a random string of length n
-func New(l int) string {
+func New(l int) []byte {
 
 	if l == 0 {
-		return ""
+		return nil
 	}
 
 	i := 0
@@ -45,7 +45,7 @@ func New(l int) string {
 			b[i] = chars[c%t]
 			i++
 			if i == l {
-				return string(b)
+				return b
 			}
 		}
 
