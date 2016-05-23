@@ -67,6 +67,7 @@ func (e *encoder) Encode(items ...interface{}) {
 			e.w.Write(bSTRING)
 			e.w.Write(value)
 			e.w.Write(bTERM)
+			e.w.Write(bTERM)
 
 		case string:
 
@@ -84,6 +85,7 @@ func (e *encoder) Encode(items ...interface{}) {
 
 			e.w.Write(bSTRING)
 			e.w.Write(value)
+			e.w.Write(bTERM)
 			e.w.Write(bTERM)
 
 		case float32, float64:

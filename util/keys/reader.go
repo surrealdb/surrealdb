@@ -31,19 +31,34 @@ func newReader(r io.Reader) *reader {
 	}
 }
 
-func (b *reader) ReadNext(exp byte) (fnd bool) {
-	byt, _ := b.ReadByte()
+func (r *reader) ReadNext(exp byte) (fnd bool) {
+	byt, _ := r.ReadByte()
 	if exp == byt {
 		return true
 	}
-	b.UnreadByte()
+	r.UnreadByte()
 	return false
 }
 
-func (b *reader) ReadUpto(exp byte) (byt []byte) {
-	byt, _ = b.ReadBytes(exp)
-	b.UnreadByte()
-	return byt[:len(byt)-1]
+func (r *reader) ReadUpto(exp ...byte) (byt []byte) {
+
+	for i := 0; i < len(exp); i++ {
+		if i == 0 {
+			rng, _ := r.ReadBytes(exp[i])
+			byt = append(byt, rng...)
+		}
+		if i >= 1 {
+			if r.ReadNext(exp[i]) {
+				byt = append(byt, exp[i])
+				continue
+			} else {
+				i = 0
+			}
+		}
+	}
+
+	return byt[:len(byt)-len(exp)]
+
 }
 
 // --------------------------------------------------
@@ -88,8 +103,7 @@ func (r *reader) FindBool() (val bool) {
 
 func (r *reader) FindBytes() (val []byte) {
 	if r.ReadNext(cSTRING) {
-		val = r.ReadUpto(cTERM)
-		r.ReadNext(cTERM)
+		val = r.ReadUpto(cTERM, cTERM)
 		return
 	}
 	return
@@ -107,8 +121,7 @@ func (r *reader) FindString() (val string) {
 		return
 	}
 	if r.ReadNext(cSTRING) {
-		val = string(r.ReadUpto(cTERM))
-		r.ReadNext(cTERM)
+		val = string(r.ReadUpto(cTERM, cTERM))
 		return
 	}
 	return
