@@ -16,9 +16,13 @@ package keys
 
 const (
 	// Prefix is the lowest char found in a key
-	Prefix = "\x00"
+	Prefix = prefix
 	// Suffix is the highest char found in a key
-	Suffix = "\xff"
+	Suffix = suffix
+	// Prefix is the lowest char found in a key
+	prefix = "\x00"
+	// Suffix is the highest char found in a key
+	suffix = "\xff"
 )
 
 var (
