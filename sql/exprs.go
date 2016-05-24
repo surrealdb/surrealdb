@@ -117,8 +117,6 @@ func (p *Parser) parseThings() (mul []Expr, err error) {
 
 	for {
 
-		// var one *Thing
-
 		one, err := p.parseThing()
 		if err != nil {
 			return nil, err
