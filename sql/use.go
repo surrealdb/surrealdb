@@ -48,8 +48,8 @@ func (p *Parser) parseUseStatement(explain bool) (stmt *UseStatement, err error)
 
 		if is(tok, CIPHERKEY) {
 			_, stmt.CK, err = p.shouldBe(IDENT, STRING)
-			if err != nil || len(stmt.CK) != 32 {
-				return nil, &ParseError{Found: stmt.CK, Expected: []string{"32 bit cipher key"}}
+			if err != nil || (len(stmt.CK) != 16 && len(stmt.CK) != 24 && len(stmt.CK) != 32) {
+				return nil, &ParseError{Found: stmt.CK, Expected: []string{"16, 24, or 32 bit cipher key"}}
 			}
 			p.c.Set("CK", stmt.CK)
 		}
