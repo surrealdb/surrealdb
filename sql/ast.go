@@ -377,14 +377,13 @@ type ContentExpression struct {
 
 // Table comment
 type Table struct {
-	Name string `json:"Name"`
+	TB string
 }
 
 // Thing comment
 type Thing struct {
-	Table string      `json:"Table"`
-	Thing string      `json:"Thing"`
-	ID    interface{} `json:"ID"`
+	TB string
+	ID interface{}
 }
 
 // Field comment

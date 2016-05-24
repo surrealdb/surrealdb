@@ -14,21 +14,23 @@
 
 package sql
 
+import (
+	"strconv"
+	"time"
+)
+
 // --------------------------------------------------
 //
 // --------------------------------------------------
 
 func (p *Parser) parseTable() (one *Table, err error) {
 
-	var lit string
-
 	one = &Table{}
 
-	_, lit, err = p.shouldBe(IDENT)
+	_, one.TB, err = p.shouldBe(IDENT, NUMBER, DATE)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"table name"}}
+		return nil, &ParseError{Found: one.TB, Expected: []string{"table name"}}
 	}
-	one.Name = lit
 
 	return one, err
 
@@ -63,17 +65,19 @@ func (p *Parser) parseTables() (mul []Expr, err error) {
 func (p *Parser) parseThing() (one *Thing, err error) {
 
 	var tok Token
+	var lit string
+	var val interface{}
 
 	one = &Thing{}
 
 	_, _, err = p.shouldBe(EAT)
 	if err != nil {
-		return nil, &ParseError{Found: one.Table, Expected: []string{"@"}}
+		return nil, err
 	}
 
-	tok, one.Table, err = p.shouldBe(IDENT, NUMBER)
+	_, one.TB, err = p.shouldBe(IDENT, NUMBER, DATE)
 	if err != nil {
-		return nil, &ParseError{Found: one.Table, Expected: []string{"table name"}}
+		return nil, &ParseError{Found: one.TB, Expected: []string{"table name"}}
 	}
 
 	_, _, err = p.shouldBe(COLON)
@@ -81,12 +85,27 @@ func (p *Parser) parseThing() (one *Thing, err error) {
 		return nil, err
 	}
 
-	tok, one.Thing, err = p.shouldBe(IDENT, NUMBER)
+	tok, lit, err = p.shouldBe(IDENT, NUMBER, DOUBLE, DATE, TIME)
 	if err != nil {
-		return nil, &ParseError{Found: one.Thing, Expected: []string{"table id"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"table id"}}
 	}
 
-	val, err := declare(tok, one.Thing)
+	switch tok {
+	case IDENT:
+		val = lit
+	case NUMBER:
+		val, err = strconv.ParseInt(lit, 10, 64)
+	case DOUBLE:
+		val, err = strconv.ParseFloat(lit, 64)
+	case DATE:
+		val, err = time.Parse("2006-01-02", lit)
+	case TIME:
+		val, err = time.Parse(time.RFC3339, lit)
+	}
+
+	if err != nil {
+		return nil, err
+	}
 
 	one.ID = val
 

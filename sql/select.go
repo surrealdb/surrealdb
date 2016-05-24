@@ -158,10 +158,6 @@ func (p *Parser) parseLimit() (Expr, error) {
 
 func (p *Parser) parseStart() (Expr, error) {
 
-	var tok Token
-	var lit string
-	var err error
-
 	// Remove the START keyword
 	if _, _, exi := p.mightBe(START); !exi {
 		return nil, nil
@@ -174,46 +170,20 @@ func (p *Parser) parseStart() (Expr, error) {
 	_, _, exi := p.mightBe(EAT)
 
 	if exi == false {
-
-		// Parse table name
-		tok, lit = p.scan()
-		if !is(tok, NUMBER) {
-			p.unscan()
-			return nil, &ParseError{Found: lit, Expected: []string{"table name"}}
-		}
-
-		return &NumberLiteral{Val: number(lit)}, nil
-
-	}
-
-	if exi == true {
-
-		t := &Thing{}
-
-		// Parse table name
-		tok, lit = p.scan()
-		if !is(tok, IDENT, NUMBER) {
-			p.unscan()
-			return nil, &ParseError{Found: lit, Expected: []string{"table name"}}
-		}
-		t.Table = lit
-
-		// Next token should be :
-		_, _, err = p.shouldBe(COLON)
+		val, err := p.parseNumber()
 		if err != nil {
 			return nil, err
 		}
+		return val, nil
+	}
 
-		// Parse table id
-		tok, lit = p.scan()
-		if !is(tok, IDENT, NUMBER) {
-			p.unscan()
-			return nil, &ParseError{Found: lit, Expected: []string{"table id"}}
+	if exi == true {
+		p.unscan()
+		val, err := p.parseThing()
+		if err != nil {
+			return nil, err
 		}
-		t.ID = lit
-
-		return t, nil
-
+		return val, nil
 	}
 
 	return nil, nil

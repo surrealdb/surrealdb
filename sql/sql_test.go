@@ -243,7 +243,7 @@ func Test_Parse_Queries_Use(t *testing.T) {
 		},
 		{
 			sql: `USE CIPHERKEY`,
-			err: "Found `` but expected `32 bit cipher key`",
+			err: "Found `` but expected `16, 24, or 32 bit cipher key`",
 		},
 		{
 			sql: `USE CIPHERKEY 1hg7dbrma8ghe5473kghvie64jgi3ph4`,
@@ -259,23 +259,23 @@ func Test_Parse_Queries_Use(t *testing.T) {
 		},
 		{
 			sql: `USE CIPHERKEY 1`,
-			err: "Found `1` but expected `32 bit cipher key`",
+			err: "Found `1` but expected `16, 24, or 32 bit cipher key`",
 		},
 		{
 			sql: `USE CIPHERKEY 1.3000`,
-			err: "Found `1.3000` but expected `32 bit cipher key`",
+			err: "Found `1.3000` but expected `16, 24, or 32 bit cipher key`",
 		},
 		{
 			sql: `USE CIPHERKEY 123.123.123.123`,
-			err: "Found `123.123.123.123` but expected `32 bit cipher key`",
+			err: "Found `123.123.123.123` but expected `16, 24, or 32 bit cipher key`",
 		},
 		{
 			sql: `USE CIPHERKEY {"some":"thing"}`,
-			err: "Found `{\"some\":\"thing\"}` but expected `32 bit cipher key`",
+			err: "Found `{\"some\":\"thing\"}` but expected `16, 24, or 32 bit cipher key`",
 		},
 		{
 			sql: `USE CIPHERKEY name something`,
-			err: "Found `name` but expected `32 bit cipher key`",
+			err: "Found `name` but expected `16, 24, or 32 bit cipher key`",
 		},
 	}
 
@@ -293,7 +293,7 @@ func Test_Parse_Queries_Explain(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				EX:   true,
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 	}
@@ -331,14 +331,14 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM person;`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
 			sql: `SELECT ALL FROM person;`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
@@ -361,123 +361,126 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM person`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM person, tweet`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}, &Table{Name: "tweet"}},
+				What: []Expr{&Table{TB: "person"}, &Table{TB: "tweet"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:1a`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "1a", ID: &IdentLiteral{Val: "1a"}}},
+				What: []Expr{&Thing{TB: "person", ID: "1a"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:123456`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "123456", ID: &NumberLiteral{Val: 123456}}},
+				What: []Expr{&Thing{TB: "person", ID: int64(123456)}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:123.456`,
-			err: "Found `123.456` but expected `table id`",
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &Wildcard{}}},
+				What: []Expr{&Thing{TB: "person", ID: float64(123.456)}},
+			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:123.456.789.012`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "123.456.789.012", ID: &IdentLiteral{Val: "123.456.789.012"}}},
+				What: []Expr{&Thing{TB: "person", ID: "123.456.789.012"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:⟨123.456.789.012⟩`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "123.456.789.012", ID: &IdentLiteral{Val: "123.456.789.012"}}},
+				What: []Expr{&Thing{TB: "person", ID: "123.456.789.012"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:{123.456.789.012}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "123.456.789.012", ID: &IdentLiteral{Val: "123.456.789.012"}}},
+				What: []Expr{&Thing{TB: "person", ID: "123.456.789.012"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:⟨A250C5A3-948F-4657-88AD-FF5F27B5B24E⟩`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "A250C5A3-948F-4657-88AD-FF5F27B5B24E", ID: &IdentLiteral{Val: "A250C5A3-948F-4657-88AD-FF5F27B5B24E"}}},
+				What: []Expr{&Thing{TB: "person", ID: "A250C5A3-948F-4657-88AD-FF5F27B5B24E"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:{A250C5A3-948F-4657-88AD-FF5F27B5B24E}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "A250C5A3-948F-4657-88AD-FF5F27B5B24E", ID: &IdentLiteral{Val: "A250C5A3-948F-4657-88AD-FF5F27B5B24E"}}},
+				What: []Expr{&Thing{TB: "person", ID: "A250C5A3-948F-4657-88AD-FF5F27B5B24E"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:⟨8250C5A3-948F-4657-88AD-FF5F27B5B24E⟩`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "8250C5A3-948F-4657-88AD-FF5F27B5B24E", ID: &IdentLiteral{Val: "8250C5A3-948F-4657-88AD-FF5F27B5B24E"}}},
+				What: []Expr{&Thing{TB: "person", ID: "8250C5A3-948F-4657-88AD-FF5F27B5B24E"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:{8250C5A3-948F-4657-88AD-FF5F27B5B24E}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "8250C5A3-948F-4657-88AD-FF5F27B5B24E", ID: &IdentLiteral{Val: "8250C5A3-948F-4657-88AD-FF5F27B5B24E"}}},
+				What: []Expr{&Thing{TB: "person", ID: "8250C5A3-948F-4657-88AD-FF5F27B5B24E"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:⟨Tobie Morgan Hitchcock⟩`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "Tobie Morgan Hitchcock", ID: &IdentLiteral{Val: "Tobie Morgan Hitchcock"}}},
+				What: []Expr{&Thing{TB: "person", ID: "Tobie Morgan Hitchcock"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:{Tobie Morgan Hitchcock}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "person", Thing: "Tobie Morgan Hitchcock", ID: &IdentLiteral{Val: "Tobie Morgan Hitchcock"}}},
+				What: []Expr{&Thing{TB: "person", ID: "Tobie Morgan Hitchcock"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @{email addresses}:⟨tobie@abcum.com⟩`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "email addresses", Thing: "tobie@abcum.com", ID: &IdentLiteral{Val: "tobie@abcum.com"}}},
+				What: []Expr{&Thing{TB: "email addresses", ID: "tobie@abcum.com"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @{email addresses}:{tobie@abcum.com}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "email addresses", Thing: "tobie@abcum.com", ID: &IdentLiteral{Val: "tobie@abcum.com"}}},
+				What: []Expr{&Thing{TB: "email addresses", ID: "tobie@abcum.com"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @{email addresses}:⟨tobie+spam@abcum.com⟩`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "email addresses", Thing: "tobie+spam@abcum.com", ID: &IdentLiteral{Val: "tobie+spam@abcum.com"}}},
+				What: []Expr{&Thing{TB: "email addresses", ID: "tobie+spam@abcum.com"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @{email addresses}:{tobie+spam@abcum.com}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "email addresses", Thing: "tobie+spam@abcum.com", ID: &IdentLiteral{Val: "tobie+spam@abcum.com"}}},
+				What: []Expr{&Thing{TB: "email addresses", ID: "tobie+spam@abcum.com"}},
 			}}},
 		},
 		{
@@ -496,7 +499,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM @{email addresses}:{this\nis\nodd}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Thing{Table: "email addresses", Thing: "this\\nis\\nodd", ID: &IdentLiteral{Val: "this\\nis\\nodd"}}},
+				What: []Expr{&Thing{TB: "email addresses", ID: "this\\nis\\nodd"}},
 			}}},
 		},
 		{
@@ -506,7 +509,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 					{Expr: &Wildcard{}},
 					{Expr: &IdentLiteral{Val: "temp"}, Alias: &IdentLiteral{Val: "test"}},
 				},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
@@ -515,7 +518,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 				Expr: []*Field{
 					{Expr: &IdentLiteral{Val: "email addresses"}, Alias: &IdentLiteral{Val: "emails"}},
 				},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
@@ -524,14 +527,14 @@ func Test_Parse_Queries_Select(t *testing.T) {
 				Expr: []*Field{
 					{Expr: &IdentLiteral{Val: "emails"}, Alias: &IdentLiteral{Val: "email addresses"}},
 				},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
 			sql: "SELECT ALL FROM person WHERE id = '\x0A'",
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "id"}, Op: "=", RHS: &StringLiteral{Val: "\n"}}},
 			}}},
 		},
@@ -539,7 +542,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: "SELECT ALL FROM person WHERE id = '\x0D'",
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "id"}, Op: "=", RHS: &StringLiteral{Val: "\r"}}},
 			}}},
 		},
@@ -547,7 +550,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT ALL FROM person WHERE id = "\b\n\r\t"`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "id"}, Op: "=", RHS: &StringLiteral{Val: "\n\r\t"}}},
 			}}},
 		},
@@ -567,7 +570,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM person WHERE id = 1`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "id"}, Op: "=", RHS: &NumberLiteral{Val: 1}}},
 			}}},
 		},
@@ -575,7 +578,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM person WHERE old != EMPTY AND old = true`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{
 					&BinaryExpression{LHS: &IdentLiteral{Val: "old"}, Op: "!=", RHS: &Empty{}},
 					&BinaryExpression{LHS: &IdentLiteral{Val: "old"}, Op: "=", RHS: &BooleanLiteral{Val: true}},
@@ -586,7 +589,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM person WHERE old != EMPTY AND old = false`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{
 					&BinaryExpression{LHS: &IdentLiteral{Val: "old"}, Op: "!=", RHS: &Empty{}},
 					&BinaryExpression{LHS: &IdentLiteral{Val: "old"}, Op: "=", RHS: &BooleanLiteral{Val: false}},
@@ -597,7 +600,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM person WHERE id != null AND id != EMPTY AND id > 13.9 AND id < 31 AND id >= 15 AND id <= 29.9`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{
 					&BinaryExpression{LHS: &IdentLiteral{Val: "id"}, Op: "!=", RHS: &Null{}},
 					&BinaryExpression{LHS: &IdentLiteral{Val: "id"}, Op: "!=", RHS: &Empty{}},
@@ -616,7 +619,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM person WHERE test IN ["London","Paris"]`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "test"}, Op: "IN", RHS: &ArrayLiteral{Val: []interface{}{"London", "Paris"}}}},
 			}}},
 		},
@@ -632,7 +635,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: "SELECT * FROM person WHERE test = {\"name\":\"\x0A\"}",
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "test"}, Op: "=", RHS: &JSONLiteral{Val: map[string]interface{}{"name": ""}}}},
 			}}},
 		},
@@ -640,7 +643,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: "SELECT * FROM person WHERE test = {\"name\":\"\x0D\"}",
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "test"}, Op: "=", RHS: &JSONLiteral{Val: map[string]interface{}{"name": ""}}}},
 			}}},
 		},
@@ -648,7 +651,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM person WHERE test = {"name":"London"}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "test"}, Op: "=", RHS: &JSONLiteral{Val: map[string]interface{}{"name": "London"}}}},
 			}}},
 		},
@@ -656,7 +659,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM person WHERE test = {"name":"\b\t\r\n\f\"\\"}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "test"}, Op: "=", RHS: &JSONLiteral{Val: map[string]interface{}{"name": "\b\t\r\n\f\"\\"}}}},
 			}}},
 		},
@@ -664,7 +667,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM person WHERE test = {"name":{"f":"first", "l":"last"}}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &Wildcard{}}},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cond: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "test"}, Op: "=", RHS: &JSONLiteral{Val: map[string]interface{}{"name": map[string]interface{}{"f": "first", "l": "last"}}}}},
 			}}},
 		},
@@ -679,7 +682,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		sql: `SELECT * FROM person WHERE bday >= "1987-06-22" AND bday >= "1987-06-22T08:00:00Z" AND bday >= "1987-06-22T08:30:00.193943735Z" AND bday <= "2016-03-14T11:19:31.193943735Z"`,
 		res: &Query{Statements: []Statement{&SelectStatement{
 			Expr: []*Field{{Expr: &Wildcard{}}},
-			What: []Expr{&Table{Name: "person"}},
+			What: []Expr{&Table{TB: "person"}},
 			Cond: []Expr{
 				&BinaryExpression{LHS: &IdentLiteral{Val: "bday"}, Op: ">=", RHS: &DatetimeLiteral{Val: bday1}},
 				&BinaryExpression{LHS: &IdentLiteral{Val: "bday"}, Op: ">=", RHS: &DatetimeLiteral{Val: bday2}},
@@ -710,7 +713,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 			sql: `CREATE person`,
 			res: &Query{Statements: []Statement{&CreateStatement{
 				What: []Expr{
-					&Table{Name: "person"},
+					&Table{TB: "person"},
 				},
 			}}},
 		},
@@ -729,7 +732,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person SET firstname = VOID`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Data: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "firstname"}, Op: "=", RHS: &Void{}}},
 			}}},
 		},
@@ -740,7 +743,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person SET firstname = "Tobie"`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Data: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "firstname"}, Op: "=", RHS: &StringLiteral{Val: "Tobie"}}},
 			}}},
 		},
@@ -759,7 +762,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person MERGE {"firstname":"Tobie"}`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Data: []Expr{&MergeExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"firstname": "Tobie"}}}},
 			}}},
 		},
@@ -778,56 +781,56 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person CONTENT {"firstname":"Tobie"}`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Data: []Expr{&ContentExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"firstname": "Tobie"}}}},
 			}}},
 		},
 		{
 			sql: `CREATE person RETURN ID`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: ID,
 			}}},
 		},
 		{
 			sql: `CREATE person RETURN NONE`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: NONE,
 			}}},
 		},
 		{
 			sql: `CREATE person RETURN FULL`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: FULL,
 			}}},
 		},
 		{
 			sql: `CREATE person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: BOTH,
 			}}},
 		},
 		{
 			sql: `CREATE person RETURN DIFF`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: DIFF,
 			}}},
 		},
 		{
 			sql: `CREATE person RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: BEFORE,
 			}}},
 		},
 		{
 			sql: `CREATE person RETURN AFTER`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: AFTER,
 			}}},
 		},
@@ -858,7 +861,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 			sql: `UPDATE person`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
 				What: []Expr{
-					&Table{Name: "person"},
+					&Table{TB: "person"},
 				},
 			}}},
 		},
@@ -877,7 +880,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person SET firstname = VOID`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Data: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "firstname"}, Op: "=", RHS: &Void{}}},
 			}}},
 		},
@@ -888,7 +891,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person SET firstname = "Tobie"`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Data: []Expr{&BinaryExpression{LHS: &IdentLiteral{Val: "firstname"}, Op: "=", RHS: &StringLiteral{Val: "Tobie"}}},
 			}}},
 		},
@@ -907,7 +910,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person MERGE {"firstname":"Tobie"}`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Data: []Expr{&MergeExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"firstname": "Tobie"}}}},
 			}}},
 		},
@@ -926,56 +929,56 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person CONTENT {"firstname":"Tobie"}`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Data: []Expr{&ContentExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"firstname": "Tobie"}}}},
 			}}},
 		},
 		{
 			sql: `UPDATE person RETURN ID`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: ID,
 			}}},
 		},
 		{
 			sql: `UPDATE person RETURN NONE`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: NONE,
 			}}},
 		},
 		{
 			sql: `UPDATE person RETURN FULL`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: FULL,
 			}}},
 		},
 		{
 			sql: `UPDATE person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: BOTH,
 			}}},
 		},
 		{
 			sql: `UPDATE person RETURN DIFF`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: DIFF,
 			}}},
 		},
 		{
 			sql: `UPDATE person RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: BEFORE,
 			}}},
 		},
 		{
 			sql: `UPDATE person RETURN AFTER`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: AFTER,
 			}}},
 		},
@@ -1009,7 +1012,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 		{
 			sql: `MODIFY @person:test DIFF {"diff": true}`,
 			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{Table: "person", Thing: "test", ID: &IdentLiteral{Val: "test"}}},
+				What: []Expr{&Thing{TB: "person", ID: "test"}},
 				Diff: &DiffExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"diff": true}}},
 			}}},
 		},
@@ -1020,7 +1023,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 		{
 			sql: `MODIFY @person:test DIFF {"diff": true} RETURN ID`,
 			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{Table: "person", Thing: "test", ID: &IdentLiteral{Val: "test"}}},
+				What: []Expr{&Thing{TB: "person", ID: "test"}},
 				Diff: &DiffExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"diff": true}}},
 				Echo: ID,
 			}}},
@@ -1028,7 +1031,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 		{
 			sql: `MODIFY @person:test DIFF {"diff": true} RETURN NONE`,
 			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{Table: "person", Thing: "test", ID: &IdentLiteral{Val: "test"}}},
+				What: []Expr{&Thing{TB: "person", ID: "test"}},
 				Diff: &DiffExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"diff": true}}},
 				Echo: NONE,
 			}}},
@@ -1036,7 +1039,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 		{
 			sql: `MODIFY @person:test DIFF {"diff": true} RETURN FULL`,
 			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{Table: "person", Thing: "test", ID: &IdentLiteral{Val: "test"}}},
+				What: []Expr{&Thing{TB: "person", ID: "test"}},
 				Diff: &DiffExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"diff": true}}},
 				Echo: FULL,
 			}}},
@@ -1044,7 +1047,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 		{
 			sql: `MODIFY @person:test DIFF {"diff": true} RETURN BOTH`,
 			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{Table: "person", Thing: "test", ID: &IdentLiteral{Val: "test"}}},
+				What: []Expr{&Thing{TB: "person", ID: "test"}},
 				Diff: &DiffExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"diff": true}}},
 				Echo: BOTH,
 			}}},
@@ -1052,7 +1055,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 		{
 			sql: `MODIFY @person:test DIFF {"diff": true} RETURN DIFF`,
 			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{Table: "person", Thing: "test", ID: &IdentLiteral{Val: "test"}}},
+				What: []Expr{&Thing{TB: "person", ID: "test"}},
 				Diff: &DiffExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"diff": true}}},
 				Echo: DIFF,
 			}}},
@@ -1060,7 +1063,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 		{
 			sql: `MODIFY @person:test DIFF {"diff": true} RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{Table: "person", Thing: "test", ID: &IdentLiteral{Val: "test"}}},
+				What: []Expr{&Thing{TB: "person", ID: "test"}},
 				Diff: &DiffExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"diff": true}}},
 				Echo: BEFORE,
 			}}},
@@ -1068,7 +1071,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 		{
 			sql: `MODIFY @person:test DIFF {"diff": true} RETURN AFTER`,
 			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{Table: "person", Thing: "test", ID: &IdentLiteral{Val: "test"}}},
+				What: []Expr{&Thing{TB: "person", ID: "test"}},
 				Diff: &DiffExpression{JSON: &JSONLiteral{Val: map[string]interface{}{"diff": true}}},
 				Echo: AFTER,
 			}}},
@@ -1100,56 +1103,56 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 			sql: `DELETE person`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
 				What: []Expr{
-					&Table{Name: "person"},
+					&Table{TB: "person"},
 				},
 			}}},
 		},
 		{
 			sql: `DELETE person RETURN ID`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: ID,
 			}}},
 		},
 		{
 			sql: `DELETE person RETURN NONE`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: NONE,
 			}}},
 		},
 		{
 			sql: `DELETE person RETURN FULL`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: FULL,
 			}}},
 		},
 		{
 			sql: `DELETE person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: BOTH,
 			}}},
 		},
 		{
 			sql: `DELETE person RETURN DIFF`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: DIFF,
 			}}},
 		},
 		{
 			sql: `DELETE person RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: BEFORE,
 			}}},
 		},
 		{
 			sql: `DELETE person RETURN AFTER`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Echo: AFTER,
 			}}},
 		},
@@ -1199,7 +1202,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE TABLE person`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
@@ -1231,7 +1234,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &IdentLiteral{Val: "any"},
 			}}},
 		},
@@ -1239,7 +1242,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE url`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &IdentLiteral{Val: "url"},
 			}}},
 		},
@@ -1247,7 +1250,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE email`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &IdentLiteral{Val: "email"},
 			}}},
 		},
@@ -1255,7 +1258,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE phone`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &IdentLiteral{Val: "phone"},
 			}}},
 		},
@@ -1263,7 +1266,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE array`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &IdentLiteral{Val: "array"},
 			}}},
 		},
@@ -1271,7 +1274,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE object`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &IdentLiteral{Val: "object"},
 			}}},
 		},
@@ -1279,7 +1282,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE string`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &IdentLiteral{Val: "string"},
 			}}},
 		},
@@ -1287,7 +1290,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE number`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &IdentLiteral{Val: "number"},
 			}}},
 		},
@@ -1295,7 +1298,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE ["default","notdefault"]`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &ArrayLiteral{Val: []interface{}{"default", "notdefault"}},
 			}}},
 		},
@@ -1303,7 +1306,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any DEFAULT true`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:    &IdentLiteral{Val: "temp"},
-				What:    []Expr{&Table{Name: "person"}},
+				What:    []Expr{&Table{TB: "person"}},
 				Type:    &IdentLiteral{Val: "any"},
 				Default: &BooleanLiteral{Val: true},
 			}}},
@@ -1312,7 +1315,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any DEFAULT false`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:    &IdentLiteral{Val: "temp"},
-				What:    []Expr{&Table{Name: "person"}},
+				What:    []Expr{&Table{TB: "person"}},
 				Type:    &IdentLiteral{Val: "any"},
 				Default: &BooleanLiteral{Val: false},
 			}}},
@@ -1321,7 +1324,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any DEFAULT 100`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:    &IdentLiteral{Val: "temp"},
-				What:    []Expr{&Table{Name: "person"}},
+				What:    []Expr{&Table{TB: "person"}},
 				Type:    &IdentLiteral{Val: "any"},
 				Default: &NumberLiteral{Val: 100},
 			}}},
@@ -1330,7 +1333,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any DEFAULT "default"`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:    &IdentLiteral{Val: "temp"},
-				What:    []Expr{&Table{Name: "person"}},
+				What:    []Expr{&Table{TB: "person"}},
 				Type:    &IdentLiteral{Val: "any"},
 				Default: &StringLiteral{Val: "default"},
 			}}},
@@ -1339,7 +1342,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any DEFAULT "this\nis\nsome\ntext"`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:    &IdentLiteral{Val: "temp"},
-				What:    []Expr{&Table{Name: "person"}},
+				What:    []Expr{&Table{TB: "person"}},
 				Type:    &IdentLiteral{Val: "any"},
 				Default: &StringLiteral{Val: "this\nis\nsome\ntext"},
 			}}},
@@ -1348,7 +1351,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any DEFAULT {"default":true}`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:    &IdentLiteral{Val: "temp"},
-				What:    []Expr{&Table{Name: "person"}},
+				What:    []Expr{&Table{TB: "person"}},
 				Type:    &IdentLiteral{Val: "any"},
 				Default: &JSONLiteral{Val: map[string]interface{}{"default": true}},
 			}}},
@@ -1365,7 +1368,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any MIN 1`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &IdentLiteral{Val: "any"},
 				Min:  &NumberLiteral{Val: 1},
 			}}},
@@ -1382,7 +1385,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any MAX 100`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Type: &IdentLiteral{Val: "any"},
 				Max:  &NumberLiteral{Val: 100},
 			}}},
@@ -1395,7 +1398,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any NOTNULL`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:    &IdentLiteral{Val: "temp"},
-				What:    []Expr{&Table{Name: "person"}},
+				What:    []Expr{&Table{TB: "person"}},
 				Type:    &IdentLiteral{Val: "any"},
 				Notnull: true,
 			}}},
@@ -1404,7 +1407,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any NOTNULL true`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:    &IdentLiteral{Val: "temp"},
-				What:    []Expr{&Table{Name: "person"}},
+				What:    []Expr{&Table{TB: "person"}},
 				Type:    &IdentLiteral{Val: "any"},
 				Notnull: true,
 			}}},
@@ -1413,7 +1416,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any NOTNULL false`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:    &IdentLiteral{Val: "temp"},
-				What:    []Expr{&Table{Name: "person"}},
+				What:    []Expr{&Table{TB: "person"}},
 				Type:    &IdentLiteral{Val: "any"},
 				Notnull: false,
 			}}},
@@ -1422,7 +1425,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any READONLY`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:     &IdentLiteral{Val: "temp"},
-				What:     []Expr{&Table{Name: "person"}},
+				What:     []Expr{&Table{TB: "person"}},
 				Type:     &IdentLiteral{Val: "any"},
 				Readonly: true,
 			}}},
@@ -1431,7 +1434,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any READONLY true`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:     &IdentLiteral{Val: "temp"},
-				What:     []Expr{&Table{Name: "person"}},
+				What:     []Expr{&Table{TB: "person"}},
 				Type:     &IdentLiteral{Val: "any"},
 				Readonly: true,
 			}}},
@@ -1440,7 +1443,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any READONLY false`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:     &IdentLiteral{Val: "temp"},
-				What:     []Expr{&Table{Name: "person"}},
+				What:     []Expr{&Table{TB: "person"}},
 				Type:     &IdentLiteral{Val: "any"},
 				Readonly: false,
 			}}},
@@ -1449,7 +1452,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any MANDATORY`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:      &IdentLiteral{Val: "temp"},
-				What:      []Expr{&Table{Name: "person"}},
+				What:      []Expr{&Table{TB: "person"}},
 				Type:      &IdentLiteral{Val: "any"},
 				Mandatory: true,
 			}}},
@@ -1458,7 +1461,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any MANDATORY true`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:      &IdentLiteral{Val: "temp"},
-				What:      []Expr{&Table{Name: "person"}},
+				What:      []Expr{&Table{TB: "person"}},
 				Type:      &IdentLiteral{Val: "any"},
 				Mandatory: true,
 			}}},
@@ -1467,7 +1470,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE FIELD temp ON person TYPE any MANDATORY false`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
 				Name:      &IdentLiteral{Val: "temp"},
-				What:      []Expr{&Table{Name: "person"}},
+				What:      []Expr{&Table{TB: "person"}},
 				Type:      &IdentLiteral{Val: "any"},
 				Mandatory: false,
 			}}},
@@ -1501,7 +1504,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE INDEX temp ON person CODE ""`,
 			res: &Query{Statements: []Statement{&DefineIndexStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Code: &CodeExpression{CODE: &StringLiteral{Val: ""}},
 			}}},
 		},
@@ -1509,7 +1512,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE INDEX temp ON person CODE "\nemit()\n"`,
 			res: &Query{Statements: []Statement{&DefineIndexStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Code: &CodeExpression{CODE: &StringLiteral{Val: "\nemit()\n"}},
 			}}},
 		},
@@ -1521,7 +1524,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE INDEX temp ON person COLUMNS firstname, lastname`,
 			res: &Query{Statements: []Statement{&DefineIndexStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cols: []*Field{
 					{Expr: &IdentLiteral{Val: "firstname"}},
 					{Expr: &IdentLiteral{Val: "lastname"}},
@@ -1533,7 +1536,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE INDEX temp ON person COLUMNS firstname, lastname UNIQUE`,
 			res: &Query{Statements: []Statement{&DefineIndexStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 				Cols: []*Field{
 					{Expr: &IdentLiteral{Val: "firstname"}},
 					{Expr: &IdentLiteral{Val: "lastname"}},
@@ -1581,7 +1584,7 @@ func Test_Parse_Queries_Resync(t *testing.T) {
 			sql: `RESYNC INDEX temp ON person`,
 			res: &Query{Statements: []Statement{&ResyncIndexStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
@@ -1610,7 +1613,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE TABLE person`,
 			res: &Query{Statements: []Statement{&RemoveTableStatement{
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
@@ -1634,7 +1637,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 			sql: `REMOVE FIELD temp ON person`,
 			res: &Query{Statements: []Statement{&RemoveFieldStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
@@ -1658,7 +1661,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 			sql: `REMOVE INDEX temp ON person`,
 			res: &Query{Statements: []Statement{&RemoveIndexStatement{
 				Name: &IdentLiteral{Val: "temp"},
-				What: []Expr{&Table{Name: "person"}},
+				What: []Expr{&Table{TB: "person"}},
 			}}},
 		},
 		{
