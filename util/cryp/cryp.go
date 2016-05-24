@@ -22,6 +22,10 @@ import (
 
 func Encrypt(key []byte, src []byte) (dst []byte, err error) {
 
+	if len(key) == 0 {
+		return src, nil
+	}
+
 	// Initiate AES256
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -45,6 +49,10 @@ func Encrypt(key []byte, src []byte) (dst []byte, err error) {
 }
 
 func Decrypt(key []byte, src []byte) (dst []byte, err error) {
+
+	if len(key) == 0 {
+		return src, nil
+	}
 
 	// Initiate AES256
 	block, err := aes.NewCipher(key)

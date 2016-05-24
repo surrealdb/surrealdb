@@ -20,6 +20,24 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
+func TestEmpty(t *testing.T) {
+
+	key := []byte("")
+	str := []byte("Hello World")
+
+	Convey("Cryptography should fail", t, func() {
+		enc, _ := Encrypt(key, str)
+		dec, _ := Decrypt(key, enc)
+		Convey("Encrypt", func() {
+			So(enc, ShouldResemble, str)
+		})
+		Convey("Decrypt", func() {
+			So(dec, ShouldResemble, str)
+		})
+	})
+
+}
+
 func TestInvalid(t *testing.T) {
 
 	key := []byte("invalidkey")
