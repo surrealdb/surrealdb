@@ -158,7 +158,7 @@ func (tx *TX) Put(key, val []byte) (err error) {
 	}
 
 	if val, err = cryp.Encrypt(tx.ck, val); err != nil {
-		err = &DBError{err}
+		err = &CKError{err}
 		return
 	}
 
@@ -194,7 +194,7 @@ func (tx *TX) CPut(key, val, exp []byte) (err error) {
 	}
 
 	if val, err = cryp.Encrypt(tx.ck, val); err != nil {
-		err = &DBError{err}
+		err = &CKError{err}
 		return
 	}
 
@@ -348,7 +348,7 @@ func get(tx *TX, key, val []byte) (kv *KV, err error) {
 
 	kv.val, err = cryp.Decrypt(tx.ck, kv.val)
 	if err != nil {
-		err = &DBError{err}
+		err = &CKError{err}
 		return
 	}
 

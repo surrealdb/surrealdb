@@ -38,6 +38,17 @@ func (e *TXError) Error() string {
 	return fmt.Sprintf("There was a problem performing a read or write with the transaction")
 }
 
+// CKError is an error which occurs when there is a
+// problem with encrypting/decrypting values.
+type CKError struct {
+	Err error
+}
+
+// Error returns the string representation of the error.
+func (e *CKError) Error() string {
+	return fmt.Sprintf("There was a problem performing a read or write with the cipherkey")
+}
+
 // KVError is an error which occurs when there is a
 // problem with a conditional put or delete.
 type KVError struct {
