@@ -125,6 +125,11 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan interface{}) {
 		case *sql.RecordStatement:
 			res, err = executeRecordStatement(stm)
 
+		case *sql.DefineTableStatement:
+			res, err = executeDefineTableStatement(stm)
+		case *sql.RemoveTableStatement:
+			res, err = executeRemoveTableStatement(stm)
+
 		case *sql.DefineFieldStatement:
 			res, err = executeDefineFieldStatement(stm)
 		case *sql.RemoveFieldStatement:
