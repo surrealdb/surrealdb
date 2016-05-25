@@ -20,7 +20,6 @@ import (
 
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
-	"github.com/abcum/surreal/err"
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
 	"github.com/cockroachdb/cockroach/base"
@@ -30,7 +29,7 @@ import (
 )
 
 type Response struct {
-	Time   string      `json:"time, omitempty"`
+	Time   string      `json:"time,omitempty"`
 	Status interface{} `json:"status,omitempty"`
 	Detail interface{} `json:"detail,omitempty"`
 	Result interface{} `json:"result,omitempty"`
@@ -96,6 +95,36 @@ func Execute(ctx *fibre.Context, txt interface{}) (out []interface{}, err error)
 
 }
 
+func status(e error) interface{} {
+	switch e.(type) {
+	default:
+		return "OK"
+	case *kvs.DBError:
+		return "ERR_DB"
+	case *kvs.TXError:
+		return "ERR_DB"
+	case *kvs.CKError:
+		return "ERR_CK"
+	case *kvs.KVError:
+		return "ERR_EXISTS"
+	}
+}
+
+func detail(e error) interface{} {
+	switch e.(type) {
+	default:
+		return nil
+	case *kvs.DBError:
+		return "A database error occured"
+	case *kvs.TXError:
+		return "A database error occured"
+	case *kvs.CKError:
+		return "A cipherkey error occured"
+	case *kvs.KVError:
+		return "The item already exists"
+	}
+}
+
 func execute(ctx *fibre.Context, ast *sql.Query, chn chan interface{}) {
 
 	for _, s := range ast.Statements {
@@ -146,8 +175,8 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan interface{}) {
 
 		chn <- &Response{
 			Time:   time.Since(now).String(),
-			Status: errors.Status(err),
-			Detail: errors.Detail(err),
+			Status: status(err),
+			Detail: detail(err),
 			Result: append([]interface{}{}, res...),
 		}
 
