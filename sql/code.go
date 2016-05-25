@@ -14,21 +14,16 @@
 
 package sql
 
-func (p *Parser) parseCode() (exp *CodeExpression, err error) {
+func (p *Parser) parseCode() (exp *StringLiteral, err error) {
 
-	exp = &CodeExpression{}
+	exp = &StringLiteral{}
 
-	tok, lit, err := p.shouldBe(STRING, REGION)
+	_, lit, err := p.shouldBe(STRING, REGION)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"LUA script"}}
 	}
 
-	val, err := declare(tok, lit)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"LUA script"}}
-	}
-
-	exp.CODE = val.(*StringLiteral)
+	exp.Val = lit
 
 	return
 

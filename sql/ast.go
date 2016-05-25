@@ -196,12 +196,12 @@ type DefineFieldStatement struct {
 	What      []Expr // Table names
 	Type      Expr   // Field type
 	Code      Expr   // Field code
-	Min       *NumberLiteral
-	Max       *NumberLiteral
-	Default   Expr
-	Notnull   bool
-	Readonly  bool
-	Mandatory bool
+	Min       Expr   // Minimum value / length
+	Max       Expr   // Maximum value / length
+	Default   Expr   // Default value
+	Notnull   bool   // Notnull?
+	Readonly  bool   // Readonly?
+	Mandatory bool   // Mnadatory?
 }
 
 // RemoveFieldStatement represents an SQL REMOVE INDEX statement.
@@ -349,11 +349,6 @@ type BinaryExpression struct {
 	LHS Expr
 	Op  string
 	RHS Expr
-}
-
-// CodeExpression represents js/lua CODE
-type CodeExpression struct {
-	CODE *StringLiteral
 }
 
 // DiffExpression represents a JSON DIFF PATCH

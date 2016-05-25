@@ -1505,7 +1505,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			res: &Query{Statements: []Statement{&DefineIndexStatement{
 				Name: &IdentLiteral{Val: "temp"},
 				What: []Expr{&Table{TB: "person"}},
-				Code: &CodeExpression{CODE: &StringLiteral{Val: ""}},
+				Code: &StringLiteral{Val: ""},
 			}}},
 		},
 		{
@@ -1513,7 +1513,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			res: &Query{Statements: []Statement{&DefineIndexStatement{
 				Name: &IdentLiteral{Val: "temp"},
 				What: []Expr{&Table{TB: "person"}},
-				Code: &CodeExpression{CODE: &StringLiteral{Val: "\nemit()\n"}},
+				Code: &StringLiteral{Val: "\nemit()\n"},
 			}}},
 		},
 		{
