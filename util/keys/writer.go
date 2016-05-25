@@ -18,8 +18,6 @@ import (
 	"encoding/binary"
 	"io"
 	"time"
-	// "golang.org/x/text/collate"
-	// "golang.org/x/text/language"
 )
 
 type writer struct {
