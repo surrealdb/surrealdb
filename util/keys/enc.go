@@ -16,6 +16,7 @@ package keys
 
 import (
 	"bytes"
+	"encoding"
 	"io"
 	"time"
 )
@@ -210,6 +211,15 @@ func (e *encoder) Encode(items ...interface{}) {
 			for _, val := range value {
 				e.Encode(val)
 			}
+			e.w.Write(bTERM)
+
+		case encoding.TextMarshaler:
+
+			buf, _ := value.MarshalText()
+
+			e.w.Write(bSTRING)
+			e.w.Write(buf)
+			e.w.Write(bTERM)
 			e.w.Write(bTERM)
 
 		}
