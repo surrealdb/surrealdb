@@ -20,12 +20,9 @@ import (
 
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
-	"github.com/cockroachdb/cockroach/base"
-	"github.com/cockroachdb/cockroach/client"
-	"github.com/cockroachdb/cockroach/rpc"
-	"github.com/cockroachdb/cockroach/util/stop"
 )
 
 type Response struct {
@@ -35,26 +32,14 @@ type Response struct {
 	Result interface{} `json:"result,omitempty"`
 }
 
-var db *client.DB
-var st *stop.Stopper
+var db *kvs.DB
 
 // Setup sets up the connection with the data layer
 func Setup(opts *cnf.Options) (err error) {
 
 	log.WithPrefix("db").Infof("Connecting to database at %s", opts.Store)
 
-	st = stop.NewStopper()
-
-	ct := rpc.NewContext(&base.Context{User: "node", Insecure: true}, nil, st)
-
-	se, err := client.NewSender(ct, opts.Store)
-	if err != nil {
-		st.Stop()
-		log.WithPrefix("db").Errorf("failed to initialize KV client: %s", err)
-		return
-	}
-
-	db = client.NewDB(se)
+	db, err = kvs.New()
 
 	return
 
@@ -65,7 +50,7 @@ func Exit() {
 
 	log.WithPrefix("db").Infof("Disconnecting from database")
 
-	st.Stop()
+	db.Close()
 
 }
 
