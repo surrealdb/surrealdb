@@ -15,6 +15,7 @@
 package keys
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 	"time"
@@ -28,6 +29,28 @@ var tests []struct {
 	str string
 	obj Key
 	new Key
+}
+
+var prefs []struct {
+	obj Key
+	yes []Key
+	nos []Key
+}
+
+func ShouldPrefix(actual interface{}, expected ...interface{}) string {
+	if bytes.HasPrefix(expected[0].([]byte), actual.([]byte)) {
+		return ""
+	} else {
+		return fmt.Sprintf("%v was not prefixed by \n%v\n%s\n%s", expected[0], actual, expected[0], actual)
+	}
+}
+
+func ShouldNotPrefix(actual interface{}, expected ...interface{}) string {
+	if bytes.HasPrefix(expected[0].([]byte), actual.([]byte)) {
+		return fmt.Sprintf("%v was prefixed by \n%v\n%s\n%s", expected[0], actual, expected[0], actual)
+	} else {
+		return ""
+	}
 }
 
 func TestMain(t *testing.T) {
@@ -244,6 +267,59 @@ func TestMain(t *testing.T) {
 		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 2, 9223372036854775807}},
 
 		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: Suffix},
+	prefs = []struct {
+		obj Key
+		yes []Key
+		nos []Key
+	}{
+		{
+			obj: &Table{KV: "kv", NS: "ns", DB: "db", TB: "person"},
+			yes: []Key{
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Prefix},
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test"},
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Suffix},
+				&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test", AT: clock},
+				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"1", "2"}},
+				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"3", "4"}},
+			},
+			nos: []Key{
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "other", ID: "test"},
+				&Thing{KV: "kv", NS: "ns", DB: "other", TB: "person", ID: "test"},
+				&Thing{KV: "kv", NS: "other", DB: "db", TB: "person", ID: "test"},
+				&Thing{KV: "other", NS: "ns", DB: "db", TB: "person", ID: "test"},
+			},
+		},
+		{
+			obj: &Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Ignore},
+			yes: []Key{
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Prefix},
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test"},
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Suffix},
+			},
+			nos: []Key{
+				&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test", AT: clock},
+				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"1", "2"}},
+				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"3", "4"}},
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "other", ID: "test"},
+				&Thing{KV: "kv", NS: "ns", DB: "other", TB: "person", ID: "test"},
+				&Thing{KV: "kv", NS: "other", DB: "db", TB: "person", ID: "test"},
+				&Thing{KV: "other", NS: "ns", DB: "db", TB: "person", ID: "test"},
+			},
+		},
+		{
+			obj: &Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: Ignore},
+			yes: []Key{
+				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"1", "2"}},
+				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"3", "4"}},
+			},
+			nos: []Key{
+				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "other", FD: []interface{}{}},
+				&Index{KV: "kv", NS: "ns", DB: "db", TB: "other", IX: "names", FD: []interface{}{}},
+				&Index{KV: "kv", NS: "ns", DB: "other", TB: "person", IX: "names", FD: []interface{}{}},
+				&Index{KV: "kv", NS: "other", DB: "db", TB: "person", IX: "names", FD: []interface{}{}},
+				&Index{KV: "other", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{}},
+			},
+		},
 	}
 
 }
@@ -277,6 +353,30 @@ func TestEncoding(t *testing.T) {
 			Convey("Key should encode and decode", func() {
 				So(test.new, ShouldResemble, test.obj)
 			})
+
+		})
+
+	}
+
+}
+
+func TestPrefixing(t *testing.T) {
+
+	for _, test := range prefs {
+
+		Convey(test.obj.String(), t, func() {
+
+			for _, key := range test.yes {
+				Convey("Key "+test.obj.String()+" should prefix "+key.String(), func() {
+					So(test.obj.Encode(), ShouldPrefix, key.Encode())
+				})
+			}
+
+			for _, key := range test.nos {
+				Convey("Key "+test.obj.String()+" should not prefix "+key.String(), func() {
+					So(test.obj.Encode(), ShouldNotPrefix, key.Encode())
+				})
+			}
 
 		})
 
