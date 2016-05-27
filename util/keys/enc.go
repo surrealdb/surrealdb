@@ -72,6 +72,10 @@ func (e *encoder) Encode(items ...interface{}) {
 
 		case string:
 
+			if value == Ignore {
+				break
+			}
+
 			if value == Prefix {
 				e.w.Write(bPREFIX)
 				e.w.Write(bTERM)

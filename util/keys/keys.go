@@ -15,10 +15,14 @@
 package keys
 
 const (
+	// Ignore specifies an ignored field
+	Ignore = ignore
 	// Prefix is the lowest char found in a key
 	Prefix = prefix
 	// Suffix is the highest char found in a key
 	Suffix = suffix
+	// Ignore specifies an ignored field
+	ignore = "\x01"
 	// Prefix is the lowest char found in a key
 	prefix = "\x00"
 	// Suffix is the highest char found in a key
