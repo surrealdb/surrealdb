@@ -15,18 +15,18 @@
 package keys
 
 import (
-	"strings"
+	"fmt"
 )
 
 // IX ...
 type IX struct {
-	KV string // KV
-	CF string // !
-	TK string // f
-	NS string // NS
-	DB string // DB
-	TB string // TB
-	IX string // Index
+	KV interface{}
+	CF interface{}
+	TK interface{}
+	NS interface{}
+	DB interface{}
+	TB interface{}
+	IX interface{}
 }
 
 // init initialises the key
@@ -51,5 +51,5 @@ func (k *IX) Decode(data []byte) {
 // String returns a string representation of the key
 func (k *IX) String() string {
 	k.init()
-	return "/" + strings.Join([]string{k.KV, k.CF, k.TK, k.NS, k.DB, k.TB, k.IX}, "/")
+	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%s", k.KV, k.CF, k.TK, k.NS, k.DB, k.TB, k.IX)
 }

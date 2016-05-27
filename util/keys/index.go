@@ -16,18 +16,17 @@ package keys
 
 import (
 	"fmt"
-	"strings"
 )
 
 // Index ...
 type Index struct {
-	KV   string      // KV
-	NS   string      // NS
-	DB   string      // DB
-	TB   string      // TB
-	TK   string      // ¤
-	ID   string      // ID
-	What interface{} // What
+	KV interface{}
+	NS interface{}
+	DB interface{}
+	TB interface{}
+	TK interface{}
+	IX interface{}
+	FD interface{}
 }
 
 // init initialises the key
@@ -39,17 +38,17 @@ func (k *Index) init() *Index {
 // Encode encodes the key into binary
 func (k *Index) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.What)
+	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.IX, k.FD)
 }
 
 // Decode decodes the key from binary
 func (k *Index) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID, &k.What)
+	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.IX, &k.FD)
 }
 
 // String returns a string representation of the key
 func (k *Index) String() string {
 	k.init()
-	return "/" + strings.Join([]string{k.KV, k.NS, k.DB, k.TB, k.TK, fmt.Sprintf("%v", k.What)}, "/")
+	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%v", k.KV, k.NS, k.DB, k.TB, k.TK, k.IX, k.FD)
 }

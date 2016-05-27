@@ -16,28 +16,25 @@ package keys
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
 // Trail ...
 type Trail struct {
-	KV   string      // KV
-	NS   string      // NS
-	DB   string      // DB
-	TB   string      // TB
-	TK   string      // •
-	ID   interface{} // ID
-	Time time.Time   // Time
+	KV interface{}
+	NS interface{}
+	DB interface{}
+	TB interface{}
+	TK interface{}
+	ID interface{}
+	AT time.Time
 }
 
 // init initialises the key
 func (k *Trail) init() *Trail {
-	if k.TK == "" {
-		k.TK = "~"
-	}
-	if k.Time.IsZero() {
-		k.Time = time.Now()
+	k.TK = "~"
+	if k.AT.IsZero() {
+		k.AT = time.Now()
 	}
 	return k
 }
@@ -45,17 +42,17 @@ func (k *Trail) init() *Trail {
 // Encode encodes the key into binary
 func (k *Trail) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.Time)
+	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.AT)
 }
 
 // Decode decodes the key from binary
 func (k *Trail) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID, &k.Time)
+	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID, &k.AT)
 }
 
 // String returns a string representation of the key
 func (k *Trail) String() string {
 	k.init()
-	return "/" + strings.Join([]string{k.KV, k.NS, k.DB, k.TB, k.TK, fmt.Sprintf("%v", k.ID), k.Time.Format(time.RFC3339Nano)}, "/")
+	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%s", k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.AT.Format(time.RFC3339Nano))
 }

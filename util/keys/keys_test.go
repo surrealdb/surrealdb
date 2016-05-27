@@ -104,48 +104,58 @@ func TestMain(t *testing.T) {
 		},
 		{
 			str: "/surreal/abcum/database/person/~/873c2f37-ea03-4c5e-843e-cf393af44155/1987-06-22T08:00:00.123456789Z",
-			obj: &Trail{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", Time: clock},
+			obj: &Trail{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", AT: clock},
 			new: &Trail{},
 		},
 		{
 			str: "/surreal/abcum/database/person/~/test/1987-06-22T08:00:00.123456789Z",
-			obj: &Trail{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "test", Time: clock},
+			obj: &Trail{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "test", AT: clock},
 			new: &Trail{},
 		},
 		{
 			str: "/surreal/abcum/database/person/•/873c2f37-ea03-4c5e-843e-cf393af44155/friend/1987-06-22T08:00:00.123456789Z",
-			obj: &Event{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", Type: "friend", Time: clock},
+			obj: &Event{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TP: "friend", AT: clock},
 			new: &Event{},
 		},
 		{
 			str: "/surreal/abcum/database/person/«»/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", Type: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TP: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
 			new: &Edge{},
 		},
 		{
 			str: "/surreal/abcum/database/person/«/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«", Type: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«", TP: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
 			new: &Edge{},
 		},
 		{
 			str: "/surreal/abcum/database/person/»/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "»", Type: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "»", TP: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
 			new: &Edge{},
 		},
 		{
 			str: "/surreal/abcum/database/person/«»/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«»", Type: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«»", TP: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
 			new: &Edge{},
 		},
 		{
-			str: "/surreal/abcum/database/person/∆/[lastname firstname]",
-			obj: &Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "names", What: []interface{}{"lastname", "firstname"}},
+			str: "/surreal/abcum/database/person/∆/names/[lastname firstname]",
+			obj: &Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "names", FD: []interface{}{"lastname", "firstname"}},
 			new: &Index{},
 		},
 		{
-			str: "/surreal/abcum/database/person/∆/[false account:1 lastname <nil> firstname]",
-			obj: &Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "names", What: []interface{}{false, "account:1", "lastname", nil, "firstname"}},
+			str: "/surreal/abcum/database/person/∆/names/[false account:1 lastname <nil> firstname]",
+			obj: &Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "names", FD: []interface{}{false, "account:1", "lastname", nil, "firstname"}},
 			new: &Index{},
+		},
+		{
+			str: "/surreal/abcum/database/person/∆/uniqs/[lastname firstname]/873c2f37-ea03-4c5e-843e-cf393af44155",
+			obj: &Point{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "uniqs", FD: []interface{}{"lastname", "firstname"}, ID: "873c2f37-ea03-4c5e-843e-cf393af44155"},
+			new: &Point{},
+		},
+		{
+			str: "/surreal/abcum/database/person/∆/uniqs/[false account:1 lastname <nil> firstname]/873c2f37-ea03-4c5e-843e-cf393af44155",
+			obj: &Point{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "uniqs", FD: []interface{}{false, "account:1", "lastname", nil, "firstname"}, ID: "873c2f37-ea03-4c5e-843e-cf393af44155"},
+			new: &Point{},
 		},
 		{
 			str: "Test key",
@@ -241,32 +251,34 @@ func TestMain(t *testing.T) {
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "😀😀😀"},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Suffix},
 
-		&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), Time: time.Now()},
-		&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), Time: time.Now()},
+		&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), AT: time.Now()},
+		&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), AT: time.Now()},
 
-		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), Type: "friend", FK: int8(2)},
-		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), Type: "friend", FK: int8(3)},
-		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(2), Type: "friend", FK: int8(1)},
+		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), TP: "friend", FK: int8(2)},
+		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), TP: "friend", FK: int8(3)},
+		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(2), TP: "friend", FK: int8(1)},
 
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: Prefix},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: Prefix},
 
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:abcum", false, "Smith", nil, "Zoe"}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:abcum", true, "Morgan Hitchcock", nil, "Tobie"}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:abcum", true, "Rutherford", nil, "Sam"}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:abcum", false, "Smith", nil, "Zoe"}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:abcum", true, "Morgan Hitchcock", nil, "Tobie"}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:abcum", true, "Rutherford", nil, "Sam"}},
 
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:tests", false, "Smith", nil, "Zoe"}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:tests", true, "Morgan Hitchcock", nil, "Tobie"}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:tests", true, "Rutherford", nil, "Sam"}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:tests", false, "Smith", nil, "Zoe"}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:tests", true, "Morgan Hitchcock", nil, "Tobie"}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:tests", true, "Rutherford", nil, "Sam"}},
 
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 0, 127}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 0, 127}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 1, 127}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 2, 32767}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 2, 2147483647}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 2, 9223372036854775807}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: []interface{}{"account:zymba", 2, 9223372036854775807}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 0, 127}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 0, 127}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 1, 127}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, 32767}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, 2147483647}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, 9223372036854775807}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, 9223372036854775807}},
 
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "names", What: Suffix},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: Suffix},
+	}
+
 	prefs = []struct {
 		obj Key
 		yes []Key

@@ -15,15 +15,15 @@
 package keys
 
 import (
-	"strings"
+	"fmt"
 )
 
 // NS ...
 type NS struct {
-	KV string // KV
-	CF string // !
-	TK string // n
-	NS string // NS
+	KV interface{}
+	CF interface{}
+	TK interface{}
+	NS interface{}
 }
 
 // init initialises the key
@@ -48,5 +48,5 @@ func (k *NS) Decode(data []byte) {
 // String returns a string representation of the key
 func (k *NS) String() string {
 	k.init()
-	return "/" + strings.Join([]string{k.KV, k.CF, k.TK, k.NS}, "/")
+	return fmt.Sprintf("/%s/%s/%s/%s", k.KV, k.CF, k.TK, k.NS)
 }

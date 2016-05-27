@@ -15,16 +15,16 @@
 package keys
 
 import (
-	"strings"
+	"fmt"
 )
 
 // DB ...
 type DB struct {
-	KV string // KV
-	CF string // !
-	TK string // d
-	NS string // NS
-	DB string // DB
+	KV interface{}
+	CF interface{}
+	TK interface{}
+	NS interface{}
+	DB interface{}
 }
 
 // init initialises the key
@@ -49,5 +49,5 @@ func (k *DB) Decode(data []byte) {
 // String returns a string representation of the key
 func (k *DB) String() string {
 	k.init()
-	return "/" + strings.Join([]string{k.KV, k.CF, k.TK, k.NS, k.DB}, "/")
+	return fmt.Sprintf("/%s/%s/%s/%s/%s", k.KV, k.CF, k.TK, k.NS, k.DB)
 }
