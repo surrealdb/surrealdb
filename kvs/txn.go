@@ -275,7 +275,7 @@ func (tx *TX) PDel(pre []byte) (err error) {
 
 	cu := tx.bu.Cursor()
 
-	for key, _ := cu.Seek(pre); bytes.HasPrefix(key, pre); key, _ = cu.Next() {
+	for key, _ := cu.Seek(pre); bytes.HasPrefix(key, pre); key, _ = cu.Seek(pre) {
 		if err = tx.bu.Delete(key); err != nil {
 			err = &DBError{err}
 			return
