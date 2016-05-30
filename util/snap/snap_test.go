@@ -20,7 +20,25 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-func TestEncodeDecode(t *testing.T) {
+func TestEmpty(t *testing.T) {
+
+	dec := []byte("")
+	enc := []byte{}
+
+	Convey("Encoding should fail", t, func() {
+		Convey("Should encode", func() {
+			res, _ := Encode(dec)
+			So(res, ShouldResemble, enc)
+		})
+		Convey("Should decode", func() {
+			res, _ := Decode(enc)
+			So(res, ShouldResemble, dec)
+		})
+	})
+
+}
+
+func TestEncoding(t *testing.T) {
 
 	dec := []byte("Hello World")
 	enc := []byte{11, 20, 72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100}

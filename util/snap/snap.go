@@ -20,11 +20,19 @@ import (
 
 func Encode(src []byte) (dst []byte, err error) {
 
+	if len(src) == 0 {
+		return src, nil
+	}
+
 	return zappy.Encode(nil, src)
 
 }
 
 func Decode(src []byte) (dst []byte, err error) {
+
+	if len(src) == 0 {
+		return src, nil
+	}
 
 	return zappy.Decode(nil, src)
 
