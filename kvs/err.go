@@ -24,7 +24,7 @@ type DBError struct {
 
 // Error returns the string representation of the error.
 func (e *DBError) Error() string {
-	return fmt.Sprintf("There was a problem performing a read or write with the database")
+	return fmt.Sprintf("There was a problem performing a read or write with the database: %s", e.Err.Error())
 }
 
 // TXError is an error which occurs when there is a
@@ -35,7 +35,7 @@ type TXError struct {
 
 // Error returns the string representation of the error.
 func (e *TXError) Error() string {
-	return fmt.Sprintf("There was a problem performing a read or write with the transaction")
+	return fmt.Sprintf("There was a problem performing a read or write with the transaction: %s", e.Err.Error())
 }
 
 // CKError is an error which occurs when there is a
@@ -46,7 +46,7 @@ type CKError struct {
 
 // Error returns the string representation of the error.
 func (e *CKError) Error() string {
-	return fmt.Sprintf("There was a problem performing a read or write with the cipherkey")
+	return fmt.Sprintf("There was a problem performing a read or write with the cipherkey: %s", e.Err.Error())
 }
 
 // KVError is an error which occurs when there is a
