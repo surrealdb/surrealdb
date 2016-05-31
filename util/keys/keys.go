@@ -14,6 +14,8 @@
 
 package keys
 
+import "time"
+
 const (
 	// Ignore specifies an ignored field
 	Ignore = ignore
@@ -27,6 +29,13 @@ const (
 	prefix = "\x00"
 	// Suffix is the highest char found in a key
 	suffix = "\xff"
+)
+
+var (
+	// StartOfTime is a datetime in the past
+	StartOfTime = time.Unix(0, 0)
+	// EndOfTime is a datetime in the future
+	EndOfTime = time.Unix(1924991999, 0)
 )
 
 var (
