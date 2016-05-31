@@ -303,7 +303,7 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 	cu := tx.bu.Cursor()
 
 	if bytes.Compare(beg, end) < 1 {
-		for key, _ := cu.Seek(beg); key != nil && max > 0 && bytes.Compare(key, end) < 0; key, _ = cu.Next() {
+		for key, _ := cu.Seek(beg); key != nil && max > 0 && bytes.Compare(key, end) < 0; key, _ = cu.Seek(beg) {
 			if err = tx.bu.Delete(key); err != nil {
 				err = &DBError{err}
 				return
@@ -313,7 +313,7 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 	}
 
 	if bytes.Compare(beg, end) > 1 {
-		for key, _ := cu.Seek(end); key != nil && max > 0 && bytes.Compare(beg, key) < 0; key, _ = cu.Prev() {
+		for key, _ := cu.Seek(end); key != nil && max > 0 && bytes.Compare(beg, key) < 0; key, _ = cu.Seek(end) {
 			if err = tx.bu.Delete(key); err != nil {
 				err = &DBError{err}
 				return
