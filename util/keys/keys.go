@@ -35,7 +35,7 @@ var (
 	// StartOfTime is a datetime in the past
 	StartOfTime = time.Unix(0, 0)
 	// EndOfTime is a datetime in the future
-	EndOfTime = time.Unix(1924991999, 0)
+	EndOfTime = time.Now().AddDate(50, 0, 0)
 )
 
 var (
