@@ -33,30 +33,30 @@ DELETE {table}
 
 - `GET` `https://api.surreal.io/key/{table}/{key}`
 ```sql
-SELECT * FROM @{table}:{id}
+SELECT * FROM @{table}:{key}
 ```
 
 - `PUT` `https://api.surreal.io/key/{table}/{key}`
 ```sql
-UPDATE @{table}:{id} CONTENT {} RETURN AFTER
+UPDATE @{table}:{key} CONTENT {} RETURN AFTER
 ```
 
 - `POST` `https://api.surreal.io/key/{table}/{key}`
 ```sql
-CREATE @{table}:{id} CONTENT {} RETURN AFTER
+CREATE @{table}:{key} CONTENT {} RETURN AFTER
 ```
 
 - `PATCH` `https://api.surreal.io/key/{table}/{key}`
 ```sql
-MODIFY @{table}:{id} DIFF {} RETURN AFTER
+MODIFY @{table}:{key} DIFF {} RETURN AFTER
 ```
 
 - `TRACE` `https://api.surreal.io/key/{table}/{key}`
 ```sql
-SELECT HISTORY FROM @{table}:{id}
+SELECT HISTORY FROM @{table}:{key}
 ```
 
 - `DELETE` `https://api.surreal.io/key/{table}/{key}`
 ```sql
-DELETE @{table}:{id}
+DELETE @{table}:{key}
 ```
