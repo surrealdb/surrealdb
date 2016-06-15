@@ -33,7 +33,6 @@ func init() {
 
 	mainCmd.AddCommand(
 		userCmd,
-		certCmd,
 		startCmd,
 		importCmd,
 		exportCmd,
