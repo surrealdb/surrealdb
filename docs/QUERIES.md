@@ -2,6 +2,34 @@
 
 This document describes example SQL queries which can be used to query the database.
 
+### FIELD
+
+```sql
+/* Example of defining a custom field */
+DEFINE FIELD age ON person TYPE number MIN 0 MAX 150 NOTNULL /* Define a numeric field */
+DEFINE FIELD kind ON person TYPE custom ENUM ["private","public"] DEFAULT "private" /* ... or a predefined field */
+DEFINE FIELD fullname ON person TYPE string CODE "return [doc.data.firstname, doc.data.middlename, doc.data.lastname].filter(function(i) { return i; }).join(' ');" /* ... or a custom-code field */
+```
+
+```sql
+/* Remove the field definition */
+REMOVE FIELD fullname ON person
+```
+
+### INDEX
+
+```sql
+/* Example of defining a custom index */
+DEFINE INDEX sortable ON person COLUMNS accounts, emails[0].value /* Define an index */
+DEFINE INDEX sortable ON person COLUMNS accounts, emails[0].value UNIQUE /* ... or a unique index */
+DEFINE INDEX sortable ON person CODE "if (doc.data.age && doc.data.age > 18) emit([doc.data.lastname, doc.data.firstname, doc.id]);" /* ... or a custom-code index */
+```
+
+```sql
+/* Remove the index definition */
+REMOVE INDEX sortable ON person
+```
+
 ### CREATE
 
 ```sql
@@ -72,91 +100,56 @@ DELETE @person:one, @person:two /* Deletes both person records */
 ### MODIFY
 
 ```sql
-MODIFY @person:id WITH {JSON}
+/* Example of modifying a record with jsondiffpatch */
+MODIFY @person:id DIFF {JSON}
 ```
 
 ### RELATE
 
 ```sql
-RELATE friend FROM @person:one TO @person:two
-RELATE friend FROM @person:one TO @person:two UNIQUE
+/* Example of defining graph edges between records */
+RELATE friend FROM @person:one TO @person:two /* Define a graph edge */
+RELATE friend FROM @person:one TO @person:two UNIQUE /* ... or ensure only one edge of this type exists */
 ```
 
 ### SELECT
 
 ```sql
-SELECT FROM VIEW adults ON PERSON
-```
-
-```sql
 SELECT * FROM person
-SELECT *, both() FROM person
-SELECT *, in(), out() FROM person
-SELECT * FROM person WHERE account = 'abcum' ORDER BY (account, firstname, lastname)
-SELECT mean(value) FROM cpu
-SELECT mean(value)
-SELECT mean(value) from cpu WHERE host = 'serverA' AND time > now() - 4h GROUP BY time(5m)
+SELECT *, ->, <-, <-> FROM person
 
-SELECT ALL FROM person WHERE tags ∋ "tag"
-SELECT ALL FROM person WHERE tags.? = "tag"
-SELECT ALL FROM person WHERE "tag" IN tags
-SELECT ALL FROM person WHERE tags CONTAINS "tag"
-SELECT ALL FROM person WHERE tags.? IN ["tag1", "tag2"]
-SELECT ALL FROM person WHERE emails.?.value ~ "gmail.com" /* Any email address value matches 'gmail.com' */
-SELECT ALL FROM person WHERE emails.*.value ~ "gmail.com" /* Every email address value matches 'gmail.com' */
+/* Examples of working with sets or arrays */
 
-SELECT ALL FROM person WHERE tags ∌ "tag"
-SELECT ALL FROM person WHERE tags.* != "tag"
-SELECT ALL FROM person WHERE "tag" NOT IN tags
-SELECT ALL FROM person WHERE tags NOT CONTAINS "tag"
-SELECT ALL FROM person WHERE tags.* NOT IN ["tag1", "tag2"]
+SELECT * FROM person WHERE tags ∋ "tag" /* contains "tag" */
+SELECT * FROM person WHERE tags.? = "tag" /* ... any tag value is "tag" */
+SELECT * FROM person WHERE "tag" IN tags
+SELECT * FROM person WHERE tags CONTAINS "tag"
+SELECT * FROM person WHERE tags.? IN ["tag1", "tag2"] /* ... at least one tag value is "tag1" or "tag2" */
 
-SELECT ALL FROM person WHERE tags IN ["tag1", "tag2", "tag3"]
-SELECT ALL FROM person WHERE "tag1" IN tags
+SELECT * FROM person WHERE tags ∌ "tag" /* does not contain "tag */
+SELECT * FROM person WHERE tags.* != "tag" /* ... no tag value is "tag" */
+SELECT * FROM person WHERE "tag" NOT IN tags
+SELECT * FROM person WHERE tags NOT CONTAINS "tag"
+SELECT * FROM person WHERE tags.* NOT IN ["tag1", "tag2"] /* ... all tag values are not "tag1" and "tag2" */
 
-SELECT *, :(friend|follow)/:person[age>=18,social=true] AS acquaintances FROM person WHERE acquaintances IN [@person:123]
-SELECT *, :(friend|follow)/:person[age>=18,social=true] AS acquaintances FROM person WHERE acquaintances.firstname IN ['Tobie']
+/* Examples of working with objects and arrays of objects */
 
-```
+SELECT * FROM person WHERE emails.?.value ~ "gmail.com" /* ... any email address value matches 'gmail.com' */
+SELECT * FROM person WHERE emails.*.value ~ "gmail.com" /* ... every email address value matches 'gmail.com' */
 
-### FIELD
+/* Examples of working with relationship paths */
 
-```sql
-DEFINE FIELD fullname ON person CODE `
-let email = doc.emails ? _(doc.emails).pluck('value').first() : null;
-return [doc.firstname, doc.middlename, doc.lastname, doc.username, email].filter(i => { return i }).join(' ');
-`
-```
+SELECT *, <->(friend|follow)
+SELECT *, <-likes<-person.id
+SELECT *, <-friend<-person[age>=18] AS friends
+SELECT * FROM person WHERE ->friend->person->click->@email:1231
 
-### INDEX
+SELECT *, ->friend->person[age>=18] AS acquaintances FROM person WHERE acquaintances IN [@person:test]
+SELECT *, ->friend->person[age>=18] AS acquaintances FROM person WHERE acquaintances.firstname IN ['Tobie']
 
-```sql
-DEFINE INDEX name ON person COLUMNS lastname, firstname /* Define a field on */
-DEFINE INDEX name ON person COLUMNS accounts, lastname, firstname, emails.0.value /* */
-```
+/* Examples of working with relationship paths and embedded objects */
 
-```sql
-DEFINE INDEX adults ON *
-MAP
-`
-if (meta.table == 'person') {
-    if (doc.firstname && doc.lastname) {
-        emit([doc.lastname, doc.firstname, meta.id], null)
-    }
-    if (doc:friend(person):name == 'Tobie') {
-        emit()
-    }
-}
-`
-REDUCE
-`
-`
-```
+SELECT * FROM person WHERE &emails.?.value->to->email->to->@email:{tobie@abcum.com} /* Anybody who has sent an email to tobie@abcum.com */
+SELECT * FROM person WHERE @email:{tobie@abcum.com}->from->email.id IN emails.?.value /* Anybody who has sent an email to tobie@abcum.com */
 
-```sql
-RESYNC INDEX name ON person
-```
-
-```sql
-REMOVE INDEX name ON person
 ```
