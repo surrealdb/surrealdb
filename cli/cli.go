@@ -33,6 +33,7 @@ func init() {
 
 	mainCmd.AddCommand(
 		startCmd,
+		backupCmd,
 		importCmd,
 		exportCmd,
 		versionCmd,
