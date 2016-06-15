@@ -15,8 +15,6 @@
 package kvs
 
 import (
-	"os"
-
 	"github.com/boltdb/bolt"
 )
 
@@ -25,13 +23,11 @@ type DB struct {
 	db *bolt.DB
 }
 
-func New() (db *DB, err error) {
+func New(path string) (db *DB, err error) {
 
 	var bo *bolt.DB
 
-	os.Remove("dev/bolt.db") // TODO remove this code!!!
-
-	bo, err = bolt.Open("dev/bolt.db", 0666, nil)
+	bo, err = bolt.Open(path, 0666, nil)
 
 	bo.Update(func(tx *bolt.Tx) error {
 		tx.CreateBucketIfNotExists(bucket)

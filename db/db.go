@@ -37,9 +37,27 @@ var db *kvs.DB
 // Setup sets up the connection with the data layer
 func Setup(opts *cnf.Options) (err error) {
 
-	log.WithPrefix("db").Infof("Connecting to database at %s", opts.Store)
+	log.WithPrefix("db").Infof("Starting database at %s", opts.DB.Path)
 
-	db, err = kvs.New()
+	db, err = kvs.New(opts.DB.Path)
+
+	/*ticker := time.NewTicker(5 * time.Second)
+	quit := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				t := time.Now()
+				n := fmt.Sprintf("%d-%02d-%02dT%02d-%02d-%02d-%d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond())
+				p := fmt.Sprintf("dev/%s.backup.db", n)
+				db.Save(p)
+			case <-quit:
+				ticker.Stop()
+				return
+			}
+		}
+	}()*/
 
 	return
 
@@ -48,7 +66,7 @@ func Setup(opts *cnf.Options) (err error) {
 // Exit shuts down the connection with the data layer
 func Exit() {
 
-	log.WithPrefix("db").Infof("Disconnecting from database")
+	log.WithPrefix("db").Infof("Gracefully shutting down database")
 
 	db.Close()
 
@@ -84,6 +102,8 @@ func status(e error) interface{} {
 	switch e.(type) {
 	default:
 		return "OK"
+	case error:
+		return "ERR"
 	case *kvs.DBError:
 		return "ERR_DB"
 	case *kvs.TXError:
@@ -96,9 +116,11 @@ func status(e error) interface{} {
 }
 
 func detail(e error) interface{} {
-	switch e.(type) {
+	switch err := e.(type) {
 	default:
 		return nil
+	case error:
+		return err.Error()
 	case *kvs.DBError:
 		return "A database error occured"
 	case *kvs.TXError:
