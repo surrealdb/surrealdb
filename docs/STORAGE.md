@@ -22,10 +22,6 @@ The namespace key is used to enable separation of data and multi-tenancy of data
 
 The database key is used to separate data into multiple different databases under each multi-tenant installation.
 
-**Unique ids**
-
-Each view, table, and index is assigned a unique id, which is used instead of the name in each key:value pair. This allows for views, indexes, and tables to be deleted asynchronously, while at the same time a new one is created in its place with the same name.
-
 **Data types**
 
 Each data type is stored using a different symbol in the key:value pair.
@@ -49,52 +45,54 @@ Each data type is stored using a different symbol in the key:value pair.
 
 **Namespace**
 ```bash
-/{$kv}/!/n/{$ns} "{$ns:id}"
+/{$kv}/!/n/{$ns} ""
 # e.g.
-/{$kv}/!/n/acme "6qh3iwp5"
+/{$kv}/!/n/acme ""
 ```
 
 **Database**
 ```bash
-/{$kv}/!/d/{$ns}/{$db} "{$db:id}"
+/{$kv}/!/d/{$ns}/{$db} ""
 # e.g.
-/{$kv}/!/d/{$ns}/test "3gt4yqk3"
+/{$kv}/!/d/{$ns}/test ""
 ```
 
 **Table**
 ```bash
-/{$kv}/!/t/{$ns}/{$db}/{$tb} "{$tb:id}"
+/{$kv}/!/t/{$ns}/{$db}/{$tb} ""
 # e.g.
-/{$kv}/!/t/{$ns}/{$db}/people "1bd7ajq8"
+/{$kv}/!/t/{$ns}/{$db}/people ""
+```
+
+**Field** 
+
+```bash
+/{$kv}/!/f/{$ns}/{$db}/{$tb}/{$fld} "{}"
+# e.g.
+/{$kv}/!/f/{$ns}/{$db}/{$tb}/fullname `{
+	"name": "fullname",
+	"type": "string",
+	"code": "",
+	"min": "",
+	"max": "",
+	"default": "",
+	"notnull": false,
+	"readonly": false,
+	"mandatory": false,
+}`
 ```
 
 **Field**
+
 ```bash
-/{$kv}/!/f/{$ns}/{$db}/{$tb}/{$fld} "{$code}"
+/{$kv}/!/i/{$ns}/{$db}/{$tb}/{$idx} "{}"
 # e.g.
-/{$kv}/!/f/{$ns}/{$db}/{$tb}/fullname "return doc.fname + doc.lname"
-```
-
-**Index**
-
-```bash
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/{$idx} "{$idx:id}"
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/{$idx}/map "{$code:map}"
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/{$idx}/red "{$code:red}"
-# e.g.
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/test "9jh1ebj4"
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/test/map "emit()"
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/test/red "return count()"
-```
-
-```bash
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/{$idx} "{$idx:id}"
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/{$idx}/col:{$cd} "{$column}"
-# e.g
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/names "5gbq3hm5"
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/names/col1 "lastname"
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/names/col2 "firstname"
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/names/col3 "emails.0.value"
+/{$kv}/!/i/{$ns}/{$db}/{$tb}/fullname `{
+	"name": "fullname",
+	"code": "",
+	"cols": ["firstname", "middlename", "lastname"],
+	"uniq": false,
+}`
 ```
 
 ---
@@ -102,29 +100,29 @@ Each data type is stored using a different symbol in the key:value pair.
 ### Items
 
 ```bash
-/{$kv}/{$ns}/{$db}/{$tb}/{$id} ""
+/{$kv}/{$ns}/{$db}/{$tb}/{$id} "{}"
 # e.g
 /{$kv}/{$ns}/{$db}/{$tb}/UUID `{"name":"Tobie","age":18}`
 ```
 
 *TRAIL*
 ```bash
-/{$kv}/{$ns}/{$db}/{$tb}/•/{$id}/{$time} ""
+/{$kv}/{$ns}/{$db}/{$tb}/•/{$id}/{$time} "{}"
 # e.g
-/{$kv}/{$ns}/{$db}/{$tb}/•/UUID/2016-01-29T22:42:56.478173947Z ""
+/{$kv}/{$ns}/{$db}/{$tb}/•/UUID/2016-01-29T22:42:56.478173947Z `{}`
 ```
 
 *EVENT*
 ```bash
-/{$kv}/{$ns}/{$db}/{$tb}/‡/{$id}/{$type}/{$time} ""
+/{$kv}/{$ns}/{$db}/{$tb}/‡/{$id}/{$type}/{$time} "{}"
 # e.g
-/{$kv}/{$ns}/{$db}/{$tb}/‡/UUID/login/2016-01-29T22:42:56.478173947Z ""
+/{$kv}/{$ns}/{$db}/{$tb}/‡/UUID/login/2016-01-29T22:42:56.478173947Z `{}`
 ```
 
 *EDGES*
 ```bash
 /{$kv}/{$ns}/{$db}/{$tableid}/»/{$id}/{$type}/{$edgeid} ""
-/{$kv}/{$ns}/{$db}/{$typeid}/{$id} ""
+/{$kv}/{$ns}/{$db}/{$typeid}/{$id} "{}"
 /{$kv}/{$ns}/{$db}/{$tableid}/«/{$id}/{$type}/{$edgeid} ""
 # e.g
 /{$kv}/{$ns}/{$db}/{$tableid}/»/1537/follow/9563 ""
@@ -132,25 +130,22 @@ Each data type is stored using a different symbol in the key:value pair.
 /{$kv}/{$ns}/{$db}/{$tableid}/«/5295/follow/9563 ""
 ```
 
-### Index
+---
 
-**Global index**
-```bash
-/{$kv}/{$ns}/{$db}/¤/{$index}/[{$columns}] "{$id}"
-# e.g
-/{$kv}/{$ns}/{$db}/¤/{$index}/[lastname,firstname] "@person:1342"
-```
+### Index
 
 **Unique index**
 ```bash
-/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[{$columns}]/{$id} ""
+/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[{$columns}] "{$id}"
 # e.g
-/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[lastname,firstname]/{$id} ""
+/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[lastname,firstname] `@person:1342`
 ```
+
+### Point
 
 **Non-unique index**
 ```bash
-/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[{$columns}] "{$id}"
+/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[{$columns}]/{$id} "{$id}"
 # e.g
-/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[lastname,firstname] "@person:1342"
+/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[lastname,firstname]/{$id} `@person:1342`
 ```
