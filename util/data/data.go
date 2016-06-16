@@ -186,35 +186,6 @@ func (d *Doc) path(path ...string) (paths []string) {
 // of field names to locate the target. If the search encounters an array and has not reached the end
 // target then it will iterate each object of the array for the target and return all of the results in
 // a JSON array.
-func (d *Doc) Search(path ...string) *Doc {
-
-	path = d.path(path...)
-
-	var object interface{}
-
-	object = d.data
-	for target := 0; target < len(path); target++ {
-		if mmap, ok := object.(map[string]interface{}); ok {
-			object = mmap[path[target]]
-		} else if marray, ok := object.([]interface{}); ok {
-			tmpArray := []interface{}{}
-			for _, val := range marray {
-				tmpGabs := &Doc{val}
-				res := tmpGabs.Search(path[target:]...).Data()
-				if res != nil {
-					tmpArray = append(tmpArray, res)
-				}
-			}
-			if len(tmpArray) == 0 {
-				return &Doc{nil}
-			}
-			return &Doc{tmpArray}
-		} else {
-			return &Doc{nil}
-		}
-	}
-	return &Doc{object}
-}
 
 // Exists - Checks whether a path exists.
 func (d *Doc) Exists(path ...string) bool {
@@ -276,6 +247,40 @@ func (d *Doc) ChildrenMap() (map[string]*Doc, error) {
 }
 
 // -----------------------------------------------------------------------------------------
+
+// Search - Attempt to find and return an object within the JSON structure by specifying the hierarchy
+// of field names to locate the target. If the search encounters an array and has not reached the end
+// target then it will iterate each object of the array for the target and return all of the results in
+// a JSON array.
+func (d *Doc) Get(path ...string) *Doc {
+
+	path = d.path(path...)
+
+	var object interface{}
+
+	object = d.data
+	for target := 0; target < len(path); target++ {
+		if mmap, ok := object.(map[string]interface{}); ok {
+			object = mmap[path[target]]
+		} else if marray, ok := object.([]interface{}); ok {
+			tmpArray := []interface{}{}
+			for _, val := range marray {
+				tmp := &Doc{val}
+				res := tmp.Get(path[target:]...).Data()
+				if res != nil {
+					tmpArray = append(tmpArray, res)
+				}
+			}
+			if len(tmpArray) == 0 {
+				return &Doc{nil}
+			}
+			return &Doc{tmpArray}
+		} else {
+			return &Doc{nil}
+		}
+	}
+	return &Doc{object}
+}
 
 // Set the value at the specified path if it does not exist.
 func (d *Doc) New(value interface{}, path ...string) (*Doc, error) {
@@ -368,7 +373,7 @@ func (d *Doc) Object(path ...string) (*Doc, error) {
 
 // ArrayAdd - Append a unique value onto a JSON array.
 func (d *Doc) ArrayAdd(value interface{}, path ...string) error {
-	array, ok := d.Search(path...).Data().([]interface{})
+	array, ok := d.Get(path...).Data().([]interface{})
 	if !ok {
 		return ErrNotArray
 	}
@@ -384,7 +389,7 @@ func (d *Doc) ArrayAdd(value interface{}, path ...string) error {
 
 // ArrayDel - Append a unique value onto a JSON array.
 func (d *Doc) ArrayDel(value interface{}, path ...string) error {
-	array, ok := d.Search(path...).Data().([]interface{})
+	array, ok := d.Get(path...).Data().([]interface{})
 	if !ok {
 		return ErrNotArray
 	}
@@ -400,7 +405,7 @@ func (d *Doc) ArrayDel(value interface{}, path ...string) error {
 
 // ArrayAppend - Append a value onto a JSON array.
 func (d *Doc) ArrayAppend(value interface{}, path ...string) error {
-	array, ok := d.Search(path...).Data().([]interface{})
+	array, ok := d.Get(path...).Data().([]interface{})
 	if !ok {
 		return ErrNotArray
 	}
@@ -414,7 +419,7 @@ func (d *Doc) ArrayRemove(index int, path ...string) error {
 	if index < 0 {
 		return ErrOutOfBounds
 	}
-	array, ok := d.Search(path...).Data().([]interface{})
+	array, ok := d.Get(path...).Data().([]interface{})
 	if !ok {
 		return ErrNotArray
 	}
@@ -432,7 +437,7 @@ func (d *Doc) ArrayElement(index int, path ...string) (*Doc, error) {
 	if index < 0 {
 		return &Doc{nil}, ErrOutOfBounds
 	}
-	array, ok := d.Search(path...).Data().([]interface{})
+	array, ok := d.Get(path...).Data().([]interface{})
 	if !ok {
 		return &Doc{nil}, ErrNotArray
 	}
@@ -444,7 +449,7 @@ func (d *Doc) ArrayElement(index int, path ...string) (*Doc, error) {
 
 // ArrayCount - Count the number of elements in a JSON array.
 func (d *Doc) ArrayCount(path ...string) (int, error) {
-	if array, ok := d.Search(path...).Data().([]interface{}); ok {
+	if array, ok := d.Get(path...).Data().([]interface{}); ok {
 		return len(array), nil
 	}
 	return 0, ErrNotArray
