@@ -19,21 +19,20 @@ import (
 	"time"
 )
 
-// Trail ...
-type Trail struct {
+// Patch ...
+type Patch struct {
 	KV interface{}
 	NS interface{}
 	DB interface{}
 	TB interface{}
 	TK interface{}
+	ID interface{}
 	AT time.Time
 }
 
 // init initialises the key
-func (k *Trail) init() *Trail {
-	// k.TK = "¤"
-	k.TK = "*"
-	k.TB = "history"
+func (k *Patch) init() *Patch {
+	k.TK = "~"
 	if k.AT.IsZero() {
 		k.AT = time.Now()
 	}
@@ -41,19 +40,19 @@ func (k *Trail) init() *Trail {
 }
 
 // Encode encodes the key into binary
-func (k *Trail) Encode() []byte {
+func (k *Patch) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.AT)
+	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.AT)
 }
 
 // Decode decodes the key from binary
-func (k *Trail) Decode(data []byte) {
+func (k *Patch) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.AT)
+	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID, &k.AT)
 }
 
 // String returns a string representation of the key
-func (k *Trail) String() string {
+func (k *Patch) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%s/%s", k.KV, k.NS, k.DB, k.TB, k.TK, k.AT.Format(time.RFC3339Nano))
+	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%s", k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.AT.Format(time.RFC3339Nano))
 }
