@@ -98,15 +98,3 @@ install: glide
 install: clean
 install:
 	$(GO) install -v -ldflags '$(LDF)'
-
-# The `make cockroach` command ensures
-# that cockroachdb is downloaded and
-# installed, ready for testing.
-
-.PHONY: cockroach
-cockroach:
-	$(GO) get -d github.com/cockroachdb/cockroach
-	$(GO) get -d ../../cockroachdb/cockroach/...
-	make -C ../../cockroachdb/cockroach clean
-	make -C ../../cockroachdb/cockroach build
-	make -C ../../cockroachdb/cockroach install
