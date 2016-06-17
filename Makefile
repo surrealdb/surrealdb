@@ -56,7 +56,7 @@ test:
 
 .PHONY: glide
 glide:
-	glide install --delete
+	glide install
 
 # The `make clean` command cleans
 # all object, build, and test files
@@ -64,6 +64,7 @@ glide:
 
 .PHONY: clean
 clean:
+	rm -rf vendor
 	$(GO) clean -i `glide novendor`
 	find . -name '*.test' -type f -exec rm -f {} \;
 
@@ -74,7 +75,6 @@ clean:
 .PHONY: quick
 quick: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 quick: 
-	@echo "Run 'make glide' before building"
 	$(GO) build
 
 # The `make build` command compiles
@@ -83,8 +83,8 @@ quick:
 
 .PHONY: build
 build: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
-build: glide
 build: clean
+build: glide
 build:
 	$(GO) build -v -ldflags '$(LDF)'
 
@@ -94,7 +94,7 @@ build:
 
 .PHONY: install
 install: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
-install: glide
 install: clean
+install: glide
 install:
 	$(GO) install -v -ldflags '$(LDF)'
