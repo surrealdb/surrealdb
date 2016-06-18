@@ -24,26 +24,14 @@ import (
 // Setup sets up the server for remote connections
 func Setup(opts *cnf.Options) (err error) {
 
+	log.WithPrefix("web").Infof("Starting web server on %s", opts.Conn.Web)
+
 	s := fibre.Server(opts)
 
-	// Setup routes
-
 	routes(s)
-
-	// Set timeouts
-
-	s.SetWait(5)
-
-	// Set timeouts
-
-	s.SetName("http")
-
-	// Setup errorware
-
+	s.SetWait("5s")
+	s.SetName("web")
 	s.SetHTTPErrorHandler(errors)
-
-	// Set log level
-
 	s.Logger().SetLogger(log.Instance())
 
 	// Setup middleware
@@ -58,7 +46,7 @@ func Setup(opts *cnf.Options) (err error) {
 	// Check body size
 
 	s.Use(mw.Size(&mw.SizeOpts{
-		AllowedLength: 1000000,
+		AllowedLength: 2000000,
 	}))
 
 	// Check body type
@@ -75,7 +63,7 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Auth(&mw.AuthOpts{
 		User: []byte(opts.Auth.User),
 		Pass: []byte(opts.Auth.Pass),
-	}).Path("/rpc", "/sql", "/key"))
+	}).Path("/import", "/export", "/backup"))
 
 	// Setup special authentication
 
@@ -97,12 +85,12 @@ func Setup(opts *cnf.Options) (err error) {
 
 	// Run the server
 
-	if len(opts.Cert.Crt.File) == 0 || len(opts.Cert.Key.File) == 0 {
-		s.Run(opts.Conn.Http)
+	if len(opts.Cert.Crt) == 0 || len(opts.Cert.Key) == 0 {
+		s.Run(opts.Conn.Web)
 	}
 
-	if len(opts.Cert.Crt.File) != 0 && len(opts.Cert.Key.File) != 0 {
-		s.Run(opts.Conn.Http, opts.Cert.Crt.File, opts.Cert.Key.File)
+	if len(opts.Cert.Crt) != 0 && len(opts.Cert.Key) != 0 {
+		s.Run(opts.Conn.Web, opts.Cert.Crt, opts.Cert.Key)
 	}
 
 	return nil
@@ -111,7 +99,5 @@ func Setup(opts *cnf.Options) (err error) {
 
 // Exit tears down the server gracefully
 func Exit() {
-
-	log.WithField("prefix", "http").Println("Gracefully shutting down http protocol")
-
+	log.WithPrefix("web").Infof("Gracefully shutting down %s protocol", "web")
 }
