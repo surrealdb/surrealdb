@@ -111,6 +111,13 @@ var errs = map[int]interface{}{
 		"information":   "There is a problem with your request. The request appears to contain invalid data.",
 	},
 
+	426: map[string]interface{}{
+		"code":          426,
+		"details":       "Upgrade required",
+		"documentation": "https://docs.surreal.io/",
+		"information":   "There is a problem with your request. The request is expected to upgrade to a websocket connection.",
+	},
+
 	500: map[string]interface{}{
 		"code":          500,
 		"details":       "There was a problem with our servers, and we have been notified",
