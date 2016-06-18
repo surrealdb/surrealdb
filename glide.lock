@@ -1,65 +1,26 @@
-hash: 1722c5d1d3b2a134e9b3f8b7c728f510cbce9d8c98eab4df3438118b885997b3
-updated: 2016-04-13T15:16:31.921842622+01:00
+hash: 2a2c04fe0124aff7a637ac9fdd7ff9badfd159ad818902364d8c1b92efc135ae
+updated: 2016-06-18T14:48:42.73126094+01:00
 imports:
 - name: github.com/abcum/fibre
-  version: 81a30aa263918015804c3df70f05da1f559d3bcf
+  version: a9935884e184e19609bb72cf55de88023c2b5648
   subpackages:
   - mw
+- name: github.com/abcum/logrus
+  version: 119b6994c03cc9597e8c1873a47d715e34b5ed9a
 - name: github.com/armon/go-metrics
-  version: f303b03b91d770a11a39677f1d3b55da4002bbcb
-- name: github.com/biogo/store
-  version: 3b4c041f52c224ee4a44f5c8b150d003a40643a0
-  subpackages:
-  - interval
-  - llrb
-- name: github.com/cockroachdb/cmux
-  version: 112f0506e7743d64a6eb8fedbcff13d9979bbf92
-- name: github.com/cockroachdb/cockroach
-  version: cce1e38bf35d5f8e6dfe4633ee433fe76eb7305f
-  subpackages:
-  - base
-  - client
-  - roachpb
-  - rpc
-  - util/stop
-  - cli/cliflags
-  - security
-  - util
-  - util/caller
-  - util/duration
-  - util/log
-  - util/retry
-  - util/tracing
-  - util/encoding
-  - util/uuid
-  - util/grpcutil
-  - util/hlc
-  - util/metric
-  - util/timeutil
-  - util/log/logflags
-  - util/envutil
-  - util/humanizeutil
-- name: github.com/codahale/hdrhistogram
-  version: 360314142131c2043d1346f197f86435b287c6da
-- name: github.com/coreos/etcd
-  version: 29853967681e161e756a6221b681743dc053604c
-  subpackages:
-  - raft/raftpb
+  version: fbf75676ee9c0a3a23eb0a4d9220a3612cfbd1ed
+- name: github.com/boltdb/bolt
+  version: 3f7947a25d970e1e5f512276c14d5dcf731ccd5e
+- name: github.com/cznic/zappy
+  version: 4f5e6ef19fd692f1ef9b01206de4f1161a314e9a
 - name: github.com/dgrijalva/jwt-go
-  version: a2c85815a77d0f951e33ba4db5ae93629a1530af
-- name: github.com/dustin/go-humanize
-  version: 8929fe90cee4b2cb9deb468b51fb34eba64d1bf0
-- name: github.com/gogo/protobuf
-  version: 4f262e4b0f3a6cea646e15798109335551e21756
-  subpackages:
-  - proto
-  - sortkeys
+  version: f0777076321ab64f6efc15a82d9d23b98539b943
 - name: github.com/golang/protobuf
-  version: f0a097ddac24fb00e07d2ac17f8671423f3ea47c
+  version: 0c1f6d65b5a189c2250d10e71a5506f06f9fa0a0
   subpackages:
   - proto
 - name: github.com/gorilla/websocket
-  version: e2e3d8414d0fbae04004f151979f4e27c6747fe7
+  version: a68708917c6a4f06314ab4e52493cc61359c9d42
 - name: github.com/hashicorp/errwrap
   version: 7554cd9344cec97297fa6649b055a8c98c2a1e55
 - name: github.com/hashicorp/go-msgpack
@@ -69,34 +30,24 @@ imports:
 - name: github.com/hashicorp/go-multierror
   version: d30f09973e19c1dfcd120b2d9c4f168e68d6b5d5
 - name: github.com/hashicorp/memberlist
-  version: 88ac4de0d1a0ca6def284b571342db3b777a4c37
+  version: 215aec831f03c9b7c61ac183d3e28fff3c7d3a37
 - name: github.com/hashicorp/serf
-  version: 44945ab711fb48f1cee51d248568487b938c178d
+  version: 6c4672d66fc6312ddde18399262943e21175d831
   subpackages:
   - serf
   - coordinate
 - name: github.com/imdario/mergo
-  version: ea0151498788f6fab6365eae24f29f41c0ac0acc
+  version: 50d4dbd4eb0e84778abe37cefef140271d96fade
 - name: github.com/inconshreveable/mousetrap
   version: 76626ae9c91c4f2a10f34cad8ce83ea42c93bb75
 - name: github.com/kr/text
-  version: bb797dc4fb8320488f47bf11de07a733d7233e1f
+  version: 7cafcd837844e784b526369c9bce262804aebc60
 - name: github.com/mgutz/ansi
   version: c286dcecd19ff979eeb73ea444e479b903f2cfcb
 - name: github.com/miekg/dns
-  version: dd83d5cbcfd986f334b2747feeb907e281318fdf
-- name: github.com/opentracing/basictracer-go
-  version: 8037d926355bd3bc9b503652580a71a030995575
-  subpackages:
-  - wire
-- name: github.com/opentracing/opentracing-go
-  version: 9b674e7920712a5317aef71befd1940335cd3d0e
-  subpackages:
-  - ext
-- name: github.com/rcrowley/go-metrics
-  version: eeba7bd0dd01ace6e690fa833b3f22aaec29af43
+  version: 5d001d020961ae1c184f9f8152fdc73810481677
 - name: github.com/robertkrimen/otto
-  version: c619b8fa107c879621b1f82e2e0b4d7fdb1d06a3
+  version: 610cd3ae864b5f0977234663966e6108c63b0f8e
   subpackages:
   - ast
   - dbg
@@ -105,46 +56,38 @@ imports:
   - registry
   - token
 - name: github.com/satori/go.uuid
-  version: f9ab0dce87d815821e221626b772e3475a0d2749
+  version: 879c5887cd475cd7864858769793b2ceb0d44feb
 - name: github.com/sergi/go-diff
   version: ec7fdbb58eb3e300c8595ad5ac74a5aa50019cc7
   subpackages:
   - diffmatchpatch
-- name: github.com/Sirupsen/logrus
-  version: 7e6f9765803ea8356f45fd9b3c62305fb36cca51
 - name: github.com/spf13/cobra
-  version: 4c05eb1145f16d0e6bb4a3e1b6d769f4713cb41f
+  version: bc81c21bd0d8be5ba2d6630a505d79d4467566e7
 - name: github.com/spf13/pflag
-  version: 1f296710f879815ad9e6d39d947c828c3e4b4c3d
-- name: github.com/VividCortex/ewma
-  version: c34099b489e4ac33ca8d8c5f9d29d6eeaf69f2ed
+  version: 367864438f1b1a3c7db4da06a2f55b144e6784e0
+- name: github.com/ugorji/go
+  version: b94837a2404ab90efe9289e77a70694c355739cb
+  subpackages:
+  - codec
+- name: github.com/yudai/golcs
+  version: d1c525dea8ce39ea9a783d33cf08932305373f2c
 - name: github.com/yvasiyarov/go-metrics
   version: c25f46c4b94079672242ec48a545e7ca9ebe3aec
 - name: github.com/yvasiyarov/gorelic
-  version: 899fe5e1be7138f2440c28e77532f0635c1249f1
+  version: ae09aa139a2b7f638e2412baceaceebd41eff115
 - name: github.com/yvasiyarov/newrelic_platform_go
-  version: db03d6dfd965ebc22dbfd910567c641b326ff055
-- name: golang.org/x/crypto
-  version: d68c3ecb62c850b645dc072a8d78006286bf81ca
-  subpackages:
-  - bcrypt
-  - ssh/terminal
-  - blowfish
+  version: 9c099fbc30e90de5bb5c5f94aa5fd08f2daeaacd
 - name: golang.org/x/net
-  version: fb93926129b8ec0056f2f458b1f519654814edf0
+  version: 1961d9def2b2d7a28d7958926d2457d05a178ecd
   subpackages:
-  - context
   - netutil
-  - http2
-  - trace
-  - http2/hpack
-  - internal/timeseries
+  - context
 - name: golang.org/x/sys
-  version: 9eef40adf05b951699605195b829612bd7b69952
+  version: 62bee037599929a6e9146f29d10dd5208c43507d
   subpackages:
   - unix
 - name: google.golang.org/appengine
-  version: b67c870a16a2d58b3afa024461dcc51805f52e9d
+  version: 7f59a8c76b8594d06044bfe0bcbe475cb2020482
   subpackages:
   - datastore
   - internal
@@ -152,27 +95,15 @@ imports:
   - internal/app_identity
   - internal/modules
   - internal/base
-  - internal/log
   - internal/remote_api
-- name: google.golang.org/grpc
-  version: 326d66361a4e305b03da4497d2c52d470f7fb584
+- name: gopkg.in/sourcemap.v1
+  version: 8cd1e2e0ddc78dcb4511bcb184d23171bed15c67
   subpackages:
-  - codes
-  - credentials
-  - grpclog
-  - internal
-  - metadata
-  - naming
-  - transport
-  - peer
-- name: gopkg.in/inf.v0
-  version: 3887ee99ecf07df5b447e9b00d9c0b2adaa9f3e4
+  - base64vlq
 - name: gopkg.in/tylerb/graceful.v1
-  version: 9a3d4236b03bb5d26f7951134d248f9d5510d599
+  version: 84177357ab104029f9237abcb52339a7b80760ef
 - name: gopkg.in/vmihailenco/msgpack.v2
-  version: 775d4b0cf44d799d42a1f6fded02252340f4e33d
+  version: fb304c4e56fe15c4128a7e49d8dfab719c998b5b
   subpackages:
   - codes
-- name: gopkg.in/yaml.v1
-  version: 9f9df34309c04878acc86042b16630b0f696e1de
 devImports: []

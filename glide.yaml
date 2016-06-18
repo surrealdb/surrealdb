@@ -1,16 +1,10 @@
 package: github.com/abcum/surreal
 import:
-- package: github.com/Sirupsen/logrus
 - package: github.com/abcum/fibre
   subpackages:
   - mw
-- package: github.com/cockroachdb/cockroach
-  subpackages:
-  - base
-  - client
-  - roachpb
-  - rpc
-  - util/stop
+- package: github.com/abcum/logrus
+- package: github.com/boltdb/bolt
 - package: github.com/hashicorp/serf
   subpackages:
   - serf
