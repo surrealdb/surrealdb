@@ -1,4 +1,4 @@
-FROM gliderlabs/alpine:latest
+FROM alpine:latest
 
 MAINTAINER Tobie Morgan Hitchcock <tobie@abcum.com>
 
