@@ -87,7 +87,7 @@ build: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 build: clean
 build: glide
 build:
-	$(GO) build -v -ldflags '$(LDF)'
+	CGO_ENABLED=0 $(GO) build -a -v -installsuffix cgo -ldflags '$(LDF)'
 
 # The `make install` command compiles
 # the build flags, gets the project
