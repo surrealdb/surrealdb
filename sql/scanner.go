@@ -18,7 +18,6 @@ import (
 	"bufio"
 	"bytes"
 	"io"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -105,6 +104,10 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 		s.unread()
 		return ADD, string(ch)
 	case '-':
+		if chn := s.read(); chn == '>' {
+			return OEDGE, "->"
+		}
+		s.unread()
 		if chn := s.read(); chn == '=' {
 			return DEC, "-="
 		}
@@ -116,6 +119,14 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 		}
 		s.unread()
 	case '<':
+		if chn := s.read(); chn == '-' {
+			if chn := s.read(); chn == '>' {
+				return BEDGE, "<->"
+			}
+			s.unread()
+			return IEDGE, "<-"
+		}
+		s.unread()
 		if chn := s.read(); chn == '=' {
 			return LTE, "<="
 		}
@@ -356,13 +367,14 @@ func (s *Scanner) scanObject() (tok Token, lit string) {
 
 	str = strings.Replace(str, "\n", "", -1)
 	str = strings.Replace(str, "\r", "", -1)
+	str = strings.Trim(str, " ")
 
 	if beg == '[' {
 		return ARRAY, string(beg) + str + string(end)
 	}
 
 	if beg == '{' {
-		if strings.Trim(str, " ")[0] == '"' {
+		if len(str) == 0 || str[0] == '"' {
 			return JSON, string(beg) + str + string(end)
 		}
 	}
@@ -384,11 +396,6 @@ func (s *Scanner) read() rune {
 // unread places the previously read rune back on the reader.
 func (s *Scanner) unread() {
 	_ = s.r.UnreadRune()
-}
-
-func number(lit string) (i int64) {
-	i, _ = strconv.ParseInt(lit, 10, 64)
-	return
 }
 
 // isWhitespace returns true if the rune is a space, tab, or newline.
@@ -413,7 +420,7 @@ func isSeparator(ch rune) bool {
 
 // isIdentChar returns true if the rune can be used in an unquoted identifier.
 func isIdentChar(ch rune) bool {
-	return isLetter(ch) || isNumber(ch) || isSeparator(ch) || ch == '_'
+	return isLetter(ch) || isNumber(ch) || isSeparator(ch) || ch == '_' || ch == '*' || ch == '?'
 }
 
 // eof represents a marker rune for the end of the reader.

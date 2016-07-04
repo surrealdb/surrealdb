@@ -28,6 +28,10 @@ func (p *Parser) parseModifyStatement(explain bool) (stmt *ModifyStatement, err 
 		return nil, err
 	}
 
+	if _, _, err := p.shouldBe(DIFF); err != nil {
+		return nil, err
+	}
+
 	if stmt.Diff, err = p.parseDiff(); err != nil {
 		return nil, err
 	}

@@ -24,6 +24,10 @@ func (p *Parser) parseDeleteStatement(explain bool) (stmt *DeleteStatement, err 
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
+	_, _, _ = p.mightBe(AND)
+
+	_, _, stmt.Hard = p.mightBe(EXPUNGE)
+
 	_, _, _ = p.mightBe(FROM)
 
 	if stmt.What, err = p.parseWhat(); err != nil {

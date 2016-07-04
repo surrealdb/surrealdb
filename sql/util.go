@@ -17,6 +17,7 @@ package sql
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"time"
 )
@@ -57,9 +58,21 @@ func contains(search string, strings []string) bool {
 
 }
 
-func declare(tok Token, lit string) (Expr, error) {
+func declare(tok Token, lit string) (interface{}, error) {
 
 	switch tok {
+
+	case TRUE:
+		return true, nil
+
+	case FALSE:
+		return false, nil
+
+	case STRING:
+		return lit, nil
+
+	case REGION:
+		return lit, nil
 
 	case NULL:
 		return &Null{}, nil
@@ -71,7 +84,7 @@ func declare(tok Token, lit string) (Expr, error) {
 		return &Empty{}, nil
 
 	case ALL:
-		return &Wildcard{}, nil
+		return &All{}, nil
 
 	case ASC:
 		return &Asc{}, nil
@@ -80,61 +93,47 @@ func declare(tok Token, lit string) (Expr, error) {
 		return &Desc{}, nil
 
 	case ID:
-		return &IdentLiteral{Val: lit}, nil
+		return Ident(lit), nil
 
 	case IDENT:
-		return &IdentLiteral{Val: lit}, nil
+		return Ident(lit), nil
 
 	case NOW:
-		return &DatetimeLiteral{Val: time.Now()}, nil
+		return time.Now(), nil
 
 	case DATE:
-		t, err := time.Parse("2006-01-02", lit)
-		return &DatetimeLiteral{Val: t}, err
+		return time.Parse("2006-01-02", lit)
 
 	case TIME:
-		t, err := time.Parse(time.RFC3339, lit)
-		return &DatetimeLiteral{Val: t}, err
+		return time.Parse(time.RFC3339, lit)
 
-	case TRUE:
-		return &BooleanLiteral{Val: true}, nil
-
-	case FALSE:
-		return &BooleanLiteral{Val: false}, nil
-
-	case STRING:
-		return &StringLiteral{Val: lit}, nil
-
-	case REGION:
-		return &StringLiteral{Val: lit}, nil
+	case REGEX:
+		return regexp.Compile(lit)
 
 	case NUMBER:
-		i, err := strconv.ParseInt(lit, 10, 64)
-		return &NumberLiteral{Val: i}, err
+		return strconv.ParseInt(lit, 10, 64)
 
 	case DOUBLE:
-		f, err := strconv.ParseFloat(lit, 64)
-		return &DoubleLiteral{Val: f}, err
+		return strconv.ParseFloat(lit, 64)
 
 	case DURATION:
-		t, err := time.ParseDuration(lit)
-		return &DurationLiteral{Val: t}, err
+		return time.ParseDuration(lit)
 
 	case ARRAY:
-		var j ArrayLiteral
-		json.Unmarshal([]byte(lit), &j.Val)
-		if j.Val == nil {
-			return &j, fmt.Errorf("Invalid JSON: %s", lit)
+		var j interface{}
+		json.Unmarshal([]byte(lit), &j)
+		if j == nil {
+			return j, fmt.Errorf("Invalid JSON: %s", lit)
 		}
-		return &j, nil
+		return j, nil
 
 	case JSON:
-		var j JSONLiteral
-		json.Unmarshal([]byte(lit), &j.Val)
-		if j.Val == nil {
-			return &j, fmt.Errorf("Invalid JSON: %s", lit)
+		var j interface{}
+		json.Unmarshal([]byte(lit), &j)
+		if j == nil {
+			return j, fmt.Errorf("Invalid JSON: %s", lit)
 		}
-		return &j, nil
+		return j, nil
 
 	}
 

@@ -76,12 +76,17 @@ const (
 	SEQ // ∋
 	SNE // ∌
 
+	OEDGE // ->
+	IEDGE // <-
+	BEDGE // <->
+
 	operatorEnd
 
 	// literals
 
 	keywordsBeg
 
+	ACCEPT
 	AFTER
 	ALL
 	AND
@@ -104,12 +109,15 @@ const (
 	DIFF
 	DISTINCT
 	EMPTY
+	ENUM
 	EXPLAIN
+	EXPUNGE
 	FALSE
 	FIELD
 	FROM
 	FULL
 	GROUP
+	HISTORY
 	ID
 	IN
 	INDEX
@@ -132,6 +140,7 @@ const (
 	ORDER
 	READONLY
 	RECORD
+	REJECT
 	RELATE
 	REMOVE
 	RESYNC
@@ -207,6 +216,7 @@ var tokens = [...]string{
 
 	// keywords
 
+	ACCEPT:    "ACCEPT",
 	AFTER:     "AFTER",
 	ALL:       "ALL",
 	AND:       "AND",
@@ -229,12 +239,15 @@ var tokens = [...]string{
 	DIFF:      "DIFF",
 	DISTINCT:  "DISTINCT",
 	EMPTY:     "EMPTY",
+	ENUM:      "ENUM",
 	EXPLAIN:   "EXPLAIN",
+	EXPUNGE:   "EXPUNGE",
 	FALSE:     "FALSE",
 	FIELD:     "FIELD",
 	FROM:      "FROM",
 	FULL:      "FULL",
 	GROUP:     "GROUP",
+	HISTORY:   "HISTORY",
 	ID:        "ID",
 	IN:        "IN",
 	INDEX:     "INDEX",
@@ -256,6 +269,7 @@ var tokens = [...]string{
 	ORDER:     "ORDER",
 	READONLY:  "READONLY",
 	RECORD:    "RECORD",
+	REJECT:    "REJECT",
 	RELATE:    "RELATE",
 	REMOVE:    "REMOVE",
 	RESYNC:    "RESYNC",

@@ -14,11 +14,6 @@
 
 package sql
 
-import (
-	"regexp"
-	"time"
-)
-
 // --------------------------------------------------
 // Queries
 // --------------------------------------------------
@@ -105,7 +100,8 @@ type ModifyStatement struct {
 	NS   string // Namespace
 	DB   string // Database
 	What []Expr // What to modify
-	Diff Expr   // Diff object
+	Diff []Expr // Diff object
+	Cond []Expr // Update conditions
 	Echo Token  // What to return
 }
 
@@ -117,6 +113,7 @@ type DeleteStatement struct {
 	KV   string // Bucket
 	NS   string // Namespace
 	DB   string // Database
+	Hard bool   // Expunge
 	What []Expr // What to delete
 	Cond []Expr // Delete conditions
 	Echo Token  // What to return
@@ -160,22 +157,22 @@ type RecordStatement struct {
 //
 // DEFINE TABLE person
 type DefineTableStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	What []Expr // Table names
+	EX   bool    // Explain
+	KV   string  // Bucket
+	NS   string  // Namespace
+	DB   string  // Database
+	What []Table // Table names
 }
 
 // RemoveTableStatement represents an SQL REMOVE TABLE statement.
 //
 // REMOVE TABLE person
 type RemoveTableStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	What []Expr // Table names
+	EX   bool    // Explain
+	KV   string  // Bucket
+	NS   string  // Namespace
+	DB   string  // Database
+	What []Table // Table names
 }
 
 // --------------------------------------------------
@@ -188,32 +185,33 @@ type RemoveTableStatement struct {
 // DEFINE FIELD name ON person TYPE [0,1,2,3,4,5] DEFAULT 0
 // DEFINE FIELD name ON person TYPE [0...100]number MIN 0 MAX 3 DEFAULT 0
 type DefineFieldStatement struct {
-	EX        bool   // Explain
-	KV        string // Bucket
-	NS        string // Namespace
-	DB        string // Database
-	Name      Expr   // Field name
-	What      []Expr // Table names
-	Type      Expr   // Field type
-	Code      Expr   // Field code
-	Min       Expr   // Minimum value / length
-	Max       Expr   // Maximum value / length
-	Default   Expr   // Default value
-	Notnull   bool   // Notnull?
-	Readonly  bool   // Readonly?
-	Mandatory bool   // Mnadatory?
+	EX        bool          // Explain
+	KV        string        // Bucket
+	NS        string        // Namespace
+	DB        string        // Database
+	Name      Ident         // Field name
+	What      []Table       // Table names
+	Type      Expr          // Field type
+	Enum      []interface{} // Custom options
+	Code      string        // Field code
+	Min       float64       // Minimum value / length
+	Max       float64       // Maximum value / length
+	Default   Expr          // Default value
+	Notnull   bool          // Notnull?
+	Readonly  bool          // Readonly?
+	Mandatory bool          // Mnadatory?
 }
 
 // RemoveFieldStatement represents an SQL REMOVE INDEX statement.
 //
 // REMOVE FIELD name ON person
 type RemoveFieldStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	Name Expr   // Field name
-	What []Expr // Table names
+	EX   bool    // Explain
+	KV   string  // Bucket
+	NS   string  // Namespace
+	DB   string  // Database
+	Name Ident   // Field name
+	What []Table // Table names
 }
 
 // --------------------------------------------------
@@ -228,9 +226,9 @@ type DefineIndexStatement struct {
 	KV   string   // Bucket
 	NS   string   // Namespace
 	DB   string   // Database
-	Name Expr     // Index name
-	What []Expr   // Table names
-	Code Expr     // Index code
+	Name Ident    // Index name
+	What []Table  // Table names
+	Code string   // Index code
 	Cols []*Field // Index cols
 	Uniq bool     // Unique index
 }
@@ -239,24 +237,23 @@ type DefineIndexStatement struct {
 //
 // REMOVE INDEX name ON person
 type RemoveIndexStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	Name Expr   // Index name
-	What []Expr // Table names
+	EX   bool    // Explain
+	KV   string  // Bucket
+	NS   string  // Namespace
+	DB   string  // Database
+	Name Ident   // Index name
+	What []Table // Table names
 }
 
 // ResyncIndexStatement represents an SQL RESYNC INDEX statement.
 //
 // RESYNC INDEX name ON person
 type ResyncIndexStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	Name Expr   // Index name
-	What []Expr // Table names
+	EX   bool    // Explain
+	KV   string  // Bucket
+	NS   string  // Namespace
+	DB   string  // Database
+	What []Table // Table names
 }
 
 // --------------------------------------------------
@@ -265,6 +262,9 @@ type ResyncIndexStatement struct {
 
 // Expr represents a sql expression
 type Expr interface{}
+
+// All represents a wildcard expression.
+type All struct{}
 
 // Asc represents the ASC expression.
 type Asc struct{}
@@ -284,61 +284,6 @@ type Empty struct{}
 // Wildcard represents a wildcard expression.
 type Wildcard struct{}
 
-// JSONLiteral represents a json object.
-type JSONLiteral struct {
-	Val interface{}
-}
-
-// ArrayLiteral represents a json array.
-type ArrayLiteral struct {
-	Val []interface{}
-}
-
-// IdentLiteral represents a variable.
-type IdentLiteral struct {
-	Val string `json:"Ident"`
-}
-
-// BytesLiteral represents a null expression.
-type BytesLiteral struct {
-	Val []byte `json:"Bytes"`
-}
-
-// RegexLiteral represents a regular expression.
-type RegexLiteral struct {
-	Val *regexp.Regexp `json:"Regex"`
-}
-
-// NumberLiteral represents a integer literal.
-type NumberLiteral struct {
-	Val int64 `json:"Number"`
-}
-
-// DoubleLiteral represents a float literal.
-type DoubleLiteral struct {
-	Val float64 `json:"Double"`
-}
-
-// StringLiteral represents a string literal.
-type StringLiteral struct {
-	Val string `json:"String"`
-}
-
-// BooleanLiteral represents a boolean literal.
-type BooleanLiteral struct {
-	Val bool `json:"Boolean"`
-}
-
-// DatetimeLiteral represents a point-in-time literal.
-type DatetimeLiteral struct {
-	Val time.Time `json:"Datetime"`
-}
-
-// DurationLiteral represents a duration literal.
-type DurationLiteral struct {
-	Val time.Duration `json:"Duration"`
-}
-
 // ClosedExpression represents a parenthesized expression.
 type ClosedExpression struct {
 	Expr Expr
@@ -353,26 +298,40 @@ type BinaryExpression struct {
 
 // DiffExpression represents a JSON DIFF PATCH
 type DiffExpression struct {
-	JSON *JSONLiteral
+	JSON interface{}
 }
 
 // MergeExpression represents JSON to MERGE
 type MergeExpression struct {
-	JSON *JSONLiteral
+	JSON interface{}
 }
 
 // ContentExpression represents JSON to REPLACE
 type ContentExpression struct {
-	JSON *JSONLiteral
+	JSON interface{}
 }
 
 // --------------------------------------------------
 // Parts
 // --------------------------------------------------
 
-// Table comment
-type Table struct {
-	TB string
+type Table string
+
+func (this Table) String() string {
+	return string(this)
+}
+
+func (this Table) MarshalText() ([]byte, error) {
+	return []byte(string(this)), nil
+}
+
+type Ident string
+
+func (this Ident) String() string {
+	return string(this)
+}
+func (this Ident) MarshalText() ([]byte, error) {
+	return []byte(string(this)), nil
 }
 
 // Thing comment

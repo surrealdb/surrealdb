@@ -38,19 +38,19 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 
 	for {
 
-		tok, _, exi := p.mightBe(MIN, MAX, TYPE, CODE, DEFAULT, NOTNULL, READONLY, MANDATORY)
+		tok, _, exi := p.mightBe(MIN, MAX, TYPE, ENUM, CODE, DEFAULT, NOTNULL, READONLY, MANDATORY)
 		if !exi {
 			break
 		}
 
 		if is(tok, MIN) {
-			if stmt.Min, err = p.parseNumber(); err != nil {
+			if stmt.Min, err = p.parseDouble(); err != nil {
 				return nil, err
 			}
 		}
 
 		if is(tok, MAX) {
-			if stmt.Max, err = p.parseNumber(); err != nil {
+			if stmt.Max, err = p.parseDouble(); err != nil {
 				return nil, err
 			}
 		}
@@ -61,8 +61,14 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 			}
 		}
 
+		if is(tok, ENUM) {
+			if stmt.Enum, err = p.parseArray(); err != nil {
+				return nil, err
+			}
+		}
+
 		if is(tok, CODE) {
-			if stmt.Code, err = p.parseCode(); err != nil {
+			if stmt.Code, err = p.parseScript(); err != nil {
 				return nil, err
 			}
 		}

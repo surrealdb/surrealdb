@@ -43,7 +43,7 @@ func (p *Parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexState
 		}
 
 		if is(tok, CODE) {
-			if stmt.Code, err = p.parseCode(); err != nil {
+			if stmt.Code, err = p.parseScript(); err != nil {
 				return nil, err
 			}
 		}
@@ -75,10 +75,6 @@ func (p *Parser) parseResyncIndexStatement(explain bool) (stmt *ResyncIndexState
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
-
-	if stmt.Name, err = p.parseIdent(); err != nil {
-		return nil, err
-	}
 
 	if _, _, err = p.shouldBe(ON); err != nil {
 		return nil, err

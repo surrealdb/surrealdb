@@ -69,9 +69,7 @@ func (p *Parser) parseSelectStatement(explain bool) (stmt *SelectStatement, err 
 
 }
 
-func (p *Parser) parseGroup() ([]*Group, error) {
-
-	var gs []*Group
+func (p *Parser) parseGroup() (mul []*Group, err error) {
 
 	// Remove the GROUP keyword
 	if _, _, exi := p.mightBe(GROUP); !exi {
@@ -81,7 +79,7 @@ func (p *Parser) parseGroup() ([]*Group, error) {
 	// Next token might be BY
 	_, _, _ = p.mightBe(BY)
 
-	return gs, nil
+	return
 
 }
 
@@ -133,7 +131,7 @@ func (p *Parser) parseOrder() (mul []*Order, err error) {
 
 	}
 
-	return mul, nil
+	return
 
 }
 
@@ -147,12 +145,12 @@ func (p *Parser) parseLimit() (Expr, error) {
 	// Next token might be BY
 	_, _, _ = p.mightBe(BY)
 
-	_, lit, err := p.shouldBe(NUMBER)
+	tok, lit, err := p.shouldBe(NUMBER)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"limit number"}}
 	}
 
-	return &NumberLiteral{Val: number(lit)}, nil
+	return declare(tok, lit)
 
 }
 

@@ -90,9 +90,9 @@ func (p *Parser) parseSet() (mul []Expr, err error) {
 
 }
 
-func (p *Parser) parseMerge() (mul []Expr, err error) {
+func (p *Parser) parseDiff() (exp []Expr, err error) {
 
-	exp := &MergeExpression{}
+	one := &DiffExpression{}
 
 	tok, lit, err := p.shouldBe(JSON)
 	if err != nil {
@@ -104,17 +104,17 @@ func (p *Parser) parseMerge() (mul []Expr, err error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	exp.JSON = val.(*JSONLiteral)
+	one.JSON = val
 
-	mul = append(mul, exp)
+	exp = append(exp, one)
 
 	return
 
 }
 
-func (p *Parser) parseContent() (mul []Expr, err error) {
+func (p *Parser) parseMerge() (exp []Expr, err error) {
 
-	exp := &ContentExpression{}
+	one := &MergeExpression{}
 
 	tok, lit, err := p.shouldBe(JSON)
 	if err != nil {
@@ -126,9 +126,31 @@ func (p *Parser) parseContent() (mul []Expr, err error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	exp.JSON = val.(*JSONLiteral)
+	one.JSON = val
 
-	mul = append(mul, exp)
+	exp = append(exp, one)
+
+	return
+
+}
+
+func (p *Parser) parseContent() (exp []Expr, err error) {
+
+	one := &ContentExpression{}
+
+	tok, lit, err := p.shouldBe(JSON)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
+	}
+
+	val, err := declare(tok, lit)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
+	}
+
+	one.JSON = val
+
+	exp = append(exp, one)
 
 	return
 

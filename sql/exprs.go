@@ -23,20 +23,18 @@ import (
 //
 // --------------------------------------------------
 
-func (p *Parser) parseTable() (one *Table, err error) {
+func (p *Parser) parseTable() (Table, error) {
 
-	one = &Table{}
-
-	_, one.TB, err = p.shouldBe(IDENT, NUMBER, DATE)
+	_, lit, err := p.shouldBe(IDENT, NUMBER, DATE)
 	if err != nil {
-		return nil, &ParseError{Found: one.TB, Expected: []string{"table name"}}
+		return Table(""), &ParseError{Found: lit, Expected: []string{"table name"}}
 	}
 
-	return one, err
+	return Table(lit), err
 
 }
 
-func (p *Parser) parseTables() (mul []Expr, err error) {
+func (p *Parser) parseTables() (mul []Table, err error) {
 
 	for {
 
@@ -139,74 +137,113 @@ func (p *Parser) parseThings() (mul []Expr, err error) {
 //
 // --------------------------------------------------
 
-func (p *Parser) parseIdent() (*IdentLiteral, error) {
+func (p *Parser) parseIdent() (Ident, error) {
 
-	tok, lit, err := p.shouldBe(IDENT)
+	_, lit, err := p.shouldBe(IDENT)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
+		return Ident(""), &ParseError{Found: lit, Expected: []string{"name"}}
 	}
 
-	val, err := declare(tok, lit)
+	val, err := declare(IDENT, lit)
 
-	return val.(*IdentLiteral), err
+	return val.(Ident), err
 
 }
 
-func (p *Parser) parseNumber() (*NumberLiteral, error) {
+func (p *Parser) parseArray() ([]interface{}, error) {
 
-	tok, lit, err := p.shouldBe(NUMBER)
+	_, lit, err := p.shouldBe(ARRAY)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"number"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"array"}}
 	}
 
-	val, err := declare(tok, lit)
+	val, err := declare(ARRAY, lit)
 
-	return val.(*NumberLiteral), err
+	return val.([]interface{}), err
 
 }
 
-func (p *Parser) parseString() (*StringLiteral, error) {
+func (p *Parser) parseNumber() (int64, error) {
 
-	tok, lit, err := p.shouldBe(STRING)
+	_, lit, err := p.shouldBe(NUMBER)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
+		return int64(0), &ParseError{Found: lit, Expected: []string{"number"}}
 	}
 
-	val, err := declare(tok, lit)
+	val, err := declare(NUMBER, lit)
 
-	return val.(*StringLiteral), err
+	return val.(int64), err
 
 }
 
-func (p *Parser) parseRegion() (*StringLiteral, error) {
+func (p *Parser) parseDouble() (float64, error) {
+
+	_, lit, err := p.shouldBe(NUMBER, DOUBLE)
+	if err != nil {
+		return float64(0), &ParseError{Found: lit, Expected: []string{"number"}}
+	}
+
+	val, err := declare(DOUBLE, lit)
+
+	return val.(float64), err
+
+}
+
+func (p *Parser) parseString() (string, error) {
+
+	_, lit, err := p.shouldBe(STRING)
+	if err != nil {
+		return string(""), &ParseError{Found: lit, Expected: []string{"string"}}
+	}
+
+	val, err := declare(STRING, lit)
+
+	return val.(string), err
+
+}
+
+func (p *Parser) parseRegion() (string, error) {
 
 	tok, lit, err := p.shouldBe(IDENT, STRING, REGION)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
+		return string(""), &ParseError{Found: lit, Expected: []string{"string"}}
 	}
 
 	val, err := declare(tok, lit)
 
-	return val.(*StringLiteral), err
+	return val.(string), err
 
 }
 
-func (p *Parser) parseBoolean() (*BooleanLiteral, error) {
+func (p *Parser) parseScript() (string, error) {
+
+	tok, lit, err := p.shouldBe(STRING, REGION)
+	if err != nil {
+		return string(""), &ParseError{Found: lit, Expected: []string{"LUA script"}}
+	}
+
+	val, err := declare(tok, lit)
+
+	return val.(string), err
+
+}
+
+func (p *Parser) parseBoolean() (bool, error) {
 
 	tok, lit, err := p.shouldBe(TRUE, FALSE)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"boolean"}}
+		return bool(false), &ParseError{Found: lit, Expected: []string{"boolean"}}
 	}
 
 	val, err := declare(tok, lit)
 
-	return val.(*BooleanLiteral), err
+	return val.(bool), err
 
 }
 
-func (p *Parser) parseDefault() (Expr, error) {
+func (p *Parser) parseDefault() (interface{}, error) {
 
-	tok, lit, err := p.shouldBe(TRUE, FALSE, NUMBER, STRING, REGION, ARRAY, JSON)
+	tok, lit, err := p.shouldBe(NULL, NOW, DATE, TIME, TRUE, FALSE, NUMBER, STRING, REGION, ARRAY, JSON)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +262,7 @@ func (p *Parser) parseExpr() (mul []*Field, err error) {
 
 		one := &Field{}
 
-		tok, lit, err = p.shouldBe(IDENT, ID, NULL, ALL, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON)
+		tok, lit, err = p.shouldBe(IDENT, ID, OEDGE, IEDGE, BEDGE, NULL, ALL, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}

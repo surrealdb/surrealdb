@@ -16,19 +16,19 @@ package sql
 
 func (p *Parser) parseType() (exp Expr, err error) {
 
-	allowed := []string{"any", "url", "email", "phone", "array", "object", "string", "number"}
+	allowed := []string{"any", "url", "email", "phone", "array", "object", "string", "number", "custom", "boolean", "datetime"}
 
-	tok, lit, err := p.shouldBe(IDENT, ARRAY)
+	tok, lit, err := p.shouldBe(IDENT)
 	if err != nil {
 		return nil, err
 	}
 
-	if tok == IDENT {
-		if !contains(lit, allowed) {
-			return nil, &ParseError{Found: lit, Expected: allowed}
-		}
+	if !contains(lit, allowed) {
+		return nil, &ParseError{Found: lit, Expected: allowed}
 	}
 
-	return declare(tok, lit)
+	val, err := declare(tok, lit)
+
+	return val.(Ident), err
 
 }
