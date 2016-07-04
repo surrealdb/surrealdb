@@ -69,7 +69,7 @@ func setup() {
 			log.Fatal("Specify only --cert-pem or --cert-key")
 		}
 
-		err := cert.Extract(opts.Cert.Pem, "asdasdasd/cert.key", "cert.crt")
+		err := cert.Extract(opts.Cert.Pem, "cert.key", "cert.crt")
 		if err != nil {
 			log.Fatal(err)
 		}
