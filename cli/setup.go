@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/abcum/surreal/log"
+	"github.com/abcum/surreal/util/cert"
 	"github.com/abcum/surreal/util/uuid"
 )
 
@@ -55,22 +56,39 @@ func setup() {
 		opts.Auth.Pass = "root"
 	}
 
-	// Ensure that the default
-	// database is defined
+	// Ensure that security
+	// is enabled by default
 
-	if opts.Store == "" {
-		opts.Store = "127.0.0.1:26257"
+	if opts.Cert.Pem != "" {
+
+		if opts.Cert.Crt != "" {
+			log.Fatal("Specify only --cert-pem or --cert-crt")
+		}
+
+		if opts.Cert.Key != "" {
+			log.Fatal("Specify only --cert-pem or --cert-key")
+		}
+
+		err := cert.Extract(opts.Cert.Pem, "asdasdasd/cert.key", "cert.crt")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		opts.Cert.Crt = "cert.crt"
+
+		opts.Cert.Key = "cert.key"
+
 	}
 
 	// Ensure that the default
-	// ports are defined
+	// database options are set
 
-	if opts.Port.Http == 0 {
-		opts.Port.Http = 8000
+	if opts.DB.Base == "" {
+		opts.DB.Base = "surreal"
 	}
 
-	if opts.Port.Raft == 0 {
-		opts.Port.Raft = 33693
+	if opts.DB.Path == "" {
+		opts.DB.Path = "surreal.db"
 	}
 
 	// Ensure that the default
@@ -91,35 +109,45 @@ func setup() {
 	// Ensure the defined ports
 	// are within range
 
-	if opts.Port.Http == opts.Port.Raft {
+	if opts.Port.Web == 0 {
+		opts.Port.Web = 8000
+	}
+
+	if opts.Port.Tcp == 0 {
+		opts.Port.Tcp = 33693
+	}
+
+	if opts.Port.Web == opts.Port.Tcp {
 		log.Fatal("Defined ports must be different")
 	}
 
-	if opts.Port.Http > 65535 {
+	if opts.Port.Web > 65535 {
 		log.Fatal("Please specify a valid port number for --port-http")
 	}
 
-	if opts.Port.Raft > 65535 {
+	if opts.Port.Tcp > 65535 {
 		log.Fatal("Please specify a valid port number for --port-raft")
 	}
 
 	// Define the listen string
 	// with host:port format
 
-	opts.Conn.Http = fmt.Sprintf(":%d", opts.Port.Http)
-	opts.Conn.Raft = fmt.Sprintf(":%d", opts.Port.Raft)
+	opts.Conn.Web = fmt.Sprintf(":%d", opts.Port.Web)
+	opts.Conn.Tcp = fmt.Sprintf(":%d", opts.Port.Tcp)
 
 	// Ensure that string args
 	// are converted to slices
 
-	opts.Node.Tags = strings.Split(opts.Node.Attr, ",")
-	for k, v := range opts.Node.Tags {
-		opts.Node.Tags[k] = strings.Trim(v, " ")
+	for _, v := range strings.Split(opts.Node.Attr, ",") {
+		if c := strings.Trim(v, " "); c != "" {
+			opts.Node.Tags = append(opts.Node.Tags, c)
+		}
 	}
 
-	opts.Cluster.Peer = strings.Split(opts.Cluster.Join, ",")
-	for k, v := range opts.Cluster.Peer {
-		opts.Cluster.Peer[k] = strings.Trim(v, " ")
+	for _, v := range strings.Split(opts.Cluster.Join, ",") {
+		if c := strings.Trim(v, " "); c != "" {
+			opts.Cluster.Peer = append(opts.Cluster.Peer, c)
+		}
 	}
 
 	// Ensure that the specified

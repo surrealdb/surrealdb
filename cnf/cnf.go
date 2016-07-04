@@ -16,27 +16,27 @@ package cnf
 
 // Options defines global configuration options
 type Options struct {
-	Store string // The backend KV store to use
-
 	DB struct {
+		Path string // Path to store the data file
 		Host string // Surreal host to connect to
 		Port string // Surreal port to connect to
 		Base string // Base key to use in KV stores
 	}
 
+	Port struct {
+		Web int // Web port as an number
+		Tcp int // Tcp port as an number
+	}
+
+	Conn struct {
+		Web string // Web port as a string
+		Tcp string // Tcp port as a string
+	}
+
 	Cert struct {
-		CA struct {
-			File string // File location of CA certificate
-			Data string // PEM encoded content of certificate
-		}
-		Crt struct {
-			File string // File location of server certificate
-			Data string // PEM encoded content of certificate
-		}
-		Key struct {
-			File string // File location of server certificate
-			Data string // PEM encoded content of certificate
-		}
+		Crt string // File location of server crt
+		Key string // File location of server key
+		Pem string // File location of server pem
 	}
 
 	Auth struct {
@@ -55,19 +55,14 @@ type Options struct {
 		Tags []string // Slice of tags for this node
 	}
 
-	Port struct {
-		Raft int // Raft port
-		Http int // Http port
-	}
-
-	Conn struct {
-		Raft string // Raft port
-		Http string // Http port
-	}
-
 	Cluster struct {
 		Join string   // Comma separated peers to join
 		Peer []string // Slice of peers to join
+	}
+
+	Backups struct {
+		Time string
+		Path string
 	}
 
 	Logging struct {

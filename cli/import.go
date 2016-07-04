@@ -31,6 +31,6 @@ func init() {
 
 	importCmd.PersistentFlags().StringVar(&opts.Auth.Auth, "auth", "root:root", "Master authentication details to use when connecting.")
 	importCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "127.0.0.1", "Database server host to connect to.")
-	importCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "33693", "Database server port to connect to.")
+	importCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "8000", "Database server port to connect to.")
 
 }

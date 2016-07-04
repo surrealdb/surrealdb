@@ -20,40 +20,29 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/abcum/surreal/db"
-	"github.com/abcum/surreal/rpc"
-	"github.com/abcum/surreal/rpl"
+	"github.com/abcum/surreal/tcp"
 	"github.com/abcum/surreal/web"
 )
 
 var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the database and http server",
-	PreRunE: func(cmd *cobra.Command, args []string) (err error) {
+	PreRun: func(cmd *cobra.Command, args []string) {
 
 		fmt.Print(logo)
-
-		err = db.Setup(opts)
-		if err != nil {
-			return
-		}
-
-		return
 
 	},
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
 
-		err = rpc.Setup(opts)
-		if err != nil {
+		if err = db.Setup(opts); err != nil {
 			return
 		}
 
-		err = rpl.Setup(opts)
-		if err != nil {
+		if err = tcp.Setup(opts); err != nil {
 			return
 		}
 
-		err = web.Setup(opts)
-		if err != nil {
+		if err = web.Setup(opts); err != nil {
 			return
 		}
 
@@ -62,10 +51,9 @@ var startCmd = &cobra.Command{
 	},
 	PostRun: func(cmd *cobra.Command, args []string) {
 
-		db.Exit()
-		rpc.Exit()
-		rpl.Exit()
+		tcp.Exit()
 		web.Exit()
+		db.Exit()
 
 	},
 }
@@ -76,23 +64,24 @@ func init() {
 	startCmd.PersistentFlags().StringVar(&opts.Auth.User, "auth-user", "", flag("auth-user"))
 	startCmd.PersistentFlags().StringVar(&opts.Auth.Pass, "auth-pass", "", flag("auth-pass"))
 
-	startCmd.PersistentFlags().StringVarP(&opts.DB.Base, "base", "", "surreal", flag("base"))
+	startCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "key", "k", "", flag("key"))
 
-	startCmd.PersistentFlags().StringVarP(&opts.Store, "db", "d", "", flag("db"))
+	startCmd.PersistentFlags().StringVar(&opts.Cert.Crt, "cert-crt", "", flag("cert-crt"))
+	startCmd.PersistentFlags().StringVar(&opts.Cert.Key, "cert-key", "", flag("cert-key"))
+	startCmd.PersistentFlags().StringVar(&opts.Cert.Pem, "cert-pem", "", flag("cert-pem"))
 
-	startCmd.PersistentFlags().IntVar(&opts.Port.Http, "port-http", 0, flag("port-http"))
-	startCmd.PersistentFlags().IntVar(&opts.Port.Raft, "port-raft", 0, flag("port-raft"))
+	startCmd.PersistentFlags().StringVar(&opts.DB.Base, "db-base", "", flag("db-base"))
+	startCmd.PersistentFlags().StringVar(&opts.DB.Path, "db-path", "", flag("db-path"))
+
+	startCmd.PersistentFlags().IntVar(&opts.Port.Tcp, "port-tcp", 0, flag("port-tcp"))
+	startCmd.PersistentFlags().IntVar(&opts.Port.Web, "port-web", 0, flag("port-web"))
 
 	startCmd.PersistentFlags().StringVarP(&opts.Node.Name, "name", "n", "", flag("name"))
 	startCmd.PersistentFlags().StringVarP(&opts.Node.Attr, "tags", "t", "", flag("tags"))
 
 	startCmd.PersistentFlags().StringVarP(&opts.Cluster.Join, "join", "j", "", flag("join"))
 
-	startCmd.PersistentFlags().StringVar(&opts.Cert.Crt.File, "cert-crt", "", flag("cert-crt"))
-	startCmd.PersistentFlags().StringVar(&opts.Cert.Key.File, "cert-key", "", flag("cert-key"))
-
 	startCmd.PersistentFlags().MarkHidden("auth-user")
 	startCmd.PersistentFlags().MarkHidden("auth-pass")
-	startCmd.PersistentFlags().MarkHidden("base")
 
 }
