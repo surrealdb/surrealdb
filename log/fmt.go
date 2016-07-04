@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/abcum/logrus"
 	"github.com/mgutz/ansi"
 )
 

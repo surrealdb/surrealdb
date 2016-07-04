@@ -18,7 +18,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/abcum/logrus"
 )
 
 var log *Logger
@@ -155,6 +155,11 @@ func Warnf(format string, v ...interface{}) {
 // Warnln loggs a message at level Warn on the standard logger.
 func Warnln(v ...interface{}) {
 	log.Warnln(v...)
+}
+
+// WithPrefix prepares a log entry with a prefix.
+func WithPrefix(value interface{}) *logrus.Entry {
+	return log.WithField("prefix", value)
 }
 
 // WithField prepares a log entry with a single data field.
