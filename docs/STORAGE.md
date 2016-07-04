@@ -73,8 +73,8 @@ Each data type is stored using a different symbol in the key:value pair.
 	"name": "fullname",
 	"type": "string",
 	"code": "",
-	"min": "",
-	"max": "",
+	"min": 0,
+	"max": 0,
 	"default": "",
 	"notnull": false,
 	"readonly": false,
@@ -82,7 +82,7 @@ Each data type is stored using a different symbol in the key:value pair.
 }`
 ```
 
-**Field**
+**Index**
 
 ```bash
 /{$kv}/!/i/{$ns}/{$db}/{$tb}/{$idx} "{}"
