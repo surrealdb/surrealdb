@@ -14,4 +14,4 @@ EXPOSE 8000 33693
 
 # Set the default command
 
-CMD echo $(ip route | awk '/default/ { print $3 }') docker >> /etc/hosts && surreal
+CMD echo $(ip route | awk '/default/ { print $3 }') docker >> /etc/hosts && ./surreal
