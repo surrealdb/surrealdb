@@ -34,7 +34,7 @@ func output(c *fibre.Context, res interface{}) error {
 
 func routes(s *fibre.Fibre) {
 
-	s.Dir("/", "gui/dist/")
+	s.Dir("/", "app/")
 
 	// --------------------------------------------------
 	// Endpoint for health checks

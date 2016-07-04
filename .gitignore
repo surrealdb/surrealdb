@@ -37,6 +37,7 @@ surreal.db
 # Other
 # -----------------------------------
 
+app/
 dev/
 vendor/
 node_modules/
