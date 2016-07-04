@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<title>WebSocket</title>
+<script>
+
+    var uri = "ws://127.0.0.1:8000/rpc";
+
+    function init() {
+
+        websocket = new WebSocket(uri);
+
+        websocket.onopen = function(evt) {
+            document.getElementById('output').innerHTML = '<span style="color:#00CC00;">Connected</span>';
+        };
+
+        websocket.onclose = function(evt) {
+            document.getElementById('output').innerHTML = '<span style="color:#FF0000;">Disconnected</span>';
+        };
+
+        websocket.onmessage = function(evt) {
+            console.log(evt.data)
+        };
+
+        websocket.onerror = function(evt) {
+            console.warn(evt.data)
+        };
+
+    }
+
+    window.addEventListener("load", init, false);
+
+</script>
+
+<h2>WebSocket</h2>
+
+<div id="output"></div>
