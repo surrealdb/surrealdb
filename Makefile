@@ -41,15 +41,6 @@ convey:
 	@echo "Run 'go get -u -v github.com/smartystreets/goconvey'"
 	goconvey -packages 5 -port 5000 -poll 1s -excludedDirs 'build,dev,docs,gui,vendor'
 
-# The `make test` command runs all
-# tests, found within all sub-folders
-# in the project folder.
-
-.PHONY: test
-test: clean
-test:
-	$(GO) test `glide novendor`
-
 # The `make glide` command ensures that
 # all imported dependencies are synced
 # and located within the vendor folder.
@@ -57,6 +48,16 @@ test:
 .PHONY: glide
 glide:
 	glide update
+	
+# The `make test` command runs all
+# tests, found within all sub-folders
+# in the project folder.
+
+.PHONY: test
+test: clean
+test: glide
+test:
+	$(GO) test `glide novendor`
 
 # The `make clean` command cleans
 # all object, build, and test files
