@@ -15,6 +15,21 @@ machine:
 
 # -----------------------------------
 
+checkout:
+    post:
+        # git tags are used to generate build info which is baked into the
+        # binary, but unfortunately it is not possible to fetch all tags
+        # without also unshallowing the checkout, so we must do both.
+        - git fetch --unshallow --tags
+        # GOPATH is cached, so we need to clean out the version from the previous
+        # run or the subsequent `mv` will fail.
+        - rm -rf         "${GOPATH%%:*}/src/github.com/abcum/surreal"
+        - mkdir -p       "${GOPATH%%:*}/src/github.com/abcum/"
+        - mv ~/surreal   "${GOPATH%%:*}/src/github.com/abcum/"
+        - ln -s          "${GOPATH%%:*}/src/github.com/abcum/surreal" ~/surreal
+
+# -----------------------------------
+
 dependencies:
     override:
         - docker info
