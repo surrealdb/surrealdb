@@ -56,7 +56,6 @@ func routes(s *fibre.Fibre) {
 		return c.Code(200)
 	})
 
-	s.Get("/backup", func(c *fibre.Context) error {
 		return c.Code(200)
 	})
 

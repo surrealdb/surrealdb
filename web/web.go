@@ -63,7 +63,7 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Auth(&mw.AuthOpts{
 		User: []byte(opts.Auth.User),
 		Pass: []byte(opts.Auth.Pass),
-	}).Path("/import", "/export", "/backup"))
+	}).Path("/import", "/export"))
 
 	// Setup special authentication
 
