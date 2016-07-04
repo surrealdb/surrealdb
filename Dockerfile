@@ -1,15 +1,10 @@
-FROM alpine:latest
+FROM alpine:3.4
 
-# Install
+RUN apk add --no-cache ca-certificates
 
-ADD gui .
-
+ADD gui gui/
 ADD surreal .
 
-# Expose the necessary ports
-
 EXPOSE 8000 33693
-
-# Set the default command
 
 ENTRYPOINT ["/surreal"]
