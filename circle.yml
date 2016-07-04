@@ -1,0 +1,39 @@
+# -----------------------------------
+
+general:
+    branches:
+        only:
+            - master
+
+# -----------------------------------
+
+machine:
+    timezone:
+        UTC
+    services:
+        - docker
+
+# -----------------------------------
+
+dependencies:
+    override:
+        - docker info
+        - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
+        - docker build -t abcum/surreal .
+
+# -----------------------------------
+
+test:
+    override:
+        - make test
+        - make build
+        - docker run -d abcum/surreal start; sleep 15
+
+# -----------------------------------
+
+deployment:
+
+    deploy:
+        branch: master
+        commands:
+            - docker push abcum/surreal
