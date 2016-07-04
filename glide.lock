@@ -1,8 +1,8 @@
-hash: 2a2c04fe0124aff7a637ac9fdd7ff9badfd159ad818902364d8c1b92efc135ae
-updated: 2016-06-18T14:48:42.73126094+01:00
+hash: ef7f6436a4e6150819b1384fc70f82399127da39c582b0a1ea0a110a0fb515c5
+updated: 2016-07-04T12:09:32.241135804+01:00
 imports:
 - name: github.com/abcum/fibre
-  version: a9935884e184e19609bb72cf55de88023c2b5648
+  version: b98e9f6e4b0fa3041dbe80e3c5565b173ae919ce
   subpackages:
   - mw
 - name: github.com/abcum/logrus
@@ -16,11 +16,11 @@ imports:
 - name: github.com/dgrijalva/jwt-go
   version: f0777076321ab64f6efc15a82d9d23b98539b943
 - name: github.com/golang/protobuf
-  version: 0c1f6d65b5a189c2250d10e71a5506f06f9fa0a0
+  version: 3852dcfda249c2097355a6aabb199a28d97b30df
   subpackages:
   - proto
 - name: github.com/gorilla/websocket
-  version: a68708917c6a4f06314ab4e52493cc61359c9d42
+  version: 54f9decdbfb3fe254c5df3d5aa234480989f4af0
 - name: github.com/hashicorp/errwrap
   version: 7554cd9344cec97297fa6649b055a8c98c2a1e55
 - name: github.com/hashicorp/go-msgpack
@@ -30,7 +30,7 @@ imports:
 - name: github.com/hashicorp/go-multierror
   version: d30f09973e19c1dfcd120b2d9c4f168e68d6b5d5
 - name: github.com/hashicorp/memberlist
-  version: 215aec831f03c9b7c61ac183d3e28fff3c7d3a37
+  version: b2053e314b4a87e5f0d2d47aeafd3e03be13da90
 - name: github.com/hashicorp/serf
   version: 6c4672d66fc6312ddde18399262943e21175d831
   subpackages:
@@ -47,7 +47,7 @@ imports:
 - name: github.com/miekg/dns
   version: 5d001d020961ae1c184f9f8152fdc73810481677
 - name: github.com/robertkrimen/otto
-  version: 610cd3ae864b5f0977234663966e6108c63b0f8e
+  version: c41cf547e08c4a88c36859766ece30dd178d7bc1
   subpackages:
   - ast
   - dbg
@@ -57,20 +57,14 @@ imports:
   - token
 - name: github.com/satori/go.uuid
   version: 879c5887cd475cd7864858769793b2ceb0d44feb
-- name: github.com/sergi/go-diff
-  version: ec7fdbb58eb3e300c8595ad5ac74a5aa50019cc7
-  subpackages:
-  - diffmatchpatch
 - name: github.com/spf13/cobra
-  version: bc81c21bd0d8be5ba2d6630a505d79d4467566e7
+  version: 6a8bd97bdb1fc0d08a83459940498ea49d3e8c93
 - name: github.com/spf13/pflag
   version: 367864438f1b1a3c7db4da06a2f55b144e6784e0
 - name: github.com/ugorji/go
   version: b94837a2404ab90efe9289e77a70694c355739cb
   subpackages:
   - codec
-- name: github.com/yudai/golcs
-  version: d1c525dea8ce39ea9a783d33cf08932305373f2c
 - name: github.com/yvasiyarov/go-metrics
   version: c25f46c4b94079672242ec48a545e7ca9ebe3aec
 - name: github.com/yvasiyarov/gorelic
@@ -78,16 +72,16 @@ imports:
 - name: github.com/yvasiyarov/newrelic_platform_go
   version: 9c099fbc30e90de5bb5c5f94aa5fd08f2daeaacd
 - name: golang.org/x/net
-  version: 1961d9def2b2d7a28d7958926d2457d05a178ecd
+  version: b400c2eff1badec7022a8c8f5bea058b6315eed7
   subpackages:
   - netutil
   - context
 - name: golang.org/x/sys
-  version: 62bee037599929a6e9146f29d10dd5208c43507d
+  version: a408501be4d17ee978c04a618e7a1b22af058c0e
   subpackages:
   - unix
 - name: google.golang.org/appengine
-  version: 7f59a8c76b8594d06044bfe0bcbe475cb2020482
+  version: 267c27e7492265b84fc6719503b14a1e17975d79
   subpackages:
   - datastore
   - internal
@@ -95,15 +89,16 @@ imports:
   - internal/app_identity
   - internal/modules
   - internal/base
+  - internal/log
   - internal/remote_api
 - name: gopkg.in/sourcemap.v1
   version: 8cd1e2e0ddc78dcb4511bcb184d23171bed15c67
   subpackages:
   - base64vlq
 - name: gopkg.in/tylerb/graceful.v1
-  version: 84177357ab104029f9237abcb52339a7b80760ef
+  version: ecde8c8f16df93a994dda8936c8f60f0c26c28ab
 - name: gopkg.in/vmihailenco/msgpack.v2
-  version: fb304c4e56fe15c4128a7e49d8dfab719c998b5b
+  version: 585b09497e708217121c79a5aa185647b757605a
   subpackages:
   - codes
 devImports: []
