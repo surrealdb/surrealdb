@@ -56,9 +56,6 @@ func routes(s *fibre.Fibre) {
 		return c.Code(200)
 	})
 
-		return c.Code(200)
-	})
-
 	// --------------------------------------------------
 	// Endpoints for submitting rpc queries
 	// --------------------------------------------------
