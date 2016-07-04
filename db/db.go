@@ -33,6 +33,8 @@ type Response struct {
 }
 
 var db *kvs.DB
+var quit chan int
+var tick *time.Ticker
 
 // Setup sets up the connection with the data layer
 func Setup(opts *cnf.Options) (err error) {
@@ -41,23 +43,7 @@ func Setup(opts *cnf.Options) (err error) {
 
 	db, err = kvs.New(opts.DB.Path)
 
-	/*ticker := time.NewTicker(5 * time.Second)
-	quit := make(chan struct{})
-
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				t := time.Now()
-				n := fmt.Sprintf("%d-%02d-%02dT%02d-%02d-%02d-%d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond())
-				p := fmt.Sprintf("dev/%s.backup.db", n)
-				db.Save(p)
-			case <-quit:
-				ticker.Stop()
-				return
-			}
-		}
-	}()*/
+	// backup(opts)
 
 	return
 
@@ -67,6 +53,8 @@ func Setup(opts *cnf.Options) (err error) {
 func Exit() {
 
 	log.WithPrefix("db").Infof("Gracefully shutting down database")
+
+	// quit <- 0
 
 	db.Close()
 
@@ -95,6 +83,27 @@ func Execute(ctx *fibre.Context, txt interface{}) (out []interface{}, err error)
 	}
 
 	return
+
+}
+
+func backup(opts *cnf.Options) {
+
+	/*tick = time.NewTicker(opts.Backups.Time)
+	quit = make(chan int)
+
+	go func() {
+		for {
+			select {
+			case <-tick.C:
+				t := time.Now().Format("2006-01-02T15-04-05")
+				n := fmt.Sprintf("%s.backup.db", t)
+				db.Save(n)
+			case <-quit:
+				tick.Stop()
+				return
+			}
+		}
+	}()*/
 
 }
 
@@ -133,6 +142,8 @@ func detail(e error) interface{} {
 }
 
 func execute(ctx *fibre.Context, ast *sql.Query, chn chan interface{}) {
+
+	defer close(chn)
 
 	for _, s := range ast.Statements {
 
@@ -188,7 +199,5 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan interface{}) {
 		}
 
 	}
-
-	close(chn)
 
 }

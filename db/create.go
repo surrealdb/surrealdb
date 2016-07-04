@@ -15,102 +15,77 @@
 package db
 
 import (
-	"github.com/abcum/surreal/kv"
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/json"
+	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
 	"github.com/abcum/surreal/util/uuid"
-	"github.com/cockroachdb/cockroach/client"
 )
 
 func executeCreateStatement(ast *sql.CreateStatement) (out []interface{}, err error) {
 
-	db.Txn(func(txn *client.Txn) error {
+	txn, err := db.Txn(true)
+	if err != nil {
+		return
+	}
 
-		bch := txn.NewBatch()
+	defer txn.Rollback()
 
-		for _, w := range ast.What {
+	for _, w := range ast.What {
 
-			switch what := w.(type) {
-
-			case *sql.Thing: // Create a thing
-
-				var res interface{}
-
-				key := &keys.Thing{
-					KV: ast.KV,
-					NS: ast.NS,
-					DB: ast.DB,
-					TB: what.Table,
-					ID: what.ID,
-				}
-
-				if res, err = create(txn, key, ast); err != nil {
-					return err
-				}
-
-				out = append(out, res)
-
-			case *sql.Table: // Create a table
-
-				var res interface{}
-
-				key := &keys.Thing{
-					KV: ast.KV,
-					NS: ast.NS,
-					DB: ast.DB,
-					TB: what.Name,
-					ID: uuid.NewV5(uuid.NewV4().UUID, ast.KV).String(),
-				}
-
-				if res, err = create(txn, key, ast); err != nil {
-					return err
-				}
-
-				out = append(out, res)
-
+		if what, ok := w.(*sql.Thing); ok {
+			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
+			kv, _ := txn.Get(key.Encode())
+			doc := item.New(kv, key)
+			if ret, err := create(txn, doc, ast); err != nil {
+				return nil, err
+			} else if ret != nil {
+				out = append(out, ret)
 			}
-
 		}
 
-		return txn.CommitInBatch(bch)
+		if what, ok := w.(sql.Table); ok {
+			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what, ID: uuid.NewV5(uuid.NewV4().UUID, ast.KV).String()}
+			kv, _ := txn.Get(key.Encode())
+			doc := item.New(kv, key)
+			if ret, err := create(txn, doc, ast); err != nil {
+				return nil, err
+			} else if ret != nil {
+				out = append(out, ret)
+			}
+		}
 
-	})
+	}
+
+	txn.Commit()
 
 	return
 
 }
 
-// create creates a single record in the database. The new record will only be created
-// if no such record already exists in the database. If no record exists, then the
-// record is created from the supplied data, and fields are computed.
-func create(txn *client.Txn, key *keys.Thing, ast *sql.CreateStatement) (res interface{}, err error) {
+func create(txn *kvs.TX, doc *item.Doc, ast *sql.CreateStatement) (out interface{}, err error) {
 
-	var kv *kv.KV
-	var old *json.Doc
-	var doc *json.Doc
-
-	// Select the record
-	if kv, err = get(txn, key); err != nil {
-		return
+	if err = doc.Merge(txn, ast.Data); err != nil {
+		return nil, err
 	}
 
-	// Parse the record
-	if old, doc, err = new(txn, key, kv); err != nil {
-		return
+	if err = doc.StoreIndex(txn); err != nil {
+		return nil, err
 	}
 
-	// Modify the record
-	if err = mrg(txn, key, old, doc, ast.Data); err != nil {
-		return
+	if err = doc.StartThing(txn); err != nil {
+		return nil, err
 	}
 
-	// Create the record
-	if err = cput(txn, key, doc.Bytes(), nil); err != nil {
-		return
+	if err = doc.StorePatch(txn); err != nil {
+		return nil, err
 	}
 
-	res = echo(key, old, doc, nil, ast.Echo, sql.AFTER)
+	if err = doc.StoreTrail(txn); err != nil {
+		return nil, err
+	}
+
+	out = doc.Yield(ast.Echo, sql.AFTER)
 
 	return
 

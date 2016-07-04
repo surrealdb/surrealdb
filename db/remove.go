@@ -16,12 +16,104 @@ package db
 
 import (
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/keys"
 )
 
-func executeRemoveFieldStatement(ast *sql.RemoveFieldStatement) ([]interface{}, error) {
-	return nil, nil
+func executeRemoveTableStatement(ast *sql.RemoveTableStatement) (out []interface{}, err error) {
+
+	txn, err := db.Txn(true)
+	if err != nil {
+		return
+	}
+
+	defer txn.Rollback()
+
+	for _, TB := range ast.What {
+
+		// Remove the table config
+		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
+		if err := txn.Del(tkey.Encode()); err != nil {
+			return nil, err
+		}
+
+		// Remove the field config
+		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, FD: keys.Ignore}
+		if err := txn.PDel(fkey.Encode()); err != nil {
+			return nil, err
+		}
+
+		// Remove the index config
+		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: keys.Ignore}
+		if err := txn.PDel(ikey.Encode()); err != nil {
+			return nil, err
+		}
+
+		// Remove all table data
+		dkey := &keys.Table{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
+		if err := txn.PDel(dkey.Encode()); err != nil {
+			return nil, err
+		}
+
+	}
+
+	txn.Commit()
+
+	return
+
 }
 
-func executeRemoveIndexStatement(ast *sql.RemoveIndexStatement) ([]interface{}, error) {
-	return nil, nil
+func executeRemoveFieldStatement(ast *sql.RemoveFieldStatement) (out []interface{}, err error) {
+
+	txn, err := db.Txn(true)
+	if err != nil {
+		return
+	}
+
+	defer txn.Rollback()
+
+	for _, TB := range ast.What {
+
+		// Remove the field config
+		ckey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, FD: ast.Name}
+		if err := txn.Del(ckey.Encode()); err != nil {
+			return nil, err
+		}
+
+	}
+
+	txn.Commit()
+
+	return
+
+}
+
+func executeRemoveIndexStatement(ast *sql.RemoveIndexStatement) (out []interface{}, err error) {
+
+	txn, err := db.Txn(true)
+	if err != nil {
+		return
+	}
+
+	defer txn.Rollback()
+
+	for _, TB := range ast.What {
+
+		// Remove the index config
+		ckey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name}
+		if err := txn.Del(ckey.Encode()); err != nil {
+			return nil, err
+		}
+
+		// Remove all index data
+		dkey := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name, FD: keys.Ignore}
+		if err := txn.PDel(dkey.Encode()); err != nil {
+			return nil, err
+		}
+
+	}
+
+	txn.Commit()
+
+	return
+
 }

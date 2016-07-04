@@ -18,6 +18,18 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func executeSelectStatement(ast *sql.SelectStatement) ([]interface{}, error) {
-	return nil, nil
+func executeSelectStatement(ast *sql.SelectStatement) (out []interface{}, err error) {
+
+	kvs, err := db.All()
+
+	for _, kv := range kvs {
+
+		out = append(out, map[string]interface{}{
+			"key": string(kv.Key()),
+			"val": string(kv.Val()),
+		})
+	}
+
+	return
+
 }

@@ -15,54 +15,69 @@
 package db
 
 import (
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
-	// "github.com/abcum/surreal/util/json"
+	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
-	"github.com/cockroachdb/cockroach/client"
 )
 
 func executeModifyStatement(ast *sql.ModifyStatement) (out []interface{}, err error) {
 
-	db.Txn(func(txn *client.Txn) error {
+	txn, err := db.Txn(true)
+	if err != nil {
+		return
+	}
 
-		bch := txn.NewBatch()
+	defer txn.Rollback()
 
-		for _, w := range ast.What {
+	for _, w := range ast.What {
 
-			switch what := w.(type) {
-
-			case *sql.Thing: // Create a thing
-
-				var res interface{}
-
-				key := &keys.Thing{
-					KV: ast.KV,
-					NS: ast.NS,
-					DB: ast.DB,
-					TB: what.Table,
-					ID: what.ID,
-				}
-
-				if res, err = modify(txn, key, ast); err != nil {
-					return err
-				}
-
-				out = append(out, res)
-
+		if what, ok := w.(*sql.Thing); ok {
+			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
+			kv, _ := txn.Get(key.Encode())
+			doc := item.New(kv, key)
+			if ret, err := modify(txn, doc, ast); err != nil {
+				return nil, err
+			} else if ret != nil {
+				out = append(out, ret)
 			}
-
 		}
 
-		return txn.CommitInBatch(bch)
+	}
 
-	})
+	txn.Commit()
 
 	return
 
 }
 
-// modify modifies a record in the database using jsondiffpatch
-func modify(txn *client.Txn, key *keys.Thing, ast *sql.ModifyStatement) (res interface{}, err error) {
+func modify(txn *kvs.TX, doc *item.Doc, ast *sql.ModifyStatement) (out interface{}, err error) {
+
+	if !doc.Check(txn, ast.Cond) {
+		return nil, nil
+	}
+
+	if err = doc.Merge(txn, ast.Diff); err != nil {
+		return nil, err
+	}
+
+	if err = doc.StoreIndex(txn); err != nil {
+		return nil, err
+	}
+
+	if err = doc.StoreThing(txn); err != nil {
+		return nil, err
+	}
+
+	if err = doc.StorePatch(txn); err != nil {
+		return nil, err
+	}
+
+	if err = doc.StoreTrail(txn); err != nil {
+		return nil, err
+	}
+
+	out = doc.Yield(ast.Echo, sql.DIFF)
 
 	return
 
