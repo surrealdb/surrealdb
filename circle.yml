@@ -32,6 +32,7 @@ checkout:
 
 dependencies:
     override:
+        - cd gui/
         - npm install -g bower
         - npm install -g ember-cli
         - npm cache clean && bower cache clean
