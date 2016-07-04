@@ -104,13 +104,13 @@ func TestMain(t *testing.T) {
 		},
 		{
 			str: "/surreal/abcum/database/person/~/873c2f37-ea03-4c5e-843e-cf393af44155/1987-06-22T08:00:00.123456789Z",
-			obj: &Trail{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", AT: clock},
-			new: &Trail{},
+			obj: &Patch{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", AT: clock},
+			new: &Patch{},
 		},
 		{
 			str: "/surreal/abcum/database/person/~/test/1987-06-22T08:00:00.123456789Z",
-			obj: &Trail{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "test", AT: clock},
-			new: &Trail{},
+			obj: &Patch{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "test", AT: clock},
+			new: &Patch{},
 		},
 		{
 			str: "/surreal/abcum/database/person/•/873c2f37-ea03-4c5e-843e-cf393af44155/friend/1987-06-22T08:00:00.123456789Z",
@@ -251,8 +251,8 @@ func TestMain(t *testing.T) {
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "😀😀😀"},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Suffix},
 
-		&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), AT: time.Now()},
-		&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), AT: time.Now()},
+		&Patch{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), AT: time.Now()},
+		&Patch{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), AT: time.Now()},
 
 		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), TP: "friend", FK: int8(2)},
 		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), TP: "friend", FK: int8(3)},
@@ -290,7 +290,7 @@ func TestMain(t *testing.T) {
 				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Prefix},
 				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test"},
 				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Suffix},
-				&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test", AT: clock},
+				&Patch{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test", AT: clock},
 				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"1", "2"}},
 				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"3", "4"}},
 			},
@@ -309,7 +309,7 @@ func TestMain(t *testing.T) {
 				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Suffix},
 			},
 			nos: []Key{
-				&Trail{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test", AT: clock},
+				&Patch{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test", AT: clock},
 				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"1", "2"}},
 				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"3", "4"}},
 				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "other", ID: "test"},
