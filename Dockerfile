@@ -12,4 +12,4 @@ EXPOSE 8000 33693
 
 # Set the default command
 
-ENTRYPOINT ["/contributors"]
+ENTRYPOINT ["/surreal"]
