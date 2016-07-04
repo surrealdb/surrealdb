@@ -17,10 +17,9 @@ machine:
 
 dependencies:
     override:
+        - export PATH=./:$PATH
         - docker info
         - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
-        - sudo add-apt-repository -y ppa:masterminds/glide
-        - sudo apt-get install glide
 
 # -----------------------------------
 
