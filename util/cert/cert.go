@@ -27,19 +27,33 @@ func Extract(enc, key, crt string) (err error) {
 
 	data := []byte(enc)
 
+	pemk, pemc := extract(data)
+	if pemk == nil || pemc == nil {
+		return fmt.Errorf("Can not decode PEM encoded file")
+	}
+
 	file, err = os.Create(key)
 	if err != nil {
 		return fmt.Errorf("Can not decode PEM encoded private key into %s", key)
 	}
-	file.Write(extractKey(data))
+	file.Write(pemk)
 	file.Close()
 
 	file, err = os.Create(crt)
 	if err != nil {
 		return fmt.Errorf("Can not decode PEM encoded certificate into %s", crt)
 	}
-	file.Write(extractCrt(data))
+	file.Write(pemc)
 	file.Close()
+
+	return
+
+}
+
+func extract(data []byte) (key []byte, crt []byte) {
+
+	key = extractKey(data)
+	crt = extractCrt(data)
 
 	return
 
@@ -51,6 +65,9 @@ func extractKey(data []byte) (output []byte) {
 
 	for len(data) > 0 {
 		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
 		if block.Type == "RSA PRIVATE KEY" {
 			output = append(output, pem.EncodeToMemory(block)...)
 		}
@@ -66,6 +83,9 @@ func extractCrt(data []byte) (output []byte) {
 
 	for len(data) > 0 {
 		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
 		if block.Type == "CERTIFICATE" {
 			output = append(output, pem.EncodeToMemory(block)...)
 		}
