@@ -17,9 +17,9 @@ machine:
 
 dependencies:
     override:
-        - export PATH=./:$PATH
         - docker info
         - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
+        - go get -u github.com/Masterminds/glide
 
 # -----------------------------------
 
