@@ -63,15 +63,15 @@ surreal start --port-web 8000
 #### Clustering
 
 ```bash
-surreal start --port-web 8000 --port-tcp 33693 --join localhost:33693
-surreal start --port-web 8001 --port-tcp 33694 --join localhost:33693
-surreal start --port-web 8002 --port-tcp 33695 --join localhost:33693
+surreal start --port-web 8000 --port-tcp 33693 --db-path surreal-1.db --join localhost:33693 --log-level debug
+surreal start --port-web 8001 --port-tcp 33694 --db-path surreal-2.db --join localhost:33693 --log-level debug
+surreal start --port-web 8002 --port-tcp 33695 --db-path surreal-3.db --join localhost:33693 --log-level debug
 ```
 
 #### Deployment
 
 ```bash
-docker run --name surreal-1 abcum/surreal start --port-web 8000 --port-tcp 33693 --join localhost:33693
-docker run --name surreal-2 abcum/surreal start --port-web 8001 --port-tcp 33694 --join localhost:33693
-docker run --name surreal-3 abcum/surreal start --port-web 8002 --port-tcp 33695 --join localhost:33693
+docker run --name surreal-1 abcum/surreal start --port-web 8000 --port-tcp 33693 --join localhost:33693 --log-level debug
+docker run --name surreal-2 abcum/surreal start --port-web 8001 --port-tcp 33694 --join localhost:33693 --log-level debug
+docker run --name surreal-3 abcum/surreal start --port-web 8002 --port-tcp 33695 --join localhost:33693 --log-level debug
 ```
