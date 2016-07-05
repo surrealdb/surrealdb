@@ -1,53 +1,30 @@
-# Gui
+# app.surreal.io
 
-This README outlines the details of collaborating on this Ember application.
-A short introduction of this app could easily go here.
+The web gui for Surreal built using ember.js.
 
-## Prerequisites
+[![](https://img.shields.io/circleci/token/adb5ca379a334a4011fa894275c312fe35833d6d/project/abcum/surreal/master.svg?style=flat-square)](https://circleci.com/gh/abcum/surreal) [![](https://img.shields.io/badge/ember-2.6.2-orange.svg?style=flat-square)](https://github.com/abcum/surreal) [![](https://img.shields.io/badge/license-Commercial-blue.svg?style=flat-square)](https://github.com/abcum/surreal) 
 
-You will need the following things properly installed on your computer.
+#### Setup
 
-* [Git](http://git-scm.com/)
-* [Node.js](http://nodejs.org/) (with NPM)
-* [Bower](http://bower.io/)
-* [Ember CLI](http://ember-cli.com/)
-* [PhantomJS](http://phantomjs.org/)
+- Install node - `brew install node`
 
-## Installation
+#### Installing
 
-* `git clone <repository-url>` this repository
-* change into the new directory
-* `npm install`
-* `bower install`
+- Clean cache - `npm cache clean && bower cache clean`
+- Install bower - `npm install -g bower`
+- Install ember-cli - `npm install -g ember-cli@2.6.2`
+- Install project ember-cli `npm install --save-dev ember-cli@2.6.2`
+- Clean temporary folders - `rm -rf node_modules bower_components dist tmp`
+- Install application dependencies - `npm install && bower install`
 
-## Running / Development
+#### Upgrading
 
-* `ember server`
-* Visit your app at [http://localhost:4200](http://localhost:4200).
+- Initialise ember - `ember init`
 
-### Code Generators
+#### Development
 
-Make use of the many generators for code, try `ember help generate` for more details
+- Serve application - `ember serve`
 
-### Running Tests
+#### Deployment
 
-* `ember test`
-* `ember test --server`
-
-### Building
-
-* `ember build` (development)
-* `ember build --environment production` (production)
-
-### Deploying
-
-Specify what it takes to deploy your app.
-
-## Further Reading / Useful Links
-
-* [ember.js](http://emberjs.com/)
-* [ember-cli](http://ember-cli.com/)
-* Development Browser Extensions
-  * [ember inspector for chrome](https://chrome.google.com/webstore/detail/ember-inspector/bmdblncegkenkacieihfhpjfppoconhi)
-  * [ember inspector for firefox](https://addons.mozilla.org/en-US/firefox/addon/ember-inspector/)
-
+- Deploy production app by pushing to master branch on github.com
