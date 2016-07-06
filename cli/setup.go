@@ -26,6 +26,25 @@ import (
 
 func setup() {
 
+	// --------------------------------------------------
+	// DB
+	// --------------------------------------------------
+
+	// Ensure that the default
+	// database options are set
+
+	if opts.DB.Base == "" {
+		opts.DB.Base = "surreal"
+	}
+
+	if opts.DB.Path == "" {
+		opts.DB.Path = "surreal.db"
+	}
+
+	// --------------------------------------------------
+	// Auth
+	// --------------------------------------------------
+
 	if opts.Auth.Auth != "" {
 
 		if opts.Auth.User != "" {
@@ -56,40 +75,9 @@ func setup() {
 		opts.Auth.Pass = "root"
 	}
 
-	// Ensure that security
-	// is enabled by default
-
-	if opts.Cert.Pem != "" {
-
-		if opts.Cert.Crt != "" {
-			log.Fatal("Specify only --cert-pem or --cert-crt")
-		}
-
-		if opts.Cert.Key != "" {
-			log.Fatal("Specify only --cert-pem or --cert-key")
-		}
-
-		err := cert.Extract(opts.Cert.Pem, "cert.key", "cert.crt")
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		opts.Cert.Crt = "cert.crt"
-
-		opts.Cert.Key = "cert.key"
-
-	}
-
-	// Ensure that the default
-	// database options are set
-
-	if opts.DB.Base == "" {
-		opts.DB.Base = "surreal"
-	}
-
-	if opts.DB.Path == "" {
-		opts.DB.Path = "surreal.db"
-	}
+	// --------------------------------------------------
+	// Nodes
+	// --------------------------------------------------
 
 	// Ensure that the default
 	// node details are defined
@@ -106,49 +94,61 @@ func setup() {
 		opts.Node.UUID = opts.Node.Name + "-" + uuid.NewV4().String()
 	}
 
-	// Ensure the defined ports
-	// are within range
-
-	if opts.Port.Web == 0 {
-		opts.Port.Web = 8000
-	}
-
-	if opts.Port.Tcp == 0 {
-		opts.Port.Tcp = 33693
-	}
-
-	if opts.Port.Web == opts.Port.Tcp {
-		log.Fatal("Defined ports must be different")
-	}
-
-	if opts.Port.Web > 65535 {
-		log.Fatal("Please specify a valid port number for --port-http")
-	}
-
-	if opts.Port.Tcp > 65535 {
-		log.Fatal("Please specify a valid port number for --port-raft")
-	}
-
-	// Define the listen string
-	// with host:port format
-
-	opts.Conn.Web = fmt.Sprintf(":%d", opts.Port.Web)
-	opts.Conn.Tcp = fmt.Sprintf(":%d", opts.Port.Tcp)
-
-	// Ensure that string args
-	// are converted to slices
-
+	// Convert string args to slices
 	for _, v := range strings.Split(opts.Node.Attr, ",") {
 		if c := strings.Trim(v, " "); c != "" {
 			opts.Node.Tags = append(opts.Node.Tags, c)
 		}
 	}
 
+	// Convert string args to slices
 	for _, v := range strings.Split(opts.Cluster.Join, ",") {
 		if c := strings.Trim(v, " "); c != "" {
 			opts.Cluster.Peer = append(opts.Cluster.Peer, c)
 		}
 	}
+
+	// --------------------------------------------------
+	// Ports
+	// --------------------------------------------------
+
+	// Ensure port number is valid
+	if opts.Port.Web < 0 || opts.Port.Web > 65535 {
+		log.Fatal("Please specify a valid port number for --port-web")
+	}
+
+	// Ensure port number is valid
+	if opts.Port.Tcp < 0 || opts.Port.Tcp > 65535 {
+		log.Fatal("Please specify a valid port number for --port-tcp")
+	}
+
+	// Store the ports in host:port string format
+	opts.Conn.Web = fmt.Sprintf(":%d", opts.Port.Web)
+	opts.Conn.Tcp = fmt.Sprintf(":%d", opts.Port.Tcp)
+
+	// --------------------------------------------------
+	// Certs
+	// --------------------------------------------------
+
+	if opts.Cert.Pem != "" {
+
+		if opts.Cert.Key != "" || opts.Cert.Crt != "" {
+			log.Fatal("You can not specify --cert-pem with --cert-key or --cert-crt")
+		}
+
+		err := cert.Extract(opts.Cert.Pem, "cert.key", "cert.crt")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		opts.Cert.Key = "cert.key"
+		opts.Cert.Crt = "cert.crt"
+
+	}
+
+	// --------------------------------------------------
+	// Logging
+	// --------------------------------------------------
 
 	// Ensure that the specified
 	// logging level is allowed
