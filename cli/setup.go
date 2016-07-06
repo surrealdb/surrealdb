@@ -112,6 +112,16 @@ func setup() {
 	// Ports
 	// --------------------------------------------------
 
+	// Specify default port
+	if opts.Port.Web == 0 {
+		opts.Port.Web = 8000
+	}
+
+	// Specify default port
+	if opts.Port.Tcp == 0 {
+		opts.Port.Tcp = 33693
+	}
+
 	// Ensure port number is valid
 	if opts.Port.Web < 0 || opts.Port.Web > 65535 {
 		log.Fatal("Please specify a valid port number for --port-web")
