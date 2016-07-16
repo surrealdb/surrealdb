@@ -120,16 +120,16 @@ func status(e error) interface{} {
 	switch e.(type) {
 	default:
 		return "OK"
-	case error:
-		return "ERR"
 	case *kvs.DBError:
 		return "ERR_DB"
 	case *kvs.TXError:
-		return "ERR_DB"
+		return "ERR_TX"
 	case *kvs.CKError:
 		return "ERR_CK"
 	case *kvs.KVError:
-		return "ERR_EXISTS"
+		return "ERR_KV"
+	case error:
+		return "ERR"
 	}
 }
 
@@ -139,14 +139,6 @@ func detail(e error) interface{} {
 		return nil
 	case error:
 		return err.Error()
-	case *kvs.DBError:
-		return "A database error occured"
-	case *kvs.TXError:
-		return "A database error occured"
-	case *kvs.CKError:
-		return "A cipherkey error occured"
-	case *kvs.KVError:
-		return "The item already exists"
 	}
 }
 

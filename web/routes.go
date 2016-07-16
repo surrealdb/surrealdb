@@ -24,9 +24,13 @@ func output(c *fibre.Context, res interface{}) error {
 	case "OK":
 		return c.Send(200, ret.Result)
 	case "ERR_DB":
+		return fibre.NewHTTPError(503)
+	case "ERR_TX":
 		return fibre.NewHTTPError(500)
-	case "ERR_EXISTS":
+	case "ERR_KV":
 		return fibre.NewHTTPError(409)
+	case "ERR_CK":
+		return fibre.NewHTTPError(403)
 	default:
 		return fibre.NewHTTPError(400)
 	}
@@ -73,8 +77,8 @@ func routes(s *fibre.Fibre) {
 	s.Post("/sql", func(c *fibre.Context) error {
 		res, err := db.Execute(c, c.Request().Body)
 		if err != nil {
-			return c.Send(400, map[string]interface{}{
-				"code":          400,
+			return c.Send(500, map[string]interface{}{
+				"code":          500,
 				"details":       "Request problems detected",
 				"documentation": "https://docs.surreal.io/",
 				"information":   err.Error(),
@@ -95,7 +99,7 @@ func routes(s *fibre.Fibre) {
 		sql := db.Prepare("SELECT * FROM ⟨%v⟩", c.Param("class"))
 		res, err := db.Execute(c, sql)
 		if err != nil {
-			return fibre.NewHTTPError(400)
+			return fibre.NewHTTPError(500)
 		}
 		return output(c, res[0])
 	})
@@ -104,7 +108,7 @@ func routes(s *fibre.Fibre) {
 		sql := db.Prepare("CREATE ⟨%v⟩ CONTENT %v RETURN AFTER", c.Param("class"), string(c.Body()))
 		res, err := db.Execute(c, sql)
 		if err != nil {
-			return fibre.NewHTTPError(400)
+			return fibre.NewHTTPError(500)
 		}
 		return output(c, res[0])
 	})
@@ -113,7 +117,7 @@ func routes(s *fibre.Fibre) {
 		sql := db.Prepare("DELETE FROM ⟨%v⟩", c.Param("class"))
 		res, err := db.Execute(c, sql)
 		if err != nil {
-			return fibre.NewHTTPError(400)
+			return fibre.NewHTTPError(500)
 		}
 		return output(c, res[0])
 	})
@@ -130,7 +134,7 @@ func routes(s *fibre.Fibre) {
 		sql := db.Prepare("SELECT * FROM @⟨%v⟩:⟨%v⟩", c.Param("class"), c.Param("id"))
 		res, err := db.Execute(c, sql)
 		if err != nil {
-			return fibre.NewHTTPError(400)
+			return fibre.NewHTTPError(500)
 		}
 		return output(c, res[0])
 	})
@@ -139,7 +143,7 @@ func routes(s *fibre.Fibre) {
 		sql := db.Prepare("CREATE @⟨%v⟩:⟨%v⟩ CONTENT %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
 		res, err := db.Execute(c, sql)
 		if err != nil {
-			return fibre.NewHTTPError(400)
+			return fibre.NewHTTPError(500)
 		}
 		return output(c, res[0])
 	})
@@ -148,7 +152,7 @@ func routes(s *fibre.Fibre) {
 		sql := db.Prepare("UPDATE @⟨%v⟩:⟨%v⟩ CONTENT %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
 		res, err := db.Execute(c, sql)
 		if err != nil {
-			return fibre.NewHTTPError(400)
+			return fibre.NewHTTPError(500)
 		}
 		return output(c, res[0])
 	})
@@ -157,7 +161,7 @@ func routes(s *fibre.Fibre) {
 		sql := db.Prepare("MODIFY @⟨%v⟩:⟨%v⟩ DIFF %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
 		res, err := db.Execute(c, sql)
 		if err != nil {
-			return fibre.NewHTTPError(400)
+			return fibre.NewHTTPError(500)
 		}
 		return output(c, res[0])
 	})
@@ -166,7 +170,7 @@ func routes(s *fibre.Fibre) {
 		sql := db.Prepare("SELECT HISTORY FROM @⟨%v⟩:⟨%v⟩", c.Param("class"), c.Param("id"))
 		res, err := db.Execute(c, sql)
 		if err != nil {
-			return fibre.NewHTTPError(400)
+			return fibre.NewHTTPError(500)
 		}
 		return output(c, res[0])
 	})
@@ -175,7 +179,7 @@ func routes(s *fibre.Fibre) {
 		sql := db.Prepare("DELETE @⟨%v⟩:⟨%v⟩", c.Param("class"), c.Param("id"))
 		res, err := db.Execute(c, sql)
 		if err != nil {
-			return fibre.NewHTTPError(400)
+			return fibre.NewHTTPError(500)
 		}
 		return output(c, res[0])
 	})
