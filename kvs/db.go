@@ -15,30 +15,38 @@
 package kvs
 
 import (
-	"github.com/boltdb/bolt"
+	"strings"
 )
+
+var stores = make(map[string]func(string) (DS, error))
 
 // DB is a database handle to a single Surreal cluster.
 type DB struct {
-	db *bolt.DB
+	ds DS
 }
 
 func New(path string) (db *DB, err error) {
 
-	var bo *bolt.DB
+	var ds DS
 
-	bo, err = bolt.Open(path, 0666, nil)
+	if strings.HasPrefix(path, "boltdb://") {
+		ds, err = stores["boltdb"](path)
+	}
 
-	bo.Update(func(tx *bolt.Tx) error {
-		tx.CreateBucketIfNotExists(bucket)
-		return nil
-	})
+	if strings.HasPrefix(path, "mysql://") {
+		ds, err = stores["mysql"](path)
+	}
 
-	return &DB{db: bo}, err
+	if strings.HasPrefix(path, "pgsql://") {
+		ds, err = stores["pgsql"](path)
+	}
+
+	return &DB{ds: ds}, err
 
 }
 
-func (db *DB) All() (kvs []*KV, err error) {
+// All retrieves all key:value items in the db.
+func (db *DB) All() (kvs []KV, err error) {
 
 	tx, err := db.Txn(false)
 	if err != nil {
@@ -52,7 +60,7 @@ func (db *DB) All() (kvs []*KV, err error) {
 }
 
 // Get retrieves a single key:value item.
-func (db *DB) Get(key []byte) (kv *KV, err error) {
+func (db *DB) Get(key []byte) (kv KV, err error) {
 
 	tx, err := db.Txn(false)
 	if err != nil {
@@ -66,7 +74,7 @@ func (db *DB) Get(key []byte) (kv *KV, err error) {
 }
 
 // MGet retrieves multiple key:value items.
-func (db *DB) MGet(keys ...[]byte) (kvs []*KV, err error) {
+func (db *DB) MGet(keys ...[]byte) (kvs []KV, err error) {
 
 	tx, err := db.Txn(false)
 	if err != nil {
@@ -80,7 +88,7 @@ func (db *DB) MGet(keys ...[]byte) (kvs []*KV, err error) {
 }
 
 // PGet retrieves the range of rows which are prefixed with `pre`.
-func (db *DB) PGet(pre []byte) (kvs []*KV, err error) {
+func (db *DB) PGet(pre []byte) (kvs []KV, err error) {
 
 	tx, err := db.Txn(false)
 	if err != nil {
@@ -96,7 +104,7 @@ func (db *DB) PGet(pre []byte) (kvs []*KV, err error) {
 // RGet retrieves the range of `max` rows between `beg` (inclusive) and
 // `end` (exclusive). To return the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
-func (db *DB) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
+func (db *DB) RGet(beg, end []byte, max uint64) (kvs []KV, err error) {
 
 	tx, err := db.Txn(false)
 	if err != nil {
@@ -218,38 +226,21 @@ func (db *DB) RDel(beg, end []byte, max uint64) (err error) {
 // committed otherwise. The retryable function should have no side
 // effects which could cause problems in the event it must be run more
 // than once.
-func (db *DB) Txn(writable bool) (txn *TX, err error) {
+func (db *DB) Txn(writable bool) (txn TX, err error) {
 
-	tx, err := db.db.Begin(writable)
-	if err != nil {
-		tx.Rollback()
-		return
-	}
-
-	txn = &TX{db: db, tx: tx, bu: tx.Bucket(bucket)}
-
-	return
-
-}
-
-func (db *DB) Save(path string) (err error) {
-
-	tx, err := db.Txn(false)
-	if err != nil {
-		return
-	}
-
-	defer tx.Close()
-
-	return tx.tx.CopyFile(path, 0666)
+	return db.ds.Txn(writable)
 
 }
 
 // Close ...
 func (db *DB) Close() (err error) {
 
-	// TODO Check if there are transactions open...
+	return db.ds.Close()
 
-	return db.db.Close()
+}
+
+func Register(name string, constructor func(string) (DS, error)) {
+
+	stores[name] = constructor
 
 }

@@ -12,11 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kvs
+package boltdb
 
-// KV represents a datastore key:value item
-type KV interface {
-	Exists() bool
-	Key() []byte
-	Val() []byte
+import (
+	"github.com/boltdb/bolt"
+
+	"github.com/abcum/surreal/kvs"
+)
+
+type DS struct {
+	db *bolt.DB
+}
+
+func (ds *DS) Txn(writable bool) (txn kvs.TX, err error) {
+
+	tx, err := ds.db.Begin(writable)
+	if err != nil {
+		err = &kvs.DSError{err}
+		if tx != nil {
+			tx.Rollback()
+		}
+		return
+	}
+
+	return &TX{ds: ds, tx: tx, bu: tx.Bucket(bucket)}, err
+
+}
+
+func (ds *DS) Close() (err error) {
+
+	return ds.db.Close()
+
 }

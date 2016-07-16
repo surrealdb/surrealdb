@@ -12,11 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kvs
+package mysql
 
-// KV represents a datastore key:value item
-type KV interface {
-	Exists() bool
-	Key() []byte
-	Val() []byte
+import (
+	"strings"
+
+	"database/sql"
+	_ "github.com/go-sql-driver/mysql"
+
+	"github.com/abcum/surreal/kvs"
+)
+
+func init() {
+	kvs.Register("mysql", New)
+}
+
+func New(path string) (ds kvs.DS, err error) {
+
+	var db *sql.DB
+
+	path = strings.TrimLeft(path, "mysql://")
+
+	db, err = sql.Open("mysql", path)
+
+	return &DS{db: db}, err
+
 }

@@ -49,7 +49,7 @@ type index struct {
 }
 
 type Doc struct {
-	kv      *kvs.KV
+	kv      kvs.KV
 	id      string
 	key     *keys.Thing
 	initial *data.Doc
@@ -58,7 +58,7 @@ type Doc struct {
 	indexes []*index
 }
 
-func New(kv *kvs.KV, key *keys.Thing) (this *Doc) {
+func New(kv kvs.KV, key *keys.Thing) (this *Doc) {
 
 	this = &Doc{kv: kv, key: key}
 
@@ -98,20 +98,20 @@ func New(kv *kvs.KV, key *keys.Thing) (this *Doc) {
 
 }
 
-func (this *Doc) Allow(txn *kvs.TX, cond string) (val bool) {
+func (this *Doc) Allow(txn kvs.TX, cond string) (val bool) {
 	return true
 }
 
-func (this *Doc) Check(txn *kvs.TX, cond []sql.Expr) (val bool) {
+func (this *Doc) Check(txn kvs.TX, cond []sql.Expr) (val bool) {
 	return true
 }
 
-func (this *Doc) Erase(txn *kvs.TX, data []sql.Expr) (err error) {
+func (this *Doc) Erase(txn kvs.TX, data []sql.Expr) (err error) {
 	this.current.Reset()
 	return
 }
 
-func (this *Doc) Merge(txn *kvs.TX, data []sql.Expr) (err error) {
+func (this *Doc) Merge(txn kvs.TX, data []sql.Expr) (err error) {
 
 	now := time.Now()
 
@@ -161,7 +161,7 @@ func (this *Doc) Merge(txn *kvs.TX, data []sql.Expr) (err error) {
 
 }
 
-func (this *Doc) StartThing(txn *kvs.TX) (err error) {
+func (this *Doc) StartThing(txn kvs.TX) (err error) {
 
 	dkey := &keys.DB{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB}
 	if err := txn.Put(dkey.Encode(), nil); err != nil {
@@ -177,13 +177,13 @@ func (this *Doc) StartThing(txn *kvs.TX) (err error) {
 
 }
 
-func (this *Doc) PurgeThing(txn *kvs.TX) (err error) {
+func (this *Doc) PurgeThing(txn kvs.TX) (err error) {
 
 	return txn.Del(this.key.Encode())
 
 }
 
-func (this *Doc) StoreThing(txn *kvs.TX) (err error) {
+func (this *Doc) StoreThing(txn kvs.TX) (err error) {
 
 	dkey := &keys.DB{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB}
 	if err := txn.Put(dkey.Encode(), nil); err != nil {
@@ -199,7 +199,7 @@ func (this *Doc) StoreThing(txn *kvs.TX) (err error) {
 
 }
 
-func (this *Doc) PurgePatch(txn *kvs.TX) (err error) {
+func (this *Doc) PurgePatch(txn kvs.TX) (err error) {
 
 	beg := &keys.Patch{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, ID: this.key.ID, AT: keys.StartOfTime}
 	end := &keys.Patch{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, ID: this.key.ID, AT: keys.EndOfTime}
@@ -207,14 +207,14 @@ func (this *Doc) PurgePatch(txn *kvs.TX) (err error) {
 
 }
 
-func (this *Doc) StorePatch(txn *kvs.TX) (err error) {
+func (this *Doc) StorePatch(txn kvs.TX) (err error) {
 
 	key := &keys.Patch{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, ID: this.key.ID}
 	return txn.CPut(key.Encode(), this.diff(), nil)
 
 }
 
-func (this *Doc) PurgeTrail(txn *kvs.TX) (err error) {
+func (this *Doc) PurgeTrail(txn kvs.TX) (err error) {
 
 	beg := &keys.Trail{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, AT: keys.StartOfTime}
 	end := &keys.Trail{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, AT: keys.EndOfTime}
@@ -222,14 +222,14 @@ func (this *Doc) PurgeTrail(txn *kvs.TX) (err error) {
 
 }
 
-func (this *Doc) StoreTrail(txn *kvs.TX) (err error) {
+func (this *Doc) StoreTrail(txn kvs.TX) (err error) {
 
 	key := &keys.Trail{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB}
 	return txn.CPut(key.Encode(), this.diff(), nil)
 
 }
 
-func (this *Doc) PurgeIndex(txn *kvs.TX) (err error) {
+func (this *Doc) PurgeIndex(txn kvs.TX) (err error) {
 
 	for _, index := range this.indexes {
 
@@ -255,7 +255,7 @@ func (this *Doc) PurgeIndex(txn *kvs.TX) (err error) {
 
 }
 
-func (this *Doc) StoreIndex(txn *kvs.TX) (err error) {
+func (this *Doc) StoreIndex(txn kvs.TX) (err error) {
 
 	for _, index := range this.indexes {
 
@@ -332,7 +332,7 @@ func (this *Doc) diff() []byte {
 	return []byte("DIFF")
 }
 
-func (this *Doc) getFlds(txn *kvs.TX) (out []*field) {
+func (this *Doc) getFlds(txn kvs.TX) (out []*field) {
 
 	beg := &keys.FD{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, FD: keys.Prefix}
 	end := &keys.FD{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, FD: keys.Suffix}
@@ -362,7 +362,7 @@ func (this *Doc) getFlds(txn *kvs.TX) (out []*field) {
 
 }
 
-func (this *Doc) getIdxs(txn *kvs.TX) (out []*data.Doc) {
+func (this *Doc) getIdxs(txn kvs.TX) (out []*data.Doc) {
 
 	beg := &keys.IX{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: keys.Prefix}
 	end := &keys.IX{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: keys.Suffix}
@@ -383,7 +383,7 @@ func (this *Doc) getIdxs(txn *kvs.TX) (out []*data.Doc) {
 // --------------------------------------------------
 // --------------------------------------------------
 
-func (this *Doc) mrgFld(txn *kvs.TX) (err error) {
+func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 
 	vm := otto.New()
 

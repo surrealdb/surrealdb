@@ -14,9 +14,21 @@
 
 package kvs
 
-// KV represents a datastore key:value item
-type KV interface {
-	Exists() bool
-	Key() []byte
-	Val() []byte
+// TX represents a datastore transaction
+type TX interface {
+	All() ([]KV, error)
+	Get([]byte) (KV, error)
+	MGet(...[]byte) ([]KV, error)
+	PGet([]byte) ([]KV, error)
+	RGet([]byte, []byte, uint64) ([]KV, error)
+	Put([]byte, []byte) error
+	CPut([]byte, []byte, []byte) error
+	Del([]byte) error
+	CDel([]byte, []byte) error
+	MDel(...[]byte) error
+	PDel([]byte) error
+	RDel([]byte, []byte, uint64) error
+	Close() error
+	Commit() error
+	Rollback() error
 }

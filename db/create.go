@@ -63,7 +63,7 @@ func executeCreateStatement(ast *sql.CreateStatement) (out []interface{}, err er
 
 }
 
-func create(txn *kvs.TX, doc *item.Doc, ast *sql.CreateStatement) (out interface{}, err error) {
+func create(txn kvs.TX, doc *item.Doc, ast *sql.CreateStatement) (out interface{}, err error) {
 
 	if err = doc.Merge(txn, ast.Data); err != nil {
 		return nil, err

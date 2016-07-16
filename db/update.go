@@ -65,7 +65,7 @@ func executeUpdateStatement(ast *sql.UpdateStatement) (out []interface{}, err er
 
 }
 
-func update(txn *kvs.TX, doc *item.Doc, ast *sql.UpdateStatement) (out interface{}, err error) {
+func update(txn kvs.TX, doc *item.Doc, ast *sql.UpdateStatement) (out interface{}, err error) {
 
 	if !doc.Check(txn, ast.Cond) {
 		return nil, nil

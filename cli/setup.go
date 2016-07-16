@@ -17,6 +17,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/abcum/surreal/log"
@@ -38,7 +39,11 @@ func setup() {
 	}
 
 	if opts.DB.Path == "" {
-		opts.DB.Path = "surreal.db"
+		opts.DB.Path = "boltdb://surreal.db"
+	}
+
+	if ok, _ := regexp.MatchString(`^(boltdb|mysql|pgsql):\/\/(.+)$`, opts.DB.Path); !ok {
+		log.Fatal("Specify a valid data store configuration path")
 	}
 
 	// --------------------------------------------------

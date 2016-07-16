@@ -12,11 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kvs
+package boltdb
 
-// KV represents a datastore key:value item
-type KV interface {
-	Exists() bool
-	Key() []byte
-	Val() []byte
+// KV represents a database key:value item
+type KV struct {
+	exi bool
+	key []byte
+	val []byte
+}
+
+// Exists is true if the key exists
+func (kv *KV) Exists() bool {
+	return kv.exi
+}
+
+// Key returns a byte slice of the key
+func (kv *KV) Key() []byte {
+	return kv.key
+}
+
+// Val returns a byte slice of the value
+func (kv *KV) Val() []byte {
+	return kv.val
 }

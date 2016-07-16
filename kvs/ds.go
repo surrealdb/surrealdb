@@ -14,9 +14,8 @@
 
 package kvs
 
-// KV represents a datastore key:value item
-type KV interface {
-	Exists() bool
-	Key() []byte
-	Val() []byte
+// DS represents a datastore implementation
+type DS interface {
+	Txn(bool) (TX, error)
+	Close() error
 }

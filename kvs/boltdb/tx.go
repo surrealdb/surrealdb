@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kvs
+package boltdb
 
 import (
 	"bytes"
@@ -20,20 +20,21 @@ import (
 
 	"github.com/boltdb/bolt"
 
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/util/cryp"
 	"github.com/abcum/surreal/util/snap"
 )
 
 // TX is a distributed database transaction.
 type TX struct {
-	db *DB
+	ds *DS
 	ck []byte
 	tx *bolt.Tx
 	bu *bolt.Bucket
 }
 
 // All retrieves all key:value items in the db.
-func (tx *TX) All() (kvs []*KV, err error) {
+func (tx *TX) All() (kvs []kvs.KV, err error) {
 
 	err = tx.bu.ForEach(func(key, val []byte) (err error) {
 
@@ -53,7 +54,7 @@ func (tx *TX) All() (kvs []*KV, err error) {
 }
 
 // Get retrieves a single key:value item.
-func (tx *TX) Get(key []byte) (kv *KV, err error) {
+func (tx *TX) Get(key []byte) (kv kvs.KV, err error) {
 
 	val := tx.bu.Get(key)
 
@@ -62,7 +63,7 @@ func (tx *TX) Get(key []byte) (kv *KV, err error) {
 }
 
 // MGet retrieves multiple key:value items.
-func (tx *TX) MGet(keys ...[]byte) (kvs []*KV, err error) {
+func (tx *TX) MGet(keys ...[]byte) (kvs []kvs.KV, err error) {
 
 	for _, key := range keys {
 
@@ -82,7 +83,7 @@ func (tx *TX) MGet(keys ...[]byte) (kvs []*KV, err error) {
 }
 
 // PGet retrieves the range of rows which are prefixed with `pre`.
-func (tx *TX) PGet(pre []byte) (kvs []*KV, err error) {
+func (tx *TX) PGet(pre []byte) (kvs []kvs.KV, err error) {
 
 	cu := tx.bu.Cursor()
 
@@ -104,7 +105,7 @@ func (tx *TX) PGet(pre []byte) (kvs []*KV, err error) {
 // RGet retrieves the range of `max` rows between `beg` (inclusive) and
 // `end` (exclusive). To return the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
-func (tx *TX) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
+func (tx *TX) RGet(beg, end []byte, max uint64) (kvs []kvs.KV, err error) {
 
 	if max == 0 {
 		max = math.MaxUint64
@@ -148,22 +149,22 @@ func (tx *TX) RGet(beg, end []byte, max uint64) (kvs []*KV, err error) {
 func (tx *TX) Put(key, val []byte) (err error) {
 
 	if !tx.tx.Writable() {
-		err = &TXError{err}
+		err = &kvs.TXError{err}
 		return
 	}
 
 	if val, err = snap.Encode(val); err != nil {
-		err = &DBError{err}
+		err = &kvs.DBError{err}
 		return
 	}
 
 	if val, err = cryp.Encrypt(tx.ck, val); err != nil {
-		err = &CKError{err}
+		err = &kvs.CKError{err}
 		return
 	}
 
 	if err = tx.bu.Put(key, val); err != nil {
-		err = &DBError{err}
+		err = &kvs.DBError{err}
 		return
 	}
 
@@ -177,29 +178,30 @@ func (tx *TX) Put(key, val []byte) (err error) {
 func (tx *TX) CPut(key, val, exp []byte) (err error) {
 
 	if !tx.tx.Writable() {
-		err = &TXError{err}
+		err = &kvs.TXError{err}
 		return
 	}
 
 	now, _ := tx.Get(key)
+	act := now.(*KV).val
 
-	if !bytes.Equal(now.val, exp) {
-		err = &KVError{err, key, now.val, exp}
+	if !bytes.Equal(act, exp) {
+		err = &kvs.KVError{err, key, act, exp}
 		return
 	}
 
 	if val, err = snap.Encode(val); err != nil {
-		err = &DBError{err}
+		err = &kvs.DBError{err}
 		return
 	}
 
 	if val, err = cryp.Encrypt(tx.ck, val); err != nil {
-		err = &CKError{err}
+		err = &kvs.CKError{err}
 		return
 	}
 
 	if err = tx.bu.Put(key, val); err != nil {
-		err = &DBError{err}
+		err = &kvs.DBError{err}
 		return
 	}
 
@@ -211,12 +213,12 @@ func (tx *TX) CPut(key, val, exp []byte) (err error) {
 func (tx *TX) Del(key []byte) (err error) {
 
 	if !tx.tx.Writable() {
-		err = &TXError{err}
+		err = &kvs.TXError{err}
 		return
 	}
 
 	if err = tx.bu.Delete(key); err != nil {
-		err = &DBError{err}
+		err = &kvs.DBError{err}
 		return
 	}
 
@@ -229,19 +231,20 @@ func (tx *TX) Del(key []byte) (err error) {
 func (tx *TX) CDel(key, exp []byte) (err error) {
 
 	if !tx.tx.Writable() {
-		err = &TXError{err}
+		err = &kvs.TXError{err}
 		return
 	}
 
 	now, _ := tx.Get(key)
+	act := now.(*KV).val
 
-	if !bytes.Equal(now.val, exp) {
-		err = &KVError{err, key, now.val, exp}
+	if !bytes.Equal(act, exp) {
+		err = &kvs.KVError{err, key, act, exp}
 		return
 	}
 
 	if err = tx.bu.Delete(key); err != nil {
-		err = &DBError{err}
+		err = &kvs.DBError{err}
 		return
 	}
 
@@ -253,14 +256,14 @@ func (tx *TX) CDel(key, exp []byte) (err error) {
 func (tx *TX) MDel(keys ...[]byte) (err error) {
 
 	if !tx.tx.Writable() {
-		err = &TXError{err}
+		err = &kvs.TXError{err}
 		return
 	}
 
 	for _, key := range keys {
 
 		if err = tx.bu.Delete(key); err != nil {
-			err = &DBError{err}
+			err = &kvs.DBError{err}
 			return
 		}
 
@@ -277,7 +280,7 @@ func (tx *TX) PDel(pre []byte) (err error) {
 
 	for key, _ := cu.Seek(pre); bytes.HasPrefix(key, pre); key, _ = cu.Seek(pre) {
 		if err = tx.bu.Delete(key); err != nil {
-			err = &DBError{err}
+			err = &kvs.DBError{err}
 			return
 		}
 	}
@@ -296,7 +299,7 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 	}
 
 	if !tx.tx.Writable() {
-		err = &TXError{err}
+		err = &kvs.TXError{err}
 		return
 	}
 
@@ -305,7 +308,7 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 	if bytes.Compare(beg, end) < 1 {
 		for key, _ := cu.Seek(beg); key != nil && max > 0 && bytes.Compare(key, end) < 0; key, _ = cu.Seek(beg) {
 			if err = tx.bu.Delete(key); err != nil {
-				err = &DBError{err}
+				err = &kvs.DBError{err}
 				return
 			}
 			max--
@@ -315,7 +318,7 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 	if bytes.Compare(beg, end) > 1 {
 		for key, _ := cu.Seek(end); key != nil && max > 0 && bytes.Compare(beg, key) < 0; key, _ = cu.Seek(end) {
 			if err = tx.bu.Delete(key); err != nil {
-				err = &DBError{err}
+				err = &kvs.DBError{err}
 				return
 			}
 			max--
@@ -348,13 +351,13 @@ func get(tx *TX, key, val []byte) (kv *KV, err error) {
 
 	kv.val, err = cryp.Decrypt(tx.ck, kv.val)
 	if err != nil {
-		err = &CKError{err}
+		err = &kvs.CKError{err}
 		return
 	}
 
 	kv.val, err = snap.Decode(kv.val)
 	if err != nil {
-		err = &DBError{err}
+		err = &kvs.DBError{err}
 		return
 	}
 

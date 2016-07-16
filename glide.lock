@@ -1,8 +1,8 @@
-hash: ef7f6436a4e6150819b1384fc70f82399127da39c582b0a1ea0a110a0fb515c5
-updated: 2016-07-04T12:25:55.535632888+01:00
+hash: 3d485f432865b9fa5118e8a5cc45f3645cf69bcf348e86d3fcb6a81e78e023d1
+updated: 2016-07-16T10:17:13.573409227+01:00
 imports:
 - name: github.com/abcum/fibre
-  version: b98e9f6e4b0fa3041dbe80e3c5565b173ae919ce
+  version: 29d9f69b6f170015ffc87d614e16032f27bb3c38
   subpackages:
   - mw
 - name: github.com/abcum/logrus
@@ -10,17 +10,19 @@ imports:
 - name: github.com/armon/go-metrics
   version: fbf75676ee9c0a3a23eb0a4d9220a3612cfbd1ed
 - name: github.com/boltdb/bolt
-  version: 3f7947a25d970e1e5f512276c14d5dcf731ccd5e
+  version: acc803f0ced151102ed51bf824f8709ebd6602bc
 - name: github.com/cznic/zappy
   version: 4f5e6ef19fd692f1ef9b01206de4f1161a314e9a
 - name: github.com/dgrijalva/jwt-go
-  version: f0777076321ab64f6efc15a82d9d23b98539b943
+  version: 01aeca54ebda6e0fbfafd0a524d234159c05ec20
+- name: github.com/go-sql-driver/mysql
+  version: a732e14c62dde3285440047bba97581bc472ae18
 - name: github.com/golang/protobuf
-  version: 3852dcfda249c2097355a6aabb199a28d97b30df
+  version: 874264fbbb43f4d91e999fecb4b40143ed611400
   subpackages:
   - proto
 - name: github.com/gorilla/websocket
-  version: 54f9decdbfb3fe254c5df3d5aa234480989f4af0
+  version: a836c37014dbbf0d1e871d04531b851fcbdeb22d
 - name: github.com/hashicorp/errwrap
   version: 7554cd9344cec97297fa6649b055a8c98c2a1e55
 - name: github.com/hashicorp/go-msgpack
@@ -42,6 +44,10 @@ imports:
   version: 76626ae9c91c4f2a10f34cad8ce83ea42c93bb75
 - name: github.com/kr/text
   version: 7cafcd837844e784b526369c9bce262804aebc60
+- name: github.com/lib/pq
+  version: 4dd446efc17690bc53e154025146f73203b18309
+  subpackages:
+  - oid
 - name: github.com/mgutz/ansi
   version: c286dcecd19ff979eeb73ea444e479b903f2cfcb
 - name: github.com/miekg/dns
@@ -56,15 +62,21 @@ imports:
   - registry
   - token
 - name: github.com/satori/go.uuid
-  version: 879c5887cd475cd7864858769793b2ceb0d44feb
+  version: 0aa62d5ddceb50dbcb909d790b5345affd3669b6
+- name: github.com/sergi/go-diff
+  version: ec7fdbb58eb3e300c8595ad5ac74a5aa50019cc7
+  subpackages:
+  - diffmatchpatch
 - name: github.com/spf13/cobra
-  version: 6a8bd97bdb1fc0d08a83459940498ea49d3e8c93
+  version: b24564e919247d7c870fe0ed3738c98d8741aca4
 - name: github.com/spf13/pflag
   version: 367864438f1b1a3c7db4da06a2f55b144e6784e0
 - name: github.com/ugorji/go
   version: b94837a2404ab90efe9289e77a70694c355739cb
   subpackages:
   - codec
+- name: github.com/yudai/golcs
+  version: d1c525dea8ce39ea9a783d33cf08932305373f2c
 - name: github.com/yvasiyarov/go-metrics
   version: c25f46c4b94079672242ec48a545e7ca9ebe3aec
 - name: github.com/yvasiyarov/gorelic
@@ -72,12 +84,11 @@ imports:
 - name: github.com/yvasiyarov/newrelic_platform_go
   version: 9c099fbc30e90de5bb5c5f94aa5fd08f2daeaacd
 - name: golang.org/x/net
-  version: b400c2eff1badec7022a8c8f5bea058b6315eed7
+  version: e90d6d0afc4c315a0d87a568ae68577cc15149a0
   subpackages:
-  - netutil
   - context
 - name: golang.org/x/sys
-  version: a408501be4d17ee978c04a618e7a1b22af058c0e
+  version: b518c298ac9dc94b6ac0757394f50d10c5dfa25a
   subpackages:
   - unix
 - name: google.golang.org/appengine
@@ -96,9 +107,26 @@ imports:
   subpackages:
   - base64vlq
 - name: gopkg.in/tylerb/graceful.v1
-  version: ecde8c8f16df93a994dda8936c8f60f0c26c28ab
+  version: d7d7a205e779a4738d38eda0671fff8bfc965f14
 - name: gopkg.in/vmihailenco/msgpack.v2
   version: 585b09497e708217121c79a5aa185647b757605a
   subpackages:
   - codes
-devImports: []
+testImports:
+- name: github.com/gopherjs/gopherjs
+  version: 090403452ab6979e3b7c054ceb7ee23da91b2ae4
+  subpackages:
+  - js
+- name: github.com/jtolds/gls
+  version: 8ddce2a84170772b95dd5d576c48d517b22cac63
+- name: github.com/smartystreets/assertions
+  version: 2063fd1cc7c975db70502811a34b06ad034ccdf2
+  subpackages:
+  - internal/go-render/render
+  - internal/oglematchers
+- name: github.com/smartystreets/goconvey
+  version: 4622128e06c77c0174e17a7f0ed2db19a989b473
+  subpackages:
+  - convey
+  - convey/reporting
+  - convey/gotest

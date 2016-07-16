@@ -16,6 +16,17 @@ package kvs
 
 import "fmt"
 
+// DSError is an error which occurs when there is a
+// problem with writing keys/values to the database.
+type DSError struct {
+	Err error
+}
+
+// Error returns the string representation of the error.
+func (e *DSError) Error() string {
+	return fmt.Sprintf("There was a problem connecting to the datastore")
+}
+
 // DBError is an error which occurs when there is a
 // problem with writing keys/values to the database.
 type DBError struct {

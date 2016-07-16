@@ -58,7 +58,7 @@ func executeResyncIndexStatement(ast *sql.ResyncIndexStatement) (out []interface
 
 }
 
-func resync(txn *kvs.TX, doc *item.Doc, ast *sql.ResyncIndexStatement) (err error) {
+func resync(txn kvs.TX, doc *item.Doc, ast *sql.ResyncIndexStatement) (err error) {
 
 	if err = doc.StoreIndex(txn); err != nil {
 		return err

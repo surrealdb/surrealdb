@@ -12,11 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kvs
+package pgsql
 
-// KV represents a datastore key:value item
-type KV interface {
-	Exists() bool
-	Key() []byte
-	Val() []byte
+import (
+	"strings"
+
+	"database/sql"
+	_ "github.com/lib/pq"
+
+	"github.com/abcum/surreal/kvs"
+)
+
+func init() {
+	kvs.Register("pgsql", New)
+}
+
+func New(path string) (ds kvs.DS, err error) {
+
+	var db *sql.DB
+
+	path = strings.TrimLeft(path, "pgsql://")
+
+	db, err = sql.Open("postgres", path)
+
+	return &DS{db: db}, err
+
 }

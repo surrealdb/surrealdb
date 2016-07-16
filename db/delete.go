@@ -65,7 +65,7 @@ func executeDeleteStatement(ast *sql.DeleteStatement) (out []interface{}, err er
 
 }
 
-func delete(txn *kvs.TX, doc *item.Doc, ast *sql.DeleteStatement) (out interface{}, err error) {
+func delete(txn kvs.TX, doc *item.Doc, ast *sql.DeleteStatement) (out interface{}, err error) {
 
 	if !doc.Check(txn, ast.Cond) {
 		return nil, nil

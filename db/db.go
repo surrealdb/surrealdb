@@ -23,6 +23,10 @@ import (
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
+
+	_ "github.com/abcum/surreal/kvs/boltdb"
+	_ "github.com/abcum/surreal/kvs/mysql"
+	_ "github.com/abcum/surreal/kvs/pgsql"
 )
 
 type Response struct {
