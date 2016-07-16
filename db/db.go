@@ -82,8 +82,13 @@ func Execute(ctx *fibre.Context, txt interface{}) (out []interface{}, err error)
 
 	go execute(ctx, ast, chn)
 
-	for res := range chn {
-		out = append(out, res)
+	for msg := range chn {
+		switch res := msg.(type) {
+		case error:
+			return nil, res
+		default:
+			out = append(out, res)
+		}
 	}
 
 	return
@@ -145,9 +150,16 @@ func detail(e error) interface{} {
 	}
 }
 
-func execute(ctx *fibre.Context, ast *sql.Query, chn chan interface{}) {
+func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 
-	defer close(chn)
+	defer func() {
+		if r := recover(); r != nil {
+			if err, ok := r.(error); ok {
+				chn <- err
+			}
+		}
+		close(chn)
+	}()
 
 	for _, s := range ast.Statements {
 
