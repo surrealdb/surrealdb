@@ -64,6 +64,7 @@ func Exit() {
 
 }
 
+// Prepare prepares a query for parameterization for future execution
 func Prepare(sql string, param ...interface{}) string {
 
 	return fmt.Sprintf(sql, param...)

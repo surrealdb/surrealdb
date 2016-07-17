@@ -26,6 +26,7 @@ type DB struct {
 }
 
 func New(path string) (db *DB, err error) {
+// New sets up the underlying key-value store
 
 	var ds DS
 
