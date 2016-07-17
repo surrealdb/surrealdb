@@ -37,8 +37,6 @@ type Response struct {
 }
 
 var db *kvs.DB
-var quit chan int
-var tick *time.Ticker
 
 // Setup sets up the connection with the data layer
 func Setup(opts *cnf.Options) (err error) {
@@ -46,8 +44,6 @@ func Setup(opts *cnf.Options) (err error) {
 	log.WithPrefix("db").Infof("Starting database at %s", opts.DB.Path)
 
 	db, err = kvs.New(opts.DB.Path)
-
-	// backup(opts)
 
 	return
 
@@ -57,8 +53,6 @@ func Setup(opts *cnf.Options) (err error) {
 func Exit() {
 
 	log.WithPrefix("db").Infof("Gracefully shutting down database")
-
-	// quit <- 0
 
 	db.Close()
 
@@ -93,27 +87,6 @@ func Execute(ctx *fibre.Context, txt interface{}) (out []interface{}, err error)
 	}
 
 	return
-
-}
-
-func backup(opts *cnf.Options) {
-
-	/*tick = time.NewTicker(opts.Backups.Time)
-	quit = make(chan int)
-
-	go func() {
-		for {
-			select {
-			case <-tick.C:
-				t := time.Now().Format("2006-01-02T15-04-05")
-				n := fmt.Sprintf("%s.backup.db", t)
-				db.Save(n)
-			case <-quit:
-				tick.Stop()
-				return
-			}
-		}
-	}()*/
 
 }
 
