@@ -76,7 +76,7 @@ clean:
 .PHONY: quick
 quick: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 quick: 
-	$(GO) build
+	CGO_ENABLED=0 $(GO) build
 
 # The `make build` command compiles
 # the build flags, gets the project
