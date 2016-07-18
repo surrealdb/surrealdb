@@ -214,21 +214,6 @@ func (this *Doc) StorePatch(txn kvs.TX) (err error) {
 
 }
 
-func (this *Doc) PurgeTrail(txn kvs.TX) (err error) {
-
-	beg := &keys.Trail{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, AT: keys.StartOfTime}
-	end := &keys.Trail{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, AT: keys.EndOfTime}
-	return txn.RDel(beg.Encode(), end.Encode(), 0)
-
-}
-
-func (this *Doc) StoreTrail(txn kvs.TX) (err error) {
-
-	key := &keys.Trail{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB}
-	return txn.CPut(key.Encode(), this.diff(), nil)
-
-}
-
 func (this *Doc) PurgeIndex(txn kvs.TX) (err error) {
 
 	for _, index := range this.indexes {

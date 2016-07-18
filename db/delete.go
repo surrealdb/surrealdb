@@ -75,10 +75,6 @@ func delete(txn kvs.TX, doc *item.Doc, ast *sql.DeleteStatement) (out interface{
 		return nil, err
 	}
 
-	if err = doc.StoreTrail(txn); err != nil {
-		return nil, err
-	}
-
 	if err = doc.PurgeIndex(txn); err != nil {
 		return nil, err
 	}

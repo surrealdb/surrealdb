@@ -81,10 +81,6 @@ func create(txn kvs.TX, doc *item.Doc, ast *sql.CreateStatement) (out interface{
 		return nil, err
 	}
 
-	if err = doc.StoreTrail(txn); err != nil {
-		return nil, err
-	}
-
 	out = doc.Yield(ast.Echo, sql.AFTER)
 
 	return
