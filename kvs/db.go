@@ -16,30 +16,32 @@ package kvs
 
 import (
 	"strings"
+
+	"github.com/abcum/surreal/cnf"
 )
 
-var stores = make(map[string]func(string) (DS, error))
+var stores = make(map[string]func(*cnf.Options) (DS, error))
 
 // DB is a database handle to a single Surreal cluster.
 type DB struct {
 	ds DS
 }
 
-func New(path string) (db *DB, err error) {
 // New sets up the underlying key-value store
+func New(opts *cnf.Options) (db *DB, err error) {
 
 	var ds DS
 
-	if strings.HasPrefix(path, "boltdb://") {
-		ds, err = stores["boltdb"](path)
+	if strings.HasPrefix(opts.DB.Path, "boltdb://") {
+		ds, err = stores["boltdb"](opts)
 	}
 
-	if strings.HasPrefix(path, "mysql://") {
-		ds, err = stores["mysql"](path)
+	if strings.HasPrefix(opts.DB.Path, "mysql://") {
+		ds, err = stores["mysql"](opts)
 	}
 
-	if strings.HasPrefix(path, "pgsql://") {
-		ds, err = stores["pgsql"](path)
+	if strings.HasPrefix(opts.DB.Path, "pgsql://") {
+		ds, err = stores["pgsql"](opts)
 	}
 
 	return &DB{ds: ds}, err
@@ -240,7 +242,7 @@ func (db *DB) Close() (err error) {
 
 }
 
-func Register(name string, constructor func(string) (DS, error)) {
+func Register(name string, constructor func(*cnf.Options) (DS, error)) {
 
 	stores[name] = constructor
 

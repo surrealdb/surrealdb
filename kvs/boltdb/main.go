@@ -19,6 +19,7 @@ import (
 
 	"github.com/boltdb/bolt"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
 )
 
@@ -28,11 +29,11 @@ func init() {
 	kvs.Register("boltdb", New)
 }
 
-func New(path string) (ds kvs.DS, err error) {
+func New(opts *cnf.Options) (ds kvs.DS, err error) {
 
 	var db *bolt.DB
 
-	path = strings.TrimLeft(path, "boltdb://")
+	path := strings.TrimLeft(opts.DB.Path, "boltdb://")
 
 	db, err = bolt.Open(path, 0666, nil)
 

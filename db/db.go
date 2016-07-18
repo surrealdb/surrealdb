@@ -43,7 +43,7 @@ func Setup(opts *cnf.Options) (err error) {
 
 	log.WithPrefix("db").Infof("Starting database at %s", opts.DB.Path)
 
-	db, err = kvs.New(opts.DB.Path)
+	db, err = kvs.New(opts)
 
 	return
 

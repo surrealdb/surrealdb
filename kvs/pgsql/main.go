@@ -20,6 +20,7 @@ import (
 	"database/sql"
 	_ "github.com/lib/pq"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
 )
 
@@ -27,11 +28,11 @@ func init() {
 	kvs.Register("pgsql", New)
 }
 
-func New(path string) (ds kvs.DS, err error) {
+func New(opts *cnf.Options) (ds kvs.DS, err error) {
 
 	var db *sql.DB
 
-	path = strings.TrimLeft(path, "pgsql://")
+	path := strings.TrimLeft(opts.DB.Path, "pgsql://")
 
 	db, err = sql.Open("postgres", path)
 
