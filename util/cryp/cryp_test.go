@@ -38,6 +38,24 @@ func TestEmpty(t *testing.T) {
 
 }
 
+func TestBlank(t *testing.T) {
+
+	key := []byte("1hg7dbrma8ghe547")
+	str := []byte("")
+
+	Convey("Cryptography should fail", t, func() {
+		enc, _ := Encrypt(key, str)
+		dec, _ := Decrypt(key, enc)
+		Convey("Encrypt", func() {
+			So(enc, ShouldResemble, str)
+		})
+		Convey("Decrypt", func() {
+			So(dec, ShouldResemble, str)
+		})
+	})
+
+}
+
 func TestInvalid(t *testing.T) {
 
 	key := []byte("invalidkey")
