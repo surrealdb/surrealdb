@@ -36,7 +36,6 @@ type Options struct {
 	Cert struct {
 		Crt string // File location of server crt
 		Key string // File location of server key
-		Pem string // File location of server pem
 	}
 
 	Auth struct {

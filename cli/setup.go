@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/abcum/surreal/log"
-	"github.com/abcum/surreal/util/cert"
 	"github.com/abcum/surreal/util/uuid"
 )
 
@@ -145,20 +144,26 @@ func setup() {
 	// Certs
 	// --------------------------------------------------
 
-	if opts.Cert.Pem != "" {
-
-		if opts.Cert.Key != "" || opts.Cert.Crt != "" {
-			log.Fatal("You can not specify --cert-pem with --cert-key or --cert-crt")
+	if strings.HasPrefix(opts.Cert.Crt, "-----") {
+		var err error
+		var doc *os.File
+		if doc, err = os.Create("cert.crt"); err != nil {
+			log.Fatal("Can not decode PEM encoded certificate into cert.crt")
 		}
-
-		err := cert.Extract(opts.Cert.Pem, "cert.key", "cert.crt")
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		opts.Cert.Key = "cert.key"
+		doc.Write([]byte(opts.Cert.Crt))
+		doc.Close()
 		opts.Cert.Crt = "cert.crt"
+	}
 
+	if strings.HasPrefix(opts.Cert.Key, "-----") {
+		var err error
+		var doc *os.File
+		if doc, err = os.Create("cert.key"); err != nil {
+			log.Fatal("Can not decode PEM encoded private key into cert.key")
+		}
+		doc.Write([]byte(opts.Cert.Key))
+		doc.Close()
+		opts.Cert.Key = "cert.key"
 	}
 
 	// --------------------------------------------------
