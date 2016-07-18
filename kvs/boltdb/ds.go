@@ -22,6 +22,7 @@ import (
 
 type DS struct {
 	db *bolt.DB
+	ck []byte
 }
 
 func (ds *DS) Txn(writable bool) (txn kvs.TX, err error) {

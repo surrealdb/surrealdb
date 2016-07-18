@@ -158,6 +158,11 @@ func (tx *TX) Put(key, val []byte) (err error) {
 		return
 	}
 
+	if val, err = cryp.Encrypt(tx.ds.ck, val); err != nil {
+		err = &kvs.CKError{err}
+		return
+	}
+
 	if val, err = cryp.Encrypt(tx.ck, val); err != nil {
 		err = &kvs.CKError{err}
 		return
@@ -192,6 +197,11 @@ func (tx *TX) CPut(key, val, exp []byte) (err error) {
 
 	if val, err = snap.Encode(val); err != nil {
 		err = &kvs.DBError{err}
+		return
+	}
+
+	if val, err = cryp.Encrypt(tx.ds.ck, val); err != nil {
+		err = &kvs.CKError{err}
 		return
 	}
 
@@ -350,6 +360,12 @@ func get(tx *TX, key, val []byte) (kv *KV, err error) {
 	}
 
 	kv.val, err = cryp.Decrypt(tx.ck, kv.val)
+	if err != nil {
+		err = &kvs.CKError{err}
+		return
+	}
+
+	kv.val, err = cryp.Decrypt(tx.ds.ck, kv.val)
 	if err != nil {
 		err = &kvs.CKError{err}
 		return

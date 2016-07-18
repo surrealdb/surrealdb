@@ -42,6 +42,6 @@ func New(opts *cnf.Options) (ds kvs.DS, err error) {
 		return nil
 	})
 
-	return &DS{db: db}, err
+	return &DS{db: db, ck: opts.DB.Key}, err
 
 }

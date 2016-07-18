@@ -36,6 +36,6 @@ func New(opts *cnf.Options) (ds kvs.DS, err error) {
 
 	db, err = sql.Open("postgres", path)
 
-	return &DS{db: db}, err
+	return &DS{db: db, ck: opts.DB.Key}, err
 
 }
