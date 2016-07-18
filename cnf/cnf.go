@@ -17,6 +17,8 @@ package cnf
 // Options defines global configuration options
 type Options struct {
 	DB struct {
+		Key  []byte // Data encryption key
+		Code string // Data encruption key string
 		Path string // Path to store the data file
 		Host string // Surreal host to connect to
 		Port string // Surreal port to connect to

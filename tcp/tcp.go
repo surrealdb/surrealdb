@@ -43,6 +43,7 @@ func Setup(opts *cnf.Options) (err error) {
 
 	cfg.MemberlistConfig.LogOutput = ioutil.Discard
 
+	cfg.MemberlistConfig.SecretKey = opts.DB.Key
 	cfg.MemberlistConfig.BindPort = opts.Port.Tcp
 	cfg.MemberlistConfig.AdvertisePort = opts.Port.Tcp
 
