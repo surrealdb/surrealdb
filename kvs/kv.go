@@ -19,4 +19,5 @@ type KV interface {
 	Exists() bool
 	Key() []byte
 	Val() []byte
+	Str() string
 }

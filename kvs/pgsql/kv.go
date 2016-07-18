@@ -35,3 +35,8 @@ func (kv *KV) Key() []byte {
 func (kv *KV) Val() []byte {
 	return kv.val
 }
+
+// Str returns a string of the value
+func (kv *KV) Str() string {
+	return string(kv.val)
+}
