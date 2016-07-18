@@ -15,9 +15,11 @@
 package kvs
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/util/keys"
 )
 
 var stores = make(map[string]func(*cnf.Options) (DS, error))
@@ -44,7 +46,29 @@ func New(opts *cnf.Options) (db *DB, err error) {
 		ds, err = stores["pgsql"](opts)
 	}
 
-	return &DB{ds: ds}, err
+	db = &DB{ds: ds}
+
+	err = db.enc(opts)
+
+	return
+
+}
+
+func (db *DB) enc(opts *cnf.Options) (err error) {
+
+	ck := &keys.CK{KV: opts.DB.Base}
+
+	kv, _ := db.Get(ck.Encode())
+
+	if kv.Exists() == false {
+		err = db.Put(ck.Encode(), []byte("±"))
+	}
+
+	if kv.Exists() == true && kv.Str() != "±" {
+		err = fmt.Errorf("Please provide a valid encryption key for the stored data.")
+	}
+
+	return
 
 }
 
