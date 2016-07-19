@@ -64,7 +64,10 @@ func (db *DB) enc(opts *cnf.Options) (err error) {
 
 	ck := &keys.CK{KV: opts.DB.Base}
 
-	kv, _ := db.Get(ck.Encode())
+	kv, err := db.Get(ck.Encode())
+	if err != nil {
+		return err
+	}
 
 	if kv.Exists() == false {
 		err = db.Put(ck.Encode(), []byte("±"))
