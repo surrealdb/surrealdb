@@ -23,6 +23,12 @@ type Options struct {
 		Host string // Surreal host to connect to
 		Port string // Surreal port to connect to
 		Base string // Base key to use in KV stores
+		Cert struct {
+			CA  string
+			Crt string
+			Key string
+			SSL bool
+		}
 	}
 
 	Port struct {

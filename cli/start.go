@@ -72,6 +72,9 @@ func init() {
 
 	startCmd.PersistentFlags().StringVar(&opts.DB.Base, "db-base", "", flag("db-base"))
 	startCmd.PersistentFlags().StringVar(&opts.DB.Path, "db-path", "", flag("db-path"))
+	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.CA, "db-ca", "", "Path to the CA file used to connect to the remote database.")
+	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Crt, "db-crt", "", "Path to the certificate file used to connect to the remote database.")
+	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Key, "db-key", "", "Path to the private key file used to connect to the remote database.")
 
 	startCmd.PersistentFlags().IntVar(&opts.Port.Tcp, "port-tcp", 0, flag("port-tcp"))
 	startCmd.PersistentFlags().IntVar(&opts.Port.Web, "port-web", 0, flag("port-web"))

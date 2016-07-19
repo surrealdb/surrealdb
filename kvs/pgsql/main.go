@@ -15,7 +15,8 @@
 package pgsql
 
 import (
-	"strings"
+	"fmt"
+	"regexp"
 
 	"database/sql"
 	_ "github.com/lib/pq"
@@ -32,13 +33,40 @@ func New(opts *cnf.Options) (ds kvs.DS, err error) {
 
 	var db *sql.DB
 
-	path := strings.TrimLeft(opts.DB.Path, "pgsql://")
+	opts.DB.Path, err = config(opts)
+	if err != nil {
+		return
+	}
 
-	db, err = sql.Open("postgres", path)
+	db, err = sql.Open("postgres", opts.DB.Path)
 	if err != nil {
 		return
 	}
 
 	return &DS{db: db, ck: opts.DB.Key}, err
+
+}
+
+func config(opts *cnf.Options) (path string, err error) {
+
+	re := regexp.MustCompile(`^mysql://` +
+		`((?:(?P<user>.*?)(?::(?P<passwd>.*))?@))?` +
+		`(?:(?:(?P<addr>[^\/]*))?)?` +
+		`\/(?P<dbname>.*?)` +
+		`(?:\?(?P<params>[^\?]*))?$`)
+
+	ma := re.FindStringSubmatch(opts.DB.Path)
+
+	if len(ma) == 0 || ma[4] == "" || ma[5] == "" {
+		err = fmt.Errorf("Specify a valid data store configuration path. Use the help command for further instructions.")
+	}
+
+	if opts.DB.Cert.SSL {
+		path += fmt.Sprintf("postgres://%s%s/%s?sslmode=verify-ca&sslrootcert=%s&sslcert=%s&sslkey=%s", ma[1], ma[4], ma[5], opts.DB.Cert.CA, opts.DB.Cert.Crt, opts.DB.Cert.Key)
+	} else {
+		path += fmt.Sprintf("postgres://%s%s/%s", ma[1], ma[4], ma[5])
+	}
+
+	return
 
 }

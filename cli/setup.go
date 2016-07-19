@@ -45,6 +45,55 @@ func setup() {
 		log.Fatal("Specify a valid data store configuration path")
 	}
 
+	if strings.HasPrefix(opts.DB.Cert.CA, "-----") {
+		var err error
+		var doc *os.File
+		if doc, err = os.Create("db.ca"); err != nil {
+			log.Fatal("Can not decode PEM encoded CA into db.ca")
+		}
+		doc.Write([]byte(opts.DB.Cert.CA))
+		doc.Close()
+		opts.Cert.Crt = "db.ca"
+	}
+
+	if strings.HasPrefix(opts.DB.Cert.Crt, "-----") {
+		var err error
+		var doc *os.File
+		if doc, err = os.Create("db.key"); err != nil {
+			log.Fatal("Can not decode PEM encoded certificate into db.crt")
+		}
+		doc.Write([]byte(opts.DB.Cert.Crt))
+		doc.Close()
+		opts.Cert.Crt = "db.crt"
+	}
+
+	if strings.HasPrefix(opts.DB.Cert.Key, "-----") {
+		var err error
+		var doc *os.File
+		if doc, err = os.Create("db.crt"); err != nil {
+			log.Fatal("Can not decode PEM encoded private key into db.key")
+		}
+		doc.Write([]byte(opts.DB.Cert.Key))
+		doc.Close()
+		opts.Cert.Crt = "db.key"
+	}
+
+	if opts.DB.Cert.CA != "" || opts.DB.Cert.Crt != "" || opts.DB.Cert.Key != "" {
+		opts.DB.Cert.SSL = true
+	}
+
+	if opts.DB.Cert.CA == "" && opts.DB.Cert.SSL {
+		log.Fatal("Specify a valid PEM encoded CA file.")
+	}
+
+	if opts.DB.Cert.Crt == "" && opts.DB.Cert.SSL {
+		log.Fatal("Specify a valid PEM encoded certificate file.")
+	}
+
+	if opts.DB.Cert.Key == "" && opts.DB.Cert.SSL {
+		log.Fatal("Specify a valid PEM encoded private key file.")
+	}
+
 	// --------------------------------------------------
 	// Auth
 	// --------------------------------------------------
