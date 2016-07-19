@@ -41,8 +41,18 @@ func setup() {
 		opts.DB.Path = "boltdb://surreal.db"
 	}
 
-	if ok, _ := regexp.MatchString(`^(boltdb|mysql|pgsql):\/\/(.+)$`, opts.DB.Path); !ok {
+	if opts.DB.Code != "" {
+		opts.DB.Key = []byte(opts.DB.Code)
+	}
+
+	if ok, _ := regexp.MatchString(`^(boltdb|mysql|pgsql)://(.+)$`, opts.DB.Path); !ok {
 		log.Fatal("Specify a valid data store configuration path")
+	}
+
+	switch len(opts.DB.Key) {
+	case 0, 16, 24, 32:
+	default:
+		log.Fatal("Specify a valid encryption key length. Valid key sizes are 16bit, 24bit, or 32bit.")
 	}
 
 	if strings.HasPrefix(opts.DB.Cert.CA, "-----") {

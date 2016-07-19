@@ -16,10 +16,12 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/abcum/surreal/db"
+	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/tcp"
 	"github.com/abcum/surreal/web"
 )
@@ -35,14 +37,17 @@ var startCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
 
 		if err = db.Setup(opts); err != nil {
+			log.Fatal(err)
 			return
 		}
 
 		if err = tcp.Setup(opts); err != nil {
+			log.Fatal(err)
 			return
 		}
 
 		if err = web.Setup(opts); err != nil {
+			log.Fatal(err)
 			return
 		}
 
@@ -60,31 +65,29 @@ var startCmd = &cobra.Command{
 
 func init() {
 
-	startCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "", flag("auth"))
-	startCmd.PersistentFlags().StringVar(&opts.Auth.User, "auth-user", "", flag("auth-user"))
-	startCmd.PersistentFlags().StringVar(&opts.Auth.Pass, "auth-pass", "", flag("auth-pass"))
+	host, _ := os.Hostname()
 
-	startCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "key", "k", "", flag("key"))
+	startCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master database authentication details.")
+	startCmd.PersistentFlags().StringVar(&opts.Auth.User, "auth-user", "", "The master username for the database. Use this as an alternative to the --auth flag.")
+	startCmd.PersistentFlags().StringVar(&opts.Auth.Pass, "auth-pass", "", "The master password for the database. Use this as an alternative to the --auth flag.")
 
-	startCmd.PersistentFlags().StringVar(&opts.Cert.Crt, "cert-crt", "", flag("cert-crt"))
-	startCmd.PersistentFlags().StringVar(&opts.Cert.Key, "cert-key", "", flag("cert-key"))
-	startCmd.PersistentFlags().StringVar(&opts.Cert.Pem, "cert-pem", "", flag("cert-pem"))
+	startCmd.PersistentFlags().StringVar(&opts.Cert.Crt, "cert-crt", "", "Path to the server certificate. Needed when running in secure mode.")
+	startCmd.PersistentFlags().StringVar(&opts.Cert.Key, "cert-key", "", "Path to the server private key. Needed when running in secure mode.")
 
-	startCmd.PersistentFlags().StringVar(&opts.DB.Base, "db-base", "", flag("db-base"))
-	startCmd.PersistentFlags().StringVar(&opts.DB.Path, "db-path", "", flag("db-path"))
 	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.CA, "db-ca", "", "Path to the CA file used to connect to the remote database.")
 	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Crt, "db-crt", "", "Path to the certificate file used to connect to the remote database.")
 	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Key, "db-key", "", "Path to the private key file used to connect to the remote database.")
-
-	startCmd.PersistentFlags().IntVar(&opts.Port.Tcp, "port-tcp", 0, flag("port-tcp"))
-	startCmd.PersistentFlags().IntVar(&opts.Port.Web, "port-web", 0, flag("port-web"))
-
-	startCmd.PersistentFlags().StringVarP(&opts.Node.Name, "name", "n", "", flag("name"))
-	startCmd.PersistentFlags().StringVarP(&opts.Node.Attr, "tags", "t", "", flag("tags"))
+	startCmd.PersistentFlags().StringVar(&opts.DB.Path, "db-path", "", flag("db"))
 
 	startCmd.PersistentFlags().StringVarP(&opts.Cluster.Join, "join", "j", "", flag("join"))
 
-	startCmd.PersistentFlags().MarkHidden("auth-user")
-	startCmd.PersistentFlags().MarkHidden("auth-pass")
+	startCmd.PersistentFlags().StringVarP(&opts.DB.Code, "key", "k", "", flag("key"))
+
+	startCmd.PersistentFlags().StringVarP(&opts.Node.Name, "name", "n", host, "The name of this node, used for logs and statistics.")
+
+	startCmd.PersistentFlags().IntVar(&opts.Port.Tcp, "port-tcp", 33693, "The port on which to serve the tcp server.")
+	startCmd.PersistentFlags().IntVar(&opts.Port.Web, "port-web", 8000, "The port on which to serve the web server.")
+
+	startCmd.PersistentFlags().StringVarP(&opts.Cluster.Join, "zone", "z", "", flag("zone"))
 
 }
