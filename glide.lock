@@ -1,5 +1,5 @@
 hash: 3d485f432865b9fa5118e8a5cc45f3645cf69bcf348e86d3fcb6a81e78e023d1
-updated: 2016-07-16T10:17:13.573409227+01:00
+updated: 2016-07-18T13:42:47.327810862+01:00
 imports:
 - name: github.com/abcum/fibre
   version: 29d9f69b6f170015ffc87d614e16032f27bb3c38
@@ -8,7 +8,7 @@ imports:
 - name: github.com/abcum/logrus
   version: 119b6994c03cc9597e8c1873a47d715e34b5ed9a
 - name: github.com/armon/go-metrics
-  version: fbf75676ee9c0a3a23eb0a4d9220a3612cfbd1ed
+  version: 3df31a1ada83e310c2e24b267c8e8b68836547b4
 - name: github.com/boltdb/bolt
   version: acc803f0ced151102ed51bf824f8709ebd6602bc
 - name: github.com/cznic/zappy
@@ -84,11 +84,11 @@ imports:
 - name: github.com/yvasiyarov/newrelic_platform_go
   version: 9c099fbc30e90de5bb5c5f94aa5fd08f2daeaacd
 - name: golang.org/x/net
-  version: e90d6d0afc4c315a0d87a568ae68577cc15149a0
+  version: 3797cd8864994d713d909eda5e61ede8683fdc12
   subpackages:
   - context
 - name: golang.org/x/sys
-  version: b518c298ac9dc94b6ac0757394f50d10c5dfa25a
+  version: a646d33e2ee3172a661fc09bca23bb4889a41bc8
   subpackages:
   - unix
 - name: google.golang.org/appengine
@@ -109,12 +109,12 @@ imports:
 - name: gopkg.in/tylerb/graceful.v1
   version: d7d7a205e779a4738d38eda0671fff8bfc965f14
 - name: gopkg.in/vmihailenco/msgpack.v2
-  version: 585b09497e708217121c79a5aa185647b757605a
+  version: 9da2e9d7beae1b7c03cf7cfe8f4911958602a5de
   subpackages:
   - codes
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: 090403452ab6979e3b7c054ceb7ee23da91b2ae4
+  version: 72e303cb5f235b23471872477b57e573dc1c71d0
   subpackages:
   - js
 - name: github.com/jtolds/gls
