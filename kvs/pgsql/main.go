@@ -35,6 +35,9 @@ func New(opts *cnf.Options) (ds kvs.DS, err error) {
 	path := strings.TrimLeft(opts.DB.Path, "pgsql://")
 
 	db, err = sql.Open("postgres", path)
+	if err != nil {
+		return
+	}
 
 	return &DS{db: db, ck: opts.DB.Key}, err
 

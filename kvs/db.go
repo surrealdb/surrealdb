@@ -35,15 +35,21 @@ func New(opts *cnf.Options) (db *DB, err error) {
 	var ds DS
 
 	if strings.HasPrefix(opts.DB.Path, "boltdb://") {
-		ds, err = stores["boltdb"](opts)
+		if ds, err = stores["boltdb"](opts); err != nil {
+			return
+		}
 	}
 
 	if strings.HasPrefix(opts.DB.Path, "mysql://") {
-		ds, err = stores["mysql"](opts)
+		if ds, err = stores["mysql"](opts); err != nil {
+			return
+		}
 	}
 
 	if strings.HasPrefix(opts.DB.Path, "pgsql://") {
-		ds, err = stores["pgsql"](opts)
+		if ds, err = stores["pgsql"](opts); err != nil {
+			return
+		}
 	}
 
 	db = &DB{ds: ds}

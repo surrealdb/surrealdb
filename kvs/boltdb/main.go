@@ -36,6 +36,9 @@ func New(opts *cnf.Options) (ds kvs.DS, err error) {
 	path := strings.TrimLeft(opts.DB.Path, "boltdb://")
 
 	db, err = bolt.Open(path, 0666, nil)
+	if err != nil {
+		return
+	}
 
 	db.Update(func(tx *bolt.Tx) error {
 		tx.CreateBucketIfNotExists(bucket)
