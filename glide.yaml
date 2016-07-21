@@ -21,3 +21,5 @@ import:
 - package: github.com/go-sql-driver/mysql
   version: ^1.2.0
 - package: github.com/lib/pq
+- package: github.com/asaskevich/govalidator
+  version: ^4.0.0
