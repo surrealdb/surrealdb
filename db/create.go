@@ -65,6 +65,10 @@ func executeCreateStatement(ast *sql.CreateStatement) (out []interface{}, err er
 
 func create(txn kvs.TX, doc *item.Doc, ast *sql.CreateStatement) (out interface{}, err error) {
 
+	if !doc.Allow(txn, "create") {
+		return nil, nil
+	}
+
 	if err = doc.Merge(txn, ast.Data); err != nil {
 		return nil, err
 	}

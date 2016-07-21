@@ -53,6 +53,10 @@ func executeModifyStatement(ast *sql.ModifyStatement) (out []interface{}, err er
 
 func modify(txn kvs.TX, doc *item.Doc, ast *sql.ModifyStatement) (out interface{}, err error) {
 
+	if !doc.Allow(txn, "modify") {
+		return nil, nil
+	}
+
 	if !doc.Check(txn, ast.Cond) {
 		return nil, nil
 	}

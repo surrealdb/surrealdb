@@ -16,6 +16,7 @@ package db
 
 import (
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/data"
 )
 
 func executeSelectStatement(ast *sql.SelectStatement) (out []interface{}, err error) {
@@ -26,7 +27,7 @@ func executeSelectStatement(ast *sql.SelectStatement) (out []interface{}, err er
 
 		out = append(out, map[string]interface{}{
 			"key": string(kv.Key()),
-			"val": string(kv.Val()),
+			"val": data.NewFromPACK(kv.Val()).Data(),
 		})
 	}
 
