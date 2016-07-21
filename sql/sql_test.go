@@ -159,7 +159,7 @@ func Test_Parse_Queries_Use(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `USE`,
-			err: "Found `` but expected `NAMESPACE, DATABASE, CIPHERKEY`",
+			err: "Found `` but expected `NAMESPACE, DATABASE`",
 		},
 		{
 			sql: `USE NAMESPACE`,
@@ -240,42 +240,6 @@ func Test_Parse_Queries_Use(t *testing.T) {
 			res: &Query{Statements: []Statement{&UseStatement{
 				DB: "",
 			}}},
-		},
-		{
-			sql: `USE CIPHERKEY`,
-			err: "Found `` but expected `16, 24, or 32 bit cipher key`",
-		},
-		{
-			sql: `USE CIPHERKEY 1hg7dbrma8ghe5473kghvie64jgi3ph4`,
-			res: &Query{Statements: []Statement{&UseStatement{
-				CK: "1hg7dbrma8ghe5473kghvie64jgi3ph4",
-			}}},
-		},
-		{
-			sql: `USE CIPHERKEY "1hg7dbrma8ghe5473kghvie64jgi3ph4"`,
-			res: &Query{Statements: []Statement{&UseStatement{
-				CK: "1hg7dbrma8ghe5473kghvie64jgi3ph4",
-			}}},
-		},
-		{
-			sql: `USE CIPHERKEY 1`,
-			err: "Found `1` but expected `16, 24, or 32 bit cipher key`",
-		},
-		{
-			sql: `USE CIPHERKEY 1.3000`,
-			err: "Found `1.3000` but expected `16, 24, or 32 bit cipher key`",
-		},
-		{
-			sql: `USE CIPHERKEY 123.123.123.123`,
-			err: "Found `123.123.123.123` but expected `16, 24, or 32 bit cipher key`",
-		},
-		{
-			sql: `USE CIPHERKEY {"some":"thing"}`,
-			err: "Found `{\"some\":\"thing\"}` but expected `16, 24, or 32 bit cipher key`",
-		},
-		{
-			sql: `USE CIPHERKEY name something`,
-			err: "Found `name` but expected `16, 24, or 32 bit cipher key`",
 		},
 	}
 

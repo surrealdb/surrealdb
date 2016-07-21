@@ -96,7 +96,6 @@ const (
 	BEFORE
 	BOTH
 	BY
-	CIPHERKEY
 	CODE
 	COLUMNS
 	CONTENT
@@ -226,7 +225,6 @@ var tokens = [...]string{
 	BEFORE:    "BEFORE",
 	BOTH:      "BOTH",
 	BY:        "BY",
-	CIPHERKEY: "CIPHERKEY",
 	CODE:      "CODE",
 	COLUMNS:   "COLUMNS",
 	CONTENT:   "CONTENT",
