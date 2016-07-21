@@ -46,7 +46,6 @@ Surreal is a scalable, distributed, strongly-consistent, collaborative document-
 	- End-to-end intra-cluster communications
 	- End-user SSL encryption for http endpoints
 	- Encryption of all data at rest using AES-256
-	- Encryption of individual data items using AES-256
 
 #### Installation
 
