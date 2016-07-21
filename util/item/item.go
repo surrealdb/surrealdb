@@ -26,7 +26,8 @@ import (
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/conv"
 	"github.com/abcum/surreal/util/data"
-	// "github.com/abcum/surreal/util/diff"
+	"github.com/abcum/surreal/util/diff"
+	"github.com/abcum/surreal/util/form"
 	"github.com/abcum/surreal/util/keys"
 )
 
@@ -114,6 +115,7 @@ func (this *Doc) Allow(txn kvs.TX, cond string) (val bool) {
 	}
 
 	return true
+
 }
 
 func (this *Doc) Check(txn kvs.TX, cond []sql.Expr) (val bool) {
@@ -224,7 +226,7 @@ func (this *Doc) PurgePatch(txn kvs.TX) (err error) {
 func (this *Doc) StorePatch(txn kvs.TX) (err error) {
 
 	key := &keys.Patch{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, ID: this.key.ID}
-	return txn.CPut(key.Encode(), this.diff(), nil)
+	return txn.CPut(key.Encode(), this.diff().ToPACK(), nil)
 
 }
 
@@ -302,7 +304,7 @@ func (this *Doc) Yield(output sql.Token, fallback sql.Token) (res interface{}) {
 	case sql.ID:
 		res = fmt.Sprintf("@%v:%v", this.key.TB, this.key.ID)
 	case sql.DIFF:
-		res = this.diff()
+		res = this.diff().Data()
 	case sql.FULL:
 		res = this.current.Data()
 	case sql.AFTER:
@@ -326,9 +328,16 @@ func (this *Doc) Yield(output sql.Token, fallback sql.Token) (res interface{}) {
 // --------------------------------------------------
 // --------------------------------------------------
 
-func (this *Doc) diff() []byte {
-	// *diff.Diff
-	return []byte("DIFF")
+func (this *Doc) diff() *data.Doc {
+
+	differ := diff.New()
+	diff, _ := differ.Compare(this.current.Get("data").ToJSON(), this.initial.Get("data").ToJSON())
+
+	format := form.NewDeltaFormatter()
+	diffed, _ := format.Format(diff)
+
+	return data.NewFromJSON([]byte(diffed))
+
 }
 
 func (this *Doc) getFlds(txn kvs.TX) (out []*field) {
