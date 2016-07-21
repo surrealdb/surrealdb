@@ -17,9 +17,11 @@ package sql
 func (p *Parser) parseRemoveStatement(explain bool) (Statement, error) {
 
 	// Inspect the next token.
-	tok, _, err := p.shouldBe(TABLE, FIELD, INDEX)
+	tok, _, err := p.shouldBe(RULES, TABLE, FIELD, INDEX)
 
 	switch tok {
+	case RULES:
+		return p.parseRemoveRulesStatement(explain)
 	case TABLE:
 		return p.parseRemoveTableStatement(explain)
 	case FIELD:

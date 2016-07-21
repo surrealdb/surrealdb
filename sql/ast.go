@@ -150,6 +150,32 @@ type RecordStatement struct {
 }
 
 // --------------------------------------------------
+// Rules
+// --------------------------------------------------
+
+// DefineRulesStatement represents an SQL DEFINE RULES statement.
+//
+// DEFINE RULES person
+type DefineRulesStatement struct {
+	EX   bool    // Explain
+	KV   string  // Bucket
+	NS   string  // Namespace
+	DB   string  // Database
+	What []Table // Table names
+}
+
+// RemoveRulesStatement represents an SQL REMOVE RULES statement.
+//
+// REMOVE RULES person
+type RemoveRulesStatement struct {
+	EX   bool    // Explain
+	KV   string  // Bucket
+	NS   string  // Namespace
+	DB   string  // Database
+	What []Table // Table names
+}
+
+// --------------------------------------------------
 // Table
 // --------------------------------------------------
 

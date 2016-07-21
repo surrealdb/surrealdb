@@ -103,6 +103,16 @@ func New(kv kvs.KV, key *keys.Thing) (this *Doc) {
 }
 
 func (this *Doc) Allow(txn kvs.TX, cond string) (val bool) {
+
+	switch cond {
+	case "select":
+	case "create":
+	case "update":
+	case "modify":
+	case "delete":
+	case "relate":
+	}
+
 	return true
 }
 
