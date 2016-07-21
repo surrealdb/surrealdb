@@ -196,8 +196,12 @@ func (p *Parser) unscan() { p.buf.n = 1 }
 // scanIgnoreWhitespace scans the next non-whitespace token.
 func (p *Parser) scanIgnoreWhitespace() (tok Token, lit string) {
 	tok, lit = p.scan()
-	if tok == WS {
-		tok, lit = p.scan()
+	for {
+		if tok == WS {
+			tok, lit = p.scan()
+		} else {
+			break
+		}
 	}
 	return
 }

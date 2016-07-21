@@ -106,6 +106,14 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 	case '-':
 		if chn := s.read(); chn == '>' {
 			return OEDGE, "->"
+	case '/':
+		chn := s.next()
+		switch {
+		case chn == '*':
+			return s.scanCommentMultiple(ch)
+		default:
+			s.unread()
+			return s.scanRegexp(ch)
 		}
 		s.unread()
 		if chn := s.read(); chn == '=' {
