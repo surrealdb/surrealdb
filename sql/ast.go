@@ -182,8 +182,8 @@ type RemoveTableStatement struct {
 // DefineFieldStatement represents an SQL DEFINE INDEX statement.
 //
 // DEFINE FIELD name ON person TYPE string CODE {}
-// DEFINE FIELD name ON person TYPE [0,1,2,3,4,5] DEFAULT 0
-// DEFINE FIELD name ON person TYPE [0...100]number MIN 0 MAX 3 DEFAULT 0
+// DEFINE FIELD name ON person TYPE number MIN 0 MAX 5 DEFAULT 0
+// DEFINE FIELD name ON person TYPE custom ENUM [0,1,2,3,4,5] DEFAULT 0
 type DefineFieldStatement struct {
 	EX        bool          // Explain
 	KV        string        // Bucket
@@ -191,15 +191,17 @@ type DefineFieldStatement struct {
 	DB        string        // Database
 	Name      Ident         // Field name
 	What      []Table       // Table names
-	Type      Expr          // Field type
+	Type      Ident         // Field type
 	Enum      []interface{} // Custom options
 	Code      string        // Field code
 	Min       float64       // Minimum value / length
 	Max       float64       // Maximum value / length
-	Default   Expr          // Default value
-	Notnull   bool          // Notnull?
-	Readonly  bool          // Readonly?
-	Mandatory bool          // Mnadatory?
+	Match     string        // Regex value
+	Default   interface{}   // Default value
+	Notnull   bool          // Notnull - can not be NULL?
+	Readonly  bool          // Readonly - can not be changed?
+	Mandatory bool          // Mandatory - can not be VOID?
+	Validate  bool          // Validate - can not be INCORRECT?
 }
 
 // RemoveFieldStatement represents an SQL REMOVE INDEX statement.

@@ -16,6 +16,7 @@ package item
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/imdario/mergo"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/conv"
 	"github.com/abcum/surreal/util/data"
 	// "github.com/abcum/surreal/util/diff"
 	"github.com/abcum/surreal/util/keys"
@@ -33,12 +35,14 @@ type field struct {
 	Name      string
 	Code      string
 	Enum      []interface{}
-	Min       int64
-	Max       int64
+	Min       float64
+	Max       float64
+	Match     string
 	Default   interface{}
 	Notnull   bool
 	Readonly  bool
 	Mandatory bool
+	Validate  bool
 }
 
 type index struct {
@@ -329,15 +333,18 @@ func (this *Doc) getFlds(txn kvs.TX) (out []*field) {
 
 		fld := &field{}
 
-		fld.Type, _ = inf.Get("type").Data().(string)
 		fld.Name, _ = inf.Get("name").Data().(string)
+		fld.Type, _ = inf.Get("type").Data().(string)
+		fld.Enum, _ = inf.Get("enum").Data().([]interface{})
 		fld.Code, _ = inf.Get("code").Data().(string)
-		fld.Min, _ = inf.Get("min").Data().(int64)
-		fld.Max, _ = inf.Get("max").Data().(int64)
+		fld.Min, _ = inf.Get("min").Data().(float64)
+		fld.Max, _ = inf.Get("max").Data().(float64)
+		fld.Match, _ = inf.Get("match").Data().(string)
 		fld.Default = inf.Get("default").Data()
 		fld.Notnull = inf.Get("notnull").Data().(bool)
 		fld.Readonly = inf.Get("readonly").Data().(bool)
 		fld.Mandatory = inf.Get("mandatory").Data().(bool)
+		fld.Validate = inf.Get("validate").Data().(bool)
 
 		out = append(out, fld)
 
@@ -379,7 +386,11 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 
 	for _, fld := range this.getFlds(txn) {
 
-		initial := this.initial.Get("data", fld.Name).Data()
+		var exists bool
+		var initial interface{}
+		var current interface{}
+
+		initial = this.initial.Get("data", fld.Name).Data()
 
 		if fld.Readonly && initial != nil {
 			this.current.Set(initial, "data", fld.Name)
@@ -408,8 +419,8 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 
 		}
 
-		current := this.current.Get("data", fld.Name).Data()
-		exists := this.current.Exists("data", fld.Name)
+		current = this.current.Get("data", fld.Name).Data()
+		exists = this.current.Exists("data", fld.Name)
 
 		if fld.Default != nil && exists == false {
 			this.current.Set(fld.Default, "data", fld.Name)
@@ -423,8 +434,298 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 			return fmt.Errorf("Need to set field '%v'", fld.Name)
 		}
 
-		if fld.Type != "" {
+		if current != nil && fld.Type != "" {
 
+			switch fld.Type {
+
+			case "url":
+				if val, err := conv.ConvertToUrl(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a URL", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "uuid":
+				if val, err := conv.ConvertToUuid(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a UUID", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "color":
+				if val, err := conv.ConvertToColor(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a HEX or RGB color", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "email":
+				if val, err := conv.ConvertToEmail(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a email address", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "phone":
+				if val, err := conv.ConvertToPhone(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a phone number", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "array":
+				if val, err := conv.ConvertToArray(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a array", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "object":
+				if val, err := conv.ConvertToObject(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a object", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "domain":
+				if val, err := conv.ConvertToDomain(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a domain name", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "base64":
+				if val, err := conv.ConvertToBase64(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be base64 data", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "string":
+				if val, err := conv.ConvertToString(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a string", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "number":
+				if val, err := conv.ConvertToNumber(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a number", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "boolean":
+				if val, err := conv.ConvertToBoolean(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a boolean", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "datetime":
+				if val, err := conv.ConvertToDatetime(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a datetime", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "latitude":
+				if val, err := conv.ConvertToLatitude(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a latitude value", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "longitude":
+				if val, err := conv.ConvertToLongitude(current); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be a longitude value", fld.Name)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			case "custom":
+
+				if val, err := conv.ConvertToOneOf(current, fld.Enum...); err == nil {
+					this.current.Set(val, "data", fld.Name)
+				} else {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to be one of %v", fld.Name, fld.Enum)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+
+			}
+
+		}
+
+		if fld.Match != "" {
+
+			if reg, err := regexp.Compile(fld.Match); err != nil {
+				return fmt.Errorf("Regular expression /%v/ is invalid", fld.Match)
+			} else {
+				if !reg.MatchString(fmt.Sprintf("%v", current)) {
+					if fld.Validate {
+						return fmt.Errorf("Field '%v' needs to match the regular expression /%v/", fld.Name, fld.Match)
+					} else {
+						this.current.Try(initial, "data", fld.Name)
+					}
+				}
+			}
+
+		}
+
+		if fld.Min != 0 {
+
+			if current = this.current.Get("data", fld.Name).Data(); current != nil {
+
+				switch now := current.(type) {
+
+				case []interface{}:
+					if len(now) < int(fld.Min) {
+						if fld.Validate {
+							return fmt.Errorf("Field '%v' needs to be have at least %v items", fld.Name, fld.Min)
+						} else {
+							this.current.Try(initial, "data", fld.Name)
+						}
+					}
+
+				case string:
+					if len(now) < int(fld.Min) {
+						if fld.Validate {
+							return fmt.Errorf("Field '%v' needs to at least %v characters", fld.Name, fld.Min)
+						} else {
+							this.current.Try(initial, "data", fld.Name)
+						}
+					}
+
+				case float64:
+					if now < fld.Min {
+						if fld.Validate {
+							return fmt.Errorf("Field '%v' needs to be >= %v", fld.Name, fld.Min)
+						} else {
+							this.current.Try(initial, "data", fld.Name)
+						}
+					}
+
+				}
+
+			}
+
+		}
+
+		if fld.Max != 0 {
+
+			if current = this.current.Get("data", fld.Name).Data(); current != nil {
+
+				switch now := current.(type) {
+
+				case []interface{}:
+					if len(now) > int(fld.Max) {
+						if fld.Validate {
+							return fmt.Errorf("Field '%v' needs to be have %v or fewer items", fld.Name, fld.Max)
+						} else {
+							this.current.Try(initial, "data", fld.Name)
+						}
+					}
+
+				case string:
+					if len(now) > int(fld.Max) {
+						if fld.Validate {
+							return fmt.Errorf("Field '%v' needs to be %v or fewer characters", fld.Name, fld.Max)
+						} else {
+							this.current.Try(initial, "data", fld.Name)
+						}
+					}
+
+				case float64:
+					if now > fld.Max {
+						if fld.Validate {
+							return fmt.Errorf("Field '%v' needs to be <= %v", fld.Name, fld.Max)
+						} else {
+							this.current.Try(initial, "data", fld.Name)
+						}
+					}
+
+				}
+
+			}
+
+		}
+
+		current = this.current.Get("data", fld.Name).Data()
+		exists = this.current.Exists("data", fld.Name)
+
+		if fld.Default != nil && exists == false {
+			this.current.Set(fld.Default, "data", fld.Name)
+		}
+
+		if fld.Notnull && exists == true && current == nil {
+			return fmt.Errorf("Can't be null field '%v'", fld.Name)
+		}
+
+		if fld.Mandatory && exists == false {
+			return fmt.Errorf("Need to set field '%v'", fld.Name)
 		}
 
 	}

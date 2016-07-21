@@ -15,6 +15,7 @@
 package sql
 
 import (
+	"regexp"
 	"strconv"
 	"time"
 )
@@ -225,6 +226,19 @@ func (p *Parser) parseScript() (string, error) {
 	val, err := declare(tok, lit)
 
 	return val.(string), err
+
+}
+
+func (p *Parser) parseRegexp() (string, error) {
+
+	tok, lit, err := p.shouldBe(REGEX)
+	if err != nil {
+		return string(""), &ParseError{Found: lit, Expected: []string{"regular expression"}}
+	}
+
+	val, err := declare(tok, lit)
+
+	return val.(*regexp.Regexp).String(), err
 
 }
 

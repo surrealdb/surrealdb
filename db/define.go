@@ -63,13 +63,16 @@ func executeDefineFieldStatement(ast *sql.DefineFieldStatement) (out []interface
 	doc := data.New()
 	doc.Set(ast.Name, "name")
 	doc.Set(ast.Type, "type")
+	doc.Set(ast.Enum, "enum")
 	doc.Set(ast.Code, "code")
 	doc.Set(ast.Min, "min")
 	doc.Set(ast.Max, "max")
+	doc.Set(ast.Match, "match")
 	doc.Set(ast.Default, "default")
 	doc.Set(ast.Notnull, "notnull")
 	doc.Set(ast.Readonly, "readonly")
 	doc.Set(ast.Mandatory, "mandatory")
+	doc.Set(ast.Validate, "validate")
 
 	for _, TB := range ast.What {
 

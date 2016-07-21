@@ -38,7 +38,7 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 
 	for {
 
-		tok, _, exi := p.mightBe(MIN, MAX, TYPE, ENUM, CODE, DEFAULT, NOTNULL, READONLY, MANDATORY)
+		tok, _, exi := p.mightBe(MIN, MAX, TYPE, ENUM, CODE, MATCH, DEFAULT, NOTNULL, READONLY, MANDATORY, VALIDATE)
 		if !exi {
 			break
 		}
@@ -69,6 +69,12 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 
 		if is(tok, CODE) {
 			if stmt.Code, err = p.parseScript(); err != nil {
+				return nil, err
+			}
+		}
+
+		if is(tok, MATCH) {
+			if stmt.Match, err = p.parseRegexp(); err != nil {
 				return nil, err
 			}
 		}
@@ -106,9 +112,18 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 			}
 		}
 
+		if is(tok, VALIDATE) {
+			stmt.Validate = true
+			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
+				if tok == FALSE {
+					stmt.Validate = false
+				}
+			}
+		}
+
 	}
 
-	if stmt.Type == nil {
+	if stmt.Type == "" {
 		return nil, &ParseError{Found: "", Expected: []string{"TYPE"}}
 	}
 

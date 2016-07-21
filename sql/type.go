@@ -14,17 +14,17 @@
 
 package sql
 
-func (p *Parser) parseType() (exp Expr, err error) {
+func (p *Parser) parseType() (exp Ident, err error) {
 
-	allowed := []string{"any", "url", "email", "phone", "array", "object", "string", "number", "custom", "boolean", "datetime"}
+	allowed := []string{"any", "url", "uuid", "color", "email", "phone", "array", "object", "domain", "string", "number", "custom", "boolean", "datetime", "latitude", "longitude"}
 
 	tok, lit, err := p.shouldBe(IDENT)
 	if err != nil {
-		return nil, err
+		return Ident(""), err
 	}
 
 	if !contains(lit, allowed) {
-		return nil, &ParseError{Found: lit, Expected: allowed}
+		return Ident(""), &ParseError{Found: lit, Expected: allowed}
 	}
 
 	val, err := declare(tok, lit)
