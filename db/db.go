@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"time"
 
+	"runtime/debug"
+
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
@@ -121,6 +123,7 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 	defer func() {
 		if r := recover(); r != nil {
 			if err, ok := r.(error); ok {
+				fmt.Printf("%s", debug.Stack())
 				chn <- err
 			}
 		}
