@@ -7,18 +7,23 @@ The web gui for Surreal built using ember.js.
 #### Setup
 
 - Install node - `brew install node`
+- Install bower - `npm install -g bower`
+- Install ember-cli - `npm install -g ember-cli@2.6.2`
 
 #### Installing
 
 - Clean cache - `npm cache clean && bower cache clean`
-- Install bower - `npm install -g bower`
-- Install ember-cli - `npm install -g ember-cli@2.6.2`
-- Install project ember-cli `npm install --save-dev ember-cli@2.6.2`
 - Clean temporary folders - `rm -rf node_modules bower_components dist tmp`
 - Install application dependencies - `npm install && bower install`
 
 #### Upgrading
 
+- Upgrade bower - `npm install -g bower`
+- Upgrade ember-cli - `npm install -g ember-cli@2.6.2`
+- Upgrade project ember-cli `npm install --save-dev ember-cli@2.6.2`
+- Clean cache - `npm cache clean && bower cache clean`
+- Clean temporary folders - `rm -rf node_modules bower_components dist tmp`
+- Install application dependencies - `npm install && bower install`
 - Initialise ember - `ember init`
 
 #### Development
