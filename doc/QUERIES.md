@@ -121,35 +121,41 @@ SELECT *, ->, <-, <-> FROM person
 /* Examples of working with sets or arrays */
 
 SELECT * FROM person WHERE tags ∋ "tag" /* contains "tag" */
+SELECT * FROM person WHERE "tag" ∈ tags /* contains ""tag" */
+SELECT * FROM person WHERE tags =~ "tag" /* contains "tag" */
 SELECT * FROM person WHERE tags.? = "tag" /* ... any tag value is "tag" */
-SELECT * FROM person WHERE "tag" IN tags
-SELECT * FROM person WHERE tags CONTAINS "tag"
-SELECT * FROM person WHERE tags.? IN ["tag1", "tag2"] /* ... at least one tag value is "tag1" or "tag2" */
+SELECT * FROM person WHERE tags CONTAINSSOME ["tag1", "tag2"] /* ... contains "tag1" or "tag2" */
 
-SELECT * FROM person WHERE tags ∌ "tag" /* does not contain "tag */
+SELECT * FROM person WHERE tags ∌ "tag" /* does not contain "tag" */
+SELECT * FROM person WHERE "tag" ∉ tags /* does not contain "tag" */
+SELECT * FROM person WHERE tags !~ "tag" /* does not contain "tag" */
 SELECT * FROM person WHERE tags.* != "tag" /* ... no tag value is "tag" */
-SELECT * FROM person WHERE "tag" NOT IN tags
-SELECT * FROM person WHERE tags NOT CONTAINS "tag"
-SELECT * FROM person WHERE tags.* NOT IN ["tag1", "tag2"] /* ... all tag values are not "tag1" and "tag2" */
+SELECT * FROM person WHERE tags CONTAINSNONE ["tag1", "tag2"] /* ... does not contain "tag1" and "tag2" */
 
 /* Examples of working with objects and arrays of objects */
 
-SELECT * FROM person WHERE emails.?.value ~ "gmail.com" /* ... any email address value matches 'gmail.com' */
-SELECT * FROM person WHERE emails.*.value ~ "gmail.com" /* ... every email address value matches 'gmail.com' */
+SELECT * FROM person WHERE emails.?.value = /gmail.com$/ /* ... any email address value ends with 'gmail.com' */
+SELECT * FROM person WHERE emails.*.value = /gmail.com$/ /* ... every email address value ends with 'gmail.com' */
 
 /* Examples of working with relationship paths */
 
-SELECT *, <->(friend|follow)
+SELECT ->[friend]->person FROM person
+
+SELECT *, <->(friend|follow)-?
 SELECT *, <-likes<-person.id
 SELECT *, <-friend<-person[age>=18] AS friends
 SELECT * FROM person WHERE ->friend->person->click->@email:1231
 
-SELECT *, ->friend->person[age>=18] AS acquaintances FROM person WHERE acquaintances IN [@person:test]
-SELECT *, ->friend->person[age>=18] AS acquaintances FROM person WHERE acquaintances.firstname IN ['Tobie']
+SELECT * FROM person WHERE age >= @person:tobie.age - 5
+
+UPDATE person SET tags-="London";
+
+SELECT *, ->friend->person(age>=18) AS acquaintances FROM person WHERE acquaintances IN [@person:test]
+SELECT *, ->friend->person(age>=18) AS acquaintances FROM person WHERE acquaintances.firstname IN ['Tobie']
 
 /* Examples of working with relationship paths and embedded objects */
 
-SELECT * FROM person WHERE &emails.?.value->to->email->to->@email:{tobie@abcum.com} /* Anybody who has sent an email to tobie@abcum.com */
+SELECT * FROM person WHERE emails.*.value->to->email->to->@email:{tobie@abcum.com} /* Anybody who has sent an email to tobie@abcum.com */
 SELECT * FROM person WHERE @email:{tobie@abcum.com}->from->email.id IN emails.?.value /* Anybody who has sent an email to tobie@abcum.com */
 
 ```
