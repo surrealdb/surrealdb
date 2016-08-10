@@ -39,7 +39,7 @@ kill:
 .PHONY: convey
 convey:
 	@echo "Run 'go get -u -v github.com/smartystreets/goconvey'"
-	goconvey -packages 5 -port 5000 -poll 1s -excludedDirs 'build,dev,docs,gui,vendor'
+	goconvey -packages 5 -port 5000 -poll 1s -excludedDirs 'build,dev,doc,gui,vendor'
 
 # The `make glide` command ensures that
 # all imported dependencies are synced
@@ -47,8 +47,8 @@ convey:
 
 .PHONY: glide
 glide:
-	glide update
-	
+	glide install
+
 # The `make test` command runs all
 # tests, found within all sub-folders
 # in the project folder.
@@ -75,7 +75,7 @@ clean:
 
 .PHONY: quick
 quick: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
-quick: 
+quick:
 	CGO_ENABLED=0 $(GO) build
 
 # The `make build` command compiles
@@ -105,9 +105,10 @@ install:
 # the build files in the app folder.
 
 .PHONY: ember
-ember: 
+ember:
 	npm install -g bower
 	npm install -g ember-cli
-	cd gui && npm cache clean && bower cache clean
+	cd gui && npm cache clean
+	cd gui && bower cache clean
 	cd gui && npm install && bower install
 	cd gui && ember build -prod -o ../app/
