@@ -10,9 +10,9 @@
     {{content-for "head"}}
     {{content-for "test-head"}}
 
-    <link rel="stylesheet" href="assets/vendor.css">
-    <link rel="stylesheet" href="assets/gui.css">
-    <link rel="stylesheet" href="assets/test-support.css">
+    <link rel="stylesheet" href="{{rootURL}}assets/vendor.css">
+    <link rel="stylesheet" href="{{rootURL}}assets/gui.css">
+    <link rel="stylesheet" href="{{rootURL}}assets/test-support.css">
 
     {{content-for "head-footer"}}
     {{content-for "test-head-footer"}}
@@ -21,12 +21,11 @@
     {{content-for "body"}}
     {{content-for "test-body"}}
 
-    <script src="testem.js" integrity=""></script>
-    <script src="assets/vendor.js"></script>
-    <script src="assets/test-support.js"></script>
-    <script src="assets/gui.js"></script>
-    <script src="assets/tests.js"></script>
-    <script src="assets/test-loader.js"></script>
+    <script src="{{rootURL}}testem.js" integrity=""></script>
+    <script src="{{rootURL}}assets/vendor.js"></script>
+    <script src="{{rootURL}}assets/test-support.js"></script>
+    <script src="{{rootURL}}assets/gui.js"></script>
+    <script src="{{rootURL}}assets/tests.js"></script>
 
     {{content-for "body-footer"}}
     {{content-for "test-body-footer"}}
