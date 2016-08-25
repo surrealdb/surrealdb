@@ -108,7 +108,10 @@ install:
 ember:
 	npm install -g bower
 	npm install -g ember-cli
+	cd gui && rm -rf dist tmp
 	cd gui && npm cache clean
 	cd gui && bower cache clean
+	cd gui && rm -rf node_modules
+	cd gui && rm -rf bower_components
 	cd gui && npm install && bower install
 	cd gui && ember build -prod -o ../app/
