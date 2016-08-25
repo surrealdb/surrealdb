@@ -446,7 +446,7 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 		}
 
 		if fld.Notnull && exists == true && current == nil {
-			return fmt.Errorf("Can't be null field '%v'", fld.Name)
+			return fmt.Errorf("Field '%v' can't be null", fld.Name)
 		}
 
 		if fld.Mandatory && exists == false {
@@ -495,7 +495,7 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 					this.current.Set(val, "data", fld.Name)
 				} else {
 					if fld.Validate {
-						return fmt.Errorf("Field '%v' needs to be a email address", fld.Name)
+						return fmt.Errorf("Field '%v' needs to be an email address", fld.Name)
 					} else {
 						this.current.Try(initial, "data", fld.Name)
 					}
@@ -517,7 +517,7 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 					this.current.Set(val, "data", fld.Name)
 				} else {
 					if fld.Validate {
-						return fmt.Errorf("Field '%v' needs to be a array", fld.Name)
+						return fmt.Errorf("Field '%v' needs to be an array", fld.Name)
 					} else {
 						this.current.Try(initial, "data", fld.Name)
 					}
@@ -528,7 +528,7 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 					this.current.Set(val, "data", fld.Name)
 				} else {
 					if fld.Validate {
-						return fmt.Errorf("Field '%v' needs to be a object", fld.Name)
+						return fmt.Errorf("Field '%v' needs to be an object", fld.Name)
 					} else {
 						this.current.Try(initial, "data", fld.Name)
 					}
@@ -663,7 +663,7 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 				case []interface{}:
 					if len(now) < int(fld.Min) {
 						if fld.Validate {
-							return fmt.Errorf("Field '%v' needs to be have at least %v items", fld.Name, fld.Min)
+							return fmt.Errorf("Field '%v' needs to have at least %v items", fld.Name, fld.Min)
 						} else {
 							this.current.Try(initial, "data", fld.Name)
 						}
@@ -672,7 +672,7 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 				case string:
 					if len(now) < int(fld.Min) {
 						if fld.Validate {
-							return fmt.Errorf("Field '%v' needs to at least %v characters", fld.Name, fld.Min)
+							return fmt.Errorf("Field '%v' needs to have at least %v characters", fld.Name, fld.Min)
 						} else {
 							this.current.Try(initial, "data", fld.Name)
 						}
@@ -702,7 +702,7 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 				case []interface{}:
 					if len(now) > int(fld.Max) {
 						if fld.Validate {
-							return fmt.Errorf("Field '%v' needs to be have %v or fewer items", fld.Name, fld.Max)
+							return fmt.Errorf("Field '%v' needs to have %v or fewer items", fld.Name, fld.Max)
 						} else {
 							this.current.Try(initial, "data", fld.Name)
 						}
@@ -711,7 +711,7 @@ func (this *Doc) mrgFld(txn kvs.TX) (err error) {
 				case string:
 					if len(now) > int(fld.Max) {
 						if fld.Validate {
-							return fmt.Errorf("Field '%v' needs to be %v or fewer characters", fld.Name, fld.Max)
+							return fmt.Errorf("Field '%v' needs to have %v or fewer characters", fld.Name, fld.Max)
 						} else {
 							this.current.Try(initial, "data", fld.Name)
 						}
