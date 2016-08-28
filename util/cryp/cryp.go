@@ -51,6 +51,11 @@ func Decrypt(key []byte, src []byte) (dst []byte, err error) {
 		return src, nil
 	}
 
+	// Corrupt
+	if len(src) < 12 {
+		return src, nil
+	}
+
 	// Initiate AES
 	block, err := aes.NewCipher(key)
 	if err != nil {
