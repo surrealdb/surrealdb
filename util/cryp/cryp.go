@@ -26,7 +26,7 @@ func Encrypt(key []byte, src []byte) (dst []byte, err error) {
 		return src, nil
 	}
 
-	// Initiate AES256
+	// Initiate AES
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return
@@ -54,7 +54,7 @@ func Decrypt(key []byte, src []byte) (dst []byte, err error) {
 		return src, nil
 	}
 
-	// Initiate AES256
+	// Initiate AES
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return
