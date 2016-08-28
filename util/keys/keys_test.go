@@ -63,6 +63,11 @@ func TestMain(t *testing.T) {
 		new Key
 	}{
 		{
+			str: "/surreal/!/¥",
+			obj: &CK{KV: "surreal"},
+			new: &CK{},
+		},
+		{
 			str: "/surreal/!/n/abcum",
 			obj: &NS{KV: "surreal", NS: "abcum"},
 			new: &NS{},
