@@ -56,6 +56,20 @@ func TestBlank(t *testing.T) {
 
 }
 
+func TestCorrupt(t *testing.T) {
+
+	key := []byte("1hg7dbrma8ghe547")
+	enc := []byte("corrupt")
+
+	Convey("Cryptography should fail", t, func() {
+		dec, _ := Decrypt(key, enc)
+		Convey("Decrypt", func() {
+			So(dec, ShouldResemble, enc)
+		})
+	})
+
+}
+
 func TestInvalid(t *testing.T) {
 
 	key := []byte("invalidkey")
@@ -69,6 +83,36 @@ func TestInvalid(t *testing.T) {
 		})
 		Convey("Decrypt", func() {
 			So(dec, ShouldResemble, []byte(nil))
+		})
+	})
+
+}
+
+func TestInvalidD(t *testing.T) {
+
+	val := []byte("1hg7dbrma8ghe547")
+	key := []byte("invalidkey")
+	str := []byte("Hello World")
+
+	Convey("Decryption should fail", t, func() {
+		enc, _ := Encrypt(val, str)
+		dec, _ := Decrypt(key, enc)
+		Convey("Decrypt", func() {
+			So(dec, ShouldResemble, []byte(nil))
+		})
+	})
+
+}
+
+func TestInvalidE(t *testing.T) {
+
+	key := []byte("invalidkey")
+	str := []byte("Hello World")
+
+	Convey("Encryption should fail", t, func() {
+		enc, _ := Encrypt(key, str)
+		Convey("Encrypt", func() {
+			So(enc, ShouldResemble, []byte(nil))
 		})
 	})
 
