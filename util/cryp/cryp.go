@@ -33,10 +33,7 @@ func Encrypt(key []byte, src []byte) (dst []byte, err error) {
 	}
 
 	// Initiate cipher
-	cipher, err := cipher.NewGCM(block)
-	if err != nil {
-		return
-	}
+	cipher, _ := cipher.NewGCM(block)
 
 	nonce := rand.New(12)
 
@@ -61,10 +58,7 @@ func Decrypt(key []byte, src []byte) (dst []byte, err error) {
 	}
 
 	// Initiate cipher
-	cipher, err := cipher.NewGCM(block)
-	if err != nil {
-		return
-	}
+	cipher, _ := cipher.NewGCM(block)
 
 	return cipher.Open(nil, src[:12], src[12:], nil)
 
