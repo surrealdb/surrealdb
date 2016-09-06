@@ -14,8 +14,27 @@
 
 package main
 
-import "github.com/abcum/surreal/cli"
+import (
+	"os"
+
+	"github.com/pkg/profile"
+
+	"github.com/abcum/surreal/cli"
+)
 
 func main() {
+
+	switch os.Getenv("DEBUG") {
+	case "cpu":
+		defer profile.Start(profile.CPUProfile, profile.ProfilePath("."), profile.NoShutdownHook).Stop()
+	case "mem":
+		defer profile.Start(profile.MemProfile, profile.ProfilePath("."), profile.NoShutdownHook).Stop()
+	case "block":
+		defer profile.Start(profile.BlockProfile, profile.ProfilePath("."), profile.NoShutdownHook).Stop()
+	case "trace":
+		defer profile.Start(profile.TraceProfile, profile.ProfilePath("."), profile.NoShutdownHook).Stop()
+	}
+
 	cli.Init()
+
 }
