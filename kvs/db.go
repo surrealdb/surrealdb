@@ -15,7 +15,6 @@
 package kvs
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/abcum/surreal/cnf"
@@ -74,7 +73,7 @@ func (db *DB) enc(opts *cnf.Options) (err error) {
 	}
 
 	if kv.Exists() == true && kv.Str() != "±" {
-		err = fmt.Errorf("Please provide a valid encryption key for the stored data.")
+		err = new(CKError)
 	}
 
 	return
