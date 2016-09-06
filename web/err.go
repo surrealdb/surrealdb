@@ -16,12 +16,26 @@ package web
 
 import (
 	"github.com/abcum/fibre"
+	"github.com/abcum/surreal/kvs"
 )
 
 func errors(err error, c *fibre.Context) {
 
 	code := 500
-	text := ""
+	text := err.Error()
+
+	switch err.(type) {
+	default:
+		err = fibre.NewHTTPError(400, text)
+	case *kvs.DBError:
+		err = fibre.NewHTTPError(503, text)
+	case *kvs.TXError:
+		err = fibre.NewHTTPError(500, text)
+	case *kvs.KVError:
+		err = fibre.NewHTTPError(409, text)
+	case *kvs.CKError:
+		err = fibre.NewHTTPError(403, text)
+	}
 
 	if e, ok := err.(*fibre.HTTPError); ok {
 		code = e.Code()
@@ -32,14 +46,18 @@ func errors(err error, c *fibre.Context) {
 	default:
 		c.Text(code, text)
 	case "application/json":
-		c.JSON(code, errs[code])
+		info := errs[code]
+		info["information"] = text
+		c.JSON(code, info)
 	case "application/msgpack":
-		c.PACK(code, errs[code])
+		info := errs[code]
+		info["information"] = text
+		c.PACK(code, info)
 	}
 
 }
 
-var errs = map[int]interface{}{
+var errs = map[int]map[string]interface{}{
 
 	200: map[string]interface{}{
 		"code":          200,

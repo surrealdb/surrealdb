@@ -77,12 +77,7 @@ func routes(s *fibre.Fibre) {
 	s.Post("/sql", func(c *fibre.Context) error {
 		res, err := db.Execute(c, c.Request().Body)
 		if err != nil {
-			return c.Send(500, map[string]interface{}{
-				"code":          500,
-				"details":       "Request problems detected",
-				"documentation": "https://docs.surreal.io/",
-				"information":   err.Error(),
-			})
+			return err
 		}
 		return c.Send(200, res)
 	})
