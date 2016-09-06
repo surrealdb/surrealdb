@@ -1,12 +1,5 @@
 # -----------------------------------
 
-general:
-    branches:
-        only:
-            - master
-
-# -----------------------------------
-
 machine:
     timezone:
         UTC
