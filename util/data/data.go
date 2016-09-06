@@ -16,52 +16,18 @@ package data
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
-	"time"
 
-	"github.com/ugorji/go/codec"
+	"github.com/abcum/surreal/util/pack"
 )
-
-// -----------------------------------------------------------------------------------------
-
-var (
-	// ErrOutOfBounds - Index out of bounds.
-	ErrOutOfBounds = errors.New("out of bounds")
-
-	// ErrNotObj - The target is not an object type.
-	ErrNotObj = errors.New("not an object")
-
-	// ErrNotArray - The target is not an array type.
-	ErrNotArray = errors.New("not an array")
-
-	// ErrNotUnique - The target is not an array type.
-	ErrNotUnique = errors.New("not a unique array item")
-
-	// ErrPathCollision - Creating a path failed because an element collided with an existing value.
-	ErrPathCollision = errors.New("encountered value collision whilst building path")
-
-	// ErrInvalidInputObj - The input value was not a map[string]interface{}.
-	ErrInvalidInputObj = errors.New("invalid input object")
-
-	// ErrInvalidInputText - The input data could not be parsed.
-	ErrInvalidInputText = errors.New("input text could not be parsed")
-
-	// ErrInvalidPath - The filepath was not valid.
-	ErrInvalidPath = errors.New("invalid file path")
-
-	// ErrInvalidBuffer - The input buffer contained an invalid JSON string
-	ErrInvalidBuffer = errors.New("input buffer contained invalid JSON")
-)
-
-// -----------------------------------------------------------------------------------------
 
 // Doc holds a reference to the core data object, or a selected path.
 type Doc struct {
 	data interface{}
 }
-
-// -----------------------------------------------------------------------------------------
 
 // New creates a new data object.
 func New() *Doc {
@@ -73,107 +39,34 @@ func Consume(input interface{}) *Doc {
 	return &Doc{input}
 }
 
-// NewFromJSON converts a JSON byte slice into a data object.
-func NewFromJSON(input []byte) *Doc {
-
-	doc := New()
-
-	var opt codec.JsonHandle
-	opt.MapType = reflect.TypeOf(map[string]interface{}(nil))
-
-	codec.NewDecoderBytes(input, &opt).Decode(doc.data)
-
-	return doc
-
-}
-
-// NewFromCBOR converts a CBOR byte slice into a data object.
-func NewFromCBOR(input []byte) *Doc {
-
-	doc := New()
-
-	var opt codec.CborHandle
-	opt.MapType = reflect.TypeOf(map[string]interface{}(nil))
-	opt.SetInterfaceExt(reflect.TypeOf(time.Time{}), 1, extTime{})
-
-	codec.NewDecoderBytes(input, &opt).Decode(doc.data)
-
-	return doc
-
-}
-
-// NewFromPACK converts a MsgPack byte slice into a data object.
-func NewFromPACK(input []byte) *Doc {
-
-	doc := New()
-
-	var opt codec.MsgpackHandle
-	opt.WriteExt = true
-	opt.RawToString = true
-	opt.MapType = reflect.TypeOf(map[string]interface{}(nil))
-	opt.SetBytesExt(reflect.TypeOf(time.Time{}), 1, extTime{})
-
-	codec.NewDecoderBytes(input, &opt).Decode(doc.data)
-
-	return doc
-
-}
-
 // Data returns the internal data object as an interface.
 func (d *Doc) Data() interface{} {
 	return d.data
 }
 
-// Reset resets and empties the internal data object.
-func (d *Doc) Reset() {
-	d.data = nil
+// Data returns the internal data object as an interface.
+func (d *Doc) Copy() (i interface{}) {
+	return pack.Copy(d.data)
 }
 
-// ToJSON converts the data object to a JSON byte slice.
-func (d *Doc) ToJSON() (data []byte) {
+// JSON converts the data object to a JSON byte slice.
+func (d *Doc) JSON() (data []byte) {
+	return pack.ToJSON(d.data)
+}
 
-	var opt codec.JsonHandle
-	opt.Canonical = true
-	opt.AsSymbols = codec.AsSymbolDefault
-
-	codec.NewEncoderBytes(&data, &opt).Encode(d.data)
-
+// Encode encodes the data object to a byte slice.
+func (d *Doc) Encode() (dst []byte) {
+	dst = pack.ToPACK(d.data)
 	return
-
 }
 
-// ToCBOR converts the data object to a CBOR byte slice.
-func (d *Doc) ToCBOR() (data []byte) {
-
-	var opt codec.CborHandle
-	opt.Canonical = true
-	opt.AsSymbols = codec.AsSymbolDefault
-	opt.SetInterfaceExt(reflect.TypeOf(time.Time{}), 1, extTime{})
-
-	codec.NewEncoderBytes(&data, &opt).Encode(d.data)
-
-	return
-
+// Decode decodes the byte slice into a data object.
+func (d *Doc) Decode(src []byte) *Doc {
+	pack.FromPACK(src, d.data)
+	return d
 }
 
-// ToPACK converts the data object to a MsgPack byte slice.
-func (d *Doc) ToPACK() (data []byte) {
-
-	var opt codec.MsgpackHandle
-	opt.WriteExt = true
-	opt.Canonical = true
-	opt.AsSymbols = codec.AsSymbolDefault
-	opt.SetBytesExt(reflect.TypeOf(time.Time{}), 1, extTime{})
-
-	codec.NewEncoderBytes(&data, &opt).Encode(d.data)
-
-	return
-
-}
-
-// -----------------------------------------------------------------------------------------
-
-// d.path("this", "is", "a.string", "and.something", "else")
+// --------------------------------------------------------------------------------
 
 func (d *Doc) path(path ...string) (paths []string) {
 	for _, p := range path {
@@ -182,115 +75,233 @@ func (d *Doc) path(path ...string) (paths []string) {
 	return
 }
 
-// Search - Attempt to find and return an object within the JSON structure by specifying the hierarchy
-// of field names to locate the target. If the search encounters an array and has not reached the end
-// target then it will iterate each object of the array for the target and return all of the results in
-// a JSON array.
+// --------------------------------------------------------------------------------
 
-// Exists - Checks whether a path exists.
-func (d *Doc) Exists(path ...string) bool {
-
-	path = d.path(path...)
-
-	var object interface{}
-
-	object = d.data
-	for target := 0; target < len(path); target++ {
-		if mmap, ok := object.(map[string]interface{}); ok {
-			object, ok = mmap[path[target]]
-			if !ok {
-				return false
-			}
-		} else {
-			return false
-		}
-	}
-	return true
+// Reset empties and resets the data at the specified path.
+func (d *Doc) Reset(path ...string) (*Doc, error) {
+	return d.Set(nil, path...)
 }
 
-// Index - Attempt to find and return an object with a JSON array by specifying the index of the
-// target.
-func (d *Doc) Index(index int) *Doc {
-	if array, ok := d.Data().([]interface{}); ok {
-		if index >= len(array) {
-			return &Doc{nil}
-		}
-		return &Doc{array[index]}
-	}
-	return &Doc{nil}
+// Array sets the specified path to an array.
+func (d *Doc) Array(path ...string) (*Doc, error) {
+	return d.Set([]interface{}{}, path...)
 }
 
-// Children - Return a slice of all the children of the array. This also works for objects, however,
-// the children returned for an object will NOT be in order and you lose the names of the returned
-// objects this way.
-func (d *Doc) Children() ([]*Doc, error) {
-	if array, ok := d.Data().([]interface{}); ok {
-		children := make([]*Doc, len(array))
-		for i := 0; i < len(array); i++ {
-			children[i] = &Doc{array[i]}
-		}
-		return children, nil
-	}
-	return nil, ErrNotArray
+// Object sets the specified path to an object.
+func (d *Doc) Object(path ...string) (*Doc, error) {
+	return d.Set(map[string]interface{}{}, path...)
 }
 
-// ChildrenMap - Return a map of all the children of an object.
-func (d *Doc) ChildrenMap() (map[string]*Doc, error) {
-	if mmap, ok := d.Data().(map[string]interface{}); ok {
-		children := map[string]*Doc{}
-		for name, obj := range mmap {
-			children[name] = &Doc{obj}
-		}
-		return children, nil
-	}
-	return nil, ErrNotObj
-}
+// --------------------------------------------------------------------------------
 
-// -----------------------------------------------------------------------------------------
-
-// Search - Attempt to find and return an object within the JSON structure by specifying the hierarchy
-// of field names to locate the target. If the search encounters an array and has not reached the end
-// target then it will iterate each object of the array for the target and return all of the results in
-// a JSON array.
-func (d *Doc) Get(path ...string) *Doc {
-
-	path = d.path(path...)
-
-	var object interface{}
-
-	object = d.data
-	for target := 0; target < len(path); target++ {
-		if mmap, ok := object.(map[string]interface{}); ok {
-			object = mmap[path[target]]
-		} else if marray, ok := object.([]interface{}); ok {
-			tmpArray := []interface{}{}
-			for _, val := range marray {
-				tmp := &Doc{val}
-				res := tmp.Get(path[target:]...).Data()
-				if res != nil {
-					tmpArray = append(tmpArray, res)
-				}
-			}
-			if len(tmpArray) == 0 {
-				return &Doc{nil}
-			}
-			return &Doc{tmpArray}
-		} else {
-			return &Doc{nil}
-		}
-	}
-	return &Doc{object}
-}
-
-// Set the value at the specified path if it does not exist.
+// New sets the value at the specified path if it does not exist.
 func (d *Doc) New(value interface{}, path ...string) (*Doc, error) {
 	if !d.Exists(path...) {
 		return d.Set(value, path...)
 	}
-	return nil, nil
+	return d.Get(path...), nil
 }
 
-// Set the value at the specified path.
+// Iff sets the value at the specified path if it is not nil, or deleted it.
+func (d *Doc) Iff(value interface{}, path ...string) (*Doc, error) {
+	if value != nil {
+		return d.Set(value, path...)
+	}
+	return &Doc{nil}, d.Del(path...)
+}
+
+// --------------------------------------------------------------------------------
+
+// Exists checks whether the specified path exists.
+func (d *Doc) Exists(path ...string) bool {
+
+	path = d.path(path...)
+
+	// If the value found at the current
+	// path part is undefined, then just
+	// return false immediately
+
+	if d.data == nil {
+		return false
+	}
+
+	// Define the temporary object so
+	// that we can loop over and traverse
+	// down the path parts of the data
+
+	object := d.data
+
+	// Loop over each part of the path
+	// whilst detecting if the data at
+	// the current path is an {} or []
+
+	for k, p := range path {
+
+		// If the value found at the current
+		// path part is an object, then move
+		// to the next part of the path
+
+		if m, ok := object.(map[string]interface{}); ok {
+			if object, ok = m[p]; !ok {
+				return false
+			}
+			continue
+		}
+
+		// If the value found at the current
+		// path part is an array, then perform
+		// the query on the specified items
+
+		if a, ok := object.([]interface{}); ok {
+
+			var i int
+			var e error
+
+			if p == "*" {
+				e = errors.New("")
+			} else if p == "first" {
+				i = 0
+			} else if p == "last" {
+				i = len(a) - 1
+			} else {
+				i, e = strconv.Atoi(p)
+			}
+
+			// If the path part is a numeric index
+			// then run the query on the specified
+			// index of the current data array
+
+			if e == nil {
+				if 0 == len(a) || i >= len(a) {
+					return false
+				}
+				return Consume(a[i]).Exists(path[k+1:]...)
+			}
+
+			// If the path part is an asterisk
+			// then run the query on all of the
+			// items in the current data array
+
+			if p == "*" {
+
+				for _, v := range a {
+					if Consume(v).Exists(path[k+1:]...) {
+						return true
+					}
+				}
+
+			}
+
+		}
+
+		return false
+
+	}
+
+	return true
+
+}
+
+// --------------------------------------------------------------------------------
+
+// Get gets the value or values at a specified path.
+func (d *Doc) Get(path ...string) *Doc {
+
+	path = d.path(path...)
+
+	// If the value found at the current
+	// path part is undefined, then just
+	// return false immediately
+
+	if d.data == nil {
+		return &Doc{nil}
+	}
+
+	// Define the temporary object so
+	// that we can loop over and traverse
+	// down the path parts of the data
+
+	object := d.data
+
+	// Loop over each part of the path
+	// whilst detecting if the data at
+	// the current path is an {} or []
+
+	for k, p := range path {
+
+		// If the value found at the current
+		// path part is an object, then move
+		// to the next part of the path
+
+		if m, ok := object.(map[string]interface{}); ok {
+			object = m[p]
+			continue
+		}
+
+		// If the value found at the current
+		// path part is an array, then perform
+		// the query on the specified items
+
+		if a, ok := object.([]interface{}); ok {
+
+			var i int
+			var e error
+
+			if p == "*" {
+				e = errors.New("")
+			} else if p == "first" {
+				i = 0
+			} else if p == "last" {
+				i = len(a) - 1
+			} else if p == "length" {
+				return &Doc{len(a)}
+			} else {
+				i, e = strconv.Atoi(p)
+			}
+
+			// If the path part is a numeric index
+			// then run the query on the specified
+			// index of the current data array
+
+			if e == nil {
+				if 0 == len(a) || i >= len(a) {
+					return &Doc{nil}
+				}
+				return Consume(a[i]).Get(path[k+1:]...)
+			}
+
+			// If the path part is an asterisk
+			// then run the query on all of the
+			// items in the current data array
+
+			if p == "*" {
+
+				out := []interface{}{}
+
+				for _, v := range a {
+					res := Consume(v).Get(path[k+1:]...)
+					if res.data != nil {
+						out = append(out, res.data)
+					}
+				}
+
+				return &Doc{out}
+
+			}
+
+		}
+
+		return &Doc{nil}
+
+	}
+
+	return &Doc{object}
+
+}
+
+// --------------------------------------------------------------------------------
+
+// Set sets the value or values at a specified path.
 func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 
 	path = d.path(path...)
@@ -299,158 +310,372 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 		d.data = value
 		return d, nil
 	}
-	var object interface{}
+
+	// If the value found at the current
+	// path part is undefined, then ensure
+	// that it is an object
+
 	if d.data == nil {
 		d.data = map[string]interface{}{}
 	}
-	object = d.data
-	for target := 0; target < len(path); target++ {
-		if mmap, ok := object.(map[string]interface{}); ok {
-			if target == len(path)-1 {
-				mmap[path[target]] = value
-			} else if mmap[path[target]] == nil {
-				mmap[path[target]] = map[string]interface{}{}
+
+	// Define the temporary object so
+	// that we can loop over and traverse
+	// down the path parts of the data
+
+	object := d.data
+
+	// Loop over each part of the path
+	// whilst detecting if the data at
+	// the current path is an {} or []
+
+	for k, p := range path {
+
+		// If the value found at the current
+		// path part is an object, then move
+		// to the next part of the path
+
+		if m, ok := object.(map[string]interface{}); ok {
+			if k == len(path)-1 {
+				m[p] = value
+			} else if m[p] == nil {
+				m[p] = map[string]interface{}{}
 			}
-			object = mmap[path[target]]
-		} else {
-			return &Doc{nil}, ErrPathCollision
+			object = m[p]
 		}
+
+		// If the value found at the current
+		// path part is an array, then perform
+		// the query on the specified items
+
+		if a, ok := object.([]interface{}); ok {
+
+			var i int
+			var e error
+
+			if p == "*" {
+				e = errors.New("")
+			} else if p == "first" {
+				i = 0
+			} else if p == "last" {
+				i = len(a) - 1
+			} else {
+				i, e = strconv.Atoi(p)
+			}
+
+			// If the path part is a numeric index
+			// then run the query on the specified
+			// index of the current data array
+
+			if e == nil {
+
+				if 0 == len(a) || i >= len(a) {
+					return &Doc{nil}, fmt.Errorf("No item with index %d in array, using path %s", i, path)
+				}
+
+				if k == len(path)-1 {
+					a[i] = value
+					object = a[i]
+				} else {
+					return Consume(a[i]).Set(value, path[k+1:]...)
+				}
+
+			}
+
+			// If the path part is an asterisk
+			// then run the query on all of the
+			// items in the current data array
+
+			if p == "*" {
+
+				out := []interface{}{}
+
+				for i, _ := range a {
+
+					if k == len(path)-1 {
+						a[i] = value
+						out = append(out, a[i])
+					} else {
+						res, _ := Consume(a[i]).Set(value, path[k+1:]...)
+						if res.data != nil {
+							out = append(out, res.data)
+						}
+					}
+
+				}
+
+				return &Doc{out}, nil
+
+			}
+
+		}
+
 	}
+
 	return &Doc{object}, nil
+
 }
 
-// Del - Delete an element at a JSON path, an error is returned if the element does not exist.
+// --------------------------------------------------------------------------------
+
+// Del deletes the value or values at a specified path.
 func (d *Doc) Del(path ...string) error {
 
 	path = d.path(path...)
 
-	var object interface{}
+	// If the value found at the current
+	// path part is undefined, then return
+	// a not an object error
 
 	if d.data == nil {
-		return ErrNotObj
+		return fmt.Errorf("Item is not an object")
 	}
-	object = d.data
-	for target := 0; target < len(path); target++ {
-		if mmap, ok := object.(map[string]interface{}); ok {
-			if target == len(path)-1 {
-				delete(mmap, path[target])
-			} else if mmap[path[target]] == nil {
-				return ErrNotObj
+
+	// Define the temporary object so
+	// that we can loop over and traverse
+	// down the path parts of the data
+
+	object := d.data
+
+	// Loop over each part of the path
+	// whilst detecting if the data at
+	// the current path is an {} or []
+
+	for k, p := range path {
+
+		// If the value found at the current
+		// path part is an object, then move
+		// to the next part of the path
+
+		if m, ok := object.(map[string]interface{}); ok {
+			if k == len(path)-1 {
+				delete(m, p)
+			} else if m[p] == nil {
+				return fmt.Errorf("Item at path %s is not an object", path)
 			}
-			object = mmap[path[target]]
-		} else {
-			return ErrNotObj
+			object = m[p]
 		}
+
+		// If the value found at the current
+		// path part is an array, then perform
+		// the query on the specified items
+
+		if a, ok := object.([]interface{}); ok {
+
+			var i int
+			var e error
+
+			if p == "*" {
+				e = errors.New("")
+			} else if p == "first" {
+				i = 0
+			} else if p == "last" {
+				i = len(a) - 1
+			} else {
+				i, e = strconv.Atoi(p)
+			}
+
+			// If the path part is a numeric index
+			// then run the query on the specified
+			// index of the current data array
+
+			if e == nil {
+
+				if 0 == len(a) || i >= len(a) {
+					return fmt.Errorf("No item with index %d in array, using path %s", i, path)
+				}
+
+				if k == len(path)-1 {
+					copy(a[i:], a[i+1:])
+					a[len(a)-1] = nil
+					a = a[:len(a)-1]
+					d.Set(a, path[:len(path)-1]...)
+				} else {
+					return Consume(a[i]).Del(path[k+1:]...)
+				}
+
+			}
+
+			// If the path part is an asterisk
+			// then run the query on all of the
+			// items in the current data array
+
+			if p == "*" {
+
+				for i := len(a) - 1; i >= 0; i-- {
+
+					if k == len(path)-1 {
+						copy(a[i:], a[i+1:])
+						a[len(a)-1] = nil
+						a = a[:len(a)-1]
+						d.Set(a, path[:len(path)-1]...)
+					} else {
+						Consume(a[i]).Del(path[k+1:]...)
+					}
+
+				}
+
+			}
+
+		}
+
 	}
+
 	return nil
+
 }
 
-// SetIndex - Set a value of an array element based on the index.
-func (d *Doc) SetIndex(value interface{}, index int) (*Doc, error) {
-	if array, ok := d.Data().([]interface{}); ok {
-		if index >= len(array) {
-			return &Doc{nil}, ErrOutOfBounds
+// --------------------------------------------------------------------------------
+
+// ArrayDel appends an item or an array of items to an array at the specified path.
+func (d *Doc) ArrayAdd(value interface{}, path ...string) (*Doc, error) {
+
+	a, ok := d.Get(path...).Data().([]interface{})
+	if !ok {
+		return &Doc{nil}, fmt.Errorf("Not an array")
+	}
+
+	if values, ok := value.([]interface{}); ok {
+	outer:
+		for _, value := range values {
+			for _, v := range a {
+				if reflect.DeepEqual(v, value) {
+					continue outer
+				}
+			}
+			a = append(a, value)
 		}
-		array[index] = value
-		return &Doc{array[index]}, nil
-	}
-	return &Doc{nil}, ErrNotArray
-}
-
-// Array - Create a new JSON array at a path. Returns an error if the path contains a collision with
-// a non object type.
-func (d *Doc) Array(path ...string) (*Doc, error) {
-	return d.Set([]interface{}{}, path...)
-}
-
-// Object - Create a new JSON object at a path. Returns an error if the path contains a collision with
-// a non object type.
-func (d *Doc) Object(path ...string) (*Doc, error) {
-	return d.Set(map[string]interface{}{}, path...)
-}
-
-// -----------------------------------------------------------------------------------------
-
-// ArrayAdd - Append a unique value onto a JSON array.
-func (d *Doc) ArrayAdd(value interface{}, path ...string) error {
-	array, ok := d.Get(path...).Data().([]interface{})
-	if !ok {
-		return ErrNotArray
-	}
-	for _, item := range array {
-		if reflect.DeepEqual(item, value) {
-			return ErrNotUnique
-		}
-	}
-	array = append(array, value)
-	_, err := d.Set(array, path...)
-	return err
-}
-
-// ArrayDel - Append a unique value onto a JSON array.
-func (d *Doc) ArrayDel(value interface{}, path ...string) error {
-	array, ok := d.Get(path...).Data().([]interface{})
-	if !ok {
-		return ErrNotArray
-	}
-	for i, item := range array {
-		if reflect.DeepEqual(item, value) {
-			array = append(array[:i], array[i+1:]...)
-			break
-		}
-	}
-	_, err := d.Set(array, path...)
-	return err
-}
-
-// ArrayAppend - Append a value onto a JSON array.
-func (d *Doc) ArrayAppend(value interface{}, path ...string) error {
-	array, ok := d.Get(path...).Data().([]interface{})
-	if !ok {
-		return ErrNotArray
-	}
-	array = append(array, value)
-	_, err := d.Set(array, path...)
-	return err
-}
-
-// ArrayRemove - Remove an element from a JSON array.
-func (d *Doc) ArrayRemove(index int, path ...string) error {
-	if index < 0 {
-		return ErrOutOfBounds
-	}
-	array, ok := d.Get(path...).Data().([]interface{})
-	if !ok {
-		return ErrNotArray
-	}
-	if index < len(array) {
-		array = append(array[:index], array[index+1:]...)
 	} else {
-		return ErrOutOfBounds
+		for _, v := range a {
+			if reflect.DeepEqual(v, value) {
+				return nil, nil
+			}
+		}
+		a = append(a, value)
 	}
-	_, err := d.Set(array, path...)
-	return err
+
+	return d.Set(a, path...)
+
 }
 
-// ArrayElement - Access an element from a JSON array.
-func (d *Doc) ArrayElement(index int, path ...string) (*Doc, error) {
-	if index < 0 {
-		return &Doc{nil}, ErrOutOfBounds
-	}
-	array, ok := d.Get(path...).Data().([]interface{})
+// ArrayDel deletes an item or an array of items from an array at the specified path.
+func (d *Doc) ArrayDel(value interface{}, path ...string) (*Doc, error) {
+
+	a, ok := d.Get(path...).Data().([]interface{})
 	if !ok {
-		return &Doc{nil}, ErrNotArray
+		return &Doc{nil}, fmt.Errorf("Not an array")
 	}
-	if index < len(array) {
-		return &Doc{array[index]}, nil
+
+	if values, ok := value.([]interface{}); ok {
+		for _, value := range values {
+			for i := len(a) - 1; i >= 0; i-- {
+				v := a[i]
+				if reflect.DeepEqual(v, value) {
+					copy(a[i:], a[i+1:])
+					a[len(a)-1] = nil
+					a = a[:len(a)-1]
+				}
+			}
+		}
+	} else {
+		for i := len(a) - 1; i >= 0; i-- {
+			v := a[i]
+			if reflect.DeepEqual(v, value) {
+				copy(a[i:], a[i+1:])
+				a[len(a)-1] = nil
+				a = a[:len(a)-1]
+			}
+		}
 	}
-	return &Doc{nil}, ErrOutOfBounds
+
+	return d.Set(a, path...)
+
 }
 
-// ArrayCount - Count the number of elements in a JSON array.
-func (d *Doc) ArrayCount(path ...string) (int, error) {
-	if array, ok := d.Get(path...).Data().([]interface{}); ok {
-		return len(array), nil
+// --------------------------------------------------------------------------------
+
+// Contains checks whether the value exists within the array at the specified path.
+func (d *Doc) Contains(value interface{}, path ...string) bool {
+
+	a, ok := d.Get(path...).Data().([]interface{})
+	if !ok {
+		return false
 	}
-	return 0, ErrNotArray
+
+	for _, v := range a {
+		if reflect.DeepEqual(v, value) {
+			return true
+		}
+	}
+
+	return false
+
+}
+
+// --------------------------------------------------------------------------------
+
+// Inc increments an item, or appends an item to an array at the specified path.
+func (d *Doc) Inc(value interface{}, path ...string) (*Doc, error) {
+
+	switch cur := d.Get(path...).Data().(type) {
+	case nil:
+		switch inc := value.(type) {
+		case int64:
+			return d.Set(0+inc, path...)
+		case float64:
+			return d.Set(0+inc, path...)
+		}
+	case int64:
+		switch inc := value.(type) {
+		case int64:
+			return d.Set(cur+inc, path...)
+		case float64:
+			return d.Set(float64(cur)+inc, path...)
+		}
+	case float64:
+		switch inc := value.(type) {
+		case int64:
+			return d.Set(cur+float64(inc), path...)
+		case float64:
+			return d.Set(cur+inc, path...)
+		}
+	case []interface{}:
+		return d.ArrayAdd(value, path...)
+	}
+
+	return &Doc{nil}, fmt.Errorf("Not possible to increment.")
+
+}
+
+// Dec decrements an item, or removes an item from an array at the specified path.
+func (d *Doc) Dec(value interface{}, path ...string) (*Doc, error) {
+
+	switch cur := d.Get(path...).Data().(type) {
+	case nil:
+		switch inc := value.(type) {
+		case int64:
+			return d.Set(0-inc, path...)
+		case float64:
+			return d.Set(0-inc, path...)
+		}
+	case int64:
+		switch inc := value.(type) {
+		case int64:
+			return d.Set(cur-inc, path...)
+		case float64:
+			return d.Set(float64(cur)-inc, path...)
+		}
+	case float64:
+		switch inc := value.(type) {
+		case int64:
+			return d.Set(cur-float64(inc), path...)
+		case float64:
+			return d.Set(cur-inc, path...)
+		}
+	case []interface{}:
+		return d.ArrayDel(value, path...)
+	}
+
+	return &Doc{nil}, fmt.Errorf("Not possible to decrement.")
+
 }
