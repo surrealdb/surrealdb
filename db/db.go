@@ -63,6 +63,8 @@ func Exit() {
 // Prepare prepares a query for parameterization for future execution
 func Prepare(sql string, param ...interface{}) string {
 
+	// IMPORTANT Need to improve database paramaterization
+
 	return fmt.Sprintf(sql, param...)
 
 }
@@ -120,7 +122,12 @@ func detail(e error) interface{} {
 
 func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 
+	var txn kvs.TX
+
 	defer func() {
+		if txn != nil {
+			txn.Rollback()
+		}
 		if r := recover(); r != nil {
 			if err, ok := r.(error); ok {
 				fmt.Printf("%s", debug.Stack())
@@ -143,37 +150,70 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 			continue
 
 		case *sql.SelectStatement:
-			res, err = executeSelectStatement(stm)
+			res, err = executeSelectStatement(txn, stm)
 		case *sql.CreateStatement:
-			res, err = executeCreateStatement(stm)
+			res, err = executeCreateStatement(txn, stm)
 		case *sql.UpdateStatement:
-			res, err = executeUpdateStatement(stm)
+			res, err = executeUpdateStatement(txn, stm)
 		case *sql.ModifyStatement:
-			res, err = executeModifyStatement(stm)
+			res, err = executeModifyStatement(txn, stm)
 		case *sql.DeleteStatement:
-			res, err = executeDeleteStatement(stm)
+			res, err = executeDeleteStatement(txn, stm)
 		case *sql.RelateStatement:
-			res, err = executeRelateStatement(stm)
+			res, err = executeRelateStatement(txn, stm)
 		case *sql.RecordStatement:
-			res, err = executeRecordStatement(stm)
+			res, err = executeRecordStatement(txn, stm)
+
+		case *sql.DefineRulesStatement:
+			res, err = executeDefineRulesStatement(txn, stm)
+		case *sql.RemoveRulesStatement:
+			res, err = executeRemoveRulesStatement(txn, stm)
 
 		case *sql.DefineTableStatement:
-			res, err = executeDefineTableStatement(stm)
+			res, err = executeDefineTableStatement(txn, stm)
 		case *sql.RemoveTableStatement:
-			res, err = executeRemoveTableStatement(stm)
+			res, err = executeRemoveTableStatement(txn, stm)
 
 		case *sql.DefineFieldStatement:
-			res, err = executeDefineFieldStatement(stm)
+			res, err = executeDefineFieldStatement(txn, stm)
 		case *sql.RemoveFieldStatement:
-			res, err = executeRemoveFieldStatement(stm)
+			res, err = executeRemoveFieldStatement(txn, stm)
 
 		case *sql.DefineIndexStatement:
-			res, err = executeDefineIndexStatement(stm)
+			res, err = executeDefineIndexStatement(txn, stm)
 		case *sql.ResyncIndexStatement:
-			res, err = executeResyncIndexStatement(stm)
+			res, err = executeResyncIndexStatement(txn, stm)
 		case *sql.RemoveIndexStatement:
-			res, err = executeRemoveIndexStatement(stm)
+			res, err = executeRemoveIndexStatement(txn, stm)
 
+		case *sql.BeginStatement:
+			if txn != nil {
+				chn <- fibre.NewHTTPError(400, "Transaction already running")
+				return
+			} else if txn, err = db.Txn(true); err != nil {
+				chn <- err
+				return
+			}
+
+		case *sql.CommitStatement:
+			if txn != nil {
+				txn.Commit()
+				txn = nil
+				continue
+			}
+
+		case *sql.CancelStatement:
+			if txn != nil {
+				txn.Rollback()
+				txn = nil
+				continue
+			}
+
+		}
+
+		if err != nil && txn != nil {
+			txn.Rollback()
+			chn <- err
 		}
 
 		chn <- &Response{

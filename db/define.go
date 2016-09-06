@@ -15,19 +15,28 @@
 package db
 
 import (
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/keys"
+	"github.com/abcum/surreal/util/pack"
 )
 
-func executeDefineTableStatement(ast *sql.DefineTableStatement) (out []interface{}, err error) {
+func executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out []interface{}, err error) {
 
-	txn, err := db.Txn(true)
-	if err != nil {
-		return
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
 	}
 
-	defer txn.Rollback()
+	if txn == nil {
+		local = true
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
 
 	for _, TB := range ast.What {
 
@@ -45,34 +54,81 @@ func executeDefineTableStatement(ast *sql.DefineTableStatement) (out []interface
 
 	}
 
-	txn.Commit()
+	if local {
+		txn.Commit()
+	}
 
 	return
 
 }
 
-func executeDefineFieldStatement(ast *sql.DefineFieldStatement) (out []interface{}, err error) {
+func executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesStatement) (out []interface{}, err error) {
 
-	txn, err := db.Txn(true)
-	if err != nil {
-		return
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
 	}
 
-	defer txn.Rollback()
+	if txn == nil {
+		local = true
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
 
-	doc := data.New()
-	doc.Set(ast.Name, "name")
-	doc.Set(ast.Type, "type")
-	doc.Set(ast.Enum, "enum")
-	doc.Set(ast.Code, "code")
-	doc.Set(ast.Min, "min")
-	doc.Set(ast.Max, "max")
-	doc.Set(ast.Match, "match")
-	doc.Set(ast.Default, "default")
-	doc.Set(ast.Notnull, "notnull")
-	doc.Set(ast.Readonly, "readonly")
-	doc.Set(ast.Mandatory, "mandatory")
-	doc.Set(ast.Validate, "validate")
+	for _, TB := range ast.What {
+
+		for _, RU := range ast.When {
+
+			// Set the database definition
+			dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
+			if err := txn.Put(dkey.Encode(), nil); err != nil {
+				return nil, err
+			}
+
+			// Set the table definition
+			tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
+			if err := txn.Put(tkey.Encode(), nil); err != nil {
+				return nil, err
+			}
+
+			// Set the field definition
+			rkey := &keys.RU{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, RU: RU}
+			if err := txn.Put(rkey.Encode(), pack.ToPACK(ast)); err != nil {
+				return nil, err
+			}
+
+		}
+
+	}
+
+	if local {
+		txn.Commit()
+	}
+
+	return
+
+}
+
+func executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out []interface{}, err error) {
+
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
+	}
+
+	if txn == nil {
+		local = true
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
 
 	for _, TB := range ast.What {
 
@@ -90,37 +146,36 @@ func executeDefineFieldStatement(ast *sql.DefineFieldStatement) (out []interface
 
 		// Set the field definition
 		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, FD: ast.Name}
-		if err := txn.Put(fkey.Encode(), doc.ToPACK()); err != nil {
+		if err := txn.Put(fkey.Encode(), pack.ToPACK(ast)); err != nil {
 			return nil, err
 		}
 
 	}
 
-	txn.Commit()
+	if local {
+		txn.Commit()
+	}
 
 	return
 
 }
 
-func executeDefineIndexStatement(ast *sql.DefineIndexStatement) (out []interface{}, err error) {
+func executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out []interface{}, err error) {
 
-	txn, err := db.Txn(true)
-	if err != nil {
-		return
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
 	}
 
-	defer txn.Rollback()
-
-	doc := data.New()
-	// doc.Set(ast.Name, "name")
-	// doc.Set(ast.Type, "type")
-	// doc.Set(ast.Code, "code")
-	// doc.Set(ast.Min, "min")
-	// doc.Set(ast.Max, "max")
-	// doc.Set(ast.Default, "default")
-	// doc.Set(ast.Notnull, "notnull")
-	// doc.Set(ast.Readonly, "readonly")
-	// doc.Set(ast.Mandatory, "mandatory")
+	if txn == nil {
+		local = true
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
 
 	for _, TB := range ast.What {
 
@@ -138,13 +193,15 @@ func executeDefineIndexStatement(ast *sql.DefineIndexStatement) (out []interface
 
 		// Set the index definition
 		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name}
-		if err := txn.Put(ikey.Encode(), doc.ToPACK()); err != nil {
+		if err := txn.Put(ikey.Encode(), pack.ToPACK(ast)); err != nil {
 			return nil, err
 		}
 
 	}
 
-	txn.Commit()
+	if local {
+		txn.Commit()
+	}
 
 	return
 

@@ -15,21 +15,70 @@
 package db
 
 import (
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/data"
+	"github.com/abcum/surreal/util/item"
+	"github.com/abcum/surreal/util/keys"
 )
 
-func executeSelectStatement(ast *sql.SelectStatement) (out []interface{}, err error) {
+func executeSelectStatement(txn kvs.TX, ast *sql.SelectStatement) (out []interface{}, err error) {
 
-	kvs, err := db.All()
-
-	for _, kv := range kvs {
-
-		out = append(out, map[string]interface{}{
-			"key": string(kv.Key()),
-			"val": data.NewFromPACK(kv.Val()).Data(),
-		})
+	if ast.EX {
+		return append(out, ast), nil
 	}
+
+	if txn == nil {
+		txn, err = db.Txn(false)
+		if err != nil {
+			return
+		}
+		defer txn.Close()
+	}
+
+	for _, w := range ast.What {
+
+		if what, ok := w.(*sql.Thing); ok {
+			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
+			kv, _ := txn.Get(key.Encode())
+			doc := item.New(kv, txn, key)
+			if ret, err := detect(doc, ast); err != nil {
+				return nil, err
+			} else if ret != nil {
+				out = append(out, ret)
+			}
+		}
+
+		if what, ok := w.(*sql.Table); ok {
+			beg := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: keys.Prefix}
+			end := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: keys.Suffix}
+			kvs, _ := txn.RGet(beg.Encode(), end.Encode(), 0)
+			for _, kv := range kvs {
+				doc := item.New(kv, txn, nil)
+				if ret, err := detect(doc, ast); err != nil {
+					return nil, err
+				} else if ret != nil {
+					out = append(out, ret)
+				}
+			}
+		}
+
+	}
+
+	return
+
+}
+
+func detect(doc *item.Doc, ast *sql.SelectStatement) (out interface{}, err error) {
+
+	if !doc.Allow("SELECT") {
+		return nil, nil
+	}
+
+	if !doc.Check(ast.Cond) {
+		return
+	}
+
+	out = doc.Blaze(ast)
 
 	return
 

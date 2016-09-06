@@ -22,33 +22,41 @@ import (
 	"github.com/abcum/surreal/util/uuid"
 )
 
-func executeCreateStatement(ast *sql.CreateStatement) (out []interface{}, err error) {
+func executeCreateStatement(txn kvs.TX, ast *sql.CreateStatement) (out []interface{}, err error) {
 
-	txn, err := db.Txn(true)
-	if err != nil {
-		return
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
 	}
 
-	defer txn.Rollback()
+	if txn == nil {
+		local = true
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
 
 	for _, w := range ast.What {
 
 		if what, ok := w.(*sql.Thing); ok {
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
 			kv, _ := txn.Get(key.Encode())
-			doc := item.New(kv, key)
-			if ret, err := create(txn, doc, ast); err != nil {
+			doc := item.New(kv, txn, key)
+			if ret, err := create(doc, ast); err != nil {
 				return nil, err
 			} else if ret != nil {
 				out = append(out, ret)
 			}
 		}
 
-		if what, ok := w.(sql.Table); ok {
-			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what, ID: uuid.NewV5(uuid.NewV4().UUID, ast.KV).String()}
+		if what, ok := w.(*sql.Table); ok {
+			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: uuid.NewV5(uuid.NewV4().UUID, ast.KV).String()}
 			kv, _ := txn.Get(key.Encode())
-			doc := item.New(kv, key)
-			if ret, err := create(txn, doc, ast); err != nil {
+			doc := item.New(kv, txn, key)
+			if ret, err := create(doc, ast); err != nil {
 				return nil, err
 			} else if ret != nil {
 				out = append(out, ret)
@@ -57,32 +65,34 @@ func executeCreateStatement(ast *sql.CreateStatement) (out []interface{}, err er
 
 	}
 
-	txn.Commit()
+	if local {
+		txn.Commit()
+	}
 
 	return
 
 }
 
-func create(txn kvs.TX, doc *item.Doc, ast *sql.CreateStatement) (out interface{}, err error) {
+func create(doc *item.Doc, ast *sql.CreateStatement) (out interface{}, err error) {
 
-	if !doc.Allow(txn, "create") {
+	if err = doc.Merge(ast.Data); err != nil {
+		return
+	}
+
+	if !doc.Allow("CREATE") {
 		return nil, nil
 	}
 
-	if err = doc.Merge(txn, ast.Data); err != nil {
-		return nil, err
+	if err = doc.StoreIndex(); err != nil {
+		return
 	}
 
-	if err = doc.StoreIndex(txn); err != nil {
-		return nil, err
+	if err = doc.StartThing(); err != nil {
+		return
 	}
 
-	if err = doc.StartThing(txn); err != nil {
-		return nil, err
-	}
-
-	if err = doc.StorePatch(txn); err != nil {
-		return nil, err
+	if err = doc.StorePatch(); err != nil {
+		return
 	}
 
 	out = doc.Yield(ast.Echo, sql.AFTER)

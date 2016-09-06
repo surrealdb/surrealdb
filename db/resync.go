@@ -21,14 +21,21 @@ import (
 	"github.com/abcum/surreal/util/keys"
 )
 
-func executeResyncIndexStatement(ast *sql.ResyncIndexStatement) (out []interface{}, err error) {
+func executeResyncIndexStatement(txn kvs.TX, ast *sql.ResyncIndexStatement) (out []interface{}, err error) {
 
-	txn, err := db.Txn(true)
-	if err != nil {
-		return
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
 	}
 
-	defer txn.Rollback()
+	if txn == nil {
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
 
 	for _, TB := range ast.What {
 
@@ -44,23 +51,25 @@ func executeResyncIndexStatement(ast *sql.ResyncIndexStatement) (out []interface
 		iend := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, ID: keys.Suffix}
 		kvs, _ := txn.RGet(ibeg.Encode(), iend.Encode(), 0)
 		for _, kv := range kvs {
-			doc := item.New(kv, nil)
-			if err := resync(txn, doc, ast); err != nil {
+			doc := item.New(kv, txn, nil)
+			if err := resync(doc, ast); err != nil {
 				return nil, err
 			}
 		}
 
 	}
 
-	txn.Commit()
+	if local {
+		txn.Commit()
+	}
 
 	return
 
 }
 
-func resync(txn kvs.TX, doc *item.Doc, ast *sql.ResyncIndexStatement) (err error) {
+func resync(doc *item.Doc, ast *sql.ResyncIndexStatement) (err error) {
 
-	if err = doc.StoreIndex(txn); err != nil {
+	if err = doc.StoreIndex(); err != nil {
 		return err
 	}
 

@@ -15,9 +15,10 @@
 package db
 
 import (
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 )
 
-func executeRelateStatement(ast *sql.RelateStatement) ([]interface{}, error) {
+func executeRelateStatement(txn kvs.TX, ast *sql.RelateStatement) ([]interface{}, error) {
 	return nil, nil
 }

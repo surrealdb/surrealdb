@@ -15,24 +15,39 @@
 package db
 
 import (
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/keys"
 )
 
-func executeRemoveTableStatement(ast *sql.RemoveTableStatement) (out []interface{}, err error) {
+func executeRemoveTableStatement(txn kvs.TX, ast *sql.RemoveTableStatement) (out []interface{}, err error) {
 
-	txn, err := db.Txn(true)
-	if err != nil {
-		return
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
 	}
 
-	defer txn.Rollback()
+	if txn == nil {
+		local = true
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
 
 	for _, TB := range ast.What {
 
 		// Remove the table config
 		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
 		if err := txn.Del(tkey.Encode()); err != nil {
+			return nil, err
+		}
+
+		// Remove the rules config
+		rkey := &keys.RU{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, RU: keys.Ignore}
+		if err := txn.PDel(rkey.Encode()); err != nil {
 			return nil, err
 		}
 
@@ -56,20 +71,69 @@ func executeRemoveTableStatement(ast *sql.RemoveTableStatement) (out []interface
 
 	}
 
-	txn.Commit()
+	if local {
+		txn.Commit()
+	}
 
 	return
 
 }
 
-func executeRemoveFieldStatement(ast *sql.RemoveFieldStatement) (out []interface{}, err error) {
+func executeRemoveRulesStatement(txn kvs.TX, ast *sql.RemoveRulesStatement) (out []interface{}, err error) {
 
-	txn, err := db.Txn(true)
-	if err != nil {
-		return
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
 	}
 
-	defer txn.Rollback()
+	if txn == nil {
+		local = true
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
+
+	for _, TB := range ast.What {
+
+		for _, RU := range ast.When {
+
+			// Remove the rules config
+			ckey := &keys.RU{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, RU: RU}
+			if err := txn.Del(ckey.Encode()); err != nil {
+				return nil, err
+			}
+
+		}
+
+	}
+
+	if local {
+		txn.Commit()
+	}
+
+	return
+
+}
+
+func executeRemoveFieldStatement(txn kvs.TX, ast *sql.RemoveFieldStatement) (out []interface{}, err error) {
+
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
+	}
+
+	if txn == nil {
+		local = true
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
 
 	for _, TB := range ast.What {
 
@@ -81,20 +145,30 @@ func executeRemoveFieldStatement(ast *sql.RemoveFieldStatement) (out []interface
 
 	}
 
-	txn.Commit()
+	if local {
+		txn.Commit()
+	}
 
 	return
 
 }
 
-func executeRemoveIndexStatement(ast *sql.RemoveIndexStatement) (out []interface{}, err error) {
+func executeRemoveIndexStatement(txn kvs.TX, ast *sql.RemoveIndexStatement) (out []interface{}, err error) {
 
-	txn, err := db.Txn(true)
-	if err != nil {
-		return
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
 	}
 
-	defer txn.Rollback()
+	if txn == nil {
+		local = true
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
 
 	for _, TB := range ast.What {
 
@@ -112,7 +186,9 @@ func executeRemoveIndexStatement(ast *sql.RemoveIndexStatement) (out []interface
 
 	}
 
-	txn.Commit()
+	if local {
+		txn.Commit()
+	}
 
 	return
 

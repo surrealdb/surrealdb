@@ -15,9 +15,10 @@
 package db
 
 import (
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 )
 
-func executeRecordStatement(ast *sql.RecordStatement) ([]interface{}, error) {
+func executeRecordStatement(txn kvs.TX, ast *sql.RecordStatement) ([]interface{}, error) {
 	return nil, nil
 }

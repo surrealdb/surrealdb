@@ -21,22 +21,30 @@ import (
 	"github.com/abcum/surreal/util/keys"
 )
 
-func executeModifyStatement(ast *sql.ModifyStatement) (out []interface{}, err error) {
+func executeModifyStatement(txn kvs.TX, ast *sql.ModifyStatement) (out []interface{}, err error) {
 
-	txn, err := db.Txn(true)
-	if err != nil {
-		return
+	var local bool
+
+	if ast.EX {
+		return append(out, ast), nil
 	}
 
-	defer txn.Rollback()
+	if txn == nil {
+		local = true
+		txn, err = db.Txn(true)
+		if err != nil {
+			return
+		}
+		defer txn.Rollback()
+	}
 
 	for _, w := range ast.What {
 
 		if what, ok := w.(*sql.Thing); ok {
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
 			kv, _ := txn.Get(key.Encode())
-			doc := item.New(kv, key)
-			if ret, err := modify(txn, doc, ast); err != nil {
+			doc := item.New(kv, txn, key)
+			if ret, err := modify(doc, ast); err != nil {
 				return nil, err
 			} else if ret != nil {
 				out = append(out, ret)
@@ -45,36 +53,38 @@ func executeModifyStatement(ast *sql.ModifyStatement) (out []interface{}, err er
 
 	}
 
-	txn.Commit()
+	if local {
+		txn.Commit()
+	}
 
 	return
 
 }
 
-func modify(txn kvs.TX, doc *item.Doc, ast *sql.ModifyStatement) (out interface{}, err error) {
+func modify(doc *item.Doc, ast *sql.ModifyStatement) (out interface{}, err error) {
 
-	if !doc.Allow(txn, "modify") {
-		return nil, nil
+	if !doc.Allow("UPDATE") {
+		return
 	}
 
-	if !doc.Check(txn, ast.Cond) {
-		return nil, nil
+	if !doc.Check(ast.Cond) {
+		return
 	}
 
-	if err = doc.Merge(txn, ast.Diff); err != nil {
-		return nil, err
+	if err = doc.Merge(ast.Diff); err != nil {
+		return
 	}
 
-	if err = doc.StoreIndex(txn); err != nil {
-		return nil, err
+	if err = doc.StoreIndex(); err != nil {
+		return
 	}
 
-	if err = doc.StoreThing(txn); err != nil {
-		return nil, err
+	if err = doc.StoreThing(); err != nil {
+		return
 	}
 
-	if err = doc.StorePatch(txn); err != nil {
-		return nil, err
+	if err = doc.StorePatch(); err != nil {
+		return
 	}
 
 	out = doc.Yield(ast.Echo, sql.DIFF)
