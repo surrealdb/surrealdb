@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/util/uuid"
 )
@@ -102,6 +103,21 @@ func setup() {
 
 	if opts.DB.Cert.Key == "" && opts.DB.Cert.SSL {
 		log.Fatal("Specify a valid PEM encoded private key file.")
+	}
+
+	// --------------------------------------------------
+	// Lang
+	// --------------------------------------------------
+
+	// Ensure that the default
+	// language options are set
+
+	if opts.DB.Lang == "" {
+		opts.DB.Lang = "lua"
+	}
+
+	if opts.DB.Lang != "js" && opts.DB.Lang != "lua" {
+		log.Fatal("Specify a valid runtime language. Valid languages are js, or lua.")
 	}
 
 	// --------------------------------------------------
@@ -286,5 +302,7 @@ func setup() {
 		log.SetFormat(opts.Logging.Format)
 
 	}
+
+	cnf.Settings = opts
 
 }
