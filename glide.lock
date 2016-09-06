@@ -1,5 +1,5 @@
-hash: 6007d2173b6159aeb58d380c3f9b545aa069a0aa23d7f75ec7d4dc0bf58b4efb
-updated: 2016-07-20T21:04:16.41898465+01:00
+hash: a89525c2d3169ec3099a7be4eb2b604a41cbece4246074204c009c240e606a42
+updated: 2016-09-06T13:06:35.093520212+01:00
 imports:
 - name: github.com/abcum/fibre
   version: 29d9f69b6f170015ffc87d614e16032f27bb3c38
@@ -38,8 +38,8 @@ imports:
 - name: github.com/hashicorp/serf
   version: a1c6efee94be3501f8454bdb9fda01b867359c27
   subpackages:
-  - serf
   - coordinate
+  - serf
 - name: github.com/imdario/mergo
   version: 50d4dbd4eb0e84778abe37cefef140271d96fade
 - name: github.com/inconshreveable/mousetrap
@@ -54,6 +54,8 @@ imports:
   version: c286dcecd19ff979eeb73ea444e479b903f2cfcb
 - name: github.com/miekg/dns
   version: 5d001d020961ae1c184f9f8152fdc73810481677
+- name: github.com/pkg/profile
+  version: 1c16f117a3ab788fdf0e334e623b8bccf5679866
 - name: github.com/robertkrimen/otto
   version: c41cf547e08c4a88c36859766ece30dd178d7bc1
   subpackages:
@@ -73,6 +75,12 @@ imports:
   version: b94837a2404ab90efe9289e77a70694c355739cb
   subpackages:
   - codec
+- name: github.com/yuin/gopher-lua
+  version: 6a1397dfb6f8e7af08496129dd96f5f62c148f47
+  subpackages:
+  - ast
+  - parse
+  - pm
 - name: github.com/yvasiyarov/go-metrics
   version: c25f46c4b94079672242ec48a545e7ca9ebe3aec
 - name: github.com/yvasiyarov/gorelic
@@ -92,11 +100,11 @@ imports:
   subpackages:
   - datastore
   - internal
-  - internal/datastore
   - internal/app_identity
-  - internal/modules
   - internal/base
+  - internal/datastore
   - internal/log
+  - internal/modules
   - internal/remote_api
 - name: gopkg.in/sourcemap.v1
   version: 8cd1e2e0ddc78dcb4511bcb184d23171bed15c67
@@ -108,4 +116,21 @@ imports:
   version: 9da2e9d7beae1b7c03cf7cfe8f4911958602a5de
   subpackages:
   - codes
-testImports: []
+testImports:
+- name: github.com/gopherjs/gopherjs
+  version: 45518c130e5bd1525f20110830a4986365a153de
+  subpackages:
+  - js
+- name: github.com/jtolds/gls
+  version: 8ddce2a84170772b95dd5d576c48d517b22cac63
+- name: github.com/smartystreets/assertions
+  version: 2063fd1cc7c975db70502811a34b06ad034ccdf2
+  subpackages:
+  - internal/go-render/render
+  - internal/oglematchers
+- name: github.com/smartystreets/goconvey
+  version: 4622128e06c77c0174e17a7f0ed2db19a989b473
+  subpackages:
+  - convey
+  - convey/gotest
+  - convey/reporting
