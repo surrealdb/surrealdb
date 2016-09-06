@@ -80,6 +80,9 @@ func declare(tok Token, lit string) (interface{}, error) {
 	case VOID:
 		return &Void{}, nil
 
+	case MISSING:
+		return &Void{}, nil
+
 	case EMPTY:
 		return &Empty{}, nil
 
@@ -93,10 +96,10 @@ func declare(tok Token, lit string) (interface{}, error) {
 		return &Desc{}, nil
 
 	case ID:
-		return Ident(lit), nil
+		return &Ident{lit}, nil
 
 	case IDENT:
-		return Ident(lit), nil
+		return &Ident{lit}, nil
 
 	case NOW:
 		return time.Now(), nil
@@ -111,7 +114,7 @@ func declare(tok Token, lit string) (interface{}, error) {
 		return regexp.Compile(lit)
 
 	case NUMBER:
-		return strconv.ParseInt(lit, 10, 64)
+		return strconv.ParseFloat(lit, 64)
 
 	case DOUBLE:
 		return strconv.ParseFloat(lit, 64)
@@ -120,7 +123,7 @@ func declare(tok Token, lit string) (interface{}, error) {
 		return time.ParseDuration(lit)
 
 	case ARRAY:
-		var j interface{}
+		var j []interface{}
 		json.Unmarshal([]byte(lit), &j)
 		if j == nil {
 			return j, fmt.Errorf("Invalid JSON: %s", lit)
@@ -128,7 +131,7 @@ func declare(tok Token, lit string) (interface{}, error) {
 		return j, nil
 
 	case JSON:
-		var j interface{}
+		var j map[string]interface{}
 		json.Unmarshal([]byte(lit), &j)
 		if j == nil {
 			return j, fmt.Errorf("Invalid JSON: %s", lit)

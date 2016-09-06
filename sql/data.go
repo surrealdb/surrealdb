@@ -65,9 +65,9 @@ func (p *Parser) parseSet() (mul []Expr, err error) {
 		if err != nil {
 			return nil, err
 		}
-		one.Op = lit
+		one.Op = tok
 
-		tok, lit, err = p.shouldBe(IDENT, NULL, VOID, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON, ARRAY)
+		tok, lit, err = p.shouldBe(IDENT, NULL, VOID, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON, ARRAY, BOUNDPARAM)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field value"}}
 		}
@@ -94,7 +94,7 @@ func (p *Parser) parseDiff() (exp []Expr, err error) {
 
 	one := &DiffExpression{}
 
-	tok, lit, err := p.shouldBe(JSON)
+	tok, lit, err := p.shouldBe(JSON, ARRAY)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}

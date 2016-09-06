@@ -24,7 +24,7 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	if stmt.Name, err = p.parseIdent(); err != nil {
+	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err
 	}
 
@@ -32,7 +32,7 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseTables(); err != nil {
+	if stmt.What, err = p.parseNames(); err != nil {
 		return nil, err
 	}
 
@@ -145,7 +145,7 @@ func (p *Parser) parseRemoveFieldStatement(explain bool) (stmt *RemoveFieldState
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	if stmt.Name, err = p.parseIdent(); err != nil {
+	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err
 	}
 
@@ -153,7 +153,7 @@ func (p *Parser) parseRemoveFieldStatement(explain bool) (stmt *RemoveFieldState
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseTables(); err != nil {
+	if stmt.What, err = p.parseNames(); err != nil {
 		return nil, err
 	}
 

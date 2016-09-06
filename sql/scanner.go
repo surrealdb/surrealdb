@@ -18,12 +18,15 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 )
 
 // Scanner represents a lexical scanner.
 type Scanner struct {
+	p []rune
+	n []rune
 	r *bufio.Reader
 }
 
@@ -36,24 +39,21 @@ func NewScanner(r io.Reader) *Scanner {
 func (s *Scanner) Scan() (tok Token, lit string) {
 
 	// Read the next rune.
-	ch := s.read()
+	ch := s.next()
 
 	// If we see whitespace then consume all contiguous whitespace.
 	if isWhitespace(ch) {
-		s.unread()
-		return s.scanWhitespace()
+		return s.scanBlank(ch)
 	}
 
 	// If we see a letter then consume as an string.
 	if isLetter(ch) {
-		s.unread()
-		return s.scanIdent()
+		return s.scanIdent(ch)
 	}
 
 	// If we see a number then consume as a number.
 	if isNumber(ch) {
-		s.unread()
-		return s.scanNumber()
+		return s.scanNumber(ch)
 	}
 
 	// Otherwise read the individual character.
@@ -63,6 +63,12 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 		return EOF, ""
 	case '*':
 		return ALL, string(ch)
+	case '×':
+		return MUL, string(ch)
+	case '∙':
+		return MUL, string(ch)
+	case '÷':
+		return DIV, string(ch)
 	case '@':
 		return EAT, string(ch)
 	case ',':
@@ -70,23 +76,19 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 	case '.':
 		return DOT, string(ch)
 	case '"':
-		s.unread()
-		return s.scanString()
+		return s.scanString(ch)
 	case '\'':
-		s.unread()
-		return s.scanString()
+		return s.scanString(ch)
 	case '`':
-		s.unread()
-		return s.scanQuoted()
+		return s.scanQuoted(ch)
 	case '⟨':
-		s.unread()
-		return s.scanQuoted()
+		return s.scanQuoted(ch)
 	case '{':
-		s.unread()
-		return s.scanObject()
+		return s.scanObject(ch)
 	case '[':
-		s.unread()
-		return s.scanObject()
+		return s.scanObject(ch)
+	case '$':
+		return s.scanParams(ch)
 	case ':':
 		return COLON, string(ch)
 	case ';':
@@ -95,102 +97,262 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 		return LPAREN, string(ch)
 	case ')':
 		return RPAREN, string(ch)
-	case '=':
-		return EQ, string(ch)
-	case '+':
-		if chn := s.read(); chn == '=' {
-			return INC, "+="
-		}
-		s.unread()
-		return ADD, string(ch)
-	case '-':
-		if chn := s.read(); chn == '>' {
-			return OEDGE, "->"
+	case '¬':
+		return NEQ, string(ch)
+	case '≤':
+		return LTE, string(ch)
+	case '≥':
+		return GTE, string(ch)
+	case '~':
+		return SIN, string(ch)
+	case '∋':
+		return SIN, string(ch)
+	case '∌':
+		return SNI, string(ch)
+	case '⊇':
+		return CONTAINSALL, string(ch)
+	case '⊃':
+		return CONTAINSSOME, string(ch)
+	case '⊅':
+		return CONTAINSNONE, string(ch)
+	case '∈':
+		return INS, string(ch)
+	case '∉':
+		return NIS, string(ch)
+	case '⊆':
+		return ALLCONTAINEDIN, string(ch)
+	case '⊂':
+		return SOMECONTAINEDIN, string(ch)
+	case '⊄':
+		return NONECONTAINEDIN, string(ch)
+	case '#':
+		return s.scanCommentSingle(ch)
 	case '/':
 		chn := s.next()
 		switch {
 		case chn == '*':
 			return s.scanCommentMultiple(ch)
+		case chn == ' ':
+			s.undo()
+			return DIV, string(ch)
 		default:
-			s.unread()
+			s.undo()
 			return s.scanRegexp(ch)
 		}
-		s.unread()
-		if chn := s.read(); chn == '=' {
-			return DEC, "-="
+	case '=':
+		chn := s.next()
+		switch {
+		case chn == '~':
+			return SIN, "=~"
+		case chn == '=':
+			return EEQ, "=="
+		default:
+			s.undo()
+			return EQ, string(ch)
 		}
-		s.unread()
-		return SUB, string(ch)
+	case '?':
+		chn := s.next()
+		switch {
+		case chn == '=':
+			return ANY, "?="
+		default:
+			s.undo()
+			return QMARK, string(ch)
+		}
 	case '!':
-		if chn := s.read(); chn == '=' {
-			return NEQ, "!="
-		}
-		s.unread()
-	case '<':
-		if chn := s.read(); chn == '-' {
-			if chn := s.read(); chn == '>' {
-				return BEDGE, "<->"
+		chn := s.next()
+		switch {
+		case chn == '=':
+			if s.next() == '=' {
+				return NEE, "!=="
+			} else {
+				s.undo()
+				return NEQ, "!="
 			}
-			s.unread()
-			return IEDGE, "<-"
+		case chn == '~':
+			return SNI, "!~"
+		default:
+			s.undo()
+			return EXC, string(ch)
 		}
-		s.unread()
-		if chn := s.read(); chn == '=' {
-			return LTE, "<="
+	case '+':
+		chn := s.next()
+		switch {
+		case chn == '=':
+			return INC, "+="
+		case isNumber(chn):
+			return s.scanNumber(ch, chn)
+		default:
+			s.undo()
+			return ADD, string(ch)
 		}
-		s.unread()
-		return LT, string(ch)
+	case '-':
+		chn := s.next()
+		switch {
+		case chn == '=':
+			return DEC, "-="
+		case chn == '>':
+			return OEDGE, "->"
+		case chn == '-':
+			return s.scanCommentSingle(ch)
+		case isNumber(chn):
+			return s.scanNumber(ch, chn)
+		default:
+			s.undo()
+			return SUB, string(ch)
+		}
 	case '>':
-		if chn := s.read(); chn == '=' {
+		chn := s.next()
+		switch {
+		case chn == '=':
 			return GTE, ">="
+		default:
+			s.undo()
+			return GT, string(ch)
 		}
-		s.unread()
-		return GT, string(ch)
-
+	case '<':
+		chn := s.next()
+		switch {
+		case chn == '>':
+			return NEQ, "<>"
+		case chn == '=':
+			return LTE, "<="
+		case chn == '-':
+			if s.next() == '>' {
+				return BEDGE, "<->"
+			} else {
+				s.undo()
+				return IEDGE, "<-"
+			}
+		default:
+			s.undo()
+			return LT, string(ch)
+		}
 	}
 
 	return ILLEGAL, string(ch)
 
 }
 
-// scanWhitespace consumes the current rune and all contiguous whitespace.
-func (s *Scanner) scanWhitespace() (tok Token, lit string) {
+// scanBlank consumes the current rune and all contiguous whitespace.
+func (s *Scanner) scanBlank(chp ...rune) (tok Token, lit string) {
 
-	// Create a buffer and read the current character into it.
+	tok = WS
+
+	// Create a buffer
 	var buf bytes.Buffer
-	buf.WriteRune(s.read())
 
-	// Read every subsequent whitespace character into the buffer.
-	// Non-whitespace characters and EOF will cause the loop to exit.
+	// Read passed in runes
+	for _, ch := range chp {
+		buf.WriteRune(ch)
+	}
+
+	// Read subsequent characters
 	for {
-		if ch := s.read(); ch == eof {
+		if ch := s.next(); ch == eof {
 			break
 		} else if !isWhitespace(ch) {
-			s.unread()
+			s.undo()
 			break
 		} else {
 			buf.WriteRune(ch)
 		}
 	}
 
-	return WS, buf.String()
+	return tok, buf.String()
+
+}
+
+// scanCommentSingle consumes the current rune and all contiguous whitespace.
+func (s *Scanner) scanCommentSingle(chp ...rune) (tok Token, lit string) {
+
+	tok = WS
+
+	// Create a buffer
+	var buf bytes.Buffer
+
+	// Read passed in runes
+	for _, ch := range chp {
+		buf.WriteRune(ch)
+	}
+
+	// Read subsequent characters
+	for {
+		if ch := s.next(); ch == '\n' || ch == '\r' {
+			buf.WriteRune(ch)
+			break
+		} else {
+			buf.WriteRune(ch)
+		}
+	}
+
+	return tok, buf.String()
+
+}
+
+// scanCommentMultiple consumes the current rune and all contiguous whitespace.
+func (s *Scanner) scanCommentMultiple(chp ...rune) (tok Token, lit string) {
+
+	tok = WS
+
+	// Create a buffer
+	var buf bytes.Buffer
+
+	// Read passed in runes
+	for _, ch := range chp {
+		buf.WriteRune(ch)
+	}
+
+	// Read subsequent characters
+	for {
+		if ch := s.next(); ch == eof {
+			break
+		} else if ch == '*' {
+			if chn := s.next(); chn == '/' {
+				buf.WriteRune(chn)
+				break
+			}
+			buf.WriteRune(ch)
+		} else {
+			buf.WriteRune(ch)
+		}
+	}
+
+	return tok, buf.String()
+
+}
+
+func (s *Scanner) scanParams(chp ...rune) (Token, string) {
+
+	tok, lit := s.scanIdent(chp...)
+
+	if is(tok, IDENT) {
+		return BOUNDPARAM, lit
+	}
+
+	return tok, lit
 
 }
 
 // scanIdent consumes the current rune and all contiguous ident runes.
-func (s *Scanner) scanIdent() (tok Token, lit string) {
+func (s *Scanner) scanIdent(chp ...rune) (tok Token, lit string) {
 
-	// Create a buffer and read the current character into it.
+	tok = IDENT
+
+	// Create a buffer
 	var buf bytes.Buffer
-	buf.WriteRune(s.read())
 
-	// Read every subsequent ident character into the buffer.
-	// Non-ident characters and EOF will cause the loop to exit.
+	// Read passed in runes
+	for _, ch := range chp {
+		buf.WriteRune(ch)
+	}
+
+	// Read subsequent characters
 	for {
-		if ch := s.read(); ch == eof {
+		if ch := s.next(); ch == eof {
 			break
 		} else if !isIdentChar(ch) {
-			s.unread()
+			s.undo()
 			break
 		} else {
 			buf.WriteRune(ch)
@@ -207,22 +369,25 @@ func (s *Scanner) scanIdent() (tok Token, lit string) {
 	}
 
 	// Otherwise return as a regular identifier.
-	return IDENT, buf.String()
+	return tok, buf.String()
 
 }
 
-func (s *Scanner) scanNumber() (tok Token, lit string) {
+func (s *Scanner) scanNumber(chp ...rune) (tok Token, lit string) {
 
 	tok = NUMBER
 
-	// Create a buffer and read the current character into it.
+	// Create a buffer
 	var buf bytes.Buffer
-	buf.WriteRune(s.read())
 
-	// Read every subsequent ident character into the buffer.
-	// Non-ident characters and EOF will cause the loop to exit.
+	// Read passed in runes
+	for _, ch := range chp {
+		buf.WriteRune(ch)
+	}
+
+	// Read subsequent characters
 	for {
-		if ch := s.read(); ch == eof {
+		if ch := s.next(); ch == eof {
 			break
 		} else if isNumber(ch) {
 			buf.WriteRune(ch)
@@ -238,7 +403,7 @@ func (s *Scanner) scanNumber() (tok Token, lit string) {
 			}
 			buf.WriteRune(ch)
 		} else {
-			s.unread()
+			s.undo()
 			break
 		}
 	}
@@ -247,9 +412,9 @@ func (s *Scanner) scanNumber() (tok Token, lit string) {
 
 }
 
-func (s *Scanner) scanQuoted() (Token, string) {
+func (s *Scanner) scanQuoted(chp ...rune) (Token, string) {
 
-	tok, lit := s.scanString()
+	tok, lit := s.scanString(chp...)
 
 	if is(tok, STRING) {
 		return IDENT, lit
@@ -259,13 +424,9 @@ func (s *Scanner) scanQuoted() (Token, string) {
 
 }
 
-func (s *Scanner) scanString() (tok Token, lit string) {
+func (s *Scanner) scanString(chp ...rune) (tok Token, lit string) {
 
-	tok = STRING
-
-	var buf bytes.Buffer
-
-	beg := s.read()
+	beg := chp[0]
 	end := beg
 
 	if beg == '"' {
@@ -280,8 +441,16 @@ func (s *Scanner) scanString() (tok Token, lit string) {
 		end = '⟩'
 	}
 
+	tok = STRING
+
+	// Create a buffer
+	var buf bytes.Buffer
+
+	// Ignore passed in runes
+
+	// Read subsequent characters
 	for {
-		if ch := s.read(); ch == end {
+		if ch := s.next(); ch == end {
 			break
 		} else if ch == eof {
 			return ILLEGAL, buf.String()
@@ -292,13 +461,13 @@ func (s *Scanner) scanString() (tok Token, lit string) {
 			tok = REGION
 			buf.WriteRune(ch)
 		} else if ch == '\\' {
-			chn := s.read()
-			switch chn {
+			switch chn := s.next(); chn {
 			default:
 				buf.WriteRune(chn)
 			case 'b':
 				continue
 			case 't':
+				tok = REGION
 				buf.WriteRune('\t')
 			case 'r':
 				tok = REGION
@@ -328,13 +497,41 @@ func (s *Scanner) scanString() (tok Token, lit string) {
 
 }
 
-func (s *Scanner) scanObject() (tok Token, lit string) {
+func (s *Scanner) scanRegexp(chp ...rune) (tok Token, lit string) {
 
 	tok = IDENT
 
+	// Create a buffer
 	var buf bytes.Buffer
 
-	beg := s.read()
+	// Ignore passed in runes
+
+	// Read subsequent characters
+	for {
+		if ch := s.next(); ch == chp[0] {
+			break
+		} else if ch == eof {
+			return ILLEGAL, buf.String()
+		} else if ch == '\\' {
+			chn := s.next()
+			buf.WriteRune(ch)
+			buf.WriteRune(chn)
+		} else {
+			buf.WriteRune(ch)
+		}
+	}
+
+	if _, err := regexp.Compile(buf.String()); err == nil {
+		return REGEX, buf.String()
+	}
+
+	return tok, buf.String()
+
+}
+
+func (s *Scanner) scanObject(chp ...rune) (tok Token, lit string) {
+
+	beg := chp[0]
 	end := beg
 	sub := 0
 
@@ -346,8 +543,20 @@ func (s *Scanner) scanObject() (tok Token, lit string) {
 		end = ']'
 	}
 
+	tok = IDENT
+
+	// Create a buffer
+	var buf bytes.Buffer
+
+	// Read passed in runes
+	for _, ch := range chp {
+		buf.WriteRune(ch)
+	}
+
+	// Read subsequent characters
 	for {
-		if ch := s.read(); ch == end && sub == 0 {
+		if ch := s.next(); ch == end && sub == 0 {
+			buf.WriteRune(ch)
 			break
 		} else if ch == beg {
 			sub++
@@ -358,8 +567,7 @@ func (s *Scanner) scanObject() (tok Token, lit string) {
 		} else if ch == eof {
 			return ILLEGAL, buf.String()
 		} else if ch == '\\' {
-			chn := s.read()
-			switch chn {
+			switch chn := s.next(); chn {
 			default:
 				return ILLEGAL, buf.String()
 			case 'b', 't', 'r', 'n', 'f', '"', '\\':
@@ -371,39 +579,49 @@ func (s *Scanner) scanObject() (tok Token, lit string) {
 		}
 	}
 
-	str := buf.String()
-
-	str = strings.Replace(str, "\n", "", -1)
-	str = strings.Replace(str, "\r", "", -1)
-	str = strings.Trim(str, " ")
-
-	if beg == '[' {
-		return ARRAY, string(beg) + str + string(end)
-	}
-
 	if beg == '{' {
-		if len(str) == 0 || str[0] == '"' {
-			return JSON, string(beg) + str + string(end)
-		}
+		return JSON, buf.String()
+	}
+	if beg == '[' {
+		return ARRAY, buf.String()
 	}
 
-	return tok, str
+	return ILLEGAL, buf.String()
 
 }
 
-// read reads the next rune from the bufferred reader.
+// next reads the next rune from the bufferred reader.
 // Returns the rune(0) if an error occurs (or io.EOF is returned).
-func (s *Scanner) read() rune {
-	ch, _, err := s.r.ReadRune()
+func (s *Scanner) next() rune {
+
+	if len(s.n) > 0 {
+		var r rune
+		r, s.n = s.n[len(s.n)-1], s.n[:len(s.n)-1]
+		s.p = append(s.p, r)
+		return r
+	}
+
+	r, _, err := s.r.ReadRune()
 	if err != nil {
 		return eof
 	}
-	return ch
+	s.p = append(s.p, r)
+	return r
+
 }
 
-// unread places the previously read rune back on the reader.
-func (s *Scanner) unread() {
+// undo places the previously read rune back on the reader.
+func (s *Scanner) undo() {
+
+	if len(s.p) > 0 {
+		var r rune
+		r, s.p = s.p[len(s.p)-1], s.p[:len(s.p)-1]
+		s.n = append(s.n, r)
+		return
+	}
+
 	_ = s.r.UnreadRune()
+
 }
 
 // isWhitespace returns true if the rune is a space, tab, or newline.
@@ -411,24 +629,19 @@ func isWhitespace(ch rune) bool {
 	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
 }
 
-// isLetter returns true if the rune is a letter.
-func isLetter(ch rune) bool {
-	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
-}
-
 // isNumber returns true if the rune is a number.
 func isNumber(ch rune) bool {
 	return (ch >= '0' && ch <= '9')
 }
 
-// isSeparator returns true if the rune is a separator expression.
-func isSeparator(ch rune) bool {
-	return (ch == '.')
+// isLetter returns true if the rune is a letter.
+func isLetter(ch rune) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
 }
 
-// isIdentChar returns true if the rune can be used in an unquoted identifier.
+// isIdentChar returns true if the rune is allowed in a IDENT.
 func isIdentChar(ch rune) bool {
-	return isLetter(ch) || isNumber(ch) || isSeparator(ch) || ch == '_' || ch == '*' || ch == '?'
+	return isLetter(ch) || isNumber(ch) || ch == '.' || ch == '_' || ch == '*'
 }
 
 // eof represents a marker rune for the end of the reader.

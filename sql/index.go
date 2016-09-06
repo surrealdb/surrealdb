@@ -24,7 +24,7 @@ func (p *Parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexState
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	if stmt.Name, err = p.parseIdent(); err != nil {
+	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err
 	}
 
@@ -32,28 +32,16 @@ func (p *Parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexState
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseTables(); err != nil {
+	if stmt.What, err = p.parseNames(); err != nil {
 		return nil, err
 	}
 
-	if tok, _, err := p.shouldBe(CODE, COLUMNS); tok != 0 {
+	if _, _, err = p.shouldBe(COLUMNS); err != nil {
+		return nil, err
+	}
 
-		if err != nil {
-			return nil, err
-		}
-
-		if is(tok, CODE) {
-			if stmt.Code, err = p.parseScript(); err != nil {
-				return nil, err
-			}
-		}
-
-		if is(tok, COLUMNS) {
-			if stmt.Cols, err = p.parseExpr(); err != nil {
-				return nil, err
-			}
-		}
-
+	if stmt.Cols, err = p.parseNames(); err != nil {
+		return nil, err
 	}
 
 	_, _, stmt.Uniq = p.mightBe(UNIQUE)
@@ -80,7 +68,7 @@ func (p *Parser) parseResyncIndexStatement(explain bool) (stmt *ResyncIndexState
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseTables(); err != nil {
+	if stmt.What, err = p.parseNames(); err != nil {
 		return nil, err
 	}
 
@@ -102,7 +90,7 @@ func (p *Parser) parseRemoveIndexStatement(explain bool) (stmt *RemoveIndexState
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	if stmt.Name, err = p.parseIdent(); err != nil {
+	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err
 	}
 
@@ -110,7 +98,7 @@ func (p *Parser) parseRemoveIndexStatement(explain bool) (stmt *RemoveIndexState
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseTables(); err != nil {
+	if stmt.What, err = p.parseNames(); err != nil {
 		return nil, err
 	}
 

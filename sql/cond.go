@@ -28,7 +28,7 @@ func (p *Parser) parseCond() (mul []Expr, err error) {
 
 		one := &BinaryExpression{}
 
-		tok, lit, err = p.shouldBe(IDENT, ID, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE)
+		tok, lit, err = p.shouldBe(ID, IDENT, NULL, VOID, MISSING, EMPTY, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, REGEX, JSON, ARRAY, BOUNDPARAM)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
@@ -38,13 +38,39 @@ func (p *Parser) parseCond() (mul []Expr, err error) {
 			return nil, err
 		}
 
-		tok, lit, err = p.shouldBe(IN, EQ, NEQ, GT, LT, GTE, LTE, EQR, NER, SEQ, SNE)
+		tok, lit, err = p.shouldBe(IS, IN, EQ, NEQ, EEQ, NEE, ANY, LT, LTE, GT, GTE, SIN, SNI, INS, NIS, CONTAINS, CONTAINSALL, CONTAINSNONE, CONTAINSSOME, ALLCONTAINEDIN, NONECONTAINEDIN, SOMECONTAINEDIN)
 		if err != nil {
 			return nil, err
 		}
-		one.Op = lit
+		one.Op = tok
 
-		tok, lit, err = p.shouldBe(IDENT, ID, NULL, EMPTY, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, REGEX, JSON, ARRAY)
+		if tok == IN {
+			one.Op = INS
+		}
+
+		if tok == IS {
+			one.Op = EQ
+			if _, _, exi := p.mightBe(NOT); exi {
+				one.Op = NEQ
+			}
+			if _, _, exi := p.mightBe(IN); exi {
+				switch one.Op {
+				case EQ:
+					one.Op = INS
+				case NEQ:
+					one.Op = NIS
+				}
+			}
+		}
+
+		if tok == CONTAINS {
+			one.Op = SIN
+			if _, _, exi := p.mightBe(NOT); exi {
+				one.Op = SNI
+			}
+		}
+
+		tok, lit, err = p.shouldBe(ID, IDENT, NULL, VOID, MISSING, EMPTY, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, REGEX, JSON, ARRAY, BOUNDPARAM)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field value"}}
 		}
@@ -56,7 +82,6 @@ func (p *Parser) parseCond() (mul []Expr, err error) {
 
 		mul = append(mul, one)
 
-		// Remove the WHERE keyword
 		if _, _, exi := p.mightBe(AND, OR); !exi {
 			break
 		}

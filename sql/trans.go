@@ -14,35 +14,39 @@
 
 package sql
 
-func (p *Parser) parseModifyStatement(explain bool) (stmt *ModifyStatement, err error) {
+func (p *Parser) parseBeginStatement(explain bool) (stmt *BeginStatement, err error) {
 
-	stmt = &ModifyStatement{}
+	stmt = &BeginStatement{}
 
-	stmt.EX = explain
+	_, _, _ = p.mightBe(TRANSACTION)
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
-
-	if stmt.What, err = p.parseThings(); err != nil {
+	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
 
-	if _, _, err := p.shouldBe(DIFF); err != nil {
+	return
+
+}
+
+func (p *Parser) parseCancelStatement(explain bool) (stmt *CancelStatement, err error) {
+
+	stmt = &CancelStatement{}
+
+	_, _, _ = p.mightBe(TRANSACTION)
+
+	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
 
-	if stmt.Diff, err = p.parseDiff(); err != nil {
-		return nil, err
-	}
+	return
 
-	if stmt.Cond, err = p.parseCond(); err != nil {
-		return nil, err
-	}
+}
 
-	if stmt.Echo, err = p.parseEcho(); err != nil {
-		return nil, err
-	}
+func (p *Parser) parseCommitStatement(explain bool) (stmt *CommitStatement, err error) {
+
+	stmt = &CommitStatement{}
+
+	_, _, _ = p.mightBe(TRANSACTION)
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err

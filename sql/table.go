@@ -24,7 +24,7 @@ func (p *Parser) parseDefineTableStatement(explain bool) (stmt *DefineTableState
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	if stmt.What, err = p.parseTables(); err != nil {
+	if stmt.What, err = p.parseNames(); err != nil {
 		return nil, err
 	}
 
@@ -46,7 +46,7 @@ func (p *Parser) parseRemoveTableStatement(explain bool) (stmt *RemoveTableState
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	if stmt.What, err = p.parseTables(); err != nil {
+	if stmt.What, err = p.parseNames(); err != nil {
 		return nil, err
 	}
 

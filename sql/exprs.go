@@ -16,26 +16,59 @@ package sql
 
 import (
 	"regexp"
-	"strconv"
-	"time"
 )
+
+func (p *Parser) parseName() (string, error) {
+
+	_, lit, err := p.shouldBe(IDENT)
+	if err != nil {
+		return string(""), &ParseError{Found: lit, Expected: []string{"name"}}
+	}
+
+	val, err := declare(STRING, lit)
+
+	return val.(string), err
+
+}
+
+func (p *Parser) parseNames() (mul []string, err error) {
+
+	for {
+
+		one, err := p.parseName()
+		if err != nil {
+			return nil, err
+		}
+
+		mul = append(mul, one)
+
+		// If the next token is not a comma then break the loop.
+		if _, _, exi := p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
+
+	return
+
+}
 
 // --------------------------------------------------
 //
 // --------------------------------------------------
 
-func (p *Parser) parseTable() (Table, error) {
+func (p *Parser) parseTable() (*Table, error) {
 
 	_, lit, err := p.shouldBe(IDENT, NUMBER, DATE)
 	if err != nil {
-		return Table(""), &ParseError{Found: lit, Expected: []string{"table name"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"table name"}}
 	}
 
-	return Table(lit), err
+	return &Table{lit}, err
 
 }
 
-func (p *Parser) parseTables() (mul []Table, err error) {
+func (p *Parser) parseTables() (mul []*Table, err error) {
 
 	for {
 
@@ -92,14 +125,8 @@ func (p *Parser) parseThing() (one *Thing, err error) {
 	switch tok {
 	case IDENT:
 		val = lit
-	case NUMBER:
-		val, err = strconv.ParseInt(lit, 10, 64)
-	case DOUBLE:
-		val, err = strconv.ParseFloat(lit, 64)
-	case DATE:
-		val, err = time.Parse("2006-01-02", lit)
-	case TIME:
-		val, err = time.Parse(time.RFC3339, lit)
+	default:
+		val, err = declare(tok, lit)
 	}
 
 	if err != nil {
@@ -138,16 +165,16 @@ func (p *Parser) parseThings() (mul []Expr, err error) {
 //
 // --------------------------------------------------
 
-func (p *Parser) parseIdent() (Ident, error) {
+func (p *Parser) parseIdent() (*Ident, error) {
 
 	_, lit, err := p.shouldBe(IDENT)
 	if err != nil {
-		return Ident(""), &ParseError{Found: lit, Expected: []string{"name"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
 	}
 
 	val, err := declare(IDENT, lit)
 
-	return val.(Ident), err
+	return val.(*Ident), err
 
 }
 
@@ -220,7 +247,7 @@ func (p *Parser) parseScript() (string, error) {
 
 	tok, lit, err := p.shouldBe(STRING, REGION)
 	if err != nil {
-		return string(""), &ParseError{Found: lit, Expected: []string{"LUA script"}}
+		return string(""), &ParseError{Found: lit, Expected: []string{"js/lua script"}}
 	}
 
 	val, err := declare(tok, lit)
@@ -257,7 +284,7 @@ func (p *Parser) parseBoolean() (bool, error) {
 
 func (p *Parser) parseDefault() (interface{}, error) {
 
-	tok, lit, err := p.shouldBe(NULL, NOW, DATE, TIME, TRUE, FALSE, NUMBER, STRING, REGION, ARRAY, JSON)
+	tok, lit, err := p.shouldBe(NULL, NOW, DATE, TIME, TRUE, FALSE, NUMBER, DOUBLE, STRING, REGION, IDENT, ARRAY, JSON)
 	if err != nil {
 		return nil, err
 	}
@@ -271,12 +298,13 @@ func (p *Parser) parseExpr() (mul []*Field, err error) {
 	var tok Token
 	var lit string
 	var exi bool
+	var val interface{}
 
 	for {
 
 		one := &Field{}
 
-		tok, lit, err = p.shouldBe(IDENT, ID, OEDGE, IEDGE, BEDGE, NULL, ALL, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON)
+		tok, lit, err = p.shouldBe(IDENT, ID, NOW, PATH, NULL, ALL, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON, ARRAY)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
@@ -286,18 +314,22 @@ func (p *Parser) parseExpr() (mul []*Field, err error) {
 			return
 		}
 
+		one.Alias = lit
+
 		// Next token might be AS
 		if _, _, exi = p.mightBe(AS); exi {
 
-			tok, lit, err = p.shouldBe(IDENT)
+			_, lit, err = p.shouldBe(IDENT)
 			if err != nil {
 				return nil, &ParseError{Found: lit, Expected: []string{"field alias"}}
 			}
 
-			one.Alias, err = declare(tok, lit)
+			val, err = declare(STRING, lit)
 			if err != nil {
 				return
 			}
+
+			one.Alias = val.(string)
 
 		}
 

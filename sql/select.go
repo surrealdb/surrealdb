@@ -61,6 +61,10 @@ func (p *Parser) parseSelectStatement(explain bool) (stmt *SelectStatement, err 
 		return nil, err
 	}
 
+	if stmt.Echo, err = p.parseEcho(); err != nil {
+		return nil, err
+	}
+
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
@@ -113,8 +117,7 @@ func (p *Parser) parseOrder() (mul []*Order, err error) {
 
 		tok, lit, exi = p.mightBe(ASC, DESC)
 		if !exi {
-			tok = ASC
-			lit = "ASC"
+			tok, lit = ASC, "ASC"
 		}
 
 		one.Dir, err = declare(tok, lit)

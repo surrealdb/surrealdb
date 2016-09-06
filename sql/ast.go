@@ -30,19 +30,44 @@ type Statement interface{}
 type Statements []Statement
 
 // --------------------------------------------------
-// Select
+// Use
 // --------------------------------------------------
 
 // UseStatement represents a SQL USE statement.
 type UseStatement struct {
 	NS string // Namespace
 	DB string // Database
-	CK string // Cipherkey
 }
 
 // --------------------------------------------------
-// Select
+// Trans
 // --------------------------------------------------
+
+type BeginStatement struct{}
+
+type CancelStatement struct{}
+
+type CommitStatement struct{}
+
+// --------------------------------------------------
+// Normal
+// --------------------------------------------------
+
+// ActionStatement represents a SQL ACTION statement.
+type ActionStatement struct {
+	EX      bool     // Explain
+	KV      string   // Bucket
+	NS      string   // Namespace
+	DB      string   // Database
+	Expr    []*Field // Which fields
+	What    []Expr   // What to select
+	Cond    []Expr   // Select conditions
+	Group   []*Group // Group by
+	Order   []*Order // Order by
+	Limit   Expr     // Limit by
+	Start   Expr     // Start at
+	Version Expr     // Version
+}
 
 // SelectStatement represents a SQL SELECT statement.
 type SelectStatement struct {
@@ -58,11 +83,8 @@ type SelectStatement struct {
 	Limit   Expr     // Limit by
 	Start   Expr     // Start at
 	Version Expr     // Version
+	Echo    Token    // What to return
 }
-
-// --------------------------------------------------
-// Items
-// --------------------------------------------------
 
 // CreateStatement represents a SQL CREATE statement.
 //
@@ -157,22 +179,26 @@ type RecordStatement struct {
 //
 // DEFINE RULES person
 type DefineRulesStatement struct {
-	EX   bool    // Explain
-	KV   string  // Bucket
-	NS   string  // Namespace
-	DB   string  // Database
-	What []Table // Table names
+	EX   bool     `json:"-" msgpack:"-"`       // Explain
+	KV   string   `json:"-" msgpack:"-"`       // Bucket
+	NS   string   `json:"-" msgpack:"-"`       // Namespace
+	DB   string   `json:"-" msgpack:"-"`       // Database
+	What []string `json:"-" msgpack:"-"`       // Table names
+	When []string `json:"-" msgpack:"-"`       // Action names
+	Rule string   `json:"rule" msgpack:"rule"` // Rule behaviour
+	Code string   `json:"code" msgpack:"code"` // Rule custom code
 }
 
 // RemoveRulesStatement represents an SQL REMOVE RULES statement.
 //
 // REMOVE RULES person
 type RemoveRulesStatement struct {
-	EX   bool    // Explain
-	KV   string  // Bucket
-	NS   string  // Namespace
-	DB   string  // Database
-	What []Table // Table names
+	EX   bool     `json:"-" msgpack:"-"` // Explain
+	KV   string   `json:"-" msgpack:"-"` // Bucket
+	NS   string   `json:"-" msgpack:"-"` // Namespace
+	DB   string   `json:"-" msgpack:"-"` // Database
+	What []string `json:"-" msgpack:"-"` // Table names
+	When []string `json:"-" msgpack:"-"` // Action names
 }
 
 // --------------------------------------------------
@@ -183,22 +209,22 @@ type RemoveRulesStatement struct {
 //
 // DEFINE TABLE person
 type DefineTableStatement struct {
-	EX   bool    // Explain
-	KV   string  // Bucket
-	NS   string  // Namespace
-	DB   string  // Database
-	What []Table // Table names
+	EX   bool     `json:"-" msgpack:"-"` // Explain
+	KV   string   `json:"-" msgpack:"-"` // Bucket
+	NS   string   `json:"-" msgpack:"-"` // Namespace
+	DB   string   `json:"-" msgpack:"-"` // Database
+	What []string `json:"-" msgpack:"-"` // Table names
 }
 
 // RemoveTableStatement represents an SQL REMOVE TABLE statement.
 //
 // REMOVE TABLE person
 type RemoveTableStatement struct {
-	EX   bool    // Explain
-	KV   string  // Bucket
-	NS   string  // Namespace
-	DB   string  // Database
-	What []Table // Table names
+	EX   bool     `json:"-" msgpack:"-"` // Explain
+	KV   string   `json:"-" msgpack:"-"` // Bucket
+	NS   string   `json:"-" msgpack:"-"` // Namespace
+	DB   string   `json:"-" msgpack:"-"` // Database
+	What []string `json:"-" msgpack:"-"` // Table names
 }
 
 // --------------------------------------------------
@@ -211,35 +237,35 @@ type RemoveTableStatement struct {
 // DEFINE FIELD name ON person TYPE number MIN 0 MAX 5 DEFAULT 0
 // DEFINE FIELD name ON person TYPE custom ENUM [0,1,2,3,4,5] DEFAULT 0
 type DefineFieldStatement struct {
-	EX        bool          // Explain
-	KV        string        // Bucket
-	NS        string        // Namespace
-	DB        string        // Database
-	Name      Ident         // Field name
-	What      []Table       // Table names
-	Type      Ident         // Field type
-	Enum      []interface{} // Custom options
-	Code      string        // Field code
-	Min       float64       // Minimum value / length
-	Max       float64       // Maximum value / length
-	Match     string        // Regex value
-	Default   interface{}   // Default value
-	Notnull   bool          // Notnull - can not be NULL?
-	Readonly  bool          // Readonly - can not be changed?
-	Mandatory bool          // Mandatory - can not be VOID?
-	Validate  bool          // Validate - can not be INCORRECT?
+	EX        bool          `json:"-" msgpack:"-"`                 // Explain
+	KV        string        `json:"-" msgpack:"-"`                 // Bucket
+	NS        string        `json:"-" msgpack:"-"`                 // Namespace
+	DB        string        `json:"-" msgpack:"-"`                 // Database
+	Name      string        `json:"name" msgpack:"name"`           // Field name
+	What      []string      `json:"-" msgpack:"-"`                 // Table names
+	Type      string        `json:"type" msgpack:"type"`           // Field type
+	Enum      []interface{} `json:"enum" msgpack:"enum"`           // Custom options
+	Code      string        `json:"code" msgpack:"code"`           // Field code
+	Min       float64       `json:"min" msgpack:"min"`             // Minimum value / length
+	Max       float64       `json:"max" msgpack:"max"`             // Maximum value / length
+	Match     string        `json:"match" msgpack:"match"`         // Regex value
+	Default   interface{}   `json:"default" msgpack:"default"`     // Default value
+	Notnull   bool          `json:"notnull" msgpack:"notnull"`     // Notnull - can not be NULL?
+	Readonly  bool          `json:"readonly" msgpack:"readonly"`   // Readonly - can not be changed?
+	Mandatory bool          `json:"mandatory" msgpack:"mandatory"` // Mandatory - can not be VOID?
+	Validate  bool          `json:"validate" msgpack:"validate"`   // Validate - can not be INCORRECT?
 }
 
 // RemoveFieldStatement represents an SQL REMOVE INDEX statement.
 //
 // REMOVE FIELD name ON person
 type RemoveFieldStatement struct {
-	EX   bool    // Explain
-	KV   string  // Bucket
-	NS   string  // Namespace
-	DB   string  // Database
-	Name Ident   // Field name
-	What []Table // Table names
+	EX   bool     `json:"-" msgpack:"-"` // Explain
+	KV   string   `json:"-" msgpack:"-"` // Bucket
+	NS   string   `json:"-" msgpack:"-"` // Namespace
+	DB   string   `json:"-" msgpack:"-"` // Database
+	Name string   `json:"-" msgpack:"-"` // Field name
+	What []string `json:"-" msgpack:"-"` // Table names
 }
 
 // --------------------------------------------------
@@ -250,38 +276,39 @@ type RemoveFieldStatement struct {
 //
 // DEFINE INDEX name ON person COLUMNS (account, age) UNIQUE
 type DefineIndexStatement struct {
-	EX   bool     // Explain
-	KV   string   // Bucket
-	NS   string   // Namespace
-	DB   string   // Database
-	Name Ident    // Index name
-	What []Table  // Table names
-	Code string   // Index code
-	Cols []*Field // Index cols
-	Uniq bool     // Unique index
+	EX   bool     `json:"-" msgpack:"-"`           // Explain
+	KV   string   `json:"-" msgpack:"-"`           // Bucket
+	NS   string   `json:"-" msgpack:"-"`           // Namespace
+	DB   string   `json:"-" msgpack:"-"`           // Database
+	Name string   `json:"name" msgpack:"name"`     // Index name
+	What []string `json:"-" msgpack:"-"`           // Table names
+	Cols []string `json:"cols" msgpack:"cols"`     // Index cols
+	Uniq bool     `json:"unique" msgpack:"unique"` // Unique index
+	CI   bool
+	CS   bool
 }
 
 // RemoveIndexStatement represents an SQL REMOVE INDEX statement.
 //
 // REMOVE INDEX name ON person
 type RemoveIndexStatement struct {
-	EX   bool    // Explain
-	KV   string  // Bucket
-	NS   string  // Namespace
-	DB   string  // Database
-	Name Ident   // Index name
-	What []Table // Table names
+	EX   bool     `json:"-" msgpack:"-"` // Explain
+	KV   string   `json:"-" msgpack:"-"` // Bucket
+	NS   string   `json:"-" msgpack:"-"` // Namespace
+	DB   string   `json:"-" msgpack:"-"` // Database
+	Name string   `json:"-" msgpack:"-"` // Index name
+	What []string `json:"-" msgpack:"-"` // Table names
 }
 
 // ResyncIndexStatement represents an SQL RESYNC INDEX statement.
 //
 // RESYNC INDEX name ON person
 type ResyncIndexStatement struct {
-	EX   bool    // Explain
-	KV   string  // Bucket
-	NS   string  // Namespace
-	DB   string  // Database
-	What []Table // Table names
+	EX   bool     `json:"-" msgpack:"-"` // Explain
+	KV   string   `json:"-" msgpack:"-"` // Bucket
+	NS   string   `json:"-" msgpack:"-"` // Namespace
+	DB   string   `json:"-" msgpack:"-"` // Database
+	What []string `json:"-" msgpack:"-"` // Table names
 }
 
 // --------------------------------------------------
@@ -309,9 +336,6 @@ type Void struct{}
 // Empty represents an expression which is null or "".
 type Empty struct{}
 
-// Wildcard represents a wildcard expression.
-type Wildcard struct{}
-
 // ClosedExpression represents a parenthesized expression.
 type ClosedExpression struct {
 	Expr Expr
@@ -320,7 +344,7 @@ type ClosedExpression struct {
 // BinaryExpression represents a binary expression tree,
 type BinaryExpression struct {
 	LHS Expr
-	Op  string
+	Op  Token
 	RHS Expr
 }
 
@@ -343,23 +367,14 @@ type ContentExpression struct {
 // Parts
 // --------------------------------------------------
 
-type Table string
-
-func (this Table) String() string {
-	return string(this)
+// Ident comment
+type Ident struct {
+	ID string
 }
 
-func (this Table) MarshalText() ([]byte, error) {
-	return []byte(string(this)), nil
-}
-
-type Ident string
-
-func (this Ident) String() string {
-	return string(this)
-}
-func (this Ident) MarshalText() ([]byte, error) {
-	return []byte(string(this)), nil
+// Table comment
+type Table struct {
+	TB string
 }
 
 // Thing comment
@@ -371,15 +386,15 @@ type Thing struct {
 // Field comment
 type Field struct {
 	Expr  Expr
-	Alias Expr
+	Alias string
 }
 
-// Group comment
+// Group represents an sql GROUP BY clause
 type Group struct {
 	Expr Expr
 }
 
-// Order comment
+// Order represents an sql ORDER BY clause
 type Order struct {
 	Expr Expr
 	Dir  Expr

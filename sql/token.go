@@ -29,22 +29,24 @@ const (
 
 	literalsBeg
 
-	DATE     // 1970-01-01
-	TIME     // 1970-01-01T00:00:00+00:00
-	PATH     // :friend
-	JSON     // {"test":true}
-	IDENT    // something
-	STRING   // "something"
-	REGION   // "a multiline \n string"
-	NUMBER   // 123456
-	DOUBLE   // 123.456
-	REGEX    // /.*/
-	ARRAY    // [0,1,2]
-	DURATION // 13h
+	DATE       // 1970-01-01
+	TIME       // 1970-01-01T00:00:00+00:00
+	PATH       // person->like->person
+	JSON       // {"test":true}
+	IDENT      // something
+	STRING     // "something"
+	REGION     // "a multiline \n string"
+	NUMBER     // 123456
+	DOUBLE     // 123.456
+	REGEX      // /.*/
+	ARRAY      // [0,1,2]
+	DURATION   // 13h
+	BOUNDPARAM // $1
 
 	EAT       // @
 	DOT       // .
 	COMMA     // ,
+	QMARK     // ?
 	LPAREN    // (
 	RPAREN    // )
 	LBRACK    // [
@@ -66,15 +68,19 @@ const (
 	DEC // -=
 
 	EQ  // =
+	EEQ // ==
+	EXC // !
 	NEQ // !=
+	NEE // !==
+	ANY // ?=
 	LT  // <
 	LTE // <=
 	GT  // >
 	GTE // >=
-	EQR // =~
-	NER // !~
-	SEQ // ∋
-	SNE // ∌
+	SIN // ∋
+	SNI // ∌
+	INS // ∈
+	NIS // ∉
 
 	OEDGE // ->
 	IEDGE // <-
@@ -89,17 +95,27 @@ const (
 	ACCEPT
 	AFTER
 	ALL
+	ALLCONTAINEDIN
 	AND
 	AS
 	ASC
 	AT
 	BEFORE
+	BEGIN
 	BOTH
 	BY
+	CANCEL
 	CODE
+	COLLECT
 	COLUMNS
+	COMMIT
+	CONTAINS
+	CONTAINSALL
+	CONTAINSNONE
+	CONTAINSSOME
 	CONTENT
 	CREATE
+	CUSTOM
 	DATABASE
 	DEFAULT
 	DEFINE
@@ -113,6 +129,7 @@ const (
 	EXPUNGE
 	FALSE
 	FIELD
+	FOR
 	FROM
 	FULL
 	GROUP
@@ -122,14 +139,21 @@ const (
 	INDEX
 	INSERT
 	INTO
+	IS
+	LET
 	LIMIT
 	MANDATORY
+	MATCH
 	MAX
 	MERGE
 	MIN
+	MISSING
 	MODIFY
+	MULTI
 	NAMESPACE
 	NONE
+	NONECONTAINEDIN
+	NOT
 	NOTNULL
 	NOW
 	NULL
@@ -144,17 +168,22 @@ const (
 	REMOVE
 	RESYNC
 	RETURN
+	ROLLBACK
+	RULES
 	SELECT
 	SET
+	SOMECONTAINEDIN
 	START
 	TABLE
 	TO
+	TRANSACTION
 	TRUE
 	TYPE
 	UNIQUE
 	UPDATE
 	UPSERT
 	USE
+	VALIDATE
 	VERSION
 	VOID
 	WHERE
@@ -170,22 +199,24 @@ var tokens = [...]string{
 
 	// literals
 
-	DATE:     "DATE",
-	TIME:     "TIME",
-	PATH:     "PATH",
-	JSON:     "JSON",
-	IDENT:    "IDENT",
-	STRING:   "STRING",
-	REGION:   "REGION",
-	NUMBER:   "NUMBER",
-	DOUBLE:   "DOUBLE",
-	REGEX:    "REGEX",
-	ARRAY:    "ARRAY",
-	DURATION: "DURATION",
+	DATE:       "DATE",
+	TIME:       "TIME",
+	PATH:       "PATH",
+	JSON:       "JSON",
+	IDENT:      "IDENT",
+	STRING:     "STRING",
+	REGION:     "REGION",
+	NUMBER:     "NUMBER",
+	DOUBLE:     "DOUBLE",
+	REGEX:      "REGEX",
+	ARRAY:      "ARRAY",
+	DURATION:   "DURATION",
+	BOUNDPARAM: "BOUNDPARAM",
 
 	EAT:       "@",
 	DOT:       ".",
 	COMMA:     ",",
+	QMARK:     "?",
 	LPAREN:    "(",
 	RPAREN:    ")",
 	LBRACK:    "[",
@@ -203,89 +234,120 @@ var tokens = [...]string{
 	DEC: "-=",
 
 	EQ:  "=",
+	EEQ: "==",
+	EXC: "!",
 	NEQ: "!=",
+	NEE: "!==",
+	ANY: "?=",
 	LT:  "<",
 	LTE: "<=",
 	GT:  ">",
 	GTE: ">=",
-	EQR: "=~",
-	NER: "!~",
-	SEQ: "∋",
-	SNE: "∌",
+	SIN: "∋",
+	SNI: "∌",
+	INS: "∈",
+	NIS: "∉",
+
+	OEDGE: "->",
+	IEDGE: "<-",
+	BEDGE: "<->",
 
 	// keywords
 
-	ACCEPT:    "ACCEPT",
-	AFTER:     "AFTER",
-	ALL:       "ALL",
-	AND:       "AND",
-	AS:        "AS",
-	ASC:       "ASC",
-	AT:        "AT",
-	BEFORE:    "BEFORE",
-	BOTH:      "BOTH",
-	BY:        "BY",
-	CODE:      "CODE",
-	COLUMNS:   "COLUMNS",
-	CONTENT:   "CONTENT",
-	CREATE:    "CREATE",
-	DATABASE:  "DATABASE",
-	DEFAULT:   "DEFAULT",
-	DEFINE:    "DEFINE",
-	DELETE:    "DELETE",
-	DESC:      "DESC",
-	DIFF:      "DIFF",
-	DISTINCT:  "DISTINCT",
-	EMPTY:     "EMPTY",
-	ENUM:      "ENUM",
-	EXPLAIN:   "EXPLAIN",
-	EXPUNGE:   "EXPUNGE",
-	FALSE:     "FALSE",
-	FIELD:     "FIELD",
-	FROM:      "FROM",
-	FULL:      "FULL",
-	GROUP:     "GROUP",
-	HISTORY:   "HISTORY",
-	ID:        "ID",
-	IN:        "IN",
-	INDEX:     "INDEX",
-	INSERT:    "INSERT",
-	INTO:      "INTO",
-	LIMIT:     "LIMIT",
-	MANDATORY: "MANDATORY",
-	MAX:       "MAX",
-	MERGE:     "MERGE",
-	MIN:       "MIN",
-	MODIFY:    "MODIFY",
-	NAMESPACE: "NAMESPACE",
-	NONE:      "NONE",
-	NOTNULL:   "NOTNULL",
-	NOW:       "NOW",
-	NULL:      "NULL",
-	ON:        "ON",
-	OR:        "OR",
-	ORDER:     "ORDER",
-	READONLY:  "READONLY",
-	RECORD:    "RECORD",
-	REJECT:    "REJECT",
-	RELATE:    "RELATE",
-	REMOVE:    "REMOVE",
-	RESYNC:    "RESYNC",
-	RETURN:    "RETURN",
-	SELECT:    "SELECT",
-	SET:       "SET",
-	START:     "START",
-	TABLE:     "TABLE",
-	TO:        "TO",
-	TRUE:      "TRUE",
-	TYPE:      "TYPE",
-	UNIQUE:    "UNIQUE",
-	UPDATE:    "UPDATE",
-	UPSERT:    "UPSERT",
-	USE:       "USE",
-	VERSION:   "VERSION",
-	VOID:      "VOID",
-	WHERE:     "WHERE",
+	ACCEPT:          "ACCEPT",
+	AFTER:           "AFTER",
+	ALL:             "ALL",
+	ALLCONTAINEDIN:  "ALLCONTAINEDIN",
+	AND:             "AND",
+	AS:              "AS",
+	ASC:             "ASC",
+	AT:              "AT",
+	BEFORE:          "BEFORE",
+	BEGIN:           "BEGIN",
+	BOTH:            "BOTH",
+	BY:              "BY",
+	CANCEL:          "CANCEL",
+	CODE:            "CODE",
+	COLLECT:         "COLLECT",
+	COLUMNS:         "COLUMNS",
+	COMMIT:          "COMMIT",
+	CONTAINS:        "CONTAINS",
+	CONTAINSALL:     "CONTAINSALL",
+	CONTAINSNONE:    "CONTAINSNONE",
+	CONTAINSSOME:    "CONTAINSSOME",
+	CONTENT:         "CONTENT",
+	CREATE:          "CREATE",
+	CUSTOM:          "CUSTOM",
+	DATABASE:        "DATABASE",
+	DEFAULT:         "DEFAULT",
+	DEFINE:          "DEFINE",
+	DELETE:          "DELETE",
+	DESC:            "DESC",
+	DIFF:            "DIFF",
+	DISTINCT:        "DISTINCT",
+	EMPTY:           "EMPTY",
+	ENUM:            "ENUM",
+	EXPLAIN:         "EXPLAIN",
+	EXPUNGE:         "EXPUNGE",
+	FALSE:           "FALSE",
+	FIELD:           "FIELD",
+	FOR:             "FOR",
+	FROM:            "FROM",
+	FULL:            "FULL",
+	GROUP:           "GROUP",
+	HISTORY:         "HISTORY",
+	ID:              "ID",
+	IN:              "IN",
+	INDEX:           "INDEX",
+	INSERT:          "INSERT",
+	INTO:            "INTO",
+	IS:              "IS",
+	LET:             "LET",
+	LIMIT:           "LIMIT",
+	MANDATORY:       "MANDATORY",
+	MATCH:           "MATCH",
+	MAX:             "MAX",
+	MERGE:           "MERGE",
+	MIN:             "MIN",
+	MISSING:         "MISSING",
+	MODIFY:          "MODIFY",
+	MULTI:           "MULTI",
+	NAMESPACE:       "NAMESPACE",
+	NONE:            "NONE",
+	NONECONTAINEDIN: "NONECONTAINEDIN",
+	NOT:             "NOT",
+	NOTNULL:         "NOTNULL",
+	NOW:             "NOW",
+	NULL:            "NULL",
+	ON:              "ON",
+	OR:              "OR",
+	ORDER:           "ORDER",
+	READONLY:        "READONLY",
+	RECORD:          "RECORD",
+	REJECT:          "REJECT",
+	RELATE:          "RELATE",
+	REMOVE:          "REMOVE",
+	RESYNC:          "RESYNC",
+	RETURN:          "RETURN",
+	ROLLBACK:        "ROLLBACK",
+	RULES:           "RULES",
+	SELECT:          "SELECT",
+	SET:             "SET",
+	SOMECONTAINEDIN: "SOMECONTAINEDIN",
+	START:           "START",
+	TABLE:           "TABLE",
+	TO:              "TO",
+	TRANSACTION:     "TRANSACTION",
+	TRUE:            "TRUE",
+	TYPE:            "TYPE",
+	UNIQUE:          "UNIQUE",
+	UPDATE:          "UPDATE",
+	UPSERT:          "UPSERT",
+	USE:             "USE",
+	VALIDATE:        "VALIDATE",
+	VERSION:         "VERSION",
+	VOID:            "VOID",
+	WHERE:           "WHERE",
 }
 
 var literals map[string]Token
@@ -325,7 +387,11 @@ func (tok Token) precedence() int {
 		return 1
 	case AND:
 		return 2
-	case EQ, NEQ, EQR, NER, LT, LTE, GT, GTE:
+	case EQ, NEQ, EEQ, NEE,
+		LT, LTE, GT, GTE,
+		ANY, SIN, SNI, INS, NIS,
+		CONTAINSALL, CONTAINSNONE, CONTAINSSOME,
+		ALLCONTAINEDIN, NONECONTAINEDIN, SOMECONTAINEDIN:
 		return 3
 	case ADD, SUB:
 		return 4

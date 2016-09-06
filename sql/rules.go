@@ -24,8 +24,49 @@ func (p *Parser) parseDefineRulesStatement(explain bool) (stmt *DefineRulesState
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	if stmt.What, err = p.parseTables(); err != nil {
+	if _, _, err = p.shouldBe(ON); err != nil {
 		return nil, err
+	}
+
+	if stmt.What, err = p.parseNames(); err != nil {
+		return nil, err
+	}
+
+	if _, _, err = p.shouldBe(FOR); err != nil {
+		return nil, err
+	}
+
+	for {
+
+		tok, _, exi := p.mightBe(SELECT, CREATE, UPDATE, DELETE, RELATE, RECORD)
+		if !exi {
+			break
+		}
+
+		stmt.When = append(stmt.When, tok.String())
+
+		if _, _, exi := p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
+
+	if len(stmt.When) == 0 {
+		return nil, &ParseError{Found: "", Expected: []string{"SELECT", "CREATE", "UPDATE", "DELETE", "RELATE", "RECORD"}}
+	}
+
+	if tok, _, err := p.shouldBe(ACCEPT, REJECT, CUSTOM); err != nil {
+		return nil, err
+	} else {
+
+		stmt.Rule = tok.String()
+
+		if is(tok, CUSTOM) {
+			if stmt.Code, err = p.parseScript(); err != nil {
+				return nil, err
+			}
+		}
+
 	}
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
@@ -46,8 +87,35 @@ func (p *Parser) parseRemoveRulesStatement(explain bool) (stmt *RemoveRulesState
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	if stmt.What, err = p.parseTables(); err != nil {
+	if _, _, err = p.shouldBe(ON); err != nil {
 		return nil, err
+	}
+
+	if stmt.What, err = p.parseNames(); err != nil {
+		return nil, err
+	}
+
+	if _, _, err = p.shouldBe(FOR); err != nil {
+		return nil, err
+	}
+
+	for {
+
+		tok, _, exi := p.mightBe(SELECT, CREATE, UPDATE, DELETE, RELATE, RECORD)
+		if !exi {
+			break
+		}
+
+		stmt.When = append(stmt.When, tok.String())
+
+		if _, _, exi := p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
+
+	if len(stmt.When) == 0 {
+		return nil, &ParseError{Found: "", Expected: []string{"SELECT", "CREATE", "UPDATE", "DELETE", "RELATE", "RECORD"}}
 	}
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
