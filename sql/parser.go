@@ -28,9 +28,10 @@ type Parser struct {
 	c   *fibre.Context
 	v   map[string]interface{}
 	buf struct {
-		tok Token  // last read token
-		lit string // last read literal
-		n   int    // buffer size (max=1)
+		n   int         // buffer size
+		tok Token       // last read token
+		lit string      // last read literal
+		val interface{} // Last read value
 	}
 }
 
@@ -85,7 +86,7 @@ func (p *Parser) ParseMulti() (*Query, error) {
 	var text bool
 
 	for {
-		if tok, _ := p.scanIgnoreWhitespace(); tok == EOF {
+		if tok, _, _ := p.scan(); tok == EOF {
 			if !text {
 				return nil, &EmptyError{}
 			}
@@ -160,7 +161,7 @@ func (p *Parser) ParseSingle() (Statement, error) {
 
 func (p *Parser) mightBe(expected ...Token) (tok Token, lit string, found bool) {
 
-	tok, lit = p.scanIgnoreWhitespace()
+	tok, lit, _ = p.scan()
 
 	if found = p.in(tok, expected); !found {
 		p.unscan()
@@ -172,7 +173,7 @@ func (p *Parser) mightBe(expected ...Token) (tok Token, lit string, found bool) 
 
 func (p *Parser) shouldBe(expected ...Token) (tok Token, lit string, err error) {
 
-	tok, lit = p.scanIgnoreWhitespace()
+	tok, lit, _ = p.scan()
 
 	if found := p.in(tok, expected); !found {
 		p.unscan()
@@ -183,36 +184,51 @@ func (p *Parser) shouldBe(expected ...Token) (tok Token, lit string, err error) 
 
 }
 
-// scan returns the next token from the underlying scanner.
-// If a token has been unscanned then read that instead.
-func (p *Parser) scan() (tok Token, lit string) {
-	// If we have a token on the buffer, then return it.
-	if p.buf.n != 0 {
-		p.buf.n = 0
-		return p.buf.tok, p.buf.lit
-	}
+// scan scans the next non-whitespace token.
+func (p *Parser) scan() (tok Token, lit string, val interface{}) {
 
-	// Otherwise read the next token from the scanner.
-	tok, lit = p.s.Scan()
+	tok, lit, val = p.seek()
 
-	// Save it to the buffer in case we unscan later.
-	p.buf.tok, p.buf.lit = tok, lit
-
-	return
-}
-
-// unscan pushes the previously read token back onto the buffer.
-func (p *Parser) unscan() { p.buf.n = 1 }
-
-// scanIgnoreWhitespace scans the next non-whitespace token.
-func (p *Parser) scanIgnoreWhitespace() (tok Token, lit string) {
-	tok, lit = p.scan()
 	for {
 		if tok == WS {
-			tok, lit = p.scan()
+			tok, lit, val = p.seek()
 		} else {
 			break
 		}
 	}
+
 	return
+
+}
+
+func (p *Parser) hold(tok Token) (val interface{}) {
+	if tok == p.buf.tok {
+		return p.buf.val
+	}
+	return nil
+}
+
+// seek returns the next token from the underlying scanner.
+// If a token has been unscanned then read that instead.
+func (p *Parser) seek() (tok Token, lit string, val interface{}) {
+
+	// If we have a token on the buffer, then return it.
+	if p.buf.n != 0 {
+		p.buf.n = 0
+		return p.buf.tok, p.buf.lit, p.buf.val
+	}
+
+	// Otherwise read the next token from the scanner.
+	tok, lit, val = p.s.Scan()
+
+	// Save it to the buffer in case we unscan later.
+	p.buf.tok, p.buf.lit, p.buf.val = tok, lit, val
+
+	return
+
+}
+
+// unscan pushes the previously read token back onto the buffer.
+func (p *Parser) unscan() {
+	p.buf.n = 1
 }

@@ -60,6 +60,10 @@ func (p *Parser) contains(search string, strings []string) bool {
 
 func (p *Parser) declare(tok Token, lit string) (interface{}, error) {
 
+	if val := p.hold(tok); val != nil {
+		return val, nil
+	}
+
 	switch tok {
 
 	case TRUE:

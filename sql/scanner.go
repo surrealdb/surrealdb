@@ -37,7 +37,7 @@ func NewScanner(p *Parser, r io.Reader) *Scanner {
 }
 
 // Scan returns the next token and literal value.
-func (s *Scanner) Scan() (tok Token, lit string) {
+func (s *Scanner) Scan() (tok Token, lit string, val interface{}) {
 
 	// Read the next rune.
 	ch := s.next()
@@ -61,21 +61,21 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 	switch ch {
 
 	case eof:
-		return EOF, ""
+		return EOF, "", val
 	case '*':
-		return ALL, string(ch)
+		return ALL, string(ch), val
 	case '×':
-		return MUL, string(ch)
+		return MUL, string(ch), val
 	case '∙':
-		return MUL, string(ch)
+		return MUL, string(ch), val
 	case '÷':
-		return DIV, string(ch)
+		return DIV, string(ch), val
 	case '@':
-		return EAT, string(ch)
+		return EAT, string(ch), val
 	case ',':
-		return COMMA, string(ch)
+		return COMMA, string(ch), val
 	case '.':
-		return DOT, string(ch)
+		return DOT, string(ch), val
 	case '"':
 		return s.scanString(ch)
 	case '\'':
@@ -91,41 +91,41 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 	case '$':
 		return s.scanParams(ch)
 	case ':':
-		return COLON, string(ch)
+		return COLON, string(ch), val
 	case ';':
-		return SEMICOLON, string(ch)
+		return SEMICOLON, string(ch), val
 	case '(':
-		return LPAREN, string(ch)
+		return LPAREN, string(ch), val
 	case ')':
-		return RPAREN, string(ch)
+		return RPAREN, string(ch), val
 	case '¬':
-		return NEQ, string(ch)
+		return NEQ, string(ch), val
 	case '≤':
-		return LTE, string(ch)
+		return LTE, string(ch), val
 	case '≥':
-		return GTE, string(ch)
+		return GTE, string(ch), val
 	case '~':
-		return SIN, string(ch)
+		return SIN, string(ch), val
 	case '∋':
-		return SIN, string(ch)
+		return SIN, string(ch), val
 	case '∌':
-		return SNI, string(ch)
+		return SNI, string(ch), val
 	case '⊇':
-		return CONTAINSALL, string(ch)
+		return CONTAINSALL, string(ch), val
 	case '⊃':
-		return CONTAINSSOME, string(ch)
+		return CONTAINSSOME, string(ch), val
 	case '⊅':
-		return CONTAINSNONE, string(ch)
+		return CONTAINSNONE, string(ch), val
 	case '∈':
-		return INS, string(ch)
+		return INS, string(ch), val
 	case '∉':
-		return NIS, string(ch)
+		return NIS, string(ch), val
 	case '⊆':
-		return ALLCONTAINEDIN, string(ch)
+		return ALLCONTAINEDIN, string(ch), val
 	case '⊂':
-		return SOMECONTAINEDIN, string(ch)
+		return SOMECONTAINEDIN, string(ch), val
 	case '⊄':
-		return NONECONTAINEDIN, string(ch)
+		return NONECONTAINEDIN, string(ch), val
 	case '#':
 		return s.scanCommentSingle(ch)
 	case '/':
@@ -135,7 +135,7 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 			return s.scanCommentMultiple(ch)
 		case chn == ' ':
 			s.undo()
-			return DIV, string(ch)
+			return DIV, string(ch), val
 		default:
 			s.undo()
 			return s.scanRegexp(ch)
@@ -144,99 +144,99 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 		chn := s.next()
 		switch {
 		case chn == '~':
-			return SIN, "=~"
+			return SIN, "=~", val
 		case chn == '=':
-			return EEQ, "=="
+			return EEQ, "==", val
 		default:
 			s.undo()
-			return EQ, string(ch)
+			return EQ, string(ch), val
 		}
 	case '?':
 		chn := s.next()
 		switch {
 		case chn == '=':
-			return ANY, "?="
+			return ANY, "?=", val
 		default:
 			s.undo()
-			return QMARK, string(ch)
+			return QMARK, string(ch), val
 		}
 	case '!':
 		chn := s.next()
 		switch {
 		case chn == '=':
 			if s.next() == '=' {
-				return NEE, "!=="
+				return NEE, "!==", val
 			} else {
 				s.undo()
-				return NEQ, "!="
+				return NEQ, "!=", val
 			}
 		case chn == '~':
-			return SNI, "!~"
+			return SNI, "!~", val
 		default:
 			s.undo()
-			return EXC, string(ch)
+			return EXC, string(ch), val
 		}
 	case '+':
 		chn := s.next()
 		switch {
 		case chn == '=':
-			return INC, "+="
+			return INC, "+=", val
 		case isNumber(chn):
 			return s.scanNumber(ch, chn)
 		default:
 			s.undo()
-			return ADD, string(ch)
+			return ADD, string(ch), val
 		}
 	case '-':
 		chn := s.next()
 		switch {
 		case chn == '=':
-			return DEC, "-="
+			return DEC, "-=", val
 		case chn == '>':
-			return OEDGE, "->"
+			return OEDGE, "->", val
 		case chn == '-':
 			return s.scanCommentSingle(ch)
 		case isNumber(chn):
 			return s.scanNumber(ch, chn)
 		default:
 			s.undo()
-			return SUB, string(ch)
+			return SUB, string(ch), val
 		}
 	case '>':
 		chn := s.next()
 		switch {
 		case chn == '=':
-			return GTE, ">="
+			return GTE, ">=", val
 		default:
 			s.undo()
-			return GT, string(ch)
+			return GT, string(ch), val
 		}
 	case '<':
 		chn := s.next()
 		switch {
 		case chn == '>':
-			return NEQ, "<>"
+			return NEQ, "<>", val
 		case chn == '=':
-			return LTE, "<="
+			return LTE, "<=", val
 		case chn == '-':
 			if s.next() == '>' {
-				return BEDGE, "<->"
+				return BEDGE, "<->", val
 			} else {
 				s.undo()
-				return IEDGE, "<-"
+				return IEDGE, "<-", val
 			}
 		default:
 			s.undo()
-			return LT, string(ch)
+			return LT, string(ch), val
 		}
 	}
 
-	return ILLEGAL, string(ch)
+	return ILLEGAL, string(ch), val
 
 }
 
 // scanBlank consumes the current rune and all contiguous whitespace.
-func (s *Scanner) scanBlank(chp ...rune) (tok Token, lit string) {
+func (s *Scanner) scanBlank(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = WS
 
@@ -260,12 +260,12 @@ func (s *Scanner) scanBlank(chp ...rune) (tok Token, lit string) {
 		}
 	}
 
-	return tok, buf.String()
+	return tok, buf.String(), val
 
 }
 
 // scanCommentSingle consumes the current rune and all contiguous whitespace.
-func (s *Scanner) scanCommentSingle(chp ...rune) (tok Token, lit string) {
+func (s *Scanner) scanCommentSingle(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = WS
 
@@ -287,12 +287,12 @@ func (s *Scanner) scanCommentSingle(chp ...rune) (tok Token, lit string) {
 		}
 	}
 
-	return tok, buf.String()
+	return tok, buf.String(), val
 
 }
 
 // scanCommentMultiple consumes the current rune and all contiguous whitespace.
-func (s *Scanner) scanCommentMultiple(chp ...rune) (tok Token, lit string) {
+func (s *Scanner) scanCommentMultiple(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = WS
 
@@ -319,24 +319,24 @@ func (s *Scanner) scanCommentMultiple(chp ...rune) (tok Token, lit string) {
 		}
 	}
 
-	return tok, buf.String()
+	return tok, buf.String(), val
 
 }
 
-func (s *Scanner) scanParams(chp ...rune) (Token, string) {
+func (s *Scanner) scanParams(chp ...rune) (tok Token, lit string, val interface{}) {
 
-	tok, lit := s.scanIdent(chp...)
+	tok, lit, val = s.scanIdent(chp...)
 
-		return BOUNDPARAM, lit
 	if s.p.is(tok, IDENT) {
+		return PARAM, lit, nil
 	}
 
-	return tok, lit
+	return
 
 }
 
 // scanIdent consumes the current rune and all contiguous ident runes.
-func (s *Scanner) scanIdent(chp ...rune) (tok Token, lit string) {
+func (s *Scanner) scanIdent(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = IDENT
 
@@ -362,19 +362,19 @@ func (s *Scanner) scanIdent(chp ...rune) (tok Token, lit string) {
 
 	// If the string matches a keyword then return that keyword.
 	if tok := keywords[strings.ToUpper(buf.String())]; tok > 0 {
-		return tok, buf.String()
+		return tok, buf.String(), val
 	}
 
-	if _, err := time.ParseDuration(buf.String()); err == nil {
-		return DURATION, buf.String()
+	if val, err := time.ParseDuration(buf.String()); err == nil {
+		return DURATION, buf.String(), val
 	}
 
 	// Otherwise return as a regular identifier.
-	return tok, buf.String()
+	return tok, buf.String(), val
 
 }
 
-func (s *Scanner) scanNumber(chp ...rune) (tok Token, lit string) {
+func (s *Scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = NUMBER
 
@@ -409,23 +409,23 @@ func (s *Scanner) scanNumber(chp ...rune) (tok Token, lit string) {
 		}
 	}
 
-	return tok, buf.String()
+	return tok, buf.String(), nil
 
 }
 
-func (s *Scanner) scanQuoted(chp ...rune) (Token, string) {
+func (s *Scanner) scanQuoted(chp ...rune) (tok Token, lit string, val interface{}) {
 
-	tok, lit := s.scanString(chp...)
+	tok, lit, val = s.scanString(chp...)
 
-		return IDENT, lit
 	if s.p.is(tok, STRING) {
+		return IDENT, lit, nil
 	}
 
-	return tok, lit
+	return
 
 }
 
-func (s *Scanner) scanString(chp ...rune) (tok Token, lit string) {
+func (s *Scanner) scanString(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	beg := chp[0]
 	end := beg
@@ -454,7 +454,7 @@ func (s *Scanner) scanString(chp ...rune) (tok Token, lit string) {
 		if ch := s.next(); ch == end {
 			break
 		} else if ch == eof {
-			return ILLEGAL, buf.String()
+			return ILLEGAL, buf.String(), val
 		} else if ch == '\n' {
 			tok = REGION
 			buf.WriteRune(ch)
@@ -482,23 +482,23 @@ func (s *Scanner) scanString(chp ...rune) (tok Token, lit string) {
 		}
 	}
 
-	if _, err := time.ParseDuration(buf.String()); err == nil {
-		return DURATION, buf.String()
+	if val, err := time.ParseDuration(buf.String()); err == nil {
+		return DURATION, buf.String(), val
 	}
 
-	if _, err := time.Parse("2006-01-02", buf.String()); err == nil {
-		return DATE, buf.String()
+	if val, err := time.Parse("2006-01-02", buf.String()); err == nil {
+		return DATE, buf.String(), val
 	}
 
-	if _, err := time.Parse(time.RFC3339, buf.String()); err == nil {
-		return TIME, buf.String()
+	if val, err := time.Parse(time.RFC3339, buf.String()); err == nil {
+		return TIME, buf.String(), val
 	}
 
-	return tok, buf.String()
+	return tok, buf.String(), val
 
 }
 
-func (s *Scanner) scanRegexp(chp ...rune) (tok Token, lit string) {
+func (s *Scanner) scanRegexp(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = IDENT
 
@@ -512,7 +512,7 @@ func (s *Scanner) scanRegexp(chp ...rune) (tok Token, lit string) {
 		if ch := s.next(); ch == chp[0] {
 			break
 		} else if ch == eof {
-			return ILLEGAL, buf.String()
+			return ILLEGAL, buf.String(), val
 		} else if ch == '\\' {
 			chn := s.next()
 			buf.WriteRune(ch)
@@ -522,15 +522,15 @@ func (s *Scanner) scanRegexp(chp ...rune) (tok Token, lit string) {
 		}
 	}
 
-	if _, err := regexp.Compile(buf.String()); err == nil {
-		return REGEX, buf.String()
+	if val, err := regexp.Compile(buf.String()); err == nil {
+		return REGEX, buf.String(), val
 	}
 
-	return tok, buf.String()
+	return tok, buf.String(), val
 
 }
 
-func (s *Scanner) scanObject(chp ...rune) (tok Token, lit string) {
+func (s *Scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	beg := chp[0]
 	end := beg
@@ -566,11 +566,11 @@ func (s *Scanner) scanObject(chp ...rune) (tok Token, lit string) {
 			sub--
 			buf.WriteRune(ch)
 		} else if ch == eof {
-			return ILLEGAL, buf.String()
+			return ILLEGAL, buf.String(), val
 		} else if ch == '\\' {
 			switch chn := s.next(); chn {
 			default:
-				return ILLEGAL, buf.String()
+				return ILLEGAL, buf.String(), val
 			case 'b', 't', 'r', 'n', 'f', '"', '\\':
 				buf.WriteRune(ch)
 				buf.WriteRune(chn)
@@ -581,13 +581,13 @@ func (s *Scanner) scanObject(chp ...rune) (tok Token, lit string) {
 	}
 
 	if beg == '{' {
-		return JSON, buf.String()
+		return JSON, buf.String(), val
 	}
 	if beg == '[' {
-		return ARRAY, buf.String()
+		return ARRAY, buf.String(), val
 	}
 
-	return ILLEGAL, buf.String()
+	return ILLEGAL, buf.String(), val
 
 }
 
