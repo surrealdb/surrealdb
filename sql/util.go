@@ -105,6 +105,9 @@ func (p *Parser) declare(tok Token, lit string) (interface{}, error) {
 	case IDENT:
 		return &Ident{lit}, nil
 
+	case TABLE:
+		return &Table{lit}, nil
+
 	case NOW:
 		return time.Now(), nil
 
