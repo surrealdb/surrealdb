@@ -43,11 +43,11 @@ func (s *Scanner) Scan() (tok Token, lit string, val interface{}) {
 	ch := s.next()
 
 	// If we see whitespace then consume all contiguous whitespace.
-	if isWhitespace(ch) {
+	if isBlank(ch) {
 		return s.scanBlank(ch)
 	}
 
-	// If we see a letter then consume as an string.
+	// If we see a letter then consume as a string.
 	if isLetter(ch) {
 		return s.scanIdent(ch)
 	}
@@ -252,7 +252,7 @@ func (s *Scanner) scanBlank(chp ...rune) (tok Token, lit string, val interface{}
 	for {
 		if ch := s.next(); ch == eof {
 			break
-		} else if !isWhitespace(ch) {
+		} else if !isBlank(ch) {
 			s.undo()
 			break
 		} else {
@@ -732,8 +732,8 @@ func (s *Scanner) undo() {
 
 }
 
-// isWhitespace returns true if the rune is a space, tab, or newline.
-func isWhitespace(ch rune) bool {
+// isBlank returns true if the rune is a space, tab, or newline.
+func isBlank(ch rune) bool {
 	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
 }
 

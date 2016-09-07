@@ -285,7 +285,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		},
 		{
 			sql: `SELECT * FROM`,
-			err: "Found `` but expected `table name`",
+			err: "Found `` but expected `table name or record id`",
 		},
 		{
 			sql: `SELECT * FROM per!son`,
@@ -307,19 +307,23 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		},
 		{
 			sql: `SELECT * FROM @`,
-			err: "Found `` but expected `table name`",
+			err: "Found `@` but expected `table name or record id`",
+		},
+		{
+			sql: `SELECT * FROM @person`,
+			err: "Found `@person` but expected `table name or record id`",
+		},
+		{
+			sql: `SELECT * FROM @person:`,
+			err: "Found `@person:` but expected `table name or record id`",
+		},
+		{
+			sql: `SELECT * FROM @person WHERE`,
+			err: "Found `@person` but expected `table name or record id`",
 		},
 		{
 			sql: `SELECT * FROM person:uuid`,
 			err: "Found `:` but expected `EOF, ;`",
-		},
-		{
-			sql: `SELECT * FROM @person`,
-			err: "Found `` but expected `:`",
-		},
-		{
-			sql: `SELECT * FROM @person:`,
-			err: "Found `` but expected `table id`",
 		},
 		{
 			sql: `SELECT * FROM person`,
@@ -371,7 +375,21 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			}}},
 		},
 		{
+			sql: `SELECT * FROM @person:{123.456.789.012}`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: "123.456.789.012"}},
+			}}},
+		},
+		{
 			sql: `SELECT * FROM @person:⟨A250C5A3-948F-4657-88AD-FF5F27B5B24E⟩`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: "A250C5A3-948F-4657-88AD-FF5F27B5B24E"}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:{A250C5A3-948F-4657-88AD-FF5F27B5B24E}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Thing{TB: "person", ID: "A250C5A3-948F-4657-88AD-FF5F27B5B24E"}},
@@ -385,7 +403,21 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			}}},
 		},
 		{
+			sql: `SELECT * FROM @person:{8250C5A3-948F-4657-88AD-FF5F27B5B24E}`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: "8250C5A3-948F-4657-88AD-FF5F27B5B24E"}},
+			}}},
+		},
+		{
 			sql: `SELECT * FROM @person:⟨Tobie Morgan Hitchcock⟩`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: "Tobie Morgan Hitchcock"}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:{Tobie Morgan Hitchcock}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Thing{TB: "person", ID: "Tobie Morgan Hitchcock"}},
@@ -399,6 +431,13 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			}}},
 		},
 		{
+			sql: `SELECT * FROM @{email addresses}:{tobie@abcum.com}`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "email addresses", ID: "tobie@abcum.com"}},
+			}}},
+		},
+		{
 			sql: `SELECT * FROM @⟨email addresses⟩:⟨tobie+spam@abcum.com⟩`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
@@ -406,8 +445,19 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			}}},
 		},
 		{
+			sql: `SELECT * FROM @{email addresses}:{tobie+spam@abcum.com}`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "email addresses", ID: "tobie+spam@abcum.com"}},
+			}}},
+		},
+		{
 			sql: `SELECT * FROM @⟨email addresses⟩:⟨this\qis\nodd⟩`,
-			err: "Found `thisqis\nodd` but expected `table id`",
+			err: "Found `@email addresses:thisqis\nodd` but expected `table name or record id`",
+		},
+		{
+			sql: `SELECT * FROM @{email addresses}:{this\qis\nodd}`,
+			err: "Found `@email addresses:thisqis\nodd` but expected `table name or record id`",
 		},
 		{
 			sql: `SELECT *, temp AS test FROM person`,
@@ -679,11 +729,11 @@ func Test_Parse_Queries_Create(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `CREATE`,
-			err: "Found `` but expected `table name`",
+			err: "Found `` but expected `table name or record id`",
 		},
 		{
 			sql: `INSERT INTO`,
-			err: "Found `` but expected `table name`",
+			err: "Found `` but expected `table name or record id`",
 		},
 		{
 			sql: `CREATE person`,
@@ -827,11 +877,11 @@ func Test_Parse_Queries_Update(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `UPDATE`,
-			err: "Found `` but expected `table name`",
+			err: "Found `` but expected `table name or record id`",
 		},
 		{
 			sql: `UPSERT INTO`,
-			err: "Found `` but expected `table name`",
+			err: "Found `` but expected `table name or record id`",
 		},
 		{
 			sql: `UPDATE person`,
@@ -975,7 +1025,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `MODIFY`,
-			err: "Found `` but expected `@`",
+			err: "Found `` but expected `table name or record id`",
 		},
 		{
 			sql: `MODIFY @person:test`,
@@ -1073,11 +1123,11 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `DELETE`,
-			err: "Found `` but expected `table name`",
+			err: "Found `` but expected `table name or record id`",
 		},
 		{
 			sql: `DELETE FROM`,
-			err: "Found `` but expected `table name`",
+			err: "Found `` but expected `table name or record id`",
 		},
 		{
 			sql: `DELETE person`,
