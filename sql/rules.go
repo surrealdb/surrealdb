@@ -61,7 +61,7 @@ func (p *Parser) parseDefineRulesStatement(explain bool) (stmt *DefineRulesState
 
 		stmt.Rule = tok.String()
 
-		if is(tok, CUSTOM) {
+		if p.is(tok, CUSTOM) {
 			if stmt.Code, err = p.parseScript(); err != nil {
 				return nil, err
 			}

@@ -25,7 +25,7 @@ func (p *Parser) parseName() (string, error) {
 		return string(""), &ParseError{Found: lit, Expected: []string{"name"}}
 	}
 
-	val, err := declare(STRING, lit)
+	val, err := p.declare(STRING, lit)
 
 	return val.(string), err
 
@@ -172,7 +172,7 @@ func (p *Parser) parseIdent() (*Ident, error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
 	}
 
-	val, err := declare(IDENT, lit)
+	val, err := p.declare(IDENT, lit)
 
 	return val.(*Ident), err
 
@@ -185,7 +185,7 @@ func (p *Parser) parseArray() ([]interface{}, error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"array"}}
 	}
 
-	val, err := declare(ARRAY, lit)
+	val, err := p.declare(ARRAY, lit)
 
 	return val.([]interface{}), err
 
@@ -198,7 +198,7 @@ func (p *Parser) parseNumber() (int64, error) {
 		return int64(0), &ParseError{Found: lit, Expected: []string{"number"}}
 	}
 
-	val, err := declare(NUMBER, lit)
+	val, err := p.declare(NUMBER, lit)
 
 	return val.(int64), err
 
@@ -211,7 +211,7 @@ func (p *Parser) parseDouble() (float64, error) {
 		return float64(0), &ParseError{Found: lit, Expected: []string{"number"}}
 	}
 
-	val, err := declare(DOUBLE, lit)
+	val, err := p.declare(DOUBLE, lit)
 
 	return val.(float64), err
 
@@ -224,7 +224,7 @@ func (p *Parser) parseString() (string, error) {
 		return string(""), &ParseError{Found: lit, Expected: []string{"string"}}
 	}
 
-	val, err := declare(STRING, lit)
+	val, err := p.declare(STRING, lit)
 
 	return val.(string), err
 
@@ -237,7 +237,7 @@ func (p *Parser) parseRegion() (string, error) {
 		return string(""), &ParseError{Found: lit, Expected: []string{"string"}}
 	}
 
-	val, err := declare(tok, lit)
+	val, err := p.declare(tok, lit)
 
 	return val.(string), err
 
@@ -250,7 +250,7 @@ func (p *Parser) parseScript() (string, error) {
 		return string(""), &ParseError{Found: lit, Expected: []string{"js/lua script"}}
 	}
 
-	val, err := declare(tok, lit)
+	val, err := p.declare(tok, lit)
 
 	return val.(string), err
 
@@ -263,7 +263,7 @@ func (p *Parser) parseRegexp() (string, error) {
 		return string(""), &ParseError{Found: lit, Expected: []string{"regular expression"}}
 	}
 
-	val, err := declare(tok, lit)
+	val, err := p.declare(tok, lit)
 
 	return val.(*regexp.Regexp).String(), err
 
@@ -276,7 +276,7 @@ func (p *Parser) parseBoolean() (bool, error) {
 		return bool(false), &ParseError{Found: lit, Expected: []string{"boolean"}}
 	}
 
-	val, err := declare(tok, lit)
+	val, err := p.declare(tok, lit)
 
 	return val.(bool), err
 
@@ -289,7 +289,7 @@ func (p *Parser) parseDefault() (interface{}, error) {
 		return nil, err
 	}
 
-	return declare(tok, lit)
+	return p.declare(tok, lit)
 
 }
 
@@ -309,7 +309,7 @@ func (p *Parser) parseExpr() (mul []*Field, err error) {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
 
-		one.Expr, err = declare(tok, lit)
+		one.Expr, err = p.declare(tok, lit)
 		if err != nil {
 			return
 		}
@@ -324,7 +324,7 @@ func (p *Parser) parseExpr() (mul []*Field, err error) {
 				return nil, &ParseError{Found: lit, Expected: []string{"field alias"}}
 			}
 
-			val, err = declare(STRING, lit)
+			val, err = p.declare(STRING, lit)
 			if err != nil {
 				return
 			}

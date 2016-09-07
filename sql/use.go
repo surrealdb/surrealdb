@@ -28,7 +28,7 @@ func (p *Parser) parseUseStatement(explain bool) (stmt *UseStatement, err error)
 
 	for {
 
-		if is(tok, NAMESPACE) {
+		if p.is(tok, NAMESPACE) {
 			_, stmt.NS, err = p.shouldBe(IDENT, STRING)
 			if err != nil {
 				return nil, &ParseError{Found: stmt.NS, Expected: []string{"namespace name"}}
@@ -37,7 +37,7 @@ func (p *Parser) parseUseStatement(explain bool) (stmt *UseStatement, err error)
 			p.c.Set("NS", stmt.NS)
 		}
 
-		if is(tok, DATABASE) {
+		if p.is(tok, DATABASE) {
 			_, stmt.DB, err = p.shouldBe(IDENT, DATE, TIME, STRING, NUMBER, DOUBLE)
 			if err != nil {
 				return nil, &ParseError{Found: stmt.DB, Expected: []string{"database name"}}

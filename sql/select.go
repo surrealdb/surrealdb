@@ -110,7 +110,7 @@ func (p *Parser) parseOrder() (mul []*Order, err error) {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
 
-		one.Expr, err = declare(tok, lit)
+		one.Expr, err = p.declare(tok, lit)
 		if err != nil {
 			return nil, err
 		}
@@ -120,7 +120,7 @@ func (p *Parser) parseOrder() (mul []*Order, err error) {
 			tok, lit = ASC, "ASC"
 		}
 
-		one.Dir, err = declare(tok, lit)
+		one.Dir, err = p.declare(tok, lit)
 		if err != nil {
 			return nil, err
 		}
@@ -153,7 +153,7 @@ func (p *Parser) parseLimit() (Expr, error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"limit number"}}
 	}
 
-	return declare(tok, lit)
+	return p.declare(tok, lit)
 
 }
 
@@ -203,6 +203,6 @@ func (p *Parser) parseVersion() (Expr, error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"timestamp"}}
 	}
 
-	return declare(tok, lit)
+	return p.declare(tok, lit)
 
 }

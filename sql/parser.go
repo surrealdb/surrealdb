@@ -50,20 +50,23 @@ func Parse(ctx *fibre.Context, i interface{}) (*Query, error) {
 // ParseBytes parses a byte array.
 func ParseBytes(ctx *fibre.Context, i []byte) (*Query, error) {
 	r := bytes.NewReader(i)
-	p := &Parser{s: NewScanner(r), c: ctx}
+	p := &Parser{c: ctx}
+	p.s = NewScanner(p, r)
 	return p.Parse()
 }
 
 // ParseString parses a string.
 func ParseString(ctx *fibre.Context, i string) (*Query, error) {
 	r := strings.NewReader(i)
-	p := &Parser{s: NewScanner(r), c: ctx}
+	p := &Parser{c: ctx}
+	p.s = NewScanner(p, r)
 	return p.Parse()
 }
 
 // ParseBuffer parses a buffer.
 func ParseBuffer(ctx *fibre.Context, r io.Reader) (*Query, error) {
-	p := &Parser{s: NewScanner(r), c: ctx}
+	p := &Parser{c: ctx}
+	p.s = NewScanner(p, r)
 	return p.Parse()
 }
 
@@ -158,7 +161,7 @@ func (p *Parser) mightBe(expected ...Token) (tok Token, lit string, found bool) 
 
 	tok, lit = p.scanIgnoreWhitespace()
 
-	if found = in(tok, expected); !found {
+	if found = p.in(tok, expected); !found {
 		p.unscan()
 	}
 
@@ -170,7 +173,7 @@ func (p *Parser) shouldBe(expected ...Token) (tok Token, lit string, err error) 
 
 	tok, lit = p.scanIgnoreWhitespace()
 
-	if found := in(tok, expected); !found {
+	if found := p.in(tok, expected); !found {
 		p.unscan()
 		err = &ParseError{Found: lit, Expected: lookup(expected)}
 	}

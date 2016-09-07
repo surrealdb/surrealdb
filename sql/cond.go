@@ -33,7 +33,7 @@ func (p *Parser) parseCond() (mul []Expr, err error) {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
 
-		one.LHS, err = declare(tok, lit)
+		one.LHS, err = p.declare(tok, lit)
 		if err != nil {
 			return nil, err
 		}
@@ -75,7 +75,7 @@ func (p *Parser) parseCond() (mul []Expr, err error) {
 			return nil, &ParseError{Found: lit, Expected: []string{"field value"}}
 		}
 
-		one.RHS, err = declare(tok, lit)
+		one.RHS, err = p.declare(tok, lit)
 		if err != nil {
 			return nil, err
 		}

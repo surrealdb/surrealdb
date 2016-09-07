@@ -23,11 +23,11 @@ func (p *Parser) parseType() (exp string, err error) {
 		return string(""), &ParseError{Found: lit, Expected: allowed}
 	}
 
-	if !contains(lit, allowed) {
+	if !p.contains(lit, allowed) {
 		return string(""), &ParseError{Found: lit, Expected: allowed}
 	}
 
-	val, err := declare(STRING, lit)
+	val, err := p.declare(STRING, lit)
 
 	return val.(string), err
 

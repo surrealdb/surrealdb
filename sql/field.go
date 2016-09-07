@@ -43,49 +43,49 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 			break
 		}
 
-		if is(tok, MIN) {
+		if p.is(tok, MIN) {
 			if stmt.Min, err = p.parseDouble(); err != nil {
 				return nil, err
 			}
 		}
 
-		if is(tok, MAX) {
+		if p.is(tok, MAX) {
 			if stmt.Max, err = p.parseDouble(); err != nil {
 				return nil, err
 			}
 		}
 
-		if is(tok, TYPE) {
+		if p.is(tok, TYPE) {
 			if stmt.Type, err = p.parseType(); err != nil {
 				return nil, err
 			}
 		}
 
-		if is(tok, ENUM) {
+		if p.is(tok, ENUM) {
 			if stmt.Enum, err = p.parseArray(); err != nil {
 				return nil, err
 			}
 		}
 
-		if is(tok, CODE) {
+		if p.is(tok, CODE) {
 			if stmt.Code, err = p.parseScript(); err != nil {
 				return nil, err
 			}
 		}
 
-		if is(tok, MATCH) {
+		if p.is(tok, MATCH) {
 			if stmt.Match, err = p.parseRegexp(); err != nil {
 				return nil, err
 			}
 		}
 
-		if is(tok, DEFAULT) {
+		if p.is(tok, DEFAULT) {
 			if stmt.Default, err = p.parseDefault(); err != nil {
 				return nil, err
 			}
 		}
 
-		if is(tok, NOTNULL) {
+		if p.is(tok, NOTNULL) {
 			stmt.Notnull = true
 			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
 				if tok == FALSE {
@@ -94,7 +94,7 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 			}
 		}
 
-		if is(tok, READONLY) {
+		if p.is(tok, READONLY) {
 			stmt.Readonly = true
 			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
 				if tok == FALSE {
@@ -103,7 +103,7 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 			}
 		}
 
-		if is(tok, MANDATORY) {
+		if p.is(tok, MANDATORY) {
 			stmt.Mandatory = true
 			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
 				if tok == FALSE {
@@ -112,7 +112,7 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 			}
 		}
 
-		if is(tok, VALIDATE) {
+		if p.is(tok, VALIDATE) {
 			stmt.Validate = true
 			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
 				if tok == FALSE {

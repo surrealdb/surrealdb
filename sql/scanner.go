@@ -25,14 +25,15 @@ import (
 
 // Scanner represents a lexical scanner.
 type Scanner struct {
-	p []rune
-	n []rune
+	b []rune // any runes before
+	a []rune // any runes after
+	p *Parser
 	r *bufio.Reader
 }
 
 // NewScanner returns a new instance of Scanner.
-func NewScanner(r io.Reader) *Scanner {
-	return &Scanner{r: bufio.NewReader(r)}
+func NewScanner(p *Parser, r io.Reader) *Scanner {
+	return &Scanner{p: p, r: bufio.NewReader(r)}
 }
 
 // Scan returns the next token and literal value.
@@ -326,8 +327,8 @@ func (s *Scanner) scanParams(chp ...rune) (Token, string) {
 
 	tok, lit := s.scanIdent(chp...)
 
-	if is(tok, IDENT) {
 		return BOUNDPARAM, lit
+	if s.p.is(tok, IDENT) {
 	}
 
 	return tok, lit
@@ -416,8 +417,8 @@ func (s *Scanner) scanQuoted(chp ...rune) (Token, string) {
 
 	tok, lit := s.scanString(chp...)
 
-	if is(tok, STRING) {
 		return IDENT, lit
+	if s.p.is(tok, STRING) {
 	}
 
 	return tok, lit
@@ -594,10 +595,10 @@ func (s *Scanner) scanObject(chp ...rune) (tok Token, lit string) {
 // Returns the rune(0) if an error occurs (or io.EOF is returned).
 func (s *Scanner) next() rune {
 
-	if len(s.n) > 0 {
+	if len(s.a) > 0 {
 		var r rune
-		r, s.n = s.n[len(s.n)-1], s.n[:len(s.n)-1]
-		s.p = append(s.p, r)
+		r, s.a = s.a[len(s.a)-1], s.a[:len(s.a)-1]
+		s.b = append(s.b, r)
 		return r
 	}
 
@@ -605,7 +606,7 @@ func (s *Scanner) next() rune {
 	if err != nil {
 		return eof
 	}
-	s.p = append(s.p, r)
+	s.b = append(s.b, r)
 	return r
 
 }
@@ -613,10 +614,10 @@ func (s *Scanner) next() rune {
 // undo places the previously read rune back on the reader.
 func (s *Scanner) undo() {
 
-	if len(s.p) > 0 {
+	if len(s.b) > 0 {
 		var r rune
-		r, s.p = s.p[len(s.p)-1], s.p[:len(s.p)-1]
-		s.n = append(s.n, r)
+		r, s.b = s.b[len(s.b)-1], s.b[:len(s.b)-1]
+		s.a = append(s.a, r)
 		return
 	}
 

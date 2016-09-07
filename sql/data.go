@@ -18,19 +18,19 @@ func (p *Parser) parseData() (exp []Expr, err error) {
 
 	if tok, _, exi := p.mightBe(SET, MERGE, CONTENT); exi {
 
-		if is(tok, SET) {
+		if p.is(tok, SET) {
 			if exp, err = p.parseSet(); err != nil {
 				return nil, err
 			}
 		}
 
-		if is(tok, MERGE) {
+		if p.is(tok, MERGE) {
 			if exp, err = p.parseMerge(); err != nil {
 				return nil, err
 			}
 		}
 
-		if is(tok, CONTENT) {
+		if p.is(tok, CONTENT) {
 			if exp, err = p.parseContent(); err != nil {
 				return nil, err
 			}
@@ -56,7 +56,7 @@ func (p *Parser) parseSet() (mul []Expr, err error) {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
 
-		one.LHS, err = declare(tok, lit)
+		one.LHS, err = p.declare(tok, lit)
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +72,7 @@ func (p *Parser) parseSet() (mul []Expr, err error) {
 			return nil, &ParseError{Found: lit, Expected: []string{"field value"}}
 		}
 
-		one.RHS, err = declare(tok, lit)
+		one.RHS, err = p.declare(tok, lit)
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +99,7 @@ func (p *Parser) parseDiff() (exp []Expr, err error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	val, err := declare(tok, lit)
+	val, err := p.declare(tok, lit)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
@@ -121,7 +121,7 @@ func (p *Parser) parseMerge() (exp []Expr, err error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	val, err := declare(tok, lit)
+	val, err := p.declare(tok, lit)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
@@ -143,7 +143,7 @@ func (p *Parser) parseContent() (exp []Expr, err error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	val, err := declare(tok, lit)
+	val, err := p.declare(tok, lit)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
