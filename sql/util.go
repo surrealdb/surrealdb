@@ -138,6 +138,12 @@ func (p *Parser) declare(tok Token, lit string) (interface{}, error) {
 		}
 		return j, nil
 
+	case PARAM:
+		if p, ok := p.v[lit]; ok {
+			return p, nil
+		}
+		return nil, fmt.Errorf("Param %s is not defined", lit)
+
 	}
 
 	return lit, nil

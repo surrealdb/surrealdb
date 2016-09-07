@@ -28,7 +28,7 @@ func (p *Parser) parseCond() (mul []Expr, err error) {
 
 		one := &BinaryExpression{}
 
-		tok, lit, err = p.shouldBe(ID, IDENT, NULL, VOID, MISSING, EMPTY, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, REGEX, JSON, ARRAY, BOUNDPARAM)
+		tok, lit, err = p.shouldBe(ID, IDENT, THING, NULL, VOID, MISSING, EMPTY, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, REGEX, JSON, ARRAY, PARAM)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
@@ -70,7 +70,7 @@ func (p *Parser) parseCond() (mul []Expr, err error) {
 			}
 		}
 
-		tok, lit, err = p.shouldBe(ID, IDENT, NULL, VOID, MISSING, EMPTY, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, REGEX, JSON, ARRAY, BOUNDPARAM)
+		tok, lit, err = p.shouldBe(ID, IDENT, THING, NULL, VOID, MISSING, EMPTY, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, REGEX, JSON, ARRAY, PARAM)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field value"}}
 		}

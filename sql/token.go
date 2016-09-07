@@ -29,19 +29,20 @@ const (
 
 	literalsBeg
 
-	DATE       // 1970-01-01
-	TIME       // 1970-01-01T00:00:00+00:00
-	PATH       // person->like->person
-	JSON       // {"test":true}
-	IDENT      // something
-	STRING     // "something"
-	REGION     // "a multiline \n string"
-	NUMBER     // 123456
-	DOUBLE     // 123.456
-	REGEX      // /.*/
-	ARRAY      // [0,1,2]
-	DURATION   // 13h
-	BOUNDPARAM // $1
+	DATE     // 1970-01-01
+	TIME     // 1970-01-01T00:00:00+00:00
+	PATH     // person->like->person
+	JSON     // {"test":true}
+	IDENT    // something
+	THING    // @class:id
+	STRING   // "something"
+	REGION   // "a multiline \n string"
+	NUMBER   // 123456
+	DOUBLE   // 123.456
+	REGEX    // /.*/
+	ARRAY    // [0,1,2]
+	DURATION // 13h
+	PARAM    // $1
 
 	EAT       // @
 	DOT       // .
@@ -199,19 +200,20 @@ var tokens = [...]string{
 
 	// literals
 
-	DATE:       "DATE",
-	TIME:       "TIME",
-	PATH:       "PATH",
-	JSON:       "JSON",
-	IDENT:      "IDENT",
-	STRING:     "STRING",
-	REGION:     "REGION",
-	NUMBER:     "NUMBER",
-	DOUBLE:     "DOUBLE",
-	REGEX:      "REGEX",
-	ARRAY:      "ARRAY",
-	DURATION:   "DURATION",
-	BOUNDPARAM: "BOUNDPARAM",
+	DATE:     "DATE",
+	TIME:     "TIME",
+	PATH:     "PATH",
+	JSON:     "JSON",
+	IDENT:    "IDENT",
+	THING:    "THING",
+	STRING:   "STRING",
+	REGION:   "REGION",
+	NUMBER:   "NUMBER",
+	DOUBLE:   "DOUBLE",
+	REGEX:    "REGEX",
+	ARRAY:    "ARRAY",
+	DURATION: "DURATION",
+	PARAM:    "PARAM",
 
 	EAT:       "@",
 	DOT:       ".",

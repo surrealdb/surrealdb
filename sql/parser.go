@@ -26,6 +26,7 @@ import (
 type Parser struct {
 	s   *Scanner
 	c   *fibre.Context
+	v   map[string]interface{}
 	buf struct {
 		tok Token  // last read token
 		lit string // last read literal
