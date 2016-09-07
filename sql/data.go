@@ -67,7 +67,7 @@ func (p *Parser) parseSet() (mul []Expr, err error) {
 		}
 		one.Op = tok
 
-		tok, lit, err = p.shouldBe(IDENT, NULL, VOID, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON, ARRAY, PARAM)
+		tok, lit, err = p.shouldBe(IDENT, THING, NULL, VOID, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON, ARRAY, PARAM)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field value"}}
 		}
