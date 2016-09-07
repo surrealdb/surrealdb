@@ -51,6 +51,20 @@ func executeModifyStatement(txn kvs.TX, ast *sql.ModifyStatement) (out []interfa
 			}
 		}
 
+		if what, ok := w.(*sql.Table); ok {
+			beg := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: keys.Prefix}
+			end := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: keys.Suffix}
+			kvs, _ := txn.RGet(beg.Encode(), end.Encode(), 0)
+			for _, kv := range kvs {
+				doc := item.New(kv, txn, nil)
+				if ret, err := modify(doc, ast); err != nil {
+					return nil, err
+				} else if ret != nil {
+					out = append(out, ret)
+				}
+			}
+		}
+
 	}
 
 	if local {

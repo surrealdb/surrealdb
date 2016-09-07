@@ -24,7 +24,7 @@ func (p *Parser) parseModifyStatement(explain bool) (stmt *ModifyStatement, err 
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	if stmt.What, err = p.parseThings(); err != nil {
+	if stmt.What, err = p.parseWhat(); err != nil {
 		return nil, err
 	}
 
