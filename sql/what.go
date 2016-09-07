@@ -18,27 +18,23 @@ func (p *Parser) parseWhat() (mul []Expr, err error) {
 
 	for {
 
-		_, _, exi := p.mightBe(EAT)
+		tok, lit, err := p.shouldBe(IDENT, THING)
+		if err != nil {
+			return nil, &ParseError{Found: lit, Expected: []string{"table name or record id"}}
+		}
 
-		if exi == false {
-			one, err := p.parseTable()
-			if err != nil {
-				return nil, err
-			}
+		if p.is(tok, IDENT) {
+			one, _ := p.declare(TABLE, lit)
 			mul = append(mul, one)
 		}
 
-		if exi == true {
-			p.unscan()
-			one, err := p.parseThing()
-			if err != nil {
-				return nil, err
-			}
+		if p.is(tok, THING) {
+			one, _ := p.declare(THING, lit)
 			mul = append(mul, one)
 		}
 
 		// If the next token is not a comma then break the loop.
-		if _, _, exi = p.mightBe(COMMA); !exi {
+		if _, _, exi := p.mightBe(COMMA); !exi {
 			break
 		}
 

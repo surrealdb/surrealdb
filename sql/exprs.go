@@ -57,114 +57,6 @@ func (p *Parser) parseNames() (mul []string, err error) {
 //
 // --------------------------------------------------
 
-func (p *Parser) parseTable() (*Table, error) {
-
-	_, lit, err := p.shouldBe(IDENT, NUMBER, DATE)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"table name"}}
-	}
-
-	return &Table{lit}, err
-
-}
-
-func (p *Parser) parseTables() (mul []*Table, err error) {
-
-	for {
-
-		one, err := p.parseTable()
-		if err != nil {
-			return nil, err
-		}
-
-		mul = append(mul, one)
-
-		// If the next token is not a comma then break the loop.
-		if _, _, exi := p.mightBe(COMMA); !exi {
-			break
-		}
-
-	}
-
-	return
-
-}
-
-// --------------------------------------------------
-//
-// --------------------------------------------------
-
-func (p *Parser) parseThing() (one *Thing, err error) {
-
-	var tok Token
-	var lit string
-	var val interface{}
-
-	one = &Thing{}
-
-	_, _, err = p.shouldBe(EAT)
-	if err != nil {
-		return nil, err
-	}
-
-	_, one.TB, err = p.shouldBe(IDENT, NUMBER, DATE)
-	if err != nil {
-		return nil, &ParseError{Found: one.TB, Expected: []string{"table name"}}
-	}
-
-	_, _, err = p.shouldBe(COLON)
-	if err != nil {
-		return nil, err
-	}
-
-	tok, lit, err = p.shouldBe(IDENT, NUMBER, DOUBLE, DATE, TIME)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"table id"}}
-	}
-
-	switch tok {
-	case IDENT:
-		val = lit
-	default:
-		val, err = declare(tok, lit)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	one.ID = val
-
-	return
-
-}
-
-func (p *Parser) parseThings() (mul []Expr, err error) {
-
-	for {
-
-		one, err := p.parseThing()
-		if err != nil {
-			return nil, err
-		}
-
-		mul = append(mul, one)
-
-		// If the next token is not a comma then break the loop.
-		if _, _, exi := p.mightBe(COMMA); !exi {
-			break
-		}
-
-	}
-
-	return
-
-}
-
-// --------------------------------------------------
-//
-// --------------------------------------------------
-
 func (p *Parser) parseIdent() (*Ident, error) {
 
 	_, lit, err := p.shouldBe(IDENT)
@@ -175,6 +67,19 @@ func (p *Parser) parseIdent() (*Ident, error) {
 	val, err := p.declare(IDENT, lit)
 
 	return val.(*Ident), err
+
+}
+
+func (p *Parser) parseThing() (*Thing, error) {
+
+	_, lit, err := p.shouldBe(THING)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"record id"}}
+	}
+
+	val, err := p.declare(THING, lit)
+
+	return val.(*Thing), err
 
 }
 

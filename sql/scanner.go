@@ -70,12 +70,12 @@ func (s *Scanner) Scan() (tok Token, lit string, val interface{}) {
 		return MUL, string(ch), val
 	case '÷':
 		return DIV, string(ch), val
-	case '@':
-		return EAT, string(ch), val
 	case ',':
 		return COMMA, string(ch), val
 	case '.':
 		return DOT, string(ch), val
+	case '@':
+		return s.scanThing(ch)
 	case '"':
 		return s.scanString(ch)
 	case '\'':
@@ -374,6 +374,109 @@ func (s *Scanner) scanIdent(chp ...rune) (tok Token, lit string, val interface{}
 
 }
 
+// scanThing consumes the current rune and all contiguous ident runes.
+func (s *Scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}) {
+
+	tok = THING
+
+	// Create a buffer
+	var buf bytes.Buffer
+	var beg bytes.Buffer
+	var mid bytes.Buffer
+	var end bytes.Buffer
+
+	// Read passed in runes
+	for _, ch := range chp {
+		buf.WriteRune(ch)
+	}
+
+	for {
+		if ch := s.next(); ch == eof {
+			break
+		} else if isLetter(ch) {
+			tok, lit, _ = s.scanIdent(ch)
+			beg.WriteString(lit)
+		} else if isNumber(ch) {
+			tok, lit, _ = s.scanNumber(ch)
+			beg.WriteString(lit)
+		} else if ch == '`' {
+			tok, lit, _ = s.scanQuoted(ch)
+			beg.WriteString(lit)
+		} else if ch == '{' {
+			tok, lit, _ = s.scanQuoted(ch)
+			beg.WriteString(lit)
+		} else if ch == '⟨' {
+			tok, lit, _ = s.scanQuoted(ch)
+			beg.WriteString(lit)
+		} else {
+			s.undo()
+			break
+		}
+	}
+
+	if beg.Len() < 1 {
+		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
+	}
+
+	for {
+		if ch := s.next(); ch != ':' {
+			s.undo()
+			break
+		} else {
+			mid.WriteRune(ch)
+			break
+		}
+	}
+
+	if mid.Len() < 1 {
+		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
+	}
+
+	for {
+		if ch := s.next(); ch == eof {
+			break
+		} else if isLetter(ch) {
+			tok, lit, _ = s.scanIdent(ch)
+			end.WriteString(lit)
+		} else if isNumber(ch) {
+			tok, lit, _ = s.scanNumber(ch)
+			end.WriteString(lit)
+		} else if ch == '`' {
+			tok, lit, _ = s.scanQuoted(ch)
+			beg.WriteString(lit)
+		} else if ch == '{' {
+			tok, lit, _ = s.scanQuoted(ch)
+			end.WriteString(lit)
+		} else if ch == '⟨' {
+			tok, lit, _ = s.scanQuoted(ch)
+			end.WriteString(lit)
+		} else {
+			s.undo()
+			break
+		}
+	}
+
+	if end.Len() < 1 {
+		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
+	}
+
+	val = &Thing{
+		TB: beg.String(),
+		ID: end.String(),
+	}
+
+	switch tok {
+	case DATE, TIME, NUMBER, DOUBLE:
+		val.(*Thing).ID, _ = s.p.declare(tok, end.String())
+	case REGION:
+		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
+	}
+
+	// Otherwise return as a regular thing.
+	return THING, buf.String() + beg.String() + mid.String() + end.String(), val
+
+}
+
 func (s *Scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = NUMBER
@@ -440,6 +543,10 @@ func (s *Scanner) scanString(chp ...rune) (tok Token, lit string, val interface{
 
 	if beg == '⟨' {
 		end = '⟩'
+	}
+
+	if beg == '{' {
+		end = '}'
 	}
 
 	tok = STRING
