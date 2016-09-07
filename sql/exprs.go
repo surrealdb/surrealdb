@@ -20,7 +20,7 @@ import (
 
 func (p *Parser) parseName() (string, error) {
 
-	_, lit, err := p.shouldBe(IDENT)
+	_, lit, err := p.shouldBe(IDENT, NUMBER, DOUBLE, DATE, TIME)
 	if err != nil {
 		return string(""), &ParseError{Found: lit, Expected: []string{"name"}}
 	}
