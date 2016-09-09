@@ -110,6 +110,40 @@ func (d *Doc) Iff(value interface{}, path ...string) (*Doc, error) {
 	return &Doc{nil}, d.Del(path...)
 }
 
+// Keys retrieves the object keys at the specified path.
+func (d *Doc) Keys(path ...string) *Doc {
+
+	path = d.path(path...)
+
+	out := []interface{}{}
+
+	if m, ok := d.Get(path...).Data().(map[string]interface{}); ok {
+		for k, _ := range m {
+			out = append(out, k)
+		}
+	}
+
+	return &Doc{out}
+
+}
+
+// Vals retrieves the object values at the specified path.
+func (d *Doc) Vals(path ...string) *Doc {
+
+	path = d.path(path...)
+
+	out := []interface{}{}
+
+	if m, ok := d.Get(path...).Data().(map[string]interface{}); ok {
+		for _, v := range m {
+			out = append(out, v)
+		}
+	}
+
+	return &Doc{out}
+
+}
+
 // --------------------------------------------------------------------------------
 
 // Exists checks whether the specified path exists.

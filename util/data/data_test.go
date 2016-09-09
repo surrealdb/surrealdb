@@ -335,6 +335,11 @@ func TestOperations(t *testing.T) {
 
 	// ----------------------------------------------------------------------------------------------------
 
+	Convey("Can get object keys and vals", t, func() {
+		So(doc.Keys("the.item.object").Data(), ShouldResemble, []interface{}{"enabled"})
+		So(doc.Vals("the.item.object").Data(), ShouldResemble, []interface{}{false})
+	})
+
 	// ----------------------------------------------------------------------------------------------------
 
 	Convey("Can get unset item", t, func() {
