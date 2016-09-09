@@ -73,10 +73,13 @@ func (r *reader) FindNext() (byt byte) {
 	return
 }
 
+func (r *reader) FindAny() (val interface{}) {
+	return r.ReadUpto(cTERM)
+}
+
 func (r *reader) FindNull() (val interface{}) {
 	if r.ReadNext(cNILL) {
 		r.ReadNext(cTERM)
-		return
 	}
 	return
 }
@@ -87,7 +90,6 @@ func (r *reader) FindTime() (val time.Time) {
 		binary.Read(r.Reader, binary.BigEndian, &out)
 		val = time.Unix(0, out).UTC()
 		r.ReadNext(cTERM)
-		return
 	}
 	return
 }
@@ -96,7 +98,6 @@ func (r *reader) FindBool() (val bool) {
 	if r.ReadNext(cBOOL) {
 		val = r.ReadNext(cBOOL)
 		r.ReadNext(cTERM)
-		return
 	}
 	return
 }
@@ -104,7 +105,6 @@ func (r *reader) FindBool() (val bool) {
 func (r *reader) FindBytes() (val []byte) {
 	if r.ReadNext(cSTRING) {
 		val = r.ReadUpto(cTERM, cTERM)
-		return
 	}
 	return
 }
@@ -113,16 +113,11 @@ func (r *reader) FindString() (val string) {
 	if r.ReadNext(cPREFIX) {
 		val = Prefix
 		r.ReadNext(cTERM)
-		return
-	}
-	if r.ReadNext(cSUFFIX) {
+	} else if r.ReadNext(cSUFFIX) {
 		val = Suffix
 		r.ReadNext(cTERM)
-		return
-	}
-	if r.ReadNext(cSTRING) {
+	} else if r.ReadNext(cSTRING) {
 		val = string(r.ReadUpto(cTERM, cTERM))
-		return
 	}
 	return
 }
@@ -187,4 +182,29 @@ func (r *reader) FindNumberFloat32() (val float32) {
 
 func (r *reader) FindNumberFloat64() (val float64) {
 	return float64(r.FindNumber())
+}
+
+func (r *reader) FindArray() (val []interface{}) {
+	if r.ReadNext(cARRAY) {
+		for !r.ReadNext(cTERM) {
+			switch fnd := r.FindNext(); fnd {
+			default:
+				val = append(val, []interface{}{r.FindAny()}...)
+			case cNILL:
+				val = append(val, []interface{}{r.FindNull()}...)
+			case cBOOL:
+				val = append(val, []interface{}{r.FindBool()}...)
+			case cTIME:
+				val = append(val, []interface{}{r.FindTime()}...)
+			case cNUMBER:
+				val = append(val, []interface{}{r.FindNumber()}...)
+			case cSTRING, cPREFIX, cSUFFIX:
+				val = append(val, []interface{}{r.FindString()}...)
+			case cARRAY:
+				val = append(val, []interface{}{r.FindArray()}...)
+			}
+		}
+		r.ReadNext(cTERM)
+	}
+	return
 }

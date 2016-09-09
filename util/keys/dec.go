@@ -17,7 +17,6 @@ package keys
 import (
 	"bytes"
 	"io"
-	"log"
 	"time"
 )
 
@@ -89,6 +88,13 @@ func (d *decoder) Decode(items ...interface{}) {
 
 		case *float64:
 			*value = d.r.FindNumberFloat64()
+
+		case *[]time.Time:
+			if d.r.ReadNext(cARRAY) {
+				for !d.r.ReadNext(cTERM) {
+					*value = append(*value, d.r.FindTime())
+				}
+			}
 
 		case *[]bool:
 			if d.r.ReadNext(cARRAY) {
@@ -182,32 +188,13 @@ func (d *decoder) Decode(items ...interface{}) {
 			}
 
 		case *[]interface{}:
-
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
-					switch fnd := d.r.FindNext(); fnd {
-					default:
-						log.Panicf("No item found in *[]interface{} - but found %#v %#q", fnd, fnd)
-					case cNILL:
-						*value = append(*value, d.r.FindNull())
-					case cBOOL:
-						*value = append(*value, d.r.FindBool())
-					case cTIME:
-						*value = append(*value, d.r.FindTime())
-					case cNUMBER:
-						*value = append(*value, d.r.FindNumber())
-					case cSTRING, cPREFIX, cSUFFIX:
-						*value = append(*value, d.r.FindString())
-					}
-				}
-				d.r.ReadNext(cTERM)
-			}
+			*value = d.r.FindArray()
 
 		case *interface{}:
 
 			switch fnd := d.r.FindNext(); fnd {
 			default:
-				log.Panicf("No item found in *interface{} - but found %#v %#q", fnd, fnd)
+				*value = d.r.FindAny()
 			case cNILL:
 				*value = d.r.FindNull()
 			case cBOOL:
@@ -219,26 +206,7 @@ func (d *decoder) Decode(items ...interface{}) {
 			case cSTRING, cPREFIX, cSUFFIX:
 				*value = d.r.FindString()
 			case cARRAY:
-				if d.r.ReadNext(cARRAY) {
-					*value = []interface{}{}
-					for !d.r.ReadNext(cTERM) {
-						switch d.r.FindNext() {
-						default:
-							log.Panicf("No item found in *interface{}...[]interface{} - but found %#v %#q", fnd, fnd)
-						case cNILL:
-							*value = append((*value).([]interface{}), []interface{}{d.r.FindNull()}...)
-						case cBOOL:
-							*value = append((*value).([]interface{}), []interface{}{d.r.FindBool()}...)
-						case cTIME:
-							*value = append((*value).([]interface{}), []interface{}{d.r.FindTime()}...)
-						case cNUMBER:
-							*value = append((*value).([]interface{}), []interface{}{d.r.FindNumber()}...)
-						case cSTRING, cPREFIX, cSUFFIX:
-							*value = append((*value).([]interface{}), []interface{}{d.r.FindString()}...)
-						}
-					}
-					d.r.ReadNext(cTERM)
-				}
+				*value = d.r.FindArray()
 
 			}
 

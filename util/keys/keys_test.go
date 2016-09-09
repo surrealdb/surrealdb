@@ -109,6 +109,11 @@ func TestMain(t *testing.T) {
 			new: &Thing{},
 		},
 		{
+			str: "/surreal/abcum/database/person",
+			obj: &Table{KV: "surreal", NS: "abcum", DB: "database", TB: "person"},
+			new: &Table{},
+		},
+		{
 			str: "/surreal/abcum/database/person/*/\xff",
 			obj: &Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: Suffix},
 			new: &Thing{},
@@ -224,6 +229,8 @@ func TestMain(t *testing.T) {
 	}
 
 	sorts = []Key{
+
+		&Table{KV: "kv", NS: "ns", DB: "db", TB: "person"},
 
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Prefix},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: nil},
