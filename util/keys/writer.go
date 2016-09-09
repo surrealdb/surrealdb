@@ -33,36 +33,98 @@ func newWriter(w io.Writer) *writer {
 func (w *writer) Write(i interface{}) {
 
 	switch v := i.(type) {
+
 	case []byte:
 		w.Writer.Write(v)
+
 	case string:
 		w.Writer.Write([]byte(v))
-	case uint:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case uint8:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case uint16:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case uint32:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case uint64:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case int:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case int8:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case int16:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case int32:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case int64:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case float32:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
-	case float64:
-		binary.Write(w.Writer, binary.BigEndian, int64(v))
+
 	case time.Time:
 		binary.Write(w.Writer, binary.BigEndian, v.UnixNano())
+
+	case uint:
+		w.Write(bBOOL)
+		binary.Write(w.Writer, binary.BigEndian, float64(v))
+
+	case uint8:
+		w.Write(bBOOL)
+		binary.Write(w.Writer, binary.BigEndian, float64(v))
+
+	case uint16:
+		w.Write(bBOOL)
+		binary.Write(w.Writer, binary.BigEndian, float64(v))
+
+	case uint32:
+		w.Write(bBOOL)
+		binary.Write(w.Writer, binary.BigEndian, float64(v))
+
+	case uint64:
+		w.Write(bBOOL)
+		binary.Write(w.Writer, binary.BigEndian, float64(v))
+
+	case int:
+		if v < 0 {
+			w.Write(bNILL)
+			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
+		} else {
+			w.Write(bBOOL)
+			binary.Write(w.Writer, binary.BigEndian, float64(v))
+		}
+
+	case int8:
+		if v < 0 {
+			w.Write(bNILL)
+			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
+		} else {
+			w.Write(bBOOL)
+			binary.Write(w.Writer, binary.BigEndian, float64(v))
+		}
+
+	case int16:
+		if v < 0 {
+			w.Write(bNILL)
+			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
+		} else {
+			w.Write(bBOOL)
+			binary.Write(w.Writer, binary.BigEndian, float64(v))
+		}
+
+	case int32:
+		if v < 0 {
+			w.Write(bNILL)
+			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
+		} else {
+			w.Write(bBOOL)
+			binary.Write(w.Writer, binary.BigEndian, float64(v))
+		}
+
+	case int64:
+		if v < 0 {
+			w.Write(bNILL)
+			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
+		} else {
+			w.Write(bBOOL)
+			binary.Write(w.Writer, binary.BigEndian, float64(v))
+		}
+
+	case float32:
+		if v < 0 {
+			w.Write(bNILL)
+			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
+		} else {
+			w.Write(bBOOL)
+			binary.Write(w.Writer, binary.BigEndian, float64(v))
+		}
+
+	case float64:
+		if v < 0 {
+			w.Write(bNILL)
+			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
+		} else {
+			w.Write(bBOOL)
+			binary.Write(w.Writer, binary.BigEndian, float64(v))
+		}
 
 	}
 

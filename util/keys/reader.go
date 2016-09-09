@@ -127,11 +127,16 @@ func (r *reader) FindString() (val string) {
 	return
 }
 
-func (r *reader) FindNumber() (val int64) {
+func (r *reader) FindNumber() (val float64) {
 	if r.ReadNext(cNUMBER) {
-		binary.Read(r.Reader, binary.BigEndian, &val)
-		r.ReadNext(cTERM)
-		return
+		if r.ReadNext(cNILL) {
+			binary.Read(r.Reader, binary.BigEndian, &val)
+			val = 0 - val
+			r.ReadNext(cTERM)
+		} else if r.ReadNext(cBOOL) {
+			binary.Read(r.Reader, binary.BigEndian, &val)
+			r.ReadNext(cTERM)
+		}
 	}
 	return
 }

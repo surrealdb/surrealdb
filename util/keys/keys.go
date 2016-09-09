@@ -62,6 +62,13 @@ var (
 	bSUFFIX = []byte("\x08")
 )
 
+const (
+	// MinNumber is the minimum number to be encoded and decoded
+	MinNumber = -1 << 53
+	// MaxNumber is the maximum number to be encoded and decoded
+	MaxNumber = 1<<53 - 1
+)
+
 // Key ...
 type Key interface {
 	String() string

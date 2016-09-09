@@ -99,10 +99,24 @@ func (e *encoder) Encode(items ...interface{}) {
 			e.w.Write(value)
 			e.w.Write(bTERM)
 
-		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		case int, int8, int16, int32, int64:
 
 			e.w.Write(bNUMBER)
 			e.w.Write(value)
+			e.w.Write(bTERM)
+
+		case uint, uint8, uint16, uint32, uint64:
+
+			e.w.Write(bNUMBER)
+			e.w.Write(value)
+			e.w.Write(bTERM)
+
+		case []time.Time:
+
+			e.w.Write(bARRAY)
+			for _, val := range value {
+				e.Encode(val)
+			}
 			e.w.Write(bTERM)
 
 		case []bool:

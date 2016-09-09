@@ -22,10 +22,11 @@ type Full struct {
 	F     bool          // false
 	S     string        // string
 	T     time.Time     // time.Time
-	N64   int64         // negative int64
-	N32   int32         // negative int32
-	N16   int16         // negative int16
-	N8    int8          // negative int8
+	NI64  int64         // negative int64
+	NI32  int32         // negative int32
+	NI16  int16         // negative int16
+	NI8   int8          // negative int8
+	NI    int           // negative int
 	I     int           // positive int
 	I8    int8          // positive int8
 	I16   int16         // positive int16
@@ -36,16 +37,19 @@ type Full struct {
 	UI16  uint16        // positive uint16
 	UI32  uint32        // positive uint32
 	UI64  uint64        // positive uint64
-	NF32  float32       // negative float32
 	NF64  float64       // negative float64
+	NF32  float32       // negative float32
 	F32   float32       // positive float32
 	F64   float64       // positive float64
 	AB    []bool        // bool array
 	AS    []string      // string array
+	AT    []time.Time   // time array
+	AI    []int         // int array
 	AI8   []int8        // int8 array
 	AI16  []int16       // int16 array
 	AI32  []int32       // int32 array
 	AI64  []int64       // int64 array
+	AUI   []uint        // uint array
 	AUI8  []uint8       // uint8 array
 	AUI16 []uint16      // uint16 array
 	AUI32 []uint32      // uint32 array
@@ -54,7 +58,7 @@ type Full struct {
 	AF64  []float64     // float64 array
 	IN    interface{}   // interface{}
 	IB    interface{}   // interface{} true
-	IF    interface{}   // interface{} talse
+	IF    interface{}   // interface{} false
 	IT    interface{}   // interface{} time.Time
 	II    interface{}   // interface{} number
 	ID    interface{}   // interface{} double
@@ -70,13 +74,13 @@ func (f *Full) Encode() []byte {
 
 	return encode(
 		f.N, f.B, f.F, f.S, f.T,
-		f.N64, f.N32, f.N16, f.N8,
+		f.NI64, f.NI32, f.NI16, f.NI8, f.NI,
 		f.I, f.I8, f.I16, f.I32, f.I64,
 		f.UI, f.UI8, f.UI16, f.UI32, f.UI64,
-		f.NF32, f.NF64, f.F32, f.F64,
-		f.AB, f.AS,
-		f.AI8, f.AI16, f.AI32, f.AI64,
-		f.AUI8, f.AUI16, f.AUI32, f.AUI64,
+		f.NF64, f.NF32, f.F32, f.F64,
+		f.AB, f.AS, f.AT,
+		f.AI, f.AI8, f.AI16, f.AI32, f.AI64,
+		f.AUI, f.AUI8, f.AUI16, f.AUI32, f.AUI64,
 		f.AF32, f.AF64,
 		f.IN, f.IB, f.IF, f.IT, f.II, f.ID, f.INA, f.AIN,
 	)
@@ -88,13 +92,13 @@ func (f *Full) Decode(data []byte) {
 	decode(
 		data,
 		&f.N, &f.B, &f.F, &f.S, &f.T,
-		&f.N64, &f.N32, &f.N16, &f.N8,
+		&f.NI64, &f.NI32, &f.NI16, &f.NI8, &f.NI,
 		&f.I, &f.I8, &f.I16, &f.I32, &f.I64,
 		&f.UI, &f.UI8, &f.UI16, &f.UI32, &f.UI64,
-		&f.NF32, &f.NF64, &f.F32, &f.F64,
-		&f.AB, &f.AS,
-		&f.AI8, &f.AI16, &f.AI32, &f.AI64,
-		&f.AUI8, &f.AUI16, &f.AUI32, &f.AUI64,
+		&f.NF64, &f.NF32, &f.F32, &f.F64,
+		&f.AB, &f.AS, &f.AT,
+		&f.AI, &f.AI8, &f.AI16, &f.AI32, &f.AI64,
+		&f.AUI, &f.AUI8, &f.AUI16, &f.AUI32, &f.AUI64,
 		&f.AF32, &f.AF64,
 		&f.IN, &f.IB, &f.IF, &f.IT, &f.II, &f.ID, &f.INA, &f.AIN,
 	)

@@ -17,6 +17,7 @@ package keys
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -171,49 +172,53 @@ func TestMain(t *testing.T) {
 			str: "Test key",
 			new: &Full{},
 			obj: &Full{
-				N:    nil,
-				B:    true,
-				F:    false,
-				S:    "Test",
-				T:    clock,
-				N64:  -9223372036854775807,
-				N32:  -2147483647,
-				N16:  -32767,
-				N8:   -127,
-				I:    1,
-				I8:   127,
-				I16:  32767,
-				I32:  2147483647,
-				I64:  9223372036854775807,
-				UI:   1,
-				UI8:  255,
-				UI16: 65535,
-				UI32: 4294967295,
-				UI64: 18446744073709551615,
-				// NF32:  -0.00001,
-				// NF64:  -0.00002,
-				// F32:   0.00001,
-				// F64:   0.00002,
+				N:     nil,
+				B:     true,
+				F:     false,
+				S:     "Test",
+				T:     clock,
+				NI64:  int64(MinNumber),
+				NI32:  math.MinInt32,
+				NI16:  math.MinInt16,
+				NI8:   math.MinInt8,
+				NI:    -1,
+				I:     1,
+				I8:    math.MaxInt8,
+				I16:   math.MaxInt16,
+				I32:   math.MaxInt32,
+				I64:   int64(MaxNumber),
+				UI:    1,
+				UI8:   math.MaxUint8,
+				UI16:  math.MaxUint16,
+				UI32:  math.MaxUint32,
+				UI64:  uint64(MaxNumber),
+				NF64:  -math.MaxFloat64,
+				NF32:  -math.MaxFloat32,
+				F32:   math.MaxFloat32,
+				F64:   math.MaxFloat64,
 				AB:    []bool{true, false},
 				AS:    []string{"A", "B", "C"},
-				AI8:   []int8{127},
-				AI16:  []int16{32767},
-				AI32:  []int32{2147483647},
-				AI64:  []int64{9223372036854775807},
-				AUI8:  []uint8{127},
-				AUI16: []uint16{32767},
-				AUI32: []uint32{2147483647},
-				AUI64: []uint64{9223372036854775807},
-				// AF32:  []float32{0.1, 0.2, 0.3},
-				// AF64:  []float64{0.1, 0.2, 0.3},
-				IN: "Test",
-				IB: true,
-				IF: false,
-				IT: clock,
-				II: int64(19387),
-				// ID:    float64(183784.13413),
-				// INA:   []interface{}{true, false, nil, "Test", clock, int64(192), 0.1, 0.2, 0.3},
-				// AIN:   []interface{}{true, false, nil, "Test", clock, int64(192), int64(9223372036854775807), 0.1, 0.2, 0.3},
+				AT:    []time.Time{clock, clock, clock},
+				AI:    []int{1},
+				AI8:   []int8{math.MaxInt8},
+				AI16:  []int16{math.MaxInt16},
+				AI32:  []int32{math.MaxInt32},
+				AI64:  []int64{int64(MaxNumber)},
+				AUI:   []uint{1},
+				AUI8:  []uint8{math.MaxUint8},
+				AUI16: []uint16{math.MaxUint16},
+				AUI32: []uint32{math.MaxUint32},
+				AUI64: []uint64{uint64(MaxNumber)},
+				AF32:  []float32{1.1, 1.2, 1.3},
+				AF64:  []float64{1.1, 1.2, 1.3},
+				IN:    "Test",
+				IB:    true,
+				IF:    false,
+				IT:    clock,
+				II:    float64(19387),
+				ID:    float64(183784.13413),
+				INA:   []interface{}{true, false, nil, "Test", clock, float64(192), 1.1, 1.2, 1.3},
+				AIN:   []interface{}{true, false, nil, "Test", clock, float64(192), float64(MaxNumber), 1.1, 1.2, 1.3, []interface{}{"Test"}},
 			},
 		},
 	}
@@ -235,13 +240,13 @@ func TestMain(t *testing.T) {
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 2},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 12},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 127},
-		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(127)},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(math.MaxInt8)},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 32767},
-		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int16(32767)},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int16(math.MaxInt16)},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 2147483647},
-		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int32(2147483647)},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int32(math.MaxInt32)},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: 9223372036854775807},
-		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int64(9223372036854775807)},
+		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int64(math.MaxInt64)},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "A"},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "B"},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "Bb"},
@@ -280,11 +285,11 @@ func TestMain(t *testing.T) {
 
 		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 0, 127}},
 		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 0, 127}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 1, 127}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, 32767}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, 2147483647}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, 9223372036854775807}},
-		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, 9223372036854775807}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 1, math.MaxInt8}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, math.MaxInt16}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, math.MaxInt32}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, MaxNumber}},
+		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"account:zymba", 2, MaxNumber}},
 
 		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: Suffix},
 	}
@@ -369,10 +374,10 @@ func TestEncoding(t *testing.T) {
 		Convey(test.str, t, func() {
 
 			enc := test.obj.Encode()
-			Printf("%s\n\n%#q\n\n%v\n\n", test.str, enc, enc)
 			test.new.Decode(enc)
 
 			Convey("Key should encode and decode", func() {
+				Printf("%s\n\n%#q\n\n%v\n\n", test.str, enc, enc)
 				So(test.new, ShouldResemble, test.obj)
 			})
 
@@ -417,9 +422,8 @@ func TestSorting(t *testing.T) {
 			one := sorts[i-1].Encode()
 			two := sorts[i].Encode()
 
-			Printf("%#v\n%#v\n------\n%#v\n%#v\n------\n%#q\n%#q", sorts[i-1], sorts[i], one, two, one, two)
-
 			Convey("Key should sort before next key", func() {
+				Printf("%#v\n%#v\n------\n%#v\n%#v\n------\n%#q\n%#q", sorts[i-1], sorts[i], one, two, one, two)
 				So(string(one), ShouldBeLessThanOrEqualTo, string(two))
 			})
 		})
