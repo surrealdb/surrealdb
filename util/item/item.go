@@ -187,15 +187,17 @@ func (this *Doc) PurgeIndex() (err error) {
 
 	for _, index := range this.indexs {
 
+		old := buildIndex(index.Cols, this.initial)
+
 		if index.Uniq == true {
-			for _, o := range buildIndex(index.Cols, this.initial) {
+			for _, o := range old {
 				key := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o}
 				this.txn.CDel(key.Encode(), []byte(this.id))
 			}
 		}
 
 		if index.Uniq == false {
-			for _, o := range buildIndex(index.Cols, this.initial) {
+			for _, o := range old {
 				key := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o, ID: this.key.ID}
 				this.txn.CDel(key.Encode(), []byte(this.id))
 			}
@@ -211,12 +213,17 @@ func (this *Doc) StoreIndex() (err error) {
 
 	for _, index := range this.indexs {
 
+		old := buildIndex(index.Cols, this.initial)
+		now := buildIndex(index.Cols, this.current)
+
+		diffIndex(old, now)
+
 		if index.Uniq == true {
-			for _, o := range buildIndex(index.Cols, this.initial) {
+			for _, o := range old {
 				oidx := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o}
 				this.txn.CDel(oidx.Encode(), []byte(this.id))
 			}
-			for _, n := range buildIndex(index.Cols, this.current) {
+			for _, n := range now {
 				nidx := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: n}
 				if err = this.txn.CPut(nidx.Encode(), []byte(this.id), nil); err != nil {
 					return fmt.Errorf("Duplicate entry for %v in index '%s' on %s", n, index.Name, this.key.TB)
@@ -225,11 +232,11 @@ func (this *Doc) StoreIndex() (err error) {
 		}
 
 		if index.Uniq == false {
-			for _, o := range buildIndex(index.Cols, this.initial) {
+			for _, o := range old {
 				oidx := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o, ID: this.key.ID}
 				this.txn.CDel(oidx.Encode(), []byte(this.id))
 			}
-			for _, n := range buildIndex(index.Cols, this.current) {
+			for _, n := range now {
 				nidx := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: n, ID: this.key.ID}
 				if err = this.txn.CPut(nidx.Encode(), []byte(this.id), nil); err != nil {
 					return fmt.Errorf("Multiple items with id %s in index '%s' on %s", this.key.ID, index.Name, this.key.TB)
@@ -240,6 +247,31 @@ func (this *Doc) StoreIndex() (err error) {
 	}
 
 	return
+
+}
+
+func diffIndex(old, now [][]interface{}) {
+
+	var d bool
+
+	for i := len(old) - 1; i >= 0; i-- {
+		o := old[i]
+		for j := len(now) - 1; j >= 0; j-- {
+			n := now[j]
+			if reflect.DeepEqual(o, n) {
+				d = true
+				copy(now[j:], now[j+1:])
+				now[len(now)-1] = nil
+				now = now[:len(now)-1]
+			}
+		}
+		if d {
+			d = false
+			copy(old[i:], old[i+1:])
+			old[len(old)-1] = nil
+			old = old[:len(old)-1]
+		}
+	}
 
 }
 
