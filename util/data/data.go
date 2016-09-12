@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/abcum/surreal/util/deep"
 	"github.com/abcum/surreal/util/pack"
 )
 
@@ -46,7 +47,7 @@ func (d *Doc) Data() interface{} {
 
 // Data returns the internal data object as an interface.
 func (d *Doc) Copy() (i interface{}) {
-	return pack.Copy(d.data)
+	return deep.Copy(d.data)
 }
 
 // JSON converts the data object to a JSON byte slice.
