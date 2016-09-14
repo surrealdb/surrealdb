@@ -22,9 +22,9 @@ import (
 	"github.com/abcum/fibre"
 )
 
-// Parser represents a parser.
-type Parser struct {
-	s   *Scanner
+// parser represents a parser.
+type parser struct {
+	s   *scanner
 	c   *fibre.Context
 	v   map[string]interface{}
 	buf struct {
@@ -35,50 +35,55 @@ type Parser struct {
 	}
 }
 
+// newParser returns a new instance of Parser.
+func newParser(c *fibre.Context, v map[string]interface{}) *parser {
+	return &parser{c: c, v: v}
+}
+
 // Parse parses sql from a []byte, string, or io.Reader.
-func Parse(ctx *fibre.Context, i interface{}) (*Query, error) {
-	switch v := i.(type) {
+func Parse(c *fibre.Context, i interface{}, v map[string]interface{}) (*Query, error) {
+	switch x := i.(type) {
 	default:
 		return nil, &EmptyError{}
 	case []byte:
-		return ParseBytes(ctx, v)
+		return parseBytes(c, x, v)
 	case string:
-		return ParseString(ctx, v)
+		return parseString(c, x, v)
 	case io.Reader:
-		return ParseBuffer(ctx, v)
+		return parseBuffer(c, x, v)
 	}
 }
 
-// ParseBytes parses a byte array.
-func ParseBytes(ctx *fibre.Context, i []byte) (*Query, error) {
+// parseBytes parses a byte array.
+func parseBytes(c *fibre.Context, i []byte, v map[string]interface{}) (*Query, error) {
 	r := bytes.NewReader(i)
-	p := &Parser{c: ctx}
-	p.s = NewScanner(p, r)
-	return p.Parse()
+	p := newParser(c, v)
+	p.s = newScanner(p, r)
+	return p.parse()
 }
 
-// ParseString parses a string.
-func ParseString(ctx *fibre.Context, i string) (*Query, error) {
+// parseString parses a string.
+func parseString(c *fibre.Context, i string, v map[string]interface{}) (*Query, error) {
 	r := strings.NewReader(i)
-	p := &Parser{c: ctx}
-	p.s = NewScanner(p, r)
-	return p.Parse()
+	p := newParser(c, v)
+	p.s = newScanner(p, r)
+	return p.parse()
 }
 
-// ParseBuffer parses a buffer.
-func ParseBuffer(ctx *fibre.Context, r io.Reader) (*Query, error) {
-	p := &Parser{c: ctx}
-	p.s = NewScanner(p, r)
-	return p.Parse()
+// parseBuffer parses a buffer.
+func parseBuffer(c *fibre.Context, r io.Reader, v map[string]interface{}) (*Query, error) {
+	p := newParser(c, v)
+	p.s = newScanner(p, r)
+	return p.parse()
 }
 
-// Parse parses single or multiple SQL queries.
-func (p *Parser) Parse() (*Query, error) {
-	return p.ParseMulti()
+// parse parses single or multiple SQL queries.
+func (p *parser) parse() (*Query, error) {
+	return p.parseMulti()
 }
 
-// ParseMulti parses multiple SQL SELECT statements.
-func (p *Parser) ParseMulti() (*Query, error) {
+// parseMulti parses multiple SQL SELECT statements.
+func (p *parser) parseMulti() (*Query, error) {
 
 	var statements Statements
 
@@ -96,7 +101,7 @@ func (p *Parser) ParseMulti() (*Query, error) {
 		} else {
 			text = true
 			p.unscan()
-			s, err := p.ParseSingle()
+			s, err := p.parseSingle()
 			if err != nil {
 				return nil, err
 			}
@@ -107,8 +112,8 @@ func (p *Parser) ParseMulti() (*Query, error) {
 
 }
 
-// ParseSingle parses a single SQL SELECT statement.
-func (p *Parser) ParseSingle() (Statement, error) {
+// parseSingle parses a single SQL SELECT statement.
+func (p *parser) parseSingle() (Statement, error) {
 
 	var explain bool
 
@@ -157,7 +162,7 @@ func (p *Parser) ParseSingle() (Statement, error) {
 
 }
 
-func (p *Parser) mightBe(expected ...Token) (tok Token, lit string, found bool) {
+func (p *parser) mightBe(expected ...Token) (tok Token, lit string, found bool) {
 
 	tok, lit, _ = p.scan()
 
@@ -169,7 +174,7 @@ func (p *Parser) mightBe(expected ...Token) (tok Token, lit string, found bool) 
 
 }
 
-func (p *Parser) shouldBe(expected ...Token) (tok Token, lit string, err error) {
+func (p *parser) shouldBe(expected ...Token) (tok Token, lit string, err error) {
 
 	tok, lit, _ = p.scan()
 
@@ -183,7 +188,7 @@ func (p *Parser) shouldBe(expected ...Token) (tok Token, lit string, err error) 
 }
 
 // scan scans the next non-whitespace token.
-func (p *Parser) scan() (tok Token, lit string, val interface{}) {
+func (p *parser) scan() (tok Token, lit string, val interface{}) {
 
 	tok, lit, val = p.seek()
 
@@ -199,7 +204,7 @@ func (p *Parser) scan() (tok Token, lit string, val interface{}) {
 
 }
 
-func (p *Parser) hold(tok Token) (val interface{}) {
+func (p *parser) hold(tok Token) (val interface{}) {
 	if tok == p.buf.tok {
 		return p.buf.val
 	}
@@ -208,7 +213,7 @@ func (p *Parser) hold(tok Token) (val interface{}) {
 
 // seek returns the next token from the underlying scanner.
 // If a token has been unscanned then read that instead.
-func (p *Parser) seek() (tok Token, lit string, val interface{}) {
+func (p *parser) seek() (tok Token, lit string, val interface{}) {
 
 	// If we have a token on the buffer, then return it.
 	if p.buf.n != 0 {
@@ -217,7 +222,7 @@ func (p *Parser) seek() (tok Token, lit string, val interface{}) {
 	}
 
 	// Otherwise read the next token from the scanner.
-	tok, lit, val = p.s.Scan()
+	tok, lit, val = p.s.scan()
 
 	// Save it to the buffer in case we unscan later.
 	p.buf.tok, p.buf.lit, p.buf.val = tok, lit, val
@@ -227,6 +232,6 @@ func (p *Parser) seek() (tok Token, lit string, val interface{}) {
 }
 
 // unscan pushes the previously read token back onto the buffer.
-func (p *Parser) unscan() {
+func (p *parser) unscan() {
 	p.buf.n = 1
 }

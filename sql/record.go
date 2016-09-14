@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseRecordStatement(explain bool) (stmt *RecordStatement, err error) {
+func (p *parser) parseRecordStatement(explain bool) (stmt *RecordStatement, err error) {
 
 	stmt = &RecordStatement{}
 

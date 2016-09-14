@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-func (p *Parser) in(token Token, tokens []Token) bool {
+func (p *parser) in(token Token, tokens []Token) bool {
 
 	for _, t := range tokens {
 		if token == t {
@@ -34,7 +34,7 @@ func (p *Parser) in(token Token, tokens []Token) bool {
 
 }
 
-func (p *Parser) is(token Token, tokens ...Token) bool {
+func (p *parser) is(token Token, tokens ...Token) bool {
 
 	for _, t := range tokens {
 		if token == t {
@@ -46,7 +46,7 @@ func (p *Parser) is(token Token, tokens ...Token) bool {
 
 }
 
-func (p *Parser) contains(search string, strings []string) bool {
+func (p *parser) contains(search string, strings []string) bool {
 
 	for _, str := range strings {
 		if str == search {
@@ -58,7 +58,7 @@ func (p *Parser) contains(search string, strings []string) bool {
 
 }
 
-func (p *Parser) declare(tok Token, lit string) (interface{}, error) {
+func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 
 	if val := p.hold(tok); val != nil {
 		return val, nil

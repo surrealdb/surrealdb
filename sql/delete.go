@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseDeleteStatement(explain bool) (stmt *DeleteStatement, err error) {
+func (p *parser) parseDeleteStatement(explain bool) (stmt *DeleteStatement, err error) {
 
 	stmt = &DeleteStatement{}
 

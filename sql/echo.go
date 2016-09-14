@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseEcho() (exp Token, err error) {
+func (p *parser) parseEcho() (exp Token, err error) {
 
 	// Next token might be RETURN
 	if _, _, exi := p.mightBe(RETURN); exi {

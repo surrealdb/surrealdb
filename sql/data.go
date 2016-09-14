@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseData() (exp []Expr, err error) {
+func (p *parser) parseData() (exp []Expr, err error) {
 
 	if tok, _, exi := p.mightBe(SET, MERGE, CONTENT); exi {
 
@@ -42,7 +42,7 @@ func (p *Parser) parseData() (exp []Expr, err error) {
 
 }
 
-func (p *Parser) parseSet() (mul []Expr, err error) {
+func (p *parser) parseSet() (mul []Expr, err error) {
 
 	var tok Token
 	var lit string
@@ -90,7 +90,7 @@ func (p *Parser) parseSet() (mul []Expr, err error) {
 
 }
 
-func (p *Parser) parseDiff() (exp []Expr, err error) {
+func (p *parser) parseDiff() (exp []Expr, err error) {
 
 	one := &DiffExpression{}
 
@@ -112,7 +112,7 @@ func (p *Parser) parseDiff() (exp []Expr, err error) {
 
 }
 
-func (p *Parser) parseMerge() (exp []Expr, err error) {
+func (p *parser) parseMerge() (exp []Expr, err error) {
 
 	one := &MergeExpression{}
 
@@ -134,7 +134,7 @@ func (p *Parser) parseMerge() (exp []Expr, err error) {
 
 }
 
-func (p *Parser) parseContent() (exp []Expr, err error) {
+func (p *parser) parseContent() (exp []Expr, err error) {
 
 	one := &ContentExpression{}
 

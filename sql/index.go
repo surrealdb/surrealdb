@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexStatement, err error) {
+func (p *parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexStatement, err error) {
 
 	stmt = &DefineIndexStatement{}
 
@@ -54,7 +54,7 @@ func (p *Parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexState
 
 }
 
-func (p *Parser) parseRemoveIndexStatement(explain bool) (stmt *RemoveIndexStatement, err error) {
+func (p *parser) parseRemoveIndexStatement(explain bool) (stmt *RemoveIndexStatement, err error) {
 
 	stmt = &RemoveIndexStatement{}
 

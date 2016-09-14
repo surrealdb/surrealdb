@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseCreateStatement(explain bool) (stmt *CreateStatement, err error) {
+func (p *parser) parseCreateStatement(explain bool) (stmt *CreateStatement, err error) {
 
 	stmt = &CreateStatement{}
 

@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseDefineRulesStatement(explain bool) (stmt *DefineRulesStatement, err error) {
+func (p *parser) parseDefineRulesStatement(explain bool) (stmt *DefineRulesStatement, err error) {
 
 	stmt = &DefineRulesStatement{}
 
@@ -77,7 +77,7 @@ func (p *Parser) parseDefineRulesStatement(explain bool) (stmt *DefineRulesState
 
 }
 
-func (p *Parser) parseRemoveRulesStatement(explain bool) (stmt *RemoveRulesStatement, err error) {
+func (p *parser) parseRemoveRulesStatement(explain bool) (stmt *RemoveRulesStatement, err error) {
 
 	stmt = &RemoveRulesStatement{}
 

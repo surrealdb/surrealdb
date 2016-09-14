@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseDefineStatement(explain bool) (Statement, error) {
+func (p *parser) parseDefineStatement(explain bool) (Statement, error) {
 
 	// Inspect the next token.
 	tok, _, err := p.shouldBe(RULES, TABLE, FIELD, INDEX)

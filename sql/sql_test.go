@@ -45,7 +45,7 @@ func testsql(t *testing.T, test tester) {
 		return
 	}
 
-	s, e := ParseString(c, test.sql)
+	s, e := Parse(c, test.sql, nil)
 
 	Convey(test.sql, t, func() {
 
@@ -77,7 +77,7 @@ func TestMain(t *testing.T) {
 func Test_Parse_General(t *testing.T) {
 
 	s := `SELECT a FROM b`
-	q, err := ParseString(c, s)
+	q, err := Parse(c, s, nil)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
@@ -91,7 +91,7 @@ func Test_Parse_General(t *testing.T) {
 func Test_Parse_General_Single(t *testing.T) {
 
 	s := `SELECT a FROM b`
-	q, err := ParseString(c, s)
+	q, err := Parse(c, s, nil)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
@@ -105,7 +105,7 @@ func Test_Parse_General_Single(t *testing.T) {
 func Test_Parse_General_Multi(t *testing.T) {
 
 	s := `SELECT a FROM b; SELECT c FROM d`
-	q, err := ParseString(c, s)
+	q, err := Parse(c, s, nil)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)

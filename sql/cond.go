@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseCond() (mul []Expr, err error) {
+func (p *parser) parseCond() (mul []Expr, err error) {
 
 	var tok Token
 	var lit string

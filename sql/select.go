@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseSelectStatement(explain bool) (stmt *SelectStatement, err error) {
+func (p *parser) parseSelectStatement(explain bool) (stmt *SelectStatement, err error) {
 
 	stmt = &SelectStatement{}
 
@@ -73,7 +73,7 @@ func (p *Parser) parseSelectStatement(explain bool) (stmt *SelectStatement, err 
 
 }
 
-func (p *Parser) parseGroup() (mul []*Group, err error) {
+func (p *parser) parseGroup() (mul []*Group, err error) {
 
 	// Remove the GROUP keyword
 	if _, _, exi := p.mightBe(GROUP); !exi {
@@ -87,7 +87,7 @@ func (p *Parser) parseGroup() (mul []*Group, err error) {
 
 }
 
-func (p *Parser) parseOrder() (mul []*Order, err error) {
+func (p *parser) parseOrder() (mul []*Order, err error) {
 
 	var tok Token
 	var lit string
@@ -138,7 +138,7 @@ func (p *Parser) parseOrder() (mul []*Order, err error) {
 
 }
 
-func (p *Parser) parseLimit() (Expr, error) {
+func (p *parser) parseLimit() (Expr, error) {
 
 	// Remove the LIMIT keyword
 	if _, _, exi := p.mightBe(LIMIT); !exi {
@@ -157,7 +157,7 @@ func (p *Parser) parseLimit() (Expr, error) {
 
 }
 
-func (p *Parser) parseStart() (Expr, error) {
+func (p *parser) parseStart() (Expr, error) {
 
 	// Remove the START keyword
 	if _, _, exi := p.mightBe(START); !exi {
@@ -191,7 +191,7 @@ func (p *Parser) parseStart() (Expr, error) {
 
 }
 
-func (p *Parser) parseVersion() (Expr, error) {
+func (p *parser) parseVersion() (Expr, error) {
 
 	// Remove the VERSION keyword
 	if _, _, exi := p.mightBe(VERSION); !exi {

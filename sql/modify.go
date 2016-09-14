@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseModifyStatement(explain bool) (stmt *ModifyStatement, err error) {
+func (p *parser) parseModifyStatement(explain bool) (stmt *ModifyStatement, err error) {
 
 	stmt = &ModifyStatement{}
 

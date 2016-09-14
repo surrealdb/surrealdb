@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseRemoveStatement(explain bool) (Statement, error) {
+func (p *parser) parseRemoveStatement(explain bool) (Statement, error) {
 
 	// Inspect the next token.
 	tok, _, err := p.shouldBe(RULES, TABLE, FIELD, INDEX)

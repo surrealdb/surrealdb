@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldStatement, err error) {
+func (p *parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldStatement, err error) {
 
 	stmt = &DefineFieldStatement{}
 
@@ -135,7 +135,7 @@ func (p *Parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 
 }
 
-func (p *Parser) parseRemoveFieldStatement(explain bool) (stmt *RemoveFieldStatement, err error) {
+func (p *parser) parseRemoveFieldStatement(explain bool) (stmt *RemoveFieldStatement, err error) {
 
 	stmt = &RemoveFieldStatement{}
 

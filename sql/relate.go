@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseRelateStatement(explain bool) (stmt *RelateStatement, err error) {
+func (p *parser) parseRelateStatement(explain bool) (stmt *RelateStatement, err error) {
 
 	stmt = &RelateStatement{}
 

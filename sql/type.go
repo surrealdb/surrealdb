@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *Parser) parseType() (exp string, err error) {
+func (p *parser) parseType() (exp string, err error) {
 
 	allowed := []string{"any", "url", "uuid", "color", "email", "phone", "array", "object", "domain", "string", "number", "custom", "boolean", "datetime", "latitude", "longitude"}
 

@@ -23,21 +23,21 @@ import (
 	"time"
 )
 
-// Scanner represents a lexical scanner.
-type Scanner struct {
+// scanner represents a lexical scanner.
+type scanner struct {
 	b []rune // any runes before
 	a []rune // any runes after
-	p *Parser
+	p *parser
 	r *bufio.Reader
 }
 
-// NewScanner returns a new instance of Scanner.
-func NewScanner(p *Parser, r io.Reader) *Scanner {
-	return &Scanner{p: p, r: bufio.NewReader(r)}
+// newScanner returns a new instance of Scanner.
+func newScanner(p *parser, r io.Reader) *scanner {
+	return &scanner{p: p, r: bufio.NewReader(r)}
 }
 
-// Scan returns the next token and literal value.
-func (s *Scanner) Scan() (tok Token, lit string, val interface{}) {
+// scan returns the next token and literal value.
+func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 
 	// Read the next rune.
 	ch := s.next()
@@ -236,7 +236,7 @@ func (s *Scanner) Scan() (tok Token, lit string, val interface{}) {
 }
 
 // scanBlank consumes the current rune and all contiguous whitespace.
-func (s *Scanner) scanBlank(chp ...rune) (tok Token, lit string, val interface{}) {
+func (s *scanner) scanBlank(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = WS
 
@@ -265,7 +265,7 @@ func (s *Scanner) scanBlank(chp ...rune) (tok Token, lit string, val interface{}
 }
 
 // scanCommentSingle consumes the current rune and all contiguous whitespace.
-func (s *Scanner) scanCommentSingle(chp ...rune) (tok Token, lit string, val interface{}) {
+func (s *scanner) scanCommentSingle(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = WS
 
@@ -292,7 +292,7 @@ func (s *Scanner) scanCommentSingle(chp ...rune) (tok Token, lit string, val int
 }
 
 // scanCommentMultiple consumes the current rune and all contiguous whitespace.
-func (s *Scanner) scanCommentMultiple(chp ...rune) (tok Token, lit string, val interface{}) {
+func (s *scanner) scanCommentMultiple(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = WS
 
@@ -323,7 +323,7 @@ func (s *Scanner) scanCommentMultiple(chp ...rune) (tok Token, lit string, val i
 
 }
 
-func (s *Scanner) scanParams(chp ...rune) (tok Token, lit string, val interface{}) {
+func (s *scanner) scanParams(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok, lit, val = s.scanIdent(chp...)
 
@@ -336,7 +336,7 @@ func (s *Scanner) scanParams(chp ...rune) (tok Token, lit string, val interface{
 }
 
 // scanIdent consumes the current rune and all contiguous ident runes.
-func (s *Scanner) scanIdent(chp ...rune) (tok Token, lit string, val interface{}) {
+func (s *scanner) scanIdent(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = IDENT
 
@@ -375,7 +375,7 @@ func (s *Scanner) scanIdent(chp ...rune) (tok Token, lit string, val interface{}
 }
 
 // scanThing consumes the current rune and all contiguous ident runes.
-func (s *Scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}) {
+func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = THING
 
@@ -477,7 +477,7 @@ func (s *Scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 
 }
 
-func (s *Scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{}) {
+func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = NUMBER
 
@@ -528,7 +528,7 @@ func (s *Scanner) scanQuoted(chp ...rune) (tok Token, lit string, val interface{
 
 }
 
-func (s *Scanner) scanString(chp ...rune) (tok Token, lit string, val interface{}) {
+func (s *scanner) scanString(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	beg := chp[0]
 	end := beg
@@ -613,7 +613,7 @@ func (s *Scanner) scanString(chp ...rune) (tok Token, lit string, val interface{
 
 }
 
-func (s *Scanner) scanRegexp(chp ...rune) (tok Token, lit string, val interface{}) {
+func (s *scanner) scanRegexp(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = IDENT
 
@@ -645,7 +645,7 @@ func (s *Scanner) scanRegexp(chp ...rune) (tok Token, lit string, val interface{
 
 }
 
-func (s *Scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{}) {
+func (s *scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	beg := chp[0]
 	end := beg
@@ -708,7 +708,7 @@ func (s *Scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{
 
 // next reads the next rune from the bufferred reader.
 // Returns the rune(0) if an error occurs (or io.EOF is returned).
-func (s *Scanner) next() rune {
+func (s *scanner) next() rune {
 
 	if len(s.a) > 0 {
 		var r rune
@@ -727,7 +727,7 @@ func (s *Scanner) next() rune {
 }
 
 // undo places the previously read rune back on the reader.
-func (s *Scanner) undo() {
+func (s *scanner) undo() {
 
 	if len(s.b) > 0 {
 		var r rune

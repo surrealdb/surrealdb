@@ -18,9 +18,9 @@ import (
 	"regexp"
 )
 
-func (p *Parser) parseName() (string, error) {
 
 	_, lit, err := p.shouldBe(IDENT, NUMBER, DOUBLE, DATE, TIME)
+func (p *parser) parseName() (string, error) {
 	if err != nil {
 		return string(""), &ParseError{Found: lit, Expected: []string{"name"}}
 	}
@@ -31,7 +31,7 @@ func (p *Parser) parseName() (string, error) {
 
 }
 
-func (p *Parser) parseNames() (mul []string, err error) {
+func (p *parser) parseNames() (mul []string, err error) {
 
 	for {
 
@@ -57,7 +57,7 @@ func (p *Parser) parseNames() (mul []string, err error) {
 //
 // --------------------------------------------------
 
-func (p *Parser) parseIdent() (*Ident, error) {
+func (p *parser) parseIdent() (*Ident, error) {
 
 	_, lit, err := p.shouldBe(IDENT)
 	if err != nil {
@@ -70,7 +70,7 @@ func (p *Parser) parseIdent() (*Ident, error) {
 
 }
 
-func (p *Parser) parseThing() (*Thing, error) {
+func (p *parser) parseThing() (*Thing, error) {
 
 	_, lit, err := p.shouldBe(THING)
 	if err != nil {
@@ -83,7 +83,7 @@ func (p *Parser) parseThing() (*Thing, error) {
 
 }
 
-func (p *Parser) parseArray() ([]interface{}, error) {
+func (p *parser) parseArray() ([]interface{}, error) {
 
 	_, lit, err := p.shouldBe(ARRAY)
 	if err != nil {
@@ -96,7 +96,7 @@ func (p *Parser) parseArray() ([]interface{}, error) {
 
 }
 
-func (p *Parser) parseNumber() (int64, error) {
+func (p *parser) parseNumber() (int64, error) {
 
 	_, lit, err := p.shouldBe(NUMBER)
 	if err != nil {
@@ -109,7 +109,7 @@ func (p *Parser) parseNumber() (int64, error) {
 
 }
 
-func (p *Parser) parseDouble() (float64, error) {
+func (p *parser) parseDouble() (float64, error) {
 
 	_, lit, err := p.shouldBe(NUMBER, DOUBLE)
 	if err != nil {
@@ -122,7 +122,7 @@ func (p *Parser) parseDouble() (float64, error) {
 
 }
 
-func (p *Parser) parseString() (string, error) {
+func (p *parser) parseString() (string, error) {
 
 	_, lit, err := p.shouldBe(STRING)
 	if err != nil {
@@ -135,7 +135,7 @@ func (p *Parser) parseString() (string, error) {
 
 }
 
-func (p *Parser) parseRegion() (string, error) {
+func (p *parser) parseRegion() (string, error) {
 
 	tok, lit, err := p.shouldBe(IDENT, STRING, REGION)
 	if err != nil {
@@ -148,7 +148,7 @@ func (p *Parser) parseRegion() (string, error) {
 
 }
 
-func (p *Parser) parseScript() (string, error) {
+func (p *parser) parseScript() (string, error) {
 
 	tok, lit, err := p.shouldBe(STRING, REGION)
 	if err != nil {
@@ -161,7 +161,7 @@ func (p *Parser) parseScript() (string, error) {
 
 }
 
-func (p *Parser) parseRegexp() (string, error) {
+func (p *parser) parseRegexp() (string, error) {
 
 	tok, lit, err := p.shouldBe(REGEX)
 	if err != nil {
@@ -174,7 +174,7 @@ func (p *Parser) parseRegexp() (string, error) {
 
 }
 
-func (p *Parser) parseBoolean() (bool, error) {
+func (p *parser) parseBoolean() (bool, error) {
 
 	tok, lit, err := p.shouldBe(TRUE, FALSE)
 	if err != nil {
@@ -187,7 +187,7 @@ func (p *Parser) parseBoolean() (bool, error) {
 
 }
 
-func (p *Parser) parseDefault() (interface{}, error) {
+func (p *parser) parseDefault() (interface{}, error) {
 
 	tok, lit, err := p.shouldBe(NULL, NOW, DATE, TIME, TRUE, FALSE, NUMBER, DOUBLE, STRING, REGION, IDENT, ARRAY, JSON)
 	if err != nil {
@@ -198,7 +198,7 @@ func (p *Parser) parseDefault() (interface{}, error) {
 
 }
 
-func (p *Parser) parseExpr() (mul []*Field, err error) {
+func (p *parser) parseExpr() (mul []*Field, err error) {
 
 	var tok Token
 	var lit string
