@@ -25,7 +25,7 @@ func (this *Doc) Blaze(ast *sql.SelectStatement) (res interface{}) {
 
 	for _, v := range ast.Expr {
 		if _, ok := v.Expr.(*sql.All); ok {
-			doc = data.Consume(this.current.Get("data").Data())
+			doc = this.current
 			break
 		}
 	}
@@ -41,7 +41,7 @@ func (this *Doc) Blaze(ast *sql.SelectStatement) (res interface{}) {
 		case *sql.Null:
 			doc.Set(nil, v.Alias)
 		case *sql.Ident:
-			doc.Set(this.current.Get("data", e.ID).Data(), v.Alias)
+			doc.Set(this.current.Get(e.ID).Data(), v.Alias)
 		case *sql.All:
 			break
 		}

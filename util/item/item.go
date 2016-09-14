@@ -55,21 +55,6 @@ func New(kv kvs.KV, txn kvs.TX, key *keys.Thing) (this *Doc) {
 		this.current = data.New().Decode(kv.Val())
 	}
 
-	if !this.current.Exists("meta") {
-		this.initial.Object("meta")
-		this.current.Object("meta")
-	}
-
-	if !this.current.Exists("data") {
-		this.initial.Object("data")
-		this.current.Object("data")
-	}
-
-	if !this.current.Exists("time") {
-		this.initial.Object("time")
-		this.current.Object("time")
-	}
-
 	this.id = fmt.Sprintf("@%v:%v", this.key.TB, this.key.ID)
 
 	return this

@@ -27,22 +27,18 @@ func (this *Doc) Yield(output sql.Token, fallback sql.Token) (res interface{}) {
 	}
 
 	switch output {
-	default:
-		res = nil
 	case sql.ID:
 		res = fmt.Sprintf("@%v:%v", this.key.TB, this.key.ID)
 	case sql.DIFF:
 		res = this.diff().Data()
-	case sql.FULL:
-		res = this.current.Data()
 	case sql.AFTER:
-		res = this.current.Get("data").Data()
+		res = this.current.Data()
 	case sql.BEFORE:
-		res = this.initial.Get("data").Data()
+		res = this.initial.Data()
 	case sql.BOTH:
 		res = map[string]interface{}{
-			"After":  this.current.Get("data").Data(),
-			"Before": this.initial.Get("data").Data(),
+			"After":  this.current.Data(),
+			"Before": this.initial.Data(),
 		}
 	}
 

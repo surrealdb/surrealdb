@@ -826,13 +826,6 @@ func Test_Parse_Queries_Create(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `CREATE person RETURN FULL`,
-			res: &Query{Statements: []Statement{&CreateStatement{
-				What: []Expr{&Table{"person"}},
-				Echo: FULL,
-			}}},
-		},
-		{
 			sql: `CREATE person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&CreateStatement{
 				What: []Expr{&Table{"person"}},
@@ -862,7 +855,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		},
 		{
 			sql: `CREATE person RETURN SOMETHING`,
-			err: "Found `SOMETHING` but expected `ID, NONE, FULL, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `SOMETHING` but expected `ID, NONE, BOTH, DIFF, BEFORE, AFTER`",
 		},
 	}
 
@@ -974,13 +967,6 @@ func Test_Parse_Queries_Update(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `UPDATE person RETURN FULL`,
-			res: &Query{Statements: []Statement{&UpdateStatement{
-				What: []Expr{&Table{"person"}},
-				Echo: FULL,
-			}}},
-		},
-		{
 			sql: `UPDATE person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
 				What: []Expr{&Table{"person"}},
@@ -1010,7 +996,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		},
 		{
 			sql: `UPDATE person RETURN SOMETHING`,
-			err: "Found `SOMETHING` but expected `ID, NONE, FULL, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `SOMETHING` but expected `ID, NONE, BOTH, DIFF, BEFORE, AFTER`",
 		},
 	}
 
@@ -1067,14 +1053,6 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `MODIFY @person:test DIFF {"diff": true} RETURN FULL`,
-			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{TB: "person", ID: "test"}},
-				Diff: []Expr{&DiffExpression{JSON: map[string]interface{}{"diff": true}}},
-				Echo: FULL,
-			}}},
-		},
-		{
 			sql: `MODIFY @person:test DIFF {"diff": true} RETURN BOTH`,
 			res: &Query{Statements: []Statement{&ModifyStatement{
 				What: []Expr{&Thing{TB: "person", ID: "test"}},
@@ -1108,7 +1086,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 		},
 		{
 			sql: `MODIFY @person:test DIFF {"diff": true} RETURN SOMETHING`,
-			err: "Found `SOMETHING` but expected `ID, NONE, FULL, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `SOMETHING` but expected `ID, NONE, BOTH, DIFF, BEFORE, AFTER`",
 		},
 	}
 
@@ -1152,13 +1130,6 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `DELETE person RETURN FULL`,
-			res: &Query{Statements: []Statement{&DeleteStatement{
-				What: []Expr{&Table{"person"}},
-				Echo: FULL,
-			}}},
-		},
-		{
 			sql: `DELETE person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
 				What: []Expr{&Table{"person"}},
@@ -1188,7 +1159,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 		},
 		{
 			sql: `DELETE person RETURN SOMETHING`,
-			err: "Found `SOMETHING` but expected `ID, NONE, FULL, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `SOMETHING` but expected `ID, NONE, BOTH, DIFF, BEFORE, AFTER`",
 		},
 	}
 

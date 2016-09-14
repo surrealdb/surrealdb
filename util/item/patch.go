@@ -21,8 +21,8 @@ import (
 
 func (this *Doc) diff() *data.Doc {
 
-	va := this.initial.Get("data").Data().(map[string]interface{})
-	vb := this.current.Get("data").Data().(map[string]interface{})
+	va := this.initial.Data().(map[string]interface{})
+	vb := this.current.Data().(map[string]interface{})
 	patch, _ := json.Diff(va, vb)
 	return data.Consume(patch)
 

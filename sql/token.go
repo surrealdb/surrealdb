@@ -132,7 +132,6 @@ const (
 	FIELD
 	FOR
 	FROM
-	FULL
 	GROUP
 	HISTORY
 	ID
@@ -294,7 +293,6 @@ var tokens = [...]string{
 	FIELD:           "FIELD",
 	FOR:             "FOR",
 	FROM:            "FROM",
-	FULL:            "FULL",
 	GROUP:           "GROUP",
 	HISTORY:         "HISTORY",
 	ID:              "ID",

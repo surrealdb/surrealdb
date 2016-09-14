@@ -67,18 +67,18 @@ func (this *Doc) defFld() (err error) {
 
 	for _, fld := range this.fields {
 
-		e := this.current.Exists("data", fld.Name)
+		e := this.current.Exists(fld.Name)
 
 		if fld.Default != nil && e == false {
 			switch val := fld.Default.(type) {
 			case sql.Null, *sql.Null:
-				this.current.Set(nil, "data", fld.Name)
+				this.current.Set(nil, fld.Name)
 			default:
-				this.current.Set(fld.Default, "data", fld.Name)
+				this.current.Set(fld.Default, fld.Name)
 			case sql.Ident:
-				this.current.Set(this.current.Get("data", val.ID).Data(), "data", fld.Name)
+				this.current.Set(this.current.Get(val.ID).Data(), fld.Name)
 			case *sql.Ident:
-				this.current.Set(this.current.Get("data", val.ID).Data(), "data", fld.Name)
+				this.current.Set(this.current.Get(val.ID).Data(), fld.Name)
 			}
 		}
 
@@ -102,15 +102,13 @@ func (this *Doc) mrgFld() (err error) {
 
 func (this *Doc) mrgAll(expr *sql.ContentExpression) {
 
-	val := data.Consume(expr.JSON)
-
-	this.current.Set(val.Data(), "data")
+	this.current = data.Consume(expr.JSON)
 
 }
 
 func (this *Doc) mrgAny(expr *sql.MergeExpression) {
 
-	lhs, _ := this.current.Get("data").Data().(map[string]interface{})
+	lhs, _ := this.current.Data().(map[string]interface{})
 	rhs, _ := expr.JSON.(map[string]interface{})
 
 	err := mergo.MapWithOverwrite(&lhs, rhs)
@@ -118,7 +116,7 @@ func (this *Doc) mrgAny(expr *sql.MergeExpression) {
 		return
 	}
 
-	this.current.Set(lhs, "data")
+	this.current = data.Consume(lhs)
 
 }
 
@@ -134,18 +132,18 @@ func (this *Doc) mrgOne(expr *sql.BinaryExpression) {
 	if expr.Op == sql.EQ {
 		switch expr.RHS.(type) {
 		default:
-			this.current.Set(rhs, "data", lhs)
+			this.current.Set(rhs, lhs)
 		case *sql.Void:
-			this.current.Del("data", lhs)
+			this.current.Del(lhs)
 		}
 	}
 
 	if expr.Op == sql.INC {
-		this.current.Inc(rhs, "data", lhs)
+		this.current.Inc(rhs, lhs)
 	}
 
 	if expr.Op == sql.DEC {
-		this.current.Dec(rhs, "data", lhs)
+		this.current.Dec(rhs, lhs)
 	}
 
 }
@@ -175,7 +173,7 @@ func getMrgItemRHS(doc *data.Doc, expr sql.Expr) interface{} {
 	case []interface{}, map[string]interface{}:
 		return val
 	case *sql.Ident:
-		return doc.Get("data", val.ID).Data()
+		return doc.Get(val.ID).Data()
 	}
 
 }

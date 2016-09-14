@@ -33,10 +33,10 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 	var i interface{}
 	var c interface{}
 
-	i = initial.Get("data", fld.Name).Data()
+	i = initial.Get(fld.Name).Data()
 
 	if fld.Readonly && i != nil {
-		current.Set(i, "data", fld.Name)
+		current.Set(i, fld.Name)
 		return
 	}
 
@@ -54,10 +54,10 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 			}
 
 			if ret.IsUndefined() {
-				current.Del("data", fld.Name)
+				current.Del(fld.Name)
 			} else {
 				val, _ := ret.Export()
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			}
 
 		}
@@ -76,33 +76,33 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 			ret := vm.Get(-1)
 
 			if ret == lua.LNil {
-				current.Del("data", fld.Name)
+				current.Del(fld.Name)
 			} else {
-				current.Set(frLUA(ret), "data", fld.Name)
+				current.Set(frLUA(ret), fld.Name)
 			}
 
 		}
 
 	}
 
-	c = current.Get("data", fld.Name).Data()
-	e = current.Exists("data", fld.Name)
+	c = current.Get(fld.Name).Data()
+	e = current.Exists(fld.Name)
 
 	if fld.Default != nil && e == false {
 		switch val := fld.Default.(type) {
 		case sql.Null, *sql.Null:
-			current.Set(nil, "data", fld.Name)
+			current.Set(nil, fld.Name)
 		default:
-			current.Set(fld.Default, "data", fld.Name)
+			current.Set(fld.Default, fld.Name)
 		case sql.Ident:
-			current.Set(current.Get("data", val.ID).Data(), "data", fld.Name)
+			current.Set(current.Get(val.ID).Data(), fld.Name)
 		case *sql.Ident:
-			current.Set(current.Get("data", val.ID).Data(), "data", fld.Name)
+			current.Set(current.Get(val.ID).Data(), fld.Name)
 		}
 	}
 
-	c = current.Get("data", fld.Name).Data()
-	e = current.Exists("data", fld.Name)
+	c = current.Get(fld.Name).Data()
+	e = current.Exists(fld.Name)
 
 	if fld.Notnull && e == true && c == nil {
 		return fmt.Errorf("Field '%v' can't be null", fld.Name)
@@ -118,178 +118,178 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 
 		case "url":
 			if val, err := conv.ConvertToUrl(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a URL", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "uuid":
 			if val, err := conv.ConvertToUuid(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a UUID", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "color":
 			if val, err := conv.ConvertToColor(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a HEX or RGB color", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "email":
 			if val, err := conv.ConvertToEmail(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be an email address", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "phone":
 			if val, err := conv.ConvertToPhone(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a phone number", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "array":
 			if val, err := conv.ConvertToArray(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be an array", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "object":
 			if val, err := conv.ConvertToObject(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be an object", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "domain":
 			if val, err := conv.ConvertToDomain(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a domain name", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "base64":
 			if val, err := conv.ConvertToBase64(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be base64 data", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "string":
 			if val, err := conv.ConvertToString(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a string", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "number":
 			if val, err := conv.ConvertToNumber(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a number", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "boolean":
 			if val, err := conv.ConvertToBoolean(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a boolean", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "datetime":
 			if val, err := conv.ConvertToDatetime(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a datetime", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "latitude":
 			if val, err := conv.ConvertToLatitude(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a latitude value", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "longitude":
 			if val, err := conv.ConvertToLongitude(c); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be a longitude value", fld.Name)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
 		case "custom":
 
 			if val, err := conv.ConvertToOneOf(c, fld.Enum...); err == nil {
-				current.Set(val, "data", fld.Name)
+				current.Set(val, fld.Name)
 			} else {
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to be one of %v", fld.Name, fld.Enum)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 
@@ -306,7 +306,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 				if fld.Validate {
 					return fmt.Errorf("Field '%v' needs to match the regular expression /%v/", fld.Name, fld.Match)
 				} else {
-					current.Iff(i, "data", fld.Name)
+					current.Iff(i, fld.Name)
 				}
 			}
 		}
@@ -315,7 +315,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 
 	if fld.Min != 0 {
 
-		if c = current.Get("data", fld.Name).Data(); c != nil {
+		if c = current.Get(fld.Name).Data(); c != nil {
 
 			switch now := c.(type) {
 
@@ -324,7 +324,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 					if fld.Validate {
 						return fmt.Errorf("Field '%v' needs to have at least %v items", fld.Name, fld.Min)
 					} else {
-						current.Iff(i, "data", fld.Name)
+						current.Iff(i, fld.Name)
 					}
 				}
 
@@ -333,7 +333,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 					if fld.Validate {
 						return fmt.Errorf("Field '%v' needs to have at least %v characters", fld.Name, fld.Min)
 					} else {
-						current.Iff(i, "data", fld.Name)
+						current.Iff(i, fld.Name)
 					}
 				}
 
@@ -342,7 +342,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 					if fld.Validate {
 						return fmt.Errorf("Field '%v' needs to be >= %v", fld.Name, fld.Min)
 					} else {
-						current.Iff(i, "data", fld.Name)
+						current.Iff(i, fld.Name)
 					}
 				}
 
@@ -354,7 +354,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 
 	if fld.Max != 0 {
 
-		if c = current.Get("data", fld.Name).Data(); c != nil {
+		if c = current.Get(fld.Name).Data(); c != nil {
 
 			switch now := c.(type) {
 
@@ -363,7 +363,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 					if fld.Validate {
 						return fmt.Errorf("Field '%v' needs to have %v or fewer items", fld.Name, fld.Max)
 					} else {
-						current.Iff(i, "data", fld.Name)
+						current.Iff(i, fld.Name)
 					}
 				}
 
@@ -372,7 +372,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 					if fld.Validate {
 						return fmt.Errorf("Field '%v' needs to have %v or fewer characters", fld.Name, fld.Max)
 					} else {
-						current.Iff(i, "data", fld.Name)
+						current.Iff(i, fld.Name)
 					}
 				}
 
@@ -381,7 +381,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 					if fld.Validate {
 						return fmt.Errorf("Field '%v' needs to be <= %v", fld.Name, fld.Max)
 					} else {
-						current.Iff(i, "data", fld.Name)
+						current.Iff(i, fld.Name)
 					}
 				}
 
@@ -391,24 +391,24 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 
 	}
 
-	c = current.Get("data", fld.Name).Data()
-	e = current.Exists("data", fld.Name)
+	c = current.Get(fld.Name).Data()
+	e = current.Exists(fld.Name)
 
 	if fld.Default != nil && e == false {
 		switch val := fld.Default.(type) {
 		case sql.Null, *sql.Null:
-			current.Set(nil, "data", fld.Name)
+			current.Set(nil, fld.Name)
 		default:
-			current.Set(fld.Default, "data", fld.Name)
+			current.Set(fld.Default, fld.Name)
 		case sql.Ident:
-			current.Set(current.Get("data", val.ID).Data(), "data", fld.Name)
+			current.Set(current.Get(val.ID).Data(), fld.Name)
 		case *sql.Ident:
-			current.Set(current.Get("data", val.ID).Data(), "data", fld.Name)
+			current.Set(current.Get(val.ID).Data(), fld.Name)
 		}
 	}
 
-	c = current.Get("data", fld.Name).Data()
-	e = current.Exists("data", fld.Name)
+	c = current.Get(fld.Name).Data()
+	e = current.Exists(fld.Name)
 
 	if fld.Notnull && e == true && c == nil {
 		return fmt.Errorf("Field '%v' can't be null", fld.Name)

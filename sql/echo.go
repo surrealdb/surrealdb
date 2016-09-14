@@ -19,7 +19,7 @@ func (p *Parser) parseEcho() (exp Token, err error) {
 	// Next token might be RETURN
 	if _, _, exi := p.mightBe(RETURN); exi {
 
-		exp, _, err = p.shouldBe(ID, NONE, FULL, BOTH, DIFF, BEFORE, AFTER)
+		exp, _, err = p.shouldBe(ID, NONE, BOTH, DIFF, BEFORE, AFTER)
 		if err != nil {
 			return 0, err
 		}

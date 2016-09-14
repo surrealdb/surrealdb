@@ -76,23 +76,23 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 
 		case *sql.Void:
 			if op == sql.EQ {
-				return this.current.Exists("data", l.ID) == false
+				return this.current.Exists(l.ID) == false
 			} else if op == sql.NEQ {
-				return this.current.Exists("data", l.ID) == true
+				return this.current.Exists(l.ID) == true
 			}
 
 		case *sql.Null:
 			if op == sql.EQ {
-				return this.current.Exists("data", l.ID) == true && this.current.Get("data", l.ID).Data() == nil
+				return this.current.Exists(l.ID) == true && this.current.Get(l.ID).Data() == nil
 			} else if op == sql.NEQ {
-				return this.current.Exists("data", l.ID) == true && this.current.Get("data", l.ID).Data() != nil
+				return this.current.Exists(l.ID) == true && this.current.Get(l.ID).Data() != nil
 			}
 
 		case *sql.Empty:
 			if op == sql.EQ {
-				return this.current.Exists("data", l.ID) == false || this.current.Get("data", l.ID).Data() == nil
+				return this.current.Exists(l.ID) == false || this.current.Get(l.ID).Data() == nil
 			} else if op == sql.NEQ {
-				return this.current.Exists("data", l.ID) == true && this.current.Get("data", l.ID).Data() != nil
+				return this.current.Exists(l.ID) == true && this.current.Get(l.ID).Data() != nil
 			}
 
 		}
@@ -106,23 +106,23 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 
 		case *sql.Void:
 			if op == sql.EQ {
-				return this.current.Exists("data", r.ID) == false
+				return this.current.Exists(r.ID) == false
 			} else if op == sql.NEQ {
-				return this.current.Exists("data", r.ID) == true
+				return this.current.Exists(r.ID) == true
 			}
 
 		case *sql.Null:
 			if op == sql.EQ {
-				return this.current.Exists("data", r.ID) == true && this.current.Get("data", r.ID).Data() == nil
+				return this.current.Exists(r.ID) == true && this.current.Get(r.ID).Data() == nil
 			} else if op == sql.NEQ {
-				return this.current.Exists("data", r.ID) == true && this.current.Get("data", r.ID).Data() != nil
+				return this.current.Exists(r.ID) == true && this.current.Get(r.ID).Data() != nil
 			}
 
 		case *sql.Empty:
 			if op == sql.EQ {
-				return this.current.Exists("data", r.ID) == false || this.current.Get("data", r.ID).Data() == nil
+				return this.current.Exists(r.ID) == false || this.current.Get(r.ID).Data() == nil
 			} else if op == sql.NEQ {
-				return this.current.Exists("data", r.ID) == true && this.current.Get("data", r.ID).Data() != nil
+				return this.current.Exists(r.ID) == true && this.current.Get(r.ID).Data() != nil
 			}
 
 		}
@@ -636,7 +636,7 @@ func getChkItem(doc *data.Doc, expr sql.Expr) interface{} {
 	case *sql.Empty:
 		return val
 	case *sql.Ident:
-		return doc.Get("data", val.ID).Data()
+		return doc.Get(val.ID).Data()
 	}
 
 }
