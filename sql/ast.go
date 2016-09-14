@@ -14,6 +14,12 @@
 
 package sql
 
+import (
+	"fmt"
+	"strconv"
+	"time"
+)
+
 // --------------------------------------------------
 // Queries
 // --------------------------------------------------
@@ -43,132 +49,107 @@ type UseStatement struct {
 // Trans
 // --------------------------------------------------
 
+// UseStatement represents a SQL BEGIN TRANSACTION statement.
 type BeginStatement struct{}
 
+// UseStatement represents a SQL CANCEL TRANSACTION statement.
 type CancelStatement struct{}
 
+// UseStatement represents a SQL COMMIT TRANSACTION statement.
 type CommitStatement struct{}
 
 // --------------------------------------------------
 // Normal
 // --------------------------------------------------
 
-// ActionStatement represents a SQL ACTION statement.
-type ActionStatement struct {
-	EX      bool     // Explain
-	KV      string   // Bucket
-	NS      string   // Namespace
-	DB      string   // Database
-	Expr    []*Field // Which fields
-	What    []Expr   // What to select
-	Cond    []Expr   // Select conditions
-	Group   []*Group // Group by
-	Order   []*Order // Order by
-	Limit   Expr     // Limit by
-	Start   Expr     // Start at
-	Version Expr     // Version
-}
-
 // SelectStatement represents a SQL SELECT statement.
 type SelectStatement struct {
-	EX      bool     // Explain
-	KV      string   // Bucket
-	NS      string   // Namespace
-	DB      string   // Database
-	Expr    []*Field // Which fields
-	What    []Expr   // What to select
-	Cond    []Expr   // Select conditions
-	Group   []*Group // Group by
-	Order   []*Order // Order by
-	Limit   Expr     // Limit by
-	Start   Expr     // Start at
-	Version Expr     // Version
-	Echo    Token    // What to return
+	EX      bool     `codec:"-"`
+	KV      string   `codec:"-"`
+	NS      string   `codec:"-"`
+	DB      string   `codec:"-"`
+	Expr    []*Field `codec:"-"`
+	What    []Expr   `codec:"-"`
+	Cond    []Expr   `codec:"-"`
+	Group   []*Group `codec:"-"`
+	Order   []*Order `codec:"-"`
+	Limit   Expr     `codec:"-"`
+	Start   Expr     `codec:"-"`
+	Version Expr     `codec:"-"`
+	Echo    Token    `codec:"-"`
 }
 
 // CreateStatement represents a SQL CREATE statement.
-//
-// CREATE person SET column = 'value' RETURN ID
 type CreateStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	What []Expr // What to create
-	Data []Expr // Create data
-	Echo Token  // What to return
+	EX   bool   `codec:"-"`
+	KV   string `codec:"-"`
+	NS   string `codec:"-"`
+	DB   string `codec:"-"`
+	What []Expr `codec:"-"`
+	Data []Expr `codec:"-"`
+	Echo Token  `codec:"-"`
 }
 
 // UpdateStatement represents a SQL UPDATE statement.
-//
-// UPDATE person SET column = 'value' WHERE age < 18 RETURN ID
 type UpdateStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	What []Expr // What to update
-	Data []Expr // Update data
-	Cond []Expr // Update conditions
-	Echo Token  // What to return
+	EX   bool   `codec:"-"`
+	KV   string `codec:"-"`
+	NS   string `codec:"-"`
+	DB   string `codec:"-"`
+	What []Expr `codec:"-"`
+	Data []Expr `codec:"-"`
+	Cond []Expr `codec:"-"`
+	Echo Token  `codec:"-"`
 }
 
-// ModifyStatement represents a SQL UPDATE statement.
-//
-// MODIFY @person:123 WITH {} RETURN ID
+// ModifyStatement represents a SQL MODIFY statement.
 type ModifyStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	What []Expr // What to modify
-	Diff []Expr // Diff object
-	Cond []Expr // Update conditions
-	Echo Token  // What to return
+	EX   bool   `codec:"-"`
+	KV   string `codec:"-"`
+	NS   string `codec:"-"`
+	DB   string `codec:"-"`
+	What []Expr `codec:"-"`
+	Diff []Expr `codec:"-"`
+	Cond []Expr `codec:"-"`
+	Echo Token  `codec:"-"`
 }
 
 // DeleteStatement represents a SQL DELETE statement.
-//
-// DELETE FROM person WHERE age < 18 RETURN ID
 type DeleteStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	Hard bool   // Expunge
-	What []Expr // What to delete
-	Cond []Expr // Delete conditions
-	Echo Token  // What to return
+	EX   bool   `codec:"-"`
+	KV   string `codec:"-"`
+	NS   string `codec:"-"`
+	DB   string `codec:"-"`
+	Hard bool   `codec:"-"`
+	What []Expr `codec:"-"`
+	Cond []Expr `codec:"-"`
+	Echo Token  `codec:"-"`
 }
 
 // RelateStatement represents a SQL RELATE statement.
-//
-// RELATE friend FROM @person:123 TO @person:456 SET column = 'value' RETURN ID
 type RelateStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	Type []Expr
-	From []Expr
-	To   []Expr
-	Data []Expr
-	Echo Token // What to return
+	EX   bool   `codec:"-"`
+	KV   string `codec:"-"`
+	NS   string `codec:"-"`
+	DB   string `codec:"-"`
+	Type []Expr `codec:"-"`
+	From []Expr `codec:"-"`
+	To   []Expr `codec:"-"`
+	Data []Expr `codec:"-"`
+	Echo Token  `codec:"-"`
 }
 
 // RecordStatement represents a SQL CREATE EVENT statement.
-//
-// RECORD login ON @person:123 AT 2016-01-29T22:42:56.478Z SET column = true
 type RecordStatement struct {
-	EX   bool   // Explain
-	KV   string // Bucket
-	NS   string // Namespace
-	DB   string // Database
-	Type []Expr
-	On   []Expr
-	At   Expr
-	Data []Expr
-	Echo Token // What to return
+	EX   bool   `codec:"-"`
+	KV   string `codec:"-"`
+	NS   string `codec:"-"`
+	DB   string `codec:"-"`
+	Type []Expr `codec:"-"`
+	On   []Expr `codec:"-"`
+	At   Expr   `codec:"-"`
+	Data []Expr `codec:"-"`
+	Echo Token  `codec:"-"`
 }
 
 // --------------------------------------------------
@@ -176,29 +157,25 @@ type RecordStatement struct {
 // --------------------------------------------------
 
 // DefineRulesStatement represents an SQL DEFINE RULES statement.
-//
-// DEFINE RULES person
 type DefineRulesStatement struct {
-	EX   bool     `json:"-" msgpack:"-"`       // Explain
-	KV   string   `json:"-" msgpack:"-"`       // Bucket
-	NS   string   `json:"-" msgpack:"-"`       // Namespace
-	DB   string   `json:"-" msgpack:"-"`       // Database
-	What []string `json:"-" msgpack:"-"`       // Table names
-	When []string `json:"-" msgpack:"-"`       // Action names
-	Rule string   `json:"rule" msgpack:"rule"` // Rule behaviour
-	Code string   `json:"code" msgpack:"code"` // Rule custom code
+	EX   bool     `codec:"-"`
+	KV   string   `codec:"-"`
+	NS   string   `codec:"-"`
+	DB   string   `codec:"-"`
+	What []string `codec:"-"`
+	When []string `codec:"-"`
+	Rule string   `codec:"rule"`
+	Code string   `codec:"code"`
 }
 
 // RemoveRulesStatement represents an SQL REMOVE RULES statement.
-//
-// REMOVE RULES person
 type RemoveRulesStatement struct {
-	EX   bool     `json:"-" msgpack:"-"` // Explain
-	KV   string   `json:"-" msgpack:"-"` // Bucket
-	NS   string   `json:"-" msgpack:"-"` // Namespace
-	DB   string   `json:"-" msgpack:"-"` // Database
-	What []string `json:"-" msgpack:"-"` // Table names
-	When []string `json:"-" msgpack:"-"` // Action names
+	EX   bool     `codec:"-"`
+	KV   string   `codec:"-"`
+	NS   string   `codec:"-"`
+	DB   string   `codec:"-"`
+	What []string `codec:"-"`
+	When []string `codec:"-"`
 }
 
 // --------------------------------------------------
@@ -206,25 +183,21 @@ type RemoveRulesStatement struct {
 // --------------------------------------------------
 
 // DefineTableStatement represents an SQL DEFINE TABLE statement.
-//
-// DEFINE TABLE person
 type DefineTableStatement struct {
-	EX   bool     `json:"-" msgpack:"-"` // Explain
-	KV   string   `json:"-" msgpack:"-"` // Bucket
-	NS   string   `json:"-" msgpack:"-"` // Namespace
-	DB   string   `json:"-" msgpack:"-"` // Database
-	What []string `json:"-" msgpack:"-"` // Table names
+	EX   bool     `codec:"-"`
+	KV   string   `codec:"-"`
+	NS   string   `codec:"-"`
+	DB   string   `codec:"-"`
+	What []string `codec:"-"`
 }
 
 // RemoveTableStatement represents an SQL REMOVE TABLE statement.
-//
-// REMOVE TABLE person
 type RemoveTableStatement struct {
-	EX   bool     `json:"-" msgpack:"-"` // Explain
-	KV   string   `json:"-" msgpack:"-"` // Bucket
-	NS   string   `json:"-" msgpack:"-"` // Namespace
-	DB   string   `json:"-" msgpack:"-"` // Database
-	What []string `json:"-" msgpack:"-"` // Table names
+	EX   bool     `codec:"-"`
+	KV   string   `codec:"-"`
+	NS   string   `codec:"-"`
+	DB   string   `codec:"-"`
+	What []string `codec:"-"`
 }
 
 // --------------------------------------------------
@@ -232,40 +205,34 @@ type RemoveTableStatement struct {
 // --------------------------------------------------
 
 // DefineFieldStatement represents an SQL DEFINE INDEX statement.
-//
-// DEFINE FIELD name ON person TYPE string CODE {}
-// DEFINE FIELD name ON person TYPE number MIN 0 MAX 5 DEFAULT 0
-// DEFINE FIELD name ON person TYPE custom ENUM [0,1,2,3,4,5] DEFAULT 0
 type DefineFieldStatement struct {
-	EX        bool          `json:"-" msgpack:"-"`                 // Explain
-	KV        string        `json:"-" msgpack:"-"`                 // Bucket
-	NS        string        `json:"-" msgpack:"-"`                 // Namespace
-	DB        string        `json:"-" msgpack:"-"`                 // Database
-	Name      string        `json:"name" msgpack:"name"`           // Field name
-	What      []string      `json:"-" msgpack:"-"`                 // Table names
-	Type      string        `json:"type" msgpack:"type"`           // Field type
-	Enum      []interface{} `json:"enum" msgpack:"enum"`           // Custom options
-	Code      string        `json:"code" msgpack:"code"`           // Field code
-	Min       float64       `json:"min" msgpack:"min"`             // Minimum value / length
-	Max       float64       `json:"max" msgpack:"max"`             // Maximum value / length
-	Match     string        `json:"match" msgpack:"match"`         // Regex value
-	Default   interface{}   `json:"default" msgpack:"default"`     // Default value
-	Notnull   bool          `json:"notnull" msgpack:"notnull"`     // Notnull - can not be NULL?
-	Readonly  bool          `json:"readonly" msgpack:"readonly"`   // Readonly - can not be changed?
-	Mandatory bool          `json:"mandatory" msgpack:"mandatory"` // Mandatory - can not be VOID?
-	Validate  bool          `json:"validate" msgpack:"validate"`   // Validate - can not be INCORRECT?
+	EX        bool          `codec:"-"`
+	KV        string        `codec:"-"`
+	NS        string        `codec:"-"`
+	DB        string        `codec:"-"`
+	Name      string        `codec:"name"`
+	What      []string      `codec:"-"`
+	Type      string        `codec:"type"`
+	Enum      []interface{} `codec:"enum"`
+	Code      string        `codec:"code"`
+	Min       float64       `codec:"min"`
+	Max       float64       `codec:"max"`
+	Match     string        `codec:"match"`
+	Default   interface{}   `codec:"default"`
+	Notnull   bool          `codec:"notnull"`
+	Readonly  bool          `codec:"readonly"`
+	Mandatory bool          `codec:"mandatory"`
+	Validate  bool          `codec:"validate"`
 }
 
 // RemoveFieldStatement represents an SQL REMOVE INDEX statement.
-//
-// REMOVE FIELD name ON person
 type RemoveFieldStatement struct {
-	EX   bool     `json:"-" msgpack:"-"` // Explain
-	KV   string   `json:"-" msgpack:"-"` // Bucket
-	NS   string   `json:"-" msgpack:"-"` // Namespace
-	DB   string   `json:"-" msgpack:"-"` // Database
-	Name string   `json:"-" msgpack:"-"` // Field name
-	What []string `json:"-" msgpack:"-"` // Table names
+	EX   bool     `codec:"-"`
+	KV   string   `codec:"-"`
+	NS   string   `codec:"-"`
+	DB   string   `codec:"-"`
+	Name string   `codec:"-"`
+	What []string `codec:"-"`
 }
 
 // --------------------------------------------------
@@ -273,42 +240,25 @@ type RemoveFieldStatement struct {
 // --------------------------------------------------
 
 // DefineIndexStatement represents an SQL DEFINE INDEX statement.
-//
-// DEFINE INDEX name ON person COLUMNS (account, age) UNIQUE
 type DefineIndexStatement struct {
-	EX   bool     `json:"-" msgpack:"-"`           // Explain
-	KV   string   `json:"-" msgpack:"-"`           // Bucket
-	NS   string   `json:"-" msgpack:"-"`           // Namespace
-	DB   string   `json:"-" msgpack:"-"`           // Database
-	Name string   `json:"name" msgpack:"name"`     // Index name
-	What []string `json:"-" msgpack:"-"`           // Table names
-	Cols []string `json:"cols" msgpack:"cols"`     // Index cols
-	Uniq bool     `json:"unique" msgpack:"unique"` // Unique index
-	CI   bool
-	CS   bool
+	EX   bool     `codec:"-"`
+	KV   string   `codec:"-"`
+	NS   string   `codec:"-"`
+	DB   string   `codec:"-"`
+	Name string   `codec:"name"`
+	What []string `codec:"-"`
+	Cols []string `codec:"cols"`
+	Uniq bool     `codec:"unique"`
 }
 
 // RemoveIndexStatement represents an SQL REMOVE INDEX statement.
-//
-// REMOVE INDEX name ON person
 type RemoveIndexStatement struct {
-	EX   bool     `json:"-" msgpack:"-"` // Explain
-	KV   string   `json:"-" msgpack:"-"` // Bucket
-	NS   string   `json:"-" msgpack:"-"` // Namespace
-	DB   string   `json:"-" msgpack:"-"` // Database
-	Name string   `json:"-" msgpack:"-"` // Index name
-	What []string `json:"-" msgpack:"-"` // Table names
-}
-
-// ResyncIndexStatement represents an SQL RESYNC INDEX statement.
-//
-// RESYNC INDEX name ON person
-type ResyncIndexStatement struct {
-	EX   bool     `json:"-" msgpack:"-"` // Explain
-	KV   string   `json:"-" msgpack:"-"` // Bucket
-	NS   string   `json:"-" msgpack:"-"` // Namespace
-	DB   string   `json:"-" msgpack:"-"` // Database
-	What []string `json:"-" msgpack:"-"` // Table names
+	EX   bool     `codec:"-"`
+	KV   string   `codec:"-"`
+	NS   string   `codec:"-"`
+	DB   string   `codec:"-"`
+	Name string   `codec:"-"`
+	What []string `codec:"-"`
 }
 
 // --------------------------------------------------
@@ -335,6 +285,23 @@ type Void struct{}
 
 // Empty represents an expression which is null or "".
 type Empty struct{}
+
+// Field represents a SELECT AS clause.
+type Field struct {
+	Expr  Expr
+	Alias string
+}
+
+// Group represents a GROUP BY clause.
+type Group struct {
+	Expr Expr
+}
+
+// Order represents a ORDER BY clause.
+type Order struct {
+	Expr Expr
+	Dir  Expr
+}
 
 // ClosedExpression represents a parenthesized expression.
 type ClosedExpression struct {
@@ -372,10 +339,34 @@ type Ident struct {
 	ID string
 }
 
+func (this Ident) String() string {
+	return this.ID
+}
+
+func NewIdent(ID string) *Ident {
+	return &Ident{ID}
+}
+
+// --------------------------------------------------
+// Parts
+// --------------------------------------------------
+
 // Table comment
 type Table struct {
 	TB string
 }
+
+func (this Table) String() string {
+	return this.TB
+}
+
+func NewTable(TB string) *Table {
+	return &Table{TB}
+}
+
+// --------------------------------------------------
+// Parts
+// --------------------------------------------------
 
 // Thing comment
 type Thing struct {
@@ -383,19 +374,23 @@ type Thing struct {
 	ID interface{}
 }
 
-// Field comment
-type Field struct {
-	Expr  Expr
-	Alias string
+func (this Thing) String() string {
+	return fmt.Sprintf("@%s:%v", this.TB, this.ID)
 }
 
-// Group represents an sql GROUP BY clause
-type Group struct {
-	Expr Expr
-}
-
-// Order represents an sql ORDER BY clause
-type Order struct {
-	Expr Expr
-	Dir  Expr
+func NewThing(TB string, ID interface{}) *Thing {
+	if str, ok := ID.(string); ok {
+		if cnv, err := strconv.ParseFloat(str, 64); err == nil {
+			return &Thing{TB: TB, ID: cnv}
+		} else if cnv, err := time.Parse(RFCDate, str); err == nil {
+			return &Thing{TB: TB, ID: cnv.UTC()}
+		} else if cnv, err := time.Parse(RFCTime, str); err == nil {
+			return &Thing{TB: TB, ID: cnv.UTC()}
+		} else if cnv, err := time.Parse(RFCNorm, str); err == nil {
+			return &Thing{TB: TB, ID: cnv.UTC()}
+		} else if cnv, err := time.Parse(RFCText, str); err == nil {
+			return &Thing{TB: TB, ID: cnv.UTC()}
+		}
+	}
+	return &Thing{TB: TB, ID: ID}
 }
