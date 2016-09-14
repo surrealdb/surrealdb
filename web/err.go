@@ -17,43 +17,42 @@ package web
 import (
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/kvs"
+	"github.com/abcum/surreal/sql"
 )
 
 func errors(err error, c *fibre.Context) {
 
-	code := 500
-	text := err.Error()
+	var code int
+	var text string
+	var info map[string]interface{}
 
-	switch err.(type) {
+	switch e := err.(type) {
 	default:
-		err = fibre.NewHTTPError(400, text)
+		code = 400
 	case *kvs.DBError:
-		err = fibre.NewHTTPError(503, text)
+		code, text = 503, e.Error()
 	case *kvs.TXError:
-		err = fibre.NewHTTPError(500, text)
+		code, text = 500, e.Error()
 	case *kvs.KVError:
-		err = fibre.NewHTTPError(409, text)
+		code, text = 409, e.Error()
 	case *kvs.CKError:
-		err = fibre.NewHTTPError(403, text)
-	}
-
-	if e, ok := err.(*fibre.HTTPError); ok {
+		code, text = 403, e.Error()
+	case *sql.ParseError:
+		code, text = 400, e.Error()
+	case *fibre.HTTPError:
 		code = e.Code()
-		text = e.Error()
 	}
 
-	switch c.Type() {
-	default:
-		c.Text(code, text)
-	case "application/json":
-		info := errs[code]
-		info["information"] = text
-		c.JSON(code, info)
-	case "application/msgpack":
-		info := errs[code]
-		info["information"] = text
-		c.PACK(code, info)
+	if _, ok := errs[code]; !ok {
+		code = 500
 	}
+
+	info = errs[code]
+	if text != "" {
+		info["information"] = text
+	}
+
+	c.Send(code, info)
 
 }
 

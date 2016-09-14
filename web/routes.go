@@ -17,10 +17,20 @@ package web
 import (
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/db"
+	"github.com/abcum/surreal/sql"
 )
 
-func output(c *fibre.Context, res interface{}) error {
-	switch ret := res.(*db.Response); ret.Status {
+func output(c *fibre.Context, err error, res []*db.Response) error {
+
+	if err != nil {
+		return fibre.NewHTTPError(500)
+	}
+
+	if len(res) == 0 {
+		return fibre.NewHTTPError(500)
+	}
+
+	switch ret := res[0]; ret.Status {
 	case "OK":
 		return c.Send(200, ret.Result)
 	case "ERR_DB":
@@ -34,6 +44,7 @@ func output(c *fibre.Context, res interface{}) error {
 	default:
 		return fibre.NewHTTPError(400)
 	}
+
 }
 
 func routes(s *fibre.Fibre) {
