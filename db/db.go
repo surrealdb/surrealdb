@@ -32,10 +32,10 @@ import (
 )
 
 type Response struct {
-	Time   string      `json:"time,omitempty"`
-	Status interface{} `json:"status,omitempty"`
-	Detail interface{} `json:"detail,omitempty"`
-	Result interface{} `json:"result,omitempty"`
+	Time   string      `codec:"time,omitempty"`
+	Status interface{} `codec:"status,omitempty"`
+	Detail interface{} `codec:"detail,omitempty"`
+	Result interface{} `codec:"result,omitempty"`
 }
 
 var db *kvs.DB
@@ -76,7 +76,7 @@ func Execute(ctx *fibre.Context, txt interface{}, vars map[string]interface{}) (
 		switch res := msg.(type) {
 		case error:
 			return nil, res
-		default:
+		case *Response:
 			out = append(out, res)
 		}
 	}
