@@ -167,7 +167,6 @@ const (
 	REJECT
 	RELATE
 	REMOVE
-	RESYNC
 	RETURN
 	ROLLBACK
 	RULES
@@ -329,7 +328,6 @@ var tokens = [...]string{
 	REJECT:          "REJECT",
 	RELATE:          "RELATE",
 	REMOVE:          "REMOVE",
-	RESYNC:          "RESYNC",
 	RETURN:          "RETURN",
 	ROLLBACK:        "ROLLBACK",
 	RULES:           "RULES",

@@ -54,32 +54,6 @@ func (p *Parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexState
 
 }
 
-func (p *Parser) parseResyncIndexStatement(explain bool) (stmt *ResyncIndexStatement, err error) {
-
-	stmt = &ResyncIndexStatement{}
-
-	stmt.EX = explain
-
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
-
-	if _, _, err = p.shouldBe(ON); err != nil {
-		return nil, err
-	}
-
-	if stmt.What, err = p.parseNames(); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
-	}
-
-	return
-
-}
-
 func (p *Parser) parseRemoveIndexStatement(explain bool) (stmt *RemoveIndexStatement, err error) {
 
 	stmt = &RemoveIndexStatement{}

@@ -140,11 +140,11 @@ func Test_Parse_Queries_Malformed(t *testing.T) {
 		},
 		{
 			sql: `!`,
-			err: "Found `!` but expected `USE, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, RESYNC, REMOVE`",
+			err: "Found `!` but expected `USE, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, REMOVE`",
 		},
 		{
 			sql: `SELECT * FROM person;;;`,
-			err: "Found `;` but expected `USE, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, RESYNC, REMOVE`",
+			err: "Found `;` but expected `USE, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, REMOVE`",
 		},
 	}
 
@@ -1736,39 +1736,6 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE INDEX temp ON person COLUMNS firstname, lastname UNIQUE something`,
-			err: "Found `something` but expected `EOF, ;`",
-		},
-	}
-
-	for _, test := range tests {
-		testsql(t, test)
-	}
-
-}
-
-func Test_Parse_Queries_Resync(t *testing.T) {
-
-	var tests = []tester{
-		{
-			sql: `RESYNC`,
-			err: "Found `` but expected `INDEX`",
-		},
-		{
-			sql: `RESYNC INDEX`,
-			err: "Found `` but expected `ON`",
-		},
-		{
-			sql: `RESYNC INDEX ON`,
-			err: "Found `` but expected `name`",
-		},
-		{
-			sql: `RESYNC INDEX ON person`,
-			res: &Query{Statements: []Statement{&ResyncIndexStatement{
-				What: []string{"person"},
-			}}},
-		},
-		{
-			sql: `RESYNC INDEX ON person something`,
 			err: "Found `something` but expected `EOF, ;`",
 		},
 	}

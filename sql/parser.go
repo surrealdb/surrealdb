@@ -116,7 +116,7 @@ func (p *Parser) ParseSingle() (Statement, error) {
 		explain = true
 	}
 
-	tok, _, err := p.shouldBe(USE, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, RESYNC, REMOVE)
+	tok, _, err := p.shouldBe(USE, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, REMOVE)
 
 	switch tok {
 
@@ -147,8 +147,6 @@ func (p *Parser) ParseSingle() (Statement, error) {
 
 	case DEFINE:
 		return p.parseDefineStatement(explain)
-	case RESYNC:
-		return p.parseResyncStatement(explain)
 	case REMOVE:
 		return p.parseRemoveStatement(explain)
 
