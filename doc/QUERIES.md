@@ -2,6 +2,18 @@
 
 This document describes example SQL queries which can be used to query the database.
 
+### TABLE
+
+```sql
+/* Define the table */
+DEFINE TABLE person
+```
+
+```sql
+/* Remove the table */
+REMOVE TABLE person
+```
+
 ### FIELD
 
 ```sql
@@ -34,7 +46,20 @@ REMOVE FIELD name ON person
 DEFINE INDEX sortable ON person COLUMNS name -- Define a simple index
 DEFINE INDEX sortable ON person COLUMNS firstname, lastname -- Define a compound index
 DEFINE INDEX sortable ON person COLUMNS firstname, lastname, emails.*.value -- Define a multi compound index
-DEFINE INDEX sortable ON person COLUMNS emails.*.value UNIQUE -- Define a unique index
+DEFINE INDEX sortable ON person COLUMNS uuid UNIQUE -- Define a unique index
+```
+
+```sql
+/* Remove the index definition */
+REMOVE INDEX sortable ON person
+```
+
+### ACTION
+
+```sql
+/* Example of defining a custom index */
+LIVE SELECT * FROM person -- Define a simple index
+LIVE SELECT * FROM person WHERE age > 18 -- ... with a conditional clause
 ```
 
 ```sql
