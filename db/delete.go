@@ -105,7 +105,7 @@ func delete(doc *item.Doc, ast *sql.DeleteStatement) (out interface{}, err error
 
 	}
 
-	out = doc.Yield(ast.Echo, sql.ID)
+	out = doc.Yield(ast.Echo, sql.NONE)
 
 	return
 
