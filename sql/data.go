@@ -94,7 +94,7 @@ func (p *Parser) parseDiff() (exp []Expr, err error) {
 
 	one := &DiffExpression{}
 
-	tok, lit, err := p.shouldBe(JSON, ARRAY)
+	tok, lit, err := p.shouldBe(JSON, ARRAY, PARAM)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
@@ -116,7 +116,7 @@ func (p *Parser) parseMerge() (exp []Expr, err error) {
 
 	one := &MergeExpression{}
 
-	tok, lit, err := p.shouldBe(JSON)
+	tok, lit, err := p.shouldBe(JSON, PARAM)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
@@ -138,7 +138,7 @@ func (p *Parser) parseContent() (exp []Expr, err error) {
 
 	one := &ContentExpression{}
 
-	tok, lit, err := p.shouldBe(JSON)
+	tok, lit, err := p.shouldBe(JSON, PARAM)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
