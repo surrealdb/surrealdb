@@ -75,7 +75,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Post("/sql", func(c *fibre.Context) error {
-		res, err := db.Execute(c, c.Request().Body)
+		res, err := db.Execute(c, c.Request().Body, nil)
 		if err != nil {
 			return err
 		}
@@ -91,30 +91,46 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Get("/key/:class", func(c *fibre.Context) error {
-		sql := db.Prepare("SELECT * FROM ⟨%v⟩", c.Param("class"))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(500)
-		}
-		return output(c, res[0])
+
+		txt := "SELECT * FROM $class"
+
+		res, err := db.Execute(c, txt, map[string]interface{}{
+			"class": sql.NewTable(c.Param("class")),
+		})
+
+		return output(c, err, res)
+
 	})
 
 	s.Post("/key/:class", func(c *fibre.Context) error {
-		sql := db.Prepare("CREATE ⟨%v⟩ CONTENT %v RETURN AFTER", c.Param("class"), string(c.Body()))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(500)
+
+		var data interface{}
+
+		if err := c.Bind(data); err != nil {
+			return fibre.NewHTTPError(422)
 		}
-		return output(c, res[0])
+
+		txt := "CREATE $class CONTENT $data RETURN AFTER"
+
+		res, err := db.Execute(c, txt, map[string]interface{}{
+			"class": sql.NewTable(c.Param("class")),
+			"data":  data,
+		})
+
+		return output(c, err, res)
+
 	})
 
 	s.Delete("/key/:class", func(c *fibre.Context) error {
-		sql := db.Prepare("DELETE FROM ⟨%v⟩", c.Param("class"))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(500)
-		}
-		return output(c, res[0])
+
+		txt := "DELETE FROM $class"
+
+		res, err := db.Execute(c, txt, map[string]interface{}{
+			"class": sql.NewTable(c.Param("class")),
+		})
+
+		return output(c, err, res)
+
 	})
 
 	// --------------------------------------------------
@@ -126,57 +142,96 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Get("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("SELECT * FROM @⟨%v⟩:⟨%v⟩", c.Param("class"), c.Param("id"))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(500)
-		}
-		return output(c, res[0])
+
+		txt := "SELECT * FROM $thing"
+
+		res, err := db.Execute(c, txt, map[string]interface{}{
+			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
+		})
+
+		return output(c, err, res)
+
 	})
 
 	s.Put("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("CREATE @⟨%v⟩:⟨%v⟩ CONTENT %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(500)
+
+		var data interface{}
+
+		if err := c.Bind(data); err != nil {
+			return fibre.NewHTTPError(422)
 		}
-		return output(c, res[0])
+
+		txt := "CREATE $thing CONTENT $data RETURN AFTER"
+
+		res, err := db.Execute(c, txt, map[string]interface{}{
+			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
+			"data":  data,
+		})
+
+		return output(c, err, res)
+
 	})
 
 	s.Post("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("UPDATE @⟨%v⟩:⟨%v⟩ CONTENT %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(500)
+
+		var data interface{}
+
+		if err := c.Bind(data); err != nil {
+			return fibre.NewHTTPError(422)
 		}
-		return output(c, res[0])
+
+		txt := "UPDATE $thing CONTENT $data RETURN AFTER"
+
+		res, err := db.Execute(c, txt, map[string]interface{}{
+			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
+			"data":  data,
+		})
+
+		return output(c, err, res)
+
 	})
 
 	s.Patch("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("MODIFY @⟨%v⟩:⟨%v⟩ DIFF %v RETURN AFTER", c.Param("class"), c.Param("id"), string(c.Body()))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(500)
+
+		var data interface{}
+
+		if err := c.Bind(data); err != nil {
+			return fibre.NewHTTPError(422)
 		}
-		return output(c, res[0])
+
+		txt := "MODIFY $thing DIFF $data RETURN AFTER"
+
+		res, err := db.Execute(c, txt, map[string]interface{}{
+			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
+			"data":  data,
+		})
+
+		return output(c, err, res)
+
 	})
 
 	s.Trace("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("SELECT HISTORY FROM @⟨%v⟩:⟨%v⟩", c.Param("class"), c.Param("id"))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(500)
-		}
-		return output(c, res[0])
+
+		txt := "SELECT HISTORY FROM $thing"
+
+		res, err := db.Execute(c, txt, map[string]interface{}{
+			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
+		})
+
+		return output(c, err, res)
+
 	})
 
 	s.Delete("/key/:class/:id", func(c *fibre.Context) error {
-		sql := db.Prepare("DELETE @⟨%v⟩:⟨%v⟩", c.Param("class"), c.Param("id"))
-		res, err := db.Execute(c, sql)
-		if err != nil {
-			return fibre.NewHTTPError(500)
-		}
-		return output(c, res[0])
+
+		txt := "DELETE $thing"
+
+		res, err := db.Execute(c, txt, map[string]interface{}{
+			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
+		})
+
+		return output(c, err, res)
+
 	})
 
 }

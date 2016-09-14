@@ -17,40 +17,57 @@ package web
 import (
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/db"
+	"github.com/abcum/surreal/sql"
 )
 
 type rpc struct{}
 
-func (r *rpc) Sql(c *fibre.Context, sql string) (interface{}, error) {
-	return db.Execute(c, sql)
+func (r *rpc) Sql(c *fibre.Context, sql string, vars map[string]interface{}) (interface{}, error) {
+	return db.Execute(c, sql, vars)
 }
 
 func (r *rpc) List(c *fibre.Context, class string) (interface{}, error) {
-	sql := db.Prepare("SELECT * FROM ⟨%v⟩", class)
-	return db.Execute(c, sql)
+	return db.Execute(c, "SELECT * FROM $class", map[string]interface{}{
+		"class": sql.NewTable(class),
+	})
 }
 
-func (r *rpc) Select(c *fibre.Context, class, thing string) (interface{}, error) {
-	sql := db.Prepare("SELECT * FROM @⟨%v⟩:⟨%v⟩", class, thing)
-	return db.Execute(c, sql)
+func (r *rpc) Create(c *fibre.Context, class string, data map[string]interface{}) (interface{}, error) {
+	return db.Execute(c, "CREATE $class CONTENT $data RETURN AFTER", map[string]interface{}{
+		"class": sql.NewTable(class),
+		"data":  data,
+	})
 }
 
-func (r *rpc) Create(c *fibre.Context, class, thing, data string) (interface{}, error) {
-	sql := db.Prepare("CREATE @⟨%v⟩:⟨%v⟩ CONTENT %v RETURN AFTER", class, thing, data)
-	return db.Execute(c, sql)
+func (r *rpc) Select(c *fibre.Context, class string, thing interface{}) (interface{}, error) {
+	return db.Execute(c, "SELECT * FROM $thing", map[string]interface{}{
+		"thing": sql.NewThing(class, thing),
+	})
 }
 
-func (r *rpc) Update(c *fibre.Context, class, thing, data string) (interface{}, error) {
-	sql := db.Prepare("UPDATE @⟨%v⟩:⟨%v⟩ CONTENT %v RETURN AFTER", class, thing, data)
-	return db.Execute(c, sql)
+func (r *rpc) Insert(c *fibre.Context, class string, thing interface{}, data map[string]interface{}) (interface{}, error) {
+	return db.Execute(c, "INSERT $thing CONTENT $data RETURN AFTER", map[string]interface{}{
+		"thing": sql.NewThing(class, thing),
+		"data":  data,
+	})
 }
 
-func (r *rpc) Modify(c *fibre.Context, class, thing, data string) (interface{}, error) {
-	sql := db.Prepare("MODIFY @⟨%v⟩:⟨%v⟩ DIFF %v RETURN DIFF", class, thing, data)
-	return db.Execute(c, sql)
+func (r *rpc) Upsert(c *fibre.Context, class string, thing interface{}, data map[string]interface{}) (interface{}, error) {
+	return db.Execute(c, "UPSERT $thing CONTENT $data RETURN AFTER", map[string]interface{}{
+		"thing": sql.NewThing(class, thing),
+		"data":  data,
+	})
 }
 
-func (r *rpc) Delete(c *fibre.Context, class, thing string) (interface{}, error) {
-	sql := db.Prepare("DELETE @⟨%v⟩:⟨%v⟩", class, thing)
-	return db.Execute(c, sql)
+func (r *rpc) Modify(c *fibre.Context, class string, thing interface{}, data map[string]interface{}) (interface{}, error) {
+	return db.Execute(c, "MODIFY $thing DIFF $data RETURN DIFF", map[string]interface{}{
+		"thing": sql.NewThing(class, thing),
+		"data":  data,
+	})
+}
+
+func (r *rpc) Delete(c *fibre.Context, class string, thing interface{}) (interface{}, error) {
+	return db.Execute(c, "DELETE $thing", map[string]interface{}{
+		"thing": sql.NewThing(class, thing),
+	})
 }

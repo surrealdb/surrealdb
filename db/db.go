@@ -60,19 +60,10 @@ func Exit() {
 
 }
 
-// Prepare prepares a query for parameterization for future execution
-func Prepare(sql string, param ...interface{}) string {
-
-	// IMPORTANT Need to improve database paramaterization
-
-	return fmt.Sprintf(sql, param...)
-
-}
-
 // Execute parses the query and executes it against the data layer
-func Execute(ctx *fibre.Context, txt interface{}) (out []interface{}, err error) {
+func Execute(ctx *fibre.Context, txt interface{}, vars map[string]interface{}) (out []*Response, err error) {
 
-	ast, err := sql.Parse(ctx, txt)
+	ast, err := sql.Parse(ctx, txt, vars)
 	if err != nil {
 		return
 	}
