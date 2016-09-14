@@ -26,15 +26,16 @@ Surreal is a scalable, distributed, strongly-consistent, collaborative document-
 	- End-user multi-tenancy authentication
 - Flexible **data manipulation** queries
 	- Automatic creation of tables
-	- Sceha-less or schema-full tables
+	- Schema-less or schema-full tables
 	- Automatic data field sanitization
-	- Mandatory, and readonly data fields
+	- Mandatory, readonly, and validated data fields
 	- Define embedded fields, and object arrays
 - Advanced customisable **indexing** support
-	- Single-column indexs
-	- Multiple-column indexes
+	- Single-column indexes
+    - Multiple-column indexes
+    - Multiple-compound indexes
 	- Indexing of embedded data fields
-	- LUA/JS scripting for custom indexes
+	- JS/LUA scripting for custom indexes
 	- Full-text indexing of all data by default
 - **Collaborative** editing and manipulation of data
 	- Live realtime queries
