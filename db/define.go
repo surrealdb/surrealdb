@@ -17,6 +17,7 @@ package db
 import (
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
 	"github.com/abcum/surreal/util/pack"
 )
@@ -195,6 +196,24 @@ func executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out
 		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name}
 		if err := txn.Put(ikey.Encode(), pack.ToBINC(ast)); err != nil {
 			return nil, err
+		}
+
+		// Remove all index data
+		dbeg := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: keys.Prefix, FD: keys.Ignore}
+		dend := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: keys.Suffix, FD: keys.Ignore}
+		if err := txn.RDel(dbeg.Encode(), dend.Encode(), 0); err != nil {
+			return nil, err
+		}
+
+		// Fetch the items
+		ibeg := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, ID: keys.Prefix}
+		iend := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, ID: keys.Suffix}
+		kvs, _ := txn.RGet(ibeg.Encode(), iend.Encode(), 0)
+		for _, kv := range kvs {
+			doc := item.New(kv, txn, nil)
+			if err := doc.StoreIndex(); err != nil {
+				return nil, err
+			}
 		}
 
 	}
