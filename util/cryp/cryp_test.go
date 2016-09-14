@@ -62,8 +62,9 @@ func TestCorrupt(t *testing.T) {
 	enc := []byte("corrupt")
 
 	Convey("Cryptography should fail", t, func() {
-		dec, _ := Decrypt(key, enc)
+		dec, err := Decrypt(key, enc)
 		Convey("Decrypt", func() {
+			So(err, ShouldNotBeNil)
 			So(dec, ShouldResemble, enc)
 		})
 	})

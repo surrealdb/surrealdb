@@ -17,6 +17,7 @@ package cryp
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"errors"
 	"github.com/abcum/surreal/util/rand"
 )
 
@@ -53,7 +54,7 @@ func Decrypt(key []byte, src []byte) (dst []byte, err error) {
 
 	// Corrupt
 	if len(src) < 12 {
-		return src, nil
+		return src, errors.New("Invalid data")
 	}
 
 	// Initiate AES
