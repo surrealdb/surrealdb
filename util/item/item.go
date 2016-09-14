@@ -56,7 +56,7 @@ func New(kv kvs.KV, txn kvs.TX, key *keys.Thing) (this *Doc) {
 		this.current = data.New().Decode(kv.Val())
 	}
 
-	this.id = fmt.Sprintf("@%v:%v", this.key.TB, this.key.ID)
+	this.id = fmt.Sprintf("%v", this.key.ID)
 
 	return this
 

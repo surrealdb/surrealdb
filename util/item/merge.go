@@ -44,20 +44,20 @@ func (this *Doc) Merge(data []sql.Expr) (err error) {
 		}
 	}
 
-	// Set data
-	this.current.Set(this.id, "id")
-	this.current.Set(this.id, "data", "id")
-
-	// Set time
-	this.current.New(time.Now(), "time", "created")
-	this.current.Set(time.Now(), "time", "updated")
-
-	// Set meta
-	this.current.Set(this.key.TB, "meta", "table")
-	this.current.Set(this.key.ID, "meta", "ident")
-
 	// Set fields
+	err = this.setFld()
 	err = this.mrgFld()
+	err = this.setFld()
+
+	return
+
+}
+
+func (this *Doc) setFld() (err error) {
+
+	// Set data
+	this.current.Set(this.key.ID, "id")
+	this.current.Set(this.key.TB, "tb")
 
 	return
 
@@ -171,6 +171,8 @@ func getMrgItemRHS(doc *data.Doc, expr sql.Expr) interface{} {
 	case bool, int64, float64, string:
 		return val
 	case []interface{}, map[string]interface{}:
+		return val
+	case *sql.Thing:
 		return val
 	case *sql.Ident:
 		return doc.Get(val.ID).Data()

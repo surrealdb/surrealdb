@@ -15,8 +15,6 @@
 package item
 
 import (
-	"fmt"
-
 	"github.com/abcum/surreal/sql"
 )
 
@@ -28,7 +26,7 @@ func (this *Doc) Yield(output sql.Token, fallback sql.Token) (res interface{}) {
 
 	switch output {
 	case sql.ID:
-		res = fmt.Sprintf("@%v:%v", this.key.TB, this.key.ID)
+		res = this.id
 	case sql.DIFF:
 		res = this.diff().Data()
 	case sql.AFTER:
