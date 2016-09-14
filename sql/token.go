@@ -107,7 +107,6 @@ const (
 	BY
 	CANCEL
 	CODE
-	COLLECT
 	COLUMNS
 	COMMIT
 	CONTAINS
@@ -268,7 +267,6 @@ var tokens = [...]string{
 	BY:              "BY",
 	CANCEL:          "CANCEL",
 	CODE:            "CODE",
-	COLLECT:         "COLLECT",
 	COLUMNS:         "COLUMNS",
 	COMMIT:          "COMMIT",
 	CONTAINS:        "CONTAINS",
