@@ -109,7 +109,7 @@ func (p *Parser) declare(tok Token, lit string) (interface{}, error) {
 		return &Table{lit}, nil
 
 	case NOW:
-		return time.Now(), nil
+		return time.Now().UTC(), nil
 
 	case DATE:
 		return time.Parse("2006-01-02", lit)

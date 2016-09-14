@@ -593,12 +593,20 @@ func (s *Scanner) scanString(chp ...rune) (tok Token, lit string, val interface{
 		return DURATION, buf.String(), val
 	}
 
-	if val, err := time.Parse("2006-01-02", buf.String()); err == nil {
-		return DATE, buf.String(), val
+	if val, err := time.Parse(RFCDate, buf.String()); err == nil {
+		return DATE, buf.String(), val.UTC()
 	}
 
-	if val, err := time.Parse(time.RFC3339, buf.String()); err == nil {
-		return TIME, buf.String(), val
+	if val, err := time.Parse(RFCTime, buf.String()); err == nil {
+		return TIME, buf.String(), val.UTC()
+	}
+
+	if val, err := time.Parse(RFCNorm, buf.String()); err == nil {
+		return TIME, buf.String(), val.UTC()
+	}
+
+	if val, err := time.Parse(RFCText, buf.String()); err == nil {
+		return TIME, buf.String(), val.UTC()
 	}
 
 	return tok, buf.String(), val
