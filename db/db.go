@@ -172,8 +172,6 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 
 		case *sql.DefineIndexStatement:
 			res, err = executeDefineIndexStatement(txn, stm)
-		case *sql.ResyncIndexStatement:
-			res, err = executeResyncIndexStatement(txn, stm)
 		case *sql.RemoveIndexStatement:
 			res, err = executeRemoveIndexStatement(txn, stm)
 
