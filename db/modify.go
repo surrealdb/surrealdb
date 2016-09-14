@@ -77,15 +77,15 @@ func executeModifyStatement(txn kvs.TX, ast *sql.ModifyStatement) (out []interfa
 
 func modify(doc *item.Doc, ast *sql.ModifyStatement) (out interface{}, err error) {
 
-	if !doc.Allow("UPDATE") {
-		return
-	}
-
 	if !doc.Check(ast.Cond) {
 		return
 	}
 
 	if err = doc.Merge(ast.Diff); err != nil {
+		return
+	}
+
+	if !doc.Allow("UPDATE") {
 		return
 	}
 

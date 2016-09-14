@@ -70,12 +70,12 @@ func executeSelectStatement(txn kvs.TX, ast *sql.SelectStatement) (out []interfa
 
 func detect(doc *item.Doc, ast *sql.SelectStatement) (out interface{}, err error) {
 
-	if !doc.Allow("SELECT") {
-		return nil, nil
-	}
-
 	if !doc.Check(ast.Cond) {
 		return
+	}
+
+	if !doc.Allow("SELECT") {
+		return nil, nil
 	}
 
 	out = doc.Blaze(ast)

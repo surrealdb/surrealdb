@@ -35,7 +35,8 @@ func (this *Doc) Allow(cond string) (val bool) {
 
 				vm := otto.New()
 
-				vm.Set("doc", this.current.Copy())
+				vm.Set("data", this.initial.Copy())
+				vm.Set("edit", this.current.Copy())
 
 				ret, err := vm.Run("(function() { " + rule.Code + " })()")
 				if err != nil {
@@ -56,7 +57,8 @@ func (this *Doc) Allow(cond string) (val bool) {
 				vm := lua.NewState()
 				defer vm.Close()
 
-				vm.SetGlobal("doc", toLUA(vm, this.current.Copy()))
+				vm.SetGlobal("data", toLUA(vm, this.initial.Copy()))
+				vm.SetGlobal("edit", toLUA(vm, this.current.Copy()))
 
 				if err := vm.DoString(rule.Code); err != nil {
 					return false

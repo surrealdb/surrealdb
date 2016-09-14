@@ -77,11 +77,11 @@ func executeDeleteStatement(txn kvs.TX, ast *sql.DeleteStatement) (out []interfa
 
 func delete(doc *item.Doc, ast *sql.DeleteStatement) (out interface{}, err error) {
 
-	if !doc.Allow("DELETE") {
+	if !doc.Check(ast.Cond) {
 		return
 	}
 
-	if !doc.Check(ast.Cond) {
+	if !doc.Allow("DELETE") {
 		return
 	}
 
