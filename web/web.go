@@ -46,7 +46,7 @@ func Setup(opts *cnf.Options) (err error) {
 	// Check body size
 
 	s.Use(mw.Size(&mw.SizeOpts{
-		AllowedLength: 2000000,
+		AllowedLength: 1 << 22,
 	}))
 
 	// Check body type
