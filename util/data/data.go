@@ -57,13 +57,13 @@ func (d *Doc) JSON() (data []byte) {
 
 // Encode encodes the data object to a byte slice.
 func (d *Doc) Encode() (dst []byte) {
-	dst = pack.ToPACK(d.data)
+	dst = pack.ToBINC(d.data)
 	return
 }
 
 // Decode decodes the byte slice into a data object.
 func (d *Doc) Decode(src []byte) *Doc {
-	pack.FromPACK(src, d.data)
+	pack.FromBINC(src, d.data)
 	return d
 }
 
