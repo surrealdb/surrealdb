@@ -325,13 +325,33 @@ func (s *scanner) scanCommentMultiple(chp ...rune) (tok Token, lit string, val i
 
 func (s *scanner) scanParams(chp ...rune) (tok Token, lit string, val interface{}) {
 
-	tok, lit, val = s.scanIdent(chp...)
+	tok, lit, _ = s.scanIdent()
 
-	if s.p.is(tok, IDENT) {
-		return PARAM, lit, nil
+	if s.p.is(tok, REGION) {
+		return ILLEGAL, lit, val
 	}
 
-	return
+	if s.p.is(tok, ILLEGAL) {
+		return ILLEGAL, lit, val
+	}
+
+	return PARAM, lit, val
+
+}
+
+func (s *scanner) scanQuoted(chp ...rune) (tok Token, lit string, val interface{}) {
+
+	tok, lit, _ = s.scanString(chp...)
+
+	if s.p.is(tok, REGION) {
+		return ILLEGAL, lit, val
+	}
+
+	if s.p.is(tok, ILLEGAL) {
+		return ILLEGAL, lit, val
+	}
+
+	return IDENT, lit, val
 
 }
 
@@ -393,28 +413,29 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 	for {
 		if ch := s.next(); ch == eof {
 			break
-		} else if isLetter(ch) {
+		} else if isThingChar(ch) {
 			tok, lit, _ = s.scanIdent(ch)
 			beg.WriteString(lit)
-		} else if isNumber(ch) {
-			tok, lit, _ = s.scanNumber(ch)
-			beg.WriteString(lit)
+			break
 		} else if ch == '`' {
 			tok, lit, _ = s.scanQuoted(ch)
 			beg.WriteString(lit)
+			break
 		} else if ch == '{' {
 			tok, lit, _ = s.scanQuoted(ch)
 			beg.WriteString(lit)
+			break
 		} else if ch == '⟨' {
 			tok, lit, _ = s.scanQuoted(ch)
 			beg.WriteString(lit)
+			break
 		} else {
 			s.undo()
 			break
 		}
 	}
 
-	if beg.Len() < 1 {
+	if beg.Len() < 1 || tok == ILLEGAL {
 		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
 	}
 
@@ -435,42 +456,33 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 	for {
 		if ch := s.next(); ch == eof {
 			break
-		} else if isLetter(ch) {
+		} else if isThingChar(ch) {
 			tok, lit, _ = s.scanIdent(ch)
 			end.WriteString(lit)
-		} else if isNumber(ch) {
-			tok, lit, _ = s.scanNumber(ch)
-			end.WriteString(lit)
+			break
 		} else if ch == '`' {
 			tok, lit, _ = s.scanQuoted(ch)
-			beg.WriteString(lit)
+			end.WriteString(lit)
+			break
 		} else if ch == '{' {
 			tok, lit, _ = s.scanQuoted(ch)
 			end.WriteString(lit)
+			break
 		} else if ch == '⟨' {
 			tok, lit, _ = s.scanQuoted(ch)
 			end.WriteString(lit)
+			break
 		} else {
 			s.undo()
 			break
 		}
 	}
 
-	if end.Len() < 1 {
+	if end.Len() < 1 || tok == ILLEGAL {
 		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
 	}
 
-	val = &Thing{
-		TB: beg.String(),
-		ID: end.String(),
-	}
-
-	switch tok {
-	case DATE, TIME, NUMBER, DOUBLE:
-		val.(*Thing).ID, _ = s.p.declare(tok, end.String())
-	case REGION:
-		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
-	}
+	val = NewThing(beg.String(), end.String())
 
 	// Otherwise return as a regular thing.
 	return THING, buf.String() + beg.String() + mid.String() + end.String(), val
@@ -513,18 +525,6 @@ func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{
 	}
 
 	return tok, buf.String(), nil
-
-}
-
-func (s *Scanner) scanQuoted(chp ...rune) (tok Token, lit string, val interface{}) {
-
-	tok, lit, val = s.scanString(chp...)
-
-	if s.p.is(tok, STRING) {
-		return IDENT, lit, nil
-	}
-
-	return
 
 }
 
@@ -758,6 +758,11 @@ func isLetter(ch rune) bool {
 // isIdentChar returns true if the rune is allowed in a IDENT.
 func isIdentChar(ch rune) bool {
 	return isLetter(ch) || isNumber(ch) || ch == '.' || ch == '_' || ch == '*'
+}
+
+// isThingChar returns true if the rune is allowed in a THING.
+func isThingChar(ch rune) bool {
+	return isLetter(ch) || isNumber(ch) || ch == '_'
 }
 
 // eof represents a marker rune for the end of the reader.

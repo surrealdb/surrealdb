@@ -18,9 +18,47 @@ import (
 	"regexp"
 )
 
+func (p *parser) parseWhat() (mul []Expr, err error) {
 
-	_, lit, err := p.shouldBe(IDENT, NUMBER, DOUBLE, DATE, TIME)
+	for {
+
+		tok, lit, err := p.shouldBe(IDENT, NUMBER, DOUBLE, THING, PARAM)
+		if err != nil {
+			return nil, &ParseError{Found: lit, Expected: []string{"table name or record id"}}
+		}
+
+		if p.is(tok, IDENT, NUMBER, DOUBLE) {
+			one, _ := p.declare(TABLE, lit)
+			mul = append(mul, one)
+		}
+
+		if p.is(tok, THING) {
+			one, _ := p.declare(THING, lit)
+			mul = append(mul, one)
+		}
+
+		if p.is(tok, PARAM) {
+			one, err := p.declare(PARAM, lit)
+			if err != nil {
+				return nil, err
+			}
+			mul = append(mul, one)
+		}
+
+		// If the next token is not a comma then break the loop.
+		if _, _, exi := p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
+
+	return
+
+}
+
 func (p *parser) parseName() (string, error) {
+
+	_, lit, err := p.shouldBe(IDENT, NUMBER, DOUBLE)
 	if err != nil {
 		return string(""), &ParseError{Found: lit, Expected: []string{"name"}}
 	}

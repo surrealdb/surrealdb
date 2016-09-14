@@ -270,6 +270,9 @@ func Test_Parse_Queries_Explain(t *testing.T) {
 
 func Test_Parse_Queries_Select(t *testing.T) {
 
+	date, _ := time.Parse("2006-01-02", "1987-06-22")
+	nano, _ := time.Parse(time.RFC3339, "1987-06-22T08:30:30.511Z")
+
 	var tests = []tester{
 		{
 			sql: `SELECT`,
@@ -326,6 +329,41 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			err: "Found `:` but expected `EOF, ;`",
 		},
 		{
+			sql: "SELECT * FROM 111",
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"111"}},
+			}}},
+		},
+		{
+			sql: "SELECT * FROM `111`",
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"111"}},
+			}}},
+		},
+		{
+			sql: "SELECT * FROM `2006-01-02`",
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"2006-01-02"}},
+			}}},
+		},
+		{
+			sql: "SELECT * FROM `2006-01-02T15:04:05+07:00`",
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"2006-01-02T15:04:05+07:00"}},
+			}}},
+		},
+		{
+			sql: "SELECT * FROM `2006-01-02T15:04:05.999999999+07:00`",
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"2006-01-02T15:04:05.999999999+07:00"}},
+			}}},
+		},
+		{
 			sql: `SELECT * FROM person`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
@@ -340,7 +378,28 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			}}},
 		},
 		{
+			sql: `SELECT * FROM @111:1a`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "111", ID: "1a"}},
+			}}},
+		},
+		{
 			sql: `SELECT * FROM @person:1a`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: "1a"}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:⟨1a⟩`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: "1a"}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:{1a}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Thing{TB: "person", ID: "1a"}},
@@ -354,7 +413,35 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			}}},
 		},
 		{
+			sql: `SELECT * FROM @person:⟨123456⟩`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: float64(123456)}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:{123456}`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: float64(123456)}},
+			}}},
+		},
+		{
 			sql: `SELECT * FROM @person:123.456`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: float64(123.456)}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:⟨123.456⟩`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: float64(123.456)}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:{123.456}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Thing{TB: "person", ID: float64(123.456)}},
@@ -379,6 +466,34 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Thing{TB: "person", ID: "123.456.789.012"}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:⟨1987-06-22⟩`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: date}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:{1987-06-22}`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: date}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:⟨1987-06-22T08:30:30.511Z⟩`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: nano}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM @person:{1987-06-22T08:30:30.511Z}`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Thing{TB: "person", ID: nano}},
 			}}},
 		},
 		{
@@ -450,6 +565,10 @@ func Test_Parse_Queries_Select(t *testing.T) {
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Thing{TB: "email addresses", ID: "tobie+spam@abcum.com"}},
 			}}},
+		},
+		{
+			sql: `SELECT * FROM @{person}test:id`,
+			err: "Found `@person` but expected `table name or record id`",
 		},
 		{
 			sql: `SELECT * FROM @⟨email addresses⟩:⟨this\qis\nodd⟩`,
@@ -1202,6 +1321,18 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			err: "Found `` but expected `name`",
 		},
 		{
+			sql: `DEFINE TABLE 111`,
+			res: &Query{Statements: []Statement{&DefineTableStatement{
+				What: []string{"111"},
+			}}},
+		},
+		{
+			sql: `DEFINE TABLE 111.111`,
+			res: &Query{Statements: []Statement{&DefineTableStatement{
+				What: []string{"111.111"},
+			}}},
+		},
+		{
 			sql: `DEFINE TABLE person`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
 				What: []string{"person"},
@@ -1730,10 +1861,26 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 			err: "Found `` but expected `name`",
 		},
 		{
+			sql: `REMOVE TABLE 111`,
+			res: &Query{Statements: []Statement{&RemoveTableStatement{
+				What: []string{"111"},
+			}}},
+		},
+		{
+			sql: `REMOVE TABLE 111.111`,
+			res: &Query{Statements: []Statement{&RemoveTableStatement{
+				What: []string{"111.111"},
+			}}},
+		},
+		{
 			sql: `REMOVE TABLE person`,
 			res: &Query{Statements: []Statement{&RemoveTableStatement{
 				What: []string{"person"},
 			}}},
+		},
+		{
+			sql: `REMOVE TABLE person something`,
+			err: "Found `something` but expected `EOF, ;`",
 		},
 		// ----------------------------------------------------------------------
 		{
