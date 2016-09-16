@@ -21,5 +21,5 @@ func (x extSqlAsc) ReadExt(dst interface{}, src []byte) {
 }
 
 func (x extSqlAsc) WriteExt(src interface{}) (dst []byte) {
-	return []byte("ASC")
+	return []byte{0x00}
 }
