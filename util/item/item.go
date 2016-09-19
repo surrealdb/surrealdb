@@ -75,7 +75,7 @@ func (this *Doc) getRules() {
 		key := new(keys.RU)
 		key.Decode(kv.Key())
 		if str, ok := key.RU.(string); ok {
-			pack.FromBINC(kv.Val(), &rul)
+			pack.Decode(kv.Val(), &rul)
 			this.rules[str] = &rul
 		}
 	}
@@ -92,7 +92,7 @@ func (this *Doc) getFields() {
 
 	for _, kv := range rng {
 		var fld sql.DefineFieldStatement
-		pack.FromBINC(kv.Val(), &fld)
+		pack.Decode(kv.Val(), &fld)
 		this.fields = append(this.fields, &fld)
 	}
 
@@ -108,7 +108,7 @@ func (this *Doc) getIndexs() {
 
 	for _, kv := range rng {
 		var idx sql.DefineIndexStatement
-		pack.FromBINC(kv.Val(), &idx)
+		pack.Decode(kv.Val(), &idx)
 		this.indexs = append(this.indexs, &idx)
 	}
 

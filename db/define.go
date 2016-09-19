@@ -98,7 +98,7 @@ func executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesStatement) (out
 
 			// Set the field definition
 			rkey := &keys.RU{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, RU: RU}
-			if err := txn.Put(rkey.Encode(), pack.ToBINC(ast)); err != nil {
+			if err := txn.Put(rkey.Encode(), pack.Encode(ast)); err != nil {
 				return nil, err
 			}
 
@@ -147,7 +147,7 @@ func executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out
 
 		// Set the field definition
 		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, FD: ast.Name}
-		if err := txn.Put(fkey.Encode(), pack.ToBINC(ast)); err != nil {
+		if err := txn.Put(fkey.Encode(), pack.Encode(ast)); err != nil {
 			return nil, err
 		}
 
@@ -194,7 +194,7 @@ func executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out
 
 		// Set the index definition
 		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name}
-		if err := txn.Put(ikey.Encode(), pack.ToBINC(ast)); err != nil {
+		if err := txn.Put(ikey.Encode(), pack.Encode(ast)); err != nil {
 			return nil, err
 		}
 
