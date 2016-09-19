@@ -1313,7 +1313,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `DEFINE`,
-			err: "Found `` but expected `RULES, TABLE, FIELD, INDEX`",
+			err: "Found `` but expected `TABLE, RULES, FIELD, INDEX`",
 		},
 		// ----------------------------------------------------------------------
 		{
@@ -1853,7 +1853,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `REMOVE`,
-			err: "Found `` but expected `RULES, TABLE, FIELD, INDEX`",
+			err: "Found `` but expected `TABLE, RULES, FIELD, INDEX`",
 		},
 		// ----------------------------------------------------------------------
 		{
