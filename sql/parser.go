@@ -121,12 +121,15 @@ func (p *parser) parseSingle() (Statement, error) {
 		explain = true
 	}
 
-	tok, _, err := p.shouldBe(USE, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, REMOVE)
+	tok, _, err := p.shouldBe(USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, REMOVE)
 
 	switch tok {
 
 	case USE:
 		return p.parseUseStatement(explain)
+
+	case INFO:
+		return p.parseInfoStatement(explain)
 
 	case BEGIN:
 		return p.parseBeginStatement(explain)

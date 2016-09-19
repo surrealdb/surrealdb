@@ -140,6 +140,9 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 		case *sql.UseStatement:
 			continue
 
+		case *sql.InfoStatement:
+			res, err = executeInfoStatement(txn, stm)
+
 		case *sql.SelectStatement:
 			res, err = executeSelectStatement(txn, stm)
 		case *sql.CreateStatement:

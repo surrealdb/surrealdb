@@ -136,6 +136,7 @@ const (
 	ID
 	IN
 	INDEX
+	INFO
 	INSERT
 	INTO
 	IS
@@ -296,6 +297,7 @@ var tokens = [...]string{
 	ID:              "ID",
 	IN:              "IN",
 	INDEX:           "INDEX",
+	INFO:            "INFO",
 	INSERT:          "INSERT",
 	INTO:            "INTO",
 	IS:              "IS",

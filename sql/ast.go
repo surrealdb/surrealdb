@@ -36,16 +36,6 @@ type Statement interface{}
 type Statements []Statement
 
 // --------------------------------------------------
-// Use
-// --------------------------------------------------
-
-// UseStatement represents a SQL USE statement.
-type UseStatement struct {
-	NS string // Namespace
-	DB string // Database
-}
-
-// --------------------------------------------------
 // Trans
 // --------------------------------------------------
 
@@ -57,6 +47,29 @@ type CancelStatement struct{}
 
 // UseStatement represents a SQL COMMIT TRANSACTION statement.
 type CommitStatement struct{}
+
+// --------------------------------------------------
+// Use
+// --------------------------------------------------
+
+// UseStatement represents a SQL USE statement.
+type UseStatement struct {
+	NS string `codec:"-"`
+	DB string `codec:"-"`
+}
+
+// --------------------------------------------------
+// Info
+// --------------------------------------------------
+
+// InfoStatement represents an SQL INFO statement.
+type InfoStatement struct {
+	EX   bool   `codec:"-"`
+	KV   string `codec:"-"`
+	NS   string `codec:"-"`
+	DB   string `codec:"-"`
+	What string `codec:"-"`
+}
 
 // --------------------------------------------------
 // Normal
