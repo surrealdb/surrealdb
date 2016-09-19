@@ -227,7 +227,7 @@ func (p *parser) parseBoolean() (bool, error) {
 
 func (p *parser) parseDefault() (interface{}, error) {
 
-	tok, lit, err := p.shouldBe(NULL, NOW, DATE, TIME, TRUE, FALSE, NUMBER, DOUBLE, STRING, REGION, IDENT, ARRAY, JSON)
+	tok, lit, err := p.shouldBe(NULL, NOW, DATE, TIME, TRUE, FALSE, NUMBER, DOUBLE, STRING, REGION, IDENT, THING, ARRAY, JSON)
 	if err != nil {
 		return nil, err
 	}
