@@ -35,7 +35,6 @@ func init() {
 
 	// GOB
 	gob.Register(time.Time{})
-	jh.Canonical = true
 	gob.Register([]interface{}{})
 	gob.Register(map[string]interface{}{})
 	gob.Register(sql.Null{})
@@ -65,6 +64,7 @@ func init() {
 
 	// JSON
 
+	jh.Canonical = false
 	jh.CheckCircularRef = false
 	jh.AsSymbols = codec.AsSymbolDefault
 	jh.SliceType = reflect.TypeOf([]interface{}(nil))
@@ -72,7 +72,7 @@ func init() {
 
 	// CBOR
 
-	ch.Canonical = true
+	ch.Canonical = false
 	ch.CheckCircularRef = false
 	ch.AsSymbols = codec.AsSymbolDefault
 	ch.SliceType = reflect.TypeOf([]interface{}(nil))
@@ -80,7 +80,7 @@ func init() {
 
 	// BINC
 
-	bh.Canonical = true
+	bh.Canonical = false
 	bh.CheckCircularRef = false
 	bh.AsSymbols = codec.AsSymbolDefault
 	bh.SliceType = reflect.TypeOf([]interface{}(nil))
@@ -103,7 +103,7 @@ func init() {
 	// PACK
 
 	mh.WriteExt = true
-	mh.Canonical = true
+	mh.Canonical = false
 	mh.RawToString = true
 	mh.CheckCircularRef = false
 	mh.AsSymbols = codec.AsSymbolDefault
