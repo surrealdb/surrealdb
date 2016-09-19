@@ -128,13 +128,23 @@ func init() {
 
 // Encode encodes a data object into a GOB.
 func Encode(src interface{}) (dst []byte) {
+	return ToGOB(src)
+}
+
+// Decode decodes a GOB into a data object.
+func Decode(src []byte, dst interface{}) {
+	FromGOB(src, dst)
+}
+
+// ToGOB encodes a data object into a GOB.
+func ToGOB(src interface{}) (dst []byte) {
 	buf := bytes.NewBuffer(nil)
 	gob.NewEncoder(buf).Encode(src)
 	return buf.Bytes()
 }
 
-// Decode decodes a GOB into a data object.
-func Decode(src []byte, dst interface{}) {
+// FromGOB decodes a GOB into a data object.
+func FromGOB(src []byte, dst interface{}) {
 	buf := bytes.NewBuffer(src)
 	gob.NewDecoder(buf).Decode(dst)
 }
