@@ -44,7 +44,6 @@ const (
 	DURATION // 13h
 	PARAM    // $1
 
-	EAT       // @
 	DOT       // .
 	COMMA     // ,
 	QMARK     // ?
@@ -213,7 +212,6 @@ var tokens = [...]string{
 	DURATION: "DURATION",
 	PARAM:    "PARAM",
 
-	EAT:       "@",
 	DOT:       ".",
 	COMMA:     ",",
 	QMARK:     "?",
