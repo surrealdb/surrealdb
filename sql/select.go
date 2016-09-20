@@ -73,12 +73,10 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 
 func (p *parser) parseGroup() (mul []*Group, err error) {
 
-	// Remove the GROUP keyword
 	if _, _, exi := p.mightBe(GROUP); !exi {
 		return nil, nil
 	}
 
-	// Next token might be BY
 	_, _, _ = p.mightBe(BY)
 
 	return
@@ -91,12 +89,10 @@ func (p *parser) parseOrder() (mul []*Order, err error) {
 	var lit string
 	var exi bool
 
-	// Remove the ORDER keyword
 	if _, _, exi := p.mightBe(ORDER); !exi {
 		return nil, nil
 	}
 
-	// Next token might be BY
 	_, _, _ = p.mightBe(BY)
 
 	for {
@@ -115,7 +111,8 @@ func (p *parser) parseOrder() (mul []*Order, err error) {
 
 		tok, lit, exi = p.mightBe(ASC, DESC)
 		if !exi {
-			tok, lit = ASC, "ASC"
+			tok = ASC
+			lit = tok.String()
 		}
 
 		one.Dir, err = p.declare(tok, lit)
@@ -138,12 +135,10 @@ func (p *parser) parseOrder() (mul []*Order, err error) {
 
 func (p *parser) parseLimit() (Expr, error) {
 
-	// Remove the LIMIT keyword
 	if _, _, exi := p.mightBe(LIMIT); !exi {
 		return nil, nil
 	}
 
-	// Next token might be BY
 	_, _, _ = p.mightBe(BY)
 
 	tok, lit, err := p.shouldBe(NUMBER)
@@ -165,34 +160,19 @@ func (p *parser) parseStart() (Expr, error) {
 	// Next token might be AT
 	_, _, _ = p.mightBe(AT)
 
-	// Next token might be @
-	_, _, exi := p.mightBe(EAT)
-
-	if exi == false {
-		val, err := p.parseNumber()
-		if err != nil {
-			return nil, err
-		}
-		return val, nil
+	tok, lit, err := p.shouldBe(NUMBER, THING)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"number or record id"}}
 	}
 
-	if exi == true {
-		p.unscan()
-		val, err := p.parseThing()
-		if err != nil {
-			return nil, err
-		}
-		return val, nil
-	}
-
-	return nil, nil
+	return p.declare(tok, lit)
 
 }
 
 func (p *parser) parseVersion() (Expr, error) {
 
 	// Remove the VERSION keyword
-	if _, _, exi := p.mightBe(VERSION); !exi {
+	if _, _, exi := p.mightBe(VERSION, ON); !exi {
 		return nil, nil
 	}
 
