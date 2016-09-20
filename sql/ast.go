@@ -81,15 +81,15 @@ type SelectStatement struct {
 	KV      string   `codec:"-"`
 	NS      string   `codec:"-"`
 	DB      string   `codec:"-"`
-	Expr    []*Field `codec:"-"`
-	What    []Expr   `codec:"-"`
-	Cond    []Expr   `codec:"-"`
-	Group   []*Group `codec:"-"`
-	Order   []*Order `codec:"-"`
-	Limit   Expr     `codec:"-"`
-	Start   Expr     `codec:"-"`
-	Version Expr     `codec:"-"`
-	Echo    Token    `codec:"-"`
+	Expr    []*Field `codec:"expr"`
+	What    []Expr   `codec:"what"`
+	Cond    []Expr   `codec:"cond"`
+	Group   []*Group `codec:"group"`
+	Order   []*Order `codec:"order"`
+	Limit   Expr     `codec:"limit"`
+	Start   Expr     `codec:"start"`
+	Version Expr     `codec:"version"`
+	Echo    Token    `codec:"echo"`
 }
 
 // CreateStatement represents a SQL CREATE statement.
@@ -98,9 +98,9 @@ type CreateStatement struct {
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
-	What []Expr `codec:"-"`
-	Data []Expr `codec:"-"`
-	Echo Token  `codec:"-"`
+	What []Expr `codec:"what"`
+	Data []Expr `codec:"data"`
+	Echo Token  `codec:"echo"`
 }
 
 // UpdateStatement represents a SQL UPDATE statement.
@@ -109,10 +109,10 @@ type UpdateStatement struct {
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
-	What []Expr `codec:"-"`
-	Data []Expr `codec:"-"`
-	Cond []Expr `codec:"-"`
-	Echo Token  `codec:"-"`
+	What []Expr `codec:"what"`
+	Data []Expr `codec:"data"`
+	Cond []Expr `codec:"cond"`
+	Echo Token  `codec:"echo"`
 }
 
 // ModifyStatement represents a SQL MODIFY statement.
@@ -121,10 +121,10 @@ type ModifyStatement struct {
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
-	What []Expr `codec:"-"`
-	Diff []Expr `codec:"-"`
-	Cond []Expr `codec:"-"`
-	Echo Token  `codec:"-"`
+	What []Expr `codec:"what"`
+	Diff []Expr `codec:"diff"`
+	Cond []Expr `codec:"cond"`
+	Echo Token  `codec:"echo"`
 }
 
 // DeleteStatement represents a SQL DELETE statement.
@@ -133,10 +133,10 @@ type DeleteStatement struct {
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
-	Hard bool   `codec:"-"`
-	What []Expr `codec:"-"`
-	Cond []Expr `codec:"-"`
-	Echo Token  `codec:"-"`
+	Hard bool   `codec:"hard"`
+	What []Expr `codec:"what"`
+	Cond []Expr `codec:"cond"`
+	Echo Token  `codec:"echo"`
 }
 
 // RelateStatement represents a SQL RELATE statement.
@@ -145,24 +145,45 @@ type RelateStatement struct {
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
-	Type []Expr `codec:"-"`
-	From []Expr `codec:"-"`
-	To   []Expr `codec:"-"`
-	Data []Expr `codec:"-"`
-	Echo Token  `codec:"-"`
+	Type []Expr `codec:"type"`
+	From []Expr `codec:"from"`
+	To   []Expr `codec:"to"`
+	Data []Expr `codec:"data"`
+	Echo Token  `codec:"echo"`
 }
 
-// RecordStatement represents a SQL CREATE EVENT statement.
+// RecordStatement represents a SQL RECORD statement.
 type RecordStatement struct {
 	EX   bool   `codec:"-"`
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
-	Type []Expr `codec:"-"`
-	On   []Expr `codec:"-"`
-	At   Expr   `codec:"-"`
-	Data []Expr `codec:"-"`
-	Echo Token  `codec:"-"`
+	Type []Expr `codec:"type"`
+	When Expr   `codec:"when"`
+	Data []Expr `codec:"data"`
+	Echo Token  `codec:"echo"`
+}
+
+// --------------------------------------------------
+// Table
+// --------------------------------------------------
+
+// DefineTableStatement represents an SQL DEFINE TABLE statement.
+type DefineTableStatement struct {
+	EX   bool     `codec:"-"`
+	KV   string   `codec:"-"`
+	NS   string   `codec:"-"`
+	DB   string   `codec:"-"`
+	What []string `codec:"-"`
+}
+
+// RemoveTableStatement represents an SQL REMOVE TABLE statement.
+type RemoveTableStatement struct {
+	EX   bool     `codec:"-"`
+	KV   string   `codec:"-"`
+	NS   string   `codec:"-"`
+	DB   string   `codec:"-"`
+	What []string `codec:"-"`
 }
 
 // --------------------------------------------------
@@ -192,32 +213,10 @@ type RemoveRulesStatement struct {
 }
 
 // --------------------------------------------------
-// Table
-// --------------------------------------------------
-
-// DefineTableStatement represents an SQL DEFINE TABLE statement.
-type DefineTableStatement struct {
-	EX   bool     `codec:"-"`
-	KV   string   `codec:"-"`
-	NS   string   `codec:"-"`
-	DB   string   `codec:"-"`
-	What []string `codec:"-"`
-}
-
-// RemoveTableStatement represents an SQL REMOVE TABLE statement.
-type RemoveTableStatement struct {
-	EX   bool     `codec:"-"`
-	KV   string   `codec:"-"`
-	NS   string   `codec:"-"`
-	DB   string   `codec:"-"`
-	What []string `codec:"-"`
-}
-
-// --------------------------------------------------
 // Field
 // --------------------------------------------------
 
-// DefineFieldStatement represents an SQL DEFINE INDEX statement.
+// DefineFieldStatement represents an SQL DEFINE FIELD statement.
 type DefineFieldStatement struct {
 	EX        bool          `codec:"-"`
 	KV        string        `codec:"-"`
@@ -238,7 +237,7 @@ type DefineFieldStatement struct {
 	Validate  bool          `codec:"validate"`
 }
 
-// RemoveFieldStatement represents an SQL REMOVE INDEX statement.
+// RemoveFieldStatement represents an SQL REMOVE FIELD statement.
 type RemoveFieldStatement struct {
 	EX   bool     `codec:"-"`
 	KV   string   `codec:"-"`
