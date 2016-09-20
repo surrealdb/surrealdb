@@ -258,6 +258,30 @@ type RemoveIndexStatement struct {
 }
 
 // --------------------------------------------------
+// View
+// --------------------------------------------------
+
+// DefineViewStatement represents an SQL DEFINE VIEW statement.
+type DefineViewStatement struct {
+	KV    string   `codec:"-"`
+	NS    string   `codec:"-"`
+	DB    string   `codec:"-"`
+	Name  string   `codec:"name"`
+	Expr  []*Field `codec:"expr"`
+	What  []Expr   `codec:"what"`
+	Cond  []Expr   `codec:"cond"`
+	Group []*Group `codec:"group"`
+}
+
+// RemoveViewStatement represents an SQL REMOVE VIEW statement.
+type RemoveViewStatement struct {
+	KV   string `codec:"-"`
+	NS   string `codec:"-"`
+	DB   string `codec:"-"`
+	Name string `codec:"-"`
+}
+
+// --------------------------------------------------
 // Literals
 // --------------------------------------------------
 

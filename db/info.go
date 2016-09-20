@@ -42,11 +42,22 @@ func executeInfoStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}
 		// Get the table definitions
 		tbeg := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: keys.Prefix}
 		tend := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: keys.Suffix}
-		kvs, _ := txn.RGet(tbeg.Encode(), tend.Encode(), 0)
-		for _, kv := range kvs {
+		tkvs, _ := txn.RGet(tbeg.Encode(), tend.Encode(), 0)
+		for _, kv := range tkvs {
 			key := &keys.TB{}
 			key.Decode(kv.Key())
 			res.Inc(key.TB, "tables")
+		}
+
+		// Get the table definitions
+		vbeg := &keys.VW{KV: ast.KV, NS: ast.NS, DB: ast.DB, VW: keys.Prefix}
+		vend := &keys.VW{KV: ast.KV, NS: ast.NS, DB: ast.DB, VW: keys.Suffix}
+		vkvs, _ := txn.RGet(vbeg.Encode(), vend.Encode(), 0)
+		for _, kv := range vkvs {
+			key, val := &keys.VW{}, &sql.DefineViewStatement{}
+			key.Decode(kv.Key())
+			pack.Decode(kv.Val(), val)
+			res.Inc(val, "views")
 		}
 
 		out = append(out, res.Data())

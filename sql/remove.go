@@ -17,7 +17,7 @@ package sql
 func (p *parser) parseRemoveStatement() (Statement, error) {
 
 	// Inspect the next token.
-	tok, _, err := p.shouldBe(TABLE, RULES, FIELD, INDEX)
+	tok, _, err := p.shouldBe(TABLE, RULES, FIELD, INDEX, VIEW)
 
 	switch tok {
 	case TABLE:
@@ -28,6 +28,8 @@ func (p *parser) parseRemoveStatement() (Statement, error) {
 		return p.parseRemoveFieldStatement()
 	case INDEX:
 		return p.parseRemoveIndexStatement()
+	case VIEW:
+		return p.parseRemoveViewStatement()
 	default:
 		return nil, err
 	}

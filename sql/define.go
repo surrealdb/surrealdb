@@ -17,7 +17,7 @@ package sql
 func (p *parser) parseDefineStatement() (Statement, error) {
 
 	// Inspect the next token.
-	tok, _, err := p.shouldBe(TABLE, RULES, FIELD, INDEX)
+	tok, _, err := p.shouldBe(TABLE, RULES, FIELD, INDEX, VIEW)
 
 	switch tok {
 	case TABLE:
@@ -28,6 +28,8 @@ func (p *parser) parseDefineStatement() (Statement, error) {
 		return p.parseDefineFieldStatement()
 	case INDEX:
 		return p.parseDefineIndexStatement()
+	case VIEW:
+		return p.parseDefineViewStatement()
 	default:
 		return nil, err
 	}

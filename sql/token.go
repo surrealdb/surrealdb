@@ -182,6 +182,7 @@ const (
 	USE
 	VALIDATE
 	VERSION
+	VIEW
 	VOID
 	WHERE
 
@@ -340,6 +341,7 @@ var tokens = [...]string{
 	USE:             "USE",
 	VALIDATE:        "VALIDATE",
 	VERSION:         "VERSION",
+	VIEW:            "VIEW",
 	VOID:            "VOID",
 	WHERE:           "WHERE",
 }
