@@ -14,11 +14,9 @@
 
 package sql
 
-func (p *parser) parseSelectStatement(explain bool) (stmt *SelectStatement, err error) {
+func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 
 	stmt = &SelectStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)

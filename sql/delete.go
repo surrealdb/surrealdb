@@ -14,11 +14,9 @@
 
 package sql
 
-func (p *parser) parseDeleteStatement(explain bool) (stmt *DeleteStatement, err error) {
+func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
 
 	stmt = &DeleteStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)

@@ -14,20 +14,20 @@
 
 package sql
 
-func (p *parser) parseDefineStatement(explain bool) (Statement, error) {
+func (p *parser) parseDefineStatement() (Statement, error) {
 
 	// Inspect the next token.
 	tok, _, err := p.shouldBe(TABLE, RULES, FIELD, INDEX)
 
 	switch tok {
 	case TABLE:
-		return p.parseDefineTableStatement(explain)
+		return p.parseDefineTableStatement()
 	case RULES:
-		return p.parseDefineRulesStatement(explain)
+		return p.parseDefineRulesStatement()
 	case FIELD:
-		return p.parseDefineFieldStatement(explain)
+		return p.parseDefineFieldStatement()
 	case INDEX:
-		return p.parseDefineIndexStatement(explain)
+		return p.parseDefineIndexStatement()
 	default:
 		return nil, err
 	}

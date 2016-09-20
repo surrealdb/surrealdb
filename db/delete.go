@@ -25,10 +25,6 @@ func executeDeleteStatement(txn kvs.TX, ast *sql.DeleteStatement) (out []interfa
 
 	var local bool
 
-	if ast.EX {
-		return append(out, ast), nil
-	}
-
 	if txn == nil {
 		local = true
 		txn, err = db.Txn(true)

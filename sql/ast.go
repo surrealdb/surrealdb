@@ -64,7 +64,6 @@ type UseStatement struct {
 
 // InfoStatement represents an SQL INFO statement.
 type InfoStatement struct {
-	EX   bool   `codec:"-"`
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
@@ -77,7 +76,6 @@ type InfoStatement struct {
 
 // SelectStatement represents a SQL SELECT statement.
 type SelectStatement struct {
-	EX      bool     `codec:"-"`
 	KV      string   `codec:"-"`
 	NS      string   `codec:"-"`
 	DB      string   `codec:"-"`
@@ -94,7 +92,6 @@ type SelectStatement struct {
 
 // CreateStatement represents a SQL CREATE statement.
 type CreateStatement struct {
-	EX   bool   `codec:"-"`
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
@@ -105,7 +102,6 @@ type CreateStatement struct {
 
 // UpdateStatement represents a SQL UPDATE statement.
 type UpdateStatement struct {
-	EX   bool   `codec:"-"`
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
@@ -117,7 +113,6 @@ type UpdateStatement struct {
 
 // ModifyStatement represents a SQL MODIFY statement.
 type ModifyStatement struct {
-	EX   bool   `codec:"-"`
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
@@ -129,7 +124,6 @@ type ModifyStatement struct {
 
 // DeleteStatement represents a SQL DELETE statement.
 type DeleteStatement struct {
-	EX   bool   `codec:"-"`
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
@@ -141,7 +135,6 @@ type DeleteStatement struct {
 
 // RelateStatement represents a SQL RELATE statement.
 type RelateStatement struct {
-	EX   bool   `codec:"-"`
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
@@ -154,7 +147,6 @@ type RelateStatement struct {
 
 // RecordStatement represents a SQL RECORD statement.
 type RecordStatement struct {
-	EX   bool   `codec:"-"`
 	KV   string `codec:"-"`
 	NS   string `codec:"-"`
 	DB   string `codec:"-"`
@@ -170,7 +162,6 @@ type RecordStatement struct {
 
 // DefineTableStatement represents an SQL DEFINE TABLE statement.
 type DefineTableStatement struct {
-	EX   bool     `codec:"-"`
 	KV   string   `codec:"-"`
 	NS   string   `codec:"-"`
 	DB   string   `codec:"-"`
@@ -179,7 +170,6 @@ type DefineTableStatement struct {
 
 // RemoveTableStatement represents an SQL REMOVE TABLE statement.
 type RemoveTableStatement struct {
-	EX   bool     `codec:"-"`
 	KV   string   `codec:"-"`
 	NS   string   `codec:"-"`
 	DB   string   `codec:"-"`
@@ -192,7 +182,6 @@ type RemoveTableStatement struct {
 
 // DefineRulesStatement represents an SQL DEFINE RULES statement.
 type DefineRulesStatement struct {
-	EX   bool     `codec:"-"`
 	KV   string   `codec:"-"`
 	NS   string   `codec:"-"`
 	DB   string   `codec:"-"`
@@ -204,7 +193,6 @@ type DefineRulesStatement struct {
 
 // RemoveRulesStatement represents an SQL REMOVE RULES statement.
 type RemoveRulesStatement struct {
-	EX   bool     `codec:"-"`
 	KV   string   `codec:"-"`
 	NS   string   `codec:"-"`
 	DB   string   `codec:"-"`
@@ -218,7 +206,6 @@ type RemoveRulesStatement struct {
 
 // DefineFieldStatement represents an SQL DEFINE FIELD statement.
 type DefineFieldStatement struct {
-	EX        bool          `codec:"-"`
 	KV        string        `codec:"-"`
 	NS        string        `codec:"-"`
 	DB        string        `codec:"-"`
@@ -239,7 +226,6 @@ type DefineFieldStatement struct {
 
 // RemoveFieldStatement represents an SQL REMOVE FIELD statement.
 type RemoveFieldStatement struct {
-	EX   bool     `codec:"-"`
 	KV   string   `codec:"-"`
 	NS   string   `codec:"-"`
 	DB   string   `codec:"-"`
@@ -253,7 +239,6 @@ type RemoveFieldStatement struct {
 
 // DefineIndexStatement represents an SQL DEFINE INDEX statement.
 type DefineIndexStatement struct {
-	EX   bool     `codec:"-"`
 	KV   string   `codec:"-"`
 	NS   string   `codec:"-"`
 	DB   string   `codec:"-"`
@@ -265,7 +250,6 @@ type DefineIndexStatement struct {
 
 // RemoveIndexStatement represents an SQL REMOVE INDEX statement.
 type RemoveIndexStatement struct {
-	EX   bool     `codec:"-"`
 	KV   string   `codec:"-"`
 	NS   string   `codec:"-"`
 	DB   string   `codec:"-"`

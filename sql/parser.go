@@ -115,48 +115,42 @@ func (p *parser) parseMulti() (*Query, error) {
 // parseSingle parses a single SQL SELECT statement.
 func (p *parser) parseSingle() (Statement, error) {
 
-	var explain bool
-
-	if _, _, exi := p.mightBe(EXPLAIN); exi {
-		explain = true
-	}
-
 	tok, _, err := p.shouldBe(USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, REMOVE)
 
 	switch tok {
 
 	case USE:
-		return p.parseUseStatement(explain)
+		return p.parseUseStatement()
 
 	case INFO:
-		return p.parseInfoStatement(explain)
+		return p.parseInfoStatement()
 
 	case BEGIN:
-		return p.parseBeginStatement(explain)
+		return p.parseBeginStatement()
 	case CANCEL, ROLLBACK:
-		return p.parseCancelStatement(explain)
+		return p.parseCancelStatement()
 	case COMMIT:
-		return p.parseCommitStatement(explain)
+		return p.parseCommitStatement()
 
 	case SELECT:
-		return p.parseSelectStatement(explain)
+		return p.parseSelectStatement()
 	case CREATE, INSERT:
-		return p.parseCreateStatement(explain)
+		return p.parseCreateStatement()
 	case UPDATE, UPSERT:
-		return p.parseUpdateStatement(explain)
+		return p.parseUpdateStatement()
 	case MODIFY:
-		return p.parseModifyStatement(explain)
+		return p.parseModifyStatement()
 	case DELETE:
-		return p.parseDeleteStatement(explain)
+		return p.parseDeleteStatement()
 	case RELATE:
-		return p.parseRelateStatement(explain)
+		return p.parseRelateStatement()
 	case RECORD:
-		return p.parseRecordStatement(explain)
+		return p.parseRecordStatement()
 
 	case DEFINE:
-		return p.parseDefineStatement(explain)
+		return p.parseDefineStatement()
 	case REMOVE:
-		return p.parseRemoveStatement(explain)
+		return p.parseRemoveStatement()
 
 	default:
 		return nil, err

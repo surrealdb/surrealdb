@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *parser) parseBeginStatement(explain bool) (stmt *BeginStatement, err error) {
+func (p *parser) parseBeginStatement() (stmt *BeginStatement, err error) {
 
 	stmt = &BeginStatement{}
 
@@ -28,7 +28,7 @@ func (p *parser) parseBeginStatement(explain bool) (stmt *BeginStatement, err er
 
 }
 
-func (p *parser) parseCancelStatement(explain bool) (stmt *CancelStatement, err error) {
+func (p *parser) parseCancelStatement() (stmt *CancelStatement, err error) {
 
 	stmt = &CancelStatement{}
 
@@ -42,7 +42,7 @@ func (p *parser) parseCancelStatement(explain bool) (stmt *CancelStatement, err 
 
 }
 
-func (p *parser) parseCommitStatement(explain bool) (stmt *CommitStatement, err error) {
+func (p *parser) parseCommitStatement() (stmt *CommitStatement, err error) {
 
 	stmt = &CommitStatement{}
 

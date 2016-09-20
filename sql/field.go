@@ -14,11 +14,9 @@
 
 package sql
 
-func (p *parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldStatement, err error) {
+func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err error) {
 
 	stmt = &DefineFieldStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)
@@ -135,11 +133,9 @@ func (p *parser) parseDefineFieldStatement(explain bool) (stmt *DefineFieldState
 
 }
 
-func (p *parser) parseRemoveFieldStatement(explain bool) (stmt *RemoveFieldStatement, err error) {
+func (p *parser) parseRemoveFieldStatement() (stmt *RemoveFieldStatement, err error) {
 
 	stmt = &RemoveFieldStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)

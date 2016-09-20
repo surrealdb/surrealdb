@@ -24,10 +24,6 @@ func executeRemoveTableStatement(txn kvs.TX, ast *sql.RemoveTableStatement) (out
 
 	var local bool
 
-	if ast.EX {
-		return append(out, ast), nil
-	}
-
 	if txn == nil {
 		local = true
 		txn, err = db.Txn(true)
@@ -83,10 +79,6 @@ func executeRemoveRulesStatement(txn kvs.TX, ast *sql.RemoveRulesStatement) (out
 
 	var local bool
 
-	if ast.EX {
-		return append(out, ast), nil
-	}
-
 	if txn == nil {
 		local = true
 		txn, err = db.Txn(true)
@@ -122,10 +114,6 @@ func executeRemoveFieldStatement(txn kvs.TX, ast *sql.RemoveFieldStatement) (out
 
 	var local bool
 
-	if ast.EX {
-		return append(out, ast), nil
-	}
-
 	if txn == nil {
 		local = true
 		txn, err = db.Txn(true)
@@ -156,10 +144,6 @@ func executeRemoveFieldStatement(txn kvs.TX, ast *sql.RemoveFieldStatement) (out
 func executeRemoveIndexStatement(txn kvs.TX, ast *sql.RemoveIndexStatement) (out []interface{}, err error) {
 
 	var local bool
-
-	if ast.EX {
-		return append(out, ast), nil
-	}
 
 	if txn == nil {
 		local = true

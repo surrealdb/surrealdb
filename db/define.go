@@ -26,10 +26,6 @@ func executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out
 
 	var local bool
 
-	if ast.EX {
-		return append(out, ast), nil
-	}
-
 	if txn == nil {
 		local = true
 		txn, err = db.Txn(true)
@@ -66,10 +62,6 @@ func executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out
 func executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesStatement) (out []interface{}, err error) {
 
 	var local bool
-
-	if ast.EX {
-		return append(out, ast), nil
-	}
 
 	if txn == nil {
 		local = true
@@ -118,10 +110,6 @@ func executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out
 
 	var local bool
 
-	if ast.EX {
-		return append(out, ast), nil
-	}
-
 	if txn == nil {
 		local = true
 		txn, err = db.Txn(true)
@@ -164,10 +152,6 @@ func executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out
 func executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out []interface{}, err error) {
 
 	var local bool
-
-	if ast.EX {
-		return append(out, ast), nil
-	}
 
 	if txn == nil {
 		local = true

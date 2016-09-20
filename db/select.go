@@ -23,10 +23,6 @@ import (
 
 func executeSelectStatement(txn kvs.TX, ast *sql.SelectStatement) (out []interface{}, err error) {
 
-	if ast.EX {
-		return append(out, ast), nil
-	}
-
 	if txn == nil {
 		txn, err = db.Txn(false)
 		if err != nil {

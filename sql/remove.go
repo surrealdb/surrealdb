@@ -14,20 +14,20 @@
 
 package sql
 
-func (p *parser) parseRemoveStatement(explain bool) (Statement, error) {
+func (p *parser) parseRemoveStatement() (Statement, error) {
 
 	// Inspect the next token.
 	tok, _, err := p.shouldBe(TABLE, RULES, FIELD, INDEX)
 
 	switch tok {
 	case TABLE:
-		return p.parseRemoveTableStatement(explain)
+		return p.parseRemoveTableStatement()
 	case RULES:
-		return p.parseRemoveRulesStatement(explain)
+		return p.parseRemoveRulesStatement()
 	case FIELD:
-		return p.parseRemoveFieldStatement(explain)
+		return p.parseRemoveFieldStatement()
 	case INDEX:
-		return p.parseRemoveIndexStatement(explain)
+		return p.parseRemoveIndexStatement()
 	default:
 		return nil, err
 	}

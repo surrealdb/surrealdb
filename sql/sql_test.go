@@ -249,25 +249,6 @@ func Test_Parse_Queries_Use(t *testing.T) {
 
 }
 
-func Test_Parse_Queries_Explain(t *testing.T) {
-
-	var tests = []tester{
-		{
-			sql: `EXPLAIN SELECT ALL FROM person`,
-			res: &Query{Statements: []Statement{&SelectStatement{
-				EX:   true,
-				Expr: []*Field{{Expr: &All{}, Alias: "ALL"}},
-				What: []Expr{&Table{"person"}},
-			}}},
-		},
-	}
-
-	for _, test := range tests {
-		testsql(t, test)
-	}
-
-}
-
 func Test_Parse_Queries_Select(t *testing.T) {
 
 	date, _ := time.Parse("2006-01-02", "1987-06-22")

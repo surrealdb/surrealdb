@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *parser) parseUseStatement(explain bool) (stmt *UseStatement, err error) {
+func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 
 	stmt = &UseStatement{}
 

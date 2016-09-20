@@ -25,10 +25,6 @@ import (
 
 func executeInfoStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	if ast.EX {
-		return append(out, ast), nil
-	}
-
 	if txn == nil {
 		txn, err = db.Txn(false)
 		if err != nil {

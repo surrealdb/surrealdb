@@ -14,11 +14,9 @@
 
 package sql
 
-func (p *parser) parseDefineRulesStatement(explain bool) (stmt *DefineRulesStatement, err error) {
+func (p *parser) parseDefineRulesStatement() (stmt *DefineRulesStatement, err error) {
 
 	stmt = &DefineRulesStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)
@@ -77,11 +75,9 @@ func (p *parser) parseDefineRulesStatement(explain bool) (stmt *DefineRulesState
 
 }
 
-func (p *parser) parseRemoveRulesStatement(explain bool) (stmt *RemoveRulesStatement, err error) {
+func (p *parser) parseRemoveRulesStatement() (stmt *RemoveRulesStatement, err error) {
 
 	stmt = &RemoveRulesStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)

@@ -14,11 +14,9 @@
 
 package sql
 
-func (p *parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexStatement, err error) {
+func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err error) {
 
 	stmt = &DefineIndexStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)
@@ -54,11 +52,9 @@ func (p *parser) parseDefineIndexStatement(explain bool) (stmt *DefineIndexState
 
 }
 
-func (p *parser) parseRemoveIndexStatement(explain bool) (stmt *RemoveIndexStatement, err error) {
+func (p *parser) parseRemoveIndexStatement() (stmt *RemoveIndexStatement, err error) {
 
 	stmt = &RemoveIndexStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)

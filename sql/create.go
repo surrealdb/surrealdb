@@ -14,11 +14,9 @@
 
 package sql
 
-func (p *parser) parseCreateStatement(explain bool) (stmt *CreateStatement, err error) {
+func (p *parser) parseCreateStatement() (stmt *CreateStatement, err error) {
 
 	stmt = &CreateStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)

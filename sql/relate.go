@@ -14,11 +14,9 @@
 
 package sql
 
-func (p *parser) parseRelateStatement(explain bool) (stmt *RelateStatement, err error) {
+func (p *parser) parseRelateStatement() (stmt *RelateStatement, err error) {
 
 	stmt = &RelateStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)

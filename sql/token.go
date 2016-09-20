@@ -124,7 +124,6 @@ const (
 	DISTINCT
 	EMPTY
 	ENUM
-	EXPLAIN
 	EXPUNGE
 	FALSE
 	FIELD
@@ -284,7 +283,6 @@ var tokens = [...]string{
 	DISTINCT:        "DISTINCT",
 	EMPTY:           "EMPTY",
 	ENUM:            "ENUM",
-	EXPLAIN:         "EXPLAIN",
 	EXPUNGE:         "EXPUNGE",
 	FALSE:           "FALSE",
 	FIELD:           "FIELD",

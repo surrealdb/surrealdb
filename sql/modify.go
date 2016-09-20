@@ -14,11 +14,9 @@
 
 package sql
 
-func (p *parser) parseModifyStatement(explain bool) (stmt *ModifyStatement, err error) {
+func (p *parser) parseModifyStatement() (stmt *ModifyStatement, err error) {
 
 	stmt = &ModifyStatement{}
-
-	stmt.EX = explain
 
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)
