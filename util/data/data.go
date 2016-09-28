@@ -45,7 +45,7 @@ func (d *Doc) Data() interface{} {
 	return d.data
 }
 
-// Data returns the internal data object as an interface.
+// Copy returns a duplicated copy of the internal data object.
 func (d *Doc) Copy() (i interface{}) {
 	return deep.Copy(d.data)
 }
