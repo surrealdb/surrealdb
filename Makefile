@@ -39,7 +39,15 @@ kill:
 .PHONY: convey
 convey:
 	@echo "Run 'go get -u -v github.com/smartystreets/goconvey'"
-	goconvey -packages 5 -port 5000 -poll 1s -excludedDirs 'build,dev,doc,gui,vendor'
+	goconvey -packages 50 -port 5000 -poll 10m -excludedDirs 'build,dev,doc,gui,vendor'
+
+# The `make test` command runs all
+# tests, found within all sub-folders
+# in the project folder.
+
+.PHONY: tests
+tests:
+	$(GO) test `glide novendor`
 
 # The `make glide` command ensures that
 # all imported dependencies are synced
@@ -48,16 +56,6 @@ convey:
 .PHONY: glide
 glide:
 	glide install
-
-# The `make test` command runs all
-# tests, found within all sub-folders
-# in the project folder.
-
-.PHONY: test
-test: clean
-test: glide
-test:
-	$(GO) test `glide novendor`
 
 # The `make clean` command cleans
 # all object, build, and test files
@@ -68,13 +66,21 @@ clean:
 	rm -rf vendor
 	$(GO) clean -i `glide novendor`
 	find . -name '*.test' -type f -exec rm -f {} \;
+	find . -name '*.gen.go' -type f -exec rm -f {} \;
+
+# The `make setup` command runs the
+# go generate command in all of the
+# project subdirectories.
+
+.PHONY: setup
+setup:
+	CGO_ENABLED=0 $(GO) generate -v `glide novendor`
 
 # The `make quick` command compiles
 # the build flags, gets the project
 # dependencies, and runs a build.
 
 .PHONY: quick
-quick: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 quick:
 	CGO_ENABLED=0 $(GO) build
 
@@ -84,10 +90,8 @@ quick:
 
 .PHONY: build
 build: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
-build: clean
-build: glide
 build:
-	CGO_ENABLED=0 $(GO) build -a -v -ldflags '$(LDF)'
+	CGO_ENABLED=0 $(GO) build -v -ldflags '$(LDF)'
 
 # The `make install` command compiles
 # the build flags, gets the project
@@ -95,10 +99,8 @@ build:
 
 .PHONY: install
 install: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
-install: clean
-install: glide
 install:
-	CGO_ENABLED=0 $(GO) install -a -v -ldflags '$(LDF)'
+	CGO_ENABLED=0 $(GO) install -v -ldflags '$(LDF)'
 
 # The `make ember` command compiles
 # the ember project, and outputs

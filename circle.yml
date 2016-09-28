@@ -33,7 +33,10 @@ dependencies:
 
 test:
     override:
-        - make test
+        - make clean
+        - make glide
+        - make setup
+        - make tests
         - make build
         - make ember
         - docker build -t abcum/surreal .
