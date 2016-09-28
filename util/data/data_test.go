@@ -31,7 +31,6 @@ func TestConversion(t *testing.T) {
 		enc := doc.Encode()
 		dec := doc.Decode(enc)
 		So(doc, ShouldResemble, dec)
-		So(doc.JSON(), ShouldResemble, dec.JSON())
 	})
 
 }

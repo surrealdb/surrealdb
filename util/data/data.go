@@ -50,11 +50,6 @@ func (d *Doc) Copy() (i interface{}) {
 	return deep.Copy(d.data)
 }
 
-// JSON converts the data object to a JSON byte slice.
-func (d *Doc) JSON() (data []byte) {
-	return pack.ToJSON(d.data)
-}
-
 // Encode encodes the data object to a byte slice.
 func (d *Doc) Encode() (dst []byte) {
 	dst = pack.Encode(&d.data)
