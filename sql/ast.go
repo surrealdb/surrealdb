@@ -54,8 +54,8 @@ type CommitStatement struct{}
 
 // UseStatement represents a SQL USE statement.
 type UseStatement struct {
-	NS string `codec:"-"`
-	DB string `codec:"-"`
+	NS string `cork:"-" codec:"-"`
+	DB string `cork:"-" codec:"-"`
 }
 
 // --------------------------------------------------
@@ -64,10 +64,10 @@ type UseStatement struct {
 
 // InfoStatement represents an SQL INFO statement.
 type InfoStatement struct {
-	KV   string `codec:"-"`
-	NS   string `codec:"-"`
-	DB   string `codec:"-"`
-	What string `codec:"-"`
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	What string `cork:"-" codec:"-"`
 }
 
 // --------------------------------------------------
@@ -76,84 +76,84 @@ type InfoStatement struct {
 
 // SelectStatement represents a SQL SELECT statement.
 type SelectStatement struct {
-	KV      string   `codec:"-"`
-	NS      string   `codec:"-"`
-	DB      string   `codec:"-"`
-	Expr    []*Field `codec:"expr"`
-	What    []Expr   `codec:"what"`
-	Cond    []Expr   `codec:"cond"`
-	Group   []*Group `codec:"group"`
-	Order   []*Order `codec:"order"`
-	Limit   Expr     `codec:"limit"`
-	Start   Expr     `codec:"start"`
-	Version Expr     `codec:"version"`
-	Echo    Token    `codec:"echo"`
+	KV      string   `cork:"-" codec:"-"`
+	NS      string   `cork:"-" codec:"-"`
+	DB      string   `cork:"-" codec:"-"`
+	Expr    []*Field `cork:"expr" codec:"expr"`
+	What    []Expr   `cork:"what" codec:"what"`
+	Cond    []Expr   `cork:"cond" codec:"cond"`
+	Group   []*Group `cork:"group" codec:"group"`
+	Order   []*Order `cork:"order" codec:"order"`
+	Limit   Expr     `cork:"limit" codec:"limit"`
+	Start   Expr     `cork:"start" codec:"start"`
+	Version Expr     `cork:"version" codec:"version"`
+	Echo    Token    `cork:"echo" codec:"echo"`
 }
 
 // CreateStatement represents a SQL CREATE statement.
 type CreateStatement struct {
-	KV   string `codec:"-"`
-	NS   string `codec:"-"`
-	DB   string `codec:"-"`
-	What []Expr `codec:"what"`
-	Data []Expr `codec:"data"`
-	Echo Token  `codec:"echo"`
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	What []Expr `cork:"what" codec:"what"`
+	Data []Expr `cork:"data" codec:"data"`
+	Echo Token  `cork:"echo" codec:"echo"`
 }
 
 // UpdateStatement represents a SQL UPDATE statement.
 type UpdateStatement struct {
-	KV   string `codec:"-"`
-	NS   string `codec:"-"`
-	DB   string `codec:"-"`
-	What []Expr `codec:"what"`
-	Data []Expr `codec:"data"`
-	Cond []Expr `codec:"cond"`
-	Echo Token  `codec:"echo"`
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	What []Expr `cork:"what" codec:"what"`
+	Data []Expr `cork:"data" codec:"data"`
+	Cond []Expr `cork:"cond" codec:"cond"`
+	Echo Token  `cork:"echo" codec:"echo"`
 }
 
 // ModifyStatement represents a SQL MODIFY statement.
 type ModifyStatement struct {
-	KV   string `codec:"-"`
-	NS   string `codec:"-"`
-	DB   string `codec:"-"`
-	What []Expr `codec:"what"`
-	Diff []Expr `codec:"diff"`
-	Cond []Expr `codec:"cond"`
-	Echo Token  `codec:"echo"`
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	What []Expr `cork:"what" codec:"what"`
+	Diff []Expr `cork:"diff" codec:"diff"`
+	Cond []Expr `cork:"cond" codec:"cond"`
+	Echo Token  `cork:"echo" codec:"echo"`
 }
 
 // DeleteStatement represents a SQL DELETE statement.
 type DeleteStatement struct {
-	KV   string `codec:"-"`
-	NS   string `codec:"-"`
-	DB   string `codec:"-"`
-	Hard bool   `codec:"hard"`
-	What []Expr `codec:"what"`
-	Cond []Expr `codec:"cond"`
-	Echo Token  `codec:"echo"`
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Hard bool   `cork:"hard" codec:"hard"`
+	What []Expr `cork:"what" codec:"what"`
+	Cond []Expr `cork:"cond" codec:"cond"`
+	Echo Token  `cork:"echo" codec:"echo"`
 }
 
 // RelateStatement represents a SQL RELATE statement.
 type RelateStatement struct {
-	KV   string `codec:"-"`
-	NS   string `codec:"-"`
-	DB   string `codec:"-"`
-	Type []Expr `codec:"type"`
-	From []Expr `codec:"from"`
-	To   []Expr `codec:"to"`
-	Data []Expr `codec:"data"`
-	Echo Token  `codec:"echo"`
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Type []Expr `cork:"type" codec:"type"`
+	From []Expr `cork:"from" codec:"from"`
+	To   []Expr `cork:"to" codec:"to"`
+	Data []Expr `cork:"data" codec:"data"`
+	Echo Token  `cork:"echo" codec:"echo"`
 }
 
 // RecordStatement represents a SQL RECORD statement.
 type RecordStatement struct {
-	KV   string `codec:"-"`
-	NS   string `codec:"-"`
-	DB   string `codec:"-"`
-	Type []Expr `codec:"type"`
-	When Expr   `codec:"when"`
-	Data []Expr `codec:"data"`
-	Echo Token  `codec:"echo"`
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Type []Expr `cork:"type" codec:"type"`
+	When Expr   `cork:"when" codec:"when"`
+	Data []Expr `cork:"data" codec:"data"`
+	Echo Token  `cork:"echo" codec:"echo"`
 }
 
 // --------------------------------------------------
@@ -162,18 +162,18 @@ type RecordStatement struct {
 
 // DefineTableStatement represents an SQL DEFINE TABLE statement.
 type DefineTableStatement struct {
-	KV   string   `codec:"-"`
-	NS   string   `codec:"-"`
-	DB   string   `codec:"-"`
-	What []string `codec:"-"`
+	KV   string   `cork:"-" codec:"-"`
+	NS   string   `cork:"-" codec:"-"`
+	DB   string   `cork:"-" codec:"-"`
+	What []string `cork:"-" codec:"-"`
 }
 
 // RemoveTableStatement represents an SQL REMOVE TABLE statement.
 type RemoveTableStatement struct {
-	KV   string   `codec:"-"`
-	NS   string   `codec:"-"`
-	DB   string   `codec:"-"`
-	What []string `codec:"-"`
+	KV   string   `cork:"-" codec:"-"`
+	NS   string   `cork:"-" codec:"-"`
+	DB   string   `cork:"-" codec:"-"`
+	What []string `cork:"-" codec:"-"`
 }
 
 // --------------------------------------------------
@@ -182,22 +182,23 @@ type RemoveTableStatement struct {
 
 // DefineRulesStatement represents an SQL DEFINE RULES statement.
 type DefineRulesStatement struct {
-	KV   string   `codec:"-"`
-	NS   string   `codec:"-"`
-	DB   string   `codec:"-"`
-	What []string `codec:"-"`
-	When []string `codec:"-"`
-	Rule string   `codec:"rule"`
-	Code string   `codec:"code"`
+	KV   string   `cork:"-" codec:"-"`
+	NS   string   `cork:"-" codec:"-"`
+	DB   string   `cork:"-" codec:"-"`
+	What []string `cork:"-" codec:"-"`
+	When []string `cork:"-" codec:"-"`
+	Rule string   `cork:"rule" codec:"rule"`
+	Code string   `cork:"code" codec:"code"`
+	Cond []Expr   `cork:"cond" codec:"cond"`
 }
 
 // RemoveRulesStatement represents an SQL REMOVE RULES statement.
 type RemoveRulesStatement struct {
-	KV   string   `codec:"-"`
-	NS   string   `codec:"-"`
-	DB   string   `codec:"-"`
-	What []string `codec:"-"`
-	When []string `codec:"-"`
+	KV   string   `cork:"-" codec:"-"`
+	NS   string   `cork:"-" codec:"-"`
+	DB   string   `cork:"-" codec:"-"`
+	What []string `cork:"-" codec:"-"`
+	When []string `cork:"-" codec:"-"`
 }
 
 // --------------------------------------------------
@@ -206,31 +207,31 @@ type RemoveRulesStatement struct {
 
 // DefineFieldStatement represents an SQL DEFINE FIELD statement.
 type DefineFieldStatement struct {
-	KV        string        `codec:"-"`
-	NS        string        `codec:"-"`
-	DB        string        `codec:"-"`
-	Name      string        `codec:"name"`
-	What      []string      `codec:"-"`
-	Type      string        `codec:"type"`
-	Enum      []interface{} `codec:"enum"`
-	Code      string        `codec:"code"`
-	Min       float64       `codec:"min"`
-	Max       float64       `codec:"max"`
-	Match     string        `codec:"match"`
-	Default   interface{}   `codec:"default"`
-	Notnull   bool          `codec:"notnull"`
-	Readonly  bool          `codec:"readonly"`
-	Mandatory bool          `codec:"mandatory"`
-	Validate  bool          `codec:"validate"`
+	KV        string        `cork:"-" codec:"-"`
+	NS        string        `cork:"-" codec:"-"`
+	DB        string        `cork:"-" codec:"-"`
+	Name      string        `cork:"name" codec:"name"`
+	What      []string      `cork:"-" codec:"-"`
+	Type      string        `cork:"type" codec:"type"`
+	Enum      []interface{} `cork:"enum" codec:"enum"`
+	Code      string        `cork:"code" codec:"code"`
+	Min       float64       `cork:"min" codec:"min"`
+	Max       float64       `cork:"max" codec:"max"`
+	Match     string        `cork:"match" codec:"match"`
+	Default   interface{}   `cork:"default" codec:"default"`
+	Notnull   bool          `cork:"notnull" codec:"notnull"`
+	Readonly  bool          `cork:"readonly" codec:"readonly"`
+	Mandatory bool          `cork:"mandatory" codec:"mandatory"`
+	Validate  bool          `cork:"validate" codec:"validate"`
 }
 
 // RemoveFieldStatement represents an SQL REMOVE FIELD statement.
 type RemoveFieldStatement struct {
-	KV   string   `codec:"-"`
-	NS   string   `codec:"-"`
-	DB   string   `codec:"-"`
-	Name string   `codec:"-"`
-	What []string `codec:"-"`
+	KV   string   `cork:"-" codec:"-"`
+	NS   string   `cork:"-" codec:"-"`
+	DB   string   `cork:"-" codec:"-"`
+	Name string   `cork:"-" codec:"-"`
+	What []string `cork:"-" codec:"-"`
 }
 
 // --------------------------------------------------
@@ -239,22 +240,22 @@ type RemoveFieldStatement struct {
 
 // DefineIndexStatement represents an SQL DEFINE INDEX statement.
 type DefineIndexStatement struct {
-	KV   string   `codec:"-"`
-	NS   string   `codec:"-"`
-	DB   string   `codec:"-"`
-	Name string   `codec:"name"`
-	What []string `codec:"-"`
-	Cols []string `codec:"cols"`
-	Uniq bool     `codec:"unique"`
+	KV   string   `cork:"-" codec:"-"`
+	NS   string   `cork:"-" codec:"-"`
+	DB   string   `cork:"-" codec:"-"`
+	Name string   `cork:"name" codec:"name"`
+	What []string `cork:"-" codec:"-"`
+	Cols []string `cork:"cols" codec:"cols"`
+	Uniq bool     `cork:"unique" codec:"unique"`
 }
 
 // RemoveIndexStatement represents an SQL REMOVE INDEX statement.
 type RemoveIndexStatement struct {
-	KV   string   `codec:"-"`
-	NS   string   `codec:"-"`
-	DB   string   `codec:"-"`
-	Name string   `codec:"-"`
-	What []string `codec:"-"`
+	KV   string   `cork:"-" codec:"-"`
+	NS   string   `cork:"-" codec:"-"`
+	DB   string   `cork:"-" codec:"-"`
+	Name string   `cork:"-" codec:"-"`
+	What []string `cork:"-" codec:"-"`
 }
 
 // --------------------------------------------------
@@ -263,22 +264,22 @@ type RemoveIndexStatement struct {
 
 // DefineViewStatement represents an SQL DEFINE VIEW statement.
 type DefineViewStatement struct {
-	KV    string   `codec:"-"`
-	NS    string   `codec:"-"`
-	DB    string   `codec:"-"`
-	Name  string   `codec:"name"`
-	Expr  []*Field `codec:"expr"`
-	What  []Expr   `codec:"what"`
-	Cond  []Expr   `codec:"cond"`
-	Group []*Group `codec:"group"`
+	KV    string   `cork:"-" codec:"-"`
+	NS    string   `cork:"-" codec:"-"`
+	DB    string   `cork:"-" codec:"-"`
+	Name  string   `cork:"name" codec:"name"`
+	Expr  []*Field `cork:"expr" codec:"expr"`
+	What  []Expr   `cork:"what" codec:"what"`
+	Cond  []Expr   `cork:"cond" codec:"cond"`
+	Group []*Group `cork:"group" codec:"group"`
 }
 
 // RemoveViewStatement represents an SQL REMOVE VIEW statement.
 type RemoveViewStatement struct {
-	KV   string `codec:"-"`
-	NS   string `codec:"-"`
-	DB   string `codec:"-"`
-	Name string `codec:"-"`
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Name string `cork:"-" codec:"-"`
 }
 
 // --------------------------------------------------

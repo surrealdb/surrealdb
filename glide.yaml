@@ -26,6 +26,7 @@ import:
 - package: github.com/yuin/gopher-lua
 - package: github.com/pkg/profile
   version: ^1.2.0
+- package: github.com/abcum/cork
 testImport:
 - package: github.com/smartystreets/goconvey
   subpackages:

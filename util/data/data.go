@@ -52,7 +52,7 @@ func (d *Doc) Copy() (i interface{}) {
 
 // Encode encodes the data object to a byte slice.
 func (d *Doc) Encode() (dst []byte) {
-	dst = pack.Encode(&d.data)
+	dst = pack.Encode(d.data)
 	return
 }
 
