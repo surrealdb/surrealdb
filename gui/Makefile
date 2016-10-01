@@ -13,7 +13,6 @@
 # limitations under the License.
 
 GO ?= go
-LDF :=
 
 # The `make default` command cleans
 # the go build and test files and
@@ -32,7 +31,7 @@ default:
 setup:
 	@echo "Setup..."
 	npm install -g bower
-	npm install -g ember-cli@2.7.0
+	npm install -g ember-cli@2.8.0
 
 # The `make install` command installs
 # the 3rd party dependencies needed
@@ -54,6 +53,6 @@ upgrade:
 	@echo "Upgrading..."
 	npm cache clean && bower cache clean
 	rm -rf node_modules bower_components dist tmp
-	npm install --save-dev ember-cli@2.7.0
+	npm install --save-dev ember-cli@2.8.0
 	npm install && bower install
 	ember init
