@@ -4,29 +4,19 @@
 
 root = true
 
-
 [*]
 end_of_line = lf
 charset = utf-8
 trim_trailing_whitespace = true
 insert_final_newline = true
+indent_style = tab
+indent_size = 4
+
+[*.yml]
 indent_style = space
 indent_size = 2
 
-[*.js]
-indent_style = space
-indent_size = 2
-
-[*.hbs]
-insert_final_newline = false
-indent_style = space
-indent_size = 2
-
-[*.css]
-indent_style = space
-indent_size = 2
-
-[*.html]
+[*.json]
 indent_style = space
 indent_size = 2
 
