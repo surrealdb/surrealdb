@@ -1,24 +1,20 @@
-# EditorConfig helps developers define and maintain consistent
-# coding styles between different editors and IDEs
-# editorconfig.org
+# EditorConfig coding styles definitions. For more information about the
+# properties used in this file, please see the EditorConfig documentation:
+# http://editorconfig.org/
 
 root = true
 
 [*]
-end_of_line = lf
 charset = utf-8
-trim_trailing_whitespace = true
-insert_final_newline = true
-indent_style = tab
+end_of_line = LF
 indent_size = 4
+indent_style = tab
+insert_final_newline = true
+trim_trailing_whitespace = true
 
-[*.yml]
-indent_style = space
+[*.{yml,json}]
 indent_size = 2
-
-[*.json]
 indent_style = space
-indent_size = 2
 
-[*.{diff,md}]
+[*.{md,diff}]
 trim_trailing_whitespace = false
