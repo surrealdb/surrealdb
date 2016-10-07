@@ -155,8 +155,6 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 			res, err = executeDeleteStatement(txn, stm)
 		case *sql.RelateStatement:
 			res, err = executeRelateStatement(txn, stm)
-		case *sql.RecordStatement:
-			res, err = executeRecordStatement(txn, stm)
 
 		case *sql.DefineTableStatement:
 			res, err = executeDefineTableStatement(txn, stm)

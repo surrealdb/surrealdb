@@ -144,8 +144,6 @@ func (p *parser) parseSingle() (Statement, error) {
 		return p.parseDeleteStatement()
 	case RELATE:
 		return p.parseRelateStatement()
-	case RECORD:
-		return p.parseRecordStatement()
 
 	case DEFINE:
 		return p.parseDefineStatement()

@@ -41,7 +41,6 @@ func init() {
 	gob.Register(sql.ModifyStatement{})
 	gob.Register(sql.DeleteStatement{})
 	gob.Register(sql.RelateStatement{})
-	gob.Register(sql.RecordStatement{})
 	gob.Register(sql.DefineViewStatement{})
 	gob.Register(sql.DefineTableStatement{})
 	gob.Register(sql.DefineRulesStatement{})

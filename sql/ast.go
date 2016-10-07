@@ -145,17 +145,6 @@ type RelateStatement struct {
 	Echo Token  `cork:"echo" codec:"echo"`
 }
 
-// RecordStatement represents a SQL RECORD statement.
-type RecordStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Type []Expr `cork:"type" codec:"type"`
-	When Expr   `cork:"when" codec:"when"`
-	Data []Expr `cork:"data" codec:"data"`
-	Echo Token  `cork:"echo" codec:"echo"`
-}
-
 // --------------------------------------------------
 // Table
 // --------------------------------------------------
