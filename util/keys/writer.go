@@ -33,62 +33,62 @@ func newWriter(w io.Writer) *writer {
 	}
 }
 
-func (w *writer) Write(i interface{}) {
+func (w *writer) write(i interface{}) {
 
 	switch v := i.(type) {
 
 	case []byte:
-		w.Writer.Write(v)
+		w.Write(v)
 
 	case string:
-		w.writeString(v)
+		w.writeStr(v)
 
 	case time.Time:
-		w.writeTime(v)
+		w.writeTme(v)
 
 	case uint:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 	case uint8:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 	case uint16:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 	case uint32:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 	case uint64:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 
 	case int:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 	case int8:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 	case int16:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 	case int32:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 	case int64:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 
 	case float32:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 	case float64:
-		w.writeNumber(float64(v))
+		w.writeNum(float64(v))
 
 	}
 
 }
 
-func (w *writer) writeString(v string) {
+func (w *writer) writeStr(v string) {
 	b := *(*[]byte)(unsafe.Pointer((*reflect.SliceHeader)(unsafe.Pointer(&v))))
 	w.Write(b)
 }
 
-func (w *writer) writeTime(v time.Time) {
+func (w *writer) writeTme(v time.Time) {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, uint64(v.UTC().UnixNano()))
 	w.Write(b)
 }
 
-func (w *writer) writeNumber(v float64) {
+func (w *writer) writeNum(v float64) {
 	b := make([]byte, 8)
 	if v < 0 {
 		w.Write(bNEG)
