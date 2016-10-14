@@ -74,6 +74,17 @@ type InfoStatement struct {
 // Normal
 // --------------------------------------------------
 
+// LiveStatement represents a SQL LIVE statement.
+type LiveStatement struct {
+	KV   string   `cork:"-" codec:"-"`
+	NS   string   `cork:"-" codec:"-"`
+	DB   string   `cork:"-" codec:"-"`
+	Expr []*Field `cork:"expr" codec:"expr"`
+	What []Expr   `cork:"what" codec:"what"`
+	Cond []Expr   `cork:"cond" codec:"cond"`
+	Echo Token    `cork:"echo" codec:"echo"`
+}
+
 // SelectStatement represents a SQL SELECT statement.
 type SelectStatement struct {
 	KV      string   `cork:"-" codec:"-"`
