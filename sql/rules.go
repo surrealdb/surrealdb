@@ -53,18 +53,12 @@ func (p *parser) parseDefineRulesStatement() (stmt *DefineRulesStatement, err er
 		return nil, &ParseError{Found: "", Expected: []string{"SELECT", "CREATE", "UPDATE", "DELETE", "RELATE"}}
 	}
 
-	if tok, _, err := p.shouldBe(ACCEPT, REJECT, CUSTOM); err != nil {
+	if _, stmt.Rule, err = p.shouldBe(ACCEPT, REJECT); err != nil {
 		return nil, err
-	} else {
+	}
 
-		stmt.Rule = tok.String()
-
-		if p.is(tok, CUSTOM) {
-			if stmt.Code, err = p.parseScript(); err != nil {
-				return nil, err
-			}
-		}
-
+	if stmt.Cond, err = p.parseCond(); err != nil {
+		return nil, err
 	}
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {

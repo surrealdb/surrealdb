@@ -1364,7 +1364,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE RULES ON person FOR select, create, update, delete`,
-			err: "Found `` but expected `ACCEPT, REJECT, CUSTOM`",
+			err: "Found `` but expected `ACCEPT, REJECT`",
 		},
 		{
 			sql: `DEFINE RULES ON person FOR select, create, update, delete ACCEPT`,
@@ -1387,24 +1387,11 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `DEFINE RULES ON person FOR select, create, update, delete REJECT something`,
+			sql: `DEFINE RULES ON person FOR select, create, update, delete ACCEPT something`,
 			err: "Found `something` but expected `EOF, ;`",
 		},
 		{
-			sql: `DEFINE RULES ON person FOR select, create, update, delete CUSTOM`,
-			err: "Found `` but expected `js/lua script`",
-		},
-		{
-			sql: `DEFINE RULES ON person FOR select, create, update, delete CUSTOM "return true"`,
-			res: &Query{Statements: []Statement{&DefineRulesStatement{
-				What: []string{"person"},
-				When: []string{"SELECT", "CREATE", "UPDATE", "DELETE"},
-				Rule: "CUSTOM",
-				Code: "return true",
-			}}},
-		},
-		{
-			sql: `DEFINE RULES ON person FOR select, create, update, delete CUSTOM "return true" something`,
+			sql: `DEFINE RULES ON person FOR select, create, update, delete REJECT something`,
 			err: "Found `something` but expected `EOF, ;`",
 		},
 		// ----------------------------------------------------------------------

@@ -178,7 +178,6 @@ type DefineRulesStatement struct {
 	What []string `cork:"-" codec:"-"`
 	When []string `cork:"-" codec:"-"`
 	Rule string   `cork:"rule" codec:"rule"`
-	Code string   `cork:"code" codec:"code"`
 	Cond []Expr   `cork:"cond" codec:"cond"`
 }
 
