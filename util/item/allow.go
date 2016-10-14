@@ -14,70 +14,22 @@
 
 package item
 
-import (
-	"github.com/robertkrimen/otto"
-	"github.com/yuin/gopher-lua"
-
-	"github.com/abcum/surreal/cnf"
-)
-
-func (this *Doc) Allow(cond string) (val bool) {
+func (this *Doc) Allow(when string) (val bool) {
 
 	this.getRules()
 
-	if rule, ok := this.rules[cond]; ok {
+	if rule, ok := this.rules[when]; ok {
 
-		val = (rule.Rule == "ACCEPT")
+		if rule.Rule == "ACCEPT" {
+			return true
+		}
 
-		if rule.Rule == "CUSTOM" {
-
-			if cnf.Settings.DB.Lang == "js" {
-
-				vm := otto.New()
-
-				vm.Set("data", this.initial.Copy())
-				vm.Set("edit", this.current.Copy())
-
-				ret, err := vm.Run("(function() { " + rule.Code + " })()")
-				if err != nil {
-					return false
-				}
-
-				if ret.IsDefined() {
-					val, _ := ret.ToBoolean()
-					return val
-				} else {
-					return false
-				}
-
-			}
-
-			if cnf.Settings.DB.Lang == "lua" {
-
-				vm := lua.NewState()
-				defer vm.Close()
-
-				vm.SetGlobal("data", toLUA(vm, this.initial.Copy()))
-				vm.SetGlobal("edit", toLUA(vm, this.current.Copy()))
-
-				if err := vm.DoString(rule.Code); err != nil {
-					return false
-				}
-
-				ret := vm.Get(-1)
-
-				if lua.LVAsBool(ret) {
-					return true
-				} else {
-					return false
-				}
-
-			}
-
+		if rule.Rule == "REJECT" {
+			return false
 		}
 
 	}
 
-	return
+	return true
 
 }
