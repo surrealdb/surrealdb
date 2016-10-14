@@ -132,6 +132,7 @@ const (
 	GROUP
 	HISTORY
 	ID
+	IF
 	IN
 	INDEX
 	INFO
@@ -293,6 +294,7 @@ var tokens = [...]string{
 	GROUP:           "GROUP",
 	HISTORY:         "HISTORY",
 	ID:              "ID",
+	IF:              "IF",
 	IN:              "IN",
 	INDEX:           "INDEX",
 	INFO:            "INFO",
