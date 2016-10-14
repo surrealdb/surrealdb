@@ -955,7 +955,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		},
 		{
 			sql: `CREATE person RETURN SOMETHING`,
-			err: "Found `SOMETHING` but expected `ID, NONE, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `SOMETHING` but expected `ID, NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
 		},
 	}
 
@@ -1096,7 +1096,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		},
 		{
 			sql: `UPDATE person RETURN SOMETHING`,
-			err: "Found `SOMETHING` but expected `ID, NONE, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `SOMETHING` but expected `ID, NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
 		},
 	}
 
@@ -1186,7 +1186,7 @@ func Test_Parse_Queries_Modify(t *testing.T) {
 		},
 		{
 			sql: `MODIFY @person:test DIFF {"diff": true} RETURN SOMETHING`,
-			err: "Found `SOMETHING` but expected `ID, NONE, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `SOMETHING` but expected `ID, NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
 		},
 	}
 
@@ -1259,7 +1259,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 		},
 		{
 			sql: `DELETE person RETURN SOMETHING`,
-			err: "Found `SOMETHING` but expected `ID, NONE, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `SOMETHING` but expected `ID, NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
 		},
 	}
 
