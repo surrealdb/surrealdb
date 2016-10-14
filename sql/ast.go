@@ -155,6 +155,7 @@ type DefineTableStatement struct {
 	NS   string   `cork:"-" codec:"-"`
 	DB   string   `cork:"-" codec:"-"`
 	What []string `cork:"-" codec:"-"`
+	Full bool     `cork:"full" codec:"full"`
 }
 
 // RemoveTableStatement represents an SQL REMOVE TABLE statement.

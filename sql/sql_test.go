@@ -1323,6 +1323,28 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE TABLE person something`,
 			err: "Found `something` but expected `EOF, ;`",
 		},
+		{
+			sql: `DEFINE TABLE person SCHEMALESS`,
+			res: &Query{Statements: []Statement{&DefineTableStatement{
+				What: []string{"person"},
+				Full: false,
+			}}},
+		},
+		{
+			sql: `DEFINE TABLE person SCHEMAFULL`,
+			res: &Query{Statements: []Statement{&DefineTableStatement{
+				What: []string{"person"},
+				Full: true,
+			}}},
+		},
+		{
+			sql: `DEFINE TABLE person SCHEMALESS something`,
+			err: "Found `something` but expected `EOF, ;`",
+		},
+		{
+			sql: `DEFINE TABLE person SCHEMAFULL something`,
+			err: "Found `something` but expected `EOF, ;`",
+		},
 		// ----------------------------------------------------------------------
 		{
 			sql: `DEFINE RULES`,

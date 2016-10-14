@@ -26,6 +26,10 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 		return nil, err
 	}
 
+	if tok, _, exi := p.mightBe(SCHEMAFULL, SCHEMALESS); exi && tok == SCHEMAFULL {
+		stmt.Full = true
+	}
+
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
