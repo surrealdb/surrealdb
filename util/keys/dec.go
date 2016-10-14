@@ -90,99 +90,99 @@ func (d *decoder) Decode(items ...interface{}) {
 			*value = d.r.FindNumberFloat64()
 
 		case *[]time.Time:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindTime())
 				}
 			}
 
 		case *[]bool:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindBool())
 				}
 			}
 
 		case *[]string:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindString())
 				}
 			}
 
 		case *[]int:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberInt())
 				}
 			}
 
 		case *[]int8:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberInt8())
 				}
 			}
 
 		case *[]int16:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberInt16())
 				}
 			}
 
 		case *[]int32:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberInt32())
 				}
 			}
 
 		case *[]int64:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberInt64())
 				}
 			}
 
 		case *[]uint:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberUint())
 				}
 			}
 
 		case *[]uint16:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberUint16())
 				}
 			}
 
 		case *[]uint32:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberUint32())
 				}
 			}
 
 		case *[]uint64:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberUint64())
 				}
 			}
 
 		case *[]float32:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberFloat32())
 				}
 			}
 
 		case *[]float64:
-			if d.r.ReadNext(cARRAY) {
-				for !d.r.ReadNext(cTERM) {
+			if d.r.ReadNext(cARR) {
+				for !d.r.ReadNext(cEND) {
 					*value = append(*value, d.r.FindNumberFloat64())
 				}
 			}
@@ -195,17 +195,17 @@ func (d *decoder) Decode(items ...interface{}) {
 			switch fnd := d.r.FindNext(); fnd {
 			default:
 				*value = d.r.FindAny()
-			case cNILL:
+			case cNIL:
 				*value = d.r.FindNull()
-			case cBOOL:
+			case cVAL:
 				*value = d.r.FindBool()
-			case cTIME:
+			case cTME:
 				*value = d.r.FindTime()
-			case cNUMBER:
+			case cNEG, cPOS:
 				*value = d.r.FindNumber()
-			case cSTRING, cPREFIX, cSUFFIX:
+			case cSTR, cPRE, cSUF:
 				*value = d.r.FindString()
-			case cARRAY:
+			case cARR:
 				*value = d.r.FindArray()
 
 			}

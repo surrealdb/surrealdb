@@ -74,50 +74,50 @@ func (r *reader) FindNext() (byt byte) {
 }
 
 func (r *reader) FindAny() (val interface{}) {
-	return r.ReadUpto(cTERM)
+	return r.ReadUpto(cEND)
 }
 
 func (r *reader) FindNull() (val interface{}) {
-	if r.ReadNext(cNILL) {
-		r.ReadNext(cTERM)
+	if r.ReadNext(cNIL) {
+		r.ReadNext(cEND)
 	}
 	return
 }
 
 func (r *reader) FindTime() (val time.Time) {
-	if r.ReadNext(cTIME) {
+	if r.ReadNext(cTME) {
 		var out int64
 		binary.Read(r.Reader, binary.BigEndian, &out)
 		val = time.Unix(0, out).UTC()
-		r.ReadNext(cTERM)
+		r.ReadNext(cEND)
 	}
 	return
 }
 
 func (r *reader) FindBool() (val bool) {
-	if r.ReadNext(cBOOL) {
-		val = r.ReadNext(cBOOL)
-		r.ReadNext(cTERM)
+	if r.ReadNext(cVAL) {
+		val = r.ReadNext(cVAL)
+		r.ReadNext(cEND)
 	}
 	return
 }
 
 func (r *reader) FindBytes() (val []byte) {
-	if r.ReadNext(cSTRING) {
-		val = r.ReadUpto(cTERM, cTERM)
+	if r.ReadNext(cSTR) {
+		val = r.ReadUpto(cEND, cEND)
 	}
 	return
 }
 
 func (r *reader) FindString() (val string) {
-	if r.ReadNext(cPREFIX) {
+	if r.ReadNext(cSTR) {
+		val = string(r.ReadUpto(cEND, cEND))
+	} else if r.ReadNext(cPRE) {
 		val = Prefix
-		r.ReadNext(cTERM)
-	} else if r.ReadNext(cSUFFIX) {
+		r.ReadNext(cEND)
+	} else if r.ReadNext(cSUF) {
 		val = Suffix
-		r.ReadNext(cTERM)
-	} else if r.ReadNext(cSTRING) {
-		val = string(r.ReadUpto(cTERM, cTERM))
+		r.ReadNext(cEND)
 	}
 	return
 }
@@ -185,26 +185,26 @@ func (r *reader) FindNumberFloat64() (val float64) {
 }
 
 func (r *reader) FindArray() (val []interface{}) {
-	if r.ReadNext(cARRAY) {
-		for !r.ReadNext(cTERM) {
+	if r.ReadNext(cARR) {
+		for !r.ReadNext(cEND) {
 			switch fnd := r.FindNext(); fnd {
 			default:
 				val = append(val, []interface{}{r.FindAny()}...)
-			case cNILL:
+			case cNIL:
 				val = append(val, []interface{}{r.FindNull()}...)
-			case cBOOL:
+			case cVAL:
 				val = append(val, []interface{}{r.FindBool()}...)
-			case cTIME:
+			case cTME:
 				val = append(val, []interface{}{r.FindTime()}...)
-			case cNUMBER:
+			case cNEG, cPOS:
 				val = append(val, []interface{}{r.FindNumber()}...)
-			case cSTRING, cPREFIX, cSUFFIX:
+			case cSTR, cPRE, cSUF:
 				val = append(val, []interface{}{r.FindString()}...)
-			case cARRAY:
+			case cARR:
 				val = append(val, []interface{}{r.FindArray()}...)
 			}
 		}
-		r.ReadNext(cTERM)
+		r.ReadNext(cEND)
 	}
 	return
 }

@@ -39,27 +39,29 @@ var (
 )
 
 var (
-	cTERM   = uint8(0x00)
-	cPREFIX = uint8(0x01)
-	cNILL   = uint8(0x02)
-	cBOOL   = uint8(0x03)
-	cTIME   = uint8(0x04)
-	cNUMBER = uint8(0x05)
-	cSTRING = uint8(0x06)
-	cARRAY  = uint8(0x07)
-	cSUFFIX = uint8(0x08)
+	cEND = byte(0x00)
+	cPRE = byte(0x01)
+	cNIL = byte(0x02)
+	cVAL = byte(0x03)
+	cTME = byte(0x04)
+	cNEG = byte(0x05)
+	cPOS = byte(0x06)
+	cSTR = byte(0x07)
+	cARR = byte(0x08)
+	cSUF = byte(0x09)
 )
 
 var (
-	bTERM   = []byte("\x00")
-	bPREFIX = []byte("\x01")
-	bNILL   = []byte("\x02")
-	bBOOL   = []byte("\x03")
-	bTIME   = []byte("\x04")
-	bNUMBER = []byte("\x05")
-	bSTRING = []byte("\x06")
-	bARRAY  = []byte("\x07")
-	bSUFFIX = []byte("\x08")
+	bEND = []byte{cEND}
+	bPRE = []byte{cPRE}
+	bNIL = []byte{cNIL}
+	bVAL = []byte{cVAL}
+	bTME = []byte{cTME}
+	bNEG = []byte{cNEG}
+	bPOS = []byte{cPOS}
+	bSTR = []byte{cSTR}
+	bARR = []byte{cARR}
+	bSUF = []byte{cSUF}
 )
 
 const (

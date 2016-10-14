@@ -45,29 +45,29 @@ func (e *encoder) Encode(items ...interface{}) {
 
 		case nil:
 
-			e.w.Write(bNILL)
-			e.w.Write(bTERM)
+			e.w.Write(bNIL)
+			e.w.Write(bEND)
 
 		case bool:
 
-			e.w.Write(bBOOL)
+			e.w.Write(bVAL)
 			if value {
-				e.w.Write(bBOOL)
+				e.w.Write(bVAL)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case time.Time:
 
-			e.w.Write(bTIME)
+			e.w.Write(bTME)
 			e.w.Write(value)
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []byte:
 
-			e.w.Write(bSTRING)
+			e.w.Write(bSTR)
 			e.w.Write(value)
-			e.w.Write(bTERM)
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
+			e.w.Write(bEND)
 
 		case string:
 
@@ -76,159 +76,156 @@ func (e *encoder) Encode(items ...interface{}) {
 			}
 
 			if value == Prefix {
-				e.w.Write(bPREFIX)
-				e.w.Write(bTERM)
+				e.w.Write(bPRE)
+				e.w.Write(bEND)
 				break
 			}
 
 			if value == Suffix {
-				e.w.Write(bSUFFIX)
-				e.w.Write(bTERM)
+				e.w.Write(bSUF)
+				e.w.Write(bEND)
 				break
 			}
 
-			e.w.Write(bSTRING)
+			e.w.Write(bSTR)
 			e.w.Write(value)
-			e.w.Write(bTERM)
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
+			e.w.Write(bEND)
 
 		case float32, float64:
 
-			e.w.Write(bNUMBER)
 			e.w.Write(value)
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case int, int8, int16, int32, int64:
 
-			e.w.Write(bNUMBER)
 			e.w.Write(value)
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case uint, uint8, uint16, uint32, uint64:
 
-			e.w.Write(bNUMBER)
 			e.w.Write(value)
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []time.Time:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []bool:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []string:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []int:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []int8:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []int16:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []int32:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []int64:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []uint:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []uint16:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []uint32:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []uint64:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []float32:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []float64:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		case []interface{}:
 
-			e.w.Write(bARRAY)
+			e.w.Write(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.Write(bTERM)
+			e.w.Write(bEND)
 
 		}
 
