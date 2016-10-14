@@ -114,7 +114,7 @@ func (d *Doc) Keys(path ...string) *Doc {
 	out := []interface{}{}
 
 	if m, ok := d.Get(path...).Data().(map[string]interface{}); ok {
-		for k, _ := range m {
+		for k := range m {
 			out = append(out, k)
 		}
 	}
@@ -420,7 +420,7 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 
 				out := []interface{}{}
 
-				for i, _ := range a {
+				for i := range a {
 
 					if k == len(path)-1 {
 						a[i] = value
