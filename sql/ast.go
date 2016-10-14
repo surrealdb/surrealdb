@@ -390,7 +390,9 @@ func (this Thing) String() string {
 
 func NewThing(TB string, ID interface{}) *Thing {
 	if str, ok := ID.(string); ok {
-		if cnv, err := strconv.ParseFloat(str, 64); err == nil {
+		if cnv, err := strconv.ParseInt(str, 10, 64); err == nil {
+			return &Thing{TB: TB, ID: cnv}
+		} else if cnv, err := strconv.ParseFloat(str, 64); err == nil {
 			return &Thing{TB: TB, ID: cnv}
 		} else if cnv, err := time.Parse(RFCDate, str); err == nil {
 			return &Thing{TB: TB, ID: cnv.UTC()}

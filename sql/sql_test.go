@@ -390,21 +390,21 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			sql: `SELECT * FROM @person:123456`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
-				What: []Expr{&Thing{TB: "person", ID: float64(123456)}},
+				What: []Expr{&Thing{TB: "person", ID: int64(123456)}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:⟨123456⟩`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
-				What: []Expr{&Thing{TB: "person", ID: float64(123456)}},
+				What: []Expr{&Thing{TB: "person", ID: int64(123456)}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM @person:{123456}`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
-				What: []Expr{&Thing{TB: "person", ID: float64(123456)}},
+				What: []Expr{&Thing{TB: "person", ID: int64(123456)}},
 			}}},
 		},
 		{
@@ -628,7 +628,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"id"}, Op: EQ, RHS: float64(1)}},
+				Cond: []Expr{&BinaryExpression{LHS: &Ident{"id"}, Op: EQ, RHS: int64(1)}},
 			}}},
 		},
 		{
@@ -739,8 +739,8 @@ func Test_Parse_Queries_Select(t *testing.T) {
 				Cond: []Expr{
 					&BinaryExpression{LHS: &Ident{"id"}, Op: NEQ, RHS: &Null{}},
 					&BinaryExpression{LHS: &Ident{"id"}, Op: GT, RHS: float64(13.9)},
-					&BinaryExpression{LHS: &Ident{"id"}, Op: LT, RHS: float64(31)},
-					&BinaryExpression{LHS: &Ident{"id"}, Op: GTE, RHS: float64(15)},
+					&BinaryExpression{LHS: &Ident{"id"}, Op: LT, RHS: int64(31)},
+					&BinaryExpression{LHS: &Ident{"id"}, Op: GTE, RHS: int64(15)},
 					&BinaryExpression{LHS: &Ident{"id"}, Op: LTE, RHS: float64(29.9)},
 				},
 			}}},
@@ -1519,7 +1519,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 				Name:    "temp",
 				What:    []string{"person"},
 				Type:    "any",
-				Default: float64(100),
+				Default: int64(100),
 			}}},
 		},
 		{

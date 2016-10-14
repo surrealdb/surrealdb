@@ -121,7 +121,7 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 		return regexp.Compile(lit)
 
 	case NUMBER:
-		return strconv.ParseFloat(lit, 64)
+		return strconv.ParseInt(lit, 10, 64)
 
 	case DOUBLE:
 		return strconv.ParseFloat(lit, 64)
