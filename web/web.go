@@ -64,7 +64,7 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Auth(&mw.AuthOpts{
 		User: []byte(opts.Auth.User),
 		Pass: []byte(opts.Auth.Pass),
-	}).Path("/import", "/export"))
+	}).PathIs("/import", "/export"))
 
 	// Setup special authentication
 
@@ -75,7 +75,6 @@ func Setup(opts *cnf.Options) (err error) {
 			c.Set("DB", d["db"])
 			return nil
 		},
-	}).Path("/rpc", "/sql", "/key"))
 
 	// Setup newrelic integration
 
@@ -83,6 +82,7 @@ func Setup(opts *cnf.Options) (err error) {
 		Name:    []byte("Surreal"),
 		License: []byte(opts.Logging.Newrelic),
 	}))
+	}).PathIs("/rpc", "/sql").PathBegsWith("/key"))
 
 	// Run the server
 
