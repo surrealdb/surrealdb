@@ -141,6 +141,7 @@ const (
 	IS
 	LET
 	LIMIT
+	LIVE
 	MANDATORY
 	MATCH
 	MAX
@@ -303,6 +304,7 @@ var tokens = [...]string{
 	IS:              "IS",
 	LET:             "LET",
 	LIMIT:           "LIMIT",
+	LIVE:            "LIVE",
 	MANDATORY:       "MANDATORY",
 	MATCH:           "MATCH",
 	MAX:             "MAX",
