@@ -14,6 +14,42 @@ DEFINE TABLE person
 REMOVE TABLE person
 ```
 
+### SCOPE
+
+```sql
+/* Define the scope */
+DEFINE SCOPE account SESSION 1h POLICY {"min": 8, "max": null, "lowercase": 1, "uppercase": 1, "numeric": 1, "special": 1, "expiry": 180}
+DEFINE SIGNUP FOR SCOPE account AS CREATE admin SET email=$email, password=$password, account=( CREATE @account:{$accountname} SET name=$accountname )
+DEFINE SIGNIN FOR SCOPE account AS SELECT * FROM admin WHERE email=$email AND password=$password
+
+DEFINE SCOPE profile SESSION 24h POLICY {"min": 8, "max": null, "lowercase": 1, "uppercase": 1, "numeric": 1, "special": 1, "expiry": null}
+DEFINE SIGNUP FOR SCOPE profile AS CREATE person SET email=$email, password=$password
+DEFINE SIGNIN FOR SCOPE profile AS SELECT * FROM person WHERE email=$email AND password=$password
+```
+
+```sql
+/* Remove the scope */
+REMOVE SCOPE account
+REMOVE SCOPE profile
+```
+
+### RULES
+
+```sql
+/* Define the rules */
+DEFINE RULES FOR person WHEN select ACCEPT
+DEFINE RULES FOR person WHEN delete REJECT
+DEFINE RULES FOR person WHEN select, create, update ACCEPT
+DEFINE RULES FOR person WHEN select, create, update, delete ACCEPT WHERE $auth.accountid = accountid
+DEFINE RULES FOR age ON person WHEN select, create, update, delete ACCEPT WHERE $auth.accountid = accountid AND $auth.type = "admin"
+```
+
+```sql
+/* Remove the rules */
+REMOVE RULES FOR person WHEN SELECT
+REMOVE RULES FOR age ON person WHEN SELECT, CREATE, UPDATE, MODIFY, DELETE
+```
+
 ### FIELD
 
 ```sql
@@ -24,7 +60,10 @@ DEFINE FIELD age ON person TYPE number MIN 0 MAX 100 NOTNULL -- ... which can't 
 DEFINE FIELD age ON person TYPE number MIN 0 MAX 100 NOTNULL VALIDATE -- ... which will fail if not a number
 DEFINE FIELD age ON person TYPE number MIN 0 MAX 100 NOTNULL VALIDATE READONLY -- ... which is not able to be changed once defined
 
-DEFINE FIELD iso ON output TYPE string MATCH /[a-zA-Z0-9]+/ -- Define a field which matches a regular expresion
+DEFINE FIELD iso ON output TYPE string MATCH /^[A-Z]{3}$/ -- Define a field which matches a regular expresion
+
+DEFINE FIELD name.first ON person TYPE string
+DEFINE FIELD name.last ON person TYPE string
 
 /* Example of defining a field with allowed values */
 DEFINE FIELD kind ON address TYPE custom ENUM ["home","work"] -- Define a custom field
@@ -54,7 +93,22 @@ DEFINE INDEX sortable ON person COLUMNS uuid UNIQUE -- Define a unique index
 REMOVE INDEX sortable ON person
 ```
 
-### ACTION
+### VIEW
+
+```sql
+/* Example of defining a custom query */
+DEFINE VIEW ages AS SELECT count(*), min(age), max(age) FROM person -- Define a simple view
+DEFINE VIEW ages AS SELECT count(*), min(age), max(age) FROM person WHERE age > 18 -- ... with a where clause
+DEFINE VIEW ages AS SELECT count(*), min(age), max(age) FROM person WHERE age > 18 GROUP BY nationality -- ... with a group by clause
+DEFINE VIEW ages AS SELECT count(*), min(age), max(age) FROM person WHERE age > 18 GROUP BY nationality, gender -- ... with multiple group-by clauses
+```
+
+```sql
+/* Remove the query definition */
+REMOVE VIEW ages
+```
+
+### LIVE
 
 ```sql
 /* Example of defining a custom index */
@@ -64,7 +118,7 @@ LIVE SELECT * FROM person WHERE age > 18 -- ... with a conditional clause
 
 ```sql
 /* Remove the index definition */
-REMOVE INDEX sortable ON person
+KILL $ID
 ```
 
 ### CREATE
