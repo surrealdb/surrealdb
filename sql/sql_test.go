@@ -140,11 +140,11 @@ func Test_Parse_Queries_Malformed(t *testing.T) {
 		},
 		{
 			sql: `!`,
-			err: "Found `!` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, REMOVE`",
+			err: "Found `!` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, DEFINE, REMOVE`",
 		},
 		{
 			sql: `SELECT * FROM person;;;`,
-			err: "Found `;` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, RECORD, DEFINE, REMOVE`",
+			err: "Found `;` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, DEFINE, REMOVE`",
 		},
 	}
 
@@ -1338,7 +1338,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE RULES ON person FOR`,
-			err: "Found `` but expected `SELECT, CREATE, UPDATE, DELETE, RELATE, RECORD`",
+			err: "Found `` but expected `SELECT, CREATE, UPDATE, DELETE, RELATE`",
 		},
 		{
 			sql: `DEFINE RULES ON person FOR select, create, update, delete`,
@@ -1878,7 +1878,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		},
 		{
 			sql: `REMOVE RULES ON person FOR`,
-			err: "Found `` but expected `SELECT, CREATE, UPDATE, DELETE, RELATE, RECORD`",
+			err: "Found `` but expected `SELECT, CREATE, UPDATE, DELETE, RELATE`",
 		},
 		{
 			sql: `REMOVE RULES ON person FOR select, create, update, delete`,

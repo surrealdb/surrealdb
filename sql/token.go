@@ -160,7 +160,6 @@ const (
 	OR
 	ORDER
 	READONLY
-	RECORD
 	REJECT
 	RELATE
 	REMOVE
@@ -319,7 +318,6 @@ var tokens = [...]string{
 	OR:              "OR",
 	ORDER:           "ORDER",
 	READONLY:        "READONLY",
-	RECORD:          "RECORD",
 	REJECT:          "REJECT",
 	RELATE:          "RELATE",
 	REMOVE:          "REMOVE",

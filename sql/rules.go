@@ -36,7 +36,7 @@ func (p *parser) parseDefineRulesStatement() (stmt *DefineRulesStatement, err er
 
 	for {
 
-		tok, _, exi := p.mightBe(SELECT, CREATE, UPDATE, DELETE, RELATE, RECORD)
+		tok, _, exi := p.mightBe(SELECT, CREATE, UPDATE, DELETE, RELATE)
 		if !exi {
 			break
 		}
@@ -50,7 +50,7 @@ func (p *parser) parseDefineRulesStatement() (stmt *DefineRulesStatement, err er
 	}
 
 	if len(stmt.When) == 0 {
-		return nil, &ParseError{Found: "", Expected: []string{"SELECT", "CREATE", "UPDATE", "DELETE", "RELATE", "RECORD"}}
+		return nil, &ParseError{Found: "", Expected: []string{"SELECT", "CREATE", "UPDATE", "DELETE", "RELATE"}}
 	}
 
 	if tok, _, err := p.shouldBe(ACCEPT, REJECT, CUSTOM); err != nil {
@@ -97,7 +97,7 @@ func (p *parser) parseRemoveRulesStatement() (stmt *RemoveRulesStatement, err er
 
 	for {
 
-		tok, _, exi := p.mightBe(SELECT, CREATE, UPDATE, DELETE, RELATE, RECORD)
+		tok, _, exi := p.mightBe(SELECT, CREATE, UPDATE, DELETE, RELATE)
 		if !exi {
 			break
 		}
@@ -111,7 +111,7 @@ func (p *parser) parseRemoveRulesStatement() (stmt *RemoveRulesStatement, err er
 	}
 
 	if len(stmt.When) == 0 {
-		return nil, &ParseError{Found: "", Expected: []string{"SELECT", "CREATE", "UPDATE", "DELETE", "RELATE", "RECORD"}}
+		return nil, &ParseError{Found: "", Expected: []string{"SELECT", "CREATE", "UPDATE", "DELETE", "RELATE"}}
 	}
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
