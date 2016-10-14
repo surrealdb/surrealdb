@@ -27,8 +27,8 @@ import (
 
 type Doc struct {
 	kv      kvs.KV
+	tx      kvs.TX
 	id      string
-	txn     kvs.TX
 	key     *keys.Thing
 	initial *data.Doc
 	current *data.Doc
@@ -37,9 +37,9 @@ type Doc struct {
 	rules   map[string]*sql.DefineRulesStatement
 }
 
-func New(kv kvs.KV, txn kvs.TX, key *keys.Thing) (this *Doc) {
+func New(kv kvs.KV, tx kvs.TX, key *keys.Thing) (this *Doc) {
 
-	this = &Doc{kv: kv, key: key, txn: txn}
+	this = &Doc{kv: kv, key: key, tx: tx}
 
 	if key == nil {
 		this.key = &keys.Thing{}
@@ -68,7 +68,7 @@ func (this *Doc) getRules() {
 
 	beg := &keys.RU{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, RU: keys.Prefix}
 	end := &keys.RU{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, RU: keys.Suffix}
-	rng, _ := this.txn.RGet(beg.Encode(), end.Encode(), 0)
+	rng, _ := this.tx.RGet(beg.Encode(), end.Encode(), 0)
 
 	for _, kv := range rng {
 		var rul sql.DefineRulesStatement
@@ -88,7 +88,7 @@ func (this *Doc) getFields() {
 
 	beg := &keys.FD{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, FD: keys.Prefix}
 	end := &keys.FD{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, FD: keys.Suffix}
-	rng, _ := this.txn.RGet(beg.Encode(), end.Encode(), 0)
+	rng, _ := this.tx.RGet(beg.Encode(), end.Encode(), 0)
 
 	for _, kv := range rng {
 		var fld sql.DefineFieldStatement
@@ -104,7 +104,7 @@ func (this *Doc) getIndexs() {
 
 	beg := &keys.IX{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: keys.Prefix}
 	end := &keys.IX{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: keys.Suffix}
-	rng, _ := this.txn.RGet(beg.Encode(), end.Encode(), 0)
+	rng, _ := this.tx.RGet(beg.Encode(), end.Encode(), 0)
 
 	for _, kv := range rng {
 		var idx sql.DefineIndexStatement
@@ -118,39 +118,19 @@ func (this *Doc) getIndexs() {
 
 func (this *Doc) StartThing() (err error) {
 
-	dkey := &keys.DB{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB}
-	if err := this.txn.Put(dkey.Encode(), nil); err != nil {
-		return err
-	}
-
-	tkey := &keys.TB{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB}
-	if err := this.txn.Put(tkey.Encode(), nil); err != nil {
-		return err
-	}
-
-	return this.txn.CPut(this.key.Encode(), this.current.Encode(), nil)
+	return this.tx.CPut(this.key.Encode(), this.current.Encode(), nil)
 
 }
 
 func (this *Doc) PurgeThing() (err error) {
 
-	return this.txn.Del(this.key.Encode())
+	return this.tx.Del(this.key.Encode())
 
 }
 
 func (this *Doc) StoreThing() (err error) {
 
-	dkey := &keys.DB{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB}
-	if err := this.txn.Put(dkey.Encode(), nil); err != nil {
-		return err
-	}
-
-	tkey := &keys.TB{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB}
-	if err := this.txn.Put(tkey.Encode(), nil); err != nil {
-		return err
-	}
-
-	return this.txn.CPut(this.key.Encode(), this.current.Encode(), this.kv.Val())
+	return this.tx.CPut(this.key.Encode(), this.current.Encode(), this.kv.Val())
 
 }
 
@@ -158,14 +138,15 @@ func (this *Doc) PurgePatch() (err error) {
 
 	beg := &keys.Patch{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, ID: this.key.ID, AT: keys.StartOfTime}
 	end := &keys.Patch{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, ID: this.key.ID, AT: keys.EndOfTime}
-	return this.txn.RDel(beg.Encode(), end.Encode(), 0)
+	return this.tx.RDel(beg.Encode(), end.Encode(), 0)
 
 }
 
 func (this *Doc) StorePatch() (err error) {
 
-	key := &keys.Patch{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, ID: this.key.ID}
-	return this.txn.CPut(key.Encode(), this.diff().Encode(), nil)
+	// key := &keys.Patch{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, ID: this.key.ID}
+	// return this.tx.CPut(key.Encode(), this.diff().Encode(), nil)
+	return
 
 }
 
@@ -178,14 +159,14 @@ func (this *Doc) PurgeIndex() (err error) {
 		if index.Uniq == true {
 			for _, o := range old {
 				key := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o}
-				this.txn.CDel(key.Encode(), []byte(this.id))
+				this.tx.CDel(key.Encode(), []byte(this.id))
 			}
 		}
 
 		if index.Uniq == false {
 			for _, o := range old {
 				key := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o, ID: this.key.ID}
-				this.txn.CDel(key.Encode(), []byte(this.id))
+				this.tx.CDel(key.Encode(), []byte(this.id))
 			}
 		}
 
@@ -207,11 +188,11 @@ func (this *Doc) StoreIndex() (err error) {
 		if index.Uniq == true {
 			for _, o := range old {
 				oidx := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o}
-				this.txn.CDel(oidx.Encode(), []byte(this.id))
+				this.tx.CDel(oidx.Encode(), []byte(this.id))
 			}
 			for _, n := range now {
 				nidx := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: n}
-				if err = this.txn.CPut(nidx.Encode(), []byte(this.id), nil); err != nil {
+				if err = this.tx.CPut(nidx.Encode(), []byte(this.id), nil); err != nil {
 					return fmt.Errorf("Duplicate entry for %v in index '%s' on %s", n, index.Name, this.key.TB)
 				}
 			}
@@ -220,11 +201,11 @@ func (this *Doc) StoreIndex() (err error) {
 		if index.Uniq == false {
 			for _, o := range old {
 				oidx := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o, ID: this.key.ID}
-				this.txn.CDel(oidx.Encode(), []byte(this.id))
+				this.tx.CDel(oidx.Encode(), []byte(this.id))
 			}
 			for _, n := range now {
 				nidx := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: n, ID: this.key.ID}
-				if err = this.txn.CPut(nidx.Encode(), []byte(this.id), nil); err != nil {
+				if err = this.tx.CPut(nidx.Encode(), []byte(this.id), nil); err != nil {
 					return fmt.Errorf("Multiple items with id %s in index '%s' on %s", this.key.ID, index.Name, this.key.TB)
 				}
 			}

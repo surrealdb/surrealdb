@@ -28,8 +28,9 @@ func (this *Doc) Merge(data []sql.Expr) (err error) {
 	this.getFields()
 	this.getIndexs()
 
-	// Set defaults
-	this.defFld()
+	if err = this.defFld(); err != nil {
+		return
+	}
 
 	for _, part := range data {
 		switch expr := part.(type) {
@@ -44,10 +45,17 @@ func (this *Doc) Merge(data []sql.Expr) (err error) {
 		}
 	}
 
-	// Set fields
-	err = this.setFld()
-	err = this.mrgFld()
-	err = this.setFld()
+	if err = this.setFld(); err != nil {
+		return
+	}
+
+	if err = this.mrgFld(); err != nil {
+		return
+	}
+
+	if err = this.setFld(); err != nil {
+		return
+	}
 
 	return
 
@@ -55,7 +63,6 @@ func (this *Doc) Merge(data []sql.Expr) (err error) {
 
 func (this *Doc) setFld() (err error) {
 
-	// Set data
 	this.current.Set(this.key.ID, "id")
 	this.current.Set(this.key.TB, "tb")
 
@@ -71,6 +78,8 @@ func (this *Doc) defFld() (err error) {
 
 		if fld.Default != nil && e == false {
 			switch val := fld.Default.(type) {
+			case sql.Void, *sql.Void:
+				this.current.Del(fld.Name)
 			case sql.Null, *sql.Null:
 				this.current.Set(nil, fld.Name)
 			default:

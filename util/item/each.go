@@ -88,7 +88,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 	c = current.Get(fld.Name).Data()
 	e = current.Exists(fld.Name)
 
-	if fld.Default != nil && e == false {
+	if fld.Default != nil && (c == nil || e == false) {
 		switch val := fld.Default.(type) {
 		case sql.Null, *sql.Null:
 			current.Set(nil, fld.Name)
@@ -394,7 +394,7 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 	c = current.Get(fld.Name).Data()
 	e = current.Exists(fld.Name)
 
-	if fld.Default != nil && e == false {
+	if fld.Default != nil && (c == nil || e == false) {
 		switch val := fld.Default.(type) {
 		case sql.Null, *sql.Null:
 			current.Set(nil, fld.Name)
