@@ -157,6 +157,28 @@ type RelateStatement struct {
 }
 
 // --------------------------------------------------
+// Scope
+// --------------------------------------------------
+
+// DefineScopeStatement represents an SQL DEFINE SCOPE statement.
+type DefineScopeStatement struct {
+	KV   string        `cork:"-" codec:"-"`
+	NS   string        `cork:"-" codec:"-"`
+	DB   string        `cork:"-" codec:"-"`
+	Name string        `cork:"name" codec:"name"`
+	Time time.Duration `cork:"time" codec:"time"`
+	Opts interface{}   `cork:"opts" codec:"opts"`
+}
+
+// RemoveScopeStatement represents an SQL REMOVE SCOPE statement.
+type RemoveScopeStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Name string `cork:"name" codec:"name"`
+}
+
+// --------------------------------------------------
 // Table
 // --------------------------------------------------
 
