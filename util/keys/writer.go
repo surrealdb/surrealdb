@@ -17,7 +17,10 @@ package keys
 import (
 	"encoding/binary"
 	"io"
+	"math"
+	"reflect"
 	"time"
+	"unsafe"
 )
 
 type writer struct {
@@ -38,94 +41,61 @@ func (w *writer) Write(i interface{}) {
 		w.Writer.Write(v)
 
 	case string:
-		w.Writer.Write([]byte(v))
+		w.writeString(v)
 
 	case time.Time:
-		binary.Write(w.Writer, binary.BigEndian, v.UnixNano())
+		w.writeTime(v)
 
 	case uint:
-		w.Write(bBOOL)
-		binary.Write(w.Writer, binary.BigEndian, float64(v))
-
+		w.writeNumber(float64(v))
 	case uint8:
-		w.Write(bBOOL)
-		binary.Write(w.Writer, binary.BigEndian, float64(v))
-
+		w.writeNumber(float64(v))
 	case uint16:
-		w.Write(bBOOL)
-		binary.Write(w.Writer, binary.BigEndian, float64(v))
-
+		w.writeNumber(float64(v))
 	case uint32:
-		w.Write(bBOOL)
-		binary.Write(w.Writer, binary.BigEndian, float64(v))
-
+		w.writeNumber(float64(v))
 	case uint64:
-		w.Write(bBOOL)
-		binary.Write(w.Writer, binary.BigEndian, float64(v))
+		w.writeNumber(float64(v))
 
 	case int:
-		if v < 0 {
-			w.Write(bNILL)
-			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
-		} else {
-			w.Write(bBOOL)
-			binary.Write(w.Writer, binary.BigEndian, float64(v))
-		}
-
+		w.writeNumber(float64(v))
 	case int8:
-		if v < 0 {
-			w.Write(bNILL)
-			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
-		} else {
-			w.Write(bBOOL)
-			binary.Write(w.Writer, binary.BigEndian, float64(v))
-		}
-
+		w.writeNumber(float64(v))
 	case int16:
-		if v < 0 {
-			w.Write(bNILL)
-			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
-		} else {
-			w.Write(bBOOL)
-			binary.Write(w.Writer, binary.BigEndian, float64(v))
-		}
-
+		w.writeNumber(float64(v))
 	case int32:
-		if v < 0 {
-			w.Write(bNILL)
-			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
-		} else {
-			w.Write(bBOOL)
-			binary.Write(w.Writer, binary.BigEndian, float64(v))
-		}
-
+		w.writeNumber(float64(v))
 	case int64:
-		if v < 0 {
-			w.Write(bNILL)
-			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
-		} else {
-			w.Write(bBOOL)
-			binary.Write(w.Writer, binary.BigEndian, float64(v))
-		}
+		w.writeNumber(float64(v))
 
 	case float32:
-		if v < 0 {
-			w.Write(bNILL)
-			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
-		} else {
-			w.Write(bBOOL)
-			binary.Write(w.Writer, binary.BigEndian, float64(v))
-		}
-
+		w.writeNumber(float64(v))
 	case float64:
-		if v < 0 {
-			w.Write(bNILL)
-			binary.Write(w.Writer, binary.BigEndian, 0-float64(v))
-		} else {
-			w.Write(bBOOL)
-			binary.Write(w.Writer, binary.BigEndian, float64(v))
-		}
+		w.writeNumber(float64(v))
 
 	}
 
+}
+
+func (w *writer) writeString(v string) {
+	b := *(*[]byte)(unsafe.Pointer((*reflect.SliceHeader)(unsafe.Pointer(&v))))
+	w.Write(b)
+}
+
+func (w *writer) writeTime(v time.Time) {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, uint64(v.UTC().UnixNano()))
+	w.Write(b)
+}
+
+func (w *writer) writeNumber(v float64) {
+	b := make([]byte, 8)
+	if v < 0 {
+		w.Write(bNEG)
+		binary.BigEndian.PutUint64(b, ^math.Float64bits(v))
+	} else {
+		w.Write(bPOS)
+		binary.BigEndian.PutUint64(b, math.Float64bits(v))
+	}
+	w.Write(b)
 }

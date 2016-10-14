@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"io"
+	"math"
 	"time"
 )
 
@@ -122,66 +123,84 @@ func (r *reader) FindString() (val string) {
 	return
 }
 
-func (r *reader) FindNumber() (val float64) {
-	if r.ReadNext(cNUMBER) {
-		if r.ReadNext(cNILL) {
-			binary.Read(r.Reader, binary.BigEndian, &val)
-			val = 0 - val
-			r.ReadNext(cTERM)
-		} else if r.ReadNext(cBOOL) {
-			binary.Read(r.Reader, binary.BigEndian, &val)
-			r.ReadNext(cTERM)
-		}
+func (r *reader) FindNumber() (val interface{}) {
+	var dec uint64
+	var num float64
+	if r.ReadNext(cNEG) {
+		binary.Read(r.Reader, binary.BigEndian, &dec)
+		num = math.Float64frombits(^dec)
+		r.ReadNext(cEND)
+	} else if r.ReadNext(cPOS) {
+		binary.Read(r.Reader, binary.BigEndian, &dec)
+		num = math.Float64frombits(dec)
+		r.ReadNext(cEND)
+	}
+	if math.Trunc(num) == num {
+		return int64(math.Trunc(num))
+	}
+	return num
+}
+
+func (r *reader) FindDouble() (val float64) {
+	var dec uint64
+	if r.ReadNext(cNEG) {
+		binary.Read(r.Reader, binary.BigEndian, &dec)
+		val = math.Float64frombits(^dec)
+		r.ReadNext(cEND)
+	} else if r.ReadNext(cPOS) {
+		binary.Read(r.Reader, binary.BigEndian, &dec)
+		val = math.Float64frombits(dec)
+		r.ReadNext(cEND)
 	}
 	return
 }
 
 func (r *reader) FindNumberInt() (val int) {
-	return int(r.FindNumber())
+	return int(r.FindDouble())
 }
 
 func (r *reader) FindNumberInt8() (val int8) {
-	return int8(r.FindNumber())
+	return int8(r.FindDouble())
 }
 
 func (r *reader) FindNumberInt16() (val int16) {
-	return int16(r.FindNumber())
+	return int16(r.FindDouble())
 }
 
 func (r *reader) FindNumberInt32() (val int32) {
-	return int32(r.FindNumber())
+	return int32(r.FindDouble())
 }
 
 func (r *reader) FindNumberInt64() (val int64) {
-	return int64(r.FindNumber())
+	return int64(r.FindDouble())
 }
 
 func (r *reader) FindNumberUint() (val uint) {
-	return uint(r.FindNumber())
+	return uint(r.FindDouble())
 }
 
 func (r *reader) FindNumberUint8() (val uint8) {
-	return uint8(r.FindNumber())
+	return uint8(r.FindDouble())
 }
 
 func (r *reader) FindNumberUint16() (val uint16) {
-	return uint16(r.FindNumber())
+	return uint16(r.FindDouble())
 }
 
 func (r *reader) FindNumberUint32() (val uint32) {
-	return uint32(r.FindNumber())
+	return uint32(r.FindDouble())
 }
 
 func (r *reader) FindNumberUint64() (val uint64) {
-	return uint64(r.FindNumber())
+	return uint64(r.FindDouble())
 }
 
 func (r *reader) FindNumberFloat32() (val float32) {
-	return float32(r.FindNumber())
+	return float32(r.FindDouble())
 }
 
 func (r *reader) FindNumberFloat64() (val float64) {
-	return float64(r.FindNumber())
+	return float64(r.FindDouble())
 }
 
 func (r *reader) FindArray() (val []interface{}) {
