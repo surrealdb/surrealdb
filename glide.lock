@@ -1,32 +1,35 @@
 hash: 0402d462f75cf177f62e8a0c786da7e9ca6a22535e6412965b600141842d6dae
-updated: 2016-10-02T00:13:11.619047909+01:00
+updated: 2016-10-14T22:57:21.611179736+01:00
 imports:
 - name: github.com/abcum/cork
-  version: d47d0e1881409c934d55048fd062a004a967959c
+  version: 8baa98b9e891d02133aea11d0786c8ec1d42c051
 - name: github.com/abcum/fibre
-  version: 0382d1281adf8f26d58db19abcd2dfa634306f7a
+  version: 2b7739337d5b9b29cfcf0f544e57117dfe01f0d9
   subpackages:
   - mw
 - name: github.com/abcum/logrus
-  version: 119b6994c03cc9597e8c1873a47d715e34b5ed9a
+  version: 4b6ea7319e214d98c938f12692336f7ca9348d6b
 - name: github.com/armon/go-metrics
   version: 3df31a1ada83e310c2e24b267c8e8b68836547b4
 - name: github.com/asaskevich/govalidator
   version: 7664702784775e51966f0885f5cd27435916517b
 - name: github.com/boltdb/bolt
-  version: 5cc10bbbc5c141029940133bb33c9e969512a698
+  version: 074dffcc83e9f421e261526d297cd93f22a34080
+- name: github.com/cznic/internal
+  version: cef02a853c3a93623c42eacd574e7ea05f55531b
+  subpackages:
+  - buffer
+  - slice
+- name: github.com/cznic/mathutil
+  version: 4609a45a9e61188d0d69a5d8ad42600c3df35002
 - name: github.com/cznic/zappy
-  version: 4f5e6ef19fd692f1ef9b01206de4f1161a314e9a
+  version: 2533cb5b45cc6c07421468ce262899ddc9d53fb7
 - name: github.com/dgrijalva/jwt-go
-  version: 01aeca54ebda6e0fbfafd0a524d234159c05ec20
+  version: d2709f9f1f31ebcda9651b03077758c1f3a0018c
 - name: github.com/go-sql-driver/mysql
   version: a732e14c62dde3285440047bba97581bc472ae18
-- name: github.com/golang/protobuf
-  version: 874264fbbb43f4d91e999fecb4b40143ed611400
-  subpackages:
-  - proto
 - name: github.com/gorilla/websocket
-  version: 5e2e56d5dfd46884df1036f828777ee6273f2cff
+  version: 1f512fc3f05332ba7117626cdfb4e07474e58e60
 - name: github.com/hashicorp/errwrap
   version: 7554cd9344cec97297fa6649b055a8c98c2a1e55
 - name: github.com/hashicorp/go-msgpack
@@ -34,11 +37,11 @@ imports:
   subpackages:
   - codec
 - name: github.com/hashicorp/go-multierror
-  version: d30f09973e19c1dfcd120b2d9c4f168e68d6b5d5
+  version: 8c5f0ad9360406a3807ce7de6bc73269a91a6e51
 - name: github.com/hashicorp/memberlist
-  version: b2053e314b4a87e5f0d2d47aeafd3e03be13da90
+  version: 7ad712f5f34ec40aebe6ca47756d07898486a8d2
 - name: github.com/hashicorp/serf
-  version: a1c6efee94be3501f8454bdb9fda01b867359c27
+  version: 1d4fa605f6ff3ed628d7ae5eda7c0e56803e72a5
   subpackages:
   - coordinate
   - serf
@@ -49,17 +52,17 @@ imports:
 - name: github.com/kr/text
   version: 7cafcd837844e784b526369c9bce262804aebc60
 - name: github.com/lib/pq
-  version: 4dd446efc17690bc53e154025146f73203b18309
+  version: ae8357db35d721c58dcdc911318b55bef6b1b001
   subpackages:
   - oid
 - name: github.com/mgutz/ansi
   version: c286dcecd19ff979eeb73ea444e479b903f2cfcb
 - name: github.com/miekg/dns
-  version: 5d001d020961ae1c184f9f8152fdc73810481677
+  version: fc4e1e2843d86c346d7203160cfdbf14fa654a9b
 - name: github.com/pkg/profile
   version: 1c16f117a3ab788fdf0e334e623b8bccf5679866
 - name: github.com/robertkrimen/otto
-  version: c41cf547e08c4a88c36859766ece30dd178d7bc1
+  version: bf1c3795ba078da6905fe80bfbc3ed3d8c36e9aa
   subpackages:
   - ast
   - dbg
@@ -68,59 +71,34 @@ imports:
   - registry
   - token
 - name: github.com/satori/go.uuid
-  version: 0aa62d5ddceb50dbcb909d790b5345affd3669b6
+  version: 879c5887cd475cd7864858769793b2ceb0d44feb
 - name: github.com/spf13/cobra
-  version: 9d9ce1213e32036f555185d5a7df854d6f801ef8
+  version: ec2fe7859914a5106dcab4e7901633d959bfc2f4
 - name: github.com/spf13/pflag
-  version: 1560c1005499d61b80f865c04d39ca7505bf7f0b
+  version: bf8481a6aebc13a8aab52e699ffe2e79771f5a3f
 - name: github.com/ugorji/go
-  version: b94837a2404ab90efe9289e77a70694c355739cb
+  version: faddd6128c66c4708f45fdc007f575f75e592a3c
   subpackages:
   - codec
 - name: github.com/yuin/gopher-lua
-  version: 6a1397dfb6f8e7af08496129dd96f5f62c148f47
+  version: d0d5dd3565a9f3c86ff5bc42a0b1cc9e5bfcf55e
   subpackages:
   - ast
   - parse
   - pm
-- name: github.com/yvasiyarov/go-metrics
-  version: c25f46c4b94079672242ec48a545e7ca9ebe3aec
-- name: github.com/yvasiyarov/gorelic
-  version: ae09aa139a2b7f638e2412baceaceebd41eff115
-- name: github.com/yvasiyarov/newrelic_platform_go
-  version: 9c099fbc30e90de5bb5c5f94aa5fd08f2daeaacd
-- name: golang.org/x/net
-  version: 4d38db76854b199960801a1734443fd02870d7e1
-  subpackages:
-  - context
 - name: golang.org/x/sys
-  version: a646d33e2ee3172a661fc09bca23bb4889a41bc8
+  version: 9bb9f0998d48b31547d975974935ae9b48c7a03c
   subpackages:
   - unix
-- name: google.golang.org/appengine
-  version: 267c27e7492265b84fc6719503b14a1e17975d79
-  subpackages:
-  - datastore
-  - internal
-  - internal/app_identity
-  - internal/base
-  - internal/datastore
-  - internal/log
-  - internal/modules
-  - internal/remote_api
 - name: gopkg.in/sourcemap.v1
-  version: 8cd1e2e0ddc78dcb4511bcb184d23171bed15c67
+  version: eef8f47ab679652a7d3a4ee34c34314d255d2536
   subpackages:
   - base64vlq
 - name: gopkg.in/tylerb/graceful.v1
-  version: d7d7a205e779a4738d38eda0671fff8bfc965f14
-- name: gopkg.in/vmihailenco/msgpack.v2
-  version: 9da2e9d7beae1b7c03cf7cfe8f4911958602a5de
-  subpackages:
-  - codes
+  version: 50a48b6e73fcc75b45e22c05b79629a67c79e938
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: 45518c130e5bd1525f20110830a4986365a153de
+  version: 00f306e07eaaaab04ea5dba605cd0e1eff9c6fb7
   subpackages:
   - js
 - name: github.com/jtolds/gls
@@ -131,7 +109,7 @@ testImports:
   - internal/go-render/render
   - internal/oglematchers
 - name: github.com/smartystreets/goconvey
-  version: 4622128e06c77c0174e17a7f0ed2db19a989b473
+  version: 7befa7fd6e2e8ca28d2b94f2d39111929904b08d
   subpackages:
   - convey
   - convey/gotest
