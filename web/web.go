@@ -52,9 +52,10 @@ func Setup(opts *cnf.Options) (err error) {
 	// Check body type
 
 	s.Use(mw.Type(&mw.TypeOpts{
-		AllowedContent: []string{
-			"application/json",
-			"application/msgpack",
+		AllowedContent: map[string]bool{
+			"application/json":    true,
+			"application/cbor":    true,
+			"application/msgpack": true,
 		},
 	}))
 
