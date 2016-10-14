@@ -16,51 +16,27 @@ package pack
 
 import (
 	"bytes"
-	"encoding/gob"
 	"github.com/abcum/cork"
-	"github.com/abcum/surreal/sql"
 )
 
+var opt cork.Handle
+
 func init() {
-
-	gob.Register(sql.Null{})
-	gob.Register(sql.Void{})
-	gob.Register(sql.Empty{})
-	gob.Register(sql.Field{})
-	gob.Register(sql.Group{})
-	gob.Register(sql.Order{})
-	gob.Register(sql.Ident{})
-	gob.Register(sql.Table{})
-	gob.Register(sql.Thing{})
-	gob.Register(sql.DiffExpression{})
-	gob.Register(sql.MergeExpression{})
-	gob.Register(sql.ContentExpression{})
-	gob.Register(sql.SelectStatement{})
-	gob.Register(sql.CreateStatement{})
-	gob.Register(sql.UpdateStatement{})
-	gob.Register(sql.ModifyStatement{})
-	gob.Register(sql.DeleteStatement{})
-	gob.Register(sql.RelateStatement{})
-	gob.Register(sql.DefineViewStatement{})
-	gob.Register(sql.DefineTableStatement{})
-	gob.Register(sql.DefineRulesStatement{})
-	gob.Register(sql.DefineFieldStatement{})
-	gob.Register(sql.DefineIndexStatement{})
-
+	opt.Precision = false
+	opt.ArrType = []interface{}{}
+	opt.MapType = map[string]interface{}{}
 }
 
-// Encode encodes a data object into a GOB.
+// Encode encodes a data object into a CORK.
 func Encode(src interface{}) (dst []byte) {
 	buf := bytes.NewBuffer(nil)
-	// gob.NewEncoder(buf).Encode(src)
-	cork.NewEncoder(buf).Encode(src)
+	cork.NewEncoder(buf).Options(&opt).Encode(src)
 	return buf.Bytes()
 }
 
-// Decode decodes a GOB into a data object.
+// Decode decodes a CORK into a data object.
 func Decode(src []byte, dst interface{}) {
 	buf := bytes.NewBuffer(src)
-	// gob.NewDecoder(buf).Decode(&dst)
-	cork.NewDecoder(buf).Decode(dst)
+	cork.NewDecoder(buf).Options(&opt).Decode(dst)
 	return
 }
