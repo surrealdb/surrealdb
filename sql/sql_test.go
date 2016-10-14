@@ -1294,7 +1294,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `DEFINE`,
-			err: "Found `` but expected `TABLE, RULES, FIELD, INDEX`",
+			err: "Found `` but expected `TABLE, RULES, FIELD, INDEX, VIEW`",
 		},
 		// ----------------------------------------------------------------------
 		{
@@ -1830,6 +1830,43 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE INDEX temp ON person COLUMNS firstname, lastname UNIQUE something`,
 			err: "Found `something` but expected `EOF, ;`",
 		},
+		// ----------------------------------------------------------------------
+		{
+			sql: `DEFINE VIEW`,
+			err: "Found `` but expected `name`",
+		},
+		{
+			sql: `DEFINE VIEW temp`,
+			err: "Found `` but expected `AS`",
+		},
+		{
+			sql: `DEFINE VIEW temp AS`,
+			err: "Found `` but expected `SELECT`",
+		},
+		{
+			sql: `DEFINE VIEW temp AS SELECT`,
+			err: "Found `` but expected `field name`",
+		},
+		{
+			sql: `DEFINE VIEW temp AS SELECT *`,
+			err: "Found `` but expected `FROM`",
+		},
+		{
+			sql: `DEFINE VIEW temp AS SELECT * FROM`,
+			err: "Found `` but expected `table name or record id`",
+		},
+		{
+			sql: `DEFINE VIEW temp AS SELECT * FROM person`,
+			res: &Query{Statements: []Statement{&DefineViewStatement{
+				Name: "temp",
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"person"}},
+			}}},
+		},
+		{
+			sql: `DEFINE VIEW temp AS SELECT * FROM person something`,
+			err: "Found `something` but expected `EOF, ;`",
+		},
 	}
 
 	for _, test := range tests {
@@ -1843,7 +1880,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `REMOVE`,
-			err: "Found `` but expected `TABLE, RULES, FIELD, INDEX`",
+			err: "Found `` but expected `TABLE, RULES, FIELD, INDEX, VIEW`",
 		},
 		// ----------------------------------------------------------------------
 		{
