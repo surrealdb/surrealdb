@@ -170,8 +170,11 @@ const (
 	RULES
 	SCHEMAFULL
 	SCHEMALESS
+	SCOPE
 	SELECT
 	SET
+	SIGNIN
+	SIGNUP
 	SOMECONTAINEDIN
 	START
 	TABLE
@@ -332,8 +335,11 @@ var tokens = [...]string{
 	RULES:           "RULES",
 	SCHEMAFULL:      "SCHEMAFULL",
 	SCHEMALESS:      "SCHEMALESS",
+	SCOPE:           "SCOPE",
 	SELECT:          "SELECT",
 	SET:             "SET",
+	SIGNIN:          "SIGNIN",
+	SIGNUP:          "SIGNUP",
 	SOMECONTAINEDIN: "SOMECONTAINEDIN",
 	START:           "START",
 	TABLE:           "TABLE",
