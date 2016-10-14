@@ -65,9 +65,9 @@ var (
 )
 
 const (
-	// MinNumber is the minimum number to be encoded and decoded
+	// MinNumber is the minimum number which can be accurately serialized
 	MinNumber = -1 << 53
-	// MaxNumber is the maximum number to be encoded and decoded
+	// MaxNumber is the maximum number which can be accurately serialized
 	MaxNumber = 1<<53 - 1
 )
 
