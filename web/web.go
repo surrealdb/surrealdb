@@ -75,13 +75,6 @@ func Setup(opts *cnf.Options) (err error) {
 			c.Set("DB", d["db"])
 			return nil
 		},
-
-	// Setup newrelic integration
-
-	s.Use(mw.Newrelic(&mw.NewrelicOpts{
-		Name:    []byte("Surreal"),
-		License: []byte(opts.Logging.Newrelic),
-	}))
 	}).PathIs("/rpc", "/sql").PathBegsWith("/key"))
 
 	// Run the server
