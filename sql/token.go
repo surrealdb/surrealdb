@@ -418,6 +418,10 @@ func (tok Token) String() string {
 	return ""
 }
 
+func (tok Token) MarshalText() (data []byte, err error) {
+	return []byte(tok.String()), err
+}
+
 func (tok Token) isLiteral() bool { return tok > literalsBeg && tok < literalsEnd }
 
 func (tok Token) isKeyword() bool { return tok > keywordsBeg && tok < keywordsEnd }
