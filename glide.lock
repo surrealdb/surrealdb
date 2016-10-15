@@ -1,8 +1,8 @@
 hash: 0402d462f75cf177f62e8a0c786da7e9ca6a22535e6412965b600141842d6dae
-updated: 2016-10-14T22:57:21.611179736+01:00
+updated: 2016-10-15T17:05:02.630102937+01:00
 imports:
 - name: github.com/abcum/cork
-  version: 8baa98b9e891d02133aea11d0786c8ec1d42c051
+  version: fc38426d08c64afbbea54b811036f2dd4ca28e48
 - name: github.com/abcum/fibre
   version: 2b7739337d5b9b29cfcf0f544e57117dfe01f0d9
   subpackages:
@@ -73,7 +73,7 @@ imports:
 - name: github.com/satori/go.uuid
   version: 879c5887cd475cd7864858769793b2ceb0d44feb
 - name: github.com/spf13/cobra
-  version: ec2fe7859914a5106dcab4e7901633d959bfc2f4
+  version: 856b96dcb49d6427babe192998a35190a12c2230
 - name: github.com/spf13/pflag
   version: bf8481a6aebc13a8aab52e699ffe2e79771f5a3f
 - name: github.com/ugorji/go
