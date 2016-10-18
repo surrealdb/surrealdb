@@ -37,6 +37,12 @@ func executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out
 
 	for _, TB := range ast.What {
 
+		// Set the namespace definition
+		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+		if err := txn.Put(nkey.Encode(), nil); err != nil {
+			return nil, err
+		}
+
 		// Set the database definition
 		dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
 		if err := txn.Put(dkey.Encode(), nil); err != nil {
@@ -75,6 +81,12 @@ func executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesStatement) (out
 	for _, TB := range ast.What {
 
 		for _, RU := range ast.When {
+
+			// Set the namespace definition
+			nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+			if err := txn.Put(nkey.Encode(), nil); err != nil {
+				return nil, err
+			}
 
 			// Set the database definition
 			dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
@@ -121,6 +133,12 @@ func executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out
 
 	for _, TB := range ast.What {
 
+		// Set the namespace definition
+		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+		if err := txn.Put(nkey.Encode(), nil); err != nil {
+			return nil, err
+		}
+
 		// Set the database definition
 		dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
 		if err := txn.Put(dkey.Encode(), nil); err != nil {
@@ -163,6 +181,12 @@ func executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out
 	}
 
 	for _, TB := range ast.What {
+
+		// Set the namespace definition
+		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+		if err := txn.Put(nkey.Encode(), nil); err != nil {
+			return nil, err
+		}
 
 		// Set the database definition
 		dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
