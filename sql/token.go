@@ -161,6 +161,7 @@ const (
 	ON
 	OR
 	ORDER
+	POLICY
 	READONLY
 	REJECT
 	RELATE
@@ -172,6 +173,7 @@ const (
 	SCHEMALESS
 	SCOPE
 	SELECT
+	SESSION
 	SET
 	SIGNIN
 	SIGNUP
@@ -326,6 +328,7 @@ var tokens = [...]string{
 	ON:              "ON",
 	OR:              "OR",
 	ORDER:           "ORDER",
+	POLICY:          "POLICY",
 	READONLY:        "READONLY",
 	REJECT:          "REJECT",
 	RELATE:          "RELATE",
@@ -337,6 +340,7 @@ var tokens = [...]string{
 	SCHEMALESS:      "SCHEMALESS",
 	SCOPE:           "SCOPE",
 	SELECT:          "SELECT",
+	SESSION:         "SESSION",
 	SET:             "SET",
 	SIGNIN:          "SIGNIN",
 	SIGNUP:          "SIGNUP",

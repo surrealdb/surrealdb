@@ -202,6 +202,11 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 		case *sql.RelateStatement:
 			res, err = executeRelateStatement(txn, stm)
 
+		case *sql.DefineScopeStatement:
+			res, err = executeDefineScopeStatement(txn, stm)
+		case *sql.RemoveScopeStatement:
+			res, err = executeRemoveScopeStatement(txn, stm)
+
 		case *sql.DefineTableStatement:
 			res, err = executeDefineTableStatement(txn, stm)
 		case *sql.RemoveTableStatement:

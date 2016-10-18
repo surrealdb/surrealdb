@@ -28,8 +28,19 @@ func executeInfoStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}
 	if ast.What == "" {
 
 		res := data.New()
+		res.Array("scopes")
 		res.Array("tables")
 		res.Array("views")
+
+		// Get the scope definitions
+		sbeg := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: keys.Prefix}
+		send := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: keys.Suffix}
+		skvs, _ := txn.RGet(sbeg.Encode(), send.Encode(), 0)
+		for _, kv := range skvs {
+			key := &keys.SC{}
+			key.Decode(kv.Key())
+			res.Inc(key.SC, "scopes")
+		}
 
 		// Get the table definitions
 		tbeg := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: keys.Prefix}

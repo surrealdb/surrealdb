@@ -22,6 +22,30 @@ import (
 	"github.com/abcum/surreal/util/pack"
 )
 
+func executeDefineScopeStatement(txn kvs.TX, ast *sql.DefineScopeStatement) (out []interface{}, err error) {
+
+	// Set the namespace definition
+	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+	if err := txn.Put(nkey.Encode(), nil); err != nil {
+		return nil, err
+	}
+
+	// Set the database definition
+	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
+	if err := txn.Put(dkey.Encode(), nil); err != nil {
+		return nil, err
+	}
+
+	// Set the scope definition
+	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name}
+	if err := txn.Put(skey.Encode(), nil); err != nil {
+		return nil, err
+	}
+
+	return
+
+}
+
 func executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {

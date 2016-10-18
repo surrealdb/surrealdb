@@ -16,6 +16,7 @@ package sql
 
 import (
 	"regexp"
+	"time"
 )
 
 func (p *parser) parseWhat() (mul []Expr, err error) {
@@ -222,6 +223,19 @@ func (p *parser) parseBoolean() (bool, error) {
 	val, err := p.declare(tok, lit)
 
 	return val.(bool), err
+
+}
+
+func (p *parser) parseDuration() (time.Duration, error) {
+
+	tok, lit, err := p.shouldBe(DURATION)
+	if err != nil {
+		return 0, &ParseError{Found: lit, Expected: []string{"duration"}}
+	}
+
+	val, err := p.declare(tok, lit)
+
+	return val.(time.Duration), err
 
 }
 

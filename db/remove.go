@@ -20,6 +20,18 @@ import (
 	"github.com/abcum/surreal/util/keys"
 )
 
+func executeRemoveScopeStatement(txn kvs.TX, ast *sql.RemoveScopeStatement) (out []interface{}, err error) {
+
+	// Remove the scope config
+	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name}
+	if err := txn.Del(skey.Encode()); err != nil {
+		return nil, err
+	}
+
+	return
+
+}
+
 func executeRemoveTableStatement(txn kvs.TX, ast *sql.RemoveTableStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
