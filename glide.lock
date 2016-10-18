@@ -1,10 +1,10 @@
 hash: 0402d462f75cf177f62e8a0c786da7e9ca6a22535e6412965b600141842d6dae
-updated: 2016-10-15T17:05:02.630102937+01:00
+updated: 2016-10-16T11:45:03.052040359+01:00
 imports:
 - name: github.com/abcum/cork
-  version: fc38426d08c64afbbea54b811036f2dd4ca28e48
+  version: afeae3b379267629b7cd7cd32d8f876933febf28
 - name: github.com/abcum/fibre
-  version: 2b7739337d5b9b29cfcf0f544e57117dfe01f0d9
+  version: f69c991460b4a8ce8954a639de21048f37e6a8b3
   subpackages:
   - mw
 - name: github.com/abcum/logrus
