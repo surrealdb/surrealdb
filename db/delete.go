@@ -23,17 +23,6 @@ import (
 
 func executeDeleteStatement(txn kvs.TX, ast *sql.DeleteStatement) (out []interface{}, err error) {
 
-	var local bool
-
-	if txn == nil {
-		local = true
-		txn, err = db.Txn(true)
-		if err != nil {
-			return
-		}
-		defer txn.Rollback()
-	}
-
 	for _, w := range ast.What {
 
 		if what, ok := w.(*sql.Thing); ok {
@@ -61,10 +50,6 @@ func executeDeleteStatement(txn kvs.TX, ast *sql.DeleteStatement) (out []interfa
 			}
 		}
 
-	}
-
-	if local {
-		txn.Commit()
 	}
 
 	return

@@ -333,8 +333,15 @@ func (tx *TX) Close() (err error) {
 	return tx.Rollback()
 }
 
+func (tx *TX) Cancel() (err error) {
+	return tx.Rollback()
+}
+
 func (tx *TX) Commit() (err error) {
-	return tx.tx.Commit()
+	if tx.tx.Writable() {
+		return tx.tx.Commit()
+	}
+	return tx.tx.Rollback()
 }
 
 func (tx *TX) Rollback() (err error) {

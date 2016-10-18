@@ -22,17 +22,6 @@ import (
 
 func executeRemoveTableStatement(txn kvs.TX, ast *sql.RemoveTableStatement) (out []interface{}, err error) {
 
-	var local bool
-
-	if txn == nil {
-		local = true
-		txn, err = db.Txn(true)
-		if err != nil {
-			return
-		}
-		defer txn.Rollback()
-	}
-
 	for _, TB := range ast.What {
 
 		// Remove the table config
@@ -67,26 +56,11 @@ func executeRemoveTableStatement(txn kvs.TX, ast *sql.RemoveTableStatement) (out
 
 	}
 
-	if local {
-		txn.Commit()
-	}
-
 	return
 
 }
 
 func executeRemoveRulesStatement(txn kvs.TX, ast *sql.RemoveRulesStatement) (out []interface{}, err error) {
-
-	var local bool
-
-	if txn == nil {
-		local = true
-		txn, err = db.Txn(true)
-		if err != nil {
-			return
-		}
-		defer txn.Rollback()
-	}
 
 	for _, TB := range ast.What {
 
@@ -102,26 +76,11 @@ func executeRemoveRulesStatement(txn kvs.TX, ast *sql.RemoveRulesStatement) (out
 
 	}
 
-	if local {
-		txn.Commit()
-	}
-
 	return
 
 }
 
 func executeRemoveFieldStatement(txn kvs.TX, ast *sql.RemoveFieldStatement) (out []interface{}, err error) {
-
-	var local bool
-
-	if txn == nil {
-		local = true
-		txn, err = db.Txn(true)
-		if err != nil {
-			return
-		}
-		defer txn.Rollback()
-	}
 
 	for _, TB := range ast.What {
 
@@ -133,26 +92,11 @@ func executeRemoveFieldStatement(txn kvs.TX, ast *sql.RemoveFieldStatement) (out
 
 	}
 
-	if local {
-		txn.Commit()
-	}
-
 	return
 
 }
 
 func executeRemoveIndexStatement(txn kvs.TX, ast *sql.RemoveIndexStatement) (out []interface{}, err error) {
-
-	var local bool
-
-	if txn == nil {
-		local = true
-		txn, err = db.Txn(true)
-		if err != nil {
-			return
-		}
-		defer txn.Rollback()
-	}
 
 	for _, TB := range ast.What {
 
@@ -168,10 +112,6 @@ func executeRemoveIndexStatement(txn kvs.TX, ast *sql.RemoveIndexStatement) (out
 			return nil, err
 		}
 
-	}
-
-	if local {
-		txn.Commit()
 	}
 
 	return

@@ -29,6 +29,7 @@ type TX interface {
 	PDel([]byte) error
 	RDel([]byte, []byte, uint64) error
 	Close() error
+	Cancel() error
 	Commit() error
 	Rollback() error
 }

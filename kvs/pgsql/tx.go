@@ -314,6 +314,10 @@ func (tx *TX) Close() (err error) {
 	return tx.Rollback()
 }
 
+func (tx *TX) Cancel() (err error) {
+	return tx.Rollback()
+}
+
 func (tx *TX) Commit() (err error) {
 	return tx.tx.Commit()
 }

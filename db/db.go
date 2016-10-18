@@ -111,13 +111,27 @@ func detail(e error) interface{} {
 	}
 }
 
+func writable(cur kvs.TX, tmp bool) (txn kvs.TX, err error, loc bool) {
+	if cur == nil {
+		cur, err = db.Txn(true)
+	}
+	return cur, err, tmp
+}
+
+func readable(cur kvs.TX, tmp bool) (txn kvs.TX, err error, loc bool) {
+	if cur == nil {
+		cur, err = db.Txn(false)
+	}
+	return cur, err, tmp
+}
+
 func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 
 	var txn kvs.TX
 
 	defer func() {
 		if txn != nil {
-			txn.Rollback()
+			txn.Cancel()
 		}
 		if r := recover(); r != nil {
 			if err, ok := r.(error); ok {
@@ -130,14 +144,46 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 
 	for _, s := range ast.Statements {
 
-		var res []interface{}
+		var loc bool
 		var err error
+		var res []interface{}
 
 		now := time.Now()
 
-		switch stm := s.(type) {
+		switch s.(type) {
 
 		case *sql.UseStatement:
+			continue
+		case *sql.BeginStatement:
+			break
+		case *sql.CancelStatement:
+			break
+		case *sql.CommitStatement:
+			break
+		case *sql.InfoStatement:
+			txn, err, loc = readable(txn, txn == nil)
+		default:
+			txn, err, loc = writable(txn, txn == nil)
+		}
+
+		if err != nil {
+			chn <- err
+		}
+
+		switch stm := s.(type) {
+
+		case *sql.CommitStatement:
+			txn.Commit()
+			txn = nil
+			continue
+
+		case *sql.CancelStatement:
+			txn.Cancel()
+			txn = nil
+			continue
+
+		case *sql.BeginStatement:
+			txn, err, loc = writable(txn, false)
 			continue
 
 		case *sql.InfoStatement:
@@ -176,34 +222,19 @@ func execute(ctx *fibre.Context, ast *sql.Query, chn chan<- interface{}) {
 		case *sql.RemoveIndexStatement:
 			res, err = executeRemoveIndexStatement(txn, stm)
 
-		case *sql.BeginStatement:
-			if txn != nil {
-				chn <- fibre.NewHTTPError(400, "Transaction already running")
-				return
-			} else if txn, err = db.Txn(true); err != nil {
-				chn <- err
-				return
-			}
-
-		case *sql.CommitStatement:
-			if txn != nil {
-				txn.Commit()
-				txn = nil
-				continue
-			}
-
-		case *sql.CancelStatement:
-			if txn != nil {
-				txn.Rollback()
-				txn = nil
-				continue
-			}
-
 		}
 
-		if err != nil && txn != nil {
-			txn.Rollback()
+		if err != nil {
 			chn <- err
+		}
+
+		if loc {
+			if err != nil {
+				txn.Cancel()
+			} else {
+				txn.Commit()
+			}
+			txn = nil
 		}
 
 		chn <- &Response{

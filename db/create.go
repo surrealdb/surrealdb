@@ -24,17 +24,6 @@ import (
 
 func executeCreateStatement(txn kvs.TX, ast *sql.CreateStatement) (out []interface{}, err error) {
 
-	var local bool
-
-	if txn == nil {
-		local = true
-		txn, err = db.Txn(true)
-		if err != nil {
-			return
-		}
-		defer txn.Rollback()
-	}
-
 	for _, w := range ast.What {
 
 		if what, ok := w.(*sql.Thing); ok {
@@ -61,10 +50,6 @@ func executeCreateStatement(txn kvs.TX, ast *sql.CreateStatement) (out []interfa
 
 	}
 
-	if local {
-		txn.Commit()
-	}
-
 	return
 
 }
@@ -76,7 +61,7 @@ func create(doc *item.Doc, ast *sql.CreateStatement) (out interface{}, err error
 	}
 
 	if !doc.Allow("CREATE") {
-		return nil, nil
+		return
 	}
 
 	if err = doc.StoreIndex(); err != nil {

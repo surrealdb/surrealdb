@@ -24,17 +24,6 @@ import (
 
 func executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out []interface{}, err error) {
 
-	var local bool
-
-	if txn == nil {
-		local = true
-		txn, err = db.Txn(true)
-		if err != nil {
-			return
-		}
-		defer txn.Rollback()
-	}
-
 	for _, TB := range ast.What {
 
 		// Set the namespace definition
@@ -57,26 +46,11 @@ func executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out
 
 	}
 
-	if local {
-		txn.Commit()
-	}
-
 	return
 
 }
 
 func executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesStatement) (out []interface{}, err error) {
-
-	var local bool
-
-	if txn == nil {
-		local = true
-		txn, err = db.Txn(true)
-		if err != nil {
-			return
-		}
-		defer txn.Rollback()
-	}
 
 	for _, TB := range ast.What {
 
@@ -110,26 +84,11 @@ func executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesStatement) (out
 
 	}
 
-	if local {
-		txn.Commit()
-	}
-
 	return
 
 }
 
 func executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out []interface{}, err error) {
-
-	var local bool
-
-	if txn == nil {
-		local = true
-		txn, err = db.Txn(true)
-		if err != nil {
-			return
-		}
-		defer txn.Rollback()
-	}
 
 	for _, TB := range ast.What {
 
@@ -159,26 +118,11 @@ func executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out
 
 	}
 
-	if local {
-		txn.Commit()
-	}
-
 	return
 
 }
 
 func executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out []interface{}, err error) {
-
-	var local bool
-
-	if txn == nil {
-		local = true
-		txn, err = db.Txn(true)
-		if err != nil {
-			return
-		}
-		defer txn.Rollback()
-	}
 
 	for _, TB := range ast.What {
 
@@ -224,10 +168,6 @@ func executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out
 			}
 		}
 
-	}
-
-	if local {
-		txn.Commit()
 	}
 
 	return

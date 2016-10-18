@@ -23,14 +23,6 @@ import (
 
 func executeSelectStatement(txn kvs.TX, ast *sql.SelectStatement) (out []interface{}, err error) {
 
-	if txn == nil {
-		txn, err = db.Txn(false)
-		if err != nil {
-			return
-		}
-		defer txn.Close()
-	}
-
 	for _, w := range ast.What {
 
 		if what, ok := w.(*sql.Thing); ok {
@@ -71,7 +63,7 @@ func detect(doc *item.Doc, ast *sql.SelectStatement) (out interface{}, err error
 	}
 
 	if !doc.Allow("SELECT") {
-		return nil, nil
+		return
 	}
 
 	out = doc.Blaze(ast)
