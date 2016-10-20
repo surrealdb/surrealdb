@@ -237,6 +237,17 @@ func each(fld *sql.DefineFieldStatement, initial *data.Doc, current *data.Doc) (
 				}
 			}
 
+		case "double":
+			if val, err := conv.ConvertToDouble(c); err == nil {
+				current.Set(val, fld.Name)
+			} else {
+				if fld.Validate {
+					return fmt.Errorf("Field '%v' needs to be a double", fld.Name)
+				} else {
+					current.Iff(i, fld.Name)
+				}
+			}
+
 		case "boolean":
 			if val, err := conv.ConvertToBoolean(c); err == nil {
 				current.Set(val, fld.Name)

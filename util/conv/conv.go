@@ -16,13 +16,40 @@ package conv
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/asaskevich/govalidator"
 )
 
+func toNumber(str string) (int64, error) {
+	val, err := strconv.ParseFloat(str, 64)
+	if err != nil {
+		val = 0.0
+	}
+	return int64(val), err
+}
+
+func toDouble(str string) (float64, error) {
+	val, err := strconv.ParseFloat(str, 64)
+	if err != nil {
+		val = 0.0
+	}
+	return float64(val), err
+}
+
+func toBoolean(str string) (bool, error) {
+	val, err := strconv.ParseBool(str)
+	if err != nil {
+		val = false
+	}
+	return bool(val), err
+}
+
+// --------------------------------------------------
+
 func ConvertToUrl(obj interface{}) (val string, err error) {
-	val = govalidator.ToString(obj)
+	val = fmt.Sprintf("%v", obj)
 	if !govalidator.IsURL(val) {
 		err = fmt.Errorf("Not a valid url")
 	}
@@ -30,7 +57,7 @@ func ConvertToUrl(obj interface{}) (val string, err error) {
 }
 
 func ConvertToUuid(obj interface{}) (val string, err error) {
-	val = govalidator.ToString(obj)
+	val = fmt.Sprintf("%v", obj)
 	if !govalidator.IsUUID(val) {
 		err = fmt.Errorf("Not a valid uuid")
 	}
@@ -38,7 +65,7 @@ func ConvertToUuid(obj interface{}) (val string, err error) {
 }
 
 func ConvertToEmail(obj interface{}) (val string, err error) {
-	val = govalidator.ToString(obj)
+	val = fmt.Sprintf("%v", obj)
 	if !govalidator.IsEmail(val) {
 		err = fmt.Errorf("Not a valid email")
 	}
@@ -46,7 +73,7 @@ func ConvertToEmail(obj interface{}) (val string, err error) {
 }
 
 func ConvertToPhone(obj interface{}) (val string, err error) {
-	val = govalidator.ToString(obj)
+	val = fmt.Sprintf("%v", obj)
 	if !govalidator.Matches(val, `^[\s\d\+\-\(\)]+$`) {
 		err = fmt.Errorf("Not a valid phone")
 	}
@@ -54,7 +81,7 @@ func ConvertToPhone(obj interface{}) (val string, err error) {
 }
 
 func ConvertToColor(obj interface{}) (val string, err error) {
-	val = govalidator.ToString(obj)
+	val = fmt.Sprintf("%v", obj)
 	if !govalidator.IsHexcolor(val) && !govalidator.IsRGBcolor(val) {
 		err = fmt.Errorf("Not a valid color")
 	}
@@ -80,7 +107,7 @@ func ConvertToObject(obj interface{}) (val map[string]interface{}, err error) {
 }
 
 func ConvertToDomain(obj interface{}) (val string, err error) {
-	val = govalidator.ToString(obj)
+	val = fmt.Sprintf("%v", obj)
 	if !govalidator.IsDNSName(val) {
 		err = fmt.Errorf("Not a valid domain name")
 	}
@@ -88,7 +115,7 @@ func ConvertToDomain(obj interface{}) (val string, err error) {
 }
 
 func ConvertToBase64(obj interface{}) (val string, err error) {
-	val = govalidator.ToString(obj)
+	val = fmt.Sprintf("%v", obj)
 	if !govalidator.IsBase64(val) {
 		err = fmt.Errorf("Not valid base64 data")
 	}
@@ -96,24 +123,55 @@ func ConvertToBase64(obj interface{}) (val string, err error) {
 }
 
 func ConvertToString(obj interface{}) (val string, err error) {
-	if now, ok := obj.(string); ok {
+	switch now := obj.(type) {
+	case string:
 		return now, err
+	case []interface{}:
+		return val, fmt.Errorf("Not valid string")
+	case map[string]interface{}:
+		return val, fmt.Errorf("Not valid string")
+	default:
+		return fmt.Sprintf("%v", obj), err
 	}
-	return govalidator.ToString(obj), err
 }
 
-func ConvertToNumber(obj interface{}) (val float64, err error) {
-	if now, ok := obj.(float64); ok {
-		return now, err
+func ConvertToNumber(obj interface{}) (val int64, err error) {
+	switch now := obj.(type) {
+	case int64:
+		return int64(now), err
+	case float64:
+		return int64(now), err
+	case string:
+		return toNumber(now)
+	default:
+		return toNumber(fmt.Sprintf("%v", obj))
 	}
-	return govalidator.ToFloat(govalidator.ToString(obj))
+}
+
+func ConvertToDouble(obj interface{}) (val float64, err error) {
+	switch now := obj.(type) {
+	case int64:
+		return float64(now), err
+	case float64:
+		return float64(now), err
+	case string:
+		return toDouble(now)
+	default:
+		return toDouble(fmt.Sprintf("%v", obj))
+	}
 }
 
 func ConvertToBoolean(obj interface{}) (val bool, err error) {
-	if now, ok := obj.(bool); ok {
-		return now, err
+	switch now := obj.(type) {
+	case int64:
+		return now > 0, err
+	case float64:
+		return now > 0, err
+	case string:
+		return toBoolean(now)
+	default:
+		return toBoolean(fmt.Sprintf("%v", obj))
 	}
-	return govalidator.ToBoolean(govalidator.ToString(obj))
 }
 
 func ConvertToDatetime(obj interface{}) (val time.Time, err error) {
@@ -126,7 +184,7 @@ func ConvertToDatetime(obj interface{}) (val time.Time, err error) {
 }
 
 func ConvertToLatitude(obj interface{}) (val float64, err error) {
-	str := govalidator.ToString(obj)
+	str := fmt.Sprintf("%v", obj)
 	if !govalidator.IsLatitude(str) {
 		err = fmt.Errorf("Not a valid latitude")
 	}
@@ -134,8 +192,8 @@ func ConvertToLatitude(obj interface{}) (val float64, err error) {
 }
 
 func ConvertToLongitude(obj interface{}) (val float64, err error) {
-	str := govalidator.ToString(obj)
-	if !govalidator.IsLatitude(str) {
+	str := fmt.Sprintf("%v", obj)
+	if !govalidator.IsLongitude(str) {
 		err = fmt.Errorf("Not a valid longitude")
 	}
 	return govalidator.ToFloat(str)
@@ -145,10 +203,10 @@ func ConvertToOneOf(obj interface{}, pos ...interface{}) (val interface{}, err e
 	for _, now := range pos {
 		if num, ok := obj.(int64); ok {
 			if float64(num) == now {
-				return obj, nil
+				return obj, err
 			}
 		} else if obj == now {
-			return obj, nil
+			return obj, err
 		}
 	}
 	return nil, fmt.Errorf("Not a valid option")

@@ -1413,11 +1413,11 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE`,
-			err: "Found `` but expected `any, url, uuid, color, email, phone, array, object, domain, string, number, custom, boolean, datetime, latitude, longitude`",
+			err: "Found `` but expected `any, url, uuid, color, email, phone, array, object, domain, string, number, double, custom, boolean, datetime, latitude, longitude`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE something`,
-			err: "Found `something` but expected `any, url, uuid, color, email, phone, array, object, domain, string, number, custom, boolean, datetime, latitude, longitude`",
+			err: "Found `something` but expected `any, url, uuid, color, email, phone, array, object, domain, string, number, double, custom, boolean, datetime, latitude, longitude`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE any`,
@@ -1481,6 +1481,14 @@ func Test_Parse_Queries_Define(t *testing.T) {
 				Name: "temp",
 				What: []string{"person"},
 				Type: "number",
+			}}},
+		},
+		{
+			sql: `DEFINE FIELD temp ON person TYPE double`,
+			res: &Query{Statements: []Statement{&DefineFieldStatement{
+				Name: "temp",
+				What: []string{"person"},
+				Type: "double",
 			}}},
 		},
 		{
