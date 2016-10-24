@@ -131,6 +131,8 @@ func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 	case '/':
 		chn := s.next()
 		switch {
+		case chn == '/':
+			return s.scanCommentSingle(ch)
 		case chn == '*':
 			return s.scanCommentMultiple(ch)
 		case chn == ' ':
