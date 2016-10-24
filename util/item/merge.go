@@ -28,7 +28,15 @@ func (this *Doc) Merge(data []sql.Expr) (err error) {
 	this.getFields()
 	this.getIndexs()
 
+	if err = this.setFld(); err != nil {
+		return
+	}
+
 	if err = this.defFld(); err != nil {
+		return
+	}
+
+	if err = this.setFld(); err != nil {
 		return
 	}
 
@@ -74,22 +82,29 @@ func (this *Doc) defFld() (err error) {
 
 	for _, fld := range this.fields {
 
-		e := this.current.Exists(fld.Name)
+		this.current.Walk(func(key string, val interface{}) error {
 
-		if fld.Default != nil && e == false {
-			switch val := fld.Default.(type) {
-			case sql.Void, *sql.Void:
-				this.current.Del(fld.Name)
-			case sql.Null, *sql.Null:
-				this.current.Set(nil, fld.Name)
-			default:
-				this.current.Set(fld.Default, fld.Name)
-			case sql.Ident:
-				this.current.Set(this.current.Get(val.ID).Data(), fld.Name)
-			case *sql.Ident:
-				this.current.Set(this.current.Get(val.ID).Data(), fld.Name)
+			v := this.current.Valid(key)
+			e := this.current.Exists(key)
+
+			if fld.Default != nil && (!e || !v && fld.Notnull) {
+				switch val := fld.Default.(type) {
+				case sql.Void, *sql.Void:
+					this.current.Del(key)
+				case sql.Null, *sql.Null:
+					this.current.Set(nil, key)
+				default:
+					this.current.Set(fld.Default, key)
+				case sql.Ident:
+					this.current.Set(this.current.Get(val.ID).Data(), key)
+				case *sql.Ident:
+					this.current.Set(this.current.Get(val.ID).Data(), key)
+				}
 			}
-		}
+
+			return nil
+
+		}, fld.Name)
 
 	}
 
@@ -100,7 +115,7 @@ func (this *Doc) defFld() (err error) {
 func (this *Doc) mrgFld() (err error) {
 
 	for _, fld := range this.fields {
-		if err = each(fld, this.initial, this.current); err != nil {
+		if err = this.each(fld); err != nil {
 			return
 		}
 	}
