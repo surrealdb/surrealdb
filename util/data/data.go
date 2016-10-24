@@ -78,6 +78,14 @@ func (d *Doc) Reset(path ...string) (*Doc, error) {
 	return d.Set(nil, path...)
 }
 
+// Valid checks whether the value at the specified path is nil.
+func (d *Doc) Valid(path ...string) bool {
+	if !d.Exists(path...) {
+		return false
+	}
+	return d.Get(path...).Data() != nil
+}
+
 // Array sets the specified path to an array.
 func (d *Doc) Array(path ...string) (*Doc, error) {
 	return d.Set([]interface{}{}, path...)

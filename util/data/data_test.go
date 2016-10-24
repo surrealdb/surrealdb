@@ -334,6 +334,16 @@ func TestOperations(t *testing.T) {
 
 	// ----------------------------------------------------------------------------------------------------
 
+	Convey("Is unset item valid", t, func() {
+		So(doc.Valid("the.none"), ShouldBeFalse)
+	})
+
+	Convey("Is item valid", t, func() {
+		So(doc.Valid("the.item"), ShouldBeTrue)
+	})
+
+	// ----------------------------------------------------------------------------------------------------
+
 	Convey("Can get object keys and vals", t, func() {
 		So(doc.Keys("the.item.object").Data(), ShouldResemble, []interface{}{"enabled"})
 		So(doc.Vals("the.item.object").Data(), ShouldResemble, []interface{}{false})
