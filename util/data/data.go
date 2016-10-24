@@ -309,10 +309,16 @@ func (d *Doc) Get(path ...string) *Doc {
 				out := []interface{}{}
 
 				for _, v := range a {
-					res := Consume(v).Get(path[k+1:]...)
-					if res.data != nil {
-						out = append(out, res.data)
+
+					if k == len(path)-1 {
+						out = append(out, v)
+					} else {
+						res := Consume(v).Get(path[k+1:]...)
+						if res.data != nil {
+							out = append(out, res.data)
+						}
 					}
+
 				}
 
 				return &Doc{out}
