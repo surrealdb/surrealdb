@@ -723,3 +723,148 @@ func (d *Doc) Dec(value interface{}, path ...string) (*Doc, error) {
 	return &Doc{nil}, fmt.Errorf("Not possible to decrement.")
 
 }
+
+// --------------------------------------------------------------------------------
+
+type walker func(key string, val interface{}) error
+
+// Walk walks the value or values at a specified path.
+func (d *Doc) Walk(exec walker, path ...string) error {
+
+	return d.walk(exec, nil, path...)
+
+}
+
+func (d *Doc) join(parts ...[]string) string {
+	var path []string
+	for _, part := range parts {
+		path = append(path, part...)
+	}
+	return strings.Join(path, ".")
+}
+
+func (d *Doc) walk(exec walker, prev []string, path ...string) error {
+
+	path = d.path(path...)
+
+	if len(path) == 0 {
+		d.data = nil
+		return nil
+	}
+
+	// If the value found at the current
+	// path part is undefined, then ensure
+	// that it is an object
+
+	if d.data == nil {
+		d.data = map[string]interface{}{}
+	}
+
+	// Define the temporary object so
+	// that we can loop over and traverse
+	// down the path parts of the data
+
+	object := d.data
+
+	// Loop over each part of the path
+	// whilst detecting if the data at
+	// the current path is an {} or []
+
+	for k, p := range path {
+
+		// If the value found at the current
+		// path part is an object, then move
+		// to the next part of the path
+
+		if m, ok := object.(map[string]interface{}); ok {
+			if object, ok = m[p]; !ok {
+				return exec(d.join(prev, path), nil)
+			}
+			continue
+		}
+
+		// If the value found at the current
+		// path part is an array, then perform
+		// the query on the specified items
+
+		if a, ok := object.([]interface{}); ok {
+
+			var i int
+			var e error
+
+			if p == "*" {
+				e = errors.New("")
+			} else if p == "first" {
+				i = 0
+			} else if p == "last" {
+				i = len(a) - 1
+			} else {
+				i, e = strconv.Atoi(p)
+			}
+
+			// If the path part is a numeric index
+			// then run the query on the specified
+			// index of the current data array
+
+			if e == nil {
+
+				if 0 == len(a) || i >= len(a) {
+					return fmt.Errorf("No item with index %d in array, using path %s", i, path)
+				}
+
+				if k == len(path)-1 {
+					return exec(d.join(prev, path), a[i])
+				} else {
+					var keep []string
+					keep = append(keep, prev...)
+					keep = append(keep, path[:k]...)
+					keep = append(keep, fmt.Sprintf("%d", i))
+					return Consume(a[i]).walk(exec, keep, path[k+1:]...)
+				}
+
+			}
+
+			// If the path part is an asterisk
+			// then run the query on all of the
+			// items in the current data array
+
+			if p == "*" {
+
+				for i := len(a) - 1; i >= 0; i-- {
+
+					if k == len(path)-1 {
+						var keep []string
+						keep = append(keep, prev...)
+						keep = append(keep, path[:k]...)
+						keep = append(keep, fmt.Sprintf("%d", i))
+						if err := exec(d.join(keep), a[i]); err != nil {
+							return err
+						}
+					} else {
+						var keep []string
+						keep = append(keep, prev...)
+						keep = append(keep, path[:k]...)
+						keep = append(keep, fmt.Sprintf("%d", i))
+						if err := Consume(a[i]).walk(exec, keep, path[k+1:]...); err != nil {
+							return err
+						}
+					}
+
+				}
+
+				return nil
+
+			}
+
+		}
+
+		// The current path item is not an object or an array
+		// but there are still other items in the search path.
+
+		return fmt.Errorf("Can not get path %s from %v", path, object)
+
+	}
+
+	return exec(d.join(prev, path), object)
+
+}

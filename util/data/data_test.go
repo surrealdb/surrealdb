@@ -15,6 +15,7 @@
 package data
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -779,6 +780,140 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can get array → ! → arrays → 0 → key", t, func() {
 		So(doc.Get("the.item.arrays.5.addresses.0.city").Data(), ShouldResemble, nil)
+	})
+
+	// ----------------------------------------------------------------------------------------------------
+
+	tmp := []interface{}{
+		map[string]interface{}{
+			"test": "one",
+		},
+		map[string]interface{}{
+			"test": "two",
+		},
+		map[string]interface{}{
+			"test": "tre",
+		},
+	}
+
+	Convey("Can del array", t, func() {
+		err := doc.Del("the.item.arrays")
+		So(err, ShouldBeNil)
+	})
+
+	Convey("Can walk nil", t, func() {
+		doc.Walk(func(key string, val interface{}) error {
+			doc.Set(tmp, "none")
+			return nil
+		})
+		So(doc.Exists("none"), ShouldBeFalse)
+	})
+
+	Convey("Can walk array", t, func() {
+		doc.Walk(func(key string, val interface{}) error {
+			So(key, ShouldResemble, "the.item.arrays")
+			doc.Set(tmp, key)
+			return nil
+		}, "the.item.arrays")
+		So(doc.Get("the.item.arrays").Data(), ShouldResemble, tmp)
+	})
+
+	Convey("Can walk array → *", t, func() {
+		doc.Walk(func(key string, val interface{}) error {
+			So(key, ShouldBeIn, "the.item.arrays.0", "the.item.arrays.1", "the.item.arrays.2")
+			So(val, ShouldBeIn, tmp[0], tmp[1], tmp[2])
+			return nil
+		}, "the.item.arrays.*")
+	})
+
+	Convey("Can walk array → * → object", t, func() {
+		doc.Walk(func(key string, val interface{}) error {
+			So(key, ShouldBeIn, "the.item.arrays.0.test", "the.item.arrays.1.test", "the.item.arrays.2.test")
+			So(val, ShouldBeIn, "one", "two", "tre")
+			return nil
+		}, "the.item.arrays.*.test")
+	})
+
+	Convey("Can walk array → first → object", t, func() {
+		doc.Walk(func(key string, val interface{}) error {
+			So(key, ShouldResemble, "the.item.arrays.0.test")
+			So(val, ShouldResemble, "one")
+			return nil
+		}, "the.item.arrays.first.test")
+	})
+
+	Convey("Can walk array → last → object", t, func() {
+		doc.Walk(func(key string, val interface{}) error {
+			So(key, ShouldResemble, "the.item.arrays.2.test")
+			So(val, ShouldResemble, "tre")
+			return nil
+		}, "the.item.arrays.last.test")
+	})
+
+	Convey("Can walk array → 0 → value", t, func() {
+		doc.Walk(func(key string, val interface{}) error {
+			So(key, ShouldResemble, "the.item.arrays.0")
+			So(val, ShouldResemble, map[string]interface{}{"test": "one"})
+			return nil
+		}, "the.item.arrays.0")
+	})
+
+	Convey("Can walk array → 1 → value", t, func() {
+		doc.Walk(func(key string, val interface{}) error {
+			So(key, ShouldResemble, "the.item.arrays.1")
+			So(val, ShouldResemble, map[string]interface{}{"test": "two"})
+			return nil
+		}, "the.item.arrays.1")
+	})
+
+	Convey("Can walk array → 2 → value", t, func() {
+		doc.Walk(func(key string, val interface{}) error {
+			So(key, ShouldResemble, "the.item.arrays.2")
+			So(val, ShouldResemble, map[string]interface{}{"test": "tre"})
+			return nil
+		}, "the.item.arrays.2")
+	})
+
+	Convey("Can walk array → 3 → value", t, func() {
+		err := doc.Walk(func(key string, val interface{}) error {
+			return nil
+		}, "the.item.arrays.3")
+		So(err, ShouldNotBeNil)
+	})
+
+	Convey("Can walk array → 0 → value → value", t, func() {
+		err := doc.Walk(func(key string, val interface{}) error {
+			return nil
+		}, "the.item.arrays.0.test.value")
+		So(err, ShouldNotBeNil)
+	})
+
+	Convey("Can walk array → 0 → value → value → value", t, func() {
+		err := doc.Walk(func(key string, val interface{}) error {
+			return nil
+		}, "the.item.arrays.0.test.value.value")
+		So(err, ShouldNotBeNil)
+	})
+
+	Convey("Can force error from walk", t, func() {
+		err := doc.Walk(func(key string, val interface{}) error {
+			return errors.New("Testing")
+		}, "the.item.something")
+		So(err, ShouldNotBeNil)
+	})
+
+	Convey("Can force error from walk array → *", t, func() {
+		err := doc.Walk(func(key string, val interface{}) error {
+			return errors.New("Testing")
+		}, "the.item.arrays.*")
+		So(err, ShouldNotBeNil)
+	})
+
+	Convey("Can force error from walk array → * → value", t, func() {
+		err := doc.Walk(func(key string, val interface{}) error {
+			return errors.New("Testing")
+		}, "the.item.arrays.*.test")
+		So(err, ShouldNotBeNil)
 	})
 
 	// ----------------------------------------------------------------------------------------------------
