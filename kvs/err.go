@@ -71,5 +71,5 @@ type KVError struct {
 
 // Error returns the string representation of the error.
 func (e *KVError) Error() string {
-	return fmt.Sprintf("Database record already exists.")
+	return fmt.Sprintf("Database record already exists")
 }
