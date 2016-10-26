@@ -1,10 +1,10 @@
 hash: 0402d462f75cf177f62e8a0c786da7e9ca6a22535e6412965b600141842d6dae
-updated: 2016-10-16T11:45:03.052040359+01:00
+updated: 2016-10-26T19:55:02.147695851+01:00
 imports:
 - name: github.com/abcum/cork
   version: afeae3b379267629b7cd7cd32d8f876933febf28
 - name: github.com/abcum/fibre
-  version: f69c991460b4a8ce8954a639de21048f37e6a8b3
+  version: 9b3dbeb9da1d975e95511c041a9fa9b6d3b4aae2
   subpackages:
   - mw
 - name: github.com/abcum/logrus
@@ -58,7 +58,7 @@ imports:
 - name: github.com/mgutz/ansi
   version: c286dcecd19ff979eeb73ea444e479b903f2cfcb
 - name: github.com/miekg/dns
-  version: fc4e1e2843d86c346d7203160cfdbf14fa654a9b
+  version: 58f52c57ce9df13460ac68200cef30a008b9c468
 - name: github.com/pkg/profile
   version: 1c16f117a3ab788fdf0e334e623b8bccf5679866
 - name: github.com/robertkrimen/otto
@@ -73,9 +73,9 @@ imports:
 - name: github.com/satori/go.uuid
   version: 879c5887cd475cd7864858769793b2ceb0d44feb
 - name: github.com/spf13/cobra
-  version: 856b96dcb49d6427babe192998a35190a12c2230
+  version: 6e91dded25d73176bf7f60b40dd7aa1f0bf9be8d
 - name: github.com/spf13/pflag
-  version: bf8481a6aebc13a8aab52e699ffe2e79771f5a3f
+  version: 5ccb023bc27df288a957c5e994cd44fd19619465
 - name: github.com/ugorji/go
   version: faddd6128c66c4708f45fdc007f575f75e592a3c
   subpackages:
@@ -87,7 +87,7 @@ imports:
   - parse
   - pm
 - name: golang.org/x/sys
-  version: 9bb9f0998d48b31547d975974935ae9b48c7a03c
+  version: c200b10b5d5e122be351b67af224adc6128af5bf
   subpackages:
   - unix
 - name: gopkg.in/sourcemap.v1
@@ -98,7 +98,7 @@ imports:
   version: 50a48b6e73fcc75b45e22c05b79629a67c79e938
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: 00f306e07eaaaab04ea5dba605cd0e1eff9c6fb7
+  version: 6f5a3c4a73badf117936d7d61a046e2fab8e2adb
   subpackages:
   - js
 - name: github.com/jtolds/gls
