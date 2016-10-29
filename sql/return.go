@@ -20,7 +20,7 @@ func (p *parser) parseReturnStatement() (stmt *ReturnStatement, err error) {
 
 	for {
 
-		tok, lit, err := p.shouldBe(NULL, NOW, DATE, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE, PARAM)
+		tok, lit, err := p.shouldBe(NULL, NOW, DATE, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE, THING, JSON, ARRAY, PARAM)
 		if err != nil {
 			return nil, err
 		}
