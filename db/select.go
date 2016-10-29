@@ -21,14 +21,20 @@ import (
 	"github.com/abcum/surreal/util/keys"
 )
 
-func executeSelectStatement(txn kvs.TX, ast *sql.SelectStatement) (out []interface{}, err error) {
+func (e *executor) executeSelectStatement(txn kvs.TX, ast *sql.SelectStatement) (out []interface{}, err error) {
+
+	for k, w := range ast.What {
+		if what, ok := w.(*sql.Param); ok {
+			ast.What[k] = e.ctx.Get(what.ID).Data()
+		}
+	}
 
 	for _, w := range ast.What {
 
 		if what, ok := w.(*sql.Thing); ok {
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
 			kv, _ := txn.Get(key.Encode())
-			doc := item.New(kv, txn, key)
+			doc := item.New(kv, txn, key, e.ctx)
 			if ret, err := detect(doc, ast); err != nil {
 				return nil, err
 			} else if ret != nil {
@@ -41,7 +47,7 @@ func executeSelectStatement(txn kvs.TX, ast *sql.SelectStatement) (out []interfa
 			end := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: keys.Suffix}
 			kvs, _ := txn.RGet(beg.Encode(), end.Encode(), 0)
 			for _, kv := range kvs {
-				doc := item.New(kv, txn, nil)
+				doc := item.New(kv, txn, nil, e.ctx)
 				if ret, err := detect(doc, ast); err != nil {
 					return nil, err
 				} else if ret != nil {

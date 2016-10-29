@@ -15,6 +15,7 @@
 package db
 
 import (
+	"fmt"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/item"
@@ -22,30 +23,41 @@ import (
 	"github.com/abcum/surreal/util/uuid"
 )
 
-func executeCreateStatement(txn kvs.TX, ast *sql.CreateStatement) (out []interface{}, err error) {
+func (e *executor) executeCreateStatement(txn kvs.TX, ast *sql.CreateStatement) (out []interface{}, err error) {
+
+	for k, w := range ast.What {
+		if what, ok := w.(*sql.Param); ok {
+			ast.What[k] = e.ctx.Get(what.ID).Data()
+		}
+	}
 
 	for _, w := range ast.What {
 
-		if what, ok := w.(*sql.Thing); ok {
+		switch what := w.(type) {
+
+		default:
+			return out, fmt.Errorf("Can not execute CREATE query using type '%T'", what)
+
+		case *sql.Thing:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
 			kv, _ := txn.Get(key.Encode())
-			doc := item.New(kv, txn, key)
+			doc := item.New(kv, txn, key, e.ctx)
 			if ret, err := create(doc, ast); err != nil {
 				return nil, err
 			} else if ret != nil {
 				out = append(out, ret)
 			}
-		}
 
-		if what, ok := w.(*sql.Table); ok {
+		case *sql.Table:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: uuid.NewV5(uuid.NewV4().UUID, ast.KV).String()}
 			kv, _ := txn.Get(key.Encode())
-			doc := item.New(kv, txn, key)
+			doc := item.New(kv, txn, key, e.ctx)
 			if ret, err := create(doc, ast); err != nil {
 				return nil, err
 			} else if ret != nil {
 				out = append(out, ret)
 			}
+
 		}
 
 	}

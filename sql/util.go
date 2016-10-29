@@ -129,6 +129,12 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 	case DURATION:
 		return time.ParseDuration(lit)
 
+	case PARAM:
+		if p, ok := p.v[lit]; ok {
+			return p, nil
+		}
+		return &Param{lit}, nil
+
 	case ARRAY:
 		var j []interface{}
 		json.Unmarshal([]byte(lit), &j)
@@ -144,12 +150,6 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 			return j, fmt.Errorf("Invalid JSON: %s", lit)
 		}
 		return j, nil
-
-	case PARAM:
-		if p, ok := p.v[lit]; ok {
-			return p, nil
-		}
-		return nil, fmt.Errorf("Param %s is not defined", lit)
 
 	}
 

@@ -22,7 +22,7 @@ import (
 	"github.com/abcum/surreal/util/pack"
 )
 
-func executeDefineScopeStatement(txn kvs.TX, ast *sql.DefineScopeStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineScopeStatement(txn kvs.TX, ast *sql.DefineScopeStatement) (out []interface{}, err error) {
 
 	// Set the namespace definition
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
@@ -46,7 +46,7 @@ func executeDefineScopeStatement(txn kvs.TX, ast *sql.DefineScopeStatement) (out
 
 }
 
-func executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 
@@ -74,7 +74,7 @@ func executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out
 
 }
 
-func executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 
@@ -112,7 +112,7 @@ func executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesStatement) (out
 
 }
 
-func executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 
@@ -146,7 +146,7 @@ func executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out
 
 }
 
-func executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 
@@ -186,7 +186,7 @@ func executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out
 		iend := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, ID: keys.Suffix}
 		kvs, _ := txn.RGet(ibeg.Encode(), iend.Encode(), 0)
 		for _, kv := range kvs {
-			doc := item.New(kv, txn, nil)
+			doc := item.New(kv, txn, nil, e.ctx)
 			if err := doc.StoreIndex(); err != nil {
 				return nil, err
 			}

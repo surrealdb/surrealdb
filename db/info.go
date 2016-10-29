@@ -23,7 +23,7 @@ import (
 	"github.com/abcum/surreal/util/pack"
 )
 
-func executeInfoStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	if ast.What == "" {
 

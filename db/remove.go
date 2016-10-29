@@ -20,7 +20,7 @@ import (
 	"github.com/abcum/surreal/util/keys"
 )
 
-func executeRemoveScopeStatement(txn kvs.TX, ast *sql.RemoveScopeStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveScopeStatement(txn kvs.TX, ast *sql.RemoveScopeStatement) (out []interface{}, err error) {
 
 	// Remove the scope config
 	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name}
@@ -32,7 +32,7 @@ func executeRemoveScopeStatement(txn kvs.TX, ast *sql.RemoveScopeStatement) (out
 
 }
 
-func executeRemoveTableStatement(txn kvs.TX, ast *sql.RemoveTableStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveTableStatement(txn kvs.TX, ast *sql.RemoveTableStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 
@@ -72,7 +72,7 @@ func executeRemoveTableStatement(txn kvs.TX, ast *sql.RemoveTableStatement) (out
 
 }
 
-func executeRemoveRulesStatement(txn kvs.TX, ast *sql.RemoveRulesStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveRulesStatement(txn kvs.TX, ast *sql.RemoveRulesStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 
@@ -92,7 +92,7 @@ func executeRemoveRulesStatement(txn kvs.TX, ast *sql.RemoveRulesStatement) (out
 
 }
 
-func executeRemoveFieldStatement(txn kvs.TX, ast *sql.RemoveFieldStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveFieldStatement(txn kvs.TX, ast *sql.RemoveFieldStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 
@@ -108,7 +108,7 @@ func executeRemoveFieldStatement(txn kvs.TX, ast *sql.RemoveFieldStatement) (out
 
 }
 
-func executeRemoveIndexStatement(txn kvs.TX, ast *sql.RemoveIndexStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveIndexStatement(txn kvs.TX, ast *sql.RemoveIndexStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 

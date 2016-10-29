@@ -39,10 +39,7 @@ func (p *parser) parseWhat() (mul []Expr, err error) {
 		}
 
 		if p.is(tok, PARAM) {
-			one, err := p.declare(PARAM, lit)
-			if err != nil {
-				return nil, err
-			}
+			one, _ := p.declare(PARAM, lit)
 			mul = append(mul, one)
 		}
 
@@ -261,7 +258,7 @@ func (p *parser) parseExpr() (mul []*Field, err error) {
 
 		one := &Field{}
 
-		tok, lit, err = p.shouldBe(IDENT, ID, NOW, PATH, NULL, ALL, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON, ARRAY)
+		tok, lit, err = p.shouldBe(IDENT, ID, NOW, PATH, NULL, ALL, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON, ARRAY, PARAM)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}

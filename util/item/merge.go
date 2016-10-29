@@ -150,8 +150,8 @@ func (this *Doc) mrgDpm(expr *sql.DiffExpression) {
 
 func (this *Doc) mrgOne(expr *sql.BinaryExpression) {
 
-	lhs := getMrgItemLHS(this.current, expr.LHS)
-	rhs := getMrgItemRHS(this.current, expr.RHS)
+	lhs := this.getMrgItemLHS(expr.LHS)
+	rhs := this.getMrgItemRHS(expr.RHS)
 
 	if expr.Op == sql.EQ {
 		switch expr.RHS.(type) {
@@ -172,7 +172,7 @@ func (this *Doc) mrgOne(expr *sql.BinaryExpression) {
 
 }
 
-func getMrgItemLHS(doc *data.Doc, expr sql.Expr) string {
+func (this *Doc) getMrgItemLHS(expr sql.Expr) string {
 
 	switch val := expr.(type) {
 	default:
@@ -185,7 +185,7 @@ func getMrgItemLHS(doc *data.Doc, expr sql.Expr) string {
 
 }
 
-func getMrgItemRHS(doc *data.Doc, expr sql.Expr) interface{} {
+func (this *Doc) getMrgItemRHS(expr sql.Expr) interface{} {
 
 	switch val := expr.(type) {
 	default:
@@ -198,8 +198,10 @@ func getMrgItemRHS(doc *data.Doc, expr sql.Expr) interface{} {
 		return val
 	case *sql.Thing:
 		return val
+	case *sql.Param:
+		return this.runtime.Get(val.ID).Data()
 	case *sql.Ident:
-		return doc.Get(val.ID).Data()
+		return this.current.Get(val.ID).Data()
 	}
 
 }

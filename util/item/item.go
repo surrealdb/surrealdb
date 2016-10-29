@@ -32,14 +32,15 @@ type Doc struct {
 	key     *keys.Thing
 	initial *data.Doc
 	current *data.Doc
+	runtime *data.Doc
 	fields  []*sql.DefineFieldStatement
 	indexs  []*sql.DefineIndexStatement
 	rules   map[string]*sql.DefineRulesStatement
 }
 
-func New(kv kvs.KV, tx kvs.TX, key *keys.Thing) (this *Doc) {
+func New(kv kvs.KV, tx kvs.TX, key *keys.Thing, vars *data.Doc) (this *Doc) {
 
-	this = &Doc{kv: kv, key: key, tx: tx}
+	this = &Doc{kv: kv, key: key, tx: tx, runtime: vars}
 
 	if key == nil {
 		this.key = &keys.Thing{}

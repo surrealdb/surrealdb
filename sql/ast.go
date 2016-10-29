@@ -48,6 +48,11 @@ type CancelStatement struct{}
 // UseStatement represents a SQL COMMIT TRANSACTION statement.
 type CommitStatement struct{}
 
+// ReturnStatement represents a SQL RETURN statement.
+type ReturnStatement struct {
+	What []Expr
+}
+
 // --------------------------------------------------
 // Use
 // --------------------------------------------------
@@ -68,6 +73,19 @@ type InfoStatement struct {
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
 	What string `cork:"-" codec:"-"`
+}
+
+// --------------------------------------------------
+// LET
+// --------------------------------------------------
+
+// LetStatement represents a SQL LET statement.
+type LetStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Name string `cork:"-" codec:"-"`
+	Expr Expr   `cork:"-" codec:"-"`
 }
 
 // --------------------------------------------------
@@ -412,6 +430,27 @@ func (this Ident) MarshalText() (data []byte, err error) {
 
 func NewIdent(ID string) *Ident {
 	return &Ident{ID}
+}
+
+// --------------------------------------------------
+// Parts
+// --------------------------------------------------
+
+// Param comment
+type Param struct {
+	ID string
+}
+
+func (this Param) String() string {
+	return this.ID
+}
+
+func (this Param) MarshalText() (data []byte, err error) {
+	return []byte("ID:" + this.ID), err
+}
+
+func NewParam(ID string) *Param {
+	return &Param{ID}
 }
 
 // --------------------------------------------------

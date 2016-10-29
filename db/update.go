@@ -15,39 +15,51 @@
 package db
 
 import (
+	"fmt"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
 )
 
-func executeUpdateStatement(txn kvs.TX, ast *sql.UpdateStatement) (out []interface{}, err error) {
+func (e *executor) executeUpdateStatement(txn kvs.TX, ast *sql.UpdateStatement) (out []interface{}, err error) {
+
+	for k, w := range ast.What {
+		if what, ok := w.(*sql.Param); ok {
+			ast.What[k] = e.ctx.Get(what.ID).Data()
+		}
+	}
 
 	for _, w := range ast.What {
 
-		if what, ok := w.(*sql.Thing); ok {
+		switch what := w.(type) {
+
+		default:
+			return out, fmt.Errorf("Can not execute UPDATE query using type '%T'", what)
+
+		case *sql.Thing:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
 			kv, _ := txn.Get(key.Encode())
-			doc := item.New(kv, txn, key)
+			doc := item.New(kv, txn, key, e.ctx)
 			if ret, err := update(doc, ast); err != nil {
 				return nil, err
 			} else if ret != nil {
 				out = append(out, ret)
 			}
-		}
 
-		if what, ok := w.(*sql.Table); ok {
+		case *sql.Table:
 			beg := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: keys.Prefix}
 			end := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: keys.Suffix}
 			kvs, _ := txn.RGet(beg.Encode(), end.Encode(), 0)
 			for _, kv := range kvs {
-				doc := item.New(kv, txn, nil)
+				doc := item.New(kv, txn, nil, e.ctx)
 				if ret, err := update(doc, ast); err != nil {
 					return nil, err
 				} else if ret != nil {
 					out = append(out, ret)
 				}
 			}
+
 		}
 
 	}

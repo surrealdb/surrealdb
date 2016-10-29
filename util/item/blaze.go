@@ -42,6 +42,8 @@ func (this *Doc) Blaze(ast *sql.SelectStatement) (res interface{}) {
 			doc.Set(nil, v.Alias)
 		case *sql.Thing:
 			doc.Set(e.String(), v.Alias)
+		case *sql.Param:
+			doc.Set(this.runtime.Get(e.ID).Data(), v.Alias)
 		case *sql.Ident:
 			doc.Set(this.current.Get(e.ID).Data(), v.Alias)
 		case *sql.All:

@@ -19,6 +19,15 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func (e *executor) executeRelateStatement(txn kvs.TX, ast *sql.RelateStatement) (out []interface{}, err error) {
-	return nil, nil
+func (e *executor) executeLetStatement(txn kvs.TX, ast *sql.LetStatement) (out []interface{}, err error) {
+
+	switch expr := ast.Expr.(type) {
+	default:
+		e.Set(ast.Name, expr)
+	case *sql.Param:
+		e.Set(ast.Name, e.Get(expr.ID))
+	}
+
+	return
+
 }

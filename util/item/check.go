@@ -42,8 +42,8 @@ func (this *Doc) Check(cond []sql.Expr) (val bool) {
 func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 
 	op := expr.Op
-	lhs := getChkItem(this.current, expr.LHS)
-	rhs := getChkItem(this.current, expr.RHS)
+	lhs := this.getChk(expr.LHS)
+	rhs := this.getChk(expr.RHS)
 
 	switch lhs.(type) {
 	case bool, string, int64, float64, time.Time:
@@ -616,7 +616,7 @@ func chkMatch(op sql.Token, a []interface{}, r *regexp.Regexp) (val bool) {
 
 }
 
-func getChkItem(doc *data.Doc, expr sql.Expr) interface{} {
+func (this *Doc) getChk(expr sql.Expr) interface{} {
 
 	switch val := expr.(type) {
 	default:
@@ -635,8 +635,10 @@ func getChkItem(doc *data.Doc, expr sql.Expr) interface{} {
 		return val
 	case *sql.Empty:
 		return val
+	case *sql.Param:
+		return this.runtime.Get(val.ID).Data()
 	case *sql.Ident:
-		return doc.Get(val.ID).Data()
+		return this.current.Get(val.ID).Data()
 	}
 
 }
