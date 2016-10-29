@@ -441,7 +441,7 @@ func NewTable(TB string) *Table {
 
 // Thing comment
 type Thing struct {
-	TB string
+	TB interface{}
 	ID interface{}
 }
 
@@ -453,7 +453,7 @@ func (this Thing) MarshalText() (data []byte, err error) {
 	return []byte(this.String()), err
 }
 
-func NewThing(TB string, ID interface{}) *Thing {
+func NewThing(TB interface{}, ID interface{}) *Thing {
 	if str, ok := ID.(string); ok {
 		if cnv, err := strconv.ParseFloat(str, 64); err == nil {
 			if cnv == float64(int64(cnv)) {
