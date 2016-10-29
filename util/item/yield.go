@@ -35,8 +35,8 @@ func (this *Doc) Yield(output sql.Token, fallback sql.Token) (res interface{}) {
 		res = this.initial.Data()
 	case sql.BOTH:
 		res = map[string]interface{}{
-			"After":  this.current.Data(),
-			"Before": this.initial.Data(),
+			"after":  this.current.Data(),
+			"fefore": this.initial.Data(),
 		}
 	}
 
