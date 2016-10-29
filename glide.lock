@@ -1,8 +1,8 @@
 hash: 0402d462f75cf177f62e8a0c786da7e9ca6a22535e6412965b600141842d6dae
-updated: 2016-10-26T19:55:02.147695851+01:00
+updated: 2016-10-27T23:38:30.501589299+01:00
 imports:
 - name: github.com/abcum/cork
-  version: afeae3b379267629b7cd7cd32d8f876933febf28
+  version: 177098ca294c7091ec158fd2a64a3422ddc7d166
 - name: github.com/abcum/fibre
   version: 9b3dbeb9da1d975e95511c041a9fa9b6d3b4aae2
   subpackages:
@@ -109,7 +109,7 @@ testImports:
   - internal/go-render/render
   - internal/oglematchers
 - name: github.com/smartystreets/goconvey
-  version: 7befa7fd6e2e8ca28d2b94f2d39111929904b08d
+  version: 95a89808c3e7f231df92fcbecb0706f8d5cd9261
   subpackages:
   - convey
   - convey/gotest
