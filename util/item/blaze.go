@@ -25,10 +25,12 @@ func (this *Doc) Blaze(ast *sql.SelectStatement) (res interface{}) {
 
 	for _, v := range ast.Expr {
 		if _, ok := v.Expr.(*sql.All); ok {
-			doc = this.current
+			doc = data.Consume(this.current.Copy())
 			break
 		}
 	}
+
+	doc.Del("meta")
 
 	for _, v := range ast.Expr {
 		switch e := v.Expr.(type) {

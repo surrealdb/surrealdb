@@ -72,6 +72,8 @@ func (this *Doc) Merge(data []sql.Expr) (err error) {
 func (this *Doc) setFld() (err error) {
 
 	this.current.Set(this.id, "id")
+	this.current.Set(this.key.ID, "meta.id")
+	this.current.Set(this.key.TB, "meta.tb")
 
 	return
 
