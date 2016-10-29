@@ -72,7 +72,8 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 	switch l := expr.LHS.(type) {
 
 	case *sql.Ident:
-		switch expr.RHS.(type) {
+
+		switch r := expr.RHS.(type) {
 
 		case *sql.Void:
 			if op == sql.EQ {
@@ -95,6 +96,15 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 				return this.current.Exists(l.ID) == true && this.current.Get(l.ID).Data() != nil
 			}
 
+		case *sql.Thing:
+			if thing, ok := this.current.Get(l.ID).Data().(*sql.Thing); ok {
+				if op == sql.EQ {
+					return thing.TB == r.TB && thing.ID == r.ID
+				} else if op == sql.NEQ {
+					return thing.TB != r.TB || thing.ID != r.ID
+				}
+			}
+
 		}
 
 	}
@@ -102,7 +112,8 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 	switch r := expr.RHS.(type) {
 
 	case *sql.Ident:
-		switch expr.LHS.(type) {
+
+		switch l := expr.LHS.(type) {
 
 		case *sql.Void:
 			if op == sql.EQ {
@@ -123,6 +134,15 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 				return this.current.Exists(r.ID) == false || this.current.Get(r.ID).Data() == nil
 			} else if op == sql.NEQ {
 				return this.current.Exists(r.ID) == true && this.current.Get(r.ID).Data() != nil
+			}
+
+		case *sql.Thing:
+			if thing, ok := this.current.Get(r.ID).Data().(*sql.Thing); ok {
+				if op == sql.EQ {
+					return thing.TB == l.TB && thing.ID == l.ID
+				} else if op == sql.NEQ {
+					return thing.TB != l.TB || thing.ID != l.ID
+				}
 			}
 
 		}
@@ -187,6 +207,16 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 			return chkObject(op, r, l)
 		}
 
+	case *sql.Thing:
+		switch r := rhs.(type) {
+		default:
+			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
+		case *sql.Thing:
+			return chkThing(op, l, r)
+		case string:
+			return chkString(op, r, l.String())
+		}
+
 	case bool:
 		switch r := rhs.(type) {
 		default:
@@ -224,6 +254,8 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 				return chkFloat(op, r, n)
 			}
 		case time.Time:
+			return chkString(op, l, r.String())
+		case *sql.Thing:
 			return chkString(op, l, r.String())
 		case *regexp.Regexp:
 			return chkRegex(op, l, r)
@@ -421,6 +453,22 @@ func chkFloat(op sql.Token, a, b float64) (val bool) {
 		return a > b
 	case sql.GTE:
 		return a >= b
+	case sql.SNI:
+		return true
+	case sql.NIS:
+		return true
+	case sql.CONTAINSNONE:
+		return true
+	}
+	return
+}
+
+func chkThing(op sql.Token, a, b *sql.Thing) (val bool) {
+	switch op {
+	case sql.EQ:
+		return a.TB == b.TB && a.ID == b.ID
+	case sql.NEQ:
+		return a.TB != b.TB || a.ID != b.ID
 	case sql.SNI:
 		return true
 	case sql.NIS:
