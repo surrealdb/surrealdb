@@ -285,7 +285,12 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			// the end of the transaction.
 
 			if txn != nil {
-				buf = append(buf, rsp)
+				switch stm.(type) {
+				case *sql.ReturnStatement:
+					buf = clear(buf, rsp)
+				default:
+					buf = append(buf, rsp)
+				}
 				continue
 			}
 
@@ -333,6 +338,8 @@ func (e *executor) operate(txn kvs.TX, ast sql.Statement) (res []interface{}, er
 
 	case *sql.LetStatement:
 		res, err = e.executeLetStatement(txn, stm)
+	case *sql.ReturnStatement:
+		res, err = e.executeReturnStatement(txn, stm)
 
 	case *sql.SelectStatement:
 		res, err = e.executeSelectStatement(txn, stm)
