@@ -28,7 +28,7 @@ import (
 type Doc struct {
 	kv      kvs.KV
 	tx      kvs.TX
-	id      string
+	id      *sql.Thing
 	key     *keys.Thing
 	initial *data.Doc
 	current *data.Doc
@@ -57,7 +57,7 @@ func New(kv kvs.KV, tx kvs.TX, key *keys.Thing, vars *data.Doc) (this *Doc) {
 		this.current = data.New().Decode(kv.Val())
 	}
 
-	this.id = fmt.Sprintf("%v", this.key.ID)
+	this.id = sql.NewThing(this.key.TB, this.key.ID)
 
 	return this
 
@@ -160,14 +160,14 @@ func (this *Doc) PurgeIndex() (err error) {
 		if index.Uniq == true {
 			for _, o := range old {
 				key := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o}
-				this.tx.CDel(key.Encode(), []byte(this.id))
+				this.tx.CDel(key.Encode(), this.id.Bytes())
 			}
 		}
 
 		if index.Uniq == false {
 			for _, o := range old {
 				key := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o, ID: this.key.ID}
-				this.tx.CDel(key.Encode(), []byte(this.id))
+				this.tx.CDel(key.Encode(), this.id.Bytes())
 			}
 		}
 
@@ -189,11 +189,11 @@ func (this *Doc) StoreIndex() (err error) {
 		if index.Uniq == true {
 			for _, o := range old {
 				oidx := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o}
-				this.tx.CDel(oidx.Encode(), []byte(this.id))
+				this.tx.CDel(oidx.Encode(), this.id.Bytes())
 			}
 			for _, n := range now {
 				nidx := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: n}
-				if err = this.tx.CPut(nidx.Encode(), []byte(this.id), nil); err != nil {
+				if err = this.tx.CPut(nidx.Encode(), this.id.Bytes(), nil); err != nil {
 					return fmt.Errorf("Duplicate entry for %v in index '%s' on %s", n, index.Name, this.key.TB)
 				}
 			}
@@ -202,11 +202,11 @@ func (this *Doc) StoreIndex() (err error) {
 		if index.Uniq == false {
 			for _, o := range old {
 				oidx := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o, ID: this.key.ID}
-				this.tx.CDel(oidx.Encode(), []byte(this.id))
+				this.tx.CDel(oidx.Encode(), this.id.Bytes())
 			}
 			for _, n := range now {
 				nidx := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: n, ID: this.key.ID}
-				if err = this.tx.CPut(nidx.Encode(), []byte(this.id), nil); err != nil {
+				if err = this.tx.CPut(nidx.Encode(), this.id.Bytes(), nil); err != nil {
 					return fmt.Errorf("Multiple items with id %s in index '%s' on %s", this.key.ID, index.Name, this.key.TB)
 				}
 			}

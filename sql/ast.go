@@ -484,6 +484,10 @@ type Thing struct {
 	ID interface{}
 }
 
+func (this Thing) Bytes() []byte {
+	return []byte(this.String())
+}
+
 func (this Thing) String() string {
 	return fmt.Sprintf("@%s:%v", this.TB, this.ID)
 }
