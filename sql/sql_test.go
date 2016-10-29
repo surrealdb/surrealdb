@@ -140,11 +140,11 @@ func Test_Parse_Queries_Malformed(t *testing.T) {
 		},
 		{
 			sql: `!`,
-			err: "Found `!` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, DEFINE, REMOVE`",
+			err: "Found `!` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, RETURN, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, DEFINE, REMOVE`",
 		},
 		{
 			sql: `SELECT * FROM person;;;`,
-			err: "Found `;` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, DEFINE, REMOVE`",
+			err: "Found `;` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, RETURN, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, DEFINE, REMOVE`",
 		},
 	}
 
@@ -240,6 +240,206 @@ func Test_Parse_Queries_Use(t *testing.T) {
 			res: &Query{Statements: []Statement{&UseStatement{
 				DB: "",
 			}}},
+		},
+	}
+
+	for _, test := range tests {
+		testsql(t, test)
+	}
+
+}
+
+func Test_Parse_Queries_Let(t *testing.T) {
+
+	var tests = []tester{
+		{
+			sql: `LET`,
+			err: "Found `` but expected `IDENT`",
+		},
+		{
+			sql: `LET name`,
+			err: "Found `` but expected `=`",
+		},
+		{
+			sql: `LET name =`,
+			err: "Found `=` but expected `NULL, NOW, DATE, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE, THING, JSON, ARRAY, PARAM`",
+		},
+		{
+			sql: `LET name = true`,
+			res: &Query{Statements: []Statement{&LetStatement{
+				Name: "name",
+				Expr: true,
+			}}},
+		},
+		{
+			sql: `LET name = false`,
+			res: &Query{Statements: []Statement{&LetStatement{
+				Name: "name",
+				Expr: false,
+			}}},
+		},
+		{
+			sql: `LET name = "test"`,
+			res: &Query{Statements: []Statement{&LetStatement{
+				Name: "name",
+				Expr: "test",
+			}}},
+		},
+		{
+			sql: `LET name = 1`,
+			res: &Query{Statements: []Statement{&LetStatement{
+				Name: "name",
+				Expr: int64(1),
+			}}},
+		},
+		{
+			sql: `LET name = 1.0`,
+			res: &Query{Statements: []Statement{&LetStatement{
+				Name: "name",
+				Expr: float64(1),
+			}}},
+		},
+		{
+			sql: `LET name = 1.1`,
+			res: &Query{Statements: []Statement{&LetStatement{
+				Name: "name",
+				Expr: float64(1.1),
+			}}},
+		},
+		{
+			sql: `LET name = @thing:test`,
+			res: &Query{Statements: []Statement{&LetStatement{
+				Name: "name",
+				Expr: &Thing{TB: "thing", ID: "test"},
+			}}},
+		},
+		{
+			sql: `LET name = {"key": "val"}`,
+			res: &Query{Statements: []Statement{&LetStatement{
+				Name: "name",
+				Expr: map[string]interface{}{"key": "val"},
+			}}},
+		},
+		{
+			sql: `LET name = ["key", "val"]`,
+			res: &Query{Statements: []Statement{&LetStatement{
+				Name: "name",
+				Expr: []interface{}{"key", "val"},
+			}}},
+		},
+		{
+			sql: `LET name = $test`,
+			res: &Query{Statements: []Statement{&LetStatement{
+				Name: "name",
+				Expr: &Param{ID: "test"},
+			}}},
+		},
+		{
+			sql: `LET name = {"key"::"val"}`,
+			err: "Invalid JSON: {\"key\"::\"val\"}",
+		},
+		{
+			sql: `LET name = "test" something`,
+			err: "Found `something` but expected `EOF, ;`",
+		},
+	}
+
+	for _, test := range tests {
+		testsql(t, test)
+	}
+
+}
+
+func Test_Parse_Queries_Return(t *testing.T) {
+
+	var tests = []tester{
+		{
+			sql: `RETURN`,
+			err: "Found `` but expected `NULL, NOW, DATE, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE, THING, JSON, ARRAY, PARAM`",
+		},
+		{
+			sql: `RETURN true`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{true},
+			}}},
+		},
+		{
+			sql: `RETURN true`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{true},
+			}}},
+		},
+		{
+			sql: `RETURN false`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{false},
+			}}},
+		},
+		{
+			sql: `RETURN "test"`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{"test"},
+			}}},
+		},
+		{
+			sql: `RETURN 1`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{int64(1)},
+			}}},
+		},
+		{
+			sql: `RETURN 1.0`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{float64(1)},
+			}}},
+		},
+		{
+			sql: `RETURN 1.1`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{float64(1.1)},
+			}}},
+		},
+		{
+			sql: `RETURN @thing:test`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{&Thing{TB: "thing", ID: "test"}},
+			}}},
+		},
+		{
+			sql: `RETURN {"key": "val"}`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{map[string]interface{}{"key": "val"}},
+			}}},
+		},
+		{
+			sql: `RETURN ["key", "val"]`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{[]interface{}{"key", "val"}},
+			}}},
+		},
+		{
+			sql: `RETURN $test`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{&Param{ID: "test"}},
+			}}},
+		},
+		{
+			sql: `RETURN $test, $test, $test`,
+			res: &Query{Statements: []Statement{&ReturnStatement{
+				What: []Expr{
+					&Param{ID: "test"},
+					&Param{ID: "test"},
+					&Param{ID: "test"},
+				},
+			}}},
+		},
+		{
+			sql: `RETURN {"key"::"val"}`,
+			err: "Invalid JSON: {\"key\"::\"val\"}",
+		},
+		{
+			sql: `RETURN $test something`,
+			err: "Found `something` but expected `EOF, ;`",
 		},
 	}
 
@@ -758,12 +958,48 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			}}},
 		},
 		{
+			sql: `SELECT * FROM person WHERE test IS IN ["London","Paris"]`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"person"}},
+				Cond: []Expr{&BinaryExpression{LHS: &Ident{"test"}, Op: INS, RHS: []interface{}{"London", "Paris"}}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM person WHERE test IS NOT IN ["London","Paris"]`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"person"}},
+				Cond: []Expr{&BinaryExpression{LHS: &Ident{"test"}, Op: NIS, RHS: []interface{}{"London", "Paris"}}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM person WHERE ["London","Paris"] CONTAINS test`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"person"}},
+				Cond: []Expr{&BinaryExpression{LHS: []interface{}{"London", "Paris"}, Op: SIN, RHS: &Ident{"test"}}},
+			}}},
+		},
+		{
+			sql: `SELECT * FROM person WHERE ["London","Paris"] CONTAINS NOT test`,
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"person"}},
+				Cond: []Expr{&BinaryExpression{LHS: []interface{}{"London", "Paris"}, Op: SNI, RHS: &Ident{"test"}}},
+			}}},
+		},
+		{
 			sql: `SELECT * FROM person WHERE test = {`,
 			err: "Found `{` but expected `field value`",
 		},
 		{
 			sql: `SELECT * FROM person WHERE test = {"name","London"}`,
 			err: `Invalid JSON: {"name","London"}`,
+		},
+		{
+			sql: "SELECT * FROM person WHERE {\"name\":\"\x0A\"} = test",
+			err: "Invalid JSON: {\"name\":\"\n\"}",
 		},
 		{
 			sql: "SELECT * FROM person WHERE test = {\"name\":\"\x0A\"}",
@@ -1991,6 +2227,21 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		},
 		{
 			sql: `REMOVE INDEX temp ON person something`,
+			err: "Found `something` but expected `EOF, ;`",
+		},
+		// ----------------------------------------------------------------------
+		{
+			sql: `REMOVE VIEW`,
+			err: "Found `` but expected `name`",
+		},
+		{
+			sql: `REMOVE VIEW temp`,
+			res: &Query{Statements: []Statement{&RemoveViewStatement{
+				Name: "temp",
+			}}},
+		},
+		{
+			sql: `REMOVE VIEW temp something`,
 			err: "Found `something` but expected `EOF, ;`",
 		},
 	}
