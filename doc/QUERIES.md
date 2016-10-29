@@ -200,13 +200,6 @@ DELETE @person:id WHERE age < 18 -- ... if the condition matches
 DELETE @person:one, @person:two -- Deletes both person records
 ```
 
-### MODIFY
-
-```sql
-/* Example of modifying a record with jsondiffpatch */
-MODIFY @person:id DIFF {JSON}
-```
-
 ### RELATE
 
 ```sql

@@ -347,8 +347,6 @@ func (e *executor) operate(txn kvs.TX, ast sql.Statement) (res []interface{}, er
 		res, err = e.executeCreateStatement(txn, stm)
 	case *sql.UpdateStatement:
 		res, err = e.executeUpdateStatement(txn, stm)
-	case *sql.ModifyStatement:
-		res, err = e.executeModifyStatement(txn, stm)
 	case *sql.DeleteStatement:
 		res, err = e.executeDeleteStatement(txn, stm)
 	case *sql.RelateStatement:

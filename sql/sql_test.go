@@ -140,11 +140,11 @@ func Test_Parse_Queries_Malformed(t *testing.T) {
 		},
 		{
 			sql: `!`,
-			err: "Found `!` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, RETURN, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, DEFINE, REMOVE`",
+			err: "Found `!` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, RETURN, SELECT, CREATE, UPDATE, INSERT, UPSERT, DELETE, RELATE, DEFINE, REMOVE`",
 		},
 		{
 			sql: `SELECT * FROM person;;;`,
-			err: "Found `;` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, RETURN, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, DEFINE, REMOVE`",
+			err: "Found `;` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, RETURN, SELECT, CREATE, UPDATE, INSERT, UPSERT, DELETE, RELATE, DEFINE, REMOVE`",
 		},
 	}
 
@@ -1251,6 +1251,25 @@ func Test_Parse_Queries_Update(t *testing.T) {
 			}}},
 		},
 		{
+			sql: `UPDATE person DIFF something`,
+			err: "Found `something` but expected `json`",
+		},
+		{
+			sql: `UPDATE person DIFF {"firstname"::"Tobie"}`,
+			err: "Found `{\"firstname\"::\"Tobie\"}` but expected `json`",
+		},
+		{
+			sql: `UPDATE person DIFF {"firstname":"Tobie"} something`,
+			err: "Found `something` but expected `EOF, ;`",
+		},
+		{
+			sql: `UPDATE person DIFF {"firstname":"Tobie"}`,
+			res: &Query{Statements: []Statement{&UpdateStatement{
+				What: []Expr{&Table{"person"}},
+				Data: []Expr{&DiffExpression{JSON: map[string]interface{}{"firstname": "Tobie"}}},
+			}}},
+		},
+		{
 			sql: `UPDATE person MERGE something`,
 			err: "Found `something` but expected `json`",
 		},
@@ -1332,96 +1351,6 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		},
 		{
 			sql: `UPDATE person RETURN SOMETHING`,
-			err: "Found `SOMETHING` but expected `ID, NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
-		},
-	}
-
-	for _, test := range tests {
-		testsql(t, test)
-	}
-
-}
-
-func Test_Parse_Queries_Modify(t *testing.T) {
-
-	var tests = []tester{
-		{
-			sql: `MODIFY`,
-			err: "Found `` but expected `table name or record id`",
-		},
-		{
-			sql: `MODIFY @person:test`,
-			err: "Found `` but expected `DIFF`",
-		},
-		{
-			sql: `MODIFY @person:test DIFF`,
-			err: "Found `` but expected `json`",
-		},
-		{
-			sql: `MODIFY @person:test DIFF {invalid}`,
-			err: "Found `{invalid}` but expected `json`",
-		},
-		{
-			sql: `MODIFY @person:test DIFF {"diff": true}`,
-			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{TB: "person", ID: "test"}},
-				Diff: []Expr{&DiffExpression{JSON: map[string]interface{}{"diff": true}}},
-			}}},
-		},
-		{
-			sql: `MODIFY @person:test DIFF {"diff": true} something`,
-			err: "Found `something` but expected `EOF, ;`",
-		},
-		{
-			sql: `MODIFY @person:test DIFF {"diff": true} RETURN ID`,
-			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{TB: "person", ID: "test"}},
-				Diff: []Expr{&DiffExpression{JSON: map[string]interface{}{"diff": true}}},
-				Echo: ID,
-			}}},
-		},
-		{
-			sql: `MODIFY @person:test DIFF {"diff": true} RETURN NONE`,
-			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{TB: "person", ID: "test"}},
-				Diff: []Expr{&DiffExpression{JSON: map[string]interface{}{"diff": true}}},
-				Echo: NONE,
-			}}},
-		},
-		{
-			sql: `MODIFY @person:test DIFF {"diff": true} RETURN BOTH`,
-			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{TB: "person", ID: "test"}},
-				Diff: []Expr{&DiffExpression{JSON: map[string]interface{}{"diff": true}}},
-				Echo: BOTH,
-			}}},
-		},
-		{
-			sql: `MODIFY @person:test DIFF {"diff": true} RETURN DIFF`,
-			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{TB: "person", ID: "test"}},
-				Diff: []Expr{&DiffExpression{JSON: map[string]interface{}{"diff": true}}},
-				Echo: DIFF,
-			}}},
-		},
-		{
-			sql: `MODIFY @person:test DIFF {"diff": true} RETURN BEFORE`,
-			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{TB: "person", ID: "test"}},
-				Diff: []Expr{&DiffExpression{JSON: map[string]interface{}{"diff": true}}},
-				Echo: BEFORE,
-			}}},
-		},
-		{
-			sql: `MODIFY @person:test DIFF {"diff": true} RETURN AFTER`,
-			res: &Query{Statements: []Statement{&ModifyStatement{
-				What: []Expr{&Thing{TB: "person", ID: "test"}},
-				Diff: []Expr{&DiffExpression{JSON: map[string]interface{}{"diff": true}}},
-				Echo: AFTER,
-			}}},
-		},
-		{
-			sql: `MODIFY @person:test DIFF {"diff": true} RETURN SOMETHING`,
 			err: "Found `SOMETHING` but expected `ID, NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
 		},
 	}

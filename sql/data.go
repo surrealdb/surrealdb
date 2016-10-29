@@ -16,10 +16,16 @@ package sql
 
 func (p *parser) parseData() (exp []Expr, err error) {
 
-	if tok, _, exi := p.mightBe(SET, MERGE, CONTENT); exi {
+	if tok, _, exi := p.mightBe(SET, DIFF, MERGE, CONTENT); exi {
 
 		if p.is(tok, SET) {
 			if exp, err = p.parseSet(); err != nil {
+				return nil, err
+			}
+		}
+
+		if p.is(tok, DIFF) {
+			if exp, err = p.parseDiff(); err != nil {
 				return nil, err
 			}
 		}

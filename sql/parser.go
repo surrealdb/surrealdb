@@ -115,7 +115,7 @@ func (p *parser) parseMulti() (*Query, error) {
 // parseSingle parses a single SQL SELECT statement.
 func (p *parser) parseSingle() (Statement, error) {
 
-	tok, _, err := p.shouldBe(USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, RETURN, SELECT, CREATE, UPDATE, INSERT, UPSERT, MODIFY, DELETE, RELATE, DEFINE, REMOVE)
+	tok, _, err := p.shouldBe(USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, RETURN, SELECT, CREATE, UPDATE, INSERT, UPSERT, DELETE, RELATE, DEFINE, REMOVE)
 
 	switch tok {
 
@@ -143,8 +143,6 @@ func (p *parser) parseSingle() (Statement, error) {
 		return p.parseCreateStatement()
 	case UPDATE, UPSERT:
 		return p.parseUpdateStatement()
-	case MODIFY:
-		return p.parseModifyStatement()
 	case DELETE:
 		return p.parseDeleteStatement()
 	case RELATE:

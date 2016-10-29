@@ -148,7 +148,6 @@ const (
 	MERGE
 	MIN
 	MISSING
-	MODIFY
 	MULTI
 	NAMESPACE
 	NONE
@@ -316,7 +315,6 @@ var tokens = [...]string{
 	MERGE:           "MERGE",
 	MIN:             "MIN",
 	MISSING:         "MISSING",
-	MODIFY:          "MODIFY",
 	MULTI:           "MULTI",
 	NAMESPACE:       "NAMESPACE",
 	NONE:            "NONE",

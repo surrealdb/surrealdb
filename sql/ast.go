@@ -140,17 +140,6 @@ type UpdateStatement struct {
 	Echo Token  `cork:"echo" codec:"echo"`
 }
 
-// ModifyStatement represents a SQL MODIFY statement.
-type ModifyStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	What []Expr `cork:"what" codec:"what"`
-	Diff []Expr `cork:"diff" codec:"diff"`
-	Cond []Expr `cork:"cond" codec:"cond"`
-	Echo Token  `cork:"echo" codec:"echo"`
-}
-
 // DeleteStatement represents a SQL DELETE statement.
 type DeleteStatement struct {
 	KV   string `cork:"-" codec:"-"`
