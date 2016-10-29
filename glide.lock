@@ -1,10 +1,10 @@
 hash: 0402d462f75cf177f62e8a0c786da7e9ca6a22535e6412965b600141842d6dae
-updated: 2016-10-27T23:38:30.501589299+01:00
+updated: 2016-10-29T14:57:11.583277704+01:00
 imports:
 - name: github.com/abcum/cork
   version: 177098ca294c7091ec158fd2a64a3422ddc7d166
 - name: github.com/abcum/fibre
-  version: 9b3dbeb9da1d975e95511c041a9fa9b6d3b4aae2
+  version: cb521c4d2cdc231c3efa08aef9cc7c731741c2a8
   subpackages:
   - mw
 - name: github.com/abcum/logrus
@@ -14,7 +14,7 @@ imports:
 - name: github.com/asaskevich/govalidator
   version: 7664702784775e51966f0885f5cd27435916517b
 - name: github.com/boltdb/bolt
-  version: 074dffcc83e9f421e261526d297cd93f22a34080
+  version: 4b1ebc1869ad66568b313d0dc410e2be72670dda
 - name: github.com/cznic/internal
   version: cef02a853c3a93623c42eacd574e7ea05f55531b
   subpackages:
@@ -109,7 +109,7 @@ testImports:
   - internal/go-render/render
   - internal/oglematchers
 - name: github.com/smartystreets/goconvey
-  version: 95a89808c3e7f231df92fcbecb0706f8d5cd9261
+  version: 9d1f119b4c758f57339d56a1cc8f2e156c0e79ba
   subpackages:
   - convey
   - convey/gotest
