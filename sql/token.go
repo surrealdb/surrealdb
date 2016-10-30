@@ -136,7 +136,6 @@ const (
 	IN
 	INDEX
 	INFO
-	INSERT
 	INTO
 	IS
 	LET
@@ -166,7 +165,6 @@ const (
 	RELATE
 	REMOVE
 	RETURN
-	ROLLBACK
 	RULES
 	SCHEMAFULL
 	SCHEMALESS
@@ -303,7 +301,6 @@ var tokens = [...]string{
 	IN:              "IN",
 	INDEX:           "INDEX",
 	INFO:            "INFO",
-	INSERT:          "INSERT",
 	INTO:            "INTO",
 	IS:              "IS",
 	LET:             "LET",
@@ -332,7 +329,6 @@ var tokens = [...]string{
 	RELATE:          "RELATE",
 	REMOVE:          "REMOVE",
 	RETURN:          "RETURN",
-	ROLLBACK:        "ROLLBACK",
 	RULES:           "RULES",
 	SCHEMAFULL:      "SCHEMAFULL",
 	SCHEMALESS:      "SCHEMALESS",
