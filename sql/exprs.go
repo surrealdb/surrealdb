@@ -106,6 +106,19 @@ func (p *parser) parseIdent() (*Ident, error) {
 
 }
 
+func (p *parser) parseTable() (*Table, error) {
+
+	_, lit, err := p.shouldBe(IDENT, NUMBER, DOUBLE)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
+	}
+
+	val, err := p.declare(TABLE, lit)
+
+	return val.(*Table), err
+
+}
+
 func (p *parser) parseThing() (*Thing, error) {
 
 	_, lit, err := p.shouldBe(THING)

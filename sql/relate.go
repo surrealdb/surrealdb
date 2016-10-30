@@ -22,6 +22,40 @@ func (p *parser) parseRelateStatement() (stmt *RelateStatement, err error) {
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
+	if stmt.Type, err = p.parseTable(); err != nil {
+		return nil, err
+	}
+
+	if _, _, err = p.shouldBe(FROM); err != nil {
+		return nil, err
+	}
+
+	if stmt.From, err = p.parseWhat(); err != nil {
+		return nil, err
+	}
+
+	if _, _, err = p.shouldBe(TO); err != nil {
+		return nil, err
+	}
+
+	if stmt.With, err = p.parseWhat(); err != nil {
+		return nil, err
+	}
+
+	_, _, stmt.Uniq = p.mightBe(UNIQUE)
+
+	if stmt.Data, err = p.parseData(); err != nil {
+		return nil, err
+	}
+
+	if stmt.Echo, err = p.parseEcho(); err != nil {
+		return nil, err
+	}
+
+	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
+		return nil, err
+	}
+
 	return
 
 }
