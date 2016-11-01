@@ -35,7 +35,7 @@ func (e *executor) executeUpdateStatement(txn kvs.TX, ast *sql.UpdateStatement) 
 		switch what := w.(type) {
 
 		default:
-			return out, fmt.Errorf("Can not execute UPDATE query using type '%T'", what)
+			return out, fmt.Errorf("Can not execute UPDATE query using value '%v' with type '%T'", what, what)
 
 		case *sql.Thing:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}

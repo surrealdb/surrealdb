@@ -35,7 +35,7 @@ func (e *executor) executeDeleteStatement(txn kvs.TX, ast *sql.DeleteStatement) 
 		switch what := w.(type) {
 
 		default:
-			return out, fmt.Errorf("Can not execute DELETE query using type '%T'", what)
+			return out, fmt.Errorf("Can not execute DELETE query using value '%v' with type '%T'", what, what)
 
 		case *sql.Thing:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
