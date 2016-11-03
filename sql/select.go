@@ -63,7 +63,7 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 		return nil, err
 	}
 
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
+	if _, _, err = p.shouldBe(EOF, RPAREN, SEMICOLON); err != nil {
 		return nil, err
 	}
 
