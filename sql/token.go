@@ -31,7 +31,6 @@ const (
 
 	DATE     // 1970-01-01
 	TIME     // 1970-01-01T00:00:00+00:00
-	PATH     // person->like->person
 	JSON     // {"test":true}
 	IDENT    // something
 	THING    // @class:id
@@ -43,6 +42,10 @@ const (
 	ARRAY    // [0,1,2]
 	DURATION // 13h
 	PARAM    // $1
+
+	OEDGE // ->
+	IEDGE // <-
+	BEDGE // <->
 
 	DOT       // .
 	COMMA     // ,
@@ -81,10 +84,6 @@ const (
 	SNI // ∌
 	INS // ∈
 	NIS // ∉
-
-	OEDGE // ->
-	IEDGE // <-
-	BEDGE // <->
 
 	operatorEnd
 
@@ -204,7 +203,6 @@ var tokens = [...]string{
 
 	DATE:     "DATE",
 	TIME:     "TIME",
-	PATH:     "PATH",
 	JSON:     "JSON",
 	IDENT:    "IDENT",
 	THING:    "THING",
@@ -216,6 +214,10 @@ var tokens = [...]string{
 	ARRAY:    "ARRAY",
 	DURATION: "DURATION",
 	PARAM:    "PARAM",
+
+	OEDGE: "->",
+	IEDGE: "<-",
+	BEDGE: "<->",
 
 	DOT:       ".",
 	COMMA:     ",",
@@ -250,10 +252,6 @@ var tokens = [...]string{
 	SNI: "∌",
 	INS: "∈",
 	NIS: "∉",
-
-	OEDGE: "->",
-	IEDGE: "<-",
-	BEDGE: "<->",
 
 	// keywords
 
