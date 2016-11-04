@@ -105,12 +105,10 @@ func (p *parser) parseDiff() (exp []Expr, err error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	val, err := p.declare(tok, lit)
+	one.JSON, err = p.declare(tok, lit)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
-
-	one.JSON = val
 
 	exp = append(exp, one)
 
@@ -127,12 +125,10 @@ func (p *parser) parseMerge() (exp []Expr, err error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	val, err := p.declare(tok, lit)
+	one.JSON, err = p.declare(tok, lit)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
-
-	one.JSON = val
 
 	exp = append(exp, one)
 
@@ -149,12 +145,10 @@ func (p *parser) parseContent() (exp []Expr, err error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	val, err := p.declare(tok, lit)
+	one.JSON, err = p.declare(tok, lit)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
-
-	one.JSON = val
 
 	exp = append(exp, one)
 
