@@ -136,6 +136,7 @@ type UpdateStatement struct {
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
+	Hard bool   `cork:"hard" codec:"hard"`
 	What []Expr `cork:"what" codec:"what"`
 	Data []Expr `cork:"data" codec:"data"`
 	Cond Expr   `cork:"cond" codec:"cond"`

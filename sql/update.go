@@ -22,7 +22,12 @@ func (p *parser) parseUpdateStatement() (stmt *UpdateStatement, err error) {
 		return nil, err
 	}
 
-	_, _, _ = p.mightBe(INTO)
+	if _, _, exi := p.mightBe(AND); exi {
+		if _, _, err = p.shouldBe(UPSERT); err != nil {
+			return nil, err
+		}
+		stmt.Hard = true
+	}
 
 	if stmt.What, err = p.parseWhat(); err != nil {
 		return nil, err
