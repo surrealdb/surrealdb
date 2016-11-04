@@ -547,6 +547,10 @@ func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{
 		}
 	}
 
+	if val, err := time.ParseDuration(buf.String()); err == nil {
+		return DURATION, buf.String(), val
+	}
+
 	return tok, buf.String(), nil
 
 }
