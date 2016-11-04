@@ -247,6 +247,17 @@ func (this *Doc) chck(fld *sql.DefineFieldStatement, key string, old, val interf
 				}
 			}
 
+		case "record":
+			if cnv, ok := val.(*sql.Thing); ok {
+				this.current.Set(cnv, key)
+			} else {
+				if fld.Validate {
+					return fmt.Errorf("Field '%v' needs to be a record, but found '%v'", key, val)
+				} else {
+					this.current.Iff(old, key)
+				}
+			}
+
 		case "string":
 			if cnv, err := conv.ConvertToString(val); err == nil {
 				this.current.Set(cnv, key)
