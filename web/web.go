@@ -26,7 +26,7 @@ func Setup(opts *cnf.Options) (err error) {
 
 	log.WithPrefix("web").Infof("Starting web server on %s", opts.Conn.Web)
 
-	s := fibre.Server(opts)
+	s := fibre.Server()
 
 	routes(s)
 	s.SetWait("15s")
@@ -36,7 +36,6 @@ func Setup(opts *cnf.Options) (err error) {
 
 	// Setup middleware
 
-	s.Use(conf())    // Setup conf
 	s.Use(auth())    // Setup auth
 	s.Use(mw.Logs()) // Log requests
 	s.Use(mw.Fail()) // Catch panics

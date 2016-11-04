@@ -23,6 +23,7 @@ func conf() fibre.MiddlewareFunc {
 	return func(h fibre.HandlerFunc) fibre.HandlerFunc {
 		return func(c *fibre.Context) error {
 
+			c.Set("KV", cnf.Settings.DB.Base)
 
 			return h(c)
 
