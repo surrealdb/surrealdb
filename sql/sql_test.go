@@ -124,27 +124,27 @@ func Test_Parse_Queries_Malformed(t *testing.T) {
 		},
 		{
 			sql: "SELECT ` FROM person",
-			err: "Found ` FROM person` but expected `field name`",
+			err: "Found ` FROM person` but expected `expression`",
 		},
 		{
 			sql: `SELECT ' FROM person`,
-			err: "Found ` FROM person` but expected `field name`",
+			err: "Found ` FROM person` but expected `expression`",
 		},
 		{
 			sql: `SELECT " FROM person`,
-			err: "Found ` FROM person` but expected `field name`",
+			err: "Found ` FROM person` but expected `expression`",
 		},
 		{
 			sql: `SELECT "\" FROM person`,
-			err: "Found `\" FROM person` but expected `field name`",
+			err: "Found `\" FROM person` but expected `expression`",
 		},
 		{
 			sql: `!`,
-			err: "Found `!` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, RETURN, SELECT, CREATE, UPDATE, INSERT, UPSERT, DELETE, RELATE, DEFINE, REMOVE`",
+			err: "Found `!` but expected `USE, INFO, BEGIN, CANCEL, COMMIT, LET, RETURN, SELECT, CREATE, UPDATE, DELETE, RELATE, DEFINE, REMOVE`",
 		},
 		{
 			sql: `SELECT * FROM person;;;`,
-			err: "Found `;` but expected `USE, INFO, LET, BEGIN, CANCEL, COMMIT, ROLLBACK, RETURN, SELECT, CREATE, UPDATE, INSERT, UPSERT, DELETE, RELATE, DEFINE, REMOVE`",
+			err: "Found `;` but expected `USE, INFO, BEGIN, CANCEL, COMMIT, LET, RETURN, SELECT, CREATE, UPDATE, DELETE, RELATE, DEFINE, REMOVE`",
 		},
 	}
 
@@ -262,76 +262,76 @@ func Test_Parse_Queries_Let(t *testing.T) {
 		},
 		{
 			sql: `LET name =`,
-			err: "Found `=` but expected `NULL, NOW, DATE, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE, THING, JSON, ARRAY, PARAM`",
+			err: "Found `=` but expected `expression`",
 		},
 		{
 			sql: `LET name = true`,
 			res: &Query{Statements: []Statement{&LetStatement{
 				Name: "name",
-				Expr: true,
+				What: true,
 			}}},
 		},
 		{
 			sql: `LET name = false`,
 			res: &Query{Statements: []Statement{&LetStatement{
 				Name: "name",
-				Expr: false,
+				What: false,
 			}}},
 		},
 		{
 			sql: `LET name = "test"`,
 			res: &Query{Statements: []Statement{&LetStatement{
 				Name: "name",
-				Expr: "test",
+				What: "test",
 			}}},
 		},
 		{
 			sql: `LET name = 1`,
 			res: &Query{Statements: []Statement{&LetStatement{
 				Name: "name",
-				Expr: int64(1),
+				What: int64(1),
 			}}},
 		},
 		{
 			sql: `LET name = 1.0`,
 			res: &Query{Statements: []Statement{&LetStatement{
 				Name: "name",
-				Expr: float64(1),
+				What: float64(1),
 			}}},
 		},
 		{
 			sql: `LET name = 1.1`,
 			res: &Query{Statements: []Statement{&LetStatement{
 				Name: "name",
-				Expr: float64(1.1),
+				What: float64(1.1),
 			}}},
 		},
 		{
 			sql: `LET name = @thing:test`,
 			res: &Query{Statements: []Statement{&LetStatement{
 				Name: "name",
-				Expr: &Thing{TB: "thing", ID: "test"},
+				What: &Thing{TB: "thing", ID: "test"},
 			}}},
 		},
 		{
 			sql: `LET name = {"key": "val"}`,
 			res: &Query{Statements: []Statement{&LetStatement{
 				Name: "name",
-				Expr: map[string]interface{}{"key": "val"},
+				What: map[string]interface{}{"key": "val"},
 			}}},
 		},
 		{
 			sql: `LET name = ["key", "val"]`,
 			res: &Query{Statements: []Statement{&LetStatement{
 				Name: "name",
-				Expr: []interface{}{"key", "val"},
+				What: []interface{}{"key", "val"},
 			}}},
 		},
 		{
 			sql: `LET name = $test`,
 			res: &Query{Statements: []Statement{&LetStatement{
 				Name: "name",
-				Expr: &Param{ID: "test"},
+				What: &Param{ID: "test"},
 			}}},
 		},
 		{
@@ -355,82 +355,72 @@ func Test_Parse_Queries_Return(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `RETURN`,
-			err: "Found `` but expected `NULL, NOW, DATE, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE, THING, JSON, ARRAY, PARAM`",
+			err: "Found `` but expected `expression`",
 		},
 		{
 			sql: `RETURN true`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{true},
+				What: true,
 			}}},
 		},
 		{
 			sql: `RETURN true`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{true},
+				What: true,
 			}}},
 		},
 		{
 			sql: `RETURN false`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{false},
+				What: false,
 			}}},
 		},
 		{
 			sql: `RETURN "test"`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{"test"},
+				What: "test",
 			}}},
 		},
 		{
 			sql: `RETURN 1`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{int64(1)},
+				What: int64(1),
 			}}},
 		},
 		{
 			sql: `RETURN 1.0`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{float64(1)},
+				What: float64(1),
 			}}},
 		},
 		{
 			sql: `RETURN 1.1`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{float64(1.1)},
+				What: float64(1.1),
 			}}},
 		},
 		{
 			sql: `RETURN @thing:test`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{&Thing{TB: "thing", ID: "test"}},
+				What: &Thing{TB: "thing", ID: "test"},
 			}}},
 		},
 		{
 			sql: `RETURN {"key": "val"}`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{map[string]interface{}{"key": "val"}},
+				What: map[string]interface{}{"key": "val"},
 			}}},
 		},
 		{
 			sql: `RETURN ["key", "val"]`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{[]interface{}{"key", "val"}},
+				What: []interface{}{"key", "val"},
 			}}},
 		},
 		{
 			sql: `RETURN $test`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{&Param{ID: "test"}},
-			}}},
-		},
-		{
-			sql: `RETURN $test, $test, $test`,
-			res: &Query{Statements: []Statement{&ReturnStatement{
-				What: []Expr{
-					&Param{ID: "test"},
-					&Param{ID: "test"},
-					&Param{ID: "test"},
-				},
+				What: &Param{ID: "test"},
 			}}},
 		},
 		{
@@ -457,11 +447,11 @@ func Test_Parse_Queries_Select(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `SELECT`,
-			err: "Found `` but expected `field name`",
+			err: "Found `` but expected `expression`",
 		},
 		{
 			sql: `SELECT FROM`,
-			err: "Found `FROM` but expected `field name`",
+			err: "Found `FROM` but expected `expression`",
 		},
 		{
 			sql: `SELECT *`,
@@ -473,19 +463,12 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		},
 		{
 			sql: `SELECT * FROM per!son`,
-			err: "Found `!` but expected `EOF, ;`",
+			err: "Found `!` but expected `EOF, ), ;`",
 		},
 		{
 			sql: `SELECT * FROM person;`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
-				What: []Expr{&Table{"person"}},
-			}}},
-		},
-		{
-			sql: `SELECT ALL FROM person;`,
-			res: &Query{Statements: []Statement{&SelectStatement{
-				Expr: []*Field{{Expr: &All{}, Alias: "ALL"}},
 				What: []Expr{&Table{"person"}},
 			}}},
 		},
@@ -507,7 +490,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		},
 		{
 			sql: `SELECT * FROM person:uuid`,
-			err: "Found `:` but expected `EOF, ;`",
+			err: "Found `:` but expected `EOF, ), ;`",
 		},
 		{
 			sql: "SELECT * FROM 111",
@@ -792,7 +775,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"id"}, Op: EQ, RHS: "\n"}},
+				Cond: &BinaryExpression{LHS: &Ident{"id"}, Op: EQ, RHS: "\n"},
 			}}},
 		},
 		{
@@ -800,7 +783,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"id"}, Op: EQ, RHS: "\r"}},
+				Cond: &BinaryExpression{LHS: &Ident{"id"}, Op: EQ, RHS: "\r"},
 			}}},
 		},
 		{
@@ -808,27 +791,32 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"id"}, Op: EQ, RHS: "\n\r\t"}},
+				Cond: &BinaryExpression{LHS: &Ident{"id"}, Op: EQ, RHS: "\n\r\t"},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM person WHERE`,
-			err: "Found `` but expected `field name`",
+			err: "Found `` but expected `expression`",
 		},
 		{
 			sql: `SELECT * FROM person WHERE id`,
-			err: "Found `` but expected `IS, IN, =, !=, ==, !==, ?=, <, <=, >, >=, ∋, ∌, ∈, ∉, CONTAINS, CONTAINSALL, CONTAINSNONE, CONTAINSSOME, ALLCONTAINEDIN, NONECONTAINEDIN, SOMECONTAINEDIN`",
+			// err: "Found `` but expected `IS, IN, =, !=, ==, !==, ?=, <, <=, >, >=, ∋, ∌, ∈, ∉, CONTAINS, CONTAINSALL, CONTAINSNONE, CONTAINSSOME, ALLCONTAINEDIN, NONECONTAINEDIN, SOMECONTAINEDIN`",
+			res: &Query{Statements: []Statement{&SelectStatement{
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"person"}},
+				Cond: &Ident{"id"},
+			}}},
 		},
 		{
 			sql: `SELECT * FROM person WHERE id = `,
-			err: "Found `` but expected `field value`",
+			err: "Found `` but expected `expression`",
 		},
 		{
 			sql: `SELECT * FROM person WHERE id = 1`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"id"}, Op: EQ, RHS: int64(1)}},
+				Cond: &BinaryExpression{LHS: &Ident{"id"}, Op: EQ, RHS: int64(1)},
 			}}},
 		},
 		{
@@ -836,9 +824,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: &Empty{}},
-				},
+				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: &Empty{}},
 			}}},
 		},
 		{
@@ -846,9 +832,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"old"}, Op: NEQ, RHS: &Empty{}},
-				},
+				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: NEQ, RHS: &Empty{}},
 			}}},
 		},
 		{
@@ -856,9 +840,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: &Void{}},
-				},
+				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: &Void{}},
 			}}},
 		},
 		{
@@ -866,9 +848,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"old"}, Op: NEQ, RHS: &Void{}},
-				},
+				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: NEQ, RHS: &Void{}},
 			}}},
 		},
 		{
@@ -876,9 +856,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: &Empty{}},
-				},
+				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: &Empty{}},
 			}}},
 		},
 		{
@@ -886,9 +864,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"old"}, Op: NEQ, RHS: &Empty{}},
-				},
+				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: NEQ, RHS: &Empty{}},
 			}}},
 		},
 		{
@@ -896,9 +872,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: &Void{}},
-				},
+				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: &Void{}},
 			}}},
 		},
 		{
@@ -906,9 +880,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"old"}, Op: NEQ, RHS: &Void{}},
-				},
+				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: NEQ, RHS: &Void{}},
 			}}},
 		},
 		{
@@ -916,9 +888,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: true},
-				},
+				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: true},
 			}}},
 		},
 		{
@@ -926,9 +896,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: false},
-				},
+				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: false},
 			}}},
 		},
 		{
@@ -936,12 +904,42 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{
-					&BinaryExpression{LHS: &Ident{"id"}, Op: NEQ, RHS: &Null{}},
-					&BinaryExpression{LHS: &Ident{"id"}, Op: GT, RHS: float64(13.9)},
-					&BinaryExpression{LHS: &Ident{"id"}, Op: LT, RHS: int64(31)},
-					&BinaryExpression{LHS: &Ident{"id"}, Op: GTE, RHS: int64(15)},
-					&BinaryExpression{LHS: &Ident{"id"}, Op: LTE, RHS: float64(29.9)},
+				Cond: &BinaryExpression{
+					LHS: &BinaryExpression{
+						LHS: &BinaryExpression{
+							LHS: &BinaryExpression{
+								LHS: &BinaryExpression{
+									LHS: &Ident{ID: "id"},
+									Op:  NEQ,
+									RHS: &Null{},
+								},
+								Op: AND,
+								RHS: &BinaryExpression{
+									LHS: &Ident{ID: "id"},
+									Op:  GT,
+									RHS: float64(13.9),
+								},
+							},
+							Op: AND,
+							RHS: &BinaryExpression{
+								LHS: &Ident{ID: "id"},
+								Op:  LT,
+								RHS: int64(31),
+							},
+						},
+						Op: AND,
+						RHS: &BinaryExpression{
+							LHS: &Ident{ID: "id"},
+							Op:  GTE,
+							RHS: int64(15),
+						},
+					},
+					Op: AND,
+					RHS: &BinaryExpression{
+						LHS: &Ident{ID: "id"},
+						Op:  LTE,
+						RHS: float64(29.9),
+					},
 				},
 			}}},
 		},
@@ -954,7 +952,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"test"}, Op: INS, RHS: []interface{}{"London", "Paris"}}},
+				Cond: &BinaryExpression{LHS: &Ident{"test"}, Op: INS, RHS: []interface{}{"London", "Paris"}},
 			}}},
 		},
 		{
@@ -962,7 +960,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"test"}, Op: INS, RHS: []interface{}{"London", "Paris"}}},
+				Cond: &BinaryExpression{LHS: &Ident{"test"}, Op: INS, RHS: []interface{}{"London", "Paris"}},
 			}}},
 		},
 		{
@@ -970,7 +968,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"test"}, Op: NIS, RHS: []interface{}{"London", "Paris"}}},
+				Cond: &BinaryExpression{LHS: &Ident{"test"}, Op: NIS, RHS: []interface{}{"London", "Paris"}},
 			}}},
 		},
 		{
@@ -978,7 +976,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: []interface{}{"London", "Paris"}, Op: SIN, RHS: &Ident{"test"}}},
+				Cond: &BinaryExpression{LHS: []interface{}{"London", "Paris"}, Op: SIN, RHS: &Ident{"test"}},
 			}}},
 		},
 		{
@@ -986,12 +984,12 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: []interface{}{"London", "Paris"}, Op: SNI, RHS: &Ident{"test"}}},
+				Cond: &BinaryExpression{LHS: []interface{}{"London", "Paris"}, Op: SNI, RHS: &Ident{"test"}},
 			}}},
 		},
 		{
 			sql: `SELECT * FROM person WHERE test = {`,
-			err: "Found `{` but expected `field value`",
+			err: "Found `{` but expected `expression`",
 		},
 		{
 			sql: `SELECT * FROM person WHERE test = {"name","London"}`,
@@ -1014,7 +1012,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"test"}, Op: EQ, RHS: map[string]interface{}{"name": "London"}}},
+				Cond: &BinaryExpression{LHS: &Ident{"test"}, Op: EQ, RHS: map[string]interface{}{"name": "London"}},
 			}}},
 		},
 		{
@@ -1022,7 +1020,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"test"}, Op: EQ, RHS: map[string]interface{}{"name": "\b\t\r\n\f\"\\"}}},
+				Cond: &BinaryExpression{LHS: &Ident{"test"}, Op: EQ, RHS: map[string]interface{}{"name": "\b\t\r\n\f\"\\"}},
 			}}},
 		},
 		{
@@ -1030,7 +1028,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 			res: &Query{Statements: []Statement{&SelectStatement{
 				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 				What: []Expr{&Table{"person"}},
-				Cond: []Expr{&BinaryExpression{LHS: &Ident{"test"}, Op: EQ, RHS: map[string]interface{}{"name": map[string]interface{}{"f": "first", "l": "last"}}}},
+				Cond: &BinaryExpression{LHS: &Ident{"test"}, Op: EQ, RHS: map[string]interface{}{"name": map[string]interface{}{"f": "first", "l": "last"}}},
 			}}},
 		},
 	}
@@ -1045,11 +1043,34 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		res: &Query{Statements: []Statement{&SelectStatement{
 			Expr: []*Field{{Expr: &All{}, Alias: "*"}},
 			What: []Expr{&Table{"person"}},
-			Cond: []Expr{
-				&BinaryExpression{LHS: &Ident{"bday"}, Op: GTE, RHS: bday1},
-				&BinaryExpression{LHS: &Ident{"bday"}, Op: GTE, RHS: bday2},
-				&BinaryExpression{LHS: &Ident{"bday"}, Op: GTE, RHS: bday3},
-				&BinaryExpression{LHS: &Ident{"bday"}, Op: LTE, RHS: bday4},
+			Cond: &BinaryExpression{
+				LHS: &BinaryExpression{
+					LHS: &BinaryExpression{
+						LHS: &BinaryExpression{
+							LHS: &Ident{ID: "bday"},
+							Op:  GTE,
+							RHS: bday1,
+						},
+						Op: AND,
+						RHS: &BinaryExpression{
+							LHS: &Ident{ID: "bday"},
+							Op:  GTE,
+							RHS: bday2,
+						},
+					},
+					Op: AND,
+					RHS: &BinaryExpression{
+						LHS: &Ident{ID: "bday"},
+						Op:  GTE,
+						RHS: bday3,
+					},
+				},
+				Op: AND,
+				RHS: &BinaryExpression{
+					LHS: &Ident{ID: "bday"},
+					Op:  LTE,
+					RHS: bday4,
+				},
 			},
 		}}},
 	})
@@ -1065,10 +1086,6 @@ func Test_Parse_Queries_Create(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `CREATE`,
-			err: "Found `` but expected `table name or record id`",
-		},
-		{
-			sql: `INSERT INTO`,
 			err: "Found `` but expected `table name or record id`",
 		},
 		{
@@ -1088,25 +1105,28 @@ func Test_Parse_Queries_Create(t *testing.T) {
 			err: "Found `` but expected `=, +=, -=`",
 		},
 		{
-			sql: `CREATE person SET firstname = EMPTY`,
-			err: "Found `EMPTY` but expected `field value`",
-		},
-		{
 			sql: `CREATE person SET firstname = VOID`,
 			res: &Query{Statements: []Statement{&CreateStatement{
 				What: []Expr{&Table{"person"}},
-				Data: []Expr{&BinaryExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Void{}}},
+				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Void{}}},
+			}}},
+		},
+		{
+			sql: `CREATE person SET firstname = EMPTY`,
+			res: &Query{Statements: []Statement{&CreateStatement{
+				What: []Expr{&Table{"person"}},
+				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Empty{}}},
 			}}},
 		},
 		{
 			sql: `CREATE person SET firstname = "Tobie" something`,
-			err: "Found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ), ;`",
 		},
 		{
 			sql: `CREATE person SET firstname = "Tobie"`,
 			res: &Query{Statements: []Statement{&CreateStatement{
 				What: []Expr{&Table{"person"}},
-				Data: []Expr{&BinaryExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: "Tobie"}},
+				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: "Tobie"}},
 			}}},
 		},
 		{
@@ -1119,7 +1139,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		},
 		{
 			sql: `CREATE person MERGE {"firstname":"Tobie"} something`,
-			err: "Found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ), ;`",
 		},
 		{
 			sql: `CREATE person MERGE {"firstname":"Tobie"}`,
@@ -1138,7 +1158,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		},
 		{
 			sql: `CREATE person CONTENT {"firstname":"Tobie"} something`,
-			err: "Found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ), ;`",
 		},
 		{
 			sql: `CREATE person CONTENT {"firstname":"Tobie"}`,
@@ -1209,10 +1229,6 @@ func Test_Parse_Queries_Update(t *testing.T) {
 			err: "Found `` but expected `table name or record id`",
 		},
 		{
-			sql: `UPSERT INTO`,
-			err: "Found `` but expected `table name or record id`",
-		},
-		{
 			sql: `UPDATE person`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
 				What: []Expr{
@@ -1229,25 +1245,28 @@ func Test_Parse_Queries_Update(t *testing.T) {
 			err: "Found `` but expected `=, +=, -=`",
 		},
 		{
-			sql: `UPDATE person SET firstname = EMPTY`,
-			err: "Found `EMPTY` but expected `field value`",
-		},
-		{
 			sql: `UPDATE person SET firstname = VOID`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
 				What: []Expr{&Table{"person"}},
-				Data: []Expr{&BinaryExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Void{}}},
+				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Void{}}},
+			}}},
+		},
+		{
+			sql: `UPDATE person SET firstname = EMPTY`,
+			res: &Query{Statements: []Statement{&UpdateStatement{
+				What: []Expr{&Table{"person"}},
+				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Empty{}}},
 			}}},
 		},
 		{
 			sql: `UPDATE person SET firstname = "Tobie" something`,
-			err: "Found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ), ;`",
 		},
 		{
 			sql: `UPDATE person SET firstname = "Tobie"`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
 				What: []Expr{&Table{"person"}},
-				Data: []Expr{&BinaryExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: "Tobie"}},
+				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: "Tobie"}},
 			}}},
 		},
 		{
@@ -1260,7 +1279,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		},
 		{
 			sql: `UPDATE person DIFF {"firstname":"Tobie"} something`,
-			err: "Found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ), ;`",
 		},
 		{
 			sql: `UPDATE person DIFF {"firstname":"Tobie"}`,
@@ -1279,7 +1298,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		},
 		{
 			sql: `UPDATE person MERGE {"firstname":"Tobie"} something`,
-			err: "Found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ), ;`",
 		},
 		{
 			sql: `UPDATE person MERGE {"firstname":"Tobie"}`,
@@ -1298,7 +1317,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		},
 		{
 			sql: `UPDATE person CONTENT {"firstname":"Tobie"} something`,
-			err: "Found `something` but expected `EOF, ;`",
+			err: "Found `something` but expected `EOF, ), ;`",
 		},
 		{
 			sql: `UPDATE person CONTENT {"firstname":"Tobie"}`,
@@ -1578,11 +1597,11 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE`,
-			err: "Found `` but expected `any, url, uuid, color, email, phone, array, object, domain, string, number, double, custom, boolean, datetime, latitude, longitude`",
+			err: "Found `` but expected `any, url, uuid, color, email, phone, array, object, domain, record, string, number, double, custom, boolean, datetime, latitude, longitude`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE something`,
-			err: "Found `something` but expected `any, url, uuid, color, email, phone, array, object, domain, string, number, double, custom, boolean, datetime, latitude, longitude`",
+			err: "Found `something` but expected `any, url, uuid, color, email, phone, array, object, domain, record, string, number, double, custom, boolean, datetime, latitude, longitude`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE any`,
@@ -2018,7 +2037,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE VIEW temp AS SELECT`,
-			err: "Found `` but expected `field name`",
+			err: "Found `` but expected `expression`",
 		},
 		{
 			sql: `DEFINE VIEW temp AS SELECT *`,
