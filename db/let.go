@@ -21,11 +21,11 @@ import (
 
 func (e *executor) executeLetStatement(txn kvs.TX, ast *sql.LetStatement) (out []interface{}, err error) {
 
-	switch expr := ast.Expr.(type) {
+	switch what := ast.What.(type) {
 	default:
-		e.Set(ast.Name, expr)
+		e.Set(ast.Name, what)
 	case *sql.Param:
-		e.Set(ast.Name, e.Get(expr.ID))
+		e.Set(ast.Name, e.Get(what.ID))
 	}
 
 	return

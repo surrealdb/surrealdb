@@ -21,26 +21,35 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 	stmt.KV = p.c.Get("KV").(string)
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
+	// The first part of a LET expression must
+	// always be an identifier, specifying a
+	// variable name to set.
 
 	_, stmt.Name, err = p.shouldBe(IDENT)
 	if err != nil {
 		return nil, err
 	}
 
+	// The next query part must always be a =
+	// operator, as this is a LET expression
+	// and not a binary expression.
+
 	_, _, err = p.shouldBe(EQ)
 	if err != nil {
 		return nil, err
 	}
 
-	tok, lit, err := p.shouldBe(NULL, NOW, DATE, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE, THING, JSON, ARRAY, PARAM)
+	// The next query part can be any expression
+	// including a parenthesised expression or a
+	// binary expression so handle accordingly.
+
+	stmt.What, err = p.parseExpr()
 	if err != nil {
 		return nil, err
 	}
 
-	stmt.Expr, err = p.declare(tok, lit)
-	if err != nil {
-		return nil, err
-	}
+	// Check that we have reached the end of the
+	// statement with either a ';' or EOF.
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err

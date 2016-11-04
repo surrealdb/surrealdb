@@ -90,8 +90,11 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 	case EMPTY:
 		return &Empty{}, nil
 
-	case ALL:
+	case MUL:
 		return &All{}, nil
+
+	case QMARK:
+		return &Any{}, nil
 
 	case ASC:
 		return &Asc{}, nil

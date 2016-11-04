@@ -50,12 +50,16 @@ func (p *parser) parseData() (exp []Expr, err error) {
 
 func (p *parser) parseSet() (mul []Expr, err error) {
 
-	var tok Token
-	var lit string
-
 	for {
 
-		one := &BinaryExpression{}
+		var tok Token
+		var lit string
+
+		one := &DataExpression{}
+
+		// The first part of a SET expression must
+		// always be an identifier, specifying a
+		// record field to set.
 
 		tok, lit, err = p.shouldBe(IDENT)
 		if err != nil {
@@ -67,32 +71,40 @@ func (p *parser) parseSet() (mul []Expr, err error) {
 			return nil, err
 		}
 
-		tok, lit, err = p.shouldBe(EQ, INC, DEC)
+		// The next query part must be a =, +=, or
+		// -= operator, as this is a SET expression
+		// and not a binary expression.
+
+		one.Op, lit, err = p.shouldBe(EQ, INC, DEC)
 		if err != nil {
 			return nil, err
 		}
-		one.Op = tok
 
-		tok, lit, err = p.shouldBe(IDENT, THING, NULL, VOID, NOW, DATE, TIME, TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, JSON, ARRAY, PARAM)
-		if err != nil {
-			return nil, &ParseError{Found: lit, Expected: []string{"field value"}}
-		}
+		// The next query part can be any expression
+		// including a parenthesised expression or a
+		// binary expression so handle accordingly.
 
-		one.RHS, err = p.declare(tok, lit)
+		one.RHS, err = p.parseExpr()
 		if err != nil {
 			return nil, err
 		}
+
+		// Append the single SET data expression to
+		// the array of data expressions.
 
 		mul = append(mul, one)
 
+		// Check to see if the next token is a comma
+		// and if not, then break out of the loop,
+		// otherwise repeat until we find no comma.
+
 		if _, _, exi := p.mightBe(COMMA); !exi {
-			p.unscan()
 			break
 		}
 
 	}
 
-	return mul, nil
+	return
 
 }
 

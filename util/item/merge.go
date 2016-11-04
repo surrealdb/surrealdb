@@ -44,7 +44,7 @@ func (this *Doc) Merge(data []sql.Expr) (err error) {
 		switch expr := part.(type) {
 		case *sql.DiffExpression:
 			this.mrgDpm(expr)
-		case *sql.BinaryExpression:
+		case *sql.DataExpression:
 			this.mrgOne(expr)
 		case *sql.MergeExpression:
 			this.mrgAny(expr)
@@ -149,7 +149,7 @@ func (this *Doc) mrgDpm(expr *sql.DiffExpression) {
 
 }
 
-func (this *Doc) mrgOne(expr *sql.BinaryExpression) {
+func (this *Doc) mrgOne(expr *sql.DataExpression) {
 
 	lhs := this.getMrgItemLHS(expr.LHS)
 	rhs := this.getMrgItemRHS(expr.RHS)

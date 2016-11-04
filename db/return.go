@@ -21,15 +21,11 @@ import (
 
 func (e *executor) executeReturnStatement(txn kvs.TX, ast *sql.ReturnStatement) (out []interface{}, err error) {
 
-	for _, w := range ast.What {
-
-		switch what := w.(type) {
-		default:
-			out = append(out, what)
-		case *sql.Param:
-			out = append(out, e.ctx.Get(what.ID).Data())
-		}
-
+	switch what := ast.What.(type) {
+	default:
+		out = append(out, what)
+	case *sql.Param:
+		out = append(out, e.ctx.Get(what.ID).Data())
 	}
 
 	return

@@ -78,7 +78,7 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 		}
 
 		if p.is(tok, DEFAULT) {
-			if stmt.Default, err = p.parseDefault(); err != nil {
+			if stmt.Default, err = p.parseExpr(); err != nil {
 				return nil, err
 			}
 		}

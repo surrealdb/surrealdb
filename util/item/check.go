@@ -24,14 +24,12 @@ import (
 	"github.com/abcum/surreal/util/data"
 )
 
-func (this *Doc) Check(cond []sql.Expr) (val bool) {
+func (this *Doc) Check(cond sql.Expr) (val bool) {
 
-	for _, part := range cond {
-		switch expr := part.(type) {
-		case *sql.BinaryExpression:
-			if !this.chkOne(expr) {
-				return false
-			}
+	switch expr := cond.(type) {
+	case *sql.BinaryExpression:
+		if !this.chkOne(expr) {
+			return false
 		}
 	}
 

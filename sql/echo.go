@@ -16,7 +16,10 @@ package sql
 
 func (p *parser) parseEcho() (exp Token, err error) {
 
-	// Next token might be RETURN
+	// The next token that we expect to see is a
+	// RETURN token, and if we don't find one then
+	// return nil, with no error.
+
 	if _, _, exi := p.mightBe(RETURN); exi {
 
 		exp, _, err = p.shouldBe(ID, NONE, INFO, BOTH, DIFF, BEFORE, AFTER)

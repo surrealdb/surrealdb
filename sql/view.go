@@ -36,7 +36,7 @@ func (p *parser) parseDefineViewStatement() (stmt *DefineViewStatement, err erro
 		return nil, err
 	}
 
-	if stmt.Expr, err = p.parseExpr(); err != nil {
+	if stmt.Expr, err = p.parseField(); err != nil {
 		return nil, err
 	}
 

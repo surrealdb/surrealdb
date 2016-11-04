@@ -63,7 +63,7 @@ func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 	case eof:
 		return EOF, "", val
 	case '*':
-		return ALL, string(ch), val
+		return MUL, string(ch), val
 	case '×':
 		return MUL, string(ch), val
 	case '∙':
@@ -135,6 +135,9 @@ func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 			return s.scanCommentSingle(ch)
 		case chn == '*':
 			return s.scanCommentMultiple(ch)
+		case isNumber(chn):
+			s.undo()
+			return DIV, string(ch), val
 		case chn == ' ':
 			s.undo()
 			return DIV, string(ch), val
@@ -759,7 +762,7 @@ func isLetter(ch rune) bool {
 
 // isIdentChar returns true if the rune is allowed in a IDENT.
 func isIdentChar(ch rune) bool {
-	return isLetter(ch) || isNumber(ch) || ch == '.' || ch == '_' || ch == '*'
+	return isLetter(ch) || isNumber(ch) || ch == '.' || ch == '_' || ch == '*' || ch == '[' || ch == ']'
 }
 
 // isThingChar returns true if the rune is allowed in a THING.

@@ -18,26 +18,21 @@ func (p *parser) parseReturnStatement() (stmt *ReturnStatement, err error) {
 
 	stmt = &ReturnStatement{}
 
-	for {
-
-		tok, lit, err := p.shouldBe(NULL, NOW, DATE, TIME, TRUE, FALSE, STRING, NUMBER, DOUBLE, THING, JSON, ARRAY, PARAM)
-		if err != nil {
-			return nil, err
-		}
-
-		val, err := p.declare(tok, lit)
-		if err != nil {
-			return nil, err
-		}
-
-		stmt.What = append(stmt.What, val)
-
-		// If the next token is not a comma then break the loop.
-		if _, _, exi := p.mightBe(COMMA); !exi {
-			break
-		}
-
+	if _, _, _, err = p.o.get(AuthTB); err != nil {
+		return nil, err
 	}
+
+	// The next query part can be any expression
+	// including a parenthesised expression or a
+	// binary expression so handle accordingly.
+
+	stmt.What, err = p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+
+	// Check that we have reached the end of the
+	// statement with either a ';' or EOF.
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err

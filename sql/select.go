@@ -71,13 +71,114 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 
 }
 
+func (p *parser) parseField() (mul []*Field, err error) {
+
+	var lit string
+	var exi bool
+
+	for {
+
+		one := &Field{}
+
+		one.Expr, err = p.parseExpr()
+		if err != nil {
+			return
+		}
+
+		one.Alias = "*" // TODO need to implement default field name
+
+		// Chec to see if the next token is an AS
+		// clause, and if it is read the defined
+		// field alias name from the scanner.
+
+		if _, _, exi = p.mightBe(AS); exi {
+
+			if _, one.Alias, err = p.shouldBe(IDENT); err != nil {
+				return nil, &ParseError{Found: lit, Expected: []string{"field alias"}}
+			}
+
+		}
+
+		// Append the single expression to the array
+		// of return statement expressions.
+
+		mul = append(mul, one)
+
+		// Check to see if the next token is a comma
+		// and if not, then break out of the loop,
+		// otherwise repeat until we find no comma.
+
+		if _, _, exi = p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
+
+	return
+
+}
+
+func (p *parser) parseWhere() (exp Expr, err error) {
+
+	// The next token that we expect to see is a
+	// WHERE token, and if we don't find one then
+	// return nil, with no error.
+
+	if _, _, exi := p.mightBe(WHERE); !exi {
+		return nil, nil
+	}
+
+	return p.parseExpr()
+
+}
+
 func (p *parser) parseGroup() (mul []*Group, err error) {
+
+	// The next token that we expect to see is a
+	// GROUP token, and if we don't find one then
+	// return nil, with no error.
 
 	if _, _, exi := p.mightBe(GROUP); !exi {
 		return nil, nil
 	}
 
+	// We don't need to have a BY token, but we
+	// allow it so that the SQL query would read
+	// better when compared to english.
+
 	_, _, _ = p.mightBe(BY)
+
+	for {
+
+		var tok Token
+		var lit string
+
+		one := &Group{}
+
+		tok, lit, err = p.shouldBe(IDENT, ID)
+		if err != nil {
+			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
+		}
+
+		one.Expr, err = p.declare(tok, lit)
+		if err != nil {
+			return nil, err
+		}
+
+		// Append the single expression to the array
+		// of return statement expressions.
+
+		mul = append(mul, one)
+
+		// Check to see if the next token is a comma
+		// and if not, then break out of the loop,
+		// otherwise repeat until we find no comma.
+
+		if _, _, exi := p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
 
 	return
 
@@ -85,17 +186,25 @@ func (p *parser) parseGroup() (mul []*Group, err error) {
 
 func (p *parser) parseOrder() (mul []*Order, err error) {
 
-	var tok Token
-	var lit string
-	var exi bool
+	// The next token that we expect to see is a
+	// ORDER token, and if we don't find one then
+	// return nil, with no error.
 
 	if _, _, exi := p.mightBe(ORDER); !exi {
 		return nil, nil
 	}
 
+	// We don't need to have a BY token, but we
+	// allow it so that the SQL query would read
+	// better when compared to english.
+
 	_, _, _ = p.mightBe(BY)
 
 	for {
+
+		var exi bool
+		var tok Token
+		var lit string
 
 		one := &Order{}
 
@@ -109,10 +218,8 @@ func (p *parser) parseOrder() (mul []*Order, err error) {
 			return nil, err
 		}
 
-		tok, lit, exi = p.mightBe(ASC, DESC)
-		if !exi {
+		if tok, lit, exi = p.mightBe(ASC, DESC); !exi {
 			tok = ASC
-			lit = tok.String()
 		}
 
 		one.Dir, err = p.declare(tok, lit)
@@ -120,9 +227,15 @@ func (p *parser) parseOrder() (mul []*Order, err error) {
 			return nil, err
 		}
 
+		// Append the single expression to the array
+		// of return statement expressions.
+
 		mul = append(mul, one)
 
-		// If the next token is not a comma then break the loop.
+		// Check to see if the next token is a comma
+		// and if not, then break out of the loop,
+		// otherwise repeat until we find no comma.
+
 		if _, _, exi := p.mightBe(COMMA); !exi {
 			break
 		}
@@ -135,9 +248,17 @@ func (p *parser) parseOrder() (mul []*Order, err error) {
 
 func (p *parser) parseLimit() (Expr, error) {
 
+	// The next token that we expect to see is a
+	// LIMIT token, and if we don't find one then
+	// return nil, with no error.
+
 	if _, _, exi := p.mightBe(LIMIT); !exi {
 		return nil, nil
 	}
+
+	// We don't need to have a BY token, but we
+	// allow it so that the SQL query would read
+	// better when compared to english.
 
 	_, _, _ = p.mightBe(BY)
 
@@ -152,17 +273,23 @@ func (p *parser) parseLimit() (Expr, error) {
 
 func (p *parser) parseStart() (Expr, error) {
 
-	// Remove the START keyword
+	// The next token that we expect to see is a
+	// START token, and if we don't find one then
+	// return nil, with no error.
+
 	if _, _, exi := p.mightBe(START); !exi {
 		return nil, nil
 	}
 
-	// Next token might be AT
+	// We don't need to have a AT token, but we
+	// allow it so that the SQL query would read
+	// better when compared to english.
+
 	_, _, _ = p.mightBe(AT)
 
-	tok, lit, err := p.shouldBe(NUMBER, THING)
+	tok, lit, err := p.shouldBe(NUMBER)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"number or record id"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"start number"}}
 	}
 
 	return p.declare(tok, lit)
@@ -171,7 +298,6 @@ func (p *parser) parseStart() (Expr, error) {
 
 func (p *parser) parseVersion() (Expr, error) {
 
-	// Remove the VERSION keyword
 	if _, _, exi := p.mightBe(VERSION, ON); !exi {
 		return nil, nil
 	}

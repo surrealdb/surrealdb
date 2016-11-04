@@ -48,11 +48,6 @@ type CancelStatement struct{}
 // UseStatement represents a SQL COMMIT TRANSACTION statement.
 type CommitStatement struct{}
 
-// ReturnStatement represents a SQL RETURN statement.
-type ReturnStatement struct {
-	What []Expr
-}
-
 // --------------------------------------------------
 // Use
 // --------------------------------------------------
@@ -81,11 +76,13 @@ type InfoStatement struct {
 
 // LetStatement represents a SQL LET statement.
 type LetStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
 	Name string `cork:"-" codec:"-"`
-	Expr Expr   `cork:"-" codec:"-"`
+	What Expr   `cork:"-" codec:"-"`
+}
+
+// ReturnStatement represents a SQL RETURN statement.
+type ReturnStatement struct {
+	What Expr `cork:"-" codec:"-"`
 }
 
 // --------------------------------------------------
@@ -99,7 +96,7 @@ type LiveStatement struct {
 	DB   string   `cork:"-" codec:"-"`
 	Expr []*Field `cork:"expr" codec:"expr"`
 	What []Expr   `cork:"what" codec:"what"`
-	Cond []Expr   `cork:"cond" codec:"cond"`
+	Cond Expr     `cork:"cond" codec:"cond"`
 	Echo Token    `cork:"echo" codec:"echo"`
 }
 
@@ -110,7 +107,7 @@ type SelectStatement struct {
 	DB      string   `cork:"-" codec:"-"`
 	Expr    []*Field `cork:"expr" codec:"expr"`
 	What    []Expr   `cork:"what" codec:"what"`
-	Cond    []Expr   `cork:"cond" codec:"cond"`
+	Cond    Expr     `cork:"cond" codec:"cond"`
 	Group   []*Group `cork:"group" codec:"group"`
 	Order   []*Order `cork:"order" codec:"order"`
 	Limit   Expr     `cork:"limit" codec:"limit"`
@@ -136,7 +133,7 @@ type UpdateStatement struct {
 	DB   string `cork:"-" codec:"-"`
 	What []Expr `cork:"what" codec:"what"`
 	Data []Expr `cork:"data" codec:"data"`
-	Cond []Expr `cork:"cond" codec:"cond"`
+	Cond Expr   `cork:"cond" codec:"cond"`
 	Echo Token  `cork:"echo" codec:"echo"`
 }
 
@@ -147,7 +144,7 @@ type DeleteStatement struct {
 	DB   string `cork:"-" codec:"-"`
 	Hard bool   `cork:"hard" codec:"hard"`
 	What []Expr `cork:"what" codec:"what"`
-	Cond []Expr `cork:"cond" codec:"cond"`
+	Cond Expr   `cork:"cond" codec:"cond"`
 	Echo Token  `cork:"echo" codec:"echo"`
 }
 
@@ -156,10 +153,11 @@ type RelateStatement struct {
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
-	Type []Expr `cork:"type" codec:"type"`
+	Type Expr   `cork:"type" codec:"type"`
 	From []Expr `cork:"from" codec:"from"`
-	To   []Expr `cork:"to" codec:"to"`
+	With []Expr `cork:"with" codec:"with"`
 	Data []Expr `cork:"data" codec:"data"`
+	Uniq bool   `cork:"uniq" codec:"uniq"`
 	Echo Token  `cork:"echo" codec:"echo"`
 }
 
@@ -218,7 +216,7 @@ type DefineRulesStatement struct {
 	What []string `cork:"-" codec:"-"`
 	When []string `cork:"-" codec:"-"`
 	Rule string   `cork:"rule" codec:"rule"`
-	Cond []Expr   `cork:"cond" codec:"cond"`
+	Cond Expr     `cork:"cond" codec:"cond"`
 }
 
 // RemoveRulesStatement represents an SQL REMOVE RULES statement.
@@ -299,7 +297,7 @@ type DefineViewStatement struct {
 	Name  string   `cork:"name" codec:"name"`
 	Expr  []*Field `cork:"expr" codec:"expr"`
 	What  []Expr   `cork:"what" codec:"what"`
-	Cond  []Expr   `cork:"cond" codec:"cond"`
+	Cond  Expr     `cork:"cond" codec:"cond"`
 	Group []*Group `cork:"group" codec:"group"`
 }
 
@@ -318,8 +316,11 @@ type RemoveViewStatement struct {
 // Expr represents a sql expression
 type Expr interface{}
 
-// All represents a wildcard expression.
+// All represents a * expression.
 type All struct{}
+
+// Any represents a ? expression.
+type Any struct{}
 
 // Asc represents the ASC expression.
 type Asc struct{}
@@ -373,19 +374,58 @@ type Order struct {
 	Dir  Expr
 }
 
-// ClosedExpression represents a parenthesized expression.
-type ClosedExpression struct {
+// --------------------------------------------------
+// Expressions
+// --------------------------------------------------
+
+// SubExpression represents a subquery.
+type SubExpression struct {
 	Expr Expr
 }
 
-// BinaryExpression represents a binary expression tree,
+// FuncExpression represents a function call.
+type FuncExpression struct {
+	Name string
+	Args []Expr
+}
+
+// DataExpression represents a SET expression.
+type DataExpression struct {
+	LHS Expr
+	Op  Token
+	RHS Expr
+}
+
+// BinaryExpression represents a WHERE expression.
 type BinaryExpression struct {
 	LHS Expr
 	Op  Token
 	RHS Expr
 }
 
-// DiffExpression represents a JSON DIFF PATCH
+// PathExpression represents a path expression.
+type PathExpression struct {
+	Expr []Expr
+}
+
+// PartExpression represents a path part expression.
+type PartExpression struct {
+	Part Expr
+}
+
+// PartExpression represents a path join expression.
+type JoinExpression struct {
+	Join Token
+}
+
+// SubpExpression represents a sub path expression.
+type SubpExpression struct {
+	What []Expr
+	Name string
+	Cond Expr
+}
+
+// DiffExpression represents a JSON to DIFF
 type DiffExpression struct {
 	JSON interface{}
 }
