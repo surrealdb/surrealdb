@@ -37,6 +37,7 @@ func Setup(opts *cnf.Options) (err error) {
 	// Setup middleware
 
 	s.Use(conf())    // Setup conf
+	s.Use(auth())    // Setup auth
 	s.Use(mw.Logs()) // Log requests
 	s.Use(mw.Fail()) // Catch panics
 	s.Use(mw.Gzip()) // Gzip responses
@@ -58,24 +59,6 @@ func Setup(opts *cnf.Options) (err error) {
 			"application/msgpack": true,
 		},
 	}))
-
-	// Setup basic authentication
-
-	s.Use(mw.Auth(&mw.AuthOpts{
-		User: []byte(opts.Auth.User),
-		Pass: []byte(opts.Auth.Pass),
-	}).PathIs("/import", "/export"))
-
-	// Setup special authentication
-
-	s.Use(mw.Sign(&mw.SignOpts{
-		Key: []byte(opts.Auth.Token),
-		Fnc: func(c *fibre.Context, h, d map[string]interface{}) error {
-			c.Set("NS", d["ns"])
-			c.Set("DB", d["db"])
-			return nil
-		},
-	}).PathIs("/rpc", "/sql").PathBegsWith("/key"))
 
 	// Run the server
 

@@ -23,11 +23,6 @@ func conf() fibre.MiddlewareFunc {
 	return func(h fibre.HandlerFunc) fibre.HandlerFunc {
 		return func(c *fibre.Context) error {
 
-			opts := c.Fibre().Opts().(*cnf.Options)
-
-			c.Set("KV", opts.DB.Base)
-			c.Set("NS", "*")
-			c.Set("DB", "*")
 
 			return h(c)
 
