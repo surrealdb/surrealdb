@@ -963,6 +963,58 @@ func (this *RelateStatement) UnmarshalCORK(src []byte) (err error) {
 }
 
 // --------------------------------------------------
+// DefineNamespaceStatement
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&DefineNamespaceStatement{})
+}
+
+func (this *DefineNamespaceStatement) ExtendCORK() byte {
+	return 0x77
+}
+
+func (this *DefineNamespaceStatement) MarshalCORK() (dst []byte, err error) {
+	b := bytes.NewBuffer(dst)
+	e := cork.NewEncoder(b)
+	e.Encode(this.Name)
+	return b.Bytes(), nil
+}
+
+func (this *DefineNamespaceStatement) UnmarshalCORK(src []byte) (err error) {
+	b := bytes.NewBuffer(src)
+	d := cork.NewDecoder(b)
+	d.Decode(&this.Name)
+	return
+}
+
+// --------------------------------------------------
+// RemoveNamespaceStatement
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&RemoveNamespaceStatement{})
+}
+
+func (this *RemoveNamespaceStatement) ExtendCORK() byte {
+	return 0x78
+}
+
+func (this *RemoveNamespaceStatement) MarshalCORK() (dst []byte, err error) {
+	b := bytes.NewBuffer(dst)
+	e := cork.NewEncoder(b)
+	e.Encode(this.Name)
+	return b.Bytes(), nil
+}
+
+func (this *RemoveNamespaceStatement) UnmarshalCORK(src []byte) (err error) {
+	b := bytes.NewBuffer(src)
+	d := cork.NewDecoder(b)
+	d.Decode(&this.Name)
+	return
+}
+
+// --------------------------------------------------
 // DefineScopeStatement
 // --------------------------------------------------
 

@@ -167,6 +167,24 @@ type RelateStatement struct {
 }
 
 // --------------------------------------------------
+// Namespace
+// --------------------------------------------------
+
+type DefineNamespaceStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Name string `cork:"name" codec:"name"`
+}
+
+type RemoveNamespaceStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Name string `cork:"name" codec:"name"`
+}
+
+// --------------------------------------------------
 // Scope
 // --------------------------------------------------
 
