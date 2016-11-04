@@ -22,7 +22,7 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 	stmt.NS = p.c.Get("NS").(string)
 	stmt.DB = p.c.Get("DB").(string)
 
-	if stmt.Expr, err = p.parseExpr(); err != nil {
+	if stmt.Expr, err = p.parseField(); err != nil {
 		return nil, err
 	}
 
