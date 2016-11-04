@@ -300,7 +300,9 @@ func (s *scanner) scanCommentSingle(chp ...rune) (tok Token, lit string, val int
 
 	// Read subsequent characters
 	for {
-		if ch := s.next(); ch == '\n' || ch == '\r' {
+		if ch := s.next(); ch == eof {
+			break
+		} else if ch == '\n' || ch == '\r' {
 			buf.WriteRune(ch)
 			break
 		} else {
