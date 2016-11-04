@@ -22,7 +22,12 @@ func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
 		return nil, err
 	}
 
-	_, _, stmt.Hard = p.mightBe(EXPUNGE)
+	if _, _, exi := p.mightBe(AND); exi {
+		if _, _, err = p.shouldBe(EXPUNGE); err != nil {
+			return nil, err
+		}
+		stmt.Hard = true
+	}
 
 	_, _, _ = p.mightBe(FROM)
 
