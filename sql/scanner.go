@@ -128,6 +128,22 @@ func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 		return NONECONTAINEDIN, string(ch), val
 	case '#':
 		return s.scanCommentSingle(ch)
+	case '|':
+		chn := s.next()
+		switch {
+		case chn == '|':
+			return OR, "OR", val
+		default:
+			s.undo()
+		}
+	case '&':
+		chn := s.next()
+		switch {
+		case chn == '&':
+			return AND, "AND", val
+		default:
+			s.undo()
+		}
 	case '/':
 		chn := s.next()
 		switch {
