@@ -15,7 +15,7 @@
 package sql
 
 // Token defines a lexical token
-type Token int
+type Token int16
 
 const (
 
@@ -414,8 +414,6 @@ func (tok Token) String() string {
 	return ""
 }
 
-func (tok Token) MarshalText() (data []byte, err error) {
-	return []byte(tok.String()), err
 }
 
 func (tok Token) isLiteral() bool { return tok > literalsBeg && tok < literalsEnd }

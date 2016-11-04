@@ -15,7 +15,6 @@
 package sql
 
 import (
-	"fmt"
 	"strconv"
 	"time"
 )
@@ -325,37 +324,17 @@ type Any struct{}
 // Asc represents the ASC expression.
 type Asc struct{}
 
-func (this Asc) MarshalText() (data []byte, err error) {
-	return []byte("~ASC~"), err
-}
-
 // Desc represents the DESC expression.
 type Desc struct{}
-
-func (this Desc) MarshalText() (data []byte, err error) {
-	return []byte("~DESC~"), err
-}
 
 // Null represents a null expression.
 type Null struct{}
 
-func (this Null) MarshalText() (data []byte, err error) {
-	return []byte("~NULL~"), err
-}
-
 // Void represents an expression which is not set.
 type Void struct{}
 
-func (this Void) MarshalText() (data []byte, err error) {
-	return []byte("~VOID~"), err
-}
-
 // Empty represents an expression which is null or "".
 type Empty struct{}
-
-func (this Empty) MarshalText() (data []byte, err error) {
-	return []byte("~EMPTY~"), err
-}
 
 // Field represents a SELECT AS clause.
 type Field struct {
@@ -449,14 +428,6 @@ type Ident struct {
 	ID string
 }
 
-func (this Ident) String() string {
-	return this.ID
-}
-
-func (this Ident) MarshalText() (data []byte, err error) {
-	return []byte("ID:" + this.ID), err
-}
-
 func NewIdent(ID string) *Ident {
 	return &Ident{ID}
 }
@@ -468,14 +439,6 @@ func NewIdent(ID string) *Ident {
 // Param comment
 type Param struct {
 	ID string
-}
-
-func (this Param) String() string {
-	return this.ID
-}
-
-func (this Param) MarshalText() (data []byte, err error) {
-	return []byte("ID:" + this.ID), err
 }
 
 func NewParam(ID string) *Param {
@@ -491,14 +454,6 @@ type Table struct {
 	TB string
 }
 
-func (this Table) String() string {
-	return this.TB
-}
-
-func (this Table) MarshalText() (data []byte, err error) {
-	return []byte("TB:" + this.TB), err
-}
-
 func NewTable(TB string) *Table {
 	return &Table{TB}
 }
@@ -511,18 +466,6 @@ func NewTable(TB string) *Table {
 type Thing struct {
 	TB interface{}
 	ID interface{}
-}
-
-func (this Thing) Bytes() []byte {
-	return []byte(this.String())
-}
-
-func (this Thing) String() string {
-	return fmt.Sprintf("@%s:%v", this.TB, this.ID)
-}
-
-func (this Thing) MarshalText() (data []byte, err error) {
-	return []byte(this.String()), err
 }
 
 func NewThing(TB interface{}, ID interface{}) *Thing {
