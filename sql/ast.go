@@ -185,6 +185,24 @@ type RemoveNamespaceStatement struct {
 }
 
 // --------------------------------------------------
+// Database
+// --------------------------------------------------
+
+type DefineDatabaseStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Name string `cork:"name" codec:"name"`
+}
+
+type RemoveDatabaseStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Name string `cork:"name" codec:"name"`
+}
+
+// --------------------------------------------------
 // Scope
 // --------------------------------------------------
 
