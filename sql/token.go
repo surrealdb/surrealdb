@@ -414,6 +414,13 @@ func (tok Token) String() string {
 	return ""
 }
 
+func newToken(str string) Token {
+	for k, v := range tokens {
+		if v == str {
+			return Token(k)
+		}
+	}
+	return ILLEGAL
 }
 
 func (tok Token) isLiteral() bool { return tok > literalsBeg && tok < literalsEnd }
