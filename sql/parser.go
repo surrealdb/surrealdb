@@ -176,7 +176,7 @@ func (p *parser) shouldBe(expected ...Token) (tok Token, lit string, err error) 
 
 	tok, lit, _ = p.scan()
 
-	if found := p.in(tok, expected); !found {
+	if !p.in(tok, expected) {
 		p.unscan()
 		err = &ParseError{Found: lit, Expected: lookup(expected)}
 	}
