@@ -60,18 +60,6 @@ func routes(s *fibre.Fibre) {
 	})
 
 	// --------------------------------------------------
-	// Endpoint for database backups
-	// --------------------------------------------------
-
-	s.Get("/import", func(c *fibre.Context) error {
-		return c.Code(200)
-	})
-
-	s.Get("/export", func(c *fibre.Context) error {
-		return c.Code(200)
-	})
-
-	// --------------------------------------------------
 	// Endpoints for submitting rpc queries
 	// --------------------------------------------------
 
