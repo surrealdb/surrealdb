@@ -843,7 +843,6 @@ func (this *CreateStatement) ExtendCORK() byte {
 func (this *CreateStatement) MarshalCORK() (dst []byte, err error) {
 	b := bytes.NewBuffer(dst)
 	e := cork.NewEncoder(b)
-	e.Encode(this.Hard)
 	e.Encode(this.What)
 	e.Encode(this.Data)
 	e.Encode(this.Echo)
@@ -853,7 +852,6 @@ func (this *CreateStatement) MarshalCORK() (dst []byte, err error) {
 func (this *CreateStatement) UnmarshalCORK(src []byte) (err error) {
 	b := bytes.NewBuffer(src)
 	d := cork.NewDecoder(b)
-	d.Decode(&this.Hard)
 	d.Decode(&this.What)
 	d.Decode(&this.Data)
 	d.Decode(&this.Echo)
