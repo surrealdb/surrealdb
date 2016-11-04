@@ -75,13 +75,19 @@ type InfoStatement struct {
 
 // LetStatement represents a SQL LET statement.
 type LetStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
 	Name string `cork:"-" codec:"-"`
 	What Expr   `cork:"-" codec:"-"`
 }
 
 // ReturnStatement represents a SQL RETURN statement.
 type ReturnStatement struct {
-	What Expr `cork:"-" codec:"-"`
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	What Expr   `cork:"-" codec:"-"`
 }
 
 // --------------------------------------------------
