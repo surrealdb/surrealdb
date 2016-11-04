@@ -1,5 +1,5 @@
 hash: 0402d462f75cf177f62e8a0c786da7e9ca6a22535e6412965b600141842d6dae
-updated: 2016-11-04T11:11:57.580487578Z
+updated: 2016-11-04T11:13:57.580487578Z
 imports:
 - name: github.com/abcum/cork
   version: 2d785aed8e7cc57a3b6741042a9b421a9d81fc13
@@ -41,7 +41,7 @@ imports:
 - name: github.com/hashicorp/memberlist
   version: 7ad712f5f34ec40aebe6ca47756d07898486a8d2
 - name: github.com/hashicorp/serf
-  version: 1d4fa605f6ff3ed628d7ae5eda7c0e56803e72a5
+  version: e0680ca729b018b791af1add413faebe3e1c147e
   subpackages:
   - coordinate
   - serf
@@ -52,7 +52,7 @@ imports:
 - name: github.com/kr/text
   version: 7cafcd837844e784b526369c9bce262804aebc60
 - name: github.com/lib/pq
-  version: ae8357db35d721c58dcdc911318b55bef6b1b001
+  version: d8eeeb8bae8896dd8e1b7e514ab0d396c4f12a1b
   subpackages:
   - oid
 - name: github.com/mgutz/ansi
@@ -98,7 +98,7 @@ imports:
   version: 50a48b6e73fcc75b45e22c05b79629a67c79e938
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: 6f5a3c4a73badf117936d7d61a046e2fab8e2adb
+  version: e34a5cd6a1bc7c4fde759f2d3039852fc68b5fcc
   subpackages:
   - js
 - name: github.com/jtolds/gls
@@ -109,7 +109,7 @@ testImports:
   - internal/go-render/render
   - internal/oglematchers
 - name: github.com/smartystreets/goconvey
-  version: 9d1f119b4c758f57339d56a1cc8f2e156c0e79ba
+  version: 019319c870f8f1d61dc9c34291abff5cd128b6e8
   subpackages:
   - convey
   - convey/gotest
