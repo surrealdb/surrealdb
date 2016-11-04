@@ -18,9 +18,9 @@ func (p *parser) parseDefineViewStatement() (stmt *DefineViewStatement, err erro
 
 	stmt = &DefineViewStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err
@@ -69,9 +69,9 @@ func (p *parser) parseRemoveViewStatement() (stmt *RemoveViewStatement, err erro
 
 	stmt = &RemoveViewStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err

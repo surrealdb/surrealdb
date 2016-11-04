@@ -18,9 +18,9 @@ func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err er
 
 	stmt = &DefineIndexStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err
@@ -56,9 +56,9 @@ func (p *parser) parseRemoveIndexStatement() (stmt *RemoveIndexStatement, err er
 
 	stmt = &RemoveIndexStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err

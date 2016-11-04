@@ -18,11 +18,9 @@ func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
 
 	stmt = &DeleteStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
-
-	_, _, _ = p.mightBe(AND)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthTB); err != nil {
+		return nil, err
+	}
 
 	_, _, stmt.Hard = p.mightBe(EXPUNGE)
 

@@ -27,6 +27,30 @@ func (e *EmptyError) Error() string {
 	return fmt.Sprint("Your SQL query is empty")
 }
 
+// EntryError represents an error that occured when switching access.
+type EntryError struct{}
+
+// Error returns the string representation of the error.
+func (e *EntryError) Error() string {
+	return fmt.Sprint("You don't have permission to access this resource")
+}
+
+// QueryError represents an error that occured when switching access.
+type QueryError struct{}
+
+// Error returns the string representation of the error.
+func (e *QueryError) Error() string {
+	return fmt.Sprint("You don't have permission to perform this query type")
+}
+
+// BlankError represents an error that occured when switching access.
+type BlankError struct{}
+
+// Error returns the string representation of the error.
+func (e *BlankError) Error() string {
+	return fmt.Sprint("You need to specify a namespace and a database to use")
+}
+
 // ParseError represents an error that occurred during parsing.
 type ParseError struct {
 	Found    string

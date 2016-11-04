@@ -25,6 +25,7 @@ import (
 // parser represents a parser.
 type parser struct {
 	s   *scanner
+	o   *options
 	c   *fibre.Context
 	v   map[string]interface{}
 	buf struct {
@@ -37,7 +38,7 @@ type parser struct {
 
 // newParser returns a new instance of Parser.
 func newParser(c *fibre.Context, v map[string]interface{}) *parser {
-	return &parser{c: c, v: v}
+	return &parser{c: c, v: v, o: newOptions(c)}
 }
 
 // Parse parses sql from a []byte, string, or io.Reader.

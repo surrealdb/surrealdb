@@ -18,9 +18,10 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 
 	stmt = &LetStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthTB); err != nil {
+		return nil, err
+	}
+
 	// The first part of a LET expression must
 	// always be an identifier, specifying a
 	// variable name to set.

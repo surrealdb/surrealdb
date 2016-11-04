@@ -18,9 +18,9 @@ func (p *parser) parseDefineRulesStatement() (stmt *DefineRulesStatement, err er
 
 	stmt = &DefineRulesStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if _, _, err = p.shouldBe(ON); err != nil {
 		return nil, err
@@ -73,9 +73,9 @@ func (p *parser) parseRemoveRulesStatement() (stmt *RemoveRulesStatement, err er
 
 	stmt = &RemoveRulesStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if _, _, err = p.shouldBe(ON); err != nil {
 		return nil, err

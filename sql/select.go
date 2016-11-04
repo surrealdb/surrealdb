@@ -18,9 +18,9 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 
 	stmt = &SelectStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthTB); err != nil {
+		return nil, err
+	}
 
 	if stmt.Expr, err = p.parseField(); err != nil {
 		return nil, err

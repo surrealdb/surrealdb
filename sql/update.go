@@ -18,9 +18,9 @@ func (p *parser) parseUpdateStatement() (stmt *UpdateStatement, err error) {
 
 	stmt = &UpdateStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthTB); err != nil {
+		return nil, err
+	}
 
 	_, _, _ = p.mightBe(INTO)
 

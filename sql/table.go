@@ -18,9 +18,9 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 
 	stmt = &DefineTableStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if stmt.What, err = p.parseNames(); err != nil {
 		return nil, err
@@ -42,9 +42,9 @@ func (p *parser) parseRemoveTableStatement() (stmt *RemoveTableStatement, err er
 
 	stmt = &RemoveTableStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if stmt.What, err = p.parseNames(); err != nil {
 		return nil, err

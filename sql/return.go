@@ -18,7 +18,7 @@ func (p *parser) parseReturnStatement() (stmt *ReturnStatement, err error) {
 
 	stmt = &ReturnStatement{}
 
-	if _, _, _, err = p.o.get(AuthTB); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthTB); err != nil {
 		return nil, err
 	}
 

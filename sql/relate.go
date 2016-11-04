@@ -18,9 +18,9 @@ func (p *parser) parseRelateStatement() (stmt *RelateStatement, err error) {
 
 	stmt = &RelateStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthTB); err != nil {
+		return nil, err
+	}
 
 	if stmt.Type, err = p.parseTable(); err != nil {
 		return nil, err

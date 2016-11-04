@@ -29,21 +29,29 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 	for {
 
 		if p.is(tok, NAMESPACE) {
+
 			_, stmt.NS, err = p.shouldBe(IDENT, STRING)
 			if err != nil {
 				return nil, &ParseError{Found: stmt.NS, Expected: []string{"namespace name"}}
 			}
-			// TODO: need to make sure this user can access this NS
-			p.c.Set("NS", stmt.NS)
+
+			if err = p.o.ns(stmt.NS); err != nil {
+				return nil, err
+			}
+
 		}
 
 		if p.is(tok, DATABASE) {
+
 			_, stmt.DB, err = p.shouldBe(IDENT, DATE, TIME, STRING, NUMBER, DOUBLE)
 			if err != nil {
 				return nil, &ParseError{Found: stmt.DB, Expected: []string{"database name"}}
 			}
-			// TODO: need to make sure this user can access this DB
-			p.c.Set("DB", stmt.DB)
+
+			if err = p.o.db(stmt.DB); err != nil {
+				return nil, err
+			}
+
 		}
 
 		tok, _, exi = p.mightBe(NAMESPACE, DATABASE)

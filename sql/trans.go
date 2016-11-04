@@ -18,6 +18,10 @@ func (p *parser) parseBeginStatement() (stmt *BeginStatement, err error) {
 
 	stmt = &BeginStatement{}
 
+	if _, _, _, err = p.o.get(AuthTB); err != nil {
+		return nil, err
+	}
+
 	_, _, _ = p.mightBe(TRANSACTION)
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
@@ -32,6 +36,10 @@ func (p *parser) parseCancelStatement() (stmt *CancelStatement, err error) {
 
 	stmt = &CancelStatement{}
 
+	if _, _, _, err = p.o.get(AuthTB); err != nil {
+		return nil, err
+	}
+
 	_, _, _ = p.mightBe(TRANSACTION)
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
@@ -45,6 +53,10 @@ func (p *parser) parseCancelStatement() (stmt *CancelStatement, err error) {
 func (p *parser) parseCommitStatement() (stmt *CommitStatement, err error) {
 
 	stmt = &CommitStatement{}
+
+	if _, _, _, err = p.o.get(AuthTB); err != nil {
+		return nil, err
+	}
 
 	_, _, _ = p.mightBe(TRANSACTION)
 

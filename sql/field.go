@@ -18,9 +18,9 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 
 	stmt = &DefineFieldStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err
@@ -137,9 +137,9 @@ func (p *parser) parseRemoveFieldStatement() (stmt *RemoveFieldStatement, err er
 
 	stmt = &RemoveFieldStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err
