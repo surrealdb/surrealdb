@@ -49,6 +49,19 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 		return nil, err
 	}
 
+	// If the defined paramater is a basic type,
+	// then instead of defining it at a later
+	// stage, convert it to that type here.
+
+	switch stmt.What.(type) {
+	case bool, int64, float64, string:
+		p.v[stmt.Name] = stmt.What
+	case []interface{}, map[string]interface{}:
+		p.v[stmt.Name] = stmt.What
+	case *Null, *Void, *Empty, *Table, *Thing, *Param:
+		p.v[stmt.Name] = stmt.What
+	}
+
 	// Check that we have reached the end of the
 	// statement with either a ';' or EOF.
 
