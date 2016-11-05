@@ -86,6 +86,14 @@ func Exit() {
 // Execute parses the query and executes it against the data layer
 func Execute(ctx *fibre.Context, txt interface{}, vars map[string]interface{}) (out []*Response, err error) {
 
+	// If no preset variables have been defined
+	// then ensure that the variables is
+	// instantiated for future use.
+
+	if vars == nil {
+		vars = make(map[string]interface{})
+	}
+
 	// Parse the received SQL batch query strings
 	// into SQL ASTs, using any immutable preset
 	// variables if set.
@@ -93,14 +101,6 @@ func Execute(ctx *fibre.Context, txt interface{}, vars map[string]interface{}) (
 	ast, err := sql.Parse(ctx, txt, vars)
 	if err != nil {
 		return
-	}
-
-	// If no preset variables have been defined
-	// then ensure that the variables is
-	// instantiated for future use.
-
-	if vars == nil {
-		vars = make(map[string]interface{})
 	}
 
 	// Create 2 channels, one for force quitting
