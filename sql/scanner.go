@@ -422,6 +422,14 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 
 	tok = THING
 
+	// Store whether params
+	var tbp bool
+	var idp bool
+
+	// Store section values
+	var tbv interface{}
+	var idv interface{}
+
 	// Create a buffer
 	var buf bytes.Buffer
 	var beg bytes.Buffer
@@ -438,6 +446,11 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 			break
 		} else if isThingChar(ch) {
 			tok, lit, _ = s.scanIdent(ch)
+			beg.WriteString(lit)
+			break
+		} else if ch == '$' {
+			tbp = true // The TB is a param
+			tok, lit, _ = s.scanParams(ch)
 			beg.WriteString(lit)
 			break
 		} else if ch == '`' {
@@ -483,6 +496,11 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 			tok, lit, _ = s.scanIdent(ch)
 			end.WriteString(lit)
 			break
+		} else if ch == '$' {
+			idp = true // The ID is a param
+			tok, lit, _ = s.scanParams(ch)
+			end.WriteString(lit)
+			break
 		} else if ch == '`' {
 			tok, lit, _ = s.scanQuoted(ch)
 			end.WriteString(lit)
@@ -505,7 +523,36 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
 	}
 
-	val = NewThing(beg.String(), end.String())
+	tbv = beg.String()
+	idv = end.String()
+
+	if tbp { // The TB is a param
+		if p, ok := s.p.v[tbv.(string)]; ok {
+			switch p.(type) {
+			case bool, int64, float64, string, []interface{}, map[string]interface{}:
+				tbv = p
+			default:
+				return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
+			}
+		} else {
+			return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
+		}
+	}
+
+	if idp { // The ID is a param
+		if p, ok := s.p.v[idv.(string)]; ok {
+			switch p.(type) {
+			case bool, int64, float64, string, []interface{}, map[string]interface{}:
+				idv = p
+			default:
+				return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
+			}
+		} else {
+			return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
+		}
+	}
+
+	val = NewThing(tbv, idv)
 
 	// Otherwise return as a regular thing.
 	return THING, buf.String() + beg.String() + mid.String() + end.String(), val
