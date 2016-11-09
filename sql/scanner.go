@@ -578,8 +578,24 @@ func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{
 		} else if isNumber(ch) {
 			buf.WriteRune(ch)
 		} else if isLetter(ch) {
-			tok = IDENT
-			buf.WriteRune(ch)
+			if tok == NUMBER || tok == DOUBLE {
+				tok = IDENT
+				buf.WriteRune(ch)
+				switch ch {
+				case 's', 'h', 'd', 'w':
+					tok = DURATION
+				case 'n', 'u', 'µ', 'm':
+					if chn := s.next(); chn == 's' {
+						tok = DURATION
+						buf.WriteRune(chn)
+					} else {
+						s.undo()
+					}
+				}
+			} else {
+				tok = IDENT
+				buf.WriteRune(ch)
+			}
 		} else if ch == '.' {
 			if tok == DOUBLE {
 				tok = IDENT
@@ -592,10 +608,6 @@ func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{
 			s.undo()
 			break
 		}
-	}
-
-	if val, err := time.ParseDuration(buf.String()); err == nil {
-		return DURATION, buf.String(), val
 	}
 
 	return tok, buf.String(), nil
@@ -661,10 +673,6 @@ func (s *scanner) scanString(chp ...rune) (tok Token, lit string, val interface{
 		} else {
 			buf.WriteRune(ch)
 		}
-	}
-
-	if val, err := time.ParseDuration(buf.String()); err == nil {
-		return DURATION, buf.String(), val
 	}
 
 	if val, err := time.Parse(RFCDate, buf.String()); err == nil {
@@ -826,7 +834,7 @@ func isNumber(ch rune) bool {
 
 // isLetter returns true if the rune is a letter.
 func isLetter(ch rune) bool {
-	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == 'µ'
 }
 
 // isIdentChar returns true if the rune is allowed in a IDENT.
