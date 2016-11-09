@@ -14,6 +14,8 @@
 
 package sql
 
+import "time"
+
 func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 
 	stmt = &LetStatement{}
@@ -57,6 +59,8 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 	case bool, int64, float64, string:
 		p.v[stmt.Name] = stmt.What
 	case []interface{}, map[string]interface{}:
+		p.v[stmt.Name] = stmt.What
+	case time.Time, time.Duration:
 		p.v[stmt.Name] = stmt.What
 	case *Null, *Void, *Empty, *Table, *Thing, *Param:
 		p.v[stmt.Name] = stmt.What
