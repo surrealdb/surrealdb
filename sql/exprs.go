@@ -435,7 +435,7 @@ func (p *parser) parsePart() (exp Expr, err error) {
 		MUL, ID, IDENT, THING,
 		NULL, VOID, EMPTY, MISSING,
 		TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE,
-		DATE, TIME, DURATION, JSON, ARRAY, PARAM, LPAREN,
+		NOW, DATE, TIME, DURATION, JSON, ARRAY, PARAM, LPAREN,
 	}
 
 	tok, lit, _ := p.scan()
