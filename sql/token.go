@@ -113,7 +113,6 @@ const (
 	CONTAINSSOME
 	CONTENT
 	CREATE
-	CUSTOM
 	DATABASE
 	DEFAULT
 	DEFINE
@@ -129,13 +128,11 @@ const (
 	FOR
 	FROM
 	GROUP
-	HISTORY
 	ID
 	IF
 	IN
 	INDEX
 	INFO
-	INTO
 	IS
 	LET
 	LIMIT
@@ -146,7 +143,6 @@ const (
 	MERGE
 	MIN
 	MISSING
-	MULTI
 	NAMESPACE
 	NONE
 	NONECONTAINEDIN
@@ -277,7 +273,6 @@ var tokens = [...]string{
 	CONTAINSSOME:    "CONTAINSSOME",
 	CONTENT:         "CONTENT",
 	CREATE:          "CREATE",
-	CUSTOM:          "CUSTOM",
 	DATABASE:        "DATABASE",
 	DEFAULT:         "DEFAULT",
 	DEFINE:          "DEFINE",
@@ -293,13 +288,11 @@ var tokens = [...]string{
 	FOR:             "FOR",
 	FROM:            "FROM",
 	GROUP:           "GROUP",
-	HISTORY:         "HISTORY",
 	ID:              "ID",
 	IF:              "IF",
 	IN:              "IN",
 	INDEX:           "INDEX",
 	INFO:            "INFO",
-	INTO:            "INTO",
 	IS:              "IS",
 	LET:             "LET",
 	LIMIT:           "LIMIT",
@@ -310,7 +303,6 @@ var tokens = [...]string{
 	MERGE:           "MERGE",
 	MIN:             "MIN",
 	MISSING:         "MISSING",
-	MULTI:           "MULTI",
 	NAMESPACE:       "NAMESPACE",
 	NONE:            "NONE",
 	NONECONTAINEDIN: "NONECONTAINEDIN",

@@ -18,7 +18,7 @@ func (p *parser) parseType() (exp string, err error) {
 
 	allowed := []string{"any", "url", "uuid", "color", "email", "phone", "array", "object", "domain", "record", "string", "number", "double", "custom", "boolean", "datetime", "latitude", "longitude"}
 
-	_, lit, err := p.shouldBe(IDENT, CUSTOM)
+	_, lit, err := p.shouldBe(IDENT)
 	if err != nil {
 		return string(""), &ParseError{Found: lit, Expected: allowed}
 	}
