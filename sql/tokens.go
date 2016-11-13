@@ -122,6 +122,7 @@ const (
 	DISTINCT
 	EMPTY
 	ENUM
+	EXISTS
 	EXPUNGE
 	FALSE
 	FIELD
@@ -137,6 +138,7 @@ const (
 	LET
 	LIMIT
 	LIVE
+	LOGIN
 	MANDATORY
 	MATCH
 	MAX
@@ -154,6 +156,7 @@ const (
 	ON
 	OR
 	ORDER
+	PASSWORD
 	POLICY
 	READONLY
 	REJECT
@@ -173,6 +176,7 @@ const (
 	START
 	TABLE
 	TO
+	TOKEN
 	TRANSACTION
 	TRUE
 	TYPE
@@ -180,6 +184,7 @@ const (
 	UPDATE
 	UPSERT
 	USE
+	USERNAME
 	VALIDATE
 	VERSION
 	VIEW
@@ -282,6 +287,7 @@ var tokens = [...]string{
 	DISTINCT:        "DISTINCT",
 	EMPTY:           "EMPTY",
 	ENUM:            "ENUM",
+	EXISTS:          "EXISTS",
 	EXPUNGE:         "EXPUNGE",
 	FALSE:           "FALSE",
 	FIELD:           "FIELD",
@@ -297,6 +303,7 @@ var tokens = [...]string{
 	LET:             "LET",
 	LIMIT:           "LIMIT",
 	LIVE:            "LIVE",
+	LOGIN:           "LOGIN",
 	MANDATORY:       "MANDATORY",
 	MATCH:           "MATCH",
 	MAX:             "MAX",
@@ -313,6 +320,7 @@ var tokens = [...]string{
 	ON:              "ON",
 	OR:              "OR",
 	ORDER:           "ORDER",
+	PASSWORD:        "PASSWORD",
 	POLICY:          "POLICY",
 	READONLY:        "READONLY",
 	REJECT:          "REJECT",
@@ -332,6 +340,7 @@ var tokens = [...]string{
 	START:           "START",
 	TABLE:           "TABLE",
 	TO:              "TO",
+	TOKEN:           "TOKEN",
 	TRANSACTION:     "TRANSACTION",
 	TRUE:            "TRUE",
 	TYPE:            "TYPE",
@@ -339,6 +348,7 @@ var tokens = [...]string{
 	UPDATE:          "UPDATE",
 	UPSERT:          "UPSERT",
 	USE:             "USE",
+	USERNAME:        "USERNAME",
 	VALIDATE:        "VALIDATE",
 	VERSION:         "VERSION",
 	VIEW:            "VIEW",
