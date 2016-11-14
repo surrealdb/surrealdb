@@ -81,8 +81,8 @@ func (o *options) ns(ns string) (err error) {
 	// the necessary authentcation privileges
 	// to be able to specify this namespace.
 
-	if o.auth["NS"] != "*" && o.auth["NS"] != ns {
-		return &EntryError{}
+	if o.auth.Possible.NS != "*" && o.auth.Possible.NS != ns {
+		return &NSError{NS: ns}
 	}
 
 	// Specify the NS on the context session, so
@@ -109,8 +109,8 @@ func (o *options) db(db string) (err error) {
 	// the necessary authentcation privileges
 	// to be able to specify this namespace.
 
-	if o.auth["DB"] != "*" && o.auth["DB"] != db {
-		return &EntryError{}
+	if o.auth.Possible.DB != "*" && o.auth.Possible.DB != db {
+		return &DBError{DB: db}
 	}
 
 	// Specify the DB on the context session, so
