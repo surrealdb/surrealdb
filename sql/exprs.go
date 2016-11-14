@@ -170,6 +170,19 @@ func (p *parser) parseArray() ([]interface{}, error) {
 
 }
 
+func (p *parser) parseObject() (exp map[string]interface{}, err error) {
+
+	_, lit, err := p.shouldBe(JSON)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"object"}}
+	}
+
+	val, err := p.declare(JSON, lit)
+
+	return val.(map[string]interface{}), err
+
+}
+
 func (p *parser) parseNumber() (int64, error) {
 
 	_, lit, err := p.shouldBe(NUMBER)
