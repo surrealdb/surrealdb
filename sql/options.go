@@ -70,14 +70,6 @@ func (o *options) get(kind int) (kv, ns, db string, err error) {
 func (o *options) ns(ns string) (err error) {
 
 	// Check to see that the current user has
-	// the necessary access level to perform
-	// namespace switching / choosing.
-
-	if o.kind > AuthKV {
-		return &EntryError{}
-	}
-
-	// Check to see that the current user has
 	// the necessary authentcation privileges
 	// to be able to specify this namespace.
 
@@ -96,14 +88,6 @@ func (o *options) ns(ns string) (err error) {
 }
 
 func (o *options) db(db string) (err error) {
-
-	// Check to see that the current user has
-	// the necessary access level to perform
-	// database switching / choosing.
-
-	if o.kind > AuthNS {
-		return &EntryError{}
-	}
 
 	// Check to see that the current user has
 	// the necessary authentcation privileges
