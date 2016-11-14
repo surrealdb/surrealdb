@@ -27,7 +27,7 @@ const (
 	// Database access
 	AuthDB
 	// Scoped user access
-	AuthTB
+	AuthSC
 	// No access
 	AuthNO
 )

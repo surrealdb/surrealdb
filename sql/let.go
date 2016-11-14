@@ -20,7 +20,7 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 
 	stmt = &LetStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthTB); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
 		return nil, err
 	}
 

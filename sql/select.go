@@ -18,7 +18,7 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 
 	stmt = &SelectStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthTB); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
 		return nil, err
 	}
 

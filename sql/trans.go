@@ -18,7 +18,7 @@ func (p *parser) parseBeginStatement() (stmt *BeginStatement, err error) {
 
 	stmt = &BeginStatement{}
 
-	if _, _, _, err = p.o.get(AuthTB); err != nil {
+	if _, _, _, err = p.o.get(AuthSC); err != nil {
 		return nil, err
 	}
 
@@ -36,7 +36,7 @@ func (p *parser) parseCancelStatement() (stmt *CancelStatement, err error) {
 
 	stmt = &CancelStatement{}
 
-	if _, _, _, err = p.o.get(AuthTB); err != nil {
+	if _, _, _, err = p.o.get(AuthSC); err != nil {
 		return nil, err
 	}
 
@@ -54,7 +54,7 @@ func (p *parser) parseCommitStatement() (stmt *CommitStatement, err error) {
 
 	stmt = &CommitStatement{}
 
-	if _, _, _, err = p.o.get(AuthTB); err != nil {
+	if _, _, _, err = p.o.get(AuthSC); err != nil {
 		return nil, err
 	}
 
