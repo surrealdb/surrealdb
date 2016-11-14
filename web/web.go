@@ -36,12 +36,14 @@ func Setup(opts *cnf.Options) (err error) {
 
 	// Setup middleware
 
-	s.Use(auth())    // Setup auth
 	s.Use(mw.Logs()) // Log requests
 	s.Use(mw.Fail()) // Catch panics
 	s.Use(mw.Gzip()) // Gzip responses
 	s.Use(mw.Uniq()) // Add uniq headers
 	s.Use(mw.Cors()) // Add cors headers
+
+	// Setup authentication
+	s.Use(auth())
 
 	// Check body size
 
