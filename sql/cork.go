@@ -1123,6 +1123,66 @@ func (this *RemoveLoginStatement) UnmarshalCORK(src []byte) (err error) {
 }
 
 // --------------------------------------------------
+// DefineTokenStatement
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&DefineTokenStatement{})
+}
+
+func (this *DefineTokenStatement) ExtendCORK() byte {
+	return 0x81
+}
+
+func (this *DefineTokenStatement) MarshalCORK() (dst []byte, err error) {
+	b := bytes.NewBuffer(dst)
+	e := cork.NewEncoder(b)
+	e.Encode(this.Kind)
+	e.Encode(this.Name)
+	e.Encode(this.Type)
+	e.Encode(this.Text)
+	return b.Bytes(), nil
+}
+
+func (this *DefineTokenStatement) UnmarshalCORK(src []byte) (err error) {
+	b := bytes.NewBuffer(src)
+	d := cork.NewDecoder(b)
+	d.Decode(&this.Kind)
+	d.Decode(&this.Name)
+	d.Decode(&this.Type)
+	d.Decode(&this.Text)
+	return
+}
+
+// --------------------------------------------------
+// RemoveTokenStatement
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&RemoveTokenStatement{})
+}
+
+func (this *RemoveTokenStatement) ExtendCORK() byte {
+	return 0x82
+}
+
+func (this *RemoveTokenStatement) MarshalCORK() (dst []byte, err error) {
+	b := bytes.NewBuffer(dst)
+	e := cork.NewEncoder(b)
+	e.Encode(this.Kind)
+	e.Encode(this.Name)
+	return b.Bytes(), nil
+}
+
+func (this *RemoveTokenStatement) UnmarshalCORK(src []byte) (err error) {
+	b := bytes.NewBuffer(src)
+	d := cork.NewDecoder(b)
+	d.Decode(&this.Kind)
+	d.Decode(&this.Name)
+	return
+}
+
+// --------------------------------------------------
 // DefineScopeStatement
 // --------------------------------------------------
 

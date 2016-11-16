@@ -227,6 +227,30 @@ type RemoveLoginStatement struct {
 }
 
 // --------------------------------------------------
+// Token
+// --------------------------------------------------
+
+// DefineTokenStatement represents an SQL DEFINE TOKEN statement.
+type DefineTokenStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Kind Token  `cork:"kind" codec:"kind"`
+	Name string `cork:"name" codec:"name"`
+	Type string `cork:"type" codec:"type"`
+	Text string `cork:"text" codec:"text"`
+}
+
+// RemoveTokenStatement represents an SQL REMOVE TOKEN statement.
+type RemoveTokenStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Kind Token  `cork:"kind" codec:"kind"`
+	Name string `cork:"name" codec:"name"`
+}
+
+// --------------------------------------------------
 // Scope
 // --------------------------------------------------
 
