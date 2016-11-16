@@ -204,6 +204,29 @@ type RemoveDatabaseStatement struct {
 }
 
 // --------------------------------------------------
+// Login
+// --------------------------------------------------
+
+// DefineLoginStatement represents an SQL DEFINE LOGIN statement.
+type DefineLoginStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Kind Token  `cork:"kind" codec:"kind"`
+	User string `cork:"user" codec:"user"`
+	Pass string `cork:"pass" codec:"pass"`
+}
+
+// RemoveLoginStatement represents an SQL REMOVE LOGIN statement.
+type RemoveLoginStatement struct {
+	KV   string `cork:"-" codec:"-"`
+	NS   string `cork:"-" codec:"-"`
+	DB   string `cork:"-" codec:"-"`
+	Kind Token  `cork:"kind" codec:"kind"`
+	User string `cork:"user" codec:"user"`
+}
+
+// --------------------------------------------------
 // Scope
 // --------------------------------------------------
 
