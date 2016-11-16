@@ -26,12 +26,39 @@ func (p *parser) parseDefineScopeStatement() (stmt *DefineScopeStatement, err er
 		return nil, err
 	}
 
-	if _, _, err = p.shouldBe(SESSION); err != nil {
-		return nil, err
-	}
+	for {
 
-	if stmt.Time, err = p.parseDuration(); err != nil {
-		return nil, err
+		tok, _, exi := p.mightBe(SESSION, POLICY, SIGNUP, SIGNIN)
+		if !exi {
+			break
+		}
+
+		if p.is(tok, SESSION) {
+			if stmt.Time, err = p.parseDuration(); err != nil {
+				return nil, err
+			}
+		}
+
+		if p.is(tok, POLICY) {
+			if stmt.Policy, err = p.parseObject(); err != nil {
+				return nil, err
+			}
+		}
+
+		if p.is(tok, SIGNUP) {
+			_, _, _ = p.mightBe(AS)
+			if stmt.Signup, err = p.parseExpr(); err != nil {
+				return nil, err
+			}
+		}
+
+		if p.is(tok, SIGNIN) {
+			_, _, _ = p.mightBe(AS)
+			if stmt.Signin, err = p.parseExpr(); err != nil {
+				return nil, err
+			}
+		}
+
 	}
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {

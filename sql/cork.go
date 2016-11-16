@@ -1199,7 +1199,9 @@ func (this *DefineScopeStatement) MarshalCORK() (dst []byte, err error) {
 	e := cork.NewEncoder(b)
 	e.Encode(this.Name)
 	e.Encode(this.Time)
-	e.Encode(this.Opts)
+	e.Encode(this.Signup)
+	e.Encode(this.Signin)
+	e.Encode(this.Policy)
 	return b.Bytes(), nil
 }
 
@@ -1208,7 +1210,9 @@ func (this *DefineScopeStatement) UnmarshalCORK(src []byte) (err error) {
 	d := cork.NewDecoder(b)
 	d.Decode(&this.Name)
 	d.Decode(&this.Time)
-	d.Decode(&this.Opts)
+	d.Decode(&this.Signup)
+	d.Decode(&this.Signin)
+	d.Decode(&this.Policy)
 	return
 }
 
