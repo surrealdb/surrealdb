@@ -50,10 +50,9 @@ type Options struct {
 	}
 
 	Auth struct {
-		Auth  string // Master authentication username:password
-		User  string // Master authentication username
-		Pass  string // Master authentication password
-		Token string
+		Auth string // Master authentication username:password
+		User string // Master authentication username
+		Pass string // Master authentication password
 	}
 
 	Node struct {
