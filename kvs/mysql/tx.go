@@ -144,7 +144,7 @@ func (tx *TX) RGet(beg, end []byte, max uint64) (kvs []kvs.KV, err error) {
 		max = math.MaxUint64
 	}
 
-	res, err := tx.tx.Query("SELECT `key`, `val` FROM kv WHERE `key` BETWEEN ? AND ? ORDER BY `key` ASC LIMIT ?", beg, end, int(max))
+	res, err := tx.tx.Query("SELECT `key`, `val` FROM kv WHERE `key` BETWEEN ? AND ? ORDER BY `key` ASC LIMIT ?", beg, end, max)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,7 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 		max = math.MaxUint64
 	}
 
-	if _, err = tx.tx.Exec("DELETE FROM kv WHERE `key` BETWEEN ? AND ? ORDER BY `key` ASC LIMIT ?", beg, end, int(max)); err != nil {
+	if _, err = tx.tx.Exec("DELETE FROM kv WHERE `key` BETWEEN ? AND ? ORDER BY `key` ASC LIMIT ?", beg, end, max); err != nil {
 		err = &kvs.DBError{err}
 		return
 	}
