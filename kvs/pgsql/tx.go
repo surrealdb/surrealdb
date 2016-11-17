@@ -35,7 +35,7 @@ type TX struct {
 // All retrieves all key:value items in the db.
 func (tx *TX) All() (kvs []kvs.KV, err error) {
 
-	res, err := tx.tx.Query("SELECT `key`, `val` FROM kv ORDER BY `key` ASC")
+	res, err := tx.tx.Query("SELECT key, val FROM kv ORDER BY key ASC")
 	if err != nil {
 		return
 	}
@@ -72,7 +72,7 @@ func (tx *TX) All() (kvs []kvs.KV, err error) {
 // Get retrieves a single key:value item.
 func (tx *TX) Get(key []byte) (kv kvs.KV, err error) {
 
-	row := tx.tx.QueryRow("SELECT `val` FROM kv WHERE `key` = $1", key)
+	row := tx.tx.QueryRow("SELECT val FROM kv WHERE key = $1", key)
 
 	var val []byte
 
@@ -86,7 +86,7 @@ func (tx *TX) Get(key []byte) (kv kvs.KV, err error) {
 func (tx *TX) MGet(keys ...[]byte) (kvs []kvs.KV, err error) {
 
 	/*
-		res, err := tx.tx.Query("SELECT `key`, `val` FROM kv WHERE `key` IN ($1)", keys)
+		res, err := tx.tx.Query("SELECT key, val FROM kv WHERE key IN ($1)", keys)
 		if err != nil {
 			return
 		}
@@ -138,14 +138,19 @@ func (tx *TX) PGet(pre []byte) (kvs []kvs.KV, err error) {
 // RGet retrieves the range of `max` rows between `beg` (inclusive) and
 // `end` (exclusive). To return the range in descending order, ensure
 // that `end` sorts lower than `beg` in the key value store.
-func (tx *TX) RGet(beg, end []byte, max uint64) (kvs []kvs.KV, err error) {
+func (tx *TX) RGet(beg, end []byte, max uint64) (items []kvs.KV, err error) {
 
 	if max == 0 {
 		max = math.MaxUint64
 	}
 
-	res, err := tx.tx.Query("SELECT `key`, `val` FROM kv WHERE `key` BETWEEN $1 AND $2 ORDER BY `key` ASC LIMIT $3", beg, end, int(max))
+	if max > math.MaxInt64 {
+		max = math.MaxInt64
+	}
+
+	res, err := tx.tx.Query("SELECT key, val FROM kv WHERE key BETWEEN $1 AND $2 ORDER BY key ASC LIMIT $3", beg, end, max)
 	if err != nil {
+		err = &kvs.DBError{err}
 		return nil, err
 	}
 
@@ -165,7 +170,7 @@ func (tx *TX) RGet(beg, end []byte, max uint64) (kvs []kvs.KV, err error) {
 			return nil, err
 		}
 
-		kvs = append(kvs, kv)
+		items = append(items, kv)
 
 	}
 
@@ -191,7 +196,7 @@ func (tx *TX) Put(key, val []byte) (err error) {
 		return
 	}
 
-	if _, err = tx.tx.Exec("INSERT INTO kv (`key`, `val`) VALUES ($1, $2) ON DUPLICATE KEY UPDATE `val` = $3", key, val, val); err != nil {
+	if _, err = tx.tx.Exec("INSERT INTO kv (key, val) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET val = $2", key, val); err != nil {
 		err = &kvs.DBError{err}
 		return
 	}
@@ -223,7 +228,7 @@ func (tx *TX) CPut(key, val, exp []byte) (err error) {
 		return
 	}
 
-	if _, err = tx.tx.Exec("INSERT INTO kv (`key`, `val`) VALUES ($1, $2) ON DUPLICATE KEY UPDATE `val` = $3", key, val, val); err != nil {
+	if _, err = tx.tx.Exec("INSERT INTO kv (key, val) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET val = $2", key, val); err != nil {
 		err = &kvs.DBError{err}
 		return
 	}
@@ -235,7 +240,7 @@ func (tx *TX) CPut(key, val, exp []byte) (err error) {
 // Del deletes a single key:value item.
 func (tx *TX) Del(key []byte) (err error) {
 
-	if _, err = tx.tx.Exec("DELETE FROM kv WHERE `key` = $1", key); err != nil {
+	if _, err = tx.tx.Exec("DELETE FROM kv WHERE key = $1", key); err != nil {
 		err = &kvs.DBError{err}
 		return
 	}
@@ -256,7 +261,7 @@ func (tx *TX) CDel(key, exp []byte) (err error) {
 		return
 	}
 
-	if _, err = tx.tx.Exec("DELETE FROM kv WHERE `key` = $1", key); err != nil {
+	if _, err = tx.tx.Exec("DELETE FROM kv WHERE key = $1", key); err != nil {
 		err = &kvs.DBError{err}
 		return
 	}
@@ -269,7 +274,7 @@ func (tx *TX) CDel(key, exp []byte) (err error) {
 func (tx *TX) MDel(keys ...[]byte) (err error) {
 
 	/*
-		if _, err = tx.tx.Exec("DELETE FROM kv WHERE `key` IN ($1)", keys); err != nil {
+		if _, err = tx.tx.Exec("DELETE FROM kv WHERE key IN ($1)", keys); err != nil {
 			err = &kvs.DBError{err}
 			return
 		}
@@ -301,7 +306,11 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 		max = math.MaxUint64
 	}
 
-	if _, err = tx.tx.Exec("DELETE FROM kv WHERE `key` BETWEEN $1 AND $2 ORDER BY `key` ASC LIMIT $3", beg, end, int(max)); err != nil {
+	if max > math.MaxInt64 {
+		max = math.MaxInt64
+	}
+
+	if _, err = tx.tx.Exec("DELETE FROM kv WHERE key BETWEEN $1 AND $2 ORDER BY key ASC LIMIT $3", beg, end, max); err != nil {
 		err = &kvs.DBError{err}
 		return
 	}

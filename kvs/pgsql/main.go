@@ -49,7 +49,7 @@ func New(opts *cnf.Options) (ds kvs.DS, err error) {
 
 func config(opts *cnf.Options) (path string, err error) {
 
-	re := regexp.MustCompile(`^mysql://` +
+	re := regexp.MustCompile(`^pgsql://` +
 		`((?:(?P<user>.*?)(?::(?P<passwd>.*))?@))?` +
 		`(?:(?:(?P<addr>[^\/]*))?)?` +
 		`\/(?P<dbname>.*?)` +
@@ -64,7 +64,7 @@ func config(opts *cnf.Options) (path string, err error) {
 	if opts.DB.Cert.SSL {
 		path += fmt.Sprintf("postgres://%s%s/%s?sslmode=verify-ca&sslrootcert=%s&sslcert=%s&sslkey=%s", ma[1], ma[4], ma[5], opts.DB.Cert.CA, opts.DB.Cert.Crt, opts.DB.Cert.Key)
 	} else {
-		path += fmt.Sprintf("postgres://%s%s/%s", ma[1], ma[4], ma[5])
+		path += fmt.Sprintf("postgres://%s%s/%s?sslmode=disable", ma[1], ma[4], ma[5])
 	}
 
 	return
