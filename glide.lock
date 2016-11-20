@@ -1,20 +1,20 @@
 hash: 0402d462f75cf177f62e8a0c786da7e9ca6a22535e6412965b600141842d6dae
-updated: 2016-11-04T11:13:57.580487578Z
+updated: 2016-11-20T09:27:39.431575913Z
 imports:
 - name: github.com/abcum/cork
   version: 2d785aed8e7cc57a3b6741042a9b421a9d81fc13
 - name: github.com/abcum/fibre
-  version: bc5ac776be0fd0e64d9546099a9f14e91652b600
+  version: 9d4410ab1ab7a4743cae0e32846e9273b996549f
   subpackages:
   - mw
 - name: github.com/abcum/logrus
   version: 4b6ea7319e214d98c938f12692336f7ca9348d6b
 - name: github.com/armon/go-metrics
-  version: 3df31a1ada83e310c2e24b267c8e8b68836547b4
+  version: 97c69685293dce4c0a2d0b19535179bbc976e4d2
 - name: github.com/asaskevich/govalidator
   version: 7664702784775e51966f0885f5cd27435916517b
 - name: github.com/boltdb/bolt
-  version: 4b1ebc1869ad66568b313d0dc410e2be72670dda
+  version: 315c65d4cf4f5278c73477a35fb1f9b08365d340
 - name: github.com/cznic/internal
   version: cef02a853c3a93623c42eacd574e7ea05f55531b
   subpackages:
@@ -37,11 +37,11 @@ imports:
   subpackages:
   - codec
 - name: github.com/hashicorp/go-multierror
-  version: 8c5f0ad9360406a3807ce7de6bc73269a91a6e51
+  version: 8484912a3b9987857bac52e0c5fec2b95f419628
 - name: github.com/hashicorp/memberlist
-  version: 7ad712f5f34ec40aebe6ca47756d07898486a8d2
+  version: d16b8b733eddcffb36008dcc425a3b0824034bbb
 - name: github.com/hashicorp/serf
-  version: e0680ca729b018b791af1add413faebe3e1c147e
+  version: f679d7594a349263f6118db40d87122d3a474e7d
   subpackages:
   - coordinate
   - serf
@@ -59,6 +59,8 @@ imports:
   version: c286dcecd19ff979eeb73ea444e479b903f2cfcb
 - name: github.com/miekg/dns
   version: 58f52c57ce9df13460ac68200cef30a008b9c468
+- name: github.com/mitchellh/mapstructure
+  version: f3009df150dadf309fdee4a54ed65c124afad715
 - name: github.com/pkg/profile
   version: 1c16f117a3ab788fdf0e334e623b8bccf5679866
 - name: github.com/robertkrimen/otto
@@ -73,7 +75,7 @@ imports:
 - name: github.com/satori/go.uuid
   version: 879c5887cd475cd7864858769793b2ceb0d44feb
 - name: github.com/spf13/cobra
-  version: 6e91dded25d73176bf7f60b40dd7aa1f0bf9be8d
+  version: 9495bc009a56819bdb0ddbc1a373e29c140bc674
 - name: github.com/spf13/pflag
   version: 5ccb023bc27df288a957c5e994cd44fd19619465
 - name: github.com/ugorji/go
@@ -86,8 +88,13 @@ imports:
   - ast
   - parse
   - pm
+- name: golang.org/x/crypto
+  version: 9477e0b78b9ac3d0b03822fd95422e2fe07627cd
+  subpackages:
+  - bcrypt
+  - blowfish
 - name: golang.org/x/sys
-  version: c200b10b5d5e122be351b67af224adc6128af5bf
+  version: b699b7032584f0953262cb2788a0ca19bb494703
   subpackages:
   - unix
 - name: gopkg.in/sourcemap.v1
@@ -104,12 +111,12 @@ testImports:
 - name: github.com/jtolds/gls
   version: 8ddce2a84170772b95dd5d576c48d517b22cac63
 - name: github.com/smartystreets/assertions
-  version: 2063fd1cc7c975db70502811a34b06ad034ccdf2
+  version: e60cfa771e3f4d18723a4119f1833898c9c62066
   subpackages:
   - internal/go-render/render
   - internal/oglematchers
 - name: github.com/smartystreets/goconvey
-  version: 019319c870f8f1d61dc9c34291abff5cd128b6e8
+  version: 3c2572876754c4669ae7417b219f0b30a29b32c7
   subpackages:
   - convey
   - convey/gotest
