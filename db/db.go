@@ -103,6 +103,12 @@ func Execute(ctx *fibre.Context, txt interface{}, vars map[string]interface{}) (
 		return
 	}
 
+	return Process(ctx, ast, vars)
+
+}
+
+func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (out []*Response, err error) {
+
 	// Create 2 channels, one for force quitting
 	// the query processor, and the other for
 	// receiving and buffering any query results.
