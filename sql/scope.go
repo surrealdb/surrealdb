@@ -28,19 +28,13 @@ func (p *parser) parseDefineScopeStatement() (stmt *DefineScopeStatement, err er
 
 	for {
 
-		tok, _, exi := p.mightBe(SESSION, POLICY, SIGNUP, SIGNIN)
+		tok, _, exi := p.mightBe(SESSION, SIGNUP, SIGNIN)
 		if !exi {
 			break
 		}
 
 		if p.is(tok, SESSION) {
 			if stmt.Time, err = p.parseDuration(); err != nil {
-				return nil, err
-			}
-		}
-
-		if p.is(tok, POLICY) {
-			if stmt.Policy, err = p.parseObject(); err != nil {
 				return nil, err
 			}
 		}

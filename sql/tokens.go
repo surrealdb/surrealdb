@@ -157,7 +157,6 @@ const (
 	OR
 	ORDER
 	PASSWORD
-	POLICY
 	READONLY
 	REJECT
 	RELATE
@@ -321,7 +320,6 @@ var tokens = [...]string{
 	OR:              "OR",
 	ORDER:           "ORDER",
 	PASSWORD:        "PASSWORD",
-	POLICY:          "POLICY",
 	READONLY:        "READONLY",
 	REJECT:          "REJECT",
 	RELATE:          "RELATE",
