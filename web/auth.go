@@ -18,10 +18,13 @@ import (
 	"fmt"
 
 	"bytes"
+	"strings"
+
 	"encoding/base64"
 
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 
 	"github.com/dgrijalva/jwt-go"
@@ -29,26 +32,41 @@ import (
 
 func auth() fibre.MiddlewareFunc {
 	return func(h fibre.HandlerFunc) fibre.HandlerFunc {
-		return func(c *fibre.Context) error {
+		return func(c *fibre.Context) (err error) {
 
-			auth := map[string]string{"NS": "", "DB": ""}
+			defer func() {
+				if r := recover(); r != nil {
+					err = fibre.NewHTTPError(403)
+				}
+			}()
+
+			auth := &cnf.Auth{}
 			c.Set("auth", auth)
-
-			conf := map[string]string{"NS": "", "DB": ""}
-			c.Set("conf", conf)
 
 			// Start off with an authentication level
 			// which prevents running any sql queries,
 			// and denies access to all data.
 
-			c.Set("kind", sql.AuthNO)
+			auth.Kind = sql.AuthNO
 
-			// Check whether there is an Authorization
-			// header present, and if there is check
-			// whether it is a Basic Auth header.
+			// Retrieve the current domain host and
+			// if we are using a subdomain then set
+			// the NS and DB to the subdomain bits.
+
+			bits := strings.Split(c.Request().URL().Host, ".")
+			subs := strings.Split(bits[0], "-")
+
+			if len(subs) == 2 {
+				auth.Kind = sql.AuthSC
+				auth.Possible.NS = subs[0]
+				auth.Selected.NS = subs[0]
+				auth.Possible.DB = subs[1]
+				auth.Selected.DB = subs[1]
+			}
 
 			// Retrieve the HTTP Authorization header
-			// from the request, and continue.
+			// from the request, so that we can detect
+			// whether it is Basic auth or Bearer auth.
 
 			head := c.Request().Header().Get("Authorization")
 
@@ -72,11 +90,11 @@ func auth() fibre.MiddlewareFunc {
 						// Root authentication
 						// ------------------------------
 
-						c.Set("kind", sql.AuthKV)
-						auth["NS"] = "*" // Anything allowed
-						conf["NS"] = ""  // Must specify
-						auth["DB"] = "*" // Anything allowed
-						conf["DB"] = ""  // Must specify
+						auth.Kind = sql.AuthKV
+						auth.Possible.NS = "*"
+						auth.Selected.NS = ""
+						auth.Possible.DB = "*"
+						auth.Selected.DB = ""
 
 						return h(c)
 
@@ -92,44 +110,107 @@ func auth() fibre.MiddlewareFunc {
 
 			if head != "" && head[:6] == "Bearer" {
 
+				var vars jwt.MapClaims
+				var nok, dok, sok, tok, uok bool
+				var nsv, dbv, scv, tkv, usv string
+
 				token, err := jwt.Parse(head[7:], func(token *jwt.Token) (interface{}, error) {
-					if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-						return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+
+					vars = token.Claims.(jwt.MapClaims)
+
+					if err := vars.Valid(); err != nil {
+						return nil, err
 					}
-					return []byte(cnf.Settings.Auth.Token), nil
+
+					nsv, nok = vars["NS"].(string) // Namespace
+					dbv, dok = vars["DB"].(string) // Database
+					scv, sok = vars["SC"].(string) // Scope
+					tkv, tok = vars["TK"].(string) // Token
+					usv, uok = vars["US"].(string) // Login
+
+					if tkv == "default" {
+						if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+							return nil, fmt.Errorf("Unexpected signing method")
+						}
+					}
+
+					if nok && dok && sok && tok {
+
+						if tkv != "default" {
+							key := mem.GetNS(nsv).GetDB(dbv).GetSC(scv).GetTK(tkv)
+							if token.Header["alg"] != key.Type {
+								return nil, fmt.Errorf("Unexpected signing method")
+							}
+							auth.Kind = sql.AuthSC
+							return []byte(key.Text), nil
+						} else {
+							scp := mem.GetNS(nsv).GetDB(dbv).GetSC(scv)
+							auth.Kind = sql.AuthSC
+							return []byte(scp.Uniq), nil
+						}
+
+					} else if nok && dok && tok {
+
+						if tkv != "default" {
+							key := mem.GetNS(nsv).GetDB(dbv).GetTK(tkv)
+							if token.Header["alg"] != key.Type {
+								return nil, fmt.Errorf("Unexpected signing method")
+							}
+							auth.Kind = sql.AuthDB
+							return []byte(key.Text), nil
+						} else if uok {
+							usr := mem.GetNS(nsv).GetDB(dbv).GetAC(usv)
+							auth.Kind = sql.AuthDB
+							return []byte(usr.Uniq), nil
+						}
+
+					} else if nok && tok {
+
+						if tkv != "default" {
+							key := mem.GetNS(nsv).GetTK(tkv)
+							if token.Header["alg"] != key.Type {
+								return nil, fmt.Errorf("Unexpected signing method")
+							}
+							auth.Kind = sql.AuthNS
+							return []byte(key.Text), nil
+						} else if uok {
+							usr := mem.GetNS(nsv).GetAC(usv)
+							auth.Kind = sql.AuthNS
+							return []byte(usr.Uniq), nil
+						}
+
+					}
+
+					return nil, fmt.Errorf("No available token")
+
 				})
 
 				if err == nil && token.Valid {
 
-					// ------------------------------
-					// Namespace authentication
-					// ------------------------------
+					if auth.Kind == sql.AuthNS {
+						auth.Possible.NS = nsv
+						auth.Selected.NS = nsv
+						auth.Possible.DB = "*"
+						auth.Selected.DB = ""
+					}
 
-					// c.Set("kind", sql.AuthNS)
-					// auth["NS"] = "SPECIFIED" // Not allowed to change
-					// conf["NS"] = "SPECIFIED" // Not allowed to change
-					// auth["DB"] = "*"         // Anything allowed
-					// conf["DB"] = ""          // Must specify
+					if auth.Kind == sql.AuthDB {
+						auth.Possible.NS = nsv
+						auth.Selected.NS = nsv
+						auth.Possible.DB = dbv
+						auth.Selected.DB = dbv
+					}
 
-					// ------------------------------
-					// Database authentication
-					// ------------------------------
+					if auth.Kind == sql.AuthSC {
+						auth.Possible.NS = nsv
+						auth.Selected.NS = nsv
+						auth.Possible.DB = dbv
+						auth.Selected.DB = dbv
+					}
 
-					// c.Set("kind", sql.AuthDB)
-					// auth["NS"] = "SPECIFIED" // Not allowed to change
-					// conf["NS"] = "SPECIFIED" // Not allowed to change
-					// auth["DB"] = "SPECIFIED" // Not allowed to change
-					// conf["DB"] = "SPECIFIED" // Not allowed to change
-
-					// ------------------------------
-					// Scoped authentication
-					// ------------------------------
-
-					// c.Set("kind", sql.AuthTB)
-					// auth["NS"] = "SPECIFIED" // Not allowed to change
-					// conf["NS"] = "SPECIFIED" // Not allowed to change
-					// auth["DB"] = "SPECIFIED" // Not allowed to change
-					// conf["DB"] = "SPECIFIED" // Not allowed to change
+					if val, ok := vars["auth"]; ok {
+						auth.Data = val
+					}
 
 					return h(c)
 
@@ -137,11 +218,7 @@ func auth() fibre.MiddlewareFunc {
 
 			}
 
-			if c.Request().Header().Get("Upgrade") == "websocket" {
-				return h(c)
-			}
-
-			return fibre.NewHTTPError(401)
+			return h(c)
 
 		}
 	}

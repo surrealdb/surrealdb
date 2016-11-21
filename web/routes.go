@@ -66,6 +66,30 @@ func routes(s *fibre.Fibre) {
 	s.Rpc("/rpc", &rpc{})
 
 	// --------------------------------------------------
+	// Endpoints for authentication signup
+	// --------------------------------------------------
+
+	s.Options("/signup", func(c *fibre.Context) error {
+		return c.Code(200)
+	})
+
+	s.Post("/signup", func(c *fibre.Context) error {
+		return signup(c)
+	})
+
+	// --------------------------------------------------
+	// Endpoints for authentication signin
+	// --------------------------------------------------
+
+	s.Options("/signin", func(c *fibre.Context) error {
+		return c.Code(200)
+	})
+
+	s.Post("/signin", func(c *fibre.Context) error {
+		return signin(c)
+	})
+
+	// --------------------------------------------------
 	// Endpoints for submitting sql queries
 	// --------------------------------------------------
 

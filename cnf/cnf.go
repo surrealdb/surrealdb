@@ -16,6 +16,19 @@ package cnf
 
 var Settings *Options
 
+type Auth struct {
+	Kind     int
+	Data     interface{}
+	Possible struct {
+		NS string
+		DB string
+	}
+	Selected struct {
+		NS string
+		DB string
+	}
+}
+
 // Options defines global configuration options
 type Options struct {
 	DB struct {

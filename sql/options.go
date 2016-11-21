@@ -34,26 +34,22 @@ const (
 
 // options represents context runtime config.
 type options struct {
-	kind int
-	auth map[string]string
-	conf map[string]string
+	auth *cnf.Auth
 }
 
 func newOptions(c *fibre.Context) *options {
 	return &options{
-		kind: c.Get("kind").(int),
-		auth: c.Get("auth").(map[string]string),
-		conf: c.Get("conf").(map[string]string),
+		auth: c.Get("auth").(*cnf.Auth),
 	}
 }
 
 func (o *options) get(kind int) (kv, ns, db string, err error) {
 
 	kv = cnf.Settings.DB.Base
-	ns = o.conf["NS"]
-	db = o.conf["DB"]
+	ns = o.auth.Selected.NS
+	db = o.auth.Selected.DB
 
-	if o.kind > kind {
+	if kind < o.auth.Kind {
 		err = &QueryError{}
 		return
 	}
@@ -81,7 +77,7 @@ func (o *options) ns(ns string) (err error) {
 	// that it is remembered across requests on
 	// any persistent connections.
 
-	o.conf["NS"] = ns
+	o.auth.Selected.NS = ns
 
 	return
 
@@ -101,7 +97,7 @@ func (o *options) db(db string) (err error) {
 	// that it is remembered across requests on
 	// any persistent connections.
 
-	o.conf["DB"] = db
+	o.auth.Selected.DB = db
 
 	return
 

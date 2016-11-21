@@ -103,6 +103,12 @@ func Execute(ctx *fibre.Context, txt interface{}, vars map[string]interface{}) (
 		return
 	}
 
+	// Ensure that the current authentication data
+	// is made available as a runtime variable to
+	// the query layer.
+
+	vars["auth"] = ctx.Get("auth").(*cnf.Auth).Data
+
 	return Process(ctx, ast, vars)
 
 }

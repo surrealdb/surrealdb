@@ -36,6 +36,12 @@ func errors(val error, c *fibre.Context) {
 		code, info = 409, e.Error()
 	case *kvs.CKError:
 		code, info = 403, e.Error()
+	case *sql.NSError:
+		code, info = 403, e.Error()
+	case *sql.DBError:
+		code, info = 403, e.Error()
+	case *sql.QueryError:
+		code, info = 401, e.Error()
 	case *sql.ParseError:
 		code, info = 400, e.Error()
 	case *fibre.HTTPError:
