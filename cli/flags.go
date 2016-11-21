@@ -22,18 +22,18 @@ var flags = map[string]string{
 }
 
 var usage = map[string][]string{
-	"db": []string{
+	"db": {
 		"--db-path boltdb://surreal.db",
 		"--db-path mysql://user:pass@127.0.0.1:3306/database",
 		"--db-path pgsql://user:pass@127.0.0.1:5432/database",
 	},
-	"join": []string{
+	"join": {
 		"--join 10.0.0.1",
 		"--join 10.0.0.1:33693",
 		"--join 10.0.0.1:33693,10.0.0.2:33693",
 		"--join 89.13.7.33:33693,example.com:33693",
 	},
-	"key": []string{
+	"key": {
 		"--enc 1hg7dbrma8ghe547",
 		"--enc 1hg7dbrma8ghe5473kghvie6",
 		"--enc 1hg7dbrma8ghe5473kghvie64jgi3ph4",
