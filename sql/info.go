@@ -18,9 +18,9 @@ func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 
 	stmt = &InfoStatement{}
 
-	stmt.KV = p.c.Get("KV").(string)
-	stmt.NS = p.c.Get("NS").(string)
-	stmt.DB = p.c.Get("DB").(string)
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		return nil, err
+	}
 
 	if _, _, exi := p.mightBe(FOR); exi {
 		if stmt.What, err = p.parseName(); err != nil {
