@@ -90,6 +90,4 @@ func init() {
 	startCmd.PersistentFlags().IntVar(&opts.Port.Tcp, "port-tcp", 33693, "The port on which to serve the tcp server.")
 	startCmd.PersistentFlags().IntVar(&opts.Port.Web, "port-web", 8000, "The port on which to serve the web server.")
 
-	startCmd.PersistentFlags().StringVarP(&opts.Cluster.Join, "zone", "z", "", flag("zone"))
-
 }

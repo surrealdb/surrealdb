@@ -18,7 +18,6 @@ var flags = map[string]string{
 	"db":   `Database configuration path used for storing data. Available backend stores are boltdb, mysql, or pgsql. (default "boltdb://surreal.db").`,
 	"key":  `Encryption key to use for intra-cluster communications, and on-disk encryption. For AES-128 encryption use a 16 bit key, for AES-192 encryption use a 24 bit key, and for AES-256 encryption use a 32 bit key.`,
 	"join": `A comma-separated list of addresses to use when a new node is joining an existing cluster. For the first node in a cluster, --join should NOT be specified.`,
-	"zone": `The continent that the server is located within. Possible values are: GL (Global), EU (Europe), AS (Asia), NA (North America), SA (South America), OC (Oceania), AF (Africa). (default "GL")`,
 }
 
 var usage = map[string][]string{
