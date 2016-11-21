@@ -55,9 +55,10 @@ func Setup(opts *cnf.Options) (err error) {
 
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{
-			"application/json":    true,
-			"application/cbor":    true,
-			"application/msgpack": true,
+			"application/json":                  true,
+			"application/cbor":                  true,
+			"application/msgpack":               true,
+			"application/x-www-form-urlencoded": true,
 		},
 	}))
 
