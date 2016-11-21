@@ -122,7 +122,7 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 	}
 
 	if stmt.Type == "" {
-		return nil, &ParseError{Found: "", Expected: []string{"TYPE"}}
+		stmt.Type = "any"
 	}
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
