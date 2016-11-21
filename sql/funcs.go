@@ -87,6 +87,10 @@ var funcs = map[string]map[int]bool{
 		1: true,
 	},
 
+	"md5": {
+		1: true,
+	},
+
 	"mean": {
 		1: true,
 	},
@@ -168,6 +172,36 @@ var funcs = map[string]map[int]bool{
 
 	"year": {
 		0: true,
+		1: true,
+	},
+
+	// Bcrypt implementation
+
+	"bcrypt.compare": {
+		2: true,
+	},
+
+	"bcrypt.generate": {
+		1: true,
+	},
+
+	// Scrypt implementation
+
+	"scrypt.compare": {
+		2: true,
+	},
+
+	"scrypt.generate": {
+		1: true,
+	},
+
+	// Pbkdf2 implementation
+
+	"pbkdf2.compare": {
+		2: true,
+	},
+
+	"pbkdf2.generate": {
 		1: true,
 	},
 }
