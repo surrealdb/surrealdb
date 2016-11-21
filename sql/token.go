@@ -22,7 +22,7 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 		return nil, err
 	}
 
-	if stmt.Kind, _, err = p.shouldBe(NAMESPACE, DATABASE); err != nil {
+	if stmt.Kind, _, err = p.shouldBe(NAMESPACE, DATABASE, SCOPE); err != nil {
 		return nil, err
 	}
 
@@ -33,6 +33,12 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 	}
 
 	if p.is(stmt.Kind, DATABASE) {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+			return nil, err
+		}
+	}
+
+	if p.is(stmt.Kind, SCOPE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
@@ -54,7 +60,7 @@ func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err er
 		return nil, err
 	}
 
-	if stmt.Kind, _, err = p.shouldBe(NAMESPACE, DATABASE); err != nil {
+	if stmt.Kind, _, err = p.shouldBe(NAMESPACE, DATABASE, SCOPE); err != nil {
 		return nil, err
 	}
 
@@ -65,6 +71,12 @@ func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err er
 	}
 
 	if p.is(stmt.Kind, DATABASE) {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+			return nil, err
+		}
+	}
+
+	if p.is(stmt.Kind, SCOPE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
