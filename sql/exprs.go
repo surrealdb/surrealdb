@@ -124,7 +124,7 @@ func (p *parser) parseCond() (exp Expr, err error) {
 
 func (p *parser) parseRand() (exp []byte, err error) {
 
-	exp = rand.New(64)
+	exp = rand.New(128)
 
 	return
 
