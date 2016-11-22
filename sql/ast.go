@@ -214,7 +214,7 @@ type DefineLoginStatement struct {
 	DB   string `cork:"-" codec:"-"`
 	Kind Token  `cork:"kind" codec:"kind"`
 	User string `cork:"user" codec:"user"`
-	Pass string `cork:"pass" codec:"pass"`
+	Pass []byte `cork:"pass" codec:"pass"`
 }
 
 // RemoveLoginStatement represents an SQL REMOVE LOGIN statement.

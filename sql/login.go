@@ -50,7 +50,7 @@ func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err er
 		return nil, err
 	}
 
-	if stmt.Pass, err = p.parseString(); err != nil {
+	if stmt.Pass, err = p.parseBcrypt(); err != nil {
 		return nil, err
 	}
 

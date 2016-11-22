@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func (p *parser) parseWhat() (mul []Expr, err error) {
@@ -284,6 +286,22 @@ func (p *parser) parseDuration() (time.Duration, error) {
 	val, err := p.declare(tok, lit)
 
 	return val.(time.Duration), err
+
+}
+
+func (p *parser) parseBcrypt() ([]byte, error) {
+
+	_, lit, err := p.shouldBe(STRING)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
+	}
+
+	val, err := p.declare(STRING, lit)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
+	}
+
+	return bcrypt.GenerateFromPassword([]byte(val.(string)), bcrypt.DefaultCost)
 
 }
 

@@ -45,8 +45,8 @@ type TB struct {
 
 type AC struct {
 	User string
-	Pass string
 	Uniq string
+	Pass []byte
 }
 
 type TK struct {
