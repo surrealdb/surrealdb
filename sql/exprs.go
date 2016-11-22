@@ -64,7 +64,7 @@ func (p *parser) parseWhat() (mul []Expr, err error) {
 
 func (p *parser) parseName() (string, error) {
 
-	_, lit, err := p.shouldBe(IDENT, NUMBER, DOUBLE)
+	_, lit, err := p.shouldBe(IDENT, STRING, NUMBER, DOUBLE)
 	if err != nil {
 		return string(""), &ParseError{Found: lit, Expected: []string{"name"}}
 	}

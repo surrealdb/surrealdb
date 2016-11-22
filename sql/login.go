@@ -18,6 +18,10 @@ func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err er
 
 	stmt = &DefineLoginStatement{}
 
+	if stmt.User, err = p.parseName(); err != nil {
+		return nil, err
+	}
+
 	if _, _, err = p.shouldBe(ON); err != nil {
 		return nil, err
 	}
@@ -36,14 +40,6 @@ func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err er
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
-	}
-
-	if _, _, err := p.shouldBe(USERNAME); err != nil {
-		return nil, err
-	}
-
-	if stmt.User, err = p.parseString(); err != nil {
-		return nil, err
 	}
 
 	if _, _, err := p.shouldBe(PASSWORD); err != nil {
@@ -70,6 +66,10 @@ func (p *parser) parseRemoveLoginStatement() (stmt *RemoveLoginStatement, err er
 
 	stmt = &RemoveLoginStatement{}
 
+	if stmt.User, err = p.parseName(); err != nil {
+		return nil, err
+	}
+
 	if _, _, err = p.shouldBe(ON); err != nil {
 		return nil, err
 	}
@@ -88,14 +88,6 @@ func (p *parser) parseRemoveLoginStatement() (stmt *RemoveLoginStatement, err er
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
-	}
-
-	if _, _, err := p.shouldBe(USERNAME); err != nil {
-		return nil, err
-	}
-
-	if stmt.User, err = p.parseString(); err != nil {
-		return nil, err
 	}
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {

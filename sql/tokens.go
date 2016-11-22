@@ -183,7 +183,6 @@ const (
 	UPDATE
 	UPSERT
 	USE
-	USERNAME
 	VALIDATE
 	VERSION
 	VIEW
@@ -346,7 +345,6 @@ var tokens = [...]string{
 	UPDATE:          "UPDATE",
 	UPSERT:          "UPSERT",
 	USE:             "USE",
-	USERNAME:        "USERNAME",
 	VALIDATE:        "VALIDATE",
 	VERSION:         "VERSION",
 	VIEW:            "VIEW",
