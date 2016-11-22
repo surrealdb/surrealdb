@@ -140,15 +140,17 @@ func auth() fibre.MiddlewareFunc {
 
 					if nok && dok && sok && tok {
 
+						scp := mem.GetNS(nsv).GetDB(dbv).GetSC(scv)
+						auth.Data["scope"] = scp.Name
+
 						if tkv != "default" {
-							key := mem.GetNS(nsv).GetDB(dbv).GetSC(scv).GetTK(tkv)
+							key := scp.GetTK(tkv)
 							if token.Header["alg"] != key.Type {
 								return nil, fmt.Errorf("Unexpected signing method")
 							}
 							auth.Kind = sql.AuthSC
 							return key.Code, nil
 						} else {
-							scp := mem.GetNS(nsv).GetDB(dbv).GetSC(scv)
 							auth.Kind = sql.AuthSC
 							return scp.Code, nil
 						}
