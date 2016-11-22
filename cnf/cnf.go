@@ -18,7 +18,7 @@ var Settings *Options
 
 type Auth struct {
 	Kind     int
-	Data     interface{}
+	Data     map[string]interface{}
 	Possible struct {
 		NS string
 		DB string

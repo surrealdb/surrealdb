@@ -122,6 +122,10 @@ func auth() fibre.MiddlewareFunc {
 						return nil, err
 					}
 
+					if val, ok := vars["auth"].(map[string]interface{}); ok {
+						auth.Data = val
+					}
+
 					nsv, nok = vars["NS"].(string) // Namespace
 					dbv, dok = vars["DB"].(string) // Database
 					scv, sok = vars["SC"].(string) // Scope
@@ -206,10 +210,6 @@ func auth() fibre.MiddlewareFunc {
 						auth.Selected.NS = nsv
 						auth.Possible.DB = dbv
 						auth.Selected.DB = dbv
-					}
-
-					if val, ok := vars["auth"]; ok {
-						auth.Data = val
 					}
 
 					return h(c)
