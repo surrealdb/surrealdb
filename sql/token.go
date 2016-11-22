@@ -18,6 +18,10 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 
 	stmt = &DefineTokenStatement{}
 
+	if stmt.Name, err = p.parseName(); err != nil {
+		return nil, err
+	}
+
 	if _, _, err = p.shouldBe(ON); err != nil {
 		return nil, err
 	}
@@ -44,8 +48,33 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 		}
 	}
 
-	if stmt.Code, err = p.parseRand(); err != nil {
-		return nil, err
+	for {
+
+		tok, _, exi := p.mightBe(TYPE, VALUE)
+		if !exi {
+			break
+		}
+
+		if p.is(tok, TYPE) {
+			if stmt.Type, err = p.parseAlgorithm(); err != nil {
+				return nil, err
+			}
+		}
+
+		if p.is(tok, VALUE) {
+			if stmt.Code, err = p.parseBinary(); err != nil {
+				return nil, err
+			}
+		}
+
+	}
+
+	if stmt.Type == "" {
+		return nil, &ParseError{Found: ";", Expected: []string{"TYPE"}}
+	}
+
+	if stmt.Code == nil {
+		return nil, &ParseError{Found: ";", Expected: []string{"VALUE"}}
 	}
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
@@ -59,6 +88,10 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err error) {
 
 	stmt = &RemoveTokenStatement{}
+
+	if stmt.Name, err = p.parseName(); err != nil {
+		return nil, err
+	}
 
 	if _, _, err = p.shouldBe(ON); err != nil {
 		return nil, err

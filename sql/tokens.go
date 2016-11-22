@@ -184,6 +184,7 @@ const (
 	UPSERT
 	USE
 	VALIDATE
+	VALUE
 	VERSION
 	VIEW
 	VOID
@@ -346,6 +347,7 @@ var tokens = [...]string{
 	UPSERT:          "UPSERT",
 	USE:             "USE",
 	VALIDATE:        "VALIDATE",
+	VALUE:           "VALUE",
 	VERSION:         "VERSION",
 	VIEW:            "VIEW",
 	VOID:            "VOID",

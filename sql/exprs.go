@@ -240,7 +240,7 @@ func (p *parser) parseString() (string, error) {
 
 func (p *parser) parseRegion() (string, error) {
 
-	tok, lit, err := p.shouldBe(IDENT, STRING, REGION)
+	tok, lit, err := p.shouldBe(STRING, REGION)
 	if err != nil {
 		return string(""), &ParseError{Found: lit, Expected: []string{"string"}}
 	}
@@ -248,6 +248,19 @@ func (p *parser) parseRegion() (string, error) {
 	val, err := p.declare(tok, lit)
 
 	return val.(string), err
+
+}
+
+func (p *parser) parseBinary() ([]byte, error) {
+
+	tok, lit, err := p.shouldBe(STRING, REGION)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
+	}
+
+	val, err := p.declare(tok, lit)
+
+	return []byte(val.(string)), err
 
 }
 
@@ -316,6 +329,35 @@ func (p *parser) parseBcrypt() ([]byte, error) {
 	}
 
 	return bcrypt.GenerateFromPassword([]byte(val.(string)), bcrypt.DefaultCost)
+
+}
+
+func (p *parser) parseAlgorithm() (string, error) {
+
+	expected := []string{
+		"ES256", "ES384", "ES512",
+		"HS256", "HS384", "HS512",
+		"PS256", "PS384", "PS512",
+		"RS256", "RS384", "RS512",
+	}
+
+	_, lit, err := p.shouldBe(IDENT, STRING)
+	if err != nil {
+		return string(""), &ParseError{Found: lit, Expected: expected}
+	}
+
+	switch lit {
+	case "ES256", "ES384", "ES512":
+	case "HS256", "HS384", "HS512":
+	case "PS256", "PS384", "PS512":
+	case "RS256", "RS384", "RS512":
+	default:
+		return string(""), &ParseError{Found: lit, Expected: expected}
+	}
+
+	val, err := p.declare(STRING, lit)
+
+	return val.(string), err
 
 }
 
