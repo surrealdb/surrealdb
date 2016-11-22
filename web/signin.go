@@ -85,7 +85,7 @@ func signin(c *fibre.Context) (err error) {
 
 		// Try to create the final signed token as a string.
 
-		str, err = signr.SignedString([]byte(scp.Uniq))
+		str, err = signr.SignedString(scp.Code)
 		if err != nil {
 			return fibre.NewHTTPError(403)
 		}
@@ -120,7 +120,7 @@ func signin(c *fibre.Context) (err error) {
 
 		// Compare the hashed and stored passwords.
 
-		err = bcrypt.CompareHashAndPassword([]byte(usr.Pass), []byte(p))
+		err = bcrypt.CompareHashAndPassword(usr.Pass, []byte(p))
 		if err != nil {
 			return fibre.NewHTTPError(403)
 		}
@@ -140,7 +140,7 @@ func signin(c *fibre.Context) (err error) {
 
 		// Try to create the final signed token as a string.
 
-		str, err = signr.SignedString([]byte(usr.Uniq))
+		str, err = signr.SignedString(usr.Code)
 		if err != nil {
 			return fibre.NewHTTPError(403)
 		}
@@ -175,7 +175,7 @@ func signin(c *fibre.Context) (err error) {
 
 		// Compare the hashed and stored passwords.
 
-		err = bcrypt.CompareHashAndPassword([]byte(usr.Pass), []byte(p))
+		err = bcrypt.CompareHashAndPassword(usr.Pass, []byte(p))
 		if err != nil {
 			return fibre.NewHTTPError(403)
 		}
@@ -194,7 +194,7 @@ func signin(c *fibre.Context) (err error) {
 
 		// Try to create the final signed token as a string.
 
-		str, err = signr.SignedString([]byte(usr.Uniq))
+		str, err = signr.SignedString(usr.Code)
 		if err != nil {
 			return fibre.NewHTTPError(403)
 		}

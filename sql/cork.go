@@ -1082,6 +1082,7 @@ func (this *DefineLoginStatement) MarshalCORK() (dst []byte, err error) {
 	e.Encode(this.Kind)
 	e.Encode(this.User)
 	e.Encode(this.Pass)
+	e.Encode(this.Code)
 	return b.Bytes(), nil
 }
 
@@ -1091,6 +1092,7 @@ func (this *DefineLoginStatement) UnmarshalCORK(src []byte) (err error) {
 	d.Decode(&this.Kind)
 	d.Decode(&this.User)
 	d.Decode(&this.Pass)
+	d.Decode(&this.Code)
 	return
 }
 
@@ -1140,7 +1142,7 @@ func (this *DefineTokenStatement) MarshalCORK() (dst []byte, err error) {
 	e.Encode(this.Kind)
 	e.Encode(this.Name)
 	e.Encode(this.Type)
-	e.Encode(this.Text)
+	e.Encode(this.Code)
 	return b.Bytes(), nil
 }
 
@@ -1150,7 +1152,7 @@ func (this *DefineTokenStatement) UnmarshalCORK(src []byte) (err error) {
 	d.Decode(&this.Kind)
 	d.Decode(&this.Name)
 	d.Decode(&this.Type)
-	d.Decode(&this.Text)
+	d.Decode(&this.Code)
 	return
 }
 
@@ -1199,6 +1201,7 @@ func (this *DefineScopeStatement) MarshalCORK() (dst []byte, err error) {
 	e := cork.NewEncoder(b)
 	e.Encode(this.Name)
 	e.Encode(this.Time)
+	e.Encode(this.Code)
 	e.Encode(this.Signup)
 	e.Encode(this.Signin)
 	return b.Bytes(), nil
@@ -1209,6 +1212,7 @@ func (this *DefineScopeStatement) UnmarshalCORK(src []byte) (err error) {
 	d := cork.NewDecoder(b)
 	d.Decode(&this.Name)
 	d.Decode(&this.Time)
+	d.Decode(&this.Code)
 	d.Decode(&this.Signup)
 	d.Decode(&this.Signin)
 	return

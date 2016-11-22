@@ -142,11 +142,11 @@ func auth() fibre.MiddlewareFunc {
 								return nil, fmt.Errorf("Unexpected signing method")
 							}
 							auth.Kind = sql.AuthSC
-							return []byte(key.Text), nil
+							return key.Code, nil
 						} else {
 							scp := mem.GetNS(nsv).GetDB(dbv).GetSC(scv)
 							auth.Kind = sql.AuthSC
-							return []byte(scp.Uniq), nil
+							return scp.Code, nil
 						}
 
 					} else if nok && dok && tok {
@@ -157,11 +157,11 @@ func auth() fibre.MiddlewareFunc {
 								return nil, fmt.Errorf("Unexpected signing method")
 							}
 							auth.Kind = sql.AuthDB
-							return []byte(key.Text), nil
+							return key.Code, nil
 						} else if uok {
 							usr := mem.GetNS(nsv).GetDB(dbv).GetAC(usv)
 							auth.Kind = sql.AuthDB
-							return []byte(usr.Uniq), nil
+							return usr.Code, nil
 						}
 
 					} else if nok && tok {
@@ -172,11 +172,11 @@ func auth() fibre.MiddlewareFunc {
 								return nil, fmt.Errorf("Unexpected signing method")
 							}
 							auth.Kind = sql.AuthNS
-							return []byte(key.Text), nil
+							return key.Code, nil
 						} else if uok {
 							usr := mem.GetNS(nsv).GetAC(usv)
 							auth.Kind = sql.AuthNS
-							return []byte(usr.Uniq), nil
+							return usr.Code, nil
 						}
 
 					}

@@ -215,6 +215,7 @@ type DefineLoginStatement struct {
 	Kind Token  `cork:"kind" codec:"kind"`
 	User string `cork:"user" codec:"user"`
 	Pass []byte `cork:"pass" codec:"pass"`
+	Code []byte `cork:"code" codec:"code"`
 }
 
 // RemoveLoginStatement represents an SQL REMOVE LOGIN statement.
@@ -238,7 +239,7 @@ type DefineTokenStatement struct {
 	Kind Token  `cork:"kind" codec:"kind"`
 	Name string `cork:"name" codec:"name"`
 	Type string `cork:"type" codec:"type"`
-	Text string `cork:"text" codec:"text"`
+	Code []byte `cork:"code" codec:"code"`
 }
 
 // RemoveTokenStatement represents an SQL REMOVE TOKEN statement.
@@ -261,6 +262,7 @@ type DefineScopeStatement struct {
 	DB     string        `cork:"-" codec:"-"`
 	Name   string        `cork:"name" codec:"name"`
 	Time   time.Duration `cork:"time" codec:"time"`
+	Code   []byte        `cork:"code" codec:"code"`
 	Signup Expr          `cork:"signup" codec:"signup"`
 	Signin Expr          `cork:"signin" codec:"signin"`
 }

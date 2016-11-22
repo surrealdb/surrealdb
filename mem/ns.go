@@ -49,11 +49,11 @@ func (this *NS) GetTK(name string) *TK {
 func (this *NS) AddTK(ast *sql.DefineTokenStatement) {
 	if tk, ok := this.TK[ast.Name]; ok {
 		tk.Name = ast.Name
-		tk.Text = ast.Text
+		tk.Code = ast.Code
 	} else {
 		this.TK[ast.Name] = &TK{
 			Name: ast.Name,
-			Text: ast.Text,
+			Code: ast.Code,
 		}
 	}
 }

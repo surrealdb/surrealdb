@@ -44,6 +44,10 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 		}
 	}
 
+	if stmt.Code, err = p.parseRand(); err != nil {
+		return nil, err
+	}
+
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}

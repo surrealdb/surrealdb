@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/abcum/surreal/util/rand"
 )
 
 func (p *parser) parseWhat() (mul []Expr, err error) {
@@ -113,6 +115,18 @@ func (p *parser) parseCond() (exp Expr, err error) {
 	}
 
 	return p.parseExpr()
+
+}
+
+// --------------------------------------------------
+//
+// --------------------------------------------------
+
+func (p *parser) parseRand() (exp []byte, err error) {
+
+	exp = rand.New(64)
+
+	return
 
 }
 

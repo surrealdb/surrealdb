@@ -45,20 +45,20 @@ type TB struct {
 
 type AC struct {
 	User string
-	Uniq string
 	Pass []byte
+	Code []byte
 }
 
 type TK struct {
 	Name string
 	Type string
-	Text string
+	Code []byte
 }
 
 type SC struct {
 	TK     map[string]*TK
 	Name   string
-	Uniq   string
+	Code   []byte
 	Time   time.Duration
 	Signup sql.Expr
 	Signin sql.Expr

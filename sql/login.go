@@ -54,6 +54,10 @@ func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err er
 		return nil, err
 	}
 
+	if stmt.Code, err = p.parseRand(); err != nil {
+		return nil, err
+	}
+
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
