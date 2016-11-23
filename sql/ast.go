@@ -66,6 +66,7 @@ type InfoStatement struct {
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
+	Kind Token  `cork:"-" codec:"-"`
 	What string `cork:"-" codec:"-"`
 }
 

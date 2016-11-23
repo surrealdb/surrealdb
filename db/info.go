@@ -15,99 +15,125 @@
 package db
 
 import (
-	"fmt"
 	"github.com/abcum/surreal/kvs"
+	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
-	"github.com/abcum/surreal/util/keys"
-	"github.com/abcum/surreal/util/pack"
 )
 
 func (e *executor) executeInfoStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	if ast.What == "" {
-
-		res := data.New()
-		res.Array("scopes")
-		res.Array("tables")
-		res.Array("views")
-
-		// Get the scope definitions
-		sbeg := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: keys.Prefix}
-		send := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: keys.Suffix}
-		skvs, _ := txn.RGet(sbeg.Encode(), send.Encode(), 0)
-		for _, kv := range skvs {
-			key := &keys.SC{}
-			key.Decode(kv.Key())
-			res.Inc(key.SC, "scopes")
-		}
-
-		// Get the table definitions
-		tbeg := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: keys.Prefix}
-		tend := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: keys.Suffix}
-		tkvs, _ := txn.RGet(tbeg.Encode(), tend.Encode(), 0)
-		for _, kv := range tkvs {
-			key := &keys.TB{}
-			key.Decode(kv.Key())
-			res.Inc(key.TB, "tables")
-		}
-
-		// Get the table definitions
-		vbeg := &keys.VW{KV: ast.KV, NS: ast.NS, DB: ast.DB, VW: keys.Prefix}
-		vend := &keys.VW{KV: ast.KV, NS: ast.NS, DB: ast.DB, VW: keys.Suffix}
-		vkvs, _ := txn.RGet(vbeg.Encode(), vend.Encode(), 0)
-		for _, kv := range vkvs {
-			key, val := &keys.VW{}, &sql.DefineViewStatement{}
-			key.Decode(kv.Key())
-			pack.Decode(kv.Val(), val)
-			res.Inc(val, "views")
-		}
-
-		out = append(out, res.Data())
-
-	} else {
-
-		res := data.New()
-		res.Object("rules")
-		res.Array("fields")
-		res.Array("indexes")
-
-		// Get the rules definitions
-		rbeg := &keys.RU{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: ast.What, RU: keys.Prefix}
-		rend := &keys.RU{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: ast.What, RU: keys.Suffix}
-		rkvs, _ := txn.RGet(rbeg.Encode(), rend.Encode(), 0)
-		for _, kv := range rkvs {
-			key, val := &keys.RU{}, &sql.DefineRulesStatement{}
-			key.Decode(kv.Key())
-			pack.Decode(kv.Val(), val)
-			res.Set(val, "rules", fmt.Sprintf("%v", key.RU))
-		}
-
-		// Get the field definitions
-		fbeg := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: ast.What, FD: keys.Prefix}
-		fend := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: ast.What, FD: keys.Suffix}
-		fkvs, _ := txn.RGet(fbeg.Encode(), fend.Encode(), 0)
-		for _, kv := range fkvs {
-			key, val := &keys.FD{}, &sql.DefineFieldStatement{}
-			key.Decode(kv.Key())
-			pack.Decode(kv.Val(), val)
-			res.Inc(val, "fields")
-		}
-
-		// Get the field definitions
-		ibeg := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: ast.What, IX: keys.Prefix}
-		iend := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: ast.What, IX: keys.Suffix}
-		ikvs, _ := txn.RGet(ibeg.Encode(), iend.Encode(), 0)
-		for _, kv := range ikvs {
-			key, val := &keys.IX{}, &sql.DefineIndexStatement{}
-			key.Decode(kv.Key())
-			pack.Decode(kv.Val(), val)
-			res.Inc(val, "indexes")
-		}
-
-		out = append(out, res.Data())
-
+	switch ast.Kind {
+	case sql.NAMESPACE:
+		return e.executeInfoNSStatement(txn, ast)
+	case sql.DATABASE:
+		return e.executeInfoDBStatement(txn, ast)
+	case sql.TABLE:
+		return e.executeInfoTBStatement(txn, ast)
 	}
+
+	return
+
+}
+
+func (e *executor) executeInfoNSStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
+
+	res := data.New()
+	res.Array("logins")
+	res.Array("tokens")
+	res.Array("databs")
+
+	defer func() {
+		if r := recover(); r != nil {
+			out = append(out, res.Data())
+		}
+	}()
+
+	db := mem.GetNS(ast.NS)
+
+	for _, v := range db.AC {
+		res.Inc(v, "logins")
+	}
+
+	for _, v := range db.TK {
+		res.Inc(v, "tokens")
+	}
+
+	for _, v := range db.DB {
+		res.Inc(v, "databs")
+	}
+
+	out = append(out, res.Data())
+
+	return
+
+}
+
+func (e *executor) executeInfoDBStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
+
+	res := data.New()
+	res.Array("logins")
+	res.Array("tokens")
+	res.Array("scopes")
+	res.Array("tables")
+
+	defer func() {
+		if r := recover(); r != nil {
+			out = append(out, res.Data())
+		}
+	}()
+
+	db := mem.GetNS(ast.NS).GetDB(ast.DB)
+
+	for _, v := range db.AC {
+		res.Inc(v, "logins")
+	}
+
+	for _, v := range db.TK {
+		res.Inc(v, "tokens")
+	}
+
+	for _, v := range db.SC {
+		res.Inc(v, "scopes")
+	}
+
+	for _, v := range db.TB {
+		res.Inc(v, "tables")
+	}
+
+	out = append(out, res.Data())
+
+	return
+
+}
+
+func (e *executor) executeInfoTBStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
+
+	res := data.New()
+	res.Array("fields")
+	res.Array("indexs")
+
+	defer func() {
+		if r := recover(); r != nil {
+			out = append(out, res.Data())
+		}
+	}()
+
+	tb := mem.GetNS(ast.NS).GetDB(ast.DB).GetTB(ast.What)
+
+	for _, v := range tb.RU {
+		res.Inc(v, "rules")
+	}
+
+	for _, v := range tb.FD {
+		res.Inc(v, "fields")
+	}
+
+	for _, v := range tb.IX {
+		res.Inc(v, "indexs")
+	}
+
+	out = append(out, res.Data())
 
 	return
 

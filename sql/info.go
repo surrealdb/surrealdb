@@ -18,11 +18,30 @@ func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 
 	stmt = &InfoStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+	if _, _, err = p.shouldBe(FOR); err != nil {
 		return nil, err
 	}
 
-	if _, _, exi := p.mightBe(FOR); exi {
+	if stmt.Kind, _, err = p.shouldBe(NAMESPACE, DATABASE, TABLE); err != nil {
+		return nil, err
+	}
+
+	if p.is(stmt.Kind, NAMESPACE) {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
+			return nil, err
+		}
+	}
+
+	if p.is(stmt.Kind, DATABASE) {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+			return nil, err
+		}
+	}
+
+	if p.is(stmt.Kind, TABLE) {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+			return nil, err
+		}
 		if stmt.What, err = p.parseName(); err != nil {
 			return nil, err
 		}
