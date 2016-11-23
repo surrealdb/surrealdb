@@ -66,7 +66,7 @@ func (this *TB) GetIX(name string) *IX {
 	return nil
 }
 
-func (this *TB) AdIX(ast *sql.DefineIndexStatement) {
+func (this *TB) AddIX(ast *sql.DefineIndexStatement) {
 	if ix, ok := this.IX[ast.Name]; ok {
 		ix.Name = ast.Name
 		ix.Cols = ast.Cols
