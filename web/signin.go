@@ -135,7 +135,7 @@ func signin(c *fibre.Context) (err error) {
 			"iss": "Surreal",
 			"iat": time.Now().Unix(),
 			"nbf": time.Now().Unix(),
-			"exp": time.Now().Add(10 * time.Minute).Unix(),
+			"exp": time.Now().Add(1 * time.Hour).Unix(),
 		})
 
 		// Try to create the final signed token as a string.
@@ -189,7 +189,7 @@ func signin(c *fibre.Context) (err error) {
 			"iss": "Surreal",
 			"iat": time.Now().Unix(),
 			"nbf": time.Now().Unix(),
-			"exp": time.Now().Add(10 * time.Minute).Unix(),
+			"exp": time.Now().Add(1 * time.Hour).Unix(),
 		})
 
 		// Try to create the final signed token as a string.
