@@ -19,6 +19,8 @@ import "github.com/abcum/surreal/sql"
 // --------------------------------------------------
 
 func (this *NS) GetAC(name string) *AC {
+	this.RLock()
+	defer this.RUnlock()
 	if ac, ok := this.AC[name]; ok {
 		return ac
 	}
@@ -26,6 +28,8 @@ func (this *NS) GetAC(name string) *AC {
 }
 
 func (this *NS) AddAC(ast *sql.DefineLoginStatement) {
+	this.RLock()
+	defer this.RUnlock()
 	if ac, ok := this.AC[ast.User]; ok {
 		ac.User = ast.User
 		ac.Pass = ast.Pass
@@ -40,6 +44,8 @@ func (this *NS) AddAC(ast *sql.DefineLoginStatement) {
 // --------------------------------------------------
 
 func (this *NS) GetTK(name string) *TK {
+	this.RLock()
+	defer this.RUnlock()
 	if tk, ok := this.TK[name]; ok {
 		return tk
 	}
@@ -47,6 +53,8 @@ func (this *NS) GetTK(name string) *TK {
 }
 
 func (this *NS) AddTK(ast *sql.DefineTokenStatement) {
+	this.RLock()
+	defer this.RUnlock()
 	if tk, ok := this.TK[ast.Name]; ok {
 		tk.Name = ast.Name
 		tk.Code = ast.Code
@@ -61,6 +69,8 @@ func (this *NS) AddTK(ast *sql.DefineTokenStatement) {
 // --------------------------------------------------
 
 func (this *NS) GetDB(name string) *DB {
+	this.RLock()
+	defer this.RUnlock()
 	if db, ok := this.DB[name]; ok {
 		return db
 	}
@@ -68,6 +78,8 @@ func (this *NS) GetDB(name string) *DB {
 }
 
 func (this *NS) AddDB(ast *sql.DefineDatabaseStatement) {
+	this.RLock()
+	defer this.RUnlock()
 	if db, ok := this.DB[ast.Name]; ok {
 		db.Name = ast.Name
 	} else {

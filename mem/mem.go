@@ -15,14 +15,21 @@
 package mem
 
 import (
+	"sync"
 	"time"
 
 	"github.com/abcum/surreal/sql"
 )
 
-var store map[string]*NS
+var store *KV
+
+type KV struct {
+	sync.RWMutex
+	NS map[string]*NS
+}
 
 type NS struct {
+	sync.RWMutex
 	AC   map[string]*AC
 	TK   map[string]*TK
 	DB   map[string]*DB
@@ -30,6 +37,7 @@ type NS struct {
 }
 
 type DB struct {
+	sync.RWMutex
 	AC   map[string]*AC
 	TK   map[string]*TK
 	SC   map[string]*SC
@@ -38,24 +46,29 @@ type DB struct {
 }
 
 type TB struct {
+	sync.RWMutex
+	RU   map[string]*RU
 	FD   map[string]*FD
 	IX   map[string]*IX
 	Name string
 }
 
 type AC struct {
+	sync.RWMutex
 	User string
 	Pass []byte
 	Code []byte
 }
 
 type TK struct {
+	sync.RWMutex
 	Name string
 	Type string
 	Code []byte
 }
 
 type SC struct {
+	sync.RWMutex
 	TK     map[string]*TK
 	Name   string
 	Code   []byte
@@ -65,6 +78,7 @@ type SC struct {
 }
 
 type FD struct {
+	sync.RWMutex
 	Name      string
 	Type      string
 	Enum      []interface{}
@@ -80,11 +94,14 @@ type FD struct {
 }
 
 type IX struct {
+	sync.RWMutex
 	Name string
 	Cols []string
 	Uniq bool
 }
 
 func init() {
-	store = make(map[string]*NS)
+	store = &KV{
+		NS: make(map[string]*NS),
+	}
 }

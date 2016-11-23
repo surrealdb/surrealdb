@@ -19,6 +19,8 @@ import "github.com/abcum/surreal/sql"
 // --------------------------------------------------
 
 func (this *SC) GetTK(name string) *TK {
+	this.RLock()
+	defer this.RUnlock()
 	if tk, ok := this.TK[name]; ok {
 		return tk
 	}
@@ -26,6 +28,8 @@ func (this *SC) GetTK(name string) *TK {
 }
 
 func (this *SC) AddTK(ast *sql.DefineTokenStatement) {
+	this.RLock()
+	defer this.RUnlock()
 	if tk, ok := this.TK[ast.Name]; ok {
 		tk.Name = ast.Name
 		tk.Code = ast.Code

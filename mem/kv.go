@@ -19,17 +19,21 @@ import "github.com/abcum/surreal/sql"
 // --------------------------------------------------
 
 func GetNS(name string) *NS {
-	if ns, ok := store[name]; ok {
+	store.RLock()
+	defer store.RUnlock()
+	if ns, ok := store.NS[name]; ok {
 		return ns
 	}
 	return nil
 }
 
 func AddNS(ast *sql.DefineNamespaceStatement) {
-	if ns, ok := store[ast.Name]; ok {
+	store.RLock()
+	defer store.RUnlock()
+	if ns, ok := store.NS[ast.Name]; ok {
 		ns.Name = ast.Name
 	} else {
-		store[ast.Name] = &NS{
+		store.NS[ast.Name] = &NS{
 			Name: ast.Name,
 			AC:   make(map[string]*AC),
 			TK:   make(map[string]*TK),

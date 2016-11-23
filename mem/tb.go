@@ -19,6 +19,8 @@ import "github.com/abcum/surreal/sql"
 // --------------------------------------------------
 
 func (this *TB) GetFD(name string) *FD {
+	this.RLock()
+	defer this.RUnlock()
 	if fd, ok := this.FD[name]; ok {
 		return fd
 	}
@@ -26,6 +28,8 @@ func (this *TB) GetFD(name string) *FD {
 }
 
 func (this *TB) AddFD(ast *sql.DefineFieldStatement) {
+	this.RLock()
+	defer this.RUnlock()
 	if fd, ok := this.FD[ast.Name]; ok {
 		fd.Name = ast.Name
 		fd.Type = ast.Type
@@ -60,6 +64,8 @@ func (this *TB) AddFD(ast *sql.DefineFieldStatement) {
 // --------------------------------------------------
 
 func (this *TB) GetIX(name string) *IX {
+	this.RLock()
+	defer this.RUnlock()
 	if ix, ok := this.IX[name]; ok {
 		return ix
 	}
@@ -67,6 +73,8 @@ func (this *TB) GetIX(name string) *IX {
 }
 
 func (this *TB) AddIX(ast *sql.DefineIndexStatement) {
+	this.RLock()
+	defer this.RUnlock()
 	if ix, ok := this.IX[ast.Name]; ok {
 		ix.Name = ast.Name
 		ix.Cols = ast.Cols
