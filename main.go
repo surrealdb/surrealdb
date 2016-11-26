@@ -17,6 +17,8 @@ package main
 import (
 	"os"
 
+	"runtime"
+
 	"github.com/pkg/profile"
 
 	"github.com/abcum/surreal/cli"
@@ -32,6 +34,8 @@ func main() {
 	case "block":
 		defer profile.Start(profile.BlockProfile, profile.ProfilePath("."), profile.NoShutdownHook).Stop()
 	}
+
+	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	cli.Init()
 
