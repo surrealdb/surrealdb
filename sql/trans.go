@@ -24,6 +24,8 @@ func (p *parser) parseBeginStatement() (stmt *BeginStatement, err error) {
 		return nil, err
 	}
 
+	p.buf.txn = true
+
 	return
 
 }
@@ -38,6 +40,8 @@ func (p *parser) parseCancelStatement() (stmt *CancelStatement, err error) {
 		return nil, err
 	}
 
+	p.buf.txn = false
+
 	return
 
 }
@@ -51,6 +55,8 @@ func (p *parser) parseCommitStatement() (stmt *CommitStatement, err error) {
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
+
+	p.buf.txn = false
 
 	return
 

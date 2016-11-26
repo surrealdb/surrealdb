@@ -16,6 +16,10 @@ package sql
 
 func (p *parser) parseDefineStatement() (Statement, error) {
 
+	if p.buf.txn {
+		return nil, &TXError{}
+	}
+
 	// Inspect the next token.
 	tok, _, err := p.shouldBe(NAMESPACE, DATABASE, LOGIN, TOKEN, SCOPE, TABLE, RULES, FIELD, INDEX, VIEW)
 

@@ -30,6 +30,7 @@ type parser struct {
 	v   map[string]interface{}
 	buf struct {
 		n   int         // buffer size
+		txn bool        // inside txn
 		tok Token       // last read token
 		lit string      // last read literal
 		val interface{} // Last read value
