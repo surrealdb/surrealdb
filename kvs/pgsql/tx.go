@@ -28,6 +28,7 @@ import (
 // TX is a distributed database transaction.
 type TX struct {
 	ds *DS
+	do bool
 	ck []byte
 	tx *sql.Tx
 }
@@ -319,6 +320,10 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 
 }
 
+func (tx *TX) Done() (val bool) {
+	return tx.do
+}
+
 func (tx *TX) Close() (err error) {
 	return tx.Rollback()
 }
@@ -328,10 +333,12 @@ func (tx *TX) Cancel() (err error) {
 }
 
 func (tx *TX) Commit() (err error) {
+	tx.do = true
 	return tx.tx.Commit()
 }
 
 func (tx *TX) Rollback() (err error) {
+	tx.do = true
 	return tx.tx.Rollback()
 }
 

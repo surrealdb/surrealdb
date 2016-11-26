@@ -28,6 +28,7 @@ type TX interface {
 	MDel(...[]byte) error
 	PDel([]byte) error
 	RDel([]byte, []byte, uint64) error
+	Done() bool
 	Close() error
 	Cancel() error
 	Commit() error
