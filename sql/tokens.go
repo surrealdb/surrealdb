@@ -128,6 +128,7 @@ const (
 	FIELD
 	FOR
 	FROM
+	FULL
 	GROUP
 	ID
 	IF
@@ -157,12 +158,12 @@ const (
 	OR
 	ORDER
 	PASSWORD
+	PERMISSIONS
 	READONLY
 	REJECT
 	RELATE
 	REMOVE
 	RETURN
-	RULES
 	SCHEMAFULL
 	SCHEMALESS
 	SCOPE
@@ -292,6 +293,7 @@ var tokens = [...]string{
 	FIELD:           "FIELD",
 	FOR:             "FOR",
 	FROM:            "FROM",
+	FULL:            "FULL",
 	GROUP:           "GROUP",
 	ID:              "ID",
 	IF:              "IF",
@@ -320,12 +322,12 @@ var tokens = [...]string{
 	OR:              "OR",
 	ORDER:           "ORDER",
 	PASSWORD:        "PASSWORD",
+	PERMISSIONS:     "PERMISSIONS",
 	READONLY:        "READONLY",
 	REJECT:          "REJECT",
 	RELATE:          "RELATE",
 	REMOVE:          "REMOVE",
 	RETURN:          "RETURN",
-	RULES:           "RULES",
 	SCHEMAFULL:      "SCHEMAFULL",
 	SCHEMALESS:      "SCHEMALESS",
 	SCOPE:           "SCOPE",

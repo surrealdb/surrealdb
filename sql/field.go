@@ -36,7 +36,7 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 
 	for {
 
-		tok, _, exi := p.mightBe(MIN, MAX, TYPE, ENUM, CODE, MATCH, DEFAULT, NOTNULL, READONLY, MANDATORY, VALIDATE)
+		tok, _, exi := p.mightBe(MIN, MAX, TYPE, ENUM, CODE, MATCH, DEFAULT, NOTNULL, READONLY, MANDATORY, VALIDATE, PERMISSIONS)
 		if !exi {
 			break
 		}
@@ -116,6 +116,12 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 				if tok == FALSE {
 					stmt.Validate = false
 				}
+			}
+		}
+
+		if p.is(tok, PERMISSIONS) {
+			if stmt.Perm, err = p.parsePerms(); err != nil {
+				return nil, err
 			}
 		}
 

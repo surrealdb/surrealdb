@@ -1600,7 +1600,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `DEFINE`,
-			err: "Found `` but expected `NAMESPACE, DATABASE, SCOPE, TABLE, RULES, FIELD, INDEX, VIEW`",
+			err: "Found `` but expected `NAMESPACE, DATABASE, SCOPE, TABLE, FIELD, INDEX, VIEW`",
 		},
 		// ----------------------------------------------------------------------
 		{
@@ -1654,57 +1654,6 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE TABLE person SCHEMAFULL something`,
-			err: "Found `something` but expected `EOF, ;`",
-		},
-		// ----------------------------------------------------------------------
-		{
-			sql: `DEFINE RULES`,
-			err: "Found `` but expected `ON`",
-		},
-		{
-			sql: `DEFINE RULES ON`,
-			err: "Found `` but expected `name`",
-		},
-		{
-			sql: `DEFINE RULES ON person`,
-			err: "Found `` but expected `FOR`",
-		},
-		{
-			sql: `DEFINE RULES ON person FOR`,
-			err: "Found `` but expected `SELECT, CREATE, UPDATE, DELETE, RELATE`",
-		},
-		{
-			sql: `DEFINE RULES ON person FOR select, create, update, delete`,
-			err: "Found `` but expected `ACCEPT, REJECT`",
-		},
-		{
-			sql: `DEFINE RULES ON person FOR select, create, update, delete ACCEPT`,
-			res: &Query{Statements: []Statement{&DefineRulesStatement{
-				KV: "*", NS: "*", DB: "*",
-				What: []string{"person"},
-				When: []string{"SELECT", "CREATE", "UPDATE", "DELETE"},
-				Rule: "ACCEPT",
-			}}},
-		},
-		{
-			sql: `DEFINE RULES ON person FOR select, create, update, delete ACCEPT something`,
-			err: "Found `something` but expected `EOF, ;`",
-		},
-		{
-			sql: `DEFINE RULES ON person FOR select, create, update, delete REJECT`,
-			res: &Query{Statements: []Statement{&DefineRulesStatement{
-				KV: "*", NS: "*", DB: "*",
-				What: []string{"person"},
-				When: []string{"SELECT", "CREATE", "UPDATE", "DELETE"},
-				Rule: "REJECT",
-			}}},
-		},
-		{
-			sql: `DEFINE RULES ON person FOR select, create, update, delete ACCEPT something`,
-			err: "Found `something` but expected `EOF, ;`",
-		},
-		{
-			sql: `DEFINE RULES ON person FOR select, create, update, delete REJECT something`,
 			err: "Found `something` but expected `EOF, ;`",
 		},
 		// ----------------------------------------------------------------------
@@ -2242,7 +2191,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `REMOVE`,
-			err: "Found `` but expected `NAMESPACE, DATABASE, SCOPE, TABLE, RULES, FIELD, INDEX, VIEW`",
+			err: "Found `` but expected `NAMESPACE, DATABASE, SCOPE, TABLE, FIELD, INDEX, VIEW`",
 		},
 		// ----------------------------------------------------------------------
 		{
@@ -2272,35 +2221,6 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		},
 		{
 			sql: `REMOVE TABLE person something`,
-			err: "Found `something` but expected `EOF, ;`",
-		},
-		// ----------------------------------------------------------------------
-		{
-			sql: `REMOVE RULES`,
-			err: "Found `` but expected `ON`",
-		},
-		{
-			sql: `REMOVE RULES ON`,
-			err: "Found `` but expected `name`",
-		},
-		{
-			sql: `REMOVE RULES ON person`,
-			err: "Found `` but expected `FOR`",
-		},
-		{
-			sql: `REMOVE RULES ON person FOR`,
-			err: "Found `` but expected `SELECT, CREATE, UPDATE, DELETE, RELATE`",
-		},
-		{
-			sql: `REMOVE RULES ON person FOR select, create, update, delete`,
-			res: &Query{Statements: []Statement{&RemoveRulesStatement{
-				KV: "*", NS: "*", DB: "*",
-				What: []string{"person"},
-				When: []string{"SELECT", "CREATE", "UPDATE", "DELETE"},
-			}}},
-		},
-		{
-			sql: `REMOVE RULES ON person FOR select, create, update, delete something`,
 			err: "Found `something` but expected `EOF, ;`",
 		},
 		// ----------------------------------------------------------------------

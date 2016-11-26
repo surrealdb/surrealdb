@@ -21,7 +21,7 @@ func (p *parser) parseRemoveStatement() (Statement, error) {
 	}
 
 	// Inspect the next token.
-	tok, _, err := p.shouldBe(NAMESPACE, DATABASE, LOGIN, TOKEN, SCOPE, TABLE, RULES, FIELD, INDEX, VIEW)
+	tok, _, err := p.shouldBe(NAMESPACE, DATABASE, LOGIN, TOKEN, SCOPE, TABLE, FIELD, INDEX, VIEW)
 
 	switch tok {
 	case NAMESPACE:
@@ -36,8 +36,6 @@ func (p *parser) parseRemoveStatement() (Statement, error) {
 		return p.parseRemoveScopeStatement()
 	case TABLE:
 		return p.parseRemoveTableStatement()
-	case RULES:
-		return p.parseRemoveRulesStatement()
 	case FIELD:
 		return p.parseRemoveFieldStatement()
 	case INDEX:

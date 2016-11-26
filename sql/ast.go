@@ -282,11 +282,12 @@ type RemoveScopeStatement struct {
 
 // DefineTableStatement represents an SQL DEFINE TABLE statement.
 type DefineTableStatement struct {
-	KV   string   `cork:"-" codec:"-"`
-	NS   string   `cork:"-" codec:"-"`
-	DB   string   `cork:"-" codec:"-"`
-	What []string `cork:"-" codec:"-"`
-	Full bool     `cork:"full" codec:"full"`
+	KV   string          `cork:"-" codec:"-"`
+	NS   string          `cork:"-" codec:"-"`
+	DB   string          `cork:"-" codec:"-"`
+	What []string        `cork:"-" codec:"-"`
+	Full bool            `cork:"full" codec:"full"`
+	Perm *PermExpression `cork:"perm" codec:"perm"`
 }
 
 // RemoveTableStatement represents an SQL REMOVE TABLE statement.
@@ -298,51 +299,28 @@ type RemoveTableStatement struct {
 }
 
 // --------------------------------------------------
-// Rules
-// --------------------------------------------------
-
-// DefineRulesStatement represents an SQL DEFINE RULES statement.
-type DefineRulesStatement struct {
-	KV   string   `cork:"-" codec:"-"`
-	NS   string   `cork:"-" codec:"-"`
-	DB   string   `cork:"-" codec:"-"`
-	What []string `cork:"-" codec:"-"`
-	When []string `cork:"-" codec:"-"`
-	Rule string   `cork:"rule" codec:"rule"`
-	Cond Expr     `cork:"cond" codec:"cond"`
-}
-
-// RemoveRulesStatement represents an SQL REMOVE RULES statement.
-type RemoveRulesStatement struct {
-	KV   string   `cork:"-" codec:"-"`
-	NS   string   `cork:"-" codec:"-"`
-	DB   string   `cork:"-" codec:"-"`
-	What []string `cork:"-" codec:"-"`
-	When []string `cork:"-" codec:"-"`
-}
-
-// --------------------------------------------------
 // Field
 // --------------------------------------------------
 
 // DefineFieldStatement represents an SQL DEFINE FIELD statement.
 type DefineFieldStatement struct {
-	KV        string        `cork:"-" codec:"-"`
-	NS        string        `cork:"-" codec:"-"`
-	DB        string        `cork:"-" codec:"-"`
-	Name      string        `cork:"name" codec:"name"`
-	What      []string      `cork:"-" codec:"-"`
-	Type      string        `cork:"type" codec:"type"`
-	Enum      []interface{} `cork:"enum" codec:"enum"`
-	Code      string        `cork:"code" codec:"code"`
-	Min       float64       `cork:"min" codec:"min"`
-	Max       float64       `cork:"max" codec:"max"`
-	Match     string        `cork:"match" codec:"match"`
-	Default   interface{}   `cork:"default" codec:"default"`
-	Notnull   bool          `cork:"notnull" codec:"notnull"`
-	Readonly  bool          `cork:"readonly" codec:"readonly"`
-	Mandatory bool          `cork:"mandatory" codec:"mandatory"`
-	Validate  bool          `cork:"validate" codec:"validate"`
+	KV        string          `cork:"-" codec:"-"`
+	NS        string          `cork:"-" codec:"-"`
+	DB        string          `cork:"-" codec:"-"`
+	Name      string          `cork:"name" codec:"name"`
+	What      []string        `cork:"-" codec:"-"`
+	Type      string          `cork:"type" codec:"type"`
+	Perm      *PermExpression `cork:"perm" codec:"perm"`
+	Enum      []interface{}   `cork:"enum" codec:"enum"`
+	Code      string          `cork:"code" codec:"code"`
+	Min       float64         `cork:"min" codec:"min"`
+	Max       float64         `cork:"max" codec:"max"`
+	Match     string          `cork:"match" codec:"match"`
+	Default   interface{}     `cork:"default" codec:"default"`
+	Notnull   bool            `cork:"notnull" codec:"notnull"`
+	Readonly  bool            `cork:"readonly" codec:"readonly"`
+	Mandatory bool            `cork:"mandatory" codec:"mandatory"`
+	Validate  bool            `cork:"validate" codec:"validate"`
 }
 
 // RemoveFieldStatement represents an SQL REMOVE FIELD statement.
@@ -496,6 +474,15 @@ type SubpExpression struct {
 	What []Expr
 	Name string
 	Cond Expr
+}
+
+// PermExpression represents a permissions expression.
+type PermExpression struct {
+	Select Expr
+	Create Expr
+	Update Expr
+	Relate Expr
+	Delete Expr
 }
 
 // DiffExpression represents a JSON to DIFF

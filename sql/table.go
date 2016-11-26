@@ -26,8 +26,27 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 		return nil, err
 	}
 
-	if tok, _, exi := p.mightBe(SCHEMAFULL, SCHEMALESS); exi && tok == SCHEMAFULL {
-		stmt.Full = true
+	for {
+
+		tok, _, exi := p.mightBe(SCHEMAFULL, SCHEMALESS, PERMISSIONS)
+		if !exi {
+			break
+		}
+
+		if p.is(tok, SCHEMAFULL) {
+			stmt.Full = true
+		}
+
+		if p.is(tok, SCHEMALESS) {
+			stmt.Full = false
+		}
+
+		if p.is(tok, PERMISSIONS) {
+			if stmt.Perm, err = p.parsePerms(); err != nil {
+				return nil, err
+			}
+		}
+
 	}
 
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
