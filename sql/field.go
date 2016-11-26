@@ -121,10 +121,6 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 
 	}
 
-	if stmt.Type == "" {
-		stmt.Type = "any"
-	}
-
 	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
