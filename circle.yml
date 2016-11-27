@@ -28,6 +28,7 @@ dependencies:
         - docker info
         - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
         - go get -u github.com/Masterminds/glide
+        - go get -u github.com/jteeuwen/go-bindata/...
 
 # -----------------------------------
 
