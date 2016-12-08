@@ -175,6 +175,26 @@ var funcs = map[string]map[int]bool{
 		1: true,
 	},
 
+	// HOTP implementation
+
+	"hotp.compare": {
+		2: true,
+	},
+
+	"hotp.generate": {
+		1: true,
+	},
+
+	// TOTP implementation
+
+	"totp.compare": {
+		2: true,
+	},
+
+	"totp.generate": {
+		1: true,
+	},
+
 	// Bcrypt implementation
 
 	"bcrypt.compare": {
@@ -203,5 +223,24 @@ var funcs = map[string]map[int]bool{
 
 	"pbkdf2.generate": {
 		1: true,
+	},
+
+	// Yubikey implementation
+
+	"yubikey.id": {
+		1: true,
+	},
+
+	"yubikey.ctr": {
+		1: true,
+	},
+
+	"yubikey.use": {
+		1: true,
+	},
+
+	"yubikey.verify": {
+		2: true, // yubikey.verify(AUTHSERV, $otp)
+		3: true, // yubikey.verify(CLIENTID, SECRET, $otp)
 	},
 }
