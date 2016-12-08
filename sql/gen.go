@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sql
-
 //+build generate
+
+package sql
 
 //go:generate codecgen -o ast.gen.go ast.go
