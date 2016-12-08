@@ -150,22 +150,22 @@ func (tx *TX) RGet(beg, end []byte, max uint64) (kvs []kvs.KV, err error) {
 func (tx *TX) Put(key, val []byte) (err error) {
 
 	if !tx.tx.Writable() {
-		err = &kvs.TXError{err}
+		err = &kvs.TXError{Err: err}
 		return
 	}
 
 	if val, err = snap.Encode(val); err != nil {
-		err = &kvs.DBError{err}
+		err = &kvs.DBError{Err: err}
 		return
 	}
 
 	if val, err = cryp.Encrypt(tx.ds.ck, val); err != nil {
-		err = &kvs.CKError{err}
+		err = &kvs.CKError{Err: err}
 		return
 	}
 
 	if err = tx.bu.Put(key, val); err != nil {
-		err = &kvs.DBError{err}
+		err = &kvs.DBError{Err: err}
 		return
 	}
 
@@ -179,7 +179,7 @@ func (tx *TX) Put(key, val []byte) (err error) {
 func (tx *TX) CPut(key, val, exp []byte) (err error) {
 
 	if !tx.tx.Writable() {
-		err = &kvs.TXError{err}
+		err = &kvs.TXError{Err: err}
 		return
 	}
 
@@ -187,22 +187,22 @@ func (tx *TX) CPut(key, val, exp []byte) (err error) {
 	act := now.(*KV).val
 
 	if !bytes.Equal(act, exp) {
-		err = &kvs.KVError{err, key, act, exp}
+		err = &kvs.KVError{Err: err, Key: key, Val: act, Exp: exp}
 		return
 	}
 
 	if val, err = snap.Encode(val); err != nil {
-		err = &kvs.DBError{err}
+		err = &kvs.DBError{Err: err}
 		return
 	}
 
 	if val, err = cryp.Encrypt(tx.ds.ck, val); err != nil {
-		err = &kvs.CKError{err}
+		err = &kvs.CKError{Err: err}
 		return
 	}
 
 	if err = tx.bu.Put(key, val); err != nil {
-		err = &kvs.DBError{err}
+		err = &kvs.DBError{Err: err}
 		return
 	}
 
@@ -214,12 +214,12 @@ func (tx *TX) CPut(key, val, exp []byte) (err error) {
 func (tx *TX) Del(key []byte) (err error) {
 
 	if !tx.tx.Writable() {
-		err = &kvs.TXError{err}
+		err = &kvs.TXError{Err: err}
 		return
 	}
 
 	if err = tx.bu.Delete(key); err != nil {
-		err = &kvs.DBError{err}
+		err = &kvs.DBError{Err: err}
 		return
 	}
 
@@ -232,7 +232,7 @@ func (tx *TX) Del(key []byte) (err error) {
 func (tx *TX) CDel(key, exp []byte) (err error) {
 
 	if !tx.tx.Writable() {
-		err = &kvs.TXError{err}
+		err = &kvs.TXError{Err: err}
 		return
 	}
 
@@ -240,12 +240,12 @@ func (tx *TX) CDel(key, exp []byte) (err error) {
 	act := now.(*KV).val
 
 	if !bytes.Equal(act, exp) {
-		err = &kvs.KVError{err, key, act, exp}
+		err = &kvs.KVError{Err: err, Key: key, Val: act, Exp: exp}
 		return
 	}
 
 	if err = tx.bu.Delete(key); err != nil {
-		err = &kvs.DBError{err}
+		err = &kvs.DBError{Err: err}
 		return
 	}
 
@@ -257,14 +257,14 @@ func (tx *TX) CDel(key, exp []byte) (err error) {
 func (tx *TX) MDel(keys ...[]byte) (err error) {
 
 	if !tx.tx.Writable() {
-		err = &kvs.TXError{err}
+		err = &kvs.TXError{Err: err}
 		return
 	}
 
 	for _, key := range keys {
 
 		if err = tx.bu.Delete(key); err != nil {
-			err = &kvs.DBError{err}
+			err = &kvs.DBError{Err: err}
 			return
 		}
 
@@ -281,7 +281,7 @@ func (tx *TX) PDel(pre []byte) (err error) {
 
 	for key, _ := cu.Seek(pre); bytes.HasPrefix(key, pre); key, _ = cu.Seek(pre) {
 		if err = tx.bu.Delete(key); err != nil {
-			err = &kvs.DBError{err}
+			err = &kvs.DBError{Err: err}
 			return
 		}
 	}
@@ -300,7 +300,7 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 	}
 
 	if !tx.tx.Writable() {
-		err = &kvs.TXError{err}
+		err = &kvs.TXError{Err: err}
 		return
 	}
 
@@ -309,7 +309,7 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 	if bytes.Compare(beg, end) < 1 {
 		for key, _ := cu.Seek(beg); key != nil && max > 0 && bytes.Compare(key, end) < 0; key, _ = cu.Seek(beg) {
 			if err = tx.bu.Delete(key); err != nil {
-				err = &kvs.DBError{err}
+				err = &kvs.DBError{Err: err}
 				return
 			}
 			max--
@@ -319,7 +319,7 @@ func (tx *TX) RDel(beg, end []byte, max uint64) (err error) {
 	if bytes.Compare(beg, end) > 1 {
 		for key, _ := cu.Seek(end); key != nil && max > 0 && bytes.Compare(beg, key) < 0; key, _ = cu.Seek(end) {
 			if err = tx.bu.Delete(key); err != nil {
-				err = &kvs.DBError{err}
+				err = &kvs.DBError{Err: err}
 				return
 			}
 			max--
@@ -365,13 +365,13 @@ func get(tx *TX, key, val []byte) (kv *KV, err error) {
 
 	kv.val, err = cryp.Decrypt(tx.ds.ck, kv.val)
 	if err != nil {
-		err = &kvs.CKError{err}
+		err = &kvs.CKError{Err: err}
 		return
 	}
 
 	kv.val, err = snap.Decode(kv.val)
 	if err != nil {
-		err = &kvs.DBError{err}
+		err = &kvs.DBError{Err: err}
 		return
 	}
 

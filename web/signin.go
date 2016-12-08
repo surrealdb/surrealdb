@@ -60,7 +60,7 @@ func signin(c *fibre.Context) (err error) {
 
 		// Process the scope signin statement.
 
-		res, err = db.Process(c, &sql.Query{[]sql.Statement{scp.Signin}}, vars)
+		res, err = db.Process(c, &sql.Query{Statements: []sql.Statement{scp.Signin}}, vars)
 		if err != nil {
 			return fibre.NewHTTPError(403)
 		}

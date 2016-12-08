@@ -29,7 +29,7 @@ func (ds *DS) Txn(writable bool) (txn kvs.TX, err error) {
 
 	tx, err := ds.db.Begin(writable)
 	if err != nil {
-		err = &kvs.DSError{err}
+		err = &kvs.DSError{Err: err}
 		if tx != nil {
 			tx.Rollback()
 		}
