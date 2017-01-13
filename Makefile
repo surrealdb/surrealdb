@@ -58,6 +58,16 @@ deps:
 tests:
 	$(GO) test `glide novendor`
 
+# The `make cover` command runs all
+# tests, and produces and uploads a
+# coverage profile to coveralls.
+
+.PHONY: cover
+cover:
+	echo 'mode: atomic' > main.cover
+	glide novendor | cut -d '/' -f-2 | xargs -I % sh -c 'touch temp.cover; go test -covermode=count -coverprofile=temp.cover %; tail -n +2 temp.cover >> main.cover; rm temp.cover;'
+	goveralls -coverprofile=./main.cover -service=circle-ci -repotoken=${COVERALLS}
+
 # The `make glide` command ensures that
 # all imported dependencies are synced
 # and located within the vendor folder.
@@ -75,6 +85,7 @@ clean:
 	rm -rf vendor
 	$(GO) clean -i `glide novendor`
 	find . -name '*.test' -type f -exec rm -f {} \;
+	find . -name '*.cover' -type f -exec rm -f {} \;
 	find . -name '*.gen.go' -type f -exec rm -f {} \;
 
 # The `make setup` command runs the
