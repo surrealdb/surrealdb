@@ -18,10 +18,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/robertkrimen/otto"
 	"github.com/yuin/gopher-lua"
 
-	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/conv"
 )
@@ -39,45 +37,21 @@ func (this *Doc) each(fld *sql.DefineFieldStatement) (err error) {
 
 		if fld.Code != "" {
 
-			if cnf.Settings.DB.Lang == "js" {
+			vm := lua.NewState()
+			defer vm.Close()
 
-				vm := otto.New()
+			vm.SetGlobal("doc", toLUA(vm, this.current.Copy()))
 
-				vm.Set("doc", this.current.Copy())
-
-				ret, err := vm.Run("(function() { " + fld.Code + " })()")
-				if err != nil {
-					return fmt.Errorf("Problem executing code: %v %v", fld.Code, err.Error())
-				}
-
-				if ret.IsUndefined() {
-					this.current.Del(key)
-				} else {
-					val, _ := ret.Export()
-					this.current.Set(val, key)
-				}
-
+			if err := vm.DoString(fld.Code); err != nil {
+				return fmt.Errorf("Problem executing code: %v %v", fld.Code, err.Error())
 			}
 
-			if cnf.Settings.DB.Lang == "lua" {
+			ret := vm.Get(-1)
 
-				vm := lua.NewState()
-				defer vm.Close()
-
-				vm.SetGlobal("doc", toLUA(vm, this.current.Copy()))
-
-				if err := vm.DoString(fld.Code); err != nil {
-					return fmt.Errorf("Problem executing code: %v %v", fld.Code, err.Error())
-				}
-
-				ret := vm.Get(-1)
-
-				if ret == lua.LNil {
-					this.current.Del(key)
-				} else {
-					this.current.Set(frLUA(ret), key)
-				}
-
+			if ret == lua.LNil {
+				this.current.Del(key)
+			} else {
+				this.current.Set(frLUA(ret), key)
 			}
 
 		}

@@ -106,21 +106,6 @@ func setup() {
 	}
 
 	// --------------------------------------------------
-	// Lang
-	// --------------------------------------------------
-
-	// Ensure that the default
-	// language options are set
-
-	if opts.DB.Lang == "" {
-		opts.DB.Lang = "lua"
-	}
-
-	if opts.DB.Lang != "js" && opts.DB.Lang != "lua" {
-		log.Fatal("Specify a valid runtime language. Valid languages are js, or lua.")
-	}
-
-	// --------------------------------------------------
 	// Auth
 	// --------------------------------------------------
 

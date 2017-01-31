@@ -79,8 +79,6 @@ func init() {
 	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Key, "db-key", "", "Path to the private key file used to connect to the remote database.")
 	startCmd.PersistentFlags().StringVar(&opts.DB.Path, "db-path", "", flag("db"))
 
-	startCmd.PersistentFlags().StringVarP(&opts.DB.Lang, "language", "l", "lua", "The runtime language to use.")
-
 	startCmd.PersistentFlags().StringVarP(&opts.Cluster.Join, "join", "j", "", flag("join"))
 
 	startCmd.PersistentFlags().StringVarP(&opts.DB.Code, "key", "k", "", flag("key"))
