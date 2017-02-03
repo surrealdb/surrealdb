@@ -15,11 +15,12 @@
 package sql
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
 	"time"
+
+	json "github.com/hjson/hjson-go"
 )
 
 func (p *parser) in(token Token, tokens []Token) bool {
