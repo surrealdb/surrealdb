@@ -756,8 +756,6 @@ func (p *parser) parsePath(expr ...Expr) (path *PathExpression, err error) {
 
 	}
 
-	return
-
 }
 
 func (p *parser) parseJoin() (exp Expr, err error) {
