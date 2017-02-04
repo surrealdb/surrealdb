@@ -65,10 +65,35 @@ func (d *Doc) Decode(src []byte) *Doc {
 // --------------------------------------------------------------------------------
 
 func (d *Doc) path(path ...string) (paths []string) {
+
 	for _, p := range path {
-		paths = append(paths, strings.Split(p, ".")...)
+		for j, i, o := 0, 0, false; i < len(p); i++ {
+			switch {
+			case i == len(p)-1:
+				if len(p[j:]) > 0 {
+					paths = append(paths, p[j:])
+				}
+			case p[i] == '.':
+				if len(p[j:i]) > 0 {
+					paths = append(paths, p[j:i])
+				}
+				j, i = i+1, i+0
+			case p[i] == '[':
+				if len(p[j:i]) > 0 {
+					paths = append(paths, p[j:i])
+				}
+				j, i, o = i, i+1, true
+			case p[i] == ']' && o:
+				if len(p[j:i+1]) > 0 {
+					paths = append(paths, p[j:i+1])
+				}
+				j, i, o = i+1, i+0, false
+			}
+		}
 	}
+
 	return
+
 }
 
 // --------------------------------------------------------------------------------
