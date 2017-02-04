@@ -751,14 +751,7 @@ func (d *Doc) Dec(value interface{}, path ...string) (*Doc, error) {
 
 // --------------------------------------------------------------------------------
 
-type walker func(key string, val interface{}) error
-
-// Walk walks the value or values at a specified path.
-func (d *Doc) Walk(exec walker, path ...string) error {
-
-	return d.walk(exec, nil, path...)
-
-}
+type Iterator func(key string, val interface{}) error
 
 func (d *Doc) join(parts ...[]string) string {
 	var path []string
@@ -768,12 +761,73 @@ func (d *Doc) join(parts ...[]string) string {
 	return strings.Join(path, ".")
 }
 
-func (d *Doc) walk(exec walker, prev []string, path ...string) error {
+// --------------------------------------------------------------------------------
+
+// Each loops through the values in the data doc.
+func (d *Doc) Each(exec Iterator) error {
+
+	return d.each(exec, nil)
+
+}
+
+func (d *Doc) each(exec Iterator, prev []string) error {
+
+	if d.data == nil {
+		return nil
+	}
+
+	// Define the temporary object so
+	// that we can loop over and traverse
+	// down the path parts of the data
+
+	object := d.data
+
+	// If the value found at the current
+	// path part is an object, then move
+	// to the next part of the path
+
+	if m, ok := object.(map[string]interface{}); ok {
+		for k, v := range m {
+			var keep []string
+			keep = append(keep, prev...)
+			keep = append(keep, k)
+			Consume(v).each(exec, keep)
+		}
+		return nil
+	}
+
+	// If the value found at the current
+	// path part is an array, then perform
+	// the query on the specified items
+
+	if a, ok := object.([]interface{}); ok {
+		for i, v := range a {
+			var keep []string
+			keep = append(keep, prev...)
+			keep = append(keep, fmt.Sprintf("%d", i))
+			Consume(v).each(exec, keep)
+		}
+		return nil
+	}
+
+	return exec(d.join(prev), object)
+
+}
+
+// --------------------------------------------------------------------------------
+
+// Walk walks the value or values at a specified path.
+func (d *Doc) Walk(exec Iterator, path ...string) error {
 
 	path = d.path(path...)
 
+	return d.walk(exec, nil, path...)
+
+}
+
+func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
+
 	if len(path) == 0 {
-		d.data = nil
 		return nil
 	}
 

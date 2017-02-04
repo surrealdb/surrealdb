@@ -64,6 +64,16 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldNotBeNil)
 	})
 
+	Convey("Can't each nil", t, func() {
+		doc := Consume(nil)
+		var i int
+		doc.Each(func(key string, val interface{}) error {
+			i++
+			return nil
+		})
+		So(i, ShouldEqual, 0)
+	})
+
 	// ----------------------------------------------------------------------
 	// Ability to attempt new()
 	// ----------------------------------------------------------------------
@@ -291,6 +301,17 @@ func TestOperations(t *testing.T) {
 		def, err := doc.Set(obj, "the.item")
 		So(err, ShouldBeNil)
 		So(def, ShouldHaveSameTypeAs, &Doc{})
+	})
+
+	// ----------------------------------------------------------------------------------------------------
+
+	Convey("Can iterate using each", t, func() {
+		var i int
+		doc.Each(func(key string, val interface{}) error {
+			i++
+			return nil
+		})
+		So(i, ShouldEqual, 15)
 	})
 
 	// ----------------------------------------------------------------------------------------------------
