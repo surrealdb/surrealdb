@@ -246,6 +246,15 @@ func TestOperations(t *testing.T) {
 
 	doc := New()
 
+	alt := map[string]interface{}{
+		"bool":   true,
+		"number": 12,
+		"string": "s",
+		"tags": []interface{}{
+			"Hot",
+		},
+	}
+
 	obj := map[string]interface{}{
 		"bool":   true,
 		"number": 10,
@@ -312,6 +321,20 @@ func TestOperations(t *testing.T) {
 			return nil
 		})
 		So(i, ShouldEqual, 15)
+	})
+
+	// ----------------------------------------------------------------------------------------------------
+
+	Convey("Can diff two different docs", t, func() {
+		dif := doc.Diff(doc)
+		So(len(dif), ShouldEqual, 0)
+	})
+
+	Convey("Can diff two different docs", t, func() {
+		two := New()
+		two.Set(alt, "the.item")
+		dif := doc.Diff(two)
+		So(len(dif), ShouldEqual, 12)
 	})
 
 	// ----------------------------------------------------------------------------------------------------

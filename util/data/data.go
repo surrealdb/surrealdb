@@ -751,6 +751,43 @@ func (d *Doc) Dec(value interface{}, path ...string) (*Doc, error) {
 
 // --------------------------------------------------------------------------------
 
+func (d *Doc) Diff(n *Doc) map[string]interface{} {
+
+	var initial = make(map[string]interface{})
+	var current = make(map[string]interface{})
+	var changes = make(map[string]interface{})
+
+	d.Each(func(key string, val interface{}) error {
+		initial[key] = val
+		return nil
+	})
+
+	n.Each(func(key string, val interface{}) error {
+		current[key] = val
+		return nil
+	})
+
+	for k, v := range current {
+		if o, ok := initial[k]; ok {
+			if reflect.DeepEqual(o, v) {
+				continue
+			}
+		}
+		changes[k] = v
+	}
+
+	for k := range initial {
+		if _, ok := current[k]; !ok {
+			changes[k] = nil
+		}
+	}
+
+	return changes
+
+}
+
+// --------------------------------------------------------------------------------
+
 type Iterator func(key string, val interface{}) error
 
 func (d *Doc) join(parts ...[]string) string {
