@@ -32,12 +32,12 @@ type Doc struct {
 
 // New creates a new data object.
 func New() *Doc {
-	return &Doc{map[string]interface{}{}}
+	return &Doc{data: map[string]interface{}{}}
 }
 
 // Consume converts a GO interface into a data object.
 func Consume(input interface{}) *Doc {
-	return &Doc{input}
+	return &Doc{data: input}
 }
 
 // Data returns the internal data object as an interface.
@@ -111,7 +111,7 @@ func (d *Doc) Iff(value interface{}, path ...string) (*Doc, error) {
 	if value != nil {
 		return d.Set(value, path...)
 	}
-	return &Doc{nil}, d.Del(path...)
+	return &Doc{data: nil}, d.Del(path...)
 }
 
 // Keys retrieves the object keys at the specified path.
@@ -127,7 +127,7 @@ func (d *Doc) Keys(path ...string) *Doc {
 		}
 	}
 
-	return &Doc{out}
+	return &Doc{data: out}
 
 }
 
@@ -144,7 +144,7 @@ func (d *Doc) Vals(path ...string) *Doc {
 		}
 	}
 
-	return &Doc{out}
+	return &Doc{data: out}
 
 }
 
@@ -252,7 +252,7 @@ func (d *Doc) Get(path ...string) *Doc {
 	// return false immediately
 
 	if d.data == nil {
-		return &Doc{nil}
+		return &Doc{data: nil}
 	}
 
 	// Define the temporary object so
@@ -292,7 +292,7 @@ func (d *Doc) Get(path ...string) *Doc {
 			} else if p == "last" {
 				i = len(a) - 1
 			} else if p == "length" {
-				return &Doc{len(a)}
+				return &Doc{data: len(a)}
 			} else {
 				i, e = strconv.Atoi(p)
 			}
@@ -303,7 +303,7 @@ func (d *Doc) Get(path ...string) *Doc {
 
 			if e == nil {
 				if 0 == len(a) || i >= len(a) {
-					return &Doc{nil}
+					return &Doc{data: nil}
 				}
 				return Consume(a[i]).Get(path[k+1:]...)
 			}
@@ -329,17 +329,17 @@ func (d *Doc) Get(path ...string) *Doc {
 
 				}
 
-				return &Doc{out}
+				return &Doc{data: out}
 
 			}
 
 		}
 
-		return &Doc{nil}
+		return &Doc{data: nil}
 
 	}
 
-	return &Doc{object}
+	return &Doc{data: object}
 
 }
 
@@ -414,7 +414,7 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 			if e == nil {
 
 				if 0 == len(a) || i >= len(a) {
-					return &Doc{nil}, fmt.Errorf("No item with index %d in array, using path %s", i, path)
+					return &Doc{data: nil}, fmt.Errorf("No item with index %d in array, using path %s", i, path)
 				}
 
 				if k == len(path)-1 {
@@ -448,7 +448,7 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 
 				}
 
-				return &Doc{out}, nil
+				return &Doc{data: out}, nil
 
 			}
 
@@ -456,7 +456,7 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 
 	}
 
-	return &Doc{object}, nil
+	return &Doc{data: object}, nil
 
 }
 
@@ -576,7 +576,7 @@ func (d *Doc) ArrayAdd(value interface{}, path ...string) (*Doc, error) {
 
 	a, ok := d.Get(path...).Data().([]interface{})
 	if !ok {
-		return &Doc{nil}, fmt.Errorf("Not an array")
+		return &Doc{data: nil}, fmt.Errorf("Not an array")
 	}
 
 	if values, ok := value.([]interface{}); ok {
@@ -607,7 +607,7 @@ func (d *Doc) ArrayDel(value interface{}, path ...string) (*Doc, error) {
 
 	a, ok := d.Get(path...).Data().([]interface{})
 	if !ok {
-		return &Doc{nil}, fmt.Errorf("Not an array")
+		return &Doc{data: nil}, fmt.Errorf("Not an array")
 	}
 
 	if values, ok := value.([]interface{}); ok {
@@ -687,7 +687,7 @@ func (d *Doc) Inc(value interface{}, path ...string) (*Doc, error) {
 		return d.ArrayAdd(value, path...)
 	}
 
-	return &Doc{nil}, fmt.Errorf("Not possible to increment.")
+	return &Doc{data: nil}, fmt.Errorf("Not possible to increment.")
 
 }
 
@@ -720,7 +720,7 @@ func (d *Doc) Dec(value interface{}, path ...string) (*Doc, error) {
 		return d.ArrayDel(value, path...)
 	}
 
-	return &Doc{nil}, fmt.Errorf("Not possible to decrement.")
+	return &Doc{data: nil}, fmt.Errorf("Not possible to decrement.")
 
 }
 
