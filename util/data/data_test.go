@@ -265,6 +265,7 @@ func TestOperations(t *testing.T) {
 		"object": map[string]interface{}{
 			"enabled": false,
 		},
+		"emptys": []interface{}{},
 		"arrays": []interface{}{
 			map[string]interface{}{
 				"id":  1,
@@ -320,7 +321,7 @@ func TestOperations(t *testing.T) {
 			i++
 			return nil
 		})
-		So(i, ShouldEqual, 15)
+		So(i, ShouldEqual, 32)
 	})
 
 	// ----------------------------------------------------------------------------------------------------
@@ -331,10 +332,17 @@ func TestOperations(t *testing.T) {
 	})
 
 	Convey("Can diff two different docs", t, func() {
-		two := New()
-		two.Set(alt, "the.item")
-		dif := doc.Diff(two)
-		So(len(dif), ShouldEqual, 12)
+		obj := New()
+		obj.Set(alt, "the.item")
+		dif := doc.Diff(obj)
+		So(len(dif), ShouldEqual, 25)
+	})
+
+	Convey("Can diff two different docs", t, func() {
+		obj := New()
+		obj.Set(alt, "the.item")
+		dif := obj.Diff(doc)
+		So(len(dif), ShouldEqual, 25)
 	})
 
 	// ----------------------------------------------------------------------------------------------------
@@ -347,26 +355,53 @@ func TestOperations(t *testing.T) {
 		So(doc.Exists("the.item"), ShouldBeTrue)
 	})
 
+	Convey("Does unset length of item exist", t, func() {
+		So(doc.Exists("the.item.emptys.length"), ShouldBeFalse)
+	})
+
+	Convey("Does unset array item exist", t, func() {
+		So(doc.Exists("the.item.emptys.0.id"), ShouldBeFalse)
+	})
+
+	Convey("Does unset multi array item exist", t, func() {
+		So(doc.Exists("the.item.emptys.*.id"), ShouldBeFalse)
+	})
+
+	Convey("Does length of item exist", t, func() {
+		So(doc.Exists("the.item.arrays.length"), ShouldBeTrue)
+	})
+
 	Convey("Does array item exist", t, func() {
 		So(doc.Exists("the.item.arrays.0.id"), ShouldBeTrue)
+		So(doc.Exists("the.item.arrays[0].id"), ShouldBeTrue)
+		So(doc.Exists("the.item.arrays.[0].id"), ShouldBeTrue)
 		So(doc.Exists("the.item.arrays.first.id"), ShouldBeTrue)
+		So(doc.Exists("the.item.arrays[first].id"), ShouldBeTrue)
+		So(doc.Exists("the.item.arrays.[first].id"), ShouldBeTrue)
 	})
 
 	Convey("Does array item exist", t, func() {
 		So(doc.Exists("the.item.arrays.1.id"), ShouldBeTrue)
+		So(doc.Exists("the.item.arrays[1].id"), ShouldBeTrue)
+		So(doc.Exists("the.item.arrays.[1].id"), ShouldBeTrue)
 		So(doc.Exists("the.item.arrays.last.id"), ShouldBeTrue)
+		So(doc.Exists("the.item.arrays[last].id"), ShouldBeTrue)
+		So(doc.Exists("the.item.arrays.[last].id"), ShouldBeTrue)
 	})
 
 	Convey("Does out of bounds array item exist", t, func() {
 		So(doc.Exists("the.item.arrays.5.id"), ShouldBeFalse)
+		So(doc.Exists("the.item.arrays[5].id"), ShouldBeFalse)
 	})
 
 	Convey("Does unset array item exist", t, func() {
 		So(doc.Exists("the.item.arrays.0.none"), ShouldBeFalse)
+		So(doc.Exists("the.item.arrays[0].none"), ShouldBeFalse)
 	})
 
 	Convey("Does incorrectly embedded array item exist", t, func() {
 		So(doc.Exists("the.item.arrays.0.id.arggghh"), ShouldBeFalse)
+		So(doc.Exists("the.item.arrays[0].id.arggghh"), ShouldBeFalse)
 	})
 
 	Convey("Does incorrectly embedded object item exist", t, func() {
@@ -375,6 +410,14 @@ func TestOperations(t *testing.T) {
 
 	Convey("Does multi array item exist", t, func() {
 		So(doc.Exists("the.item.arrays.*.id"), ShouldBeTrue)
+		So(doc.Exists("the.item.arrays[*].id"), ShouldBeTrue)
+		So(doc.Exists("the.item.arrays[:].id"), ShouldBeTrue)
+	})
+
+	Convey("Does sparse multi array item exist", t, func() {
+		So(doc.Exists("the.item.arrays.*.one"), ShouldBeFalse)
+		So(doc.Exists("the.item.arrays[*].one"), ShouldBeFalse)
+		So(doc.Exists("the.item.arrays[:].one"), ShouldBeFalse)
 	})
 
 	// ----------------------------------------------------------------------------------------------------
@@ -582,6 +625,22 @@ func TestOperations(t *testing.T) {
 		So(doc.Contains("Cold", "the.item.tags"), ShouldBeFalse)
 	})
 
+	Convey("Can get range queries from array", t, func() {
+		So(doc.Get("the.item.tags[0:]").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm"})
+		So(doc.Get("the.item.tags[:$]").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm"})
+		So(doc.Get("the.item.tags[0:$]").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm"})
+		So(doc.Get("the.item.tags[first:last]").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm"})
+		So(doc.Get("the.item.tags[0:1]").Data(), ShouldResemble, []interface{}{"Hot"})
+		So(doc.Get("the.item.tags[2:3]").Data(), ShouldResemble, []interface{}{"Sticky"})
+		So(doc.Get("the.item.tags[2:4]").Data(), ShouldResemble, []interface{}{"Sticky", "Warm"})
+		So(doc.Get("the.item.tags[2:5]").Data(), ShouldResemble, []interface{}{"Sticky", "Warm"})
+		So(doc.Get("the.item.tags[2:9]").Data(), ShouldResemble, []interface{}{"Sticky", "Warm"})
+		So(doc.Get("the.item.tags[4:5]").Data(), ShouldResemble, nil)
+		So(doc.Get("the.item.tags[8:9]").Data(), ShouldResemble, nil)
+		So(doc.Get("the.item.tags[0:none]").Data(), ShouldResemble, nil)
+		So(doc.Get("the.item.tags[0:none:some]").Data(), ShouldResemble, nil)
+	})
+
 	Convey("Can add single to array", t, func() {
 		_, err := doc.Inc("Sunny", "the.item.tags")
 		So(err, ShouldBeNil)
@@ -631,7 +690,7 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can't del array → 5", t, func() {
 		err := doc.Del("the.item.tags.5")
-		So(err, ShouldNotBeNil)
+		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Warm"})
 		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
 	})
@@ -646,7 +705,7 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can't set array → 5", t, func() {
 		set, err := doc.Set("Other", "the.item.tags.5")
-		So(err, ShouldNotBeNil)
+		So(err, ShouldBeNil)
 		So(set.Data(), ShouldResemble, nil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Tepid", "Humid", "Warm"})
 		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
@@ -746,6 +805,10 @@ func TestOperations(t *testing.T) {
 		So(doc.Get("the.item.arrays.*.id").Data(), ShouldResemble, []interface{}{1, 2})
 	})
 
+	Convey("Can't get array → 5 → key", t, func() {
+		So(doc.Get("the.item.arrays.5.id").Data(), ShouldResemble, nil)
+	})
+
 	Convey("Can set array → * → key", t, func() {
 		set, err := doc.Set("ID", "the.item.arrays.*.id")
 		So(err, ShouldBeNil)
@@ -773,6 +836,12 @@ func TestOperations(t *testing.T) {
 		err := doc.Del("the.item.arrays.0.id")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.arrays.0.id").Data(), ShouldResemble, nil)
+		So(doc.Get("the.item.arrays.*.id").Data(), ShouldResemble, []interface{}{"ID2"})
+	})
+
+	Convey("Can't del array → 5 → key", t, func() {
+		err := doc.Del("the.item.arrays.5.id")
+		So(err, ShouldBeNil)
 		So(doc.Get("the.item.arrays.*.id").Data(), ShouldResemble, []interface{}{"ID2"})
 	})
 
@@ -807,10 +876,12 @@ func TestOperations(t *testing.T) {
 	})
 
 	Convey("Can get array → * → object → key", t, func() {
-		So(doc.Get("the.item.arrays.*.selected.city").Data(), ShouldResemble, []interface{}{"London", "Tonbridge"})
+		So(doc.Get("the.item.arrays[*].selected.city").Data(), ShouldResemble, []interface{}{"London", "Tonbridge"})
+		So(doc.Get("the.item.arrays[:].selected.city").Data(), ShouldResemble, []interface{}{"London", "Tonbridge"})
 	})
 
 	Convey("Can get array → 0 → arrays → 0 → key", t, func() {
+		So(doc.Get("the.item.arrays.0.addresses.0.city").Data(), ShouldResemble, "London")
 		So(doc.Get("the.item.arrays.0.addresses.0.city").Data(), ShouldResemble, "London")
 	})
 
@@ -864,7 +935,7 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can walk array → *", t, func() {
 		doc.Walk(func(key string, val interface{}) error {
-			So(key, ShouldBeIn, "the.item.arrays.0", "the.item.arrays.1", "the.item.arrays.2")
+			So(key, ShouldBeIn, "the.item.arrays.[0]", "the.item.arrays.[1]", "the.item.arrays.[2]")
 			So(val, ShouldBeIn, tmp[0], tmp[1], tmp[2])
 			return nil
 		}, "the.item.arrays.*")
@@ -872,7 +943,7 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can walk array → * → object", t, func() {
 		doc.Walk(func(key string, val interface{}) error {
-			So(key, ShouldBeIn, "the.item.arrays.0.test", "the.item.arrays.1.test", "the.item.arrays.2.test")
+			So(key, ShouldBeIn, "the.item.arrays.[0].test", "the.item.arrays.[1].test", "the.item.arrays.[2].test")
 			So(val, ShouldBeIn, "one", "two", "tre")
 			return nil
 		}, "the.item.arrays.*.test")
@@ -880,7 +951,7 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can walk array → first → object", t, func() {
 		doc.Walk(func(key string, val interface{}) error {
-			So(key, ShouldResemble, "the.item.arrays.0.test")
+			So(key, ShouldResemble, "the.item.arrays.[0].test")
 			So(val, ShouldResemble, "one")
 			return nil
 		}, "the.item.arrays.first.test")
@@ -888,7 +959,7 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can walk array → last → object", t, func() {
 		doc.Walk(func(key string, val interface{}) error {
-			So(key, ShouldResemble, "the.item.arrays.2.test")
+			So(key, ShouldResemble, "the.item.arrays.[2].test")
 			So(val, ShouldResemble, "tre")
 			return nil
 		}, "the.item.arrays.last.test")
@@ -896,7 +967,7 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can walk array → 0 → value", t, func() {
 		doc.Walk(func(key string, val interface{}) error {
-			So(key, ShouldResemble, "the.item.arrays.0")
+			So(key, ShouldResemble, "the.item.arrays.[0]")
 			So(val, ShouldResemble, map[string]interface{}{"test": "one"})
 			return nil
 		}, "the.item.arrays.0")
@@ -904,7 +975,7 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can walk array → 1 → value", t, func() {
 		doc.Walk(func(key string, val interface{}) error {
-			So(key, ShouldResemble, "the.item.arrays.1")
+			So(key, ShouldResemble, "the.item.arrays.[1]")
 			So(val, ShouldResemble, map[string]interface{}{"test": "two"})
 			return nil
 		}, "the.item.arrays.1")
@@ -912,7 +983,7 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can walk array → 2 → value", t, func() {
 		doc.Walk(func(key string, val interface{}) error {
-			So(key, ShouldResemble, "the.item.arrays.2")
+			So(key, ShouldResemble, "the.item.arrays.[2]")
 			So(val, ShouldResemble, map[string]interface{}{"test": "tre"})
 			return nil
 		}, "the.item.arrays.2")

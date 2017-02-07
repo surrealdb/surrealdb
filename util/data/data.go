@@ -15,7 +15,6 @@
 package data
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -23,6 +22,16 @@ import (
 
 	"github.com/abcum/surreal/util/deep"
 	"github.com/abcum/surreal/util/pack"
+)
+
+const (
+	one int8 = iota
+	many
+)
+
+const (
+	choose int8 = iota
+	remove
 )
 
 // Doc holds a reference to the core data object, or a selected path.
@@ -93,6 +102,142 @@ func (d *Doc) path(path ...string) (paths []string) {
 	}
 
 	return
+
+}
+
+func trim(s string) string {
+	if s[0] == '[' && s[len(s)-1] == ']' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+func (d *Doc) what(p string, a []interface{}, t int8) (o []interface{}, i []int, r int8) {
+
+	p = trim(p)
+
+	i = []int{}
+
+	o = []interface{}{}
+
+	// If there are no items in the
+	// original array, then return
+	// an empty array immediately.
+
+	if len(a) == 0 {
+		if strings.ContainsAny(p, ":*") {
+			return o, i, many
+		} else {
+			return o, i, one
+		}
+	}
+
+	// If the array index is a star
+	// or a colon only, then return
+	// the full array immediately
+
+	if p == "*" || p == ":" {
+		switch t {
+		case choose:
+			for k := range a {
+				i = append(i, k)
+			}
+			return a, i, many
+		case remove:
+			for k := range a {
+				i = append(i, k)
+			}
+			return o, i, many
+		}
+	}
+
+	// Split the specified array index
+	// by commas, so that we can get
+	// the specified array items.
+
+	c := strings.Count(p, ":")
+
+	if c == 0 {
+
+		switch p {
+		case "0", "first":
+			if t == choose {
+				i = append(i, 0)
+				o = append(o, a[0])
+			} else {
+				for k := range a[1:] {
+					i = append(i, k)
+				}
+				o = append(o, a[1:]...)
+			}
+		case "$", "last":
+			if t == choose {
+				i = append(i, len(a)-1)
+				o = append(o, a[len(a)-1])
+			} else {
+				for k := range a[:len(a)-1] {
+					i = append(i, k)
+				}
+				o = append(o, a[:len(a)-1]...)
+			}
+		default:
+			if z, e := strconv.Atoi(p); e == nil {
+				if len(a) > z {
+					if t == choose {
+						i = append(i, z)
+						o = append(o, a[z])
+					} else {
+						for k := range append(a[:z], a[z+1:]...) {
+							i = append(i, k)
+						}
+						o = append(o, append(a[:z], a[z+1:]...)...)
+					}
+				} else {
+					if t == remove {
+						for k := range a {
+							i = append(i, k)
+						}
+						o = append(o, a[:]...)
+					}
+				}
+			}
+		}
+
+		return o, i, one
+
+	}
+
+	if c == 1 {
+
+		var e error
+
+		b := []int{0, len(a)}
+		x := strings.Split(p, ":")
+
+		for k := range x {
+			switch x[k] {
+			case "":
+			case "0", "first":
+				b[k] = 0
+			case "$", "last":
+				b[k] = len(a)
+			default:
+				if b[k], e = strconv.Atoi(x[k]); e != nil {
+					return nil, nil, many
+				}
+			}
+		}
+
+		for k := b[0]; k < b[1] && k < len(a); k++ {
+			i = append(i, k)
+			o = append(o, a[k])
+		}
+
+		return o, i, many
+
+	}
+
+	return nil, nil, many
 
 }
 
@@ -205,7 +350,7 @@ func (d *Doc) Exists(path ...string) bool {
 		// to the next part of the path
 
 		if m, ok := object.(map[string]interface{}); ok {
-			if object, ok = m[p]; !ok {
+			if object, ok = m[trim(p)]; !ok {
 				return false
 			}
 			continue
@@ -217,42 +362,27 @@ func (d *Doc) Exists(path ...string) bool {
 
 		if a, ok := object.([]interface{}); ok {
 
-			var i int
-			var e error
-
-			if p == "*" {
-				e = errors.New("")
-			} else if p == "first" {
-				i = 0
-			} else if p == "last" {
-				i = len(a) - 1
-			} else {
-				i, e = strconv.Atoi(p)
+			if p == "length" {
+				return len(a) > 0
 			}
 
-			// If the path part is a numeric index
-			// then run the query on the specified
-			// index of the current data array
+			c, _, r := d.what(p, a, choose)
 
-			if e == nil {
-				if 0 == len(a) || i >= len(a) {
-					return false
-				}
-				return Consume(a[i]).Exists(path[k+1:]...)
+			if len(c) == 0 {
+				return false
 			}
 
-			// If the path part is an asterisk
-			// then run the query on all of the
-			// items in the current data array
+			if r == one {
+				return Consume(c[0]).Exists(path[k+1:]...)
+			}
 
-			if p == "*" {
-
-				for _, v := range a {
-					if Consume(v).Exists(path[k+1:]...) {
-						return true
+			if r == many {
+				for _, v := range c {
+					if !Consume(v).Exists(path[k+1:]...) {
+						return false
 					}
 				}
-
+				return true
 			}
 
 		}
@@ -297,7 +427,7 @@ func (d *Doc) Get(path ...string) *Doc {
 		// to the next part of the path
 
 		if m, ok := object.(map[string]interface{}); ok {
-			object = m[p]
+			object = m[trim(p)]
 			continue
 		}
 
@@ -307,55 +437,29 @@ func (d *Doc) Get(path ...string) *Doc {
 
 		if a, ok := object.([]interface{}); ok {
 
-			var i int
-			var e error
-
-			if p == "*" {
-				e = errors.New("")
-			} else if p == "first" {
-				i = 0
-			} else if p == "last" {
-				i = len(a) - 1
-			} else if p == "length" {
+			if p == "length" {
 				return &Doc{data: len(a)}
-			} else {
-				i, e = strconv.Atoi(p)
 			}
 
-			// If the path part is a numeric index
-			// then run the query on the specified
-			// index of the current data array
+			c, _, r := d.what(p, a, choose)
 
-			if e == nil {
-				if 0 == len(a) || i >= len(a) {
-					return &Doc{data: nil}
-				}
-				return Consume(a[i]).Get(path[k+1:]...)
+			if len(c) == 0 {
+				return &Doc{data: nil}
 			}
 
-			// If the path part is an asterisk
-			// then run the query on all of the
-			// items in the current data array
+			if r == one {
+				return Consume(c[0]).Get(path[k+1:]...)
+			}
 
-			if p == "*" {
-
+			if r == many {
 				out := []interface{}{}
-
-				for _, v := range a {
-
-					if k == len(path)-1 {
-						out = append(out, v)
-					} else {
-						res := Consume(v).Get(path[k+1:]...)
-						if res.data != nil {
-							out = append(out, res.data)
-						}
+				for _, v := range c {
+					res := Consume(v).Get(path[k+1:]...)
+					if res.data != nil {
+						out = append(out, res.data)
 					}
-
 				}
-
 				return &Doc{data: out}
-
 			}
 
 		}
@@ -406,11 +510,12 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 
 		if m, ok := object.(map[string]interface{}); ok {
 			if k == len(path)-1 {
-				m[p] = value
+				m[trim(p)] = value
 			} else if m[p] == nil {
-				m[p] = map[string]interface{}{}
+				m[trim(p)] = map[string]interface{}{}
 			}
-			object = m[p]
+			object = m[trim(p)]
+			continue
 		}
 
 		// If the value found at the current
@@ -419,62 +524,35 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 
 		if a, ok := object.([]interface{}); ok {
 
-			var i int
-			var e error
+			c, i, r := d.what(p, a, choose)
 
-			if p == "*" {
-				e = errors.New("")
-			} else if p == "first" {
-				i = 0
-			} else if p == "last" {
-				i = len(a) - 1
-			} else {
-				i, e = strconv.Atoi(p)
+			if len(c) == 0 {
+				return &Doc{data: nil}, nil
 			}
 
-			// If the path part is a numeric index
-			// then run the query on the specified
-			// index of the current data array
-
-			if e == nil {
-
-				if 0 == len(a) || i >= len(a) {
-					return &Doc{data: nil}, fmt.Errorf("No item with index %d in array, using path %s", i, path)
-				}
-
+			if r == one {
 				if k == len(path)-1 {
-					a[i] = value
-					object = a[i]
+					a[i[0]] = value
+					object = a[i[0]]
 				} else {
-					return Consume(a[i]).Set(value, path[k+1:]...)
+					return Consume(a[i[0]]).Set(value, path[k+1:]...)
 				}
-
 			}
 
-			// If the path part is an asterisk
-			// then run the query on all of the
-			// items in the current data array
-
-			if p == "*" {
-
+			if r == many {
 				out := []interface{}{}
-
-				for i := range a {
-
+				for j, v := range c {
 					if k == len(path)-1 {
-						a[i] = value
-						out = append(out, a[i])
+						a[i[j]] = value
+						out = append(out, value)
 					} else {
-						res, _ := Consume(a[i]).Set(value, path[k+1:]...)
+						res, _ := Consume(v).Set(value, path[k+1:]...)
 						if res.data != nil {
 							out = append(out, res.data)
 						}
 					}
-
 				}
-
 				return &Doc{data: out}, nil
-
 			}
 
 		}
@@ -518,11 +596,12 @@ func (d *Doc) Del(path ...string) error {
 
 		if m, ok := object.(map[string]interface{}); ok {
 			if k == len(path)-1 {
-				delete(m, p)
-			} else if m[p] == nil {
+				delete(m, trim(p))
+			} else if m[trim(p)] == nil {
 				return fmt.Errorf("Item at path %s is not an object", path)
 			}
-			object = m[p]
+			object = m[trim(p)]
+			continue
 		}
 
 		// If the value found at the current
@@ -531,59 +610,34 @@ func (d *Doc) Del(path ...string) error {
 
 		if a, ok := object.([]interface{}); ok {
 
-			var i int
-			var e error
+			var r int8
+			var c []interface{}
 
-			if p == "*" {
-				e = errors.New("")
-			} else if p == "first" {
-				i = 0
-			} else if p == "last" {
-				i = len(a) - 1
+			if k == len(path)-1 {
+				c, _, r = d.what(p, a, remove)
 			} else {
-				i, e = strconv.Atoi(p)
+				c, _, r = d.what(p, a, choose)
 			}
 
-			// If the path part is a numeric index
-			// then run the query on the specified
-			// index of the current data array
-
-			if e == nil {
-
-				if 0 == len(a) || i >= len(a) {
-					return fmt.Errorf("No item with index %d in array, using path %s", i, path)
-				}
-
+			if r == one {
 				if k == len(path)-1 {
-					copy(a[i:], a[i+1:])
-					a[len(a)-1] = nil
-					a = a[:len(a)-1]
-					d.Set(a, path[:len(path)-1]...)
+					d.Set(c, path[:len(path)-1]...)
 				} else {
-					return Consume(a[i]).Del(path[k+1:]...)
+					if len(c) != 0 {
+						return Consume(c[0]).Del(path[k+1:]...)
+					}
 				}
-
 			}
 
-			// If the path part is an asterisk
-			// then run the query on all of the
-			// items in the current data array
-
-			if p == "*" {
-
-				for i := len(a) - 1; i >= 0; i-- {
-
-					if k == len(path)-1 {
-						copy(a[i:], a[i+1:])
-						a[len(a)-1] = nil
-						a = a[:len(a)-1]
-						d.Set(a, path[:len(path)-1]...)
-					} else {
-						Consume(a[i]).Del(path[k+1:]...)
+			if r == many {
+				if k == len(path)-1 {
+					d.Set(c, path[:len(path)-1]...)
+				} else {
+					for _, v := range c {
+						Consume(v).Del(path[k+1:]...)
 					}
-
+					break
 				}
-
 			}
 
 		}
@@ -824,6 +878,7 @@ func (d *Doc) each(exec Iterator, prev []string) error {
 	// to the next part of the path
 
 	if m, ok := object.(map[string]interface{}); ok {
+		exec(d.join(prev), make(map[string]interface{}))
 		for k, v := range m {
 			var keep []string
 			keep = append(keep, prev...)
@@ -838,10 +893,11 @@ func (d *Doc) each(exec Iterator, prev []string) error {
 	// the query on the specified items
 
 	if a, ok := object.([]interface{}); ok {
+		exec(d.join(prev), make([]interface{}, len(a)))
 		for i, v := range a {
 			var keep []string
 			keep = append(keep, prev...)
-			keep = append(keep, fmt.Sprintf("%d", i))
+			keep = append(keep, fmt.Sprintf("[%d]", i))
 			Consume(v).each(exec, keep)
 		}
 		return nil
@@ -893,7 +949,7 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 		// to the next part of the path
 
 		if m, ok := object.(map[string]interface{}); ok {
-			if object, ok = m[p]; !ok {
+			if object, ok = m[trim(p)]; !ok {
 				return exec(d.join(prev, path), nil)
 			}
 			continue
@@ -905,71 +961,49 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 
 		if a, ok := object.([]interface{}); ok {
 
-			var i int
-			var e error
+			c, i, r := d.what(p, a, choose)
 
-			if p == "*" {
-				e = errors.New("")
-			} else if p == "first" {
-				i = 0
-			} else if p == "last" {
-				i = len(a) - 1
-			} else {
-				i, e = strconv.Atoi(p)
+			if len(c) == 0 {
+				return fmt.Errorf("No item with index %s in array, using path %s", p, path)
 			}
 
-			// If the path part is a numeric index
-			// then run the query on the specified
-			// index of the current data array
-
-			if e == nil {
-
-				if 0 == len(a) || i >= len(a) {
-					return fmt.Errorf("No item with index %d in array, using path %s", i, path)
-				}
-
+			if r == one {
 				if k == len(path)-1 {
-					return exec(d.join(prev, path), a[i])
+					var keep []string
+					keep = append(keep, prev...)
+					keep = append(keep, path[:k]...)
+					keep = append(keep, fmt.Sprintf("[%d]", i[0]))
+					return exec(d.join(keep), c[0])
 				} else {
 					var keep []string
 					keep = append(keep, prev...)
 					keep = append(keep, path[:k]...)
-					keep = append(keep, fmt.Sprintf("%d", i))
-					return Consume(a[i]).walk(exec, keep, path[k+1:]...)
+					keep = append(keep, fmt.Sprintf("[%d]", i[0]))
+					return Consume(c[0]).walk(exec, keep, path[k+1:]...)
 				}
-
 			}
 
-			// If the path part is an asterisk
-			// then run the query on all of the
-			// items in the current data array
-
-			if p == "*" {
-
-				for i := len(a) - 1; i >= 0; i-- {
-
+			if r == many {
+				for j, v := range c {
 					if k == len(path)-1 {
 						var keep []string
 						keep = append(keep, prev...)
 						keep = append(keep, path[:k]...)
-						keep = append(keep, fmt.Sprintf("%d", i))
-						if err := exec(d.join(keep), a[i]); err != nil {
+						keep = append(keep, fmt.Sprintf("[%d]", i[j]))
+						if err := exec(d.join(keep), v); err != nil {
 							return err
 						}
 					} else {
 						var keep []string
 						keep = append(keep, prev...)
 						keep = append(keep, path[:k]...)
-						keep = append(keep, fmt.Sprintf("%d", i))
-						if err := Consume(a[i]).walk(exec, keep, path[k+1:]...); err != nil {
+						keep = append(keep, fmt.Sprintf("[%d]", i[j]))
+						if err := Consume(v).walk(exec, keep, path[k+1:]...); err != nil {
 							return err
 						}
 					}
-
 				}
-
 				return nil
-
 			}
 
 		}
