@@ -168,6 +168,7 @@ func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 
 	var err error
+	var now time.Time
 	var rsp *Response
 	var buf []*Response
 	var res []interface{}
@@ -239,7 +240,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			// next statement is not ignored.
 
 			if e.txn == nil {
-				err = nil
+				err, now = nil, time.Now()
 			}
 
 			// Check to see if the current statement is
@@ -257,12 +258,6 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 				err, buf = e.commit(buf, err, send)
 				continue
 			}
-
-			// This is not a TRANSACTION statement and
-			// therefore we must time the execution speed
-			// and process the statement response.
-
-			now := time.Now()
 
 			// If an error has occured and we are inside
 			// a global transaction, then ignore all
