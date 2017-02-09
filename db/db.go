@@ -27,9 +27,8 @@ import (
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 
-	_ "github.com/abcum/surreal/kvs/boltdb"
-	_ "github.com/abcum/surreal/kvs/mysql"
-	_ "github.com/abcum/surreal/kvs/pgsql"
+	_ "github.com/abcum/surreal/kvs/rixxdb"
+	// _ "github.com/abcum/surreal/kvs/dendro"
 )
 
 type executor struct {
@@ -61,7 +60,7 @@ type Response struct {
 	Result []interface{} `codec:"result,omitempty"`
 }
 
-var db *kvs.DB
+var db *kvs.DS
 
 // Setup sets up the connection with the data layer
 func Setup(opts *cnf.Options) (err error) {

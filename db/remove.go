@@ -20,13 +20,75 @@ import (
 	"github.com/abcum/surreal/util/keys"
 )
 
+func (e *executor) executeRemoveNamespaceStatement(txn kvs.TX, ast *sql.RemoveNamespaceStatement) (out []interface{}, err error) {
+
+	// Remove the namespace
+	nkey := &keys.NS{KV: ast.KV, NS: ast.Name}
+	_, err = txn.DelP(0, nkey.Encode(), 0)
+
+	return
+
+}
+
+func (e *executor) executeRemoveDatabaseStatement(txn kvs.TX, ast *sql.RemoveDatabaseStatement) (out []interface{}, err error) {
+
+	// Remove the database
+	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name}
+	_, err = txn.DelP(0, dkey.Encode(), 0)
+
+	return
+
+}
+
+func (e *executor) executeRemoveLoginStatement(txn kvs.TX, ast *sql.RemoveLoginStatement) (out []interface{}, err error) {
+
+	if ast.Kind == sql.NAMESPACE {
+
+		// Remove the login
+		ukey := &keys.NU{KV: ast.KV, NS: ast.NS, US: ast.User}
+		_, err = txn.DelP(0, ukey.Encode(), 0)
+
+	}
+
+	if ast.Kind == sql.DATABASE {
+
+		// Remove the login
+		ukey := &keys.DU{KV: ast.KV, NS: ast.NS, DB: ast.DB, US: ast.User}
+		_, err = txn.DelP(0, ukey.Encode(), 0)
+
+	}
+
+	return
+
+}
+
+func (e *executor) executeRemoveTokenStatement(txn kvs.TX, ast *sql.RemoveTokenStatement) (out []interface{}, err error) {
+
+	if ast.Kind == sql.NAMESPACE {
+
+		// Remove the token
+		tkey := &keys.NT{KV: ast.KV, NS: ast.NS, TK: ast.Name}
+		_, err = txn.DelP(0, tkey.Encode(), 0)
+
+	}
+
+	if ast.Kind == sql.DATABASE {
+
+		// Remove the token
+		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name}
+		_, err = txn.DelP(0, tkey.Encode(), 0)
+
+	}
+
+	return
+
+}
+
 func (e *executor) executeRemoveScopeStatement(txn kvs.TX, ast *sql.RemoveScopeStatement) (out []interface{}, err error) {
 
-	// Remove the scope config
+	// Remove the scope
 	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name}
-	if err := txn.Del(skey.Encode()); err != nil {
-		return nil, err
-	}
+	_, err = txn.DelP(0, skey.Encode(), 0)
 
 	return
 
@@ -36,55 +98,9 @@ func (e *executor) executeRemoveTableStatement(txn kvs.TX, ast *sql.RemoveTableS
 
 	for _, TB := range ast.What {
 
-		// Remove the table config
+		// Remove the table
 		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
-		if err := txn.Del(tkey.Encode()); err != nil {
-			return nil, err
-		}
-
-		// Remove the rules config
-		rkey := &keys.RU{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, RU: keys.Ignore}
-		if err := txn.PDel(rkey.Encode()); err != nil {
-			return nil, err
-		}
-
-		// Remove the field config
-		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, FD: keys.Ignore}
-		if err := txn.PDel(fkey.Encode()); err != nil {
-			return nil, err
-		}
-
-		// Remove the index config
-		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: keys.Ignore}
-		if err := txn.PDel(ikey.Encode()); err != nil {
-			return nil, err
-		}
-
-		// Remove all table data
-		dkey := &keys.Table{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
-		if err := txn.PDel(dkey.Encode()); err != nil {
-			return nil, err
-		}
-
-	}
-
-	return
-
-}
-
-func (e *executor) executeRemoveRulesStatement(txn kvs.TX, ast *sql.RemoveRulesStatement) (out []interface{}, err error) {
-
-	for _, TB := range ast.What {
-
-		for _, RU := range ast.When {
-
-			// Remove the rules config
-			ckey := &keys.RU{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, RU: RU}
-			if err := txn.Del(ckey.Encode()); err != nil {
-				return nil, err
-			}
-
-		}
+		_, err = txn.DelP(0, tkey.Encode(), 0)
 
 	}
 
@@ -96,11 +112,9 @@ func (e *executor) executeRemoveFieldStatement(txn kvs.TX, ast *sql.RemoveFieldS
 
 	for _, TB := range ast.What {
 
-		// Remove the field config
-		ckey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, FD: ast.Name}
-		if err := txn.Del(ckey.Encode()); err != nil {
-			return nil, err
-		}
+		// Remove the field
+		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, FD: ast.Name}
+		_, err = txn.DelP(0, fkey.Encode(), 0)
 
 	}
 
@@ -112,17 +126,13 @@ func (e *executor) executeRemoveIndexStatement(txn kvs.TX, ast *sql.RemoveIndexS
 
 	for _, TB := range ast.What {
 
-		// Remove the index config
-		ckey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name}
-		if err := txn.Del(ckey.Encode()); err != nil {
-			return nil, err
-		}
+		// Remove the index
+		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name}
+		_, err = txn.DelP(0, ikey.Encode(), 0)
 
-		// Remove all index data
+		// Remove the index
 		dkey := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name, FD: keys.Ignore}
-		if err := txn.PDel(dkey.Encode()); err != nil {
-			return nil, err
-		}
+		_, err = txn.DelP(0, dkey.Encode(), 0)
 
 	}
 

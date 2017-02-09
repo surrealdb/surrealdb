@@ -22,25 +22,120 @@ import (
 	"github.com/abcum/surreal/util/pack"
 )
 
+func (e *executor) executeDefineNamespaceStatement(txn kvs.TX, ast *sql.DefineNamespaceStatement) (out []interface{}, err error) {
+
+	// Set the namespace
+	nkey := &keys.NS{KV: ast.KV, NS: ast.Name}
+	_, err = txn.Put(0, nkey.Encode(), ast.Encode())
+
+	return
+
+}
+
+func (e *executor) executeDefineDatabaseStatement(txn kvs.TX, ast *sql.DefineDatabaseStatement) (out []interface{}, err error) {
+
+	// Set the namespace
+	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+	nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+	txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
+
+	// Set the database
+	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name}
+	_, err = txn.Put(0, dkey.Encode(), ast.Encode())
+
+	return
+
+}
+
+func (e *executor) executeDefineLoginStatement(txn kvs.TX, ast *sql.DefineLoginStatement) (out []interface{}, err error) {
+
+	if ast.Kind == sql.NAMESPACE {
+
+		// Set the namespace
+		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+		nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+		txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
+
+		// Set the login
+		ukey := &keys.NU{KV: ast.KV, NS: ast.NS, US: ast.User}
+		_, err = txn.Put(0, ukey.Encode(), ast.Encode())
+
+	}
+
+	if ast.Kind == sql.DATABASE {
+
+		// Set the namespace
+		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+		nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+		txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
+
+		// Set the database
+		dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
+		dval := &sql.DefineDatabaseStatement{Name: ast.DB}
+		txn.PutC(0, dkey.Encode(), dval.Encode(), nil)
+
+		// Set the login
+		ukey := &keys.DU{KV: ast.KV, NS: ast.NS, DB: ast.DB, US: ast.User}
+		_, err = txn.Put(0, ukey.Encode(), ast.Encode())
+
+	}
+
+	return
+
+}
+
+func (e *executor) executeDefineTokenStatement(txn kvs.TX, ast *sql.DefineTokenStatement) (out []interface{}, err error) {
+
+	if ast.Kind == sql.NAMESPACE {
+
+		// Set the namespace
+		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+		nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+		txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
+
+		// Set the token
+		tkey := &keys.NT{KV: ast.KV, NS: ast.NS, TK: ast.Name}
+		_, err = txn.Put(0, tkey.Encode(), ast.Encode())
+
+	}
+
+	if ast.Kind == sql.DATABASE {
+
+		// Set the namespace
+		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+		nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+		txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
+
+		// Set the database
+		dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
+		dval := &sql.DefineDatabaseStatement{Name: ast.DB}
+		txn.PutC(0, dkey.Encode(), dval.Encode(), nil)
+
+		// Set the token
+		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name}
+		_, err = txn.Put(0, tkey.Encode(), ast.Encode())
+
+	}
+
+	return
+
+}
+
 func (e *executor) executeDefineScopeStatement(txn kvs.TX, ast *sql.DefineScopeStatement) (out []interface{}, err error) {
 
-	// Set the namespace definition
+	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-	if err := txn.Put(nkey.Encode(), nil); err != nil {
-		return nil, err
-	}
+	nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+	txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
 
-	// Set the database definition
+	// Set the database
 	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-	if err := txn.Put(dkey.Encode(), nil); err != nil {
-		return nil, err
-	}
+	dval := &sql.DefineDatabaseStatement{Name: ast.DB}
+	txn.PutC(0, dkey.Encode(), dval.Encode(), nil)
 
-	// Set the scope definition
+	// Set the scope
 	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name}
-	if err := txn.Put(skey.Encode(), nil); err != nil {
-		return nil, err
-	}
+	_, err = txn.Put(0, skey.Encode(), ast.Encode())
 
 	return
 
@@ -48,62 +143,22 @@ func (e *executor) executeDefineScopeStatement(txn kvs.TX, ast *sql.DefineScopeS
 
 func (e *executor) executeDefineTableStatement(txn kvs.TX, ast *sql.DefineTableStatement) (out []interface{}, err error) {
 
+	// Set the namespace
+	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+	nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+	txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
+
+	// Set the database
+	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
+	dval := &sql.DefineDatabaseStatement{Name: ast.DB}
+	txn.PutC(0, dkey.Encode(), dval.Encode(), nil)
+
 	for _, TB := range ast.What {
 
-		// Set the namespace definition
-		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-		if err := txn.Put(nkey.Encode(), nil); err != nil {
-			return nil, err
-		}
-
-		// Set the database definition
-		dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-		if err := txn.Put(dkey.Encode(), nil); err != nil {
-			return nil, err
-		}
-
-		// Set the table definition
+		// Set the table
 		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
-		if err := txn.Put(tkey.Encode(), nil); err != nil {
+		if _, err = txn.Put(0, tkey.Encode(), ast.Encode()); err != nil {
 			return nil, err
-		}
-
-	}
-
-	return
-
-}
-
-func (e *executor) executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesStatement) (out []interface{}, err error) {
-
-	for _, TB := range ast.What {
-
-		for _, RU := range ast.When {
-
-			// Set the namespace definition
-			nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-			if err := txn.Put(nkey.Encode(), nil); err != nil {
-				return nil, err
-			}
-
-			// Set the database definition
-			dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-			if err := txn.Put(dkey.Encode(), nil); err != nil {
-				return nil, err
-			}
-
-			// Set the table definition
-			tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
-			if err := txn.Put(tkey.Encode(), nil); err != nil {
-				return nil, err
-			}
-
-			// Set the field definition
-			rkey := &keys.RU{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, RU: RU}
-			if err := txn.Put(rkey.Encode(), pack.Encode(ast)); err != nil {
-				return nil, err
-			}
-
 		}
 
 	}
@@ -114,29 +169,24 @@ func (e *executor) executeDefineRulesStatement(txn kvs.TX, ast *sql.DefineRulesS
 
 func (e *executor) executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldStatement) (out []interface{}, err error) {
 
+	// Set the namespace
+	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+	txn.Put(0, nkey.Encode(), nil)
+
+	// Set the database
+	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
+	txn.Put(0, dkey.Encode(), nil)
+
 	for _, TB := range ast.What {
 
-		// Set the namespace definition
-		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-		if err := txn.Put(nkey.Encode(), nil); err != nil {
-			return nil, err
-		}
-
-		// Set the database definition
-		dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-		if err := txn.Put(dkey.Encode(), nil); err != nil {
-			return nil, err
-		}
-
-		// Set the table definition
+		// Set the table
 		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
-		if err := txn.Put(tkey.Encode(), nil); err != nil {
-			return nil, err
-		}
+		tval := &sql.DefineTableStatement{What: ast.What}
+		txn.PutC(0, tkey.Encode(), tval.Encode(), nil)
 
-		// Set the field definition
+		// Set the field
 		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, FD: ast.Name}
-		if err := txn.Put(fkey.Encode(), pack.Encode(ast)); err != nil {
+		if _, err = txn.Put(0, fkey.Encode(), pack.Encode(ast)); err != nil {
 			return nil, err
 		}
 
@@ -148,43 +198,38 @@ func (e *executor) executeDefineFieldStatement(txn kvs.TX, ast *sql.DefineFieldS
 
 func (e *executor) executeDefineIndexStatement(txn kvs.TX, ast *sql.DefineIndexStatement) (out []interface{}, err error) {
 
+	// Set the namespace
+	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
+	txn.Put(0, nkey.Encode(), nil)
+
+	// Set the database
+	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
+	txn.Put(0, dkey.Encode(), nil)
+
 	for _, TB := range ast.What {
 
-		// Set the namespace definition
-		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-		if err := txn.Put(nkey.Encode(), nil); err != nil {
-			return nil, err
-		}
-
-		// Set the database definition
-		dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-		if err := txn.Put(dkey.Encode(), nil); err != nil {
-			return nil, err
-		}
-
-		// Set the table definition
+		// Set the table
 		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
-		if err := txn.Put(tkey.Encode(), nil); err != nil {
-			return nil, err
-		}
+		tval := &sql.DefineTableStatement{What: ast.What}
+		txn.PutC(0, tkey.Encode(), tval.Encode(), nil)
 
-		// Set the index definition
+		// Set the index
 		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name}
-		if err := txn.Put(ikey.Encode(), pack.Encode(ast)); err != nil {
+		if _, err = txn.Put(0, ikey.Encode(), ast.Encode()); err != nil {
 			return nil, err
 		}
 
 		// Remove all index data
 		dbeg := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: keys.Prefix, FD: keys.Ignore}
 		dend := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: keys.Suffix, FD: keys.Ignore}
-		if err := txn.RDel(dbeg.Encode(), dend.Encode(), 0); err != nil {
+		if _, err = txn.DelR(0, dbeg.Encode(), dend.Encode(), 0); err != nil {
 			return nil, err
 		}
 
 		// Fetch the items
 		ibeg := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, ID: keys.Prefix}
 		iend := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, ID: keys.Suffix}
-		kvs, _ := txn.RGet(ibeg.Encode(), iend.Encode(), 0)
+		kvs, _ := txn.GetR(0, ibeg.Encode(), iend.Encode(), 0)
 		for _, kv := range kvs {
 			doc := item.New(kv, txn, nil, e.ctx)
 			if err := doc.StoreIndex(); err != nil {
