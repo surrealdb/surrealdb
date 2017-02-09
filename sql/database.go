@@ -22,10 +22,6 @@ func (p *parser) parseDefineDatabaseStatement() (stmt *DefineDatabaseStatement, 
 		return nil, err
 	}
 
-	if _, _, err = p.shouldBe(DATABASE); err != nil {
-		return nil, err
-	}
-
 	if stmt.Name, err = p.parseName(); err != nil {
 		return nil, err
 	}
@@ -39,10 +35,6 @@ func (p *parser) parseRemoveDatabaseStatement() (stmt *RemoveDatabaseStatement, 
 	stmt = &RemoveDatabaseStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(DATABASE); err != nil {
 		return nil, err
 	}
 
