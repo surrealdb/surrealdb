@@ -17,13 +17,14 @@ package log
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/abcum/logrus"
 	"github.com/mgutz/ansi"
+	"github.com/sirupsen/logrus"
 )
 
 const clear = ansi.Reset
@@ -35,7 +36,7 @@ var (
 
 func init() {
 	baseTimestamp = time.Now()
-	isTerminal = logrus.IsTerminal()
+	isTerminal = logrus.IsTerminal(os.Stdout)
 }
 
 func miniTS() int {

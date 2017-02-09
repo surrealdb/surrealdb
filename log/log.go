@@ -18,7 +18,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/abcum/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 var log *Logger
