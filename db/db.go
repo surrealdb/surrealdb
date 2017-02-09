@@ -188,7 +188,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 		}
 	}()
 
-	// If we have paniced during query execution
+	// If we have panicked during query execution
 	// then ensure that we recover from the error
 	// and print the error to the log.
 

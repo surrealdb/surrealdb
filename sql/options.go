@@ -66,7 +66,7 @@ func (o *options) get(kind int) (kv, ns, db string, err error) {
 func (o *options) ns(ns string) (err error) {
 
 	// Check to see that the current user has
-	// the necessary authentcation privileges
+	// the necessary authentication privileges
 	// to be able to specify this namespace.
 
 	if o.auth.Possible.NS != "*" && o.auth.Possible.NS != ns {
@@ -86,7 +86,7 @@ func (o *options) ns(ns string) (err error) {
 func (o *options) db(db string) (err error) {
 
 	// Check to see that the current user has
-	// the necessary authentcation privileges
+	// the necessary authentication privileges
 	// to be able to specify this namespace.
 
 	if o.auth.Possible.DB != "*" && o.auth.Possible.DB != db {
