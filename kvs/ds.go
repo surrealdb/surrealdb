@@ -14,8 +14,68 @@
 
 package kvs
 
-// DS represents a datastore implementation
-type DS interface {
-	Txn(bool) (TX, error)
-	Close() error
+import (
+	"strings"
+
+	"github.com/abcum/surreal/cnf"
+)
+
+var stores = make(map[string]func(*cnf.Options) (DB, error))
+
+// DB represents a backing datastore.
+type DS struct {
+	db DB
+}
+
+// New sets up the underlying key-value store
+func New(opts *cnf.Options) (ds *DS, err error) {
+
+	var db DB
+
+	switch {
+
+	case opts.DB.Path == "memory":
+		db, err = stores["rixxdb"](opts)
+	case strings.HasPrefix(opts.DB.Path, "s3://"):
+		db, err = stores["rixxdb"](opts)
+	case strings.HasPrefix(opts.DB.Path, "gcs://"):
+		db, err = stores["rixxdb"](opts)
+	case strings.HasPrefix(opts.DB.Path, "logr://"):
+		db, err = stores["rixxdb"](opts)
+	case strings.HasPrefix(opts.DB.Path, "file://"):
+		db, err = stores["rixxdb"](opts)
+	case strings.HasPrefix(opts.DB.Path, "rixxdb://"):
+		db, err = stores["rixxdb"](opts)
+	case strings.HasPrefix(opts.DB.Path, "dendrodb://"):
+		db, err = stores["dendro"](opts)
+	}
+
+	if err != nil {
+		return
+	}
+
+	ds = &DS{db: db}
+
+	return
+
+}
+
+// Begin ...
+func (ds *DS) Begin(writable bool) (txn TX, err error) {
+
+	return ds.db.Begin(writable)
+
+}
+
+// Close ...
+func (ds *DS) Close() (err error) {
+
+	return ds.db.Close()
+
+}
+
+func Register(name string, constructor func(*cnf.Options) (DB, error)) {
+
+	stores[name] = constructor
+
 }

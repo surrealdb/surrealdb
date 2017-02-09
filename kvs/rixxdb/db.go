@@ -12,31 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mysql
+package rixxdb
 
-// KV represents a database key:value item
-type KV struct {
-	exi bool
-	key []byte
-	val []byte
+import (
+	"github.com/abcum/rixxdb"
+	"github.com/abcum/surreal/kvs"
+)
+
+type DB struct {
+	pntr *rixxdb.DB
 }
 
-// Exists is true if the key exists
-func (kv *KV) Exists() bool {
-	return kv.exi
+func (db *DB) Begin(writable bool) (txn kvs.TX, err error) {
+
+	pntr, err := db.pntr.Begin(writable)
+	if err != nil {
+		err = &kvs.DSError{Err: err}
+		if pntr != nil {
+			pntr.Cancel()
+		}
+		return
+	}
+
+	return &TX{pntr: pntr}, err
+
 }
 
-// Key returns a byte slice of the key
-func (kv *KV) Key() []byte {
-	return kv.key
-}
+func (db *DB) Close() (err error) {
 
-// Val returns a byte slice of the value
-func (kv *KV) Val() []byte {
-	return kv.val
-}
+	return db.pntr.Close()
 
-// Str returns a string of the value
-func (kv *KV) Str() string {
-	return string(kv.val)
 }

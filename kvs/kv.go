@@ -14,10 +14,10 @@
 
 package kvs
 
-// KV represents a datastore key:value item
+// KV represents a database item
 type KV interface {
-	Exists() bool
+	Exi() bool
 	Key() []byte
 	Val() []byte
-	Str() string
+	Ver() int64
 }

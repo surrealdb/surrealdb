@@ -78,6 +78,7 @@ func init() {
 	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Crt, "db-crt", "", "Path to the certificate file used to connect to the remote database.")
 	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Key, "db-key", "", "Path to the private key file used to connect to the remote database.")
 	startCmd.PersistentFlags().StringVar(&opts.DB.Path, "db-path", "", flag("db"))
+	startCmd.PersistentFlags().StringVar(&opts.DB.Time, "db-sync", "0s", "Something here")
 
 	startCmd.PersistentFlags().StringVarP(&opts.Cluster.Join, "join", "j", "", flag("join"))
 

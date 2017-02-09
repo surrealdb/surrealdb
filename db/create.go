@@ -40,7 +40,7 @@ func (e *executor) executeCreateStatement(txn kvs.TX, ast *sql.CreateStatement) 
 
 		case *sql.Thing:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
-			kv, _ := txn.Get(key.Encode())
+			kv, _ := txn.Get(0, key.Encode())
 			doc := item.New(kv, txn, key, e.ctx)
 			if ret, err := create(doc, ast); err != nil {
 				return nil, err
@@ -50,7 +50,7 @@ func (e *executor) executeCreateStatement(txn kvs.TX, ast *sql.CreateStatement) 
 
 		case *sql.Table:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: uuid.NewV5(uuid.NewV4().UUID, ast.KV).String()}
-			kv, _ := txn.Get(key.Encode())
+			kv, _ := txn.Get(0, key.Encode())
 			doc := item.New(kv, txn, key, e.ctx)
 			if ret, err := create(doc, ast); err != nil {
 				return nil, err

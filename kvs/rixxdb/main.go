@@ -12,36 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pgsql
+package rixxdb
 
 import (
-	"database/sql"
+	"strings"
 
+	"github.com/abcum/rixxdb"
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
 )
 
-type DS struct {
-	db *sql.DB
-	ck []byte
-}
+func init() {
 
-func (ds *DS) Txn(writable bool) (txn kvs.TX, err error) {
+	kvs.Register("rixxdb", func(opts *cnf.Options) (db kvs.DB, err error) {
 
-	tx, err := ds.db.Begin()
-	if err != nil {
-		err = &kvs.DSError{Err: err}
-		if tx != nil {
-			tx.Rollback()
+		var pntr *rixxdb.DB
+
+		path := strings.TrimLeft(opts.DB.Path, "rixxdb://")
+
+		pntr, err = rixxdb.Open(path, &rixxdb.Config{
+			SyncPolicy:    opts.DB.Sync,
+			EncryptionKey: opts.DB.Key,
+		})
+
+		if err != nil {
+			return
 		}
-		return
-	}
 
-	return &TX{ds: ds, tx: tx}, err
+		return &DB{pntr: pntr}, err
 
-}
-
-func (ds *DS) Close() (err error) {
-
-	return ds.db.Close()
+	})
 
 }

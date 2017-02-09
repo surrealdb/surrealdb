@@ -14,23 +14,26 @@
 
 package kvs
 
-// TX represents a datastore transaction
+// TX represents a database transaction
 type TX interface {
-	All() ([]KV, error)
-	Get([]byte) (KV, error)
-	MGet(...[]byte) ([]KV, error)
-	PGet([]byte) ([]KV, error)
-	RGet([]byte, []byte, uint64) ([]KV, error)
-	Put([]byte, []byte) error
-	CPut([]byte, []byte, []byte) error
-	Del([]byte) error
-	CDel([]byte, []byte) error
-	MDel(...[]byte) error
-	PDel([]byte) error
-	RDel([]byte, []byte, uint64) error
-	Done() bool
-	Close() error
+	Closed() bool
 	Cancel() error
 	Commit() error
-	Rollback() error
+
+	Get(int64, []byte) (KV, error)
+	GetL(int64, []byte) ([]KV, error)
+	GetP(int64, []byte, uint64) ([]KV, error)
+	GetR(int64, []byte, []byte, uint64) ([]KV, error)
+
+	Del(int64, []byte) (KV, error)
+	DelC(int64, []byte, []byte) (KV, error)
+	DelL(int64, []byte) ([]KV, error)
+	DelP(int64, []byte, uint64) ([]KV, error)
+	DelR(int64, []byte, []byte, uint64) ([]KV, error)
+
+	Put(int64, []byte, []byte) (KV, error)
+	PutC(int64, []byte, []byte, []byte) (KV, error)
+	PutL(int64, []byte, []byte) ([]KV, error)
+	PutP(int64, []byte, []byte, uint64) ([]KV, error)
+	PutR(int64, []byte, []byte, []byte, uint64) ([]KV, error)
 }

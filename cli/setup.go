@@ -19,6 +19,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/log"
@@ -34,26 +35,35 @@ func setup() {
 	// Ensure that the default
 	// database options are set
 
-	if opts.DB.Base == "" {
-		opts.DB.Base = "surreal"
+	if opts.DB.Path == "" {
+		opts.DB.Path = "memory"
 	}
 
-	if opts.DB.Path == "" {
-		opts.DB.Path = "boltdb://surreal.db"
+	if opts.DB.Base == "" {
+		opts.DB.Base = "surreal"
 	}
 
 	if opts.DB.Code != "" {
 		opts.DB.Key = []byte(opts.DB.Code)
 	}
 
-	if ok, _ := regexp.MatchString(`^(boltdb|mysql|pgsql)://(.+)$`, opts.DB.Path); !ok {
-		log.Fatal("Specify a valid data store configuration path")
+	if opts.DB.Time != "" {
+		var err error
+		if opts.DB.Sync, err = time.ParseDuration(opts.DB.Time); err != nil {
+			log.Fatal("Specify a valid database sync time frequency")
+		}
 	}
 
 	switch len(opts.DB.Key) {
 	case 0, 16, 24, 32:
 	default:
 		log.Fatal("Specify a valid encryption key length. Valid key sizes are 16bit, 24bit, or 32bit.")
+	}
+
+	if opts.DB.Path != "memory" {
+		if ok, _ := regexp.MatchString(`^(s3|gcs|logr|file|rixxdb|dendrodb)://(.+)$`, opts.DB.Path); !ok {
+			log.Fatal("Specify a valid data store configuration path")
+		}
 	}
 
 	if strings.HasPrefix(opts.DB.Cert.CA, "-----") {

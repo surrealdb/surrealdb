@@ -14,6 +14,8 @@
 
 package cnf
 
+import "time"
+
 var Settings *Options
 
 type Auth struct {
@@ -38,6 +40,8 @@ type Options struct {
 		Host string // Surreal host to connect to
 		Port string // Surreal port to connect to
 		Base string // Base key to use in KV stores
+		Time string // Timeframe for syncing data
+		Sync time.Duration
 		Cert struct {
 			CA  string
 			Crt string

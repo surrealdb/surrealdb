@@ -15,16 +15,16 @@
 package cli
 
 var flags = map[string]string{
-	"db":   `Database configuration path used for storing data. Available backend stores are boltdb, mysql, or pgsql. (default "boltdb://surreal.db").`,
+	"db":   `Database configuration path used for storing data. Available backend stores are memory, rixxdb, or dendrodb. (default "memory").`,
 	"key":  `Encryption key to use for intra-cluster communications, and on-disk encryption. For AES-128 encryption use a 16 bit key, for AES-192 encryption use a 24 bit key, and for AES-256 encryption use a 32 bit key.`,
 	"join": `A comma-separated list of addresses to use when a new node is joining an existing cluster. For the first node in a cluster, --join should NOT be specified.`,
 }
 
 var usage = map[string][]string{
 	"db": {
-		"--db-path boltdb://surreal.db",
-		"--db-path mysql://user:pass@127.0.0.1:3306/database",
-		"--db-path pgsql://user:pass@127.0.0.1:5432/database",
+		"--db-path memory",
+		"--db-path rixxdb://surreal.db",
+		"--db-path dendro://user:pass@192.168.1.100",
 	},
 	"join": {
 		"--join 10.0.0.1",
@@ -33,8 +33,8 @@ var usage = map[string][]string{
 		"--join 89.13.7.33:33693,example.com:33693",
 	},
 	"key": {
-		"--enc 1hg7dbrma8ghe547",
-		"--enc 1hg7dbrma8ghe5473kghvie6",
-		"--enc 1hg7dbrma8ghe5473kghvie64jgi3ph4",
+		"--key 1hg7dbrma8ghe547",
+		"--key 1hg7dbrma8ghe5473kghvie6",
+		"--key 1hg7dbrma8ghe5473kghvie64jgi3ph4",
 	},
 }

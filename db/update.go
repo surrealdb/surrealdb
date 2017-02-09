@@ -39,8 +39,8 @@ func (e *executor) executeUpdateStatement(txn kvs.TX, ast *sql.UpdateStatement) 
 
 		case *sql.Thing:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
-			kv, _ := txn.Get(key.Encode())
-			doc := item.New(kv, txn, key, e.ctx)
+			kv, _ := txn.Get(0, key.Encode())
+			doc := item.New(kv, e.txn, key, e.ctx)
 			if ret, err := update(doc, ast); err != nil {
 				return nil, err
 			} else if ret != nil {
@@ -48,9 +48,8 @@ func (e *executor) executeUpdateStatement(txn kvs.TX, ast *sql.UpdateStatement) 
 			}
 
 		case *sql.Table:
-			beg := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: keys.Prefix}
-			end := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: keys.Suffix}
-			kvs, _ := txn.RGet(beg.Encode(), end.Encode(), 0)
+			key := &keys.Table{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB}
+			kvs, _ := txn.GetL(0, key.Encode())
 			for _, kv := range kvs {
 				doc := item.New(kv, txn, nil, e.ctx)
 				if ret, err := update(doc, ast); err != nil {
