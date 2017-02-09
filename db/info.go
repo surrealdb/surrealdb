@@ -15,28 +15,27 @@
 package db
 
 import (
-	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 )
 
-func (e *executor) executeInfoStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	switch ast.Kind {
 	case sql.NAMESPACE:
-		return e.executeInfoNSStatement(txn, ast)
+		return e.executeInfoNSStatement(ast)
 	case sql.DATABASE:
-		return e.executeInfoDBStatement(txn, ast)
+		return e.executeInfoDBStatement(ast)
 	case sql.TABLE:
-		return e.executeInfoTBStatement(txn, ast)
+		return e.executeInfoTBStatement(ast)
 	}
 
 	return
 
 }
 
-func (e *executor) executeInfoNSStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoNSStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	res := data.New()
 	res.Array("logins")
@@ -69,7 +68,7 @@ func (e *executor) executeInfoNSStatement(txn kvs.TX, ast *sql.InfoStatement) (o
 
 }
 
-func (e *executor) executeInfoDBStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoDBStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	res := data.New()
 	res.Array("logins")
@@ -107,7 +106,7 @@ func (e *executor) executeInfoDBStatement(txn kvs.TX, ast *sql.InfoStatement) (o
 
 }
 
-func (e *executor) executeInfoTBStatement(txn kvs.TX, ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoTBStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	res := data.New()
 	res.Array("fields")

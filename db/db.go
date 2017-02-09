@@ -168,7 +168,6 @@ func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 
 	var err error
-	var txn kvs.TX
 	var rsp *Response
 	var buf []*Response
 	var res []interface{}
@@ -184,8 +183,8 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 	// query set, then cancel the transaction.
 
 	defer func() {
-		if txn != nil {
-			txn.Cancel()
+		if e.txn != nil {
+			e.txn.Cancel()
 		}
 	}()
 
@@ -239,7 +238,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			// then reset the error to nil so that the
 			// next statement is not ignored.
 
-			if txn == nil {
+			if e.txn == nil {
 				err = nil
 			}
 
@@ -249,13 +248,13 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 
 			switch stm.(type) {
 			case *sql.BeginStatement:
-				txn, err = begin(txn)
+				err = e.begin()
 				continue
 			case *sql.CancelStatement:
-				txn, err, buf = cancel(txn, buf, err, send)
+				err, buf = e.cancel(buf, err, send)
 				continue
 			case *sql.CommitStatement:
-				txn, err, buf = commit(txn, buf, err, send)
+				err, buf = e.commit(buf, err, send)
 				continue
 			}
 
@@ -270,7 +269,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			// subsequent statements in the transaction.
 
 			if err == nil {
-				res, err = e.operate(txn, stm)
+				res, err = e.operate(stm)
 			} else {
 				res, err = []interface{}{}, fmt.Errorf("Query not executed")
 			}
@@ -286,7 +285,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			// then we can output the statement response
 			// immediately to the channel.
 
-			if txn == nil {
+			if e.txn == nil {
 				send <- rsp
 				continue
 			}
@@ -295,7 +294,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			// must buffer the responses for output at
 			// the end of the transaction.
 
-			if txn != nil {
+			if e.txn != nil {
 				switch stm.(type) {
 				case *sql.ReturnStatement:
 					buf = clear(buf, rsp)
@@ -311,7 +310,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 
 }
 
-func (e *executor) operate(txn kvs.TX, ast sql.Statement) (res []interface{}, err error) {
+func (e *executor) operate(ast sql.Statement) (res []interface{}, err error) {
 
 	var loc bool
 
@@ -319,22 +318,22 @@ func (e *executor) operate(txn kvs.TX, ast sql.Statement) (res []interface{}, er
 	// then grab a new transaction, ensuring that
 	// it is closed at the end.
 
-	if txn == nil {
+	if e.txn == nil {
 
 		loc = true
 
 		switch ast.(type) {
 		case *sql.InfoStatement:
-			txn, err = readable()
+			e.txn, err = readable()
 		default:
-			txn, err = writable()
+			e.txn, err = writable()
 		}
 
 		if err != nil {
 			return
 		}
 
-		defer txn.Close()
+		defer e.txn.Cancel()
 
 	}
 
@@ -345,48 +344,63 @@ func (e *executor) operate(txn kvs.TX, ast sql.Statement) (res []interface{}, er
 	switch stm := ast.(type) {
 
 	case *sql.InfoStatement:
-		res, err = e.executeInfoStatement(txn, stm)
+		res, err = e.executeInfoStatement(stm)
 
 	case *sql.LetStatement:
-		res, err = e.executeLetStatement(txn, stm)
+		res, err = e.executeLetStatement(stm)
 	case *sql.ReturnStatement:
-		res, err = e.executeReturnStatement(txn, stm)
+		res, err = e.executeReturnStatement(stm)
 
 	case *sql.SelectStatement:
-		res, err = e.executeSelectStatement(txn, stm)
+		res, err = e.executeSelectStatement(stm)
 	case *sql.CreateStatement:
-		res, err = e.executeCreateStatement(txn, stm)
+		res, err = e.executeCreateStatement(stm)
 	case *sql.UpdateStatement:
-		res, err = e.executeUpdateStatement(txn, stm)
+		res, err = e.executeUpdateStatement(stm)
 	case *sql.DeleteStatement:
-		res, err = e.executeDeleteStatement(txn, stm)
+		res, err = e.executeDeleteStatement(stm)
 	case *sql.RelateStatement:
-		res, err = e.executeRelateStatement(txn, stm)
+		res, err = e.executeRelateStatement(stm)
+
+	case *sql.DefineNamespaceStatement:
+		res, err = e.executeDefineNamespaceStatement(stm)
+	case *sql.RemoveNamespaceStatement:
+		res, err = e.executeRemoveNamespaceStatement(stm)
+
+	case *sql.DefineDatabaseStatement:
+		res, err = e.executeDefineDatabaseStatement(stm)
+	case *sql.RemoveDatabaseStatement:
+		res, err = e.executeRemoveDatabaseStatement(stm)
+
+	case *sql.DefineLoginStatement:
+		res, err = e.executeDefineLoginStatement(stm)
+	case *sql.RemoveLoginStatement:
+		res, err = e.executeRemoveLoginStatement(stm)
+
+	case *sql.DefineTokenStatement:
+		res, err = e.executeDefineTokenStatement(stm)
+	case *sql.RemoveTokenStatement:
+		res, err = e.executeRemoveTokenStatement(stm)
 
 	case *sql.DefineScopeStatement:
-		res, err = e.executeDefineScopeStatement(txn, stm)
+		res, err = e.executeDefineScopeStatement(stm)
 	case *sql.RemoveScopeStatement:
-		res, err = e.executeRemoveScopeStatement(txn, stm)
+		res, err = e.executeRemoveScopeStatement(stm)
 
 	case *sql.DefineTableStatement:
-		res, err = e.executeDefineTableStatement(txn, stm)
+		res, err = e.executeDefineTableStatement(stm)
 	case *sql.RemoveTableStatement:
-		res, err = e.executeRemoveTableStatement(txn, stm)
-
-	case *sql.DefineRulesStatement:
-		res, err = e.executeDefineRulesStatement(txn, stm)
-	case *sql.RemoveRulesStatement:
-		res, err = e.executeRemoveRulesStatement(txn, stm)
+		res, err = e.executeRemoveTableStatement(stm)
 
 	case *sql.DefineFieldStatement:
-		res, err = e.executeDefineFieldStatement(txn, stm)
+		res, err = e.executeDefineFieldStatement(stm)
 	case *sql.RemoveFieldStatement:
-		res, err = e.executeRemoveFieldStatement(txn, stm)
+		res, err = e.executeRemoveFieldStatement(stm)
 
 	case *sql.DefineIndexStatement:
-		res, err = e.executeDefineIndexStatement(txn, stm)
+		res, err = e.executeDefineIndexStatement(stm)
 	case *sql.RemoveIndexStatement:
-		res, err = e.executeRemoveIndexStatement(txn, stm)
+		res, err = e.executeRemoveIndexStatement(stm)
 
 	}
 
@@ -394,11 +408,11 @@ func (e *executor) operate(txn kvs.TX, ast sql.Statement) (res []interface{}, er
 	// current statement, then commit or cancel
 	// depending on the result error.
 
-	if loc {
+	if loc && !e.txn.Closed() {
 		if err != nil {
-			txn.Cancel()
+			e.txn, err = nil, e.txn.Cancel()
 		} else {
-			txn.Commit()
+			e.txn, err = nil, e.txn.Commit()
 		}
 	}
 
@@ -440,20 +454,20 @@ func clear(buf []*Response, rsp *Response) []*Response {
 	return append(buf, rsp)
 }
 
-func begin(txn kvs.TX) (tmp kvs.TX, err error) {
-	if txn == nil {
-		txn, err = writable()
+func (e *executor) begin() (err error) {
+	if e.txn == nil {
+		e.txn, err = writable()
 	}
-	return txn, err
+	return
 }
 
-func cancel(txn kvs.TX, buf []*Response, err error, chn chan<- *Response) (kvs.TX, error, []*Response) {
+func (e *executor) cancel(buf []*Response, err error, chn chan<- *Response) (error, []*Response) {
 
-	if txn == nil {
-		return nil, nil, buf
+	if e.txn == nil {
+		return nil, buf
 	}
 
-	txn.Cancel()
+	e.txn.Cancel()
 
 	for _, v := range buf {
 		v.Status = "ERR"
@@ -465,20 +479,22 @@ func cancel(txn kvs.TX, buf []*Response, err error, chn chan<- *Response) (kvs.T
 		buf = buf[:len(buf)-1]
 	}
 
-	return nil, nil, buf
+	e.txn = nil
+
+	return nil, buf
 
 }
 
-func commit(txn kvs.TX, buf []*Response, err error, chn chan<- *Response) (kvs.TX, error, []*Response) {
+func (e *executor) commit(buf []*Response, err error, chn chan<- *Response) (error, []*Response) {
 
-	if txn == nil {
-		return nil, nil, buf
+	if e.txn == nil {
+		return nil, buf
 	}
 
 	if err != nil {
-		txn.Cancel()
+		e.txn.Cancel()
 	} else {
-		txn.Commit()
+		e.txn.Commit()
 	}
 
 	for _, v := range buf {
@@ -493,14 +509,16 @@ func commit(txn kvs.TX, buf []*Response, err error, chn chan<- *Response) (kvs.T
 		buf = buf[:len(buf)-1]
 	}
 
-	return nil, nil, buf
+	e.txn = nil
+
+	return nil, buf
 
 }
 
 func writable() (txn kvs.TX, err error) {
-	return db.Txn(true)
+	return db.Begin(true)
 }
 
 func readable() (txn kvs.TX, err error) {
-	return db.Txn(false)
+	return db.Begin(false)
 }

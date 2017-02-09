@@ -15,13 +15,12 @@
 package db
 
 import (
-	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
 )
 
-func (e *executor) executeSelectStatement(txn kvs.TX, ast *sql.SelectStatement) (out []interface{}, err error) {
+func (e *executor) executeSelectStatement(ast *sql.SelectStatement) (out []interface{}, err error) {
 
 	for k, w := range ast.What {
 		if what, ok := w.(*sql.Param); ok {
@@ -33,7 +32,7 @@ func (e *executor) executeSelectStatement(txn kvs.TX, ast *sql.SelectStatement) 
 
 		if what, ok := w.(*sql.Thing); ok {
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
-			kv, _ := txn.Get(0, key.Encode())
+			kv, _ := e.txn.Get(0, key.Encode())
 			doc := item.New(kv, e.txn, key, e.ctx)
 			if ret, err := detect(doc, ast); err != nil {
 				return nil, err
@@ -44,9 +43,9 @@ func (e *executor) executeSelectStatement(txn kvs.TX, ast *sql.SelectStatement) 
 
 		if what, ok := w.(*sql.Table); ok {
 			key := &keys.Table{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB}
-			kvs, _ := txn.GetL(0, key.Encode())
+			kvs, _ := e.txn.GetL(0, key.Encode())
 			for _, kv := range kvs {
-				doc := item.New(kv, txn, nil, e.ctx)
+				doc := item.New(kv, e.txn, nil, e.ctx)
 				if ret, err := detect(doc, ast); err != nil {
 					return nil, err
 				} else if ret != nil {

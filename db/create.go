@@ -16,14 +16,13 @@ package db
 
 import (
 	"fmt"
-	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
 	"github.com/abcum/surreal/util/uuid"
 )
 
-func (e *executor) executeCreateStatement(txn kvs.TX, ast *sql.CreateStatement) (out []interface{}, err error) {
+func (e *executor) executeCreateStatement(ast *sql.CreateStatement) (out []interface{}, err error) {
 
 	for k, w := range ast.What {
 		if what, ok := w.(*sql.Param); ok {
@@ -40,8 +39,8 @@ func (e *executor) executeCreateStatement(txn kvs.TX, ast *sql.CreateStatement) 
 
 		case *sql.Thing:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
-			kv, _ := txn.Get(0, key.Encode())
-			doc := item.New(kv, txn, key, e.ctx)
+			kv, _ := e.txn.Get(0, key.Encode())
+			doc := item.New(kv, e.txn, key, e.ctx)
 			if ret, err := create(doc, ast); err != nil {
 				return nil, err
 			} else if ret != nil {
@@ -50,8 +49,8 @@ func (e *executor) executeCreateStatement(txn kvs.TX, ast *sql.CreateStatement) 
 
 		case *sql.Table:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: uuid.NewV5(uuid.NewV4().UUID, ast.KV).String()}
-			kv, _ := txn.Get(0, key.Encode())
-			doc := item.New(kv, txn, key, e.ctx)
+			kv, _ := e.txn.Get(0, key.Encode())
+			doc := item.New(kv, e.txn, key, e.ctx)
 			if ret, err := create(doc, ast); err != nil {
 				return nil, err
 			} else if ret != nil {

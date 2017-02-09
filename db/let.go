@@ -15,11 +15,10 @@
 package db
 
 import (
-	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 )
 
-func (e *executor) executeLetStatement(txn kvs.TX, ast *sql.LetStatement) (out []interface{}, err error) {
+func (e *executor) executeLetStatement(ast *sql.LetStatement) (out []interface{}, err error) {
 
 	switch what := ast.What.(type) {
 	default:
