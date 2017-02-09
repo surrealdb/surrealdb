@@ -84,6 +84,8 @@ func init() {
 
 	startCmd.PersistentFlags().StringVarP(&opts.DB.Code, "key", "k", "", flag("key"))
 
+	startCmd.PersistentFlags().StringVarP(&opts.Node.Host, "bind", "b", "0.0.0.0", "The hostname or ip address to listen for connections on.")
+
 	startCmd.PersistentFlags().StringVarP(&opts.Node.Name, "name", "n", host, "The name of this node, used for logs and statistics.")
 
 	startCmd.PersistentFlags().IntVar(&opts.Port.Tcp, "port-tcp", 33693, "The port on which to serve the tcp server.")

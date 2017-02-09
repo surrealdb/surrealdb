@@ -207,8 +207,8 @@ func setup() {
 	}
 
 	// Store the ports in host:port string format
-	opts.Conn.Web = fmt.Sprintf(":%d", opts.Port.Web)
-	opts.Conn.Tcp = fmt.Sprintf(":%d", opts.Port.Tcp)
+	opts.Conn.Web = fmt.Sprintf("%s:%d", opts.Node.Host, opts.Port.Web)
+	opts.Conn.Tcp = fmt.Sprintf("%s:%d", opts.Node.Host, opts.Port.Tcp)
 
 	// --------------------------------------------------
 	// Certs
