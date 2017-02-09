@@ -43,6 +43,7 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Cors()) // Add cors headers
 
 	// Setup authentication
+
 	s.Use(auth())
 
 	// Check body size
