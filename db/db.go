@@ -20,6 +20,8 @@ import (
 
 	"net/http"
 
+	"runtime/debug"
+
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
@@ -196,7 +198,8 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 	defer func() {
 		if r := recover(); r != nil {
 			if err, ok := r.(error); ok {
-				fmt.Println(err)
+				log.WithPrefix("db").Errorln(err)
+				log.WithPrefix("db").Debugln(string(debug.Stack()))
 			}
 		}
 	}()
