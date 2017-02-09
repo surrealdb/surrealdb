@@ -14,33 +14,17 @@
 
 package keys
 
-// LV ...
-type LV struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	LV interface{}
-}
+import "fmt"
 
-// init initialises the key
-func (k *LV) init() *LV {
-	return k
-}
-
-// Encode encodes the key into binary
-func (k *LV) Encode() []byte {
-	k.init()
-	return encode(k.KV, k.NS, "*", k.DB, "!", "l", k.LV)
-}
-
-// Decode decodes the key from binary
-func (k *LV) Decode(data []byte) {
-	k.init()
-	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &skip, &k.LV)
-}
-
-// String returns a string representation of the key
-func (k *LV) String() string {
-	k.init()
-	return output(k.KV, k.NS, "*", k.DB, "!", "l", k.LV)
+// output decodes an encoded string using the unicode collation algorithm.
+func output(items ...interface{}) (out string) {
+	for _, v := range items {
+		switch v.(type) {
+		default:
+			out = out + fmt.Sprintf("/%s", v)
+		case []interface{}:
+			out = out + fmt.Sprintf("/%v", v)
+		}
+	}
+	return
 }

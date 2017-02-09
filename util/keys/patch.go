@@ -15,7 +15,6 @@
 package keys
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -25,14 +24,12 @@ type Patch struct {
 	NS interface{}
 	DB interface{}
 	TB interface{}
-	TK interface{}
 	ID interface{}
 	AT time.Time
 }
 
 // init initialises the key
 func (k *Patch) init() *Patch {
-	k.TK = "~"
 	if k.AT.IsZero() {
 		k.AT = time.Now()
 	}
@@ -42,17 +39,17 @@ func (k *Patch) init() *Patch {
 // Encode encodes the key into binary
 func (k *Patch) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.AT)
+	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "~", k.ID, k.AT)
 }
 
 // Decode decodes the key from binary
 func (k *Patch) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID, &k.AT)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB, &skip, &k.ID, &k.AT)
 }
 
 // String returns a string representation of the key
 func (k *Patch) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%s", k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.AT.Format(time.RFC3339Nano))
+	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "~", k.ID, k.AT.Format(time.RFC3339Nano))
 }

@@ -14,40 +14,34 @@
 
 package keys
 
-import (
-	"fmt"
-)
-
 // Thing ...
 type Thing struct {
 	KV interface{}
 	NS interface{}
 	DB interface{}
 	TB interface{}
-	TK interface{}
 	ID interface{}
 }
 
 // init initialises the key
 func (k *Thing) init() *Thing {
-	k.TK = "*"
 	return k
 }
 
 // Encode encodes the key into binary
 func (k *Thing) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID)
+	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "*", k.ID)
 }
 
 // Decode decodes the key from binary
 func (k *Thing) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB, &skip, &k.ID)
 }
 
 // String returns a string representation of the key
 func (k *Thing) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s", k.KV, k.NS, k.DB, k.TB, k.TK, k.ID)
+	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "*", k.ID)
 }

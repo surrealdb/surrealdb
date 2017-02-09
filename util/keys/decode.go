@@ -24,7 +24,7 @@ type decoder struct {
 	r *reader
 }
 
-// Decode decodes an encoded string using the unicode collation algorithm.
+// decode decodes an encoded string using the unicode collation algorithm.
 func decode(data []byte, items ...interface{}) {
 	newDecoder(bytes.NewReader(data)).Decode(items...)
 }

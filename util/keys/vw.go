@@ -14,15 +14,9 @@
 
 package keys
 
-import (
-	"fmt"
-)
-
 // VW ...
 type VW struct {
 	KV interface{}
-	CF interface{}
-	TK interface{}
 	NS interface{}
 	DB interface{}
 	VW interface{}
@@ -30,25 +24,23 @@ type VW struct {
 
 // init initialises the key
 func (k *VW) init() *VW {
-	k.CF = "!"
-	k.TK = "v"
 	return k
 }
 
 // Encode encodes the key into binary
 func (k *VW) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.CF, k.TK, k.NS, k.DB, k.VW)
+	return encode(k.KV, k.NS, "*", k.DB, "!", "v", k.VW)
 }
 
 // Decode decodes the key from binary
 func (k *VW) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.CF, &k.TK, &k.NS, &k.DB, &k.VW)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &skip, &k.VW)
 }
 
 // String returns a string representation of the key
 func (k *VW) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s", k.KV, k.CF, k.TK, k.NS, k.DB, k.VW)
+	return output(k.KV, k.NS, "*", k.DB, "!", "v", k.VW)
 }

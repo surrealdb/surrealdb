@@ -14,17 +14,12 @@
 
 package keys
 
-import (
-	"fmt"
-)
-
 // Point ...
 type Point struct {
 	KV interface{}
 	NS interface{}
 	DB interface{}
 	TB interface{}
-	TK interface{}
 	IX interface{}
 	FD interface{}
 	ID interface{}
@@ -32,24 +27,23 @@ type Point struct {
 
 // init initialises the key
 func (k *Point) init() *Point {
-	k.TK = "∆"
 	return k
 }
 
 // Encode encodes the key into binary
 func (k *Point) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.IX, k.FD, k.ID)
+	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "¤", k.IX, k.FD, k.ID)
 }
 
 // Decode decodes the key from binary
 func (k *Point) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.IX, &k.FD, &k.ID)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB, &skip, &k.IX, &k.FD, &k.ID)
 }
 
 // String returns a string representation of the key
 func (k *Point) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%v/%s", k.KV, k.NS, k.DB, k.TB, k.TK, k.IX, k.FD, k.ID)
+	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "¤", k.IX, k.FD, k.ID)
 }

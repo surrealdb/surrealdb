@@ -14,15 +14,9 @@
 
 package keys
 
-import (
-	"fmt"
-)
-
 // IX ...
 type IX struct {
 	KV interface{}
-	CF interface{}
-	TK interface{}
 	NS interface{}
 	DB interface{}
 	TB interface{}
@@ -31,25 +25,23 @@ type IX struct {
 
 // init initialises the key
 func (k *IX) init() *IX {
-	k.CF = "!"
-	k.TK = "i"
 	return k
 }
 
 // Encode encodes the key into binary
 func (k *IX) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.CF, k.TK, k.NS, k.DB, k.TB, k.IX)
+	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "!", "i", k.IX)
 }
 
 // Decode decodes the key from binary
 func (k *IX) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.CF, &k.TK, &k.NS, &k.DB, &k.TB, &k.IX)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB, &skip, &skip, &k.IX)
 }
 
 // String returns a string representation of the key
 func (k *IX) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%s", k.KV, k.CF, k.TK, k.NS, k.DB, k.TB, k.IX)
+	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "!", "i", k.IX)
 }

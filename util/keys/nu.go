@@ -14,46 +14,32 @@
 
 package keys
 
-import (
-	"fmt"
-	"time"
-)
-
-// Event ...
-type Event struct {
+// NU ...
+type NU struct {
 	KV interface{}
 	NS interface{}
-	DB interface{}
-	TB interface{}
-	TK interface{}
-	ID interface{}
-	TP interface{}
-	AT time.Time
+	US interface{}
 }
 
 // init initialises the key
-func (k *Event) init() *Event {
-	k.TK = "•"
-	if k.AT.IsZero() {
-		k.AT = time.Now()
-	}
+func (k *NU) init() *NU {
 	return k
 }
 
 // Encode encodes the key into binary
-func (k *Event) Encode() []byte {
+func (k *NU) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.TP, k.AT)
+	return encode(k.KV, k.NS, "!", "u", k.US)
 }
 
 // Decode decodes the key from binary
-func (k *Event) Decode(data []byte) {
+func (k *NU) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID, &k.TP, &k.AT)
+	decode(data, &k.KV, &k.NS, &skip, &skip, &k.US)
 }
 
 // String returns a string representation of the key
-func (k *Event) String() string {
+func (k *NU) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%s/%s", k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.TP, k.AT.Format(time.RFC3339Nano))
+	return output(k.KV, k.NS, "!", "u", k.US)
 }

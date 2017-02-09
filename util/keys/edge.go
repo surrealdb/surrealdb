@@ -14,25 +14,26 @@
 
 package keys
 
-import (
-	"fmt"
-)
-
 // Edge ...
 type Edge struct {
 	KV interface{}
 	NS interface{}
 	DB interface{}
 	TB interface{}
-	TK interface{}
 	ID interface{}
+	TK interface{}
 	TP interface{}
+	FT interface{}
 	FK interface{}
 }
 
 // init initialises the key
 func (k *Edge) init() *Edge {
-	if k.TK == nil {
+	switch k.TK {
+	case "«»":
+	case "‹", "›":
+	case "«", "»":
+	default:
 		k.TK = "«»"
 	}
 	return k
@@ -41,17 +42,17 @@ func (k *Edge) init() *Edge {
 // Encode encodes the key into binary
 func (k *Edge) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.TP, k.FK)
+	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "*", k.ID, k.TK, k.TP, k.FT, k.FK)
 }
 
 // Decode decodes the key from binary
 func (k *Edge) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &k.DB, &k.TB, &k.TK, &k.ID, &k.TP, &k.FK)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB, &skip, &k.ID, &k.TK, &k.TP, &k.FT, &k.FK)
 }
 
 // String returns a string representation of the key
 func (k *Edge) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%s/%s", k.KV, k.NS, k.DB, k.TB, k.TK, k.ID, k.TP, k.FK)
+	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "*", k.ID, k.TK, k.TP, k.FT, k.FK)
 }

@@ -14,42 +14,34 @@
 
 package keys
 
-import (
-	"fmt"
-)
-
-// RU ...
-type RU struct {
+// ST ...
+type ST struct {
 	KV interface{}
-	CF interface{}
-	TK interface{}
 	NS interface{}
 	DB interface{}
-	TB interface{}
-	RU interface{}
+	SC interface{}
+	TK interface{}
 }
 
 // init initialises the key
-func (k *RU) init() *RU {
-	k.CF = "!"
-	k.TK = "r"
+func (k *ST) init() *ST {
 	return k
 }
 
 // Encode encodes the key into binary
-func (k *RU) Encode() []byte {
+func (k *ST) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.CF, k.TK, k.NS, k.DB, k.TB, k.RU)
+	return encode(k.KV, k.NS, "*", k.DB, "!", "s", k.SC, "!", "t", k.TK)
 }
 
 // Decode decodes the key from binary
-func (k *RU) Decode(data []byte) {
+func (k *ST) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.CF, &k.TK, &k.NS, &k.DB, &k.TB, &k.RU)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &skip, &k.SC, &skip, &skip, &k.TK)
 }
 
 // String returns a string representation of the key
-func (k *RU) String() string {
+func (k *ST) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s/%s", k.KV, k.CF, k.TK, k.NS, k.DB, k.TB, k.RU)
+	return output(k.KV, k.NS, "*", k.DB, "!", "s", k.SC, "!", "t", k.TK)
 }

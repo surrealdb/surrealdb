@@ -54,6 +54,22 @@ func ShouldNotPrefix(actual interface{}, expected ...interface{}) string {
 	}
 }
 
+func ShouldSortBefore(actual interface{}, expected ...interface{}) string {
+	if bytes.Compare(actual.([]byte), expected[0].([]byte)) > 0 {
+		return fmt.Sprintf("%v should sort before \n%v\n%s\n%s", actual, expected[0], actual, expected[0])
+	} else {
+		return ""
+	}
+}
+
+func ShouldSortAfter(actual interface{}, expected ...interface{}) string {
+	if bytes.Compare(actual.([]byte), expected[0].([]byte)) < 0 {
+		return fmt.Sprintf("%v should sort after \n%v\n%s\n%s", actual, expected[0], actual, expected[0])
+	} else {
+		return ""
+	}
+}
+
 func TestMain(t *testing.T) {
 
 	clock, _ := time.Parse(time.RFC3339, "1987-06-22T08:00:00.123456789Z")
@@ -64,113 +80,158 @@ func TestMain(t *testing.T) {
 		new Key
 	}{
 		{
+			str: "/surreal",
+			obj: &KV{KV: "surreal"},
+			new: &KV{},
+		},
+		{
 			str: "/surreal/!/¥",
 			obj: &CK{KV: "surreal"},
 			new: &CK{},
 		},
 		{
-			str: "/surreal/!/n/abcum",
+			str: "/surreal/abcum",
 			obj: &NS{KV: "surreal", NS: "abcum"},
 			new: &NS{},
 		},
 		{
-			str: "/surreal/!/d/abcum/database",
+			str: "/surreal/abcum/!/t/default",
+			obj: &NT{KV: "surreal", NS: "abcum", TK: "default"},
+			new: &NT{},
+		},
+		{
+			str: "/surreal/abcum/!/u/info@abcum.com",
+			obj: &NU{KV: "surreal", NS: "abcum", US: "info@abcum.com"},
+			new: &NU{},
+		},
+		{
+			str: "/surreal/abcum/*/database",
 			obj: &DB{KV: "surreal", NS: "abcum", DB: "database"},
 			new: &DB{},
 		},
 		{
-			str: "/surreal/!/t/abcum/database/person",
+			str: "/surreal/abcum/*/database/!/l/df8c74fa-428a-42b7-b279-b5fbe33d72a7",
+			obj: &LV{KV: "surreal", NS: "abcum", DB: "database", LV: "df8c74fa-428a-42b7-b279-b5fbe33d72a7"},
+			new: &LV{},
+		},
+		{
+			str: "/surreal/abcum/*/database/!/s/admin",
+			obj: &SC{KV: "surreal", NS: "abcum", DB: "database", SC: "admin"},
+			new: &SC{},
+		},
+		{
+			str: "/surreal/abcum/*/database/!/s/admin/!/t/default",
+			obj: &ST{KV: "surreal", NS: "abcum", DB: "database", SC: "admin", TK: "default"},
+			new: &ST{},
+		},
+		{
+			str: "/surreal/abcum/*/database/!/t/default",
+			obj: &DT{KV: "surreal", NS: "abcum", DB: "database", TK: "default"},
+			new: &DT{},
+		},
+		{
+			str: "/surreal/abcum/*/database/!/u/info@abcum.com",
+			obj: &DU{KV: "surreal", NS: "abcum", DB: "database", US: "info@abcum.com"},
+			new: &DU{},
+		},
+		{
+			str: "/surreal/abcum/*/database/!/v/ages",
+			obj: &VW{KV: "surreal", NS: "abcum", DB: "database", VW: "ages"},
+			new: &VW{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person",
 			obj: &TB{KV: "surreal", NS: "abcum", DB: "database", TB: "person"},
 			new: &TB{},
 		},
 		{
-			str: "/surreal/!/f/abcum/database/person/fullname",
+			str: "/surreal/abcum/*/database/*/person/!/f/fullname",
 			obj: &FD{KV: "surreal", NS: "abcum", DB: "database", TB: "person", FD: "fullname"},
 			new: &FD{},
 		},
 		{
-			str: "/surreal/!/r/abcum/database/person/select",
-			obj: &RU{KV: "surreal", NS: "abcum", DB: "database", TB: "person", RU: "select"},
-			new: &RU{},
-		},
-		{
-			str: "/surreal/!/i/abcum/database/person/teenagers",
+			str: "/surreal/abcum/*/database/*/person/!/i/teenagers",
 			obj: &IX{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "teenagers"},
 			new: &IX{},
 		},
 		{
-			str: "/surreal/abcum/database/person/*/\x00",
-			obj: &Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: Prefix},
-			new: &Thing{},
-		},
-		{
-			str: "/surreal/abcum/database/person/*/873c2f37-ea03-4c5e-843e-cf393af44155",
-			obj: &Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155"},
-			new: &Thing{},
-		},
-		{
-			str: "/surreal/abcum/database/person",
+			str: "/surreal/abcum/*/database/*/person/*",
 			obj: &Table{KV: "surreal", NS: "abcum", DB: "database", TB: "person"},
 			new: &Table{},
 		},
 		{
-			str: "/surreal/abcum/database/person/*/\xff",
+			str: "/surreal/abcum/*/database/*/person/*/\x00",
+			obj: &Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: Prefix},
+			new: &Thing{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person/*/873c2f37-ea03-4c5e-843e-cf393af44155",
+			obj: &Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155"},
+			new: &Thing{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person/*/873c2f37-ea03-4c5e-843e-cf393af44155/*/name.first",
+			obj: &Field{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", FD: "name.first"},
+			new: &Field{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person/*/873c2f37-ea03-4c5e-843e-cf393af44155/*/name.last",
+			obj: &Field{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", FD: "name.last"},
+			new: &Field{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person/*/873c2f37-ea03-4c5e-843e-cf393af44155/«/clicked/link/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«", TP: "clicked", FT: "link", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			new: &Edge{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person/*/873c2f37-ea03-4c5e-843e-cf393af44155/«»/clicked/link/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«»", TP: "clicked", FT: "link", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			new: &Edge{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person/*/873c2f37-ea03-4c5e-843e-cf393af44155/»/clicked/link/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
+			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "»", TP: "clicked", FT: "link", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
+			new: &Edge{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person/*/\xff",
 			obj: &Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: Suffix},
 			new: &Thing{},
 		},
 		{
-			str: "/surreal/abcum/database/person/~/873c2f37-ea03-4c5e-843e-cf393af44155/1987-06-22T08:00:00.123456789Z",
+			str: "/surreal/abcum/*/database/*/person/~/873c2f37-ea03-4c5e-843e-cf393af44155/1987-06-22T08:00:00.123456789Z",
 			obj: &Patch{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", AT: clock},
 			new: &Patch{},
 		},
 		{
-			str: "/surreal/abcum/database/person/~/test/1987-06-22T08:00:00.123456789Z",
+			str: "/surreal/abcum/*/database/*/person/~/test/1987-06-22T08:00:00.123456789Z",
 			obj: &Patch{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "test", AT: clock},
 			new: &Patch{},
 		},
 		{
-			str: "/surreal/abcum/database/person/•/873c2f37-ea03-4c5e-843e-cf393af44155/friend/1987-06-22T08:00:00.123456789Z",
-			obj: &Event{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TP: "friend", AT: clock},
-			new: &Event{},
-		},
-		{
-			str: "/surreal/abcum/database/person/«»/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TP: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
-			new: &Edge{},
-		},
-		{
-			str: "/surreal/abcum/database/person/«/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«", TP: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
-			new: &Edge{},
-		},
-		{
-			str: "/surreal/abcum/database/person/»/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "»", TP: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
-			new: &Edge{},
-		},
-		{
-			str: "/surreal/abcum/database/person/«»/873c2f37-ea03-4c5e-843e-cf393af44155/clicked/b38d7aa1-60d6-4f2d-8702-46bd0fa961fe",
-			obj: &Edge{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: "873c2f37-ea03-4c5e-843e-cf393af44155", TK: "«»", TP: "clicked", FK: "b38d7aa1-60d6-4f2d-8702-46bd0fa961fe"},
-			new: &Edge{},
-		},
-		{
-			str: "/surreal/abcum/database/person/∆/names/[lastname firstname]",
-			obj: &Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "names", FD: []interface{}{"lastname", "firstname"}},
-			new: &Index{},
-		},
-		{
-			str: "/surreal/abcum/database/person/∆/names/[false account:1 lastname <nil> firstname]",
+			str: "/surreal/abcum/*/database/*/person/¤/names/[false account:1 lastname <nil> firstname]",
 			obj: &Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "names", FD: []interface{}{false, "account:1", "lastname", nil, "firstname"}},
 			new: &Index{},
 		},
 		{
-			str: "/surreal/abcum/database/person/∆/uniqs/[lastname firstname]/873c2f37-ea03-4c5e-843e-cf393af44155",
-			obj: &Point{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "uniqs", FD: []interface{}{"lastname", "firstname"}, ID: "873c2f37-ea03-4c5e-843e-cf393af44155"},
+			str: "/surreal/abcum/*/database/*/person/¤/names/[lastname firstname]",
+			obj: &Index{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "names", FD: []interface{}{"lastname", "firstname"}},
+			new: &Index{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person/¤/names/[lastname firstname]/873c2f37-ea03-4c5e-843e-cf393af44155",
+			obj: &Point{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "names", FD: []interface{}{"lastname", "firstname"}, ID: "873c2f37-ea03-4c5e-843e-cf393af44155"},
 			new: &Point{},
 		},
 		{
-			str: "/surreal/abcum/database/person/∆/uniqs/[false account:1 lastname <nil> firstname]/873c2f37-ea03-4c5e-843e-cf393af44155",
+			str: "/surreal/abcum/*/database/*/person/¤/uniqs/[false account:1 lastname <nil> firstname]/873c2f37-ea03-4c5e-843e-cf393af44155",
 			obj: &Point{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "uniqs", FD: []interface{}{false, "account:1", "lastname", nil, "firstname"}, ID: "873c2f37-ea03-4c5e-843e-cf393af44155"},
+			new: &Point{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person/¤/uniqs/[lastname firstname]/873c2f37-ea03-4c5e-843e-cf393af44155",
+			obj: &Point{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "uniqs", FD: []interface{}{"lastname", "firstname"}, ID: "873c2f37-ea03-4c5e-843e-cf393af44155"},
 			new: &Point{},
 		},
 		{
@@ -262,6 +323,9 @@ func TestMain(t *testing.T) {
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "b"},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "bB"},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "c"},
+		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test1", TP: "friend", FK: int8(2)},
+		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test1", TP: "friend", FK: int8(3)},
+		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test2", TP: "friend", FK: int8(1)},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "z"},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "Â"},
 		&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "Ä"},
@@ -275,10 +339,6 @@ func TestMain(t *testing.T) {
 
 		&Patch{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), AT: time.Now()},
 		&Patch{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), AT: time.Now()},
-
-		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), TP: "friend", FK: int8(2)},
-		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(1), TP: "friend", FK: int8(3)},
-		&Edge{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: int8(2), TP: "friend", FK: int8(1)},
 
 		&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: Prefix},
 
@@ -307,20 +367,37 @@ func TestMain(t *testing.T) {
 		nos []Key
 	}{
 		{
-			obj: &Table{KV: "kv", NS: "ns", DB: "db", TB: "person"},
+			obj: &TB{KV: "kv", NS: "ns", DB: "db", TB: "person"},
 			yes: []Key{
 				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Prefix},
 				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test"},
 				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Suffix},
 				&Patch{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test", AT: clock},
 				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"1", "2"}},
-				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"3", "4"}},
+				&Point{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"3", "4"}},
 			},
 			nos: []Key{
 				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "other", ID: "test"},
 				&Thing{KV: "kv", NS: "ns", DB: "other", TB: "person", ID: "test"},
 				&Thing{KV: "kv", NS: "other", DB: "db", TB: "person", ID: "test"},
 				&Thing{KV: "other", NS: "ns", DB: "db", TB: "person", ID: "test"},
+			},
+		},
+		{
+			obj: &Table{KV: "kv", NS: "ns", DB: "db", TB: "person"},
+			yes: []Key{
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Prefix},
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test"},
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: Suffix},
+			},
+			nos: []Key{
+				&Thing{KV: "kv", NS: "ns", DB: "db", TB: "other", ID: "test"},
+				&Thing{KV: "kv", NS: "ns", DB: "other", TB: "person", ID: "test"},
+				&Thing{KV: "kv", NS: "other", DB: "db", TB: "person", ID: "test"},
+				&Thing{KV: "other", NS: "ns", DB: "db", TB: "person", ID: "test"},
+				&Patch{KV: "kv", NS: "ns", DB: "db", TB: "person", ID: "test", AT: clock},
+				&Index{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"1", "2"}},
+				&Point{KV: "kv", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{"3", "4"}},
 			},
 		},
 		{
@@ -363,11 +440,7 @@ func TestDisplaying(t *testing.T) {
 	for _, test := range tests {
 
 		Convey(test.str, t, func() {
-
-			Convey("String should match", func() {
-				So(test.obj.String(), ShouldEqual, test.str)
-			})
-
+			So(test.obj.String(), ShouldEqual, test.str)
 		})
 
 	}
@@ -376,17 +449,19 @@ func TestDisplaying(t *testing.T) {
 
 func TestEncoding(t *testing.T) {
 
-	for _, test := range tests {
+	for i, test := range tests {
 
 		Convey(test.str, t, func() {
 
 			enc := test.obj.Encode()
 			test.new.Decode(enc)
 
-			Convey("Key should encode and decode", func() {
-				Printf("%s\n\n%#q\n\n%v\n\n", test.str, enc, enc)
-				So(test.new, ShouldResemble, test.obj)
-			})
+			So(test.new, ShouldResemble, test.obj)
+
+			if i > 0 && i < len(tests)-1 {
+				old := tests[i-1].obj.Encode()
+				So(old, ShouldSortBefore, enc)
+			}
 
 		})
 
@@ -425,14 +500,9 @@ func TestSorting(t *testing.T) {
 		txt := fmt.Sprintf("%#v", sorts[i-1])
 
 		Convey(txt, t, func() {
-
 			one := sorts[i-1].Encode()
 			two := sorts[i].Encode()
-
-			Convey("Key should sort before next key", func() {
-				Printf("%#v\n%#v\n------\n%#v\n%#v\n------\n%#q\n%#q", sorts[i-1], sorts[i], one, two, one, two)
-				So(string(one), ShouldBeLessThanOrEqualTo, string(two))
-			})
+			So(one, ShouldSortBefore, two)
 		})
 
 	}

@@ -24,7 +24,7 @@ type encoder struct {
 	w *writer
 }
 
-// Encode encodes an interface using the unicode collation algorithm.
+// encode encodes an interface using the unicode collation algorithm.
 func encode(items ...interface{}) []byte {
 	b := &bytes.Buffer{}
 	newEncoder(b).Encode(items...)

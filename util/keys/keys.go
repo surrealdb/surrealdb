@@ -39,6 +39,10 @@ var (
 )
 
 var (
+	skip interface{}
+)
+
+var (
 	cEND = byte(0x00)
 	cPRE = byte(0x01)
 	cNIL = byte(0x02)

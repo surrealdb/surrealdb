@@ -14,10 +14,6 @@
 
 package keys
 
-import (
-	"fmt"
-)
-
 // Table ...
 type Table struct {
 	KV interface{}
@@ -34,17 +30,17 @@ func (k *Table) init() *Table {
 // Encode encodes the key into binary
 func (k *Table) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, k.DB, k.TB)
+	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "*")
 }
 
 // Decode decodes the key from binary
 func (k *Table) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &k.DB, &k.TB)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB, &skip)
 }
 
 // String returns a string representation of the key
 func (k *Table) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s", k.KV, k.NS, k.DB, k.TB)
+	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "*")
 }

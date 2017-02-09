@@ -14,15 +14,9 @@
 
 package keys
 
-import (
-	"fmt"
-)
-
 // SC ...
 type SC struct {
 	KV interface{}
-	CF interface{}
-	TK interface{}
 	NS interface{}
 	DB interface{}
 	SC interface{}
@@ -30,25 +24,23 @@ type SC struct {
 
 // init initialises the key
 func (k *SC) init() *SC {
-	k.CF = "!"
-	k.TK = "s"
 	return k
 }
 
 // Encode encodes the key into binary
 func (k *SC) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.CF, k.TK, k.NS, k.DB, k.SC)
+	return encode(k.KV, k.NS, "*", k.DB, "!", "s", k.SC)
 }
 
 // Decode decodes the key from binary
 func (k *SC) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.CF, &k.TK, &k.NS, &k.DB, &k.SC)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &skip, &k.SC)
 }
 
 // String returns a string representation of the key
 func (k *SC) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s/%s/%s", k.KV, k.CF, k.TK, k.NS, k.DB, k.SC)
+	return output(k.KV, k.NS, "*", k.DB, "!", "s", k.SC)
 }

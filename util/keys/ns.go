@@ -14,39 +14,31 @@
 
 package keys
 
-import (
-	"fmt"
-)
-
 // NS ...
 type NS struct {
 	KV interface{}
-	CF interface{}
-	TK interface{}
 	NS interface{}
 }
 
 // init initialises the key
 func (k *NS) init() *NS {
-	k.CF = "!"
-	k.TK = "n"
 	return k
 }
 
 // Encode encodes the key into binary
 func (k *NS) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.CF, k.TK, k.NS)
+	return encode(k.KV, k.NS)
 }
 
 // Decode decodes the key from binary
 func (k *NS) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.CF, &k.TK, &k.NS)
+	decode(data, &k.KV, &k.NS)
 }
 
 // String returns a string representation of the key
 func (k *NS) String() string {
 	k.init()
-	return fmt.Sprintf("/%s/%s/%s/%s", k.KV, k.CF, k.TK, k.NS)
+	return output(k.KV, k.NS)
 }

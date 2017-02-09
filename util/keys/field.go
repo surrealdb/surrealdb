@@ -14,34 +14,35 @@
 
 package keys
 
-// FD ...
-type FD struct {
+// Field ...
+type Field struct {
 	KV interface{}
 	NS interface{}
 	DB interface{}
 	TB interface{}
+	ID interface{}
 	FD interface{}
 }
 
 // init initialises the key
-func (k *FD) init() *FD {
+func (k *Field) init() *Field {
 	return k
 }
 
 // Encode encodes the key into binary
-func (k *FD) Encode() []byte {
+func (k *Field) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "!", "f", k.FD)
+	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "*", k.ID, "*", k.FD)
 }
 
 // Decode decodes the key from binary
-func (k *FD) Decode(data []byte) {
+func (k *Field) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB, &skip, &skip, &k.FD)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB, &skip, &k.ID, &skip, &k.FD)
 }
 
 // String returns a string representation of the key
-func (k *FD) String() string {
+func (k *Field) String() string {
 	k.init()
-	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "!", "f", k.FD)
+	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "*", k.ID, "*", k.FD)
 }
