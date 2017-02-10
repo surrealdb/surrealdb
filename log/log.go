@@ -21,6 +21,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	PanicLevel = logrus.PanicLevel
+	FatalLevel = logrus.FatalLevel
+	ErrorLevel = logrus.ErrorLevel
+	WarnLevel  = logrus.WarnLevel
+	InfoLevel  = logrus.InfoLevel
+	DebugLevel = logrus.DebugLevel
+)
+
 var log *Logger
 
 // Logger ...
