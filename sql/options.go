@@ -54,7 +54,12 @@ func (o *options) get(kind int) (kv, ns, db string, err error) {
 		return
 	}
 
-	if ns == "" || db == "" {
+	if kind >= AuthNS && ns == "" {
+		err = &BlankError{}
+		return
+	}
+
+	if kind >= AuthDB && db == "" {
 		err = &BlankError{}
 		return
 	}
