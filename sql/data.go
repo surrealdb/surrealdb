@@ -112,7 +112,7 @@ func (p *parser) parseDiff() (exp []Expr, err error) {
 
 	one := &DiffExpression{}
 
-	tok, lit, err := p.shouldBe(JSON, ARRAY, PARAM)
+	tok, lit, err := p.shouldBe(ARRAY, PARAM)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
