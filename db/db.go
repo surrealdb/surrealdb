@@ -199,7 +199,9 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 		if r := recover(); r != nil {
 			if err, ok := r.(error); ok {
 				log.WithPrefix("db").Errorln(err)
-				log.WithPrefix("db").Debugln(string(debug.Stack()))
+				if log.Instance().Level >= log.DebugLevel {
+					log.WithPrefix("db").Debugf("%s", debug.Stack())
+				}
 			}
 		}
 	}()
