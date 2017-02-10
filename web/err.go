@@ -137,7 +137,9 @@ var errs = map[int]*err{
 	},
 
 	500: {
-		Code:    500,
-		Details: "There was a problem with our servers, and we have been notified",
+		Code:        500,
+		Details:     "Internal server error",
+		Description: "There was a problem with our servers, and we have been notified.",
+	},
 	},
 }
