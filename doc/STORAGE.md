@@ -1,6 +1,6 @@
 # Storage
 
-Surreal can be used with any key-value storage which enables range scans. This document describes how the data is stored in the storage layer, so that it can be queried and manipulated quickly and efficiently.
+This document describes how the database data is stored in the key-value storage layer;
 
 **Base keys**
 
@@ -22,130 +22,72 @@ The namespace key is used to enable separation of data and multi-tenancy of data
 
 The database key is used to separate data into multiple different databases under each multi-tenant installation.
 
-**Data types**
+#### Chars
 
-Each data type is stored using a different symbol in the key:value pair.
+Each data type is stored using a different symbol in the key-value pair.
 
 ```bash
-! # Used to store Surreal config data
+! # Used to store config data
 * # Used to store item data
 ~ # Used to store item diffs
-¤ # 
+• # Used to store item trail
 « # Used to store item edges
 » # Used to store item edges
-• # Used to store item events
-‹ # Used to store item links
-› # Used to store item links
-∆ # Used to store index data
+¤ # Used to store index data
 ```
 
----
+#### Keys
 
-### Config
+The keys for the data in the key-value store use the template below.
 
-**Namespace**
 ```bash
-/{$kv}/!/n/{$ns} ""
-# e.g.
-/{$kv}/!/n/acme ""
+KV 		/{$kv}
+NS 		/{$kv}/{$ns}
+NT 		/{$kv}/{$ns}/!/t/{$tk}
+NU 		/{$kv}/{$ns}/!/u/{$us}
+DB 		/{$kv}/{$ns}/*/{$db}
+LV 		/{$kv}/{$ns}/*/{$db}/!/l/{$lv}
+SC 		/{$kv}/{$ns}/*/{$db}/!/s/{$sc}
+ST 		/{$kv}/{$ns}/*/{$db}/!/s/{$sc}/!/t/{$tk}
+DT 		/{$kv}/{$ns}/*/{$db}/!/t/{$tk}
+DU 		/{$kv}/{$ns}/*/{$db}/!/u/{$us}
+VW 		/{$kv}/{$ns}/*/{$db}/!/v/{$vw}
+TB 		/{$kv}/{$ns}/*/{$db}/*/{$tb}
+EV		/{$kv}/{$ns}/*/{$db}/*/{$tb}/!/e/{$ev}
+FD 		/{$kv}/{$ns}/*/{$db}/*/{$tb}/!/f/{$fd}
+IX 		/{$kv}/{$ns}/*/{$db}/*/{$tb}/!/i/{$ix}
+Table 	/{$kv}/{$ns}/*/{$db}/*/{$tb}/*
+Thing 	/{$kv}/{$ns}/*/{$db}/*/{$tb}/*/{$id}
+Field 	/{$kv}/{$ns}/*/{$db}/*/{$tb}/*/{$id}/*/{$fd}
+Edge	/{$kv}/{$ns}/*/{$db}/*/{$tb}/*/{$id}/»/{$tp}/{$ft}/{$fk}
+Patch 	/{$kv}/{$ns}/*/{$db}/*/{$tb}/~/{$id}/{$at}
+Index	/{$kv}/{$ns}/*/{$db}/*/{$tb}/¤/{$ix}/{$fd}
+Point	/{$kv}/{$ns}/*/{$db}/*/{$tb}/¤/{$ix}/{$fd}/{$id}
 ```
 
-**Database**
-```bash
-/{$kv}/!/d/{$ns}/{$db} ""
-# e.g.
-/{$kv}/!/d/{$ns}/test ""
-```
-
-**Table**
-```bash
-/{$kv}/!/t/{$ns}/{$db}/{$tb} ""
-# e.g.
-/{$kv}/!/t/{$ns}/{$db}/people ""
-```
-
-**Field** 
+The specific keys listed above are displayed with example data below.
 
 ```bash
-/{$kv}/!/f/{$ns}/{$db}/{$tb}/{$fld} "{}"
-# e.g.
-/{$kv}/!/f/{$ns}/{$db}/{$tb}/fullname `{
-	"name": "fullname",
-	"type": "string",
-	"code": "",
-	"min": 0,
-	"max": 0,
-	"default": "",
-	"notnull": false,
-	"readonly": false,
-	"mandatory": false,
-}`
-```
-
-**Index**
-
-```bash
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/{$idx} "{}"
-# e.g.
-/{$kv}/!/i/{$ns}/{$db}/{$tb}/fullname `{
-	"name": "fullname",
-	"code": "",
-	"cols": ["firstname", "middlename", "lastname"],
-	"uniq": false,
-}`
-```
-
----
-
-### Items
-
-```bash
-/{$kv}/{$ns}/{$db}/{$tb}/{$id} "{}"
-# e.g
-/{$kv}/{$ns}/{$db}/{$tb}/UUID `{"name":"Tobie","age":18}`
-```
-
-*TRAIL*
-```bash
-/{$kv}/{$ns}/{$db}/{$tb}/•/{$id}/{$time} "{}"
-# e.g
-/{$kv}/{$ns}/{$db}/{$tb}/•/UUID/2016-01-29T22:42:56.478173947Z `{}`
-```
-
-*EVENT*
-```bash
-/{$kv}/{$ns}/{$db}/{$tb}/‡/{$id}/{$type}/{$time} "{}"
-# e.g
-/{$kv}/{$ns}/{$db}/{$tb}/‡/UUID/login/2016-01-29T22:42:56.478173947Z `{}`
-```
-
-*EDGES*
-```bash
-/{$kv}/{$ns}/{$db}/{$tableid}/»/{$id}/{$type}/{$edgeid} ""
-/{$kv}/{$ns}/{$db}/{$typeid}/{$id} "{}"
-/{$kv}/{$ns}/{$db}/{$tableid}/«/{$id}/{$type}/{$edgeid} ""
-# e.g
-/{$kv}/{$ns}/{$db}/{$tableid}/»/1537/follow/9563 ""
-/{$kv}/{$ns}/{$db}/{$typeid}/9563 `{"in":"1537","out":"5295"}`
-/{$kv}/{$ns}/{$db}/{$tableid}/«/5295/follow/9563 ""
-```
-
----
-
-### Index
-
-**Unique index**
-```bash
-/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[{$columns}] "{$id}"
-# e.g
-/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[lastname,firstname] `@person:1342`
-```
-
-### Point
-
-**Non-unique index**
-```bash
-/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[{$columns}]/{$id} "{$id}"
-# e.g
-/{$kv}/{$ns}/{$db}/{$table}/¤/{$index}/[lastname,firstname]/{$id} `@person:1342`
+KV 		/surreal
+NS 		/surreal/abcum
+NT 		/surreal/abcum/!/t/default
+NU 		/surreal/abcum/!/u/tobie@abcum.com
+DB 		/surreal/abcum/*/acreon
+LV 		/surreal/abcum/*/acreon/!/l/name
+SC 		/surreal/abcum/*/acreon/!/s/admin
+ST 		/surreal/abcum/*/acreon/!/s/admin/!/t/default
+DT 		/surreal/abcum/*/acreon/!/t/default
+DU 		/surreal/abcum/*/acreon/!/u/tobie@abcum.com
+VW 		/surreal/abcum/*/acreon/!/v/ages
+TB 		/surreal/abcum/*/acreon/*/person
+EV		/surreal/abcum/*/acreon/*/person/!/e/activity
+FD 		/surreal/abcum/*/acreon/*/person/!/f/name.first
+IX 		/surreal/abcum/*/acreon/*/person/!/i/names
+Table 	/surreal/abcum/*/acreon/*/person/*
+Thing 	/surreal/abcum/*/acreon/*/person/*/tobie
+Field 	/surreal/abcum/*/acreon/*/person/*/tobie/*/name.first
+Edge	/surreal/abcum/*/acreon/*/person/*/tobie/»/like/entity/apple
+Patch 	/surreal/abcum/*/acreon/*/person/~/tobie/2016-01-29T22:42:56.478173947Z
+Index	/surreal/abcum/*/acreon/*/person/¤/names/[col1,col2,col3]
+Point	/surreal/abcum/*/acreon/*/person/¤/names/[col1,col2,col3]/tobie
 ```
