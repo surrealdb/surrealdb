@@ -141,5 +141,10 @@ var errs = map[int]*err{
 		Details:     "Internal server error",
 		Description: "There was a problem with our servers, and we have been notified.",
 	},
+
+	501: {
+		Code:        501,
+		Details:     "Not Implemented",
+		Description: "The server either does not recognize the request method, or it lacks the ability to fulfill the request.",
 	},
 }
