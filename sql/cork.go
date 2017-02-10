@@ -764,7 +764,7 @@ func init() {
 }
 
 func (this *LiveStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *LiveStatement) Encode() (dst []byte) {
@@ -804,7 +804,7 @@ func init() {
 }
 
 func (this *SelectStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *SelectStatement) Encode() (dst []byte) {
@@ -854,7 +854,7 @@ func init() {
 }
 
 func (this *CreateStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *CreateStatement) Encode() (dst []byte) {
@@ -892,7 +892,7 @@ func init() {
 }
 
 func (this *UpdateStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *UpdateStatement) Encode() (dst []byte) {
@@ -934,7 +934,7 @@ func init() {
 }
 
 func (this *DeleteStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *DeleteStatement) Encode() (dst []byte) {
@@ -974,7 +974,7 @@ func init() {
 }
 
 func (this *RelateStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *RelateStatement) Encode() (dst []byte) {
@@ -1018,7 +1018,7 @@ func init() {
 }
 
 func (this *DefineNamespaceStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *DefineNamespaceStatement) Encode() (dst []byte) {
@@ -1052,7 +1052,7 @@ func init() {
 }
 
 func (this *RemoveNamespaceStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *RemoveNamespaceStatement) Encode() (dst []byte) {
@@ -1086,7 +1086,7 @@ func init() {
 }
 
 func (this *DefineDatabaseStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *DefineDatabaseStatement) Encode() (dst []byte) {
@@ -1120,7 +1120,7 @@ func init() {
 }
 
 func (this *RemoveDatabaseStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *RemoveDatabaseStatement) Encode() (dst []byte) {
@@ -1154,7 +1154,7 @@ func init() {
 }
 
 func (this *DefineLoginStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *DefineLoginStatement) Encode() (dst []byte) {
@@ -1194,7 +1194,7 @@ func init() {
 }
 
 func (this *RemoveLoginStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *RemoveLoginStatement) Encode() (dst []byte) {
@@ -1230,7 +1230,7 @@ func init() {
 }
 
 func (this *DefineTokenStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *DefineTokenStatement) Encode() (dst []byte) {
@@ -1270,7 +1270,7 @@ func init() {
 }
 
 func (this *RemoveTokenStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *RemoveTokenStatement) Encode() (dst []byte) {
@@ -1306,7 +1306,7 @@ func init() {
 }
 
 func (this *DefineScopeStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *DefineScopeStatement) Encode() (dst []byte) {
@@ -1348,7 +1348,7 @@ func init() {
 }
 
 func (this *RemoveScopeStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *RemoveScopeStatement) Encode() (dst []byte) {
@@ -1382,7 +1382,7 @@ func init() {
 }
 
 func (this *DefineTableStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *DefineTableStatement) Encode() (dst []byte) {
@@ -1418,7 +1418,7 @@ func init() {
 }
 
 func (this *RemoveTableStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *RemoveTableStatement) Encode() (dst []byte) {
@@ -1452,7 +1452,7 @@ func init() {
 }
 
 func (this *DefineFieldStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *DefineFieldStatement) Encode() (dst []byte) {
@@ -1510,7 +1510,7 @@ func init() {
 }
 
 func (this *RemoveFieldStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *RemoveFieldStatement) Encode() (dst []byte) {
@@ -1546,7 +1546,7 @@ func init() {
 }
 
 func (this *DefineIndexStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *DefineIndexStatement) Encode() (dst []byte) {
@@ -1586,7 +1586,7 @@ func init() {
 }
 
 func (this *RemoveIndexStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *RemoveIndexStatement) Encode() (dst []byte) {
@@ -1622,7 +1622,7 @@ func init() {
 }
 
 func (this *DefineViewStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *DefineViewStatement) Encode() (dst []byte) {
@@ -1664,7 +1664,7 @@ func init() {
 }
 
 func (this *RemoveViewStatement) Decode(src []byte) {
-	pack.Decode(src, &this)
+	pack.Decode(src, this)
 }
 
 func (this *RemoveViewStatement) Encode() (dst []byte) {
