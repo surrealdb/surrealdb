@@ -43,14 +43,6 @@ func (e *BlankError) Error() string {
 	return fmt.Sprint("You need to specify a namespace and a database to use")
 }
 
-// TXError represents an error that occured when switching access.
-type TXError struct{}
-
-// Error returns the string representation of the error.
-func (e *TXError) Error() string {
-	return fmt.Sprintf("DEFINE and REMOVE statements must be outside of a transaction.")
-}
-
 // NSError represents an error that occured when switching access.
 type NSError struct {
 	NS string
