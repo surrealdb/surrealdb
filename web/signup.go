@@ -17,17 +17,12 @@ package web
 import (
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/db"
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 )
 
 func signup(c *fibre.Context) (err error) {
-
-	defer func() {
-		if r := recover(); r != nil {
-			err = fibre.NewHTTPError(403)
-		}
-	}()
 
 	var vars map[string]interface{}
 
@@ -43,12 +38,23 @@ func signup(c *fibre.Context) (err error) {
 
 	if nok && len(n) > 0 && dok && len(d) > 0 && sok && len(s) > 0 {
 
-		var scp *mem.SC
+		var txn kvs.TX
 		var res []*db.Response
+		var scp *sql.DefineScopeStatement
+
+		// Start a new read transaction.
+
+		if txn, err = db.Begin(false); err != nil {
+			return fibre.NewHTTPError(500)
+		}
+
+		// Ensure the transaction closes.
+
+		defer txn.Cancel()
 
 		// Get the specified signin scope.
 
-		if scp = mem.GetNS(n).GetDB(d).GetSC(s); scp == nil {
+		if scp, err = mem.New(txn).GetSC(n, d, s); err != nil {
 			return fibre.NewHTTPError(403)
 		}
 

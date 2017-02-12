@@ -24,21 +24,16 @@ import (
 
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/db"
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
-
 	"github.com/dgrijalva/jwt-go"
 )
 
 func auth() fibre.MiddlewareFunc {
 	return func(h fibre.HandlerFunc) fibre.HandlerFunc {
 		return func(c *fibre.Context) (err error) {
-
-			defer func() {
-				if r := recover(); r != nil {
-					err = fibre.NewHTTPError(403)
-				}
-			}()
 
 			auth := &cnf.Auth{}
 			c.Set("auth", auth)
@@ -110,9 +105,22 @@ func auth() fibre.MiddlewareFunc {
 
 			if head != "" && head[:6] == "Bearer" {
 
+				var txn kvs.TX
 				var vars jwt.MapClaims
 				var nok, dok, sok, tok, uok bool
 				var nsv, dbv, scv, tkv, usv string
+
+				// Start a new read transaction.
+
+				if txn, err = db.Begin(false); err != nil {
+					return fibre.NewHTTPError(500)
+				}
+
+				// Ensure the transaction closes.
+
+				defer txn.Cancel()
+
+				// Parse the specified JWT Token.
 
 				token, err := jwt.Parse(head[7:], func(token *jwt.Token) (interface{}, error) {
 
@@ -140,11 +148,18 @@ func auth() fibre.MiddlewareFunc {
 
 					if nok && dok && sok && tok {
 
-						scp := mem.GetNS(nsv).GetDB(dbv).GetSC(scv)
+						scp, err := mem.New(txn).GetSC(nsv, dbv, scv)
+						if err != nil {
+							fmt.Errorf("Credentials failed")
+						}
+
 						auth.Data["scope"] = scp.Name
 
 						if tkv != "default" {
-							key := scp.GetTK(tkv)
+							key, err := mem.New(txn).GetST(nsv, dbv, scv, tkv)
+							if err != nil {
+								fmt.Errorf("Credentials failed")
+							}
 							if token.Header["alg"] != key.Type {
 								return nil, fmt.Errorf("Unexpected signing method")
 							}
@@ -158,14 +173,20 @@ func auth() fibre.MiddlewareFunc {
 					} else if nok && dok && tok {
 
 						if tkv != "default" {
-							key := mem.GetNS(nsv).GetDB(dbv).GetTK(tkv)
+							key, err := mem.New(txn).GetDT(nsv, dbv, tkv)
+							if err != nil {
+								fmt.Errorf("Credentials failed")
+							}
 							if token.Header["alg"] != key.Type {
 								return nil, fmt.Errorf("Unexpected signing method")
 							}
 							auth.Kind = sql.AuthDB
 							return key.Code, nil
 						} else if uok {
-							usr := mem.GetNS(nsv).GetDB(dbv).GetAC(usv)
+							usr, err := mem.New(txn).GetDU(nsv, dbv, usv)
+							if err != nil {
+								fmt.Errorf("Credentials failed")
+							}
 							auth.Kind = sql.AuthDB
 							return usr.Code, nil
 						}
@@ -173,14 +194,20 @@ func auth() fibre.MiddlewareFunc {
 					} else if nok && tok {
 
 						if tkv != "default" {
-							key := mem.GetNS(nsv).GetTK(tkv)
+							key, err := mem.New(txn).GetNT(nsv, tkv)
+							if err != nil {
+								fmt.Errorf("Credentials failed")
+							}
 							if token.Header["alg"] != key.Type {
 								return nil, fmt.Errorf("Unexpected signing method")
 							}
 							auth.Kind = sql.AuthNS
 							return key.Code, nil
 						} else if uok {
-							usr := mem.GetNS(nsv).GetAC(usv)
+							usr, err := mem.New(txn).GetNU(nsv, usv)
+							if err != nil {
+								fmt.Errorf("Credentials failed")
+							}
 							auth.Kind = sql.AuthNS
 							return usr.Code, nil
 						}

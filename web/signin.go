@@ -19,6 +19,7 @@ import (
 
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/db"
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 
@@ -27,12 +28,6 @@ import (
 )
 
 func signin(c *fibre.Context) (err error) {
-
-	defer func() {
-		if r := recover(); r != nil {
-			err = fibre.NewHTTPError(403)
-		}
-	}()
 
 	var vars map[string]interface{}
 
@@ -48,13 +43,24 @@ func signin(c *fibre.Context) (err error) {
 
 	if nok && len(n) > 0 && dok && len(d) > 0 && sok && len(s) > 0 {
 
+		var txn kvs.TX
 		var str string
-		var scp *mem.SC
 		var res []*db.Response
+		var scp *sql.DefineScopeStatement
+
+		// Start a new read transaction.
+
+		if txn, err = db.Begin(false); err != nil {
+			return fibre.NewHTTPError(500)
+		}
+
+		// Ensure the transaction closes.
+
+		defer txn.Cancel()
 
 		// Get the specified signin scope.
 
-		if scp = mem.GetNS(n).GetDB(d).GetSC(s); scp == nil {
+		if scp, err = mem.New(txn).GetSC(n, d, s); err != nil {
 			return fibre.NewHTTPError(403)
 		}
 
@@ -100,8 +106,9 @@ func signin(c *fibre.Context) (err error) {
 
 	if nok && len(n) > 0 && dok && len(d) > 0 {
 
+		var txn kvs.TX
 		var str string
-		var usr *mem.AC
+		var usr *sql.DefineLoginStatement
 
 		// Get the specified user and password.
 
@@ -112,9 +119,20 @@ func signin(c *fibre.Context) (err error) {
 			return fibre.NewHTTPError(403)
 		}
 
+		// Start a new read transaction.
+
+		if txn, err = db.Begin(false); err != nil {
+			log.Debugln("Transaction initialisation failure")
+			return fibre.NewHTTPError(500)
+		}
+
+		// Ensure the transaction closes.
+
+		defer txn.Cancel()
+
 		// Get the specified database login.
 
-		if usr = mem.GetNS(n).GetDB(d).GetAC(u); usr == nil {
+		if usr, err = mem.New(txn).GetDU(n, d, u); err != nil {
 			return fibre.NewHTTPError(403)
 		}
 
@@ -155,8 +173,9 @@ func signin(c *fibre.Context) (err error) {
 
 	if nok && len(n) > 0 {
 
+		var txn kvs.TX
 		var str string
-		var usr *mem.AC
+		var usr *sql.DefineLoginStatement
 
 		// Get the specified user and password.
 
@@ -167,9 +186,19 @@ func signin(c *fibre.Context) (err error) {
 			return fibre.NewHTTPError(403)
 		}
 
+		// Start a new read transaction.
+
+		if txn, err = db.Begin(false); err != nil {
+			return fibre.NewHTTPError(500)
+		}
+
+		// Ensure the transaction closes.
+
+		defer txn.Cancel()
+
 		// Get the specified namespace login.
 
-		if usr = mem.GetNS(n).GetAC(u); usr == nil {
+		if usr, err = mem.New(txn).GetNU(n, u); err != nil {
 			return fibre.NewHTTPError(403)
 		}
 

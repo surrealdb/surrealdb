@@ -26,6 +26,7 @@ import (
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/log"
+	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 
@@ -37,6 +38,7 @@ type executor struct {
 	txn kvs.TX
 	ctx *data.Doc
 	ast *sql.Query
+	mem *mem.Store
 }
 
 func newExecutor(ast *sql.Query, vars map[string]interface{}) *executor {
@@ -45,6 +47,10 @@ func newExecutor(ast *sql.Query, vars map[string]interface{}) *executor {
 
 func (e *executor) Txn() kvs.TX {
 	return e.txn
+}
+
+func (e *executor) Mem() *mem.Store {
+	return e.mem
 }
 
 func (e *executor) Set(key string, val interface{}) {
@@ -81,6 +87,13 @@ func Exit() {
 	log.WithPrefix("db").Infof("Gracefully shutting down database")
 
 	db.Close()
+
+}
+
+// Begin opens a new manual transaction with the data layer
+func Begin(rw bool) (txn kvs.TX, err error) {
+
+	return db.Begin(rw)
 
 }
 
@@ -254,7 +267,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 
 			switch stm.(type) {
 			case *sql.BeginStatement:
-				err = e.begin()
+				err = e.begin(true)
 				continue
 			case *sql.CancelStatement:
 				err, buf = e.cancel(buf, err, send)
@@ -313,6 +326,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 func (e *executor) operate(ast sql.Statement) (res []interface{}, err error) {
 
 	var loc bool
+	var trw bool
 
 	// If we are not inside a global transaction
 	// then grab a new transaction, ensuring that
@@ -324,9 +338,11 @@ func (e *executor) operate(ast sql.Statement) (res []interface{}, err error) {
 
 		switch ast.(type) {
 		case *sql.InfoStatement:
-			e.txn, err = readable()
+			trw = false
+			err = e.begin(trw)
 		default:
-			e.txn, err = writable()
+			trw = true
+			err = e.begin(trw)
 		}
 
 		if err != nil {
@@ -409,7 +425,7 @@ func (e *executor) operate(ast sql.Statement) (res []interface{}, err error) {
 	// depending on the result error.
 
 	if loc && !e.txn.Closed() {
-		if err != nil {
+		if !trw || err != nil {
 			e.txn, err = nil, e.txn.Cancel()
 		} else {
 			e.txn, err = nil, e.txn.Commit()
@@ -454,14 +470,20 @@ func clear(buf []*Response, rsp *Response) []*Response {
 	return append(buf, rsp)
 }
 
-func (e *executor) begin() (err error) {
+func (e *executor) begin(rw bool) (err error) {
 	if e.txn == nil {
-		e.txn, err = writable()
+		e.txn, err = db.Begin(rw)
+		e.mem = mem.New(e.txn)
 	}
 	return
 }
 
 func (e *executor) cancel(buf []*Response, err error, chn chan<- *Response) (error, []*Response) {
+
+	defer func() {
+		e.txn = nil
+		e.mem = nil
+	}()
 
 	if e.txn == nil {
 		return nil, buf
@@ -479,13 +501,16 @@ func (e *executor) cancel(buf []*Response, err error, chn chan<- *Response) (err
 		buf = buf[:len(buf)-1]
 	}
 
-	e.txn = nil
-
 	return nil, buf
 
 }
 
 func (e *executor) commit(buf []*Response, err error, chn chan<- *Response) (error, []*Response) {
+
+	defer func() {
+		e.txn = nil
+		e.mem = nil
+	}()
 
 	if e.txn == nil {
 		return nil, buf
@@ -509,16 +534,6 @@ func (e *executor) commit(buf []*Response, err error, chn chan<- *Response) (err
 		buf = buf[:len(buf)-1]
 	}
 
-	e.txn = nil
-
 	return nil, buf
 
-}
-
-func writable() (txn kvs.TX, err error) {
-	return db.Begin(true)
-}
-
-func readable() (txn kvs.TX, err error) {
-	return db.Begin(false)
 }
