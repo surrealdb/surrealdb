@@ -59,10 +59,6 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 		return nil, err
 	}
 
-	if stmt.Echo, err = p.parseEcho(); err != nil {
-		return nil, err
-	}
-
 	if _, _, err = p.shouldBe(EOF, RPAREN, SEMICOLON); err != nil {
 		return nil, err
 	}

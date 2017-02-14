@@ -119,7 +119,6 @@ type SelectStatement struct {
 	Limit   Expr     `cork:"limit" codec:"limit"`
 	Start   Expr     `cork:"start" codec:"start"`
 	Version Expr     `cork:"version" codec:"version"`
-	Echo    Token    `cork:"echo" codec:"echo"`
 }
 
 // CreateStatement represents a SQL CREATE statement.

@@ -826,7 +826,6 @@ func (this *SelectStatement) MarshalCORK() (dst []byte, err error) {
 	e.Encode(this.Limit)
 	e.Encode(this.Start)
 	e.Encode(this.Version)
-	e.Encode(this.Echo)
 	return b.Bytes(), nil
 }
 
@@ -841,7 +840,6 @@ func (this *SelectStatement) UnmarshalCORK(src []byte) (err error) {
 	d.Decode(&this.Limit)
 	d.Decode(&this.Start)
 	d.Decode(&this.Version)
-	d.Decode(&this.Echo)
 	return
 }
 
