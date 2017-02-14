@@ -39,7 +39,7 @@ func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
 		return nil, err
 	}
 
-	if stmt.Echo, err = p.parseEcho(); err != nil {
+	if stmt.Echo, err = p.parseEcho(NONE); err != nil {
 		return nil, err
 	}
 

@@ -92,7 +92,7 @@ func update(doc *item.Doc, ast *sql.UpdateStatement) (out interface{}, err error
 		return
 	}
 
-	out = doc.Yield(ast.Echo, sql.AFTER)
+	out = doc.Yield(ast.Echo)
 
 	return
 

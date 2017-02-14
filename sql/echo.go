@@ -14,7 +14,9 @@
 
 package sql
 
-func (p *parser) parseEcho() (exp Token, err error) {
+func (p *parser) parseEcho(empty Token) (exp Token, err error) {
+
+	exp = empty
 
 	// The next token that we expect to see is a
 	// RETURN token, and if we don't find one then

@@ -87,7 +87,7 @@ func create(doc *item.Doc, ast *sql.CreateStatement) (out interface{}, err error
 		return
 	}
 
-	out = doc.Yield(ast.Echo, sql.AFTER)
+	out = doc.Yield(ast.Echo)
 
 	return
 

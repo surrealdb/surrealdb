@@ -18,11 +18,7 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func (this *Doc) Yield(output sql.Token, fallback sql.Token) (res interface{}) {
-
-	if output == 0 {
-		output = fallback
-	}
+func (this *Doc) Yield(output sql.Token) (res interface{}) {
 
 	switch output {
 	case sql.ID:

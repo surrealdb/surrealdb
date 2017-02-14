@@ -30,7 +30,7 @@ func (p *parser) parseCreateStatement() (stmt *CreateStatement, err error) {
 		return nil, err
 	}
 
-	if stmt.Echo, err = p.parseEcho(); err != nil {
+	if stmt.Echo, err = p.parseEcho(AFTER); err != nil {
 		return nil, err
 	}
 
