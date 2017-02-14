@@ -16,6 +16,7 @@ package db
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"net/http"
@@ -34,6 +35,16 @@ import (
 	// _ "github.com/abcum/surreal/kvs/dendro"
 )
 
+var pool sync.Pool
+
+func init() {
+
+	pool.New = func() interface{} {
+		return newExecutor(new(sql.Query), make(map[string]interface{}))
+	}
+
+}
+
 type executor struct {
 	txn kvs.TX
 	ctx *data.Doc
@@ -43,6 +54,10 @@ type executor struct {
 
 func newExecutor(ast *sql.Query, vars map[string]interface{}) *executor {
 	return &executor{ast: ast, ctx: data.Consume(vars)}
+}
+
+func (e *executor) Reset(ast *sql.Query, vars map[string]interface{}) {
+	e.ast, e.ctx = ast, data.Consume(vars)
 }
 
 func (e *executor) Txn() kvs.TX {
@@ -166,7 +181,13 @@ func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 	// details, and the current runtime variables
 	// and execute the queries within.
 
-	go newExecutor(ast, vars).execute(quit, recv)
+	exec := pool.Get().(*executor)
+
+	defer pool.Put(exec)
+
+	exec.Reset(ast, vars)
+
+	go exec.execute(quit, recv)
 
 	// Wait for all of the processed queries to
 	// return results, buffer the output, and
