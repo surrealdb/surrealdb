@@ -258,7 +258,7 @@ func (p *parser) parseLimit() (Expr, error) {
 
 	_, _, _ = p.mightBe(BY)
 
-	tok, lit, err := p.shouldBe(NUMBER)
+	tok, lit, err := p.shouldBe(NUMBER, PARAM)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"limit number"}}
 	}
@@ -283,7 +283,7 @@ func (p *parser) parseStart() (Expr, error) {
 
 	_, _, _ = p.mightBe(AT)
 
-	tok, lit, err := p.shouldBe(NUMBER)
+	tok, lit, err := p.shouldBe(NUMBER, PARAM)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"start number"}}
 	}
