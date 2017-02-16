@@ -19,9 +19,9 @@ import (
 )
 
 var exportCmd = &cobra.Command{
-	Use:     "export [options] <file>",
-	Short:   "Export data from an existing database into a JSON file",
-	Example: "  surreal export backup.zip",
+	Use:     "export",
+	Short:   "Export data from an existing database",
+	Example: "  surreal export",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Do Stuff Here
 	},
