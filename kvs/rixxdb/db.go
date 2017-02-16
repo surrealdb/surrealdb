@@ -15,6 +15,8 @@
 package rixxdb
 
 import (
+	"io"
+
 	"github.com/abcum/rixxdb"
 	"github.com/abcum/surreal/kvs"
 )
@@ -24,22 +26,22 @@ type DB struct {
 }
 
 func (db *DB) Begin(writable bool) (txn kvs.TX, err error) {
-
-	pntr, err := db.pntr.Begin(writable)
-	if err != nil {
-		err = &kvs.DSError{Err: err}
-		if pntr != nil {
-			pntr.Cancel()
-		}
+	var pntr *rixxdb.TX
+	if pntr, err = db.pntr.Begin(writable); err != nil {
+		err = &kvs.DBError{Err: err}
 		return
 	}
-
 	return &TX{pntr: pntr}, err
+}
 
+func (db *DB) Import(r io.Reader) (err error) {
+	return db.pntr.Load(r)
+}
+
+func (db *DB) Export(w io.Writer) (err error) {
+	return db.pntr.Save(w)
 }
 
 func (db *DB) Close() (err error) {
-
 	return db.pntr.Close()
-
 }

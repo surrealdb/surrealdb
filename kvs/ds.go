@@ -15,6 +15,7 @@
 package kvs
 
 import (
+	"io"
 	"strings"
 
 	"github.com/abcum/surreal/cnf"
@@ -64,6 +65,20 @@ func New(opts *cnf.Options) (ds *DS, err error) {
 // the transaction, or any error which occured.
 func (ds *DS) Begin(writable bool) (txn TX, err error) {
 	return ds.db.Begin(writable)
+}
+
+// Import loads database operations from a reader.
+// This can be used to playback a database snapshot
+// into an already running database.
+func (ds *DS) Import(r io.Reader) (err error) {
+	return ds.db.Import(r)
+}
+
+// Export saves all database operations to a writer.
+// This can be used to save a database snapshot
+// to a secondary file or stream.
+func (ds *DS) Export(w io.Writer) (err error) {
+	return ds.db.Export(w)
 }
 
 // Close closes the underlying rixxdb / dendrodb

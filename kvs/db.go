@@ -14,8 +14,12 @@
 
 package kvs
 
+import "io"
+
 // DB represents a database implementation
 type DB interface {
 	Begin(bool) (TX, error)
+	Import(io.Reader) error
+	Export(io.Writer) error
 	Close() error
 }

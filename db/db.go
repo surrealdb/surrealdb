@@ -16,6 +16,7 @@ package db
 
 import (
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -105,14 +106,30 @@ func Exit() {
 
 }
 
-// Begin opens a new manual transaction with the data layer
-func Begin(rw bool) (txn kvs.TX, err error) {
-
-	return db.Begin(rw)
-
+// Import loads database operations from a reader.
+// This can be used to playback a database snapshot
+// into an already running database.
+func Import(r io.Reader) (err error) {
+	return db.Import(r)
 }
 
-// Execute parses the query and executes it against the data layer
+// Export saves all database operations to a writer.
+// This can be used to save a database snapshot
+// to a secondary file or stream.
+func Export(w io.Writer) (err error) {
+	return db.Export(w)
+}
+
+// Begin begins a new read / write transaction
+// with the underlying database, and returns
+// the transaction, or any error which occured.
+func Begin(rw bool) (txn kvs.TX, err error) {
+	return db.Begin(rw)
+}
+
+// Execute parses a single sql query, or multiple
+// sql queries, and executes them serially against
+// the underlying data layer.
 func Execute(ctx *fibre.Context, txt interface{}, vars map[string]interface{}) (out []*Response, err error) {
 
 	// If no preset variables have been defined
@@ -142,6 +159,9 @@ func Execute(ctx *fibre.Context, txt interface{}, vars map[string]interface{}) (
 
 }
 
+// Process takes a parsed set of sql queries and
+// executes them serially against the underlying
+// data layer.
 func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (out []*Response, err error) {
 
 	// Create 2 channels, one for force quitting
