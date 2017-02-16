@@ -33,7 +33,6 @@ func New(opts *cnf.Options) (ds *DS, err error) {
 	var db DB
 
 	switch {
-
 	case opts.DB.Path == "memory":
 		db, err = stores["rixxdb"](opts)
 	case strings.HasPrefix(opts.DB.Path, "s3://"):
@@ -60,22 +59,23 @@ func New(opts *cnf.Options) (ds *DS, err error) {
 
 }
 
-// Begin ...
+// Begin begins a new read / write transaction
+// with the underlying database, and returns
+// the transaction, or any error which occured.
 func (ds *DS) Begin(writable bool) (txn TX, err error) {
-
 	return ds.db.Begin(writable)
-
 }
 
-// Close ...
+// Close closes the underlying rixxdb / dendrodb
+// database connection, enabling the underlying
+// database to clean up remainging transactions.
 func (ds *DS) Close() (err error) {
-
 	return ds.db.Close()
-
 }
 
+// Register registers a new database type with
+// the kvs package, enabling it's use as a
+// backing datastore within SurrealDB.
 func Register(name string, constructor func(*cnf.Options) (DB, error)) {
-
 	stores[name] = constructor
-
 }
