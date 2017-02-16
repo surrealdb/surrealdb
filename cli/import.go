@@ -19,9 +19,9 @@ import (
 )
 
 var importCmd = &cobra.Command{
-	Use:     "import [options] <file>",
-	Short:   "Import data into an existing database from a JSON file",
-	Example: "  surreal import backup.zip",
+	Use:     "import",
+	Short:   "Import data into an existing database",
+	Example: "  surreal import",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Do Stuff Here
 	},
