@@ -44,6 +44,15 @@ func auth() fibre.MiddlewareFunc {
 
 			auth.Kind = sql.AuthNO
 
+			// Set the default possible values for the
+			// possible and selected namespace / database
+			// so that they can be overridden.
+
+			auth.Possible.NS = ""
+			auth.Selected.NS = ""
+			auth.Possible.DB = ""
+			auth.Selected.DB = ""
+
 			// Retrieve the current domain host and
 			// if we are using a subdomain then set
 			// the NS and DB to the subdomain bits.
@@ -59,6 +68,26 @@ func auth() fibre.MiddlewareFunc {
 				auth.Selected.DB = subs[1]
 			}
 
+			// If there is a namespace specified in
+			// the request headers, then mark it as
+			// the selected namespace.
+
+			if ns := c.Request().Header().Get("NS"); len(ns) != 0 {
+				auth.Kind = sql.AuthSC
+				auth.Possible.NS = ns
+				auth.Selected.NS = ns
+			}
+
+			// If there is a database specified in
+			// the request headers, then mark it as
+			// the selected database.
+
+			if db := c.Request().Header().Get("DB"); len(db) != 0 {
+				auth.Kind = sql.AuthSC
+				auth.Possible.DB = db
+				auth.Selected.DB = db
+			}
+
 			// Retrieve the HTTP Authorization header
 			// from the request, so that we can detect
 			// whether it is Basic auth or Bearer auth.
@@ -69,7 +98,7 @@ func auth() fibre.MiddlewareFunc {
 			// is a Basic Auth header, and if it is then
 			// process this as root authentication.
 
-			if head != "" && head[:5] == "Basic" {
+			if len(head) > 0 && head[:5] == "Basic" {
 
 				base, err := base64.StdEncoding.DecodeString(head[6:])
 
@@ -80,19 +109,10 @@ func auth() fibre.MiddlewareFunc {
 					cred := bytes.SplitN(base, []byte(":"), 2)
 
 					if len(cred) == 2 && bytes.Equal(cred[0], user) && bytes.Equal(cred[1], pass) {
-
-						// ------------------------------
-						// Root authentication
-						// ------------------------------
-
 						auth.Kind = sql.AuthKV
 						auth.Possible.NS = "*"
-						auth.Selected.NS = ""
 						auth.Possible.DB = "*"
-						auth.Selected.DB = ""
-
 						return h(c)
-
 					}
 
 				}
@@ -103,7 +123,7 @@ func auth() fibre.MiddlewareFunc {
 			// is a Bearer Auth header, and if it is then
 			// process this as default authentication.
 
-			if head != "" && head[:6] == "Bearer" {
+			if len(head) > 0 && head[:6] == "Bearer" {
 
 				var txn kvs.TX
 				var vars jwt.MapClaims
@@ -224,7 +244,6 @@ func auth() fibre.MiddlewareFunc {
 						auth.Possible.NS = nsv
 						auth.Selected.NS = nsv
 						auth.Possible.DB = "*"
-						auth.Selected.DB = ""
 					}
 
 					if auth.Kind == sql.AuthDB {
