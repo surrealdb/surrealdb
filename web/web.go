@@ -59,6 +59,7 @@ func Setup(opts *cnf.Options) (err error) {
 			"application/json":                  true,
 			"application/cbor":                  true,
 			"application/msgpack":               true,
+			"application/octet-stream":          true,
 			"application/x-www-form-urlencoded": true,
 		},
 	}))

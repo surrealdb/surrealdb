@@ -27,7 +27,7 @@ import (
 )
 
 var startCmd = &cobra.Command{
-	Use:   "start",
+	Use:   "start [flags]",
 	Short: "Start the database and http server",
 	PreRun: func(cmd *cobra.Command, args []string) {
 

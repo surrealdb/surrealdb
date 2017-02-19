@@ -90,6 +90,18 @@ func routes(s *fibre.Fibre) {
 	})
 
 	// --------------------------------------------------
+	// Endpoints for import and exporting data
+	// --------------------------------------------------
+
+	s.Get("/export", func(c *fibre.Context) error {
+		return exporter(c)
+	})
+
+	s.Post("/import", func(c *fibre.Context) error {
+		return importer(c)
+	})
+
+	// --------------------------------------------------
 	// Endpoints for submitting sql queries
 	// --------------------------------------------------
 
