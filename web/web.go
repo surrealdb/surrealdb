@@ -17,6 +17,7 @@ package web
 import (
 	"github.com/abcum/fibre"
 	"github.com/abcum/fibre/mw"
+
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/log"
 )
@@ -36,10 +37,11 @@ func Setup(opts *cnf.Options) (err error) {
 
 	// Setup middleware
 
-	s.Use(mw.Logs()) // Log requests
+	s.Use(mw.Uniq()) // Add uniq id
 	s.Use(mw.Fail()) // Catch panics
+	s.Use(mw.Logs()) // Log requests
+	s.Use(mw.Sock()) // Log requests
 	s.Use(mw.Gzip()) // Gzip responses
-	s.Use(mw.Uniq()) // Add uniq headers
 	s.Use(mw.Cors()) // Add cors headers
 
 	// Setup authentication
