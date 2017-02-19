@@ -183,7 +183,6 @@ func WithFields(fields map[string]interface{}) *logrus.Entry {
 
 // New returns a new Logger instance.
 func New() *Logger {
-
 	return &Logger{
 		&logrus.Logger{
 			Out:   os.Stderr,
@@ -218,7 +217,9 @@ func (l *Logger) SetLevel(v string) {
 func (l *Logger) SetFormat(v string) {
 	switch v {
 	case "json":
-		l.Formatter = &logrus.JSONFormatter{}
+		l.Formatter = &logrus.JSONFormatter{
+			TimestampFormat: time.RFC3339,
+		}
 	case "text":
 		l.Formatter = &TextFormatter{
 			TimestampFormat: time.RFC3339,
