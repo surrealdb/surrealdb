@@ -114,6 +114,7 @@ const (
 	CONTENT
 	CREATE
 	DATABASE
+	DB
 	DEFAULT
 	DEFINE
 	DELETE
@@ -152,6 +153,7 @@ const (
 	NOT
 	NOTNULL
 	NOW
+	NS
 	NULL
 	OFFSET
 	ON
@@ -279,6 +281,7 @@ var tokens = [...]string{
 	CONTENT:         "CONTENT",
 	CREATE:          "CREATE",
 	DATABASE:        "DATABASE",
+	DB:              "DB",
 	DEFAULT:         "DEFAULT",
 	DEFINE:          "DEFINE",
 	DELETE:          "DELETE",
@@ -317,6 +320,7 @@ var tokens = [...]string{
 	NOT:             "NOT",
 	NOTNULL:         "NOTNULL",
 	NOW:             "NOW",
+	NS:              "NS",
 	NULL:            "NULL",
 	ON:              "ON",
 	OR:              "OR",
