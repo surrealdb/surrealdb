@@ -29,6 +29,7 @@ import (
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 	"github.com/dgrijalva/jwt-go"
+	"github.com/gorilla/websocket"
 )
 
 func auth() fibre.MiddlewareFunc {
@@ -93,6 +94,18 @@ func auth() fibre.MiddlewareFunc {
 			// whether it is Basic auth or Bearer auth.
 
 			head := c.Request().Header().Get("Authorization")
+
+			// If there is no HTTP Authorization header,
+			// check if there are websocket subprotocols
+			// which might contain authn information.
+
+			if len(head) == 0 {
+				for _, val := range websocket.Subprotocols(c.Request().Request) {
+					if len(val) > 7 && val[0:7] == "bearer-" {
+						head = "Bearer " + val[7:]
+					}
+				}
+			}
 
 			// Check whether the Authorization header
 			// is a Basic Auth header, and if it is then
