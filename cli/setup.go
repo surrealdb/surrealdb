@@ -22,6 +22,7 @@ import (
 
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/log"
+	"github.com/abcum/surreal/util/rand"
 	"github.com/abcum/surreal/util/uuid"
 )
 
@@ -138,7 +139,7 @@ func setup() {
 	}
 
 	if opts.Auth.Pass == "" {
-		opts.Auth.Pass = "root"
+		opts.Auth.Pass = string(rand.New(20))
 	}
 
 	// --------------------------------------------------
