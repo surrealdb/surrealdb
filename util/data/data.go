@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 
+	"encoding/json"
+
 	"github.com/abcum/surreal/util/deep"
 	"github.com/abcum/surreal/util/pack"
 )
@@ -69,6 +71,10 @@ func (d *Doc) Encode() (dst []byte) {
 func (d *Doc) Decode(src []byte) *Doc {
 	pack.Decode(src, &d.data)
 	return d
+}
+
+func (d *Doc) MarshalJSON() ([]byte, error) {
+	return json.Marshal(d.Data())
 }
 
 // --------------------------------------------------------------------------------
