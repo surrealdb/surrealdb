@@ -63,9 +63,9 @@ surreal start --port-web 8000
 #### Clustering
 
 ```bash
-surreal start --port-web 8000 --port-tcp 33693 --db-path boltdb://surreal-1.db --join localhost:33693 --log-level debug
-surreal start --port-web 8001 --port-tcp 33694 --db-path boltdb://surreal-2.db --join localhost:33693 --log-level debug
-surreal start --port-web 8002 --port-tcp 33695 --db-path boltdb://surreal-3.db --join localhost:33693 --log-level debug
+surreal start --port-web 8000 --port-tcp 33693 --db-path file://surreal-1.db --join localhost:33693 --log-level debug
+surreal start --port-web 8001 --port-tcp 33694 --db-path file://surreal-2.db --join localhost:33693 --log-level debug
+surreal start --port-web 8002 --port-tcp 33695 --db-path file://surreal-3.db --join localhost:33693 --log-level debug
 ```
 
 #### Deployment
