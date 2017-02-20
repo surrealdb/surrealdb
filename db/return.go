@@ -29,6 +29,12 @@ func (e *executor) executeReturnStatement(ast *sql.ReturnStatement) (out []inter
 	switch what := ast.What.(type) {
 	default:
 		out = append(out, what)
+	case *sql.Null:
+		out = append(out, nil)
+	case *sql.Void:
+		// Ignore
+	case *sql.Empty:
+		// Ignore
 	case *sql.Param:
 		out = append(out, e.ctx.Get(what.ID).Data())
 	}
