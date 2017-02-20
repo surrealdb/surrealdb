@@ -15,6 +15,9 @@
 package web
 
 import (
+	"strconv"
+	"time"
+
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/sql"
@@ -45,6 +48,33 @@ func output(c *fibre.Context, err error, res []*db.Response) error {
 		return fibre.NewHTTPError(400)
 	}
 
+}
+
+func limit(c *fibre.Context, i int64) int64 {
+	if s := c.Query("limit"); len(s) > 0 {
+		if x, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return x
+		}
+	}
+	return i
+}
+
+func start(c *fibre.Context, i int64) int64 {
+	if s := c.Query("start"); len(s) > 0 {
+		if x, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return x
+		}
+	}
+	return i
+}
+
+func trace(c *fibre.Context, i time.Time) time.Time {
+	if s := c.Query("version"); len(s) > 0 {
+		if x, err := time.Parse(sql.RFCNano, s); err == nil {
+			return x
+		}
+	}
+	return i
 }
 
 func routes(s *fibre.Fibre) {
@@ -152,10 +182,12 @@ func routes(s *fibre.Fibre) {
 
 	s.Get("/key/:class", func(c *fibre.Context) error {
 
-		txt := "SELECT * FROM $class"
+		txt := "SELECT * FROM $class LIMIT $limit START $start"
 
 		res, err := db.Execute(c, txt, map[string]interface{}{
 			"class": sql.NewTable(c.Param("class")),
+			"limit": limit(c, 100),
+			"start": start(c, 0),
 		})
 
 		return output(c, err, res)
@@ -166,7 +198,7 @@ func routes(s *fibre.Fibre) {
 
 		var data interface{}
 
-		if err := c.Bind(data); err != nil {
+		if err := c.Bind(&data); err != nil {
 			return fibre.NewHTTPError(422)
 		}
 
@@ -203,21 +235,22 @@ func routes(s *fibre.Fibre) {
 
 	s.Get("/key/:class/:id", func(c *fibre.Context) error {
 
-		txt := "SELECT * FROM $thing"
+		txt := "SELECT * FROM $thing VERSION $trace"
 
 		res, err := db.Execute(c, txt, map[string]interface{}{
 			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
+			"trace": trace(c, time.Now()),
 		})
 
 		return output(c, err, res)
 
 	})
 
-	s.Put("/key/:class/:id", func(c *fibre.Context) error {
+	s.Post("/key/:class/:id", func(c *fibre.Context) error {
 
 		var data interface{}
 
-		if err := c.Bind(data); err != nil {
+		if err := c.Bind(&data); err != nil {
 			return fibre.NewHTTPError(422)
 		}
 
@@ -232,11 +265,11 @@ func routes(s *fibre.Fibre) {
 
 	})
 
-	s.Post("/key/:class/:id", func(c *fibre.Context) error {
+	s.Put("/key/:class/:id", func(c *fibre.Context) error {
 
 		var data interface{}
 
-		if err := c.Bind(data); err != nil {
+		if err := c.Bind(&data); err != nil {
 			return fibre.NewHTTPError(422)
 		}
 
@@ -255,11 +288,11 @@ func routes(s *fibre.Fibre) {
 
 		var data interface{}
 
-		if err := c.Bind(data); err != nil {
+		if err := c.Bind(&data); err != nil {
 			return fibre.NewHTTPError(422)
 		}
 
-		txt := "MODIFY $thing DIFF $data RETURN AFTER"
+		txt := "UPDATE $thing DIFF $data RETURN DIFF"
 
 		res, err := db.Execute(c, txt, map[string]interface{}{
 			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
