@@ -117,6 +117,31 @@ func routes(s *fibre.Fibre) {
 		return c.Send(200, res)
 	})
 
+	s.Get("/sql", func(c *fibre.Context) error {
+
+		if err := c.Upgrade(); err != nil {
+			return err
+		}
+
+		for {
+
+			_, msg, err := c.Socket().Read()
+			if err != nil {
+				return err
+			}
+
+			if res, err := db.Execute(c, msg, nil); err != nil {
+				c.Socket().SendText(err.Error())
+			} else {
+				c.Socket().SendJSON(res)
+			}
+
+		}
+
+		return nil
+
+	})
+
 	// --------------------------------------------------
 	// Endpoints for manipulating multiple records
 	// --------------------------------------------------
