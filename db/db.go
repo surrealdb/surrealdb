@@ -475,9 +475,11 @@ func (e *executor) operate(ast sql.Statement) (res []interface{}, err error) {
 
 	if loc && !e.txn.Closed() {
 		if !trw || err != nil {
-			e.txn, err = nil, e.txn.Cancel()
+			e.txn.Cancel()
+			e.txn = nil
 		} else {
-			e.txn, err = nil, e.txn.Commit()
+			e.txn.Commit()
+			e.txn = nil
 		}
 	}
 
