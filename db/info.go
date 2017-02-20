@@ -15,11 +15,17 @@
 package db
 
 import (
+	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 )
 
 func (e *executor) executeInfoStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
+
+	log.WithPrefix("sql").WithFields(map[string]interface{}{
+		"ns": ast.NS,
+		"db": ast.DB,
+	}).Debugln(ast)
 
 	switch ast.Kind {
 	case sql.NAMESPACE:

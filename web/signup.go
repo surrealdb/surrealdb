@@ -18,6 +18,7 @@ import (
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/kvs"
+	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 )
@@ -55,17 +56,36 @@ func signup(c *fibre.Context) (err error) {
 		// Get the specified signin scope.
 
 		if scp, err = mem.New(txn).GetSC(n, d, s); err != nil {
+			log.WithFields(map[string]interface{}{
+				"NS":  n,
+				"DB":  d,
+				"SC":  s,
+				"url": "/signup",
+			}).Debugln("Authentication scope does not exist")
 			return fibre.NewHTTPError(403)
 		}
 
 		// Process the scope signup statement.
 
-		res, err = db.Process(c, &sql.Query{Statements: []sql.Statement{scp.Signup}}, vars)
-		if err != nil {
-			return fibre.NewHTTPError(403)
+		qury := &sql.Query{Statements: []sql.Statement{scp.Signup}}
+
+		if res, err = db.Process(c, qury, vars); err != nil {
+			log.WithFields(map[string]interface{}{
+				"NS":  n,
+				"DB":  d,
+				"SC":  s,
+				"URL": "/signup",
+			}).Debugln("Authentication scope signup was unsuccessful")
+			return fibre.NewHTTPError(501)
 		}
 
 		if len(res) != 1 && len(res[0].Result) != 1 {
+			log.WithFields(map[string]interface{}{
+				"NS":  n,
+				"DB":  d,
+				"SC":  s,
+				"URL": "/signup",
+			}).Debugln("Authentication scope signup was unsuccessful")
 			return fibre.NewHTTPError(403)
 		}
 

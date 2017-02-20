@@ -253,10 +253,16 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			if err, ok := r.(error); ok {
+			switch err := r.(type) {
+			case string:
 				log.WithPrefix("db").Errorln(err)
 				if log.Instance().Level >= log.DebugLevel {
 					log.WithPrefix("db").Debugf("%s", debug.Stack())
+				}
+			case error:
+				log.WithPrefix("db").Errorln(err)
+				if log.Instance().Level >= log.DebugLevel {
+					log.WithPrefix("db").WithError(err).Debugf("%s", debug.Stack())
 				}
 			}
 		}

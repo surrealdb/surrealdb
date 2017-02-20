@@ -15,11 +15,17 @@
 package db
 
 import (
+	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/keys"
 )
 
 func (e *executor) executeRemoveNamespaceStatement(ast *sql.RemoveNamespaceStatement) (out []interface{}, err error) {
+
+	log.WithPrefix("sql").WithFields(map[string]interface{}{
+		"ns": ast.NS,
+		"db": ast.DB,
+	}).Debugln(ast)
 
 	// Remove the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.Name}
@@ -31,6 +37,11 @@ func (e *executor) executeRemoveNamespaceStatement(ast *sql.RemoveNamespaceState
 
 func (e *executor) executeRemoveDatabaseStatement(ast *sql.RemoveDatabaseStatement) (out []interface{}, err error) {
 
+	log.WithPrefix("sql").WithFields(map[string]interface{}{
+		"ns": ast.NS,
+		"db": ast.DB,
+	}).Debugln(ast)
+
 	// Remove the database
 	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name}
 	_, err = e.txn.DelP(0, dkey.Encode(), 0)
@@ -40,6 +51,11 @@ func (e *executor) executeRemoveDatabaseStatement(ast *sql.RemoveDatabaseStateme
 }
 
 func (e *executor) executeRemoveLoginStatement(ast *sql.RemoveLoginStatement) (out []interface{}, err error) {
+
+	log.WithPrefix("sql").WithFields(map[string]interface{}{
+		"ns": ast.NS,
+		"db": ast.DB,
+	}).Debugln(ast)
 
 	if ast.Kind == sql.NAMESPACE {
 
@@ -63,6 +79,11 @@ func (e *executor) executeRemoveLoginStatement(ast *sql.RemoveLoginStatement) (o
 
 func (e *executor) executeRemoveTokenStatement(ast *sql.RemoveTokenStatement) (out []interface{}, err error) {
 
+	log.WithPrefix("sql").WithFields(map[string]interface{}{
+		"ns": ast.NS,
+		"db": ast.DB,
+	}).Debugln(ast)
+
 	if ast.Kind == sql.NAMESPACE {
 
 		// Remove the token
@@ -85,6 +106,11 @@ func (e *executor) executeRemoveTokenStatement(ast *sql.RemoveTokenStatement) (o
 
 func (e *executor) executeRemoveScopeStatement(ast *sql.RemoveScopeStatement) (out []interface{}, err error) {
 
+	log.WithPrefix("sql").WithFields(map[string]interface{}{
+		"ns": ast.NS,
+		"db": ast.DB,
+	}).Debugln(ast)
+
 	// Remove the scope
 	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name}
 	_, err = e.txn.DelP(0, skey.Encode(), 0)
@@ -94,6 +120,11 @@ func (e *executor) executeRemoveScopeStatement(ast *sql.RemoveScopeStatement) (o
 }
 
 func (e *executor) executeRemoveTableStatement(ast *sql.RemoveTableStatement) (out []interface{}, err error) {
+
+	log.WithPrefix("sql").WithFields(map[string]interface{}{
+		"ns": ast.NS,
+		"db": ast.DB,
+	}).Debugln(ast)
 
 	for _, TB := range ast.What {
 
@@ -109,6 +140,11 @@ func (e *executor) executeRemoveTableStatement(ast *sql.RemoveTableStatement) (o
 
 func (e *executor) executeRemoveFieldStatement(ast *sql.RemoveFieldStatement) (out []interface{}, err error) {
 
+	log.WithPrefix("sql").WithFields(map[string]interface{}{
+		"ns": ast.NS,
+		"db": ast.DB,
+	}).Debugln(ast)
+
 	for _, TB := range ast.What {
 
 		// Remove the field
@@ -122,6 +158,11 @@ func (e *executor) executeRemoveFieldStatement(ast *sql.RemoveFieldStatement) (o
 }
 
 func (e *executor) executeRemoveIndexStatement(ast *sql.RemoveIndexStatement) (out []interface{}, err error) {
+
+	log.WithPrefix("sql").WithFields(map[string]interface{}{
+		"ns": ast.NS,
+		"db": ast.DB,
+	}).Debugln(ast)
 
 	for _, TB := range ast.What {
 
