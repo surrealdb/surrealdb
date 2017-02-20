@@ -54,18 +54,6 @@ func Setup(opts *cnf.Options) (err error) {
 		AllowedLength: 1 << 20,
 	}))
 
-	// Check body type
-
-	s.Use(mw.Type(&mw.TypeOpts{
-		AllowedContent: map[string]bool{
-			"application/json":                  true,
-			"application/cbor":                  true,
-			"application/msgpack":               true,
-			"application/octet-stream":          true,
-			"application/x-www-form-urlencoded": true,
-		},
-	}))
-
 	// Run the server
 
 	if len(opts.Cert.Crt) == 0 || len(opts.Cert.Key) == 0 {

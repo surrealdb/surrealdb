@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/abcum/fibre"
+	"github.com/abcum/fibre/mw"
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/sql"
 )
@@ -107,6 +108,15 @@ func routes(s *fibre.Fibre) {
 		return signup(c)
 	})
 
+	s.Use(mw.Type(&mw.TypeOpts{
+		AllowedContent: map[string]bool{
+			"application/json":                  true,
+			"application/cbor":                  true,
+			"application/msgpack":               true,
+			"application/x-www-form-urlencoded": true,
+		},
+	}).PathIs("/signup"))
+
 	// --------------------------------------------------
 	// Endpoints for authentication signin
 	// --------------------------------------------------
@@ -119,6 +129,15 @@ func routes(s *fibre.Fibre) {
 		return signin(c)
 	})
 
+	s.Use(mw.Type(&mw.TypeOpts{
+		AllowedContent: map[string]bool{
+			"application/json":                  true,
+			"application/cbor":                  true,
+			"application/msgpack":               true,
+			"application/x-www-form-urlencoded": true,
+		},
+	}).PathIs("/signin"))
+
 	// --------------------------------------------------
 	// Endpoints for import and exporting data
 	// --------------------------------------------------
@@ -130,6 +149,12 @@ func routes(s *fibre.Fibre) {
 	s.Post("/import", func(c *fibre.Context) error {
 		return importer(c)
 	})
+
+	s.Use(mw.Type(&mw.TypeOpts{
+		AllowedContent: map[string]bool{
+			"application/octet-stream": true,
+		},
+	}).PathIs("/export", "/import"))
 
 	// --------------------------------------------------
 	// Endpoints for submitting sql queries
@@ -146,6 +171,14 @@ func routes(s *fibre.Fibre) {
 		}
 		return c.Send(200, res)
 	})
+
+	s.Use(mw.Type(&mw.TypeOpts{
+		AllowedContent: map[string]bool{
+			"application/json":    true,
+			"application/cbor":    true,
+			"application/msgpack": true,
+		},
+	}).PathIs("/sql"))
 
 	s.Get("/sql", func(c *fibre.Context) error {
 
@@ -326,5 +359,14 @@ func routes(s *fibre.Fibre) {
 		return output(c, err, res)
 
 	})
+
+	s.Use(mw.Type(&mw.TypeOpts{
+		AllowedContent: map[string]bool{
+			"application/json":         true,
+			"application/cbor":         true,
+			"application/msgpack":      true,
+			"application/vnd.api+json": true,
+		},
+	}).PathBegsWith("/key/"))
 
 }
