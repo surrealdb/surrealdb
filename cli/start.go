@@ -70,6 +70,7 @@ func init() {
 	startCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master database authentication details.")
 	startCmd.PersistentFlags().StringVar(&opts.Auth.User, "auth-user", "", "The master username for the database. Use this as an alternative to the --auth flag.")
 	startCmd.PersistentFlags().StringVar(&opts.Auth.Pass, "auth-pass", "", "The master password for the database. Use this as an alternative to the --auth flag.")
+	startCmd.PersistentFlags().StringSliceVar(&opts.Auth.Addr, "auth-addr", nil, "The IP address ranges from which master authentication is possible.")
 
 	startCmd.PersistentFlags().StringVar(&opts.Cert.Crt, "cert-crt", "", "Path to the server certificate. Needed when running in secure mode.")
 	startCmd.PersistentFlags().StringVar(&opts.Cert.Key, "cert-key", "", "Path to the server private key. Needed when running in secure mode.")
@@ -78,9 +79,9 @@ func init() {
 	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Crt, "db-crt", "", "Path to the certificate file used to connect to the remote database.")
 	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Key, "db-key", "", "Path to the private key file used to connect to the remote database.")
 	startCmd.PersistentFlags().StringVar(&opts.DB.Path, "db-path", "", flag("db"))
-	startCmd.PersistentFlags().StringVar(&opts.DB.Time, "db-sync", "0s", "Something here")
+	startCmd.PersistentFlags().DurationVar(&opts.DB.Time, "db-sync", 0, "Something here")
 
-	startCmd.PersistentFlags().StringVarP(&opts.Cluster.Join, "join", "j", "", flag("join"))
+	startCmd.PersistentFlags().StringSliceVarP(&opts.Node.Join, "join", "j", nil, flag("join"))
 
 	startCmd.PersistentFlags().StringVarP(&opts.DB.Code, "key", "k", "", flag("key"))
 

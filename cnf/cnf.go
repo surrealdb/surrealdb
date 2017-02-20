@@ -34,14 +34,13 @@ type Auth struct {
 // Options defines global configuration options
 type Options struct {
 	DB struct {
-		Key  []byte // Data encryption key
-		Code string // Data encruption key string
-		Path string // Path to store the data file
-		Host string // Surreal host to connect to
-		Port string // Surreal port to connect to
-		Base string // Base key to use in KV stores
-		Time string // Timeframe for syncing data
-		Sync time.Duration
+		Key  []byte        // Data encryption key
+		Code string        // Data encruption key string
+		Path string        // Path to store the data file
+		Host string        // Surreal host to connect to
+		Port string        // Surreal port to connect to
+		Base string        // Base key to use in KV stores
+		Time time.Duration // Timeframe for syncing data
 		Cert struct {
 			CA  string
 			Crt string
@@ -69,6 +68,7 @@ type Options struct {
 		Auth string // Master authentication username:password
 		User string // Master authentication username
 		Pass string // Master authentication password
+		Addr []string
 	}
 
 	Node struct {
@@ -78,11 +78,7 @@ type Options struct {
 		UUID string   // UUID of this node
 		Attr string   // Comma separated tags for this node
 		Tags []string // Slice of tags for this node
-	}
-
-	Cluster struct {
-		Join string   // Comma separated peers to join
-		Peer []string // Slice of peers to join
+		Join []string // Slice of cluster peers to join
 	}
 
 	Backups struct {

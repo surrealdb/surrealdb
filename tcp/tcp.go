@@ -48,8 +48,8 @@ func Setup(opts *cnf.Options) (err error) {
 	cfg.MemberlistConfig.AdvertisePort = opts.Port.Tcp
 
 	srf, err = serf.Create(cfg)
-	if len(opts.Cluster.Peer) > 0 {
-		if _, err := srf.Join(opts.Cluster.Peer, true); err != nil {
+	if len(opts.Node.Join) > 0 {
+		if _, err := srf.Join(opts.Node.Join, true); err != nil {
 			log.Infoln(err)
 		}
 	}

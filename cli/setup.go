@@ -19,7 +19,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/log"
@@ -45,13 +44,6 @@ func setup() {
 
 	if opts.DB.Code != "" {
 		opts.DB.Key = []byte(opts.DB.Code)
-	}
-
-	if opts.DB.Time != "" {
-		var err error
-		if opts.DB.Sync, err = time.ParseDuration(opts.DB.Time); err != nil {
-			log.Fatal("Specify a valid database sync time frequency")
-		}
 	}
 
 	switch len(opts.DB.Key) {
@@ -166,20 +158,6 @@ func setup() {
 
 	if opts.Node.UUID == "" {
 		opts.Node.UUID = opts.Node.Name + "-" + uuid.NewV4().String()
-	}
-
-	// Convert string args to slices
-	for _, v := range strings.Split(opts.Node.Attr, ",") {
-		if c := strings.Trim(v, " "); c != "" {
-			opts.Node.Tags = append(opts.Node.Tags, c)
-		}
-	}
-
-	// Convert string args to slices
-	for _, v := range strings.Split(opts.Cluster.Join, ",") {
-		if c := strings.Trim(v, " "); c != "" {
-			opts.Cluster.Peer = append(opts.Cluster.Peer, c)
-		}
 	}
 
 	// --------------------------------------------------
