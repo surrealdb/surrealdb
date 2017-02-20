@@ -180,29 +180,26 @@ func routes(s *fibre.Fibre) {
 		},
 	}).PathIs("/sql"))
 
-	s.Get("/sql", func(c *fibre.Context) error {
+	// --------------------------------------------------
+	// Endpoints for submitting websocket sql
+	// --------------------------------------------------
 
+	s.Get("/sql", func(c *fibre.Context) error {
 		if err := c.Upgrade(); err != nil {
 			return err
 		}
-
 		for {
-
 			_, msg, err := c.Socket().Read()
 			if err != nil {
 				return err
 			}
-
 			if res, err := db.Execute(c, msg, nil); err != nil {
 				c.Socket().SendText(err.Error())
 			} else {
 				c.Socket().SendJSON(res)
 			}
-
 		}
-
 		return nil
-
 	})
 
 	// --------------------------------------------------
