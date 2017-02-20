@@ -23,6 +23,36 @@ type TX struct {
 	pntr *rixxdb.TX
 }
 
+func one(all kvs.KV, err error) (kvs.KV, error) {
+
+	switch err {
+	case nil:
+		break
+	default:
+		return nil, &kvs.DBError{}
+	case rixxdb.ErrTxNotExpectedValue:
+		return nil, &kvs.KVError{}
+	}
+
+	return all, err
+
+}
+
+func many(all []kvs.KV, err error) ([]kvs.KV, error) {
+
+	switch err {
+	case nil:
+		break
+	default:
+		return nil, &kvs.DBError{}
+	case rixxdb.ErrTxNotExpectedValue:
+		return nil, &kvs.KVError{}
+	}
+
+	return all, err
+
+}
+
 func (tx *TX) Closed() bool {
 	return tx.pntr.Closed()
 }
@@ -36,7 +66,8 @@ func (tx *TX) Commit() error {
 }
 
 func (tx *TX) Get(ver int64, key []byte) (kvs.KV, error) {
-	return tx.pntr.Get(ver, key)
+	all, err := tx.pntr.Get(ver, key)
+	return one(all, err)
 }
 
 func (tx *TX) GetL(ver int64, key []byte) ([]kvs.KV, error) {
@@ -45,7 +76,7 @@ func (tx *TX) GetL(ver int64, key []byte) ([]kvs.KV, error) {
 	for i, v := range all {
 		out[i] = v
 	}
-	return out, err
+	return many(out, err)
 }
 
 func (tx *TX) GetP(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
@@ -54,7 +85,7 @@ func (tx *TX) GetP(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
 	for i, v := range all {
 		out[i] = v
 	}
-	return out, err
+	return many(out, err)
 }
 
 func (tx *TX) GetR(ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
@@ -63,11 +94,12 @@ func (tx *TX) GetR(ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, err
 	for i, v := range all {
 		out[i] = v
 	}
-	return out, err
+	return many(out, err)
 }
 
 func (tx *TX) Del(ver int64, key []byte) (kvs.KV, error) {
-	return tx.pntr.Del(ver, key)
+	all, err := tx.pntr.Del(ver, key)
+	return one(all, err)
 }
 
 func (tx *TX) DelC(ver int64, key []byte, exp []byte) (kvs.KV, error) {
@@ -80,7 +112,7 @@ func (tx *TX) DelL(ver int64, key []byte) ([]kvs.KV, error) {
 	for i, v := range all {
 		out[i] = v
 	}
-	return out, err
+	return many(out, err)
 }
 
 func (tx *TX) DelP(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
@@ -89,7 +121,7 @@ func (tx *TX) DelP(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
 	for i, v := range all {
 		out[i] = v
 	}
-	return out, err
+	return many(out, err)
 }
 
 func (tx *TX) DelR(ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
@@ -98,15 +130,17 @@ func (tx *TX) DelR(ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, err
 	for i, v := range all {
 		out[i] = v
 	}
-	return out, err
+	return many(out, err)
 }
 
 func (tx *TX) Put(ver int64, key []byte, val []byte) (kvs.KV, error) {
-	return tx.pntr.Put(ver, key, val)
+	all, err := tx.pntr.Put(ver, key, val)
+	return one(all, err)
 }
 
 func (tx *TX) PutC(ver int64, key []byte, val []byte, exp []byte) (kvs.KV, error) {
-	return tx.pntr.PutC(ver, key, val, exp)
+	all, err := tx.pntr.PutC(ver, key, val, exp)
+	return one(all, err)
 }
 
 func (tx *TX) PutL(ver int64, key []byte, val []byte) ([]kvs.KV, error) {
@@ -115,7 +149,7 @@ func (tx *TX) PutL(ver int64, key []byte, val []byte) ([]kvs.KV, error) {
 	for i, v := range all {
 		out[i] = v
 	}
-	return out, err
+	return many(out, err)
 }
 
 func (tx *TX) PutP(ver int64, key []byte, val []byte, max uint64) ([]kvs.KV, error) {
@@ -124,7 +158,7 @@ func (tx *TX) PutP(ver int64, key []byte, val []byte, max uint64) ([]kvs.KV, err
 	for i, v := range all {
 		out[i] = v
 	}
-	return out, err
+	return many(out, err)
 }
 
 func (tx *TX) PutR(ver int64, key []byte, val []byte, exp []byte, max uint64) ([]kvs.KV, error) {
@@ -133,5 +167,5 @@ func (tx *TX) PutR(ver int64, key []byte, val []byte, exp []byte, max uint64) ([
 	for i, v := range all {
 		out[i] = v
 	}
-	return out, err
+	return many(out, err)
 }

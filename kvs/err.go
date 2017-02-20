@@ -16,17 +16,6 @@ package kvs
 
 import "fmt"
 
-// DSError is an error which occurs when there is a
-// problem with writing keys/values to the database.
-type DSError struct {
-	Err error
-}
-
-// Error returns the string representation of the error.
-func (e *DSError) Error() string {
-	return fmt.Sprintf("There was a problem connecting to the datastore")
-}
-
 // DBError is an error which occurs when there is a
 // problem with writing keys/values to the database.
 type DBError struct {
@@ -36,28 +25,6 @@ type DBError struct {
 // Error returns the string representation of the error.
 func (e *DBError) Error() string {
 	return fmt.Sprintf("There was a problem writing to the database")
-}
-
-// TXError is an error which occurs when there is a
-// problem with a writable transaction.
-type TXError struct {
-	Err error
-}
-
-// Error returns the string representation of the error.
-func (e *TXError) Error() string {
-	return fmt.Sprintf("There was a problem with the transaction")
-}
-
-// CKError is an error which occurs when there is a
-// problem with encrypting/decrypting values.
-type CKError struct {
-	Err error
-}
-
-// Error returns the string representation of the error.
-func (e *CKError) Error() string {
-	return fmt.Sprintf("This cipherkey used is not valid")
 }
 
 // KVError is an error which occurs when there is a

@@ -36,6 +36,8 @@ import (
 	// _ "github.com/abcum/surreal/kvs/dendro"
 )
 
+var QueryNotExecuted = fmt.Errorf("Query not executed")
+
 var pool sync.Pool
 
 func init() {
@@ -325,7 +327,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			if err == nil {
 				res, err = e.operate(stm)
 			} else {
-				res, err = []interface{}{}, fmt.Errorf("Query not executed")
+				res, err = []interface{}{}, QueryNotExecuted
 			}
 
 			rsp = &Response{
@@ -483,10 +485,6 @@ func status(e error) (s string) {
 		return "OK"
 	case *kvs.DBError:
 		return "ERR_DB"
-	case *kvs.TXError:
-		return "ERR_TX"
-	case *kvs.CKError:
-		return "ERR_CK"
 	case *kvs.KVError:
 		return "ERR_KV"
 	case error:

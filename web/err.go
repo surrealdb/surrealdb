@@ -16,11 +16,14 @@ package web
 
 import (
 	"github.com/abcum/fibre"
-	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 )
 
 func errors(val error, c *fibre.Context) {
+
+	if c.Socket() != nil {
+		return
+	}
 
 	var code int
 	var info string
@@ -28,17 +31,9 @@ func errors(val error, c *fibre.Context) {
 	switch e := val.(type) {
 	default:
 		code, info = 400, e.Error()
-	case *kvs.DBError:
-		code, info = 503, e.Error()
-	case *kvs.TXError:
-		code, info = 500, e.Error()
-	case *kvs.KVError:
-		code, info = 409, e.Error()
-	case *kvs.CKError:
+	case *sql.PermsError:
 		code, info = 403, e.Error()
-	case *sql.NSError:
-		code, info = 403, e.Error()
-	case *sql.DBError:
+	case *sql.BlankError:
 		code, info = 403, e.Error()
 	case *sql.QueryError:
 		code, info = 401, e.Error()

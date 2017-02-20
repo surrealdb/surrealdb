@@ -39,22 +39,28 @@ func (e *executor) executeCreateStatement(ast *sql.CreateStatement) (out []inter
 
 		case *sql.Thing:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
-			kv, _ := e.txn.Get(0, key.Encode())
-			doc := item.New(kv, e.txn, key, e.ctx)
-			if ret, err := create(doc, ast); err != nil {
+			if kv, err := e.txn.Get(0, key.Encode()); err != nil {
 				return nil, err
-			} else if ret != nil {
-				out = append(out, ret)
+			} else {
+				doc := item.New(kv, e.txn, key, e.ctx)
+				if ret, err := create(doc, ast); err != nil {
+					return nil, err
+				} else if ret != nil {
+					out = append(out, ret)
+				}
 			}
 
 		case *sql.Table:
 			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: uuid.NewV5(uuid.NewV4().UUID, ast.KV).String()}
-			kv, _ := e.txn.Get(0, key.Encode())
-			doc := item.New(kv, e.txn, key, e.ctx)
-			if ret, err := create(doc, ast); err != nil {
+			if kv, err := e.txn.Get(0, key.Encode()); err != nil {
 				return nil, err
-			} else if ret != nil {
-				out = append(out, ret)
+			} else {
+				doc := item.New(kv, e.txn, key, e.ctx)
+				if ret, err := create(doc, ast); err != nil {
+					return nil, err
+				} else if ret != nil {
+					out = append(out, ret)
+				}
 			}
 
 		}

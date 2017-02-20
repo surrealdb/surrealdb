@@ -43,24 +43,14 @@ func (e *BlankError) Error() string {
 	return fmt.Sprint("You need to specify a namespace and a database to use")
 }
 
-// NSError represents an error that occured when switching access.
-type NSError struct {
-	NS string
+// PermsError represents an error that occured when switching access.
+type PermsError struct {
+	Resource string
 }
 
 // Error returns the string representation of the error.
-func (e *NSError) Error() string {
-	return fmt.Sprintf("You don't have permission to access the '%s' namespace", e.NS)
-}
-
-// DBError represents an error that occured when switching access.
-type DBError struct {
-	DB string
-}
-
-// Error returns the string representation of the error.
-func (e *DBError) Error() string {
-	return fmt.Sprintf("You don't have permission to access the '%s' database", e.DB)
+func (e *PermsError) Error() string {
+	return fmt.Sprintf("You don't have permission to access the '%s' resource", e.Resource)
 }
 
 // ParseError represents an error that occurred during parsing.
