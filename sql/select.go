@@ -298,7 +298,7 @@ func (p *parser) parseVersion() (Expr, error) {
 		return nil, nil
 	}
 
-	tok, lit, err := p.shouldBe(DATE, TIME)
+	tok, lit, err := p.shouldBe(DATE, TIME, PARAM)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"timestamp"}}
 	}
