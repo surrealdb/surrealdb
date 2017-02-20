@@ -1,33 +1,42 @@
 package: github.com/abcum/surreal
 import:
+- package: github.com/abcum/cork
 - package: github.com/abcum/fibre
   subpackages:
   - mw
-- package: github.com/abcum/logrus
-- package: github.com/boltdb/bolt
+- package: github.com/abcum/rixxdb
+- package: github.com/asaskevich/govalidator
+  version: ^5.0.0
 - package: github.com/cznic/zappy
+- package: github.com/dgrijalva/jwt-go
+  version: ^3.0.0
+- package: github.com/fatih/structs
 - package: github.com/hashicorp/serf
+  version: ^0.8.1
   subpackages:
   - serf
+- package: github.com/hjson/hjson-go
+  version: ^0.2.2
 - package: github.com/imdario/mergo
+  version: ^0.2.2
 - package: github.com/kr/text
 - package: github.com/mgutz/ansi
-- package: github.com/robertkrimen/otto
-- package: github.com/satori/go.uuid
-- package: github.com/spf13/cobra
-- package: github.com/ugorji/go
-  subpackages:
-  - codec
-- package: github.com/go-sql-driver/mysql
-  version: ^1.2.0
-- package: github.com/lib/pq
-- package: github.com/asaskevich/govalidator
-  version: ^4.0.0
-- package: github.com/yuin/gopher-lua
 - package: github.com/pkg/profile
   version: ^1.2.0
-- package: github.com/abcum/cork
+- package: github.com/satori/go.uuid
+  version: ^1.1.0
+- package: github.com/sergi/go-diff
+  subpackages:
+  - diffmatchpatch
+- package: github.com/sirupsen/logrus
+  version: ^0.11.2
+- package: github.com/spf13/cobra
+- package: github.com/yuin/gopher-lua
+- package: golang.org/x/crypto
+  subpackages:
+  - bcrypt
 testImport:
 - package: github.com/smartystreets/goconvey
+  version: ^1.6.2
   subpackages:
   - convey
