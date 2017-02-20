@@ -22,34 +22,8 @@ import (
 	"github.com/abcum/fibre/mw"
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/show"
 )
-
-func output(c *fibre.Context, err error, res []*db.Response) error {
-
-	if err != nil {
-		return fibre.NewHTTPError(500)
-	}
-
-	if len(res) == 0 {
-		return fibre.NewHTTPError(500)
-	}
-
-	switch ret := res[0]; ret.Status {
-	case "OK":
-		return c.Send(200, ret.Result)
-	case "ERR_DB":
-		return fibre.NewHTTPError(503)
-	case "ERR_TX":
-		return fibre.NewHTTPError(500)
-	case "ERR_KV":
-		return fibre.NewHTTPError(409)
-	case "ERR_CK":
-		return fibre.NewHTTPError(403)
-	default:
-		return fibre.NewHTTPError(400)
-	}
-
-}
 
 func limit(c *fibre.Context, i int64) int64 {
 	if s := c.Query("limit"); len(s) > 0 {
@@ -220,7 +194,7 @@ func routes(s *fibre.Fibre) {
 			"start": start(c, 0),
 		})
 
-		return output(c, err, res)
+		return show.Output(c, c.Param("class"), show.Many, show.Select, res, err)
 
 	})
 
@@ -239,7 +213,7 @@ func routes(s *fibre.Fibre) {
 			"data":  data,
 		})
 
-		return output(c, err, res)
+		return show.Output(c, c.Param("class"), show.Many, show.Create, res, err)
 
 	})
 
@@ -251,7 +225,7 @@ func routes(s *fibre.Fibre) {
 			"class": sql.NewTable(c.Param("class")),
 		})
 
-		return output(c, err, res)
+		return show.Output(c, c.Param("class"), show.Many, show.Delete, res, err)
 
 	})
 
@@ -272,7 +246,7 @@ func routes(s *fibre.Fibre) {
 			"trace": trace(c, time.Now()),
 		})
 
-		return output(c, err, res)
+		return show.Output(c, c.Param("class"), show.One, show.Select, res, err)
 
 	})
 
@@ -291,7 +265,7 @@ func routes(s *fibre.Fibre) {
 			"data":  data,
 		})
 
-		return output(c, err, res)
+		return show.Output(c, c.Param("class"), show.One, show.Create, res, err)
 
 	})
 
@@ -310,7 +284,7 @@ func routes(s *fibre.Fibre) {
 			"data":  data,
 		})
 
-		return output(c, err, res)
+		return show.Output(c, c.Param("class"), show.One, show.Update, res, err)
 
 	})
 
@@ -329,7 +303,7 @@ func routes(s *fibre.Fibre) {
 			"data":  data,
 		})
 
-		return output(c, err, res)
+		return show.Output(c, c.Param("class"), show.One, show.Modify, res, err)
 
 	})
 
@@ -341,7 +315,7 @@ func routes(s *fibre.Fibre) {
 			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
 		})
 
-		return output(c, err, res)
+		return show.Output(c, c.Param("class"), show.One, show.Trace, res, err)
 
 	})
 
@@ -353,7 +327,7 @@ func routes(s *fibre.Fibre) {
 			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
 		})
 
-		return output(c, err, res)
+		return show.Output(c, c.Param("class"), show.One, show.Delete, res, err)
 
 	})
 
