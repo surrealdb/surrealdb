@@ -23,6 +23,7 @@ import (
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/show"
+	"github.com/gorilla/websocket"
 )
 
 func limit(c *fibre.Context, i int64) int64 {
@@ -165,6 +166,9 @@ func routes(s *fibre.Fibre) {
 		for {
 			_, msg, err := c.Socket().Read()
 			if err != nil {
+				if websocket.IsCloseError(err, 1000, 1001, 1005) {
+					return nil
+				}
 				return err
 			}
 			if res, err := db.Execute(c, msg, nil); err != nil {
