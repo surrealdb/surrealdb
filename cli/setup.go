@@ -16,6 +16,7 @@ package cli
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -140,6 +141,16 @@ func setup() {
 
 	if opts.Auth.Pass == "" {
 		opts.Auth.Pass = string(rand.New(20))
+	}
+
+	//
+
+	for _, cidr := range opts.Auth.Addr {
+		_, subn, err := net.ParseCIDR(cidr)
+		if err != nil {
+			log.Fatalf("Invalid cidr %s. Please specify a valid CIDR address for --auth-addr", cidr)
+		}
+		opts.Auth.Nets = append(opts.Auth.Nets, subn)
 	}
 
 	// --------------------------------------------------

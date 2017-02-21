@@ -14,7 +14,10 @@
 
 package cnf
 
-import "time"
+import (
+	"net"
+	"time"
+)
 
 var Settings *Options
 
@@ -69,6 +72,7 @@ type Options struct {
 		User string // Master authentication username
 		Pass string // Master authentication password
 		Addr []string
+		Nets []*net.IPNet
 	}
 
 	Node struct {

@@ -16,6 +16,7 @@ package web
 
 import (
 	"fmt"
+	"net"
 
 	"bytes"
 	"strings"
@@ -32,7 +33,20 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func cidr(ip net.IP, networks []*net.IPNet) bool {
+	for _, network := range networks {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 func auth() fibre.MiddlewareFunc {
+
+	user := []byte(cnf.Settings.Auth.User)
+	pass := []byte(cnf.Settings.Auth.Pass)
+
 	return func(h fibre.HandlerFunc) fibre.HandlerFunc {
 		return func(c *fibre.Context) (err error) {
 
@@ -115,10 +129,8 @@ func auth() fibre.MiddlewareFunc {
 
 				base, err := base64.StdEncoding.DecodeString(head[6:])
 
-				if err == nil {
+				if err == nil && cidr(c.IP(), cnf.Settings.Auth.Nets) {
 
-					user := []byte(cnf.Settings.Auth.User)
-					pass := []byte(cnf.Settings.Auth.Pass)
 					cred := bytes.SplitN(base, []byte(":"), 2)
 
 					if len(cred) == 2 && bytes.Equal(cred[0], user) && bytes.Equal(cred[1], pass) {
