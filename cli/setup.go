@@ -55,7 +55,7 @@ func setup() {
 
 	if opts.DB.Path != "memory" {
 		if ok, _ := regexp.MatchString(`^(s3|gcs|logr|file|rixxdb|dendrodb)://(.+)$`, opts.DB.Path); !ok {
-			log.Fatal("Specify a valid data store configuration path")
+			log.Fatal("Invalid path %s. Specify a valid data store configuration path", opts.DB.Path)
 		}
 	}
 
@@ -177,12 +177,12 @@ func setup() {
 
 	// Ensure port number is valid
 	if opts.Port.Web < 0 || opts.Port.Web > 65535 {
-		log.Fatal("Please specify a valid port number for --port-web")
+		log.Fatalf("Invalid port %d. Please specify a valid port number for --port-web", opts.Port.Web)
 	}
 
 	// Ensure port number is valid
 	if opts.Port.Tcp < 0 || opts.Port.Tcp > 65535 {
-		log.Fatal("Please specify a valid port number for --port-tcp")
+		log.Fatalf("Invalid port %d. Please specify a valid port number for --port-tcp", opts.Port.Tcp)
 	}
 
 	// Store the ports in host:port string format
