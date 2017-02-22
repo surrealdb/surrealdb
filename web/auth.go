@@ -43,15 +43,17 @@ func cidr(ip net.IP, networks []*net.IPNet) bool {
 }
 
 func auth() fibre.MiddlewareFunc {
-
-	user := []byte(cnf.Settings.Auth.User)
-	pass := []byte(cnf.Settings.Auth.Pass)
-
 	return func(h fibre.HandlerFunc) fibre.HandlerFunc {
 		return func(c *fibre.Context) (err error) {
 
 			auth := &cnf.Auth{}
 			c.Set("auth", auth)
+
+			// Ensure that the authentication data
+			// object is initiated at the beginning
+			// so it is present when serialized.
+
+			auth.Data = make(map[string]interface{})
 
 			// Start off with an authentication level
 			// which prevents running any sql queries,
@@ -114,9 +116,12 @@ func auth() fibre.MiddlewareFunc {
 			// which might contain authn information.
 
 			if len(head) == 0 {
-				for _, val := range websocket.Subprotocols(c.Request().Request) {
-					if len(val) > 7 && val[0:7] == "bearer-" {
-						head = "Bearer " + val[7:]
+				for _, prot := range websocket.Subprotocols(c.Request().Request) {
+					if len(prot) > 7 && prot[0:7] == "bearer-" {
+						head = "Bearer " + prot[7:]
+						return checkBearer(c, prot[7:], func() error {
+							return h(c)
+						})
 					}
 				}
 			}
@@ -126,22 +131,9 @@ func auth() fibre.MiddlewareFunc {
 			// process this as root authentication.
 
 			if len(head) > 0 && head[:5] == "Basic" {
-
-				base, err := base64.StdEncoding.DecodeString(head[6:])
-
-				if err == nil && cidr(c.IP(), cnf.Settings.Auth.Nets) {
-
-					cred := bytes.SplitN(base, []byte(":"), 2)
-
-					if len(cred) == 2 && bytes.Equal(cred[0], user) && bytes.Equal(cred[1], pass) {
-						auth.Kind = sql.AuthKV
-						auth.Possible.NS = "*"
-						auth.Possible.DB = "*"
-						return h(c)
-					}
-
-				}
-
+				return checkMaster(c, head[6:], func() error {
+					return h(c)
+				})
 			}
 
 			// Check whether the Authorization header
@@ -149,150 +141,200 @@ func auth() fibre.MiddlewareFunc {
 			// process this as default authentication.
 
 			if len(head) > 0 && head[:6] == "Bearer" {
-
-				var txn kvs.TX
-				var vars jwt.MapClaims
-				var nok, dok, sok, tok, uok bool
-				var nsv, dbv, scv, tkv, usv string
-
-				// Start a new read transaction.
-
-				if txn, err = db.Begin(false); err != nil {
-					return fibre.NewHTTPError(500)
-				}
-
-				// Ensure the transaction closes.
-
-				defer txn.Cancel()
-
-				// Parse the specified JWT Token.
-
-				token, err := jwt.Parse(head[7:], func(token *jwt.Token) (interface{}, error) {
-
-					vars = token.Claims.(jwt.MapClaims)
-
-					if err := vars.Valid(); err != nil {
-						return nil, err
-					}
-
-					if val, ok := vars["auth"].(map[string]interface{}); ok {
-						auth.Data = val
-					}
-
-					nsv, nok = vars["NS"].(string) // Namespace
-					dbv, dok = vars["DB"].(string) // Database
-					scv, sok = vars["SC"].(string) // Scope
-					tkv, tok = vars["TK"].(string) // Token
-					usv, uok = vars["US"].(string) // Login
-
-					if tkv == "default" {
-						if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-							return nil, fmt.Errorf("Unexpected signing method")
-						}
-					}
-
-					if nok && dok && sok && tok {
-
-						scp, err := mem.New(txn).GetSC(nsv, dbv, scv)
-						if err != nil {
-							fmt.Errorf("Credentials failed")
-						}
-
-						auth.Data["scope"] = scp.Name
-
-						if tkv != "default" {
-							key, err := mem.New(txn).GetST(nsv, dbv, scv, tkv)
-							if err != nil {
-								fmt.Errorf("Credentials failed")
-							}
-							if token.Header["alg"] != key.Type {
-								return nil, fmt.Errorf("Unexpected signing method")
-							}
-							auth.Kind = sql.AuthSC
-							return key.Code, nil
-						} else {
-							auth.Kind = sql.AuthSC
-							return scp.Code, nil
-						}
-
-					} else if nok && dok && tok {
-
-						if tkv != "default" {
-							key, err := mem.New(txn).GetDT(nsv, dbv, tkv)
-							if err != nil {
-								fmt.Errorf("Credentials failed")
-							}
-							if token.Header["alg"] != key.Type {
-								return nil, fmt.Errorf("Unexpected signing method")
-							}
-							auth.Kind = sql.AuthDB
-							return key.Code, nil
-						} else if uok {
-							usr, err := mem.New(txn).GetDU(nsv, dbv, usv)
-							if err != nil {
-								fmt.Errorf("Credentials failed")
-							}
-							auth.Kind = sql.AuthDB
-							return usr.Code, nil
-						}
-
-					} else if nok && tok {
-
-						if tkv != "default" {
-							key, err := mem.New(txn).GetNT(nsv, tkv)
-							if err != nil {
-								fmt.Errorf("Credentials failed")
-							}
-							if token.Header["alg"] != key.Type {
-								return nil, fmt.Errorf("Unexpected signing method")
-							}
-							auth.Kind = sql.AuthNS
-							return key.Code, nil
-						} else if uok {
-							usr, err := mem.New(txn).GetNU(nsv, usv)
-							if err != nil {
-								fmt.Errorf("Credentials failed")
-							}
-							auth.Kind = sql.AuthNS
-							return usr.Code, nil
-						}
-
-					}
-
-					return nil, fmt.Errorf("No available token")
-
-				})
-
-				if err == nil && token.Valid {
-
-					if auth.Kind == sql.AuthNS {
-						auth.Possible.NS = nsv
-						auth.Selected.NS = nsv
-						auth.Possible.DB = "*"
-					}
-
-					if auth.Kind == sql.AuthDB {
-						auth.Possible.NS = nsv
-						auth.Selected.NS = nsv
-						auth.Possible.DB = dbv
-						auth.Selected.DB = dbv
-					}
-
-					if auth.Kind == sql.AuthSC {
-						auth.Possible.NS = nsv
-						auth.Selected.NS = nsv
-						auth.Possible.DB = dbv
-						auth.Selected.DB = dbv
-					}
-
+				return checkBearer(c, head[6:], func() error {
 					return h(c)
-
-				}
-
+				})
 			}
 
 			return h(c)
 
 		}
 	}
+}
+
+func checkRoot(c *fibre.Context, user, pass string, callback func() error) (err error) {
+
+	auth := c.Get("auth").(*cnf.Auth)
+
+	if cidr(c.IP(), cnf.Settings.Auth.Nets) {
+
+		if user == cnf.Settings.Auth.User && pass == cnf.Settings.Auth.Pass {
+			auth.Kind = sql.AuthKV
+			auth.Possible.NS = "*"
+			auth.Possible.DB = "*"
+		}
+
+	}
+
+	return callback()
+
+}
+
+func checkMaster(c *fibre.Context, info string, callback func() error) (err error) {
+
+	auth := c.Get("auth").(*cnf.Auth)
+	user := []byte(cnf.Settings.Auth.User)
+	pass := []byte(cnf.Settings.Auth.Pass)
+
+	base, err := base64.StdEncoding.DecodeString(info)
+
+	if err == nil && cidr(c.IP(), cnf.Settings.Auth.Nets) {
+
+		cred := bytes.SplitN(base, []byte(":"), 2)
+
+		if len(cred) == 2 && bytes.Equal(cred[0], user) && bytes.Equal(cred[1], pass) {
+			auth.Kind = sql.AuthKV
+			auth.Possible.NS = "*"
+			auth.Possible.DB = "*"
+		}
+
+	}
+
+	return callback()
+
+}
+
+func checkBearer(c *fibre.Context, info string, callback func() error) (err error) {
+
+	auth := c.Get("auth").(*cnf.Auth)
+
+	var txn kvs.TX
+	var vars jwt.MapClaims
+	var nok, dok, sok, tok, uok bool
+	var nsv, dbv, scv, tkv, usv string
+
+	// Start a new read transaction.
+
+	if txn, err = db.Begin(false); err != nil {
+		return fibre.NewHTTPError(500)
+	}
+
+	// Ensure the transaction closes.
+
+	defer txn.Cancel()
+
+	// Parse the specified JWT Token.
+
+	token, err := jwt.Parse(info, func(token *jwt.Token) (interface{}, error) {
+
+		vars = token.Claims.(jwt.MapClaims)
+
+		if err := vars.Valid(); err != nil {
+			return nil, err
+		}
+
+		if val, ok := vars["auth"].(map[string]interface{}); ok {
+			auth.Data = val
+		}
+
+		nsv, nok = vars["NS"].(string) // Namespace
+		dbv, dok = vars["DB"].(string) // Database
+		scv, sok = vars["SC"].(string) // Scope
+		tkv, tok = vars["TK"].(string) // Token
+		usv, uok = vars["US"].(string) // Login
+
+		if tkv == "default" {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("Unexpected signing method")
+			}
+		}
+
+		if nok && dok && sok && tok {
+
+			scp, err := mem.New(txn).GetSC(nsv, dbv, scv)
+			if err != nil {
+				return nil, fmt.Errorf("Credentials failed")
+			}
+
+			auth.Data["scope"] = scp.Name
+
+			if tkv != "default" {
+				key, err := mem.New(txn).GetST(nsv, dbv, scv, tkv)
+				if err != nil {
+					return nil, fmt.Errorf("Credentials failed")
+				}
+				if token.Header["alg"] != key.Type {
+					return nil, fmt.Errorf("Unexpected signing method")
+				}
+				auth.Kind = sql.AuthSC
+				return key.Code, nil
+			} else {
+				auth.Kind = sql.AuthSC
+				return scp.Code, nil
+			}
+
+		} else if nok && dok && tok {
+
+			if tkv != "default" {
+				key, err := mem.New(txn).GetDT(nsv, dbv, tkv)
+				if err != nil {
+					return nil, fmt.Errorf("Credentials failed")
+				}
+				if token.Header["alg"] != key.Type {
+					return nil, fmt.Errorf("Unexpected signing method")
+				}
+				auth.Kind = sql.AuthDB
+				return key.Code, nil
+			} else if uok {
+				usr, err := mem.New(txn).GetDU(nsv, dbv, usv)
+				if err != nil {
+					return nil, fmt.Errorf("Credentials failed")
+				}
+				auth.Kind = sql.AuthDB
+				return usr.Code, nil
+			}
+
+		} else if nok && tok {
+
+			if tkv != "default" {
+				key, err := mem.New(txn).GetNT(nsv, tkv)
+				if err != nil {
+					return nil, fmt.Errorf("Credentials failed")
+				}
+				if token.Header["alg"] != key.Type {
+					return nil, fmt.Errorf("Unexpected signing method")
+				}
+				auth.Kind = sql.AuthNS
+				return key.Code, nil
+			} else if uok {
+				usr, err := mem.New(txn).GetNU(nsv, usv)
+				if err != nil {
+					return nil, fmt.Errorf("Credentials failed")
+				}
+				auth.Kind = sql.AuthNS
+				return usr.Code, nil
+			}
+
+		}
+
+		return nil, fmt.Errorf("No available token")
+
+	})
+
+	if err == nil && token.Valid {
+
+		if auth.Kind == sql.AuthNS {
+			auth.Possible.NS = nsv
+			auth.Selected.NS = nsv
+			auth.Possible.DB = "*"
+		}
+
+		if auth.Kind == sql.AuthDB {
+			auth.Possible.NS = nsv
+			auth.Selected.NS = nsv
+			auth.Possible.DB = dbv
+			auth.Selected.DB = dbv
+		}
+
+		if auth.Kind == sql.AuthSC {
+			auth.Possible.NS = nsv
+			auth.Selected.NS = nsv
+			auth.Possible.DB = dbv
+			auth.Selected.DB = dbv
+		}
+
+	}
+
+	return callback()
+
 }

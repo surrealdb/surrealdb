@@ -22,7 +22,15 @@ import (
 
 type rpc struct{}
 
-func (r *rpc) Sql(c *fibre.Context, sql string, vars map[string]interface{}) (interface{}, error) {
+func (r *rpc) Info(c *fibre.Context) (interface{}, error) {
+	return c.Get("auth"), nil
+}
+
+func (r *rpc) Auth(c *fibre.Context, auth string) (interface{}, error) {
+	return nil, checkBearer(c, auth, func() error { return nil })
+}
+
+func (r *rpc) Query(c *fibre.Context, sql string, vars map[string]interface{}) (interface{}, error) {
 	return db.Execute(c, sql, vars)
 }
 
@@ -63,6 +71,21 @@ func (r *rpc) Update(c *fibre.Context, class string, thing interface{}, data map
 		})
 	default:
 		return db.Execute(c, "UPDATE $thing CONTENT $data RETURN AFTER", map[string]interface{}{
+			"thing": sql.NewThing(class, thing),
+			"data":  data,
+		})
+	}
+}
+
+func (r *rpc) Change(c *fibre.Context, class string, thing interface{}, data map[string]interface{}) (interface{}, error) {
+	switch thing.(type) {
+	case *fibre.RPCNull:
+		return db.Execute(c, "UPDATE $class MERGE $data RETURN AFTER", map[string]interface{}{
+			"class": sql.NewTable(class),
+			"data":  data,
+		})
+	default:
+		return db.Execute(c, "UPDATE $thing MERGE $data RETURN AFTER", map[string]interface{}{
 			"thing": sql.NewThing(class, thing),
 			"data":  data,
 		})
