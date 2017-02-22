@@ -51,7 +51,7 @@ func init() {
 	mainCmd.PersistentFlags().MarkHidden("log-driver-google-project")
 	mainCmd.PersistentFlags().MarkHidden("log-driver-google-credentials")
 
-	mainCmd.PersistentFlags().StringVar(&opts.Logging.Syslog.Tag, "log-driver-syslog-tag", "cirrius", "Specify a tag for the syslog driver")
+	mainCmd.PersistentFlags().StringVar(&opts.Logging.Syslog.Tag, "log-driver-syslog-tag", "surreal", "Specify a tag for the syslog driver")
 	mainCmd.PersistentFlags().StringVar(&opts.Logging.Syslog.Host, "log-driver-syslog-host", "localhost:514", "Specify a remote host:port for the syslog driver")
 	mainCmd.PersistentFlags().StringVar(&opts.Logging.Syslog.Protocol, "log-driver-syslog-protocol", "", "Specify the protocol to use for the syslog driver")
 	mainCmd.PersistentFlags().StringVar(&opts.Logging.Syslog.Priority, "log-driver-syslog-priority", "debug", "Specify the syslog priority for the syslog driver")
