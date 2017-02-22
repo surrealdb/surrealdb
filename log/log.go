@@ -191,6 +191,7 @@ func New() *Logger {
 			Level: logrus.ErrorLevel,
 			Hooks: logrus.LevelHooks{},
 			Formatter: &TextFormatter{
+				IgnoreFields:    []string{"ctx"},
 				TimestampFormat: time.RFC3339,
 			},
 		},
@@ -219,11 +220,13 @@ func (l *Logger) SetLevel(v string) {
 func (l *Logger) SetFormat(v string) {
 	switch v {
 	case "json":
-		l.Formatter = &logrus.JSONFormatter{
+		l.Formatter = &JSONFormatter{
+			IgnoreFields:    []string{"ctx"},
 			TimestampFormat: time.RFC3339,
 		}
 	case "text":
 		l.Formatter = &TextFormatter{
+			IgnoreFields:    []string{"ctx"},
 			TimestampFormat: time.RFC3339,
 		}
 	}
