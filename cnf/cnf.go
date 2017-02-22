@@ -38,7 +38,7 @@ type Auth struct {
 type Options struct {
 	DB struct {
 		Key  []byte        // Data encryption key
-		Code string        // Data encruption key string
+		Code string        // Data encryption key string
 		Path string        // Path to store the data file
 		Host string        // Surreal host to connect to
 		Port string        // Surreal port to connect to
@@ -68,26 +68,18 @@ type Options struct {
 	}
 
 	Auth struct {
-		Auth string // Master authentication username:password
-		User string // Master authentication username
-		Pass string // Master authentication password
-		Addr []string
-		Nets []*net.IPNet
+		Auth string       // Master authentication user:pass
+		User string       // Master authentication username
+		Pass string       // Master authentication password
+		Addr []string     // Allowed ip ranges for authentication
+		Nets []*net.IPNet // Allowed cidr ranges for authentication
 	}
 
 	Node struct {
 		Host string   // Node hostname
 		Name string   // Name of this node
-		Uniq string   // Uniq of this node
 		UUID string   // UUID of this node
-		Attr string   // Comma separated tags for this node
-		Tags []string // Slice of tags for this node
 		Join []string // Slice of cluster peers to join
-	}
-
-	Backups struct {
-		Time string
-		Path string
 	}
 
 	Logging struct {
