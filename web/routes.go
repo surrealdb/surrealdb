@@ -22,6 +22,7 @@ import (
 	"github.com/abcum/fibre/mw"
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/build"
 	"github.com/abcum/surreal/util/show"
 	"github.com/gorilla/websocket"
 )
@@ -62,7 +63,7 @@ func routes(s *fibre.Fibre) {
 	// --------------------------------------------------
 
 	s.Get("/info", func(c *fibre.Context) error {
-		return c.Code(200)
+		return c.Send(200, build.GetInfo())
 	})
 
 	// --------------------------------------------------
