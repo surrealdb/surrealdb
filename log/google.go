@@ -17,10 +17,18 @@ package log
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"time"
+
+	"runtime/debug"
+
+	"github.com/abcum/fibre"
+	"github.com/abcum/surreal/util/build"
 
 	"github.com/Sirupsen/logrus"
 
 	"cloud.google.com/go/compute/metadata"
+	"cloud.google.com/go/errors"
 	"cloud.google.com/go/logging"
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/api/monitoredres"
@@ -32,6 +40,7 @@ type HookGoogle struct {
 	credentials string
 	level       logrus.Level
 	levels      []logrus.Level
+	errclient   *errors.Client
 	logclient   *logging.Client
 	logbuffer   *logging.Logger
 }
@@ -121,6 +130,22 @@ func NewGoogleHook(level, name, project, credentials string) (hook *HookGoogle, 
 		return nil, err
 	}
 
+	// Attempt to ping the Stackdriver
+	// endpoint to ensure the settings
+	// and authentication are correct.
+
+	hook.errclient, err = errors.NewClient(
+		context.Background(),
+		hook.project,
+		hook.name,
+		build.GetInfo().Ver,
+		true,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
 	// Setup the asynchronous buffering
 	// logger, which we can use to send
 	// logs to the Stackdriver client.
@@ -142,7 +167,33 @@ func (h *HookGoogle) Levels() []logrus.Level {
 
 func (h *HookGoogle) Fire(entry *logrus.Entry) error {
 
-	e := logging.Entry{
+	// If we receive an error, fatal, or
+	// panic - then log the error to GCE
+	// with a full stack trace.
+
+	switch entry.Level {
+	case logrus.ErrorLevel, logrus.FatalLevel, logrus.PanicLevel:
+		ctx := context.Background()
+		err := fmt.Sprintf("%s\n%s", entry.Message, debug.Stack())
+		go func() {
+			for _, v := range entry.Data {
+				switch i := v.(type) {
+				case *http.Request:
+					h.errclient.Report(ctx, i, err)
+					return
+				case *fibre.Context:
+					h.errclient.Report(ctx, i.Request().Request, err)
+					return
+				}
+			}
+		}()
+	}
+
+	// Otherwise just log the error to
+	// GCE as a log entry, and attach any
+	// http request data to it.
+
+	msg := logging.Entry{
 		Timestamp: entry.Time,
 		Labels:    make(map[string]string),
 		Payload:   entry.Message,
@@ -150,10 +201,27 @@ func (h *HookGoogle) Fire(entry *logrus.Entry) error {
 	}
 
 	for k, v := range entry.Data {
-		e.Labels[k] = fmt.Sprintf("%v", v)
+		switch i := v.(type) {
+		default:
+			msg.Labels[k] = fmt.Sprintf("%v", i)
+		case *http.Request:
+			msg.HTTPRequest = &logging.HTTPRequest{
+				Request:  i,
+				RemoteIP: i.RemoteAddr,
+			}
+		case *fibre.Context:
+			msg.HTTPRequest = &logging.HTTPRequest{
+				RemoteIP:     i.IP().String(),
+				Request:      i.Request().Request,
+				Status:       i.Response().Status(),
+				RequestSize:  i.Request().Size(),
+				ResponseSize: i.Response().Size(),
+				Latency:      time.Since(i.Request().Start()),
+			}
+		}
 	}
 
-	h.logbuffer.Log(e)
+	h.logbuffer.Log(msg)
 
 	return nil
 
