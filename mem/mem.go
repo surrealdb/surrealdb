@@ -29,7 +29,7 @@ type Store struct {
 	kv string
 }
 
-var Invalid = fmt.Errorf("Does not exist")
+var invalid = fmt.Errorf("Does not exist")
 
 // --------------------------------------------------
 
@@ -68,7 +68,7 @@ func (s *Store) GetNS(ns string) (val *sql.DefineNamespaceStatement, err error) 
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineNamespaceStatement{}
@@ -119,7 +119,7 @@ func (s *Store) GetNT(ns, tk string) (val *sql.DefineTokenStatement, err error) 
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineTokenStatement{}
@@ -160,7 +160,7 @@ func (s *Store) GetNU(ns, us string) (val *sql.DefineLoginStatement, err error) 
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineLoginStatement{}
@@ -201,7 +201,7 @@ func (s *Store) GetDB(ns, db string) (val *sql.DefineDatabaseStatement, err erro
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineDatabaseStatement{}
@@ -254,7 +254,7 @@ func (s *Store) GetDT(ns, db, tk string) (val *sql.DefineTokenStatement, err err
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineTokenStatement{}
@@ -295,7 +295,7 @@ func (s *Store) GetDU(ns, db, us string) (val *sql.DefineLoginStatement, err err
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineLoginStatement{}
@@ -336,7 +336,7 @@ func (s *Store) GetSC(ns, db, sc string) (val *sql.DefineScopeStatement, err err
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineScopeStatement{}
@@ -377,7 +377,7 @@ func (s *Store) GetST(ns, db, sc, tk string) (val *sql.DefineTokenStatement, err
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineTokenStatement{}
@@ -418,7 +418,7 @@ func (s *Store) GetTB(ns, db, tb string) (val *sql.DefineTableStatement, err err
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineTableStatement{}
@@ -471,7 +471,7 @@ func (s *Store) GetFD(ns, db, tb, fd string) (val *sql.DefineFieldStatement, err
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineFieldStatement{}
@@ -512,7 +512,7 @@ func (s *Store) GetIX(ns, db, tb, ix string) (val *sql.DefineIndexStatement, err
 	}
 
 	if !kv.Exi() {
-		return nil, Invalid
+		return nil, invalid
 	}
 
 	val = &sql.DefineIndexStatement{}
