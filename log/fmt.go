@@ -24,7 +24,8 @@ import (
 	"time"
 
 	"github.com/mgutz/ansi"
-	"github.com/sirupsen/logrus"
+
+	"github.com/Sirupsen/logrus"
 )
 
 const clear = ansi.Reset

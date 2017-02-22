@@ -1,12 +1,12 @@
-hash: 73529bc33b28bd833377e2926d69897748a9e89b2927b1398d0e523e91e1247f
-updated: 2017-02-20T01:40:19.776634651Z
+hash: 2dca4dfab8b788033a03f9e04b3ea4476b861322ebde954ab31e37bc5e9d36e6
+updated: 2017-02-22T09:09:49.273468979Z
 imports:
 - name: github.com/abcum/cork
   version: 023d8293ed77a01ba325b0232e11e5f8bacea59c
 - name: github.com/abcum/emitr
   version: 67359a63b282c8056e52cf25488937aaddbc2a8b
 - name: github.com/abcum/fibre
-  version: ef2be8713582086f9b1eeb3a8bb7992597efd450
+  version: ceb14ba330b58090e3dad05a2b28d26ed721432c
   subpackages:
   - mw
 - name: github.com/abcum/ptree
@@ -69,13 +69,13 @@ imports:
 - name: github.com/kr/text
   version: 7cafcd837844e784b526369c9bce262804aebc60
 - name: github.com/mattn/go-colorable
-  version: 5411d3eea5978e6cdc258b30de592b60df6aba96
+  version: d898aa9fb31c91f35dd28ca75db377eff023c076
 - name: github.com/mattn/go-isatty
   version: dda3de49cbfcec471bd7a70e6cc01fcc3ff90109
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: 75229eecb7af00b2736e93b779a78429dcb19472
+  version: 0b729df06cb29cf7a3ff59b876e9a2ecb7fac2b1
 - name: github.com/mitchellh/mapstructure
   version: db1efb556f84b25a0a13a04aad883943538ad2e0
 - name: github.com/newrelic/go-agent
@@ -96,7 +96,7 @@ imports:
   version: 24e2351369ec4949b2ed0dc5c477afdd4c4034e8
   subpackages:
   - diffmatchpatch
-- name: github.com/sirupsen/logrus
+- name: github.com/Sirupsen/logrus
   version: c078b1e43f58d563c74cebe63c85789e76ddb627
 - name: github.com/spf13/cobra
   version: ee4055870c2d5f7ce112642377e32c9929c3bbaf

@@ -1,5 +1,7 @@
 package: github.com/abcum/surreal
 import:
+- package: github.com/Sirupsen/logrus
+  version: ^0.11.2
 - package: github.com/abcum/cork
 - package: github.com/abcum/fibre
   subpackages:
@@ -11,6 +13,8 @@ import:
 - package: github.com/dgrijalva/jwt-go
   version: ^3.0.0
 - package: github.com/fatih/structs
+- package: github.com/gorilla/websocket
+  version: ^1.1.0
 - package: github.com/hashicorp/serf
   version: ^0.8.1
   subpackages:
@@ -28,8 +32,6 @@ import:
 - package: github.com/sergi/go-diff
   subpackages:
   - diffmatchpatch
-- package: github.com/sirupsen/logrus
-  version: ^0.11.2
 - package: github.com/spf13/cobra
 - package: github.com/yuin/gopher-lua
 - package: golang.org/x/crypto
