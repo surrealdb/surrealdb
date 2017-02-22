@@ -83,9 +83,19 @@ type Options struct {
 	}
 
 	Logging struct {
-		Level    string // Stores the configured logging level
-		Output   string // Stores the configured logging output
-		Format   string // Stores the configured logging format
-		Newrelic string // Stores the configured newrelic license key
+		Level  string // Stores the configured logging level
+		Output string // Stores the configured logging output
+		Format string // Stores the configured logging format
+		Google struct {
+			Name        string // Stores the GCE logging name
+			Project     string // Stores the GCE logging project
+			Credentials string // Store the path to the credentials file
+		}
+		Syslog struct {
+			Tag      string // Stores the syslog tag name
+			Host     string // Stores the syslog remote host:port
+			Protocol string // Stores the syslog protocol to use
+			Priority string // Stores the syslog logging priority
+		}
 	}
 }

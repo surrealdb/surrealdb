@@ -230,12 +230,14 @@ func setup() {
 	// Logging
 	// --------------------------------------------------
 
+	var chk map[string]bool
+
 	// Ensure that the specified
 	// logging level is allowed
 
 	if opts.Logging.Level != "" {
 
-		chk := map[string]bool{
+		chk = map[string]bool{
 			"debug":   true,
 			"info":    true,
 			"warning": true,
@@ -253,30 +255,11 @@ func setup() {
 	}
 
 	// Ensure that the specified
-	// logging output is allowed
-
-	if opts.Logging.Output != "" {
-
-		chk := map[string]bool{
-			"none":   true,
-			"stdout": true,
-			"stderr": true,
-		}
-
-		if _, ok := chk[opts.Logging.Output]; !ok {
-			log.Fatal("Incorrect log output specified")
-		}
-
-		log.SetOutput(opts.Logging.Output)
-
-	}
-
-	// Ensure that the specified
 	// logging format is allowed
 
 	if opts.Logging.Format != "" {
 
-		chk := map[string]bool{
+		chk = map[string]bool{
 			"text": true,
 			"json": true,
 		}
@@ -288,6 +271,93 @@ func setup() {
 		log.SetFormat(opts.Logging.Format)
 
 	}
+
+	// Ensure that the specified
+	// logging output is allowed
+
+	if opts.Logging.Output != "" {
+
+		chk = map[string]bool{
+			"none":   true,
+			"stdout": true,
+			"stderr": true,
+			"google": true,
+			"syslog": true,
+		}
+
+		if _, ok := chk[opts.Logging.Output]; !ok {
+			log.Fatal("Incorrect log output specified")
+		}
+
+		if opts.Logging.Output == "google" {
+
+			hook, err := log.NewGoogleHook(
+				opts.Logging.Level,
+				opts.Logging.Google.Name,
+				opts.Logging.Google.Project,
+				opts.Logging.Google.Credentials,
+			)
+
+			if err != nil {
+				log.Fatal("There was a problem configuring the google logging driver")
+			}
+
+			log.Instance().Hooks.Add(hook)
+
+			opts.Logging.Output = "none"
+
+		}
+
+		if opts.Logging.Output == "syslog" {
+
+			chk = map[string]bool{
+				"":    true,
+				"tcp": true,
+				"udp": true,
+			}
+
+			if _, ok := chk[opts.Logging.Syslog.Protocol]; !ok {
+				log.Fatal("Incorrect log protocol specified for syslog logging driver")
+			}
+
+			chk = map[string]bool{
+				"debug":   true,
+				"info":    true,
+				"notice":  true,
+				"warning": true,
+				"err":     true,
+				"crit":    true,
+				"alert":   true,
+				"emerg":   true,
+			}
+
+			if _, ok := chk[opts.Logging.Syslog.Priority]; !ok {
+				log.Fatal("Incorrect log priority specified for syslog logging driver")
+			}
+
+			hook, err := log.NewSyslogHook(
+				opts.Logging.Level,
+				opts.Logging.Syslog.Protocol,
+				opts.Logging.Syslog.Host,
+				opts.Logging.Syslog.Priority,
+				opts.Logging.Syslog.Tag,
+			)
+
+			if err != nil {
+				log.Fatal("There was a problem configuring the syslog logging driver")
+			}
+
+			log.Instance().Hooks.Add(hook)
+
+			opts.Logging.Output = "none"
+
+		}
+
+		log.SetOutput(opts.Logging.Output)
+
+	}
+
+	// Enable global options object
 
 	cnf.Settings = opts
 
