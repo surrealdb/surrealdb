@@ -18,6 +18,8 @@ import (
 	"os"
 	"time"
 
+	"io/ioutil"
+
 	"github.com/sirupsen/logrus"
 )
 
@@ -230,6 +232,8 @@ func (l *Logger) SetFormat(v string) {
 // SetOutput sets the logging output of the logger instance.
 func (l *Logger) SetOutput(v string) {
 	switch v {
+	case "none":
+		l.Out = ioutil.Discard
 	case "stdout":
 		l.Out = os.Stdout
 	case "stderr":

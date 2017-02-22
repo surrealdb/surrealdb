@@ -258,6 +258,7 @@ func setup() {
 	if opts.Logging.Output != "" {
 
 		chk := map[string]bool{
+			"none":   true,
 			"stdout": true,
 			"stderr": true,
 		}
