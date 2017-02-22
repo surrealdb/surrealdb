@@ -57,9 +57,10 @@ func signup(c *fibre.Context) (err error) {
 
 		if scp, err = mem.New(txn).GetSC(n, d, s); err != nil {
 			log.WithFields(map[string]interface{}{
-				"NS":  n,
-				"DB":  d,
-				"SC":  s,
+				"ns":  n,
+				"db":  d,
+				"sc":  s,
+				"ctx": c,
 				"url": "/signup",
 			}).Debugln("Authentication scope does not exist")
 			return fibre.NewHTTPError(403)
@@ -71,20 +72,22 @@ func signup(c *fibre.Context) (err error) {
 
 		if res, err = db.Process(c, qury, vars); err != nil {
 			log.WithFields(map[string]interface{}{
-				"NS":  n,
-				"DB":  d,
-				"SC":  s,
-				"URL": "/signup",
+				"ns":  n,
+				"db":  d,
+				"sc":  s,
+				"ctx": c,
+				"url": "/signup",
 			}).Debugln("Authentication scope signup was unsuccessful")
 			return fibre.NewHTTPError(501)
 		}
 
 		if len(res) != 1 && len(res[0].Result) != 1 {
 			log.WithFields(map[string]interface{}{
-				"NS":  n,
-				"DB":  d,
-				"SC":  s,
-				"URL": "/signup",
+				"ns":  n,
+				"db":  d,
+				"sc":  s,
+				"ctx": c,
+				"url": "/signup",
 			}).Debugln("Authentication scope signup was unsuccessful")
 			return fibre.NewHTTPError(403)
 		}

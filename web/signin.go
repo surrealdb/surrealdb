@@ -66,6 +66,7 @@ func signin(c *fibre.Context) (err error) {
 				"ns":  n,
 				"db":  d,
 				"sc":  s,
+				"ctx": c,
 				"url": "/signin",
 				"id":  c.Get("id"),
 			}).Debugln("Authentication scope does not exist")
@@ -81,6 +82,7 @@ func signin(c *fibre.Context) (err error) {
 				"ns":  n,
 				"db":  d,
 				"sc":  s,
+				"ctx": c,
 				"url": "/signin",
 				"id":  c.Get("id"),
 			}).Debugln("Authentication scope signin was unsuccessful")
@@ -92,6 +94,7 @@ func signin(c *fibre.Context) (err error) {
 				"ns":  n,
 				"db":  d,
 				"sc":  s,
+				"ctx": c,
 				"url": "/signin",
 				"id":  c.Get("id"),
 			}).Debugln("Authentication scope signin was unsuccessful")
@@ -120,6 +123,7 @@ func signin(c *fibre.Context) (err error) {
 				"ns":  n,
 				"db":  d,
 				"sc":  s,
+				"ctx": c,
 				"url": "/signin",
 				"id":  c.Get("id"),
 			}).Debugln("Problem with signing string")
@@ -130,6 +134,7 @@ func signin(c *fibre.Context) (err error) {
 			"ns":  n,
 			"db":  d,
 			"sc":  s,
+			"ctx": c,
 			"url": "/signin",
 			"id":  c.Get("id"),
 		}).Debugln("Authentication scope signin was successful")
@@ -157,6 +162,7 @@ func signin(c *fibre.Context) (err error) {
 			log.WithPrefix("web").WithFields(map[string]interface{}{
 				"ns":  n,
 				"nu":  u,
+				"ctx": c,
 				"url": "/signin",
 				"id":  c.Get("id"),
 			}).Debugln("Username or password is missing")
@@ -181,6 +187,7 @@ func signin(c *fibre.Context) (err error) {
 				"ns":  n,
 				"db":  d,
 				"du":  u,
+				"ctx": c,
 				"url": "/signin",
 				"id":  c.Get("id"),
 			}).Debugln("Database login does not exist")
@@ -195,6 +202,7 @@ func signin(c *fibre.Context) (err error) {
 				"ns":  n,
 				"db":  d,
 				"du":  u,
+				"ctx": c,
 				"url": "/signin",
 				"id":  c.Get("id"),
 			}).Debugln("Database signin was unsuccessful")
@@ -222,6 +230,7 @@ func signin(c *fibre.Context) (err error) {
 				"ns":  n,
 				"db":  d,
 				"du":  u,
+				"ctx": c,
 				"url": "/signin",
 				"id":  c.Get("id"),
 			}).Debugln("Problem with signing string")
@@ -232,6 +241,7 @@ func signin(c *fibre.Context) (err error) {
 			"ns":  n,
 			"db":  d,
 			"du":  u,
+			"ctx": c,
 			"url": "/signin",
 			"id":  c.Get("id"),
 		}).Debugln("Database signin was successful")
@@ -259,6 +269,7 @@ func signin(c *fibre.Context) (err error) {
 			log.WithPrefix("web").WithFields(map[string]interface{}{
 				"ns":  n,
 				"nu":  u,
+				"ctx": c,
 				"url": "/signin",
 				"id":  c.Get("id"),
 			}).Debugln("Username or password is missing")
@@ -281,6 +292,7 @@ func signin(c *fibre.Context) (err error) {
 			log.WithPrefix("web").WithFields(map[string]interface{}{
 				"ns":  n,
 				"nu":  u,
+				"ctx": c,
 				"url": "/signin",
 				"id":  c.Get("id"),
 			}).Debugln("Namespace login does not exist")
@@ -316,9 +328,10 @@ func signin(c *fibre.Context) (err error) {
 		str, err = signr.SignedString(usr.Code)
 		if err != nil {
 			log.WithPrefix("web").WithFields(map[string]interface{}{
-				"NS":  n,
-				"NU":  u,
-				"URL": "/signin",
+				"ns":  n,
+				"nu":  u,
+				"ctx": c,
+				"url": "/signin",
 			}).Debugln("Problem with signing string")
 			return fibre.NewHTTPError(403)
 		}
@@ -326,6 +339,7 @@ func signin(c *fibre.Context) (err error) {
 		log.WithFields(map[string]interface{}{
 			"ns":  n,
 			"du":  u,
+			"ctx": c,
 			"url": "/signin",
 			"id":  c.Get("id"),
 		}).Debugln("Namespace signin was successful")
