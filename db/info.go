@@ -36,17 +36,17 @@ func (e *executor) executeInfoStatement(ast *sql.InfoStatement) (out []interface
 
 func (e *executor) executeInfoNSStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	db, err := e.Mem().AllDB(ast.NS)
+	db, err := e.mem.AllDB(ast.NS)
 	if err != nil {
 		return nil, err
 	}
 
-	nt, err := e.Mem().AllNT(ast.NS)
+	nt, err := e.mem.AllNT(ast.NS)
 	if err != nil {
 		return nil, err
 	}
 
-	nu, err := e.Mem().AllNU(ast.NS)
+	nu, err := e.mem.AllNU(ast.NS)
 	if err != nil {
 		return nil, err
 	}
@@ -76,17 +76,17 @@ func (e *executor) executeInfoNSStatement(ast *sql.InfoStatement) (out []interfa
 
 func (e *executor) executeInfoDBStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	tb, err := e.Mem().AllTB(ast.NS, ast.DB)
+	tb, err := e.mem.AllTB(ast.NS, ast.DB)
 	if err != nil {
 		return nil, err
 	}
 
-	dt, err := e.Mem().AllDT(ast.NS, ast.DB)
+	dt, err := e.mem.AllDT(ast.NS, ast.DB)
 	if err != nil {
 		return nil, err
 	}
 
-	du, err := e.Mem().AllDU(ast.NS, ast.DB)
+	du, err := e.mem.AllDU(ast.NS, ast.DB)
 	if err != nil {
 		return nil, err
 	}
@@ -116,17 +116,17 @@ func (e *executor) executeInfoDBStatement(ast *sql.InfoStatement) (out []interfa
 
 func (e *executor) executeInfoTBStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	tb, err := e.Mem().GetTB(ast.NS, ast.DB, ast.What)
+	tb, err := e.mem.GetTB(ast.NS, ast.DB, ast.What)
 	if err != nil {
 		return nil, err
 	}
 
-	fd, err := e.Mem().AllFD(ast.NS, ast.DB, ast.What)
+	fd, err := e.mem.AllFD(ast.NS, ast.DB, ast.What)
 	if err != nil {
 		return nil, err
 	}
 
-	ix, err := e.Mem().AllIX(ast.NS, ast.DB, ast.What)
+	ix, err := e.mem.AllIX(ast.NS, ast.DB, ast.What)
 	if err != nil {
 		return nil, err
 	}

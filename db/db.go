@@ -17,7 +17,6 @@ package db
 import (
 	"fmt"
 	"io"
-	"sync"
 	"time"
 
 	"net/http"
@@ -30,54 +29,12 @@ import (
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/data"
 
 	_ "github.com/abcum/surreal/kvs/rixxdb"
 	// _ "github.com/abcum/surreal/kvs/dendro"
 )
 
 var QueryNotExecuted = fmt.Errorf("Query not executed")
-
-var pool sync.Pool
-
-func init() {
-
-	pool.New = func() interface{} {
-		return newExecutor(new(sql.Query), make(map[string]interface{}))
-	}
-
-}
-
-type executor struct {
-	txn kvs.TX
-	ctx *data.Doc
-	ast *sql.Query
-	mem *mem.Store
-}
-
-func newExecutor(ast *sql.Query, vars map[string]interface{}) *executor {
-	return &executor{ast: ast, ctx: data.Consume(vars)}
-}
-
-func (e *executor) Reset(ast *sql.Query, vars map[string]interface{}) {
-	e.ast, e.ctx = ast, data.Consume(vars)
-}
-
-func (e *executor) Txn() kvs.TX {
-	return e.txn
-}
-
-func (e *executor) Mem() *mem.Store {
-	return e.mem
-}
-
-func (e *executor) Set(key string, val interface{}) {
-	e.ctx.Set(val, key)
-}
-
-func (e *executor) Get(key string) (val interface{}) {
-	return e.ctx.Get(key).Data()
-}
 
 type Response struct {
 	Time   string        `codec:"time,omitempty"`
@@ -207,7 +164,7 @@ func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 
 	defer pool.Put(exec)
 
-	exec.Reset(ast, vars)
+	exec.Reset(ast, ctx, vars)
 
 	go exec.execute(quit, recv)
 

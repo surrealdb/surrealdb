@@ -26,7 +26,7 @@ func (e *executor) executeCreateStatement(ast *sql.CreateStatement) (out []inter
 
 	for k, w := range ast.What {
 		if what, ok := w.(*sql.Param); ok {
-			ast.What[k] = e.ctx.Get(what.ID).Data()
+			ast.What[k] = e.Get(what.ID)
 		}
 	}
 

@@ -15,24 +15,43 @@
 package db
 
 import (
+	"sync"
+
+	"github.com/abcum/fibre"
+	"github.com/abcum/surreal/kvs"
+	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/data"
 )
 
-func (e *executor) executeReturnStatement(ast *sql.ReturnStatement) (out []interface{}, err error) {
+var pool sync.Pool
 
-	switch what := ast.What.(type) {
-	default:
-		out = append(out, what)
-	case *sql.Null:
-		out = append(out, nil)
-	case *sql.Void:
-		// Ignore
-	case *sql.Empty:
-		// Ignore
-	case *sql.Param:
-		out = append(out, e.Get(what.ID))
+func init() {
+
+	pool.New = func() interface{} {
+		return &executor{}
 	}
 
-	return
+}
 
+type executor struct {
+	txn kvs.TX
+	ctx *data.Doc
+	ast *sql.Query
+	mem *mem.Store
+	web *fibre.Context
+}
+
+func (e *executor) Reset(ast *sql.Query, web *fibre.Context, vars map[string]interface{}) {
+	e.ast = ast
+	e.web = web
+	e.ctx = data.Consume(vars)
+}
+
+func (e *executor) Set(key string, val interface{}) {
+	e.ctx.Set(val, key)
+}
+
+func (e *executor) Get(key string) (val interface{}) {
+	return e.ctx.Get(key).Data()
 }
