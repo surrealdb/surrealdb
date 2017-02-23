@@ -760,6 +760,20 @@ func TestOperations(t *testing.T) {
 		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 0)
 	})
 
+	Convey("Can del single from array", t, func() {
+		_, err := doc.Inc([]interface{}{"Hot", "Humid", "Sticky", "Warm", "Snowy", "Icy"}, "the.item.tags")
+		So(err, ShouldBeNil)
+		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm", "Snowy", "Icy"})
+		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 6)
+	})
+
+	Convey("Can del single from array", t, func() {
+		err := doc.Del("the.item.tags[0:3]")
+		So(err, ShouldBeNil)
+		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy"})
+		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 2)
+	})
+
 	Convey("Can del array", t, func() {
 		err := doc.Del("the.item.tags")
 		So(err, ShouldBeNil)

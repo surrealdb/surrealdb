@@ -111,6 +111,20 @@ func (d *Doc) path(path ...string) (paths []string) {
 
 }
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func trim(s string) string {
 	if s[0] == '[' && s[len(s)-1] == ']' {
 		return s[1 : len(s)-1]
@@ -158,7 +172,7 @@ func (d *Doc) what(p string, a []interface{}, t int8) (o []interface{}, i []int,
 	}
 
 	// Split the specified array index
-	// by commas, so that we can get
+	// by colons, so that we can get
 	// the specified array items.
 
 	c := strings.Count(p, ":")
@@ -216,6 +230,7 @@ func (d *Doc) what(p string, a []interface{}, t int8) (o []interface{}, i []int,
 	if c == 1 {
 
 		var e error
+		var s, f int
 
 		b := []int{0, len(a)}
 		x := strings.Split(p, ":")
@@ -234,9 +249,24 @@ func (d *Doc) what(p string, a []interface{}, t int8) (o []interface{}, i []int,
 			}
 		}
 
-		for k := b[0]; k < b[1] && k < len(a); k++ {
-			i = append(i, k)
-			o = append(o, a[k])
+		s = b[0]
+		s = max(s, 0)
+		s = min(s, len(a))
+
+		f = b[1]
+		f = max(f, 0)
+		f = min(f, len(a))
+
+		if t == choose {
+			for k, v := range a[s:f] {
+				i = append(i, k)
+				o = append(o, v)
+			}
+		} else {
+			for k, v := range append(a[:s], a[f+1:]...) {
+				i = append(i, k)
+				o = append(o, v)
+			}
 		}
 
 		return o, i, many
