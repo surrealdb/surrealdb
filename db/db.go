@@ -310,6 +310,12 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 				err, now = nil, time.Now()
 			}
 
+			// When in debugging mode, log every sql
+			// query, along with the query execution
+			// speed, so we can analyse slow queries.
+
+			log.WithPrefix("sql").Debugln(stm)
+
 			// Check to see if the current statement is
 			// a TRANSACTION statement, and if it is
 			// then deal with it and move on to the next.

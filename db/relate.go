@@ -15,16 +15,10 @@
 package db
 
 import (
-	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
 )
 
 func (e *executor) executeRelateStatement(ast *sql.RelateStatement) (out []interface{}, err error) {
-
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
 
 	return nil, nil
 

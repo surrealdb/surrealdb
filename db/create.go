@@ -16,7 +16,6 @@ package db
 
 import (
 	"fmt"
-	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
@@ -24,11 +23,6 @@ import (
 )
 
 func (e *executor) executeCreateStatement(ast *sql.CreateStatement) (out []interface{}, err error) {
-
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
 
 	for k, w := range ast.What {
 		if what, ok := w.(*sql.Param); ok {

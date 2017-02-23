@@ -15,7 +15,6 @@
 package db
 
 import (
-	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
@@ -23,11 +22,6 @@ import (
 )
 
 func (e *executor) executeDefineNamespaceStatement(ast *sql.DefineNamespaceStatement) (out []interface{}, err error) {
-
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.Name}
@@ -38,11 +32,6 @@ func (e *executor) executeDefineNamespaceStatement(ast *sql.DefineNamespaceState
 }
 
 func (e *executor) executeDefineDatabaseStatement(ast *sql.DefineDatabaseStatement) (out []interface{}, err error) {
-
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
@@ -58,11 +47,6 @@ func (e *executor) executeDefineDatabaseStatement(ast *sql.DefineDatabaseStateme
 }
 
 func (e *executor) executeDefineLoginStatement(ast *sql.DefineLoginStatement) (out []interface{}, err error) {
-
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
 
 	if ast.Kind == sql.NAMESPACE {
 
@@ -101,11 +85,6 @@ func (e *executor) executeDefineLoginStatement(ast *sql.DefineLoginStatement) (o
 
 func (e *executor) executeDefineTokenStatement(ast *sql.DefineTokenStatement) (out []interface{}, err error) {
 
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
-
 	if ast.Kind == sql.NAMESPACE {
 
 		// Set the namespace
@@ -143,11 +122,6 @@ func (e *executor) executeDefineTokenStatement(ast *sql.DefineTokenStatement) (o
 
 func (e *executor) executeDefineScopeStatement(ast *sql.DefineScopeStatement) (out []interface{}, err error) {
 
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
-
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
 	nval := &sql.DefineNamespaceStatement{Name: ast.NS}
@@ -167,11 +141,6 @@ func (e *executor) executeDefineScopeStatement(ast *sql.DefineScopeStatement) (o
 }
 
 func (e *executor) executeDefineTableStatement(ast *sql.DefineTableStatement) (out []interface{}, err error) {
-
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
@@ -198,11 +167,6 @@ func (e *executor) executeDefineTableStatement(ast *sql.DefineTableStatement) (o
 }
 
 func (e *executor) executeDefineFieldStatement(ast *sql.DefineFieldStatement) (out []interface{}, err error) {
-
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
@@ -234,11 +198,6 @@ func (e *executor) executeDefineFieldStatement(ast *sql.DefineFieldStatement) (o
 }
 
 func (e *executor) executeDefineIndexStatement(ast *sql.DefineIndexStatement) (out []interface{}, err error) {
-
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}

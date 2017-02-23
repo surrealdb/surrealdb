@@ -15,16 +15,10 @@
 package db
 
 import (
-	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
 )
 
 func (e *executor) executeLetStatement(ast *sql.LetStatement) (out []interface{}, err error) {
-
-	log.WithPrefix("sql").WithFields(map[string]interface{}{
-		"ns": ast.NS,
-		"db": ast.DB,
-	}).Debugln(ast)
 
 	switch what := ast.What.(type) {
 	default:
