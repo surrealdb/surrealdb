@@ -32,6 +32,9 @@ func Setup(opts *cnf.Options) (err error) {
 	routes(s)
 	s.SetWait("15s")
 	s.SetName("web")
+	s.SetReadTimeout("5s")
+	s.SetIdleTimeout("60s")
+	s.SetWriteTimeout("30s")
 	s.SetHTTPErrorHandler(errors)
 	s.Logger().SetLogger(log.Instance())
 
