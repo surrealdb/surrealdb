@@ -70,15 +70,20 @@ func TestMain(t *testing.T) {
 	cnf.Settings = &cnf.Options{}
 	cnf.Settings.DB.Base = "*"
 
+	auth := &cnf.Auth{}
+	auth.Kind = AuthKV
+	auth.Possible.NS = "*"
+	auth.Selected.NS = "*"
+	auth.Possible.DB = "*"
+	auth.Selected.DB = "*"
+
 	c = fibre.NewContext(nil, nil, nil)
-	c.Set("kind", AuthKV)
-	c.Set("auth", map[string]string{"NS": "*", "DB": "*"})
-	c.Set("conf", map[string]string{"NS": "*", "DB": "*"})
+	c.Set("auth", auth)
 
 	var tests = []tester{
 		{
 			sql: `USE`,
-			err: "Found `` but expected `NAMESPACE, DATABASE`",
+			err: "Found `` but expected `NAMESPACE, NS, DATABASE, DB`",
 		},
 		{
 			sql: `USE NAMESPACE`,
@@ -1083,15 +1088,30 @@ func Test_Parse_Queries_Select(t *testing.T) {
 		},
 		{
 			sql: "SELECT * FROM person WHERE {\"name\":\"\x0A\"} = test",
-			err: "Invalid JSON: {\"name\":\"\n\"}",
+			res: &Query{Statements: []Statement{&SelectStatement{
+				KV: "*", NS: "*", DB: "*",
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"person"}},
+				Cond: &BinaryExpression{LHS: map[string]interface{}{"name": "\n"}, Op: EQ, RHS: &Ident{"test"}},
+			}}},
 		},
 		{
 			sql: "SELECT * FROM person WHERE test = {\"name\":\"\x0A\"}",
-			err: "Invalid JSON: {\"name\":\"\n\"}",
+			res: &Query{Statements: []Statement{&SelectStatement{
+				KV: "*", NS: "*", DB: "*",
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"person"}},
+				Cond: &BinaryExpression{LHS: &Ident{"test"}, Op: EQ, RHS: map[string]interface{}{"name": "\n"}},
+			}}},
 		},
 		{
 			sql: "SELECT * FROM person WHERE test = {\"name\":\"\x0D\"}",
-			err: "Invalid JSON: {\"name\":\"\r\"}",
+			res: &Query{Statements: []Statement{&SelectStatement{
+				KV: "*", NS: "*", DB: "*",
+				Expr: []*Field{{Expr: &All{}, Alias: "*"}},
+				What: []Expr{&Table{"person"}},
+				Cond: &BinaryExpression{LHS: &Ident{"test"}, Op: EQ, RHS: map[string]interface{}{"name": "\r"}},
+			}}},
 		},
 		{
 			sql: `SELECT * FROM person WHERE test = {"name":"London"}`,
@@ -1185,6 +1205,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 				What: []Expr{
 					&Table{"person"},
 				},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1201,6 +1222,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
 				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Void{}}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1209,6 +1231,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
 				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Empty{}}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1221,6 +1244,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
 				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: "Tobie"}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1241,6 +1265,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
 				Data: []Expr{&MergeExpression{JSON: map[string]interface{}{"firstname": "Tobie"}}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1261,6 +1286,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
 				Data: []Expr{&ContentExpression{JSON: map[string]interface{}{"firstname": "Tobie"}}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1337,6 +1363,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 				What: []Expr{
 					&Table{"person"},
 				},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1353,6 +1380,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
 				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Void{}}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1361,6 +1389,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
 				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Empty{}}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1373,6 +1402,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
 				Data: []Expr{&DataExpression{LHS: &Ident{"firstname"}, Op: EQ, RHS: "Tobie"}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1380,19 +1410,20 @@ func Test_Parse_Queries_Update(t *testing.T) {
 			err: "Found `something` but expected `json`",
 		},
 		{
-			sql: `UPDATE person DIFF {"firstname"::"Tobie"}`,
-			err: "Found `{\"firstname\"::\"Tobie\"}` but expected `json`",
+			sql: `UPDATE person DIFF {} something`,
+			err: "Found `{}` but expected `json`",
 		},
 		{
-			sql: `UPDATE person DIFF {"firstname":"Tobie"} something`,
+			sql: `UPDATE person DIFF [] something`,
 			err: "Found `something` but expected `EOF, ), ;`",
 		},
 		{
-			sql: `UPDATE person DIFF {"firstname":"Tobie"}`,
+			sql: `UPDATE person DIFF []`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
-				Data: []Expr{&DiffExpression{JSON: map[string]interface{}{"firstname": "Tobie"}}},
+				Data: []Expr{&DiffExpression{JSON: []interface{}{}}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1413,6 +1444,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
 				Data: []Expr{&MergeExpression{JSON: map[string]interface{}{"firstname": "Tobie"}}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1433,6 +1465,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Table{"person"}},
 				Data: []Expr{&ContentExpression{JSON: map[string]interface{}{"firstname": "Tobie"}}},
+				Echo: AFTER,
 			}}},
 		},
 		{
@@ -1513,6 +1546,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 				What: []Expr{
 					&Table{"person"},
 				},
+				Echo: NONE,
 			}}},
 		},
 		{
@@ -1600,7 +1634,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `DEFINE`,
-			err: "Found `` but expected `NAMESPACE, DATABASE, SCOPE, TABLE, FIELD, INDEX, VIEW`",
+			err: "Found `` but expected `NAMESPACE, DATABASE, LOGIN, TOKEN, SCOPE, TABLE, FIELD, INDEX, VIEW`",
 		},
 		// ----------------------------------------------------------------------
 		{
@@ -1671,15 +1705,19 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE FIELD temp ON person`,
-			err: "Found `` but expected `TYPE`",
+			res: &Query{Statements: []Statement{&DefineFieldStatement{
+				KV: "*", NS: "*", DB: "*",
+				Name: "temp",
+				What: []string{"person"},
+			}}},
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE`,
-			err: "Found `` but expected `any, url, uuid, color, email, phone, array, object, domain, record, string, number, double, custom, boolean, datetime, latitude, longitude`",
+			err: "Found `` but expected `any, url, uuid, color, email, phone, array, object, domain, record, string, number, double, custom, boolean, password, datetime, latitude, longitude`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE something`,
-			err: "Found `something` but expected `any, url, uuid, color, email, phone, array, object, domain, record, string, number, double, custom, boolean, datetime, latitude, longitude`",
+			err: "Found `something` but expected `any, url, uuid, color, email, phone, array, object, domain, record, string, number, double, custom, boolean, password, datetime, latitude, longitude`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE any`,
@@ -1783,7 +1821,13 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE custom ENUM ["default" "notdefault"]`,
-			err: `Invalid JSON: ["default" "notdefault"]`,
+			res: &Query{Statements: []Statement{&DefineFieldStatement{
+				KV: "*", NS: "*", DB: "*",
+				Name: "temp",
+				What: []string{"person"},
+				Type: "custom",
+				Enum: []interface{}{"default", "notdefault"},
+			}}},
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE any DEFAULT true`,
@@ -2191,7 +2235,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `REMOVE`,
-			err: "Found `` but expected `NAMESPACE, DATABASE, SCOPE, TABLE, FIELD, INDEX, VIEW`",
+			err: "Found `` but expected `NAMESPACE, DATABASE, LOGIN, TOKEN, SCOPE, TABLE, FIELD, INDEX, VIEW`",
 		},
 		// ----------------------------------------------------------------------
 		{

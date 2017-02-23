@@ -37,13 +37,13 @@ type parser struct {
 	}
 }
 
-// newParser returns a new instance of Parser.
-func newParser(c *fibre.Context, v map[string]interface{}) *parser {
-	return &parser{c: c, v: v, o: newOptions(c)}
-}
-
 // Parse parses sql from a []byte, string, or io.Reader.
 func Parse(c *fibre.Context, i interface{}, v map[string]interface{}) (*Query, error) {
+
+	if v == nil {
+		v = make(map[string]interface{})
+	}
+
 	switch x := i.(type) {
 	default:
 		return nil, &EmptyError{}
@@ -54,6 +54,12 @@ func Parse(c *fibre.Context, i interface{}, v map[string]interface{}) (*Query, e
 	case io.Reader:
 		return parseBuffer(c, x, v)
 	}
+
+}
+
+// newParser returns a new instance of Parser.
+func newParser(c *fibre.Context, v map[string]interface{}) *parser {
+	return &parser{c: c, v: v, o: newOptions(c)}
 }
 
 // parseBytes parses a byte array.
