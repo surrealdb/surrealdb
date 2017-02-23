@@ -209,19 +209,11 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 	// and print the error to the log.
 
 	defer func() {
-		if r := recover(); r != nil {
-			switch err := r.(type) {
-			case string:
-				log.WithPrefix("db").Errorln(err)
-				if log.Instance().Level >= log.DebugLevel {
-					log.WithPrefix("db").Debugf("%s", debug.Stack())
-				}
-			case error:
-				log.WithPrefix("db").Errorln(err)
-				if log.Instance().Level >= log.DebugLevel {
-					log.WithPrefix("db").WithError(err).Debugf("%s", debug.Stack())
-				}
-			}
+		if err := recover(); err != nil {
+			stk := string(debug.Stack())
+			log.WithPrefix("db").WithFields(map[string]interface{}{
+				"ctx": e.web, "stack": stk,
+			}).Errorln(err)
 		}
 	}()
 
@@ -271,7 +263,9 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			// query, along with the query execution
 			// speed, so we can analyse slow queries.
 
-			log.WithPrefix("sql").Debugln(stm)
+			log.WithPrefix("sql").WithFields(map[string]interface{}{
+				"ctx": e.web,
+			}).Debugln(stm)
 
 			// Check to see if the current statement is
 			// a TRANSACTION statement, and if it is
