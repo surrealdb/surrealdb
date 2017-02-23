@@ -1,5 +1,11 @@
 package: github.com/abcum/surreal
 import:
+- package: cloud.google.com/go
+  version: 9b68cf4865e93f379a337b7e957f33de60397a48
+  subpackages:
+  - compute/metadata
+  - errors
+  - logging
 - package: github.com/Sirupsen/logrus
   version: ^0.11.2
 - package: github.com/abcum/cork
@@ -37,6 +43,12 @@ import:
 - package: golang.org/x/crypto
   subpackages:
   - bcrypt
+- package: google.golang.org/api
+  subpackages:
+  - option
+- package: google.golang.org/genproto
+  subpackages:
+  - googleapis/api/monitoredres
 testImport:
 - package: github.com/smartystreets/goconvey
   version: ^1.6.2
