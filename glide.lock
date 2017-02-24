@@ -1,5 +1,5 @@
 hash: 323da77f9dc4a58b21e5b955a28edf6d4489cc74d3d6e61a4b2a60bdfe373b70
-updated: 2017-02-23T22:04:50.907304222Z
+updated: 2017-02-24T00:48:37.913219964Z
 imports:
 - name: cloud.google.com/go
   version: 9b68cf4865e93f379a337b7e957f33de60397a48
@@ -17,7 +17,7 @@ imports:
 - name: github.com/abcum/emitr
   version: 67359a63b282c8056e52cf25488937aaddbc2a8b
 - name: github.com/abcum/fibre
-  version: ddff7a6e8f7a32a42ab1c201c807cce867cbc7c6
+  version: cfe61e4d3b8a1085f93e82e2fa5f04cac5b0a6f2
   subpackages:
   - mw
 - name: github.com/abcum/ptree
@@ -142,7 +142,7 @@ imports:
   - bcrypt
   - blowfish
 - name: golang.org/x/net
-  version: 6b27048ae5e6ad1ef927e72e437531493de612fe
+  version: dd2d9a67c97da0afa00d5726e28086007a0acce5
   subpackages:
   - context
   - context/ctxhttp
@@ -160,11 +160,11 @@ imports:
   - jws
   - jwt
 - name: golang.org/x/sys
-  version: 075e574b89e4c2d22f2286a7e2b919519c6f3547
+  version: e4594059fe4cde2daf423055a596c2cd1e6c9adf
   subpackages:
   - unix
 - name: google.golang.org/api
-  version: bc20c61134e1d25265dd60049f5735381e79b631
+  version: 64485db7e8c8be51e572801d06cdbcfadd3546c1
   subpackages:
   - googleapi/transport
   - internal
@@ -197,7 +197,7 @@ imports:
   - googleapis/logging/v2
   - googleapis/rpc/status
 - name: google.golang.org/grpc
-  version: 20633fa172ac711ac6a77fd573ed13f23ec56dcb
+  version: 34384f34de585705f1a6783a158d2ec8af29f618
   subpackages:
   - codes
   - credentials
