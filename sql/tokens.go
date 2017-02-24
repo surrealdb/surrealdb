@@ -32,6 +32,7 @@ const (
 	DATE     // 1970-01-01
 	TIME     // 1970-01-01T00:00:00+00:00
 	JSON     // {"test":true}
+	EXPR     // something[0].value
 	IDENT    // something
 	THING    // @class:id
 	STRING   // "something"

@@ -395,11 +395,14 @@ func (s *scanner) scanIdent(chp ...rune) (tok Token, lit string, val interface{}
 	for {
 		if ch := s.next(); ch == eof {
 			break
-		} else if !isIdentChar(ch) {
+		} else if isIdentChar(ch) {
+			buf.WriteRune(ch)
+		} else if isExprsChar(ch) {
+			tok = EXPR
+			buf.WriteRune(ch)
+		} else {
 			s.undo()
 			break
-		} else {
-			buf.WriteRune(ch)
 		}
 	}
 
@@ -839,12 +842,17 @@ func isLetter(ch rune) bool {
 
 // isIdentChar returns true if the rune is allowed in a IDENT.
 func isIdentChar(ch rune) bool {
-	return isLetter(ch) || isNumber(ch) || ch == '.' || ch == '_' || ch == '*' || ch == '[' || ch == ']'
+	return isLetter(ch) || isNumber(ch) || ch == '_'
 }
 
 // isThingChar returns true if the rune is allowed in a THING.
 func isThingChar(ch rune) bool {
 	return isLetter(ch) || isNumber(ch) || ch == '_'
+}
+
+// isExprsChar returns true if the rune is allowed in a IDENT.
+func isExprsChar(ch rune) bool {
+	return isLetter(ch) || isNumber(ch) || ch == '.' || ch == '_' || ch == '*' || ch == '[' || ch == ']'
 }
 
 // eof represents a marker rune for the end of the reader.
