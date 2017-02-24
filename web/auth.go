@@ -28,7 +28,6 @@ import (
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/mem"
-	"github.com/abcum/surreal/sql"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/websocket"
 )
@@ -59,7 +58,7 @@ func auth() fibre.MiddlewareFunc {
 			// which prevents running any sql queries,
 			// and denies access to all data.
 
-			auth.Kind = sql.AuthNO
+			auth.Kind = cnf.AuthNO
 
 			// Set the default possible values for the
 			// possible and selected namespace / database
@@ -78,7 +77,7 @@ func auth() fibre.MiddlewareFunc {
 			subs := strings.Split(bits[0], "-")
 
 			if len(subs) == 2 {
-				auth.Kind = sql.AuthSC
+				auth.Kind = cnf.AuthSC
 				auth.Possible.NS = subs[0]
 				auth.Selected.NS = subs[0]
 				auth.Possible.DB = subs[1]
@@ -90,7 +89,7 @@ func auth() fibre.MiddlewareFunc {
 			// the selected namespace.
 
 			if ns := c.Request().Header().Get("NS"); len(ns) != 0 {
-				auth.Kind = sql.AuthSC
+				auth.Kind = cnf.AuthSC
 				auth.Possible.NS = ns
 				auth.Selected.NS = ns
 			}
@@ -100,7 +99,7 @@ func auth() fibre.MiddlewareFunc {
 			// the selected database.
 
 			if db := c.Request().Header().Get("DB"); len(db) != 0 {
-				auth.Kind = sql.AuthSC
+				auth.Kind = cnf.AuthSC
 				auth.Possible.DB = db
 				auth.Selected.DB = db
 			}
@@ -159,7 +158,7 @@ func checkRoot(c *fibre.Context, user, pass string, callback func() error) (err 
 	if cidr(c.IP(), cnf.Settings.Auth.Nets) {
 
 		if user == cnf.Settings.Auth.User && pass == cnf.Settings.Auth.Pass {
-			auth.Kind = sql.AuthKV
+			auth.Kind = cnf.AuthKV
 			auth.Possible.NS = "*"
 			auth.Possible.DB = "*"
 		}
@@ -183,7 +182,7 @@ func checkMaster(c *fibre.Context, info string, callback func() error) (err erro
 		cred := bytes.SplitN(base, []byte(":"), 2)
 
 		if len(cred) == 2 && bytes.Equal(cred[0], user) && bytes.Equal(cred[1], pass) {
-			auth.Kind = sql.AuthKV
+			auth.Kind = cnf.AuthKV
 			auth.Possible.NS = "*"
 			auth.Possible.DB = "*"
 		}
@@ -256,10 +255,10 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 				if token.Header["alg"] != key.Type {
 					return nil, fmt.Errorf("Unexpected signing method")
 				}
-				auth.Kind = sql.AuthSC
+				auth.Kind = cnf.AuthSC
 				return key.Code, nil
 			} else {
-				auth.Kind = sql.AuthSC
+				auth.Kind = cnf.AuthSC
 				return scp.Code, nil
 			}
 
@@ -273,14 +272,14 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 				if token.Header["alg"] != key.Type {
 					return nil, fmt.Errorf("Unexpected signing method")
 				}
-				auth.Kind = sql.AuthDB
+				auth.Kind = cnf.AuthDB
 				return key.Code, nil
 			} else if uok {
 				usr, err := mem.New(txn).GetDU(nsv, dbv, usv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
-				auth.Kind = sql.AuthDB
+				auth.Kind = cnf.AuthDB
 				return usr.Code, nil
 			}
 
@@ -294,14 +293,14 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 				if token.Header["alg"] != key.Type {
 					return nil, fmt.Errorf("Unexpected signing method")
 				}
-				auth.Kind = sql.AuthNS
+				auth.Kind = cnf.AuthNS
 				return key.Code, nil
 			} else if uok {
 				usr, err := mem.New(txn).GetNU(nsv, usv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
-				auth.Kind = sql.AuthNS
+				auth.Kind = cnf.AuthNS
 				return usr.Code, nil
 			}
 
@@ -313,20 +312,20 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 
 	if err == nil && token.Valid {
 
-		if auth.Kind == sql.AuthNS {
+		if auth.Kind == cnf.AuthNS {
 			auth.Possible.NS = nsv
 			auth.Selected.NS = nsv
 			auth.Possible.DB = "*"
 		}
 
-		if auth.Kind == sql.AuthDB {
+		if auth.Kind == cnf.AuthDB {
 			auth.Possible.NS = nsv
 			auth.Selected.NS = nsv
 			auth.Possible.DB = dbv
 			auth.Selected.DB = dbv
 		}
 
-		if auth.Kind == sql.AuthSC {
+		if auth.Kind == cnf.AuthSC {
 			auth.Possible.NS = nsv
 			auth.Selected.NS = nsv
 			auth.Possible.DB = dbv

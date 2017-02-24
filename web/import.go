@@ -18,12 +18,11 @@ import (
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/db"
-	"github.com/abcum/surreal/sql"
 )
 
 func importer(c *fibre.Context) (err error) {
 
-	if c.Get("auth").(*cnf.Auth).Kind != sql.AuthKV {
+	if c.Get("auth").(*cnf.Auth).Kind != cnf.AuthKV {
 		return fibre.NewHTTPError(401)
 	}
 

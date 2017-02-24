@@ -21,8 +21,38 @@ import (
 
 var Settings *Options
 
+type Kind int
+
+func (k Kind) String() string {
+	switch k {
+	default:
+		return "NO"
+	case AuthKV:
+		return "KV"
+	case AuthNS:
+		return "NS"
+	case AuthDB:
+		return "DB"
+	case AuthSC:
+		return "SC"
+	}
+}
+
+const (
+	// Root access
+	AuthKV Kind = iota
+	// Namespace access
+	AuthNS
+	// Database access
+	AuthDB
+	// Scoped user access
+	AuthSC
+	// No access
+	AuthNO
+)
+
 type Auth struct {
-	Kind     int
+	Kind     Kind
 	Data     map[string]interface{}
 	Possible struct {
 		NS string

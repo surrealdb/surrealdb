@@ -49,17 +49,17 @@ func (o *options) get(kind int) (kv, ns, db string, err error) {
 	ns = o.auth.Selected.NS
 	db = o.auth.Selected.DB
 
-	if kind < o.auth.Kind {
+	if cnf.Kind(kind) < o.auth.Kind {
 		err = &QueryError{}
 		return
 	}
 
-	if kind >= AuthNS && ns == "" {
+	if cnf.Kind(kind) >= cnf.AuthNS && ns == "" {
 		err = &BlankError{}
 		return
 	}
 
-	if kind >= AuthDB && db == "" {
+	if cnf.Kind(kind) >= cnf.AuthDB && db == "" {
 		err = &BlankError{}
 		return
 	}
