@@ -140,7 +140,7 @@ func auth() fibre.MiddlewareFunc {
 			// process this as default authentication.
 
 			if len(head) > 0 && head[:6] == "Bearer" {
-				return checkBearer(c, head[6:], func() error {
+				return checkBearer(c, head[7:], func() error {
 					return h(c)
 				})
 			}
