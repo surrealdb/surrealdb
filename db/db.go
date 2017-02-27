@@ -140,10 +140,10 @@ func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 	// connection then force quit any running
 	// queries if a socket close event occurs.
 
-	if _, ok := ctx.Response().ResponseWriter.(http.CloseNotifier); ok {
+	if _, ok := ctx.Response().Writer().(http.CloseNotifier); ok {
 
 		exit := ctx.Response().CloseNotify()
-		done := make(chan bool)
+		done := make(chan struct{})
 		defer close(done)
 
 		go func() {
