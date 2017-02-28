@@ -30,7 +30,7 @@ func (e *executor) executeReturnStatement(ast *sql.ReturnStatement) (out []inter
 	case *sql.Empty:
 		// Ignore
 	case *sql.Param:
-		out = append(out, e.Get(what.ID))
+		out = append(out, e.get(what.ID))
 	}
 
 	return

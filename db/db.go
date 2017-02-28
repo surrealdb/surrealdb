@@ -160,11 +160,9 @@ func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 	// details, and the current runtime variables
 	// and execute the queries within.
 
-	exec := pool.Get().(*executor)
+	exec := newExec(ast, ctx, vars)
 
-	defer pool.Put(exec)
-
-	exec.Reset(ast, ctx, vars)
+	defer exec.done()
 
 	go exec.execute(quit, recv)
 

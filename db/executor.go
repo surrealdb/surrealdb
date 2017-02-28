@@ -24,34 +24,38 @@ import (
 	"github.com/abcum/surreal/util/data"
 )
 
-var pool sync.Pool
-
-func init() {
-
-	pool.New = func() interface{} {
+var executors = sync.Pool{
+	New: func() interface{} {
 		return &executor{}
-	}
-
+	},
 }
 
 type executor struct {
-	txn kvs.TX
-	ctx *data.Doc
-	ast *sql.Query
-	mem *mem.Store
-	web *fibre.Context
+	txn    kvs.TX
+	ctx    *data.Doc
+	ast    *sql.Query
+	mem    *mem.Store
+	web    *fibre.Context
+	closed chan struct{}
 }
 
-func (e *executor) Reset(ast *sql.Query, web *fibre.Context, vars map[string]interface{}) {
+func newExec(ast *sql.Query, web *fibre.Context, vars map[string]interface{}) (e *executor) {
+	e = executors.Get().(*executor)
 	e.ast = ast
 	e.web = web
 	e.ctx = data.Consume(vars)
+	e.closed = make(chan struct{}, 1)
+	return
 }
 
-func (e *executor) Set(key string, val interface{}) {
+func (e *executor) done() {
+	executors.Put(e)
+}
+
+func (e *executor) set(key string, val interface{}) {
 	e.ctx.Set(val, key)
 }
 
-func (e *executor) Get(key string) (val interface{}) {
+func (e *executor) get(key string) (val interface{}) {
 	return e.ctx.Get(key).Data()
 }

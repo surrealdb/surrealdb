@@ -22,9 +22,9 @@ func (e *executor) executeLetStatement(ast *sql.LetStatement) (out []interface{}
 
 	switch what := ast.What.(type) {
 	default:
-		e.Set(ast.Name, what)
+		e.set(ast.Name, what)
 	case *sql.Param:
-		e.Set(ast.Name, e.Get(what.ID))
+		e.set(ast.Name, e.get(what.ID))
 	}
 
 	return
