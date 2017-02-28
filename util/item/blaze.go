@@ -30,8 +30,6 @@ func (this *Doc) Blaze(ast *sql.SelectStatement) (res interface{}) {
 		}
 	}
 
-	doc.Del("meta")
-
 	for _, v := range ast.Expr {
 		switch e := v.Expr.(type) {
 		default:
