@@ -217,39 +217,18 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 		}
 	}()
 
-	stms := make(chan sql.Statement)
-
 	// Loop over the defined query statements and
-	// pass them to the statement processing
-	// channel for execution.
+	// process them, while listening for the quit
+	// channel to see if the client has gone away.
 
-	go func() {
-		for _, stm := range e.ast.Statements {
-			stms <- stm
-		}
-		close(stms)
-	}()
-
-	// Listen for any new statements to process and
-	// at the same time listen for the quit signal
-	// notifying us whether the client has gone away.
-
-	for {
+	for _, stm := range e.ast.Statements {
 
 		select {
 
 		case <-quit:
 			return
 
-		case stm, open := <-stms:
-
-			// If we have reached the end of the statement
-			// processing channel then return out of this
-			// for loop and exit.
-
-			if !open {
-				return
-			}
+		default:
 
 			// If we are not inside a global transaction
 			// then reset the error to nil so that the
