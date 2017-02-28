@@ -241,7 +241,9 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			// speed, so we can analyse slow queries.
 
 			log.WithPrefix("sql").WithFields(map[string]interface{}{
-				"ctx": e.web,
+				"id":   e.web.Get("id"),
+				"kind": e.web.Get("auth").(*cnf.Auth).Kind,
+				"auth": e.web.Get("auth").(*cnf.Auth).Data,
 			}).Debugln(stm)
 
 			// Check to see if the current statement is
