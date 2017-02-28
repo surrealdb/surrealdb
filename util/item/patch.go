@@ -16,14 +16,20 @@ package item
 
 import (
 	"github.com/abcum/surreal/util/data"
-	"github.com/abcum/surreal/util/json"
+	"github.com/abcum/surreal/util/diff"
 )
 
 func (this *Doc) diff() *data.Doc {
 
 	va := this.initial.Data().(map[string]interface{})
 	vb := this.current.Data().(map[string]interface{})
-	patch, _ := json.Diff(va, vb)
-	return data.Consume(patch)
+
+	dif := diff.Diff(va, vb).Out()
+
+	if len(dif) == 0 {
+		return data.Consume(nil)
+	}
+
+	return data.Consume(dif)
 
 }
