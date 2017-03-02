@@ -15,10 +15,13 @@
 package db
 
 import (
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
 	"github.com/abcum/surreal/util/pack"
+	"github.com/abcum/surreal/util/rand"
 )
 
 func (e *executor) executeDefineNamespaceStatement(ast *sql.DefineNamespaceStatement) (out []interface{}, err error) {
@@ -47,6 +50,10 @@ func (e *executor) executeDefineDatabaseStatement(ast *sql.DefineDatabaseStateme
 }
 
 func (e *executor) executeDefineLoginStatement(ast *sql.DefineLoginStatement) (out []interface{}, err error) {
+
+	ast.Code = rand.New(128)
+
+	ast.Pass, _ = bcrypt.GenerateFromPassword(ast.Pass, bcrypt.DefaultCost)
 
 	if ast.Kind == sql.NAMESPACE {
 
@@ -121,6 +128,8 @@ func (e *executor) executeDefineTokenStatement(ast *sql.DefineTokenStatement) (o
 }
 
 func (e *executor) executeDefineScopeStatement(ast *sql.DefineScopeStatement) (out []interface{}, err error) {
+
+	ast.Code = rand.New(128)
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}

@@ -46,11 +46,7 @@ func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err er
 		return nil, err
 	}
 
-	if stmt.Pass, err = p.parseBcrypt(); err != nil {
-		return nil, err
-	}
-
-	if stmt.Code, err = p.parseRand(); err != nil {
+	if stmt.Pass, err = p.parseBinary(); err != nil {
 		return nil, err
 	}
 
