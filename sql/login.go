@@ -18,7 +18,7 @@ func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err er
 
 	stmt = &DefineLoginStatement{}
 
-	if stmt.User, err = p.parseName(); err != nil {
+	if stmt.User, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 
@@ -62,7 +62,7 @@ func (p *parser) parseRemoveLoginStatement() (stmt *RemoveLoginStatement, err er
 
 	stmt = &RemoveLoginStatement{}
 
-	if stmt.User, err = p.parseName(); err != nil {
+	if stmt.User, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 

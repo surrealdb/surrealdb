@@ -16,9 +16,9 @@ package keys
 
 // NT ...
 type NT struct {
-	KV interface{}
-	NS interface{}
-	TK interface{}
+	KV string
+	NS string
+	TK string
 }
 
 // init initialises the key

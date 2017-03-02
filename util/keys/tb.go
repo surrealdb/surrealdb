@@ -16,10 +16,10 @@ package keys
 
 // TB ...
 type TB struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	TB interface{}
+	KV string
+	NS string
+	DB string
+	TB string
 }
 
 // init initialises the key

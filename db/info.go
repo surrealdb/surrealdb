@@ -116,17 +116,17 @@ func (e *executor) executeInfoDBStatement(ast *sql.InfoStatement) (out []interfa
 
 func (e *executor) executeInfoTBStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	tb, err := e.mem.GetTB(ast.NS, ast.DB, ast.What)
+	tb, err := e.mem.GetTB(ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}
 
-	fd, err := e.mem.AllFD(ast.NS, ast.DB, ast.What)
+	fd, err := e.mem.AllFD(ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}
 
-	ix, err := e.mem.AllIX(ast.NS, ast.DB, ast.What)
+	ix, err := e.mem.AllIX(ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}

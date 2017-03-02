@@ -22,7 +22,7 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseNames(); err != nil {
+	if stmt.What, err = p.parseTables(); err != nil {
 		return nil, err
 	}
 
@@ -65,7 +65,7 @@ func (p *parser) parseRemoveTableStatement() (stmt *RemoveTableStatement, err er
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseNames(); err != nil {
+	if stmt.What, err = p.parseTables(); err != nil {
 		return nil, err
 	}
 

@@ -27,8 +27,6 @@ func (p *parser) parseType() (exp string, err error) {
 		return string(""), &ParseError{Found: lit, Expected: allowed}
 	}
 
-	val, err := p.declare(STRING, lit)
-
-	return val.(string), err
+	return lit, err
 
 }

@@ -16,11 +16,11 @@ package keys
 
 // IX ...
 type IX struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	TB interface{}
-	IX interface{}
+	KV string
+	NS string
+	DB string
+	TB string
+	IX string
 }
 
 // init initialises the key

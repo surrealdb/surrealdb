@@ -16,10 +16,10 @@ package keys
 
 // VW ...
 type VW struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	VW interface{}
+	KV string
+	NS string
+	DB string
+	VW string
 }
 
 // init initialises the key

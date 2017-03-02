@@ -28,12 +28,12 @@ func (p *parser) parseWhat() (mul []Expr, err error) {
 
 	for {
 
-		tok, lit, err := p.shouldBe(IDENT, NUMBER, DOUBLE, THING, PARAM)
+		tok, lit, err := p.shouldBe(IDENT, THING, PARAM)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"table name or record id"}}
 		}
 
-		if p.is(tok, IDENT, NUMBER, DOUBLE) {
+		if p.is(tok, IDENT) {
 			one, _ := p.declare(TABLE, lit)
 			mul = append(mul, one)
 		}
@@ -62,33 +62,131 @@ func (p *parser) parseWhat() (mul []Expr, err error) {
 
 }
 
-func (p *parser) parseName() (string, error) {
+func (p *parser) parseIdent() (*Ident, error) {
 
-	_, lit, err := p.shouldBe(IDENT, STRING, NUMBER, DOUBLE)
+	_, lit, err := p.shouldBe(IDENT)
 	if err != nil {
-		return string(""), &ParseError{Found: lit, Expected: []string{"name"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
 	}
 
-	val, err := p.declare(STRING, lit)
+	val, err := p.declare(IDENT, lit)
 
-	return val.(string), err
+	return val.(*Ident), err
 
 }
 
-func (p *parser) parseNames() (mul []string, err error) {
+func (p *parser) parseIdents() (mul Idents, err error) {
 
 	for {
 
-		one, err := p.parseName()
+		one, err := p.parseIdent()
 		if err != nil {
 			return nil, err
 		}
 
 		mul = append(mul, one)
 
-		// Check to see if the next token is a comma
-		// and if not, then break out of the loop,
-		// otherwise repeat until we find no comma.
+		if _, _, exi := p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
+
+	return
+
+}
+
+func (p *parser) parseTable() (*Table, error) {
+
+	_, lit, err := p.shouldBe(IDENT)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
+	}
+
+	val, err := p.declare(TABLE, lit)
+
+	return val.(*Table), err
+
+}
+
+func (p *parser) parseTables() (mul Tables, err error) {
+
+	for {
+
+		one, err := p.parseTable()
+		if err != nil {
+			return nil, err
+		}
+
+		mul = append(mul, one)
+
+		if _, _, exi := p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
+
+	return
+
+}
+
+func (p *parser) parseThing() (*Thing, error) {
+
+	_, lit, err := p.shouldBe(THING)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"record id"}}
+	}
+
+	val, err := p.declare(THING, lit)
+
+	return val.(*Thing), err
+
+}
+
+func (p *parser) parseThings() (mul Things, err error) {
+
+	for {
+
+		one, err := p.parseThing()
+		if err != nil {
+			return nil, err
+		}
+
+		mul = append(mul, one)
+
+		if _, _, exi := p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
+
+	return
+
+}
+
+func (p *parser) parseIdiom() (*Ident, error) {
+
+	_, lit, err := p.shouldBe(IDENT, EXPR)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
+	}
+
+	val, err := p.declare(IDENT, lit)
+
+	return val.(*Ident), err
+
+}
+
+func (p *parser) parseIdioms() (mul Idents, err error) {
+
+	for {
+
+		one, err := p.parseIdiom()
+		if err != nil {
+			return nil, err
+		}
+
+		mul = append(mul, one)
 
 		if _, _, exi := p.mightBe(COMMA); !exi {
 			break
@@ -134,46 +232,7 @@ func (p *parser) parseRand() (exp []byte, err error) {
 //
 // --------------------------------------------------
 
-func (p *parser) parseIdent() (*Ident, error) {
-
-	_, lit, err := p.shouldBe(IDENT)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
-	}
-
-	val, err := p.declare(IDENT, lit)
-
-	return val.(*Ident), err
-
-}
-
-func (p *parser) parseTable() (*Table, error) {
-
-	_, lit, err := p.shouldBe(IDENT, NUMBER, DOUBLE)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
-	}
-
-	val, err := p.declare(TABLE, lit)
-
-	return val.(*Table), err
-
-}
-
-func (p *parser) parseThing() (*Thing, error) {
-
-	_, lit, err := p.shouldBe(THING)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"record id"}}
-	}
-
-	val, err := p.declare(THING, lit)
-
-	return val.(*Thing), err
-
-}
-
-func (p *parser) parseArray() ([]interface{}, error) {
+func (p *parser) parseArray() (Array, error) {
 
 	_, lit, err := p.shouldBe(ARRAY)
 	if err != nil {
@@ -182,11 +241,11 @@ func (p *parser) parseArray() ([]interface{}, error) {
 
 	val, err := p.declare(ARRAY, lit)
 
-	return val.([]interface{}), err
+	return val.(Array), err
 
 }
 
-func (p *parser) parseObject() (exp map[string]interface{}, err error) {
+func (p *parser) parseObject() (Object, error) {
 
 	_, lit, err := p.shouldBe(JSON)
 	if err != nil {
@@ -195,7 +254,7 @@ func (p *parser) parseObject() (exp map[string]interface{}, err error) {
 
 	val, err := p.declare(JSON, lit)
 
-	return val.(map[string]interface{}), err
+	return val.(Object), err
 
 }
 
@@ -232,48 +291,40 @@ func (p *parser) parseString() (string, error) {
 		return string(""), &ParseError{Found: lit, Expected: []string{"string"}}
 	}
 
-	val, err := p.declare(STRING, lit)
-
-	return val.(string), err
+	return lit, err
 
 }
 
 func (p *parser) parseRegion() (string, error) {
 
-	tok, lit, err := p.shouldBe(STRING, REGION)
+	_, lit, err := p.shouldBe(STRING, REGION)
 	if err != nil {
 		return string(""), &ParseError{Found: lit, Expected: []string{"string"}}
 	}
 
-	val, err := p.declare(tok, lit)
-
-	return val.(string), err
+	return lit, err
 
 }
 
 func (p *parser) parseBinary() ([]byte, error) {
 
-	tok, lit, err := p.shouldBe(STRING, REGION)
+	_, lit, err := p.shouldBe(STRING, REGION)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
 	}
 
-	val, err := p.declare(tok, lit)
-
-	return []byte(val.(string)), err
+	return []byte(lit), err
 
 }
 
 func (p *parser) parseScript() (string, error) {
 
-	tok, lit, err := p.shouldBe(STRING, REGION)
+	_, lit, err := p.shouldBe(STRING, REGION)
 	if err != nil {
 		return string(""), &ParseError{Found: lit, Expected: []string{"js/lua script"}}
 	}
 
-	val, err := p.declare(tok, lit)
-
-	return val.(string), err
+	return lit, err
 
 }
 
@@ -323,12 +374,7 @@ func (p *parser) parseBcrypt() ([]byte, error) {
 		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
 	}
 
-	val, err := p.declare(STRING, lit)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
-	}
-
-	return bcrypt.GenerateFromPassword([]byte(val.(string)), bcrypt.DefaultCost)
+	return bcrypt.GenerateFromPassword([]byte(lit), bcrypt.DefaultCost)
 
 }
 
@@ -355,9 +401,7 @@ func (p *parser) parseAlgorithm() (string, error) {
 		return string(""), &ParseError{Found: lit, Expected: expected}
 	}
 
-	val, err := p.declare(STRING, lit)
-
-	return val.(string), err
+	return lit, err
 
 }
 
@@ -822,7 +866,7 @@ func (p *parser) parseSubp() (stmt *SubpExpression, err error) {
 	}
 
 	if _, _, exi := p.mightBe(AS); exi {
-		if stmt.Name, err = p.parseName(); err != nil {
+		if stmt.Name, err = p.parseIdent(); err != nil {
 			return nil, err
 		}
 	}

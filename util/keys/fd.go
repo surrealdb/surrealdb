@@ -16,11 +16,11 @@ package keys
 
 // FD ...
 type FD struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	TB interface{}
-	FD interface{}
+	KV string
+	NS string
+	DB string
+	TB string
+	FD string
 }
 
 // init initialises the key

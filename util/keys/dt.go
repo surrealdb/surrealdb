@@ -16,10 +16,10 @@ package keys
 
 // DT ...
 type DT struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	TK interface{}
+	KV string
+	NS string
+	DB string
+	TK string
 }
 
 // init initialises the key

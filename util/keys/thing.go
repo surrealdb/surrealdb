@@ -16,10 +16,10 @@ package keys
 
 // Thing ...
 type Thing struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	TB interface{}
+	KV string
+	NS string
+	DB string
+	TB string
 	ID interface{}
 }
 

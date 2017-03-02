@@ -16,7 +16,7 @@ package keys
 
 // KV ...
 type KV struct {
-	KV interface{}
+	KV string
 }
 
 // init initialises the key

@@ -16,12 +16,12 @@ package keys
 
 // Field ...
 type Field struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	TB interface{}
+	KV string
+	NS string
+	DB string
+	TB string
 	ID interface{}
-	FD interface{}
+	FD string
 }
 
 // init initialises the key

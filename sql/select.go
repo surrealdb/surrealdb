@@ -22,7 +22,7 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 		return nil, err
 	}
 
-	if stmt.Expr, err = p.parseField(); err != nil {
+	if stmt.Expr, err = p.parseFields(); err != nil {
 		return nil, err
 	}
 
@@ -67,7 +67,7 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 
 }
 
-func (p *parser) parseField() (mul []*Field, err error) {
+func (p *parser) parseFields() (mul Fields, err error) {
 
 	var lit string
 	var exi bool
@@ -81,16 +81,14 @@ func (p *parser) parseField() (mul []*Field, err error) {
 			return
 		}
 
-		one.Alias = "*" // TODO need to implement default field name
-
 		// Chec to see if the next token is an AS
 		// clause, and if it is read the defined
 		// field alias name from the scanner.
 
 		if _, _, exi = p.mightBe(AS); exi {
 
-			if _, one.Alias, err = p.shouldBe(IDENT); err != nil {
-				return nil, &ParseError{Found: lit, Expected: []string{"field alias"}}
+			if one.Alias, err = p.parseIdent(); err != nil {
+				return nil, &ParseError{Found: lit, Expected: []string{"alias name"}}
 			}
 
 		}
@@ -128,7 +126,7 @@ func (p *parser) parseWhere() (exp Expr, err error) {
 
 }
 
-func (p *parser) parseGroup() (mul []*Group, err error) {
+func (p *parser) parseGroup() (mul Groups, err error) {
 
 	// The next token that we expect to see is a
 	// GROUP token, and if we don't find one then
@@ -180,7 +178,7 @@ func (p *parser) parseGroup() (mul []*Group, err error) {
 
 }
 
-func (p *parser) parseOrder() (mul []*Order, err error) {
+func (p *parser) parseOrder() (mul Orders, err error) {
 
 	// The next token that we expect to see is a
 	// ORDER token, and if we don't find one then

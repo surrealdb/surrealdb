@@ -16,10 +16,10 @@ package keys
 
 // DU ...
 type DU struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	US interface{}
+	KV string
+	NS string
+	DB string
+	US string
 }
 
 // init initialises the key

@@ -28,7 +28,7 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 	// always be an identifier, specifying a
 	// variable name to set.
 
-	_, stmt.Name, err = p.shouldBe(IDENT)
+	stmt.Name, err = p.parseIdent()
 	if err != nil {
 		return nil, err
 	}
@@ -57,13 +57,13 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 
 	switch stmt.What.(type) {
 	case bool, int64, float64, string:
-		p.v[stmt.Name] = stmt.What
+		p.v[stmt.Name.ID] = stmt.What
 	case []interface{}, map[string]interface{}:
-		p.v[stmt.Name] = stmt.What
+		p.v[stmt.Name.ID] = stmt.What
 	case time.Time, time.Duration:
-		p.v[stmt.Name] = stmt.What
+		p.v[stmt.Name.ID] = stmt.What
 	case *Null, *Void, *Empty, *Table, *Thing, *Param:
-		p.v[stmt.Name] = stmt.What
+		p.v[stmt.Name.ID] = stmt.What
 	}
 
 	// Check that we have reached the end of the

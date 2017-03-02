@@ -159,15 +159,15 @@ func (this *Doc) PurgeIndex() (err error) {
 
 		if index.Uniq == true {
 			for _, o := range old {
-				key := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o}
-				this.tx.CDel(key.Encode(), this.id.Bytes())
+				key := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name.ID, FD: o}
+				this.tx.DelC(this.now, key.Encode(), this.id.Bytes())
 			}
 		}
 
 		if index.Uniq == false {
 			for _, o := range old {
-				key := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o, ID: this.key.ID}
-				this.tx.CDel(key.Encode(), this.id.Bytes())
+				key := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name.ID, FD: o, ID: this.key.ID}
+				this.tx.DelC(this.now, key.Encode(), this.id.Bytes())
 			}
 		}
 
@@ -188,12 +188,12 @@ func (this *Doc) StoreIndex() (err error) {
 
 		if index.Uniq == true {
 			for _, o := range old {
-				oidx := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o}
-				this.tx.CDel(oidx.Encode(), this.id.Bytes())
+				oidx := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name.ID, FD: o}
+				this.tx.DelC(this.now, oidx.Encode(), this.id.Bytes())
 			}
 			for _, n := range now {
-				nidx := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: n}
-				if err = this.tx.CPut(nidx.Encode(), this.id.Bytes(), nil); err != nil {
+				nidx := &keys.Index{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name.ID, FD: n}
+				if _, err = this.tx.PutC(this.now, nidx.Encode(), this.id.Bytes(), nil); err != nil {
 					return fmt.Errorf("Duplicate entry for %v in index '%s' on %s", n, index.Name, this.key.TB)
 				}
 			}
@@ -201,12 +201,12 @@ func (this *Doc) StoreIndex() (err error) {
 
 		if index.Uniq == false {
 			for _, o := range old {
-				oidx := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: o, ID: this.key.ID}
-				this.tx.CDel(oidx.Encode(), this.id.Bytes())
+				oidx := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name.ID, FD: o, ID: this.key.ID}
+				this.tx.DelC(this.now, oidx.Encode(), this.id.Bytes())
 			}
 			for _, n := range now {
-				nidx := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name, FD: n, ID: this.key.ID}
-				if err = this.tx.CPut(nidx.Encode(), this.id.Bytes(), nil); err != nil {
+				nidx := &keys.Point{KV: this.key.KV, NS: this.key.NS, DB: this.key.DB, TB: this.key.TB, IX: index.Name.ID, FD: n, ID: this.key.ID}
+				if _, err = this.tx.PutC(this.now, nidx.Encode(), this.id.Bytes(), nil); err != nil {
 					return fmt.Errorf("Multiple items with id %s in index '%s' on %s", this.key.ID, index.Name, this.key.TB)
 				}
 			}
@@ -243,7 +243,7 @@ func diffIndex(old, now [][]interface{}) {
 
 }
 
-func buildIndex(cols []string, item *data.Doc) (out [][]interface{}) {
+func buildIndex(cols sql.Idents, item *data.Doc) (out [][]interface{}) {
 
 	if len(cols) == 0 {
 		return [][]interface{}{nil}
@@ -253,7 +253,7 @@ func buildIndex(cols []string, item *data.Doc) (out [][]interface{}) {
 
 	sub := buildIndex(cols, item)
 
-	if arr, ok := item.Get("data", col).Data().([]interface{}); ok {
+	if arr, ok := item.Get("data", col.ID).Data().([]interface{}); ok {
 		for _, s := range sub {
 			for _, a := range arr {
 				idx := []interface{}{}
@@ -265,7 +265,7 @@ func buildIndex(cols []string, item *data.Doc) (out [][]interface{}) {
 	} else {
 		for _, s := range sub {
 			idx := []interface{}{}
-			idx = append(idx, item.Get("data", col).Data())
+			idx = append(idx, item.Get("data", col.ID).Data())
 			idx = append(idx, s...)
 			out = append(out, idx)
 		}

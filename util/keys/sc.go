@@ -16,10 +16,10 @@ package keys
 
 // SC ...
 type SC struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	SC interface{}
+	KV string
+	NS string
+	DB string
+	SC string
 }
 
 // init initialises the key

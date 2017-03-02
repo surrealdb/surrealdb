@@ -22,7 +22,7 @@ func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err er
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 
@@ -30,7 +30,7 @@ func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err er
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseNames(); err != nil {
+	if stmt.What, err = p.parseTables(); err != nil {
 		return nil, err
 	}
 
@@ -38,7 +38,7 @@ func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err er
 		return nil, err
 	}
 
-	if stmt.Cols, err = p.parseNames(); err != nil {
+	if stmt.Cols, err = p.parseIdioms(); err != nil {
 		return nil, err
 	}
 
@@ -60,7 +60,7 @@ func (p *parser) parseRemoveIndexStatement() (stmt *RemoveIndexStatement, err er
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 
@@ -68,7 +68,7 @@ func (p *parser) parseRemoveIndexStatement() (stmt *RemoveIndexStatement, err er
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseNames(); err != nil {
+	if stmt.What, err = p.parseTables(); err != nil {
 		return nil, err
 	}
 

@@ -15,6 +15,7 @@
 package item
 
 import (
+	"fmt"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 )
@@ -31,24 +32,34 @@ func (this *Doc) Blaze(ast *sql.SelectStatement) (res interface{}) {
 	}
 
 	for _, v := range ast.Expr {
+
+		var a string
+
+		if v.Alias != nil {
+			a = fmt.Sprintf("%s", v.Alias)
+		} else {
+			a = fmt.Sprintf("%v", v)
+		}
+
 		switch e := v.Expr.(type) {
 		default:
-			doc.Set(e, v.Alias)
+			doc.Set(e, a)
 		case bool, int64, float64, string:
-			doc.Set(e, v.Alias)
+			doc.Set(e, a)
 		case []interface{}, map[string]interface{}:
-			doc.Set(e, v.Alias)
+			doc.Set(e, a)
 		case *sql.Null:
-			doc.Set(nil, v.Alias)
+			doc.Set(nil, a)
 		case *sql.Thing:
-			doc.Set(e.String(), v.Alias)
+			doc.Set(e.String(), a)
 		case *sql.Param:
-			doc.Set(this.runtime.Get(e.ID).Data(), v.Alias)
+			doc.Set(this.runtime.Get(e.ID).Data(), a)
 		case *sql.Ident:
-			doc.Set(this.current.Get(e.ID).Data(), v.Alias)
+			doc.Set(this.current.Get(e.ID).Data(), a)
 		case *sql.All:
 			break
 		}
+
 	}
 
 	return doc.Data()

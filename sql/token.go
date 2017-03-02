@@ -18,7 +18,7 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 
 	stmt = &DefineTokenStatement{}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 
@@ -89,7 +89,7 @@ func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err er
 
 	stmt = &RemoveTokenStatement{}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 

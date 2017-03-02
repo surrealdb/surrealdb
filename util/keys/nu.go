@@ -16,9 +16,9 @@ package keys
 
 // NU ...
 type NU struct {
-	KV interface{}
-	NS interface{}
-	US interface{}
+	KV string
+	NS string
+	US string
 }
 
 // init initialises the key

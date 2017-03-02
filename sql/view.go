@@ -22,7 +22,7 @@ func (p *parser) parseDefineViewStatement() (stmt *DefineViewStatement, err erro
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 
@@ -36,7 +36,7 @@ func (p *parser) parseDefineViewStatement() (stmt *DefineViewStatement, err erro
 		return nil, err
 	}
 
-	if stmt.Expr, err = p.parseField(); err != nil {
+	if stmt.Expr, err = p.parseFields(); err != nil {
 		return nil, err
 	}
 
@@ -73,7 +73,7 @@ func (p *parser) parseRemoveViewStatement() (stmt *RemoveViewStatement, err erro
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 

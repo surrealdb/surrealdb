@@ -42,7 +42,7 @@ func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
-		if stmt.What, err = p.parseName(); err != nil {
+		if stmt.What, err = p.parseTable(); err != nil {
 			return nil, err
 		}
 	}

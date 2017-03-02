@@ -22,7 +22,7 @@ func (p *parser) parseDefineNamespaceStatement() (stmt *DefineNamespaceStatement
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 
@@ -38,7 +38,7 @@ func (p *parser) parseRemoveNamespaceStatement() (stmt *RemoveNamespaceStatement
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 

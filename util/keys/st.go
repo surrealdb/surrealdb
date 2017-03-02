@@ -16,11 +16,11 @@ package keys
 
 // ST ...
 type ST struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	SC interface{}
-	TK interface{}
+	KV string
+	NS string
+	DB string
+	SC string
+	TK string
 }
 
 // init initialises the key

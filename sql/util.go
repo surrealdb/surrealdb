@@ -73,12 +73,6 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 	case FALSE:
 		return false, nil
 
-	case STRING:
-		return lit, nil
-
-	case REGION:
-		return lit, nil
-
 	case NULL:
 		return &Null{}, nil
 
@@ -102,6 +96,12 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 
 	case DESC:
 		return &Desc{}, nil
+
+	case STRING:
+		return &Value{lit}, nil
+
+	case REGION:
+		return &Value{lit}, nil
 
 	case ID:
 		return &Ident{lit}, nil
@@ -140,7 +140,7 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 		return &Param{lit}, nil
 
 	case ARRAY:
-		var j []interface{}
+		var j Array
 		json.Unmarshal([]byte(lit), &j)
 		if j == nil {
 			return j, fmt.Errorf("Invalid JSON: %s", lit)
@@ -148,7 +148,7 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 		return j, nil
 
 	case JSON:
-		var j map[string]interface{}
+		var j Object
 		json.Unmarshal([]byte(lit), &j)
 		if j == nil {
 			return j, fmt.Errorf("Invalid JSON: %s", lit)

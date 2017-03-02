@@ -14,6 +14,8 @@
 
 package sql
 
+import "strings"
+
 // Token defines a lexical token
 type Token int16
 
@@ -423,7 +425,7 @@ func (tok Token) String() string {
 
 func newToken(str string) Token {
 	for k, v := range tokens {
-		if v == str {
+		if v == strings.ToUpper(str) {
 			return Token(k)
 		}
 	}

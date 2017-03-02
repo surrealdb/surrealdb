@@ -16,9 +16,9 @@ package keys
 
 // DB ...
 type DB struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
+	KV string
+	NS string
+	DB string
 }
 
 // init initialises the key

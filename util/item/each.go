@@ -74,7 +74,7 @@ func (this *Doc) each(fld *sql.DefineFieldStatement) (err error) {
 
 		return nil
 
-	}, fld.Name)
+	}, fld.Name.String())
 
 }
 

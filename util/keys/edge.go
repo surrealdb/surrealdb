@@ -16,14 +16,14 @@ package keys
 
 // Edge ...
 type Edge struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	TB interface{}
+	KV string
+	NS string
+	DB string
+	TB string
 	ID interface{}
-	TK interface{}
-	TP interface{}
-	FT interface{}
+	TK string
+	TP string
+	FT string
 	FK interface{}
 }
 

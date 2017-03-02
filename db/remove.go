@@ -22,7 +22,7 @@ import (
 func (e *executor) executeRemoveNamespaceStatement(ast *sql.RemoveNamespaceStatement) (out []interface{}, err error) {
 
 	// Remove the namespace
-	nkey := &keys.NS{KV: ast.KV, NS: ast.Name}
+	nkey := &keys.NS{KV: ast.KV, NS: ast.Name.ID}
 	_, err = e.txn.DelP(0, nkey.Encode(), 0)
 
 	return
@@ -32,7 +32,7 @@ func (e *executor) executeRemoveNamespaceStatement(ast *sql.RemoveNamespaceState
 func (e *executor) executeRemoveDatabaseStatement(ast *sql.RemoveDatabaseStatement) (out []interface{}, err error) {
 
 	// Remove the database
-	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name}
+	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name.ID}
 	_, err = e.txn.DelP(0, dkey.Encode(), 0)
 
 	return
@@ -44,7 +44,7 @@ func (e *executor) executeRemoveLoginStatement(ast *sql.RemoveLoginStatement) (o
 	if ast.Kind == sql.NAMESPACE {
 
 		// Remove the login
-		ukey := &keys.NU{KV: ast.KV, NS: ast.NS, US: ast.User}
+		ukey := &keys.NU{KV: ast.KV, NS: ast.NS, US: ast.User.ID}
 		_, err = e.txn.DelP(0, ukey.Encode(), 0)
 
 	}
@@ -52,7 +52,7 @@ func (e *executor) executeRemoveLoginStatement(ast *sql.RemoveLoginStatement) (o
 	if ast.Kind == sql.DATABASE {
 
 		// Remove the login
-		ukey := &keys.DU{KV: ast.KV, NS: ast.NS, DB: ast.DB, US: ast.User}
+		ukey := &keys.DU{KV: ast.KV, NS: ast.NS, DB: ast.DB, US: ast.User.ID}
 		_, err = e.txn.DelP(0, ukey.Encode(), 0)
 
 	}
@@ -66,7 +66,7 @@ func (e *executor) executeRemoveTokenStatement(ast *sql.RemoveTokenStatement) (o
 	if ast.Kind == sql.NAMESPACE {
 
 		// Remove the token
-		tkey := &keys.NT{KV: ast.KV, NS: ast.NS, TK: ast.Name}
+		tkey := &keys.NT{KV: ast.KV, NS: ast.NS, TK: ast.Name.ID}
 		_, err = e.txn.DelP(0, tkey.Encode(), 0)
 
 	}
@@ -74,7 +74,7 @@ func (e *executor) executeRemoveTokenStatement(ast *sql.RemoveTokenStatement) (o
 	if ast.Kind == sql.DATABASE {
 
 		// Remove the token
-		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name}
+		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name.ID}
 		_, err = e.txn.DelP(0, tkey.Encode(), 0)
 
 	}
@@ -86,7 +86,7 @@ func (e *executor) executeRemoveTokenStatement(ast *sql.RemoveTokenStatement) (o
 func (e *executor) executeRemoveScopeStatement(ast *sql.RemoveScopeStatement) (out []interface{}, err error) {
 
 	// Remove the scope
-	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name}
+	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name.ID}
 	_, err = e.txn.DelP(0, skey.Encode(), 0)
 
 	return
@@ -98,7 +98,7 @@ func (e *executor) executeRemoveTableStatement(ast *sql.RemoveTableStatement) (o
 	for _, TB := range ast.What {
 
 		// Remove the table
-		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
+		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB}
 		_, err = e.txn.DelP(0, tkey.Encode(), 0)
 
 	}
@@ -112,7 +112,7 @@ func (e *executor) executeRemoveFieldStatement(ast *sql.RemoveFieldStatement) (o
 	for _, TB := range ast.What {
 
 		// Remove the field
-		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, FD: ast.Name}
+		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, FD: ast.Name.ID}
 		_, err = e.txn.DelP(0, fkey.Encode(), 0)
 
 	}
@@ -126,11 +126,11 @@ func (e *executor) executeRemoveIndexStatement(ast *sql.RemoveIndexStatement) (o
 	for _, TB := range ast.What {
 
 		// Remove the index
-		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name}
+		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: ast.Name.ID}
 		_, err = e.txn.DelP(0, ikey.Encode(), 0)
 
 		// Remove the index
-		dkey := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name, FD: keys.Ignore}
+		dkey := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: ast.Name.ID, FD: keys.Ignore}
 		_, err = e.txn.DelP(0, dkey.Encode(), 0)
 
 	}

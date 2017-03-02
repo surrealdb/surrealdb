@@ -23,13 +23,17 @@ func (e *executor) executeReturnStatement(ast *sql.ReturnStatement) (out []inter
 	switch what := ast.What.(type) {
 	default:
 		out = append(out, what)
-	case *sql.Null:
-		out = append(out, nil)
 	case *sql.Void:
 		// Ignore
 	case *sql.Empty:
 		// Ignore
-	case *sql.Param:
+	case *sql.Null: // Specifically asked for null
+		out = append(out, nil)
+	case *sql.Ident: // Return does not have columns.
+		out = append(out, nil)
+	case *sql.Value: // Specifically asked for a string.
+		out = append(out, what.ID)
+	case *sql.Param: // Let's get the value of the param.
 		out = append(out, e.get(what.ID))
 	}
 

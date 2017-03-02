@@ -23,10 +23,7 @@ import (
 	"github.com/abcum/surreal/util/data"
 )
 
-func (this *Doc) Merge(data []sql.Expr) (err error) {
-
-	this.getFields()
-	this.getIndexs()
+func (this *Doc) Merge(data sql.Expr) (err error) {
 
 	if err = this.setFld(); err != nil {
 		return
@@ -40,17 +37,15 @@ func (this *Doc) Merge(data []sql.Expr) (err error) {
 		return
 	}
 
-	for _, part := range data {
-		switch expr := part.(type) {
-		case *sql.DiffExpression:
-			this.mrgDpm(expr)
-		case *sql.DataExpression:
-			this.mrgOne(expr)
-		case *sql.MergeExpression:
-			this.mrgAny(expr)
-		case *sql.ContentExpression:
-			this.mrgAll(expr)
-		}
+	switch expr := data.(type) {
+	case *sql.DataExpression:
+		this.mrgSet(expr)
+	case *sql.DiffExpression:
+		this.mrgDpm(expr)
+	case *sql.MergeExpression:
+		this.mrgAny(expr)
+	case *sql.ContentExpression:
+		this.mrgAll(expr)
 	}
 
 	if err = this.setFld(); err != nil {
@@ -105,7 +100,7 @@ func (this *Doc) defFld() (err error) {
 
 			return nil
 
-		}, fld.Name)
+		}, fld.Name.String())
 
 	}
 
@@ -127,14 +122,26 @@ func (this *Doc) mrgFld() (err error) {
 
 func (this *Doc) mrgAll(expr *sql.ContentExpression) {
 
-	this.current = data.Consume(expr.JSON)
+	switch val := expr.Data.(type) {
+	case sql.Object:
+		this.current = data.Consume(map[string]interface{}(val))
+	case map[string]interface{}:
+		this.current = data.Consume(map[string]interface{}(val))
+	case *sql.Param:
+		switch val := this.runtime.Get(val.ID).Data().(type) {
+		case sql.Object:
+			this.current = data.Consume(map[string]interface{}(val))
+		case map[string]interface{}:
+			this.current = data.Consume(map[string]interface{}(val))
+		}
+	}
 
 }
 
 func (this *Doc) mrgAny(expr *sql.MergeExpression) {
 
 	lhs, _ := this.current.Data().(map[string]interface{})
-	rhs, _ := expr.JSON.(map[string]interface{})
+	rhs, _ := expr.Data.(map[string]interface{})
 
 	err := mergo.MapWithOverwrite(&lhs, rhs)
 	if err != nil {
@@ -149,26 +156,30 @@ func (this *Doc) mrgDpm(expr *sql.DiffExpression) {
 
 }
 
-func (this *Doc) mrgOne(expr *sql.DataExpression) {
+func (this *Doc) mrgSet(expr *sql.DataExpression) {
 
-	lhs := this.getMrgItemLHS(expr.LHS)
-	rhs := this.getMrgItemRHS(expr.RHS)
+	for _, part := range expr.Data {
 
-	if expr.Op == sql.EQ {
-		switch expr.RHS.(type) {
-		default:
-			this.current.Set(rhs, lhs)
-		case *sql.Void:
-			this.current.Del(lhs)
+		lhs := this.getMrgItemLHS(part.LHS)
+		rhs := this.getMrgItemRHS(part.RHS)
+
+		if part.Op == sql.EQ {
+			switch part.RHS.(type) {
+			default:
+				this.current.Set(rhs, lhs)
+			case *sql.Void:
+				this.current.Del(lhs)
+			}
 		}
-	}
 
-	if expr.Op == sql.INC {
-		this.current.Inc(rhs, lhs)
-	}
+		if part.Op == sql.INC {
+			this.current.Inc(rhs, lhs)
+		}
 
-	if expr.Op == sql.DEC {
-		this.current.Dec(rhs, lhs)
+		if part.Op == sql.DEC {
+			this.current.Dec(rhs, lhs)
+		}
+
 	}
 
 }

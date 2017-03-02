@@ -22,7 +22,7 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 
@@ -30,7 +30,7 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseNames(); err != nil {
+	if stmt.What, err = p.parseTables(); err != nil {
 		return nil, err
 	}
 
@@ -143,7 +143,7 @@ func (p *parser) parseRemoveFieldStatement() (stmt *RemoveFieldStatement, err er
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 
@@ -151,7 +151,7 @@ func (p *parser) parseRemoveFieldStatement() (stmt *RemoveFieldStatement, err er
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseNames(); err != nil {
+	if stmt.What, err = p.parseTables(); err != nil {
 		return nil, err
 	}
 

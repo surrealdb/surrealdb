@@ -430,7 +430,7 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 	var idp bool
 
 	// Store section values
-	var tbv interface{}
+	var tbv string
 	var idv interface{}
 
 	// Create a buffer
@@ -530,10 +530,10 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 	idv = end.String()
 
 	if tbp { // The TB is a param
-		if p, ok := s.p.v[tbv.(string)]; ok {
-			switch p.(type) {
-			case bool, int64, float64, string, []interface{}, map[string]interface{}:
-				tbv = p
+		if p, ok := s.p.v[tbv]; ok {
+			switch v := p.(type) {
+			case string:
+				tbv = v
 			default:
 				return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
 			}
@@ -544,9 +544,9 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 
 	if idp { // The ID is a param
 		if p, ok := s.p.v[idv.(string)]; ok {
-			switch p.(type) {
+			switch v := p.(type) {
 			case bool, int64, float64, string, []interface{}, map[string]interface{}:
-				idv = p
+				idv = v
 			default:
 				return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
 			}

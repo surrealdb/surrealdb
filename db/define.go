@@ -27,7 +27,7 @@ import (
 func (e *executor) executeDefineNamespaceStatement(ast *sql.DefineNamespaceStatement) (out []interface{}, err error) {
 
 	// Set the namespace
-	nkey := &keys.NS{KV: ast.KV, NS: ast.Name}
+	nkey := &keys.NS{KV: ast.KV, NS: ast.Name.ID}
 	_, err = e.txn.Put(0, nkey.Encode(), ast.Encode())
 
 	return
@@ -38,11 +38,11 @@ func (e *executor) executeDefineDatabaseStatement(ast *sql.DefineDatabaseStateme
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-	nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+	nval := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ast.NS)}
 	e.txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
 
 	// Set the database
-	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name}
+	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name.ID}
 	_, err = e.txn.Put(0, dkey.Encode(), ast.Encode())
 
 	return
@@ -59,11 +59,11 @@ func (e *executor) executeDefineLoginStatement(ast *sql.DefineLoginStatement) (o
 
 		// Set the namespace
 		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-		nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+		nval := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ast.NS)}
 		e.txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
 
 		// Set the login
-		ukey := &keys.NU{KV: ast.KV, NS: ast.NS, US: ast.User}
+		ukey := &keys.NU{KV: ast.KV, NS: ast.NS, US: ast.User.ID}
 		_, err = e.txn.Put(0, ukey.Encode(), ast.Encode())
 
 	}
@@ -72,16 +72,16 @@ func (e *executor) executeDefineLoginStatement(ast *sql.DefineLoginStatement) (o
 
 		// Set the namespace
 		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-		nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+		nval := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ast.NS)}
 		e.txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
 
 		// Set the database
 		dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-		dval := &sql.DefineDatabaseStatement{Name: ast.DB}
+		dval := &sql.DefineDatabaseStatement{Name: sql.NewIdent(ast.DB)}
 		e.txn.PutC(0, dkey.Encode(), dval.Encode(), nil)
 
 		// Set the login
-		ukey := &keys.DU{KV: ast.KV, NS: ast.NS, DB: ast.DB, US: ast.User}
+		ukey := &keys.DU{KV: ast.KV, NS: ast.NS, DB: ast.DB, US: ast.User.ID}
 		_, err = e.txn.Put(0, ukey.Encode(), ast.Encode())
 
 	}
@@ -96,11 +96,11 @@ func (e *executor) executeDefineTokenStatement(ast *sql.DefineTokenStatement) (o
 
 		// Set the namespace
 		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-		nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+		nval := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ast.NS)}
 		e.txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
 
 		// Set the token
-		tkey := &keys.NT{KV: ast.KV, NS: ast.NS, TK: ast.Name}
+		tkey := &keys.NT{KV: ast.KV, NS: ast.NS, TK: ast.Name.ID}
 		_, err = e.txn.Put(0, tkey.Encode(), ast.Encode())
 
 	}
@@ -109,16 +109,16 @@ func (e *executor) executeDefineTokenStatement(ast *sql.DefineTokenStatement) (o
 
 		// Set the namespace
 		nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-		nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+		nval := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ast.NS)}
 		e.txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
 
 		// Set the database
 		dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-		dval := &sql.DefineDatabaseStatement{Name: ast.DB}
+		dval := &sql.DefineDatabaseStatement{Name: sql.NewIdent(ast.DB)}
 		e.txn.PutC(0, dkey.Encode(), dval.Encode(), nil)
 
 		// Set the token
-		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name}
+		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name.ID}
 		_, err = e.txn.Put(0, tkey.Encode(), ast.Encode())
 
 	}
@@ -133,16 +133,16 @@ func (e *executor) executeDefineScopeStatement(ast *sql.DefineScopeStatement) (o
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-	nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+	nval := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ast.NS)}
 	e.txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
 
 	// Set the database
 	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-	dval := &sql.DefineDatabaseStatement{Name: ast.DB}
+	dval := &sql.DefineDatabaseStatement{Name: sql.NewIdent(ast.DB)}
 	e.txn.PutC(0, dkey.Encode(), dval.Encode(), nil)
 
 	// Set the scope
-	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name}
+	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name.ID}
 	_, err = e.txn.Put(0, skey.Encode(), ast.Encode())
 
 	return
@@ -153,18 +153,18 @@ func (e *executor) executeDefineTableStatement(ast *sql.DefineTableStatement) (o
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-	nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+	nval := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ast.NS)}
 	e.txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
 
 	// Set the database
 	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-	dval := &sql.DefineDatabaseStatement{Name: ast.DB}
+	dval := &sql.DefineDatabaseStatement{Name: sql.NewIdent(ast.DB)}
 	e.txn.PutC(0, dkey.Encode(), dval.Encode(), nil)
 
 	for _, TB := range ast.What {
 
 		// Set the table
-		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
+		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB}
 		if _, err = e.txn.Put(0, tkey.Encode(), ast.Encode()); err != nil {
 			return nil, err
 		}
@@ -179,23 +179,23 @@ func (e *executor) executeDefineFieldStatement(ast *sql.DefineFieldStatement) (o
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-	nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+	nval := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ast.NS)}
 	e.txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
 
 	// Set the database
 	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-	dval := &sql.DefineDatabaseStatement{Name: ast.DB}
+	dval := &sql.DefineDatabaseStatement{Name: sql.NewIdent(ast.DB)}
 	e.txn.PutC(0, dkey.Encode(), dval.Encode(), nil)
 
 	for _, TB := range ast.What {
 
 		// Set the table
-		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
+		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB}
 		tval := &sql.DefineTableStatement{What: ast.What}
 		e.txn.PutC(0, tkey.Encode(), tval.Encode(), nil)
 
 		// Set the field
-		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, FD: ast.Name}
+		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, FD: ast.Name.ID}
 		if _, err = e.txn.Put(0, fkey.Encode(), pack.Encode(ast)); err != nil {
 			return nil, err
 		}
@@ -210,37 +210,37 @@ func (e *executor) executeDefineIndexStatement(ast *sql.DefineIndexStatement) (o
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
-	nval := &sql.DefineNamespaceStatement{Name: ast.NS}
+	nval := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ast.NS)}
 	e.txn.PutC(0, nkey.Encode(), nval.Encode(), nil)
 
 	// Set the database
 	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.DB}
-	dval := &sql.DefineDatabaseStatement{Name: ast.DB}
+	dval := &sql.DefineDatabaseStatement{Name: sql.NewIdent(ast.DB)}
 	e.txn.PutC(0, dkey.Encode(), dval.Encode(), nil)
 
 	for _, TB := range ast.What {
 
 		// Set the table
-		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB}
+		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB}
 		tval := &sql.DefineTableStatement{What: ast.What}
 		e.txn.PutC(0, tkey.Encode(), tval.Encode(), nil)
 
 		// Set the index
-		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: ast.Name}
+		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: ast.Name.ID}
 		if _, err = e.txn.Put(0, ikey.Encode(), ast.Encode()); err != nil {
 			return nil, err
 		}
 
 		// Remove all index data
-		dbeg := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: keys.Prefix, FD: keys.Ignore}
-		dend := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, IX: keys.Suffix, FD: keys.Ignore}
+		dbeg := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: keys.Prefix, FD: keys.Ignore}
+		dend := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: keys.Suffix, FD: keys.Ignore}
 		if _, err = e.txn.DelR(0, dbeg.Encode(), dend.Encode(), 0); err != nil {
 			return nil, err
 		}
 
 		// Fetch the items
-		ibeg := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, ID: keys.Prefix}
-		iend := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB, ID: keys.Suffix}
+		ibeg := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, ID: keys.Prefix}
+		iend := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, ID: keys.Suffix}
 		kvs, _ := e.txn.GetR(0, ibeg.Encode(), iend.Encode(), 0)
 		for _, kv := range kvs {
 			doc := item.New(kv, e.txn, nil, e.ctx)

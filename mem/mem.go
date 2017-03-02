@@ -81,7 +81,7 @@ func (s *Store) GetNS(ns string) (val *sql.DefineNamespaceStatement, err error) 
 func (s *Store) AddNS(ns string) (err error) {
 
 	key := &keys.NS{KV: s.kv, NS: ns}
-	val := &sql.DefineNamespaceStatement{Name: ns}
+	val := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ns)}
 	s.tx.PutC(0, key.Encode(), val.Encode(), nil)
 
 	return
@@ -216,7 +216,7 @@ func (s *Store) AddDB(ns, db string) (err error) {
 	err = s.AddNS(ns)
 
 	key := &keys.DB{KV: s.kv, NS: ns, DB: db}
-	val := &sql.DefineDatabaseStatement{Name: db}
+	val := &sql.DefineDatabaseStatement{Name: sql.NewIdent(db)}
 	s.tx.PutC(0, key.Encode(), val.Encode(), nil)
 
 	return
@@ -433,7 +433,7 @@ func (s *Store) AddTB(ns, db, tb string) (err error) {
 	err = s.AddDB(ns, db)
 
 	key := &keys.TB{KV: s.kv, NS: ns, DB: db, TB: tb}
-	val := &sql.DefineTableStatement{What: []string{db}}
+	val := &sql.DefineTableStatement{What: sql.Tables{sql.NewTable(tb)}}
 	s.tx.PutC(0, key.Encode(), val.Encode(), nil)
 
 	return

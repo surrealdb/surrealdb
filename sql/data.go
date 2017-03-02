@@ -14,7 +14,7 @@
 
 package sql
 
-func (p *parser) parseData() (exp []Expr, err error) {
+func (p *parser) parseData() (exp Expr, err error) {
 
 	if tok, _, exi := p.mightBe(SET, DIFF, MERGE, CONTENT); exi {
 
@@ -48,14 +48,16 @@ func (p *parser) parseData() (exp []Expr, err error) {
 
 }
 
-func (p *parser) parseSet() (mul []Expr, err error) {
+func (p *parser) parseSet() (mul Expr, err error) {
+
+	out := DataExpression{}
 
 	for {
 
 		var tok Token
 		var lit string
 
-		one := &DataExpression{}
+		one := &ItemExpression{}
 
 		// The first part of a SET expression must
 		// always be an identifier, specifying a
@@ -92,7 +94,7 @@ func (p *parser) parseSet() (mul []Expr, err error) {
 		// Append the single SET data expression to
 		// the array of data expressions.
 
-		mul = append(mul, one)
+		out.Data = append(out.Data, one)
 
 		// Check to see if the next token is a comma
 		// and if not, then break out of the loop,
@@ -104,65 +106,59 @@ func (p *parser) parseSet() (mul []Expr, err error) {
 
 	}
 
-	return
+	return out, err
 
 }
 
-func (p *parser) parseDiff() (exp []Expr, err error) {
+func (p *parser) parseDiff() (exp *DiffExpression, err error) {
 
-	one := &DiffExpression{}
+	exp = &DiffExpression{}
 
 	tok, lit, err := p.shouldBe(ARRAY, PARAM)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	one.JSON, err = p.declare(tok, lit)
+	exp.Data, err = p.declare(tok, lit)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
-
-	exp = append(exp, one)
 
 	return
 
 }
 
-func (p *parser) parseMerge() (exp []Expr, err error) {
+func (p *parser) parseMerge() (exp *MergeExpression, err error) {
 
-	one := &MergeExpression{}
+	exp = &MergeExpression{}
 
 	tok, lit, err := p.shouldBe(JSON, PARAM)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	one.JSON, err = p.declare(tok, lit)
+	exp.Data, err = p.declare(tok, lit)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
-
-	exp = append(exp, one)
 
 	return
 
 }
 
-func (p *parser) parseContent() (exp []Expr, err error) {
+func (p *parser) parseContent() (exp *ContentExpression, err error) {
 
-	one := &ContentExpression{}
+	exp = &ContentExpression{}
 
 	tok, lit, err := p.shouldBe(JSON, PARAM)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
 
-	one.JSON, err = p.declare(tok, lit)
+	exp.Data, err = p.declare(tok, lit)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"json"}}
 	}
-
-	exp = append(exp, one)
 
 	return
 

@@ -16,10 +16,10 @@ package keys
 
 // LV ...
 type LV struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	LV interface{}
+	KV string
+	NS string
+	DB string
+	LV string
 }
 
 // init initialises the key

@@ -28,27 +28,15 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 
 	for {
 
-		var ok bool
-		var lit string
-		var val interface{}
+		var val *Ident
 
 		if p.is(tok, NAMESPACE, NS) {
 
-			tok, lit, err = p.shouldBe(IDENT, STRING, PARAM)
-			if err != nil {
-				return nil, &ParseError{Found: lit, Expected: []string{"namespace name"}}
+			if val, err = p.parseIdent(); err != nil {
+				return nil, err
 			}
 
-			switch tok {
-			default:
-				val, err = p.declare(STRING, lit)
-			case PARAM:
-				val, err = p.declare(PARAM, lit)
-			}
-
-			if stmt.NS, ok = val.(string); !ok || err != nil {
-				return nil, &ParseError{Found: lit, Expected: []string{"namespace name as a STRING"}}
-			}
+			stmt.NS = val.ID
 
 			if err = p.o.ns(stmt.NS); err != nil {
 				return nil, err
@@ -58,21 +46,11 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 
 		if p.is(tok, DATABASE, DB) {
 
-			tok, lit, err = p.shouldBe(IDENT, DATE, TIME, STRING, NUMBER, DOUBLE, PARAM)
-			if err != nil {
-				return nil, &ParseError{Found: lit, Expected: []string{"database name"}}
+			if val, err = p.parseIdent(); err != nil {
+				return nil, err
 			}
 
-			switch tok {
-			default:
-				val, err = p.declare(STRING, lit)
-			case PARAM:
-				val, err = p.declare(PARAM, lit)
-			}
-
-			if stmt.DB, ok = val.(string); !ok || err != nil {
-				return nil, &ParseError{Found: lit, Expected: []string{"database name as a STRING"}}
-			}
+			stmt.DB = val.ID
 
 			if err = p.o.db(stmt.DB); err != nil {
 				return nil, err

@@ -16,11 +16,11 @@ package keys
 
 // Point ...
 type Point struct {
-	KV interface{}
-	NS interface{}
-	DB interface{}
-	TB interface{}
-	IX interface{}
+	KV string
+	NS string
+	DB string
+	TB string
+	IX string
 	FD interface{}
 	ID interface{}
 }

@@ -22,7 +22,7 @@ func (p *parser) parseDefineDatabaseStatement() (stmt *DefineDatabaseStatement, 
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 
@@ -38,7 +38,7 @@ func (p *parser) parseRemoveDatabaseStatement() (stmt *RemoveDatabaseStatement, 
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseName(); err != nil {
+	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
 

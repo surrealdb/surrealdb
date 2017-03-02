@@ -16,8 +16,8 @@ package keys
 
 // NS ...
 type NS struct {
-	KV interface{}
-	NS interface{}
+	KV string
+	NS string
 }
 
 // init initialises the key

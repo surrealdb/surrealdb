@@ -16,7 +16,6 @@ package sql
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/abcum/cork"
 	"github.com/abcum/surreal/util/pack"
@@ -356,18 +355,18 @@ func (this *FuncExpression) UnmarshalCORK(src []byte) (err error) {
 }
 
 // --------------------------------------------------
-// DataExpression
+// ItemExpression
 // --------------------------------------------------
 
 func init() {
-	cork.Register(&DataExpression{})
+	cork.Register(&ItemExpression{})
 }
 
-func (this *DataExpression) ExtendCORK() byte {
+func (this *ItemExpression) ExtendCORK() byte {
 	return 0x23
 }
 
-func (this *DataExpression) MarshalCORK() (dst []byte, err error) {
+func (this *ItemExpression) MarshalCORK() (dst []byte, err error) {
 	b := bytes.NewBuffer(dst)
 	e := cork.NewEncoder(b)
 	e.Encode(this.LHS)
@@ -376,7 +375,7 @@ func (this *DataExpression) MarshalCORK() (dst []byte, err error) {
 	return b.Bytes(), nil
 }
 
-func (this *DataExpression) UnmarshalCORK(src []byte) (err error) {
+func (this *ItemExpression) UnmarshalCORK(src []byte) (err error) {
 	b := bytes.NewBuffer(src)
 	d := cork.NewDecoder(b)
 	d.Decode(&this.LHS)
@@ -524,6 +523,66 @@ func (this *SubpExpression) UnmarshalCORK(src []byte) (err error) {
 }
 
 // --------------------------------------------------
+// PermExpression
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&PermExpression{})
+}
+
+func (this *PermExpression) ExtendCORK() byte {
+	return 0x29
+}
+
+func (this *PermExpression) MarshalCORK() (dst []byte, err error) {
+	b := bytes.NewBuffer(dst)
+	e := cork.NewEncoder(b)
+	e.Encode(this.Select)
+	e.Encode(this.Create)
+	e.Encode(this.Update)
+	e.Encode(this.Delete)
+	e.Encode(this.Relate)
+	return b.Bytes(), nil
+}
+
+func (this *PermExpression) UnmarshalCORK(src []byte) (err error) {
+	b := bytes.NewBuffer(src)
+	d := cork.NewDecoder(b)
+	d.Decode(&this.Select)
+	d.Decode(&this.Create)
+	d.Decode(&this.Update)
+	d.Decode(&this.Delete)
+	d.Decode(&this.Relate)
+	return
+}
+
+// --------------------------------------------------
+// DataExpression
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&DataExpression{})
+}
+
+func (this *DataExpression) ExtendCORK() byte {
+	return 0x30
+}
+
+func (this *DataExpression) MarshalCORK() (dst []byte, err error) {
+	b := bytes.NewBuffer(dst)
+	e := cork.NewEncoder(b)
+	e.Encode(this.Data)
+	return b.Bytes(), nil
+}
+
+func (this *DataExpression) UnmarshalCORK(src []byte) (err error) {
+	b := bytes.NewBuffer(src)
+	d := cork.NewDecoder(b)
+	d.Decode(&this.Data)
+	return
+}
+
+// --------------------------------------------------
 // DiffExpression
 // --------------------------------------------------
 
@@ -532,20 +591,20 @@ func init() {
 }
 
 func (this *DiffExpression) ExtendCORK() byte {
-	return 0x29
+	return 0x31
 }
 
 func (this *DiffExpression) MarshalCORK() (dst []byte, err error) {
 	b := bytes.NewBuffer(dst)
 	e := cork.NewEncoder(b)
-	e.Encode(this.JSON)
+	e.Encode(this.Data)
 	return b.Bytes(), nil
 }
 
 func (this *DiffExpression) UnmarshalCORK(src []byte) (err error) {
 	b := bytes.NewBuffer(src)
 	d := cork.NewDecoder(b)
-	d.Decode(&this.JSON)
+	d.Decode(&this.Data)
 	return
 }
 
@@ -558,20 +617,20 @@ func init() {
 }
 
 func (this *MergeExpression) ExtendCORK() byte {
-	return 0x30
+	return 0x32
 }
 
 func (this *MergeExpression) MarshalCORK() (dst []byte, err error) {
 	b := bytes.NewBuffer(dst)
 	e := cork.NewEncoder(b)
-	e.Encode(this.JSON)
+	e.Encode(this.Data)
 	return b.Bytes(), nil
 }
 
 func (this *MergeExpression) UnmarshalCORK(src []byte) (err error) {
 	b := bytes.NewBuffer(src)
 	d := cork.NewDecoder(b)
-	d.Decode(&this.JSON)
+	d.Decode(&this.Data)
 	return
 }
 
@@ -584,20 +643,20 @@ func init() {
 }
 
 func (this *ContentExpression) ExtendCORK() byte {
-	return 0x31
+	return 0x33
 }
 
 func (this *ContentExpression) MarshalCORK() (dst []byte, err error) {
 	b := bytes.NewBuffer(dst)
 	e := cork.NewEncoder(b)
-	e.Encode(this.JSON)
+	e.Encode(this.Data)
 	return b.Bytes(), nil
 }
 
 func (this *ContentExpression) UnmarshalCORK(src []byte) (err error) {
 	b := bytes.NewBuffer(src)
 	d := cork.NewDecoder(b)
-	d.Decode(&this.JSON)
+	d.Decode(&this.Data)
 	return
 }
 
@@ -606,40 +665,6 @@ func (this *ContentExpression) UnmarshalCORK(src []byte) (err error) {
 // ##################################################
 // ##################################################
 // ##################################################
-
-// --------------------------------------------------
-// Ident
-// --------------------------------------------------
-
-func init() {
-	cork.Register(&Ident{})
-}
-
-func (this Ident) String() string {
-	return this.ID
-}
-
-func (this *Ident) ExtendCORK() byte {
-	return 0x51
-}
-
-func (this *Ident) MarshalCORK() (dst []byte, err error) {
-	b := bytes.NewBuffer(dst)
-	e := cork.NewEncoder(b)
-	e.Encode(this.ID)
-	return b.Bytes(), nil
-}
-
-func (this *Ident) UnmarshalCORK(src []byte) (err error) {
-	b := bytes.NewBuffer(src)
-	d := cork.NewDecoder(b)
-	d.Decode(&this.ID)
-	return
-}
-
-func (this Ident) MarshalText() (data []byte, err error) {
-	return []byte("ID:" + this.ID), err
-}
 
 // --------------------------------------------------
 // Param
@@ -649,12 +674,8 @@ func init() {
 	cork.Register(&Param{})
 }
 
-func (this Param) String() string {
-	return this.ID
-}
-
 func (this *Param) ExtendCORK() byte {
-	return 0x52
+	return 0x51
 }
 
 func (this *Param) MarshalCORK() (dst []byte, err error) {
@@ -676,6 +697,66 @@ func (this Param) MarshalText() (data []byte, err error) {
 }
 
 // --------------------------------------------------
+// Value
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&Value{})
+}
+
+func (this *Value) ExtendCORK() byte {
+	return 0x52
+}
+
+func (this *Value) MarshalCORK() (dst []byte, err error) {
+	b := bytes.NewBuffer(dst)
+	e := cork.NewEncoder(b)
+	e.Encode(this.ID)
+	return b.Bytes(), nil
+}
+
+func (this *Value) UnmarshalCORK(src []byte) (err error) {
+	b := bytes.NewBuffer(src)
+	d := cork.NewDecoder(b)
+	d.Decode(&this.ID)
+	return
+}
+
+func (this Value) MarshalText() (data []byte, err error) {
+	return []byte(this.ID), err
+}
+
+// --------------------------------------------------
+// Ident
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&Ident{})
+}
+
+func (this *Ident) ExtendCORK() byte {
+	return 0x53
+}
+
+func (this *Ident) MarshalCORK() (dst []byte, err error) {
+	b := bytes.NewBuffer(dst)
+	e := cork.NewEncoder(b)
+	e.Encode(this.ID)
+	return b.Bytes(), nil
+}
+
+func (this *Ident) UnmarshalCORK(src []byte) (err error) {
+	b := bytes.NewBuffer(src)
+	d := cork.NewDecoder(b)
+	d.Decode(&this.ID)
+	return
+}
+
+func (this Ident) MarshalText() (data []byte, err error) {
+	return []byte("ID:" + this.ID), err
+}
+
+// --------------------------------------------------
 // Table
 // --------------------------------------------------
 
@@ -683,12 +764,8 @@ func init() {
 	cork.Register(&Table{})
 }
 
-func (this Table) String() string {
-	return this.TB
-}
-
 func (this *Table) ExtendCORK() byte {
-	return 0x53
+	return 0x54
 }
 
 func (this *Table) MarshalCORK() (dst []byte, err error) {
@@ -721,12 +798,8 @@ func (this Thing) Bytes() []byte {
 	return []byte(this.String())
 }
 
-func (this Thing) String() string {
-	return fmt.Sprintf("@%s:%v", this.TB, this.ID)
-}
-
 func (this *Thing) ExtendCORK() byte {
-	return 0x54
+	return 0x55
 }
 
 func (this *Thing) MarshalCORK() (dst []byte, err error) {
@@ -1236,7 +1309,7 @@ func (this *DefineTokenStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineTokenStatement) ExtendCORK() byte {
-	return 0x81
+	return 0x83
 }
 
 func (this *DefineTokenStatement) MarshalCORK() (dst []byte, err error) {
@@ -1276,7 +1349,7 @@ func (this *RemoveTokenStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveTokenStatement) ExtendCORK() byte {
-	return 0x82
+	return 0x84
 }
 
 func (this *RemoveTokenStatement) MarshalCORK() (dst []byte, err error) {
@@ -1312,7 +1385,7 @@ func (this *DefineScopeStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineScopeStatement) ExtendCORK() byte {
-	return 0x81
+	return 0x85
 }
 
 func (this *DefineScopeStatement) MarshalCORK() (dst []byte, err error) {
@@ -1354,7 +1427,7 @@ func (this *RemoveScopeStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveScopeStatement) ExtendCORK() byte {
-	return 0x82
+	return 0x86
 }
 
 func (this *RemoveScopeStatement) MarshalCORK() (dst []byte, err error) {
@@ -1388,7 +1461,7 @@ func (this *DefineTableStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineTableStatement) ExtendCORK() byte {
-	return 0x83
+	return 0x87
 }
 
 func (this *DefineTableStatement) MarshalCORK() (dst []byte, err error) {
@@ -1424,7 +1497,7 @@ func (this *RemoveTableStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveTableStatement) ExtendCORK() byte {
-	return 0x84
+	return 0x88
 }
 
 func (this *RemoveTableStatement) MarshalCORK() (dst []byte, err error) {
@@ -1458,7 +1531,7 @@ func (this *DefineFieldStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineFieldStatement) ExtendCORK() byte {
-	return 0x85
+	return 0x89
 }
 
 func (this *DefineFieldStatement) MarshalCORK() (dst []byte, err error) {
@@ -1516,7 +1589,7 @@ func (this *RemoveFieldStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveFieldStatement) ExtendCORK() byte {
-	return 0x86
+	return 0x90
 }
 
 func (this *RemoveFieldStatement) MarshalCORK() (dst []byte, err error) {
@@ -1552,7 +1625,7 @@ func (this *DefineIndexStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineIndexStatement) ExtendCORK() byte {
-	return 0x87
+	return 0x91
 }
 
 func (this *DefineIndexStatement) MarshalCORK() (dst []byte, err error) {
@@ -1592,7 +1665,7 @@ func (this *RemoveIndexStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveIndexStatement) ExtendCORK() byte {
-	return 0x88
+	return 0x92
 }
 
 func (this *RemoveIndexStatement) MarshalCORK() (dst []byte, err error) {
@@ -1628,7 +1701,7 @@ func (this *DefineViewStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineViewStatement) ExtendCORK() byte {
-	return 0x89
+	return 0x93
 }
 
 func (this *DefineViewStatement) MarshalCORK() (dst []byte, err error) {
@@ -1670,7 +1743,7 @@ func (this *RemoveViewStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveViewStatement) ExtendCORK() byte {
-	return 0x90
+	return 0x94
 }
 
 func (this *RemoveViewStatement) MarshalCORK() (dst []byte, err error) {
