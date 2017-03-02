@@ -180,6 +180,7 @@ const (
 	SOMECONTAINEDIN
 	START
 	TABLE
+	TIMEOUT
 	TO
 	TOKEN
 	TRANSACTION
@@ -346,6 +347,7 @@ var tokens = [...]string{
 	SOMECONTAINEDIN: "SOMECONTAINEDIN",
 	START:           "START",
 	TABLE:           "TABLE",
+	TIMEOUT:         "TIMEOUT",
 	TO:              "TO",
 	TOKEN:           "TOKEN",
 	TRANSACTION:     "TRANSACTION",

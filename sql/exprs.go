@@ -367,6 +367,16 @@ func (p *parser) parseDuration() (time.Duration, error) {
 
 }
 
+func (p *parser) parseTimeout() (time.Duration, error) {
+
+	if _, _, exi := p.mightBe(TIMEOUT); !exi {
+		return 0, nil
+	}
+
+	return p.parseDuration()
+
+}
+
 func (p *parser) parseBcrypt() ([]byte, error) {
 
 	_, lit, err := p.shouldBe(STRING)

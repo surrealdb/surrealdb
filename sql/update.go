@@ -45,6 +45,10 @@ func (p *parser) parseUpdateStatement() (stmt *UpdateStatement, err error) {
 		return nil, err
 	}
 
+	if stmt.Timeout, err = p.parseTimeout(); err != nil {
+		return nil, err
+	}
+
 	if _, _, err = p.shouldBe(EOF, RPAREN, SEMICOLON); err != nil {
 		return nil, err
 	}

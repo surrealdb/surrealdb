@@ -591,6 +591,9 @@ func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{
 					if chn := s.next(); chn == 's' {
 						tok = DURATION
 						buf.WriteRune(chn)
+					} else if ch == 'm' {
+						tok = DURATION
+						s.undo()
 					} else {
 						s.undo()
 					}

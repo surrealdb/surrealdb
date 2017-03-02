@@ -1,0 +1,7 @@
+[
+  { "name": "Select" },
+  { "name": "Create" },
+  { "name": "Update" },
+  { "name": "Delete" },
+  { "name": "Relate" }
+]

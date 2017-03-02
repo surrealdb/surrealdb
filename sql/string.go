@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 func orNil(v interface{}) string {
@@ -147,6 +148,15 @@ func stringFromInterface(v interface{}, y, n string) string {
 	}
 }
 
+func stringFromDuration(v time.Duration, y, n string) string {
+	switch v {
+	case 0:
+		return n
+	default:
+		return y
+	}
+}
+
 // ---------------------------------------------
 // Statements
 // ---------------------------------------------
@@ -199,7 +209,7 @@ func (this ReturnStatement) String() string {
 }
 
 func (this SelectStatement) String() string {
-	return fmt.Sprintf("SELECT %v FROM %v%v%v%v%v%v%v",
+	return fmt.Sprintf("SELECT %v FROM %v%v%v%v%v%v%v%v",
 		this.Expr,
 		this.What,
 		stringFromInterface(this.Cond, fmt.Sprintf(" WHERE %v", this.Cond), ""),
@@ -208,43 +218,48 @@ func (this SelectStatement) String() string {
 		stringFromInterface(this.Limit, fmt.Sprintf(" LIMIT %v", this.Limit), ""),
 		stringFromInterface(this.Start, fmt.Sprintf(" START %v", this.Start), ""),
 		stringFromInterface(this.Version, fmt.Sprintf(" VERSION %v", this.Version), ""),
+		stringFromDuration(this.Timeout, fmt.Sprintf(" TIMEOUT %v", this.Timeout.String()), ""),
 	)
 }
 
 func (this CreateStatement) String() string {
-	return fmt.Sprintf("CREATE %v%v RETURN %v",
+	return fmt.Sprintf("CREATE %v%v RETURN %v%v",
 		this.What,
 		this.Data,
 		this.Echo,
+		stringFromDuration(this.Timeout, fmt.Sprintf(" TIMEOUT %v", this.Timeout.String()), ""),
 	)
 }
 
 func (this UpdateStatement) String() string {
-	return fmt.Sprintf("CREATE %v%v%v RETURN %v",
+	return fmt.Sprintf("CREATE %v%v%v RETURN %v%v",
 		this.What,
 		this.Data,
 		this.Cond,
 		this.Echo,
+		stringFromDuration(this.Timeout, fmt.Sprintf(" TIMEOUT %v", this.Timeout.String()), ""),
 	)
 }
 
 func (this DeleteStatement) String() string {
-	return fmt.Sprintf("DELETE %v%v%v RETURN %v",
+	return fmt.Sprintf("DELETE %v%v%v RETURN %v%v",
 		stringFromBool(this.Hard, "AND EXPUNGE ", ""),
 		this.What,
 		this.Cond,
 		this.Echo,
+		stringFromDuration(this.Timeout, fmt.Sprintf(" TIMEOUT %v", this.Timeout.String()), ""),
 	)
 }
 
 func (this RelateStatement) String() string {
-	return fmt.Sprintf("RELATE %v FROM %v WITH %v%v%v RETURN %v",
+	return fmt.Sprintf("RELATE %v FROM %v WITH %v%v%v RETURN %v%v",
 		this.Type,
 		this.From,
 		this.With,
 		this.Data,
 		stringFromBool(this.Uniq, " UNIQUE", ""),
 		this.Echo,
+		stringFromDuration(this.Timeout, fmt.Sprintf(" TIMEOUT %v", this.Timeout.String()), ""),
 	)
 }
 

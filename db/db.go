@@ -338,6 +338,14 @@ func (e *executor) operate(ast sql.Statement) (res []interface{}, err error) {
 
 	}
 
+	// Mark the beginning of this statement so we
+	// can monitor the running time, and ensure
+	// it runs no longer than specified.
+
+	if stm, ok := ast.(sql.KillableStatement); ok {
+		stm.Begin()
+	}
+
 	// Execute the defined statement, receiving the
 	// result set, and any errors which occured
 	// while processing the query.
@@ -417,6 +425,14 @@ func (e *executor) operate(ast sql.Statement) (res []interface{}, err error) {
 			e.txn.Commit()
 			e.txn = nil
 		}
+	}
+
+	// The statement has successfully cancelled
+	// or committed, so stop all the transaction
+	// timeout timers if any were set.
+
+	if stm, ok := ast.(sql.KillableStatement); ok {
+		stm.Cease()
 	}
 
 	return

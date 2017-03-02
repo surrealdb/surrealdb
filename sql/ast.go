@@ -35,6 +35,21 @@ type Statement interface{}
 type Statements []Statement
 
 // --------------------------------------------------
+// Other
+// --------------------------------------------------
+
+type KillableStatement interface {
+	Begin()
+	Cease()
+	Timedout() <-chan struct{}
+}
+
+type killable struct {
+	ticker *time.Timer
+	closer chan struct{}
+}
+
+// --------------------------------------------------
 // Trans
 // --------------------------------------------------
 
@@ -108,63 +123,73 @@ type LiveStatement struct {
 
 // SelectStatement represents a SQL SELECT statement.
 type SelectStatement struct {
-	KV      string `cork:"-" codec:"-"`
-	NS      string `cork:"-" codec:"-"`
-	DB      string `cork:"-" codec:"-"`
-	Expr    Fields `cork:"expr" codec:"expr"`
-	What    Exprs  `cork:"what" codec:"what"`
-	Cond    Expr   `cork:"cond" codec:"cond"`
-	Group   Groups `cork:"group" codec:"group"`
-	Order   Orders `cork:"order" codec:"order"`
-	Limit   Expr   `cork:"limit" codec:"limit"`
-	Start   Expr   `cork:"start" codec:"start"`
-	Version Expr   `cork:"version" codec:"version"`
+	killable
+	KV      string        `cork:"-" codec:"-"`
+	NS      string        `cork:"-" codec:"-"`
+	DB      string        `cork:"-" codec:"-"`
+	Expr    Fields        `cork:"expr" codec:"expr"`
+	What    Exprs         `cork:"what" codec:"what"`
+	Cond    Expr          `cork:"cond" codec:"cond"`
+	Group   Groups        `cork:"group" codec:"group"`
+	Order   Orders        `cork:"order" codec:"order"`
+	Limit   Expr          `cork:"limit" codec:"limit"`
+	Start   Expr          `cork:"start" codec:"start"`
+	Version Expr          `cork:"version" codec:"version"`
+	Timeout time.Duration `cork:"timeout" codec:"timeout"`
 }
 
 // CreateStatement represents a SQL CREATE statement.
 type CreateStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	What Exprs  `cork:"what" codec:"what"`
-	Data Expr   `cork:"data" codec:"data"`
-	Echo Token  `cork:"echo" codec:"echo"`
+	killable
+	KV      string        `cork:"-" codec:"-"`
+	NS      string        `cork:"-" codec:"-"`
+	DB      string        `cork:"-" codec:"-"`
+	What    Exprs         `cork:"what" codec:"what"`
+	Data    Expr          `cork:"data" codec:"data"`
+	Echo    Token         `cork:"echo" codec:"echo"`
+	Timeout time.Duration `cork:"timeout" codec:"timeout"`
 }
 
 // UpdateStatement represents a SQL UPDATE statement.
 type UpdateStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Hard bool   `cork:"hard" codec:"hard"`
-	What Exprs  `cork:"what" codec:"what"`
-	Data Expr   `cork:"data" codec:"data"`
-	Cond Expr   `cork:"cond" codec:"cond"`
-	Echo Token  `cork:"echo" codec:"echo"`
+	killable
+	KV      string        `cork:"-" codec:"-"`
+	NS      string        `cork:"-" codec:"-"`
+	DB      string        `cork:"-" codec:"-"`
+	Hard    bool          `cork:"hard" codec:"hard"`
+	What    Exprs         `cork:"what" codec:"what"`
+	Data    Expr          `cork:"data" codec:"data"`
+	Cond    Expr          `cork:"cond" codec:"cond"`
+	Echo    Token         `cork:"echo" codec:"echo"`
+	Timeout time.Duration `cork:"timeout" codec:"timeout"`
 }
 
 // DeleteStatement represents a SQL DELETE statement.
 type DeleteStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Hard bool   `cork:"hard" codec:"hard"`
-	What Exprs  `cork:"what" codec:"what"`
-	Cond Expr   `cork:"cond" codec:"cond"`
-	Echo Token  `cork:"echo" codec:"echo"`
+	killable
+	KV      string        `cork:"-" codec:"-"`
+	NS      string        `cork:"-" codec:"-"`
+	DB      string        `cork:"-" codec:"-"`
+	Hard    bool          `cork:"hard" codec:"hard"`
+	What    Exprs         `cork:"what" codec:"what"`
+	Cond    Expr          `cork:"cond" codec:"cond"`
+	Echo    Token         `cork:"echo" codec:"echo"`
+	Timeout time.Duration `cork:"timeout" codec:"timeout"`
 }
 
 // RelateStatement represents a SQL RELATE statement.
 type RelateStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Type Expr   `cork:"type" codec:"type"`
-	From Exprs  `cork:"from" codec:"from"`
-	With Exprs  `cork:"with" codec:"with"`
-	Data Expr   `cork:"data" codec:"data"`
-	Uniq bool   `cork:"uniq" codec:"uniq"`
-	Echo Token  `cork:"echo" codec:"echo"`
+	killable
+	KV      string        `cork:"-" codec:"-"`
+	NS      string        `cork:"-" codec:"-"`
+	DB      string        `cork:"-" codec:"-"`
+	Type    Expr          `cork:"type" codec:"type"`
+	From    Exprs         `cork:"from" codec:"from"`
+	With    Exprs         `cork:"with" codec:"with"`
+	Data    Expr          `cork:"data" codec:"data"`
+	Uniq    bool          `cork:"uniq" codec:"uniq"`
+	Echo    Token         `cork:"echo" codec:"echo"`
+	Timeout time.Duration `cork:"timeout" codec:"timeout"`
 }
 
 // --------------------------------------------------
