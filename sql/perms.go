@@ -16,7 +16,13 @@ package sql
 
 func (p *parser) parsePerms() (exp *PermExpression, err error) {
 
-	exp = &PermExpression{}
+	exp = &PermExpression{
+		Select: false,
+		Create: false,
+		Update: false,
+		Delete: false,
+		Relate: false,
+	}
 
 	tok, _, err := p.shouldBe(FOR, NONE, FULL, WHERE)
 	if err != nil {
