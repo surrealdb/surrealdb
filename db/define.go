@@ -15,6 +15,8 @@
 package db
 
 import (
+	"context"
+
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/abcum/surreal/sql"
@@ -24,7 +26,7 @@ import (
 	"github.com/abcum/surreal/util/rand"
 )
 
-func (e *executor) executeDefineNamespaceStatement(ast *sql.DefineNamespaceStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineNamespaceStatement(ctx context.Context, ast *sql.DefineNamespaceStatement) (out []interface{}, err error) {
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.Name.ID}
@@ -34,7 +36,7 @@ func (e *executor) executeDefineNamespaceStatement(ast *sql.DefineNamespaceState
 
 }
 
-func (e *executor) executeDefineDatabaseStatement(ast *sql.DefineDatabaseStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineDatabaseStatement(ctx context.Context, ast *sql.DefineDatabaseStatement) (out []interface{}, err error) {
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
@@ -49,7 +51,7 @@ func (e *executor) executeDefineDatabaseStatement(ast *sql.DefineDatabaseStateme
 
 }
 
-func (e *executor) executeDefineLoginStatement(ast *sql.DefineLoginStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineLoginStatement(ctx context.Context, ast *sql.DefineLoginStatement) (out []interface{}, err error) {
 
 	ast.Code = rand.New(128)
 
@@ -90,7 +92,7 @@ func (e *executor) executeDefineLoginStatement(ast *sql.DefineLoginStatement) (o
 
 }
 
-func (e *executor) executeDefineTokenStatement(ast *sql.DefineTokenStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineTokenStatement(ctx context.Context, ast *sql.DefineTokenStatement) (out []interface{}, err error) {
 
 	if ast.Kind == sql.NAMESPACE {
 
@@ -127,7 +129,7 @@ func (e *executor) executeDefineTokenStatement(ast *sql.DefineTokenStatement) (o
 
 }
 
-func (e *executor) executeDefineScopeStatement(ast *sql.DefineScopeStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineScopeStatement(ctx context.Context, ast *sql.DefineScopeStatement) (out []interface{}, err error) {
 
 	ast.Code = rand.New(128)
 
@@ -149,7 +151,7 @@ func (e *executor) executeDefineScopeStatement(ast *sql.DefineScopeStatement) (o
 
 }
 
-func (e *executor) executeDefineTableStatement(ast *sql.DefineTableStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineTableStatement(ctx context.Context, ast *sql.DefineTableStatement) (out []interface{}, err error) {
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
@@ -175,7 +177,7 @@ func (e *executor) executeDefineTableStatement(ast *sql.DefineTableStatement) (o
 
 }
 
-func (e *executor) executeDefineFieldStatement(ast *sql.DefineFieldStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineFieldStatement(ctx context.Context, ast *sql.DefineFieldStatement) (out []interface{}, err error) {
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}
@@ -206,7 +208,7 @@ func (e *executor) executeDefineFieldStatement(ast *sql.DefineFieldStatement) (o
 
 }
 
-func (e *executor) executeDefineIndexStatement(ast *sql.DefineIndexStatement) (out []interface{}, err error) {
+func (e *executor) executeDefineIndexStatement(ctx context.Context, ast *sql.DefineIndexStatement) (out []interface{}, err error) {
 
 	// Set the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.NS}

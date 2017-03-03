@@ -15,12 +15,14 @@
 package db
 
 import (
+	"context"
+
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
 )
 
-func (e *executor) executeSelectStatement(ast *sql.SelectStatement) (out []interface{}, err error) {
+func (e *executor) executeSelectStatement(ctx context.Context, ast *sql.SelectStatement) (out []interface{}, err error) {
 
 	for k, w := range ast.What {
 		if what, ok := w.(*sql.Param); ok {

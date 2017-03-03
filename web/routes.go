@@ -45,7 +45,7 @@ func start(c *fibre.Context, i int64) int64 {
 	return i
 }
 
-func trace(c *fibre.Context, i time.Time) time.Time {
+func versn(c *fibre.Context, i time.Time) time.Time {
 	if s := c.Query("version"); len(s) > 0 {
 		if x, err := time.Parse(sql.RFCNano, s); err == nil {
 			return x
@@ -244,11 +244,11 @@ func routes(s *fibre.Fibre) {
 
 	s.Get("/key/:class/:id", func(c *fibre.Context) error {
 
-		txt := "SELECT * FROM $thing VERSION $trace"
+		txt := "SELECT * FROM $thing VERSION $versn"
 
 		res, err := db.Execute(c, txt, map[string]interface{}{
 			"thing": sql.NewThing(c.Param("class"), c.Param("id")),
-			"trace": trace(c, time.Now()),
+			"versn": versn(c, time.Now()),
 		})
 
 		return show.Output(c, c.Param("class"), show.One, show.Select, res, err)

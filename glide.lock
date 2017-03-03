@@ -1,5 +1,5 @@
 hash: 323da77f9dc4a58b21e5b955a28edf6d4489cc74d3d6e61a4b2a60bdfe373b70
-updated: 2017-02-24T00:48:37.913219964Z
+updated: 2017-03-03T21:38:13.520578616Z
 imports:
 - name: cloud.google.com/go
   version: 9b68cf4865e93f379a337b7e957f33de60397a48
@@ -12,12 +12,13 @@ imports:
   - logging
   - logging/apiv2
   - logging/internal
+  - trace
 - name: github.com/abcum/cork
   version: 023d8293ed77a01ba325b0232e11e5f8bacea59c
 - name: github.com/abcum/emitr
   version: 67359a63b282c8056e52cf25488937aaddbc2a8b
 - name: github.com/abcum/fibre
-  version: cfe61e4d3b8a1085f93e82e2fa5f04cac5b0a6f2
+  version: f00fdced46786a5a0a78ad417649e1b0977e21b6
   subpackages:
   - mw
 - name: github.com/abcum/ptree
@@ -99,7 +100,7 @@ imports:
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: 0b729df06cb29cf7a3ff59b876e9a2ecb7fac2b1
+  version: eda6b320244f0700772bb765282381d17495e7d3
 - name: github.com/mitchellh/mapstructure
   version: db1efb556f84b25a0a13a04aad883943538ad2e0
 - name: github.com/newrelic/go-agent
@@ -121,9 +122,9 @@ imports:
   subpackages:
   - diffmatchpatch
 - name: github.com/Sirupsen/logrus
-  version: c078b1e43f58d563c74cebe63c85789e76ddb627
+  version: 0208149b40d863d2c1a2f8fe5753096a9cf2cc8b
 - name: github.com/spf13/cobra
-  version: 92ea23a837e66f46ac9e7d04fa826602b7b0a42d
+  version: fcd0c5a1df88f5d6784cb4feead962c3f3d0b66c
 - name: github.com/spf13/pflag
   version: 9ff6c6923cfffbcd502984b8e0c80539a94968b7
 - name: github.com/ugorji/go
@@ -131,18 +132,18 @@ imports:
   subpackages:
   - codec
 - name: github.com/yuin/gopher-lua
-  version: eed1c7917d2f4a7bbed5e9bf6a0ce64cbd2918c5
+  version: 65fb8eeb2aa6d29a7b654d61afd1a07ce3897cc9
   subpackages:
   - ast
   - parse
   - pm
 - name: golang.org/x/crypto
-  version: 453249f01cfeb54c3d549ddb75ff152ca243f9d8
+  version: 40541ccb1c6e64c947ed6f606b8a6cb4b67d7436
   subpackages:
   - bcrypt
   - blowfish
 - name: golang.org/x/net
-  version: dd2d9a67c97da0afa00d5726e28086007a0acce5
+  version: 906cda9512f77671ab44f8c8563b13a8e707b230
   subpackages:
   - context
   - context/ctxhttp
@@ -153,19 +154,27 @@ imports:
   - lex/httplex
   - trace
 - name: golang.org/x/oauth2
-  version: b9780ec78894ab900c062d58ee3076cd9b2a4501
+  version: efb10a30610e617dbb17fc243f4cc61a8cfa2903
   subpackages:
   - google
   - internal
   - jws
   - jwt
 - name: golang.org/x/sys
-  version: e4594059fe4cde2daf423055a596c2cd1e6c9adf
+  version: e48874b42435b4347fc52bdee0424a52abc974d7
   subpackages:
   - unix
-- name: google.golang.org/api
-  version: 64485db7e8c8be51e572801d06cdbcfadd3546c1
+- name: golang.org/x/time
+  version: f51c12702a4d776e4c1fa9b0fabab841babae631
   subpackages:
+  - rate
+- name: google.golang.org/api
+  version: f786854525c2e5b0b49c2a301b0ff076d2ae20df
+  subpackages:
+  - cloudtrace/v1
+  - gensupport
+  - googleapi
+  - googleapi/internal/uritemplates
   - googleapi/transport
   - internal
   - iterator
@@ -173,7 +182,7 @@ imports:
   - support/bundler
   - transport
 - name: google.golang.org/appengine
-  version: 3a452f9e00122ead39586d68ffdb9c6e1326af3c
+  version: 5403c08c6e8fb3b2dc1209d2d833d8e8ac8240de
   subpackages:
   - internal
   - internal/app_identity
@@ -187,7 +196,7 @@ imports:
   - socket
   - urlfetch
 - name: google.golang.org/genproto
-  version: dee11a626cb8e7ff045ac9413dcd8a92e72f5863
+  version: 1e95789587db7d93ebbaa5eb65da17d3dbf8ab64
   subpackages:
   - googleapis/api/annotations
   - googleapis/api/label
@@ -197,7 +206,7 @@ imports:
   - googleapis/logging/v2
   - googleapis/rpc/status
 - name: google.golang.org/grpc
-  version: 34384f34de585705f1a6783a158d2ec8af29f618
+  version: 1dab93372523195731c738b0f0cb4e452228e959
   subpackages:
   - codes
   - credentials
@@ -214,7 +223,7 @@ imports:
   version: 4654dfbb6ad53cb5e27f37d99b02e16c1872fbbb
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: b9bcb1da229a59cc1e1d168401662cb6450aae08
+  version: 7d94d732be268c4904141f8b8604eb2d6d6544a1
   subpackages:
   - js
 - name: github.com/jtolds/gls

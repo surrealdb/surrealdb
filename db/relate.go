@@ -15,10 +15,12 @@
 package db
 
 import (
+	"context"
+
 	"github.com/abcum/surreal/sql"
 )
 
-func (e *executor) executeRelateStatement(ast *sql.RelateStatement) (out []interface{}, err error) {
+func (e *executor) executeRelateStatement(ctx context.Context, ast *sql.RelateStatement) (out []interface{}, err error) {
 
 	return nil, nil
 

@@ -15,26 +15,28 @@
 package db
 
 import (
+	"context"
+
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 )
 
-func (e *executor) executeInfoStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoStatement(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	switch ast.Kind {
 	case sql.NAMESPACE:
-		return e.executeInfoNSStatement(ast)
+		return e.executeInfoNSStatement(ctx, ast)
 	case sql.DATABASE:
-		return e.executeInfoDBStatement(ast)
+		return e.executeInfoDBStatement(ctx, ast)
 	case sql.TABLE:
-		return e.executeInfoTBStatement(ast)
+		return e.executeInfoTBStatement(ctx, ast)
 	}
 
 	return
 
 }
 
-func (e *executor) executeInfoNSStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoNSStatement(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	db, err := e.mem.AllDB(ast.NS)
 	if err != nil {
@@ -74,7 +76,7 @@ func (e *executor) executeInfoNSStatement(ast *sql.InfoStatement) (out []interfa
 
 }
 
-func (e *executor) executeInfoDBStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoDBStatement(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	tb, err := e.mem.AllTB(ast.NS, ast.DB)
 	if err != nil {
@@ -114,7 +116,7 @@ func (e *executor) executeInfoDBStatement(ast *sql.InfoStatement) (out []interfa
 
 }
 
-func (e *executor) executeInfoTBStatement(ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoTBStatement(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	tb, err := e.mem.GetTB(ast.NS, ast.DB, ast.What.TB)
 	if err != nil {

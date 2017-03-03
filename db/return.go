@@ -15,10 +15,12 @@
 package db
 
 import (
+	"context"
+
 	"github.com/abcum/surreal/sql"
 )
 
-func (e *executor) executeReturnStatement(ast *sql.ReturnStatement) (out []interface{}, err error) {
+func (e *executor) executeReturnStatement(ctx context.Context, ast *sql.ReturnStatement) (out []interface{}, err error) {
 
 	switch what := ast.What.(type) {
 	default:

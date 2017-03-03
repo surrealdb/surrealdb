@@ -16,13 +16,16 @@ package db
 
 import (
 	"fmt"
+
+	"context"
+
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
 	"github.com/abcum/surreal/util/uuid"
 )
 
-func (e *executor) executeCreateStatement(ast *sql.CreateStatement) (out []interface{}, err error) {
+func (e *executor) executeCreateStatement(ctx context.Context, ast *sql.CreateStatement) (out []interface{}, err error) {
 
 	for k, w := range ast.What {
 		if what, ok := w.(*sql.Param); ok {

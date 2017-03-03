@@ -15,6 +15,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"time"
@@ -29,6 +30,8 @@ import (
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
+
+	"cloud.google.com/go/trace"
 
 	_ "github.com/abcum/surreal/kvs/rixxdb"
 	// _ "github.com/abcum/surreal/kvs/dendro"
@@ -91,6 +94,11 @@ func Begin(rw bool) (txn kvs.TX, err error) {
 // the underlying data layer.
 func Execute(ctx *fibre.Context, txt interface{}, vars map[string]interface{}) (out []*Response, err error) {
 
+	span := trace.FromContext(ctx.Context()).NewChild("db.Execute")
+	nctx := trace.NewContext(ctx.Context(), span)
+	ctx = ctx.WithContext(nctx)
+	defer span.Finish()
+
 	// If no preset variables have been defined
 	// then ensure that the variables is
 	// instantiated for future use.
@@ -123,11 +131,16 @@ func Execute(ctx *fibre.Context, txt interface{}, vars map[string]interface{}) (
 // data layer.
 func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (out []*Response, err error) {
 
+	span := trace.FromContext(ctx.Context()).NewChild("db.Process")
+	nctx := trace.NewContext(ctx.Context(), span)
+	ctx = ctx.WithContext(nctx)
+	defer span.Finish()
+
 	// Create 2 channels, one for force quitting
 	// the query processor, and the other for
 	// receiving and buffering any query results.
 
-	quit := make(chan bool, 1)
+	quit := make(chan bool)
 	recv := make(chan *Response)
 
 	// Ensure that the force quit channel is auto
@@ -164,7 +177,7 @@ func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 
 	defer exec.done()
 
-	go exec.execute(quit, recv)
+	go exec.execute(ctx.Context(), quit, recv)
 
 	// Wait for all of the processed queries to
 	// return results, buffer the output, and
@@ -178,7 +191,7 @@ func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 
 }
 
-func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
+func (e *executor) execute(ctx context.Context, quit <-chan bool, send chan<- *Response) {
 
 	var err error
 	var now time.Time
@@ -228,6 +241,9 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 
 		default:
 
+			trc := trace.FromContext(ctx).NewChild(fmt.Sprint(stm))
+			ctx := trace.NewContext(ctx, trc)
+
 			// If we are not inside a global transaction
 			// then reset the error to nil so that the
 			// next statement is not ignored.
@@ -253,12 +269,15 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			switch stm.(type) {
 			case *sql.BeginStatement:
 				err = e.begin(true)
+				trc.Finish()
 				continue
 			case *sql.CancelStatement:
 				err, buf = e.cancel(buf, err, send)
+				trc.Finish()
 				continue
 			case *sql.CommitStatement:
 				err, buf = e.commit(buf, err, send)
+				trc.Finish()
 				continue
 			}
 
@@ -267,7 +286,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 			// subsequent statements in the transaction.
 
 			if err == nil {
-				res, err = e.operate(stm)
+				res, err = e.operate(ctx, stm)
 			} else {
 				res, err = []interface{}{}, QueryNotExecuted
 			}
@@ -285,7 +304,6 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 
 			if e.txn == nil {
 				send <- rsp
-				continue
 			}
 
 			// If we are inside a global transaction we
@@ -299,8 +317,9 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 				default:
 					buf = append(buf, rsp)
 				}
-				continue
 			}
+
+			trc.Finish()
 
 		}
 
@@ -308,7 +327,7 @@ func (e *executor) execute(quit <-chan bool, send chan<- *Response) {
 
 }
 
-func (e *executor) operate(ast sql.Statement) (res []interface{}, err error) {
+func (e *executor) operate(ctx context.Context, ast sql.Statement) (res []interface{}, err error) {
 
 	var loc bool
 	var trw bool
@@ -353,63 +372,63 @@ func (e *executor) operate(ast sql.Statement) (res []interface{}, err error) {
 	switch stm := ast.(type) {
 
 	case *sql.InfoStatement:
-		res, err = e.executeInfoStatement(stm)
+		res, err = e.executeInfoStatement(ctx, stm)
 
 	case *sql.LetStatement:
-		res, err = e.executeLetStatement(stm)
+		res, err = e.executeLetStatement(ctx, stm)
 	case *sql.ReturnStatement:
-		res, err = e.executeReturnStatement(stm)
+		res, err = e.executeReturnStatement(ctx, stm)
 
 	case *sql.SelectStatement:
-		res, err = e.executeSelectStatement(stm)
+		res, err = e.executeSelectStatement(ctx, stm)
 	case *sql.CreateStatement:
-		res, err = e.executeCreateStatement(stm)
+		res, err = e.executeCreateStatement(ctx, stm)
 	case *sql.UpdateStatement:
-		res, err = e.executeUpdateStatement(stm)
+		res, err = e.executeUpdateStatement(ctx, stm)
 	case *sql.DeleteStatement:
-		res, err = e.executeDeleteStatement(stm)
+		res, err = e.executeDeleteStatement(ctx, stm)
 	case *sql.RelateStatement:
-		res, err = e.executeRelateStatement(stm)
+		res, err = e.executeRelateStatement(ctx, stm)
 
 	case *sql.DefineNamespaceStatement:
-		res, err = e.executeDefineNamespaceStatement(stm)
+		res, err = e.executeDefineNamespaceStatement(ctx, stm)
 	case *sql.RemoveNamespaceStatement:
-		res, err = e.executeRemoveNamespaceStatement(stm)
+		res, err = e.executeRemoveNamespaceStatement(ctx, stm)
 
 	case *sql.DefineDatabaseStatement:
-		res, err = e.executeDefineDatabaseStatement(stm)
+		res, err = e.executeDefineDatabaseStatement(ctx, stm)
 	case *sql.RemoveDatabaseStatement:
-		res, err = e.executeRemoveDatabaseStatement(stm)
+		res, err = e.executeRemoveDatabaseStatement(ctx, stm)
 
 	case *sql.DefineLoginStatement:
-		res, err = e.executeDefineLoginStatement(stm)
+		res, err = e.executeDefineLoginStatement(ctx, stm)
 	case *sql.RemoveLoginStatement:
-		res, err = e.executeRemoveLoginStatement(stm)
+		res, err = e.executeRemoveLoginStatement(ctx, stm)
 
 	case *sql.DefineTokenStatement:
-		res, err = e.executeDefineTokenStatement(stm)
+		res, err = e.executeDefineTokenStatement(ctx, stm)
 	case *sql.RemoveTokenStatement:
-		res, err = e.executeRemoveTokenStatement(stm)
+		res, err = e.executeRemoveTokenStatement(ctx, stm)
 
 	case *sql.DefineScopeStatement:
-		res, err = e.executeDefineScopeStatement(stm)
+		res, err = e.executeDefineScopeStatement(ctx, stm)
 	case *sql.RemoveScopeStatement:
-		res, err = e.executeRemoveScopeStatement(stm)
+		res, err = e.executeRemoveScopeStatement(ctx, stm)
 
 	case *sql.DefineTableStatement:
-		res, err = e.executeDefineTableStatement(stm)
+		res, err = e.executeDefineTableStatement(ctx, stm)
 	case *sql.RemoveTableStatement:
-		res, err = e.executeRemoveTableStatement(stm)
+		res, err = e.executeRemoveTableStatement(ctx, stm)
 
 	case *sql.DefineFieldStatement:
-		res, err = e.executeDefineFieldStatement(stm)
+		res, err = e.executeDefineFieldStatement(ctx, stm)
 	case *sql.RemoveFieldStatement:
-		res, err = e.executeRemoveFieldStatement(stm)
+		res, err = e.executeRemoveFieldStatement(ctx, stm)
 
 	case *sql.DefineIndexStatement:
-		res, err = e.executeDefineIndexStatement(stm)
+		res, err = e.executeDefineIndexStatement(ctx, stm)
 	case *sql.RemoveIndexStatement:
-		res, err = e.executeRemoveIndexStatement(stm)
+		res, err = e.executeRemoveIndexStatement(ctx, stm)
 
 	}
 

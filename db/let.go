@@ -15,10 +15,12 @@
 package db
 
 import (
+	"context"
+
 	"github.com/abcum/surreal/sql"
 )
 
-func (e *executor) executeLetStatement(ast *sql.LetStatement) (out []interface{}, err error) {
+func (e *executor) executeLetStatement(ctx context.Context, ast *sql.LetStatement) (out []interface{}, err error) {
 
 	switch what := ast.What.(type) {
 	default:

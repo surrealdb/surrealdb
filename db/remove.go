@@ -15,11 +15,13 @@
 package db
 
 import (
+	"context"
+
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/keys"
 )
 
-func (e *executor) executeRemoveNamespaceStatement(ast *sql.RemoveNamespaceStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveNamespaceStatement(ctx context.Context, ast *sql.RemoveNamespaceStatement) (out []interface{}, err error) {
 
 	// Remove the namespace
 	nkey := &keys.NS{KV: ast.KV, NS: ast.Name.ID}
@@ -29,7 +31,7 @@ func (e *executor) executeRemoveNamespaceStatement(ast *sql.RemoveNamespaceState
 
 }
 
-func (e *executor) executeRemoveDatabaseStatement(ast *sql.RemoveDatabaseStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveDatabaseStatement(ctx context.Context, ast *sql.RemoveDatabaseStatement) (out []interface{}, err error) {
 
 	// Remove the database
 	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name.ID}
@@ -39,7 +41,7 @@ func (e *executor) executeRemoveDatabaseStatement(ast *sql.RemoveDatabaseStateme
 
 }
 
-func (e *executor) executeRemoveLoginStatement(ast *sql.RemoveLoginStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveLoginStatement(ctx context.Context, ast *sql.RemoveLoginStatement) (out []interface{}, err error) {
 
 	if ast.Kind == sql.NAMESPACE {
 
@@ -61,7 +63,7 @@ func (e *executor) executeRemoveLoginStatement(ast *sql.RemoveLoginStatement) (o
 
 }
 
-func (e *executor) executeRemoveTokenStatement(ast *sql.RemoveTokenStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveTokenStatement(ctx context.Context, ast *sql.RemoveTokenStatement) (out []interface{}, err error) {
 
 	if ast.Kind == sql.NAMESPACE {
 
@@ -83,7 +85,7 @@ func (e *executor) executeRemoveTokenStatement(ast *sql.RemoveTokenStatement) (o
 
 }
 
-func (e *executor) executeRemoveScopeStatement(ast *sql.RemoveScopeStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveScopeStatement(ctx context.Context, ast *sql.RemoveScopeStatement) (out []interface{}, err error) {
 
 	// Remove the scope
 	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name.ID}
@@ -93,7 +95,7 @@ func (e *executor) executeRemoveScopeStatement(ast *sql.RemoveScopeStatement) (o
 
 }
 
-func (e *executor) executeRemoveTableStatement(ast *sql.RemoveTableStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveTableStatement(ctx context.Context, ast *sql.RemoveTableStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 
@@ -107,7 +109,7 @@ func (e *executor) executeRemoveTableStatement(ast *sql.RemoveTableStatement) (o
 
 }
 
-func (e *executor) executeRemoveFieldStatement(ast *sql.RemoveFieldStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveFieldStatement(ctx context.Context, ast *sql.RemoveFieldStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 
@@ -121,7 +123,7 @@ func (e *executor) executeRemoveFieldStatement(ast *sql.RemoveFieldStatement) (o
 
 }
 
-func (e *executor) executeRemoveIndexStatement(ast *sql.RemoveIndexStatement) (out []interface{}, err error) {
+func (e *executor) executeRemoveIndexStatement(ctx context.Context, ast *sql.RemoveIndexStatement) (out []interface{}, err error) {
 
 	for _, TB := range ast.What {
 

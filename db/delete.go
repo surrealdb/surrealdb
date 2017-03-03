@@ -16,12 +16,15 @@ package db
 
 import (
 	"fmt"
+
+	"context"
+
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/item"
 	"github.com/abcum/surreal/util/keys"
 )
 
-func (e *executor) executeDeleteStatement(ast *sql.DeleteStatement) (out []interface{}, err error) {
+func (e *executor) executeDeleteStatement(ctx context.Context, ast *sql.DeleteStatement) (out []interface{}, err error) {
 
 	for k, w := range ast.What {
 		if what, ok := w.(*sql.Param); ok {
