@@ -183,8 +183,16 @@ func Process(ctx *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 	// return results, buffer the output, and
 	// return the output when finished.
 
-	for res := range recv {
-		out = append(out, res)
+	for {
+		select {
+		case <-ctx.Context().Done():
+			return nil, fibre.NewHTTPError(504)
+		case res, open := <-recv:
+			if !open {
+				return
+			}
+			out = append(out, res)
+		}
 	}
 
 	return
@@ -235,6 +243,9 @@ func (e *executor) execute(ctx context.Context, quit <-chan bool, send chan<- *R
 	for _, stm := range e.ast.Statements {
 
 		select {
+
+		case <-ctx.Done():
+			return
 
 		case <-quit:
 			return

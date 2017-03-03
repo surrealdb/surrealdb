@@ -84,6 +84,10 @@ func routes(s *fibre.Fibre) {
 		return signup(c)
 	})
 
+	s.Use(mw.Quit(&mw.QuitOpts{
+		Timeout: 10 * time.Second,
+	}).PathIs("/signup"))
+
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{
 			"application/json":                  true,
@@ -104,6 +108,10 @@ func routes(s *fibre.Fibre) {
 	s.Post("/signin", func(c *fibre.Context) error {
 		return signin(c)
 	})
+
+	s.Use(mw.Quit(&mw.QuitOpts{
+		Timeout: 10 * time.Second,
+	}).PathIs("/signin"))
 
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{
@@ -335,6 +343,10 @@ func routes(s *fibre.Fibre) {
 		return show.Output(c, c.Param("class"), show.One, show.Delete, res, err)
 
 	})
+
+	s.Use(mw.Quit(&mw.QuitOpts{
+		Timeout: 15 * time.Second,
+	}).PathBegsWith("/key/"))
 
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{

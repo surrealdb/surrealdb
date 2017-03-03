@@ -142,4 +142,10 @@ var errs = map[int]*err{
 		Details:     "Not Implemented",
 		Description: "The server either does not recognize the request method, or it lacks the ability to fulfill the request.",
 	},
+
+	504: {
+		Code:        504,
+		Details:     "Gateway Timeout",
+		Description: "The request to the server was restricted by a timeout duration, and did not manage to complete in time.",
+	},
 }
