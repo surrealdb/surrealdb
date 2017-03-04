@@ -14,4 +14,5 @@
 
 package db
 
+//go:generate go get -u github.com/ugorji/go/codec/codecgen
 //go:generate codecgen -o db.gen.go db.go
