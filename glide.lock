@@ -1,5 +1,5 @@
-hash: 323da77f9dc4a58b21e5b955a28edf6d4489cc74d3d6e61a4b2a60bdfe373b70
-updated: 2017-03-03T21:38:13.520578616Z
+hash: ef4035aeda273b5ed9a6a864200f0f8581bbf31a19b8de9c453e6e2f4faea6dc
+updated: 2017-03-04T11:00:17.387487026Z
 imports:
 - name: cloud.google.com/go
   version: 9b68cf4865e93f379a337b7e957f33de60397a48
@@ -143,7 +143,7 @@ imports:
   - bcrypt
   - blowfish
 - name: golang.org/x/net
-  version: 906cda9512f77671ab44f8c8563b13a8e707b230
+  version: d379faa25cbdc04d653984913a2ceb43b0bc46d7
   subpackages:
   - context
   - context/ctxhttp

@@ -6,8 +6,9 @@ import:
   - compute/metadata
   - errors
   - logging
+  - trace
 - package: github.com/Sirupsen/logrus
-  version: ^0.11.2
+  version: ^0.11.4
 - package: github.com/abcum/cork
 - package: github.com/abcum/fibre
   subpackages:

@@ -28,6 +28,7 @@ dependencies:
         - docker info
         - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
         - go get -u github.com/Masterminds/glide
+        - go get -u github.com/mattn/goveralls
 
 # -----------------------------------
 
@@ -37,6 +38,7 @@ test:
         - make glide
         - make setup
         - make tests
+        - make cover
         - make build
         - make ember
         - docker build -t abcum/surreal .
