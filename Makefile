@@ -41,15 +41,6 @@ convey:
 	@echo "Run 'go get -u -v github.com/smartystreets/goconvey'"
 	goconvey -packages 50 -port 5000 -poll 10m -excludedDirs 'build,dev,doc,gui,vendor'
 
-# The `make deps` command ensures all
-# 3rd party dependencies are downloaded
-# and installed.
-
-.PHONY: deps
-deps:
-	glide cache-clear
-	glide update
-
 # The `make test` command runs all
 # tests, found within all sub-folders
 # in the project folder.
