@@ -27,7 +27,6 @@ Temporary Items
 
 *.test
 *.cover
-*.gen.go
 
 # -----------------------------------
 # Folders
