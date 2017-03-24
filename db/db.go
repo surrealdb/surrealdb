@@ -267,11 +267,18 @@ func (e *executor) execute(ctx context.Context, quit <-chan bool, send chan<- *R
 			// query, along with the query execution
 			// speed, so we can analyse slow queries.
 
-			log.WithPrefix("sql").WithFields(map[string]interface{}{
+			log := log.WithPrefix("sql").WithFields(map[string]interface{}{
 				"id":   e.web.Get("id"),
 				"kind": e.web.Get("auth").(*cnf.Auth).Kind,
 				"auth": e.web.Get("auth").(*cnf.Auth).Data,
-			}).Debugln(stm)
+			})
+
+			if stm, ok := stm.(sql.AuthableStatement); ok {
+				ns, db := stm.Auth()
+				log = log.WithField("ns", ns).WithField("db", db)
+			}
+
+			log.Debugln(stm)
 
 			// Check to see if the current statement is
 			// a TRANSACTION statement, and if it is

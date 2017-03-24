@@ -1,0 +1,33 @@
+[
+  { "name": "Use" },
+  { "name": "Info" },
+
+  { "name": "Let" },
+  { "name": "Return" },
+
+  { "name": "Live" },
+  { "name": "Select" },
+  { "name": "Create" },
+  { "name": "Update" },
+  { "name": "Delete" },
+  { "name": "Relate" },
+
+  { "name": "DefineNamespace" },
+  { "name": "RemoveNamespace" },
+  { "name": "DefineDatabase" },
+  { "name": "RemoveDatabase" },
+  { "name": "DefineLogin" },
+  { "name": "RemoveLogin" },
+  { "name": "DefineToken" },
+  { "name": "RemoveToken" },
+  { "name": "DefineScope" },
+  { "name": "RemoveScope" },
+  { "name": "DefineTable" },
+  { "name": "RemoveTable" },
+  { "name": "DefineField" },
+  { "name": "RemoveField" },
+  { "name": "DefineIndex" },
+  { "name": "RemoveIndex" },
+  { "name": "DefineView" },
+  { "name": "RemoveView" }
+]

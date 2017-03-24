@@ -38,6 +38,10 @@ type Statements []Statement
 // Other
 // --------------------------------------------------
 
+type AuthableStatement interface {
+	Auth() (string, string)
+}
+
 type KillableStatement interface {
 	Begin()
 	Cease()
