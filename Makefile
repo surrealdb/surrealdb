@@ -47,7 +47,7 @@ convey:
 
 .PHONY: tests
 tests:
-	$(GO) test `glide novendor`
+	CGO_ENABLED=0 $(GO) test `glide novendor`
 
 # The `make cover` command runs all
 # tests, and produces and uploads a
