@@ -87,7 +87,12 @@ func Setup(opts *cnf.Options) (err error) {
 		}
 	}()
 
+	// Log successful start
+
+	log.WithPrefix("tcp").Infof("Started tcp server on %s", opts.Conn.Tcp)
+
 	return
+
 }
 
 func Send(name string, data []byte) {

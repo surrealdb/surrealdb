@@ -58,8 +58,12 @@ func Setup(opts *cnf.Options) (err error) {
 	// Check body size
 
 	s.Use(mw.Size(&mw.SizeOpts{
-		AllowedLength: 1 << 20,
+		AllowedLength: 1 << 20, // 1mb
 	}))
+
+	// Log successful start
+
+	log.WithPrefix("web").Infof("Started web server on %s", opts.Conn.Web)
 
 	// Run the server
 
