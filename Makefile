@@ -86,6 +86,14 @@ clean:
 setup:
 	CGO_ENABLED=0 $(GO) generate -v `glide novendor`
 
+# The `make patch` command applies
+# any git patches to the necessary
+# source 3rd party source files.
+
+.PHONY: patch
+patch:
+	@echo "No patches"
+
 # The `make quick` command compiles
 # the build flags, gets the project
 # dependencies, and runs a build.

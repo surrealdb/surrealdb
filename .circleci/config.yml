@@ -1,0 +1,30 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: abcum/circle:0.1.1
+    working_directory: /go/src/github.com/abcum/surreal
+    steps:
+      - checkout
+      - run:
+          name: Clean
+          command: make clean
+      - run:
+          name: Glide
+          command: make glide
+      - run:
+          name: Patch
+          command: make patch
+      - run:
+          name: Tests
+          command: make tests
+      - run:
+          name: Build
+          command: make build
+      - setup_remote_docker
+      - run:
+          name: Deploy
+          command: |
+            docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
+            docker build -t abcum/surreal .
+            docker push abcum/surreal
