@@ -111,14 +111,3 @@ build:
 install: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 install:
 	CGO_ENABLED=0 $(GO) install -v -ldflags '$(LDF)'
-
-# The `make ember` command compiles
-# the ember project, and outputs
-# the build files in the app folder.
-
-.PHONY: ember
-ember:
-	cd gui && make setup
-	cd gui && make install
-	cd gui && make tests
-	cd gui && ember build -prod -o ../app/
