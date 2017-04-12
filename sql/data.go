@@ -50,7 +50,7 @@ func (p *parser) parseData() (exp Expr, err error) {
 
 func (p *parser) parseSet() (mul Expr, err error) {
 
-	out := DataExpression{}
+	out := &DataExpression{}
 
 	for {
 
