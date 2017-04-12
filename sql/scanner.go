@@ -738,16 +738,17 @@ func (s *scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{
 	beg := chp[0]
 	end := beg
 	sub := 0
+	qut := 0
 
 	if beg == '{' {
 		end = '}'
+		tok = JSON
 	}
 
 	if beg == '[' {
 		end = ']'
+		tok = ARRAY
 	}
-
-	tok = IDENT
 
 	// Create a buffer
 	var buf bytes.Buffer
@@ -759,7 +760,7 @@ func (s *scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{
 
 	// Read subsequent characters
 	for {
-		if ch := s.next(); ch == end && sub == 0 {
+		if ch := s.next(); ch == end && sub == 0 && qut == 0 {
 			buf.WriteRune(ch)
 			break
 		} else if ch == beg {
@@ -770,6 +771,13 @@ func (s *scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{
 			buf.WriteRune(ch)
 		} else if ch == eof {
 			return ILLEGAL, buf.String(), val
+		} else if ch == '"' {
+			if qut == 0 {
+				qut++
+			} else {
+				qut--
+			}
+			buf.WriteRune(ch)
 		} else if ch == '\\' {
 			switch chn := s.next(); chn {
 			default:
@@ -783,14 +791,7 @@ func (s *scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{
 		}
 	}
 
-	if beg == '{' {
-		return JSON, buf.String(), val
-	}
-	if beg == '[' {
-		return ARRAY, buf.String(), val
-	}
-
-	return ILLEGAL, buf.String(), val
+	return tok, buf.String(), val
 
 }
 
