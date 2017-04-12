@@ -100,7 +100,7 @@ func (p *parser) parseTable() (*Table, error) {
 
 	_, lit, err := p.shouldBe(IDENT)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"table"}}
 	}
 
 	val, err := p.declare(TABLE, lit)
@@ -134,7 +134,7 @@ func (p *parser) parseThing() (*Thing, error) {
 
 	_, lit, err := p.shouldBe(THING)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"record id"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"thing"}}
 	}
 
 	val, err := p.declare(THING, lit)
@@ -168,7 +168,7 @@ func (p *parser) parseIdiom() (*Ident, error) {
 
 	_, lit, err := p.shouldBe(IDENT, EXPR)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"name, or expression"}}
 	}
 
 	val, err := p.declare(IDENT, lit)
@@ -321,7 +321,7 @@ func (p *parser) parseScript() (string, error) {
 
 	_, lit, err := p.shouldBe(STRING, REGION)
 	if err != nil {
-		return string(""), &ParseError{Found: lit, Expected: []string{"js/lua script"}}
+		return string(""), &ParseError{Found: lit, Expected: []string{"script"}}
 	}
 
 	return lit, err
