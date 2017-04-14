@@ -17,6 +17,3 @@ package sql
 //go:generate go get -u github.com/abcum/tmpl
 //go:generate tmpl -file=auth.gen.json auth.gen.go.tmpl
 //go:generate tmpl -file=kill.gen.json kill.gen.go.tmpl
-
-//go:generate go get -u github.com/ugorji/go/codec/codecgen
-//go:generate codecgen -o ast.gen.go ast.go
