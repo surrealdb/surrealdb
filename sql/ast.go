@@ -635,6 +635,8 @@ func NewThing(TB string, ID interface{}) *Thing {
 				return &Thing{TB: TB, ID: int64(cnv)}
 			}
 			return &Thing{TB: TB, ID: cnv}
+		} else if cnv, err := strconv.ParseBool(str); err == nil {
+			return &Thing{TB: TB, ID: cnv}
 		} else if cnv, err := time.Parse(RFCDate, str); err == nil {
 			return &Thing{TB: TB, ID: cnv.UTC()}
 		} else if cnv, err := time.Parse(RFCTime, str); err == nil {

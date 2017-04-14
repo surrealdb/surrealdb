@@ -62,7 +62,11 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 		p.v[stmt.Name.ID] = stmt.What
 	case time.Time, time.Duration:
 		p.v[stmt.Name.ID] = stmt.What
-	case *Null, *Void, *Empty, *Table, *Thing, *Param:
+	case Array, Object:
+		p.v[stmt.Name.ID] = stmt.What
+	case *Null, *Void, *Empty:
+		p.v[stmt.Name.ID] = stmt.What
+	case *Table, *Thing, *Param, *Ident, *Value:
 		p.v[stmt.Name.ID] = stmt.What
 	}
 

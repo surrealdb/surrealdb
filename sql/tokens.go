@@ -211,6 +211,7 @@ var tokens = [...]string{
 	DATE:     "DATE",
 	TIME:     "TIME",
 	JSON:     "JSON",
+	EXPR:     "EXPR",
 	IDENT:    "IDENT",
 	THING:    "THING",
 	STRING:   "STRING",

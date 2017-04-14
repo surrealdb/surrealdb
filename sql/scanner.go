@@ -17,6 +17,7 @@ package sql
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -425,140 +426,38 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 
 	tok = THING
 
-	// Store whether params
-	var tbp bool
-	var idp bool
-
-	// Store section values
 	var tbv string
 	var idv interface{}
 
 	// Create a buffer
 	var buf bytes.Buffer
-	var beg bytes.Buffer
-	var mid bytes.Buffer
-	var end bytes.Buffer
 
 	// Read passed in runes
 	for _, ch := range chp {
 		buf.WriteRune(ch)
 	}
 
-	for {
-		if ch := s.next(); ch == eof {
-			break
-		} else if isThingChar(ch) {
-			tok, lit, _ = s.scanIdent(ch)
-			beg.WriteString(lit)
-			break
-		} else if ch == '$' {
-			tbp = true // The TB is a param
-			tok, lit, _ = s.scanParams(ch)
-			beg.WriteString(lit)
-			break
-		} else if ch == '`' {
-			tok, lit, _ = s.scanQuoted(ch)
-			beg.WriteString(lit)
-			break
-		} else if ch == '{' {
-			tok, lit, _ = s.scanQuoted(ch)
-			beg.WriteString(lit)
-			break
-		} else if ch == '⟨' {
-			tok, lit, _ = s.scanQuoted(ch)
-			beg.WriteString(lit)
-			break
-		} else {
-			s.undo()
-			break
-		}
+	if tok, tbv, _ = s.part(); tok == ILLEGAL {
+		buf.WriteString(tbv)
+		return ILLEGAL, buf.String(), val
+	} else {
+		buf.WriteString(tbv)
 	}
 
-	if beg.Len() < 1 || tok == ILLEGAL {
-		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
+	if ch := s.next(); ch == ':' {
+		buf.WriteRune(ch)
+	} else {
+		return ILLEGAL, buf.String(), val
 	}
 
-	for {
-		if ch := s.next(); ch != ':' {
-			s.undo()
-			break
-		} else {
-			mid.WriteRune(ch)
-			break
-		}
+	if tok, lit, idv = s.part(); tok == ILLEGAL {
+		buf.WriteString(lit)
+		return ILLEGAL, buf.String(), val
+	} else {
+		buf.WriteString(lit)
 	}
 
-	if mid.Len() < 1 {
-		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
-	}
-
-	for {
-		if ch := s.next(); ch == eof {
-			break
-		} else if isThingChar(ch) {
-			tok, lit, _ = s.scanIdent(ch)
-			end.WriteString(lit)
-			break
-		} else if ch == '$' {
-			idp = true // The ID is a param
-			tok, lit, _ = s.scanParams(ch)
-			end.WriteString(lit)
-			break
-		} else if ch == '`' {
-			tok, lit, _ = s.scanQuoted(ch)
-			end.WriteString(lit)
-			break
-		} else if ch == '{' {
-			tok, lit, _ = s.scanQuoted(ch)
-			end.WriteString(lit)
-			break
-		} else if ch == '⟨' {
-			tok, lit, _ = s.scanQuoted(ch)
-			end.WriteString(lit)
-			break
-		} else {
-			s.undo()
-			break
-		}
-	}
-
-	if end.Len() < 1 || tok == ILLEGAL {
-		return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
-	}
-
-	tbv = beg.String()
-	idv = end.String()
-
-	if tbp { // The TB is a param
-		if p, ok := s.p.v[tbv]; ok {
-			switch v := p.(type) {
-			case string:
-				tbv = v
-			default:
-				return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
-			}
-		} else {
-			return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
-		}
-	}
-
-	if idp { // The ID is a param
-		if p, ok := s.p.v[idv.(string)]; ok {
-			switch v := p.(type) {
-			case bool, int64, float64, string, []interface{}, map[string]interface{}:
-				idv = v
-			default:
-				return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
-			}
-		} else {
-			return ILLEGAL, buf.String() + beg.String() + mid.String() + end.String(), val
-		}
-	}
-
-	val = NewThing(tbv, idv)
-
-	// Otherwise return as a regular thing.
-	return THING, buf.String() + beg.String() + mid.String() + end.String(), val
+	return THING, buf.String(), NewThing(tbv, idv)
 
 }
 
@@ -792,6 +691,51 @@ func (s *scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{
 	}
 
 	return tok, buf.String(), val
+
+}
+
+func (s *scanner) part() (tok Token, lit string, val interface{}) {
+
+	if ch := s.next(); isLetter(ch) {
+		tok, lit, _ = s.scanIdent(ch)
+	} else if isNumber(ch) {
+		tok, lit, _ = s.scanNumber(ch)
+	} else if ch == '`' {
+		tok, lit, _ = s.scanQuoted(ch)
+	} else if ch == '{' {
+		tok, lit, _ = s.scanQuoted(ch)
+	} else if ch == '⟨' {
+		tok, lit, _ = s.scanQuoted(ch)
+	} else if ch == '$' {
+		tok, lit, _ = s.scanParams(ch)
+		if p, ok := s.p.v[lit]; ok {
+			switch v := p.(type) {
+			case bool, int64, float64, string:
+				val, lit = v, fmt.Sprint(v)
+			case *Ident:
+				lit = v.ID
+			case *Value:
+				lit = v.ID
+			default:
+				tok = ILLEGAL
+			}
+		} else {
+			tok = ILLEGAL
+		}
+	} else {
+		s.undo()
+		tok = ILLEGAL
+	}
+
+	if tok != IDENT && tok != PARAM && tok != NUMBER && tok != DOUBLE {
+		tok = ILLEGAL
+	}
+
+	if val == nil {
+		val = lit
+	}
+
+	return
 
 }
 

@@ -30,7 +30,7 @@ func (p *parser) parseWhat() (mul []Expr, err error) {
 
 		tok, lit, err := p.shouldBe(IDENT, THING, PARAM)
 		if err != nil {
-			return nil, &ParseError{Found: lit, Expected: []string{"table name or record id"}}
+			return nil, &ParseError{Found: lit, Expected: []string{"table, or thing"}}
 		}
 
 		if p.is(tok, IDENT) {
