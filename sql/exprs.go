@@ -28,7 +28,7 @@ func (p *parser) parseWhat() (mul []Expr, err error) {
 
 	for {
 
-		tok, lit, err := p.shouldBe(IDENT, THING, PARAM)
+		tok, lit, err := p.shouldBe(IDENT, THING, PARAM, MODEL)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"table, or thing"}}
 		}
@@ -45,6 +45,11 @@ func (p *parser) parseWhat() (mul []Expr, err error) {
 
 		if p.is(tok, PARAM) {
 			one, _ := p.declare(PARAM, lit)
+			mul = append(mul, one)
+		}
+
+		if p.is(tok, MODEL) {
+			one, _ := p.declare(MODEL, lit)
 			mul = append(mul, one)
 		}
 

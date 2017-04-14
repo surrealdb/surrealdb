@@ -37,6 +37,7 @@ const (
 	EXPR     // something[0].value
 	IDENT    // something
 	THING    // @class:id
+	MODEL    // [person|1..1000]
 	STRING   // "something"
 	REGION   // "a multiline \n string"
 	NUMBER   // 123456
@@ -214,6 +215,7 @@ var tokens = [...]string{
 	EXPR:     "EXPR",
 	IDENT:    "IDENT",
 	THING:    "THING",
+	MODEL:    "MODEL",
 	STRING:   "STRING",
 	REGION:   "REGION",
 	NUMBER:   "NUMBER",

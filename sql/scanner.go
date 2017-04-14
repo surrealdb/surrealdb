@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -136,6 +137,7 @@ func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 			return OR, "OR", val
 		default:
 			s.undo()
+			return s.scanModel(ch)
 		}
 	case '&':
 		chn := s.next()
@@ -461,6 +463,151 @@ func (s *scanner) scanThing(chp ...rune) (tok Token, lit string, val interface{}
 
 }
 
+func (s *scanner) scanModel(chp ...rune) (tok Token, lit string, val interface{}) {
+
+	var com bool
+	var dot bool
+
+	var tbv string
+	var min float64 = 0
+	var inc float64 = 0
+	var max float64 = 0
+
+	// Create a buffer
+	var buf bytes.Buffer
+
+	// Read passed in runes
+	for _, ch := range chp {
+		buf.WriteRune(ch)
+	}
+
+	if tok, tbv, _ = s.part(); tok == ILLEGAL {
+		buf.WriteString(tbv)
+		return ILLEGAL, buf.String(), val
+	} else {
+		buf.WriteString(tbv)
+	}
+
+	if ch := s.next(); ch == ':' {
+		buf.WriteRune(ch)
+	} else {
+		return ILLEGAL, buf.String(), val
+	}
+
+	if ch := s.next(); isSignal(ch) {
+		tok, lit, _ = s.scanSignal(ch)
+		buf.WriteString(lit)
+		max, _ = strconv.ParseFloat(lit, 64)
+	} else {
+		return ILLEGAL, buf.String(), val
+	}
+
+	if ch := s.next(); ch == ',' {
+		com = true
+		buf.WriteRune(ch)
+		if ch := s.next(); isSignal(ch) {
+			tok, lit, _ = s.scanSignal(ch)
+			buf.WriteString(lit)
+			inc, _ = strconv.ParseFloat(lit, 64)
+		} else {
+			return ILLEGAL, buf.String(), val
+		}
+	} else {
+		s.undo()
+	}
+
+	if ch := s.next(); ch == '.' {
+		dot = true
+		buf.WriteRune(ch)
+		if ch := s.next(); ch == '.' {
+			buf.WriteRune(ch)
+			if ch := s.next(); isSignal(ch) {
+				tok, lit, _ = s.scanSignal(ch)
+				buf.WriteString(lit)
+				min = max
+				max, _ = strconv.ParseFloat(lit, 64)
+			} else {
+				return ILLEGAL, buf.String(), val
+			}
+		} else {
+			return ILLEGAL, buf.String(), val
+		}
+	} else {
+		s.undo()
+	}
+
+	if ch := s.next(); ch == '|' {
+		buf.WriteRune(ch)
+	} else {
+		return ILLEGAL, buf.String(), val
+	}
+
+	// If we have a comma, but the
+	// value is below zero, we will
+	// error as this will cause an
+	// infinite loop in db.
+
+	if com == true && inc <= 0 {
+		return ILLEGAL, buf.String(), val
+	}
+
+	// If we have a min, and a max
+	// with .. notation, but no `inc`
+	// is specified, set the `inc` to
+	// a default of `1`.
+
+	if dot == true && inc <= 0 {
+		inc = 1
+	}
+
+	// If we have a comma, but no
+	// max value is specified then
+	// error, as we need a max with
+	// incrementing integer ids.
+
+	if com == true && dot == false {
+		return ILLEGAL, buf.String(), val
+	}
+
+	return MODEL, buf.String(), NewModel(tbv, min, inc, max)
+
+}
+
+func (s *scanner) scanSignal(chp ...rune) (tok Token, lit string, val interface{}) {
+
+	// Create a buffer
+	var buf bytes.Buffer
+
+	// Read passed in runes
+	for _, ch := range chp {
+		buf.WriteRune(ch)
+	}
+
+	// Read subsequent characters
+	for {
+		if ch := s.next(); ch == eof {
+			break
+		} else if isNumber(ch) {
+			buf.WriteRune(ch)
+		} else if ch == '.' {
+			if s.next() == '.' {
+				s.undo()
+				s.undo()
+				break
+			} else {
+				s.undo()
+				buf.WriteRune(ch)
+			}
+		} else {
+			s.undo()
+			break
+		}
+	}
+
+	return NUMBER, buf.String(), nil
+
+}
+
 func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok = NUMBER
@@ -781,6 +928,11 @@ func isBlank(ch rune) bool {
 // isNumber returns true if the rune is a number.
 func isNumber(ch rune) bool {
 	return (ch >= '0' && ch <= '9')
+}
+
+// isSignal returns true if the rune is a number.
+func isSignal(ch rune) bool {
+	return (ch >= '0' && ch <= '9') || ch == '-' || ch == '+'
 }
 
 // isLetter returns true if the rune is a letter.

@@ -552,6 +552,22 @@ type ContentExpression struct {
 }
 
 // --------------------------------------------------
+// Model
+// --------------------------------------------------
+
+// Model comment
+type Model struct {
+	TB  string
+	MIN float64
+	INC float64
+	MAX float64
+}
+
+func NewModel(TB string, MIN, INC, MAX float64) *Model {
+	return &Model{TB: TB, MIN: MIN, INC: INC, MAX: MAX}
+}
+
+// --------------------------------------------------
 // Param
 // --------------------------------------------------
 
