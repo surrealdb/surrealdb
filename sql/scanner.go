@@ -542,6 +542,15 @@ func (s *scanner) scanModel(chp ...rune) (tok Token, lit string, val interface{}
 		return ILLEGAL, buf.String(), val
 	}
 
+	// If the minimum value is the
+	// same as the maximum value then
+	// error, as there is no ability
+	// to increment or decrement.
+
+	if min == max {
+		return ILLEGAL, buf.String(), val
+	}
+
 	// If we have a comma, but the
 	// value is below zero, we will
 	// error as this will cause an
