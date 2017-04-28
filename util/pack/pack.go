@@ -36,7 +36,7 @@ func Encode(src interface{}) (dst []byte) {
 
 // Decode decodes a CORK into a data object.
 func Decode(src []byte, dst interface{}) {
-	buf := bytes.NewBuffer(src)
+	buf := bytes.NewReader(src)
 	cork.NewDecoder(buf).Options(&opt).Decode(dst)
 	return
 }
