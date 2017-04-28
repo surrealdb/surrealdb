@@ -46,6 +46,10 @@ func (s *{{$k.name}}Statement) Cease() {
 	}
 }
 
+func (s *{{$k.name}}Statement) Duration() time.Duration {
+	return s.Timeout
+}
+
 func (s *{{$k.name}}Statement) Timedout() <-chan struct{} {
 	if s.Timeout == 0 {
 		return nil

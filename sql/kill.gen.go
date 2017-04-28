@@ -48,6 +48,10 @@ func (s *SelectStatement) Cease() {
 	}
 }
 
+func (s *SelectStatement) Duration() time.Duration {
+	return s.Timeout
+}
+
 func (s *SelectStatement) Timedout() <-chan struct{} {
 	if s.Timeout == 0 {
 		return nil
@@ -82,6 +86,10 @@ func (s *CreateStatement) Cease() {
 	if s.killable.ticker != nil {
 		s.killable.ticker.Stop()
 	}
+}
+
+func (s *CreateStatement) Duration() time.Duration {
+	return s.Timeout
 }
 
 func (s *CreateStatement) Timedout() <-chan struct{} {
@@ -120,6 +128,10 @@ func (s *UpdateStatement) Cease() {
 	}
 }
 
+func (s *UpdateStatement) Duration() time.Duration {
+	return s.Timeout
+}
+
 func (s *UpdateStatement) Timedout() <-chan struct{} {
 	if s.Timeout == 0 {
 		return nil
@@ -156,6 +168,10 @@ func (s *DeleteStatement) Cease() {
 	}
 }
 
+func (s *DeleteStatement) Duration() time.Duration {
+	return s.Timeout
+}
+
 func (s *DeleteStatement) Timedout() <-chan struct{} {
 	if s.Timeout == 0 {
 		return nil
@@ -190,6 +206,10 @@ func (s *RelateStatement) Cease() {
 	if s.killable.ticker != nil {
 		s.killable.ticker.Stop()
 	}
+}
+
+func (s *RelateStatement) Duration() time.Duration {
+	return s.Timeout
 }
 
 func (s *RelateStatement) Timedout() <-chan struct{} {

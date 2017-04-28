@@ -45,6 +45,7 @@ type AuthableStatement interface {
 type KillableStatement interface {
 	Begin()
 	Cease()
+	Duration() time.Duration
 	Timedout() <-chan struct{}
 }
 
@@ -395,7 +396,7 @@ type DefineViewStatement struct {
 	DB    string `cork:"-" codec:"-"`
 	Name  *Ident `cork:"name" codec:"name"`
 	Expr  Fields `cork:"expr" codec:"expr"`
-	What  Exprs  `cork:"what" codec:"what"`
+	What  Tables `cork:"what" codec:"what"`
 	Cond  Expr   `cork:"cond" codec:"cond"`
 	Group Groups `cork:"group" codec:"group"`
 }
