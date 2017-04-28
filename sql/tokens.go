@@ -197,6 +197,7 @@ const (
 	VIEW
 	VOID
 	WHERE
+	WITH
 
 	keywordsEnd
 )
@@ -366,6 +367,7 @@ var tokens = [...]string{
 	VIEW:            "VIEW",
 	VOID:            "VOID",
 	WHERE:           "WHERE",
+	WITH:            "WITH",
 }
 
 var literals map[string]Token

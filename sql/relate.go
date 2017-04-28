@@ -34,7 +34,7 @@ func (p *parser) parseRelateStatement() (stmt *RelateStatement, err error) {
 		return nil, err
 	}
 
-	if _, _, err = p.shouldBe(TO); err != nil {
+	if _, _, err = p.shouldBe(TO, WITH); err != nil {
 		return nil, err
 	}
 
