@@ -15,21 +15,19 @@
 package diff
 
 import (
-	"fmt"
 	"reflect"
 	"sort"
-	"strings"
+	"strconv"
 
-	"github.com/fatih/structs"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
 type Operation struct {
-	Op     string      `cork:"op,omietmpty" json:"op,omietmpty" structs:"op,omitempty"`
-	From   string      `cork:"from,omitempty" json:"from,omitempty" structs:"from,omitempty"`
-	Path   string      `cork:"path,omitempty" json:"path,omitempty" structs:"path,omitempty"`
-	Value  interface{} `cork:"value,omitempty" json:"value,omitempty" structs:"value,omitempty"`
-	Before interface{} `cork:"-" json:"-" structs:"-"`
+	Op     string      `cork:"op,omietmpty" json:"op,omietmpty"`
+	From   string      `cork:"from,omitempty" json:"from,omitempty"`
+	Path   string      `cork:"path,omitempty" json:"path,omitempty"`
+	Value  interface{} `cork:"value,omitempty" json:"value,omitempty"`
+	Before interface{} `cork:"-" json:"-"`
 }
 
 type Operations struct {
@@ -57,21 +55,41 @@ func (o *Operations) Rebase(other *Operations) (ops *Operations, err error) {
 func (o *Operations) Out() (ops []map[string]interface{}) {
 
 	for _, v := range o.Ops {
-		ops = append(ops, structs.Map(v))
+
+		op := make(map[string]interface{})
+
+		if len(v.Op) > 0 {
+			op["op"] = v.Op
+		}
+
+		if len(v.From) > 0 {
+			op["from"] = v.From
+		}
+
+		if len(v.Path) > 0 {
+			op["path"] = v.Path
+		}
+
+		if v.Value != nil {
+			op["value"] = v.Value
+		}
+
+		ops = append(ops, op)
+
 	}
 
 	return
 
 }
 
-func route(path string, part interface{}) string {
-	if path == "" {
-		return fmt.Sprintf("/%v", part)
+func route(path string, part string) string {
+	if len(path) == 0 {
+		return "/" + part
 	} else {
-		if strings.HasSuffix(path, "/") {
-			return path + fmt.Sprintf("%v", part)
+		if path[0] == '/' {
+			return path + part
 		} else {
-			return path + fmt.Sprintf("/%v", part)
+			return path + "/" + part
 		}
 	}
 }
@@ -220,18 +238,18 @@ func (o *Operations) arrs(old, now []interface{}, path string) {
 	var i int
 
 	for i = 0; i < len(old) && i < len(now); i++ {
-		o.vals(old[i], now[i], route(path, i))
+		o.vals(old[i], now[i], strconv.Itoa(i))
 	}
 
 	for j := i; j < len(now); j++ {
 		if j >= len(old) || !reflect.DeepEqual(now[j], old[j]) {
-			o.op("add", "", route(path, j), nil, now[j])
+			o.op("add", "", route(path, strconv.Itoa(j)), nil, now[j])
 		}
 	}
 
 	for j := i; j < len(old); j++ {
 		if j >= len(now) || !reflect.DeepEqual(old[j], now[j]) {
-			o.op("remove", "", route(path, j), old[j], nil)
+			o.op("remove", "", route(path, strconv.Itoa(j)), old[j], nil)
 		}
 	}
 
