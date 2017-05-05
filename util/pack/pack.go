@@ -19,24 +19,26 @@ import (
 	"github.com/abcum/cork"
 )
 
-var opt cork.Handle
-
-func init() {
-	opt.Precision = false
-	opt.ArrType = []interface{}{}
-	opt.MapType = map[string]interface{}{}
+var opt = cork.Handle{
+	Precision: false,
+	ArrType:   make([]interface{}, 0),
+	MapType:   make(map[string]interface{}),
 }
 
 // Encode encodes a data object into a CORK.
 func Encode(src interface{}) (dst []byte) {
 	buf := bytes.NewBuffer(nil)
-	cork.NewEncoder(buf).Options(&opt).Encode(src)
+	enc := cork.NewEncoderFromPool(buf).Options(&opt)
+	enc.Encode(src)
+	enc.Done()
 	return buf.Bytes()
 }
 
 // Decode decodes a CORK into a data object.
 func Decode(src []byte, dst interface{}) {
 	buf := bytes.NewReader(src)
-	cork.NewDecoder(buf).Options(&opt).Decode(dst)
+	dec := cork.NewDecoderFromPool(buf).Options(&opt)
+	dec.Decode(dst)
+	dec.Done()
 	return
 }
