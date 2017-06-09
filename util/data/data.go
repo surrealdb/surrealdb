@@ -686,7 +686,7 @@ func (d *Doc) Del(path ...string) error {
 
 // --------------------------------------------------------------------------------
 
-// ArrayDel appends an item or an array of items to an array at the specified path.
+// ArrayAdd appends an item or an array of items to an array at the specified path.
 func (d *Doc) ArrayAdd(value interface{}, path ...string) (*Doc, error) {
 
 	a, ok := d.Get(path...).Data().([]interface{})
