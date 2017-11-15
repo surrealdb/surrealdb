@@ -23,12 +23,13 @@ import (
 	"runtime/debug"
 
 	"github.com/abcum/fibre"
-	"github.com/abcum/surreal/util/build"
 
 	"github.com/Sirupsen/logrus"
 
+	"github.com/abcum/surreal/util/build"
+
 	"cloud.google.com/go/compute/metadata"
-	"cloud.google.com/go/errors"
+	"cloud.google.com/go/errorreporting"
 	"cloud.google.com/go/logging"
 	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/api/monitoredres"
@@ -40,9 +41,9 @@ type HookGoogle struct {
 	credentials string
 	level       logrus.Level
 	levels      []logrus.Level
-	errclient   *errors.Client
 	logclient   *logging.Client
 	logbuffer   *logging.Logger
+	errclient   *errorreporting.Client
 }
 
 func NewGoogleHook(level, name, project, credentials string) (hook *HookGoogle, err error) {
@@ -134,12 +135,13 @@ func NewGoogleHook(level, name, project, credentials string) (hook *HookGoogle, 
 	// endpoint to ensure the settings
 	// and authentication are correct.
 
-	hook.errclient, err = errors.NewClient(
+	hook.errclient, err = errorreporting.NewClient(
 		context.Background(),
 		hook.project,
-		hook.name,
-		build.GetInfo().Ver,
-		true,
+		errorreporting.Config{
+			ServiceName:    hook.name,
+			ServiceVersion: build.GetInfo().Ver,
+		},
 	)
 
 	if err != nil {
@@ -174,15 +176,19 @@ func (h *HookGoogle) Fire(entry *logrus.Entry) error {
 	switch entry.Level {
 	case logrus.ErrorLevel, logrus.FatalLevel, logrus.PanicLevel:
 		ctx := context.Background()
-		err := fmt.Sprintf("%s\n%s", entry.Message, debug.Stack())
+		err := fmt.Errorf("%s\n%s", entry.Message, debug.Stack())
 		go func() {
 			for _, v := range entry.Data {
 				switch i := v.(type) {
 				case *http.Request:
-					h.errclient.Report(ctx, i, err)
+					h.errclient.ReportSync(ctx, errorreporting.Entry{
+						Error: err, Req: i,
+					})
 					return
 				case *fibre.Context:
-					h.errclient.Report(ctx, i.Request().Request, err)
+					h.errclient.ReportSync(ctx, errorreporting.Entry{
+						Error: err, Req: i.Request().Request,
+					})
 					return
 				}
 			}
