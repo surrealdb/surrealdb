@@ -112,6 +112,10 @@ type Options struct {
 		Join []string // Slice of cluster peers to join
 	}
 
+	Format struct {
+		Type string // Stores the cli output format
+	}
+
 	Logging struct {
 		Level  string // Stores the configured logging level
 		Output string // Stores the configured logging output

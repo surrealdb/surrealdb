@@ -32,6 +32,7 @@ var mainCmd = &cobra.Command{
 func init() {
 
 	mainCmd.AddCommand(
+		sqlCmd,
 		startCmd,
 		importCmd,
 		exportCmd,
