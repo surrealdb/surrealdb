@@ -26,6 +26,8 @@ import (
 	"github.com/mgutz/ansi"
 
 	"github.com/Sirupsen/logrus"
+
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 const clear = ansi.Reset
@@ -36,7 +38,7 @@ var (
 )
 
 func init() {
-	isTerminal = logrus.IsTerminal(os.Stdout)
+	isTerminal = terminal.IsTerminal(int(os.Stdout.Fd()))
 	isColoured = isTerminal && (runtime.GOOS != "windows")
 }
 
