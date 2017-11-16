@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 
@@ -209,23 +210,25 @@ func setup() {
 	if strings.HasPrefix(opts.Cert.Crt, "-----") {
 		var err error
 		var doc *os.File
-		if doc, err = os.Create("cert.crt"); err != nil {
-			log.Fatal("Can not decode PEM encoded certificate into cert.crt")
+		var out string = path.Join(os.TempDir(), "surreal.crt")
+		if doc, err = os.Create(out); err != nil {
+			log.Fatalf("Can not decode PEM encoded certificate into %s", out)
 		}
 		doc.Write([]byte(opts.Cert.Crt))
 		doc.Close()
-		opts.Cert.Crt = "cert.crt"
+		opts.Cert.Crt = out
 	}
 
 	if strings.HasPrefix(opts.Cert.Key, "-----") {
 		var err error
 		var doc *os.File
-		if doc, err = os.Create("cert.key"); err != nil {
-			log.Fatal("Can not decode PEM encoded private key into cert.key")
+		var out string = path.Join(os.TempDir(), "surreal.key")
+		if doc, err = os.Create(out); err != nil {
+			log.Fatalf("Can not decode PEM encoded private key into %s: %s", out)
 		}
 		doc.Write([]byte(opts.Cert.Key))
 		doc.Close()
-		opts.Cert.Key = "cert.key"
+		opts.Cert.Key = out
 	}
 
 	// --------------------------------------------------
