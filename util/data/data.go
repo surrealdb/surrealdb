@@ -203,17 +203,19 @@ func (d *Doc) what(p string, a []interface{}, t int8) (o []interface{}, i []int,
 		default:
 			if z, e := strconv.Atoi(p); e == nil {
 				if len(a) > z {
-					if t == choose {
+					switch t {
+					case choose:
 						i = append(i, z)
 						o = append(o, a[z])
-					} else {
+					case remove:
 						for k := range append(a[:z], a[z+1:]...) {
 							i = append(i, k)
 						}
 						o = append(o, append(a[:z], a[z+1:]...)...)
 					}
 				} else {
-					if t == remove {
+					switch t {
+					case remove:
 						for k := range a {
 							i = append(i, k)
 						}
