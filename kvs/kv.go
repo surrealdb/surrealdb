@@ -19,5 +19,5 @@ type KV interface {
 	Exi() bool
 	Key() []byte
 	Val() []byte
-	Ver() int64
+	Ver() uint64
 }

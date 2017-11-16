@@ -28,7 +28,7 @@ func init() {
 
 		var pntr *rixxdb.DB
 
-		path := strings.TrimLeft(opts.DB.Path, "rixxdb://")
+		path := strings.TrimPrefix(opts.DB.Path, "rixxdb://")
 
 		pntr, err = rixxdb.Open(path, &rixxdb.Config{
 			SyncPolicy:    opts.DB.Time,

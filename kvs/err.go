@@ -24,7 +24,7 @@ type DBError struct {
 
 // Error returns the string representation of the error.
 func (e *DBError) Error() string {
-	return fmt.Sprintf("There was a problem writing to the database")
+	return fmt.Sprintf("Unable to write to the database")
 }
 
 // KVError is an error which occurs when there is a
