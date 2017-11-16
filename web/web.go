@@ -42,7 +42,6 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Fail()) // Catch panics
 	s.Use(mw.Logs()) // Log requests
 	s.Use(mw.Sock()) // Log requests
-	s.Use(mw.Gzip()) // Gzip responses
 
 	// Add trace information
 
@@ -81,6 +80,10 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Size(&mw.SizeOpts{
 		AllowedLength: 1 << 20, // 1mb
 	}))
+
+	// Compress responses
+
+	s.Use(mw.Gzip())
 
 	// Log successful start
 
