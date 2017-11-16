@@ -85,11 +85,6 @@ func TestMain(t *testing.T) {
 			new: &KV{},
 		},
 		{
-			str: "/surreal/!/¥",
-			obj: &CK{KV: "surreal"},
-			new: &CK{},
-		},
-		{
 			str: "/surreal/abcum",
 			obj: &NS{KV: "surreal", NS: "abcum"},
 			new: &NS{},
