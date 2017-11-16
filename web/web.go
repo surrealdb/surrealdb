@@ -81,6 +81,10 @@ func Setup(opts *cnf.Options) (err error) {
 
 	s.Use(auth())
 
+	// Setup live queries
+
+	s.Use(live())
+
 	// Compress responses
 
 	s.Use(mw.Gzip())
