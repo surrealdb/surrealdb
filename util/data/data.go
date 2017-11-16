@@ -281,7 +281,7 @@ func (d *Doc) what(p string, a []interface{}, t int8) (o []interface{}, i []int,
 
 // Reset empties and resets the data at the specified path.
 func (d *Doc) Reset(path ...string) (*Doc, error) {
-	return d.Set(nil, path...)
+	return d.Set(map[string]interface{}{}, path...)
 }
 
 // Valid checks whether the value at the specified path is nil.
@@ -707,7 +707,7 @@ func (d *Doc) ArrayAdd(value interface{}, path ...string) (*Doc, error) {
 	} else {
 		for _, v := range a {
 			if reflect.DeepEqual(v, value) {
-				return nil, nil
+				return Consume(a), nil
 			}
 		}
 		a = append(a, value)
