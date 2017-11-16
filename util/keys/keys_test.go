@@ -106,11 +106,6 @@ func TestMain(t *testing.T) {
 			new: &DB{},
 		},
 		{
-			str: "/surreal/abcum/*/database/!/l/df8c74fa-428a-42b7-b279-b5fbe33d72a7",
-			obj: &LV{KV: "surreal", NS: "abcum", DB: "database", LV: "df8c74fa-428a-42b7-b279-b5fbe33d72a7"},
-			new: &LV{},
-		},
-		{
 			str: "/surreal/abcum/*/database/!/s/admin",
 			obj: &SC{KV: "surreal", NS: "abcum", DB: "database", SC: "admin"},
 			new: &SC{},
@@ -144,6 +139,11 @@ func TestMain(t *testing.T) {
 			str: "/surreal/abcum/*/database/*/person/!/i/teenagers",
 			obj: &IX{KV: "surreal", NS: "abcum", DB: "database", TB: "person", IX: "teenagers"},
 			new: &IX{},
+		},
+		{
+			str: "/surreal/abcum/*/database/*/person/!/l/realtime",
+			obj: &LV{KV: "surreal", NS: "abcum", DB: "database", TB: "person", LV: "realtime"},
+			new: &LV{},
 		},
 		{
 			str: "/surreal/abcum/*/database/*/person/*",

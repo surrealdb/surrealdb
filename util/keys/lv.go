@@ -19,6 +19,7 @@ type LV struct {
 	KV string
 	NS string
 	DB string
+	TB string
 	LV string
 }
 
@@ -33,6 +34,7 @@ func (k *LV) Copy() *LV {
 		KV: k.KV,
 		NS: k.NS,
 		DB: k.DB,
+		TB: k.TB,
 		LV: k.LV,
 	}
 }
@@ -40,17 +42,17 @@ func (k *LV) Copy() *LV {
 // Encode encodes the key into binary
 func (k *LV) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, "*", k.DB, "!", "l", k.LV)
+	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "!", "l", k.LV)
 }
 
 // Decode decodes the key from binary
 func (k *LV) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &skip, &k.LV)
+	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB, &skip, &skip, &k.LV)
 }
 
 // String returns a string representation of the key
 func (k *LV) String() string {
 	k.init()
-	return output(k.KV, k.NS, "*", k.DB, "!", "l", k.LV)
+	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "!", "l", k.LV)
 }
