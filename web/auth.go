@@ -28,8 +28,24 @@ import (
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/mem"
+	"github.com/abcum/surreal/sql"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/websocket"
+)
+
+const (
+	varKeyIp     = "ip"
+	varKeyNs     = "NS"
+	varKeyDb     = "DB"
+	varKeySc     = "SC"
+	varKeyTk     = "TK"
+	varKeyUs     = "US"
+	varKeyTb     = "TB"
+	varKeyId     = "ID"
+	varKeyAuth   = "auth"
+	varKeyUser   = "user"
+	varKeyPass   = "pass"
+	varKeyOrigin = "origin"
 )
 
 func cidr(ip net.IP, networks []*net.IPNet) bool {
@@ -46,13 +62,7 @@ func auth() fibre.MiddlewareFunc {
 		return func(c *fibre.Context) (err error) {
 
 			auth := &cnf.Auth{}
-			c.Set("auth", auth)
-
-			// Ensure that the authentication data
-			// object is initiated at the beginning
-			// so it is present when serialized.
-
-			auth.Data = make(map[string]interface{})
+			c.Set(varKeyAuth, auth)
 
 			// Start off with an authentication level
 			// which prevents running any sql queries,
@@ -77,7 +87,6 @@ func auth() fibre.MiddlewareFunc {
 			subs := strings.Split(bits[0], "-")
 
 			if len(subs) == 2 {
-				auth.Kind = cnf.AuthSC
 				auth.Possible.NS = subs[0]
 				auth.Selected.NS = subs[0]
 				auth.Possible.DB = subs[1]
@@ -88,8 +97,7 @@ func auth() fibre.MiddlewareFunc {
 			// the request headers, then mark it as
 			// the selected namespace.
 
-			if ns := c.Request().Header().Get("NS"); len(ns) != 0 {
-				auth.Kind = cnf.AuthSC
+			if ns := c.Request().Header().Get(varKeyNs); len(ns) != 0 {
 				auth.Possible.NS = ns
 				auth.Selected.NS = ns
 			}
@@ -98,8 +106,7 @@ func auth() fibre.MiddlewareFunc {
 			// the request headers, then mark it as
 			// the selected database.
 
-			if db := c.Request().Header().Get("DB"); len(db) != 0 {
-				auth.Kind = cnf.AuthSC
+			if db := c.Request().Header().Get(varKeyDb); len(db) != 0 {
 				auth.Possible.DB = db
 				auth.Selected.DB = db
 			}
@@ -117,7 +124,6 @@ func auth() fibre.MiddlewareFunc {
 			if len(head) == 0 {
 				for _, prot := range websocket.Subprotocols(c.Request().Request) {
 					if len(prot) > 7 && prot[0:7] == "bearer-" {
-						head = "Bearer " + prot[7:]
 						return checkBearer(c, prot[7:], func() error {
 							return h(c)
 						})
@@ -129,8 +135,8 @@ func auth() fibre.MiddlewareFunc {
 			// is a Basic Auth header, and if it is then
 			// process this as root authentication.
 
-			if len(head) > 0 && head[:5] == "Basic" {
-				return checkMaster(c, head[6:], func() error {
+			if len(head) > 6 && head[:5] == "Basic" {
+				return checkBasics(c, head[6:], func() error {
 					return h(c)
 				})
 			}
@@ -139,7 +145,7 @@ func auth() fibre.MiddlewareFunc {
 			// is a Bearer Auth header, and if it is then
 			// process this as default authentication.
 
-			if len(head) > 0 && head[:6] == "Bearer" {
+			if len(head) > 7 && head[:6] == "Bearer" {
 				return checkBearer(c, head[7:], func() error {
 					return h(c)
 				})
@@ -151,56 +157,90 @@ func auth() fibre.MiddlewareFunc {
 	}
 }
 
-func checkRoot(c *fibre.Context, user, pass string, callback func() error) (err error) {
+func checkBasics(c *fibre.Context, info string, callback func() error) (err error) {
 
-	auth := c.Get("auth").(*cnf.Auth)
+	var base []byte
+	var cred [][]byte
 
-	if cidr(c.IP(), cnf.Settings.Auth.Nets) {
-
-		if user == cnf.Settings.Auth.User && pass == cnf.Settings.Auth.Pass {
-			auth.Kind = cnf.AuthKV
-			auth.Possible.NS = "*"
-			auth.Possible.DB = "*"
-		}
-
-	}
-
-	return callback()
-
-}
-
-func checkMaster(c *fibre.Context, info string, callback func() error) (err error) {
-
-	auth := c.Get("auth").(*cnf.Auth)
+	auth := c.Get(varKeyAuth).(*cnf.Auth)
 	user := []byte(cnf.Settings.Auth.User)
 	pass := []byte(cnf.Settings.Auth.Pass)
 
-	base, err := base64.StdEncoding.DecodeString(info)
+	// Parse the base64 encoded basic auth data
 
-	if err == nil && cidr(c.IP(), cnf.Settings.Auth.Nets) {
+	if base, err = base64.StdEncoding.DecodeString(info); err != nil {
+		return fibre.NewHTTPError(401).WithMessage("Problem with basic auth data")
+	}
 
-		cred := bytes.SplitN(base, []byte(":"), 2)
+	// Split the basic auth USER and PASS details
 
-		if len(cred) == 2 && bytes.Equal(cred[0], user) && bytes.Equal(cred[1], pass) {
+	if cred = bytes.SplitN(base, []byte(":"), 2); len(cred) != 2 {
+		return fibre.NewHTTPError(401).WithMessage("Problem with basic auth data")
+	}
+
+	// Check to see if IP, USER, and PASS match server settings
+
+	if bytes.Equal(cred[0], user) && bytes.Equal(cred[1], pass) {
+
+		if cidr(c.IP(), cnf.Settings.Auth.Nets) {
 			auth.Kind = cnf.AuthKV
 			auth.Possible.NS = "*"
 			auth.Possible.DB = "*"
+			return callback()
+		}
+
+		return fibre.NewHTTPError(403).WithMessage("IP invalid for root authentication")
+
+	}
+
+	// If no KV authentication, then try to authenticate as NS user
+
+	if auth.Selected.NS != "" {
+
+		n := auth.Selected.NS
+		u := string(cred[0])
+		p := string(cred[1])
+
+		if _, err = signinNS(n, u, p); err == nil {
+			auth.Kind = cnf.AuthNS
+			auth.Possible.NS = n
+			auth.Possible.DB = "*"
+			return callback()
+		}
+
+		// If no NS authentication, then try to authenticate as DB user
+
+		if auth.Selected.DB != "" {
+
+			n := auth.Selected.NS
+			d := auth.Selected.DB
+			u := string(cred[0])
+			p := string(cred[1])
+
+			if _, err = signinDB(n, d, u, p); err == nil {
+				auth.Kind = cnf.AuthDB
+				auth.Possible.NS = n
+				auth.Possible.DB = d
+				return callback()
+			}
+
 		}
 
 	}
 
-	return callback()
+	return fibre.NewHTTPError(401).WithMessage("Invalid authentication details")
 
 }
 
 func checkBearer(c *fibre.Context, info string, callback func() error) (err error) {
 
-	auth := c.Get("auth").(*cnf.Auth)
+	auth := c.Get(varKeyAuth).(*cnf.Auth)
 
 	var txn kvs.TX
+	var res []*db.Response
 	var vars jwt.MapClaims
-	var nok, dok, sok, tok, uok bool
-	var nsv, dbv, scv, tkv, usv string
+	var nsk, dbk, sck, tkk, usk, tbk, idk bool
+	var nsv, dbv, scv, tkv, usv, tbv, idv string
 
 	// Start a new read transaction.
 
@@ -212,6 +252,10 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 
 	defer txn.Cancel()
 
+	// Setup the kvs layer cache.
+
+	cache := mem.NewWithTX(txn)
+
 	// Parse the specified JWT Token.
 
 	token, err := jwt.Parse(info, func(token *jwt.Token) (interface{}, error) {
@@ -222,15 +266,13 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 			return nil, err
 		}
 
-		if val, ok := vars["auth"].(map[string]interface{}); ok {
-			auth.Data = val
-		}
-
-		nsv, nok = vars["NS"].(string) // Namespace
-		dbv, dok = vars["DB"].(string) // Database
-		scv, sok = vars["SC"].(string) // Scope
-		tkv, tok = vars["TK"].(string) // Token
-		usv, uok = vars["US"].(string) // Login
+		nsv, nsk = vars[varKeyNs].(string) // Namespace
+		dbv, dbk = vars[varKeyDb].(string) // Database
+		scv, sck = vars[varKeySc].(string) // Scope
+		tkv, tkk = vars[varKeyTk].(string) // Token
+		usv, usk = vars[varKeyUs].(string) // Login
+		tbv, tbk = vars[varKeyTb].(string) // Table
+		idv, idk = vars[varKeyId].(string) // Thing
 
 		if tkv == "default" {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -238,17 +280,53 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 			}
 		}
 
-		if nok && dok && sok && tok {
+		if nsk && dbk && sck && tkk {
 
-			scp, err := mem.New(txn).GetSC(nsv, dbv, scv)
+			scp, err := cache.GetSC(nsv, dbv, scv)
 			if err != nil {
 				return nil, fmt.Errorf("Credentials failed")
 			}
 
-			auth.Data["scope"] = scp.Name
+			// Store the authenticated scope.
+
+			auth.Scope = scp.Name.ID
+
+			// Store the authenticated thing.
+
+			auth.Data = sql.NewThing(tbv, idv)
+
+			// Check that the scope specifies connect.
+
+			if exp, ok := scp.Connect.(*sql.SubExpression); ok {
+
+				// Process the scope connect statement.
+
+				c := fibre.NewContext(c.Request(), c.Response(), c.Fibre())
+
+				c.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
+
+				qvars := map[string]interface{}{"id": auth.Data}
+
+				query := &sql.Query{Statements: []sql.Statement{exp.Expr}}
+
+				// If the query fails then fail authentication.
+
+				if res, err = db.Process(c, query, qvars); err != nil {
+					return nil, fmt.Errorf("Credentials failed")
+				}
+
+				// If the response is not 1 record then fail authentication.
+
+				if len(res) != 1 || len(res[0].Result) != 1 {
+					return nil, fmt.Errorf("Credentials failed")
+				}
+
+				auth.Data = res[0].Result[0]
+
+			}
 
 			if tkv != "default" {
-				key, err := mem.New(txn).GetST(nsv, dbv, scv, tkv)
+				key, err := cache.GetST(nsv, dbv, scv, tkv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
@@ -262,10 +340,10 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 				return scp.Code, nil
 			}
 
-		} else if nok && dok && tok {
+		} else if nsk && dbk && tkk {
 
 			if tkv != "default" {
-				key, err := mem.New(txn).GetDT(nsv, dbv, tkv)
+				key, err := cache.GetDT(nsv, dbv, tkv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
@@ -274,8 +352,8 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 				}
 				auth.Kind = cnf.AuthDB
 				return key.Code, nil
-			} else if uok {
-				usr, err := mem.New(txn).GetDU(nsv, dbv, usv)
+			} else if usk {
+				usr, err := cache.GetDU(nsv, dbv, usv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
@@ -283,10 +361,10 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 				return usr.Code, nil
 			}
 
-		} else if nok && tok {
+		} else if nsk && tkk {
 
 			if tkv != "default" {
-				key, err := mem.New(txn).GetNT(nsv, tkv)
+				key, err := cache.GetNT(nsv, tkv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
@@ -295,8 +373,8 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 				}
 				auth.Kind = cnf.AuthNS
 				return key.Code, nil
-			} else if uok {
-				usr, err := mem.New(txn).GetNU(nsv, usv)
+			} else if usk {
+				usr, err := cache.GetNU(nsv, usv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
@@ -332,8 +410,10 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 			auth.Selected.DB = dbv
 		}
 
+		return callback()
+
 	}
 
-	return callback()
+	return fibre.NewHTTPError(401).WithMessage("Invalid authentication details")
 
 }

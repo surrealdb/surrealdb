@@ -16,10 +16,12 @@ package web
 
 import (
 	"github.com/abcum/fibre"
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/data"
 )
 
 func signup(c *fibre.Context) (err error) {
@@ -28,9 +30,21 @@ func signup(c *fibre.Context) (err error) {
 
 	c.Bind(&vars)
 
-	n, nok := vars["NS"].(string)
-	d, dok := vars["DB"].(string)
-	s, sok := vars["SC"].(string)
+	n, nok := vars[varKeyNs].(string)
+	d, dok := vars[varKeyDb].(string)
+	s, sok := vars[varKeySc].(string)
+
+	// Ensure that the IP address of the
+	// user signing up is available so that
+	// it can be used within signup queries.
+
+	vars[varKeyIp] = c.IP().String()
+
+	// Ensure that the website origin of the
+	// user signing up is available so that
+	// it can be used within signup queries.
+
+	vars[varKeyOrigin] = c.Origin()
 
 	// If we have a namespace, database, and
 	// scope defined, then we are logging in
@@ -38,8 +52,10 @@ func signup(c *fibre.Context) (err error) {
 
 	if nok && len(n) > 0 && dok && len(d) > 0 && sok && len(s) > 0 {
 
+		var ok bool
 		var txn kvs.TX
 		var res []*db.Response
+		var exp *sql.SubExpression
 		var scp *sql.DefineScopeStatement
 
 		// Start a new read transaction.
@@ -54,7 +70,7 @@ func signup(c *fibre.Context) (err error) {
 
 		// Get the specified signin scope.
 
-		if scp, err = mem.New(txn).GetSC(n, d, s); err != nil {
+		if scp, err = mem.NewWithTX(txn).GetSC(n, d, s); err != nil {
 			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
 				"ns": n,
 				"db": d,
@@ -62,19 +78,9 @@ func signup(c *fibre.Context) (err error) {
 			}).WithMessage("Authentication scope does not exist")
 		}
 
-		// Process the scope signup statement.
+		// Check that the scope allows signup.
 
-		qury := &sql.Query{Statements: []sql.Statement{scp.Signup}}
-
-		if res, err = db.Process(c, qury, vars); err != nil {
-			return fibre.NewHTTPError(501).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope signup was unsuccessful")
-		}
-
-		if len(res) != 1 && len(res[0].Result) != 1 {
+		if exp, ok = scp.Signup.(*sql.SubExpression); !ok {
 			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
 				"ns": n,
 				"db": d,
@@ -82,10 +88,46 @@ func signup(c *fibre.Context) (err error) {
 			}).WithMessage("Authentication scope signup was unsuccessful")
 		}
 
-		return c.Code(200)
+		// Process the scope signup statement.
+
+		c.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
+
+		query := &sql.Query{Statements: []sql.Statement{exp.Expr}}
+
+		// If the query fails then return a 501 error.
+
+		if res, err = db.Process(c, query, vars); err != nil {
+			return fibre.NewHTTPError(501).WithFields(map[string]interface{}{
+				"ns": n,
+				"db": d,
+				"sc": s,
+			}).WithMessage("Authentication scope signup was unsuccessful")
+		}
+
+		// If the response is not 1 record then return a 403 error.
+
+		if len(res) != 1 || len(res[0].Result) != 1 {
+			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
+				"ns": n,
+				"db": d,
+				"sc": s,
+			}).WithMessage("Authentication scope signup was unsuccessful")
+		}
+
+		// If the query does not return an id field then return a 403 error.
+
+		if _, ok = data.Consume(res[0].Result[0]).Get("id").Data().(*sql.Thing); !ok {
+			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
+				"ns": n,
+				"db": d,
+				"sc": s,
+			}).WithMessage("Authentication scope signup was unsuccessful")
+		}
+
+		return c.Code(204)
 
 	}
 
-	return fibre.NewHTTPError(401)
+	return fibre.NewHTTPError(403)
 
 }

@@ -23,6 +23,10 @@ var Settings *Options
 
 type Kind int
 
+func (k Kind) MarshalText() (data []byte, err error) {
+	return []byte(k.String()), err
+}
+
 func (k Kind) String() string {
 	switch k {
 	default:
@@ -53,7 +57,8 @@ const (
 
 type Auth struct {
 	Kind     Kind
-	Data     map[string]interface{}
+	Data     interface{}
+	Scope    string
 	Possible struct {
 		NS string
 		DB string
