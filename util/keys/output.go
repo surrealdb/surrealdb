@@ -19,12 +19,7 @@ import "fmt"
 // output decodes an encoded string using the unicode collation algorithm.
 func output(items ...interface{}) (out string) {
 	for _, v := range items {
-		switch v.(type) {
-		default:
-			out = out + fmt.Sprintf("/%s", v)
-		case []interface{}:
-			out = out + fmt.Sprintf("/%v", v)
-		}
+		out = out + fmt.Sprintf("/%v", v)
 	}
 	return
 }

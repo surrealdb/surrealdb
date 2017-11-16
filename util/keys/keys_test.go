@@ -161,7 +161,7 @@ func TestMain(t *testing.T) {
 			new: &Table{},
 		},
 		{
-			str: "/surreal/abcum/*/database/*/person/*/\x00",
+			str: "/surreal/abcum/*/database/*/person/*/\x01",
 			obj: &Thing{KV: "surreal", NS: "abcum", DB: "database", TB: "person", ID: Prefix},
 			new: &Thing{},
 		},

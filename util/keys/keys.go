@@ -24,9 +24,9 @@ const (
 	// Suffix is the highest char found in a key
 	Suffix = suffix
 	// Ignore specifies an ignored field
-	ignore = "\x01"
+	ignore = "\x00"
 	// Prefix is the lowest char found in a key
-	prefix = "\x00"
+	prefix = "\x01"
 	// Suffix is the highest char found in a key
 	suffix = "\xff"
 )
@@ -39,33 +39,20 @@ var (
 )
 
 var (
-	skip interface{}
+	skip string
 )
 
 var (
-	cEND = byte(0x00)
-	cPRE = byte(0x01)
-	cNIL = byte(0x02)
-	cVAL = byte(0x03)
-	cTME = byte(0x04)
-	cNEG = byte(0x05)
-	cPOS = byte(0x06)
-	cSTR = byte(0x07)
-	cARR = byte(0x08)
-	cSUF = byte(0x09)
-)
-
-var (
-	bEND = []byte{cEND}
-	bPRE = []byte{cPRE}
-	bNIL = []byte{cNIL}
-	bVAL = []byte{cVAL}
-	bTME = []byte{cTME}
-	bNEG = []byte{cNEG}
-	bPOS = []byte{cPOS}
-	bSTR = []byte{cSTR}
-	bARR = []byte{cARR}
-	bSUF = []byte{cSUF}
+	bEND = byte(0x00)
+	bPRE = byte(0x01)
+	bNIL = byte(0x02)
+	bVAL = byte(0x03)
+	bTME = byte(0x04)
+	bNEG = byte(0x05)
+	bPOS = byte(0x06)
+	bSTR = byte(0x07)
+	bARR = byte(0x08)
+	bSUF = byte(0x09)
 )
 
 const (

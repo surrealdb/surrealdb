@@ -15,47 +15,66 @@
 package keys
 
 import (
-	"bufio"
 	"encoding/binary"
-	"io"
 	"math"
 	"time"
+
+	"github.com/abcum/bump"
 )
 
 type reader struct {
-	*bufio.Reader
+	r *bump.Reader
 }
 
-func newReader(r io.Reader) *reader {
+func newReader() *reader {
 	return &reader{
-		bufio.NewReader(r),
+		r: bump.NewReader(nil),
 	}
 }
 
-func (r *reader) ReadNext(exp byte) (fnd bool) {
-	byt, _ := r.ReadByte()
-	if exp == byt {
+func (r *reader) unread() {
+
+}
+
+func (r *reader) lookNext() (byt byte) {
+	byt, _ = r.r.PeekByte()
+	return
+}
+
+func (r *reader) readNext(exp byte) (fnd bool) {
+	if byt, _ := r.r.PeekByte(); byt == exp {
+		r.r.ReadByte()
 		return true
 	}
-	r.UnreadByte()
 	return false
 }
 
-func (r *reader) ReadUpto(exp ...byte) (byt []byte) {
+func (r *reader) readSize(sze int) (byt []byte) {
+	byt, _ = r.r.ReadBytes(sze)
+	return byt
+}
 
-	for i := 0; i < len(exp); i++ {
-		if i == 0 {
-			rng, _ := r.ReadBytes(exp[i])
-			byt = append(byt, rng...)
+func (r *reader) readUpto(exp ...byte) (byt []byte) {
+
+LOOP:
+	for {
+
+		bit, _ := r.r.ReadByte()
+		byt = append(byt, bit)
+		if bit != exp[0] {
+			continue
 		}
-		if i >= 1 {
-			if r.ReadNext(exp[i]) {
-				byt = append(byt, exp[i])
+
+		for j := 1; j < len(exp); j++ {
+			if r.readNext(exp[j]) {
+				byt = append(byt, bit)
 				continue
-			} else {
-				i = 0
 			}
+			break LOOP
 		}
+
+		break
+
 	}
 
 	return byt[:len(byt)-len(exp)]
@@ -68,72 +87,82 @@ func (r *reader) ReadUpto(exp ...byte) (byt []byte) {
 // --------------------------------------------------
 // --------------------------------------------------
 
-func (r *reader) FindNext() (byt byte) {
-	byt, _ = r.ReadByte()
-	r.UnreadByte()
-	return
+func (r *reader) readAny() (val interface{}) {
+	return r.readUpto(bEND)
 }
 
-func (r *reader) FindAny() (val interface{}) {
-	return r.ReadUpto(cEND)
-}
-
-func (r *reader) FindNull() (val interface{}) {
-	if r.ReadNext(cNIL) {
-		r.ReadNext(cEND)
+func (r *reader) readNull() (val interface{}) {
+	if r.readNext(bNIL) {
+		r.readNext(bEND)
 	}
 	return
 }
 
-func (r *reader) FindTime() (val time.Time) {
-	if r.ReadNext(cTME) {
-		var out int64
-		binary.Read(r.Reader, binary.BigEndian, &out)
-		val = time.Unix(0, out).UTC()
-		r.ReadNext(cEND)
+func (r *reader) readTime() (val time.Time) {
+	if r.readNext(bTME) {
+		bin := r.readSize(8)
+		dec := binary.BigEndian.Uint64(bin)
+		val = time.Unix(0, int64(dec)).UTC()
+		r.readNext(bEND)
 	}
 	return
 }
 
-func (r *reader) FindBool() (val bool) {
-	if r.ReadNext(cVAL) {
-		val = r.ReadNext(cVAL)
-		r.ReadNext(cEND)
+func (r *reader) readBool() (val bool) {
+	if r.readNext(bVAL) {
+		val = r.readNext(bVAL)
+		r.readNext(bEND)
 	}
 	return
 }
 
-func (r *reader) FindBytes() (val []byte) {
-	if r.ReadNext(cSTR) {
-		val = r.ReadUpto(cEND, cEND)
+func (r *reader) readBytes() (val []byte) {
+	if r.readNext(bSTR) {
+		val = r.readUpto(bEND, bEND)
 	}
 	return
 }
 
-func (r *reader) FindString() (val string) {
-	if r.ReadNext(cSTR) {
-		val = string(r.ReadUpto(cEND, cEND))
-	} else if r.ReadNext(cPRE) {
+func (r *reader) readFloat() (val float64) {
+	if r.readNext(bNEG) {
+		bin := r.readSize(8)
+		dec := binary.BigEndian.Uint64(bin)
+		val = math.Float64frombits(^dec)
+		r.readNext(bEND)
+	} else if r.readNext(bPOS) {
+		bin := r.readSize(8)
+		dec := binary.BigEndian.Uint64(bin)
+		val = math.Float64frombits(dec)
+		r.readNext(bEND)
+	}
+	return
+}
+
+func (r *reader) readString() (val string) {
+	if r.readNext(bSTR) {
+		val = string(r.readUpto(bEND, bEND))
+	} else if r.readNext(bPRE) {
 		val = Prefix
-		r.ReadNext(cEND)
-	} else if r.ReadNext(cSUF) {
+		r.readNext(bEND)
+	} else if r.readNext(bSUF) {
 		val = Suffix
-		r.ReadNext(cEND)
+		r.readNext(bEND)
 	}
 	return
 }
 
-func (r *reader) FindNumber() (val interface{}) {
-	var dec uint64
+func (r *reader) readNumber() (val interface{}) {
 	var num float64
-	if r.ReadNext(cNEG) {
-		binary.Read(r.Reader, binary.BigEndian, &dec)
+	if r.readNext(bNEG) {
+		bin := r.readSize(8)
+		dec := binary.BigEndian.Uint64(bin)
 		num = math.Float64frombits(^dec)
-		r.ReadNext(cEND)
-	} else if r.ReadNext(cPOS) {
-		binary.Read(r.Reader, binary.BigEndian, &dec)
+		r.readNext(bEND)
+	} else if r.readNext(bPOS) {
+		bin := r.readSize(8)
+		dec := binary.BigEndian.Uint64(bin)
 		num = math.Float64frombits(dec)
-		r.ReadNext(cEND)
+		r.readNext(bEND)
 	}
 	if math.Trunc(num) == num {
 		return int64(math.Trunc(num))
@@ -141,89 +170,27 @@ func (r *reader) FindNumber() (val interface{}) {
 	return num
 }
 
-func (r *reader) FindDouble() (val float64) {
-	var dec uint64
-	if r.ReadNext(cNEG) {
-		binary.Read(r.Reader, binary.BigEndian, &dec)
-		val = math.Float64frombits(^dec)
-		r.ReadNext(cEND)
-	} else if r.ReadNext(cPOS) {
-		binary.Read(r.Reader, binary.BigEndian, &dec)
-		val = math.Float64frombits(dec)
-		r.ReadNext(cEND)
-	}
-	return
-}
-
-func (r *reader) FindNumberInt() (val int) {
-	return int(r.FindDouble())
-}
-
-func (r *reader) FindNumberInt8() (val int8) {
-	return int8(r.FindDouble())
-}
-
-func (r *reader) FindNumberInt16() (val int16) {
-	return int16(r.FindDouble())
-}
-
-func (r *reader) FindNumberInt32() (val int32) {
-	return int32(r.FindDouble())
-}
-
-func (r *reader) FindNumberInt64() (val int64) {
-	return int64(r.FindDouble())
-}
-
-func (r *reader) FindNumberUint() (val uint) {
-	return uint(r.FindDouble())
-}
-
-func (r *reader) FindNumberUint8() (val uint8) {
-	return uint8(r.FindDouble())
-}
-
-func (r *reader) FindNumberUint16() (val uint16) {
-	return uint16(r.FindDouble())
-}
-
-func (r *reader) FindNumberUint32() (val uint32) {
-	return uint32(r.FindDouble())
-}
-
-func (r *reader) FindNumberUint64() (val uint64) {
-	return uint64(r.FindDouble())
-}
-
-func (r *reader) FindNumberFloat32() (val float32) {
-	return float32(r.FindDouble())
-}
-
-func (r *reader) FindNumberFloat64() (val float64) {
-	return float64(r.FindDouble())
-}
-
-func (r *reader) FindArray() (val []interface{}) {
-	if r.ReadNext(cARR) {
-		for !r.ReadNext(cEND) {
-			switch fnd := r.FindNext(); fnd {
+func (r *reader) readArray() (val []interface{}) {
+	if r.readNext(bARR) {
+		for !r.readNext(bEND) {
+			switch r.lookNext() {
 			default:
-				val = append(val, []interface{}{r.FindAny()}...)
-			case cNIL:
-				val = append(val, []interface{}{r.FindNull()}...)
-			case cVAL:
-				val = append(val, []interface{}{r.FindBool()}...)
-			case cTME:
-				val = append(val, []interface{}{r.FindTime()}...)
-			case cNEG, cPOS:
-				val = append(val, []interface{}{r.FindNumber()}...)
-			case cSTR, cPRE, cSUF:
-				val = append(val, []interface{}{r.FindString()}...)
-			case cARR:
-				val = append(val, []interface{}{r.FindArray()}...)
+				val = append(val, []interface{}{r.readAny()}...)
+			case bNIL:
+				val = append(val, []interface{}{r.readNull()}...)
+			case bVAL:
+				val = append(val, []interface{}{r.readBool()}...)
+			case bTME:
+				val = append(val, []interface{}{r.readTime()}...)
+			case bNEG, bPOS:
+				val = append(val, []interface{}{r.readNumber()}...)
+			case bSTR, bPRE, bSUF:
+				val = append(val, []interface{}{r.readString()}...)
+			case bARR:
+				val = append(val, []interface{}{r.readArray()}...)
 			}
 		}
-		r.ReadNext(cEND)
+		r.readNext(bEND)
 	}
 	return
 }

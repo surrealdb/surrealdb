@@ -15,8 +15,7 @@
 package keys
 
 import (
-	"bytes"
-	"io"
+	"sync"
 	"time"
 )
 
@@ -24,15 +23,30 @@ type decoder struct {
 	r *reader
 }
 
-// decode decodes an encoded string using the unicode collation algorithm.
-func decode(data []byte, items ...interface{}) {
-	newDecoder(bytes.NewReader(data)).Decode(items...)
+var decoders = sync.Pool{
+	New: func() interface{} {
+		return &decoder{
+			r: newReader(),
+		}
+	},
 }
 
-func newDecoder(r io.Reader) *decoder {
-	return &decoder{
-		r: newReader(r),
-	}
+// decode decodes an encoded string using the unicode collation algorithm.
+func decode(data []byte, items ...interface{}) {
+	dec := newDecoder(data)
+	dec.Decode(items...)
+	dec.Reset()
+	return
+}
+
+func newDecoder(b []byte) *decoder {
+	d := decoders.Get().(*decoder)
+	d.r.r.ResetBytes(b)
+	return d
+}
+
+func (d *decoder) Reset() {
+	decoders.Put(d)
 }
 
 func (d *decoder) Decode(items ...interface{}) {
@@ -42,171 +56,171 @@ func (d *decoder) Decode(items ...interface{}) {
 		switch value := item.(type) {
 
 		case *time.Time:
-			*value = d.r.FindTime()
+			*value = d.r.readTime()
 
 		case *bool:
-			*value = d.r.FindBool()
+			*value = d.r.readBool()
 
 		case *[]byte:
-			*value = d.r.FindBytes()
+			*value = d.r.readBytes()
 
 		case *string:
-			*value = d.r.FindString()
+			*value = d.r.readString()
 
 		case *int:
-			*value = d.r.FindNumberInt()
+			*value = int(d.r.readFloat())
 
 		case *int8:
-			*value = d.r.FindNumberInt8()
+			*value = int8(d.r.readFloat())
 
 		case *int16:
-			*value = d.r.FindNumberInt16()
+			*value = int16(d.r.readFloat())
 
 		case *int32:
-			*value = d.r.FindNumberInt32()
+			*value = int32(d.r.readFloat())
 
 		case *int64:
-			*value = d.r.FindNumberInt64()
+			*value = int64(d.r.readFloat())
 
 		case *uint:
-			*value = d.r.FindNumberUint()
+			*value = uint(d.r.readFloat())
 
 		case *uint8:
-			*value = d.r.FindNumberUint8()
+			*value = uint8(d.r.readFloat())
 
 		case *uint16:
-			*value = d.r.FindNumberUint16()
+			*value = uint16(d.r.readFloat())
 
 		case *uint32:
-			*value = d.r.FindNumberUint32()
+			*value = uint32(d.r.readFloat())
 
 		case *uint64:
-			*value = d.r.FindNumberUint64()
+			*value = uint64(d.r.readFloat())
 
 		case *float32:
-			*value = d.r.FindNumberFloat32()
+			*value = float32(d.r.readFloat())
 
 		case *float64:
-			*value = d.r.FindNumberFloat64()
+			*value = float64(d.r.readFloat())
 
 		case *[]time.Time:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindTime())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, d.r.readTime())
 				}
 			}
 
 		case *[]bool:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindBool())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, d.r.readBool())
 				}
 			}
 
 		case *[]string:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindString())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, d.r.readString())
 				}
 			}
 
 		case *[]int:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberInt())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, int(d.r.readFloat()))
 				}
 			}
 
 		case *[]int8:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberInt8())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, int8(d.r.readFloat()))
 				}
 			}
 
 		case *[]int16:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberInt16())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, int16(d.r.readFloat()))
 				}
 			}
 
 		case *[]int32:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberInt32())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, int32(d.r.readFloat()))
 				}
 			}
 
 		case *[]int64:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberInt64())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, int64(d.r.readFloat()))
 				}
 			}
 
 		case *[]uint:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberUint())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, uint(d.r.readFloat()))
 				}
 			}
 
 		case *[]uint16:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberUint16())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, uint16(d.r.readFloat()))
 				}
 			}
 
 		case *[]uint32:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberUint32())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, uint32(d.r.readFloat()))
 				}
 			}
 
 		case *[]uint64:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberUint64())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, uint64(d.r.readFloat()))
 				}
 			}
 
 		case *[]float32:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberFloat32())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, float32(d.r.readFloat()))
 				}
 			}
 
 		case *[]float64:
-			if d.r.ReadNext(cARR) {
-				for !d.r.ReadNext(cEND) {
-					*value = append(*value, d.r.FindNumberFloat64())
+			if d.r.readNext(bARR) {
+				for !d.r.readNext(bEND) {
+					*value = append(*value, float64(d.r.readFloat()))
 				}
 			}
 
 		case *[]interface{}:
-			*value = d.r.FindArray()
+			*value = d.r.readArray()
 
 		case *interface{}:
 
-			switch fnd := d.r.FindNext(); fnd {
+			switch d.r.lookNext() {
 			default:
-				*value = d.r.FindAny()
-			case cNIL:
-				*value = d.r.FindNull()
-			case cVAL:
-				*value = d.r.FindBool()
-			case cTME:
-				*value = d.r.FindTime()
-			case cNEG, cPOS:
-				*value = d.r.FindNumber()
-			case cSTR, cPRE, cSUF:
-				*value = d.r.FindString()
-			case cARR:
-				*value = d.r.FindArray()
+				*value = d.r.readAny()
+			case bNIL:
+				*value = d.r.readNull()
+			case bVAL:
+				*value = d.r.readBool()
+			case bTME:
+				*value = d.r.readTime()
+			case bNEG, bPOS:
+				*value = d.r.readFloat()
+			case bSTR, bPRE, bSUF:
+				*value = d.r.readString()
+			case bARR:
+				*value = d.r.readArray()
 
 			}
 

@@ -15,8 +15,7 @@
 package keys
 
 import (
-	"bytes"
-	"io"
+	"sync"
 	"time"
 )
 
@@ -24,17 +23,35 @@ type encoder struct {
 	w *writer
 }
 
-// encode encodes an interface using the unicode collation algorithm.
-func encode(items ...interface{}) []byte {
-	b := &bytes.Buffer{}
-	newEncoder(b).Encode(items...)
-	return b.Bytes()
+var encoders = sync.Pool{
+	New: func() interface{} {
+		return &encoder{
+			w: newWriter(),
+		}
+	},
 }
 
-func newEncoder(w io.Writer) *encoder {
-	return &encoder{
-		w: newWriter(w),
-	}
+// Encode encodes an interface using the unicode collation algorithm.
+func Encode(items ...interface{}) []byte {
+	return encode(items...)
+}
+
+// encode encodes an interface using the unicode collation algorithm.
+func encode(items ...interface{}) (dst []byte) {
+	enc := newEncoder(&dst)
+	enc.Encode(items...)
+	enc.Reset()
+	return
+}
+
+func newEncoder(b *[]byte) *encoder {
+	e := encoders.Get().(*encoder)
+	e.w.w.ResetBytes(b)
+	return e
+}
+
+func (e *encoder) Reset() {
+	encoders.Put(e)
 }
 
 func (e *encoder) Encode(items ...interface{}) {
@@ -45,29 +62,29 @@ func (e *encoder) Encode(items ...interface{}) {
 
 		case nil:
 
-			e.w.write(bNIL)
-			e.w.write(bEND)
+			e.w.writeOne(bNIL)
+			e.w.writeOne(bEND)
 
 		case bool:
 
-			e.w.write(bVAL)
+			e.w.writeOne(bVAL)
 			if value {
-				e.w.write(bVAL)
+				e.w.writeOne(bVAL)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case time.Time:
 
-			e.w.write(bTME)
-			e.w.write(value)
-			e.w.write(bEND)
+			e.w.writeOne(bTME)
+			e.w.writeTime(value)
+			e.w.writeOne(bEND)
 
 		case []byte:
 
-			e.w.write(bSTR)
-			e.w.write(value)
-			e.w.write(bEND)
-			e.w.write(bEND)
+			e.w.writeOne(bSTR)
+			e.w.writeMany(value)
+			e.w.writeOne(bEND)
+			e.w.writeOne(bEND)
 
 		case string:
 
@@ -76,156 +93,202 @@ func (e *encoder) Encode(items ...interface{}) {
 			}
 
 			if value == Prefix {
-				e.w.write(bPRE)
-				e.w.write(bEND)
+				e.w.writeOne(bPRE)
+				e.w.writeOne(bEND)
 				break
 			}
 
 			if value == Suffix {
-				e.w.write(bSUF)
-				e.w.write(bEND)
+				e.w.writeOne(bSUF)
+				e.w.writeOne(bEND)
 				break
 			}
 
-			e.w.write(bSTR)
-			e.w.write(value)
-			e.w.write(bEND)
-			e.w.write(bEND)
+			e.w.writeOne(bSTR)
+			e.w.writeString(value)
+			e.w.writeOne(bEND)
+			e.w.writeOne(bEND)
 
-		case float32, float64:
+		case int:
 
-			e.w.write(value)
-			e.w.write(bEND)
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
 
-		case int, int8, int16, int32, int64:
+		case int8:
 
-			e.w.write(value)
-			e.w.write(bEND)
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
 
-		case uint, uint8, uint16, uint32, uint64:
+		case int16:
 
-			e.w.write(value)
-			e.w.write(bEND)
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
+
+		case int32:
+
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
+
+		case int64:
+
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
+
+		case uint:
+
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
+
+		case uint8:
+
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
+
+		case uint16:
+
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
+
+		case uint32:
+
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
+
+		case uint64:
+
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
+
+		case float32:
+
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
+
+		case float64:
+
+			e.w.writeFloat(float64(value))
+			e.w.writeOne(bEND)
 
 		case []time.Time:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []bool:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []string:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []int:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
-				e.Encode(val)
+				e.w.writeFloat(float64(val))
+				e.w.writeOne(bEND)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []int8:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []int16:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []int32:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []int64:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []uint:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []uint16:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []uint32:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []uint64:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []float32:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []float64:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		case []interface{}:
 
-			e.w.write(bARR)
+			e.w.writeOne(bARR)
 			for _, val := range value {
 				e.Encode(val)
 			}
-			e.w.write(bEND)
+			e.w.writeOne(bEND)
 
 		}
 
