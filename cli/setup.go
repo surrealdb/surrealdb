@@ -143,7 +143,9 @@ func setup() {
 		opts.Auth.Pass = string(rand.New(20))
 	}
 
-	//
+	// Ensure that login as
+	// root can only be from
+	// specified ip addresses
 
 	for _, cidr := range opts.Auth.Addr {
 		_, subn, err := net.ParseCIDR(cidr)
