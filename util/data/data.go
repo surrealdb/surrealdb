@@ -688,6 +688,26 @@ func (d *Doc) Del(path ...string) error {
 
 // --------------------------------------------------------------------------------
 
+// Append appends an item or an array of items to an array at the specified path.
+func (d *Doc) Append(value interface{}, path ...string) (*Doc, error) {
+
+	a, ok := d.Get(path...).Data().([]interface{})
+	if !ok {
+		return &Doc{data: nil}, fmt.Errorf("Not an array")
+	}
+
+	if values, ok := value.([]interface{}); ok {
+		for _, value := range values {
+			a = append(a, value)
+		}
+	} else {
+		a = append(a, value)
+	}
+
+	return d.Set(a, path...)
+
+}
+
 // ArrayAdd appends an item or an array of items to an array at the specified path.
 func (d *Doc) ArrayAdd(value interface{}, path ...string) (*Doc, error) {
 

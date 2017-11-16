@@ -774,6 +774,54 @@ func TestOperations(t *testing.T) {
 		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 2)
 	})
 
+	Convey("Can add to array", t, func() {
+		set, err := doc.ArrayAdd("None", "the.item.tags")
+		So(err, ShouldBeNil)
+		So(set.Data(), ShouldHaveLength, 3)
+		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy", "None"})
+		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
+	})
+
+	Convey("Can add to array", t, func() {
+		set, err := doc.ArrayAdd("None", "the.item.tags")
+		So(err, ShouldBeNil)
+		So(set.Data(), ShouldHaveLength, 3)
+		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy", "None"})
+		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
+	})
+
+	Convey("Can del from array", t, func() {
+		set, err := doc.ArrayDel("None", "the.item.tags")
+		So(err, ShouldBeNil)
+		So(set.Data(), ShouldHaveLength, 2)
+		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy"})
+		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 2)
+	})
+
+	Convey("Can append to array", t, func() {
+		set, err := doc.Append("None", "the.item.tags")
+		So(err, ShouldBeNil)
+		So(set.Data(), ShouldHaveLength, 3)
+		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy", "None"})
+		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
+	})
+
+	Convey("Can append to array", t, func() {
+		set, err := doc.Append("None", "the.item.tags")
+		So(err, ShouldBeNil)
+		So(set.Data(), ShouldHaveLength, 4)
+		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy", "None", "None"})
+		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 4)
+	})
+
+	Convey("Can append to array", t, func() {
+		set, err := doc.Append("None", "the.item.tags")
+		So(err, ShouldBeNil)
+		So(set.Data(), ShouldHaveLength, 5)
+		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy", "None", "None", "None"})
+		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 5)
+	})
+
 	Convey("Can del array", t, func() {
 		err := doc.Del("the.item.tags")
 		So(err, ShouldBeNil)
