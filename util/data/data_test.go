@@ -1048,7 +1048,7 @@ func TestOperations(t *testing.T) {
 	// ----------------------------------------------------------------------------------------------------
 
 	Convey("Can copy object", t, func() {
-		So(doc.Copy(), ShouldResemble, doc.Data())
+		So(doc.Copy().Data(), ShouldResemble, doc.Data())
 	})
 
 	// ----------------------------------------------------------------------------------------------------

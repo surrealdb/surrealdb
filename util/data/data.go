@@ -57,8 +57,8 @@ func (d *Doc) Data() interface{} {
 }
 
 // Copy returns a duplicated copy of the internal data object.
-func (d *Doc) Copy() (i interface{}) {
-	return deep.Copy(d.data)
+func (d *Doc) Copy() *Doc {
+	return &Doc{data: deep.Copy(d.data)}
 }
 
 // Encode encodes the data object to a byte slice.
