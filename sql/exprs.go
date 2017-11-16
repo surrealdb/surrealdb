@@ -16,42 +16,22 @@ package sql
 
 import (
 	"fmt"
-	"regexp"
+	"sort"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
-	"github.com/abcum/surreal/util/rand"
+	"golang.org/x/text/language"
 )
 
 func (p *parser) parseWhat() (mul []Expr, err error) {
 
 	for {
 
-		tok, lit, err := p.shouldBe(IDENT, THING, PARAM, MODEL)
+		exp, err := p.parsePart()
 		if err != nil {
-			return nil, &ParseError{Found: lit, Expected: []string{"table, or thing"}}
+			return nil, err
 		}
 
-		if p.is(tok, IDENT) {
-			one, _ := p.declare(TABLE, lit)
-			mul = append(mul, one)
-		}
-
-		if p.is(tok, THING) {
-			one, _ := p.declare(THING, lit)
-			mul = append(mul, one)
-		}
-
-		if p.is(tok, PARAM) {
-			one, _ := p.declare(PARAM, lit)
-			mul = append(mul, one)
-		}
-
-		if p.is(tok, MODEL) {
-			one, _ := p.declare(MODEL, lit)
-			mul = append(mul, one)
-		}
+		mul = append(mul, exp)
 
 		// Check to see if the next token is a comma
 		// and if not, then break out of the loop,
@@ -64,6 +44,19 @@ func (p *parser) parseWhat() (mul []Expr, err error) {
 	}
 
 	return
+
+}
+
+func (p *parser) parseValue() (*Value, error) {
+
+	tok, lit, err := p.shouldBe(STRING, REGION)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
+	}
+
+	val, err := p.declare(tok, lit)
+
+	return val.(*Value), err
 
 }
 
@@ -119,40 +112,6 @@ func (p *parser) parseTables() (mul Tables, err error) {
 	for {
 
 		one, err := p.parseTable()
-		if err != nil {
-			return nil, err
-		}
-
-		mul = append(mul, one)
-
-		if _, _, exi := p.mightBe(COMMA); !exi {
-			break
-		}
-
-	}
-
-	return
-
-}
-
-func (p *parser) parseThing() (*Thing, error) {
-
-	_, lit, err := p.shouldBe(THING)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"thing"}}
-	}
-
-	val, err := p.declare(THING, lit)
-
-	return val.(*Thing), err
-
-}
-
-func (p *parser) parseThings() (mul Things, err error) {
-
-	for {
-
-		one, err := p.parseThing()
 		if err != nil {
 			return nil, err
 		}
@@ -225,92 +184,6 @@ func (p *parser) parseCond() (exp Expr, err error) {
 //
 // --------------------------------------------------
 
-func (p *parser) parseRand() (exp []byte, err error) {
-
-	exp = rand.New(128)
-
-	return
-
-}
-
-// --------------------------------------------------
-//
-// --------------------------------------------------
-
-func (p *parser) parseArray() (Array, error) {
-
-	_, lit, err := p.shouldBe(ARRAY)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"array"}}
-	}
-
-	val, err := p.declare(ARRAY, lit)
-
-	return val.(Array), err
-
-}
-
-func (p *parser) parseObject() (Object, error) {
-
-	_, lit, err := p.shouldBe(JSON)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"object"}}
-	}
-
-	val, err := p.declare(JSON, lit)
-
-	return val.(Object), err
-
-}
-
-func (p *parser) parseNumber() (int64, error) {
-
-	_, lit, err := p.shouldBe(NUMBER)
-	if err != nil {
-		return int64(0), &ParseError{Found: lit, Expected: []string{"number"}}
-	}
-
-	val, err := p.declare(NUMBER, lit)
-
-	return val.(int64), err
-
-}
-
-func (p *parser) parseDouble() (float64, error) {
-
-	_, lit, err := p.shouldBe(NUMBER, DOUBLE)
-	if err != nil {
-		return float64(0), &ParseError{Found: lit, Expected: []string{"number"}}
-	}
-
-	val, err := p.declare(DOUBLE, lit)
-
-	return val.(float64), err
-
-}
-
-func (p *parser) parseString() (string, error) {
-
-	_, lit, err := p.shouldBe(STRING)
-	if err != nil {
-		return string(""), &ParseError{Found: lit, Expected: []string{"string"}}
-	}
-
-	return lit, err
-
-}
-
-func (p *parser) parseRegion() (string, error) {
-
-	_, lit, err := p.shouldBe(STRING, REGION)
-	if err != nil {
-		return string(""), &ParseError{Found: lit, Expected: []string{"string"}}
-	}
-
-	return lit, err
-
-}
-
 func (p *parser) parseBinary() ([]byte, error) {
 
 	_, lit, err := p.shouldBe(STRING, REGION)
@@ -322,40 +195,13 @@ func (p *parser) parseBinary() ([]byte, error) {
 
 }
 
-func (p *parser) parseScript() (string, error) {
+func (p *parser) parseTimeout() (time.Duration, error) {
 
-	_, lit, err := p.shouldBe(STRING, REGION)
-	if err != nil {
-		return string(""), &ParseError{Found: lit, Expected: []string{"script"}}
+	if _, _, exi := p.mightBe(TIMEOUT); !exi {
+		return 0, nil
 	}
 
-	return lit, err
-
-}
-
-func (p *parser) parseRegexp() (string, error) {
-
-	tok, lit, err := p.shouldBe(REGEX)
-	if err != nil {
-		return string(""), &ParseError{Found: lit, Expected: []string{"regular expression"}}
-	}
-
-	val, err := p.declare(tok, lit)
-
-	return val.(*regexp.Regexp).String(), err
-
-}
-
-func (p *parser) parseBoolean() (bool, error) {
-
-	tok, lit, err := p.shouldBe(TRUE, FALSE)
-	if err != nil {
-		return bool(false), &ParseError{Found: lit, Expected: []string{"boolean"}}
-	}
-
-	val, err := p.declare(tok, lit)
-
-	return val.(bool), err
+	return p.parseDuration()
 
 }
 
@@ -372,48 +218,69 @@ func (p *parser) parseDuration() (time.Duration, error) {
 
 }
 
-func (p *parser) parseTimeout() (time.Duration, error) {
+func (p *parser) parseType() (t, k string, err error) {
 
-	if _, _, exi := p.mightBe(TIMEOUT); !exi {
-		return 0, nil
+	_, t, err = p.shouldBe(IDENT, STRING)
+	if err != nil {
+		err = &ParseError{Found: t, Expected: allowedTypes}
+		return
 	}
 
-	return p.parseDuration()
+	if !p.contains(t, allowedTypes) {
+		err = &ParseError{Found: t, Expected: allowedTypes}
+		return
+	}
+
+	if t == "record" {
+		if _, _, exi := p.mightBe(LPAREN); exi {
+			if _, k, err = p.shouldBe(IDENT); err != nil {
+				return
+			}
+			if _, _, err = p.shouldBe(RPAREN); err != nil {
+				return
+			}
+		}
+	}
+
+	return
 
 }
 
-func (p *parser) parseBcrypt() ([]byte, error) {
+func (p *parser) parseLanguage() (language.Tag, error) {
 
-	_, lit, err := p.shouldBe(STRING)
+	_, lit, err := p.shouldBe(IDENT, STRING)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
+		return language.English, &ParseError{Found: lit, Expected: []string{"string"}}
 	}
 
-	return bcrypt.GenerateFromPassword([]byte(lit), bcrypt.DefaultCost)
+	tag, err := language.Parse(lit)
+	if err != nil {
+		return language.English, &ParseError{Found: lit, Expected: []string{"BCP47 language"}}
+	}
+
+	if _, _, exi := p.mightBe(NUMERIC); exi {
+		tag, _ = tag.SetTypeForKey("kn", "true")
+	}
+
+	return tag, err
 
 }
 
 func (p *parser) parseAlgorithm() (string, error) {
 
-	expected := []string{
-		"ES256", "ES384", "ES512",
-		"HS256", "HS384", "HS512",
-		"PS256", "PS384", "PS512",
-		"RS256", "RS384", "RS512",
-	}
-
 	_, lit, err := p.shouldBe(IDENT, STRING)
 	if err != nil {
-		return string(""), &ParseError{Found: lit, Expected: expected}
+		return string(""), &ParseError{Found: lit, Expected: allowedAlgorithms}
 	}
 
 	switch lit {
-	case "ES256", "ES384", "ES512":
-	case "HS256", "HS384", "HS512":
-	case "PS256", "PS384", "PS512":
-	case "RS256", "RS384", "RS512":
+	case
+		"ES256", "ES384", "ES512",
+		"HS256", "HS384", "HS512",
+		"PS256", "PS384", "PS512",
+		"RS256", "RS384", "RS512":
 	default:
-		return string(""), &ParseError{Found: lit, Expected: expected}
+		return string(""), &ParseError{Found: lit, Expected: allowedAlgorithms}
 	}
 
 	return lit, err
@@ -426,28 +293,40 @@ func (p *parser) parseExpr() (exp Expr, err error) {
 
 	root := &BinaryExpression{}
 
-	// If the subsequent token is an in, out, or
-	// multi way path expression, then parse all
-	// following expressions as a path.
+	// If the primary token is an in, out, or
+	// multi way path expression, then follow
+	// the path through to the end.
 
 	if tok, _, exi := p.mightBe(OEDGE, IEDGE, BEDGE); exi {
-		return p.parsePath(tok)
-	}
 
-	// Begin with parsing the first expression
-	// as the root of the tree to start with.
+		root.RHS, err = p.parsePath(tok)
+		if err != nil {
+			return nil, err
+		}
 
-	root.RHS, err = p.parsePart()
-	if err != nil {
-		return nil, err
-	}
+	} else {
 
-	// If the subsequent token is an in, out, or
-	// multi way path expression, then parse all
-	// following expressions as a path.
+		// Otherwise begin with parsing the first
+		// expression, as the root of the tree.
 
-	if tok, _, exi := p.mightBe(OEDGE, IEDGE, BEDGE); exi {
-		return p.parsePath(root.RHS, tok)
+		root.RHS, err = p.parsePart()
+		if err != nil {
+			return nil, err
+		}
+
+		// But if the subsequent token is an in, out,
+		// or multi way path expression, then follow
+		// the path through to the end.
+
+		if tok, _, exi := p.mightBe(DOT, OEDGE, IEDGE, BEDGE); exi {
+
+			root.RHS, err = p.parsePath(root.RHS, tok)
+			if err != nil {
+				return nil, err
+			}
+
+		}
+
 	}
 
 	// Loop over the operations and expressions
@@ -548,7 +427,7 @@ func (p *parser) parseExpr() (exp Expr, err error) {
 		// of the expression and add it to the right.
 
 		if rhs == nil {
-			rhs, err = p.parsePart()
+			rhs, err = p.parseExpr()
 			if err != nil {
 				return nil, err
 			}
@@ -562,6 +441,21 @@ func (p *parser) parseExpr() (exp Expr, err error) {
 
 		for node := root; ; {
 			r, ok := node.RHS.(*BinaryExpression)
+			// IMPORTANT fix binary OR/AND expressions
+			/*if !ok {
+				if node.Op.precedence() >= tok.precedence() {
+					node.RHS = &BinaryExpression{LHS: node.RHS, Op: tok, RHS: rhs}
+					break
+				} else {
+					r = &BinaryExpression{LHS: node, Op: tok, RHS: rhs}
+					break
+				}
+			} else {
+				if r.Op.precedence() >= tok.precedence() {
+					node.RHS = &BinaryExpression{LHS: node.RHS, Op: tok, RHS: rhs}
+					break
+				}
+			}*/
 			if !ok || r.Op.precedence() >= tok.precedence() {
 				node.RHS = &BinaryExpression{LHS: node.RHS, Op: tok, RHS: rhs}
 				break
@@ -578,10 +472,10 @@ func (p *parser) parseExpr() (exp Expr, err error) {
 func (p *parser) parsePart() (exp Expr, err error) {
 
 	toks := []Token{
-		MUL, ID, EXPR, IDENT, THING,
+		MUL, EXPR, IDENT, THING, MODEL,
 		NULL, VOID, EMPTY, MISSING,
 		TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE,
-		NOW, DATE, TIME, DURATION, JSON, ARRAY, PARAM, LPAREN,
+		DATE, TIME, DURATION, JSON, ARRAY, PARAM, LPAREN, IF,
 	}
 
 	tok, lit, _ := p.scan()
@@ -593,6 +487,14 @@ func (p *parser) parsePart() (exp Expr, err error) {
 	exp, err = p.declare(tok, lit)
 	if err != nil {
 		return nil, err
+	}
+
+	// If the current token is a IF word clause
+	// then we will parse anything from here on
+	// as an IF expression clause.
+
+	if p.is(tok, IF) {
+		return p.parseIfel()
 	}
 
 	// If the current token is a left parenthesis
@@ -628,32 +530,113 @@ func (p *parser) parseSubq() (sub *SubExpression, err error) {
 	var exp Expr
 	var tok Token
 
-	tok, _, _ = p.mightBe(SELECT, CREATE, UPDATE, DELETE, RELATE)
+	tok, _, _ = p.mightBe(SELECT, CREATE, UPDATE, DELETE, RELATE, INSERT, UPSERT)
 
 	switch tok {
-	default:
-		exp, err = p.parseExpr()
 	case SELECT:
 		exp, err = p.parseSelectStatement()
 	case CREATE:
+		p.buf.rw = true
 		exp, err = p.parseCreateStatement()
 	case UPDATE:
+		p.buf.rw = true
 		exp, err = p.parseUpdateStatement()
 	case DELETE:
+		p.buf.rw = true
 		exp, err = p.parseDeleteStatement()
 	case RELATE:
+		p.buf.rw = true
 		exp, err = p.parseRelateStatement()
+	case INSERT:
+		p.buf.rw = true
+		exp, err = p.parseInsertStatement()
+	case UPSERT:
+		p.buf.rw = true
+		exp, err = p.parseUpsertStatement()
+	default:
+		exp, err = p.parseExpr()
 	}
 
-	p.mightBe(RPAREN)
+	if err != nil {
+		return nil, err
+	}
+
+	_, _, err = p.shouldBe(RPAREN)
 
 	return &SubExpression{Expr: exp}, err
+
+}
+
+func (p *parser) parseIfel() (exp *IfelExpression, err error) {
+
+	exp = &IfelExpression{}
+
+	for {
+
+		var tok Token
+
+		if cond, err := p.parseExpr(); err != nil {
+			return nil, err
+		} else {
+			exp.Cond = append(exp.Cond, cond)
+		}
+
+		if _, _, err = p.shouldBe(THEN); err != nil {
+			return nil, err
+		}
+
+		if then, err := p.parseExpr(); err != nil {
+			return nil, err
+		} else {
+			exp.Then = append(exp.Then, then)
+		}
+
+		// Check to see if the next token is an
+		// ELSE keyword and if it is then check to
+		// see if there is another if statement.
+
+		if tok, _, err = p.shouldBe(ELSE, END); err != nil {
+			return nil, err
+		}
+
+		if tok == END {
+			return
+		}
+
+		if tok == ELSE {
+			if _, _, exi := p.mightBe(IF); !exi {
+				break
+			}
+		}
+
+	}
+
+	if then, err := p.parseExpr(); err != nil {
+		return nil, err
+	} else {
+		exp.Else = then
+	}
+
+	if _, _, err = p.shouldBe(END); err != nil {
+		return nil, err
+	}
+
+	return
 
 }
 
 func (p *parser) parseCall(name string) (fnc *FuncExpression, err error) {
 
 	fnc = &FuncExpression{Name: name}
+
+	// Check to see if this is an aggregate
+	// function, and if it is then mark it,
+	// so we can process it correcyly in the
+	// 'iterator' and 'document' layers.
+
+	if _, ok := aggrs[name]; ok {
+		fnc.Aggr = true
+	}
 
 	// Check to see if the immediate token
 	// is a right parenthesis bracket, and if
@@ -702,13 +685,27 @@ func (p *parser) parseCall(name string) (fnc *FuncExpression, err error) {
 
 	}
 
+	// Check to see if this function is allowed to
+	// have an undefined number of arguments, and
+	// if it is then skip argument checking.
+
+	if _, ok := funcs[fnc.Name][-1]; ok {
+		return
+	}
+
 	// Check to see if the number of arguments
 	// is correct for the specified function name,
 	// and if not, then return an error.
 
 	if _, ok := funcs[fnc.Name][len(fnc.Args)]; !ok {
 
-		s, t := "", len(funcs[fnc.Name])
+		s, a, t := "", []int{}, len(funcs[fnc.Name])
+
+		for i := range funcs[fnc.Name] {
+			a = append(a, i)
+		}
+
+		sort.Ints(a)
 
 		for i := 0; i < t; i++ {
 			switch {
@@ -717,13 +714,13 @@ func (p *parser) parseCall(name string) (fnc *FuncExpression, err error) {
 			case i > 0:
 				s = s + ", "
 			}
-			s = s + fmt.Sprintf("%d", i)
+			s = s + fmt.Sprintf("%d", a[i])
 		}
 
-		switch {
-		case t == 1:
+		switch t {
+		case 1:
 			s = s + " argument"
-		case t >= 2:
+		default:
 			s = s + " arguments"
 		}
 
@@ -739,6 +736,17 @@ func (p *parser) parseCall(name string) (fnc *FuncExpression, err error) {
 }
 
 func (p *parser) parsePath(expr ...Expr) (path *PathExpression, err error) {
+
+	defer func() {
+		if val, ok := path.Expr[len(path.Expr)-1].(*JoinExpression); ok {
+			if val.Join == DOT {
+				err = &ParseError{
+					Found:    fmt.Sprintf("."),
+					Expected: []string{"field expression"},
+				}
+			}
+		}
+	}()
 
 	path = &PathExpression{}
 
@@ -820,7 +828,7 @@ func (p *parser) parsePath(expr ...Expr) (path *PathExpression, err error) {
 func (p *parser) parseJoin() (exp Expr, err error) {
 
 	toks := []Token{
-		OEDGE, IEDGE, BEDGE,
+		DOT, OEDGE, IEDGE, BEDGE,
 	}
 
 	tok, _, _ := p.scan()
@@ -837,7 +845,7 @@ func (p *parser) parseJoin() (exp Expr, err error) {
 func (p *parser) parseStep() (exp Expr, err error) {
 
 	toks := []Token{
-		QMARK, IDENT, THING, PARAM, LPAREN,
+		QMARK, IDENT, THING, PARAM, LPAREN, EXPR, MUL,
 	}
 
 	tok, lit, _ := p.scan()
@@ -875,6 +883,8 @@ func (p *parser) parseStep() (exp Expr, err error) {
 func (p *parser) parseSubp() (stmt *SubpExpression, err error) {
 
 	stmt = &SubpExpression{}
+
+	// IMPORTANT maybe we should not accept any expression here
 
 	if stmt.What, err = p.parseWhat(); err != nil {
 		return nil, err

@@ -20,44 +20,8 @@ import (
 
 {{with $types := .}}{{range $k := $types}}
 
-func (s *{{$k.name}}Statement) Begin() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	s.killable.ticker = time.AfterFunc(s.Timeout, func() {
-		s.killable.ticker.Stop()
-		s.killable.ticker = nil
-		close(s.killable.closer)
-	})
-}
-
-func (s *{{$k.name}}Statement) Cease() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	if s.killable.ticker != nil {
-		s.killable.ticker.Stop()
-	}
-}
-
 func (s *{{$k.name}}Statement) Duration() time.Duration {
 	return s.Timeout
-}
-
-func (s *{{$k.name}}Statement) Timedout() <-chan struct{} {
-	if s.Timeout == 0 {
-		return nil
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	return s.killable.closer
 }
 
 {{end}}{{end}}

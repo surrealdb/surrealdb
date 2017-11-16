@@ -30,3 +30,22 @@ const (
 	// Parsing format for readable text format date times
 	RFCText = "2006-01-02 15:04:05.999999999 -0700 MST"
 )
+
+var (
+	allowedTypes = []string{
+		"array", "boolean", "circle",
+		"color", "datetime", "domain",
+		"double", "email", "latitude",
+		"longitude", "number", "object",
+		"password", "phone", "point",
+		"polygon", "record", "string",
+		"url", "uuid",
+	}
+
+	allowedAlgorithms = []string{
+		"ES256", "ES384", "ES512",
+		"HS256", "HS384", "HS512",
+		"PS256", "PS384", "PS512",
+		"RS256", "RS384", "RS512",
+	}
+)

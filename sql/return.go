@@ -26,17 +26,16 @@ func (p *parser) parseReturnStatement() (stmt *ReturnStatement, err error) {
 	// including a parenthesised expression or a
 	// binary expression so handle accordingly.
 
-	stmt.What, err = p.parseExpr()
+	stmt.What, err = p.parseWhat()
 	if err != nil {
 		return nil, err
 	}
 
-	// Check that we have reached the end of the
-	// statement with either a ';' or EOF.
+	// If this query has any subqueries which
+	// need to alter the database then mark
+	// this query as a writeable statement.
 
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
-	}
+	stmt.RW = p.buf.rw
 
 	return
 

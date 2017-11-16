@@ -29,9 +29,9 @@ type parser struct {
 	s   *scanner
 	o   *options
 	c   *fibre.Context
-	v   map[string]interface{}
 	buf struct {
 		n   int         // buffer size
+		rw  bool        // writeable
 		txn bool        // inside txn
 		tok Token       // last read token
 		lit string      // last read literal
@@ -40,51 +40,47 @@ type parser struct {
 }
 
 // Parse parses sql from a []byte, string, or io.Reader.
-func Parse(c *fibre.Context, i interface{}, v map[string]interface{}) (*Query, error) {
+func Parse(c *fibre.Context, i interface{}) (*Query, error) {
 
 	defer trace.FromContext(c.Context()).NewChild("sql.Parse").Finish()
-
-	if v == nil {
-		v = make(map[string]interface{})
-	}
 
 	switch x := i.(type) {
 	default:
 		return nil, &EmptyError{}
 	case []byte:
-		return parseBytes(c, x, v)
+		return parseBytes(c, x)
 	case string:
-		return parseString(c, x, v)
+		return parseString(c, x)
 	case io.Reader:
-		return parseBuffer(c, x, v)
+		return parseBuffer(c, x)
 	}
 
 }
 
 // newParser returns a new instance of Parser.
-func newParser(c *fibre.Context, v map[string]interface{}) *parser {
-	return &parser{c: c, v: v, o: newOptions(c)}
+func newParser(c *fibre.Context) *parser {
+	return &parser{c: c, o: newOptions(c)}
 }
 
 // parseBytes parses a byte array.
-func parseBytes(c *fibre.Context, i []byte, v map[string]interface{}) (*Query, error) {
+func parseBytes(c *fibre.Context, i []byte) (*Query, error) {
+	p := newParser(c)
 	r := bytes.NewReader(i)
-	p := newParser(c, v)
 	p.s = newScanner(p, r)
 	return p.parse()
 }
 
 // parseString parses a string.
-func parseString(c *fibre.Context, i string, v map[string]interface{}) (*Query, error) {
+func parseString(c *fibre.Context, i string) (*Query, error) {
+	p := newParser(c)
 	r := strings.NewReader(i)
-	p := newParser(c, v)
 	p.s = newScanner(p, r)
 	return p.parse()
 }
 
 // parseBuffer parses a buffer.
-func parseBuffer(c *fibre.Context, r io.Reader, v map[string]interface{}) (*Query, error) {
-	p := newParser(c, v)
+func parseBuffer(c *fibre.Context, r io.Reader) (*Query, error) {
+	p := newParser(c)
 	p.s = newScanner(p, r)
 	return p.parse()
 }
@@ -97,39 +93,90 @@ func (p *parser) parse() (*Query, error) {
 // parseMulti parses multiple SQL SELECT statements.
 func (p *parser) parseMulti() (*Query, error) {
 
-	var statements Statements
-
 	var semi bool
-	var text bool
+
+	var stmts Statements
 
 	for {
-		if tok, _, _ := p.scan(); tok == EOF {
-			if !text {
-				return nil, &EmptyError{}
+
+		// If the next token is an EOF then
+		// check to see if the query is empty
+		// or return the parsed statements.
+
+		if _, _, exi := p.mightBe(EOF); exi {
+			if len(stmts) == 0 {
+				return nil, new(EmptyError)
 			}
-			return &Query{Statements: statements}, nil
-		} else if !semi && tok == SEMICOLON {
-			semi = true
-		} else {
-			text = true
-			p.unscan()
-			s, err := p.parseSingle()
-			if err != nil {
-				return nil, err
-			}
-			statements = append(statements, s)
-			semi = false
+			return &Query{Statements: stmts}, nil
 		}
+
+		// If this is a multi statement query
+		// and there is no semicolon separating
+		// the statements, then return an error.
+
+		if len(stmts) > 0 {
+			switch semi {
+			case true:
+				_, _, exi := p.mightBe(SEMICOLON)
+				if exi {
+					continue
+				}
+			case false:
+				_, _, err := p.shouldBe(SEMICOLON)
+				if err != nil {
+					return nil, err
+				}
+				semi = true
+				continue
+			}
+		}
+
+		// Parse the next token as a statement
+		// and append it to the statements
+		// array for the current sql query.
+
+		stmt, err := p.parseSingle()
+		if err != nil {
+			return nil, err
+		}
+
+		stmts = append(stmts, stmt)
+
 	}
 
 }
 
 // parseSingle parses a single SQL SELECT statement.
-func (p *parser) parseSingle() (Statement, error) {
+func (p *parser) parseSingle() (stmt Statement, err error) {
 
-	tok, _, err := p.shouldBe(USE, INFO, BEGIN, CANCEL, COMMIT, LET, RETURN, SELECT, CREATE, UPDATE, DELETE, RELATE, DEFINE, REMOVE)
+	p.buf.rw = false
+
+	tok, _, err := p.shouldBe(
+		USE,
+		INFO,
+		BEGIN,
+		CANCEL,
+		COMMIT,
+		IF,
+		LET,
+		RETURN,
+		LIVE,
+		KILL,
+		SELECT,
+		CREATE,
+		UPDATE,
+		DELETE,
+		RELATE,
+		INSERT,
+		UPSERT,
+		DEFINE,
+		REMOVE,
+	)
 
 	switch tok {
+
+	case IF:
+		return p.parseIfStatement()
 
 	case USE:
 		return p.parseUseStatement()
@@ -140,12 +187,18 @@ func (p *parser) parseSingle() (Statement, error) {
 	case INFO:
 		return p.parseInfoStatement()
 
+	case LIVE:
+		return p.parseLiveStatement()
+	case KILL:
+		return p.parseKillStatement()
+
 	case BEGIN:
 		return p.parseBeginStatement()
 	case CANCEL:
 		return p.parseCancelStatement()
 	case COMMIT:
 		return p.parseCommitStatement()
+
 	case RETURN:
 		return p.parseReturnStatement()
 
@@ -159,6 +212,11 @@ func (p *parser) parseSingle() (Statement, error) {
 		return p.parseDeleteStatement()
 	case RELATE:
 		return p.parseRelateStatement()
+
+	case INSERT:
+		return p.parseInsertStatement()
+	case UPSERT:
+		return p.parseUpsertStatement()
 
 	case DEFINE:
 		return p.parseDefineStatement()

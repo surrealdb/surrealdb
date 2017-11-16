@@ -21,22 +21,27 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 	var tok Token
 	var exi bool
 
-	tok, _, err = p.shouldBe(NAMESPACE, NS, DATABASE, DB)
+	if p.buf.txn {
+		return nil, &TransError{}
+	}
+
+	tok, _, err = p.shouldBe(NAMESPACE, DATABASE, NS, DB)
 	if err != nil {
 		return nil, err
 	}
 
 	for {
 
-		var val *Ident
-
 		if p.is(tok, NAMESPACE, NS) {
 
-			if val, err = p.parseIdent(); err != nil {
-				return nil, err
+			_, stmt.NS, err = p.shouldBe(IDENT, STRING, NUMBER, DOUBLE, DATE, TIME)
+			if err != nil {
+				return
 			}
 
-			stmt.NS = val.ID
+			if len(stmt.NS) == 0 {
+				return nil, &ParseError{Expected: []string{"namespace name"}, Found: stmt.NS}
+			}
 
 			if err = p.o.ns(stmt.NS); err != nil {
 				return nil, err
@@ -46,11 +51,14 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 
 		if p.is(tok, DATABASE, DB) {
 
-			if val, err = p.parseIdent(); err != nil {
-				return nil, err
+			_, stmt.DB, err = p.shouldBe(IDENT, STRING, NUMBER, DOUBLE, DATE, TIME)
+			if err != nil {
+				return
 			}
 
-			stmt.DB = val.ID
+			if len(stmt.DB) == 0 {
+				return nil, &ParseError{Expected: []string{"database name"}, Found: stmt.DB}
+			}
 
 			if err = p.o.db(stmt.DB); err != nil {
 				return nil, err
@@ -63,10 +71,6 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 			break
 		}
 
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
 	}
 
 	return

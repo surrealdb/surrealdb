@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDefineNamespaceStatement() (stmt *DefineNamespaceStatement, err error) {
 
-	stmt = &DefineNamespaceStatement{}
+	stmt = &DefineNamespaceStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthKV); err != nil {
 		return nil, err
@@ -32,7 +32,7 @@ func (p *parser) parseDefineNamespaceStatement() (stmt *DefineNamespaceStatement
 
 func (p *parser) parseRemoveNamespaceStatement() (stmt *RemoveNamespaceStatement, err error) {
 
-	stmt = &RemoveNamespaceStatement{}
+	stmt = &RemoveNamespaceStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthKV); err != nil {
 		return nil, err

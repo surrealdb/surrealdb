@@ -17,7 +17,7 @@ package sql
 func (p *parser) parseDefineStatement() (Statement, error) {
 
 	// Inspect the next token.
-	tok, _, err := p.shouldBe(NAMESPACE, DATABASE, LOGIN, TOKEN, SCOPE, TABLE, FIELD, INDEX, VIEW)
+	tok, _, err := p.shouldBe(NAMESPACE, DATABASE, LOGIN, TOKEN, SCOPE, TABLE, EVENT, FIELD, INDEX)
 
 	switch tok {
 	case NAMESPACE:
@@ -32,12 +32,12 @@ func (p *parser) parseDefineStatement() (Statement, error) {
 		return p.parseDefineScopeStatement()
 	case TABLE:
 		return p.parseDefineTableStatement()
+	case EVENT:
+		return p.parseDefineEventStatement()
 	case FIELD:
 		return p.parseDefineFieldStatement()
 	case INDEX:
 		return p.parseDefineIndexStatement()
-	case VIEW:
-		return p.parseDefineViewStatement()
 	default:
 		return nil, err
 	}

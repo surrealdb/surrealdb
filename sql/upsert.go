@@ -14,19 +14,36 @@
 
 package sql
 
-func (p *parser) parseType() (exp string, err error) {
+func (p *parser) parseUpsertStatement() (stmt *UpsertStatement, err error) {
 
-	allowed := []string{"any", "url", "uuid", "color", "email", "phone", "array", "object", "domain", "record", "string", "number", "double", "custom", "boolean", "password", "datetime", "latitude", "longitude"}
+	stmt = &UpsertStatement{RW: true}
 
-	_, lit, err := p.shouldBe(IDENT)
-	if err != nil {
-		return string(""), &ParseError{Found: lit, Expected: allowed}
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
+		return nil, err
 	}
 
-	if !p.contains(lit, allowed) {
-		return string(""), &ParseError{Found: lit, Expected: allowed}
+	if stmt.Data, err = p.parseExpr(); err != nil {
+		return nil, err
 	}
 
-	return lit, err
+	if _, _, err = p.shouldBe(INTO); err != nil {
+		return nil, err
+	}
+
+	_, _, _ = p.mightBe(TABLE)
+
+	if stmt.Into, err = p.parseTable(); err != nil {
+		return nil, err
+	}
+
+	if stmt.Echo, err = p.parseEcho(AFTER); err != nil {
+		return nil, err
+	}
+
+	if stmt.Timeout, err = p.parseTimeout(); err != nil {
+		return nil, err
+	}
+
+	return
 
 }

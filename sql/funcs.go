@@ -14,233 +14,272 @@
 
 package sql
 
-var funcs = map[string]map[int]bool{
+var rolls = map[string]bool{
 
-	"abs": {
-		1: true,
-	},
+	"distinct": true,
 
-	"avg": {
-		1: true,
-	},
+	// Count implementation
 
-	"ceil": {
-		1: true,
-	},
+	"count":     true,
+	"count.if":  true,
+	"count.not": true,
 
-	"count": {
-		1: true,
-	},
+	// Math implementation
 
-	"date": {
-		0: true,
-		1: true,
-	},
+	"geometricmean": true,
+	"mean":          true,
+	"percentile":    true,
+	"stddev":        true,
+	"sum":           true,
+	"variance":      true,
 
-	"day": {
-		0: true,
-		1: true,
-	},
+	// Math implementation
 
-	"derivative": {
-		1: true,
-	},
+	"math.geometricmean": true,
+	"math.mean":          true,
+	"math.percentile":    true,
+	"math.stddev":        true,
+	"math.sum":           true,
+	"math.variance":      true,
+}
 
-	"difference": {
-		1: true,
-		2: true,
-		3: true,
-		4: true,
-		5: true,
-		6: true,
-		7: true,
-		8: true,
-		9: true,
-	},
+var aggrs = map[string]bool{
 
-	"distinct": {
-		1: true,
-	},
+	"distinct": true,
 
-	"floor": {
-		1: true,
-	},
+	// Count implementation
 
-	"hour": {
-		0: true,
-		1: true,
-	},
+	"count":     true,
+	"count.if":  true,
+	"count.not": true,
 
-	"intersect": {
-		1: true,
-		2: true,
-		3: true,
-		4: true,
-		5: true,
-		6: true,
-		7: true,
-		8: true,
-		9: true,
-	},
+	// Math implementation
 
-	"max": {
-		1: true,
-	},
+	"bottom":        true,
+	"geometricmean": true,
+	"harmonicmean":  true,
+	"interquartile": true,
+	"max":           true,
+	"mean":          true,
+	"median":        true,
+	"midhinge":      true,
+	"min":           true,
+	"mode":          true,
+	"percentile":    true,
+	"sample":        true,
+	"spread":        true,
+	"stddev":        true,
+	"sum":           true,
+	"top":           true,
+	"trimean":       true,
+	"variance":      true,
 
-	"md5": {
-		1: true,
-	},
+	// Math implementation
 
-	"mean": {
-		1: true,
-	},
+	"math.bottom":        true,
+	"math.geometricmean": true,
+	"math.harmonicmean":  true,
+	"math.interquartile": true,
+	"math.max":           true,
+	"math.mean":          true,
+	"math.median":        true,
+	"math.midhinge":      true,
+	"math.min":           true,
+	"math.mode":          true,
+	"math.percentile":    true,
+	"math.sample":        true,
+	"math.spread":        true,
+	"math.stddev":        true,
+	"math.sum":           true,
+	"math.top":           true,
+	"math.trimean":       true,
+	"math.variance":      true,
+}
 
-	"median": {
-		1: true,
-	},
+var funcs = map[string]map[int]interface{}{
 
-	"min": {
-		1: true,
-	},
+	"batch":      {2: nil},
+	"binary":     {1: nil},
+	"difference": {-1: nil},
+	"distinct":   {1: nil},
+	"get":        {2: nil},
+	"if":         {3: nil},
+	"intersect":  {-1: nil},
+	"model":      {2: nil, 3: nil, 4: nil},
+	"table":      {1: nil},
+	"thing":      {2: nil},
+	"union":      {-1: nil},
 
-	"mins": {
-		0: true,
-		1: true,
-	},
+	// Count implementation
 
-	"mode": {
-		1: true,
-	},
+	"count":     {1: nil},
+	"count.if":  {2: nil},
+	"count.not": {2: nil},
 
-	"month": {
-		0: true,
-		1: true,
-	},
+	// Json implementation
+	"json.decode": {1: nil},
+	"json.encode": {1: nil},
 
-	"now": {
-		0: true,
-	},
+	// Geo implementation
+	"geo.point":       {1: nil, 2: nil},
+	"geo.circle":      {2: nil},
+	"geo.polygon":     {-1: nil},
+	"geo.distance":    {2: nil},
+	"geo.inside":      {2: nil},
+	"geo.intersects":  {2: nil},
+	"geo.hash.decode": {1: nil},
+	"geo.hash.encode": {2: nil},
 
-	"percentile": {
-		1: true,
-	},
+	// Http implementation
+	"http.head":         {1: nil, 2: nil},
+	"http.get":          {1: nil, 2: nil},
+	"http.put":          {1: nil, 2: nil, 3: nil},
+	"http.post":         {1: nil, 2: nil, 3: nil},
+	"http.patch":        {1: nil, 2: nil, 3: nil},
+	"http.delete":       {1: nil, 2: nil},
+	"http.async.head":   {1: nil, 2: nil},
+	"http.async.get":    {1: nil, 2: nil},
+	"http.async.put":    {1: nil, 2: nil, 3: nil},
+	"http.async.post":   {1: nil, 2: nil, 3: nil},
+	"http.async.patch":  {1: nil, 2: nil, 3: nil},
+	"http.async.delete": {1: nil, 2: nil},
 
-	"round": {
-		1: true,
-	},
+	// Math implementation
+	"abs":                {1: nil},
+	"bottom":             {2: nil},
+	"ceil":               {1: nil},
+	"correlation":        {2: nil},
+	"covariance":         {2: nil},
+	"floor":              {1: nil},
+	"geometricmean":      {1: nil},
+	"harmonicmean":       {1: nil},
+	"interquartile":      {1: nil},
+	"max":                {1: nil},
+	"mean":               {1: nil},
+	"median":             {1: nil},
+	"midhinge":           {1: nil},
+	"min":                {1: nil},
+	"mode":               {1: nil},
+	"percentile":         {2: nil},
+	"round":              {2: nil},
+	"sample":             {2: nil},
+	"spread":             {1: nil},
+	"stddev":             {1: nil},
+	"sum":                {1: nil},
+	"top":                {2: nil},
+	"trimean":            {1: nil},
+	"variance":           {1: nil},
+	"math.abs":           {1: nil},
+	"math.bottom":        {2: nil},
+	"math.ceil":          {1: nil},
+	"math.correlation":   {2: nil},
+	"math.covariance":    {2: nil},
+	"math.floor":         {1: nil},
+	"math.geometricmean": {1: nil},
+	"math.harmonicmean":  {1: nil},
+	"math.interquartile": {1: nil},
+	"math.max":           {1: nil},
+	"math.mean":          {1: nil},
+	"math.median":        {1: nil},
+	"math.midhinge":      {1: nil},
+	"math.min":           {1: nil},
+	"math.mode":          {1: nil},
+	"math.percentile":    {2: nil},
+	"math.round":         {1: nil},
+	"math.sample":        {2: nil},
+	"math.spread":        {1: nil},
+	"math.stddev":        {1: nil},
+	"math.sum":           {1: nil},
+	"math.top":           {2: nil},
+	"math.trimean":       {1: nil},
+	"math.variance":      {1: nil},
 
-	"stddev": {
-		1: true,
-	},
+	// String implementation
+	"string.concat":     {-1: nil},
+	"string.contains":   {2: nil},
+	"string.endsWith":   {2: nil},
+	"string.format":     {-1: nil},
+	"string.includes":   {2: nil},
+	"string.join":       {-1: nil},
+	"string.length":     {1: nil},
+	"string.lowercase":  {1: nil},
+	"string.repeat":     {2: nil},
+	"string.replace":    {3: nil},
+	"string.reverse":    {3: nil},
+	"string.search":     {2: nil},
+	"string.slice":      {3: nil},
+	"string.split":      {2: nil},
+	"string.startsWith": {2: nil},
+	"string.substr":     {3: nil},
+	"string.trim":       {1: nil},
+	"string.uppercase":  {1: nil},
+	"string.words":      {1: nil},
 
-	"sum": {
-		1: true,
-	},
+	// Hash implementation
+	"hash.md5":    {1: nil},
+	"hash.sha1":   {1: nil},
+	"hash.sha256": {1: nil},
+	"hash.sha512": {1: nil},
 
-	"table": {
-		1: true,
-	},
+	// Time implementation
+	"time.now":   {0: nil},
+	"time.add":   {2: nil},
+	"time.age":   {2: nil},
+	"time.floor": {2: nil},
+	"time.round": {2: nil},
+	"time.day":   {0: nil, 1: nil},
+	"time.hour":  {0: nil, 1: nil},
+	"time.mins":  {0: nil, 1: nil},
+	"time.month": {0: nil, 1: nil},
+	"time.nano":  {0: nil, 1: nil},
+	"time.secs":  {0: nil, 1: nil},
+	"time.unix":  {0: nil, 1: nil},
+	"time.year":  {0: nil, 1: nil},
 
-	"thing": {
-		2: true,
-	},
-
-	"union": {
-		1: true,
-		2: true,
-		3: true,
-		4: true,
-		5: true,
-		6: true,
-		7: true,
-		8: true,
-		9: true,
-	},
-
-	"unixtime": {
-		0: true,
-		1: true,
-	},
-
-	"uuid": {
-		0: true,
-	},
-
-	"variance": {
-		1: true,
-	},
-
-	"year": {
-		0: true,
-		1: true,
-	},
-
-	// HOTP implementation
-
-	"hotp.compare": {
-		2: true,
-	},
-
-	"hotp.generate": {
-		1: true,
-	},
-
-	// TOTP implementation
-
-	"totp.compare": {
-		2: true,
-	},
-
-	"totp.generate": {
-		1: true,
-	},
+	// Email implementation
+	"email.user":   {1: nil},
+	"email.domain": {1: nil},
+	"email.valid":  {1: nil},
 
 	// Bcrypt implementation
-
-	"bcrypt.compare": {
-		2: true,
-	},
-
-	"bcrypt.generate": {
-		1: true,
-	},
+	"bcrypt.compare":  {2: nil},
+	"bcrypt.generate": {1: nil},
 
 	// Scrypt implementation
+	"scrypt.compare":  {2: nil},
+	"scrypt.generate": {1: nil},
 
-	"scrypt.compare": {
-		2: true,
-	},
-
-	"scrypt.generate": {
-		1: true,
-	},
-
-	// Pbkdf2 implementation
-
-	"pbkdf2.compare": {
-		2: true,
-	},
-
-	"pbkdf2.generate": {
-		1: true,
-	},
-
-	// Yubikey implementation
-
-	"yubikey.id": {
-		1: true,
-	},
-
-	"yubikey.ctr": {
-		1: true,
-	},
-
-	"yubikey.use": {
-		1: true,
-	},
-
-	"yubikey.verify": {
-		2: true, // yubikey.verify(AUTHSERV, $otp)
-		3: true, // yubikey.verify(CLIENTID, SECRET, $otp)
-	},
+	// Random implementation
+	"rand":                    {0: nil},
+	"uuid":                    {0: nil},
+	"rand.bool":               {0: nil},
+	"rand.uuid":               {0: nil},
+	"rand.enum":               {-1: nil},
+	"rand.time":               {0: nil, 2: nil},
+	"rand.string":             {0: nil, 1: nil, 2: nil},
+	"rand.integer":            {0: nil, 2: nil},
+	"rand.decimal":            {0: nil, 2: nil},
+	"rand.sentence":           {0: nil, 2: nil},
+	"rand.paragraph":          {0: nil, 2: nil},
+	"rand.person.email":       {0: nil},
+	"rand.person.phone":       {0: nil},
+	"rand.person.fullname":    {0: nil},
+	"rand.person.firstname":   {0: nil},
+	"rand.person.lastname":    {0: nil},
+	"rand.person.username":    {0: nil},
+	"rand.person.jobtitle":    {0: nil},
+	"rand.company.name":       {0: nil},
+	"rand.company.industry":   {0: nil},
+	"rand.location.name":      {0: nil},
+	"rand.location.address":   {0: nil},
+	"rand.location.street":    {0: nil},
+	"rand.location.city":      {0: nil},
+	"rand.location.state":     {0: nil},
+	"rand.location.county":    {0: nil},
+	"rand.location.zipcode":   {0: nil},
+	"rand.location.postcode":  {0: nil},
+	"rand.location.country":   {0: nil},
+	"rand.location.altitude":  {0: nil},
+	"rand.location.latitude":  {0: nil},
+	"rand.location.longitude": {0: nil},
 }

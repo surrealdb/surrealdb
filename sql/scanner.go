@@ -17,7 +17,6 @@ package sql
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"regexp"
 	"strconv"
@@ -51,7 +50,7 @@ func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 
 	// If we see a letter then consume as a string.
 	if isLetter(ch) {
-		return s.scanIdent(ch)
+		return s.scanIdiom(ch)
 	}
 
 	// If we see a number then consume as a number.
@@ -351,7 +350,11 @@ func (s *scanner) scanCommentMultiple(chp ...rune) (tok Token, lit string, val i
 
 func (s *scanner) scanParams(chp ...rune) (tok Token, lit string, val interface{}) {
 
-	tok, lit, _ = s.scanIdent()
+	tok, lit, _ = s.scanIdiom()
+
+	if s.p.is(tok, THING) {
+		return ILLEGAL, lit, val
+	}
 
 	if s.p.is(tok, REGION) {
 		return ILLEGAL, lit, val
@@ -366,6 +369,49 @@ func (s *scanner) scanParams(chp ...rune) (tok Token, lit string, val interface{
 }
 
 func (s *scanner) scanQuoted(chp ...rune) (tok Token, lit string, val interface{}) {
+
+	var tbv string
+	var idv interface{}
+
+	// Create a buffer
+	var buf bytes.Buffer
+
+	tok, lit, _ = s.scanString(chp...)
+
+	if s.p.is(tok, REGION) {
+		return ILLEGAL, lit, val
+	}
+
+	if s.p.is(tok, ILLEGAL) {
+		return ILLEGAL, lit, val
+	}
+
+	if ch := s.next(); ch == ':' {
+
+		tbv = lit
+
+		buf.WriteString(lit)
+
+		buf.WriteRune(ch)
+
+		if tok, lit, idv = s.part(); tok == ILLEGAL {
+			buf.WriteString(lit)
+			return ILLEGAL, buf.String(), val
+		} else {
+			buf.WriteString(lit)
+		}
+
+		return THING, buf.String(), NewThing(tbv, idv)
+
+	} else if ch != eof {
+		s.undo()
+	}
+
+	return IDENT, lit, val
+
+}
+
+func (s *scanner) scanSection(chp ...rune) (tok Token, lit string, val interface{}) {
 
 	tok, lit, _ = s.scanString(chp...)
 
@@ -400,9 +446,71 @@ func (s *scanner) scanIdent(chp ...rune) (tok Token, lit string, val interface{}
 			break
 		} else if isIdentChar(ch) {
 			buf.WriteRune(ch)
+		} else {
+			s.undo()
+			break
+		}
+	}
+
+	// If the string matches a keyword then return that keyword.
+	if tok := keywords[strings.ToUpper(buf.String())]; tok > 0 {
+		return tok, buf.String(), val
+	}
+
+	if val, err := time.ParseDuration(buf.String()); err == nil {
+		return DURATION, buf.String(), val
+	}
+
+	// Otherwise return as a regular identifier.
+	return tok, buf.String(), val
+
+}
+
+// scanIdiom consumes the current rune and all contiguous ident runes.
+func (s *scanner) scanIdiom(chp ...rune) (tok Token, lit string, val interface{}) {
+
+	tok = IDENT
+
+	var tbv string
+	var idv interface{}
+
+	// Create a buffer
+	var buf bytes.Buffer
+
+	// Read passed in runes
+	for _, ch := range chp {
+		buf.WriteRune(ch)
+	}
+
+	// Read subsequent characters
+	for {
+		if ch := s.next(); ch == eof {
+			break
+		} else if isIdentChar(ch) {
+			buf.WriteRune(ch)
 		} else if isExprsChar(ch) {
 			tok = EXPR
 			buf.WriteRune(ch)
+		} else if ch == ':' {
+
+			if tok == EXPR {
+				s.undo()
+				break
+			}
+
+			tbv = buf.String()
+
+			buf.WriteRune(ch)
+
+			if tok, lit, idv = s.part(); tok == ILLEGAL {
+				buf.WriteString(lit)
+				return ILLEGAL, buf.String(), val
+			} else {
+				buf.WriteString(lit)
+			}
+
+			return THING, buf.String(), NewThing(tbv, idv)
+
 		} else {
 			s.undo()
 			break
@@ -640,6 +748,16 @@ func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{
 				tok = IDENT
 				buf.WriteRune(ch)
 				switch ch {
+				case 'e', 'E':
+					if chn := s.next(); chn == '+' {
+						tok = DOUBLE
+						buf.WriteRune(chn)
+					} else if ch == '-' {
+						tok = DOUBLE
+						buf.WriteRune(chn)
+					} else {
+						s.undo()
+					}
 				case 's', 'h', 'd', 'w':
 					tok = DURATION
 				case 'n', 'u', 'µ', 'm':
@@ -692,10 +810,6 @@ func (s *scanner) scanString(chp ...rune) (tok Token, lit string, val interface{
 		end = '⟩'
 	}
 
-	if beg == '{' {
-		end = '}'
-	}
-
 	tok = STRING
 
 	// Create a buffer
@@ -741,14 +855,6 @@ func (s *scanner) scanString(chp ...rune) (tok Token, lit string, val interface{
 	}
 
 	if val, err := time.Parse(RFCTime, buf.String()); err == nil {
-		return TIME, buf.String(), val.UTC()
-	}
-
-	if val, err := time.Parse(RFCNorm, buf.String()); err == nil {
-		return TIME, buf.String(), val.UTC()
-	}
-
-	if val, err := time.Parse(RFCText, buf.String()); err == nil {
 		return TIME, buf.String(), val.UTC()
 	}
 
@@ -850,6 +956,10 @@ func (s *scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{
 
 }
 
+func (s *scanner) scanPart() {
+
+}
+
 func (s *scanner) part() (tok Token, lit string, val interface{}) {
 
 	if ch := s.next(); isLetter(ch) {
@@ -857,33 +967,15 @@ func (s *scanner) part() (tok Token, lit string, val interface{}) {
 	} else if isNumber(ch) {
 		tok, lit, _ = s.scanNumber(ch)
 	} else if ch == '`' {
-		tok, lit, _ = s.scanQuoted(ch)
-	} else if ch == '{' {
-		tok, lit, _ = s.scanQuoted(ch)
+		tok, lit, _ = s.scanSection(ch)
 	} else if ch == '⟨' {
-		tok, lit, _ = s.scanQuoted(ch)
-	} else if ch == '$' {
-		tok, lit, _ = s.scanParams(ch)
-		if p, ok := s.p.v[lit]; ok {
-			switch v := p.(type) {
-			case bool, int64, float64, string:
-				val, lit = v, fmt.Sprint(v)
-			case *Ident:
-				lit = v.ID
-			case *Value:
-				lit = v.ID
-			default:
-				tok = ILLEGAL
-			}
-		} else {
-			tok = ILLEGAL
-		}
+		tok, lit, _ = s.scanSection(ch)
 	} else {
 		s.undo()
 		tok = ILLEGAL
 	}
 
-	if tok != IDENT && tok != PARAM && tok != NUMBER && tok != DOUBLE {
+	if tok != IDENT && tok != NUMBER && tok != DOUBLE {
 		tok = ILLEGAL
 	}
 

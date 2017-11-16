@@ -43,6 +43,14 @@ func (e *BlankError) Error() string {
 	return fmt.Sprint("You need to specify a namespace and a database to use")
 }
 
+// TransError represents an error that occured when switching access.
+type TransError struct{}
+
+// Error returns the string representation of the error.
+func (e *TransError) Error() string {
+	return fmt.Sprintf("You can't change NAMESPACE or DATABASE inside of a transaction")
+}
+
 // PermsError represents an error that occured when switching access.
 type PermsError struct {
 	Resource string
@@ -51,6 +59,16 @@ type PermsError struct {
 // Error returns the string representation of the error.
 func (e *PermsError) Error() string {
 	return fmt.Sprintf("You don't have permission to access the '%s' resource", e.Resource)
+}
+
+// GroupError occurs when a 'group' expression is invalid.
+type GroupError struct {
+	found interface{}
+}
+
+// Error returns the string representation of the error.
+func (e *GroupError) Error() string {
+	return fmt.Sprintf("Found '%v' but field is not an aggregate function, and is not present in GROUP expression", e.found)
 }
 
 // ParseError represents an error that occurred during parsing.

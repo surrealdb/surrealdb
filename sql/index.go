@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err error) {
 
-	stmt = &DefineIndexStatement{}
+	stmt = &DefineIndexStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
@@ -44,17 +44,13 @@ func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err er
 
 	_, _, stmt.Uniq = p.mightBe(UNIQUE)
 
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
-	}
-
 	return
 
 }
 
 func (p *parser) parseRemoveIndexStatement() (stmt *RemoveIndexStatement, err error) {
 
-	stmt = &RemoveIndexStatement{}
+	stmt = &RemoveIndexStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
@@ -69,10 +65,6 @@ func (p *parser) parseRemoveIndexStatement() (stmt *RemoveIndexStatement, err er
 	}
 
 	if stmt.What, err = p.parseTables(); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
 

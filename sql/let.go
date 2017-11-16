@@ -14,8 +14,6 @@
 
 package sql
 
-import "time"
-
 func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 
 	stmt = &LetStatement{}
@@ -51,31 +49,11 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 		return nil, err
 	}
 
-	// If the defined paramater is a basic type,
-	// then instead of defining it at a later
-	// stage, convert it to that type here.
+	// If this query has any subqueries which
+	// need to alter the database then mark
+	// this query as a writeable statement.
 
-	switch stmt.What.(type) {
-	case bool, int64, float64, string:
-		p.v[stmt.Name.ID] = stmt.What
-	case []interface{}, map[string]interface{}:
-		p.v[stmt.Name.ID] = stmt.What
-	case time.Time, time.Duration:
-		p.v[stmt.Name.ID] = stmt.What
-	case Array, Object:
-		p.v[stmt.Name.ID] = stmt.What
-	case *Null, *Void, *Empty:
-		p.v[stmt.Name.ID] = stmt.What
-	case *Table, *Thing, *Param, *Ident, *Value:
-		p.v[stmt.Name.ID] = stmt.What
-	}
-
-	// Check that we have reached the end of the
-	// statement with either a ';' or EOF.
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
-	}
+	stmt.RW = p.buf.rw
 
 	return
 

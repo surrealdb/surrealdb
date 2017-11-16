@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 
-	stmt = &InfoStatement{}
+	stmt = &InfoStatement{RW: false}
 
 	if _, _, err = p.shouldBe(FOR); err != nil {
 		return nil, err
@@ -45,10 +45,6 @@ func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 		if stmt.What, err = p.parseTable(); err != nil {
 			return nil, err
 		}
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
 	}
 
 	return

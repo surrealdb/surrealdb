@@ -14,23 +14,10 @@
 
 package sql
 
-func (p *parser) parseEcho(fallback Token) (exp Token, err error) {
+{{with $types := .}}{{range $k := $types}}
 
-	exp = fallback
-
-	// The next token that we expect to see is a
-	// RETURN token, and if we don't find one then
-	// return nil, with no error.
-
-	if _, _, exi := p.mightBe(RETURN); exi {
-
-		exp, _, err = p.shouldBe(NONE, INFO, BOTH, DIFF, BEFORE, AFTER)
-		if err != nil {
-			return 0, err
-		}
-
-	}
-
-	return
-
+func (s *{{$k.name}}Statement) Writeable() bool {
+	return s.RW
 }
+
+{{end}}{{end}}

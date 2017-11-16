@@ -16,9 +16,9 @@ package sql
 
 func (p *parser) parseCreateStatement() (stmt *CreateStatement, err error) {
 
-	stmt = &CreateStatement{}
+	stmt = &CreateStatement{RW: true}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err
 	}
 
@@ -35,10 +35,6 @@ func (p *parser) parseCreateStatement() (stmt *CreateStatement, err error) {
 	}
 
 	if stmt.Timeout, err = p.parseTimeout(); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(EOF, RPAREN, SEMICOLON); err != nil {
 		return nil, err
 	}
 

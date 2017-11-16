@@ -3,5 +3,7 @@
   { "name": "Create" },
   { "name": "Update" },
   { "name": "Delete" },
-  { "name": "Relate" }
+  { "name": "Relate" },
+  { "name": "Insert" },
+  { "name": "Upsert" }
 ]

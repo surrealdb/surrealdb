@@ -63,7 +63,7 @@ func (p *parser) parseSet() (mul Expr, err error) {
 		// always be an identifier, specifying a
 		// record field to set.
 
-		tok, lit, err = p.shouldBe(IDENT)
+		tok, lit, err = p.shouldBe(IDENT, EXPR)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}

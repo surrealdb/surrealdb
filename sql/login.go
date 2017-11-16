@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err error) {
 
-	stmt = &DefineLoginStatement{}
+	stmt = &DefineLoginStatement{RW: true}
 
 	if stmt.User, err = p.parseIdent(); err != nil {
 		return nil, err
@@ -50,17 +50,13 @@ func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err er
 		return nil, err
 	}
 
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
-	}
-
 	return
 
 }
 
 func (p *parser) parseRemoveLoginStatement() (stmt *RemoveLoginStatement, err error) {
 
-	stmt = &RemoveLoginStatement{}
+	stmt = &RemoveLoginStatement{RW: true}
 
 	if stmt.User, err = p.parseIdent(); err != nil {
 		return nil, err
@@ -84,10 +80,6 @@ func (p *parser) parseRemoveLoginStatement() (stmt *RemoveLoginStatement, err er
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
 	}
 
 	return

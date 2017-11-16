@@ -16,9 +16,9 @@ package sql
 
 func (p *parser) parseRelateStatement() (stmt *RelateStatement, err error) {
 
-	stmt = &RelateStatement{}
+	stmt = &RelateStatement{RW: true}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err
 	}
 
@@ -53,10 +53,6 @@ func (p *parser) parseRelateStatement() (stmt *RelateStatement, err error) {
 	}
 
 	if stmt.Timeout, err = p.parseTimeout(); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(EOF, RPAREN, SEMICOLON); err != nil {
 		return nil, err
 	}
 

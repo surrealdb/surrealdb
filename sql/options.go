@@ -73,9 +73,15 @@ func (o *options) ns(ns string) (err error) {
 	// Check to see that the current user has
 	// the necessary authentication privileges
 	// to be able to specify this namespace.
+	// This is only run if we are using the
+	// KV, NS, or DB authentication levels, as
+	// SC authentication levels make use of
+	// table and field permissions instead.
 
-	if o.auth.Possible.NS != "*" && o.auth.Possible.NS != ns {
-		return &PermsError{Resource: ns}
+	if o.auth.Kind < cnf.Kind(AuthSC) {
+		if o.auth.Possible.NS != "*" && o.auth.Possible.NS != ns {
+			return &PermsError{Resource: ns}
+		}
 	}
 
 	// Specify the NS on the context session, so
@@ -93,9 +99,15 @@ func (o *options) db(db string) (err error) {
 	// Check to see that the current user has
 	// the necessary authentication privileges
 	// to be able to specify this namespace.
+	// This is only run if we are using the
+	// KV, NS, or DB authentication levels, as
+	// SC authentication levels make use of
+	// table and field permissions instead.
 
-	if o.auth.Possible.DB != "*" && o.auth.Possible.DB != db {
-		return &PermsError{Resource: db}
+	if o.auth.Kind < cnf.Kind(AuthSC) {
+		if o.auth.Possible.DB != "*" && o.auth.Possible.DB != db {
+			return &PermsError{Resource: db}
+		}
 	}
 
 	// Specify the DB on the context session, so

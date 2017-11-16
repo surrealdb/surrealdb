@@ -14,24 +14,35 @@
 
 package sql
 
-func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
+func (p *parser) parseLiveStatement() (stmt *LiveStatement, err error) {
 
-	stmt = &DeleteStatement{RW: true}
+	stmt = &LiveStatement{RW: true}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
 		return nil, err
 	}
 
-	if _, _, exi := p.mightBe(AND); exi {
-		if _, _, err = p.shouldBe(EXPUNGE); err != nil {
-			return nil, err
-		}
-		stmt.Hard = true
+	_, _, err = p.shouldBe(SELECT)
+	if err != nil {
+		return nil, err
 	}
 
-	_, _, _ = p.mightBe(FROM)
+	_, _, stmt.Diff = p.mightBe(DIFF)
 
-	if stmt.What, err = p.parseWhat(); err != nil {
+	if stmt.Diff == false {
+
+		if stmt.Expr, err = p.parseFields(); err != nil {
+			return nil, err
+		}
+
+	}
+
+	_, _, err = p.shouldBe(FROM)
+	if err != nil {
+		return nil, err
+	}
+
+	if stmt.What, err = p.parseTable(); err != nil {
 		return nil, err
 	}
 
@@ -39,11 +50,19 @@ func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
 		return nil, err
 	}
 
-	if stmt.Echo, err = p.parseEcho(NONE); err != nil {
+	return
+
+}
+
+func (p *parser) parseKillStatement() (stmt *KillStatement, err error) {
+
+	stmt = &KillStatement{RW: true}
+
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
 		return nil, err
 	}
 
-	if stmt.Timeout, err = p.parseTimeout(); err != nil {
+	if stmt.Name, err = p.parseValue(); err != nil {
 		return nil, err
 	}
 

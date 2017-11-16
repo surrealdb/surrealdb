@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err error) {
 
-	stmt = &DefineTableStatement{}
+	stmt = &DefineTableStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
@@ -28,9 +28,13 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 
 	for {
 
-		tok, _, exi := p.mightBe(SCHEMAFULL, SCHEMALESS, PERMISSIONS)
+		tok, _, exi := p.mightBe(DROP, SCHEMAFULL, SCHEMALESS, PERMISSIONS, AS)
 		if !exi {
 			break
+		}
+
+		if p.is(tok, DROP) {
+			stmt.Drop = true
 		}
 
 		if p.is(tok, SCHEMAFULL) {
@@ -42,15 +46,51 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 		}
 
 		if p.is(tok, PERMISSIONS) {
-			if stmt.Perm, err = p.parsePerms(); err != nil {
+			if stmt.Perms, err = p.parsePerms(); err != nil {
 				return nil, err
 			}
 		}
 
-	}
+		if p.is(tok, AS) {
 
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
+			stmt.Lock = true
+
+			_, _, _ = p.mightBe(LPAREN)
+
+			_, _, err = p.shouldBe(SELECT)
+			if err != nil {
+				return nil, err
+			}
+
+			if stmt.Expr, err = p.parseFields(); err != nil {
+				return nil, err
+			}
+
+			_, _, err = p.shouldBe(FROM)
+			if err != nil {
+				return nil, err
+			}
+
+			if stmt.From, err = p.parseTables(); err != nil {
+				return nil, err
+			}
+
+			if stmt.Cond, err = p.parseCond(); err != nil {
+				return nil, err
+			}
+
+			if stmt.Group, err = p.parseGroup(); err != nil {
+				return nil, err
+			}
+
+			_, _, _ = p.mightBe(RPAREN)
+
+			if err = checkExpression(rolls, stmt.Expr, stmt.Group); err != nil {
+				return nil, err
+			}
+
+		}
+
 	}
 
 	return
@@ -59,17 +99,13 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 
 func (p *parser) parseRemoveTableStatement() (stmt *RemoveTableStatement, err error) {
 
-	stmt = &RemoveTableStatement{}
+	stmt = &RemoveTableStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
 	}
 
 	if stmt.What, err = p.parseTables(); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
 

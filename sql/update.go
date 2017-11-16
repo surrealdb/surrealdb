@@ -16,17 +16,10 @@ package sql
 
 func (p *parser) parseUpdateStatement() (stmt *UpdateStatement, err error) {
 
-	stmt = &UpdateStatement{}
+	stmt = &UpdateStatement{RW: true}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err
-	}
-
-	if _, _, exi := p.mightBe(AND); exi {
-		if _, _, err = p.shouldBe(UPSERT); err != nil {
-			return nil, err
-		}
-		stmt.Hard = true
 	}
 
 	if stmt.What, err = p.parseWhat(); err != nil {
@@ -46,10 +39,6 @@ func (p *parser) parseUpdateStatement() (stmt *UpdateStatement, err error) {
 	}
 
 	if stmt.Timeout, err = p.parseTimeout(); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(EOF, RPAREN, SEMICOLON); err != nil {
 		return nil, err
 	}
 

@@ -21,7 +21,6 @@ func (p *parser) parsePerms() (exp *PermExpression, err error) {
 		Create: false,
 		Update: false,
 		Delete: false,
-		Relate: false,
 	}
 
 	tok, _, err := p.shouldBe(FOR, NONE, FULL, WHERE)
@@ -48,7 +47,6 @@ func (p *parser) parsePerms() (exp *PermExpression, err error) {
 		exp.Create = expr
 		exp.Update = expr
 		exp.Delete = expr
-		exp.Relate = expr
 
 		return
 
@@ -62,7 +60,7 @@ func (p *parser) parsePerms() (exp *PermExpression, err error) {
 			var when []Token
 
 			for {
-				tok, _, err := p.shouldBe(SELECT, CREATE, UPDATE, DELETE, RELATE)
+				tok, _, err := p.shouldBe(SELECT, CREATE, UPDATE, DELETE)
 				if err != nil {
 					return exp, err
 				}
@@ -98,8 +96,6 @@ func (p *parser) parsePerms() (exp *PermExpression, err error) {
 					exp.Update = expr
 				case DELETE:
 					exp.Delete = expr
-				case RELATE:
-					exp.Relate = expr
 				}
 			}
 

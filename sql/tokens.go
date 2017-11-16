@@ -91,26 +91,26 @@ const (
 
 	operatorEnd
 
-	// literals
+	// keywords
 
 	keywordsBeg
 
-	ACCEPT
 	AFTER
-	ALL
 	ALLCONTAINEDIN
 	AND
 	AS
 	ASC
+	ASSERT
 	AT
 	BEFORE
 	BEGIN
 	BOTH
 	BY
 	CANCEL
-	CODE
+	COLLATE
 	COLUMNS
 	COMMIT
+	CONNECT
 	CONTAINS
 	CONTAINSALL
 	CONTAINSNONE
@@ -119,15 +119,15 @@ const (
 	CREATE
 	DATABASE
 	DB
-	DEFAULT
 	DEFINE
 	DELETE
 	DESC
 	DIFF
-	DISTINCT
+	DROP
+	ELSE
 	EMPTY
-	ENUM
-	EXISTS
+	END
+	EVENT
 	EXPUNGE
 	FALSE
 	FIELD
@@ -135,38 +135,34 @@ const (
 	FROM
 	FULL
 	GROUP
-	ID
 	IF
 	IN
 	INDEX
 	INFO
+	INSERT
+	INTO
 	IS
+	KILL
 	LET
 	LIMIT
 	LIVE
 	LOGIN
-	MANDATORY
-	MATCH
-	MAX
 	MERGE
-	MIN
 	MISSING
 	NAMESPACE
 	NONE
 	NONECONTAINEDIN
 	NOT
 	NOTNULL
-	NOW
 	NS
 	NULL
-	OFFSET
+	NUMERIC
 	ON
 	OR
 	ORDER
 	PASSWORD
 	PERMISSIONS
-	READONLY
-	REJECT
+	RAND
 	RELATE
 	REMOVE
 	RETURN
@@ -181,6 +177,7 @@ const (
 	SOMECONTAINEDIN
 	START
 	TABLE
+	THEN
 	TIMEOUT
 	TO
 	TOKEN
@@ -191,11 +188,10 @@ const (
 	UPDATE
 	UPSERT
 	USE
-	VALIDATE
 	VALUE
 	VERSION
-	VIEW
 	VOID
+	WHEN
 	WHERE
 	WITH
 
@@ -266,22 +262,22 @@ var tokens = [...]string{
 
 	// keywords
 
-	ACCEPT:          "ACCEPT",
 	AFTER:           "AFTER",
-	ALL:             "ALL",
 	ALLCONTAINEDIN:  "ALLCONTAINEDIN",
 	AND:             "AND",
 	AS:              "AS",
 	ASC:             "ASC",
+	ASSERT:          "ASSERT",
 	AT:              "AT",
 	BEFORE:          "BEFORE",
 	BEGIN:           "BEGIN",
 	BOTH:            "BOTH",
 	BY:              "BY",
 	CANCEL:          "CANCEL",
-	CODE:            "CODE",
+	COLLATE:         "COLLATE",
 	COLUMNS:         "COLUMNS",
 	COMMIT:          "COMMIT",
+	CONNECT:         "CONNECT",
 	CONTAINS:        "CONTAINS",
 	CONTAINSALL:     "CONTAINSALL",
 	CONTAINSNONE:    "CONTAINSNONE",
@@ -290,15 +286,15 @@ var tokens = [...]string{
 	CREATE:          "CREATE",
 	DATABASE:        "DATABASE",
 	DB:              "DB",
-	DEFAULT:         "DEFAULT",
 	DEFINE:          "DEFINE",
 	DELETE:          "DELETE",
 	DESC:            "DESC",
 	DIFF:            "DIFF",
-	DISTINCT:        "DISTINCT",
+	DROP:            "DROP",
+	ELSE:            "ELSE",
 	EMPTY:           "EMPTY",
-	ENUM:            "ENUM",
-	EXISTS:          "EXISTS",
+	END:             "END",
+	EVENT:           "EVENT",
 	EXPUNGE:         "EXPUNGE",
 	FALSE:           "FALSE",
 	FIELD:           "FIELD",
@@ -306,37 +302,34 @@ var tokens = [...]string{
 	FROM:            "FROM",
 	FULL:            "FULL",
 	GROUP:           "GROUP",
-	ID:              "ID",
 	IF:              "IF",
 	IN:              "IN",
 	INDEX:           "INDEX",
 	INFO:            "INFO",
+	INSERT:          "INSERT",
+	INTO:            "INTO",
 	IS:              "IS",
+	KILL:            "KILL",
 	LET:             "LET",
 	LIMIT:           "LIMIT",
 	LIVE:            "LIVE",
 	LOGIN:           "LOGIN",
-	MANDATORY:       "MANDATORY",
-	MATCH:           "MATCH",
-	MAX:             "MAX",
 	MERGE:           "MERGE",
-	MIN:             "MIN",
 	MISSING:         "MISSING",
 	NAMESPACE:       "NAMESPACE",
 	NONE:            "NONE",
 	NONECONTAINEDIN: "NONECONTAINEDIN",
 	NOT:             "NOT",
 	NOTNULL:         "NOTNULL",
-	NOW:             "NOW",
 	NS:              "NS",
 	NULL:            "NULL",
+	NUMERIC:         "NUMERIC",
 	ON:              "ON",
 	OR:              "OR",
 	ORDER:           "ORDER",
 	PASSWORD:        "PASSWORD",
 	PERMISSIONS:     "PERMISSIONS",
-	READONLY:        "READONLY",
-	REJECT:          "REJECT",
+	RAND:            "RAND",
 	RELATE:          "RELATE",
 	REMOVE:          "REMOVE",
 	RETURN:          "RETURN",
@@ -351,6 +344,7 @@ var tokens = [...]string{
 	SOMECONTAINEDIN: "SOMECONTAINEDIN",
 	START:           "START",
 	TABLE:           "TABLE",
+	THEN:            "THEN",
 	TIMEOUT:         "TIMEOUT",
 	TO:              "TO",
 	TOKEN:           "TOKEN",
@@ -361,11 +355,10 @@ var tokens = [...]string{
 	UPDATE:          "UPDATE",
 	UPSERT:          "UPSERT",
 	USE:             "USE",
-	VALIDATE:        "VALIDATE",
 	VALUE:           "VALUE",
 	VERSION:         "VERSION",
-	VIEW:            "VIEW",
 	VOID:            "VOID",
+	WHEN:            "WHEN",
 	WHERE:           "WHERE",
 	WITH:            "WITH",
 }
@@ -430,10 +423,12 @@ func (tok Token) String() string {
 	return ""
 }
 
-func newToken(str string) Token {
+func newToken(s string) Token {
 	for k, v := range tokens {
-		if v == strings.ToUpper(str) {
-			return Token(k)
+		if len(v) == len(s) {
+			if strings.EqualFold(v, s) {
+				return Token(k)
+			}
 		}
 	}
 	return ILLEGAL

@@ -16,13 +16,13 @@ package sql
 
 func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err error) {
 
-	stmt = &DefineFieldStatement{}
+	stmt = &DefineFieldStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseIdent(); err != nil {
+	if stmt.Name, err = p.parseIdiom(); err != nil {
 		return nil, err
 	}
 
@@ -36,99 +36,35 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 
 	for {
 
-		tok, _, exi := p.mightBe(MIN, MAX, TYPE, ENUM, CODE, MATCH, DEFAULT, NOTNULL, READONLY, MANDATORY, VALIDATE, PERMISSIONS)
+		tok, _, exi := p.mightBe(TYPE, VALUE, ASSERT, PERMISSIONS)
 		if !exi {
 			break
 		}
 
-		if p.is(tok, MIN) {
-			if stmt.Min, err = p.parseDouble(); err != nil {
-				return nil, err
-			}
-		}
-
-		if p.is(tok, MAX) {
-			if stmt.Max, err = p.parseDouble(); err != nil {
-				return nil, err
-			}
-		}
-
 		if p.is(tok, TYPE) {
-			if stmt.Type, err = p.parseType(); err != nil {
+			if stmt.Type, stmt.Kind, err = p.parseType(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, ENUM) {
-			if stmt.Enum, err = p.parseArray(); err != nil {
+		if p.is(tok, VALUE) {
+			if stmt.Value, err = p.parseExpr(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, CODE) {
-			if stmt.Code, err = p.parseScript(); err != nil {
+		if p.is(tok, ASSERT) {
+			if stmt.Assert, err = p.parseExpr(); err != nil {
 				return nil, err
-			}
-		}
-
-		if p.is(tok, MATCH) {
-			if stmt.Match, err = p.parseRegexp(); err != nil {
-				return nil, err
-			}
-		}
-
-		if p.is(tok, DEFAULT) {
-			if stmt.Default, err = p.parseExpr(); err != nil {
-				return nil, err
-			}
-		}
-
-		if p.is(tok, NOTNULL) {
-			stmt.Notnull = true
-			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
-				if tok == FALSE {
-					stmt.Notnull = false
-				}
-			}
-		}
-
-		if p.is(tok, READONLY) {
-			stmt.Readonly = true
-			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
-				if tok == FALSE {
-					stmt.Readonly = false
-				}
-			}
-		}
-
-		if p.is(tok, MANDATORY) {
-			stmt.Mandatory = true
-			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
-				if tok == FALSE {
-					stmt.Mandatory = false
-				}
-			}
-		}
-
-		if p.is(tok, VALIDATE) {
-			stmt.Validate = true
-			if tok, _, exi := p.mightBe(TRUE, FALSE); exi {
-				if tok == FALSE {
-					stmt.Validate = false
-				}
 			}
 		}
 
 		if p.is(tok, PERMISSIONS) {
-			if stmt.Perm, err = p.parsePerms(); err != nil {
+			if stmt.Perms, err = p.parsePerms(); err != nil {
 				return nil, err
 			}
 		}
 
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
 	}
 
 	return
@@ -137,7 +73,7 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 
 func (p *parser) parseRemoveFieldStatement() (stmt *RemoveFieldStatement, err error) {
 
-	stmt = &RemoveFieldStatement{}
+	stmt = &RemoveFieldStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
@@ -152,10 +88,6 @@ func (p *parser) parseRemoveFieldStatement() (stmt *RemoveFieldStatement, err er
 	}
 
 	if stmt.What, err = p.parseTables(); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
 		return nil, err
 	}
 

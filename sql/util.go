@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	json "github.com/hjson/hjson-go"
@@ -67,14 +68,14 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 
 	switch tok {
 
+	case NULL:
+		return nil, nil
+
 	case TRUE:
 		return true, nil
 
 	case FALSE:
 		return false, nil
-
-	case NULL:
-		return &Null{}, nil
 
 	case VOID:
 		return &Void{}, nil
@@ -91,19 +92,13 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 	case QMARK:
 		return &Any{}, nil
 
-	case ASC:
-		return &Asc{}, nil
-
-	case DESC:
-		return &Desc{}, nil
-
 	case STRING:
 		return &Value{lit}, nil
 
 	case REGION:
 		return &Value{lit}, nil
 
-	case ID:
+	case EXPR:
 		return &Ident{lit}, nil
 
 	case IDENT:
@@ -112,35 +107,50 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 	case TABLE:
 		return &Table{lit}, nil
 
-	case NOW:
-		return time.Now().UTC(), nil
+	case PARAM:
+		return &Param{lit}, nil
 
 	case DATE:
-		return time.Parse("2006-01-02", lit)
+		return time.Parse(RFCDate, lit)
 
 	case TIME:
-		return time.Parse(time.RFC3339, lit)
+		return time.Parse(RFCTime, lit)
 
 	case REGEX:
 		return regexp.Compile(lit)
 
 	case NUMBER:
-		return strconv.ParseInt(lit, 10, 64)
+		val, err := strconv.ParseFloat(lit, 64)
+		if err != nil {
+			return val, fmt.Errorf("Invalid number: %s", lit)
+		}
+		return val, nil
 
 	case DOUBLE:
-		return strconv.ParseFloat(lit, 64)
+		val, err := strconv.ParseFloat(lit, 64)
+		if err != nil {
+			return val, fmt.Errorf("Invalid number: %s", lit)
+		}
+		return val, nil
 
 	case DURATION:
-		return time.ParseDuration(lit)
-
-	case PARAM:
-		if p, ok := p.v[lit]; ok {
-			return p, nil
+		var mul time.Duration
+		switch {
+		default:
+			mul = 1
+		case strings.HasSuffix(lit, "d"):
+			mul, lit = 24, strings.Replace(lit, "d", "h", -1)
+		case strings.HasSuffix(lit, "w"):
+			mul, lit = 168, strings.Replace(lit, "w", "h", -1)
 		}
-		return &Param{lit}, nil
+		val, err := time.ParseDuration(lit)
+		if err != nil {
+			return val, fmt.Errorf("Invalid duration: %s", lit)
+		}
+		return val * mul, nil
 
 	case ARRAY:
-		var j Array
+		var j []interface{}
 		json.Unmarshal([]byte(lit), &j)
 		if j == nil {
 			return j, fmt.Errorf("Invalid JSON: %s", lit)
@@ -148,7 +158,7 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 		return j, nil
 
 	case JSON:
-		var j Object
+		var j map[string]interface{}
 		json.Unmarshal([]byte(lit), &j)
 		if j == nil {
 			return j, fmt.Errorf("Invalid JSON: %s", lit)

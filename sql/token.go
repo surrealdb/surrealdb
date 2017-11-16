@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err error) {
 
-	stmt = &DefineTokenStatement{}
+	stmt = &DefineTokenStatement{RW: true}
 
 	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
@@ -70,15 +70,11 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 	}
 
 	if stmt.Type == "" {
-		return nil, &ParseError{Found: ";", Expected: []string{"TYPE"}}
+		return nil, &ParseError{Found: "", Expected: []string{"TYPE"}}
 	}
 
-	if stmt.Code == nil {
-		return nil, &ParseError{Found: ";", Expected: []string{"VALUE"}}
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
+	if len(stmt.Code) == 0 {
+		return nil, &ParseError{Found: "", Expected: []string{"VALUE"}}
 	}
 
 	return
@@ -87,7 +83,7 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 
 func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err error) {
 
-	stmt = &RemoveTokenStatement{}
+	stmt = &RemoveTokenStatement{RW: true}
 
 	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
@@ -117,10 +113,6 @@ func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err er
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
-		return nil, err
 	}
 
 	return

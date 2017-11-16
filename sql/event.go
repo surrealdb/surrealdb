@@ -14,9 +14,9 @@
 
 package sql
 
-func (p *parser) parseDefineViewStatement() (stmt *DefineViewStatement, err error) {
+func (p *parser) parseDefineEventStatement() (stmt *DefineEventStatement, err error) {
 
-	stmt = &DefineViewStatement{}
+	stmt = &DefineEventStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
@@ -26,38 +26,27 @@ func (p *parser) parseDefineViewStatement() (stmt *DefineViewStatement, err erro
 		return nil, err
 	}
 
-	_, _, err = p.shouldBe(AS)
-	if err != nil {
+	if _, _, err = p.shouldBe(ON); err != nil {
 		return nil, err
 	}
 
-	_, _, err = p.shouldBe(SELECT)
-	if err != nil {
+	if stmt.What, err = p.parseTables(); err != nil {
 		return nil, err
 	}
 
-	if stmt.Expr, err = p.parseFields(); err != nil {
+	if _, _, err = p.shouldBe(WHEN); err != nil {
 		return nil, err
 	}
 
-	_, _, err = p.shouldBe(FROM)
-	if err != nil {
+	if stmt.When, err = p.parseExpr(); err != nil {
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseWhat(); err != nil {
+	if _, _, err = p.shouldBe(THEN); err != nil {
 		return nil, err
 	}
 
-	if stmt.Cond, err = p.parseCond(); err != nil {
-		return nil, err
-	}
-
-	if stmt.Group, err = p.parseGroup(); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
+	if stmt.Then, err = p.parseExpr(); err != nil {
 		return nil, err
 	}
 
@@ -65,9 +54,9 @@ func (p *parser) parseDefineViewStatement() (stmt *DefineViewStatement, err erro
 
 }
 
-func (p *parser) parseRemoveViewStatement() (stmt *RemoveViewStatement, err error) {
+func (p *parser) parseRemoveEventStatement() (stmt *RemoveEventStatement, err error) {
 
-	stmt = &RemoveViewStatement{}
+	stmt = &RemoveEventStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
@@ -77,7 +66,11 @@ func (p *parser) parseRemoveViewStatement() (stmt *RemoveViewStatement, err erro
 		return nil, err
 	}
 
-	if _, _, err = p.shouldBe(EOF, SEMICOLON); err != nil {
+	if _, _, err = p.shouldBe(ON); err != nil {
+		return nil, err
+	}
+
+	if stmt.What, err = p.parseTables(); err != nil {
 		return nil, err
 	}
 

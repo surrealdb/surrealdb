@@ -38,6 +38,10 @@ func (s *LiveStatement) Auth() (string, string) {
 	return s.NS, s.DB
 }
 
+func (s *KillStatement) Auth() (string, string) {
+	return s.NS, s.DB
+}
+
 func (s *SelectStatement) Auth() (string, string) {
 	return s.NS, s.DB
 }
@@ -55,6 +59,14 @@ func (s *DeleteStatement) Auth() (string, string) {
 }
 
 func (s *RelateStatement) Auth() (string, string) {
+	return s.NS, s.DB
+}
+
+func (s *InsertStatement) Auth() (string, string) {
+	return s.NS, s.DB
+}
+
+func (s *UpsertStatement) Auth() (string, string) {
 	return s.NS, s.DB
 }
 
@@ -106,6 +118,14 @@ func (s *RemoveTableStatement) Auth() (string, string) {
 	return s.NS, s.DB
 }
 
+func (s *DefineEventStatement) Auth() (string, string) {
+	return s.NS, s.DB
+}
+
+func (s *RemoveEventStatement) Auth() (string, string) {
+	return s.NS, s.DB
+}
+
 func (s *DefineFieldStatement) Auth() (string, string) {
 	return s.NS, s.DB
 }
@@ -119,13 +139,5 @@ func (s *DefineIndexStatement) Auth() (string, string) {
 }
 
 func (s *RemoveIndexStatement) Auth() (string, string) {
-	return s.NS, s.DB
-}
-
-func (s *DefineViewStatement) Auth() (string, string) {
-	return s.NS, s.DB
-}
-
-func (s *RemoveViewStatement) Auth() (string, string) {
 	return s.NS, s.DB
 }

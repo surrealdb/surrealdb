@@ -22,202 +22,30 @@ import (
 	"time"
 )
 
-func (s *SelectStatement) Begin() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	s.killable.ticker = time.AfterFunc(s.Timeout, func() {
-		s.killable.ticker.Stop()
-		s.killable.ticker = nil
-		close(s.killable.closer)
-	})
-}
-
-func (s *SelectStatement) Cease() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	if s.killable.ticker != nil {
-		s.killable.ticker.Stop()
-	}
-}
-
 func (s *SelectStatement) Duration() time.Duration {
 	return s.Timeout
-}
-
-func (s *SelectStatement) Timedout() <-chan struct{} {
-	if s.Timeout == 0 {
-		return nil
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	return s.killable.closer
-}
-
-func (s *CreateStatement) Begin() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	s.killable.ticker = time.AfterFunc(s.Timeout, func() {
-		s.killable.ticker.Stop()
-		s.killable.ticker = nil
-		close(s.killable.closer)
-	})
-}
-
-func (s *CreateStatement) Cease() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	if s.killable.ticker != nil {
-		s.killable.ticker.Stop()
-	}
 }
 
 func (s *CreateStatement) Duration() time.Duration {
 	return s.Timeout
 }
 
-func (s *CreateStatement) Timedout() <-chan struct{} {
-	if s.Timeout == 0 {
-		return nil
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	return s.killable.closer
-}
-
-func (s *UpdateStatement) Begin() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	s.killable.ticker = time.AfterFunc(s.Timeout, func() {
-		s.killable.ticker.Stop()
-		s.killable.ticker = nil
-		close(s.killable.closer)
-	})
-}
-
-func (s *UpdateStatement) Cease() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	if s.killable.ticker != nil {
-		s.killable.ticker.Stop()
-	}
-}
-
 func (s *UpdateStatement) Duration() time.Duration {
 	return s.Timeout
-}
-
-func (s *UpdateStatement) Timedout() <-chan struct{} {
-	if s.Timeout == 0 {
-		return nil
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	return s.killable.closer
-}
-
-func (s *DeleteStatement) Begin() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	s.killable.ticker = time.AfterFunc(s.Timeout, func() {
-		s.killable.ticker.Stop()
-		s.killable.ticker = nil
-		close(s.killable.closer)
-	})
-}
-
-func (s *DeleteStatement) Cease() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	if s.killable.ticker != nil {
-		s.killable.ticker.Stop()
-	}
 }
 
 func (s *DeleteStatement) Duration() time.Duration {
 	return s.Timeout
 }
 
-func (s *DeleteStatement) Timedout() <-chan struct{} {
-	if s.Timeout == 0 {
-		return nil
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	return s.killable.closer
-}
-
-func (s *RelateStatement) Begin() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	s.killable.ticker = time.AfterFunc(s.Timeout, func() {
-		s.killable.ticker.Stop()
-		s.killable.ticker = nil
-		close(s.killable.closer)
-	})
-}
-
-func (s *RelateStatement) Cease() {
-	if s.Timeout == 0 {
-		return
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	if s.killable.ticker != nil {
-		s.killable.ticker.Stop()
-	}
-}
-
 func (s *RelateStatement) Duration() time.Duration {
 	return s.Timeout
 }
 
-func (s *RelateStatement) Timedout() <-chan struct{} {
-	if s.Timeout == 0 {
-		return nil
-	}
-	if s.killable.closer == nil {
-		s.killable.closer = make(chan struct{})
-	}
-	return s.killable.closer
+func (s *InsertStatement) Duration() time.Duration {
+	return s.Timeout
+}
+
+func (s *UpsertStatement) Duration() time.Duration {
+	return s.Timeout
 }

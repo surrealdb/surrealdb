@@ -17,40 +17,96 @@ package sql
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
-func orNil(v interface{}) string {
-	switch v.(type) {
-	case nil:
-		return ""
-	default:
-		return fmt.Sprint(v)
+const (
+	_select method = iota
+	_create
+	_update
+	_delete
+)
+
+type method int
+
+type methods []method
+
+func (this method) String() string {
+	switch this {
+	case _select:
+		return "select"
+	case _create:
+		return "create"
+	case _update:
+		return "update"
+	case _delete:
+		return "delete"
 	}
+	return ""
 }
 
-func stringIf(b bool, v interface{}) string {
+func (this methods) String() string {
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
+	}
+	return strings.Join(m, ", ")
+}
+
+// ---------------------------------------------
+// Helpers
+// ---------------------------------------------
+
+func print(s string, a ...interface{}) string {
+	for k, v := range a {
+		switch v.(type) {
+		default:
+		case nil:
+			a[k] = "NULL"
+		case []interface{}:
+			out, _ := json.Marshal(v)
+			a[k] = string(out)
+		case map[string]interface{}:
+			out, _ := json.Marshal(v)
+			a[k] = string(out)
+		}
+	}
+	return fmt.Sprintf(s, a...)
+}
+
+func maybe(b bool, v ...interface{}) string {
 	switch b {
 	case false:
-		return ""
-	default:
-		return fmt.Sprint(v)
+		if len(v) >= 2 {
+			return fmt.Sprint(v[1])
+		}
+	case true:
+		if len(v) >= 1 {
+			return fmt.Sprint(v[0])
+		}
 	}
+	return ""
 }
 
-func padToken(t Token) string {
+func quote(s string) string {
+	t := newToken(s)
 	switch t {
-	case OR, AND:
-		fallthrough
-	case IN, IS, CONTAINS:
-		fallthrough
-	case CONTAINSALL, CONTAINSNONE, CONTAINSSOME:
-		fallthrough
-	case ALLCONTAINEDIN, NONECONTAINEDIN, SOMECONTAINEDIN:
-		return fmt.Sprintf(" %v ", t)
+	case ILLEGAL:
+		if toQuote(s) {
+			return "`" + s + "`"
+		}
+		return s
 	default:
-		return fmt.Sprintf("%v", t)
+		switch {
+		case t.isKeyword():
+			return "`" + s + "`"
+		case t.isOperator():
+			return "`" + s + "`"
+		}
+		return s
 	}
 }
 
@@ -65,96 +121,13 @@ func toQuote(s string) bool {
 			continue
 		case c == '[', c == ']':
 			continue
-		case c == '-', c == '.':
-			continue
-		case c == '*':
+		case c == '.', c == '*':
 			continue
 		default:
 			return true
 		}
 	}
 	return false
-}
-
-func stringFromBool(v bool, y, n string) string {
-	switch v {
-	case false:
-		return n
-	default:
-		return y
-	}
-}
-
-func stringFromString(v string, y, n string) string {
-	switch v {
-	case "":
-		return n
-	default:
-		return y
-	}
-}
-
-func stringFromInt(v int64, y, n string) string {
-	switch v {
-	case 0:
-		return n
-	default:
-		return y
-	}
-}
-
-func stringFromFloat(v float64, y, n string) string {
-	switch v {
-	case 0:
-		return n
-	default:
-		return y
-	}
-}
-
-func stringFromArray(v Array, y, n string) string {
-	switch len(v) {
-	case 0:
-		return n
-	default:
-		return y
-	}
-}
-
-func stringFromSlice(v []interface{}, y, n string) string {
-	switch len(v) {
-	case 0:
-		return n
-	default:
-		return y
-	}
-}
-
-func stringFromIdent(v *Ident, y, n string) string {
-	switch v {
-	case nil:
-		return n
-	default:
-		return y
-	}
-}
-
-func stringFromInterface(v interface{}, y, n string) string {
-	switch v {
-	case nil:
-		return n
-	default:
-		return y
-	}
-}
-
-func stringFromDuration(v time.Duration, y, n string) string {
-	switch v {
-	case 0:
-		return n
-	default:
-		return y
-	}
 }
 
 // ---------------------------------------------
@@ -176,133 +149,166 @@ func (this CommitStatement) String() string {
 func (this UseStatement) String() string {
 	switch {
 	case len(this.NS) == 0:
-		return fmt.Sprintf("USE DB %v", this.DB)
+		return print("USE DATABASE %v", quote(this.DB))
 	case len(this.DB) == 0:
-		return fmt.Sprintf("USE NS %v", this.NS)
+		return print("USE NAMESPACE %v", quote(this.NS))
 	default:
-		return fmt.Sprintf("USE NS %v DB %v", this.NS, this.DB)
+		return print("USE NAMESPACE %v DATABASE %v", quote(this.NS), quote(this.DB))
 	}
 }
 
 func (this InfoStatement) String() string {
 	switch this.Kind {
 	case NAMESPACE:
-		return fmt.Sprintf("INFO FOR NAMESPACE")
+		return "INFO FOR NAMESPACE"
 	case DATABASE:
-		return fmt.Sprintf("INFO FOR DATABASE")
+		return "INFO FOR DATABASE"
 	default:
-		return fmt.Sprintf("INFO FOR TABLE %v", this.What)
+		return print("INFO FOR TABLE %s", this.What)
 	}
 }
 
 func (this LetStatement) String() string {
-	return fmt.Sprintf("LET %v = %v",
+	return print("LET %v = %v",
 		this.Name,
 		this.What,
 	)
 }
 
 func (this ReturnStatement) String() string {
-	return fmt.Sprintf("RETURN %v",
+	return print("RETURN %v",
 		this.What,
+	)
+}
+
+func (this LiveStatement) String() string {
+	return print("LIVE SELECT %v%v FROM %v%v",
+		maybe(this.Diff, "DIFF"),
+		this.Expr,
+		this.What,
+		maybe(this.Cond != nil, print(" WHERE %v", this.Cond)),
+	)
+}
+
+func (this KillStatement) String() string {
+	return print("KILL %v",
+		this.Name,
 	)
 }
 
 func (this SelectStatement) String() string {
-	return fmt.Sprintf("SELECT %v FROM %v%v%v%v%v%v%v%v",
+	return print("SELECT %v FROM %v%v%v%v%v%v%v%v",
 		this.Expr,
 		this.What,
-		stringFromInterface(this.Cond, fmt.Sprintf(" WHERE %v", this.Cond), ""),
+		maybe(this.Cond != nil, print(" WHERE %v", this.Cond)),
 		this.Group,
 		this.Order,
-		stringFromInterface(this.Limit, fmt.Sprintf(" LIMIT %v", this.Limit), ""),
-		stringFromInterface(this.Start, fmt.Sprintf(" START %v", this.Start), ""),
-		stringFromInterface(this.Version, fmt.Sprintf(" VERSION %v", this.Version), ""),
-		stringFromDuration(this.Timeout, fmt.Sprintf(" TIMEOUT %v", this.Timeout.String()), ""),
+		maybe(this.Limit != nil, print(" LIMIT %v", this.Limit)),
+		maybe(this.Start != nil, print(" START %v", this.Start)),
+		maybe(this.Version != nil, print(" VERSION %v", this.Version)),
+		maybe(this.Timeout > 0, print(" TIMEOUT %v", this.Timeout.String())),
 	)
 }
 
 func (this CreateStatement) String() string {
-	return fmt.Sprintf("CREATE %v%v RETURN %v%v",
+	return print("CREATE %v%v%v%v",
 		this.What,
-		this.Data,
-		this.Echo,
-		stringFromDuration(this.Timeout, fmt.Sprintf(" TIMEOUT %v", this.Timeout.String()), ""),
+		maybe(this.Data != nil, print("%v", this.Data)),
+		maybe(this.Echo != AFTER, print(" RETURN %v", this.Echo)),
+		maybe(this.Timeout > 0, print(" TIMEOUT %v", this.Timeout.String())),
 	)
 }
 
 func (this UpdateStatement) String() string {
-	return fmt.Sprintf("CREATE %v%v%v RETURN %v%v",
+	return print("UPDATE %v%v%v%v%v",
 		this.What,
-		this.Data,
-		this.Cond,
-		this.Echo,
-		stringFromDuration(this.Timeout, fmt.Sprintf(" TIMEOUT %v", this.Timeout.String()), ""),
+		maybe(this.Data != nil, print("%v", this.Data)),
+		maybe(this.Cond != nil, print(" WHERE %v", this.Cond)),
+		maybe(this.Echo != AFTER, print(" RETURN %v", this.Echo)),
+		maybe(this.Timeout > 0, print(" TIMEOUT %v", this.Timeout.String())),
 	)
 }
 
 func (this DeleteStatement) String() string {
-	return fmt.Sprintf("DELETE %v%v%v RETURN %v%v",
-		stringFromBool(this.Hard, "AND EXPUNGE ", ""),
+	return print("DELETE %v%v%v%v%v",
+		maybe(this.Hard, "AND EXPUNGE "),
 		this.What,
-		this.Cond,
-		this.Echo,
-		stringFromDuration(this.Timeout, fmt.Sprintf(" TIMEOUT %v", this.Timeout.String()), ""),
+		maybe(this.Cond != nil, print(" WHERE %v", this.Cond)),
+		maybe(this.Echo != NONE, print(" RETURN %v", this.Echo)),
+		maybe(this.Timeout > 0, print(" TIMEOUT %v", this.Timeout.String())),
 	)
 }
 
 func (this RelateStatement) String() string {
-	return fmt.Sprintf("RELATE %v FROM %v WITH %v%v%v RETURN %v%v",
+	return print("RELATE %v FROM %v WITH %v%v%v%v%v",
 		this.Type,
 		this.From,
 		this.With,
+		maybe(this.Data != nil, print("%v", this.Data)),
+		maybe(this.Uniq, " UNIQUE"),
+		maybe(this.Echo != AFTER, print(" RETURN %v", this.Echo)),
+		maybe(this.Timeout > 0, print(" TIMEOUT %v", this.Timeout.String())),
+	)
+}
+
+func (this InsertStatement) String() string {
+	return print("INSERT %v INTO %v%v%v",
 		this.Data,
-		stringFromBool(this.Uniq, " UNIQUE", ""),
-		this.Echo,
-		stringFromDuration(this.Timeout, fmt.Sprintf(" TIMEOUT %v", this.Timeout.String()), ""),
+		this.Into,
+		maybe(this.Echo != AFTER, print(" RETURN %v", this.Echo)),
+		maybe(this.Timeout > 0, print(" TIMEOUT %v", this.Timeout.String())),
+	)
+}
+
+func (this UpsertStatement) String() string {
+	return print("UPSERT %v INTO %v%v%v",
+		this.Data,
+		this.Into,
+		maybe(this.Echo != AFTER, print(" RETURN %v", this.Echo)),
+		maybe(this.Timeout > 0, print(" TIMEOUT %v", this.Timeout.String())),
 	)
 }
 
 func (this DefineNamespaceStatement) String() string {
-	return fmt.Sprintf("DEFINE NAMESPACE %v",
+	return print("DEFINE NAMESPACE %v",
 		this.Name,
 	)
 }
 
 func (this RemoveNamespaceStatement) String() string {
-	return fmt.Sprintf("REMOVE NAMESPACE %v",
+	return print("REMOVE NAMESPACE %v",
 		this.Name,
 	)
 }
 
 func (this DefineDatabaseStatement) String() string {
-	return fmt.Sprintf("DEFINE DATABASE %v",
+	return print("DEFINE DATABASE %v",
 		this.Name,
 	)
 }
 
 func (this RemoveDatabaseStatement) String() string {
-	return fmt.Sprintf("REMOVE DATABASE %v",
+	return print("REMOVE DATABASE %v",
 		this.Name,
 	)
 }
 
 func (this DefineLoginStatement) String() string {
-	return fmt.Sprintf("DEFINE LOGIN %v ON %v PASSWORD ********",
+	return print("DEFINE LOGIN %v ON %v PASSWORD ********",
 		this.User,
 		this.Kind,
 	)
 }
 
 func (this RemoveLoginStatement) String() string {
-	return fmt.Sprintf("REMOVE LOGIN %v ON %v",
+	return print("REMOVE LOGIN %v ON %v",
 		this.User,
 		this.Kind,
 	)
 }
 
 func (this DefineTokenStatement) String() string {
-	return fmt.Sprintf("DEFINE TOKEN %v ON %v TYPE %v VALUE ********",
+	return print("DEFINE TOKEN %v ON %v TYPE %v VALUE ********",
 		this.Name,
 		this.Kind,
 		this.Type,
@@ -310,91 +316,93 @@ func (this DefineTokenStatement) String() string {
 }
 
 func (this RemoveTokenStatement) String() string {
-	return fmt.Sprintf("REMOVE TOKEN %v ON %v",
+	return print("REMOVE TOKEN %v ON %v",
 		this.Name,
 		this.Kind,
 	)
 }
 
 func (this DefineScopeStatement) String() string {
-	return fmt.Sprintf("DEFINE SCOPE %v SESSION %v SIGNUP AS (%v) SIGNIN AS (%v)",
+	return print("DEFINE SCOPE %v%v%v%v%v",
 		this.Name,
-		this.Time,
-		this.Signup,
-		this.Signin,
+		maybe(this.Time > 0, print(" SESSION %v", this.Time)),
+		maybe(this.Signup != nil, print(" SIGNUP AS %v", this.Signup)),
+		maybe(this.Signin != nil, print(" SIGNIN AS %v", this.Signin)),
+		maybe(this.Connect != nil, print(" CONNECT AS %v", this.Connect)),
 	)
 }
 
 func (this RemoveScopeStatement) String() string {
-	return fmt.Sprintf("REMOVE SCOPE %v",
+	return print("REMOVE SCOPE %v",
 		this.Name,
 	)
 }
 
-func (this DefineTableStatement) String() string {
-	return fmt.Sprintf("DEFINE TABLE %v%v%v",
-		this.What,
-		stringFromBool(this.Full, " SCHEMAFULL", " SCHEMALESS"),
-		stringIf(this.Perm != nil, this.Perm),
+func (this DefineTableStatement) String() (s string) {
+	w := maybe(this.Cond != nil, print(" WHERE %v", this.Cond))
+	return print("DEFINE TABLE %v%v%v%v%v",
+		maybe(this.Name != nil, print("%s", this.Name), print("%s", this.What)),
+		maybe(this.Full, " SCHEMAFULL"),
+		maybe(this.Drop, " DROP"),
+		maybe(this.Lock, print(" AS SELECT %v FROM %v%v%v", this.Expr, this.From, w, this.Group)),
+		maybe(this.Perms != nil, this.Perms),
 	)
 }
 
 func (this RemoveTableStatement) String() string {
-	return fmt.Sprintf("REMOVE TABLE %v",
+	return print("REMOVE TABLE %v",
+		this.What,
+	)
+}
+
+func (this DefineEventStatement) String() string {
+	return print("DEFINE EVENT %v ON %v WHEN %v THEN %v",
+		this.Name,
+		this.What,
+		this.When,
+		this.Then,
+	)
+}
+
+func (this RemoveEventStatement) String() string {
+	return print("REMOVE EVENT %v ON %v",
+		this.Name,
 		this.What,
 	)
 }
 
 func (this DefineFieldStatement) String() string {
-	return fmt.Sprintf("DEFINE FIELD %v ON %v TYPE %v%v%v%v%v%v%v%v%v%v%v%v",
+	return print("DEFINE FIELD %v ON %v%v%v%v%v%v",
 		this.Name,
 		this.What,
-		this.Type,
-		stringFromFloat(this.Min, fmt.Sprintf(" MIN %v", this.Min), ""),
-		stringFromFloat(this.Max, fmt.Sprintf(" MAX %v", this.Max), ""),
-		stringFromArray(this.Enum, fmt.Sprintf(" ENUM %v", this.Enum), ""),
-		stringFromString(this.Code, fmt.Sprintf(" CODE \"%v\"", this.Code), ""),
-		stringFromString(this.Match, fmt.Sprintf(" MATCH /%v/", this.Match), ""),
-		stringFromInterface(this.Default, fmt.Sprintf(" DEFAULT %v", this.Default), ""),
-		stringFromBool(this.Notnull, " NOTNULL", ""),
-		stringFromBool(this.Readonly, " READONLY", ""),
-		stringFromBool(this.Validate, " VALIDATE", ""),
-		stringFromBool(this.Mandatory, " MANDATORY", ""),
-		stringIf(this.Perm != nil, this.Perm),
+		maybe(this.Type != "", print(" TYPE %v", this.Type)),
+		maybe(this.Kind != "", print(" (%v)", this.Kind)),
+		maybe(this.Value != nil, print(" VALUE %v", this.Value)),
+		maybe(this.Assert != nil, print(" ASSERT %v", this.Assert)),
+		maybe(this.Perms != nil, this.Perms),
 	)
 }
 
 func (this RemoveFieldStatement) String() string {
-	return fmt.Sprintf("REMOVE FIELD %v ON %v",
+	return print("REMOVE FIELD %v ON %v",
 		this.Name,
 		this.What,
 	)
 }
 
 func (this DefineIndexStatement) String() string {
-	return fmt.Sprintf("DEFINE INDEX %v ON %v COLUMNS %v%v",
+	return print("DEFINE INDEX %v ON %v COLUMNS %v%v",
 		this.Name,
 		this.What,
 		this.Cols,
-		stringFromBool(this.Uniq, " UNIQUE", ""),
+		maybe(this.Uniq, " UNIQUE"),
 	)
 }
 
 func (this RemoveIndexStatement) String() string {
-	return fmt.Sprintf("REMOVE INDEX %v",
+	return print("REMOVE INDEX %v ON %v",
 		this.Name,
-	)
-}
-
-func (this DefineViewStatement) String() string {
-	return fmt.Sprintf("DEFINE VIEW %v",
-		this.Name,
-	)
-}
-
-func (this RemoveViewStatement) String() string {
-	return fmt.Sprintf("REMOVE VIEW %v",
-		this.Name,
+		this.What,
 	)
 }
 
@@ -403,9 +411,9 @@ func (this RemoveViewStatement) String() string {
 // ---------------------------------------------
 
 func (this Exprs) String() string {
-	var m []string
-	for _, v := range this {
-		m = append(m, fmt.Sprintf("%v", v))
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = print("%v", v)
 	}
 	return strings.Join(m, ", ")
 }
@@ -418,18 +426,6 @@ func (this Any) String() string {
 	return "?"
 }
 
-func (this Asc) String() string {
-	return "ASC"
-}
-
-func (this Desc) String() string {
-	return "DESC"
-}
-
-func (this Null) String() string {
-	return "NULL"
-}
-
 func (this Void) String() string {
 	return "VOID"
 }
@@ -438,34 +434,24 @@ func (this Empty) String() string {
 	return "EMPTY"
 }
 
-func (this Array) String() string {
-	out, _ := json.Marshal(this)
-	return string(out)
-}
-
-func (this Object) String() string {
-	out, _ := json.Marshal(this)
-	return string(out)
-}
-
 // ---------------------------------------------
 // Field
 // ---------------------------------------------
 
 func (this Fields) String() string {
-	var m []string
-	for _, v := range this {
-		m = append(m, v.String())
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
 	}
-	return fmt.Sprintf("%v",
+	return print("%v",
 		strings.Join(m, ", "),
 	)
 }
 
 func (this Field) String() string {
-	return fmt.Sprintf("%v%v",
+	return print("%v%v",
 		this.Expr,
-		stringFromIdent(this.Alias, fmt.Sprintf(" AS %v", this.Alias), ""),
+		maybe(this.Alias != "", print(" AS %s", quote(this.Alias))),
 	)
 }
 
@@ -477,17 +463,17 @@ func (this Groups) String() string {
 	if len(this) == 0 {
 		return ""
 	}
-	var m []string
-	for _, v := range this {
-		m = append(m, v.String())
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
 	}
-	return fmt.Sprintf(" GROUP BY %v",
+	return print(" GROUP BY %v",
 		strings.Join(m, ", "),
 	)
 }
 
 func (this Group) String() string {
-	return fmt.Sprintf("%v",
+	return print("%v",
 		this.Expr,
 	)
 }
@@ -500,20 +486,41 @@ func (this Orders) String() string {
 	if len(this) == 0 {
 		return ""
 	}
-	var m []string
-	for _, v := range this {
-		m = append(m, v.String())
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
 	}
-	return fmt.Sprintf(" ORDER BY %v",
+	return print(" ORDER BY %v",
 		strings.Join(m, ", "),
 	)
 }
 
 func (this Order) String() string {
-	return fmt.Sprintf("%v %v",
+	return print("%v %v",
 		this.Expr,
 		this.Dir,
 	)
+}
+
+// ---------------------------------------------
+// Model
+// ---------------------------------------------
+
+func (this Model) String() string {
+	switch {
+	case this.INC == 0:
+		max := strconv.FormatFloat(this.MAX, 'f', -1, 64)
+		return print("|%s:%s|", quote(this.TB), max)
+	case this.INC == 1:
+		min := strconv.FormatFloat(this.MIN, 'f', -1, 64)
+		max := strconv.FormatFloat(this.MAX, 'f', -1, 64)
+		return print("|%s:%s..%s|", quote(this.TB), min, max)
+	default:
+		inc := strconv.FormatFloat(this.INC, 'f', -1, 64)
+		min := strconv.FormatFloat(this.MIN, 'f', -1, 64)
+		max := strconv.FormatFloat(this.MAX, 'f', -1, 64)
+		return print("|%s:%s,%s..%s|", quote(this.TB), min, inc, max)
+	}
 }
 
 // ---------------------------------------------
@@ -521,15 +528,15 @@ func (this Order) String() string {
 // ---------------------------------------------
 
 func (this Params) String() string {
-	var m []string
-	for _, v := range this {
-		m = append(m, v.String())
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
 	}
 	return strings.Join(m, ", ")
 }
 
 func (this Param) String() string {
-	return fmt.Sprintf("$%v", this.ID)
+	return print("$%v", this.ID)
 }
 
 // ---------------------------------------------
@@ -537,15 +544,15 @@ func (this Param) String() string {
 // ---------------------------------------------
 
 func (this Values) String() string {
-	var m []string
-	for _, v := range this {
-		m = append(m, v.String())
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
 	}
 	return strings.Join(m, ", ")
 }
 
 func (this Value) String() string {
-	return fmt.Sprintf("\"%v\"", this.ID)
+	return print("\"%v\"", this.ID)
 }
 
 // ---------------------------------------------
@@ -553,23 +560,15 @@ func (this Value) String() string {
 // ---------------------------------------------
 
 func (this Idents) String() string {
-	var m []string
-	for _, v := range this {
-		m = append(m, v.String())
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
 	}
 	return strings.Join(m, ", ")
 }
 
 func (this Ident) String() string {
-	switch newToken(this.ID) {
-	case ILLEGAL:
-		if toQuote(this.ID) {
-			return fmt.Sprintf("`%v`", this.ID)
-		}
-		return fmt.Sprintf("%v", this.ID)
-	default:
-		return fmt.Sprintf("`%v`", this.ID)
-	}
+	return quote(this.ID)
 }
 
 // ---------------------------------------------
@@ -577,23 +576,31 @@ func (this Ident) String() string {
 // ---------------------------------------------
 
 func (this Tables) String() string {
-	var m []string
-	for _, v := range this {
-		m = append(m, v.String())
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
 	}
 	return strings.Join(m, ", ")
 }
 
 func (this Table) String() string {
-	switch newToken(this.TB) {
-	case ILLEGAL:
-		if toQuote(this.TB) {
-			return fmt.Sprintf("`%v`", this.TB)
-		}
-		return fmt.Sprintf("%v", this.TB)
-	default:
-		return fmt.Sprintf("`%v`", this.TB)
+	return quote(this.TB)
+}
+
+// ---------------------------------------------
+// Batch
+// ---------------------------------------------
+
+func (this Batchs) String() string {
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
 	}
+	return strings.Join(m, ", ")
+}
+
+func (this Batch) String() string {
+	return print("batch(%v, [%v]", this.TB, this.BA)
 }
 
 // ---------------------------------------------
@@ -601,23 +608,106 @@ func (this Table) String() string {
 // ---------------------------------------------
 
 func (this Things) String() string {
-	var m []string
-	for _, v := range this {
-		m = append(m, v.String())
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
 	}
 	return strings.Join(m, ", ")
 }
 
 func (this Thing) String() string {
 	tb := this.TB
-	if toQuote(fmt.Sprint(this.TB)) {
-		tb = fmt.Sprintf("{%v}", this.TB)
+	if toQuote(this.TB) {
+		tb = print("⟨%v⟩", this.TB)
 	}
 	id := this.ID
-	if toQuote(fmt.Sprint(this.ID)) {
-		id = fmt.Sprintf("{%v}", this.ID)
+	switch v := this.ID.(type) {
+	case int64:
+		id = strconv.FormatInt(v, 10)
+	case float64:
+		id = strconv.FormatFloat(v, 'f', -1, 64)
+	case time.Time:
+		id = print("⟨%v⟩", v.Format(RFCNano))
+	case string:
+		if toQuote(v) {
+			id = print("⟨%v⟩", v)
+		}
+	default:
+		if toQuote(fmt.Sprint(v)) {
+			id = print("⟨%v⟩", v)
+		}
 	}
-	return fmt.Sprintf("@%v:%v", tb, id)
+	return print("%v:%v", tb, id)
+}
+
+// ---------------------------------------------
+// Point
+// ---------------------------------------------
+
+func (this Points) String() string {
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
+	}
+	return strings.Join(m, ", ")
+}
+
+func (this Point) String() string {
+	return print("geo.point(%v,%v)", this.LA, this.LO)
+}
+
+func (this Point) JSON() string {
+	return fmt.Sprintf(`[%v,%v]`, this.LA, this.LO)
+}
+
+// ---------------------------------------------
+// Circle
+// ---------------------------------------------
+
+func (this Circles) String() string {
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
+	}
+	return strings.Join(m, ", ")
+}
+
+func (this Circle) String() string {
+	return print("geo.circle(%v,%v)", this.CE, this.RA)
+}
+
+func (this Circle) JSON() string {
+	return fmt.Sprintf(`{"type":"circle","center":%v,"radius":%v}`, this.CE.JSON(), this.RA)
+}
+
+// ---------------------------------------------
+// Polygon
+// ---------------------------------------------
+
+func (this Polygons) String() string {
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
+	}
+	return strings.Join(m, ", ")
+}
+
+func (this Polygon) String() string {
+	var m []string
+	for _, v := range this.PS {
+		m = append(m, v.String())
+	}
+	return print("geo.polygon(%v)",
+		strings.Join(m, ", "),
+	)
+}
+
+func (this Polygon) JSON() string {
+	var m []string
+	for _, p := range this.PS {
+		m = append(m, p.JSON())
+	}
+	return fmt.Sprintf(`{"type":"polygon","points":[%v]}`, strings.Join(m, ","))
 }
 
 // ---------------------------------------------
@@ -625,19 +715,28 @@ func (this Thing) String() string {
 // ---------------------------------------------
 
 func (this SubExpression) String() string {
-	return fmt.Sprintf("(%v)",
+	return print("(%v)",
 		this.Expr,
 	)
 }
 
+func (this IfelExpression) String() string {
+	return print("IF %v THEN %v%v",
+		this.Cond,
+		this.Then,
+		maybe(this.Else != nil, print("ELSE %v END", this.Else)),
+	)
+}
+
 func (this FuncExpression) String() string {
-	return fmt.Sprintf("%v()",
+	return print("%v(%v)",
 		this.Name,
+		this.Args,
 	)
 }
 
 func (this ItemExpression) String() string {
-	return fmt.Sprintf("%v %v %v",
+	return print("%v %v %v",
 		this.LHS,
 		this.Op,
 		this.RHS,
@@ -645,9 +744,9 @@ func (this ItemExpression) String() string {
 }
 
 func (this BinaryExpression) String() string {
-	return fmt.Sprintf("%v%v%v",
+	return print("%v %v %v",
 		this.LHS,
-		padToken(this.Op),
+		this.Op,
 		this.RHS,
 	)
 }
@@ -655,28 +754,28 @@ func (this BinaryExpression) String() string {
 func (this PathExpression) String() string {
 	var m []string
 	for _, v := range this.Expr {
-		m = append(m, fmt.Sprintf("%v", v))
+		m = append(m, print("%v", v))
 	}
 	return strings.Join(m, "")
 }
 
 func (this PartExpression) String() string {
-	return fmt.Sprintf("%v",
+	return print("%v",
 		this.Part,
 	)
 }
 
 func (this JoinExpression) String() string {
-	return fmt.Sprintf("%v",
+	return print("%v",
 		this.Join,
 	)
 }
 
 func (this SubpExpression) String() string {
-	return fmt.Sprintf("(%v%v%v)",
+	return print("(%v%v%v)",
 		this.What,
-		stringFromIdent(this.Name, fmt.Sprintf(" AS %v", this.Name), ""),
-		stringFromInterface(this.Cond, fmt.Sprintf(" WHERE %v", this.Cond), ""),
+		maybe(this.Name != nil, print(" AS %v", this.Name)),
+		maybe(this.Cond != nil, print(" WHERE %v", this.Cond)),
 	)
 }
 
@@ -685,91 +784,86 @@ func (this DataExpression) String() string {
 	for _, v := range this.Data {
 		m = append(m, v.String())
 	}
-	return fmt.Sprintf(" SET %v",
+	return print(" SET %v",
 		strings.Join(m, ", "),
 	)
 }
 
 func (this DiffExpression) String() string {
-	return fmt.Sprintf(" DIFF %v",
+	return print(" DIFF %v",
 		this.Data,
 	)
 }
 
 func (this MergeExpression) String() string {
-	return fmt.Sprintf(" MERGE %v",
+	return print(" MERGE %v",
 		this.Data,
 	)
 }
 
 func (this ContentExpression) String() string {
-	return fmt.Sprintf(" CONTENT %v",
+	return print(" CONTENT %v",
 		this.Data,
 	)
 }
 
 func (this PermExpression) String() string {
 
-	var s, c, u, d, r string
+	var k, o string
 
-	p := map[bool][]string{}
+	a := []string{}
+	m := map[string]methods{}
 
 	if v, ok := this.Select.(bool); ok {
-		s = stringFromBool(v, "FULL", "NONE")
-		p[v] = append(p[v], fmt.Sprintf("select"))
+		k = maybe(v, "FULL", "NONE")
+		m[k] = append(m[k], _select)
 	} else {
-		s = fmt.Sprintf("WHERE %v", this.Select)
+		k = print("WHERE %v", this.Select)
+		m[k] = append(m[k], _select)
 	}
 
 	if v, ok := this.Create.(bool); ok {
-		c = stringFromBool(v, "FULL", "NONE")
-		p[v] = append(p[v], fmt.Sprintf("create"))
+		k = maybe(v, "FULL", "NONE")
+		m[k] = append(m[k], _create)
 	} else {
-		c = fmt.Sprintf("WHERE %v", this.Create)
+		k = print("WHERE %v", this.Create)
+		m[k] = append(m[k], _create)
 	}
 
 	if v, ok := this.Update.(bool); ok {
-		u = stringFromBool(v, "FULL", "NONE")
-		p[v] = append(p[v], fmt.Sprintf("update"))
+		k = maybe(v, "FULL", "NONE")
+		m[k] = append(m[k], _update)
 	} else {
-		u = fmt.Sprintf("WHERE %v", this.Update)
+		k = print("WHERE %v", this.Update)
+		m[k] = append(m[k], _update)
 	}
 
 	if v, ok := this.Delete.(bool); ok {
-		d = stringFromBool(v, "FULL", "NONE")
-		p[v] = append(p[v], fmt.Sprintf("delete"))
+		k = maybe(v, "FULL", "NONE")
+		m[k] = append(m[k], _delete)
 	} else {
-		d = fmt.Sprintf("WHERE %v", this.Delete)
+		k = print("WHERE %v", this.Delete)
+		m[k] = append(m[k], _delete)
 	}
 
-	if v, ok := this.Relate.(bool); ok {
-		r = stringFromBool(v, "FULL", "NONE")
-		p[v] = append(p[v], fmt.Sprintf("relate"))
-	} else {
-		r = fmt.Sprintf("WHERE %v", this.Relate)
+	if len(m) == 1 {
+		for k := range m {
+			return print(" PERMISSIONS %v", k)
+		}
 	}
 
-	if len(p[true]) == 5 {
-		return fmt.Sprintf(" PERMISSIONS FULL")
+	for k := range m {
+		a = append(a, k)
 	}
 
-	if len(p[false]) == 5 {
-		return fmt.Sprintf(" PERMISSIONS NONE")
+	sort.Slice(a, func(i, j int) bool {
+		return m[a[i]][0] < m[a[j]][0]
+	})
+
+	for _, v := range a {
+		o += print(" FOR %v %v", m[v], v)
 	}
 
-	if len(p[true])+len(p[false]) == 5 {
-		return fmt.Sprintf(" PERMISSIONS FOR %v FULL FOR %v NONE",
-			strings.Join(p[true], ", "),
-			strings.Join(p[false], ", "),
-		)
-	}
-
-	return fmt.Sprintf(" PERMISSIONS%v%v%v%v%v",
-		fmt.Sprintf(" FOR select %v", s),
-		fmt.Sprintf(" FOR create %v", c),
-		fmt.Sprintf(" FOR update %v", u),
-		fmt.Sprintf(" FOR delete %v", d),
-		fmt.Sprintf(" FOR relate %v", r),
-	)
+	return print(" PERMISSIONS%v", o)
 
 }

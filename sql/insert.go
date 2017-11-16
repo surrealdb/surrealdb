@@ -14,32 +14,29 @@
 
 package sql
 
-func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
+func (p *parser) parseInsertStatement() (stmt *InsertStatement, err error) {
 
-	stmt = &DeleteStatement{RW: true}
+	stmt = &InsertStatement{RW: true}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err
 	}
 
-	if _, _, exi := p.mightBe(AND); exi {
-		if _, _, err = p.shouldBe(EXPUNGE); err != nil {
-			return nil, err
-		}
-		stmt.Hard = true
-	}
-
-	_, _, _ = p.mightBe(FROM)
-
-	if stmt.What, err = p.parseWhat(); err != nil {
+	if stmt.Data, err = p.parseExpr(); err != nil {
 		return nil, err
 	}
 
-	if stmt.Cond, err = p.parseCond(); err != nil {
+	if _, _, err = p.shouldBe(INTO); err != nil {
 		return nil, err
 	}
 
-	if stmt.Echo, err = p.parseEcho(NONE); err != nil {
+	_, _, _ = p.mightBe(TABLE)
+
+	if stmt.Into, err = p.parseTable(); err != nil {
+		return nil, err
+	}
+
+	if stmt.Echo, err = p.parseEcho(AFTER); err != nil {
 		return nil, err
 	}
 

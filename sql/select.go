@@ -18,7 +18,7 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 
 	stmt = &SelectStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err
 	}
 
@@ -63,18 +63,21 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 		return nil, err
 	}
 
-	if _, _, err = p.shouldBe(EOF, RPAREN, SEMICOLON); err != nil {
+	if err = checkExpression(aggrs, stmt.Expr, stmt.Group); err != nil {
 		return nil, err
 	}
 
-	return stmt, nil
+	// If this query has any subqueries which
+	// need to alter the database then mark
+	// this query as a writeable statement.
+
+	stmt.RW = p.buf.rw
+
+	return
 
 }
 
 func (p *parser) parseFields() (mul Fields, err error) {
-
-	var lit string
-	var exi bool
 
 	for {
 
@@ -89,10 +92,25 @@ func (p *parser) parseFields() (mul Fields, err error) {
 		// clause, and if it is read the defined
 		// field alias name from the scanner.
 
-		if _, _, exi = p.mightBe(AS); exi {
+		if _, _, exi := p.mightBe(AS); exi {
 
-			if one.Alias, err = p.parseIdent(); err != nil {
-				return nil, &ParseError{Found: lit, Expected: []string{"alias name"}}
+			if _, one.Alias, err = p.shouldBe(IDENT); err != nil {
+				return nil, &ParseError{Found: one.Alias, Expected: []string{"alias name"}}
+			}
+
+			one.Field = one.Alias
+
+		} else {
+
+			switch v := one.Expr.(type) {
+			case *Param:
+				one.Field = v.ID
+			case *Value:
+				one.Field = v.ID
+			case *Ident:
+				one.Field = v.ID
+			default:
+				one.Field = one.String()
 			}
 
 		}
@@ -106,27 +124,13 @@ func (p *parser) parseFields() (mul Fields, err error) {
 		// and if not, then break out of the loop,
 		// otherwise repeat until we find no comma.
 
-		if _, _, exi = p.mightBe(COMMA); !exi {
+		if _, _, exi := p.mightBe(COMMA); !exi {
 			break
 		}
 
 	}
 
 	return
-
-}
-
-func (p *parser) parseWhere() (exp Expr, err error) {
-
-	// The next token that we expect to see is a
-	// WHERE token, and if we don't find one then
-	// return nil, with no error.
-
-	if _, _, exi := p.mightBe(WHERE); !exi {
-		return nil, nil
-	}
-
-	return p.parseExpr()
 
 }
 
@@ -153,7 +157,7 @@ func (p *parser) parseGroup() (mul Groups, err error) {
 
 		one := &Group{}
 
-		tok, lit, err = p.shouldBe(IDENT, ID)
+		tok, lit, err = p.shouldBe(IDENT, EXPR)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
@@ -206,23 +210,38 @@ func (p *parser) parseOrder() (mul Orders, err error) {
 
 		one := &Order{}
 
-		tok, lit, err = p.shouldBe(IDENT, ID)
+		tok, lit, err = p.shouldBe(IDENT, EXPR, RAND)
 		if err != nil {
 			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
 		}
 
-		one.Expr, err = p.declare(tok, lit)
-		if err != nil {
-			return nil, err
+		switch tok {
+		default:
+			one.Expr, err = p.declare(tok, lit)
+			if err != nil {
+				return nil, err
+			}
+		case RAND:
+			one.Expr = &FuncExpression{Name: "rand"}
+			if _, _, exi = p.mightBe(LPAREN); exi {
+				_, _, err = p.shouldBe(RPAREN)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 
-		if tok, lit, exi = p.mightBe(ASC, DESC); !exi {
-			tok = ASC
+		if _, _, exi = p.mightBe(COLLATE); exi {
+			one.Tag, err = p.parseLanguage()
+			if err != nil {
+				return nil, err
+			}
 		}
 
-		one.Dir, err = p.declare(tok, lit)
-		if err != nil {
-			return nil, err
+		if tok, _, exi = p.mightBe(ASC, DESC); exi {
+			one.Dir = (tok == ASC)
+		} else {
+			one.Dir = true
 		}
 
 		// Append the single expression to the array
@@ -302,7 +321,7 @@ func (p *parser) parseVersion() (Expr, error) {
 
 	tok, lit, err := p.shouldBe(DATE, TIME, PARAM)
 	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"timestamp"}}
+		return nil, &ParseError{Found: lit, Expected: []string{"version date or time"}}
 	}
 
 	return p.declare(tok, lit)
