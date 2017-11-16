@@ -2,19 +2,21 @@ version: 2
 jobs:
   build:
     docker:
-      - image: abcum/circle:0.1.1
+      - image: abcum/circle-golang:latest
+        environment:
+          GOOGLE_APPLICATION_CREDENTIALS: /root/gcloud-service-key.json
     working_directory: /go/src/github.com/abcum/surreal
     steps:
       - checkout
       - run:
+          name: Auth
+          command: gcauth
+      - run:
           name: Clean
           command: make clean
       - run:
-          name: Glide
-          command: make glide
-      - run:
-          name: Patch
-          command: make patch
+          name: Setup
+          command: make setup
       - run:
           name: Tests
           command: make tests
@@ -25,6 +27,11 @@ jobs:
       - run:
           name: Deploy
           command: |
-            docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
-            docker build -t abcum/surreal .
-            docker push abcum/surreal
+            if [ "${CIRCLE_BRANCH}" == "master" ]; then
+              docker login -u $DOCKER_USER -p $DOCKER_PASS
+              docker build -t abcum/surreal .
+              docker push abcum/surreal
+              gcloud docker -- build -t abcum/surreal .
+              gcloud docker -- tag abcum/surreal:latest eu.gcr.io/abcum-ltd/surreal:latest
+              gcloud docker -- push eu.gcr.io/abcum-ltd/surreal:latest
+            fi
