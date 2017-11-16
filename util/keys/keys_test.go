@@ -131,11 +131,6 @@ func TestMain(t *testing.T) {
 			new: &DU{},
 		},
 		{
-			str: "/surreal/abcum/*/database/!/v/ages",
-			obj: &VW{KV: "surreal", NS: "abcum", DB: "database", VW: "ages"},
-			new: &VW{},
-		},
-		{
 			str: "/surreal/abcum/*/database/*/person",
 			obj: &TB{KV: "surreal", NS: "abcum", DB: "database", TB: "person"},
 			new: &TB{},
