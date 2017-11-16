@@ -15,8 +15,7 @@
 package mem
 
 import (
-	"fmt"
-	"math"
+	"sync"
 
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
@@ -24,27 +23,62 @@ import (
 	"github.com/abcum/surreal/util/keys"
 )
 
-type Store struct {
-	tx kvs.TX
-	kv string
+type Cache struct {
+	kvs.TX
+	lock sync.RWMutex
+	data map[string]interface{}
 }
 
-var invalid = fmt.Errorf("Does not exist")
+func New() (c *Cache) {
+	return &Cache{
+		data: make(map[string]interface{}),
+	}
+}
+
+func NewWithTX(tx kvs.TX) (c *Cache) {
+	return &Cache{
+		TX:   tx,
+		data: make(map[string]interface{}),
+	}
+}
+
+func (c *Cache) Reset() {
+	c.TX = nil
+}
+
+func (c *Cache) get(idx string) (out interface{}, ok bool) {
+	c.lock.RLock()
+	out, ok = c.data[idx]
+	c.lock.RUnlock()
+	return
+}
+
+func (c *Cache) put(idx string, val interface{}) {
+	c.lock.Lock()
+	c.data[idx] = val
+	c.lock.Unlock()
+}
+
+func (c *Cache) del(idx string) {
+	c.lock.Lock()
+	delete(c.data, idx)
+	c.lock.Unlock()
+}
 
 // --------------------------------------------------
 
-func New(tx kvs.TX) *Store {
-	return &Store{tx: tx, kv: cnf.Settings.DB.Base}
-}
+func (c *Cache) AllNS() (out []*sql.DefineNamespaceStatement, err error) {
 
-// --------------------------------------------------
+	idx := (&keys.KV{}).String()
 
-func (s *Store) AllNS() (out []*sql.DefineNamespaceStatement, err error) {
+	if out, ok := c.get(idx); ok {
+		return out.([]*sql.DefineNamespaceStatement), nil
+	}
 
 	var kvs []kvs.KV
 
-	key := &keys.NS{KV: s.kv, NS: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.NS{KV: cnf.Settings.DB.Base, NS: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -54,35 +88,69 @@ func (s *Store) AllNS() (out []*sql.DefineNamespaceStatement, err error) {
 		out = append(out, val)
 	}
 
+	c.put(idx, out)
+
 	return
 
 }
 
-func (s *Store) GetNS(ns string) (val *sql.DefineNamespaceStatement, err error) {
+func (c *Cache) GetNS(ns string) (val *sql.DefineNamespaceStatement, err error) {
+
+	idx := (&keys.NS{NS: ns}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.DefineNamespaceStatement), nil
+	}
 
 	var kv kvs.KV
 
-	key := &keys.NS{KV: s.kv, NS: ns}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.NS{KV: cnf.Settings.DB.Base, NS: ns}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorNSNotFound
 	}
 
 	val = &sql.DefineNamespaceStatement{}
 	val.Decode(kv.Val())
 
+	c.put(idx, val)
+
 	return
 
 }
 
-func (s *Store) AddNS(ns string) (err error) {
+func (c *Cache) AddNS(ns string) (*sql.DefineNamespaceStatement, error) {
 
-	key := &keys.NS{KV: s.kv, NS: ns}
+	idx := (&keys.NS{NS: ns}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.DefineNamespaceStatement), nil
+	}
+
+	if out, err := c.GetNS(ns); err == nil {
+		return out, nil
+	}
+
+	key := &keys.NS{KV: cnf.Settings.DB.Base, NS: ns}
 	val := &sql.DefineNamespaceStatement{Name: sql.NewIdent(ns)}
-	s.tx.PutC(0, key.Encode(), val.Encode(), nil)
+	if _, err := c.TX.PutC(0, key.Encode(), val.Encode(), nil); err != nil {
+		return nil, err
+	}
+
+	c.put(idx, val)
+
+	return val, nil
+
+}
+
+func (c *Cache) DelNS(ns string) {
+
+	c.del((&keys.NS{NS: keys.Ignore}).String())
+
+	c.del((&keys.NS{NS: ns}).String())
 
 	return
 
@@ -90,12 +158,12 @@ func (s *Store) AddNS(ns string) (err error) {
 
 // --------------------------------------------------
 
-func (s *Store) AllNT(ns string) (out []*sql.DefineTokenStatement, err error) {
+func (c *Cache) AllNT(ns string) (out []*sql.DefineTokenStatement, err error) {
 
 	var kvs []kvs.KV
 
-	key := &keys.NT{KV: s.kv, NS: ns, TK: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.NT{KV: cnf.Settings.DB.Base, NS: ns, TK: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -109,17 +177,17 @@ func (s *Store) AllNT(ns string) (out []*sql.DefineTokenStatement, err error) {
 
 }
 
-func (s *Store) GetNT(ns, tk string) (val *sql.DefineTokenStatement, err error) {
+func (c *Cache) GetNT(ns, tk string) (val *sql.DefineTokenStatement, err error) {
 
 	var kv kvs.KV
 
-	key := &keys.NT{KV: s.kv, NS: ns, TK: tk}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.NT{KV: cnf.Settings.DB.Base, NS: ns, TK: tk}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorNTNotFound
 	}
 
 	val = &sql.DefineTokenStatement{}
@@ -131,12 +199,12 @@ func (s *Store) GetNT(ns, tk string) (val *sql.DefineTokenStatement, err error) 
 
 // --------------------------------------------------
 
-func (s *Store) AllNU(ns string) (out []*sql.DefineLoginStatement, err error) {
+func (c *Cache) AllNU(ns string) (out []*sql.DefineLoginStatement, err error) {
 
 	var kvs []kvs.KV
 
-	key := &keys.NU{KV: s.kv, NS: ns, US: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.NU{KV: cnf.Settings.DB.Base, NS: ns, US: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -150,17 +218,17 @@ func (s *Store) AllNU(ns string) (out []*sql.DefineLoginStatement, err error) {
 
 }
 
-func (s *Store) GetNU(ns, us string) (val *sql.DefineLoginStatement, err error) {
+func (c *Cache) GetNU(ns, us string) (val *sql.DefineLoginStatement, err error) {
 
 	var kv kvs.KV
 
-	key := &keys.NU{KV: s.kv, NS: ns, US: us}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.NU{KV: cnf.Settings.DB.Base, NS: ns, US: us}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorNUNotFound
 	}
 
 	val = &sql.DefineLoginStatement{}
@@ -172,12 +240,18 @@ func (s *Store) GetNU(ns, us string) (val *sql.DefineLoginStatement, err error) 
 
 // --------------------------------------------------
 
-func (s *Store) AllDB(ns string) (out []*sql.DefineDatabaseStatement, err error) {
+func (c *Cache) AllDB(ns string) (out []*sql.DefineDatabaseStatement, err error) {
+
+	idx := (&keys.DB{NS: ns, DB: keys.Ignore}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.([]*sql.DefineDatabaseStatement), nil
+	}
 
 	var kvs []kvs.KV
 
-	key := &keys.DB{KV: s.kv, NS: ns, DB: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.DB{KV: cnf.Settings.DB.Base, NS: ns, DB: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -187,37 +261,73 @@ func (s *Store) AllDB(ns string) (out []*sql.DefineDatabaseStatement, err error)
 		out = append(out, val)
 	}
 
+	c.put(idx, out)
+
 	return
 
 }
 
-func (s *Store) GetDB(ns, db string) (val *sql.DefineDatabaseStatement, err error) {
+func (c *Cache) GetDB(ns, db string) (val *sql.DefineDatabaseStatement, err error) {
+
+	idx := (&keys.DB{NS: ns, DB: db}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.DefineDatabaseStatement), nil
+	}
 
 	var kv kvs.KV
 
-	key := &keys.DB{KV: s.kv, NS: ns, DB: db}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.DB{KV: cnf.Settings.DB.Base, NS: ns, DB: db}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorDBNotFound
 	}
 
 	val = &sql.DefineDatabaseStatement{}
 	val.Decode(kv.Val())
 
+	c.put(idx, val)
+
 	return
 
 }
 
-func (s *Store) AddDB(ns, db string) (err error) {
+func (c *Cache) AddDB(ns, db string) (*sql.DefineDatabaseStatement, error) {
 
-	err = s.AddNS(ns)
+	idx := (&keys.DB{NS: ns, DB: db}).String()
 
-	key := &keys.DB{KV: s.kv, NS: ns, DB: db}
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.DefineDatabaseStatement), nil
+	}
+
+	if out, err := c.GetDB(ns, db); err == nil {
+		return out, nil
+	}
+
+	if _, err := c.AddNS(ns); err != nil {
+		return nil, err
+	}
+
+	key := &keys.DB{KV: cnf.Settings.DB.Base, NS: ns, DB: db}
 	val := &sql.DefineDatabaseStatement{Name: sql.NewIdent(db)}
-	s.tx.PutC(0, key.Encode(), val.Encode(), nil)
+	if _, err := c.TX.PutC(0, key.Encode(), val.Encode(), nil); err != nil {
+		return nil, err
+	}
+
+	c.put(idx, val)
+
+	return val, nil
+
+}
+
+func (c *Cache) DelDB(ns, db string) {
+
+	c.del((&keys.DB{NS: ns, DB: keys.Ignore}).String())
+
+	c.del((&keys.DB{NS: ns, DB: db}).String())
 
 	return
 
@@ -225,12 +335,12 @@ func (s *Store) AddDB(ns, db string) (err error) {
 
 // --------------------------------------------------
 
-func (s *Store) AllDT(ns, db string) (out []*sql.DefineTokenStatement, err error) {
+func (c *Cache) AllDT(ns, db string) (out []*sql.DefineTokenStatement, err error) {
 
 	var kvs []kvs.KV
 
-	key := &keys.DT{KV: s.kv, NS: ns, DB: db, TK: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.DT{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TK: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -244,17 +354,17 @@ func (s *Store) AllDT(ns, db string) (out []*sql.DefineTokenStatement, err error
 
 }
 
-func (s *Store) GetDT(ns, db, tk string) (val *sql.DefineTokenStatement, err error) {
+func (c *Cache) GetDT(ns, db, tk string) (val *sql.DefineTokenStatement, err error) {
 
 	var kv kvs.KV
 
-	key := &keys.DT{KV: s.kv, NS: ns, DB: db, TK: tk}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.DT{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TK: tk}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorDTNotFound
 	}
 
 	val = &sql.DefineTokenStatement{}
@@ -266,12 +376,12 @@ func (s *Store) GetDT(ns, db, tk string) (val *sql.DefineTokenStatement, err err
 
 // --------------------------------------------------
 
-func (s *Store) AllDU(ns, db string) (out []*sql.DefineLoginStatement, err error) {
+func (c *Cache) AllDU(ns, db string) (out []*sql.DefineLoginStatement, err error) {
 
 	var kvs []kvs.KV
 
-	key := &keys.DU{KV: s.kv, NS: ns, DB: db, US: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.DU{KV: cnf.Settings.DB.Base, NS: ns, DB: db, US: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -285,17 +395,17 @@ func (s *Store) AllDU(ns, db string) (out []*sql.DefineLoginStatement, err error
 
 }
 
-func (s *Store) GetDU(ns, db, us string) (val *sql.DefineLoginStatement, err error) {
+func (c *Cache) GetDU(ns, db, us string) (val *sql.DefineLoginStatement, err error) {
 
 	var kv kvs.KV
 
-	key := &keys.DU{KV: s.kv, NS: ns, DB: db, US: us}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.DU{KV: cnf.Settings.DB.Base, NS: ns, DB: db, US: us}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorDUNotFound
 	}
 
 	val = &sql.DefineLoginStatement{}
@@ -307,12 +417,12 @@ func (s *Store) GetDU(ns, db, us string) (val *sql.DefineLoginStatement, err err
 
 // --------------------------------------------------
 
-func (s *Store) AllSC(ns, db string) (out []*sql.DefineScopeStatement, err error) {
+func (c *Cache) AllSC(ns, db string) (out []*sql.DefineScopeStatement, err error) {
 
 	var kvs []kvs.KV
 
-	key := &keys.SC{KV: s.kv, NS: ns, DB: db, SC: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.SC{KV: cnf.Settings.DB.Base, NS: ns, DB: db, SC: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -326,17 +436,17 @@ func (s *Store) AllSC(ns, db string) (out []*sql.DefineScopeStatement, err error
 
 }
 
-func (s *Store) GetSC(ns, db, sc string) (val *sql.DefineScopeStatement, err error) {
+func (c *Cache) GetSC(ns, db, sc string) (val *sql.DefineScopeStatement, err error) {
 
 	var kv kvs.KV
 
-	key := &keys.SC{KV: s.kv, NS: ns, DB: db, SC: sc}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.SC{KV: cnf.Settings.DB.Base, NS: ns, DB: db, SC: sc}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorSCNotFound
 	}
 
 	val = &sql.DefineScopeStatement{}
@@ -348,12 +458,12 @@ func (s *Store) GetSC(ns, db, sc string) (val *sql.DefineScopeStatement, err err
 
 // --------------------------------------------------
 
-func (s *Store) AllST(ns, db, sc string) (out []*sql.DefineTokenStatement, err error) {
+func (c *Cache) AllST(ns, db, sc string) (out []*sql.DefineTokenStatement, err error) {
 
 	var kvs []kvs.KV
 
-	key := &keys.ST{KV: s.kv, NS: ns, DB: db, SC: sc, TK: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.ST{KV: cnf.Settings.DB.Base, NS: ns, DB: db, SC: sc, TK: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -367,17 +477,17 @@ func (s *Store) AllST(ns, db, sc string) (out []*sql.DefineTokenStatement, err e
 
 }
 
-func (s *Store) GetST(ns, db, sc, tk string) (val *sql.DefineTokenStatement, err error) {
+func (c *Cache) GetST(ns, db, sc, tk string) (val *sql.DefineTokenStatement, err error) {
 
 	var kv kvs.KV
 
-	key := &keys.ST{KV: s.kv, NS: ns, DB: db, SC: sc, TK: tk}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.ST{KV: cnf.Settings.DB.Base, NS: ns, DB: db, SC: sc, TK: tk}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorSTNotFound
 	}
 
 	val = &sql.DefineTokenStatement{}
@@ -389,12 +499,18 @@ func (s *Store) GetST(ns, db, sc, tk string) (val *sql.DefineTokenStatement, err
 
 // --------------------------------------------------
 
-func (s *Store) AllTB(ns, db string) (out []*sql.DefineTableStatement, err error) {
+func (c *Cache) AllTB(ns, db string) (out []*sql.DefineTableStatement, err error) {
+
+	idx := (&keys.TB{NS: ns, DB: db, TB: keys.Ignore}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.([]*sql.DefineTableStatement), nil
+	}
 
 	var kvs []kvs.KV
 
-	key := &keys.TB{KV: s.kv, NS: ns, DB: db, TB: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.TB{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -404,37 +520,75 @@ func (s *Store) AllTB(ns, db string) (out []*sql.DefineTableStatement, err error
 		out = append(out, val)
 	}
 
+	c.put(idx, out)
+
 	return
 
 }
 
-func (s *Store) GetTB(ns, db, tb string) (val *sql.DefineTableStatement, err error) {
+func (c *Cache) GetTB(ns, db, tb string) (val *sql.DefineTableStatement, err error) {
+
+	idx := (&keys.TB{NS: ns, DB: db, TB: tb}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.DefineTableStatement), nil
+	}
 
 	var kv kvs.KV
 
-	key := &keys.TB{KV: s.kv, NS: ns, DB: db, TB: tb}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.TB{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorTBNotFound
 	}
 
 	val = &sql.DefineTableStatement{}
 	val.Decode(kv.Val())
 
+	c.put(idx, val)
+
 	return
 
 }
 
-func (s *Store) AddTB(ns, db, tb string) (err error) {
+func (c *Cache) AddTB(ns, db, tb string) (*sql.DefineTableStatement, error) {
 
-	err = s.AddDB(ns, db)
+	// var exi bool
 
-	key := &keys.TB{KV: s.kv, NS: ns, DB: db, TB: tb}
-	val := &sql.DefineTableStatement{What: sql.Tables{sql.NewTable(tb)}}
-	s.tx.PutC(0, key.Encode(), val.Encode(), nil)
+	idx := (&keys.TB{NS: ns, DB: db, TB: tb}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.DefineTableStatement), nil
+	}
+
+	if out, err := c.GetTB(ns, db, tb); err == nil {
+		return out, nil
+	}
+
+	if _, err := c.AddDB(ns, db); err != nil {
+		return nil, err
+	}
+
+	key := &keys.TB{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb}
+	val := &sql.DefineTableStatement{Name: sql.NewIdent(tb)}
+	if _, err := c.TX.PutC(0, key.Encode(), val.Encode(), nil); err != nil {
+		return nil, err
+	}
+
+	c.put(idx, val)
+
+	return val, nil
+
+}
+
+func (c *Cache) DelTB(ns, db, tb string) {
+
+	c.del((&keys.TB{NS: ns, DB: db, TB: keys.Ignore}).String())
+
+	c.del((&keys.TB{NS: ns, DB: db, TB: tb}).String())
 
 	return
 
@@ -442,12 +596,85 @@ func (s *Store) AddTB(ns, db, tb string) (err error) {
 
 // --------------------------------------------------
 
-func (s *Store) AllFD(ns, db, tb string) (out []*sql.DefineFieldStatement, err error) {
+func (c *Cache) AllEV(ns, db, tb string) (out []*sql.DefineEventStatement, err error) {
+
+	idx := (&keys.EV{NS: ns, DB: db, TB: tb, EV: keys.Ignore}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.([]*sql.DefineEventStatement), nil
+	}
 
 	var kvs []kvs.KV
 
-	key := &keys.FD{KV: s.kv, NS: ns, DB: db, TB: tb, FD: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.EV{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, EV: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+		return
+	}
+
+	for _, kv := range kvs {
+		val := &sql.DefineEventStatement{}
+		val.Decode(kv.Val())
+		out = append(out, val)
+	}
+
+	c.put(idx, out)
+
+	return
+
+}
+
+func (c *Cache) GetEV(ns, db, tb, ev string) (val *sql.DefineEventStatement, err error) {
+
+	idx := (&keys.EV{NS: ns, DB: db, TB: tb, EV: ev}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.DefineEventStatement), nil
+	}
+
+	var kv kvs.KV
+
+	key := &keys.EV{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, EV: ev}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+		return nil, err
+	}
+
+	if !kv.Exi() {
+		return nil, ErrorEVNotFound
+	}
+
+	val = &sql.DefineEventStatement{}
+	val.Decode(kv.Val())
+
+	c.put(idx, val)
+
+	return
+
+}
+
+func (c *Cache) DelEV(ns, db, tb, ev string) {
+
+	c.del((&keys.EV{NS: ns, DB: db, TB: tb, EV: keys.Ignore}).String())
+
+	c.del((&keys.EV{NS: ns, DB: db, TB: tb, EV: ev}).String())
+
+	return
+
+}
+
+// --------------------------------------------------
+
+func (c *Cache) AllFD(ns, db, tb string) (out []*sql.DefineFieldStatement, err error) {
+
+	idx := (&keys.FD{NS: ns, DB: db, TB: tb, FD: keys.Ignore}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.([]*sql.DefineFieldStatement), nil
+	}
+
+	var kvs []kvs.KV
+
+	key := &keys.FD{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, FD: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -457,25 +684,45 @@ func (s *Store) AllFD(ns, db, tb string) (out []*sql.DefineFieldStatement, err e
 		out = append(out, val)
 	}
 
+	c.put(idx, out)
+
 	return
 
 }
 
-func (s *Store) GetFD(ns, db, tb, fd string) (val *sql.DefineFieldStatement, err error) {
+func (c *Cache) GetFD(ns, db, tb, fd string) (val *sql.DefineFieldStatement, err error) {
+
+	idx := (&keys.FD{NS: ns, DB: db, TB: tb, FD: fd}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.DefineFieldStatement), nil
+	}
 
 	var kv kvs.KV
 
-	key := &keys.FD{KV: s.kv, NS: ns, DB: db, TB: tb, FD: fd}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.FD{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, FD: fd}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorFDNotFound
 	}
 
 	val = &sql.DefineFieldStatement{}
 	val.Decode(kv.Val())
+
+	c.put(idx, val)
+
+	return
+
+}
+
+func (c *Cache) DelFD(ns, db, tb, fd string) {
+
+	c.del((&keys.FD{NS: ns, DB: db, TB: tb, FD: keys.Ignore}).String())
+
+	c.del((&keys.FD{NS: ns, DB: db, TB: tb, FD: fd}).String())
 
 	return
 
@@ -483,12 +730,18 @@ func (s *Store) GetFD(ns, db, tb, fd string) (val *sql.DefineFieldStatement, err
 
 // --------------------------------------------------
 
-func (s *Store) AllIX(ns, db, tb string) (out []*sql.DefineIndexStatement, err error) {
+func (c *Cache) AllIX(ns, db, tb string) (out []*sql.DefineIndexStatement, err error) {
+
+	idx := (&keys.IX{NS: ns, DB: db, TB: tb, IX: keys.Ignore}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.([]*sql.DefineIndexStatement), nil
+	}
 
 	var kvs []kvs.KV
 
-	key := &keys.IX{KV: s.kv, NS: ns, DB: db, TB: tb, IX: keys.Ignore}
-	if kvs, err = s.tx.GetL(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.IX{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, IX: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -498,25 +751,179 @@ func (s *Store) AllIX(ns, db, tb string) (out []*sql.DefineIndexStatement, err e
 		out = append(out, val)
 	}
 
+	c.put(idx, out)
+
 	return
 
 }
 
-func (s *Store) GetIX(ns, db, tb, ix string) (val *sql.DefineIndexStatement, err error) {
+func (c *Cache) GetIX(ns, db, tb, ix string) (val *sql.DefineIndexStatement, err error) {
+
+	idx := (&keys.IX{NS: ns, DB: db, TB: tb, IX: ix}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.DefineIndexStatement), nil
+	}
 
 	var kv kvs.KV
 
-	key := &keys.IX{KV: s.kv, NS: ns, DB: db, TB: tb, IX: ix}
-	if kv, err = s.tx.Get(math.MaxInt64, key.Encode()); err != nil {
+	key := &keys.IX{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, IX: ix}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
 		return nil, err
 	}
 
 	if !kv.Exi() {
-		return nil, invalid
+		return nil, ErrorIXNotFound
 	}
 
 	val = &sql.DefineIndexStatement{}
 	val.Decode(kv.Val())
+
+	c.put(idx, val)
+
+	return
+
+}
+
+func (c *Cache) DelIX(ns, db, tb, ix string) {
+
+	c.del((&keys.IX{NS: ns, DB: db, TB: tb, IX: keys.Ignore}).String())
+
+	c.del((&keys.IX{NS: ns, DB: db, TB: tb, IX: ix}).String())
+
+	return
+
+}
+
+// --------------------------------------------------
+
+func (c *Cache) AllFT(ns, db, tb string) (out []*sql.DefineTableStatement, err error) {
+
+	idx := (&keys.FT{NS: ns, DB: db, TB: tb, FT: keys.Ignore}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.([]*sql.DefineTableStatement), nil
+	}
+
+	var kvs []kvs.KV
+
+	key := &keys.FT{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, FT: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+		return
+	}
+
+	for _, kv := range kvs {
+		val := &sql.DefineTableStatement{}
+		val.Decode(kv.Val())
+		out = append(out, val)
+	}
+
+	c.put(idx, out)
+
+	return
+
+}
+
+func (c *Cache) GetFT(ns, db, tb, ft string) (val *sql.DefineTableStatement, err error) {
+
+	idx := (&keys.FT{NS: ns, DB: db, TB: tb, FT: ft}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.DefineTableStatement), nil
+	}
+
+	var kv kvs.KV
+
+	key := &keys.FT{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, FT: ft}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+		return nil, err
+	}
+
+	if !kv.Exi() {
+		return nil, ErrorFTNotFound
+	}
+
+	val = &sql.DefineTableStatement{}
+	val.Decode(kv.Val())
+
+	c.put(idx, val)
+
+	return
+
+}
+
+func (c *Cache) DelFT(ns, db, tb, ft string) {
+
+	c.del((&keys.FT{NS: ns, DB: db, TB: tb, FT: keys.Ignore}).String())
+
+	c.del((&keys.FT{NS: ns, DB: db, TB: tb, FT: ft}).String())
+
+	return
+
+}
+
+// --------------------------------------------------
+
+func (c *Cache) AllLV(ns, db, tb string) (out []*sql.LiveStatement, err error) {
+
+	idx := (&keys.LV{NS: ns, DB: db, TB: tb, LV: keys.Ignore}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.([]*sql.LiveStatement), nil
+	}
+
+	var kvs []kvs.KV
+
+	key := &keys.LV{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, LV: keys.Ignore}
+	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+		return
+	}
+
+	for _, kv := range kvs {
+		val := &sql.LiveStatement{}
+		val.Decode(kv.Val())
+		out = append(out, val)
+	}
+
+	c.put(idx, out)
+
+	return
+
+}
+
+func (c *Cache) GetLV(ns, db, tb, lv string) (val *sql.LiveStatement, err error) {
+
+	idx := (&keys.LV{NS: ns, DB: db, TB: tb, LV: lv}).String()
+
+	if out, ok := c.get(idx); ok {
+		return out.(*sql.LiveStatement), nil
+	}
+
+	var kv kvs.KV
+
+	key := &keys.LV{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, LV: lv}
+	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+		return nil, err
+	}
+
+	if !kv.Exi() {
+		return nil, ErrorLVNotFound
+	}
+
+	val = &sql.LiveStatement{}
+	val.Decode(kv.Val())
+
+	c.put(idx, val)
+
+	return
+
+}
+
+func (c *Cache) DelLV(ns, db, tb, lv string) {
+
+	c.del((&keys.LV{NS: ns, DB: db, TB: tb, LV: keys.Ignore}).String())
+
+	c.del((&keys.LV{NS: ns, DB: db, TB: tb, LV: lv}).String())
 
 	return
 
