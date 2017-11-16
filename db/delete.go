@@ -20,87 +20,141 @@ import (
 	"context"
 
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/item"
+	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/keys"
 )
 
-func (e *executor) executeDeleteStatement(ctx context.Context, ast *sql.DeleteStatement) (out []interface{}, err error) {
+func (e *executor) executeDelete(ctx context.Context, stm *sql.DeleteStatement) ([]interface{}, error) {
 
-	for k, w := range ast.What {
-		if what, ok := w.(*sql.Param); ok {
-			ast.What[k] = e.get(what.ID)
+	var what sql.Exprs
+
+	for _, val := range stm.What {
+		w, err := e.fetch(ctx, val, nil)
+		if err != nil {
+			return nil, err
 		}
+		what = append(what, w)
 	}
 
-	for _, w := range ast.What {
+	i := newIterator(e, ctx, stm, false)
+
+	for _, w := range what {
 
 		switch what := w.(type) {
 
 		default:
-			return out, fmt.Errorf("Can not execute DELETE query using value '%v' with type '%T'", what, what)
-
-		case *sql.Thing:
-			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
-			kv, _ := e.txn.Get(0, key.Encode())
-			doc := item.New(kv, e.txn, key, e.ctx)
-			if ret, err := delete(doc, ast); err != nil {
-				return nil, err
-			} else if ret != nil {
-				out = append(out, ret)
-			}
+			return nil, fmt.Errorf("Can not execute DELETE query using value '%v'", what)
 
 		case *sql.Table:
-			key := &keys.Table{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB}
-			kvs, _ := e.txn.GetL(0, key.Encode())
-			for _, kv := range kvs {
-				doc := item.New(kv, e.txn, nil, e.ctx)
-				if ret, err := delete(doc, ast); err != nil {
-					return nil, err
-				} else if ret != nil {
-					out = append(out, ret)
-				}
-			}
+			key := &keys.Table{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB}
+			i.processTable(ctx, key)
+
+		case *sql.Ident:
+			key := &keys.Table{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID}
+			i.processTable(ctx, key)
+
+		case *sql.Thing:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: what.ID}
+			i.processThing(ctx, key)
+
+		case *sql.Model:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: nil}
+			i.processModel(ctx, key, what)
+
+		case *sql.Batch:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: nil}
+			i.processBatch(ctx, key, what)
 
 		}
 
 	}
 
-	return
+	return i.Yield(ctx)
 
 }
 
-func delete(doc *item.Doc, ast *sql.DeleteStatement) (out interface{}, err error) {
+func (e *executor) fetchDelete(ctx context.Context, stm *sql.DeleteStatement, doc *data.Doc) (interface{}, error) {
 
-	if !doc.Check(ast.Cond) {
-		return
+	stm.Echo = sql.BEFORE
+
+	if doc != nil {
+		vars := data.New()
+		vars.Set(doc, varKeyParent)
+		ctx = context.WithValue(ctx, ctxKeySubs, vars)
 	}
 
-	if !doc.Allow("DELETE") {
-		return
+	out, err := e.executeDelete(ctx, stm)
+	if err != nil {
+		return nil, err
 	}
 
-	if err = doc.Erase(); err != nil {
-		return
+	switch len(out) {
+	case 1:
+		return data.Consume(out).Get(docKeyOne, docKeyId).Data(), nil
+	default:
+		return data.Consume(out).Get(docKeyAll, docKeyId).Data(), nil
 	}
 
-	if err = doc.PurgeIndex(); err != nil {
-		return
+}
+
+func (d *document) runDelete(ctx context.Context, stm *sql.DeleteStatement) (interface{}, error) {
+
+	var ok bool
+	var err error
+	var met = _DELETE
+
+	defer d.close()
+
+	if err = d.setup(); err != nil {
+		return nil, err
 	}
 
-	if err = doc.PurgeThing(); err != nil {
-		return
+	if d.val.Exi() == false {
+		return nil, nil
 	}
 
-	if ast.Hard {
+	if ok, err = d.allow(ctx, met); err != nil {
+		return nil, err
+	} else if ok == false {
+		return nil, nil
+	}
 
-		if err = doc.PurgePatch(); err != nil {
-			return
+	if ok, err = d.check(ctx, stm.Cond); err != nil {
+		return nil, err
+	} else if ok == false {
+		return nil, nil
+	}
+
+	if err = d.erase(); err != nil {
+		return nil, err
+	}
+
+	if err = d.purgeIndex(); err != nil {
+		return nil, err
+	}
+
+	if stm.Hard {
+		if err = d.eraseThing(); err != nil {
+			return nil, err
 		}
-
+	} else {
+		if err = d.purgeThing(); err != nil {
+			return nil, err
+		}
 	}
 
-	out = doc.Yield(ast.Echo)
+	if err = d.table(ctx, met); err != nil {
+		return nil, err
+	}
 
-	return
+	if err = d.event(ctx, met); err != nil {
+		return nil, err
+	}
+
+	if err = d.lives(ctx, met); err != nil {
+		return nil, err
+	}
+
+	return d.yield(ctx, stm, stm.Echo)
 
 }

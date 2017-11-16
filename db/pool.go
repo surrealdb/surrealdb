@@ -12,9 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package item
+package db
 
-func (this *Doc) Erase() (err error) {
-	this.current.Reset()
-	return
+import "sync"
+
+var executorPool = sync.Pool{
+	New: func() interface{} {
+		return new(executor)
+	},
+}
+
+var iteratorPool = sync.Pool{
+	New: func() interface{} {
+		return new(iterator)
+	},
+}
+
+var documentPool = sync.Pool{
+	New: func() interface{} {
+		return new(document)
+	},
 }

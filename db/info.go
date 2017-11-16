@@ -21,154 +21,141 @@ import (
 	"github.com/abcum/surreal/util/data"
 )
 
-func (e *executor) executeInfoStatement(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfo(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	switch ast.Kind {
 	case sql.NAMESPACE:
-		return e.executeInfoNSStatement(ctx, ast)
+		return e.executeInfoNS(ctx, ast)
 	case sql.DATABASE:
-		return e.executeInfoDBStatement(ctx, ast)
+		return e.executeInfoDB(ctx, ast)
 	case sql.TABLE:
-		return e.executeInfoTBStatement(ctx, ast)
+		return e.executeInfoTB(ctx, ast)
 	}
 
 	return
 
 }
 
-func (e *executor) executeInfoNSStatement(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoNS(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	db, err := e.mem.AllDB(ast.NS)
+	db, err := e.dbo.AllDB(ast.NS)
 	if err != nil {
 		return nil, err
 	}
 
-	nt, err := e.mem.AllNT(ast.NS)
+	nt, err := e.dbo.AllNT(ast.NS)
 	if err != nil {
 		return nil, err
 	}
 
-	nu, err := e.mem.AllNU(ast.NS)
+	nu, err := e.dbo.AllNU(ast.NS)
 	if err != nil {
 		return nil, err
 	}
 
 	res := data.New()
 
-	res.Array("databases")
+	res.Object("database")
 	for _, v := range db {
-		res.Inc(v.Name, "databases")
+		res.Set(v.String(), "database", v.Name.ID)
 	}
 
-	res.Array("tokens")
+	res.Object("token")
 	for _, v := range nt {
-		res.Inc(v.Name, "tokens")
+		res.Set(v.String(), "token", v.Name.ID)
 	}
 
-	res.Array("logins")
+	res.Object("login")
 	for _, v := range nu {
-		res.Inc(v.User, "logins")
+		res.Set(v.String(), "login", v.User.ID)
 	}
 
-	out = append(out, res.Data())
-
-	return
+	return []interface{}{res.Data()}, nil
 
 }
 
-func (e *executor) executeInfoDBStatement(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoDB(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	tb, err := e.mem.AllTB(ast.NS, ast.DB)
+	tb, err := e.dbo.AllTB(ast.NS, ast.DB)
 	if err != nil {
 		return nil, err
 	}
 
-	dt, err := e.mem.AllDT(ast.NS, ast.DB)
+	dt, err := e.dbo.AllDT(ast.NS, ast.DB)
 	if err != nil {
 		return nil, err
 	}
 
-	du, err := e.mem.AllDU(ast.NS, ast.DB)
+	du, err := e.dbo.AllDU(ast.NS, ast.DB)
+	if err != nil {
+		return nil, err
+	}
+
+	sc, err := e.dbo.AllSC(ast.NS, ast.DB)
 	if err != nil {
 		return nil, err
 	}
 
 	res := data.New()
 
-	res.Array("tables")
+	res.Object("table")
 	for _, v := range tb {
-		res.Inc(v, "tables")
+		res.Set(v.String(), "table", v.Name.ID)
 	}
 
-	res.Array("tokens")
+	res.Object("token")
 	for _, v := range dt {
-		res.Inc(v.Name, "tokens")
+		res.Set(v.String(), "token", v.Name.ID)
 	}
 
-	res.Array("logins")
+	res.Object("login")
 	for _, v := range du {
-		res.Inc(v.User, "logins")
+		res.Set(v.String(), "login", v.User.ID)
 	}
 
-	out = append(out, res.Data())
+	res.Object("scope")
+	for _, v := range sc {
+		res.Set(v.String(), "scope", v.Name.ID)
+	}
 
-	return
+	return []interface{}{res.Data()}, nil
 
 }
 
-func (e *executor) executeInfoTBStatement(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
+func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	tb, err := e.mem.GetTB(ast.NS, ast.DB, ast.What.TB)
+	ev, err := e.dbo.AllEV(ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}
 
-	fd, err := e.mem.AllFD(ast.NS, ast.DB, ast.What.TB)
+	fd, err := e.dbo.AllFD(ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}
 
-	ix, err := e.mem.AllIX(ast.NS, ast.DB, ast.What.TB)
+	ix, err := e.dbo.AllIX(ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}
 
 	res := data.New()
-	res.Set(tb.Full, "full")
-	res.Set(tb.Perm, "perm")
 
-	res.Array("indexes")
-	for _, v := range ix {
-		obj := map[string]interface{}{
-			"name": v.Name,
-			"cols": v.Cols,
-			"uniq": v.Uniq,
-		}
-		res.Inc(obj, "indexes")
+	res.Object("event")
+	for _, v := range ev {
+		res.Set(v.String(), "event", v.Name.ID)
 	}
 
-	res.Array("fields")
+	res.Object("field")
 	for _, v := range fd {
-		obj := map[string]interface{}{
-			"name":      v.Name,
-			"type":      v.Type,
-			"perm":      v.Perm,
-			"enum":      v.Enum,
-			"code":      v.Code,
-			"min":       v.Min,
-			"max":       v.Max,
-			"match":     v.Match,
-			"default":   v.Default,
-			"notnull":   v.Notnull,
-			"readonly":  v.Readonly,
-			"mandatory": v.Mandatory,
-			"validate":  v.Validate,
-		}
-		res.Inc(obj, "fields")
+		res.Set(v.String(), "field", v.Name.ID)
 	}
 
-	out = append(out, res.Data())
+	res.Object("index")
+	for _, v := range ix {
+		res.Set(v.String(), "index", v.Name.ID)
+	}
 
-	return
+	return []interface{}{res.Data()}, nil
 
 }

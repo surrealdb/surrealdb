@@ -12,24 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package item
+package db
 
 import (
-	"github.com/abcum/surreal/util/data"
-	"github.com/abcum/surreal/util/diff"
+	"context"
+
+	"github.com/abcum/surreal/sql"
 )
 
-func (this *Doc) diff() *data.Doc {
+func (e *executor) executeIf(ctx context.Context, stm *sql.IfStatement) (out []interface{}, err error) {
 
-	va := this.initial.Data().(map[string]interface{})
-	vb := this.current.Data().(map[string]interface{})
-
-	dif := diff.Diff(va, vb).Out()
-
-	if len(dif) == 0 {
-		return data.Consume(nil)
+	val, err := e.fetch(ctx, stm, nil)
+	if err != nil {
+		return nil, err
 	}
 
-	return data.Consume(dif)
+	switch val := val.(type) {
+	case []interface{}:
+		out = val
+	case interface{}:
+		out = append(out, val)
+	}
+
+	return
 
 }

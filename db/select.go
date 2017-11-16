@@ -18,62 +18,150 @@ import (
 	"context"
 
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/item"
+	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/keys"
 )
 
-func (e *executor) executeSelectStatement(ctx context.Context, ast *sql.SelectStatement) (out []interface{}, err error) {
+func (e *executor) executeSelect(ctx context.Context, stm *sql.SelectStatement) ([]interface{}, error) {
 
-	for k, w := range ast.What {
-		if what, ok := w.(*sql.Param); ok {
-			ast.What[k] = e.get(what.ID)
+	var what sql.Exprs
+
+	for _, val := range stm.What {
+		w, err := e.fetch(ctx, val, nil)
+		if err != nil {
+			return nil, err
 		}
+		what = append(what, w)
 	}
 
-	for _, w := range ast.What {
+	i := newIterator(e, ctx, stm, false)
 
-		if what, ok := w.(*sql.Thing); ok {
-			key := &keys.Thing{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB, ID: what.ID}
-			kv, _ := e.txn.Get(0, key.Encode())
-			doc := item.New(kv, e.txn, key, e.ctx)
-			if ret, err := detect(doc, ast); err != nil {
-				return nil, err
-			} else if ret != nil {
-				out = append(out, ret)
-			}
-		}
+	for _, w := range what {
 
-		if what, ok := w.(*sql.Table); ok {
-			key := &keys.Table{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: what.TB}
-			kvs, _ := e.txn.GetL(0, key.Encode())
-			for _, kv := range kvs {
-				doc := item.New(kv, e.txn, nil, e.ctx)
-				if ret, err := detect(doc, ast); err != nil {
-					return nil, err
-				} else if ret != nil {
-					out = append(out, ret)
-				}
-			}
+		switch what := w.(type) {
+
+		default:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB}
+			i.processQuery(ctx, key, []interface{}{what})
+
+		case *sql.Table:
+			key := &keys.Table{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB}
+			i.processTable(ctx, key)
+
+		case *sql.Ident:
+			key := &keys.Table{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID}
+			i.processTable(ctx, key)
+
+		case *sql.Thing:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: what.ID}
+			i.processThing(ctx, key)
+
+		case *sql.Model:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: nil}
+			i.processModel(ctx, key, what)
+
+		case *sql.Batch:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: nil}
+			i.processBatch(ctx, key, what)
+
+		// Result of subquery
+		case []interface{}:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB}
+			i.processQuery(ctx, key, what)
+
+		// Result of subquery with LIMIT 1
+		case map[string]interface{}:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB}
+			i.processQuery(ctx, key, []interface{}{what})
+
 		}
 
 	}
 
-	return
+	return i.Yield(ctx)
 
 }
 
-func detect(doc *item.Doc, ast *sql.SelectStatement) (out interface{}, err error) {
+func (e *executor) fetchSelect(ctx context.Context, stm *sql.SelectStatement, doc *data.Doc) (interface{}, error) {
 
-	if !doc.Check(ast.Cond) {
-		return
+	if doc != nil {
+		vars := data.New()
+		vars.Set(doc, varKeyParent)
+		ctx = context.WithValue(ctx, ctxKeySubs, vars)
 	}
 
-	if !doc.Allow("SELECT") {
-		return
+	out, err := e.executeSelect(ctx, stm)
+	if err != nil {
+		return nil, err
 	}
 
-	out = doc.Blaze(ast)
+	lim, err := e.fetchLimit(ctx, stm.Limit)
+	if err != nil {
+		return nil, err
+	}
 
-	return
+	switch lim {
+	case 1:
+		switch len(stm.Expr) {
+		case 1:
+			f := stm.Expr[0]
+			switch f.Expr.(type) {
+			default:
+				return data.Consume(out).Get(docKeyOne, f.Field).Data(), nil
+			case *sql.All:
+				return data.Consume(out).Get(docKeyOne).Data(), nil
+			}
+		default:
+			return data.Consume(out).Get(docKeyOne).Data(), nil
+		}
+	default:
+		switch len(stm.Expr) {
+		case 1:
+			f := stm.Expr[0]
+			switch f.Expr.(type) {
+			default:
+				return data.Consume(out).Get(docKeyAll, f.Field).Data(), nil
+			case *sql.All:
+				return data.Consume(out).Get(docKeyAll).Data(), nil
+			}
+		default:
+			return data.Consume(out).Get(docKeyAll).Data(), nil
+		}
+	}
+
+	return out, err
+
+}
+
+func (d *document) runSelect(ctx context.Context, stm *sql.SelectStatement) (interface{}, error) {
+
+	var ok bool
+	var err error
+
+	defer d.close()
+
+	if err = d.setup(); err != nil {
+		return nil, err
+	}
+
+	if d.doc == nil && !d.val.Exi() {
+		return nil, nil
+	}
+
+	if d.doc == nil {
+		if ok, err = d.allow(ctx, _SELECT); err != nil {
+			return nil, err
+		} else if ok == false {
+			return nil, nil
+		}
+	}
+
+	if ok, err = d.check(ctx, stm.Cond); err != nil {
+		return nil, err
+	} else if ok == false {
+		return nil, nil
+	}
+
+	return d.yield(ctx, stm, sql.ILLEGAL)
 
 }

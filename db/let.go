@@ -18,15 +18,24 @@ import (
 	"context"
 
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/data"
 )
 
-func (e *executor) executeLetStatement(ctx context.Context, ast *sql.LetStatement) (out []interface{}, err error) {
+func (e *executor) executeLet(ctx context.Context, stm *sql.LetStatement) (out []interface{}, err error) {
 
-	switch what := ast.What.(type) {
+	var vars = ctx.Value(ctxKeyVars).(*data.Doc)
+
+	switch what := stm.What.(type) {
+	case *sql.Void:
+		vars.Del(stm.Name.ID)
+	case *sql.Empty:
+		vars.Del(stm.Name.ID)
 	default:
-		e.set(ast.Name.ID, what)
-	case *sql.Param:
-		e.set(ast.Name.ID, e.get(what.ID))
+		val, err := e.fetch(ctx, what, nil)
+		if err != nil {
+			return nil, err
+		}
+		vars.Set(val, stm.Name.ID)
 	}
 
 	return

@@ -12,145 +12,438 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package item
+package db
 
 import (
+	"context"
+	"fmt"
+	"math"
 	"reflect"
 	"regexp"
 	"strconv"
 	"time"
 
+	// "github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
+	"github.com/abcum/surreal/util/deep"
+	"github.com/abcum/surreal/util/fncs"
+	// "github.com/abcum/surreal/util/keys"
 )
 
-func (this *Doc) Check(cond sql.Expr) (val bool) {
+var ign = data.New()
 
-	switch expr := cond.(type) {
-	case *sql.BinaryExpression:
-		if !this.chkOne(expr) {
-			return false
+func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (out interface{}, err error) {
+
+	switch val := val.(type) {
+	default:
+		return val, nil
+	case *sql.Thing:
+		return val, nil
+	case *sql.Value:
+		return val.ID, nil
+	case []byte:
+		return string(val), nil
+	case []interface{}:
+		// TODO do we really need to copy?
+		return deep.Copy(val), nil
+	case map[string]interface{}:
+		// TODO do we really need to copy?
+		return deep.Copy(val), nil
+
+	// case *sql.Thing:
+
+	// 	if doc == nil {
+	// 		return val, nil
+	// 	}
+
+	// 	s := &sql.SelectStatement{
+	// 		KV: cnf.Settings.DB.Base, NS: "test", DB: "test",
+	// 		Expr: []*sql.Field{{Expr: &sql.All{}, Field: "*"}},
+	// 		What: []sql.Expr{val},
+	// 	}
+	// 	i := newIterator(e, ctx, s, false)
+	// 	key := &keys.Thing{KV: s.KV, NS: s.NS, DB: s.DB, TB: val.TB, ID: val.ID}
+	// 	i.processThing(ctx, key)
+	// 	res, err := i.Yield(ctx)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	if len(res) > 0 {
+	// 		return res[0], nil
+	// 	}
+	// 	return val, nil
+
+	case *sql.Ident:
+
+		switch {
+		case doc == ign:
+			return val, queryIdentFailed
+		case doc != nil:
+			res := doc.Get(val.ID).Data()
+			return e.fetch(ctx, res, doc)
+		default:
+			return val, nil
 		}
+
+	case *sql.Param:
+
+		if obj, ok := ctx.Value(ctxKeySubs).(*data.Doc); ok {
+			if res := obj.Get(val.ID).Data(); res != nil {
+				return e.fetch(ctx, res, doc)
+			}
+		}
+		if obj, ok := ctx.Value(ctxKeyVars).(*data.Doc); ok {
+			if res := obj.Get(val.ID).Data(); res != nil {
+				return e.fetch(ctx, res, doc)
+			}
+		}
+		return nil, nil
+
+	case *sql.IfStatement:
+
+		for k, v := range val.Cond {
+			ife, err := e.fetch(ctx, v, doc)
+			if err != nil {
+				return nil, err
+			}
+			if chk, ok := ife.(bool); ok && chk {
+				return e.fetch(ctx, val.Then[k], doc)
+			}
+		}
+		return e.fetch(ctx, val.Else, doc)
+
+	case *sql.IfelExpression:
+
+		for k, v := range val.Cond {
+			ife, err := e.fetch(ctx, v, doc)
+			if err != nil {
+				return nil, err
+			}
+			if chk, ok := ife.(bool); ok && chk {
+				return e.fetch(ctx, val.Then[k], doc)
+			}
+		}
+		return e.fetch(ctx, val.Else, doc)
+
+	case *sql.FuncExpression:
+
+		var args []interface{}
+		for _, v := range val.Args {
+			val, err := e.fetch(ctx, v, doc)
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, val)
+		}
+		res, err := fncs.Run(ctx, val.Name, args...)
+		if err != nil {
+			return nil, err
+		}
+		return e.fetch(ctx, res, doc)
+
+	case *sql.SubExpression:
+
+		switch exp := val.Expr.(type) {
+		default:
+			return e.fetch(ctx, exp, doc)
+		case *sql.SelectStatement:
+			return e.fetchSelect(ctx, exp, doc)
+		case *sql.CreateStatement:
+			return e.fetchCreate(ctx, exp, doc)
+		case *sql.UpdateStatement:
+			return e.fetchUpdate(ctx, exp, doc)
+		case *sql.DeleteStatement:
+			return e.fetchDelete(ctx, exp, doc)
+		case *sql.RelateStatement:
+			return e.fetchRelate(ctx, exp, doc)
+		case *sql.InsertStatement:
+			return e.fetchInsert(ctx, exp, doc)
+		case *sql.UpsertStatement:
+			return e.fetchUpsert(ctx, exp, doc)
+		}
+
+	case *sql.PathExpression:
+
+		for _, v := range val.Expr {
+			fmt.Printf("%T %v\n", v, v)
+			switch v := v.(type) {
+			case *sql.JoinExpression:
+				switch v.Join {
+				case sql.DOT:
+				case sql.OEDGE:
+				case sql.IEDGE:
+				case sql.BEDGE:
+				}
+			case *sql.PartExpression:
+
+				switch v.Part.(type) {
+				case *sql.Thing:
+				default:
+				}
+
+				fmt.Printf("  %T %v\n", v.Part, v.Part)
+			}
+		}
+
+	case *sql.BinaryExpression:
+
+		l, err := e.fetch(ctx, val.LHS, doc)
+		if err != nil {
+			return nil, err
+		}
+
+		r, err := e.fetch(ctx, val.RHS, doc)
+		if err != nil {
+			return nil, err
+		}
+
+		switch val.Op {
+		case sql.EEQ:
+			return l == r, nil
+		case sql.NEE:
+			return l != r, nil
+		case sql.AND, sql.OR:
+			return binaryBool(val.Op, l, r), nil
+		case sql.ADD, sql.SUB, sql.MUL, sql.DIV, sql.INC, sql.DEC:
+			return binaryMath(val.Op, l, r), nil
+		case sql.EQ, sql.NEQ, sql.ANY, sql.LT, sql.LTE, sql.GT, sql.GTE, sql.SIN, sql.SNI, sql.INS, sql.NIS:
+			return binaryCheck(val.Op, l, r, val.LHS, val.RHS, doc), nil
+		}
+
 	}
 
-	return true
+	return nil, nil
 
 }
 
-func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
+func (e *executor) fetchLimit(ctx context.Context, val sql.Expr) (int, error) {
 
-	op := expr.Op
-	lhs := this.getChk(expr.LHS)
-	rhs := this.getChk(expr.RHS)
+	v, err := e.fetch(ctx, val, nil)
+	if err != nil {
+		return -1, err
+	}
 
-	switch lhs.(type) {
-	case bool, string, int64, float64, time.Time:
-		switch rhs.(type) {
-		case bool, string, int64, float64, time.Time:
+	switch v := v.(type) {
+	case float64:
+		return int(v), nil
+	case int64:
+		return int(v), nil
+	case nil:
+		return -1, nil
+	default:
+		return -1, &LimitError{found: v}
+	}
 
-			if op == sql.EEQ {
-				return lhs == rhs
-			}
+}
 
-			if op == sql.NEE {
-				return lhs != rhs
-			}
+func (e *executor) fetchStart(ctx context.Context, val sql.Expr) (int, error) {
 
-			if op == sql.EQ && lhs == rhs {
-				return true
-			}
+	v, err := e.fetch(ctx, val, nil)
+	if err != nil {
+		return -1, err
+	}
 
-			if op == sql.NEQ && lhs == rhs {
-				return false
-			}
+	switch v := v.(type) {
+	case float64:
+		return int(v), nil
+	case int64:
+		return int(v), nil
+	case nil:
+		return -1, nil
+	default:
+		return -1, &StartError{found: v}
+	}
 
+}
+
+func (e *executor) fetchVersion(ctx context.Context, val sql.Expr) (int64, error) {
+
+	v, err := e.fetch(ctx, val, nil)
+	if err != nil {
+		return math.MaxInt64, err
+	}
+
+	switch v := v.(type) {
+	case time.Time:
+		return v.UnixNano(), nil
+	case nil:
+		return math.MaxInt64, nil
+	default:
+		return math.MaxInt64, &VersnError{found: v}
+	}
+
+}
+
+func calcAsBool(i interface{}) bool {
+
+	switch v := i.(type) {
+	default:
+		return false
+	case bool:
+		return v
+	case int64:
+		return v > 0
+	case float64:
+		return v > 0
+	case string:
+		return v != ""
+	case time.Time:
+		return v.UnixNano() > 0
+	case *sql.Thing:
+		return true
+	case []interface{}:
+		return len(v) > 0
+	case map[string]interface{}:
+		return len(v) > 0
+	}
+
+}
+
+func calcAsMath(i interface{}) float64 {
+
+	switch v := i.(type) {
+	default:
+		return 0
+	case bool:
+		if v {
+			return 1
+		}
+		return 0
+	case int64:
+		return float64(v)
+	case float64:
+		return v
+	case time.Time:
+		return float64(v.UnixNano())
+	}
+
+}
+
+func binaryBool(op sql.Token, l, r interface{}) interface{} {
+
+	a := calcAsBool(l)
+	b := calcAsBool(r)
+
+	switch op {
+	case sql.AND:
+		return a && b
+	case sql.OR:
+		return a || b
+	}
+
+	return nil
+
+}
+
+func binaryMath(op sql.Token, l, r interface{}) interface{} {
+
+	a := calcAsMath(l)
+	b := calcAsMath(r)
+
+	switch op {
+	case sql.ADD, sql.INC:
+		return a + b
+	case sql.SUB, sql.DEC:
+		return a - b
+	case sql.MUL:
+		return a * b
+	case sql.DIV:
+		if b != 0 {
+			return a / b
 		}
 	}
 
-	switch l := expr.LHS.(type) {
+	return nil
 
-	case *sql.Ident:
+}
 
-		switch r := expr.RHS.(type) {
+func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{} {
+
+	if d != nil {
+
+		switch l := lo.(type) {
 
 		case *sql.Void:
-			if op == sql.EQ {
-				return this.current.Exists(l.ID) == false
-			} else if op == sql.NEQ {
-				return this.current.Exists(l.ID) == true
+
+			switch r.(type) {
+			case nil:
+				return op == sql.NEQ
 			}
 
-		case *sql.Null:
-			if op == sql.EQ {
-				return this.current.Exists(l.ID) == true && this.current.Get(l.ID).Data() == nil
-			} else if op == sql.NEQ {
-				return this.current.Exists(l.ID) == true && this.current.Get(l.ID).Data() != nil
-			}
+		case *sql.Ident:
 
-		case *sql.Empty:
-			if op == sql.EQ {
-				return this.current.Exists(l.ID) == false || this.current.Get(l.ID).Data() == nil
-			} else if op == sql.NEQ {
-				return this.current.Exists(l.ID) == true && this.current.Get(l.ID).Data() != nil
-			}
+			switch r.(type) {
 
-		case *sql.Thing:
-			if thing, ok := this.current.Get(l.ID).Data().(*sql.Thing); ok {
+			case *sql.Void:
 				if op == sql.EQ {
-					return thing.TB == r.TB && thing.ID == r.ID
+					return d.Exists(l.ID) == false
 				} else if op == sql.NEQ {
-					return thing.TB != r.TB || thing.ID != r.ID
+					return d.Exists(l.ID) == true
 				}
+
+			case nil:
+				if op == sql.EQ {
+					return d.Exists(l.ID) == true && d.Get(l.ID).Data() == nil
+				} else if op == sql.NEQ {
+					return d.Exists(l.ID) == false || d.Get(l.ID).Data() != nil
+				}
+
+			case *sql.Empty:
+				if op == sql.EQ {
+					return d.Exists(l.ID) == false || d.Get(l.ID).Data() == nil
+				} else if op == sql.NEQ {
+					return d.Exists(l.ID) == true && d.Get(l.ID).Data() != nil
+				}
+
 			}
 
 		}
 
-	}
-
-	switch r := expr.RHS.(type) {
-
-	case *sql.Ident:
-
-		switch l := expr.LHS.(type) {
+		switch r := ro.(type) {
 
 		case *sql.Void:
-			if op == sql.EQ {
-				return this.current.Exists(r.ID) == false
-			} else if op == sql.NEQ {
-				return this.current.Exists(r.ID) == true
+
+			switch l.(type) {
+			case nil:
+				return op == sql.NEQ
 			}
 
-		case *sql.Null:
-			if op == sql.EQ {
-				return this.current.Exists(r.ID) == true && this.current.Get(r.ID).Data() == nil
-			} else if op == sql.NEQ {
-				return this.current.Exists(r.ID) == true && this.current.Get(r.ID).Data() != nil
-			}
+		case *sql.Ident:
 
-		case *sql.Empty:
-			if op == sql.EQ {
-				return this.current.Exists(r.ID) == false || this.current.Get(r.ID).Data() == nil
-			} else if op == sql.NEQ {
-				return this.current.Exists(r.ID) == true && this.current.Get(r.ID).Data() != nil
-			}
+			switch l.(type) {
 
-		case *sql.Thing:
-			if thing, ok := this.current.Get(r.ID).Data().(*sql.Thing); ok {
+			case *sql.Void:
 				if op == sql.EQ {
-					return thing.TB == l.TB && thing.ID == l.ID
+					return d.Exists(r.ID) == false
 				} else if op == sql.NEQ {
-					return thing.TB != l.TB || thing.ID != l.ID
+					return d.Exists(r.ID) == true
 				}
+
+			case nil:
+				if op == sql.EQ {
+					return d.Exists(r.ID) == true && d.Get(r.ID).Data() == nil
+				} else if op == sql.NEQ {
+					return d.Exists(r.ID) == false || d.Get(r.ID).Data() != nil
+				}
+
+			case *sql.Empty:
+				if op == sql.EQ {
+					return d.Exists(r.ID) == false || d.Get(r.ID).Data() == nil
+				} else if op == sql.NEQ {
+					return d.Exists(r.ID) == true && d.Get(r.ID).Data() != nil
+				}
+
 			}
 
 		}
 
 	}
 
-	switch l := lhs.(type) {
+	switch l := l.(type) {
 
 	case nil:
-		switch r := rhs.(type) {
+		switch r := r.(type) {
 		default:
 			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case nil:
@@ -161,62 +454,20 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 			return chkObject(op, r, l)
 		}
 
-	case *sql.Void:
-		switch r := rhs.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
-		case *sql.Void:
-			return op == sql.EQ
-		case *sql.Empty:
-			return op == sql.EQ
-		case []interface{}:
-			return chkArrayR(op, l, r)
-		case map[string]interface{}:
-			return chkObject(op, r, l)
-		}
-
-	case *sql.Null:
-		switch r := rhs.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
-		case *sql.Null:
-			return op == sql.EQ
-		case *sql.Empty:
-			return op == sql.EQ
-		case []interface{}:
-			return chkArrayR(op, l, r)
-		case map[string]interface{}:
-			return chkObject(op, r, l)
-		}
-
-	case *sql.Empty:
-		switch r := rhs.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
-		case *sql.Null:
-			return op == sql.EQ
-		case *sql.Void:
-			return op == sql.EQ
-		case *sql.Empty:
-			return op == sql.EQ
-		case []interface{}:
-			return chkArrayR(op, l, r)
-		case map[string]interface{}:
-			return chkObject(op, r, l)
-		}
-
 	case *sql.Thing:
-		switch r := rhs.(type) {
+		switch r := r.(type) {
 		default:
 			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case *sql.Thing:
 			return chkThing(op, l, r)
 		case string:
 			return chkString(op, r, l.String())
+		case []interface{}:
+			return chkArrayR(op, l, r)
 		}
 
 	case bool:
-		switch r := rhs.(type) {
+		switch r := r.(type) {
 		default:
 			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case bool:
@@ -225,6 +476,7 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 			if b, err := strconv.ParseBool(r); err == nil {
 				return chkBool(op, l, b)
 			}
+			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case *regexp.Regexp:
 			return chkRegex(op, strconv.FormatBool(l), r)
 		case []interface{}:
@@ -234,23 +486,26 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 		}
 
 	case string:
-		switch r := rhs.(type) {
+		switch r := r.(type) {
 		default:
 			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case bool:
 			if b, err := strconv.ParseBool(l); err == nil {
 				return chkBool(op, r, b)
 			}
+			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case string:
 			return chkString(op, l, r)
 		case int64:
 			if n, err := strconv.ParseInt(l, 10, 64); err == nil {
 				return chkInt(op, r, n)
 			}
+			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case float64:
 			if n, err := strconv.ParseFloat(l, 64); err == nil {
 				return chkFloat(op, r, n)
 			}
+			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case time.Time:
 			return chkString(op, l, r.String())
 		case *sql.Thing:
@@ -264,13 +519,14 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 		}
 
 	case int64:
-		switch r := rhs.(type) {
+		switch r := r.(type) {
 		default:
 			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case string:
 			if n, err := strconv.ParseInt(r, 10, 64); err == nil {
 				return chkInt(op, l, n)
 			}
+			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case int64:
 			return chkInt(op, l, r)
 		case float64:
@@ -286,13 +542,14 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 		}
 
 	case float64:
-		switch r := rhs.(type) {
+		switch r := r.(type) {
 		default:
 			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case string:
 			if n, err := strconv.ParseFloat(r, 64); err == nil {
 				return chkFloat(op, l, n)
 			}
+			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case int64:
 			return chkFloat(op, l, float64(r))
 		case float64:
@@ -308,7 +565,7 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 		}
 
 	case time.Time:
-		switch r := rhs.(type) {
+		switch r := r.(type) {
 		default:
 			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case string:
@@ -328,7 +585,7 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 		}
 
 	case []interface{}:
-		switch r := rhs.(type) {
+		switch r := r.(type) {
 		default:
 			return chkArrayL(op, l, r)
 		case bool:
@@ -350,7 +607,7 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 		}
 
 	case map[string]interface{}:
-		switch r := rhs.(type) {
+		switch r := r.(type) {
 		default:
 			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case []interface{}:
@@ -361,7 +618,7 @@ func (this *Doc) chkOne(expr *sql.BinaryExpression) (val bool) {
 
 	}
 
-	return
+	return nil
 
 }
 
@@ -516,13 +773,13 @@ func chkArrayL(op sql.Token, a []interface{}, i interface{}) (val bool) {
 	case sql.NEQ:
 		return true
 	case sql.SIN:
-		if _, ok := i.(*sql.Null); ok {
+		if i == nil {
 			return data.Consume(a).Contains(nil) == true
 		} else {
 			return data.Consume(a).Contains(i) == true
 		}
 	case sql.SNI:
-		if _, ok := i.(*sql.Null); ok {
+		if i == nil {
 			return data.Consume(a).Contains(nil) == false
 		} else {
 			return data.Consume(a).Contains(i) == false
@@ -548,13 +805,13 @@ func chkArrayR(op sql.Token, i interface{}, a []interface{}) (val bool) {
 	case sql.SNI:
 		return true
 	case sql.INS:
-		if _, ok := i.(*sql.Null); ok {
+		if i == nil {
 			return data.Consume(a).Contains(nil) == true
 		} else {
 			return data.Consume(a).Contains(i) == true
 		}
 	case sql.NIS:
-		if _, ok := i.(*sql.Null); ok {
+		if i == nil {
 			return data.Consume(a).Contains(nil) == false
 		} else {
 			return data.Consume(a).Contains(i) == false
@@ -659,32 +916,5 @@ func chkMatch(op sql.Token, a []interface{}, r *regexp.Regexp) (val bool) {
 	}
 
 	return
-
-}
-
-func (this *Doc) getChk(expr sql.Expr) interface{} {
-
-	switch val := expr.(type) {
-	default:
-		return nil
-	case time.Time:
-		return val
-	case *regexp.Regexp:
-		return val
-	case bool, int64, float64, string:
-		return val
-	case []interface{}, map[string]interface{}:
-		return val
-	case *sql.Void:
-		return val
-	case *sql.Null:
-		return val
-	case *sql.Empty:
-		return val
-	case *sql.Param:
-		return this.runtime.Get(val.ID).Data()
-	case *sql.Ident:
-		return this.current.Get(val.ID).Data()
-	}
 
 }

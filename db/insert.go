@@ -22,51 +22,29 @@ import (
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/keys"
-	"github.com/abcum/surreal/util/uuid"
 )
 
-func (e *executor) executeCreate(ctx context.Context, stm *sql.CreateStatement) ([]interface{}, error) {
+func (e *executor) executeInsert(ctx context.Context, stm *sql.InsertStatement) ([]interface{}, error) {
 
-	var what sql.Exprs
-
-	for _, val := range stm.What {
-		w, err := e.fetch(ctx, val, nil)
-		if err != nil {
-			return nil, err
-		}
-		what = append(what, w)
+	data, err := e.fetch(ctx, stm.Data, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	i := newIterator(e, ctx, stm, false)
 
-	for _, w := range what {
+	switch data := data.(type) {
 
-		switch what := w.(type) {
+	default:
+		return nil, fmt.Errorf("Can not execute INSERT query using value '%v'", data)
 
-		default:
-			return nil, fmt.Errorf("Can not execute CREATE query using value '%v'", what)
+	case []interface{}:
+		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: stm.Into.TB}
+		i.processArray(ctx, key, data)
 
-		case *sql.Table:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: uuid.NewV4().String()}
-			i.processThing(ctx, key)
-
-		case *sql.Ident:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, ID: uuid.NewV4().String()}
-			i.processThing(ctx, key)
-
-		case *sql.Thing:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: what.ID}
-			i.processThing(ctx, key)
-
-		case *sql.Model:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: nil}
-			i.processModel(ctx, key, what)
-
-		case *sql.Batch:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: nil}
-			i.processBatch(ctx, key, what)
-
-		}
+	case map[string]interface{}:
+		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: stm.Into.TB}
+		i.processArray(ctx, key, []interface{}{data})
 
 	}
 
@@ -74,7 +52,7 @@ func (e *executor) executeCreate(ctx context.Context, stm *sql.CreateStatement) 
 
 }
 
-func (e *executor) fetchCreate(ctx context.Context, stm *sql.CreateStatement, doc *data.Doc) (interface{}, error) {
+func (e *executor) fetchInsert(ctx context.Context, stm *sql.InsertStatement, doc *data.Doc) (interface{}, error) {
 
 	stm.Echo = sql.AFTER
 
@@ -84,7 +62,7 @@ func (e *executor) fetchCreate(ctx context.Context, stm *sql.CreateStatement, do
 		ctx = context.WithValue(ctx, ctxKeySubs, vars)
 	}
 
-	out, err := e.executeCreate(ctx, stm)
+	out, err := e.executeInsert(ctx, stm)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +76,7 @@ func (e *executor) fetchCreate(ctx context.Context, stm *sql.CreateStatement, do
 
 }
 
-func (d *document) runCreate(ctx context.Context, stm *sql.CreateStatement) (interface{}, error) {
+func (d *document) runInsert(ctx context.Context, stm *sql.InsertStatement) (interface{}, error) {
 
 	var ok bool
 	var err error
@@ -114,7 +92,7 @@ func (d *document) runCreate(ctx context.Context, stm *sql.CreateStatement) (int
 		return nil, &ExistError{exist: d.id}
 	}
 
-	if err = d.merge(ctx, stm.Data); err != nil {
+	if err = d.merge(ctx, nil); err != nil {
 		return nil, err
 	}
 

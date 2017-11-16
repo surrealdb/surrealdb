@@ -20,23 +20,23 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func (e *executor) executeReturnStatement(ctx context.Context, ast *sql.ReturnStatement) (out []interface{}, err error) {
+func (e *executor) executeReturn(ctx context.Context, stm *sql.ReturnStatement) (out []interface{}, err error) {
 
-	switch what := ast.What.(type) {
-	default:
-		out = append(out, what)
-	case *sql.Void:
-		// Ignore
-	case *sql.Empty:
-		// Ignore
-	case *sql.Null: // Specifically asked for null
-		out = append(out, nil)
-	case *sql.Ident: // Return does not have columns.
-		out = append(out, nil)
-	case *sql.Value: // Specifically asked for a string.
-		out = append(out, what.ID)
-	case *sql.Param: // Let's get the value of the param.
-		out = append(out, e.get(what.ID))
+	for _, w := range stm.What {
+
+		switch what := w.(type) {
+		case *sql.Void:
+			// Ignore
+		case *sql.Empty:
+			// Ignore
+		default:
+			val, err := e.fetch(ctx, what, nil)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, val)
+		}
+
 	}
 
 	return
