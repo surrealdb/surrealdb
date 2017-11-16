@@ -15,30 +15,35 @@
 package pack
 
 import (
-	"bytes"
 	"github.com/abcum/cork"
 )
 
 var opt = cork.Handle{
-	Precision: false,
-	ArrType:   make([]interface{}, 0),
-	MapType:   make(map[string]interface{}),
+	SortMaps: true,
+	ArrType:  make([]interface{}, 0),
+	MapType:  make(map[string]interface{}),
 }
 
 // Encode encodes a data object into a CORK.
 func Encode(src interface{}) (dst []byte) {
-	buf := bytes.NewBuffer(nil)
-	enc := cork.NewEncoderFromPool(buf).Options(&opt)
-	enc.Encode(src)
-	enc.Done()
-	return buf.Bytes()
+	enc := cork.NewEncoderBytesFromPool(&dst)
+	enc.Options(&opt)
+	err := enc.Encode(src)
+	enc.Reset()
+	if err != nil {
+		panic(err)
+	}
+	return
 }
 
 // Decode decodes a CORK into a data object.
 func Decode(src []byte, dst interface{}) {
-	buf := bytes.NewReader(src)
-	dec := cork.NewDecoderFromPool(buf).Options(&opt)
-	dec.Decode(dst)
-	dec.Done()
+	dec := cork.NewDecoderBytesFromPool(src)
+	dec.Options(&opt)
+	err := dec.Decode(dst)
+	dec.Reset()
+	if err != nil {
+		panic(err)
+	}
 	return
 }
