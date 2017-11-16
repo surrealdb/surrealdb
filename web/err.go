@@ -25,6 +25,10 @@ func errors(val error, c *fibre.Context) {
 		return
 	}
 
+	if c.IsComplete() {
+		return
+	}
+
 	var code int
 	var info string
 
