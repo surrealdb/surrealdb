@@ -18,63 +18,98 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
+
+	"github.com/abcum/surreal/sql"
+
+	"github.com/abcum/surreal/util/data"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
-type Operation struct {
-	Op     string      `cork:"op,omietmpty" json:"op,omietmpty"`
-	From   string      `cork:"from,omitempty" json:"from,omitempty"`
-	Path   string      `cork:"path,omitempty" json:"path,omitempty"`
-	Value  interface{} `cork:"value,omitempty" json:"value,omitempty"`
-	Before interface{} `cork:"-" json:"-"`
+type operations struct {
+	ops []*operation
 }
 
-type Operations struct {
-	Ops []*Operation
+type operation struct {
+	op     string
+	from   string
+	path   string
+	value  interface{}
+	before interface{}
 }
 
-func Diff(old, now map[string]interface{}) (ops *Operations) {
+func Diff(old, now map[string]interface{}) []interface{} {
+	out := &operations{}
+	out.diff(old, now, "")
+	return out.diffs()
+}
 
-	ops = &Operations{}
+func Patch(old map[string]interface{}, ops []interface{}) map[string]interface{} {
+	out := &operations{}
+	out.load(ops)
+	return out.patch(old)
+}
 
-	ops.diff(old, now, "")
+func (o *operations) load(ops []interface{}) {
 
-	return
+	for _, v := range ops {
+
+		if obj, ok := v.(map[string]interface{}); ok {
+
+			op := &operation{}
+
+			op.value = obj["value"]
+
+			if str, ok := obj["op"].(string); ok {
+				op.op = str
+			}
+
+			if str, ok := obj["from"].(string); ok {
+				op.from = str
+			}
+
+			if str, ok := obj["path"].(string); ok {
+				op.path = str
+			}
+
+			o.ops = append(o.ops, op)
+
+		}
+
+	}
 
 }
 
-func (o *Operations) Patch(old map[string]interface{}) (now map[string]interface{}, err error) {
-	return nil, nil
-}
+func (o *operations) diffs() (ops []interface{}) {
 
-func (o *Operations) Rebase(other *Operations) (ops *Operations, err error) {
-	return nil, nil
-}
+	ops = make([]interface{}, len(o.ops))
 
-func (o *Operations) Out() (ops []map[string]interface{}) {
+	sort.Slice(o.ops, func(i, j int) bool {
+		return o.ops[i].path < o.ops[j].path
+	})
 
-	for _, v := range o.Ops {
+	for k, v := range o.ops {
 
 		op := make(map[string]interface{})
 
-		if len(v.Op) > 0 {
-			op["op"] = v.Op
+		if len(v.op) > 0 {
+			op["op"] = v.op
 		}
 
-		if len(v.From) > 0 {
-			op["from"] = v.From
+		if len(v.from) > 0 {
+			op["from"] = v.from
 		}
 
-		if len(v.Path) > 0 {
-			op["path"] = v.Path
+		if len(v.path) > 0 {
+			op["path"] = v.path
 		}
 
-		if v.Value != nil {
-			op["value"] = v.Value
+		if v.value != nil {
+			op["value"] = v.value
 		}
 
-		ops = append(ops, op)
+		ops[k] = op
 
 	}
 
@@ -82,11 +117,20 @@ func (o *Operations) Out() (ops []map[string]interface{}) {
 
 }
 
+func isIn(a int, list []int) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
+}
+
 func route(path string, part string) string {
 	if len(path) == 0 {
 		return "/" + part
 	} else {
-		if path[0] == '/' {
+		if part[0] == '/' {
 			return path + part
 		} else {
 			return path + "/" + part
@@ -94,19 +138,19 @@ func route(path string, part string) string {
 	}
 }
 
-func (o *Operations) op(op, from, path string, before, after interface{}) {
+func (o *operations) op(op, from, path string, before, after interface{}) {
 
-	o.Ops = append(o.Ops, &Operation{
-		Op:     op,
-		From:   from,
-		Path:   path,
-		Value:  after,
-		Before: before,
+	o.ops = append(o.ops, &operation{
+		op:     op,
+		from:   from,
+		path:   path,
+		value:  after,
+		before: before,
 	})
 
 }
 
-func (o *Operations) diff(old, now map[string]interface{}, path string) {
+func (o *operations) diff(old, now map[string]interface{}, path string) {
 
 	for key, after := range now {
 
@@ -149,13 +193,13 @@ func (o *Operations) diff(old, now map[string]interface{}, path string) {
 
 	var used []int
 
-	for i := len(o.Ops) - 1; i >= 0; i-- {
-		if iv := o.Ops[i]; !isIn(i, used) && iv.Op == "add" {
-			for j := len(o.Ops) - 1; j >= 0; j-- {
-				if jv := o.Ops[j]; !isIn(j, used) && jv.Op == "remove" {
-					if reflect.DeepEqual(iv.Value, jv.Before) {
+	for i := len(o.ops) - 1; i >= 0; i-- {
+		if iv := o.ops[i]; !isIn(i, used) && iv.op == "add" {
+			for j := len(o.ops) - 1; j >= 0; j-- {
+				if jv := o.ops[j]; !isIn(j, used) && jv.op == "remove" {
+					if reflect.DeepEqual(iv.value, jv.before) {
 						used = append(used, []int{i, j}...)
-						o.op("move", jv.Path, iv.Path, nil, nil)
+						o.op("move", jv.path, iv.path, nil, nil)
 					}
 				}
 			}
@@ -165,21 +209,49 @@ func (o *Operations) diff(old, now map[string]interface{}, path string) {
 	sort.Sort(sort.Reverse(sort.IntSlice(used)))
 
 	for _, i := range used {
-		o.Ops = append(o.Ops[:i], o.Ops[i+1:]...)
+		o.ops = append(o.ops[:i], o.ops[i+1:]...)
 	}
 
 }
 
-func isIn(a int, list []int) bool {
-	for _, b := range list {
-		if b == a {
-			return true
+func (o *operations) patch(old map[string]interface{}) (now map[string]interface{}) {
+
+	obj := data.Consume(old)
+
+	for _, v := range o.ops {
+
+		path := strings.Split(v.path, "/")
+
+		prev := path[:len(path)-1]
+
+		switch v.op {
+		case "add":
+			switch obj.Get(prev...).Data().(type) {
+			case []interface{}:
+				obj.Append(v.value, prev...)
+			default:
+				obj.Set(v.value, path...)
+			}
+		case "remove":
+			obj.Del(path...)
+		case "replace":
+			obj.Set(v.value, path...)
+		case "change":
+			if txt, ok := obj.Get(path...).Data().(string); ok {
+				dmp := diffmatchpatch.New()
+				dif, _ := dmp.DiffFromDelta(txt, v.value.(string))
+				str := dmp.DiffText2(dif)
+				obj.Set(str, path...)
+			}
 		}
+
 	}
-	return false
+
+	return old
+
 }
 
-func (o *Operations) text(old, now string, path string) {
+func (o *operations) text(old, now string, path string) {
 
 	dmp := diffmatchpatch.New()
 
@@ -191,7 +263,7 @@ func (o *Operations) text(old, now string, path string) {
 
 }
 
-func (o *Operations) vals(old, now interface{}, path string) {
+func (o *operations) vals(old, now interface{}, path string) {
 
 	if reflect.TypeOf(old) != reflect.TypeOf(now) {
 		o.op("replace", "", path, old, now)
@@ -201,6 +273,11 @@ func (o *Operations) vals(old, now interface{}, path string) {
 	switch ov := old.(type) {
 	default:
 		if !reflect.DeepEqual(old, now) {
+			o.op("replace", "", path, old, now)
+		}
+	case *sql.Thing:
+		nv := now.(*sql.Thing)
+		if ov.TB != nv.TB && ov.ID != nv.ID {
 			o.op("replace", "", path, old, now)
 		}
 	case bool:
@@ -233,12 +310,12 @@ func (o *Operations) vals(old, now interface{}, path string) {
 
 }
 
-func (o *Operations) arrs(old, now []interface{}, path string) {
+func (o *operations) arrs(old, now []interface{}, path string) {
 
 	var i int
 
 	for i = 0; i < len(old) && i < len(now); i++ {
-		o.vals(old[i], now[i], strconv.Itoa(i))
+		o.vals(old[i], now[i], route(path, strconv.Itoa(i)))
 	}
 
 	for j := i; j < len(now); j++ {
