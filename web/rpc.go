@@ -27,7 +27,7 @@ func (r *rpc) Info(c *fibre.Context) (interface{}, error) {
 }
 
 func (r *rpc) Auth(c *fibre.Context, auth string) (interface{}, error) {
-	return nil, checkBearer(c, auth, func() error { return nil })
+	return c.Get("auth"), checkBearer(c, auth, func() error { return nil })
 }
 
 func (r *rpc) Query(c *fibre.Context, sql string, vars map[string]interface{}) (interface{}, error) {
