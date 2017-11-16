@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"os"
 
+	"io/ioutil"
+
 	"github.com/spf13/cobra"
 
 	"github.com/abcum/surreal/log"
@@ -62,7 +64,7 @@ var importCmd = &cobra.Command{
 		// and specify the authentication header using
 		// basic auth for root login.
 
-		url := fmt.Sprintf("http://%s@%s:%s/import", opts.Auth.Auth, opts.DB.Host, opts.DB.Port)
+		url := fmt.Sprintf("https://%s@%s:%s/import", opts.Auth.Auth, opts.DB.Host, opts.DB.Port)
 
 		// Create a new http request object that we
 		// can use to connect to the import endpoint
@@ -88,12 +90,28 @@ var importCmd = &cobra.Command{
 			return
 		}
 
-		// Ensure that we received a http 200 status
+		// Ensure that we close the body, otherwise
+		// if the Body is not closed, the Client can
+		// not use the underlying transport again.
+
+		defer res.Body.Close()
+
+		// Ensure that we didn't receive a 401 status
 		// code back from the server, otherwise there
 		// was a problem with our authentication.
 
+		if res.StatusCode == 401 {
+			log.Fatalln("Authentication failed - check the connection details and try again.")
+			return
+		}
+
+		// Ensure that we received a http 200 status
+		// code back from the server, otherwise there
+		// was a problem with our request.
+
 		if res.StatusCode != 200 {
-			log.Fatalln("Connection failed - check the connection details and try again.")
+			bdy, _ := ioutil.ReadAll(res.Body)
+			log.Fatalf("%s", bdy)
 			return
 		}
 
@@ -105,7 +123,7 @@ var importCmd = &cobra.Command{
 func init() {
 
 	importCmd.PersistentFlags().StringVar(&opts.Auth.Auth, "auth", "root:root", "Master authentication details to use when connecting.")
-	importCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "127.0.0.1", "Database server host to connect to.")
-	importCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "8000", "Database server port to connect to.")
+	importCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "surreal.io", "Database server host to connect to.")
+	importCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "80", "Database server port to connect to.")
 
 }
