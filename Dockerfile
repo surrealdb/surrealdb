@@ -1,12 +1,7 @@
-FROM alpine:3.5
+FROM alpine:latest
 
-RUN apk update
+RUN apk add --update --no-cache ca-certificates
 
-RUN apk add --no-cache ca-certificates
+ADD surreal /usr/bin/
 
-
-ADD surreal .
-
-EXPOSE 8000 33693
-
-ENTRYPOINT ["/surreal"]
+ENTRYPOINT ["surreal"]
