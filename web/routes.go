@@ -229,7 +229,7 @@ func routes(s *fibre.Fibre) {
 
 	s.Delete("/key/:class", func(c *fibre.Context) error {
 
-		txt := "DELETE FROM $class"
+		txt := "DELETE $class"
 
 		res, err := db.Execute(c, txt, map[string]interface{}{
 			"class": sql.NewTable(c.Param("class")),
