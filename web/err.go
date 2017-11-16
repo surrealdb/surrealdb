@@ -44,19 +44,24 @@ func errors(val error, c *fibre.Context) {
 	case *sql.ParseError:
 		code, info = 400, e.Error()
 	case *fibre.HTTPError:
-		code = e.Code()
+		code, info = e.Code(), e.Error()
 	}
 
 	if _, ok := errs[code]; !ok {
 		code = 500
 	}
 
-	c.Send(code, &err{
-		errs[code].Code,
-		errs[code].Details,
-		errs[code].Description,
-		info,
-	})
+	switch c.Type() {
+	case "text/plain":
+		c.Send(code, info)
+	default:
+		c.Send(code, &err{
+			errs[code].Code,
+			errs[code].Details,
+			errs[code].Description,
+			info,
+		})
+	}
 
 }
 
