@@ -90,11 +90,11 @@ func routes(s *fibre.Fibre) {
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{
 			"application/json":                  true,
-			"application/cbor":                  true,
+			"application/cork":                  true,
 			"application/msgpack":               true,
 			"application/x-www-form-urlencoded": true,
 		},
-	}).PathIs("/signup"))
+	}).PathIs("/signup").MethodIsNot("OPTIONS"))
 
 	// --------------------------------------------------
 	// Endpoints for authentication signin
@@ -115,11 +115,11 @@ func routes(s *fibre.Fibre) {
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{
 			"application/json":                  true,
-			"application/cbor":                  true,
+			"application/cork":                  true,
 			"application/msgpack":               true,
 			"application/x-www-form-urlencoded": true,
 		},
-	}).PathIs("/signin"))
+	}).PathIs("/signin").MethodIsNot("OPTIONS"))
 
 	// --------------------------------------------------
 	// Endpoints for import and exporting data
@@ -157,11 +157,12 @@ func routes(s *fibre.Fibre) {
 
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{
+			"text/plain":          true,
 			"application/json":    true,
-			"application/cbor":    true,
+			"application/cork":    true,
 			"application/msgpack": true,
 		},
-	}).PathIs("/sql"))
+	}).PathIs("/sql").MethodIsNot("OPTIONS"))
 
 	// --------------------------------------------------
 	// Endpoints for submitting websocket sql
@@ -339,17 +340,13 @@ func routes(s *fibre.Fibre) {
 
 	})
 
-	s.Use(mw.Quit(&mw.QuitOpts{
-		Timeout: 15 * time.Second,
-	}).PathBegsWith("/key/"))
-
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{
 			"application/json":         true,
-			"application/cbor":         true,
+			"application/cork":         true,
 			"application/msgpack":      true,
 			"application/vnd.api+json": true,
 		},
-	}).PathBegsWith("/key/"))
+	}).PathBegsWith("/key/").MethodIsNot("OPTIONS"))
 
 }
