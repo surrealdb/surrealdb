@@ -47,10 +47,6 @@ func Setup(opts *cnf.Options) (err error) {
 
 	s.Use(tracer())
 
-	// Setup authentication
-
-	s.Use(auth())
-
 	// Add cors headers
 
 	s.Use(mw.Cors(&mw.CorsOpts{
@@ -80,6 +76,10 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Size(&mw.SizeOpts{
 		AllowedLength: 1 << 20, // 1mb
 	}))
+
+	// Setup authentication
+
+	s.Use(auth())
 
 	// Compress responses
 
