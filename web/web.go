@@ -45,7 +45,6 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Logs()) // Log requests
 	s.Use(mw.Sock()) // Log requests
 	s.Use(mw.Gzip()) // Gzip responses
-	s.Use(mw.Cors()) // Add cors headers
 
 	// Add trace information
 
@@ -54,6 +53,30 @@ func Setup(opts *cnf.Options) (err error) {
 	// Setup authentication
 
 	s.Use(auth())
+
+	// Add cors headers
+
+	s.Use(mw.Cors(&mw.CorsOpts{
+		AllowedOrigin: "*",
+		AllowedMethods: []string{
+			"GET",
+			"PUT",
+			"POST",
+			"PATCH",
+			"DELETE",
+			"TRACE",
+			"OPTIONS",
+		},
+		AllowedHeaders: []string{
+			"Accept",
+			"Authorization",
+			"Content-Type",
+			"Origin",
+			"NS",
+			"DB",
+		},
+		AccessControlMaxAge: 600,
+	}))
 
 	// Check body size
 
