@@ -53,6 +53,8 @@ func Output(c *fibre.Context, t string, d Display, m Method, res []*db.Response,
 		return fibre.NewHTTPError(403) // Should not happen
 	case *sql.EmptyError:
 		return fibre.NewHTTPError(500) // Should not happen
+	case *fibre.HTTPError:
+		return err // Probably a timeout error
 	}
 
 	if len(res) == 0 {
@@ -90,9 +92,15 @@ func OutputBase(c *fibre.Context, t string, d Display, m Method, res []*db.Respo
 	case "ERR_DB":
 		return fibre.NewHTTPError(503)
 	case "ERR_KV":
-		return fibre.NewHTTPError(409)
+		return fibre.NewHTTPError(409, ret.Detail)
+	case "ERR_PE":
+		return fibre.NewHTTPError(403, ret.Detail)
+	case "ERR_FD":
+		return fibre.NewHTTPError(422, ret.Detail)
+	case "ERR_IX":
+		return fibre.NewHTTPError(422, ret.Detail)
 	default:
-		return fibre.NewHTTPError(400)
+		return fibre.NewHTTPError(400, ret.Detail)
 	}
 
 }
@@ -110,9 +118,15 @@ func OutputRest(c *fibre.Context, t string, d Display, m Method, res []*db.Respo
 	case "ERR_DB":
 		return fibre.NewHTTPError(503)
 	case "ERR_KV":
-		return fibre.NewHTTPError(409)
+		return fibre.NewHTTPError(409, ret.Detail)
+	case "ERR_PE":
+		return fibre.NewHTTPError(403, ret.Detail)
+	case "ERR_FD":
+		return fibre.NewHTTPError(422, ret.Detail)
+	case "ERR_IX":
+		return fibre.NewHTTPError(422, ret.Detail)
 	default:
-		return fibre.NewHTTPError(400)
+		return fibre.NewHTTPError(400, ret.Detail)
 	}
 
 	if len(res[0].Result) == 0 {
@@ -176,9 +190,15 @@ func OutputJson(c *fibre.Context, t string, d Display, m Method, res []*db.Respo
 	case "ERR_DB":
 		return fibre.NewHTTPError(503)
 	case "ERR_KV":
-		return fibre.NewHTTPError(409)
+		return fibre.NewHTTPError(409, ret.Detail)
+	case "ERR_PE":
+		return fibre.NewHTTPError(403, ret.Detail)
+	case "ERR_FD":
+		return fibre.NewHTTPError(422, ret.Detail)
+	case "ERR_IX":
+		return fibre.NewHTTPError(422, ret.Detail)
 	default:
-		return fibre.NewHTTPError(400)
+		return fibre.NewHTTPError(400, ret.Detail)
 	}
 
 	if len(res[0].Result) == 0 {
