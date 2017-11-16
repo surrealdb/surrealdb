@@ -151,6 +151,11 @@ func TestMain(t *testing.T) {
 			new: &LV{},
 		},
 		{
+			str: "/surreal/abcum/*/database/*/person/!/t/foreign",
+			obj: &FT{KV: "surreal", NS: "abcum", DB: "database", TB: "person", FT: "foreign"},
+			new: &FT{},
+		},
+		{
 			str: "/surreal/abcum/*/database/*/person/*",
 			obj: &Table{KV: "surreal", NS: "abcum", DB: "database", TB: "person"},
 			new: &Table{},
