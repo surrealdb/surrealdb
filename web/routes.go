@@ -29,6 +29,9 @@ import (
 func limit(c *fibre.Context, i int64) int64 {
 	if s := c.Query("limit"); len(s) > 0 {
 		if x, err := strconv.ParseInt(s, 10, 64); err == nil {
+			if x > i {
+				return i
+			}
 			return x
 		}
 	}
@@ -38,6 +41,9 @@ func limit(c *fibre.Context, i int64) int64 {
 func start(c *fibre.Context, i int64) int64 {
 	if s := c.Query("start"); len(s) > 0 {
 		if x, err := strconv.ParseInt(s, 10, 64); err == nil {
+			if x < i {
+				return i
+			}
 			return x
 		}
 	}
