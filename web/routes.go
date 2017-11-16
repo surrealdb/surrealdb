@@ -84,7 +84,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Use(mw.Quit(&mw.QuitOpts{
-		Timeout: 10 * time.Second,
+		Timeout: 5 * time.Second,
 	}).PathIs("/signup"))
 
 	s.Use(mw.Type(&mw.TypeOpts{
@@ -109,7 +109,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Use(mw.Quit(&mw.QuitOpts{
-		Timeout: 10 * time.Second,
+		Timeout: 5 * time.Second,
 	}).PathIs("/signin"))
 
 	s.Use(mw.Type(&mw.TypeOpts{
