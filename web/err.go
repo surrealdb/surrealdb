@@ -21,7 +21,7 @@ import (
 
 func errors(val error, c *fibre.Context) {
 
-	if c.Socket() != nil {
+	if c.IsSocket() {
 		return
 	}
 
