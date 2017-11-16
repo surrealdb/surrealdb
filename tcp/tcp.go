@@ -27,6 +27,13 @@ import (
 
 var srf *serf.Serf
 
+var listeners []*listener
+
+type listener struct {
+	name string
+	call func([]byte)
+}
+
 // Setup sets up the server for remote connections
 func Setup(opts *cnf.Options) (err error) {
 
@@ -100,7 +107,7 @@ func Send(name string, data []byte) {
 }
 
 // Exit tears down the server gracefully
-func Exit() {
+func Exit() (err error) {
 	log.WithPrefix("tcp").Infof("Gracefully shutting down %s protocol", "tcp")
-	srf.Leave()
+	return srf.Leave()
 }

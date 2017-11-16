@@ -56,11 +56,24 @@ var startCmd = &cobra.Command{
 		return
 
 	},
-	PostRun: func(cmd *cobra.Command, args []string) {
+	PostRunE: func(cmd *cobra.Command, args []string) (err error) {
 
-		tcp.Exit()
-		web.Exit()
-		db.Exit()
+		if err = web.Exit(); err != nil {
+			log.Fatal(err)
+			return
+		}
+
+		if err = tcp.Exit(); err != nil {
+			log.Fatal(err)
+			return
+		}
+
+		if err = db.Exit(); err != nil {
+			log.Fatal(err)
+			return
+		}
+
+		return
 
 	},
 }

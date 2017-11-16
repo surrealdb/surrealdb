@@ -60,12 +60,9 @@ func Setup(opts *cnf.Options) (err error) {
 }
 
 // Exit shuts down the connection with the data layer
-func Exit() {
-
+func Exit() error {
 	log.WithPrefix("db").Infof("Gracefully shutting down database")
-
-	db.Close()
-
+	return db.Close()
 }
 
 // Import loads database operations from a reader.
