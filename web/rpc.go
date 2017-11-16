@@ -35,10 +35,14 @@ func (r *rpc) Query(c *fibre.Context, sql string, vars map[string]interface{}) (
 }
 
 func (r *rpc) Select(c *fibre.Context, class string, thing interface{}) (interface{}, error) {
-	switch thing.(type) {
+	switch thing := thing.(type) {
 	case *fibre.RPCNull:
 		return db.Execute(c, "SELECT * FROM $class", map[string]interface{}{
 			"class": sql.NewTable(class),
+		})
+	case []interface{}:
+		return db.Execute(c, "SELECT * FROM $batch", map[string]interface{}{
+			"batch": sql.NewBatch(class, thing),
 		})
 	default:
 		return db.Execute(c, "SELECT * FROM $thing", map[string]interface{}{
@@ -48,10 +52,15 @@ func (r *rpc) Select(c *fibre.Context, class string, thing interface{}) (interfa
 }
 
 func (r *rpc) Create(c *fibre.Context, class string, thing interface{}, data map[string]interface{}) (interface{}, error) {
-	switch thing.(type) {
+	switch thing := thing.(type) {
 	case *fibre.RPCNull:
 		return db.Execute(c, "CREATE $class CONTENT $data RETURN AFTER", map[string]interface{}{
 			"class": sql.NewTable(class),
+			"data":  data,
+		})
+	case []interface{}:
+		return db.Execute(c, "CREATE $batch CONTENT $data RETURN AFTER", map[string]interface{}{
+			"batch": sql.NewBatch(class, thing),
 			"data":  data,
 		})
 	default:
@@ -63,10 +72,15 @@ func (r *rpc) Create(c *fibre.Context, class string, thing interface{}, data map
 }
 
 func (r *rpc) Update(c *fibre.Context, class string, thing interface{}, data map[string]interface{}) (interface{}, error) {
-	switch thing.(type) {
+	switch thing := thing.(type) {
 	case *fibre.RPCNull:
 		return db.Execute(c, "UPDATE $class CONTENT $data RETURN AFTER", map[string]interface{}{
 			"class": sql.NewTable(class),
+			"data":  data,
+		})
+	case []interface{}:
+		return db.Execute(c, "UPDATE $batch CONTENT $data RETURN AFTER", map[string]interface{}{
+			"batch": sql.NewBatch(class, thing),
 			"data":  data,
 		})
 	default:
@@ -78,10 +92,15 @@ func (r *rpc) Update(c *fibre.Context, class string, thing interface{}, data map
 }
 
 func (r *rpc) Change(c *fibre.Context, class string, thing interface{}, data map[string]interface{}) (interface{}, error) {
-	switch thing.(type) {
+	switch thing := thing.(type) {
 	case *fibre.RPCNull:
 		return db.Execute(c, "UPDATE $class MERGE $data RETURN AFTER", map[string]interface{}{
 			"class": sql.NewTable(class),
+			"data":  data,
+		})
+	case []interface{}:
+		return db.Execute(c, "UPDATE $batch MERGE $data RETURN AFTER", map[string]interface{}{
+			"batch": sql.NewBatch(class, thing),
 			"data":  data,
 		})
 	default:
@@ -93,10 +112,15 @@ func (r *rpc) Change(c *fibre.Context, class string, thing interface{}, data map
 }
 
 func (r *rpc) Modify(c *fibre.Context, class string, thing interface{}, data map[string]interface{}) (interface{}, error) {
-	switch thing.(type) {
+	switch thing := thing.(type) {
 	case *fibre.RPCNull:
 		return db.Execute(c, "UPDATE $class DIFF $data RETURN AFTER", map[string]interface{}{
 			"class": sql.NewTable(class),
+			"data":  data,
+		})
+	case []interface{}:
+		return db.Execute(c, "UPDATE $batch DIFF $data RETURN AFTER", map[string]interface{}{
+			"batch": sql.NewBatch(class, thing),
 			"data":  data,
 		})
 	default:
@@ -108,10 +132,14 @@ func (r *rpc) Modify(c *fibre.Context, class string, thing interface{}, data map
 }
 
 func (r *rpc) Delete(c *fibre.Context, class string, thing interface{}) (interface{}, error) {
-	switch thing.(type) {
+	switch thing := thing.(type) {
 	case *fibre.RPCNull:
 		return db.Execute(c, "DELETE $class", map[string]interface{}{
 			"class": sql.NewTable(class),
+		})
+	case []interface{}:
+		return db.Execute(c, "DELETE $batch", map[string]interface{}{
+			"batch": sql.NewBatch(class, thing),
 		})
 	default:
 		return db.Execute(c, "DELETE $thing", map[string]interface{}{
