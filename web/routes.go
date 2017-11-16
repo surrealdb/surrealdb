@@ -195,12 +195,13 @@ func routes(s *fibre.Fibre) {
 
 	s.Get("/key/:class", func(c *fibre.Context) error {
 
-		txt := "SELECT * FROM $class LIMIT $limit START $start"
+		txt := "SELECT * FROM $class LIMIT $limit START $start VERSION $versn"
 
 		res, err := db.Execute(c, txt, map[string]interface{}{
 			"class": sql.NewTable(c.Param("class")),
 			"limit": limit(c, 100),
 			"start": start(c, 0),
+			"versn": versn(c, time.Now()),
 		})
 
 		return show.Output(c, c.Param("class"), show.Many, show.Select, res, err)
