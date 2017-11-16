@@ -41,7 +41,7 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Uniq()) // Add uniq id
 	s.Use(mw.Fail()) // Catch panics
 	s.Use(mw.Logs()) // Log requests
-	s.Use(mw.Sock()) // Log requests
+	s.Use(mw.Sock()) // Setup sockets
 
 	// Add trace information
 
