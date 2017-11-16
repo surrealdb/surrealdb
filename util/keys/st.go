@@ -28,6 +28,17 @@ func (k *ST) init() *ST {
 	return k
 }
 
+// Copy creates a copy of the key
+func (k *ST) Copy() *ST {
+	return &ST{
+		KV: k.KV,
+		NS: k.NS,
+		DB: k.DB,
+		SC: k.SC,
+		TK: k.TK,
+	}
+}
+
 // Encode encodes the key into binary
 func (k *ST) Encode() []byte {
 	k.init()

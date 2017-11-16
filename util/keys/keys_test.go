@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 
@@ -426,6 +427,19 @@ func TestMain(t *testing.T) {
 				&Index{KV: "other", NS: "ns", DB: "db", TB: "person", IX: "names", FD: []interface{}{}},
 			},
 		},
+	}
+
+}
+
+func TestCopying(t *testing.T) {
+
+	for _, test := range tests {
+
+		Convey(test.str, t, func() {
+			val := reflect.ValueOf(test.obj).MethodByName("Copy").Call([]reflect.Value{})
+			So(val[0].Interface(), ShouldResemble, test.obj)
+		})
+
 	}
 
 }

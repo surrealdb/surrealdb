@@ -27,6 +27,16 @@ func (k *LV) init() *LV {
 	return k
 }
 
+// Copy creates a copy of the key
+func (k *LV) Copy() *LV {
+	return &LV{
+		KV: k.KV,
+		NS: k.NS,
+		DB: k.DB,
+		LV: k.LV,
+	}
+}
+
 // Encode encodes the key into binary
 func (k *LV) Encode() []byte {
 	k.init()

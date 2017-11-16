@@ -29,6 +29,18 @@ func (k *Index) init() *Index {
 	return k
 }
 
+// Copy creates a copy of the key
+func (k *Index) Copy() *Index {
+	return &Index{
+		KV: k.KV,
+		NS: k.NS,
+		DB: k.DB,
+		TB: k.TB,
+		IX: k.IX,
+		FD: k.FD,
+	}
+}
+
 // Encode encodes the key into binary
 func (k *Index) Encode() []byte {
 	k.init()

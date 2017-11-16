@@ -27,6 +27,16 @@ func (k *DT) init() *DT {
 	return k
 }
 
+// Copy creates a copy of the key
+func (k *DT) Copy() *DT {
+	return &DT{
+		KV: k.KV,
+		NS: k.NS,
+		DB: k.DB,
+		TK: k.TK,
+	}
+}
+
 // Encode encodes the key into binary
 func (k *DT) Encode() []byte {
 	k.init()

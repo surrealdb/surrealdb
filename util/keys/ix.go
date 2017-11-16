@@ -28,6 +28,17 @@ func (k *IX) init() *IX {
 	return k
 }
 
+// Copy creates a copy of the key
+func (k *IX) Copy() *IX {
+	return &IX{
+		KV: k.KV,
+		NS: k.NS,
+		DB: k.DB,
+		TB: k.TB,
+		IX: k.IX,
+	}
+}
+
 // Encode encodes the key into binary
 func (k *IX) Encode() []byte {
 	k.init()

@@ -30,6 +30,19 @@ func (k *Point) init() *Point {
 	return k
 }
 
+// Copy creates a copy of the key
+func (k *Point) Copy() *Point {
+	return &Point{
+		KV: k.KV,
+		NS: k.NS,
+		DB: k.DB,
+		TB: k.TB,
+		IX: k.IX,
+		FD: k.FD,
+		ID: k.ID,
+	}
+}
+
 // Encode encodes the key into binary
 func (k *Point) Encode() []byte {
 	k.init()

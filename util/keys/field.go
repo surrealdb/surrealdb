@@ -29,6 +29,18 @@ func (k *Field) init() *Field {
 	return k
 }
 
+// Copy creates a copy of the key
+func (k *Field) Copy() *Field {
+	return &Field{
+		KV: k.KV,
+		NS: k.NS,
+		DB: k.DB,
+		TB: k.TB,
+		ID: k.ID,
+		FD: k.FD,
+	}
+}
+
 // Encode encodes the key into binary
 func (k *Field) Encode() []byte {
 	k.init()

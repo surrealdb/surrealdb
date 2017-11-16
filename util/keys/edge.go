@@ -39,6 +39,21 @@ func (k *Edge) init() *Edge {
 	return k
 }
 
+// Copy creates a copy of the key
+func (k *Edge) Copy() *Edge {
+	return &Edge{
+		KV: k.KV,
+		NS: k.NS,
+		DB: k.DB,
+		TB: k.TB,
+		ID: k.ID,
+		TK: k.TK,
+		TP: k.TP,
+		FT: k.FT,
+		FK: k.FK,
+	}
+}
+
 // Encode encodes the key into binary
 func (k *Edge) Encode() []byte {
 	k.init()

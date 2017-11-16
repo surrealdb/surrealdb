@@ -26,6 +26,15 @@ func (k *NU) init() *NU {
 	return k
 }
 
+// Copy creates a copy of the key
+func (k *NU) Copy() *NU {
+	return &NU{
+		KV: k.KV,
+		NS: k.NS,
+		US: k.US,
+	}
+}
+
 // Encode encodes the key into binary
 func (k *NU) Encode() []byte {
 	k.init()

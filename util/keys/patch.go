@@ -36,6 +36,18 @@ func (k *Patch) init() *Patch {
 	return k
 }
 
+// Copy creates a copy of the key
+func (k *Patch) Copy() *Patch {
+	return &Patch{
+		KV: k.KV,
+		NS: k.NS,
+		DB: k.DB,
+		TB: k.TB,
+		ID: k.ID,
+		AT: k.AT,
+	}
+}
+
 // Encode encodes the key into binary
 func (k *Patch) Encode() []byte {
 	k.init()

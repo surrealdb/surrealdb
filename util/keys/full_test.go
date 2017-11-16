@@ -66,6 +66,58 @@ type Full struct {
 	AIN   []interface{} // []interface{} array
 }
 
+func (f *Full) Copy() Key {
+	return &Full{
+		N:     f.N,
+		B:     f.B,
+		F:     f.F,
+		S:     f.S,
+		T:     f.T,
+		NI64:  f.NI64,
+		NI32:  f.NI32,
+		NI16:  f.NI16,
+		NI8:   f.NI8,
+		NI:    f.NI,
+		I:     f.I,
+		I8:    f.I8,
+		I16:   f.I16,
+		I32:   f.I32,
+		I64:   f.I64,
+		UI:    f.UI,
+		UI8:   f.UI8,
+		UI16:  f.UI16,
+		UI32:  f.UI32,
+		UI64:  f.UI64,
+		NF64:  f.NF64,
+		NF32:  f.NF32,
+		F32:   f.F32,
+		F64:   f.F64,
+		AB:    f.AB,
+		AS:    f.AS,
+		AT:    f.AT,
+		AI:    f.AI,
+		AI8:   f.AI8,
+		AI16:  f.AI16,
+		AI32:  f.AI32,
+		AI64:  f.AI64,
+		AUI:   f.AUI,
+		AUI8:  f.AUI8,
+		AUI16: f.AUI16,
+		AUI32: f.AUI32,
+		AUI64: f.AUI64,
+		AF32:  f.AF32,
+		AF64:  f.AF64,
+		IN:    f.IN,
+		IB:    f.IB,
+		IF:    f.IF,
+		IT:    f.IT,
+		II:    f.II,
+		ID:    f.ID,
+		INA:   f.INA,
+		AIN:   f.AIN,
+	}
+}
+
 func (f *Full) String() (s string) {
 	return "Test key"
 }
