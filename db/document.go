@@ -89,7 +89,7 @@ func (d *document) clear() {
 }
 
 func (d *document) erase() (err error) {
-	d.current.Reset()
+	d.current = data.Consume(nil)
 	return
 }
 
@@ -276,15 +276,15 @@ func (d *document) setup() (err error) {
 }
 
 func (d *document) changed() bool {
-	a := d.initial.Data().(map[string]interface{})
-	b := d.current.Data().(map[string]interface{})
+	a, _ := d.initial.Data().(map[string]interface{})
+	b, _ := d.current.Data().(map[string]interface{})
 	c := diff.Diff(a, b)
 	return len(c) > 0
 }
 
 func (d *document) diff() *data.Doc {
-	a := d.initial.Data().(map[string]interface{})
-	b := d.current.Data().(map[string]interface{})
+	a, _ := d.initial.Data().(map[string]interface{})
+	b, _ := d.current.Data().(map[string]interface{})
 	if c := diff.Diff(a, b); len(c) > 0 {
 		return data.Consume(c)
 	}
