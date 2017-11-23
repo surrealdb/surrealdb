@@ -1,5 +1,5 @@
 hash: 38028d7190e274aa6aa1346ce217556592f8c27eade989507685da3959323eaf
-updated: 2017-11-14T01:39:37.871561Z
+updated: 2017-11-23T13:36:00.529593Z
 imports:
 - name: cloud.google.com/go
   version: 2d3a6656c17a60b0815b7e06ab0be04eacb6e613
@@ -22,7 +22,7 @@ imports:
 - name: github.com/abcum/cork
   version: 7f7718f642ea6e607fb04ff030884223b0cb9c92
 - name: github.com/abcum/fibre
-  version: 4daebfda4241ab8996127e91f52cb674a7919a63
+  version: b4850d6c9e931b6816f5569d71a4b6029cea6842
   subpackages:
   - mw
 - name: github.com/abcum/ptree
@@ -39,11 +39,11 @@ imports:
 - name: github.com/abcum/tlist
   version: 6c74cef6e6785964f5984f7ff480148aa5f9e679
 - name: github.com/armon/go-metrics
-  version: 9a4b6e10bed6220a1665955aa2b75afc91eb10b3
+  version: 7aa49fde808223f8dadfdbfd3a20ff6c19e5f9ec
 - name: github.com/asaskevich/govalidator
   version: 73945b6115bfbbcc57d89b7316e28109364124e1
 - name: github.com/aws/aws-sdk-go
-  version: e6c5e190452424b404ecdb81d6e3991d46b18e9d
+  version: cd721c97ef6fcfcb76b4feb14fcfead57fb01e5e
   subpackages:
   - aws
   - aws/awserr
@@ -86,7 +86,7 @@ imports:
 - name: github.com/elithrar/simple-scrypt
   version: 2325946f714c95de4a6088202c402fbdfa64163b
 - name: github.com/go-ini/ini
-  version: 7e7da451323b6766da368f8a1e8ec9a88a16b4a0
+  version: 32e4c1e6bc4e7d0d8451aa6b75200d19e37a536a
 - name: github.com/golang/protobuf
   version: 1e59b77b52bf8e4b449a57e6f79f21226d571845
   subpackages:
@@ -119,7 +119,7 @@ imports:
   subpackages:
   - simplelru
 - name: github.com/hashicorp/memberlist
-  version: caa5d20d6a642b7543b3745e54031a96008bee57
+  version: 9bdd37bfb26bd039c08b0f36be6f80ceede4aaf3
 - name: github.com/hashicorp/serf
   version: d6574a5bb1226678d7010325fb6c985db20ee458
   subpackages:
@@ -130,7 +130,7 @@ imports:
 - name: github.com/inconshreveable/mousetrap
   version: 76626ae9c91c4f2a10f34cad8ce83ea42c93bb75
 - name: github.com/jmespath/go-jmespath
-  version: bd40a432e4c76585ef6b72d3fd96fb9b6dc7b68d
+  version: dd801d4f4ce7ac746e7e7b4489d2fa600b3b096b
 - name: github.com/kr/text
   version: 7cafcd837844e784b526369c9bce262804aebc60
 - name: github.com/mattn/go-colorable
@@ -140,7 +140,7 @@ imports:
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: 9fc4eb252eedf0ef8adc05169ce35da5e31beaba
+  version: be5ae6ca7ac994584d2e30167737687f1c1ded8e
   subpackages:
   - internal/socket
 - name: github.com/mitchellh/mapstructure
@@ -170,7 +170,7 @@ imports:
 - name: github.com/spf13/pflag
   version: 4c012f6dcd9546820e378d0bdda4d8fc772cdfea
 - name: github.com/ugorji/go
-  version: 69968d74aefca74ab12359e8e24e057fb7d88222
+  version: 84cb69a8af8316eed8cf4a3c9368a56977850062
   subpackages:
   - codec
 - name: golang.org/x/crypto
@@ -182,7 +182,7 @@ imports:
   - scrypt
   - ssh/terminal
 - name: golang.org/x/net
-  version: a337091b0525af65de94df2eb7e98bd9962dcbe2
+  version: c7086645de248775cbf2373cf5ca4d2fa664b8c1
   subpackages:
   - context
   - context/ctxhttp
@@ -193,7 +193,7 @@ imports:
   - lex/httplex
   - trace
 - name: golang.org/x/oauth2
-  version: 9ff8ebcc8e241d46f52ecc5bff0e5a2f2dbef402
+  version: f95fa95eaa936d9d87489b15d1d18b97c1ba9c28
   subpackages:
   - google
   - internal
@@ -204,7 +204,7 @@ imports:
   subpackages:
   - semaphore
 - name: golang.org/x/sys
-  version: 665f6529cca930e27b831a0d1dafffbe1c172924
+  version: 82aafbf43bf885069dc71b7e7c2f9d7a614d47da
   subpackages:
   - unix
   - windows
@@ -224,7 +224,7 @@ imports:
   subpackages:
   - rate
 - name: google.golang.org/api
-  version: a0c31fb0028e0111b942a29b9fc2e9235202c48b
+  version: 92db9b55d2aa90e54a33cfaa8caf354afae68157
   subpackages:
   - cloudtrace/v1
   - gensupport
@@ -254,7 +254,7 @@ imports:
   - socket
   - urlfetch
 - name: google.golang.org/genproto
-  version: 11c7f9e547da6db876260ce49ea7536985904c9b
+  version: 7f0da29060c682909f650ad8ed4e515bd74fa12a
   subpackages:
   - googleapis/api/annotations
   - googleapis/api/distribution
@@ -268,7 +268,7 @@ imports:
   - googleapis/rpc/status
   - protobuf/field_mask
 - name: google.golang.org/grpc
-  version: 409fd8e23b1b48140bc8dc73950f762063baa859
+  version: 10873b30bf245efc365a957b425da2e15f47a560
   subpackages:
   - balancer
   - balancer/roundrobin

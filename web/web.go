@@ -89,6 +89,12 @@ func Setup(opts *cnf.Options) (err error) {
 
 	s.Use(mw.Gzip())
 
+	// Redirect non-https
+
+	s.Use(mw.Secure(&mw.SecureOpts{
+		RedirectHTTP: len(opts.Cert.Crt) == 0 || len(opts.Cert.Key) == 0,
+	}))
+
 	// Log successful start
 
 	log.WithPrefix("web").Infof("Started web server on %s", opts.Conn.Web)
