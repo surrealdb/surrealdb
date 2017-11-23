@@ -92,7 +92,7 @@ func Setup(opts *cnf.Options) (err error) {
 	// Redirect non-https
 
 	s.Use(mw.Secure(&mw.SecureOpts{
-		RedirectHTTP: len(opts.Cert.Crt) == 0 || len(opts.Cert.Key) == 0,
+		RedirectHTTP: len(opts.Cert.Crt) != 0 || len(opts.Cert.Key) != 0,
 	}))
 
 	// Log successful start
