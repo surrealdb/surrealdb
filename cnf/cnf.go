@@ -23,10 +23,6 @@ var Settings *Options
 
 type Kind int
 
-func (k Kind) MarshalText() (data []byte, err error) {
-	return []byte(k.String()), err
-}
-
 func (k Kind) String() string {
 	switch k {
 	default:
@@ -40,6 +36,14 @@ func (k Kind) String() string {
 	case AuthSC:
 		return "SC"
 	}
+}
+
+func (k Kind) MarshalText() (data []byte, err error) {
+	return []byte(k.String()), err
+}
+
+func (k Kind) UnmarshalText(text []byte) error {
+	return nil
 }
 
 const (
