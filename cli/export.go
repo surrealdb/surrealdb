@@ -132,7 +132,7 @@ var exportCmd = &cobra.Command{
 
 func init() {
 
-	exportCmd.PersistentFlags().StringVar(&opts.Auth.Auth, "auth", "root:root", "Master authentication details to use when connecting.")
+	exportCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master authentication details to use when connecting.")
 	exportCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "surreal.io", "Database server host to connect to.")
 	exportCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "80", "Database server port to connect to.")
 
