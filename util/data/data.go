@@ -77,6 +77,10 @@ func (d *Doc) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.Data())
 }
 
+func (d *Doc) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &d.data)
+}
+
 // --------------------------------------------------------------------------------
 
 func (d *Doc) path(path ...string) (paths []string) {
