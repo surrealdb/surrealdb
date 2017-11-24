@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err error) {
 
-	stmt = &DefineFieldStatement{RW: true}
+	stmt = &DefineFieldStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 
 func (p *parser) parseRemoveFieldStatement() (stmt *RemoveFieldStatement, err error) {
 
-	stmt = &RemoveFieldStatement{RW: true}
+	stmt = &RemoveFieldStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err

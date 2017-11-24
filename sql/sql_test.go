@@ -293,14 +293,14 @@ func Test_Parse_Queries_Info(t *testing.T) {
 		{
 			sql: `INFO FOR NAMESPACE`,
 			res: &Query{Statements: []Statement{&InfoStatement{
-				RW: false, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: NAMESPACE,
 			}}},
 		},
 		{
 			sql: `INFO FOR DATABASE`,
 			res: &Query{Statements: []Statement{&InfoStatement{
-				RW: false, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: DATABASE,
 			}}},
 		},
@@ -311,7 +311,7 @@ func Test_Parse_Queries_Info(t *testing.T) {
 		{
 			sql: `INFO FOR TABLE test`,
 			res: &Query{Statements: []Statement{&InfoStatement{
-				RW: false, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: TABLE,
 				What: &Table{"test"},
 			}}},
@@ -449,7 +449,7 @@ func Test_Parse_Queries_Let(t *testing.T) {
 				RW: true, KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"name"},
 				What: &SubExpression{Expr: &CreateStatement{
-					RW: true, KV: "*", NS: "*", DB: "*",
+					KV: "*", NS: "*", DB: "*",
 					What: Exprs{&Ident{ID: "person"}},
 					Echo: AFTER,
 				}},
@@ -560,7 +560,7 @@ func Test_Parse_Queries_Return(t *testing.T) {
 			res: &Query{Statements: []Statement{&ReturnStatement{
 				RW: true, KV: "*", NS: "*", DB: "*",
 				What: Exprs{&SubExpression{Expr: &CreateStatement{
-					RW: true, KV: "*", NS: "*", DB: "*",
+					KV: "*", NS: "*", DB: "*",
 					What: Exprs{&Ident{ID: "person"}},
 					Echo: AFTER,
 				}}},
@@ -849,7 +849,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 					{Expr: &All{}, Field: "*"},
 				},
 				What: Exprs{&SubExpression{Expr: &CreateStatement{
-					RW: true, KV: "*", NS: "*", DB: "*",
+					KV: "*", NS: "*", DB: "*",
 					What: Exprs{&Ident{ID: "person"}},
 					Echo: AFTER,
 				}}},
@@ -1195,7 +1195,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: AFTER,
 			}}},
@@ -1211,7 +1211,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person SET firstname = VOID`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &DataExpression{Data: []*ItemExpression{{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Void{}}}},
 				Echo: AFTER,
@@ -1220,7 +1220,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person SET firstname = EMPTY`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &DataExpression{Data: []*ItemExpression{{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Empty{}}}},
 				Echo: AFTER,
@@ -1233,7 +1233,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person SET firstname = "Tobie"`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &DataExpression{Data: []*ItemExpression{{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Value{"Tobie"}}}},
 				Echo: AFTER,
@@ -1254,7 +1254,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person MERGE {"firstname":"Tobie"}`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &MergeExpression{Data: map[string]interface{}{"firstname": "Tobie"}},
 				Echo: AFTER,
@@ -1275,7 +1275,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person CONTENT {"firstname":"Tobie"}`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &ContentExpression{Data: map[string]interface{}{"firstname": "Tobie"}},
 				Echo: AFTER,
@@ -1288,7 +1288,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person RETURN NONE`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: NONE,
 			}}},
@@ -1296,7 +1296,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: BOTH,
 			}}},
@@ -1304,7 +1304,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person RETURN DIFF`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: DIFF,
 			}}},
@@ -1312,7 +1312,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: BEFORE,
 			}}},
@@ -1321,7 +1321,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 			sql: `CREATE person RETURN AFTER`,
 			str: `CREATE person`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: AFTER,
 			}}},
@@ -1329,7 +1329,7 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		{
 			sql: `CREATE person TIMEOUT 1s`,
 			res: &Query{Statements: []Statement{&CreateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What:    []Expr{&Ident{"person"}},
 				Echo:    AFTER,
 				Timeout: 1 * time.Second,
@@ -1361,7 +1361,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: AFTER,
 			}}},
@@ -1377,7 +1377,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person SET firstname = VOID`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &DataExpression{Data: []*ItemExpression{{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Void{}}}},
 				Echo: AFTER,
@@ -1386,7 +1386,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person SET firstname = EMPTY`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &DataExpression{Data: []*ItemExpression{{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Empty{}}}},
 				Echo: AFTER,
@@ -1399,7 +1399,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person SET firstname = "Tobie"`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &DataExpression{Data: []*ItemExpression{{LHS: &Ident{"firstname"}, Op: EQ, RHS: &Value{"Tobie"}}}},
 				Echo: AFTER,
@@ -1420,7 +1420,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person DIFF []`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &DiffExpression{Data: []interface{}{}},
 				Echo: AFTER,
@@ -1441,7 +1441,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person MERGE {"firstname":"Tobie"}`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &MergeExpression{Data: map[string]interface{}{"firstname": "Tobie"}},
 				Echo: AFTER,
@@ -1462,7 +1462,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person CONTENT {"firstname":"Tobie"}`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Data: &ContentExpression{Data: map[string]interface{}{"firstname": "Tobie"}},
 				Echo: AFTER,
@@ -1475,7 +1475,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person RETURN NONE`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: NONE,
 			}}},
@@ -1483,7 +1483,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: BOTH,
 			}}},
@@ -1491,7 +1491,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person RETURN DIFF`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: DIFF,
 			}}},
@@ -1499,7 +1499,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: BEFORE,
 			}}},
@@ -1508,7 +1508,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 			sql: `UPDATE person RETURN AFTER`,
 			str: `UPDATE person`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: AFTER,
 			}}},
@@ -1516,7 +1516,7 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		{
 			sql: `UPDATE person TIMEOUT 1s`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What:    []Expr{&Ident{"person"}},
 				Echo:    AFTER,
 				Timeout: 1 * time.Second,
@@ -1552,7 +1552,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 		{
 			sql: `DELETE person`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: NONE,
 			}}},
@@ -1560,7 +1560,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 		{
 			sql: `DELETE AND EXPUNGE person`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Hard: true,
 				Echo: NONE,
@@ -1574,7 +1574,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 			sql: `DELETE person RETURN NONE`,
 			str: `DELETE person`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: NONE,
 			}}},
@@ -1582,7 +1582,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 		{
 			sql: `DELETE person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: BOTH,
 			}}},
@@ -1590,7 +1590,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 		{
 			sql: `DELETE person RETURN DIFF`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: DIFF,
 			}}},
@@ -1598,7 +1598,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 		{
 			sql: `DELETE person RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: BEFORE,
 			}}},
@@ -1606,7 +1606,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 		{
 			sql: `DELETE person RETURN AFTER`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: []Expr{&Ident{"person"}},
 				Echo: AFTER,
 			}}},
@@ -1614,7 +1614,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 		{
 			sql: `DELETE person TIMEOUT 1s`,
 			res: &Query{Statements: []Statement{&DeleteStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What:    []Expr{&Ident{"person"}},
 				Echo:    NONE,
 				Timeout: 1 * time.Second,
@@ -1662,7 +1662,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 		{
 			sql: `RELATE purchase FROM person WITH item`,
 			res: &Query{Statements: []Statement{&RelateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Type: &Table{"purchase"},
 				From: []Expr{&Ident{"person"}},
 				With: []Expr{&Ident{"item"}},
@@ -1672,7 +1672,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 		{
 			sql: `RELATE purchase FROM person WITH item UNIQUE`,
 			res: &Query{Statements: []Statement{&RelateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Type: &Table{"purchase"},
 				From: []Expr{&Ident{"person"}},
 				With: []Expr{&Ident{"item"}},
@@ -1691,7 +1691,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 		{
 			sql: `RELATE purchase FROM person WITH item SET public = true`,
 			res: &Query{Statements: []Statement{&RelateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Type: &Table{"purchase"},
 				From: []Expr{&Ident{"person"}},
 				With: []Expr{&Ident{"item"}},
@@ -1706,7 +1706,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 		{
 			sql: `RELATE purchase FROM person WITH item RETURN NONE`,
 			res: &Query{Statements: []Statement{&RelateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Type: &Table{"purchase"},
 				From: []Expr{&Ident{"person"}},
 				With: []Expr{&Ident{"item"}},
@@ -1716,7 +1716,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 		{
 			sql: `RELATE purchase FROM person WITH item RETURN BOTH`,
 			res: &Query{Statements: []Statement{&RelateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Type: &Table{"purchase"},
 				From: []Expr{&Ident{"person"}},
 				With: []Expr{&Ident{"item"}},
@@ -1726,7 +1726,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 		{
 			sql: `RELATE purchase FROM person WITH item RETURN DIFF`,
 			res: &Query{Statements: []Statement{&RelateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Type: &Table{"purchase"},
 				From: []Expr{&Ident{"person"}},
 				With: []Expr{&Ident{"item"}},
@@ -1736,7 +1736,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 		{
 			sql: `RELATE purchase FROM person WITH item RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&RelateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Type: &Table{"purchase"},
 				From: []Expr{&Ident{"person"}},
 				With: []Expr{&Ident{"item"}},
@@ -1747,7 +1747,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 			sql: `RELATE purchase FROM person WITH item RETURN AFTER`,
 			str: `RELATE purchase FROM person WITH item`,
 			res: &Query{Statements: []Statement{&RelateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Type: &Table{"purchase"},
 				From: []Expr{&Ident{"person"}},
 				With: []Expr{&Ident{"item"}},
@@ -1757,7 +1757,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 		{
 			sql: `RELATE purchase FROM person WITH item TIMEOUT 1s`,
 			res: &Query{Statements: []Statement{&RelateStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Type:    &Table{"purchase"},
 				From:    []Expr{&Ident{"person"}},
 				With:    []Expr{&Ident{"item"}},
@@ -1799,7 +1799,7 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 		{
 			sql: `INSERT ["one","two","tre"] INTO person`,
 			res: &Query{Statements: []Statement{&InsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: AFTER,
@@ -1812,7 +1812,7 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 		{
 			sql: `INSERT ["one","two","tre"] INTO person RETURN NONE`,
 			res: &Query{Statements: []Statement{&InsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: NONE,
@@ -1821,7 +1821,7 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 		{
 			sql: `INSERT ["one","two","tre"] INTO person RETURN INFO`,
 			res: &Query{Statements: []Statement{&InsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: INFO,
@@ -1830,7 +1830,7 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 		{
 			sql: `INSERT ["one","two","tre"] INTO person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&InsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: BOTH,
@@ -1839,7 +1839,7 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 		{
 			sql: `INSERT ["one","two","tre"] INTO person RETURN DIFF`,
 			res: &Query{Statements: []Statement{&InsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: DIFF,
@@ -1848,7 +1848,7 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 		{
 			sql: `INSERT ["one","two","tre"] INTO person RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&InsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: BEFORE,
@@ -1858,7 +1858,7 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 			sql: `INSERT ["one","two","tre"] INTO person RETURN AFTER`,
 			str: `INSERT ["one","two","tre"] INTO person`,
 			res: &Query{Statements: []Statement{&InsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: AFTER,
@@ -1867,7 +1867,7 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 		{
 			sql: `INSERT ["one","two","tre"] INTO person TIMEOUT 1s`,
 			res: &Query{Statements: []Statement{&InsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data:    []interface{}{"one", "two", "tre"},
 				Into:    &Table{"person"},
 				Echo:    AFTER,
@@ -1908,7 +1908,7 @@ func Test_Parse_Queries_Upsert(t *testing.T) {
 		{
 			sql: `UPSERT ["one","two","tre"] INTO person`,
 			res: &Query{Statements: []Statement{&UpsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: AFTER,
@@ -1921,7 +1921,7 @@ func Test_Parse_Queries_Upsert(t *testing.T) {
 		{
 			sql: `UPSERT ["one","two","tre"] INTO person RETURN NONE`,
 			res: &Query{Statements: []Statement{&UpsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: NONE,
@@ -1930,7 +1930,7 @@ func Test_Parse_Queries_Upsert(t *testing.T) {
 		{
 			sql: `UPSERT ["one","two","tre"] INTO person RETURN INFO`,
 			res: &Query{Statements: []Statement{&UpsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: INFO,
@@ -1939,7 +1939,7 @@ func Test_Parse_Queries_Upsert(t *testing.T) {
 		{
 			sql: `UPSERT ["one","two","tre"] INTO person RETURN BOTH`,
 			res: &Query{Statements: []Statement{&UpsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: BOTH,
@@ -1948,7 +1948,7 @@ func Test_Parse_Queries_Upsert(t *testing.T) {
 		{
 			sql: `UPSERT ["one","two","tre"] INTO person RETURN DIFF`,
 			res: &Query{Statements: []Statement{&UpsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: DIFF,
@@ -1957,7 +1957,7 @@ func Test_Parse_Queries_Upsert(t *testing.T) {
 		{
 			sql: `UPSERT ["one","two","tre"] INTO person RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&UpsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: BEFORE,
@@ -1967,7 +1967,7 @@ func Test_Parse_Queries_Upsert(t *testing.T) {
 			sql: `UPSERT ["one","two","tre"] INTO person RETURN AFTER`,
 			str: `UPSERT ["one","two","tre"] INTO person`,
 			res: &Query{Statements: []Statement{&UpsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data: []interface{}{"one", "two", "tre"},
 				Into: &Table{"person"},
 				Echo: AFTER,
@@ -1976,7 +1976,7 @@ func Test_Parse_Queries_Upsert(t *testing.T) {
 		{
 			sql: `UPSERT ["one","two","tre"] INTO person TIMEOUT 1s`,
 			res: &Query{Statements: []Statement{&UpsertStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Data:    []interface{}{"one", "two", "tre"},
 				Into:    &Table{"person"},
 				Echo:    AFTER,
@@ -2021,7 +2021,7 @@ func Test_Parse_Queries_Live(t *testing.T) {
 		{
 			sql: `LIVE SELECT * FROM person`,
 			res: &Query{Statements: []Statement{&LiveStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Expr: []*Field{{Expr: &All{}, Field: "*"}},
 				What: &Table{"person"},
 			}}},
@@ -2033,7 +2033,7 @@ func Test_Parse_Queries_Live(t *testing.T) {
 		{
 			sql: `LIVE SELECT * FROM person WHERE public = true`,
 			res: &Query{Statements: []Statement{&LiveStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Expr: []*Field{{Expr: &All{}, Field: "*"}},
 				What: &Table{"person"},
 				Cond: &BinaryExpression{
@@ -2081,7 +2081,7 @@ func Test_Parse_Queries_Kill(t *testing.T) {
 		{
 			sql: `KILL "identifier"`,
 			res: &Query{Statements: []Statement{&KillStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Value{"identifier"},
 			}}},
 		},
@@ -2120,7 +2120,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE NAMESPACE test`,
 			res: &Query{Statements: []Statement{&DefineNamespaceStatement{
-				RW: true, KV: "*", NS: "*", DB: "*", Name: &Ident{"test"},
+				KV: "*", NS: "*", DB: "*", Name: &Ident{"test"},
 			}}},
 		},
 		{
@@ -2143,7 +2143,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE DATABASE test`,
 			res: &Query{Statements: []Statement{&DefineDatabaseStatement{
-				RW: true, KV: "*", NS: "*", DB: "*", Name: &Ident{"test"},
+				KV: "*", NS: "*", DB: "*", Name: &Ident{"test"},
 			}}},
 		},
 		{
@@ -2187,7 +2187,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE LOGIN test ON NAMESPACE PASSWORD "123456"`,
 			str: `DEFINE LOGIN test ON NAMESPACE PASSWORD ********`,
 			res: &Query{Statements: []Statement{&DefineLoginStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: NAMESPACE,
 				User: &Ident{"test"},
 				Pass: []byte("123456"),
@@ -2197,7 +2197,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE LOGIN test ON DATABASE PASSWORD "123456"`,
 			str: `DEFINE LOGIN test ON DATABASE PASSWORD ********`,
 			res: &Query{Statements: []Statement{&DefineLoginStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: DATABASE,
 				User: &Ident{"test"},
 				Pass: []byte("123456"),
@@ -2260,7 +2260,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE TOKEN test ON NAMESPACE TYPE HS512 VALUE "secret"`,
 			str: `DEFINE TOKEN test ON NAMESPACE TYPE HS512 VALUE ********`,
 			res: &Query{Statements: []Statement{&DefineTokenStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: NAMESPACE,
 				Name: &Ident{"test"},
 				Type: "HS512",
@@ -2271,7 +2271,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE TOKEN test ON DATABASE TYPE HS512 VALUE "secret"`,
 			str: `DEFINE TOKEN test ON DATABASE TYPE HS512 VALUE ********`,
 			res: &Query{Statements: []Statement{&DefineTokenStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: DATABASE,
 				Name: &Ident{"test"},
 				Type: "HS512",
@@ -2282,7 +2282,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE TOKEN test ON SCOPE TYPE HS512 VALUE "secret"`,
 			str: `DEFINE TOKEN test ON SCOPE TYPE HS512 VALUE ********`,
 			res: &Query{Statements: []Statement{&DefineTokenStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: SCOPE,
 				Name: &Ident{"test"},
 				Type: "HS512",
@@ -2309,7 +2309,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE SCOPE test`,
 			res: &Query{Statements: []Statement{&DefineScopeStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"test"},
 			}}},
 		},
@@ -2321,7 +2321,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE SCOPE test SESSION 1h`,
 			str: `DEFINE SCOPE test SESSION 1h0m0s`,
 			res: &Query{Statements: []Statement{&DefineScopeStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"test"},
 				Time: 1 * time.Hour,
 			}}},
@@ -2330,7 +2330,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE SCOPE test SESSION 1d`,
 			str: `DEFINE SCOPE test SESSION 24h0m0s`,
 			res: &Query{Statements: []Statement{&DefineScopeStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"test"},
 				Time: 24 * time.Hour,
 			}}},
@@ -2339,7 +2339,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE SCOPE test SESSION 1w`,
 			str: `DEFINE SCOPE test SESSION 168h0m0s`,
 			res: &Query{Statements: []Statement{&DefineScopeStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"test"},
 				Time: 168 * time.Hour,
 			}}},
@@ -2351,11 +2351,11 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE SCOPE test SIGNUP AS (CREATE person)`,
 			res: &Query{Statements: []Statement{&DefineScopeStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"test"},
 				Signup: &SubExpression{
 					Expr: &CreateStatement{
-						RW: true, KV: "*", NS: "*", DB: "*",
+						KV: "*", NS: "*", DB: "*",
 						What: Exprs{&Ident{ID: "person"}},
 						Echo: AFTER,
 					},
@@ -2369,11 +2369,11 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE SCOPE test SIGNIN AS (SELECT * FROM person)`,
 			res: &Query{Statements: []Statement{&DefineScopeStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"test"},
 				Signin: &SubExpression{
 					Expr: &SelectStatement{
-						RW: false, KV: "*", NS: "*", DB: "*",
+						KV: "*", NS: "*", DB: "*",
 						Expr: []*Field{{Expr: &All{}, Field: "*"}},
 						What: []Expr{&Ident{"person"}},
 					},
@@ -2387,11 +2387,11 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE SCOPE test CONNECT AS (SELECT * FROM $id)`,
 			res: &Query{Statements: []Statement{&DefineScopeStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"test"},
 				Connect: &SubExpression{
 					Expr: &SelectStatement{
-						RW: false, KV: "*", NS: "*", DB: "*",
+						KV: "*", NS: "*", DB: "*",
 						Expr: []*Field{{Expr: &All{}, Field: "*"}},
 						What: []Expr{&Param{"id"}},
 					},
@@ -2418,7 +2418,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE TABLE person`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 			}}},
 		},
@@ -2430,7 +2430,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE TABLE person DROP`,
 			str: `DEFINE TABLE person DROP`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 				Drop: true,
 			}}},
@@ -2439,7 +2439,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			sql: `DEFINE TABLE person SCHEMALESS`,
 			str: `DEFINE TABLE person`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 				Full: false,
 			}}},
@@ -2447,7 +2447,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE TABLE person SCHEMAFULL`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 				Full: true,
 			}}},
@@ -2459,7 +2459,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE TABLE person PERMISSIONS NONE`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 				Perms: &PermExpression{
 					Select: false,
@@ -2472,7 +2472,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE TABLE person PERMISSIONS FULL`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 				Perms: &PermExpression{
 					Select: true,
@@ -2485,7 +2485,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE TABLE person PERMISSIONS WHERE public = true`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 				Perms: &PermExpression{
 					Select: &BinaryExpression{LHS: &Ident{"public"}, Op: EQ, RHS: true},
@@ -2506,7 +2506,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE TABLE person PERMISSIONS FOR select FULL FOR create, update, delete NONE`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 				Perms: &PermExpression{
 					Select: true,
@@ -2519,7 +2519,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE TABLE person PERMISSIONS FOR select, create, update WHERE public = true FOR delete NONE`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 				Perms: &PermExpression{
 					Select: &BinaryExpression{LHS: &Ident{"public"}, Op: EQ, RHS: true},
@@ -2536,7 +2536,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE TABLE person AS SELECT nationality, count(*) AS total FROM users WHERE public = true GROUP BY nationality`,
 			res: &Query{Statements: []Statement{&DefineTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 				Lock: true,
 				Expr: Fields{
@@ -2609,7 +2609,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE EVENT temp ON person WHEN $before.price < $after.price THEN (UPDATE $this SET increased = true)`,
 			res: &Query{Statements: []Statement{&DefineEventStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				When: &BinaryExpression{
@@ -2619,7 +2619,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 				},
 				Then: &SubExpression{
 					Expr: &UpdateStatement{
-						RW: true, KV: "*", NS: "*", DB: "*",
+						KV: "*", NS: "*", DB: "*",
 						What: Exprs{&Param{"this"}},
 						Data: &DataExpression{[]*ItemExpression{
 							{
@@ -2653,7 +2653,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 			}}},
@@ -2669,7 +2669,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person TYPE url`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "url",
@@ -2678,7 +2678,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person TYPE email`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "email",
@@ -2687,7 +2687,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person TYPE phone`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "phone",
@@ -2696,7 +2696,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person TYPE array`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "array",
@@ -2705,7 +2705,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person TYPE object`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "object",
@@ -2714,7 +2714,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person TYPE string`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "string",
@@ -2723,7 +2723,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person TYPE number`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "number",
@@ -2732,7 +2732,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person TYPE double`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "double",
@@ -2741,7 +2741,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person TYPE record`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "record",
@@ -2750,7 +2750,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person TYPE record (item)`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "record",
@@ -2764,7 +2764,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person VALUE string.uppercase($value)`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name:  &Ident{"temp"},
 				What:  Tables{&Table{"person"}},
 				Value: &FuncExpression{Name: "string.uppercase", Args: Exprs{&Param{"value"}}},
@@ -2777,7 +2777,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person ASSERT $value > 0 AND $value < 100`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Assert: &BinaryExpression{
@@ -2802,7 +2802,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person PERMISSIONS NONE`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Perms: &PermExpression{
@@ -2816,7 +2816,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person PERMISSIONS FULL`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Perms: &PermExpression{
@@ -2830,7 +2830,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person PERMISSIONS WHERE public = true`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Perms: &PermExpression{
@@ -2852,7 +2852,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person PERMISSIONS FOR select FULL FOR create, update, delete NONE`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Perms: &PermExpression{
@@ -2866,7 +2866,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE FIELD temp ON person PERMISSIONS FOR select, create, update WHERE public = true FOR delete NONE`,
 			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Perms: &PermExpression{
@@ -2905,7 +2905,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE INDEX temp ON person COLUMNS firstname, lastname`,
 			res: &Query{Statements: []Statement{&DefineIndexStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Cols: Idents{&Ident{"firstname"}, &Ident{"lastname"}},
@@ -2915,7 +2915,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		{
 			sql: `DEFINE INDEX temp ON person COLUMNS firstname, lastname UNIQUE`,
 			res: &Query{Statements: []Statement{&DefineIndexStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Cols: Idents{&Ident{"firstname"}, &Ident{"lastname"}},
@@ -2961,7 +2961,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE NAMESPACE test`,
 			res: &Query{Statements: []Statement{&RemoveNamespaceStatement{
-				RW: true, KV: "*", NS: "*", DB: "*", Name: &Ident{"test"},
+				KV: "*", NS: "*", DB: "*", Name: &Ident{"test"},
 			}}},
 		},
 		{
@@ -2984,7 +2984,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE DATABASE test`,
 			res: &Query{Statements: []Statement{&RemoveDatabaseStatement{
-				RW: true, KV: "*", NS: "*", DB: "*", Name: &Ident{"test"},
+				KV: "*", NS: "*", DB: "*", Name: &Ident{"test"},
 			}}},
 		},
 		{
@@ -3019,7 +3019,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE LOGIN test ON NAMESPACE`,
 			res: &Query{Statements: []Statement{&RemoveLoginStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: NAMESPACE,
 				User: &Ident{"test"},
 			}}},
@@ -3027,7 +3027,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE LOGIN test ON DATABASE`,
 			res: &Query{Statements: []Statement{&RemoveLoginStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: DATABASE,
 				User: &Ident{"test"},
 			}}},
@@ -3064,7 +3064,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE TOKEN test ON NAMESPACE`,
 			res: &Query{Statements: []Statement{&RemoveTokenStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: NAMESPACE,
 				Name: &Ident{"test"},
 			}}},
@@ -3072,7 +3072,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE TOKEN test ON DATABASE`,
 			res: &Query{Statements: []Statement{&RemoveTokenStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: DATABASE,
 				Name: &Ident{"test"},
 			}}},
@@ -3080,7 +3080,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE TOKEN test ON SCOPE`,
 			res: &Query{Statements: []Statement{&RemoveTokenStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Kind: SCOPE,
 				Name: &Ident{"test"},
 			}}},
@@ -3105,7 +3105,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE SCOPE test`,
 			res: &Query{Statements: []Statement{&RemoveScopeStatement{
-				RW: true, KV: "*", NS: "*", DB: "*", Name: &Ident{"test"},
+				KV: "*", NS: "*", DB: "*", Name: &Ident{"test"},
 			}}},
 		},
 		{
@@ -3128,7 +3128,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE TABLE person`,
 			res: &Query{Statements: []Statement{&RemoveTableStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				What: Tables{&Table{"person"}},
 			}}},
 		},
@@ -3152,7 +3152,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE EVENT temp ON person`,
 			res: &Query{Statements: []Statement{&RemoveEventStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 			}}},
@@ -3177,7 +3177,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE FIELD temp ON person`,
 			res: &Query{Statements: []Statement{&RemoveFieldStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 			}}},
@@ -3202,7 +3202,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		{
 			sql: `REMOVE INDEX temp ON person`,
 			res: &Query{Statements: []Statement{&RemoveIndexStatement{
-				RW: true, KV: "*", NS: "*", DB: "*",
+				KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 			}}},

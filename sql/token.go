@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err error) {
 
-	stmt = &DefineTokenStatement{RW: true}
+	stmt = &DefineTokenStatement{}
 
 	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
@@ -83,7 +83,7 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 
 func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err error) {
 
-	stmt = &RemoveTokenStatement{RW: true}
+	stmt = &RemoveTokenStatement{}
 
 	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err

@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDefineEventStatement() (stmt *DefineEventStatement, err error) {
 
-	stmt = &DefineEventStatement{RW: true}
+	stmt = &DefineEventStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func (p *parser) parseDefineEventStatement() (stmt *DefineEventStatement, err er
 
 func (p *parser) parseRemoveEventStatement() (stmt *RemoveEventStatement, err error) {
 
-	stmt = &RemoveEventStatement{RW: true}
+	stmt = &RemoveEventStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err

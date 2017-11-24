@@ -19,7 +19,7 @@
 package sql
 
 func (s *InfoStatement) Writeable() bool {
-	return s.RW
+	return false
 }
 
 func (s *IfStatement) Writeable() bool {
@@ -35,11 +35,11 @@ func (s *ReturnStatement) Writeable() bool {
 }
 
 func (s *LiveStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *KillStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *SelectStatement) Writeable() bool {
@@ -47,97 +47,97 @@ func (s *SelectStatement) Writeable() bool {
 }
 
 func (s *CreateStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *UpdateStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *DeleteStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *RelateStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *InsertStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *UpsertStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *DefineNamespaceStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *RemoveNamespaceStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *DefineDatabaseStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *RemoveDatabaseStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *DefineLoginStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *RemoveLoginStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *DefineTokenStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *RemoveTokenStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *DefineScopeStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *RemoveScopeStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *DefineTableStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *RemoveTableStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *DefineEventStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *RemoveEventStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *DefineFieldStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *RemoveFieldStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *DefineIndexStatement) Writeable() bool {
-	return s.RW
+	return true
 }
 
 func (s *RemoveIndexStatement) Writeable() bool {
-	return s.RW
+	return true
 }

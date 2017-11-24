@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err error) {
 
-	stmt = &DefineIndexStatement{RW: true}
+	stmt = &DefineIndexStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err er
 
 func (p *parser) parseRemoveIndexStatement() (stmt *RemoveIndexStatement, err error) {
 
-	stmt = &RemoveIndexStatement{RW: true}
+	stmt = &RemoveIndexStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err

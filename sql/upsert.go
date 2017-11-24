@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseUpsertStatement() (stmt *UpsertStatement, err error) {
 
-	stmt = &UpsertStatement{RW: true}
+	stmt = &UpsertStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err

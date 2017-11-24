@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 
-	stmt = &InfoStatement{RW: false}
+	stmt = &InfoStatement{}
 
 	if _, _, err = p.shouldBe(FOR); err != nil {
 		return nil, err

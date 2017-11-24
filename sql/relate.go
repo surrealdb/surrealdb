@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseRelateStatement() (stmt *RelateStatement, err error) {
 
-	stmt = &RelateStatement{RW: true}
+	stmt = &RelateStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err

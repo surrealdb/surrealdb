@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
 
-	stmt = &DeleteStatement{RW: true}
+	stmt = &DeleteStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err

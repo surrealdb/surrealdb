@@ -82,7 +82,6 @@ type UseStatement struct {
 
 // InfoStatement represents an SQL INFO statement.
 type InfoStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -131,7 +130,6 @@ type ReturnStatement struct {
 
 // LiveStatement represents a SQL LIVE statement.
 type LiveStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	ID   string `cork:"ID" codec:"ID"`
 	FB   string `cork:"FB" codec:"FB"`
 	KV   string `cork:"KV" codec:"KV"`
@@ -145,7 +143,6 @@ type LiveStatement struct {
 
 // KillStatement represents a SQL KILL statement.
 type KillStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	FB   string `cork:"FB" codec:"FB"`
 	KV   string `cork:"KV" codec:"KV"`
 	NS   string `cork:"NS" codec:"NS"`
@@ -173,7 +170,6 @@ type SelectStatement struct {
 
 // CreateStatement represents a SQL CREATE statement.
 type CreateStatement struct {
-	RW       bool          `cork:"-" codec:"-"`
 	KV       string        `cork:"KV" codec:"KV"`
 	NS       string        `cork:"NS" codec:"NS"`
 	DB       string        `cork:"DB" codec:"DB"`
@@ -186,7 +182,6 @@ type CreateStatement struct {
 
 // UpdateStatement represents a SQL UPDATE statement.
 type UpdateStatement struct {
-	RW       bool          `cork:"-" codec:"-"`
 	KV       string        `cork:"KV" codec:"KV"`
 	NS       string        `cork:"NS" codec:"NS"`
 	DB       string        `cork:"DB" codec:"DB"`
@@ -200,7 +195,6 @@ type UpdateStatement struct {
 
 // DeleteStatement represents a SQL DELETE statement.
 type DeleteStatement struct {
-	RW       bool          `cork:"-" codec:"-"`
 	KV       string        `cork:"KV" codec:"KV"`
 	NS       string        `cork:"NS" codec:"NS"`
 	DB       string        `cork:"DB" codec:"DB"`
@@ -214,7 +208,6 @@ type DeleteStatement struct {
 
 // RelateStatement represents a SQL RELATE statement.
 type RelateStatement struct {
-	RW       bool          `cork:"-" codec:"-"`
 	KV       string        `cork:"KV" codec:"KV"`
 	NS       string        `cork:"NS" codec:"NS"`
 	DB       string        `cork:"DB" codec:"DB"`
@@ -230,7 +223,6 @@ type RelateStatement struct {
 
 // InsertStatement represents a SQL INSERT statement.
 type InsertStatement struct {
-	RW       bool          `cork:"-" codec:"-"`
 	KV       string        `cork:"KV" codec:"KV"`
 	NS       string        `cork:"NS" codec:"NS"`
 	DB       string        `cork:"DB" codec:"DB"`
@@ -243,7 +235,6 @@ type InsertStatement struct {
 
 // UpsertStatement represents a SQL UPSERT statement.
 type UpsertStatement struct {
-	RW       bool          `cork:"-" codec:"-"`
 	KV       string        `cork:"KV" codec:"KV"`
 	NS       string        `cork:"NS" codec:"NS"`
 	DB       string        `cork:"DB" codec:"DB"`
@@ -259,7 +250,6 @@ type UpsertStatement struct {
 // --------------------------------------------------
 
 type DefineNamespaceStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -267,7 +257,6 @@ type DefineNamespaceStatement struct {
 }
 
 type RemoveNamespaceStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -279,7 +268,6 @@ type RemoveNamespaceStatement struct {
 // --------------------------------------------------
 
 type DefineDatabaseStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -287,7 +275,6 @@ type DefineDatabaseStatement struct {
 }
 
 type RemoveDatabaseStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -300,7 +287,6 @@ type RemoveDatabaseStatement struct {
 
 // DefineLoginStatement represents an SQL DEFINE LOGIN statement.
 type DefineLoginStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -312,7 +298,6 @@ type DefineLoginStatement struct {
 
 // RemoveLoginStatement represents an SQL REMOVE LOGIN statement.
 type RemoveLoginStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -326,7 +311,6 @@ type RemoveLoginStatement struct {
 
 // DefineTokenStatement represents an SQL DEFINE TOKEN statement.
 type DefineTokenStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -338,7 +322,6 @@ type DefineTokenStatement struct {
 
 // RemoveTokenStatement represents an SQL REMOVE TOKEN statement.
 type RemoveTokenStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -352,7 +335,6 @@ type RemoveTokenStatement struct {
 
 // DefineScopeStatement represents an SQL DEFINE SCOPE statement.
 type DefineScopeStatement struct {
-	RW      bool          `cork:"-" codec:"-"`
 	KV      string        `cork:"-" codec:"-"`
 	NS      string        `cork:"-" codec:"-"`
 	DB      string        `cork:"-" codec:"-"`
@@ -366,7 +348,6 @@ type DefineScopeStatement struct {
 
 // RemoveScopeStatement represents an SQL REMOVE SCOPE statement.
 type RemoveScopeStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -379,7 +360,6 @@ type RemoveScopeStatement struct {
 
 // DefineTableStatement represents an SQL DEFINE TABLE statement.
 type DefineTableStatement struct {
-	RW    bool   `cork:"-" codec:"-"`
 	KV    string `cork:"-" codec:"-"`
 	NS    string `cork:"-" codec:"-"`
 	DB    string `cork:"-" codec:"-"`
@@ -397,7 +377,6 @@ type DefineTableStatement struct {
 
 // RemoveTableStatement represents an SQL REMOVE TABLE statement.
 type RemoveTableStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -410,7 +389,6 @@ type RemoveTableStatement struct {
 
 // DefineEventStatement represents an SQL DEFINE EVENT statement.
 type DefineEventStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -422,7 +400,6 @@ type DefineEventStatement struct {
 
 // RemoveEventStatement represents an SQL REMOVE EVENT statement.
 type RemoveEventStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -436,7 +413,6 @@ type RemoveEventStatement struct {
 
 // DefineFieldStatement represents an SQL DEFINE FIELD statement.
 type DefineFieldStatement struct {
-	RW     bool   `cork:"-" codec:"-"`
 	KV     string `cork:"-" codec:"-"`
 	NS     string `cork:"-" codec:"-"`
 	DB     string `cork:"-" codec:"-"`
@@ -451,7 +427,6 @@ type DefineFieldStatement struct {
 
 // RemoveFieldStatement represents an SQL REMOVE FIELD statement.
 type RemoveFieldStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -465,7 +440,6 @@ type RemoveFieldStatement struct {
 
 // DefineIndexStatement represents an SQL DEFINE INDEX statement.
 type DefineIndexStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`
@@ -477,7 +451,6 @@ type DefineIndexStatement struct {
 
 // RemoveIndexStatement represents an SQL REMOVE INDEX statement.
 type RemoveIndexStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
 	KV   string `cork:"-" codec:"-"`
 	NS   string `cork:"-" codec:"-"`
 	DB   string `cork:"-" codec:"-"`

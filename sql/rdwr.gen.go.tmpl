@@ -17,7 +17,7 @@ package sql
 {{with $types := .}}{{range $k := $types}}
 
 func (s *{{$k.name}}Statement) Writeable() bool {
-	return s.RW
+	return {{if $k.a}}s.RW{{else}}{{if $k.y}}true{{else}}false{{end}}{{end}}
 }
 
 {{end}}{{end}}

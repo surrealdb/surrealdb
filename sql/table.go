@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err error) {
 
-	stmt = &DefineTableStatement{RW: true}
+	stmt = &DefineTableStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err
@@ -99,7 +99,7 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 
 func (p *parser) parseRemoveTableStatement() (stmt *RemoveTableStatement, err error) {
 
-	stmt = &RemoveTableStatement{RW: true}
+	stmt = &RemoveTableStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 		return nil, err

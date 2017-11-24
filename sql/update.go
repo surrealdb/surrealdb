@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseUpdateStatement() (stmt *UpdateStatement, err error) {
 
-	stmt = &UpdateStatement{RW: true}
+	stmt = &UpdateStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err

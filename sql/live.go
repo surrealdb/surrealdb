@@ -16,7 +16,7 @@ package sql
 
 func (p *parser) parseLiveStatement() (stmt *LiveStatement, err error) {
 
-	stmt = &LiveStatement{RW: true}
+	stmt = &LiveStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func (p *parser) parseLiveStatement() (stmt *LiveStatement, err error) {
 
 func (p *parser) parseKillStatement() (stmt *KillStatement, err error) {
 
-	stmt = &KillStatement{RW: true}
+	stmt = &KillStatement{}
 
 	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
 		return nil, err

@@ -26,188 +26,188 @@ import (
 
 func TestRdwr(t *testing.T) {
 
-	Convey("InfoStatement should auth correctly", t, func() {
-		s := &InfoStatement{RW: true}
+	Convey("InfoStatement should rdwr correctly", t, func() {
+		s := &InfoStatement{}
 		w := s.Writeable()
-		So(w, ShouldEqual, true)
+		So(w, ShouldEqual, false)
 	})
 
-	Convey("IfStatement should auth correctly", t, func() {
+	Convey("IfStatement should rdwr correctly", t, func() {
 		s := &IfStatement{RW: true}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("LetStatement should auth correctly", t, func() {
+	Convey("LetStatement should rdwr correctly", t, func() {
 		s := &LetStatement{RW: true}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("ReturnStatement should auth correctly", t, func() {
+	Convey("ReturnStatement should rdwr correctly", t, func() {
 		s := &ReturnStatement{RW: true}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("LiveStatement should auth correctly", t, func() {
-		s := &LiveStatement{RW: true}
+	Convey("LiveStatement should rdwr correctly", t, func() {
+		s := &LiveStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("KillStatement should auth correctly", t, func() {
-		s := &KillStatement{RW: true}
+	Convey("KillStatement should rdwr correctly", t, func() {
+		s := &KillStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("SelectStatement should auth correctly", t, func() {
+	Convey("SelectStatement should rdwr correctly", t, func() {
 		s := &SelectStatement{RW: true}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("CreateStatement should auth correctly", t, func() {
-		s := &CreateStatement{RW: true}
+	Convey("CreateStatement should rdwr correctly", t, func() {
+		s := &CreateStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("UpdateStatement should auth correctly", t, func() {
-		s := &UpdateStatement{RW: true}
+	Convey("UpdateStatement should rdwr correctly", t, func() {
+		s := &UpdateStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("DeleteStatement should auth correctly", t, func() {
-		s := &DeleteStatement{RW: true}
+	Convey("DeleteStatement should rdwr correctly", t, func() {
+		s := &DeleteStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("RelateStatement should auth correctly", t, func() {
-		s := &RelateStatement{RW: true}
+	Convey("RelateStatement should rdwr correctly", t, func() {
+		s := &RelateStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("InsertStatement should auth correctly", t, func() {
-		s := &InsertStatement{RW: true}
+	Convey("InsertStatement should rdwr correctly", t, func() {
+		s := &InsertStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("UpsertStatement should auth correctly", t, func() {
-		s := &UpsertStatement{RW: true}
+	Convey("UpsertStatement should rdwr correctly", t, func() {
+		s := &UpsertStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("DefineNamespaceStatement should auth correctly", t, func() {
-		s := &DefineNamespaceStatement{RW: true}
+	Convey("DefineNamespaceStatement should rdwr correctly", t, func() {
+		s := &DefineNamespaceStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("RemoveNamespaceStatement should auth correctly", t, func() {
-		s := &RemoveNamespaceStatement{RW: true}
+	Convey("RemoveNamespaceStatement should rdwr correctly", t, func() {
+		s := &RemoveNamespaceStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("DefineDatabaseStatement should auth correctly", t, func() {
-		s := &DefineDatabaseStatement{RW: true}
+	Convey("DefineDatabaseStatement should rdwr correctly", t, func() {
+		s := &DefineDatabaseStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("RemoveDatabaseStatement should auth correctly", t, func() {
-		s := &RemoveDatabaseStatement{RW: true}
+	Convey("RemoveDatabaseStatement should rdwr correctly", t, func() {
+		s := &RemoveDatabaseStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("DefineLoginStatement should auth correctly", t, func() {
-		s := &DefineLoginStatement{RW: true}
+	Convey("DefineLoginStatement should rdwr correctly", t, func() {
+		s := &DefineLoginStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("RemoveLoginStatement should auth correctly", t, func() {
-		s := &RemoveLoginStatement{RW: true}
+	Convey("RemoveLoginStatement should rdwr correctly", t, func() {
+		s := &RemoveLoginStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("DefineTokenStatement should auth correctly", t, func() {
-		s := &DefineTokenStatement{RW: true}
+	Convey("DefineTokenStatement should rdwr correctly", t, func() {
+		s := &DefineTokenStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("RemoveTokenStatement should auth correctly", t, func() {
-		s := &RemoveTokenStatement{RW: true}
+	Convey("RemoveTokenStatement should rdwr correctly", t, func() {
+		s := &RemoveTokenStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("DefineScopeStatement should auth correctly", t, func() {
-		s := &DefineScopeStatement{RW: true}
+	Convey("DefineScopeStatement should rdwr correctly", t, func() {
+		s := &DefineScopeStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("RemoveScopeStatement should auth correctly", t, func() {
-		s := &RemoveScopeStatement{RW: true}
+	Convey("RemoveScopeStatement should rdwr correctly", t, func() {
+		s := &RemoveScopeStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("DefineTableStatement should auth correctly", t, func() {
-		s := &DefineTableStatement{RW: true}
+	Convey("DefineTableStatement should rdwr correctly", t, func() {
+		s := &DefineTableStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("RemoveTableStatement should auth correctly", t, func() {
-		s := &RemoveTableStatement{RW: true}
+	Convey("RemoveTableStatement should rdwr correctly", t, func() {
+		s := &RemoveTableStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("DefineEventStatement should auth correctly", t, func() {
-		s := &DefineEventStatement{RW: true}
+	Convey("DefineEventStatement should rdwr correctly", t, func() {
+		s := &DefineEventStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("RemoveEventStatement should auth correctly", t, func() {
-		s := &RemoveEventStatement{RW: true}
+	Convey("RemoveEventStatement should rdwr correctly", t, func() {
+		s := &RemoveEventStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("DefineFieldStatement should auth correctly", t, func() {
-		s := &DefineFieldStatement{RW: true}
+	Convey("DefineFieldStatement should rdwr correctly", t, func() {
+		s := &DefineFieldStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("RemoveFieldStatement should auth correctly", t, func() {
-		s := &RemoveFieldStatement{RW: true}
+	Convey("RemoveFieldStatement should rdwr correctly", t, func() {
+		s := &RemoveFieldStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("DefineIndexStatement should auth correctly", t, func() {
-		s := &DefineIndexStatement{RW: true}
+	Convey("DefineIndexStatement should rdwr correctly", t, func() {
+		s := &DefineIndexStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
 
-	Convey("RemoveIndexStatement should auth correctly", t, func() {
-		s := &RemoveIndexStatement{RW: true}
+	Convey("RemoveIndexStatement should rdwr correctly", t, func() {
+		s := &RemoveIndexStatement{}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
