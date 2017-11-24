@@ -79,6 +79,7 @@ type Options struct {
 		Key  []byte        // Data encryption key
 		Code string        // Data encryption key string
 		Path string        // Path to store the data file
+		Type string        // HTTP scheme type to use
 		Host string        // Surreal host to connect to
 		Port string        // Surreal port to connect to
 		Base string        // Base key to use in KV stores

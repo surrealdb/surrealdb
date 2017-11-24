@@ -60,11 +60,20 @@ var importCmd = &cobra.Command{
 
 		defer fle.Close()
 
+		// Check to see if the http request type has
+		// been specified as eith 'http' or 'https'
+		// as these are the only supported schemes.
+
+		if opts.DB.Type != "http" && opts.DB.Type != "https" {
+			log.Fatalln("Connection failed - please specify 'http' or 'https' for the scheme.")
+			return
+		}
+
 		// Configure the export connection endpoint url
 		// and specify the authentication header using
 		// basic auth for root login.
 
-		url := fmt.Sprintf("https://%s@%s:%s/import", opts.Auth.Auth, opts.DB.Host, opts.DB.Port)
+		url := fmt.Sprintf("%s://%s@%s:%s/import", opts.DB.Type, opts.Auth.Auth, opts.DB.Host, opts.DB.Port)
 
 		// Create a new http request object that we
 		// can use to connect to the import endpoint
@@ -123,6 +132,7 @@ var importCmd = &cobra.Command{
 func init() {
 
 	importCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master authentication details to use when connecting.")
+	importCmd.PersistentFlags().StringVar(&opts.DB.Type, "scheme", "https", "HTTP connection scheme to use to connect to the database.")
 	importCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "surreal.io", "Database server host to connect to.")
 	importCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "80", "Database server port to connect to.")
 
