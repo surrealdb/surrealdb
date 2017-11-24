@@ -424,7 +424,7 @@ func (d *document) storeIndex() (err error) {
 			}
 			for _, n := range now {
 				nidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: n}
-				if _, err = d.i.e.dbo.PutC(d.now, nidx.Encode(), d.id.Bytes(), nil); err != nil {
+				if _, err = d.i.e.dbo.PutC(0, nidx.Encode(), d.id.Bytes(), nil); err != nil {
 					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: n}
 				}
 			}
@@ -437,7 +437,7 @@ func (d *document) storeIndex() (err error) {
 			}
 			for _, n := range now {
 				nidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: n, ID: d.key.ID}
-				if _, err = d.i.e.dbo.PutC(d.now, nidx.Encode(), d.id.Bytes(), nil); err != nil {
+				if _, err = d.i.e.dbo.PutC(0, nidx.Encode(), d.id.Bytes(), nil); err != nil {
 					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: n}
 				}
 			}
@@ -474,14 +474,14 @@ func (d *document) purgeIndex() (err error) {
 		if ix.Uniq == true {
 			for _, o := range old {
 				key := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: o}
-				d.i.e.dbo.DelC(d.now, key.Encode(), d.id.Bytes())
+				d.i.e.dbo.DelC(0, key.Encode(), d.id.Bytes())
 			}
 		}
 
 		if ix.Uniq == false {
 			for _, o := range old {
 				key := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: o, ID: d.key.ID}
-				d.i.e.dbo.DelC(d.now, key.Encode(), d.id.Bytes())
+				d.i.e.dbo.DelC(0, key.Encode(), d.id.Bytes())
 			}
 		}
 
