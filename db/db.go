@@ -223,8 +223,6 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 
 	executor := newExecutor()
 
-	defer executor.reset()
-
 	go executor.execute(ctx, ast)
 
 	// Wait for all of the processed queries to

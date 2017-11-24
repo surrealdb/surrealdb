@@ -47,13 +47,6 @@ func newExecutor() (e *executor) {
 
 }
 
-func (e *executor) reset() {
-
-	e.send = nil
-	executorPool.Put(e)
-
-}
-
 func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 
 	var err error
