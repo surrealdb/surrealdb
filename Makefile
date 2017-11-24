@@ -36,7 +36,7 @@ setup:
 
 .PHONY: tests
 tests:
-	$(GO) test -v ./...
+	$(GO) test ./...
 
 .PHONY: build
 build: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
