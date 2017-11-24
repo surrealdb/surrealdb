@@ -819,6 +819,40 @@ func (this Polygon) MarshalJSON() (data []byte, err error) {
 // ##################################################
 
 // --------------------------------------------------
+// IfStatement
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&IfStatement{})
+}
+
+func (this *IfStatement) Decode(src []byte) {
+	pack.Decode(src, this)
+}
+
+func (this *IfStatement) Encode() (dst []byte) {
+	return pack.Encode(this)
+}
+
+func (this *IfStatement) ExtendCORK() byte {
+	return 0x71
+}
+
+func (this *IfStatement) MarshalCORK(w *cork.Writer) (err error) {
+	w.EncodeAny(this.Cond)
+	w.EncodeAny(this.Then)
+	w.EncodeAny(this.Else)
+	return
+}
+
+func (this *IfStatement) UnmarshalCORK(r *cork.Reader) (err error) {
+	r.DecodeAny(&this.Cond)
+	r.DecodeAny(&this.Then)
+	r.DecodeAny(&this.Else)
+	return
+}
+
+// --------------------------------------------------
 // LiveStatement
 // --------------------------------------------------
 
