@@ -24,7 +24,75 @@ import (
 
 func TestSelect(t *testing.T) {
 
-	Convey("Select records from multiple tables", t, func() {
+	Convey("Select records from one thing", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:1;
+		CREATE person:test;
+		SELECT * FROM person:1;
+		SELECT * FROM person:test;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+
+	})
+
+	Convey("Select records from one thing using quotes", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:1;
+		CREATE person:test;
+		SELECT * FROM person:⟨1⟩;
+		SELECT * FROM person:⟨test⟩;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+
+	})
+
+	Convey("Select records from one table", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:test;
+		CREATE |person:10|;
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 10)
+		So(res[3].Result, ShouldHaveLength, 11)
+
+	})
+
+	Convey("Select records from multiple things", t, func() {
 
 		setupDB()
 

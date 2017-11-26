@@ -261,6 +261,7 @@ func TestCreate(t *testing.T) {
 		USE NS test DB test;
 		CREATE person:1;
 		CREATE person:1.0;
+		CREATE person:1.0000;
 		CREATE person:⟨1⟩;
 		CREATE person:⟨1.0⟩;
 		CREATE person:⟨1.0000⟩;
@@ -269,7 +270,7 @@ func TestCreate(t *testing.T) {
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 7)
+		So(res, ShouldHaveLength, 8)
 		So(res[1].Result, ShouldHaveLength, 1)
 		So(res[2].Status, ShouldEqual, "ERR_KV")
 		So(res[2].Detail, ShouldEqual, "Database record 'person:1' already exists")
@@ -279,7 +280,9 @@ func TestCreate(t *testing.T) {
 		So(res[4].Detail, ShouldEqual, "Database record 'person:1' already exists")
 		So(res[5].Status, ShouldEqual, "ERR_KV")
 		So(res[5].Detail, ShouldEqual, "Database record 'person:1' already exists")
-		So(res[6].Result, ShouldHaveLength, 1)
+		So(res[6].Status, ShouldEqual, "ERR_KV")
+		So(res[6].Detail, ShouldEqual, "Database record 'person:1' already exists")
+		So(res[7].Result, ShouldHaveLength, 1)
 
 	})
 
