@@ -95,12 +95,12 @@ func (e *executor) fetchSelect(ctx context.Context, stm *sql.SelectStatement, do
 		return nil, err
 	}
 
-	lim, err := e.fetchLimit(ctx, stm.Limit)
+	cnt, err := e.fetchOutputs(ctx, stm)
 	if err != nil {
 		return nil, err
 	}
 
-	switch lim {
+	switch cnt {
 	case 1:
 		switch len(stm.Expr) {
 		case 1:

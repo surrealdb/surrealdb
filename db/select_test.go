@@ -159,6 +159,28 @@ func TestSelect(t *testing.T) {
 
 	})
 
+	Convey("Select records using an * subquery, specifying a single record", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:1 SET name="Tobias";
+		CREATE person:2 SET name="Silvana";
+		CREATE person:3 SET name="Jonathan";
+		CREATE person:4 SET name="Benjamin";
+		CREATE person:5 SET name="Alexander";
+		SELECT * FROM (SELECT * FROM person:5);
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 7)
+		So(res[6].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[6].Result[0]).Get("name").Data(), ShouldEqual, "Alexander")
+
+	})
+
 	Convey("Select records using an id subquery", t, func() {
 
 		setupDB()
@@ -194,6 +216,28 @@ func TestSelect(t *testing.T) {
 		CREATE person:4 SET name="Benjamin";
 		CREATE person:5 SET name="Alexander";
 		SELECT * FROM (SELECT id FROM (SELECT * FROM person ORDER BY name) LIMIT 1);
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 7)
+		So(res[6].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[6].Result[0]).Get("name").Data(), ShouldEqual, "Alexander")
+
+	})
+
+	Convey("Select records using an id subquery, specifying a single record", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:1 SET name="Tobias";
+		CREATE person:2 SET name="Silvana";
+		CREATE person:3 SET name="Jonathan";
+		CREATE person:4 SET name="Benjamin";
+		CREATE person:5 SET name="Alexander";
+		SELECT * FROM (SELECT id FROM (SELECT * FROM person:5));
 		`
 
 		res, err := Execute(setupKV(), txt, nil)

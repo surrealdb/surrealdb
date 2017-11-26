@@ -275,6 +275,23 @@ func (e *executor) fetchVersion(ctx context.Context, val sql.Expr) (int64, error
 
 }
 
+func (e *executor) fetchOutputs(ctx context.Context, stm *sql.SelectStatement) (int, error) {
+
+	l, err := e.fetchLimit(ctx, stm.Limit)
+	if err != nil {
+		return -1, err
+	}
+
+	if len(stm.What) == 1 {
+		if _, ok := stm.What[0].(*sql.Thing); ok {
+			l = 1
+		}
+	}
+
+	return l, nil
+
+}
+
 func calcAsBool(i interface{}) bool {
 
 	switch v := i.(type) {
