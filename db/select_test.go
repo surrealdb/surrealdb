@@ -86,7 +86,7 @@ func TestSelect(t *testing.T) {
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 1)
 		So(res[2].Result, ShouldHaveLength, 1)
-		So(data.Consume(res[1].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 36)
+		So(data.Consume(res[1].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 20)
 		So(data.Consume(res[1].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person")
 
 	})

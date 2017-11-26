@@ -82,7 +82,7 @@ func TestCreate(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 1)
-		So(data.Consume(res[1].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 36)
+		So(data.Consume(res[1].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 20)
 		So(data.Consume(res[1].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person")
 
 	})
@@ -136,8 +136,8 @@ func TestCreate(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 100)
-		So(data.Consume(res[1].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 36)
-		So(data.Consume(res[1].Result[99]).Get("meta.id").Data(), ShouldHaveLength, 36)
+		So(data.Consume(res[1].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 20)
+		So(data.Consume(res[1].Result[99]).Get("meta.id").Data(), ShouldHaveLength, 20)
 
 	})
 

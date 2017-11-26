@@ -21,8 +21,8 @@ import (
 
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
+	"github.com/abcum/surreal/util/guid"
 	"github.com/abcum/surreal/util/keys"
-	"github.com/abcum/surreal/util/uuid"
 )
 
 func (e *executor) executeRelate(ctx context.Context, stm *sql.RelateStatement) ([]interface{}, error) {
@@ -53,11 +53,11 @@ func (e *executor) executeRelate(ctx context.Context, stm *sql.RelateStatement) 
 		return nil, fmt.Errorf("Can not execute RELATE query using value '%v'", what)
 
 	case *sql.Table:
-		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: uuid.NewV4().String()}
+		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: guid.New().String()}
 		i.processThing(ctx, key)
 
 	case *sql.Ident:
-		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, ID: uuid.NewV4().String()}
+		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, ID: guid.New().String()}
 		i.processThing(ctx, key)
 
 	}

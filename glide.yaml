@@ -61,6 +61,8 @@ import:
 - package: google.golang.org/genproto
   subpackages:
   - googleapis/api/monitoredres
+- package: github.com/rs/xid
+  version: ^1.1.0
 testImport:
 - package: github.com/smartystreets/goconvey
   version: ^1.6.3

@@ -1,5 +1,5 @@
-hash: 38028d7190e274aa6aa1346ce217556592f8c27eade989507685da3959323eaf
-updated: 2017-11-23T13:36:00.529593Z
+hash: 2cdf97833582dc0d969ea9de15f67a99cf9fc5f4689f13a246b1e26a774faf7d
+updated: 2017-11-26T16:33:32.201745Z
 imports:
 - name: cloud.google.com/go
   version: 2d3a6656c17a60b0815b7e06ab0be04eacb6e613
@@ -155,6 +155,8 @@ imports:
   - internal/utilization
 - name: github.com/pkg/profile
   version: 5b67d428864e92711fcbd2f8629456121a56d91f
+- name: github.com/rs/xid
+  version: 02dd45c33376f85d1064355dc790dcc4850596b1
 - name: github.com/satori/go.uuid
   version: 879c5887cd475cd7864858769793b2ceb0d44feb
 - name: github.com/sean-/seed

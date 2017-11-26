@@ -28,11 +28,11 @@ import (
 	"github.com/abcum/surreal/util/comp"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/fncs"
+	"github.com/abcum/surreal/util/guid"
 	"github.com/abcum/surreal/util/ints"
 	"github.com/abcum/surreal/util/keys"
 	"github.com/abcum/surreal/util/nums"
 	"github.com/abcum/surreal/util/rand"
-	"github.com/abcum/surreal/util/uuid"
 )
 
 type iterator struct {
@@ -650,7 +650,7 @@ func (i *iterator) processModel(ctx context.Context, key *keys.Thing, qry *sql.M
 
 			if i.checkState(ctx) {
 				key := key.Copy()
-				key.ID = uuid.NewV4().String()
+				key.ID = guid.New().String()
 				i.submitTask(key, nil, nil)
 				continue
 			}
@@ -805,7 +805,7 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 
 				if i.checkState(ctx) {
 					key := key.Copy()
-					key.ID = uuid.NewV4().String()
+					key.ID = guid.New().String()
 					i.submitTask(key, nil, data.Consume(val))
 					continue
 				}

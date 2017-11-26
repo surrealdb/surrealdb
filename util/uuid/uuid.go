@@ -54,7 +54,11 @@ func NewV5(ns uuid.UUID, name string) *UUID {
 	return &UUID{uuid.NewV5(ns, name)}
 }
 
-// GetUUID parses and checks for a valid UUID string, and returns Nil if not valid.
-func GetUUID(input string) *UUID {
-	return &UUID{uuid.FromStringOrNil(input)}
+// Parse parses and checks for a valid UUID string, and returns nil if not valid.
+func Parse(input string) *UUID {
+	id, err := uuid.FromString(input)
+	if err != nil {
+		return nil
+	}
+	return &UUID{id}
 }

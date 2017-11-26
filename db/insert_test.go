@@ -170,10 +170,10 @@ func TestInsert(t *testing.T) {
 		So(res, ShouldHaveLength, 4)
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[2].Result[0]).Get("login").Data(), ShouldEqual, "tom")
-		So(data.Consume(res[2].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 36)
+		So(data.Consume(res[2].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 20)
 		So(res[3].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[3].Result[0]).Get("login").Data(), ShouldEqual, "tom")
-		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 36)
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 20)
 
 	})
 
@@ -232,10 +232,10 @@ func TestInsert(t *testing.T) {
 		So(res, ShouldHaveLength, 4)
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[2].Result[0]).Get("login").Data(), ShouldEqual, "tom")
-		So(data.Consume(res[2].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 36)
+		So(data.Consume(res[2].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 20)
 		So(res[3].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[3].Result[0]).Get("login").Data(), ShouldEqual, "tom")
-		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 36)
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldHaveLength, 20)
 
 	})
 
