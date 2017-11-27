@@ -43,10 +43,8 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 	case []byte:
 		return string(val), nil
 	case []interface{}:
-		// TODO do we really need to copy?
 		return deep.Copy(val), nil
 	case map[string]interface{}:
-		// TODO do we really need to copy?
 		return deep.Copy(val), nil
 
 	case *sql.Ident:
