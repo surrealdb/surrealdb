@@ -252,10 +252,14 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 	// Rand implementation
 	case "rand":
 		return rand(ctx, args...)
+	case "guid":
+		return randGuid(ctx, args...)
 	case "uuid":
 		return randUuid(ctx, args...)
 	case "rand.bool":
 		return randBool(ctx, args...)
+	case "rand.guid":
+		return randGuid(ctx, args...)
 	case "rand.uuid":
 		return randUuid(ctx, args...)
 	case "rand.enum":

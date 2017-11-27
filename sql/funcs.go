@@ -251,8 +251,10 @@ var funcs = map[string]map[int]interface{}{
 
 	// Random implementation
 	"rand":                    {0: nil},
+	"guid":                    {0: nil},
 	"uuid":                    {0: nil},
 	"rand.bool":               {0: nil},
+	"rand.guid":               {0: nil},
 	"rand.uuid":               {0: nil},
 	"rand.enum":               {-1: nil},
 	"rand.time":               {0: nil, 2: nil},

@@ -29,6 +29,10 @@ func randBool(ctx context.Context, args ...interface{}) (bool, error) {
 	return fake.Bool(), nil
 }
 
+func randGuid(ctx context.Context, args ...interface{}) (string, error) {
+	return fake.Guid(), nil
+}
+
 func randUuid(ctx context.Context, args ...interface{}) (string, error) {
 	return fake.Uuid(), nil
 }
