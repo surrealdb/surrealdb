@@ -387,12 +387,14 @@ func (d *Doc) Exists(path ...string) bool {
 
 	for k, p := range path {
 
+		p = trim(p)
+
 		// If the value found at the current
 		// path part is an object, then move
 		// to the next part of the path
 
 		if m, ok := object.(map[string]interface{}); ok {
-			if object, ok = m[trim(p)]; !ok {
+			if object, ok = m[p]; !ok {
 				return false
 			}
 			continue
@@ -464,12 +466,14 @@ func (d *Doc) Get(path ...string) *Doc {
 
 	for k, p := range path {
 
+		p = trim(p)
+
 		// If the value found at the current
 		// path part is an object, then move
 		// to the next part of the path
 
 		if m, ok := object.(map[string]interface{}); ok {
-			object = m[trim(p)]
+			object = m[p]
 			continue
 		}
 
@@ -546,17 +550,19 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 
 	for k, p := range path {
 
+		p = trim(p)
+
 		// If the value found at the current
 		// path part is an object, then move
 		// to the next part of the path
 
 		if m, ok := object.(map[string]interface{}); ok {
 			if k == len(path)-1 {
-				m[trim(p)] = value
+				m[p] = value
 			} else if m[p] == nil {
-				m[trim(p)] = map[string]interface{}{}
+				m[p] = map[string]interface{}{}
 			}
-			object = m[trim(p)]
+			object = m[p]
 			continue
 		}
 
@@ -632,17 +638,19 @@ func (d *Doc) Del(path ...string) error {
 
 	for k, p := range path {
 
+		p = trim(p)
+
 		// If the value found at the current
 		// path part is an object, then move
 		// to the next part of the path
 
 		if m, ok := object.(map[string]interface{}); ok {
 			if k == len(path)-1 {
-				delete(m, trim(p))
-			} else if m[trim(p)] == nil {
+				delete(m, p)
+			} else if m[p] == nil {
 				return fmt.Errorf("Item at path %s is not an object", path)
 			}
-			object = m[trim(p)]
+			object = m[p]
 			continue
 		}
 
@@ -1006,12 +1014,14 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 
 	for k, p := range path {
 
+		p = trim(p)
+
 		// If the value found at the current
 		// path part is an object, then move
 		// to the next part of the path
 
 		if m, ok := object.(map[string]interface{}); ok {
-			if object, ok = m[trim(p)]; !ok {
+			if object, ok = m[p]; !ok {
 				return exec(d.join(prev, path), nil)
 			}
 			continue
