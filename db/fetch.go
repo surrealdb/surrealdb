@@ -23,12 +23,10 @@ import (
 	"strconv"
 	"time"
 
-	// "github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/deep"
 	"github.com/abcum/surreal/util/fncs"
-	// "github.com/abcum/surreal/util/keys"
 )
 
 var ign = data.New()
@@ -50,29 +48,6 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 	case map[string]interface{}:
 		// TODO do we really need to copy?
 		return deep.Copy(val), nil
-
-	// case *sql.Thing:
-
-	// 	if doc == nil {
-	// 		return val, nil
-	// 	}
-
-	// 	s := &sql.SelectStatement{
-	// 		KV: cnf.Settings.DB.Base, NS: "test", DB: "test",
-	// 		Expr: []*sql.Field{{Expr: &sql.All{}, Field: "*"}},
-	// 		What: []sql.Expr{val},
-	// 	}
-	// 	i := newIterator(e, ctx, s, false)
-	// 	key := &keys.Thing{KV: s.KV, NS: s.NS, DB: s.DB, TB: val.TB, ID: val.ID}
-	// 	i.processThing(ctx, key)
-	// 	res, err := i.Yield(ctx)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	if len(res) > 0 {
-	// 		return res[0], nil
-	// 	}
-	// 	return val, nil
 
 	case *sql.Ident:
 
