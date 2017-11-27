@@ -172,7 +172,7 @@ func setup() {
 	}
 
 	if opts.Node.UUID == "" {
-		opts.Node.UUID = opts.Node.Name + "-" + uuid.NewV4().String()
+		opts.Node.UUID = opts.Node.Name + "-" + uuid.New().String()
 	}
 
 	// --------------------------------------------------

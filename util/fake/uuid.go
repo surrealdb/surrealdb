@@ -15,13 +15,13 @@
 package fake
 
 import (
-	"github.com/satori/go.uuid"
+	"github.com/abcum/surreal/util/uuid"
 )
 
 func Uuid() string {
-	return uuid.NewV4().String()
+	return uuid.New().String()
 }
 
 func (f *Faker) Uuid() string {
-	return uuid.NewV4().String()
+	return uuid.New().String()
 }

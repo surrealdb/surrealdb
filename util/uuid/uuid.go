@@ -29,29 +29,9 @@ type UUID struct {
 	uuid.UUID
 }
 
-// NewV1 returns a new UUID (Version 1) based on current timestamp and MAC address.
-func NewV1() *UUID {
-	return &UUID{uuid.NewV1()}
-}
-
-// NewV2 returns a new DCE Security UUID (Version 2) based on POSIX UID/GID.
-func NewV2(domain byte) *UUID {
-	return &UUID{uuid.NewV2(domain)}
-}
-
-// NewV3 returns a new UUID (Version 3) based on MD5 hash of namespace UUID and name.
-func NewV3(ns uuid.UUID, name string) *UUID {
-	return &UUID{uuid.NewV3(ns, name)}
-}
-
 // NewV4 returns a new UUID (Version 4) using 16 random bytes or panics.
-func NewV4() *UUID {
+func New() *UUID {
 	return &UUID{uuid.NewV4()}
-}
-
-// NewV5 returns a new UUID (Version 5) based on SHA-1 hash of namespace UUID and name.
-func NewV5(ns uuid.UUID, name string) *UUID {
-	return &UUID{uuid.NewV5(ns, name)}
 }
 
 // Parse parses and checks for a valid UUID string, and returns nil if not valid.

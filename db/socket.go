@@ -246,7 +246,7 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 	// query when sending push messages
 	// and when killing the query.
 
-	stm.ID = uuid.NewV4().String()
+	stm.ID = uuid.New().String()
 
 	// Store the live query on the socket.
 

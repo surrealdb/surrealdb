@@ -20,11 +20,11 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-func TestNewV1(t *testing.T) {
+func TestNew(t *testing.T) {
 
 	var str *UUID
 
-	str = NewV1()
+	str = New()
 
 	Convey(str.String(), t, func() {
 		Convey("Should be a UUID", func() {
@@ -32,135 +32,6 @@ func TestNewV1(t *testing.T) {
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
-		})
-		Convey("Should be version 1", func() {
-			So(str.Version(), ShouldEqual, 1)
-		})
-		Convey("Should be of length 36", func() {
-			So(str.String(), ShouldHaveLength, 36)
-		})
-	})
-
-}
-
-func TestNewV2(t *testing.T) {
-
-	var str *UUID
-
-	str = NewV2(0)
-
-	Convey(str.String(), t, func() {
-		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &UUID{})
-		})
-		Convey("Should not be nil", func() {
-			So(str, ShouldNotBeNil)
-		})
-		Convey("Should be version 2", func() {
-			So(str.Version(), ShouldEqual, 2)
-		})
-		Convey("Should be of length 36", func() {
-			So(str.String(), ShouldHaveLength, 36)
-		})
-	})
-
-}
-
-func TestNewV3(t *testing.T) {
-
-	var str *UUID
-
-	str = NewV3(NamespaceDNS, "abcum.com")
-
-	Convey(str.String(), t, func() {
-		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &UUID{})
-		})
-		Convey("Should not be nil", func() {
-			So(str, ShouldNotBeNil)
-		})
-		Convey("Should be version 3", func() {
-			So(str.Version(), ShouldEqual, 3)
-		})
-		Convey("Should be of length 36", func() {
-			So(str.String(), ShouldHaveLength, 36)
-		})
-	})
-
-	str = NewV3(NamespaceURL, "https://abcum.com")
-
-	Convey(str.String(), t, func() {
-		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &UUID{})
-		})
-		Convey("Should not be nil", func() {
-			So(str, ShouldNotBeNil)
-		})
-		Convey("Should be version 3", func() {
-			So(str.Version(), ShouldEqual, 3)
-		})
-		Convey("Should be of length 36", func() {
-			So(str.String(), ShouldHaveLength, 36)
-		})
-	})
-
-}
-
-func TestNewV4(t *testing.T) {
-
-	var str *UUID
-
-	str = NewV4()
-
-	Convey(str.String(), t, func() {
-		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &UUID{})
-		})
-		Convey("Should not be nil", func() {
-			So(str, ShouldNotBeNil)
-		})
-		Convey("Should be version 4", func() {
-			So(str.Version(), ShouldEqual, 4)
-		})
-		Convey("Should be of length 36", func() {
-			So(str.String(), ShouldHaveLength, 36)
-		})
-	})
-
-}
-
-func TestNewV5(t *testing.T) {
-
-	var str *UUID
-
-	str = NewV5(NamespaceDNS, "abcum.com")
-
-	Convey(str.String(), t, func() {
-		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &UUID{})
-		})
-		Convey("Should not be nil", func() {
-			So(str, ShouldNotBeNil)
-		})
-		Convey("Should be version 5", func() {
-			So(str.Version(), ShouldEqual, 5)
-		})
-		Convey("Should be of length 36", func() {
-			So(str.String(), ShouldHaveLength, 36)
-		})
-	})
-
-	str = NewV5(NamespaceURL, "https://abcum.com")
-
-	Convey(str.String(), t, func() {
-		Convey("Should be a UUID", func() {
-			So(str, ShouldHaveSameTypeAs, &UUID{})
-		})
-		Convey("Should not be nil", func() {
-			So(str, ShouldNotBeNil)
-		})
-		Convey("Should be version 5", func() {
-			So(str.Version(), ShouldEqual, 5)
 		})
 		Convey("Should be of length 36", func() {
 			So(str.String(), ShouldHaveLength, 36)
@@ -189,9 +60,6 @@ func TestParsing(t *testing.T) {
 		})
 		Convey("Should not be nil", func() {
 			So(str, ShouldNotBeNil)
-		})
-		Convey("Should be version 4", func() {
-			So(str.Version(), ShouldEqual, 4)
 		})
 		Convey("Should be of length 36", func() {
 			So(str.String(), ShouldHaveLength, 36)
