@@ -557,6 +557,38 @@ func (this *ContentExpression) UnmarshalCORK(r *cork.Reader) (err error) {
 // ##################################################
 
 // --------------------------------------------------
+// Model
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&Model{})
+}
+
+func (this *Model) ExtendCORK() byte {
+	return 0x51
+}
+
+func (this *Model) MarshalCORK(w *cork.Writer) (err error) {
+	w.EncodeString(this.TB)
+	w.EncodeFloat64(this.MIN)
+	w.EncodeFloat64(this.INC)
+	w.EncodeFloat64(this.MAX)
+	return
+}
+
+func (this *Model) UnmarshalCORK(r *cork.Reader) (err error) {
+	r.DecodeString(&this.TB)
+	r.DecodeFloat64(&this.MIN)
+	r.DecodeFloat64(&this.INC)
+	r.DecodeFloat64(&this.MAX)
+	return
+}
+
+func (this Model) MarshalText() (data []byte, err error) {
+	return []byte(this.String()), err
+}
+
+// --------------------------------------------------
 // Param
 // --------------------------------------------------
 
@@ -565,7 +597,7 @@ func init() {
 }
 
 func (this *Param) ExtendCORK() byte {
-	return 0x51
+	return 0x52
 }
 
 func (this *Param) MarshalCORK(w *cork.Writer) (err error) {
@@ -591,7 +623,7 @@ func init() {
 }
 
 func (this *Value) ExtendCORK() byte {
-	return 0x52
+	return 0x53
 }
 
 func (this *Value) MarshalCORK(w *cork.Writer) (err error) {
@@ -617,7 +649,7 @@ func init() {
 }
 
 func (this *Ident) ExtendCORK() byte {
-	return 0x53
+	return 0x54
 }
 
 func (this *Ident) MarshalCORK(w *cork.Writer) (err error) {
@@ -643,7 +675,7 @@ func init() {
 }
 
 func (this *Table) ExtendCORK() byte {
-	return 0x54
+	return 0x55
 }
 
 func (this *Table) MarshalCORK(w *cork.Writer) (err error) {
@@ -669,7 +701,7 @@ func init() {
 }
 
 func (this *Batch) ExtendCORK() byte {
-	return 0x55
+	return 0x56
 }
 
 func (this *Batch) MarshalCORK(w *cork.Writer) (err error) {
@@ -699,7 +731,7 @@ func (this Thing) Bytes() []byte {
 }
 
 func (this *Thing) ExtendCORK() byte {
-	return 0x56
+	return 0x57
 }
 
 func (this *Thing) MarshalCORK(w *cork.Writer) (err error) {
@@ -727,7 +759,7 @@ func init() {
 }
 
 func (this *Point) ExtendCORK() byte {
-	return 0x57
+	return 0x58
 }
 
 func (this *Point) MarshalCORK(w *cork.Writer) (err error) {
@@ -759,7 +791,7 @@ func init() {
 }
 
 func (this *Circle) ExtendCORK() byte {
-	return 0x58
+	return 0x59
 }
 
 func (this *Circle) MarshalCORK(w *cork.Writer) (err error) {
@@ -791,7 +823,7 @@ func init() {
 }
 
 func (this *Polygon) ExtendCORK() byte {
-	return 0x59
+	return 0x60
 }
 
 func (this *Polygon) MarshalCORK(w *cork.Writer) (err error) {
