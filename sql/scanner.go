@@ -956,10 +956,6 @@ func (s *scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{
 
 }
 
-func (s *scanner) scanPart() {
-
-}
-
 func (s *scanner) part() (tok Token, lit string, val interface{}) {
 
 	if ch := s.next(); isLetter(ch) {
