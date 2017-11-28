@@ -564,6 +564,38 @@ func TestSelect(t *testing.T) {
 
 	})
 
+	Convey("Filter records using a single field subquery, with a limit of 1", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:test SET age=30;
+		CREATE person:1 SET name="Tobias", age=30;
+		CREATE person:2 SET name="Silvana", age=27;
+		CREATE person:3 SET name="Jonathan", age=32;
+		CREATE person:4 SET name="Benjamin", age=31;
+		CREATE person:5 SET name="Alexander", age=22;
+		SELECT * FROM person WHERE age >= person:⟨1⟩.age ORDER BY name;
+		SELECT * FROM person WHERE age >= person:test.age ORDER BY name;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 9)
+		So(res[7].Result, ShouldHaveLength, 4)
+		So(data.Consume(res[7].Result[0]).Get("name").Data(), ShouldEqual, nil)
+		So(data.Consume(res[7].Result[1]).Get("name").Data(), ShouldEqual, "Benjamin")
+		So(data.Consume(res[7].Result[2]).Get("name").Data(), ShouldEqual, "Jonathan")
+		So(data.Consume(res[7].Result[3]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(res[8].Result, ShouldHaveLength, 4)
+		So(data.Consume(res[8].Result[0]).Get("name").Data(), ShouldEqual, nil)
+		So(data.Consume(res[8].Result[1]).Get("name").Data(), ShouldEqual, "Benjamin")
+		So(data.Consume(res[8].Result[2]).Get("name").Data(), ShouldEqual, "Jonathan")
+		So(data.Consume(res[8].Result[3]).Get("name").Data(), ShouldEqual, "Tobias")
+
+	})
+
 	Convey("Group records by field", t, func() {
 
 		setupDB()

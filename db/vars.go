@@ -36,6 +36,8 @@ const (
 
 const (
 	ctxKeyId    = "id"
+	ctxKeyNs    = "ns"
+	ctxKeyDb    = "db"
 	ctxKeyVars  = "vars"
 	ctxKeySubs  = "subs"
 	ctxKeyAuth  = "auth"

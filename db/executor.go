@@ -118,6 +118,8 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 
 			if stm, ok := stm.(sql.AuthableStatement); ok {
 				ns, db := stm.Auth()
+				ctx = context.WithValue(ctx, ctxKeyNs, ns)
+				ctx = context.WithValue(ctx, ctxKeyDb, db)
 				log = log.WithField("ns", ns).WithField("db", db)
 			}
 

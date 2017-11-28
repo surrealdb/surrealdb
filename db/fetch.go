@@ -16,13 +16,13 @@ package db
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"reflect"
 	"regexp"
 	"strconv"
 	"time"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/deep"
@@ -50,13 +50,29 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 	case *sql.Ident:
 
 		switch {
+		default:
+			return val, nil
 		case doc == ign:
 			return val, queryIdentFailed
 		case doc != nil:
-			res := doc.Get(val.ID).Data()
-			return e.fetch(ctx, res, doc)
-		default:
-			return val, nil
+
+			doc.Fetch(func(key string, val interface{}) interface{} {
+				switch key {
+				case ctxKeyId:
+					return val
+				default:
+					switch res := val.(type) {
+					case *sql.Thing:
+						val, _ = e.fetchThing(ctx, res, doc)
+						return val
+					default:
+						return val
+					}
+				}
+			})
+
+			return e.fetch(ctx, doc.Get(val.ID).Data(), doc)
+
 		}
 
 	case *sql.Param:
@@ -138,26 +154,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 	case *sql.PathExpression:
 
-		for _, v := range val.Expr {
-			fmt.Printf("%T %v\n", v, v)
-			switch v := v.(type) {
-			case *sql.JoinExpression:
-				switch v.Join {
-				case sql.DOT:
-				case sql.OEDGE:
-				case sql.IEDGE:
-				case sql.BEDGE:
-				}
-			case *sql.PartExpression:
-
-				switch v.Part.(type) {
-				case *sql.Thing:
-				default:
-				}
-
-				fmt.Printf("  %T %v\n", v.Part, v.Part)
-			}
-		}
+		return e.fetchPaths(ctx, doc, val.Expr...)
 
 	case *sql.BinaryExpression:
 
@@ -184,6 +181,68 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 			return binaryCheck(val.Op, l, r, val.LHS, val.RHS, doc), nil
 		}
 
+	}
+
+	return nil, nil
+
+}
+
+func (e *executor) fetchPaths(ctx context.Context, doc *data.Doc, exprs ...sql.Expr) (interface{}, error) {
+
+	var expr sql.Expr
+
+	if len(exprs) == 0 {
+		return doc.Data(), nil
+	}
+
+	expr, exprs = exprs[0], exprs[1:]
+
+	switch val := expr.(type) {
+	case *sql.JoinExpression:
+		switch val.Join {
+		case sql.DOT:
+			return e.fetchPaths(ctx, doc, exprs...)
+		case sql.OEDGE:
+		case sql.IEDGE:
+		case sql.BEDGE:
+		}
+	case *sql.PartExpression:
+		switch val := val.Part.(type) {
+		case *sql.Ident:
+			res, err := e.fetch(ctx, val, doc)
+			if err != nil {
+				return nil, err
+			}
+			return e.fetchPaths(ctx, data.Consume(res), exprs...)
+		case *sql.Thing:
+			res, err := e.fetchThing(ctx, val, doc)
+			if err != nil {
+				return nil, err
+			}
+			return e.fetchPaths(ctx, data.Consume(res), exprs...)
+		}
+	}
+
+	return nil, nil
+
+}
+
+func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc) (interface{}, error) {
+
+	res, err := e.executeSelect(ctx, &sql.SelectStatement{
+		KV:   cnf.Settings.DB.Base,
+		NS:   ctx.Value(ctxKeyNs).(string),
+		DB:   ctx.Value(ctxKeyDb).(string),
+		Expr: []*sql.Field{{Expr: &sql.All{}}},
+		What: []sql.Expr{val},
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(res) > 0 {
+		return res[0], nil
 	}
 
 	return nil, nil
