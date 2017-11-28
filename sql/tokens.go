@@ -153,7 +153,6 @@ const (
 	NONE
 	NONECONTAINEDIN
 	NOT
-	NOTNULL
 	NS
 	NULL
 	NUMERIC
@@ -320,7 +319,6 @@ var tokens = [...]string{
 	NONE:            "NONE",
 	NONECONTAINEDIN: "NONECONTAINEDIN",
 	NOT:             "NOT",
-	NOTNULL:         "NOTNULL",
 	NS:              "NS",
 	NULL:            "NULL",
 	NUMERIC:         "NUMERIC",
