@@ -39,7 +39,14 @@ const (
 // Doc holds a reference to the core data object, or a selected path.
 type Doc struct {
 	data interface{}
+	call Fetcher
 }
+
+// Fetcher is used when fetching values.
+type Fetcher func(key string, val interface{}) interface{}
+
+// Iterator is used when iterating over items.
+type Iterator func(key string, val interface{}) error
 
 // New creates a new data object.
 func New() *Doc {
@@ -59,6 +66,11 @@ func (d *Doc) Data() interface{} {
 // Copy returns a duplicated copy of the internal data object.
 func (d *Doc) Copy() *Doc {
 	return &Doc{data: deep.Copy(d.data)}
+}
+
+// Fetch adds a function to be used for retrieving and converting values.
+func (d *Doc) Fetch(fetcher Fetcher) {
+	d.call = fetcher
 }
 
 // Encode encodes the data object to a byte slice.
@@ -417,11 +429,17 @@ func (d *Doc) Exists(path ...string) bool {
 			}
 
 			if r == one {
+				if d.call != nil && len(path[k+1:]) > 0 {
+					c[0] = d.call(p, c[0])
+				}
 				return Consume(c[0]).Exists(path[k+1:]...)
 			}
 
 			if r == many {
 				for _, v := range c {
+					if d.call != nil && len(path[k+1:]) > 0 {
+						v = d.call(p, v)
+					}
 					if !Consume(v).Exists(path[k+1:]...) {
 						return false
 					}
@@ -473,7 +491,11 @@ func (d *Doc) Get(path ...string) *Doc {
 		// to the next part of the path
 
 		if m, ok := object.(map[string]interface{}); ok {
-			object = m[p]
+			if d.call != nil && len(path[k+1:]) > 0 {
+				object = d.call(p, m[p])
+			} else {
+				object = m[p]
+			}
 			continue
 		}
 
@@ -494,12 +516,18 @@ func (d *Doc) Get(path ...string) *Doc {
 			}
 
 			if r == one {
+				if d.call != nil && len(path[k+1:]) > 0 {
+					c[0] = d.call(p, c[0])
+				}
 				return Consume(c[0]).Get(path[k+1:]...)
 			}
 
 			if r == many {
 				out := []interface{}{}
 				for _, v := range c {
+					if d.call != nil && len(path[k+1:]) > 0 {
+						v = d.call(p, v)
+					}
 					res := Consume(v).Get(path[k+1:]...)
 					if res.data != nil {
 						out = append(out, res.data)
@@ -911,8 +939,6 @@ func (d *Doc) Diff(n *Doc) map[string]interface{} {
 }
 
 // --------------------------------------------------------------------------------
-
-type Iterator func(key string, val interface{}) error
 
 func (d *Doc) join(parts ...[]string) string {
 	var path []string

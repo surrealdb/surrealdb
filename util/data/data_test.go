@@ -302,6 +302,14 @@ func TestOperations(t *testing.T) {
 
 	// ----------------------------------------------------------------------------------------------------
 
+	Convey("Can set fetcher function", t, func() {
+		doc.Fetch(func(key string, val interface{}) interface{} {
+			return val
+		})
+	})
+
+	// ----------------------------------------------------------------------------------------------------
+
 	Convey("Can't del undefined", t, func() {
 		err := doc.Del("the.item")
 		So(err, ShouldNotBeNil)
