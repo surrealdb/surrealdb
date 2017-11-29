@@ -845,7 +845,7 @@ func (p *parser) parseJoin() (exp Expr, err error) {
 func (p *parser) parseStep() (exp Expr, err error) {
 
 	toks := []Token{
-		QMARK, IDENT, THING, PARAM, LPAREN, EXPR, MUL,
+		QMARK, IDENT, THING, LPAREN, EXPR, MUL,
 	}
 
 	tok, lit, _ := p.scan()
