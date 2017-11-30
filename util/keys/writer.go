@@ -17,9 +17,7 @@ package keys
 import (
 	"encoding/binary"
 	"math"
-	"reflect"
 	"time"
-	"unsafe"
 
 	"github.com/abcum/bump"
 )
@@ -61,6 +59,5 @@ func (w *writer) writeFloat(v float64) {
 }
 
 func (w *writer) writeString(v string) {
-	b := *(*[]byte)(unsafe.Pointer((*reflect.SliceHeader)(unsafe.Pointer(&v))))
-	w.w.WriteBytes(b)
+	w.w.WriteString(v)
 }
