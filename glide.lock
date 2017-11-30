@@ -1,5 +1,5 @@
 hash: 2cdf97833582dc0d969ea9de15f67a99cf9fc5f4689f13a246b1e26a774faf7d
-updated: 2017-11-26T16:33:32.201745Z
+updated: 2017-11-30T00:56:16.467515Z
 imports:
 - name: cloud.google.com/go
   version: 2d3a6656c17a60b0815b7e06ab0be04eacb6e613
@@ -18,9 +18,9 @@ imports:
   - storage
   - trace
 - name: github.com/abcum/bump
-  version: a387c1b94124df52e6cd702ed49ac8442d13dc1f
+  version: 8c43cce06105894a9b74f89a79ca62ba8e365cf7
 - name: github.com/abcum/cork
-  version: 7f7718f642ea6e607fb04ff030884223b0cb9c92
+  version: 0b63c702b78a46d64249a0f4de3f69bb3ba8999b
 - name: github.com/abcum/fibre
   version: b4850d6c9e931b6816f5569d71a4b6029cea6842
   subpackages:
@@ -43,7 +43,7 @@ imports:
 - name: github.com/asaskevich/govalidator
   version: 73945b6115bfbbcc57d89b7316e28109364124e1
 - name: github.com/aws/aws-sdk-go
-  version: cd721c97ef6fcfcb76b4feb14fcfead57fb01e5e
+  version: 5bcc0a238d880469f949fc7cd24e35f32ab80cbd
   subpackages:
   - aws
   - aws/awserr
@@ -140,15 +140,16 @@ imports:
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: be5ae6ca7ac994584d2e30167737687f1c1ded8e
+  version: 6da3249dfb57fbaa16efafcd8744cee8809d80cd
   subpackages:
   - internal/socket
 - name: github.com/mitchellh/mapstructure
   version: 06020f85339e21b2478f756a78e295255ffa4d6a
 - name: github.com/newrelic/go-agent
-  version: 462a146a1270954750aac98c5b3e83dec6a9adfd
+  version: f5bce3387232559bcbe6a5f8227c4bf508dac1ba
   subpackages:
   - internal
+  - internal/cat
   - internal/jsonx
   - internal/logger
   - internal/sysinfo
@@ -172,19 +173,21 @@ imports:
 - name: github.com/spf13/pflag
   version: 4c012f6dcd9546820e378d0bdda4d8fc772cdfea
 - name: github.com/ugorji/go
-  version: 84cb69a8af8316eed8cf4a3c9368a56977850062
+  version: 14c9063c18427f21537bc9da3d15cfb0ed3c61c0
   subpackages:
   - codec
 - name: golang.org/x/crypto
-  version: 9f005a07e0d31d45e6656d241bb5c0f2efd4bc94
+  version: 94eea52f7b742c7cbe0b03b22f0c4c8631ece122
   subpackages:
   - bcrypt
   - blowfish
+  - ed25519
+  - ed25519/internal/edwards25519
   - pbkdf2
   - scrypt
   - ssh/terminal
 - name: golang.org/x/net
-  version: c7086645de248775cbf2373cf5ca4d2fa664b8c1
+  version: a8b9294777976932365dabb6640cf1468d95c70f
   subpackages:
   - context
   - context/ctxhttp
@@ -206,12 +209,12 @@ imports:
   subpackages:
   - semaphore
 - name: golang.org/x/sys
-  version: 82aafbf43bf885069dc71b7e7c2f9d7a614d47da
+  version: 316e9227019baa6ea3f76ea21538bab101fd1182
   subpackages:
   - unix
   - windows
 - name: golang.org/x/text
-  version: 88f656faf3f37f690df1a32515b479415e1a6769
+  version: 572a2b141f625f4360cf42a41a43622067e0510b
   subpackages:
   - collate
   - internal/colltab
@@ -226,7 +229,7 @@ imports:
   subpackages:
   - rate
 - name: google.golang.org/api
-  version: 92db9b55d2aa90e54a33cfaa8caf354afae68157
+  version: 88d8826ad7655f8bdc7328b1ec3774f3851c3a44
   subpackages:
   - cloudtrace/v1
   - gensupport
@@ -270,7 +273,7 @@ imports:
   - googleapis/rpc/status
   - protobuf/field_mask
 - name: google.golang.org/grpc
-  version: 10873b30bf245efc365a957b425da2e15f47a560
+  version: a62701e4aa1d276bec70311251d62a478404d63f
   subpackages:
   - balancer
   - balancer/roundrobin
@@ -288,6 +291,7 @@ imports:
   - peer
   - resolver
   - resolver/dns
+  - resolver/manual
   - resolver/passthrough
   - stats
   - status
