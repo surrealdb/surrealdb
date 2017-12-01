@@ -584,28 +584,30 @@ func (i *iterator) processTable(ctx context.Context, key *keys.Table) {
 			return
 		}
 
+		// If there are no further records
+		// fetched from the data layer, then
+		// return out of this loop iteration.
+
 		if x >= len(vals) {
 			return
 		}
 
-		for ; x < len(vals); x++ {
+		// If there were at least 1 or 2
+		// keys-values, then loop over all
+		// the items and process the records.
 
-			// When we loop around, we will use
-			// the key of the last retrieved key
-			// to perform the next range request.
-
-			if x == len(vals)-1 {
-				beg.Decode(vals[len(vals)-1].Key())
-			}
-
+		for _, val := range vals {
 			if i.checkState(ctx) {
-				i.submitTask(nil, vals[x], nil)
+				i.submitTask(nil, val, nil)
 				continue
 			}
-
-			break
-
 		}
+
+		// When we loop around, we will use
+		// the key of the last retrieved key
+		// to perform the next range request.
+
+		beg.Decode(vals[len(vals)-1].Key())
 
 	}
 
