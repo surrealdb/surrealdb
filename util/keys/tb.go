@@ -46,7 +46,8 @@ func (k *TB) Encode() []byte {
 // Decode decodes the key from binary
 func (k *TB) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB)
+	var __ string
+	decode(data, &k.KV, &k.NS, &__, &k.DB, &__, &k.TB)
 }
 
 // String returns a string representation of the key

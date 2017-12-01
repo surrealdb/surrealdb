@@ -63,7 +63,8 @@ func (k *Edge) Encode() []byte {
 // Decode decodes the key from binary
 func (k *Edge) Decode(data []byte) {
 	k.init()
-	decode(data, &k.KV, &k.NS, &skip, &k.DB, &skip, &k.TB, &skip, &k.ID, &k.TK, &k.TP, &k.FT, &k.FK)
+	var __ string
+	decode(data, &k.KV, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.ID, &k.TK, &k.TP, &k.FT, &k.FK)
 }
 
 // String returns a string representation of the key

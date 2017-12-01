@@ -39,10 +39,6 @@ var (
 )
 
 var (
-	skip string
-)
-
-var (
 	bEND = byte(0x00)
 	bPRE = byte(0x01)
 	bNIL = byte(0x02)
