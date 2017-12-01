@@ -236,24 +236,24 @@ func (i *iterator) setupWorkers(ctx context.Context) {
 		switch {
 		case i.tasks == 0:
 			for w := 1; w <= workerCount; w++ {
-				go i.setupWorker(ctx)
+				go i.setupWorker(ctx, i.jobs, i.vals)
 			}
 		default:
 			for w := 1; w <= ints.Between(1, workerCount, i.tasks); w++ {
-				go i.setupWorker(ctx)
+				go i.setupWorker(ctx, i.jobs, i.vals)
 			}
 		}
 	}
 
 }
 
-func (i *iterator) setupWorker(ctx context.Context) {
+func (i *iterator) setupWorker(ctx context.Context, jobs chan *workable, vals chan *doneable) {
 
-	for j := range i.jobs {
+	for j := range jobs {
 
 		res, err := newDocument(i, j.key, j.val, j.doc).query(ctx, i.stm)
 
-		i.vals <- &doneable{res: res, err: err}
+		vals <- &doneable{res: res, err: err}
 
 	}
 
@@ -269,17 +269,17 @@ func (i *iterator) submitTask(key *keys.Thing, val kvs.KV, doc *data.Doc) {
 
 func (i *iterator) checkWorker(ctx context.Context) {
 
-	go func() {
-		for err := range i.fail {
+	go func(fail chan error) {
+		for err := range fail {
 			i.receivedError(err)
 		}
-	}()
+	}(i.fail)
 
-	go func() {
-		for val := range i.vals {
+	go func(vals chan *doneable) {
+		for val := range vals {
 			i.receivedResult(val)
 		}
-	}()
+	}(i.vals)
 
 }
 
