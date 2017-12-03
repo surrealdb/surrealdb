@@ -1,5 +1,5 @@
 hash: 2cdf97833582dc0d969ea9de15f67a99cf9fc5f4689f13a246b1e26a774faf7d
-updated: 2017-11-30T00:56:16.467515Z
+updated: 2017-12-03T01:44:19.574842Z
 imports:
 - name: cloud.google.com/go
   version: 2d3a6656c17a60b0815b7e06ab0be04eacb6e613
@@ -20,7 +20,7 @@ imports:
 - name: github.com/abcum/bump
   version: 8c43cce06105894a9b74f89a79ca62ba8e365cf7
 - name: github.com/abcum/cork
-  version: 0b63c702b78a46d64249a0f4de3f69bb3ba8999b
+  version: 19ca3dc37b0805d7b6c58b2f3548c3d607ac2c95
 - name: github.com/abcum/fibre
   version: b4850d6c9e931b6816f5569d71a4b6029cea6842
   subpackages:
@@ -43,7 +43,7 @@ imports:
 - name: github.com/asaskevich/govalidator
   version: 73945b6115bfbbcc57d89b7316e28109364124e1
 - name: github.com/aws/aws-sdk-go
-  version: 5bcc0a238d880469f949fc7cd24e35f32ab80cbd
+  version: 388e6676807f5968ad5eaaec0c70002f80c20b84
   subpackages:
   - aws
   - aws/awserr
@@ -119,7 +119,7 @@ imports:
   subpackages:
   - simplelru
 - name: github.com/hashicorp/memberlist
-  version: 9bdd37bfb26bd039c08b0f36be6f80ceede4aaf3
+  version: 3d8438da9589e7b608a83ffac1ef8211486bcb7c
 - name: github.com/hashicorp/serf
   version: d6574a5bb1226678d7010325fb6c985db20ee458
   subpackages:
@@ -173,7 +173,7 @@ imports:
 - name: github.com/spf13/pflag
   version: 4c012f6dcd9546820e378d0bdda4d8fc772cdfea
 - name: github.com/ugorji/go
-  version: 14c9063c18427f21537bc9da3d15cfb0ed3c61c0
+  version: 7a1de86227c3a2d8c266c99436d6cf6685d0dc53
   subpackages:
   - codec
 - name: golang.org/x/crypto
@@ -209,12 +209,12 @@ imports:
   subpackages:
   - semaphore
 - name: golang.org/x/sys
-  version: 316e9227019baa6ea3f76ea21538bab101fd1182
+  version: 8b4580aae2a0dd0c231a45d3ccb8434ff533b840
   subpackages:
   - unix
   - windows
 - name: golang.org/x/text
-  version: 572a2b141f625f4360cf42a41a43622067e0510b
+  version: 75cc3cad82b5f47d3fb229ddda8c5167da14f294
   subpackages:
   - collate
   - internal/colltab
@@ -229,7 +229,7 @@ imports:
   subpackages:
   - rate
 - name: google.golang.org/api
-  version: 88d8826ad7655f8bdc7328b1ec3774f3851c3a44
+  version: 3a1d936b7575b82197a1fea0632218dd07b1e65c
   subpackages:
   - cloudtrace/v1
   - gensupport
@@ -273,7 +273,7 @@ imports:
   - googleapis/rpc/status
   - protobuf/field_mask
 - name: google.golang.org/grpc
-  version: a62701e4aa1d276bec70311251d62a478404d63f
+  version: cd563b81ec334abe62cda34a33b8640ea67ef5ba
   subpackages:
   - balancer
   - balancer/roundrobin
