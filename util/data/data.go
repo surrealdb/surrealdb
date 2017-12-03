@@ -330,7 +330,7 @@ func (d *Doc) New(value interface{}, path ...string) (*Doc, error) {
 	return d.Get(path...), nil
 }
 
-// Iff sets the value at the specified path if it is not nil, or deleted it.
+// Iff sets the value at the specified path if it is not nil, or deletes it.
 func (d *Doc) Iff(value interface{}, path ...string) (*Doc, error) {
 	if value != nil {
 		return d.Set(value, path...)
