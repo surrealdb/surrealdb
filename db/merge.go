@@ -136,11 +136,17 @@ func (d *document) mrgAll(ctx context.Context, expr *sql.ContentExpression) (err
 	case map[string]interface{}:
 		obj = v
 	case *sql.Param:
-		p, _ := d.i.e.fetch(ctx, v.ID, d.current)
+
+		p, err := d.i.e.fetch(ctx, v, d.current)
+		if err != nil {
+			return err
+		}
+
 		switch v := p.(type) {
 		case map[string]interface{}:
 			obj = v
 		}
+
 	}
 
 	d.current.Reset()
@@ -161,11 +167,17 @@ func (d *document) mrgAny(ctx context.Context, expr *sql.MergeExpression) (err e
 	case map[string]interface{}:
 		obj = v
 	case *sql.Param:
-		p, _ := d.i.e.fetch(ctx, v.ID, d.current)
+
+		p, err := d.i.e.fetch(ctx, v, d.current)
+		if err != nil {
+			return err
+		}
+
 		switch v := p.(type) {
 		case map[string]interface{}:
 			obj = v
 		}
+
 	}
 
 	for k, v := range obj {
@@ -186,11 +198,17 @@ func (d *document) mrgDpm(ctx context.Context, expr *sql.DiffExpression) (err er
 	case []interface{}:
 		obj = v
 	case *sql.Param:
-		p, _ := d.i.e.fetch(ctx, v.ID, d.current)
+
+		p, err := d.i.e.fetch(ctx, v, d.current)
+		if err != nil {
+			return err
+		}
+
 		switch v := p.(type) {
 		case []interface{}:
 			obj = v
 		}
+
 	}
 
 	old = d.current.Data().(map[string]interface{})
