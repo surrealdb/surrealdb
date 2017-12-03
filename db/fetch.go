@@ -409,93 +409,149 @@ func binaryMath(op sql.Token, l, r interface{}) interface{} {
 
 func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{} {
 
+	switch lo.(type) {
+	case *sql.Void:
+		switch ro.(type) {
+		default:
+			return op == sql.NEQ
+		case nil:
+			return op == sql.NEQ
+		case *sql.Void:
+			return op == sql.EQ
+		case *sql.Empty:
+			return op == sql.EQ
+		case *sql.Ident:
+			break
+		}
+	case *sql.Empty:
+		switch ro.(type) {
+		default:
+			return op == sql.NEQ
+		case nil:
+			return op == sql.EQ
+		case *sql.Void:
+			return op == sql.EQ
+		case *sql.Empty:
+			return op == sql.EQ
+		case *sql.Param:
+			break
+		case *sql.Ident:
+			break
+		}
+	}
+
+	switch ro.(type) {
+	case *sql.Void:
+		switch lo.(type) {
+		default:
+			return op == sql.NEQ
+		case nil:
+			return op == sql.NEQ
+		case *sql.Void:
+			return op == sql.EQ
+		case *sql.Empty:
+			return op == sql.EQ
+		case *sql.Ident:
+			break
+		}
+	case *sql.Empty:
+		switch lo.(type) {
+		default:
+			return op == sql.NEQ
+		case nil:
+			return op == sql.EQ
+		case *sql.Void:
+			return op == sql.EQ
+		case *sql.Empty:
+			return op == sql.EQ
+		case *sql.Param:
+			break
+		case *sql.Ident:
+			break
+		}
+	}
+
 	if d != nil {
 
-		switch l := lo.(type) {
-
+		switch lo.(type) {
 		case *sql.Void:
-
-			switch r.(type) {
-			case nil:
-				return op == sql.NEQ
-			}
-
-		case *sql.Ident:
-
-			switch r.(type) {
-
-			case *sql.Void:
-				if op == sql.EQ {
-					return d.Exists(l.ID) == false
-				} else if op == sql.NEQ {
-					return d.Exists(l.ID) == true
-				}
-
-			case nil:
-				if op == sql.EQ {
-					return d.Exists(l.ID) == true && d.Get(l.ID).Data() == nil
-				} else if op == sql.NEQ {
-					return d.Exists(l.ID) == false || d.Get(l.ID).Data() != nil
-				}
-
-			case *sql.Empty:
-				if op == sql.EQ {
-					return d.Exists(l.ID) == false || d.Get(l.ID).Data() == nil
-				} else if op == sql.NEQ {
-					return d.Exists(l.ID) == true && d.Get(l.ID).Data() != nil
-				}
-
-			}
-
-		}
-
-		switch r := ro.(type) {
-
-		case *sql.Void:
-
-			switch l.(type) {
-			case nil:
-				return op == sql.NEQ
-			}
-
-		case *sql.Ident:
-
-			switch l.(type) {
-
-			case *sql.Void:
+			switch r := ro.(type) {
+			case *sql.Ident:
 				if op == sql.EQ {
 					return d.Exists(r.ID) == false
 				} else if op == sql.NEQ {
 					return d.Exists(r.ID) == true
 				}
-
-			case nil:
-				if op == sql.EQ {
-					return d.Exists(r.ID) == true && d.Get(r.ID).Data() == nil
-				} else if op == sql.NEQ {
-					return d.Exists(r.ID) == false || d.Get(r.ID).Data() != nil
-				}
-
-			case *sql.Empty:
+			}
+		case *sql.Empty:
+			switch r := ro.(type) {
+			case *sql.Ident:
 				if op == sql.EQ {
 					return d.Exists(r.ID) == false || d.Get(r.ID).Data() == nil
 				} else if op == sql.NEQ {
 					return d.Exists(r.ID) == true && d.Get(r.ID).Data() != nil
 				}
-
 			}
+		case nil:
+			switch r := ro.(type) {
+			case *sql.Ident:
+				if op == sql.EQ {
+					return d.Exists(r.ID) == true && d.Get(r.ID).Data() == nil
+				} else if op == sql.NEQ {
+					return d.Exists(r.ID) == false || d.Get(r.ID).Data() != nil
+				}
+			}
+		}
 
+		switch ro.(type) {
+		case *sql.Void:
+			switch l := lo.(type) {
+			case *sql.Ident:
+				if op == sql.EQ {
+					return d.Exists(l.ID) == false
+				} else if op == sql.NEQ {
+					return d.Exists(l.ID) == true
+				}
+			}
+		case *sql.Empty:
+			switch l := lo.(type) {
+			case *sql.Ident:
+				if op == sql.EQ {
+					return d.Exists(l.ID) == false || d.Get(l.ID).Data() == nil
+				} else if op == sql.NEQ {
+					return d.Exists(l.ID) == true && d.Get(l.ID).Data() != nil
+				}
+			}
+		case nil:
+			switch l := lo.(type) {
+			case *sql.Ident:
+				if op == sql.EQ {
+					return d.Exists(l.ID) == true && d.Get(l.ID).Data() == nil
+				} else if op == sql.NEQ {
+					return d.Exists(l.ID) == false || d.Get(l.ID).Data() != nil
+				}
+			}
 		}
 
 	}
 
 	switch l := l.(type) {
 
+	case *sql.Empty:
+		switch r.(type) {
+		default:
+			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
+		case nil:
+			return op == sql.EQ
+		}
+
 	case nil:
 		switch r := r.(type) {
 		default:
 			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case nil:
+			return op == sql.EQ
+		case *sql.Empty:
 			return op == sql.EQ
 		case []interface{}:
 			return chkArrayR(op, l, r)
