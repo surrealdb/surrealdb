@@ -236,6 +236,12 @@ var funcs = map[string]map[int]interface{}{
 	"time.unix":  {0: nil, 1: nil},
 	"time.year":  {0: nil, 1: nil},
 
+	// Url implementation
+	"url.domain": {1: nil},
+	"url.host":   {1: nil},
+	"url.port":   {1: nil},
+	"url.path":   {1: nil},
+
 	// Email implementation
 	"email.user":   {1: nil},
 	"email.domain": {1: nil},

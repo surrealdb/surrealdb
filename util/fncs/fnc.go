@@ -229,6 +229,16 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 	case "time.year":
 		return timeYear(ctx, args...)
 
+	// Url implementation
+	case "url.domain":
+		return urlHost(ctx, args...)
+	case "url.host":
+		return urlHost(ctx, args...)
+	case "url.port":
+		return urlPort(ctx, args...)
+	case "url.path":
+		return urlPath(ctx, args...)
+
 	// Email implementation
 	case "email.user":
 		return emailUser(ctx, args...)
