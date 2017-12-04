@@ -315,7 +315,12 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 				}
 			}
 
-			d.current.Iff(val, key)
+			switch val.(type) {
+			default:
+				d.current.Iff(val, key)
+			case *sql.Void:
+				d.current.Del(key)
+			}
 
 			return
 
