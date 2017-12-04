@@ -498,7 +498,7 @@ func (this Orders) String() string {
 func (this Order) String() string {
 	return print("%v %v",
 		this.Expr,
-		this.Dir,
+		maybe(this.Dir, "ASC", "DESC"),
 	)
 }
 
