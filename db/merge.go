@@ -271,6 +271,8 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 
 		err = d.current.Walk(func(key string, val interface{}) (err error) {
 
+			vars := data.New()
+
 			var old = d.initial.Get(key).Data()
 
 			// Ensure the field is the correct type
@@ -281,7 +283,8 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 				}
 			}
 
-			vars := data.New()
+			// Reset the variables
+
 			vars.Set(val, varKeyValue)
 			vars.Set(val, varKeyAfter)
 			vars.Set(old, varKeyBefore)
@@ -294,6 +297,13 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 					return err
 				}
 			}
+
+			// Reset the variables
+
+			vars.Set(val, varKeyValue)
+			vars.Set(val, varKeyAfter)
+			vars.Set(old, varKeyBefore)
+			ctx = context.WithValue(ctx, ctxKeySubs, vars)
 
 			// We are checking the value of the field
 
