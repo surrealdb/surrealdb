@@ -72,7 +72,7 @@ func (e *executor) fetchRelate(ctx context.Context, stm *sql.RelateStatement, do
 
 	if doc != nil {
 		vars := data.New()
-		vars.Set(doc, varKeyParent)
+		vars.Set(doc.Data(), varKeyParent)
 		ctx = context.WithValue(ctx, ctxKeySubs, vars)
 	}
 

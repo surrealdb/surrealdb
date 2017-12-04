@@ -258,7 +258,13 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 				if err != nil {
 					return nil, err
 				}
-				doc.Set(v, e.Field)
+
+				switch v {
+				case d.current:
+					doc.Set(nil, e.Field)
+				default:
+					doc.Set(v, e.Field)
+				}
 
 			}
 

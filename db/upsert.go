@@ -58,7 +58,7 @@ func (e *executor) fetchUpsert(ctx context.Context, stm *sql.UpsertStatement, do
 
 	if doc != nil {
 		vars := data.New()
-		vars.Set(doc, varKeyParent)
+		vars.Set(doc.Data(), varKeyParent)
 		ctx = context.WithValue(ctx, ctxKeySubs, vars)
 	}
 

@@ -79,7 +79,7 @@ func (e *executor) fetchDelete(ctx context.Context, stm *sql.DeleteStatement, do
 
 	if doc != nil {
 		vars := data.New()
-		vars.Set(doc, varKeyParent)
+		vars.Set(doc.Data(), varKeyParent)
 		ctx = context.WithValue(ctx, ctxKeySubs, vars)
 	}
 

@@ -86,7 +86,7 @@ func (e *executor) fetchSelect(ctx context.Context, stm *sql.SelectStatement, do
 
 	if doc != nil {
 		vars := data.New()
-		vars.Set(doc, varKeyParent)
+		vars.Set(doc.Data(), varKeyParent)
 		ctx = context.WithValue(ctx, ctxKeySubs, vars)
 	}
 

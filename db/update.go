@@ -79,7 +79,7 @@ func (e *executor) fetchUpdate(ctx context.Context, stm *sql.UpdateStatement, do
 
 	if doc != nil {
 		vars := data.New()
-		vars.Set(doc, varKeyParent)
+		vars.Set(doc.Data(), varKeyParent)
 		ctx = context.WithValue(ctx, ctxKeySubs, vars)
 	}
 
