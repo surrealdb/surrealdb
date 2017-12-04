@@ -57,17 +57,12 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 		case doc != nil:
 
 			doc.Fetch(func(key string, val interface{}) interface{} {
-				switch key {
-				case ctxKeyId:
+				switch res := val.(type) {
+				case *sql.Thing:
+					val, _ = e.fetchThing(ctx, res, doc)
 					return val
 				default:
-					switch res := val.(type) {
-					case *sql.Thing:
-						val, _ = e.fetchThing(ctx, res, doc)
-						return val
-					default:
-						return val
-					}
+					return val
 				}
 			})
 
@@ -78,15 +73,41 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 	case *sql.Param:
 
 		if obj, ok := ctx.Value(ctxKeySubs).(*data.Doc); ok {
+
+			obj.Fetch(func(key string, val interface{}) interface{} {
+				switch res := val.(type) {
+				case *sql.Thing:
+					val, _ = e.fetchThing(ctx, res, doc)
+					return val
+				default:
+					return val
+				}
+			})
+
 			if res := obj.Get(val.ID).Data(); res != nil {
 				return e.fetch(ctx, res, doc)
 			}
+
 		}
+
 		if obj, ok := ctx.Value(ctxKeyVars).(*data.Doc); ok {
+
+			obj.Fetch(func(key string, val interface{}) interface{} {
+				switch res := val.(type) {
+				case *sql.Thing:
+					val, _ = e.fetchThing(ctx, res, doc)
+					return val
+				default:
+					return val
+				}
+			})
+
 			if res := obj.Get(val.ID).Data(); res != nil {
 				return e.fetch(ctx, res, doc)
 			}
+
 		}
+
 		return nil, nil
 
 	case *sql.IfStatement:
@@ -208,6 +229,12 @@ func (e *executor) fetchPaths(ctx context.Context, doc *data.Doc, exprs ...sql.E
 		}
 	case *sql.PartExpression:
 		switch val := val.Part.(type) {
+		case *sql.Param:
+			res, err := e.fetch(ctx, val, doc)
+			if err != nil {
+				return nil, err
+			}
+			return e.fetchPaths(ctx, data.Consume(res), exprs...)
 		case *sql.Ident:
 			res, err := e.fetch(ctx, val, doc)
 			if err != nil {

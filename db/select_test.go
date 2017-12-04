@@ -451,6 +451,368 @@ func TestSelect(t *testing.T) {
 
 	})
 
+	Convey("Select $thing from a direct `thing` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, person:test AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldResemble, &sql.Thing{"person", "test"})
+
+	})
+
+	Convey("Select 'id' parameter from a direct `thing` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, person:test.id AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldResemble, &sql.Thing{"person", "test"})
+
+	})
+
+	Convey("Select 'name' parameter from a direct `thing` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, person:test.name AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, "Tobias")
+
+	})
+
+	Convey("Select 'id.name' parameter from a direct `thing` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, person:test.id.name AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, "Tobias")
+
+	})
+
+	Convey("Select 'id.id.id.name' parameter from a direct `thing` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, person:test.id.id.id.name AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, "Tobias")
+
+	})
+
+	Convey("Select $param parameter from a direct `param` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		LET person = person:test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, $person.id AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[4].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldResemble, &sql.Thing{"person", "test"})
+
+	})
+
+	Convey("Select 'id' parameter from a direct `param` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		LET person = person:test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, $person.id AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[4].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldResemble, &sql.Thing{"person", "test"})
+
+	})
+
+	Convey("Select 'name' parameter from a direct `param` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		LET person = person:test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, $person.name AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[4].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldEqual, "Tobias")
+
+	})
+
+	Convey("Select 'id.name' parameter from a direct `param` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		LET person = person:test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, $person.id.name AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[4].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldEqual, "Tobias")
+
+	})
+
+	Convey("Select 'id.id.id.name' parameter from a direct `param` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		LET person = person:test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, $person.id.id.id.name AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[4].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldEqual, "Tobias")
+
+	})
+
+	Convey("Select $parent parameter from a subquery `param`", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, (SELECT $parent FROM tester LIMIT 1) AS test FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldResemble, map[string]interface{}{
+			"id": &sql.Thing{"person", "test"},
+			"meta": map[string]interface{}{
+				"id": "test",
+				"tb": "person",
+			},
+			"name": "Tobias",
+		})
+
+	})
+
+	Convey("Select 'id' parameter from a subquery `param`", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, (SELECT $parent.id FROM tester LIMIT 1) AS test FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldResemble, &sql.Thing{"person", "test"})
+
+	})
+
+	Convey("Select 'name' parameter from a subquery `param`", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, (SELECT $parent.name FROM tester LIMIT 1) AS test FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, "Tobias")
+
+	})
+
+	Convey("Select 'id.name' parameter from a subquery `param`", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, (SELECT $parent.id.name FROM tester LIMIT 1) AS test FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, "Tobias")
+
+	})
+
+	Convey("Select 'id.id.id.name' parameter from a subquery `param`", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, (SELECT $parent.id.id.id.name FROM tester LIMIT 1) AS test FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, "Tobias")
+
+	})
+
 	Convey("Filter using VOID to find records where the field is not set", t, func() {
 
 		setupDB()
