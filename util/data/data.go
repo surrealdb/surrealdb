@@ -959,10 +959,6 @@ func (d *Doc) Each(exec Iterator) error {
 
 func (d *Doc) each(exec Iterator, prev []string) error {
 
-	if d.data == nil {
-		return nil
-	}
-
 	// Define the temporary object so
 	// that we can loop over and traverse
 	// down the path parts of the data

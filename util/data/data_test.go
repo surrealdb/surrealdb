@@ -71,7 +71,7 @@ func TestOperations(t *testing.T) {
 			i++
 			return nil
 		})
-		So(i, ShouldEqual, 0)
+		So(i, ShouldEqual, 1)
 	})
 
 	// ----------------------------------------------------------------------

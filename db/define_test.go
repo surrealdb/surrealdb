@@ -17,6 +17,7 @@ package db
 import (
 	"testing"
 
+	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	. "github.com/smartystreets/goconvey/convey"
 )
@@ -113,8 +114,64 @@ func TestDefine(t *testing.T) {
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
-		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, true)
-		So(data.Consume(res[3].Result[0]).Get("other").Data(), ShouldEqual, nil)
+		So(data.Consume(res[3].Result[0]).Data(), ShouldResemble, map[string]interface{}{
+			"id": &sql.Thing{"person", "test"},
+			"meta": map[string]interface{}{
+				"tb": "person",
+				"id": "test",
+			},
+			"test": true,
+		})
+
+	})
+
+	Convey("Define a schemafull table with nil values", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD test ON person TYPE boolean;
+		UPDATE @person:test SET test=true, other=NULL;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(data.Consume(res[3].Result[0]).Data(), ShouldResemble, map[string]interface{}{
+			"id": &sql.Thing{"person", "test"},
+			"meta": map[string]interface{}{
+				"tb": "person",
+				"id": "test",
+			},
+			"test": true,
+		})
+
+	})
+
+	Convey("Define a schemafull table with nested records", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD test ON person TYPE record (person);
+		UPDATE @person:test SET test=person:other;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(data.Consume(res[3].Result[0]).Data(), ShouldResemble, map[string]interface{}{
+			"id": &sql.Thing{"person", "test"},
+			"meta": map[string]interface{}{
+				"tb": "person",
+				"id": "test",
+			},
+			"test": &sql.Thing{"person", "other"},
+		})
 
 	})
 
@@ -127,13 +184,23 @@ func TestDefine(t *testing.T) {
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD test ON person TYPE array;
 		DEFINE FIELD test.* ON person TYPE record (person);
-		UPDATE @person:test SET test=[], test+=person:1, test+=person:2;
+		UPDATE @person:test SET test=[], test+=person:one, test+=person:two;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
-		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldHaveLength, 2)
+		So(data.Consume(res[4].Result[0]).Data(), ShouldResemble, map[string]interface{}{
+			"id": &sql.Thing{"person", "test"},
+			"meta": map[string]interface{}{
+				"tb": "person",
+				"id": "test",
+			},
+			"test": []interface{}{
+				&sql.Thing{"person", "one"},
+				&sql.Thing{"person", "two"},
+			},
+		})
 
 	})
 
