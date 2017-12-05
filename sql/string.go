@@ -168,6 +168,17 @@ func (this InfoStatement) String() string {
 	}
 }
 
+func (this IfStatement) String() string {
+	m := make([]string, len(this.Cond))
+	for k := range this.Cond {
+		m[k] = print("%v THEN %v", this.Cond[k], this.Then[k])
+	}
+	return print("IF %v%v END",
+		strings.Join(m, " ELSE IF "),
+		maybe(this.Else != nil, print(" ELSE %v", this.Else)),
+	)
+}
+
 func (this LetStatement) String() string {
 	return print("LET %v = %v",
 		this.Name,
@@ -722,10 +733,13 @@ func (this SubExpression) String() string {
 }
 
 func (this IfelExpression) String() string {
-	return print("IF %v THEN %v%v",
-		this.Cond,
-		this.Then,
-		maybe(this.Else != nil, print("ELSE %v END", this.Else)),
+	m := make([]string, len(this.Cond))
+	for k := range this.Cond {
+		m[k] = print("%v THEN %v", this.Cond[k], this.Then[k])
+	}
+	return print("IF %v%v END",
+		strings.Join(m, " ELSE IF "),
+		maybe(this.Else != nil, print(" ELSE %v", this.Else)),
 	)
 }
 
