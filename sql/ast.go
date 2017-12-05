@@ -413,16 +413,17 @@ type RemoveEventStatement struct {
 
 // DefineFieldStatement represents an SQL DEFINE FIELD statement.
 type DefineFieldStatement struct {
-	KV     string `cork:"-" codec:"-"`
-	NS     string `cork:"-" codec:"-"`
-	DB     string `cork:"-" codec:"-"`
-	Name   *Ident `cork:"name" codec:"name"`
-	What   Tables `cork:"-" codec:"-"`
-	Perms  Expr   `cork:"perms" codec:"perms"`
-	Type   string `cork:"type" codec:"type"`
-	Kind   string `cork:"kind" codec:"kind"`
-	Value  Expr   `cork:"value" codec:"value"`
-	Assert Expr   `cork:"assert" codec:"assert"`
+	KV       string  `cork:"-" codec:"-"`
+	NS       string  `cork:"-" codec:"-"`
+	DB       string  `cork:"-" codec:"-"`
+	Name     *Ident  `cork:"name" codec:"name"`
+	What     Tables  `cork:"-" codec:"-"`
+	Perms    Expr    `cork:"perms" codec:"perms"`
+	Type     string  `cork:"type" codec:"type"`
+	Kind     string  `cork:"kind" codec:"kind"`
+	Value    Expr    `cork:"value" codec:"value"`
+	Assert   Expr    `cork:"assert" codec:"assert"`
+	Priority float64 `cork:"priority" codec:"priority"`
 }
 
 // RemoveFieldStatement represents an SQL REMOVE FIELD statement.

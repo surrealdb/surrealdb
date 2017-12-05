@@ -161,6 +161,7 @@ const (
 	ORDER
 	PASSWORD
 	PERMISSIONS
+	PRIORITY
 	RAND
 	RELATE
 	REMOVE
@@ -327,6 +328,7 @@ var tokens = [...]string{
 	ORDER:           "ORDER",
 	PASSWORD:        "PASSWORD",
 	PERMISSIONS:     "PERMISSIONS",
+	PRIORITY:        "PRIORITY",
 	RAND:            "RAND",
 	RELATE:          "RELATE",
 	REMOVE:          "REMOVE",

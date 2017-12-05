@@ -269,6 +269,34 @@ func TestDefine(t *testing.T) {
 
 	})
 
+	Convey("Specify the priority of a field so that it is processed after any dependent fields", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE FIELD name.first ON person;
+		DEFINE FIELD name.last ON person;
+		DEFINE FIELD name.full ON person VALUE string.join(' ', name.first, name.last) PRIORITY 10;
+		DEFINE FIELD name.alias ON person VALUE string.join(' ', name.full, "(aka. Toboman)") PRIORITY 20;
+		UPDATE person:test SET name.first="Tobias", name.last="Ottoman";
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 6)
+		So(res[1].Status, ShouldEqual, "OK")
+		So(res[2].Status, ShouldEqual, "OK")
+		So(res[3].Status, ShouldEqual, "OK")
+		So(res[4].Status, ShouldEqual, "OK")
+		So(res[5].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[5].Result[0]).Get("name.first").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[5].Result[0]).Get("name.last").Data(), ShouldEqual, "Ottoman")
+		So(data.Consume(res[5].Result[0]).Get("name.full").Data(), ShouldEqual, "Tobias Ottoman")
+		So(data.Consume(res[5].Result[0]).Get("name.alias").Data(), ShouldEqual, "Tobias Ottoman (aka. Toboman)")
+
+	})
+
 	Convey("Define an event when a value changes", t, func() {
 
 		setupDB()

@@ -372,13 +372,14 @@ func (this RemoveEventStatement) String() string {
 }
 
 func (this DefineFieldStatement) String() string {
-	return print("DEFINE FIELD %v ON %v%v%v%v%v%v",
+	return print("DEFINE FIELD %v ON %v%v%v%v%v%v%v",
 		this.Name,
 		this.What,
 		maybe(this.Type != "", print(" TYPE %v", this.Type)),
 		maybe(this.Kind != "", print(" (%v)", this.Kind)),
 		maybe(this.Value != nil, print(" VALUE %v", this.Value)),
 		maybe(this.Assert != nil, print(" ASSERT %v", this.Assert)),
+		maybe(this.Priority != 0, print(" PRIORITY %v", this.Priority)),
 		maybe(this.Perms != nil, this.Perms),
 	)
 }

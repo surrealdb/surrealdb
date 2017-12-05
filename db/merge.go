@@ -15,6 +15,8 @@
 package db
 
 import (
+	"sort"
+
 	"context"
 
 	"github.com/abcum/surreal/sql"
@@ -260,12 +262,13 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 		return err
 	}
 
-	// TODO need a way of arranging the fields
-	// This is so that a field can depend on
-	// another field if it uses the data from
-	// the other field. Perhaps a DEPENDS ON
-	// command can be used to specify other
-	// fields that a field relies on.
+	// Sort the fields according to their
+	// priority and then loop over them in
+	// order processing them fully.
+
+	sort.Slice(fds, func(i, j int) bool {
+		return fds[i].Priority < fds[j].Priority
+	})
 
 	for _, fd := range fds {
 

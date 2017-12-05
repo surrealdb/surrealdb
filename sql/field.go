@@ -36,7 +36,7 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 
 	for {
 
-		tok, _, exi := p.mightBe(TYPE, VALUE, ASSERT, PERMISSIONS)
+		tok, _, exi := p.mightBe(TYPE, VALUE, ASSERT, PRIORITY, PERMISSIONS)
 		if !exi {
 			break
 		}
@@ -55,6 +55,12 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 
 		if p.is(tok, ASSERT) {
 			if stmt.Assert, err = p.parseExpr(); err != nil {
+				return nil, err
+			}
+		}
+
+		if p.is(tok, PRIORITY) {
+			if stmt.Priority, err = p.parsePriority(); err != nil {
 				return nil, err
 			}
 		}

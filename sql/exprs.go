@@ -218,6 +218,19 @@ func (p *parser) parseDuration() (time.Duration, error) {
 
 }
 
+func (p *parser) parsePriority() (float64, error) {
+
+	tok, lit, err := p.shouldBe(NUMBER)
+	if err != nil {
+		return 0, &ParseError{Found: lit, Expected: []string{"number"}}
+	}
+
+	val, err := p.declare(tok, lit)
+
+	return val.(float64), err
+
+}
+
 func (p *parser) parseType() (t, k string, err error) {
 
 	_, t, err = p.shouldBe(IDENT, STRING, PASSWORD)

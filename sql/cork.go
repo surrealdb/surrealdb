@@ -1738,6 +1738,7 @@ func (this *DefineFieldStatement) MarshalCORK(w *cork.Writer) (err error) {
 	w.EncodeAny(this.Perms)
 	w.EncodeAny(this.Value)
 	w.EncodeAny(this.Assert)
+	w.EncodeFloat64(this.Priority)
 	return
 }
 
@@ -1749,6 +1750,7 @@ func (this *DefineFieldStatement) UnmarshalCORK(r *cork.Reader) (err error) {
 	r.DecodeAny(&this.Perms)
 	r.DecodeAny(&this.Value)
 	r.DecodeAny(&this.Assert)
+	r.DecodeFloat64(&this.Priority)
 	return
 }
 
