@@ -1,5 +1,5 @@
-hash: 2cdf97833582dc0d969ea9de15f67a99cf9fc5f4689f13a246b1e26a774faf7d
-updated: 2017-12-03T01:44:19.574842Z
+hash: 9b2aaa0b9a7168dd046b09fecf8945ade00d02b018acb7013de8ee17b2afcddb
+updated: 2017-12-05T01:07:38.515006Z
 imports:
 - name: cloud.google.com/go
   version: 2d3a6656c17a60b0815b7e06ab0be04eacb6e613
@@ -26,11 +26,11 @@ imports:
   subpackages:
   - mw
 - name: github.com/abcum/ptree
-  version: 42a9901f14a8f1e96a135d9d50a881068c2e9237
+  version: 474d875024a90dd50bfc66afaf2a35a4447afc44
 - name: github.com/abcum/rixxdb
-  version: 581b9aaeadee018a528266f7b88577c530499f35
+  version: 1e0089510ee7b6da1965337d8447eabda4d7c198
 - name: github.com/abcum/syncr
-  version: ea52fa5bfae9223d84a5a5b29adc9853084470b3
+  version: 55c907d89cba69cad2701004ec86119d448c0f92
   subpackages:
   - file
   - gcs
@@ -41,9 +41,9 @@ imports:
 - name: github.com/armon/go-metrics
   version: 7aa49fde808223f8dadfdbfd3a20ff6c19e5f9ec
 - name: github.com/asaskevich/govalidator
-  version: 73945b6115bfbbcc57d89b7316e28109364124e1
+  version: 521b25f4b05fd26bec69d9dedeb8f9c9a83939a8
 - name: github.com/aws/aws-sdk-go
-  version: 388e6676807f5968ad5eaaec0c70002f80c20b84
+  version: 107df09c5f137b9dfe53b7a4c25dd4d79f81390f
   subpackages:
   - aws
   - aws/awserr
@@ -111,7 +111,7 @@ imports:
   subpackages:
   - codec
 - name: github.com/hashicorp/go-multierror
-  version: 83588e72410abfbe4df460eeb6f30841ae47d4c4
+  version: b7773ae218740a7be65057fc60b366a49b538a44
 - name: github.com/hashicorp/go-sockaddr
   version: 9b4c5fa5b10a683339a270d664474b9f4aee62fc
 - name: github.com/hashicorp/golang-lru
@@ -140,9 +140,7 @@ imports:
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: 6da3249dfb57fbaa16efafcd8744cee8809d80cd
-  subpackages:
-  - internal/socket
+  version: 325e98bb8641b89fa2b1542149b09ec670953ac4
 - name: github.com/mitchellh/mapstructure
   version: 06020f85339e21b2478f756a78e295255ffa4d6a
 - name: github.com/newrelic/go-agent
@@ -173,7 +171,7 @@ imports:
 - name: github.com/spf13/pflag
   version: 4c012f6dcd9546820e378d0bdda4d8fc772cdfea
 - name: github.com/ugorji/go
-  version: 7a1de86227c3a2d8c266c99436d6cf6685d0dc53
+  version: f0aa215a7d653544d39d0e27dfa10fa4b183f397
   subpackages:
   - codec
 - name: golang.org/x/crypto
@@ -189,12 +187,17 @@ imports:
 - name: golang.org/x/net
   version: a8b9294777976932365dabb6640cf1468d95c70f
   subpackages:
+  - bpf
   - context
   - context/ctxhttp
   - http2
   - http2/hpack
   - idna
+  - internal/iana
+  - internal/socket
   - internal/timeseries
+  - ipv4
+  - ipv6
   - lex/httplex
   - trace
 - name: golang.org/x/oauth2
@@ -214,7 +217,7 @@ imports:
   - unix
   - windows
 - name: golang.org/x/text
-  version: 75cc3cad82b5f47d3fb229ddda8c5167da14f294
+  version: 57961680700a5336d15015c8c50686ca5ba362a4
   subpackages:
   - collate
   - internal/colltab
@@ -229,7 +232,7 @@ imports:
   subpackages:
   - rate
 - name: google.golang.org/api
-  version: 3a1d936b7575b82197a1fea0632218dd07b1e65c
+  version: 8cfdc57a0663729cc2811afefb5b7cd3d901e97c
   subpackages:
   - cloudtrace/v1
   - gensupport
@@ -273,7 +276,7 @@ imports:
   - googleapis/rpc/status
   - protobuf/field_mask
 - name: google.golang.org/grpc
-  version: cd563b81ec334abe62cda34a33b8640ea67ef5ba
+  version: be077907e29fdb945d351e4284eb5361e7f8924e
   subpackages:
   - balancer
   - balancer/roundrobin

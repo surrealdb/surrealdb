@@ -347,4 +347,55 @@ func TestDefine(t *testing.T) {
 
 	})
 
+	Convey("Define an event on a table, and ensure it is not output with records", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE EVENT test ON person WHEN true THEN false;
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 3)
+		So(res[2].Result, ShouldHaveLength, 0)
+
+	})
+
+	Convey("Define an field on a table, and ensure it is not output with records", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE FIELD test ON person;
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 3)
+		So(res[2].Result, ShouldHaveLength, 0)
+
+	})
+
+	Convey("Define an index on a table, and ensure it is not output with records", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE INDEX test ON person COLUMNS test;
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 3)
+		So(res[2].Result, ShouldHaveLength, 0)
+
+	})
+
 }
