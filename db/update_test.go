@@ -365,6 +365,33 @@ func TestUpdate(t *testing.T) {
 
 	})
 
+	Convey("Update a record using CONTENT stored in a $param", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		Let data = {"other":true};
+		CREATE person:test SET test="text";
+		UPDATE person:test CONTENT $data;
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[2].Result[0]).Get("test").Data(), ShouldEqual, "text")
+		So(data.Consume(res[2].Result[0]).Get("other").Data(), ShouldEqual, nil)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, nil)
+		So(data.Consume(res[3].Result[0]).Get("other").Data(), ShouldEqual, true)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldEqual, nil)
+		So(data.Consume(res[4].Result[0]).Get("other").Data(), ShouldEqual, true)
+
+	})
+
 	Convey("Update a record using MERGE", t, func() {
 
 		setupDB()
@@ -427,6 +454,33 @@ func TestUpdate(t *testing.T) {
 
 	})
 
+	Convey("Update a record using MERGE stored in a $param", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		LET data = {"other":true};
+		CREATE person:test SET test="text";
+		UPDATE person:test MERGE $data;
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[2].Result[0]).Get("test").Data(), ShouldEqual, "text")
+		So(data.Consume(res[2].Result[0]).Get("other").Data(), ShouldEqual, nil)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, "text")
+		So(data.Consume(res[3].Result[0]).Get("other").Data(), ShouldEqual, true)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldEqual, "text")
+		So(data.Consume(res[4].Result[0]).Get("other").Data(), ShouldEqual, true)
+
+	})
+
 	Convey("Update a record using DIFF", t, func() {
 
 		setupDB()
@@ -442,12 +496,41 @@ func TestUpdate(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[1].Result[0]).Get("test").Data(), ShouldEqual, "text")
+		So(data.Consume(res[1].Result[0]).Get("other").Data(), ShouldEqual, nil)
 		So(res[2].Result, ShouldHaveLength, 1)
-		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, "text")
-		So(data.Consume(res[3].Result[0]).Get("other").Data(), ShouldEqual, true)
+		So(data.Consume(res[2].Result[0]).Get("test").Data(), ShouldEqual, "text")
+		So(data.Consume(res[2].Result[0]).Get("other").Data(), ShouldEqual, true)
 		So(res[3].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, "text")
 		So(data.Consume(res[3].Result[0]).Get("other").Data(), ShouldEqual, true)
+
+	})
+
+	Convey("Update a record using DIFF stored in a $param", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		LET data = [{"op":"add","path":"/other","value":true}];
+		CREATE person:test SET test="text";
+		UPDATE person:test DIFF $data;
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[2].Result[0]).Get("test").Data(), ShouldEqual, "text")
+		So(data.Consume(res[2].Result[0]).Get("other").Data(), ShouldEqual, nil)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, "text")
+		So(data.Consume(res[3].Result[0]).Get("other").Data(), ShouldEqual, true)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldEqual, "text")
+		So(data.Consume(res[4].Result[0]).Get("other").Data(), ShouldEqual, true)
 
 	})
 
