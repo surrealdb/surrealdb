@@ -220,7 +220,7 @@ func (p *parser) parseDuration() (time.Duration, error) {
 
 func (p *parser) parseType() (t, k string, err error) {
 
-	_, t, err = p.shouldBe(IDENT, STRING)
+	_, t, err = p.shouldBe(IDENT, STRING, PASSWORD)
 	if err != nil {
 		err = &ParseError{Found: t, Expected: allowedTypes}
 		return
