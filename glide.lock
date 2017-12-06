@@ -1,5 +1,5 @@
 hash: 9b2aaa0b9a7168dd046b09fecf8945ade00d02b018acb7013de8ee17b2afcddb
-updated: 2017-12-05T01:07:38.515006Z
+updated: 2017-12-06T13:12:51.913214Z
 imports:
 - name: cloud.google.com/go
   version: 2d3a6656c17a60b0815b7e06ab0be04eacb6e613
@@ -20,7 +20,7 @@ imports:
 - name: github.com/abcum/bump
   version: 8c43cce06105894a9b74f89a79ca62ba8e365cf7
 - name: github.com/abcum/cork
-  version: 19ca3dc37b0805d7b6c58b2f3548c3d607ac2c95
+  version: 2f3e8fbc78752fed4f7f155362483cc6d302f877
 - name: github.com/abcum/fibre
   version: b4850d6c9e931b6816f5569d71a4b6029cea6842
   subpackages:
@@ -43,7 +43,7 @@ imports:
 - name: github.com/asaskevich/govalidator
   version: 521b25f4b05fd26bec69d9dedeb8f9c9a83939a8
 - name: github.com/aws/aws-sdk-go
-  version: 107df09c5f137b9dfe53b7a4c25dd4d79f81390f
+  version: a9c63ac6fd79402f91191c2e0a1348d0b8968e6c
   subpackages:
   - aws
   - aws/awserr
@@ -140,7 +140,7 @@ imports:
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: 325e98bb8641b89fa2b1542149b09ec670953ac4
+  version: e508eecd675477dde88eb6508aa5212ebed13ce8
 - name: github.com/mitchellh/mapstructure
   version: 06020f85339e21b2478f756a78e295255ffa4d6a
 - name: github.com/newrelic/go-agent
@@ -165,7 +165,7 @@ imports:
   subpackages:
   - diffmatchpatch
 - name: github.com/Sirupsen/logrus
-  version: f006c2ac4710855cf0f916dd6b77acf6b048dc6e
+  version: d682213848ed68c0a260ca37d6dd5ace8423f5ba
 - name: github.com/spf13/cobra
   version: 7b2c5ac9fc04fc5efafb60700713d4fa609b777b
 - name: github.com/spf13/pflag
@@ -201,7 +201,7 @@ imports:
   - lex/httplex
   - trace
 - name: golang.org/x/oauth2
-  version: f95fa95eaa936d9d87489b15d1d18b97c1ba9c28
+  version: ea8c6730ed5beeff685fcd20d17423a8546daf6c
   subpackages:
   - google
   - internal
@@ -232,7 +232,7 @@ imports:
   subpackages:
   - rate
 - name: google.golang.org/api
-  version: 8cfdc57a0663729cc2811afefb5b7cd3d901e97c
+  version: e31351a3998a5bddef4462979b301901b02003d1
   subpackages:
   - cloudtrace/v1
   - gensupport
@@ -276,9 +276,10 @@ imports:
   - googleapis/rpc/status
   - protobuf/field_mask
 - name: google.golang.org/grpc
-  version: be077907e29fdb945d351e4284eb5361e7f8924e
+  version: bf35f1b9619f442d2887b585620f1fa2efa39bc0
   subpackages:
   - balancer
+  - balancer/base
   - balancer/roundrobin
   - codes
   - connectivity
