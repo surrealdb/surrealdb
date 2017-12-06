@@ -60,6 +60,13 @@ func (d *document) grant(ctx context.Context, when method) (ok bool, err error) 
 		return false, err
 	}
 
+	// Once we have the table we reset the
+	// context to DB level so that no other
+	// embedded permissions are checked on
+	// records within these permissions.
+
+	ctx = context.WithValue(ctx, ctxKeyKind, cnf.AuthDB)
+
 	// We then try to process the relevant
 	// permissions dependent on the query
 	// that we are currently processing. If
@@ -122,6 +129,13 @@ func (d *document) allow(ctx context.Context, when method) (ok bool, err error) 
 	if err != nil {
 		return false, err
 	}
+
+	// Once we have the table we reset the
+	// context to DB level so that no other
+	// embedded permissions are checked on
+	// records within these permissions.
+
+	ctx = context.WithValue(ctx, ctxKeyKind, cnf.AuthDB)
 
 	// We then try to process the relevant
 	// permissions dependent on the query
