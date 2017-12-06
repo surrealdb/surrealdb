@@ -1004,51 +1004,51 @@ func Test_Parse_Queries_Select(t *testing.T) {
 				Cond: &BinaryExpression{LHS: &Ident{"old"}, Op: EQ, RHS: false},
 			}}},
 		},
-		/*{
-			sql: `SELECT * FROM person WHERE id != null AND id > 13.9 AND id < 31 AND id >= 15 AND id <= 29.9`,
+		{
+			sql: `SELECT * FROM person WHERE id != NULL AND id > 13.9 AND id < 31 AND id >= 15 AND id <= 29.9`,
 			res: &Query{Statements: []Statement{&SelectStatement{
 				RW: false, KV: "*", NS: "*", DB: "*",
 				Expr: []*Field{{Expr: &All{}, Field: "*"}},
 				What: []Expr{&Ident{"person"}},
 				Cond: &BinaryExpression{
 					LHS: &BinaryExpression{
+						LHS: &Ident{"id"},
+						Op:  NEQ,
+						RHS: nil,
+					},
+					Op: AND,
+					RHS: &BinaryExpression{
 						LHS: &BinaryExpression{
+							LHS: &Ident{"id"},
+							Op:  GT,
+							RHS: float64(13.9),
+						},
+						Op: AND,
+						RHS: &BinaryExpression{
 							LHS: &BinaryExpression{
+								LHS: &Ident{"id"},
+								Op:  LT,
+								RHS: float64(31),
+							},
+							Op: AND,
+							RHS: &BinaryExpression{
 								LHS: &BinaryExpression{
-									LHS: &Ident{ID: "id"},
-									Op:  NEQ,
-									RHS: nil,
+									LHS: &Ident{"id"},
+									Op:  GTE,
+									RHS: float64(15),
 								},
 								Op: AND,
 								RHS: &BinaryExpression{
 									LHS: &Ident{ID: "id"},
-									Op:  GT,
-									RHS: float64(13.9),
+									Op:  LTE,
+									RHS: float64(29.9),
 								},
 							},
-							Op: AND,
-							RHS: &BinaryExpression{
-								LHS: &Ident{ID: "id"},
-								Op:  LT,
-								RHS: float64(31),
-							},
 						},
-						Op: AND,
-						RHS: &BinaryExpression{
-							LHS: &Ident{ID: "id"},
-							Op:  GTE,
-							RHS: float64(15),
-						},
-					},
-					Op: AND,
-					RHS: &BinaryExpression{
-						LHS: &Ident{ID: "id"},
-						Op:  LTE,
-						RHS: float64(29.9),
 					},
 				},
 			}}},
-		},*/
+		},
 		{
 			sql: `SELECT * FROM person WHERE test IN ["London","Paris"]`,
 			str: `SELECT * FROM person WHERE test ∈ ["London","Paris"]`,
@@ -2781,16 +2781,16 @@ func Test_Parse_Queries_Define(t *testing.T) {
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Assert: &BinaryExpression{
-					LHS: &Param{"value"},
-					Op:  GT,
+					LHS: &BinaryExpression{
+						LHS: &Param{"value"},
+						Op:  GT,
+						RHS: 0.0,
+					},
+					Op: AND,
 					RHS: &BinaryExpression{
-						LHS: 0.0,
-						Op:  AND,
-						RHS: &BinaryExpression{
-							LHS: &Param{"value"},
-							Op:  LT,
-							RHS: 100.0,
-						},
+						LHS: &Param{"value"},
+						Op:  LT,
+						RHS: 100.0,
 					},
 				},
 			}}},

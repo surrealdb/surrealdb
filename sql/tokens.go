@@ -396,20 +396,18 @@ func lookup(lookups []Token) (literals []string) {
 func (tok Token) precedence() int {
 
 	switch tok {
-	case OR:
+	case OR, AND:
 		return 1
-	case AND:
-		return 2
 	case EQ, NEQ, EEQ, NEE,
 		LT, LTE, GT, GTE,
 		ANY, SIN, SNI, INS, NIS,
 		CONTAINSALL, CONTAINSNONE, CONTAINSSOME,
 		ALLCONTAINEDIN, NONECONTAINEDIN, SOMECONTAINEDIN:
-		return 3
+		return 2
 	case ADD, SUB:
-		return 4
+		return 3
 	case MUL, DIV:
-		return 5
+		return 4
 	}
 
 	return 0

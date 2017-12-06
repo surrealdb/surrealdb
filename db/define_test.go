@@ -418,12 +418,9 @@ func TestDefine(t *testing.T) {
 
 		setupDB()
 
-		// IMPORTANT enable test
-
 		txt := `
 		USE NS test DB test;
-		# DEFINE EVENT test ON person WHEN $before.test < 5000 AND $after.test > 5000 THEN (CREATE temp);
-		DEFINE EVENT test ON person WHEN ($before.test < 5000) AND ($after.test > 5000) THEN (CREATE temp);
+		DEFINE EVENT test ON person WHEN $before.test < 5000 AND $after.test > 5000 THEN (CREATE temp);
 		UPDATE @person:test SET test = 1000;
 		UPDATE @person:test SET test = 4000;
 		UPDATE @person:test SET test = 2000;

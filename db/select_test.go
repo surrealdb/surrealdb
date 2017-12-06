@@ -882,7 +882,7 @@ func TestSelect(t *testing.T) {
 
 	})
 
-	Convey("Filter using OR boolean logic to find records", t, func() {
+	Convey("Filter using boolean logic to find records", t, func() {
 
 		setupDB()
 
@@ -891,38 +891,43 @@ func TestSelect(t *testing.T) {
 		CREATE person:1 SET test = "one";
 		CREATE person:2 SET test = "two";
 		CREATE person:3 SET test = "tre";
-		SELECT test FROM person WHERE ( (test = "one") OR (test = "two") );
-		SELECT test FROM person WHERE ( test = "one" OR test = "two" );
+
+		SELECT test FROM person WHERE test = "one";
+
+		SELECT test FROM person WHERE test = "one" OR test = "two";
+		SELECT test FROM person WHERE test = "one" OR test = "two" OR test = "tre";
+		SELECT test FROM person WHERE test = "one" OR (test = "two" OR test = "tre");
+		SELECT test FROM person WHERE (test = "one") OR (test = "two") OR (test = "tre");
+		SELECT test FROM person WHERE (test = "one") OR ( (test = "two") OR (test = "tre") );
+		SELECT test FROM person WHERE ( (test = "one") OR (test = "two") OR (test = "tre") );
+
+		SELECT test FROM person WHERE test = "one" AND test = "two" AND test = "tre";
+		SELECT test FROM person WHERE test = "one" AND test != "two" AND test != "tre";
+		SELECT test FROM person WHERE test = "one" AND (test != "two" AND test != "tre");
+		SELECT test FROM person WHERE (test = "one") AND (test != "two") AND (test != "tre");
+		SELECT test FROM person WHERE (test = "one") AND ( (test != "two") AND (test != "tre") );
+		SELECT test FROM person WHERE ( (test = "one") AND (test != "two") AND (test != "tre") );
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 6)
-		So(res[4].Result, ShouldHaveLength, 2)
-		// IMPORTANT enable test
-		SkipSo(res[5].Result, ShouldHaveLength, 2)
+		So(res, ShouldHaveLength, 17)
 
-	})
-
-	Convey("Filter using AND boolean logic to find records", t, func() {
-
-		setupDB()
-
-		txt := `
-		USE NS test DB test;
-		CREATE person:1 SET test = "one";
-		CREATE person:2 SET test = "two";
-		CREATE person:3 SET test = "tre";
-		SELECT test FROM person WHERE ( (test = "one") AND ( (test != "two") AND (test != "tre") ) );
-		SELECT test FROM person WHERE ( test = "one" AND (test != "two" AND test != "tre") );
-		`
-
-		res, err := Execute(setupKV(), txt, nil)
-		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 6)
 		So(res[4].Result, ShouldHaveLength, 1)
-		// IMPORTANT enable test
-		SkipSo(res[5].Result, ShouldHaveLength, 1)
+
+		So(res[5].Result, ShouldHaveLength, 2)
+		So(res[6].Result, ShouldHaveLength, 3)
+		So(res[7].Result, ShouldHaveLength, 3)
+		So(res[8].Result, ShouldHaveLength, 3)
+		So(res[9].Result, ShouldHaveLength, 3)
+		So(res[10].Result, ShouldHaveLength, 3)
+
+		So(res[11].Result, ShouldHaveLength, 0)
+		So(res[12].Result, ShouldHaveLength, 1)
+		So(res[13].Result, ShouldHaveLength, 1)
+		So(res[14].Result, ShouldHaveLength, 1)
+		So(res[15].Result, ShouldHaveLength, 1)
+		So(res[16].Result, ShouldHaveLength, 1)
 
 	})
 

@@ -453,32 +453,46 @@ func (p *parser) parseExpr() (exp Expr, err error) {
 		// whose operator precendence >= this precedence.
 
 		for node := root; ; {
-			r, ok := node.RHS.(*BinaryExpression)
-			// IMPORTANT fix binary OR/AND expressions
-			/*if !ok {
-				if node.Op.precedence() >= tok.precedence() {
-					node.RHS = &BinaryExpression{LHS: node.RHS, Op: tok, RHS: rhs}
+
+			if r, ok := rhs.(*BinaryExpression); ok {
+
+				if r.Op.precedence() < tok.precedence() {
+
+					r.LHS = &BinaryExpression{
+						LHS: root.RHS,
+						Op:  tok,
+						RHS: r.LHS,
+					}
+
+					node.RHS = rhs
+
 					break
-				} else {
-					r = &BinaryExpression{LHS: node, Op: tok, RHS: rhs}
-					break
+
 				}
-			} else {
-				if r.Op.precedence() >= tok.precedence() {
-					node.RHS = &BinaryExpression{LHS: node.RHS, Op: tok, RHS: rhs}
-					break
-				}
-			}*/
-			if !ok || r.Op.precedence() >= tok.precedence() {
-				node.RHS = &BinaryExpression{LHS: node.RHS, Op: tok, RHS: rhs}
-				break
+
 			}
+
+			r, ok := node.RHS.(*BinaryExpression)
+
+			if !ok || r.Op.precedence() <= tok.precedence() {
+
+				node.RHS = &BinaryExpression{
+					LHS: node.RHS,
+					Op:  tok,
+					RHS: rhs,
+				}
+
+				break
+
+			}
+
 			node = r
+
 		}
 
 	}
 
-	return root, err
+	return nil, nil
 
 }
 
