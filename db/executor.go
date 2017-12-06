@@ -249,8 +249,8 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 				if tim := ctx.Err(); err == nil && tim != nil {
 					res, err = nil, &TimerError{timer: stm.Duration()}
 				}
+				canc()
 			}()
-			defer canc()
 		}
 	}
 
