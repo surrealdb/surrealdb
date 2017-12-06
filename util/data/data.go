@@ -1057,7 +1057,7 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 
 			c, i, r := d.what(p, a, choose)
 
-			if len(c) == 0 {
+			if r == one && len(c) == 0 {
 				return fmt.Errorf("No item with index %s in array, using path %s", p, path)
 			}
 
