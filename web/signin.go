@@ -74,24 +74,22 @@ func signin(c *fibre.Context) (err error) {
 
 		defer txn.Cancel()
 
+		// Specify fields to show in logs.
+
+		f := map[string]interface{}{"ns": n, "db": d, "sc": s}
+
 		// Get the specified signin scope.
 
 		if scp, err = mem.NewWithTX(txn).GetSC(n, d, s); err != nil {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope does not exist")
+			m := "Authentication scope does not exist"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Check that the scope allows signin.
 
 		if exp, ok = scp.Signin.(*sql.SubExpression); !ok {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope signup was unsuccessful")
+			m := "Authentication scope does not allow signin"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Process the scope signin statement.
@@ -103,31 +101,36 @@ func signin(c *fibre.Context) (err error) {
 		// If the query fails then return a 501 error.
 
 		if res, err = db.Process(c, query, vars); err != nil {
-			return fibre.NewHTTPError(501).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope signin was unsuccessful")
+			m := "Authentication scope signin was unsuccessful: Query failed"
+			return fibre.NewHTTPError(501).WithFields(f).WithMessage(m)
 		}
 
 		// If the response is not 1 record then return a 403 error.
 
-		if len(res) != 1 || len(res[0].Result) != 1 {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope signin was unsuccessful")
+		if len(res) != 1 {
+			m := "Authentication scope signin was unsuccessful: Query failed"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+		}
+
+		// If the response has an error set then return a 403 error.
+
+		if res[0].Status != "OK" {
+			m := "Authentication scope signin was unsuccessful: " + res[0].Detail
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+		}
+
+		// If the response has no record set then return a 403 error.
+
+		if len(res[0].Result) != 1 {
+			m := "Authentication scope signin was unsuccessful: No record created"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// If the query does not return an id field then return a 403 error.
 
 		if doc, ok = data.Consume(res[0].Result[0]).Get("id").Data().(*sql.Thing); !ok {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope signin was unsuccessful")
+			m := "Authentication scope signin was unsuccessful: No id field found"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Create a new token signer with the default claims.
@@ -148,11 +151,8 @@ func signin(c *fibre.Context) (err error) {
 		// Try to create the final signed token as a string.
 
 		if str, err = signr.SignedString(scp.Code); err != nil {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Problem with signing string")
+			m := "Problem with signing method: " + err.Error()
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		return c.Send(200, str)
@@ -173,12 +173,15 @@ func signin(c *fibre.Context) (err error) {
 		u, uok := vars[varKeyUser].(string)
 		p, pok := vars[varKeyPass].(string)
 
+		// Specify fields to show in logs.
+
+		f := map[string]interface{}{"ns": n, "db": d, "du": u}
+
+		// Check that the required fields exist.
+
 		if !uok || !pok {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"du": u,
-			}).WithMessage("Username or password is missing")
+			m := "Username or password is missing"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Start a new read transaction.
@@ -203,11 +206,8 @@ func signin(c *fibre.Context) (err error) {
 		// Try to create the final signed token as a string.
 
 		if str, err = signr.SignedString(usr.Code); err != nil {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"du": u,
-			}).WithMessage("Problem with signing string")
+			m := "Problem with signing method: " + err.Error()
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		return c.Send(200, str)
@@ -228,11 +228,15 @@ func signin(c *fibre.Context) (err error) {
 		u, uok := vars[varKeyUser].(string)
 		p, pok := vars[varKeyPass].(string)
 
+		// Specify fields to show in logs.
+
+		f := map[string]interface{}{"ns": n, "nu": u}
+
+		// Check that the required fields exist.
+
 		if !uok || !pok {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"nu": u,
-			}).WithMessage("Database signin was unsuccessful")
+			m := "Username or password is missing"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		if usr, err = signinNS(n, u, p); err != nil {
@@ -254,10 +258,8 @@ func signin(c *fibre.Context) (err error) {
 		// Try to create the final signed token as a string.
 
 		if str, err = signr.SignedString(usr.Code); err != nil {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"nu": u,
-			}).WithMessage("Problem with signing string")
+			m := "Problem with signing method: " + err.Error()
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		return c.Send(200, str)
@@ -282,31 +284,29 @@ func signinDB(n, d, u, p string) (usr *sql.DefineLoginStatement, err error) {
 
 	defer txn.Cancel()
 
+	// Specify fields to show in logs.
+
+	f := map[string]interface{}{"ns": n, "db": d, "du": u}
+
 	// Get the specified user and password.
 
 	if len(u) == 0 || len(p) == 0 {
-		return nil, fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-			"ns": n,
-			"nu": u,
-		}).WithMessage("Database signin was unsuccessful")
+		m := "Database signin was unsuccessful"
+		return nil, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 	}
 
 	// Get the specified namespace login.
 
 	if usr, err = mem.NewWithTX(txn).GetDU(n, d, u); err != nil {
-		return nil, fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-			"ns": n,
-			"nu": u,
-		}).WithMessage("Database login does not exist")
+		m := "Database login does not exist"
+		return nil, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 	}
 
 	// Compare the hashed and stored passwords.
 
 	if err = bcrypt.CompareHashAndPassword(usr.Pass, []byte(p)); err != nil {
-		return nil, fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-			"ns": n,
-			"nu": u,
-		}).WithMessage("Database signin was unsuccessful")
+		m := "Database signin was unsuccessful"
+		return nil, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 	}
 
 	return
@@ -327,31 +327,29 @@ func signinNS(n, u, p string) (usr *sql.DefineLoginStatement, err error) {
 
 	defer txn.Cancel()
 
+	// Specify fields to show in logs.
+
+	f := map[string]interface{}{"ns": n, "nu": u}
+
 	// Get the specified user and password.
 
 	if len(u) == 0 || len(p) == 0 {
-		return nil, fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-			"ns": n,
-			"nu": u,
-		}).WithMessage("Database signin was unsuccessful")
+		m := "Namespace signin was unsuccessful"
+		return nil, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 	}
 
 	// Get the specified namespace login.
 
 	if usr, err = mem.NewWithTX(txn).GetNU(n, u); err != nil {
-		return nil, fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-			"ns": n,
-			"nu": u,
-		}).WithMessage("Namespace login does not exist")
+		m := "Namespace login does not exist"
+		return nil, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 	}
 
 	// Compare the hashed and stored passwords.
 
 	if err = bcrypt.CompareHashAndPassword(usr.Pass, []byte(p)); err != nil {
-		return nil, fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-			"ns": n,
-			"nu": u,
-		}).WithMessage("Namespace signin was unsuccessful")
+		m := "Namespace signin was unsuccessful"
+		return nil, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 	}
 
 	return

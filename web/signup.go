@@ -68,24 +68,22 @@ func signup(c *fibre.Context) (err error) {
 
 		defer txn.Cancel()
 
+		// Specify fields to show in logs.
+
+		f := map[string]interface{}{"ns": n, "db": d, "sc": s}
+
 		// Get the specified signin scope.
 
 		if scp, err = mem.NewWithTX(txn).GetSC(n, d, s); err != nil {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope does not exist")
+			m := "Authentication scope does not exist"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Check that the scope allows signup.
 
 		if exp, ok = scp.Signup.(*sql.SubExpression); !ok {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope signup was unsuccessful")
+			m := "Authentication scope does not allow signup"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Process the scope signup statement.
@@ -97,31 +95,36 @@ func signup(c *fibre.Context) (err error) {
 		// If the query fails then return a 501 error.
 
 		if res, err = db.Process(c, query, vars); err != nil {
-			return fibre.NewHTTPError(501).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope signup was unsuccessful")
+			m := "Authentication scope signup was unsuccessful: Query failed"
+			return fibre.NewHTTPError(501).WithFields(f).WithMessage(m)
 		}
 
 		// If the response is not 1 record then return a 403 error.
 
-		if len(res) != 1 || len(res[0].Result) != 1 {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope signup was unsuccessful")
+		if len(res) != 1 {
+			m := "Authentication scope signup was unsuccessful: Query failed"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+		}
+
+		// If the response has an error set then return a 403 error.
+
+		if res[0].Status != "OK" {
+			m := "Authentication scope signin was unsuccessful: " + res[0].Detail
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+		}
+
+		// If the response has no record set then return a 403 error.
+
+		if len(res[0].Result) != 1 {
+			m := "Authentication scope signup was unsuccessful: No record created"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// If the query does not return an id field then return a 403 error.
 
 		if _, ok = data.Consume(res[0].Result[0]).Get("id").Data().(*sql.Thing); !ok {
-			return fibre.NewHTTPError(403).WithFields(map[string]interface{}{
-				"ns": n,
-				"db": d,
-				"sc": s,
-			}).WithMessage("Authentication scope signup was unsuccessful")
+			m := "Authentication scope signup was unsuccessful: No id field found"
+			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		return c.Code(204)
