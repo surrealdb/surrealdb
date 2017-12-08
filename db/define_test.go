@@ -439,6 +439,26 @@ func TestDefine(t *testing.T) {
 
 	})
 
+	Convey("Define an event when a value changes and set a foreign key on another table", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE EVENT test ON person WHEN $before.fk != $after.fk THEN (UPDATE $after.fk SET fk = $this);
+		UPDATE person:test SET fk = other:test;
+		SELECT * FROM other;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("fk").Data(), ShouldResemble, &sql.Thing{"person", "test"})
+
+	})
+
 	Convey("Define an event on a table, and ensure it is not output with records", t, func() {
 
 		setupDB()
