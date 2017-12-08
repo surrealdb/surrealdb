@@ -291,7 +291,7 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 			vars.Set(val, varKeyValue)
 			vars.Set(val, varKeyAfter)
 			vars.Set(old, varKeyBefore)
-			ctx = context.WithValue(ctx, ctxKeySubs, vars)
+			ctx = context.WithValue(ctx, ctxKeySpec, vars)
 
 			// We are setting the value of the field
 
@@ -306,7 +306,7 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 			vars.Set(val, varKeyValue)
 			vars.Set(val, varKeyAfter)
 			vars.Set(old, varKeyBefore)
-			ctx = context.WithValue(ctx, ctxKeySubs, vars)
+			ctx = context.WithValue(ctx, ctxKeySpec, vars)
 
 			// We are checking the value of the field
 

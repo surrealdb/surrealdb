@@ -90,38 +90,24 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 	case *sql.Param:
 
-		if obj, ok := ctx.Value(ctxKeySubs).(*data.Doc); ok {
+		for _, s := range paramSearchKeys {
 
-			obj.Fetch(func(key string, val interface{}) interface{} {
-				switch res := val.(type) {
-				case *sql.Thing:
-					val, _ = e.fetchThing(ctx, res, doc)
-					return val
-				default:
-					return val
+			if obj, ok := ctx.Value(s).(*data.Doc); ok {
+
+				obj.Fetch(func(key string, val interface{}) interface{} {
+					switch res := val.(type) {
+					case *sql.Thing:
+						val, _ = e.fetchThing(ctx, res, doc)
+						return val
+					default:
+						return val
+					}
+				})
+
+				if res := obj.Get(val.ID).Data(); res != nil {
+					return e.fetch(ctx, res, doc)
 				}
-			})
 
-			if res := obj.Get(val.ID).Data(); res != nil {
-				return e.fetch(ctx, res, doc)
-			}
-
-		}
-
-		if obj, ok := ctx.Value(ctxKeyVars).(*data.Doc); ok {
-
-			obj.Fetch(func(key string, val interface{}) interface{} {
-				switch res := val.(type) {
-				case *sql.Thing:
-					val, _ = e.fetchThing(ctx, res, doc)
-					return val
-				default:
-					return val
-				}
-			})
-
-			if res := obj.Get(val.ID).Data(); res != nil {
-				return e.fetch(ctx, res, doc)
 			}
 
 		}

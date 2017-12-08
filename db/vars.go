@@ -40,6 +40,7 @@ const (
 	ctxKeyDb    = "db"
 	ctxKeyVars  = "vars"
 	ctxKeySubs  = "subs"
+	ctxKeySpec  = "spec"
 	ctxKeyAuth  = "auth"
 	ctxKeyKind  = "kind"
 	ctxKeyScope = "scope"
@@ -63,4 +64,5 @@ var (
 	queryNotExecuted      = errors.New("Query not executed")
 	queryIdentFailed      = errors.New("Found ident but no doc available")
 	featureNotImplemented = errors.New("Feature is not yet implemented")
+	paramSearchKeys       = []string{ctxKeySpec, ctxKeySubs, ctxKeyVars}
 )

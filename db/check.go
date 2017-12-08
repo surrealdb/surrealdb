@@ -194,7 +194,7 @@ func (d *document) event(ctx context.Context, when method) (err error) {
 		vars.Set(d.id, varKeyThis)
 		vars.Set(d.current.Data(), varKeyAfter)
 		vars.Set(d.initial.Data(), varKeyBefore)
-		ctx = context.WithValue(ctx, ctxKeySubs, vars)
+		ctx = context.WithValue(ctx, ctxKeySpec, vars)
 
 		for _, ev := range evs {
 
