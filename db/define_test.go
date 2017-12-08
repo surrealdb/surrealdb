@@ -89,7 +89,7 @@ func TestDefine(t *testing.T) {
 		USE NS test DB test;
 		DEFINE TABLE person SCHEMALESS;
 		DEFINE FIELD test ON person TYPE boolean;
-		UPDATE @person:test SET test=true, other="text";
+		UPDATE person:test SET test=true, other="text";
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -108,7 +108,7 @@ func TestDefine(t *testing.T) {
 		USE NS test DB test;
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD test ON person TYPE boolean;
-		UPDATE @person:test SET test=true, other="text";
+		UPDATE person:test SET test=true, other="text";
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -133,7 +133,7 @@ func TestDefine(t *testing.T) {
 		USE NS test DB test;
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD test ON person TYPE boolean;
-		UPDATE @person:test SET test=true, other=NULL;
+		UPDATE person:test SET test=true, other=NULL;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -158,7 +158,7 @@ func TestDefine(t *testing.T) {
 		USE NS test DB test;
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD test ON person TYPE record (person);
-		UPDATE @person:test SET test=person:other;
+		UPDATE person:test SET test=person:other;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -184,7 +184,7 @@ func TestDefine(t *testing.T) {
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD test ON person TYPE array;
 		DEFINE FIELD test.* ON person TYPE record (person);
-		UPDATE @person:test SET test=[], test+=person:one, test+=person:two;
+		UPDATE person:test SET test=[], test+=person:one, test+=person:two;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -211,7 +211,7 @@ func TestDefine(t *testing.T) {
 		txt := `
 		USE NS test DB test;
 		DEFINE TABLE person DROP;
-		UPDATE @person:test;
+		UPDATE person:test;
 		SELECT * FROM person;
 		`
 
@@ -230,7 +230,7 @@ func TestDefine(t *testing.T) {
 		txt := `
 		USE NS test DB test;
 		DEFINE TABLE temp AS SELECT name FROM person;
-		UPDATE @person:test SET name="Test", test=true;
+		UPDATE person:test SET name="Test", test=true;
 		SELECT * FROM person;
 		SELECT * FROM temp;
 		`
@@ -273,8 +273,8 @@ func TestDefine(t *testing.T) {
 
 			txt := `
 			USE NS test DB test;
-			UPDATE @person:1 SET name="Tobie";
-			UPDATE @person:2 SET name="Jaime";
+			UPDATE person:1 SET name="Tobie";
+			UPDATE person:2 SET name="Jaime";
 			SELECT * FROM person;
 			`
 
@@ -297,9 +297,9 @@ func TestDefine(t *testing.T) {
 		txt := `
 		USE NS test DB test;
 		DEFINE FIELD test ON person TYPE number ASSERT ($after >= 0) AND ($after <= 10);
-		UPDATE @person:1;
-		UPDATE @person:2 SET test = 5;
-		UPDATE @person:3 SET test = 50;
+		UPDATE person:1;
+		UPDATE person:2 SET test = 5;
+		UPDATE person:3 SET test = 50;
 		SELECT * FROM person;
 		`
 
@@ -320,9 +320,9 @@ func TestDefine(t *testing.T) {
 		txt := `
 		USE NS test DB test;
 		DEFINE FIELD test ON person TYPE number ASSERT IF $after != null THEN ($after >= 0) AND ($after <= 10) ELSE true END;
-		UPDATE @person:1;
-		UPDATE @person:2 SET test = 5;
-		UPDATE @person:3 SET test = 50;
+		UPDATE person:1;
+		UPDATE person:2 SET test = 5;
+		UPDATE person:3 SET test = 50;
 		SELECT * FROM person;
 		`
 
@@ -371,10 +371,10 @@ func TestDefine(t *testing.T) {
 		txt := `
 		USE NS test DB test;
 		DEFINE EVENT test ON person WHEN test > 1000 THEN (CREATE temp);
-		UPDATE @person:test SET test = 1000;
-		UPDATE @person:test SET test = 4000;
-		UPDATE @person:test SET test = 2000;
-		UPDATE @person:test SET test = 6000;
+		UPDATE person:test SET test = 1000;
+		UPDATE person:test SET test = 4000;
+		UPDATE person:test SET test = 2000;
+		UPDATE person:test SET test = 6000;
 		SELECT * FROM temp;
 		`
 
@@ -396,10 +396,10 @@ func TestDefine(t *testing.T) {
 		txt := `
 		USE NS test DB test;
 		DEFINE EVENT test ON person WHEN $before.test < $after.test THEN (CREATE temp);
-		UPDATE @person:test SET test = 1000;
-		UPDATE @person:test SET test = 4000;
-		UPDATE @person:test SET test = 2000;
-		UPDATE @person:test SET test = 6000;
+		UPDATE person:test SET test = 1000;
+		UPDATE person:test SET test = 4000;
+		UPDATE person:test SET test = 2000;
+		UPDATE person:test SET test = 6000;
 		SELECT * FROM temp;
 		`
 
@@ -421,10 +421,10 @@ func TestDefine(t *testing.T) {
 		txt := `
 		USE NS test DB test;
 		DEFINE EVENT test ON person WHEN $before.test < 5000 AND $after.test > 5000 THEN (CREATE temp);
-		UPDATE @person:test SET test = 1000;
-		UPDATE @person:test SET test = 4000;
-		UPDATE @person:test SET test = 2000;
-		UPDATE @person:test SET test = 6000;
+		UPDATE person:test SET test = 1000;
+		UPDATE person:test SET test = 4000;
+		UPDATE person:test SET test = 2000;
+		UPDATE person:test SET test = 6000;
 		SELECT * FROM temp;
 		`
 
