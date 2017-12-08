@@ -203,7 +203,7 @@ func (this LiveStatement) String() string {
 
 func (this KillStatement) String() string {
 	return print("KILL %v",
-		this.Name,
+		this.What,
 	)
 }
 

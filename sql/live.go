@@ -18,7 +18,7 @@ func (p *parser) parseLiveStatement() (stmt *LiveStatement, err error) {
 
 	stmt = &LiveStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err
 	}
 
@@ -42,7 +42,7 @@ func (p *parser) parseLiveStatement() (stmt *LiveStatement, err error) {
 		return nil, err
 	}
 
-	if stmt.What, err = p.parseTable(); err != nil {
+	if stmt.What, err = p.parseWhat(); err != nil {
 		return nil, err
 	}
 
@@ -58,11 +58,11 @@ func (p *parser) parseKillStatement() (stmt *KillStatement, err error) {
 
 	stmt = &KillStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthSC); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseValue(); err != nil {
+	if stmt.What, err = p.parseWhat(); err != nil {
 		return nil, err
 	}
 

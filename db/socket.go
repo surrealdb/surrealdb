@@ -15,6 +15,7 @@
 package db
 
 import (
+	"fmt"
 	"sync"
 
 	"context"
@@ -139,9 +140,9 @@ func (s *socket) flush() (err error) {
 
 }
 
-func (s *socket) check(e *executor, ctx context.Context, stm *sql.LiveStatement) (err error) {
+func (s *socket) check(e *executor, ctx context.Context, ns, db, tb string) (err error) {
 
-	var tb *sql.DefineTableStatement
+	var tbv *sql.DefineTableStatement
 
 	// If we are authenticated using DB, NS,
 	// or KV permissions level, then we can
@@ -155,7 +156,7 @@ func (s *socket) check(e *executor, ctx context.Context, stm *sql.LiveStatement)
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	_, err = e.dbo.GetNS(stm.NS)
+	_, err = e.dbo.GetNS(ns)
 	if err != nil {
 		return err
 	}
@@ -164,7 +165,7 @@ func (s *socket) check(e *executor, ctx context.Context, stm *sql.LiveStatement)
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	_, err = e.dbo.GetDB(stm.NS, stm.DB)
+	_, err = e.dbo.GetDB(ns, db)
 	if err != nil {
 		return err
 	}
@@ -173,10 +174,17 @@ func (s *socket) check(e *executor, ctx context.Context, stm *sql.LiveStatement)
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	tb, err = e.dbo.GetTB(stm.NS, stm.DB, stm.What.TB)
+	tbv, err = e.dbo.GetTB(ns, db, tb)
 	if err != nil {
 		return err
 	}
+
+	// Once we have the table we reset the
+	// context to DB level so that no other
+	// embedded permissions are checked on
+	// records within these permissions.
+
+	ctx = context.WithValue(ctx, ctxKeyKind, cnf.AuthDB)
 
 	// If the table does exist we then try
 	// to process the relevant permissions
@@ -185,11 +193,11 @@ func (s *socket) check(e *executor, ctx context.Context, stm *sql.LiveStatement)
 
 	var val interface{}
 
-	switch p := tb.Perms.(type) {
+	switch p := tbv.Perms.(type) {
 	case *sql.PermExpression:
 		val, err = e.fetch(ctx, p.Select, ign)
 	default:
-		return &PermsError{table: stm.What.TB}
+		return &PermsError{table: tb}
 	}
 
 	// If we receive an 'ident failed' error
@@ -201,11 +209,11 @@ func (s *socket) check(e *executor, ctx context.Context, stm *sql.LiveStatement)
 
 	if err != queryIdentFailed {
 		if val, ok := val.(bool); ok && !val {
-			return &PermsError{table: stm.What.TB}
+			return &PermsError{table: tb}
 		}
 	}
 
-	return
+	return nil
 
 }
 
@@ -219,8 +227,23 @@ func (s *socket) deregister(id string) {
 
 	for id, stm := range s.lives {
 
-		key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: stm.What.TB, LV: id}
-		txn.Clr(key.Encode())
+		for _, w := range stm.What {
+
+			switch what := w.(type) {
+
+			case *sql.Table:
+
+				key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, LV: id}
+				txn.Clr(key.Encode())
+
+			case *sql.Ident:
+
+				key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, LV: id}
+				txn.Clr(key.Encode())
+
+			}
+
+		}
 
 	}
 
@@ -231,20 +254,7 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	// Check that we are allowed to perform
-	// the live query on the specified table
-	// and if we can't then return an error
-	// and don't save the live query.
-
-	err = s.check(e, ctx, stm)
-	if err != nil {
-		return nil, err
-	}
-
-	// Generate a new uuid for this query,
-	// which we will use to identify the
-	// query when sending push messages
-	// and when killing the query.
+	// Generate a new query uuid.
 
 	stm.ID = uuid.New().String()
 
@@ -252,15 +262,52 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 
 	s.lives[stm.ID] = stm
 
-	// Add the live query to the database
-	// under the relevant NS, DB, and TB.
-
-	key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: stm.What.TB, LV: stm.ID}
-	_, err = e.dbo.Put(0, key.Encode(), stm.Encode())
-
 	// Return the query id to the user.
 
 	out = append(out, stm.ID)
+
+	// Store the live query in the database layer.
+
+	for key, val := range stm.What {
+		w, err := e.fetch(ctx, val, nil)
+		if err != nil {
+			return nil, err
+		}
+		stm.What[key] = w
+	}
+
+	for _, w := range stm.What {
+
+		switch what := w.(type) {
+
+		default:
+			return nil, fmt.Errorf("Can not execute LIVE query using value '%v'", what)
+
+		case *sql.Table:
+
+			if err = s.check(e, ctx, stm.NS, stm.DB, what.TB); err != nil {
+				return nil, err
+			}
+
+			key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, LV: stm.ID}
+			if _, err = e.dbo.Put(0, key.Encode(), stm.Encode()); err != nil {
+				return nil, err
+			}
+
+		case *sql.Ident:
+
+			if err = s.check(e, ctx, stm.NS, stm.DB, what.ID); err != nil {
+				return nil, err
+			}
+
+			key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, LV: stm.ID}
+			if _, err = e.dbo.Put(0, key.Encode(), stm.Encode()); err != nil {
+				return nil, err
+			}
+
+		}
+
+	}
 
 	return
 
@@ -271,18 +318,52 @@ func (s *socket) executeKill(e *executor, ctx context.Context, stm *sql.KillStat
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	// Get the specified query on this socket.
+	// Remove the live query from the database layer.
 
-	if qry, ok := s.lives[stm.Name.ID]; ok {
+	for key, val := range stm.What {
+		w, err := e.fetch(ctx, val, nil)
+		if err != nil {
+			return nil, err
+		}
+		stm.What[key] = w
+	}
 
-		// Delete the live query from the saved queries.
+	for _, w := range stm.What {
 
-		delete(s.lives, qry.ID)
+		switch what := w.(type) {
 
-		// Delete the live query from the database layer.
+		default:
+			return nil, fmt.Errorf("Can not execute KILL query using value '%v'", what)
 
-		key := &keys.LV{KV: qry.KV, NS: qry.NS, DB: qry.DB, TB: qry.What.TB, LV: qry.ID}
-		_, err = e.dbo.Clr(key.Encode())
+		case string:
+
+			if qry, ok := s.lives[what]; ok {
+
+				// Delete the live query from the saved queries.
+
+				delete(s.lives, qry.ID)
+
+				// Delete the live query from the database layer.
+
+				for _, w := range qry.What {
+
+					switch what := w.(type) {
+
+					case *sql.Table:
+						key := &keys.LV{KV: qry.KV, NS: qry.NS, DB: qry.DB, TB: what.TB, LV: qry.ID}
+						_, err = e.dbo.Clr(key.Encode())
+
+					case *sql.Ident:
+						key := &keys.LV{KV: qry.KV, NS: qry.NS, DB: qry.DB, TB: what.ID, LV: qry.ID}
+						_, err = e.dbo.Clr(key.Encode())
+
+					}
+
+				}
+
+			}
+
+		}
 
 	}
 

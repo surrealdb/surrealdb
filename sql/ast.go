@@ -137,7 +137,7 @@ type LiveStatement struct {
 	DB   string `cork:"DB" codec:"DB"`
 	Diff bool   `cork:"diff" codec:"diff"`
 	Expr Fields `cork:"expr" codec:"expr"`
-	What *Table `cork:"what" codec:"what"`
+	What Exprs  `cork:"what" codec:"what"`
 	Cond Expr   `cork:"cond" codec:"cond"`
 }
 
@@ -147,7 +147,7 @@ type KillStatement struct {
 	KV   string `cork:"KV" codec:"KV"`
 	NS   string `cork:"NS" codec:"NS"`
 	DB   string `cork:"DB" codec:"DB"`
-	Name *Value `cork:"name" codec:"name"`
+	What Exprs  `cork:"what" codec:"what"`
 }
 
 // SelectStatement represents a SQL SELECT statement.

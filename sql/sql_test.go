@@ -2016,14 +2016,14 @@ func Test_Parse_Queries_Live(t *testing.T) {
 		},
 		{
 			sql: `LIVE SELECT * FROM`,
-			err: "Found `` but expected `table`",
+			err: "Found `` but expected `expression`",
 		},
 		{
 			sql: `LIVE SELECT * FROM person`,
 			res: &Query{Statements: []Statement{&LiveStatement{
 				KV: "*", NS: "*", DB: "*",
 				Expr: []*Field{{Expr: &All{}, Field: "*"}},
-				What: &Table{"person"},
+				What: Exprs{&Ident{"person"}},
 			}}},
 		},
 		{
@@ -2035,7 +2035,7 @@ func Test_Parse_Queries_Live(t *testing.T) {
 			res: &Query{Statements: []Statement{&LiveStatement{
 				KV: "*", NS: "*", DB: "*",
 				Expr: []*Field{{Expr: &All{}, Field: "*"}},
-				What: &Table{"person"},
+				What: Exprs{&Ident{"person"}},
 				Cond: &BinaryExpression{
 					LHS: &Ident{"public"},
 					Op:  EQ,
@@ -2060,29 +2060,20 @@ func Test_Parse_Queries_Kill(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `KILL`,
-			err: "Found `` but expected `string`",
-		},
-		{
-			sql: `KILL null`,
-			err: "Found `null` but expected `string`",
-		},
-		{
-			sql: `KILL 1`,
-			err: "Found `1` but expected `string`",
-		},
-		{
-			sql: `KILL 1.3000`,
-			err: "Found `1.3000` but expected `string`",
+			err: "Found `` but expected `expression`",
 		},
 		{
 			sql: `KILL identifier`,
-			err: "Found `identifier` but expected `string`",
+			res: &Query{Statements: []Statement{&KillStatement{
+				KV: "*", NS: "*", DB: "*",
+				What: Exprs{&Ident{"identifier"}},
+			}}},
 		},
 		{
 			sql: `KILL "identifier"`,
 			res: &Query{Statements: []Statement{&KillStatement{
 				KV: "*", NS: "*", DB: "*",
-				Name: &Value{"identifier"},
+				What: Exprs{&Value{"identifier"}},
 			}}},
 		},
 		{

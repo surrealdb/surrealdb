@@ -34,6 +34,18 @@ func (r *rpc) Query(c *fibre.Context, sql string, vars map[string]interface{}) (
 	return db.Execute(c, sql, vars)
 }
 
+func (r *rpc) Kill(c *fibre.Context, query string) (interface{}, error) {
+	return db.Execute(c, "KILL $query", map[string]interface{}{
+		"query": query,
+	})
+}
+
+func (r *rpc) Live(c *fibre.Context, class string) (interface{}, error) {
+	return db.Execute(c, "LIVE SELECT * FROM $class", map[string]interface{}{
+		"class": sql.NewTable(class),
+	})
+}
+
 func (r *rpc) Select(c *fibre.Context, class string, thing interface{}) (interface{}, error) {
 	switch thing := thing.(type) {
 	case *fibre.RPCNull:
