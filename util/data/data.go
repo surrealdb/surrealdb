@@ -845,6 +845,8 @@ func (d *Doc) Inc(value interface{}, path ...string) (*Doc, error) {
 			return d.Set(0+inc, path...)
 		case float64:
 			return d.Set(0+inc, path...)
+		default:
+			return d.Set([]interface{}{value}, path...)
 		}
 	case int64:
 		switch inc := value.(type) {
