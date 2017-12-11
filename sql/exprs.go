@@ -501,7 +501,7 @@ func (p *parser) parsePart() (exp Expr, err error) {
 	toks := []Token{
 		MUL, EXPR, IDENT, THING, MODEL,
 		NULL, VOID, EMPTY, MISSING,
-		TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE,
+		TRUE, FALSE, STRING, REGION, NUMBER, DOUBLE, REGEX,
 		DATE, TIME, DURATION, JSON, ARRAY, PARAM, LPAREN, IF,
 	}
 
