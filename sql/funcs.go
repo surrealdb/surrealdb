@@ -106,6 +106,7 @@ var funcs = map[string]map[int]interface{}{
 	"if":         {3: nil},
 	"intersect":  {-1: nil},
 	"model":      {2: nil, 3: nil, 4: nil},
+	"regex":      {1: nil},
 	"table":      {1: nil},
 	"thing":      {2: nil},
 	"union":      {-1: nil},

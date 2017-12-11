@@ -34,6 +34,8 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return intersect(ctx, args...)
 	case "model":
 		return model(ctx, args...)
+	case "regex":
+		return regex(ctx, args...)
 	case "table":
 		return table(ctx, args...)
 	case "thing":
