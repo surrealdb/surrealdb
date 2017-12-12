@@ -296,7 +296,7 @@ func TestDefine(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
-		DEFINE FIELD test ON person TYPE number ASSERT ($after >= 0) AND ($after <= 10);
+		DEFINE FIELD test ON person TYPE number ASSERT $after >= 0 AND $after <= 10;
 		UPDATE person:1;
 		UPDATE person:2 SET test = 5;
 		UPDATE person:3 SET test = 50;
@@ -319,7 +319,7 @@ func TestDefine(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
-		DEFINE FIELD test ON person TYPE number ASSERT IF $after != null THEN ($after >= 0) AND ($after <= 10) ELSE true END;
+		DEFINE FIELD test ON person TYPE number ASSERT IF $after != null THEN $after >= 0 AND $after <= 10 ELSE true END;
 		UPDATE person:1;
 		UPDATE person:2 SET test = 5;
 		UPDATE person:3 SET test = 50;
