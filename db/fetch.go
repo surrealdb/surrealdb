@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/abcum/surreal/cnf"
@@ -36,6 +37,8 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 	switch val := val.(type) {
 	default:
 		return val, nil
+	case *sql.Null:
+		return nil, nil
 	case *sql.Thing:
 		return val, nil
 	case *sql.Value:
@@ -202,7 +205,13 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 			return binaryBool(val.Op, l, r), nil
 		case sql.ADD, sql.SUB, sql.MUL, sql.DIV, sql.INC, sql.DEC:
 			return binaryMath(val.Op, l, r), nil
-		case sql.EQ, sql.NEQ, sql.ANY, sql.LT, sql.LTE, sql.GT, sql.GTE, sql.SIN, sql.SNI, sql.INS, sql.NIS:
+		case sql.EQ, sql.NEQ, sql.ANY, sql.LT, sql.LTE, sql.GT, sql.GTE:
+			return binaryCheck(val.Op, l, r, val.LHS, val.RHS, doc), nil
+		case sql.SIN, sql.SNI, sql.INS, sql.NIS:
+			return binaryCheck(val.Op, l, r, val.LHS, val.RHS, doc), nil
+		case sql.CONTAINSALL, sql.CONTAINSSOME, sql.CONTAINSNONE:
+			return binaryCheck(val.Op, l, r, val.LHS, val.RHS, doc), nil
+		case sql.ALLCONTAINEDIN, sql.SOMECONTAINEDIN, sql.NONECONTAINEDIN:
 			return binaryCheck(val.Op, l, r, val.LHS, val.RHS, doc), nil
 		}
 
@@ -228,8 +237,11 @@ func (e *executor) fetchPaths(ctx context.Context, doc *data.Doc, exprs ...sql.E
 		case sql.DOT:
 			return e.fetchPaths(ctx, doc, exprs...)
 		case sql.OEDGE:
+			return nil, featureNotImplemented
 		case sql.IEDGE:
+			return nil, featureNotImplemented
 		case sql.BEDGE:
+			return nil, featureNotImplemented
 		}
 	case *sql.PartExpression:
 		switch val := val.Part.(type) {
@@ -443,62 +455,42 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 	switch lo.(type) {
 	case *sql.Void:
 		switch ro.(type) {
-		default:
-			return op == sql.NEQ
-		case nil:
+		case *sql.Null:
 			return op == sql.NEQ
 		case *sql.Void:
 			return op == sql.EQ
 		case *sql.Empty:
 			return op == sql.EQ
-		case *sql.Ident:
-			break
 		}
 	case *sql.Empty:
 		switch ro.(type) {
-		default:
-			return op == sql.NEQ
-		case nil:
+		case *sql.Null:
 			return op == sql.EQ
 		case *sql.Void:
 			return op == sql.EQ
 		case *sql.Empty:
 			return op == sql.EQ
-		case *sql.Param:
-			break
-		case *sql.Ident:
-			break
 		}
 	}
 
 	switch ro.(type) {
 	case *sql.Void:
 		switch lo.(type) {
-		default:
-			return op == sql.NEQ
-		case nil:
+		case *sql.Null:
 			return op == sql.NEQ
 		case *sql.Void:
 			return op == sql.EQ
 		case *sql.Empty:
 			return op == sql.EQ
-		case *sql.Ident:
-			break
 		}
 	case *sql.Empty:
 		switch lo.(type) {
-		default:
-			return op == sql.NEQ
-		case nil:
+		case *sql.Null:
 			return op == sql.EQ
 		case *sql.Void:
 			return op == sql.EQ
 		case *sql.Empty:
 			return op == sql.EQ
-		case *sql.Param:
-			break
-		case *sql.Ident:
-			break
 		}
 	}
 
@@ -523,7 +515,7 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 					return d.Exists(r.ID) == true && d.Get(r.ID).Data() != nil
 				}
 			}
-		case nil:
+		case *sql.Null:
 			switch r := ro.(type) {
 			case *sql.Ident:
 				if op == sql.EQ {
@@ -553,7 +545,7 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 					return d.Exists(l.ID) == true && d.Get(l.ID).Data() != nil
 				}
 			}
-		case nil:
+		case *sql.Null:
 			switch l := lo.(type) {
 			case *sql.Ident:
 				if op == sql.EQ {
@@ -568,19 +560,35 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 
 	switch l := l.(type) {
 
-	case *sql.Empty:
-		switch r.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
-		case nil:
-			return op == sql.EQ
-		}
-
 	case nil:
 		switch r := r.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case nil:
+			return op == sql.EQ
+		case *sql.Null:
+			return op == sql.EQ
+		case *sql.Empty:
+			return op == sql.EQ
+		case []interface{}:
+			return chkArrayR(op, l, r)
+		}
+
+	case *sql.Null:
+		switch r := r.(type) {
+		case nil:
+			return op == sql.EQ
+		case *sql.Null:
+			return op == sql.EQ
+		case *sql.Empty:
+			return op == sql.EQ
+		case []interface{}:
+			return chkArrayR(op, l, r)
+		}
+
+	case *sql.Empty:
+		switch r := r.(type) {
+		case nil:
+			return op == sql.EQ
+		case *sql.Null:
 			return op == sql.EQ
 		case *sql.Empty:
 			return op == sql.EQ
@@ -592,8 +600,6 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 
 	case *sql.Thing:
 		switch r := r.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case *sql.Thing:
 			return chkThing(op, l, r)
 		case string:
@@ -604,44 +610,34 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 
 	case bool:
 		switch r := r.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case bool:
 			return chkBool(op, l, r)
 		case string:
 			if b, err := strconv.ParseBool(r); err == nil {
 				return chkBool(op, l, b)
 			}
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case *regexp.Regexp:
 			return chkRegex(op, strconv.FormatBool(l), r)
 		case []interface{}:
 			return chkArrayR(op, l, r)
-		case map[string]interface{}:
-			return chkObject(op, r, l)
 		}
 
 	case string:
 		switch r := r.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case bool:
 			if b, err := strconv.ParseBool(l); err == nil {
 				return chkBool(op, r, b)
 			}
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case string:
 			return chkString(op, l, r)
 		case int64:
 			if n, err := strconv.ParseInt(l, 10, 64); err == nil {
 				return chkInt(op, r, n)
 			}
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case float64:
 			if n, err := strconv.ParseFloat(l, 64); err == nil {
 				return chkFloat(op, r, n)
 			}
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case time.Time:
 			return chkString(op, l, r.String())
 		case *sql.Thing:
@@ -650,19 +646,14 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 			return chkRegex(op, l, r)
 		case []interface{}:
 			return chkArrayR(op, l, r)
-		case map[string]interface{}:
-			return chkObject(op, r, l)
 		}
 
 	case int64:
 		switch r := r.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case string:
 			if n, err := strconv.ParseInt(r, 10, 64); err == nil {
 				return chkInt(op, l, n)
 			}
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case int64:
 			return chkInt(op, l, r)
 		case float64:
@@ -673,19 +664,14 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 			return chkRegex(op, strconv.FormatInt(l, 10), r)
 		case []interface{}:
 			return chkArrayR(op, l, r)
-		case map[string]interface{}:
-			return chkObject(op, r, l)
 		}
 
 	case float64:
 		switch r := r.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case string:
 			if n, err := strconv.ParseFloat(r, 64); err == nil {
 				return chkFloat(op, l, n)
 			}
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case int64:
 			return chkFloat(op, l, float64(r))
 		case float64:
@@ -696,14 +682,10 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 			return chkRegex(op, strconv.FormatFloat(l, 'g', -1, 64), r)
 		case []interface{}:
 			return chkArrayR(op, l, r)
-		case map[string]interface{}:
-			return chkObject(op, r, l)
 		}
 
 	case time.Time:
 		switch r := r.(type) {
-		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
 		case string:
 			return chkString(op, l.String(), r)
 		case int64:
@@ -716,8 +698,6 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 			return chkRegex(op, l.String(), r)
 		case []interface{}:
 			return chkArrayR(op, l, r)
-		case map[string]interface{}:
-			return chkObject(op, r, l)
 		}
 
 	case []interface{}:
@@ -745,7 +725,7 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 	case map[string]interface{}:
 		switch r := r.(type) {
 		default:
-			return op == sql.NEQ || op == sql.SNI || op == sql.NIS || op == sql.CONTAINSNONE
+			return chkObject(op, l, r)
 		case []interface{}:
 			return chkArrayR(op, l, r)
 		case map[string]interface{}:
@@ -754,16 +734,39 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 
 	}
 
-	return nil
+	return negOp(op)
 
 }
 
-func chkVoid(op sql.Token, a, b bool) (val bool) {
-	return
+func posOp(op sql.Token) bool {
+	return chkOp(op) > 1
 }
 
-func chkNull(op sql.Token, a, b bool) (val bool) {
-	return
+func negOp(op sql.Token) bool {
+	return chkOp(op) < 0
+}
+
+func chkOp(op sql.Token) int8 {
+	switch op {
+	case sql.EQ, sql.SIN, sql.INS:
+		return +1
+	case sql.NEQ, sql.SNI, sql.NIS:
+		return -1
+	case sql.CONTAINSALL:
+		return +1
+	case sql.CONTAINSSOME:
+		return +1
+	case sql.CONTAINSNONE:
+		return -1
+	case sql.ALLCONTAINEDIN:
+		return +1
+	case sql.SOMECONTAINEDIN:
+		return +1
+	case sql.NONECONTAINEDIN:
+		return -1
+	default:
+		return 0
+	}
 }
 
 func chkBool(op sql.Token, a, b bool) (val bool) {
@@ -772,14 +775,8 @@ func chkBool(op sql.Token, a, b bool) (val bool) {
 		return a == b
 	case sql.NEQ:
 		return a != b
-	case sql.SNI:
-		return true
-	case sql.NIS:
-		return true
-	case sql.CONTAINSNONE:
-		return true
 	}
-	return
+	return negOp(op)
 }
 
 func chkString(op sql.Token, a, b string) (val bool) {
@@ -796,14 +793,16 @@ func chkString(op sql.Token, a, b string) (val bool) {
 		return a > b
 	case sql.GTE:
 		return a >= b
-	case sql.SNI:
-		return true
+	case sql.INS:
+		return strings.Contains(b, a) == true
 	case sql.NIS:
-		return true
-	case sql.CONTAINSNONE:
-		return true
+		return strings.Contains(b, a) == false
+	case sql.SIN:
+		return strings.Contains(a, b) == true
+	case sql.SNI:
+		return strings.Contains(a, b) == false
 	}
-	return
+	return negOp(op)
 }
 
 func chkInt(op sql.Token, a, b int64) (val bool) {
@@ -820,14 +819,8 @@ func chkInt(op sql.Token, a, b int64) (val bool) {
 		return a > b
 	case sql.GTE:
 		return a >= b
-	case sql.SNI:
-		return true
-	case sql.NIS:
-		return true
-	case sql.CONTAINSNONE:
-		return true
 	}
-	return
+	return negOp(op)
 }
 
 func chkFloat(op sql.Token, a, b float64) (val bool) {
@@ -844,14 +837,8 @@ func chkFloat(op sql.Token, a, b float64) (val bool) {
 		return a > b
 	case sql.GTE:
 		return a >= b
-	case sql.SNI:
-		return true
-	case sql.NIS:
-		return true
-	case sql.CONTAINSNONE:
-		return true
 	}
-	return
+	return negOp(op)
 }
 
 func chkThing(op sql.Token, a, b *sql.Thing) (val bool) {
@@ -860,14 +847,8 @@ func chkThing(op sql.Token, a, b *sql.Thing) (val bool) {
 		return a.TB == b.TB && a.ID == b.ID
 	case sql.NEQ:
 		return a.TB != b.TB || a.ID != b.ID
-	case sql.SNI:
-		return true
-	case sql.NIS:
-		return true
-	case sql.CONTAINSNONE:
-		return true
 	}
-	return
+	return negOp(op)
 }
 
 func chkRegex(op sql.Token, a string, r *regexp.Regexp) (val bool) {
@@ -879,83 +860,95 @@ func chkRegex(op sql.Token, a string, r *regexp.Regexp) (val bool) {
 	case sql.ANY:
 		return r.MatchString(a) == true
 	}
-	return
+	return negOp(op)
 }
 
 func chkObject(op sql.Token, m map[string]interface{}, i interface{}) (val bool) {
 	switch op {
 	case sql.EQ:
-		if reflect.TypeOf(m) == reflect.TypeOf(i) && reflect.DeepEqual(m, i) == true {
-			return true
+		switch i.(type) {
+		case *sql.Empty:
+			return len(m) == 0
+		default:
+			return reflect.TypeOf(m) == reflect.TypeOf(i) && reflect.DeepEqual(m, i) == true
 		}
 	case sql.NEQ:
-		if reflect.TypeOf(m) != reflect.TypeOf(i) || reflect.DeepEqual(m, i) == false {
-			return true
+		switch i.(type) {
+		case *sql.Empty:
+			return len(m) != 0
+		default:
+			return reflect.TypeOf(m) != reflect.TypeOf(i) || reflect.DeepEqual(m, i) == false
 		}
-	case sql.SNI:
-		return true
-	case sql.NIS:
-		return true
-	case sql.CONTAINSNONE:
-		return true
 	}
-	return
+	return negOp(op)
 }
 
 func chkArrayL(op sql.Token, a []interface{}, i interface{}) (val bool) {
 	switch op {
 	case sql.EQ:
-		return false
+		switch i.(type) {
+		case *sql.Empty:
+			return len(a) == 0
+		default:
+			return false
+		}
 	case sql.NEQ:
-		return true
+		switch i.(type) {
+		case *sql.Empty:
+			return len(a) != 0
+		default:
+			return true
+		}
 	case sql.SIN:
-		if i == nil {
+		switch i.(type) {
+		case nil, *sql.Null:
 			return data.Consume(a).Contains(nil) == true
-		} else {
+		default:
 			return data.Consume(a).Contains(i) == true
 		}
 	case sql.SNI:
-		if i == nil {
+		switch i.(type) {
+		case nil, *sql.Null:
 			return data.Consume(a).Contains(nil) == false
-		} else {
+		default:
 			return data.Consume(a).Contains(i) == false
 		}
-	case sql.INS:
-		return false
-	case sql.NIS:
-		return true
-	case sql.CONTAINSNONE:
-		return true
 	}
-	return
+	return negOp(op)
 }
 
 func chkArrayR(op sql.Token, i interface{}, a []interface{}) (val bool) {
 	switch op {
 	case sql.EQ:
-		return false
+		switch i.(type) {
+		case *sql.Empty:
+			return len(a) == 0
+		default:
+			return false
+		}
 	case sql.NEQ:
-		return true
-	case sql.SIN:
-		return false
-	case sql.SNI:
-		return true
+		switch i.(type) {
+		case *sql.Empty:
+			return len(a) != 0
+		default:
+			return true
+		}
 	case sql.INS:
-		if i == nil {
+		switch i.(type) {
+		case nil, *sql.Null:
 			return data.Consume(a).Contains(nil) == true
-		} else {
+		default:
 			return data.Consume(a).Contains(i) == true
 		}
 	case sql.NIS:
-		if i == nil {
+		switch i.(type) {
+		case nil, *sql.Null:
 			return data.Consume(a).Contains(nil) == false
-		} else {
+		default:
 			return data.Consume(a).Contains(i) == false
 		}
-	case sql.CONTAINSNONE:
-		return true
 	}
-	return
+	return negOp(op)
 }
 
 func chkArray(op sql.Token, a []interface{}, b []interface{}) (val bool) {
@@ -993,6 +986,27 @@ func chkArray(op sql.Token, a []interface{}, b []interface{}) (val bool) {
 	case sql.CONTAINSNONE:
 		for _, v := range b {
 			if data.Consume(a).Contains(v) == true {
+				return false
+			}
+		}
+		return true
+	case sql.ALLCONTAINEDIN:
+		for _, v := range a {
+			if data.Consume(b).Contains(v) == false {
+				return false
+			}
+		}
+		return true
+	case sql.SOMECONTAINEDIN:
+		for _, v := range a {
+			if data.Consume(b).Contains(v) == true {
+				return true
+			}
+		}
+		return false
+	case sql.NONECONTAINEDIN:
+		for _, v := range a {
+			if data.Consume(b).Contains(v) == true {
 				return false
 			}
 		}

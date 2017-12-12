@@ -24,12 +24,25 @@ import (
 
 func (d *document) check(ctx context.Context, cond sql.Expr) (ok bool, err error) {
 
-	val, err := d.i.e.fetch(ctx, cond, d.current)
-	if val, ok := val.(bool); ok {
-		return val, err
+	// If no condition expression has been
+	// defined then we can ignore this, and
+	// process the current document.
+
+	if cond == nil {
+		return true, nil
 	}
 
-	return true, err
+	// If a condition expression has been
+	// defined then let's process it to see
+	// what value it returns or error.
+
+	val, err := d.i.e.fetch(ctx, cond, d.current)
+
+	// If the condition expression result is
+	// not a boolean value, then let's see
+	// if the value can be equated to a bool.
+
+	return calcAsBool(val), err
 
 }
 
