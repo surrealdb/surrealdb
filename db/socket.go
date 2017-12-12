@@ -48,9 +48,12 @@ func flush() {
 	}
 }
 
-func (s *socket) ctx() (ctx context.Context) {
+func (s *socket) ctx(ns, db string) (ctx context.Context) {
 
 	ctx = context.Background()
+
+	ctx = context.WithValue(ctx, ctxKeyNs, ns)
+	ctx = context.WithValue(ctx, ctxKeyDb, db)
 
 	auth := s.fibre.Get(varKeyAuth).(*cnf.Auth)
 	ctx = context.WithValue(ctx, ctxKeyAuth, auth.Data)

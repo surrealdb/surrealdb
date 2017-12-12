@@ -52,7 +52,7 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 
 			if con, ok = sockets[lv.FB]; ok {
 
-				ctx = con.ctx()
+				ctx = con.ctx(d.ns, d.db)
 
 				// Check whether this live query has the
 				// necessary permissions to view this
