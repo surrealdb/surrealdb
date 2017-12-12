@@ -220,9 +220,12 @@ func ConvertToBoolean(obj interface{}) (val bool, err error) {
 }
 
 func ConvertToDatetime(obj interface{}) (val time.Time, err error) {
-	if now, ok := obj.(time.Time); ok {
+	switch now := obj.(type) {
+	case time.Time:
 		val = now
-	} else {
+	case string:
+		val, err = time.Parse(time.RFC3339Nano, now)
+	default:
 		err = fmt.Errorf("Expected a datetime, but found '%v'", obj)
 	}
 	return
@@ -255,7 +258,12 @@ func ConvertToRecord(obj interface{}, tb string) (val *sql.Thing, err error) {
 			err = fmt.Errorf("Expected a record of type '%s', but found '%v'", tb, obj)
 		}
 	} else {
-		err = fmt.Errorf("Expected a record of type '%s', but found '%v'", tb, obj)
+		switch tb {
+		default:
+			err = fmt.Errorf("Expected a record of type '%s', but found '%v'", tb, obj)
+		case "":
+			err = fmt.Errorf("Expected a record of any type, but found '%v'", tb, obj)
+		}
 	}
 	return
 }
