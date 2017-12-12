@@ -438,6 +438,10 @@ func (this Any) String() string {
 	return "?"
 }
 
+func (this Null) String() string {
+	return "NULL"
+}
+
 func (this Void) String() string {
 	return "VOID"
 }

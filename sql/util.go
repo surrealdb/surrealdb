@@ -68,14 +68,14 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 
 	switch tok {
 
-	case NULL:
-		return nil, nil
-
 	case TRUE:
 		return true, nil
 
 	case FALSE:
 		return false, nil
+
+	case NULL:
+		return &Null{}, nil
 
 	case VOID:
 		return &Void{}, nil

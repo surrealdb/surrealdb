@@ -91,6 +91,30 @@ func (this Any) MarshalText() (data []byte, err error) {
 }
 
 // --------------------------------------------------
+// NULL
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&Null{})
+}
+
+func (this *Null) ExtendCORK() byte {
+	return 0x05
+}
+
+func (this *Null) MarshalCORK() (dst []byte, err error) {
+	return
+}
+
+func (this *Null) UnmarshalCORK(src []byte) (err error) {
+	return
+}
+
+func (this Null) MarshalText() (data []byte, err error) {
+	return []byte("null"), err
+}
+
+// --------------------------------------------------
 // VOID
 // --------------------------------------------------
 
@@ -99,7 +123,7 @@ func init() {
 }
 
 func (this *Void) ExtendCORK() byte {
-	return 0x05
+	return 0x06
 }
 
 func (this *Void) MarshalCORK() (dst []byte, err error) {
@@ -123,7 +147,7 @@ func init() {
 }
 
 func (this *Empty) ExtendCORK() byte {
-	return 0x06
+	return 0x07
 }
 
 func (this *Empty) MarshalCORK() (dst []byte, err error) {
@@ -147,7 +171,7 @@ func init() {
 }
 
 func (this *Field) ExtendCORK() byte {
-	return 0x07
+	return 0x08
 }
 
 func (this *Field) MarshalCORK(w *cork.Writer) (err error) {
@@ -173,7 +197,7 @@ func init() {
 }
 
 func (this *Group) ExtendCORK() byte {
-	return 0x08
+	return 0x09
 }
 
 func (this *Group) MarshalCORK(w *cork.Writer) (err error) {
@@ -195,7 +219,7 @@ func init() {
 }
 
 func (this *Order) ExtendCORK() byte {
-	return 0x09
+	return 0x10
 }
 
 func (this *Order) MarshalCORK(w *cork.Writer) (dst []byte, err error) {

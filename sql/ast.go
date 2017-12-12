@@ -475,6 +475,9 @@ type All struct{}
 // Any represents a ? expression.
 type Any struct{}
 
+// Null represents an expression which is null.
+type Null struct{}
+
 // Void represents an expression which is not set.
 type Void struct{}
 

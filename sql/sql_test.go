@@ -1014,7 +1014,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 					LHS: &BinaryExpression{
 						LHS: &Ident{"id"},
 						Op:  NEQ,
-						RHS: nil,
+						RHS: &Null{},
 					},
 					Op: AND,
 					RHS: &BinaryExpression{
