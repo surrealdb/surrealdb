@@ -15,6 +15,8 @@
 package deep
 
 import (
+	"time"
+
 	"reflect"
 )
 
@@ -57,6 +59,11 @@ func copy(prime, clone reflect.Value) {
 		clone.Set(alike)
 
 	case reflect.Struct:
+		t, ok := prime.Interface().(time.Time)
+		if ok {
+			clone.Set(reflect.ValueOf(t))
+			return
+		}
 		for i := 0; i < prime.NumField(); i++ {
 			if prime.Type().Field(i).PkgPath != "" {
 				continue

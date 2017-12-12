@@ -1,6 +1,8 @@
 package deep
 
 import (
+	"time"
+
 	"testing"
 
 	. "github.com/smartystreets/goconvey/convey"
@@ -62,6 +64,12 @@ func TestSimple(t *testing.T) {
 		So(item, ShouldResemble, done)
 	})
 
+	Convey("Can copy time.Time", t, func() {
+		item := time.Now()
+		done := Copy(item)
+		So(item, ShouldResemble, done)
+	})
+
 }
 
 func TestSlices(t *testing.T) {
@@ -105,12 +113,23 @@ func TestSlices(t *testing.T) {
 		So(item, ShouldResemble, done)
 	})
 
+	Convey("Can copy slice of time.Times", t, func() {
+		item := []time.Time{
+			time.Now(),
+			time.Now(),
+			time.Now(),
+		}
+		done := Copy(item)
+		So(item, ShouldResemble, done)
+	})
+
 	Convey("Can copy slice of interfaces", t, func() {
 		item := []interface{}{
 			nil,
 			int64(1),
 			float64(2),
 			"str",
+			time.Now(),
 		}
 		done := Copy(item)
 		So(item, ShouldResemble, done)
@@ -159,12 +178,23 @@ func TestObjects(t *testing.T) {
 		So(item, ShouldResemble, done)
 	})
 
+	Convey("Can copy map of time.Times", t, func() {
+		item := map[string]time.Time{
+			"a": time.Now(),
+			"b": time.Now(),
+			"c": time.Now(),
+		}
+		done := Copy(item)
+		So(item, ShouldResemble, done)
+	})
+
 	Convey("Can copy map of interfaces", t, func() {
 		item := map[interface{}]interface{}{
 			1:    nil,
 			"b":  int64(1),
 			true: float64(2),
 			"d":  "str",
+			"e":  time.Now(),
 		}
 		done := Copy(item)
 		So(item, ShouldResemble, done)
@@ -184,6 +214,7 @@ func TestStructs(t *testing.T) {
 			"a": 1,
 			"b": "str",
 			"c": true,
+			"d": time.Now(),
 		},
 		privateNumber: 1,
 		privateString: "str",
@@ -194,6 +225,7 @@ func TestStructs(t *testing.T) {
 			"a": 1,
 			"b": "str",
 			"c": true,
+			"d": time.Now(),
 		},
 	}
 
