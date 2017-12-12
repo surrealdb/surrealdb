@@ -98,6 +98,7 @@ var aggrs = map[string]bool{
 
 var funcs = map[string]map[int]interface{}{
 
+	"array":      {-1: nil},
 	"batch":      {2: nil},
 	"binary":     {1: nil},
 	"difference": {-1: nil},

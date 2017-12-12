@@ -20,6 +20,8 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 
 	switch name {
 
+	case "array":
+		return array(ctx, args...)
 	case "batch":
 		return batch(ctx, args...)
 	case "difference":
