@@ -152,7 +152,7 @@ func init() {
 	sqlCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master authentication details to use when connecting.")
 	sqlCmd.PersistentFlags().StringVar(&opts.DB.Type, "scheme", "https", "HTTP connection scheme to use to connect to the database.")
 	sqlCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "surreal.io", "Database server host to connect to.")
-	sqlCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "80", "Database server port to connect to.")
+	sqlCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "443", "Database server port to connect to.")
 
 	sqlCmd.PersistentFlags().StringVar(&opts.Format.Type, "format", "text", "The output format for the server response data.")
 

@@ -134,6 +134,6 @@ func init() {
 	importCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master authentication details to use when connecting.")
 	importCmd.PersistentFlags().StringVar(&opts.DB.Type, "scheme", "https", "HTTP connection scheme to use to connect to the database.")
 	importCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "surreal.io", "Database server host to connect to.")
-	importCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "80", "Database server port to connect to.")
+	importCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "443", "Database server port to connect to.")
 
 }
