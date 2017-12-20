@@ -203,8 +203,20 @@ func (d *document) event(ctx context.Context, when method) (err error) {
 
 	if len(evs) > 0 {
 
+		kind := ""
+
+		switch when {
+		case _CREATE:
+			kind = "CREATE"
+		case _UPDATE:
+			kind = "UPDATE"
+		case _DELETE:
+			kind = "DELETE"
+		}
+
 		vars := data.New()
 		vars.Set(d.id, varKeyThis)
+		vars.Set(kind, varKeyMethod)
 		vars.Set(d.current.Data(), varKeyAfter)
 		vars.Set(d.initial.Data(), varKeyBefore)
 		ctx = context.WithValue(ctx, ctxKeySpec, vars)
