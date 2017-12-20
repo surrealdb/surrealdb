@@ -122,7 +122,7 @@ func signin(c *fibre.Context) (err error) {
 		// If the response has no record set then return a 403 error.
 
 		if len(res[0].Result) != 1 {
-			m := "Authentication scope signin was unsuccessful: No record created"
+			m := "Authentication scope signin was unsuccessful: No record returned"
 			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
