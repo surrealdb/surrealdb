@@ -579,13 +579,15 @@ func (i *iterator) processTable(ctx context.Context, key *keys.Table) {
 	beg := &keys.Thing{KV: key.KV, NS: key.NS, DB: key.DB, TB: key.TB, ID: keys.Ignore}
 	end := &keys.Thing{KV: key.KV, NS: key.NS, DB: key.DB, TB: key.TB, ID: keys.Suffix}
 
+	min, max := beg.Encode(), end.Encode()
+
 	for x := 0; ; x = 1 {
 
 		if !i.checkState(ctx) {
 			return
 		}
 
-		vals, err := i.e.dbo.GetR(i.versn, beg.Encode(), end.Encode(), 1000)
+		vals, err := i.e.dbo.GetR(i.versn, min, max, 1000)
 		if err != nil {
 			i.fail <- err
 			return
@@ -615,6 +617,8 @@ func (i *iterator) processTable(ctx context.Context, key *keys.Table) {
 		// to perform the next range request.
 
 		beg.Decode(vals[len(vals)-1].Key())
+
+		min = append(beg.Encode(), byte(0))
 
 	}
 

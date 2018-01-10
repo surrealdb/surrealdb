@@ -1073,6 +1073,25 @@ func TestSelect(t *testing.T) {
 
 	})
 
+	Convey("Group and retrieve more than 1000 records to test incremental processing", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE |person:1..10000|;
+		SELECT meta.tb, count(*) AS test FROM person GROUP BY meta.tb;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 3)
+		So(res[1].Result, ShouldHaveLength, 10000)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[2].Result[0]).Get("test").Data(), ShouldEqual, 10000)
+
+	})
+
 	Convey("Order records ascending", t, func() {
 
 		setupDB()
