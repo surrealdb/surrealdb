@@ -54,6 +54,35 @@ func toBoolean(str string) (bool, error) {
 
 // --------------------------------------------------
 
+func MightBe(obj interface{}) (val interface{}, ok bool) {
+	switch now := obj.(type) {
+	case string:
+		if val, ok := MightBeDatetime(now); ok {
+			return val, ok
+		}
+		if val, ok := MightBeRecord(now); ok {
+			return val, ok
+		}
+	}
+	return obj, false
+}
+
+func MightBeDatetime(obj string) (val interface{}, ok bool) {
+	if val, err := time.Parse(time.RFC3339, obj); err == nil {
+		return val, true
+	}
+	return nil, false
+}
+
+func MightBeRecord(obj string) (val interface{}, ok bool) {
+	if val := sql.ParseThing(obj); val != nil {
+		return val, true
+	}
+	return nil, false
+}
+
+// --------------------------------------------------
+
 func ConvertTo(t, k string, obj interface{}) (val interface{}, err error) {
 	switch t {
 	default:
@@ -248,7 +277,8 @@ func ConvertToLongitude(obj interface{}) (val float64, err error) {
 }
 
 func ConvertToRecord(obj interface{}, tb string) (val *sql.Thing, err error) {
-	if now, ok := obj.(*sql.Thing); ok {
+	switch now := obj.(type) {
+	case *sql.Thing:
 		switch tb {
 		case now.TB:
 			val = now
@@ -257,7 +287,7 @@ func ConvertToRecord(obj interface{}, tb string) (val *sql.Thing, err error) {
 		default:
 			err = fmt.Errorf("Expected a record of type '%s', but found '%v'", tb, obj)
 		}
-	} else {
+	default:
 		switch tb {
 		default:
 			err = fmt.Errorf("Expected a record of type '%s', but found '%v'", tb, obj)

@@ -713,6 +713,15 @@ type Thing struct {
 	ID interface{}
 }
 
+func ParseThing(val string) *Thing {
+	r := strings.NewReader(val)
+	s := newScanner(r)
+	if t, _, v := s.scanThing(); t == THING {
+		return v.(*Thing)
+	}
+	return nil
+}
+
 func NewThing(TB string, ID interface{}) *Thing {
 	switch val := ID.(type) {
 	default:

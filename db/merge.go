@@ -263,12 +263,30 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 	}
 
 	// Sort the fields according to their
-	// priority and then loop over them in
-	// order processing them fully.
+	// priority so that fields which depend
+	// on another field can be processed
+	// after that field in a specific order.
 
 	sort.Slice(fds, func(i, j int) bool {
 		return fds[i].Priority < fds[j].Priority
 	})
+
+	// Loop through each field and check to
+	// see if it might be a specific type.
+	// This is because when updating records
+	// using json, there is no specific type
+	// for a 'datetime' and 'record'.
+
+	d.current.Each(func(key string, val interface{}) (err error) {
+		if val, ok := conv.MightBe(val); ok {
+			d.current.Iff(val, key)
+		}
+		return nil
+	})
+
+	// Loop over each of the defined fields
+	// and process them fully, applying the
+	// VALUE and ASSERT clauses sequentially.
 
 	for _, fd := range fds {
 
