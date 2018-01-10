@@ -15,8 +15,11 @@
 package db
 
 import (
+	"time"
+
 	"testing"
 
+	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	. "github.com/smartystreets/goconvey/convey"
 )
@@ -631,6 +634,30 @@ func TestUpdate(t *testing.T) {
 		So(data.Consume(res[1].Result[0]).Get("test").Data(), ShouldEqual, true)
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[2].Result[0]).Get("test").Data(), ShouldEqual, false)
+
+	})
+
+	Convey("Update a set of records using CONTENT with embedded times / records", t, func() {
+
+		clock, _ := time.Parse(time.RFC3339, "1987-06-22T08:00:00.123456789Z")
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:test CONTENT {"time":"1987-06-22T08:00:00.123456789Z","test":"person:other"};
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 3)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[1].Result[0]).Get("time").Data(), ShouldEqual, clock)
+		So(data.Consume(res[1].Result[0]).Get("test").Data(), ShouldResemble, sql.NewThing("person", "other"))
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[2].Result[0]).Get("time").Data(), ShouldEqual, clock)
+		So(data.Consume(res[2].Result[0]).Get("test").Data(), ShouldResemble, sql.NewThing("person", "other"))
 
 	})
 
