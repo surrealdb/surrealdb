@@ -1,8 +1,8 @@
 hash: 9b2aaa0b9a7168dd046b09fecf8945ade00d02b018acb7013de8ee17b2afcddb
-updated: 2017-12-06T13:12:51.913214Z
+updated: 2018-01-10T11:45:27.004275Z
 imports:
 - name: cloud.google.com/go
-  version: 2d3a6656c17a60b0815b7e06ab0be04eacb6e613
+  version: 050b16d2314d5fc3d4c9a51e4cd5c7468e77f162
   subpackages:
   - compute/metadata
   - errorreporting
@@ -20,15 +20,15 @@ imports:
 - name: github.com/abcum/bump
   version: 8c43cce06105894a9b74f89a79ca62ba8e365cf7
 - name: github.com/abcum/cork
-  version: 2f3e8fbc78752fed4f7f155362483cc6d302f877
+  version: b8afe0a174bbc5f8434efdf7a7d80ed7eb5f0290
 - name: github.com/abcum/fibre
-  version: b4850d6c9e931b6816f5569d71a4b6029cea6842
+  version: 811dcb449de88a86a75bc27e47f34f967abb7650
   subpackages:
   - mw
 - name: github.com/abcum/ptree
   version: 474d875024a90dd50bfc66afaf2a35a4447afc44
 - name: github.com/abcum/rixxdb
-  version: 1e0089510ee7b6da1965337d8447eabda4d7c198
+  version: aa4049b75c09aafab8f27a97eb3066d6dcf38937
 - name: github.com/abcum/syncr
   version: 55c907d89cba69cad2701004ec86119d448c0f92
   subpackages:
@@ -43,7 +43,7 @@ imports:
 - name: github.com/asaskevich/govalidator
   version: 521b25f4b05fd26bec69d9dedeb8f9c9a83939a8
 - name: github.com/aws/aws-sdk-go
-  version: a9c63ac6fd79402f91191c2e0a1348d0b8968e6c
+  version: 3c754f1d340244540350f0a00b940781bae9c905
   subpackages:
   - aws
   - aws/awserr
@@ -78,7 +78,7 @@ imports:
   - buffer
   - slice
 - name: github.com/cznic/mathutil
-  version: 09cde8d5df5fd3e1944897ce6d00d83dd5ed3a91
+  version: c90ba19bea8927552cef4560ab888231566f049d
 - name: github.com/cznic/zappy
   version: 2533cb5b45cc6c07421468ce262899ddc9d53fb7
 - name: github.com/dgrijalva/jwt-go
@@ -134,13 +134,13 @@ imports:
 - name: github.com/kr/text
   version: 7cafcd837844e784b526369c9bce262804aebc60
 - name: github.com/mattn/go-colorable
-  version: 6fcc0c1fd9b620311d821b106a400b35dc95c497
+  version: 586e6dcca296d085100876beb6dbf02287a247f7
 - name: github.com/mattn/go-isatty
   version: 6ca4dbf54d38eea1a992b3c722a76a5d1c4cb25c
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: e508eecd675477dde88eb6508aa5212ebed13ce8
+  version: 9cef7a0d3d796007006f263f7edcbadd58dd7140
 - name: github.com/mitchellh/mapstructure
   version: 06020f85339e21b2478f756a78e295255ffa4d6a
 - name: github.com/newrelic/go-agent
@@ -171,11 +171,11 @@ imports:
 - name: github.com/spf13/pflag
   version: 4c012f6dcd9546820e378d0bdda4d8fc772cdfea
 - name: github.com/ugorji/go
-  version: f0aa215a7d653544d39d0e27dfa10fa4b183f397
+  version: ccfe18359b55b97855cee1d3f74e5efbda4869dc
   subpackages:
   - codec
 - name: golang.org/x/crypto
-  version: 94eea52f7b742c7cbe0b03b22f0c4c8631ece122
+  version: 6bd909f163c83732e0b5e22a27154b1a112c3ff9
   subpackages:
   - bcrypt
   - blowfish
@@ -185,7 +185,7 @@ imports:
   - scrypt
   - ssh/terminal
 - name: golang.org/x/net
-  version: a8b9294777976932365dabb6640cf1468d95c70f
+  version: 434ec0c7fe3742c984919a691b2018a6e9694425
   subpackages:
   - bpf
   - context
@@ -201,7 +201,7 @@ imports:
   - lex/httplex
   - trace
 - name: golang.org/x/oauth2
-  version: ea8c6730ed5beeff685fcd20d17423a8546daf6c
+  version: 30785a2c434e431ef7c507b54617d6a951d5f2b4
   subpackages:
   - google
   - internal
@@ -212,12 +212,12 @@ imports:
   subpackages:
   - semaphore
 - name: golang.org/x/sys
-  version: 8b4580aae2a0dd0c231a45d3ccb8434ff533b840
+  version: 810d7000345868fc619eb81f46307107118f4ae1
   subpackages:
   - unix
   - windows
 - name: golang.org/x/text
-  version: 57961680700a5336d15015c8c50686ca5ba362a4
+  version: e19ae1496984b1c655b8044a65c0300a3c878dd3
   subpackages:
   - collate
   - internal/colltab
@@ -232,7 +232,7 @@ imports:
   subpackages:
   - rate
 - name: google.golang.org/api
-  version: e31351a3998a5bddef4462979b301901b02003d1
+  version: aa8d5015340e9f762d4db55e17939f144d75ba38
   subpackages:
   - cloudtrace/v1
   - gensupport
@@ -248,7 +248,7 @@ imports:
   - transport/grpc
   - transport/http
 - name: google.golang.org/appengine
-  version: 9d8544a6b2c7df9cff240fcf92d7b2f59bc13416
+  version: 5bee14b453b4c71be47ec1781b0fa61c2ea182db
   subpackages:
   - internal
   - internal/app_identity
@@ -262,7 +262,7 @@ imports:
   - socket
   - urlfetch
 - name: google.golang.org/genproto
-  version: 7f0da29060c682909f650ad8ed4e515bd74fa12a
+  version: a8101f21cf983e773d0c1133ebc5424792003214
   subpackages:
   - googleapis/api/annotations
   - googleapis/api/distribution
@@ -276,7 +276,7 @@ imports:
   - googleapis/rpc/status
   - protobuf/field_mask
 - name: google.golang.org/grpc
-  version: bf35f1b9619f442d2887b585620f1fa2efa39bc0
+  version: 6913ad5caedced5d627918609375b057963334a5
   subpackages:
   - balancer
   - balancer/base
@@ -295,7 +295,6 @@ imports:
   - peer
   - resolver
   - resolver/dns
-  - resolver/manual
   - resolver/passthrough
   - stats
   - status
