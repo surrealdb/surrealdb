@@ -33,27 +33,27 @@ func (p *parser) parseDefineScopeStatement() (stmt *DefineScopeStatement, err er
 			break
 		}
 
-		if p.is(tok, SESSION) {
+		if is(tok, SESSION) {
 			if stmt.Time, err = p.parseDuration(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, SIGNUP) {
+		if is(tok, SIGNUP) {
 			_, _, _ = p.mightBe(AS)
 			if stmt.Signup, err = p.parseExpr(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, SIGNIN) {
+		if is(tok, SIGNIN) {
 			_, _, _ = p.mightBe(AS)
 			if stmt.Signin, err = p.parseExpr(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, CONNECT) {
+		if is(tok, CONNECT) {
 			_, _, _ = p.mightBe(AS)
 			if stmt.Connect, err = p.parseExpr(); err != nil {
 				return nil, err

@@ -28,7 +28,7 @@ func (p *parser) parsePerms() (exp *PermExpression, err error) {
 		return exp, err
 	}
 
-	if p.is(tok, NONE, FULL, WHERE) {
+	if is(tok, NONE, FULL, WHERE) {
 
 		var expr Expr
 
@@ -52,7 +52,7 @@ func (p *parser) parsePerms() (exp *PermExpression, err error) {
 
 	}
 
-	if p.is(tok, FOR) {
+	if is(tok, FOR) {
 
 		for {
 

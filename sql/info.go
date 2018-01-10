@@ -26,19 +26,19 @@ func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 		return nil, err
 	}
 
-	if p.is(stmt.Kind, NAMESPACE) {
+	if is(stmt.Kind, NAMESPACE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
 			return nil, err
 		}
 	}
 
-	if p.is(stmt.Kind, DATABASE) {
+	if is(stmt.Kind, DATABASE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
 	}
 
-	if p.is(stmt.Kind, TABLE) {
+	if is(stmt.Kind, TABLE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}

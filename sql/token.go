@@ -30,19 +30,19 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 		return nil, err
 	}
 
-	if p.is(stmt.Kind, NAMESPACE) {
+	if is(stmt.Kind, NAMESPACE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
 			return nil, err
 		}
 	}
 
-	if p.is(stmt.Kind, DATABASE) {
+	if is(stmt.Kind, DATABASE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
 	}
 
-	if p.is(stmt.Kind, SCOPE) {
+	if is(stmt.Kind, SCOPE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
@@ -55,13 +55,13 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 			break
 		}
 
-		if p.is(tok, TYPE) {
+		if is(tok, TYPE) {
 			if stmt.Type, err = p.parseAlgorithm(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, VALUE) {
+		if is(tok, VALUE) {
 			if stmt.Code, err = p.parseBinary(); err != nil {
 				return nil, err
 			}
@@ -97,19 +97,19 @@ func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err er
 		return nil, err
 	}
 
-	if p.is(stmt.Kind, NAMESPACE) {
+	if is(stmt.Kind, NAMESPACE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
 			return nil, err
 		}
 	}
 
-	if p.is(stmt.Kind, DATABASE) {
+	if is(stmt.Kind, DATABASE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
 	}
 
-	if p.is(stmt.Kind, SCOPE) {
+	if is(stmt.Kind, SCOPE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}

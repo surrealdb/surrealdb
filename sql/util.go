@@ -24,7 +24,7 @@ import (
 	json "github.com/hjson/hjson-go"
 )
 
-func (p *parser) in(token Token, tokens []Token) bool {
+func in(token Token, tokens []Token) bool {
 
 	for _, t := range tokens {
 		if token == t {
@@ -36,7 +36,7 @@ func (p *parser) in(token Token, tokens []Token) bool {
 
 }
 
-func (p *parser) is(token Token, tokens ...Token) bool {
+func is(token Token, tokens ...Token) bool {
 
 	for _, t := range tokens {
 		if token == t {
@@ -48,7 +48,7 @@ func (p *parser) is(token Token, tokens ...Token) bool {
 
 }
 
-func (p *parser) contains(search string, strings []string) bool {
+func contains(search string, strings []string) bool {
 
 	for _, str := range strings {
 		if str == search {

@@ -32,7 +32,7 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 
 	for {
 
-		if p.is(tok, NAMESPACE, NS) {
+		if is(tok, NAMESPACE, NS) {
 
 			_, stmt.NS, err = p.shouldBe(IDENT, STRING, NUMBER, DOUBLE, DATE, TIME)
 			if err != nil {
@@ -49,7 +49,7 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 
 		}
 
-		if p.is(tok, DATABASE, DB) {
+		if is(tok, DATABASE, DB) {
 
 			_, stmt.DB, err = p.shouldBe(IDENT, STRING, NUMBER, DOUBLE, DATE, TIME)
 			if err != nil {

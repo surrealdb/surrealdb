@@ -239,7 +239,7 @@ func (p *parser) parseType() (t, k string, err error) {
 		return
 	}
 
-	if !p.contains(t, allowedTypes) {
+	if !contains(t, allowedTypes) {
 		err = &ParseError{Found: t, Expected: allowedTypes}
 		return
 	}
@@ -520,7 +520,7 @@ func (p *parser) parsePart() (exp Expr, err error) {
 	// then we will parse anything from here on
 	// as an IF expression clause.
 
-	if p.is(tok, IF) {
+	if is(tok, IF) {
 		return p.parseIfel()
 	}
 
@@ -528,7 +528,7 @@ func (p *parser) parsePart() (exp Expr, err error) {
 	// bracket, then we will parse this complete
 	// expression part as a subquery.
 
-	if p.is(tok, LPAREN) {
+	if is(tok, LPAREN) {
 		return p.parseSubq()
 	}
 
@@ -544,7 +544,7 @@ func (p *parser) parsePart() (exp Expr, err error) {
 	// function call, then check to see if the
 	// token is in the list of allowed tokens.
 
-	if !p.in(tok, toks) {
+	if !in(tok, toks) {
 		err = &ParseError{Found: lit, Expected: []string{"expression"}}
 	}
 
@@ -860,7 +860,7 @@ func (p *parser) parseJoin() (exp Expr, err error) {
 
 	tok, _, _ := p.scan()
 
-	if !p.in(tok, toks) {
+	if !in(tok, toks) {
 		p.unscan()
 		return
 	}
@@ -890,7 +890,7 @@ func (p *parser) parseStep() (exp Expr, err error) {
 	// bracket, then we will parse this complete
 	// expression part as a subquery.
 
-	if p.is(tok, LPAREN) {
+	if is(tok, LPAREN) {
 		return p.parseSubp()
 	}
 
@@ -898,7 +898,7 @@ func (p *parser) parseStep() (exp Expr, err error) {
 	// expression, then check to see if the
 	// token is in the list of allowed tokens.
 
-	if !p.in(tok, toks) {
+	if !in(tok, toks) {
 		p.unscan()
 		exp = nil
 	}

@@ -66,7 +66,7 @@ func newParser(c *fibre.Context) *parser {
 func parseBytes(c *fibre.Context, i []byte) (*Query, error) {
 	p := newParser(c)
 	r := bytes.NewReader(i)
-	p.s = newScanner(p, r)
+	p.s = newScanner(r)
 	return p.parse()
 }
 
@@ -74,14 +74,14 @@ func parseBytes(c *fibre.Context, i []byte) (*Query, error) {
 func parseString(c *fibre.Context, i string) (*Query, error) {
 	p := newParser(c)
 	r := strings.NewReader(i)
-	p.s = newScanner(p, r)
+	p.s = newScanner(r)
 	return p.parse()
 }
 
 // parseBuffer parses a buffer.
 func parseBuffer(c *fibre.Context, r io.Reader) (*Query, error) {
 	p := newParser(c)
-	p.s = newScanner(p, r)
+	p.s = newScanner(r)
 	return p.parse()
 }
 
@@ -234,7 +234,7 @@ func (p *parser) mightBe(expected ...Token) (tok Token, lit string, found bool) 
 
 	tok, lit, _ = p.scan()
 
-	if found = p.in(tok, expected); !found {
+	if found = in(tok, expected); !found {
 		p.unscan()
 	}
 
@@ -246,7 +246,7 @@ func (p *parser) shouldBe(expected ...Token) (tok Token, lit string, err error) 
 
 	tok, lit, _ = p.scan()
 
-	if !p.in(tok, expected) {
+	if !in(tok, expected) {
 		p.unscan()
 		err = &ParseError{Found: lit, Expected: lookup(expected)}
 	}

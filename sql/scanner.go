@@ -28,13 +28,12 @@ import (
 type scanner struct {
 	b []rune // any runes before
 	a []rune // any runes after
-	p *parser
 	r *bufio.Reader
 }
 
 // newScanner returns a new instance of Scanner.
-func newScanner(p *parser, r io.Reader) *scanner {
-	return &scanner{p: p, r: bufio.NewReader(r)}
+func newScanner(r io.Reader) *scanner {
+	return &scanner{r: bufio.NewReader(r)}
 }
 
 // scan returns the next token and literal value.
@@ -352,15 +351,15 @@ func (s *scanner) scanParams(chp ...rune) (tok Token, lit string, val interface{
 
 	tok, lit, _ = s.scanIdiom()
 
-	if s.p.is(tok, THING) {
+	if is(tok, THING) {
 		return ILLEGAL, lit, val
 	}
 
-	if s.p.is(tok, REGION) {
+	if is(tok, REGION) {
 		return ILLEGAL, lit, val
 	}
 
-	if s.p.is(tok, ILLEGAL) {
+	if is(tok, ILLEGAL) {
 		return ILLEGAL, lit, val
 	}
 
@@ -378,11 +377,11 @@ func (s *scanner) scanQuoted(chp ...rune) (tok Token, lit string, val interface{
 
 	tok, lit, _ = s.scanString(chp...)
 
-	if s.p.is(tok, REGION) {
+	if is(tok, REGION) {
 		return ILLEGAL, lit, val
 	}
 
-	if s.p.is(tok, ILLEGAL) {
+	if is(tok, ILLEGAL) {
 		return ILLEGAL, lit, val
 	}
 
@@ -415,11 +414,11 @@ func (s *scanner) scanSection(chp ...rune) (tok Token, lit string, val interface
 
 	tok, lit, _ = s.scanString(chp...)
 
-	if s.p.is(tok, REGION) {
+	if is(tok, REGION) {
 		return ILLEGAL, lit, val
 	}
 
-	if s.p.is(tok, ILLEGAL) {
+	if is(tok, ILLEGAL) {
 		return ILLEGAL, lit, val
 	}
 

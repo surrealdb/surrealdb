@@ -41,31 +41,31 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 			break
 		}
 
-		if p.is(tok, TYPE) {
+		if is(tok, TYPE) {
 			if stmt.Type, stmt.Kind, err = p.parseType(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, VALUE) {
+		if is(tok, VALUE) {
 			if stmt.Value, err = p.parseExpr(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, ASSERT) {
+		if is(tok, ASSERT) {
 			if stmt.Assert, err = p.parseExpr(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, PRIORITY) {
+		if is(tok, PRIORITY) {
 			if stmt.Priority, err = p.parsePriority(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, PERMISSIONS) {
+		if is(tok, PERMISSIONS) {
 			if stmt.Perms, err = p.parsePerms(); err != nil {
 				return nil, err
 			}

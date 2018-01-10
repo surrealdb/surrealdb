@@ -33,25 +33,25 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 			break
 		}
 
-		if p.is(tok, DROP) {
+		if is(tok, DROP) {
 			stmt.Drop = true
 		}
 
-		if p.is(tok, SCHEMAFULL) {
+		if is(tok, SCHEMAFULL) {
 			stmt.Full = true
 		}
 
-		if p.is(tok, SCHEMALESS) {
+		if is(tok, SCHEMALESS) {
 			stmt.Full = false
 		}
 
-		if p.is(tok, PERMISSIONS) {
+		if is(tok, PERMISSIONS) {
 			if stmt.Perms, err = p.parsePerms(); err != nil {
 				return nil, err
 			}
 		}
 
-		if p.is(tok, AS) {
+		if is(tok, AS) {
 
 			stmt.Lock = true
 
