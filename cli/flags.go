@@ -15,10 +15,11 @@
 package cli
 
 var flags = map[string]string{
-	"db":   `Database configuration path used for storing data. Available backend stores are memory, file, s3, gcs, rixxdb, or dendrodb. (default "memory").`,
-	"key":  `Encryption key to use for intra-cluster communications, and on-disk encryption. For AES-128 encryption use a 16 bit key, for AES-192 encryption use a 24 bit key, and for AES-256 encryption use a 32 bit key.`,
-	"sync": `A time duration to use when syncing data to persistent storage. To sync data with every write specify '0', otherwise the data will be persisted asynchronously after the specified duration.`,
-	"join": `A comma-separated list of addresses to use when a new node is joining an existing cluster. For the first node in a cluster, --join should NOT be specified.`,
+	"db":     `Database configuration path used for storing data. Available backend stores are memory, file, s3, gcs, rixxdb, or dendrodb. (default "memory").`,
+	"key":    `Encryption key to use for intra-cluster communications, and on-disk encryption. For AES-128 encryption use a 16 bit key, for AES-192 encryption use a 24 bit key, and for AES-256 encryption use a 32 bit key.`,
+	"sync":   `A time duration to use when syncing data to persistent storage. To sync data with every write specify '0', otherwise the data will be persisted asynchronously after the specified duration.`,
+	"shrink": `A time duration to use when shrinking data on persistent storage. To shrink data asynchronously after a repeating period of time, specify a duration.`,
+	"join":   `A comma-separated list of addresses to use when a new node is joining an existing cluster. For the first node in a cluster, --join should NOT be specified.`,
 }
 
 var usage = map[string][]string{

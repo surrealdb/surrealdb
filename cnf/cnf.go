@@ -76,14 +76,17 @@ type Auth struct {
 // Options defines global configuration options
 type Options struct {
 	DB struct {
-		Key  []byte        // Data encryption key
-		Code string        // Data encryption key string
-		Path string        // Path to store the data file
-		Type string        // HTTP scheme type to use
-		Host string        // Surreal host to connect to
-		Port string        // Surreal port to connect to
-		Base string        // Base key to use in KV stores
-		Time time.Duration // Timeframe for syncing data
+		Key  []byte // Data encryption key
+		Code string // Data encryption key string
+		Path string // Path to store the data file
+		Type string // HTTP scheme type to use
+		Host string // Surreal host to connect to
+		Port string // Surreal port to connect to
+		Base string // Base key to use in KV stores
+		Proc struct {
+			Sync   time.Duration // Timeframe for syncing data
+			Shrink time.Duration // Timeframe for shrinking data
+		}
 		Cert struct {
 			CA  string
 			Crt string
