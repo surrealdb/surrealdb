@@ -31,9 +31,10 @@ func init() {
 		path := strings.TrimPrefix(opts.DB.Path, "rixxdb://")
 
 		pntr, err = rixxdb.Open(path, &rixxdb.Config{
-			SyncPolicy:    opts.DB.Proc.Sync,
-			ShrinkPolicy:  opts.DB.Proc.Shrink,
-			EncryptionKey: opts.DB.Key,
+			IgnoreSyncPolicyWhenShrinking: true,
+			SyncPolicy:                    opts.DB.Proc.Sync,
+			ShrinkPolicy:                  opts.DB.Proc.Shrink,
+			EncryptionKey:                 opts.DB.Key,
 		})
 
 		if err != nil {
