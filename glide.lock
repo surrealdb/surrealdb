@@ -1,5 +1,5 @@
 hash: 9b2aaa0b9a7168dd046b09fecf8945ade00d02b018acb7013de8ee17b2afcddb
-updated: 2018-01-11T15:11:18.470888Z
+updated: 2018-01-12T10:54:55.406725Z
 imports:
 - name: cloud.google.com/go
   version: 050b16d2314d5fc3d4c9a51e4cd5c7468e77f162
@@ -28,9 +28,9 @@ imports:
 - name: github.com/abcum/ptree
   version: 474d875024a90dd50bfc66afaf2a35a4447afc44
 - name: github.com/abcum/rixxdb
-  version: 5ff493da7a5a3671cd32d353e39ea219d6a71d6f
+  version: df3def9ab05432cb8a369094f559479de11b74aa
 - name: github.com/abcum/syncr
-  version: 55c907d89cba69cad2701004ec86119d448c0f92
+  version: 76d86536887a385eff351b1850106badc958db70
   subpackages:
   - file
   - gcs
@@ -43,7 +43,7 @@ imports:
 - name: github.com/asaskevich/govalidator
   version: 521b25f4b05fd26bec69d9dedeb8f9c9a83939a8
 - name: github.com/aws/aws-sdk-go
-  version: 3c754f1d340244540350f0a00b940781bae9c905
+  version: 726cba4d63d34a7055809986b7942c3eae6c4eb2
   subpackages:
   - aws
   - aws/awserr
@@ -185,7 +185,7 @@ imports:
   - scrypt
   - ssh/terminal
 - name: golang.org/x/net
-  version: ab555f366c4508dbe0802550b1b20c46c5c18aa0
+  version: 5ccada7d0a7ba9aeb5d3aca8d3501b4c2a509fec
   subpackages:
   - bpf
   - context
@@ -232,7 +232,7 @@ imports:
   subpackages:
   - rate
 - name: google.golang.org/api
-  version: d2c53ea20b719a26e291430d99eaaf6c9a8eb68c
+  version: 37df4fabefb044819e927f44b8487d4cd926d06c
   subpackages:
   - cloudtrace/v1
   - gensupport
