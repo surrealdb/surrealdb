@@ -84,6 +84,7 @@ type Options struct {
 		Port string // Surreal port to connect to
 		Base string // Base key to use in KV stores
 		Proc struct {
+			Size   int           // Policy for data file size
 			Sync   time.Duration // Timeframe for syncing data
 			Shrink time.Duration // Timeframe for shrinking data
 		}

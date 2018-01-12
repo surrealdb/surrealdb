@@ -30,6 +30,7 @@ func setupDB() {
 	cnf.Settings = &cnf.Options{}
 	cnf.Settings.DB.Path = "memory"
 	cnf.Settings.DB.Base = "*"
+	cnf.Settings.DB.Proc.Size = 5
 
 	workerCount = 1
 
@@ -93,6 +94,7 @@ func TestYield(t *testing.T) {
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 7)
 		So(res[1].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[1].Result[0]).Get("test").Data(), ShouldEqual, 1)
 		So(res[2].Result, ShouldHaveLength, 1)

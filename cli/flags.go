@@ -15,10 +15,11 @@
 package cli
 
 var flags = map[string]string{
-	"db":     `Database configuration path used for storing data. Available backend stores are memory, file, s3, gcs, rixxdb, or dendrodb. (default "memory").`,
+	"db":     `Database configuration path used for storing data. Available backend stores are memory, file, logr, s3, gcs, or dendrodb. (default "memory").`,
 	"key":    `Encryption key to use for intra-cluster communications, and on-disk encryption. For AES-128 encryption use a 16 bit key, for AES-192 encryption use a 24 bit key, and for AES-256 encryption use a 32 bit key.`,
-	"sync":   `A time duration to use when syncing data to persistent storage. To sync data with every write specify '0', otherwise the data will be persisted asynchronously after the specified duration.`,
-	"shrink": `A time duration to use when shrinking data on persistent storage. To shrink data asynchronously after a repeating period of time, specify a duration.`,
+	"size":   `A size in MB which determines the minimum or maximum file size for streaming data file storage. This is used for specifying maximum cached data sizes when using remote streaming storage. (default "5")`,
+	"sync":   `A time duration to use when syncing data to persistent storage. To sync data with every write specify '0', otherwise the data will be persisted asynchronously after the specified duration. (default "0s")`,
+	"shrink": `A time duration to use when shrinking data on persistent storage. To shrink data asynchronously after a repeating period of time, specify a duration. Disabled by default. (default "0s")`,
 	"join":   `A comma-separated list of addresses to use when a new node is joining an existing cluster. For the first node in a cluster, --join should NOT be specified.`,
 }
 
@@ -36,10 +37,17 @@ var usage = map[string][]string{
 		"--key 1hg7dbrma8ghe5473kghvie6",
 		"--key 1hg7dbrma8ghe5473kghvie64jgi3ph4",
 	},
+	"size": {
+		"--db-size 30",
+	},
 	"sync": {
 		"--db-sync 0",
 		"--db-sync 5s",
 		"--db-sync 1m",
+	},
+	"shrink": {
+		"--db-shrink 30m",
+		"--db-shrink 24h",
 	},
 	"join": {
 		"--join 10.0.0.1",

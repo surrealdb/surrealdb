@@ -61,6 +61,14 @@ func setup() {
 		}
 	}
 
+	if opts.DB.Proc.Size == 0 {
+		opts.DB.Proc.Size = 5
+	}
+
+	if opts.DB.Proc.Size < 0 {
+		log.Fatal("Specify a valid data file size policy. Valid sizes are greater than 0 and are specified in MB.")
+	}
+
 	if strings.HasPrefix(opts.DB.Cert.CA, "-----") {
 		var err error
 		var doc *os.File
