@@ -447,6 +447,6 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 
 	}
 
-	return fibre.NewHTTPError(401).WithMessage("Invalid authentication details")
+	return fibre.NewHTTPError(401).WithMessage("Invalid authentication details: " + err.Error())
 
 }
