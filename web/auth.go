@@ -33,6 +33,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var ignore = func() error {
+	return nil
+}
+
 const (
 	varKeyIp     = "ip"
 	varKeyNs     = "NS"
@@ -117,20 +121,6 @@ func auth() fibre.MiddlewareFunc {
 
 			head := c.Request().Header().Get("Authorization")
 
-			// If there is no HTTP Authorization header,
-			// check if there are websocket subprotocols
-			// which might contain authn information.
-
-			if len(head) == 0 {
-				for _, prot := range websocket.Subprotocols(c.Request().Request) {
-					if len(prot) > 7 && prot[0:7] == "bearer-" {
-						return checkBearer(c, prot[7:], func() error {
-							return h(c)
-						})
-					}
-				}
-			}
-
 			// Check whether the Authorization header
 			// is a Basic Auth header, and if it is then
 			// process this as root authentication.
@@ -149,6 +139,49 @@ func auth() fibre.MiddlewareFunc {
 				return checkBearer(c, head[7:], func() error {
 					return h(c)
 				})
+			}
+
+			// If there is no HTTP Authorization header,
+			// check to see if there are confuguration
+			// options specified in the socket protocols.
+
+			if len(head) == 0 {
+
+				// If there is a NS configuration option
+				// defined as one of the socket protocols
+				// then use this as the selected NS.
+
+				for _, prot := range websocket.Subprotocols(c.Request().Request) {
+					if len(prot) > 3 && prot[0:3] == "ns-" {
+						auth.Selected.NS = prot[3:]
+					}
+				}
+
+				// If there is a DB configuration option
+				// defined as one of the socket protocols
+				// then use this as the selected DB.
+
+				for _, prot := range websocket.Subprotocols(c.Request().Request) {
+					if len(prot) > 3 && prot[0:3] == "db-" {
+						auth.Selected.DB = prot[3:]
+					}
+				}
+
+				// If there is a Auth configuration option
+				// defined as one of the socket protocols
+				// then use this as the auth information.
+
+				for _, prot := range websocket.Subprotocols(c.Request().Request) {
+					if len(prot) > 5 && prot[0:5] == "auth-" {
+						if err := checkBasics(c, prot[5:], ignore); err == nil {
+							return h(c)
+						}
+						if err := checkBearer(c, prot[5:], ignore); err == nil {
+							return h(c)
+						}
+					}
+				}
+
 			}
 
 			return h(c)
