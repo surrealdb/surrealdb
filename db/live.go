@@ -39,7 +39,8 @@ func register(fib *fibre.Context, id string) func() {
 
 		sockets[id] = &socket{
 			fibre: fib,
-			waits: make([]interface{}, 0),
+			holds: make(map[string][]interface{}),
+			waits: make(map[string][]interface{}),
 			lives: make(map[string]*sql.LiveStatement),
 		}
 

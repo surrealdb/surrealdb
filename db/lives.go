@@ -25,6 +25,12 @@ import (
 // this table, and executes them in name order.
 func (d *document) lives(ctx context.Context, when method) (err error) {
 
+	// Get the ID of the current fibre
+	// connection so that we can check
+	// against the ID of live queries.
+
+	id := ctx.Value(ctxKeyId).(string)
+
 	// If this document has not changed
 	// then there is no need to update
 	// any registered live queries.
@@ -53,6 +59,14 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 			if con, ok = sockets[lv.FB]; ok {
 
 				ctx = con.ctx(d.ns, d.db)
+
+				// Check whether the change was made by
+				// the same connection as the live query,
+				// and if it is then don't notify changes.
+
+				if id == lv.FB {
+					continue
+				}
 
 				// Check whether this live query has the
 				// necessary permissions to view this
@@ -120,11 +134,11 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 
 				switch when {
 				case _CREATE:
-					con.queue(lv.ID, "CREATE", doc.Data())
+					con.queue(id, lv.ID, "CREATE", doc.Data())
 				case _UPDATE:
-					con.queue(lv.ID, "UPDATE", doc.Data())
+					con.queue(id, lv.ID, "UPDATE", doc.Data())
 				case _DELETE:
-					con.queue(lv.ID, "DELETE", d.id)
+					con.queue(id, lv.ID, "DELETE", d.id)
 				}
 
 			}

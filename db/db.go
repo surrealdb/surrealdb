@@ -28,6 +28,7 @@ import (
 	"github.com/abcum/surreal/sql"
 
 	"github.com/abcum/surreal/util/data"
+	"github.com/abcum/surreal/util/uuid"
 
 	"cloud.google.com/go/trace"
 
@@ -112,6 +113,14 @@ func Execute(fib *fibre.Context, txt interface{}, vars map[string]interface{}) (
 		vars = make(map[string]interface{})
 	}
 
+	// Ensure that we have a unique id assigned
+	// to this fibre connection, as we need it
+	// to detect unique websocket notifications.
+
+	if fib.Get(ctxKeyId) == nil {
+		fib.Set(ctxKeyId, uuid.New().String())
+	}
+
 	// Ensure that the IP address of the
 	// user signing in is available so that
 	// it can be used within signin queries.
@@ -165,6 +174,14 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 		vars = make(map[string]interface{})
 	}
 
+	// Ensure that we have a unique id assigned
+	// to this fibre connection, as we need it
+	// to detect unique websocket notifications.
+
+	if fib.Get(ctxKeyId) == nil {
+		fib.Set(ctxKeyId, uuid.New().String())
+	}
+
 	// Create a new context so that we can quit
 	// all goroutine workers if the http client
 	// itself is closed before finishing.
@@ -177,11 +194,17 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 
 	defer quit()
 
+	// Get the unique id for this connection
+	// so that we can assign it to the context
+	// and detect any websocket notifications.
+
+	id := fib.Get(ctxKeyId).(string)
+
 	// Assign the fibre request context id to
 	// the context so that we can log the id
 	// together with the request.
 
-	ctx = context.WithValue(ctx, ctxKeyId, fib.Get("id"))
+	ctx = context.WithValue(ctx, ctxKeyId, id)
 
 	// Assign the authentication data to the
 	// context so that we can log the auth kind
@@ -224,6 +247,12 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 	executor := newExecutor()
 
 	go executor.execute(ctx, ast)
+
+	// Ensure that we flush all websocket events
+	// once the query has been fully processed
+	// whilst ignoring this connection itself.
+
+	defer flush(id)
 
 	// Wait for all of the processed queries to
 	// return results, buffer the output, and

@@ -55,6 +55,12 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 	var buf []*Response
 	var res []interface{}
 
+	// Get the fibre context ID so that we can use
+	// it to clear or flush websocket notification
+	// changes linked to this context.
+
+	id := ctx.Value(ctxKeyId).(string)
+
 	// Ensure that the executor is added back into
 	// the executor pool when the executor has
 	// finished processing the request.
@@ -74,7 +80,7 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 	defer func() {
 		if e.dbo.TX != nil {
 			e.dbo.Cancel()
-			clear()
+			clear(id)
 		}
 	}()
 
@@ -145,18 +151,18 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 			case *sql.CancelStatement:
 				err, buf = e.cancel(buf, err, e.send)
 				if err != nil {
-					clear()
+					clear(id)
 				} else {
-					clear()
+					clear(id)
 				}
 				trc.Finish()
 				continue
 			case *sql.CommitStatement:
 				err, buf = e.commit(buf, err, e.send)
 				if err != nil {
-					clear()
+					clear(id)
 				} else {
-					flush()
+					flush(id)
 				}
 				trc.Finish()
 				continue
@@ -262,6 +268,12 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 		}
 	}
 
+	// Get the fibre context ID so that we can use
+	// it to clear or flush websocket notification
+	// changes linked to this context.
+
+	id := ctx.Value(ctxKeyId).(string)
+
 	// Execute the defined statement, receiving the
 	// result set, and any errors which occured
 	// while processing the query.
@@ -357,7 +369,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 		e.dbo.Cancel()
 		e.dbo.Reset()
-		clear()
+		clear(id)
 
 	default:
 
@@ -379,7 +391,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 			if err != nil {
 				e.dbo.Cancel()
-				clear()
+				clear(id)
 				return
 			}
 
@@ -389,15 +401,15 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 			if !trw {
 				if err = e.dbo.Cancel(); err != nil {
-					clear()
+					clear(id)
 				} else {
-					clear()
+					clear(id)
 				}
 			} else {
 				if err = e.dbo.Commit(); err != nil {
-					clear()
+					clear(id)
 				} else {
-					flush()
+					shift(id)
 				}
 			}
 		}

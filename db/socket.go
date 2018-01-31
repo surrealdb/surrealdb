@@ -32,19 +32,26 @@ import (
 type socket struct {
 	mutex sync.Mutex
 	fibre *fibre.Context
-	waits []interface{}
+	holds map[string][]interface{}
+	waits map[string][]interface{}
 	lives map[string]*sql.LiveStatement
 }
 
-func clear() {
+func clear(id string) {
 	for _, s := range sockets {
-		s.clear()
+		s.clear(id)
 	}
 }
 
-func flush() {
+func shift(id string) {
 	for _, s := range sockets {
-		s.flush()
+		s.shift(id)
+	}
+}
+
+func flush(id string) {
+	for _, s := range sockets {
+		s.flush(id)
 	}
 }
 
@@ -70,12 +77,12 @@ func (s *socket) ctx(ns, db string) (ctx context.Context) {
 
 }
 
-func (s *socket) queue(query, action string, result interface{}) {
+func (s *socket) queue(id, query, action string, result interface{}) {
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.waits = append(s.waits, &Dispatch{
+	s.holds[id] = append(s.holds[id], &Dispatch{
 		Query:  query,
 		Action: action,
 		Result: result,
@@ -83,18 +90,31 @@ func (s *socket) queue(query, action string, result interface{}) {
 
 }
 
-func (s *socket) clear() (err error) {
+func (s *socket) clear(id string) (err error) {
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.waits = nil
+	s.holds[id] = nil
 
 	return
 
 }
 
-func (s *socket) flush() (err error) {
+func (s *socket) shift(id string) (err error) {
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.waits[id] = s.holds[id]
+
+	s.holds[id] = nil
+
+	return
+
+}
+
+func (s *socket) flush(id string) (err error) {
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -103,7 +123,7 @@ func (s *socket) flush() (err error) {
 	// notifications for this socket
 	// then ignore this method call.
 
-	if len(s.waits) == 0 {
+	if len(s.waits[id]) == 0 {
 		return nil
 	}
 
@@ -113,7 +133,7 @@ func (s *socket) flush() (err error) {
 
 	obj := &fibre.RPCNotification{
 		Method: "notify",
-		Params: s.waits,
+		Params: s.waits[id],
 	}
 
 	// Check the websocket subprotocol
@@ -137,7 +157,7 @@ func (s *socket) flush() (err error) {
 	// pending message notifications
 	// for this socket when done.
 
-	s.waits = nil
+	s.waits[id] = nil
 
 	return
 
