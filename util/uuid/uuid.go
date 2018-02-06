@@ -29,7 +29,7 @@ type UUID struct {
 	uuid.UUID
 }
 
-// NewV4 returns a new UUID (Version 4) using 16 random bytes or panics.
+// New returns a new UUID (Version 4) using 16 random bytes or panics.
 func New() *UUID {
 	return &UUID{uuid.NewV4()}
 }
