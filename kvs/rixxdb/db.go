@@ -17,6 +17,8 @@ package rixxdb
 import (
 	"io"
 
+	"context"
+
 	"github.com/abcum/rixxdb"
 	"github.com/abcum/surreal/kvs"
 )
@@ -25,7 +27,7 @@ type DB struct {
 	pntr *rixxdb.DB
 }
 
-func (db *DB) Begin(writable bool) (txn kvs.TX, err error) {
+func (db *DB) Begin(ctx context.Context, writable bool) (txn kvs.TX, err error) {
 	var pntr *rixxdb.TX
 	if pntr, err = db.pntr.Begin(writable); err != nil {
 		err = &kvs.DBError{Err: err}

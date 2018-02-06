@@ -145,7 +145,7 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 
 			switch stm.(type) {
 			case *sql.BeginStatement:
-				err = e.begin(true)
+				err = e.begin(ctx, true)
 				trc.Finish()
 				continue
 			case *sql.CancelStatement:
@@ -243,7 +243,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 			trw = false
 		}
 
-		err = e.begin(trw)
+		err = e.begin(ctx, trw)
 		if err != nil {
 			return
 		}
@@ -420,9 +420,9 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 }
 
-func (e *executor) begin(rw bool) (err error) {
+func (e *executor) begin(ctx context.Context, rw bool) (err error) {
 	if e.dbo.TX == nil {
-		e.dbo.TX, err = db.Begin(rw)
+		e.dbo.TX, err = db.Begin(ctx, rw)
 	}
 	return
 }

@@ -83,7 +83,7 @@ func Export(w io.Writer) (err error) {
 // with the underlying database, and returns
 // the transaction, or any error which occured.
 func Begin(rw bool) (txn kvs.TX, err error) {
-	return db.Begin(rw)
+	return db.Begin(context.Background(), rw)
 }
 
 // Socket registers a websocket for live queries

@@ -14,11 +14,14 @@
 
 package kvs
 
-import "io"
+import (
+	"context"
+	"io"
+)
 
 // DB represents a database implementation
 type DB interface {
-	Begin(bool) (TX, error)
+	Begin(context.Context, bool) (TX, error)
 	Import(io.Reader) error
 	Export(io.Writer) error
 	Close() error

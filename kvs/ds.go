@@ -15,6 +15,7 @@
 package kvs
 
 import (
+	"context"
 	"io"
 	"strings"
 
@@ -63,8 +64,8 @@ func New(opts *cnf.Options) (ds *DS, err error) {
 // Begin begins a new read / write transaction
 // with the underlying database, and returns
 // the transaction, or any error which occured.
-func (ds *DS) Begin(writable bool) (txn TX, err error) {
-	return ds.db.Begin(writable)
+func (ds *DS) Begin(ctx context.Context, writable bool) (txn TX, err error) {
+	return ds.db.Begin(ctx, writable)
 }
 
 // Import loads database operations from a reader.

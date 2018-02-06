@@ -244,7 +244,7 @@ func (s *socket) deregister(id string) {
 
 	delete(sockets, id)
 
-	txn, _ := db.Begin(true)
+	txn, _ := db.Begin(context.Background(), true)
 
 	defer txn.Commit()
 
