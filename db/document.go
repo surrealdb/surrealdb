@@ -306,31 +306,6 @@ func (d *document) shouldDrop() (bool, error) {
 
 }
 
-func (d *document) startThing() (err error) {
-
-	// Check that the table should
-	// drop data being written.
-
-	if ok, err := d.shouldDrop(); ok {
-		return err
-	}
-
-	// Check that the rcord has been
-	// changed, and if not, return.
-
-	if ok := d.changed(); !ok {
-		return
-	}
-
-	// Write the value to the data
-	// layer and return any errors.
-
-	_, err = d.i.e.dbo.PutC(d.now, d.key.Encode(), d.current.Encode(), nil)
-
-	return
-
-}
-
 func (d *document) storeThing() (err error) {
 
 	// Check that the table should
