@@ -78,7 +78,7 @@ func (c *Cache) AllNS() (out []*sql.DefineNamespaceStatement, err error) {
 	var kvs []kvs.KV
 
 	key := &keys.NS{KV: cnf.Settings.DB.Base, NS: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -163,7 +163,7 @@ func (c *Cache) AllNT(ns string) (out []*sql.DefineTokenStatement, err error) {
 	var kvs []kvs.KV
 
 	key := &keys.NT{KV: cnf.Settings.DB.Base, NS: ns, TK: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -204,7 +204,7 @@ func (c *Cache) AllNU(ns string) (out []*sql.DefineLoginStatement, err error) {
 	var kvs []kvs.KV
 
 	key := &keys.NU{KV: cnf.Settings.DB.Base, NS: ns, US: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -251,7 +251,7 @@ func (c *Cache) AllDB(ns string) (out []*sql.DefineDatabaseStatement, err error)
 	var kvs []kvs.KV
 
 	key := &keys.DB{KV: cnf.Settings.DB.Base, NS: ns, DB: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -340,7 +340,7 @@ func (c *Cache) AllDT(ns, db string) (out []*sql.DefineTokenStatement, err error
 	var kvs []kvs.KV
 
 	key := &keys.DT{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TK: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -381,7 +381,7 @@ func (c *Cache) AllDU(ns, db string) (out []*sql.DefineLoginStatement, err error
 	var kvs []kvs.KV
 
 	key := &keys.DU{KV: cnf.Settings.DB.Base, NS: ns, DB: db, US: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -422,7 +422,7 @@ func (c *Cache) AllSC(ns, db string) (out []*sql.DefineScopeStatement, err error
 	var kvs []kvs.KV
 
 	key := &keys.SC{KV: cnf.Settings.DB.Base, NS: ns, DB: db, SC: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -463,7 +463,7 @@ func (c *Cache) AllST(ns, db, sc string) (out []*sql.DefineTokenStatement, err e
 	var kvs []kvs.KV
 
 	key := &keys.ST{KV: cnf.Settings.DB.Base, NS: ns, DB: db, SC: sc, TK: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -510,7 +510,7 @@ func (c *Cache) AllTB(ns, db string) (out []*sql.DefineTableStatement, err error
 	var kvs []kvs.KV
 
 	key := &keys.TB{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -607,7 +607,7 @@ func (c *Cache) AllEV(ns, db, tb string) (out []*sql.DefineEventStatement, err e
 	var kvs []kvs.KV
 
 	key := &keys.EV{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, EV: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -674,7 +674,7 @@ func (c *Cache) AllFD(ns, db, tb string) (out []*sql.DefineFieldStatement, err e
 	var kvs []kvs.KV
 
 	key := &keys.FD{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, FD: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -741,7 +741,7 @@ func (c *Cache) AllIX(ns, db, tb string) (out []*sql.DefineIndexStatement, err e
 	var kvs []kvs.KV
 
 	key := &keys.IX{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, IX: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -808,7 +808,7 @@ func (c *Cache) AllFT(ns, db, tb string) (out []*sql.DefineTableStatement, err e
 	var kvs []kvs.KV
 
 	key := &keys.FT{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, FT: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -875,7 +875,7 @@ func (c *Cache) AllLV(ns, db, tb string) (out []*sql.LiveStatement, err error) {
 	var kvs []kvs.KV
 
 	key := &keys.LV{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb, LV: keys.Ignore}
-	if kvs, err = c.TX.GetL(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
 		return
 	}
 

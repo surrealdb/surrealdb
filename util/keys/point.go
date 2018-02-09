@@ -46,18 +46,18 @@ func (k *Point) Copy() *Point {
 // Encode encodes the key into binary
 func (k *Point) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "¤", k.IX, k.FD, k.ID)
+	return encode(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "¤", k.IX, k.FD, k.ID)
 }
 
 // Decode decodes the key from binary
 func (k *Point) Decode(data []byte) {
 	k.init()
 	var __ string
-	decode(data, &k.KV, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.IX, &k.FD, &k.ID)
+	decode(data, &k.KV, &__, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.IX, &k.FD, &k.ID)
 }
 
 // String returns a string representation of the key
 func (k *Point) String() string {
 	k.init()
-	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "¤", k.IX, k.FD, k.ID)
+	return output(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "¤", k.IX, k.FD, k.ID)
 }

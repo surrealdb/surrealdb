@@ -44,18 +44,18 @@ func (k *Index) Copy() *Index {
 // Encode encodes the key into binary
 func (k *Index) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "¤", k.IX, k.FD)
+	return encode(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "¤", k.IX, k.FD)
 }
 
 // Decode decodes the key from binary
 func (k *Index) Decode(data []byte) {
 	k.init()
 	var __ string
-	decode(data, &k.KV, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.IX, &k.FD)
+	decode(data, &k.KV, &__, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.IX, &k.FD)
 }
 
 // String returns a string representation of the key
 func (k *Index) String() string {
 	k.init()
-	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "¤", k.IX, k.FD)
+	return output(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "¤", k.IX, k.FD)
 }

@@ -51,18 +51,18 @@ func (k *Patch) Copy() *Patch {
 // Encode encodes the key into binary
 func (k *Patch) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "~", k.ID, k.AT)
+	return encode(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "~", k.ID, k.AT)
 }
 
 // Decode decodes the key from binary
 func (k *Patch) Decode(data []byte) {
 	k.init()
 	var __ string
-	decode(data, &k.KV, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.ID, &k.AT)
+	decode(data, &k.KV, &__, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.ID, &k.AT)
 }
 
 // String returns a string representation of the key
 func (k *Patch) String() string {
 	k.init()
-	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "~", k.ID, k.AT.Format(time.RFC3339Nano))
+	return output(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "~", k.ID, k.AT.Format(time.RFC3339Nano))
 }

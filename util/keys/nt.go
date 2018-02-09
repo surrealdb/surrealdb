@@ -38,18 +38,18 @@ func (k *NT) Copy() *NT {
 // Encode encodes the key into binary
 func (k *NT) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, "!", "t", k.TK)
+	return encode(k.KV, "*", k.NS, "!", "k", k.TK)
 }
 
 // Decode decodes the key from binary
 func (k *NT) Decode(data []byte) {
 	k.init()
 	var __ string
-	decode(data, &k.KV, &k.NS, &__, &__, &k.TK)
+	decode(data, &k.KV, &__, &k.NS, &__, &__, &k.TK)
 }
 
 // String returns a string representation of the key
 func (k *NT) String() string {
 	k.init()
-	return output(k.KV, k.NS, "!", "t", k.TK)
+	return output(k.KV, "*", k.NS, "!", "k", k.TK)
 }

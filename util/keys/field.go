@@ -44,18 +44,18 @@ func (k *Field) Copy() *Field {
 // Encode encodes the key into binary
 func (k *Field) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "*", k.ID, "*", k.FD)
+	return encode(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "*", k.ID, "*", k.FD)
 }
 
 // Decode decodes the key from binary
 func (k *Field) Decode(data []byte) {
 	k.init()
 	var __ string
-	decode(data, &k.KV, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.ID, &__, &k.FD)
+	decode(data, &k.KV, &__, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.ID, &__, &k.FD)
 }
 
 // String returns a string representation of the key
 func (k *Field) String() string {
 	k.init()
-	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "*", k.ID, "*", k.FD)
+	return output(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "*", k.ID, "*", k.FD)
 }

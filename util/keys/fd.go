@@ -42,18 +42,18 @@ func (k *FD) Copy() *FD {
 // Encode encodes the key into binary
 func (k *FD) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "!", "f", k.FD)
+	return encode(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "!", "f", k.FD)
 }
 
 // Decode decodes the key from binary
 func (k *FD) Decode(data []byte) {
 	k.init()
 	var __ string
-	decode(data, &k.KV, &k.NS, &__, &k.DB, &__, &k.TB, &__, &__, &k.FD)
+	decode(data, &k.KV, &__, &k.NS, &__, &k.DB, &__, &k.TB, &__, &__, &k.FD)
 }
 
 // String returns a string representation of the key
 func (k *FD) String() string {
 	k.init()
-	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "!", "f", k.FD)
+	return output(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "!", "f", k.FD)
 }

@@ -57,18 +57,18 @@ func (k *Edge) Copy() *Edge {
 // Encode encodes the key into binary
 func (k *Edge) Encode() []byte {
 	k.init()
-	return encode(k.KV, k.NS, "*", k.DB, "*", k.TB, "*", k.ID, k.TK, k.TP, k.FT, k.FK)
+	return encode(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "*", k.ID, k.TK, k.TP, k.FT, k.FK)
 }
 
 // Decode decodes the key from binary
 func (k *Edge) Decode(data []byte) {
 	k.init()
 	var __ string
-	decode(data, &k.KV, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.ID, &k.TK, &k.TP, &k.FT, &k.FK)
+	decode(data, &k.KV, &__, &k.NS, &__, &k.DB, &__, &k.TB, &__, &k.ID, &k.TK, &k.TP, &k.FT, &k.FK)
 }
 
 // String returns a string representation of the key
 func (k *Edge) String() string {
 	k.init()
-	return output(k.KV, k.NS, "*", k.DB, "*", k.TB, "*", k.ID, k.TK, k.TP, k.FT, k.FK)
+	return output(k.KV, "*", k.NS, "*", k.DB, "*", k.TB, "*", k.ID, k.TK, k.TP, k.FT, k.FK)
 }

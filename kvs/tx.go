@@ -21,24 +21,18 @@ type TX interface {
 	Commit() error
 
 	Clr([]byte) (KV, error)
-	ClrL([]byte, uint64) ([]KV, error)
 	ClrP([]byte, uint64) ([]KV, error)
 	ClrR([]byte, []byte, uint64) ([]KV, error)
 
 	Get(int64, []byte) (KV, error)
-	GetL(int64, []byte, uint64) ([]KV, error)
 	GetP(int64, []byte, uint64) ([]KV, error)
 	GetR(int64, []byte, []byte, uint64) ([]KV, error)
 
 	Del(int64, []byte) (KV, error)
 	DelC(int64, []byte, []byte) (KV, error)
-	DelL(int64, []byte, uint64) ([]KV, error)
 	DelP(int64, []byte, uint64) ([]KV, error)
 	DelR(int64, []byte, []byte, uint64) ([]KV, error)
 
 	Put(int64, []byte, []byte) (KV, error)
 	PutC(int64, []byte, []byte, []byte) (KV, error)
-	PutL(int64, []byte, []byte, uint64) ([]KV, error)
-	PutP(int64, []byte, []byte, uint64) ([]KV, error)
-	PutR(int64, []byte, []byte, []byte, uint64) ([]KV, error)
 }

@@ -26,7 +26,10 @@ func (e *executor) executeRemoveNamespace(ctx context.Context, ast *sql.RemoveNa
 	e.dbo.DelNS(ast.Name.ID)
 
 	nkey := &keys.NS{KV: ast.KV, NS: ast.Name.ID}
-	_, err = e.dbo.ClrP(nkey.Encode(), 0)
+	_, err = e.dbo.Clr(nkey.Encode())
+
+	akey := &keys.Namespace{KV: ast.KV, NS: ast.Name.ID}
+	_, err = e.dbo.ClrP(akey.Encode(), 0)
 
 	return
 
@@ -37,7 +40,10 @@ func (e *executor) executeRemoveDatabase(ctx context.Context, ast *sql.RemoveDat
 	e.dbo.DelDB(ast.NS, ast.Name.ID)
 
 	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name.ID}
-	_, err = e.dbo.ClrP(dkey.Encode(), 0)
+	_, err = e.dbo.Clr(dkey.Encode())
+
+	akey := &keys.Database{KV: ast.KV, NS: ast.NS, DB: ast.Name.ID}
+	_, err = e.dbo.ClrP(akey.Encode(), 0)
 
 	return
 
@@ -94,7 +100,13 @@ func (e *executor) executeRemoveTable(ctx context.Context, ast *sql.RemoveTableS
 		}
 
 		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB}
-		_, err = e.dbo.ClrP(tkey.Encode(), 0)
+		_, err = e.dbo.Clr(tkey.Encode())
+		if err != nil {
+			return nil, err
+		}
+
+		akey := &keys.Table{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB}
+		_, err = e.dbo.ClrP(akey.Encode(), 0)
 		if err != nil {
 			return nil, err
 		}

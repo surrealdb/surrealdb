@@ -14,40 +14,42 @@
 
 package keys
 
-// NS ...
-type NS struct {
+// Database ...
+type Database struct {
 	KV string
 	NS string
+	DB string
 }
 
 // init initialises the key
-func (k *NS) init() *NS {
+func (k *Database) init() *Database {
 	return k
 }
 
 // Copy creates a copy of the key
-func (k *NS) Copy() *NS {
-	return &NS{
+func (k *Database) Copy() *Database {
+	return &Database{
 		KV: k.KV,
 		NS: k.NS,
+		DB: k.DB,
 	}
 }
 
 // Encode encodes the key into binary
-func (k *NS) Encode() []byte {
+func (k *Database) Encode() []byte {
 	k.init()
-	return encode(k.KV, "!", "n", k.NS)
+	return encode(k.KV, "*", k.NS, "*", k.DB)
 }
 
 // Decode decodes the key from binary
-func (k *NS) Decode(data []byte) {
+func (k *Database) Decode(data []byte) {
 	k.init()
 	var __ string
-	decode(data, &k.KV, &__, &__, &k.NS)
+	decode(data, &k.KV, &__, &k.NS, &__, &k.DB)
 }
 
 // String returns a string representation of the key
-func (k *NS) String() string {
+func (k *Database) String() string {
 	k.init()
-	return output(k.KV, "!", "n", k.NS)
+	return output(k.KV, "*", k.NS, "*", k.DB)
 }

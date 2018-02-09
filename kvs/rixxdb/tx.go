@@ -23,7 +23,7 @@ type TX struct {
 	pntr *rixxdb.TX
 }
 
-func one(all kvs.KV, err error) (kvs.KV, error) {
+func one(res *rixxdb.KV, err error) (kvs.KV, error) {
 
 	switch err {
 	case nil:
@@ -34,11 +34,11 @@ func one(all kvs.KV, err error) (kvs.KV, error) {
 		return nil, &kvs.KVError{}
 	}
 
-	return all, err
+	return res, err
 
 }
 
-func many(all []kvs.KV, err error) ([]kvs.KV, error) {
+func many(res []*rixxdb.KV, err error) ([]kvs.KV, error) {
 
 	switch err {
 	case nil:
@@ -49,7 +49,13 @@ func many(all []kvs.KV, err error) ([]kvs.KV, error) {
 		return nil, &kvs.KVError{}
 	}
 
-	return all, err
+	var out = make([]kvs.KV, len(res))
+
+	for i, v := range res {
+		out[i] = v
+	}
+
+	return out, err
 
 }
 
@@ -66,138 +72,61 @@ func (tx *TX) Commit() error {
 }
 
 func (tx *TX) Clr(key []byte) (kvs.KV, error) {
-	all, err := tx.pntr.Clr(key)
-	return one(all, err)
-}
-
-func (tx *TX) ClrL(key []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.ClrL(key, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
+	res, err := tx.pntr.Clr(key)
+	return one(res, err)
 }
 
 func (tx *TX) ClrP(key []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.ClrP(key, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
+	res, err := tx.pntr.ClrP(key, max)
+	return many(res, err)
 }
 
 func (tx *TX) ClrR(beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.ClrR(beg, end, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
+	res, err := tx.pntr.ClrR(beg, end, max)
+	return many(res, err)
 }
 
 func (tx *TX) Get(ver int64, key []byte) (kvs.KV, error) {
-	all, err := tx.pntr.Get(uint64(ver), key)
-	return one(all, err)
-}
-
-func (tx *TX) GetL(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.GetL(uint64(ver), key, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
+	res, err := tx.pntr.Get(uint64(ver), key)
+	return one(res, err)
 }
 
 func (tx *TX) GetP(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.GetP(uint64(ver), key, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
+	res, err := tx.pntr.GetP(uint64(ver), key, max)
+	return many(res, err)
 }
 
 func (tx *TX) GetR(ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.GetR(uint64(ver), beg, end, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
+	res, err := tx.pntr.GetR(uint64(ver), beg, end, max)
+	return many(res, err)
 }
 
 func (tx *TX) Del(ver int64, key []byte) (kvs.KV, error) {
-	all, err := tx.pntr.Del(uint64(ver), key)
-	return one(all, err)
+	res, err := tx.pntr.Del(uint64(ver), key)
+	return one(res, err)
 }
 
 func (tx *TX) DelC(ver int64, key []byte, exp []byte) (kvs.KV, error) {
-	return tx.pntr.DelC(uint64(ver), key, exp)
-}
-
-func (tx *TX) DelL(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.DelL(uint64(ver), key, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
+	res, err := tx.pntr.DelC(uint64(ver), key, exp)
+	return one(res, err)
 }
 
 func (tx *TX) DelP(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.DelP(uint64(ver), key, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
+	res, err := tx.pntr.DelP(uint64(ver), key, max)
+	return many(res, err)
 }
 
 func (tx *TX) DelR(ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.DelR(uint64(ver), beg, end, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
+	res, err := tx.pntr.DelR(uint64(ver), beg, end, max)
+	return many(res, err)
 }
 
 func (tx *TX) Put(ver int64, key []byte, val []byte) (kvs.KV, error) {
-	all, err := tx.pntr.Put(uint64(ver), key, val)
-	return one(all, err)
+	res, err := tx.pntr.Put(uint64(ver), key, val)
+	return one(res, err)
 }
 
 func (tx *TX) PutC(ver int64, key []byte, val []byte, exp []byte) (kvs.KV, error) {
-	all, err := tx.pntr.PutC(uint64(ver), key, val, exp)
-	return one(all, err)
-}
-
-func (tx *TX) PutL(ver int64, key []byte, val []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.PutL(uint64(ver), key, val, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
-}
-
-func (tx *TX) PutP(ver int64, key []byte, val []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.PutP(uint64(ver), key, val, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
-}
-
-func (tx *TX) PutR(ver int64, beg []byte, end []byte, val []byte, max uint64) ([]kvs.KV, error) {
-	all, err := tx.pntr.PutR(uint64(ver), beg, end, val, max)
-	out := make([]kvs.KV, len(all))
-	for i, v := range all {
-		out[i] = v
-	}
-	return many(out, err)
+	res, err := tx.pntr.PutC(uint64(ver), key, val, exp)
+	return one(res, err)
 }
