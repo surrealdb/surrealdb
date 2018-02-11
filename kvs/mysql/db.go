@@ -51,7 +51,6 @@ func (db *DB) Close() (err error) {
 
 func (db *DB) opt(writable bool) *sql.TxOptions {
 	return &sql.TxOptions{
-		ReadOnly:  !writable,
-		Isolation: sql.LevelReadCommitted,
+		ReadOnly: !writable,
 	}
 }
