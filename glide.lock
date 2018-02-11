@@ -1,8 +1,8 @@
-hash: 9b2aaa0b9a7168dd046b09fecf8945ade00d02b018acb7013de8ee17b2afcddb
-updated: 2018-01-12T10:54:55.406725Z
+hash: cb30626843c69bbd04e9ae741a97488cca0765662df098cdf4ca212a582d7f5f
+updated: 2018-02-11T09:39:58.24498Z
 imports:
 - name: cloud.google.com/go
-  version: 050b16d2314d5fc3d4c9a51e4cd5c7468e77f162
+  version: 767c40d6a2e058483c25fa193e963a22da17236d
   subpackages:
   - compute/metadata
   - errorreporting
@@ -22,7 +22,7 @@ imports:
 - name: github.com/abcum/cork
   version: b8afe0a174bbc5f8434efdf7a7d80ed7eb5f0290
 - name: github.com/abcum/fibre
-  version: 811dcb449de88a86a75bc27e47f34f967abb7650
+  version: c2d6bee48884ea63bff04f1a1292d419229a576e
   subpackages:
   - mw
 - name: github.com/abcum/ptree
@@ -43,7 +43,7 @@ imports:
 - name: github.com/asaskevich/govalidator
   version: 521b25f4b05fd26bec69d9dedeb8f9c9a83939a8
 - name: github.com/aws/aws-sdk-go
-  version: 726cba4d63d34a7055809986b7942c3eae6c4eb2
+  version: 82eadef012f77590875babb177c60878727821c0
   subpackages:
   - aws
   - aws/awserr
@@ -87,8 +87,10 @@ imports:
   version: 2325946f714c95de4a6088202c402fbdfa64163b
 - name: github.com/go-ini/ini
   version: 32e4c1e6bc4e7d0d8451aa6b75200d19e37a536a
+- name: github.com/go-sql-driver/mysql
+  version: a0583e0143b1624142adab07e0e97fe106d99561
 - name: github.com/golang/protobuf
-  version: 1e59b77b52bf8e4b449a57e6f79f21226d571845
+  version: bbd03ef6da3a115852eaf24c8a1c46aeb39aa175
   subpackages:
   - proto
   - protoc-gen-go/descriptor
@@ -100,12 +102,19 @@ imports:
   - ptypes/timestamp
 - name: github.com/googleapis/gax-go
   version: 317e0006254c44a0ac427cc52a0e083ff0b9622f
+- name: github.com/GoogleCloudPlatform/cloudsql-proxy
+  version: 61590edac4c769d295cc5f48140ebeff88ccc5bf
+  subpackages:
+  - logging
+  - proxy/certs
+  - proxy/proxy
+  - proxy/util
 - name: github.com/gorilla/websocket
   version: ea4d1f681babbce9545c9c5f3d5194a789c89f5b
 - name: github.com/hashicorp/errwrap
   version: 7554cd9344cec97297fa6649b055a8c98c2a1e55
 - name: github.com/hashicorp/go-immutable-radix
-  version: 8aac2701530899b64bdea735a1de8da899815220
+  version: 7f3cd4390caab3250a57f30efdb2a65dd7649ecf
 - name: github.com/hashicorp/go-msgpack
   version: fa3f63826f7c23912c15263591e65d54d080b458
   subpackages:
@@ -113,13 +122,13 @@ imports:
 - name: github.com/hashicorp/go-multierror
   version: b7773ae218740a7be65057fc60b366a49b538a44
 - name: github.com/hashicorp/go-sockaddr
-  version: 9b4c5fa5b10a683339a270d664474b9f4aee62fc
+  version: 7165ee14aff120ee3642aa2bcf2dea8eebef29c3
 - name: github.com/hashicorp/golang-lru
-  version: 0a025b7e63adc15a622f29b0b2c4c3848243bbf6
+  version: 0fb14efe8c47ae851c0034ed7a448854d3d34cf3
   subpackages:
   - simplelru
 - name: github.com/hashicorp/memberlist
-  version: 3d8438da9589e7b608a83ffac1ef8211486bcb7c
+  version: 2288bf30e9c8d7b5f6549bf62e07120d72fd4b6c
 - name: github.com/hashicorp/serf
   version: d6574a5bb1226678d7010325fb6c985db20ee458
   subpackages:
@@ -130,19 +139,19 @@ imports:
 - name: github.com/inconshreveable/mousetrap
   version: 76626ae9c91c4f2a10f34cad8ce83ea42c93bb75
 - name: github.com/jmespath/go-jmespath
-  version: dd801d4f4ce7ac746e7e7b4489d2fa600b3b096b
+  version: c2b33e8439af944379acbdd9c3a5fe0bc44bd8a5
 - name: github.com/kr/text
   version: 7cafcd837844e784b526369c9bce262804aebc60
 - name: github.com/mattn/go-colorable
-  version: 586e6dcca296d085100876beb6dbf02287a247f7
+  version: 7dc3415be66d7cc68bf0182f35c8d31f8d2ad8a7
 - name: github.com/mattn/go-isatty
   version: 6ca4dbf54d38eea1a992b3c722a76a5d1c4cb25c
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: f5ac34d755eb6975958108413c7802a782ca16c8
+  version: 5364553f1ee9cddc7ac8b62dce148309c386695b
 - name: github.com/mitchellh/mapstructure
-  version: b4575eea38cca1123ec2dc90c26529b5c5acfcff
+  version: a4e142e9c047c904fa2f1e144d9a84e6133024bc
 - name: github.com/newrelic/go-agent
   version: f5bce3387232559bcbe6a5f8227c4bf508dac1ba
   subpackages:
@@ -169,13 +178,13 @@ imports:
 - name: github.com/spf13/cobra
   version: 7b2c5ac9fc04fc5efafb60700713d4fa609b777b
 - name: github.com/spf13/pflag
-  version: 4c012f6dcd9546820e378d0bdda4d8fc772cdfea
+  version: 6a877ebacf28c5fc79846f4fcd380a5d9872b997
 - name: github.com/ugorji/go
-  version: ccfe18359b55b97855cee1d3f74e5efbda4869dc
+  version: 9831f2c3ac1068a78f50999a30db84270f647af6
   subpackages:
   - codec
 - name: golang.org/x/crypto
-  version: 5f55bce93ad2c89f411e009659bb1fd83da36e7b
+  version: 5119cf507ed5294cc409c092980c7497ee5d6fd2
   subpackages:
   - bcrypt
   - blowfish
@@ -185,7 +194,7 @@ imports:
   - scrypt
   - ssh/terminal
 - name: golang.org/x/net
-  version: 5ccada7d0a7ba9aeb5d3aca8d3501b4c2a509fec
+  version: f5dfe339be1d06f81b22525fe34671ee7d2c8904
   subpackages:
   - bpf
   - context
@@ -201,7 +210,7 @@ imports:
   - lex/httplex
   - trace
 - name: golang.org/x/oauth2
-  version: 30785a2c434e431ef7c507b54617d6a951d5f2b4
+  version: 543e37812f10c46c622c9575afd7ad22f22a12ba
   subpackages:
   - google
   - internal
@@ -212,12 +221,12 @@ imports:
   subpackages:
   - semaphore
 - name: golang.org/x/sys
-  version: 810d7000345868fc619eb81f46307107118f4ae1
+  version: 37707fdb30a5b38865cfb95e5aab41707daec7fd
   subpackages:
   - unix
   - windows
 - name: golang.org/x/text
-  version: e19ae1496984b1c655b8044a65c0300a3c878dd3
+  version: 4e4a3210bb54bb31f6ab2cdca2edcc0b50c420c1
   subpackages:
   - collate
   - internal/colltab
@@ -232,7 +241,7 @@ imports:
   subpackages:
   - rate
 - name: google.golang.org/api
-  version: 37df4fabefb044819e927f44b8487d4cd926d06c
+  version: 068431dcab1a5817548dd244d9795788a98329f4
   subpackages:
   - cloudtrace/v1
   - gensupport
@@ -242,6 +251,7 @@ imports:
   - internal
   - iterator
   - option
+  - sqladmin/v1beta4
   - storage/v1
   - support/bundler
   - transport
@@ -262,7 +272,7 @@ imports:
   - socket
   - urlfetch
 - name: google.golang.org/genproto
-  version: a8101f21cf983e773d0c1133ebc5424792003214
+  version: 2b5a72b8730b0b16380010cfe5286c42108d88e7
   subpackages:
   - googleapis/api/annotations
   - googleapis/api/distribution
@@ -276,7 +286,7 @@ imports:
   - googleapis/rpc/status
   - protobuf/field_mask
 - name: google.golang.org/grpc
-  version: 1cd234627e6f392ade0527d593eb3fe53e832d4a
+  version: d50734d1d6ca477a72646f3022216ec39639f4cd
   subpackages:
   - balancer
   - balancer/base
@@ -286,6 +296,7 @@ imports:
   - credentials
   - credentials/oauth
   - encoding
+  - encoding/proto
   - grpclb/grpc_lb_v1/messages
   - grpclog
   - internal
@@ -304,7 +315,7 @@ imports:
   version: 4654dfbb6ad53cb5e27f37d99b02e16c1872fbbb
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: 444abdf920945de5d4a977b572bcc6c674d1e4eb
+  version: 296de816d4fe28b61803072c3f89360e9d1823ff
   subpackages:
   - js
 - name: github.com/jtolds/gls
