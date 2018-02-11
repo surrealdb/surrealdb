@@ -32,6 +32,7 @@ import (
 
 	"cloud.google.com/go/trace"
 
+	_ "github.com/abcum/surreal/kvs/mysql"
 	_ "github.com/abcum/surreal/kvs/rixxdb"
 )
 

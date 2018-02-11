@@ -56,7 +56,7 @@ func setup() {
 	}
 
 	if opts.DB.Path != "memory" {
-		if ok, _ := regexp.MatchString(`^(s3|gcs|logr|file|rixxdb|dendrodb)://(.+)$`, opts.DB.Path); !ok {
+		if ok, _ := regexp.MatchString(`^(s3|gcs|logr|file|mysql|rixxdb|dendrodb)://(.+)$`, opts.DB.Path); !ok {
 			log.Fatalf("Invalid path %s. Specify a valid data store configuration path", opts.DB.Path)
 		}
 	}
