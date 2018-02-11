@@ -31,7 +31,7 @@ type DB struct {
 
 func (db *DB) Begin(ctx context.Context, writable bool) (txn kvs.TX, err error) {
 	var pntr *sql.Tx
-	if pntr, err = db.pntr.BeginTx(ctx, db.opt(writable)); err != nil {
+	if pntr, err = db.pntr.BeginTx(ctx, &sql.TxOptions{}); err != nil {
 		log.WithPrefix("kvs").Errorln(err)
 		err = &kvs.DBError{Err: err}
 		return
@@ -49,10 +49,4 @@ func (db *DB) Export(w io.Writer) (err error) {
 
 func (db *DB) Close() (err error) {
 	return db.pntr.Close()
-}
-
-func (db *DB) opt(writable bool) *sql.TxOptions {
-	return &sql.TxOptions{
-		ReadOnly: !writable,
-	}
 }
