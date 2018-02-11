@@ -587,7 +587,7 @@ func (i *iterator) processTable(ctx context.Context, key *keys.Table) {
 			return
 		}
 
-		vals, err := i.e.dbo.GetR(i.versn, min, max, 1000)
+		vals, err := i.e.dbo.GetR(i.versn, min, max, 10000)
 		if err != nil {
 			i.fail <- err
 			return
