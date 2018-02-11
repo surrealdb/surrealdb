@@ -22,6 +22,7 @@ import (
 	"database/sql"
 
 	"github.com/abcum/surreal/kvs"
+	"github.com/abcum/surreal/log"
 )
 
 type DB struct {
@@ -31,6 +32,7 @@ type DB struct {
 func (db *DB) Begin(ctx context.Context, writable bool) (txn kvs.TX, err error) {
 	var pntr *sql.Tx
 	if pntr, err = db.pntr.BeginTx(ctx, db.opt(writable)); err != nil {
+		log.WithPrefix("kvs").Errorln(err)
 		err = &kvs.DBError{Err: err}
 		return
 	}

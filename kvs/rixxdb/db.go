@@ -21,6 +21,7 @@ import (
 
 	"github.com/abcum/rixxdb"
 	"github.com/abcum/surreal/kvs"
+	"github.com/abcum/surreal/log"
 )
 
 type DB struct {
@@ -30,6 +31,7 @@ type DB struct {
 func (db *DB) Begin(ctx context.Context, writable bool) (txn kvs.TX, err error) {
 	var pntr *rixxdb.TX
 	if pntr, err = db.pntr.Begin(writable); err != nil {
+		log.WithPrefix("kvs").Errorln(err)
 		err = &kvs.DBError{Err: err}
 		return
 	}

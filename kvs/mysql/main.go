@@ -21,6 +21,7 @@ import (
 
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
+	"github.com/abcum/surreal/log"
 
 	"github.com/go-sql-driver/mysql"
 
@@ -39,6 +40,7 @@ func init() {
 
 		pntr, err = sql.Open("mysql", path)
 		if err != nil {
+			log.WithPrefix("kvs").Errorln(err)
 			return
 		}
 

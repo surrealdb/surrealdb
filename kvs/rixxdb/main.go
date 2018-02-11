@@ -20,6 +20,7 @@ import (
 	"github.com/abcum/rixxdb"
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
+	"github.com/abcum/surreal/log"
 )
 
 func init() {
@@ -44,6 +45,7 @@ func init() {
 		})
 
 		if err != nil {
+			log.WithPrefix("kvs").Errorln(err)
 			return
 		}
 
