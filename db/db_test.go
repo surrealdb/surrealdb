@@ -40,7 +40,9 @@ func setupDB() {
 
 func setupKV() *fibre.Context {
 
-	auth := &cnf.Auth{}
+	keep := new(data.Doc)
+
+	auth := new(cnf.Auth)
 	auth.Kind = cnf.AuthKV
 	auth.Possible.NS = "*"
 	auth.Selected.NS = "*"
@@ -52,6 +54,7 @@ func setupKV() *fibre.Context {
 
 	ctx := fibre.NewContext(req, res, nil)
 	ctx.Set("auth", auth)
+	ctx.Set("keep", keep)
 
 	return ctx
 
@@ -59,7 +62,9 @@ func setupKV() *fibre.Context {
 
 func setupSC() *fibre.Context {
 
-	auth := &cnf.Auth{}
+	keep := new(data.Doc)
+
+	auth := new(cnf.Auth)
 	auth.Kind = cnf.AuthSC
 	auth.Possible.NS = "*"
 	auth.Selected.NS = "*"
@@ -71,6 +76,7 @@ func setupSC() *fibre.Context {
 
 	ctx := fibre.NewContext(req, res, nil)
 	ctx.Set("auth", auth)
+	ctx.Set("keep", keep)
 
 	return ctx
 

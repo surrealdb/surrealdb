@@ -41,6 +41,7 @@ const (
 	ctxKeyVars  = "vars"
 	ctxKeySubs  = "subs"
 	ctxKeySpec  = "spec"
+	ctxKeyKeep  = "keep"
 	ctxKeyAuth  = "auth"
 	ctxKeyKind  = "kind"
 	ctxKeyScope = "scope"
@@ -50,6 +51,7 @@ const (
 	varKeyId     = "id"
 	varKeyIp     = "ip"
 	varKeyAuth   = "auth"
+	varKeyKeep   = "keep"
 	varKeyThis   = "this"
 	varKeyScope  = "scope"
 	varKeyValue  = "value"
@@ -65,5 +67,5 @@ var (
 	queryNotExecuted      = errors.New("Query not executed")
 	queryIdentFailed      = errors.New("Found ident but no doc available")
 	featureNotImplemented = errors.New("Feature is not yet implemented")
-	paramSearchKeys       = []string{ctxKeySpec, ctxKeySubs, ctxKeyVars}
+	paramSearchKeys       = []string{ctxKeySpec, ctxKeySubs, ctxKeyVars, ctxKeyKeep}
 )

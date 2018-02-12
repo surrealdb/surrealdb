@@ -19,6 +19,7 @@ import (
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/rand"
 )
 
@@ -34,6 +35,10 @@ func (r *rpc) Info(c *fibre.Context) (interface{}, error) {
 
 func (r *rpc) Auth(c *fibre.Context, auth string) (interface{}, error) {
 	return c.Get("auth").(*cnf.Auth).Data, checkBearer(c, auth, ignore)
+}
+
+func (r *rpc) Let(c *fibre.Context, key string, val interface{}) (interface{}, error) {
+	return c.Get("keep").(*data.Doc).Set(val, key)
 }
 
 func (r *rpc) Query(c *fibre.Context, sql string, vars map[string]interface{}) (interface{}, error) {
