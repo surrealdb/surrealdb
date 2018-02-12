@@ -19,9 +19,14 @@ import (
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/rand"
 )
 
 type rpc struct{}
+
+func (r *rpc) Uniq(c *fibre.Context) (interface{}, error) {
+	return rand.String(128), nil
+}
 
 func (r *rpc) Info(c *fibre.Context) (interface{}, error) {
 	return c.Get("auth").(*cnf.Auth).Data, nil
