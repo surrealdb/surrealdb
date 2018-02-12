@@ -16,6 +16,7 @@ package web
 
 import (
 	"github.com/abcum/fibre"
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/sql"
 )
@@ -23,11 +24,11 @@ import (
 type rpc struct{}
 
 func (r *rpc) Info(c *fibre.Context) (interface{}, error) {
-	return c.Get("auth"), nil
+	return c.Get("auth").(*cnf.Auth).Data, nil
 }
 
 func (r *rpc) Auth(c *fibre.Context, auth string) (interface{}, error) {
-	return c.Get("auth"), checkBearer(c, auth, func() error { return nil })
+	return c.Get("auth").(*cnf.Auth).Data, checkBearer(c, auth, ignore)
 }
 
 func (r *rpc) Query(c *fibre.Context, sql string, vars map[string]interface{}) (interface{}, error) {

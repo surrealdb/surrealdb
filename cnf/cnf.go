@@ -21,58 +21,6 @@ import (
 
 var Settings *Options
 
-type Kind int
-
-func (k Kind) String() string {
-	switch k {
-	default:
-		return "NO"
-	case AuthKV:
-		return "KV"
-	case AuthNS:
-		return "NS"
-	case AuthDB:
-		return "DB"
-	case AuthSC:
-		return "SC"
-	}
-}
-
-func (k Kind) MarshalText() (data []byte, err error) {
-	return []byte(k.String()), err
-}
-
-func (k Kind) UnmarshalText(text []byte) error {
-	return nil
-}
-
-const (
-	// Root access
-	AuthKV Kind = iota
-	// Namespace access
-	AuthNS
-	// Database access
-	AuthDB
-	// Scoped user access
-	AuthSC
-	// No access
-	AuthNO
-)
-
-type Auth struct {
-	Kind     Kind
-	Data     interface{}
-	Scope    string
-	Possible struct {
-		NS string
-		DB string
-	}
-	Selected struct {
-		NS string
-		DB string
-	}
-}
-
 // Options defines global configuration options
 type Options struct {
 	DB struct {
