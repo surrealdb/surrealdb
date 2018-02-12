@@ -170,7 +170,7 @@ func (e *executor) executeDefineIndex(ctx context.Context, ast *sql.DefineIndexS
 		}
 
 		dkey := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: ast.Name.ID, FD: keys.Ignore}
-		if _, err = e.dbo.DelP(0, dkey.Encode(), 0); err != nil {
+		if _, err = e.dbo.ClrP(dkey.Encode(), 0); err != nil {
 			return nil, err
 		}
 
