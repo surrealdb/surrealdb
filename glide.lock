@@ -1,5 +1,5 @@
 hash: cb30626843c69bbd04e9ae741a97488cca0765662df098cdf4ca212a582d7f5f
-updated: 2018-02-11T09:39:58.24498Z
+updated: 2018-02-12T22:22:19.44024Z
 imports:
 - name: cloud.google.com/go
   version: 767c40d6a2e058483c25fa193e963a22da17236d
@@ -22,7 +22,7 @@ imports:
 - name: github.com/abcum/cork
   version: b8afe0a174bbc5f8434efdf7a7d80ed7eb5f0290
 - name: github.com/abcum/fibre
-  version: c2d6bee48884ea63bff04f1a1292d419229a576e
+  version: 4276ae74a9da7e2c52ee761e53e2a146140414d7
   subpackages:
   - mw
 - name: github.com/abcum/ptree
@@ -43,7 +43,7 @@ imports:
 - name: github.com/asaskevich/govalidator
   version: 521b25f4b05fd26bec69d9dedeb8f9c9a83939a8
 - name: github.com/aws/aws-sdk-go
-  version: 82eadef012f77590875babb177c60878727821c0
+  version: ebc8a649dc2a7c78c9237c2575a63b3efd6d0a2d
   subpackages:
   - aws
   - aws/awserr
@@ -184,7 +184,7 @@ imports:
   subpackages:
   - codec
 - name: golang.org/x/crypto
-  version: 5119cf507ed5294cc409c092980c7497ee5d6fd2
+  version: 9de5f2eaf759b4c4550b3db39fed2e9e5f86f45c
   subpackages:
   - bcrypt
   - blowfish
@@ -286,7 +286,7 @@ imports:
   - googleapis/rpc/status
   - protobuf/field_mask
 - name: google.golang.org/grpc
-  version: d50734d1d6ca477a72646f3022216ec39639f4cd
+  version: 08d626137c87d1df11c1a0d5cb59207ce5ade4e6
   subpackages:
   - balancer
   - balancer/base
