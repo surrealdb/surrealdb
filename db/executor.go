@@ -119,7 +119,6 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 			log := log.WithPrefix("sql").WithFields(map[string]interface{}{
 				"id":   ctx.Value(ctxKeyId),
 				"kind": ctx.Value(ctxKeyKind),
-				"auth": ctx.Value(ctxKeyAuth),
 			})
 
 			if stm, ok := stm.(sql.AuthableStatement); ok {
