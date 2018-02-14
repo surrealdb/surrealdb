@@ -211,7 +211,7 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 	// to the context so that we can retrieve
 	// the variables from within any queries.
 
-	keep := fib.Get(varKeyKeep).(*data.Doc)
+	keep := fib.Get(varKeyKeep)
 	ctx = context.WithValue(ctx, ctxKeyKeep, keep)
 
 	// Assign the authentication data to the
