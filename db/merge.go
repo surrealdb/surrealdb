@@ -290,7 +290,7 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 
 	for _, fd := range fds {
 
-		err = d.current.Walk(func(key string, val interface{}) (err error) {
+		err = d.current.Walk(func(key string, val interface{}) error {
 
 			vars := data.New()
 
@@ -299,8 +299,10 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 			// Ensure the field is the correct type
 
 			if val != nil {
-				if val, err = conv.ConvertTo(fd.Type, fd.Kind, val); err != nil {
-					val = old
+				if now, err := conv.ConvertTo(fd.Type, fd.Kind, val); err != nil {
+					val = nil
+				} else {
+					val = now
 				}
 			}
 
@@ -314,8 +316,10 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 			// We are setting the value of the field
 
 			if fd.Value != nil {
-				if val, err = d.i.e.fetch(ctx, fd.Value, d.current); err != nil {
+				if now, err := d.i.e.fetch(ctx, fd.Value, d.current); err != nil {
 					return err
+				} else {
+					val = now
 				}
 			}
 
@@ -343,7 +347,7 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 				d.current.Del(key)
 			}
 
-			return
+			return nil
 
 		}, fd.Name.ID)
 
