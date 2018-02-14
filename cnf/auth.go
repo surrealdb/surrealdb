@@ -27,3 +27,19 @@ type Auth struct {
 		DB string
 	} `json:"-" msgpack:"-"`
 }
+
+// Reset resets the authentication data.
+func (a *Auth) Reset() *Auth {
+
+	// Remove any saved session data
+	a.Data = nil
+
+	// Reset the authentication level
+	a.Kind = AuthNO
+
+	// Clear any authenticated scope
+	a.Scope = ""
+
+	return a
+
+}

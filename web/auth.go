@@ -281,8 +281,6 @@ func checkBasics(c *fibre.Context, info string, callback func() error) (err erro
 
 func checkBearer(c *fibre.Context, info string, callback func() error) (err error) {
 
-	auth := c.Get(varKeyAuth).(*cnf.Auth)
-
 	var txn kvs.TX
 	var res []*db.Response
 	var vars jwt.MapClaims
@@ -302,6 +300,10 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 	// Setup the kvs layer cache.
 
 	cache := mem.NewWithTX(txn)
+
+	// Reset the auth data first.
+
+	auth := c.Get(varKeyAuth).(*cnf.Auth).Reset()
 
 	// Parse the specified JWT Token.
 
@@ -458,6 +460,10 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 		}
 
 		return callback()
+
+	} else {
+
+		auth.Reset()
 
 	}
 
