@@ -25,25 +25,37 @@ import (
 
 type rpc struct{}
 
+// --------------------------------------------------
+// Methods for authentication
+// --------------------------------------------------
+
 func (r *rpc) Uniq(c *fibre.Context) (interface{}, error) {
-	return rand.String(128), nil
+	return rand.String(64), nil
 }
 
 func (r *rpc) Info(c *fibre.Context) (interface{}, error) {
 	return c.Get("auth").(*cnf.Auth).Data, nil
 }
 
-func (r *rpc) Auth(c *fibre.Context, auth string) (interface{}, error) {
-	return c.Get("auth").(*cnf.Auth).Data, checkBearer(c, auth, ignore)
+func (r *rpc) Signup(c *fibre.Context, vars map[string]interface{}) (interface{}, error) {
+	return signupRpc(c, vars)
 }
 
-func (r *rpc) Let(c *fibre.Context, key string, val interface{}) (interface{}, error) {
-	return c.Get("keep").(*data.Doc).Set(val, key)
+func (r *rpc) Signin(c *fibre.Context, vars map[string]interface{}) (interface{}, error) {
+	return signinRpc(c, vars)
 }
 
-func (r *rpc) Query(c *fibre.Context, sql string, vars map[string]interface{}) (interface{}, error) {
-	return db.Execute(c, sql, vars)
+func (r *rpc) Invalidate(c *fibre.Context) (interface{}, error) {
+	return c.Get("auth").(*cnf.Auth).Reset().Data, nil
 }
+
+func (r *rpc) Authenticate(c *fibre.Context, auth string) (interface{}, error) {
+	return c.Get("auth").(*cnf.Auth).Reset().Data, checkBearer(c, auth, ignore)
+}
+
+// --------------------------------------------------
+// Methods for live queries
+// --------------------------------------------------
 
 func (r *rpc) Kill(c *fibre.Context, query string) (interface{}, error) {
 	return db.Execute(c, "KILL $query", map[string]interface{}{
@@ -55,6 +67,18 @@ func (r *rpc) Live(c *fibre.Context, class string) (interface{}, error) {
 	return db.Execute(c, "LIVE SELECT * FROM $class", map[string]interface{}{
 		"class": sql.NewTable(class),
 	})
+}
+
+// --------------------------------------------------
+// Methods for static queries
+// --------------------------------------------------
+
+func (r *rpc) Let(c *fibre.Context, key string, val interface{}) (interface{}, error) {
+	return c.Get("keep").(*data.Doc).Set(val, key)
+}
+
+func (r *rpc) Query(c *fibre.Context, sql string, vars map[string]interface{}) (interface{}, error) {
+	return db.Execute(c, sql, vars)
 }
 
 func (r *rpc) Select(c *fibre.Context, class string, thing interface{}) (interface{}, error) {

@@ -34,6 +34,37 @@ func signin(c *fibre.Context) (err error) {
 
 	c.Bind(&vars)
 
+	str, err := signinInternal(c, vars)
+
+	switch err {
+	case nil:
+		return c.Send(200, str)
+	default:
+		return err
+	}
+
+}
+
+func signinRpc(c *fibre.Context, vars map[string]interface{}) (res interface{}, err error) {
+
+	var str string
+
+	str, err = signinInternal(c, vars)
+	if err != nil {
+		return nil, err
+	}
+
+	err = checkBearer(c, str, ignore)
+	if err != nil {
+		return nil, err
+	}
+
+	return str, nil
+
+}
+
+func signinInternal(c *fibre.Context, vars map[string]interface{}) (str string, err error) {
+
 	n, nok := vars[varKeyNs].(string)
 	d, dok := vars[varKeyDb].(string)
 	s, sok := vars[varKeySc].(string)
@@ -58,7 +89,6 @@ func signin(c *fibre.Context) (err error) {
 
 		var ok bool
 		var txn kvs.TX
-		var str string
 		var doc *sql.Thing
 		var res []*db.Response
 		var exp *sql.SubExpression
@@ -67,7 +97,7 @@ func signin(c *fibre.Context) (err error) {
 		// Start a new read transaction.
 
 		if txn, err = db.Begin(false); err != nil {
-			return fibre.NewHTTPError(500)
+			return str, fibre.NewHTTPError(500)
 		}
 
 		// Ensure the transaction closes.
@@ -82,14 +112,14 @@ func signin(c *fibre.Context) (err error) {
 
 		if scp, err = mem.NewWithTX(txn).GetSC(n, d, s); err != nil {
 			m := "Authentication scope does not exist"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Check that the scope allows signin.
 
 		if exp, ok = scp.Signin.(*sql.SubExpression); !ok {
 			m := "Authentication scope does not allow signin"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Process the scope signin statement.
@@ -102,35 +132,35 @@ func signin(c *fibre.Context) (err error) {
 
 		if res, err = db.Process(c, query, vars); err != nil {
 			m := "Authentication scope signin was unsuccessful: Query failed"
-			return fibre.NewHTTPError(501).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(501).WithFields(f).WithMessage(m)
 		}
 
 		// If the response is not 1 record then return a 403 error.
 
 		if len(res) != 1 {
 			m := "Authentication scope signin was unsuccessful: Query failed"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// If the response has an error set then return a 403 error.
 
 		if res[0].Status != "OK" {
 			m := "Authentication scope signin was unsuccessful: " + res[0].Detail
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// If the response has no record set then return a 403 error.
 
 		if len(res[0].Result) != 1 {
 			m := "Authentication scope signin was unsuccessful: No record returned"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// If the query does not return an id field then return a 403 error.
 
 		if doc, ok = data.Consume(res[0].Result[0]).Get("id").Data().(*sql.Thing); !ok {
 			m := "Authentication scope signin was unsuccessful: No id field found"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Create a new token signer with the default claims.
@@ -152,10 +182,10 @@ func signin(c *fibre.Context) (err error) {
 
 		if str, err = signr.SignedString(scp.Code); err != nil {
 			m := "Problem with signing method: " + err.Error()
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
-		return c.Send(200, str)
+		return str, err
 
 	}
 
@@ -181,13 +211,13 @@ func signin(c *fibre.Context) (err error) {
 
 		if !uok || !pok {
 			m := "Username or password is missing"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Start a new read transaction.
 
 		if usr, err = signinDB(n, d, u, p); err != nil {
-			return err
+			return str, err
 		}
 
 		// Create a new token signer with the default claims.
@@ -207,10 +237,10 @@ func signin(c *fibre.Context) (err error) {
 
 		if str, err = signr.SignedString(usr.Code); err != nil {
 			m := "Problem with signing method: " + err.Error()
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
-		return c.Send(200, str)
+		return str, err
 
 	}
 
@@ -236,11 +266,11 @@ func signin(c *fibre.Context) (err error) {
 
 		if !uok || !pok {
 			m := "Username or password is missing"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		if usr, err = signinNS(n, u, p); err != nil {
-			return err
+			return str, err
 		}
 
 		// Create a new token signer with the default claims.
@@ -259,14 +289,14 @@ func signin(c *fibre.Context) (err error) {
 
 		if str, err = signr.SignedString(usr.Code); err != nil {
 			m := "Problem with signing method: " + err.Error()
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
-		return c.Send(200, str)
+		return str, err
 
 	}
 
-	return fibre.NewHTTPError(403)
+	return str, fibre.NewHTTPError(403)
 
 }
 

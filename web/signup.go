@@ -15,6 +15,8 @@
 package web
 
 import (
+	"time"
+
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/db"
@@ -22,6 +24,7 @@ import (
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
+	"github.com/dgrijalva/jwt-go"
 )
 
 func signup(c *fibre.Context) (err error) {
@@ -29,6 +32,37 @@ func signup(c *fibre.Context) (err error) {
 	var vars map[string]interface{}
 
 	c.Bind(&vars)
+
+	str, err := signinInternal(c, vars)
+
+	switch err {
+	case nil:
+		return c.Send(200, str)
+	default:
+		return err
+	}
+
+}
+
+func signupRpc(c *fibre.Context, vars map[string]interface{}) (res interface{}, err error) {
+
+	var str string
+
+	str, err = signupInternal(c, vars)
+	if err != nil {
+		return nil, err
+	}
+
+	err = checkBearer(c, str, ignore)
+	if err != nil {
+		return nil, err
+	}
+
+	return str, nil
+
+}
+
+func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, err error) {
 
 	n, nok := vars[varKeyNs].(string)
 	d, dok := vars[varKeyDb].(string)
@@ -54,6 +88,7 @@ func signup(c *fibre.Context) (err error) {
 
 		var ok bool
 		var txn kvs.TX
+		var doc *sql.Thing
 		var res []*db.Response
 		var exp *sql.SubExpression
 		var scp *sql.DefineScopeStatement
@@ -61,7 +96,7 @@ func signup(c *fibre.Context) (err error) {
 		// Start a new read transaction.
 
 		if txn, err = db.Begin(false); err != nil {
-			return fibre.NewHTTPError(500)
+			return str, fibre.NewHTTPError(500)
 		}
 
 		// Ensure the transaction closes.
@@ -76,14 +111,14 @@ func signup(c *fibre.Context) (err error) {
 
 		if scp, err = mem.NewWithTX(txn).GetSC(n, d, s); err != nil {
 			m := "Authentication scope does not exist"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Check that the scope allows signup.
 
 		if exp, ok = scp.Signup.(*sql.SubExpression); !ok {
 			m := "Authentication scope does not allow signup"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// Process the scope signup statement.
@@ -96,41 +131,63 @@ func signup(c *fibre.Context) (err error) {
 
 		if res, err = db.Process(c, query, vars); err != nil {
 			m := "Authentication scope signup was unsuccessful: Query failed"
-			return fibre.NewHTTPError(501).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(501).WithFields(f).WithMessage(m)
 		}
 
 		// If the response is not 1 record then return a 403 error.
 
 		if len(res) != 1 {
 			m := "Authentication scope signup was unsuccessful: Query failed"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// If the response has an error set then return a 403 error.
 
 		if res[0].Status != "OK" {
 			m := "Authentication scope signin was unsuccessful: " + res[0].Detail
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// If the response has no record set then return a 403 error.
 
 		if len(res[0].Result) != 1 {
 			m := "Authentication scope signup was unsuccessful: No record created"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
 		// If the query does not return an id field then return a 403 error.
 
-		if _, ok = data.Consume(res[0].Result[0]).Get("id").Data().(*sql.Thing); !ok {
+		if doc, ok = data.Consume(res[0].Result[0]).Get("id").Data().(*sql.Thing); !ok {
 			m := "Authentication scope signup was unsuccessful: No id field found"
-			return fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
-		return c.Code(204)
+		// Create a new token signer with the default claims.
+
+		signr := jwt.NewWithClaims(jwt.SigningMethodHS512, jwt.MapClaims{
+			"NS":  n,
+			"DB":  d,
+			"SC":  s,
+			"TK":  "default",
+			"iss": "Surreal",
+			"iat": time.Now().Unix(),
+			"nbf": time.Now().Unix(),
+			"exp": time.Now().Add(scp.Time).Unix(),
+			"TB":  doc.TB,
+			"ID":  doc.ID,
+		})
+
+		// Try to create the final signed token as a string.
+
+		if str, err = signr.SignedString(scp.Code); err != nil {
+			m := "Problem with signing method: " + err.Error()
+			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+		}
+
+		return str, err
 
 	}
 
-	return fibre.NewHTTPError(403)
+	return str, fibre.NewHTTPError(403)
 
 }
