@@ -592,6 +592,8 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 			return op == sql.EQ
 		case *sql.Empty:
 			return op == sql.EQ
+		case string:
+			return chkLen(op, r)
 		case []interface{}:
 			return chkArrayR(op, l, r)
 		case map[string]interface{}:
@@ -640,6 +642,8 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 			}
 		case time.Time:
 			return chkString(op, l, r.String())
+		case *sql.Empty:
+			return chkLen(op, l)
 		case *sql.Thing:
 			return chkString(op, l, r.String())
 		case *regexp.Regexp:
@@ -767,6 +771,16 @@ func chkOp(op sql.Token) int8 {
 	default:
 		return 0
 	}
+}
+
+func chkLen(op sql.Token, s string) (val bool) {
+	switch op {
+	case sql.EQ:
+		return len(s) == 0
+	case sql.NEQ:
+		return len(s) != 0
+	}
+	return negOp(op)
 }
 
 func chkBool(op sql.Token, a, b bool) (val bool) {

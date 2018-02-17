@@ -467,7 +467,7 @@ func TestFetch(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 46)
 
-		So(res[2].Result, ShouldHaveLength, 0)
+		So(res[2].Result, ShouldHaveLength, 1)
 		So(res[3].Result, ShouldHaveLength, 1)
 		So(res[4].Result, ShouldHaveLength, 1)
 		So(res[5].Result, ShouldHaveLength, 1)
@@ -476,7 +476,7 @@ func TestFetch(t *testing.T) {
 		So(res[8].Result, ShouldHaveLength, 1)
 		So(res[9].Result, ShouldHaveLength, 1)
 
-		So(res[10].Result, ShouldHaveLength, 0)
+		So(res[10].Result, ShouldHaveLength, 1)
 		So(res[11].Result, ShouldHaveLength, 1)
 		So(res[12].Result, ShouldHaveLength, 1)
 		So(res[13].Result, ShouldHaveLength, 1)
@@ -485,7 +485,7 @@ func TestFetch(t *testing.T) {
 		So(res[16].Result, ShouldHaveLength, 1)
 		So(res[17].Result, ShouldHaveLength, 1)
 
-		So(res[18].Result, ShouldHaveLength, 1)
+		So(res[18].Result, ShouldHaveLength, 0)
 		So(res[19].Result, ShouldHaveLength, 0)
 		So(res[20].Result, ShouldHaveLength, 0)
 		So(res[21].Result, ShouldHaveLength, 0)
@@ -494,7 +494,7 @@ func TestFetch(t *testing.T) {
 		So(res[24].Result, ShouldHaveLength, 0)
 		So(res[25].Result, ShouldHaveLength, 0)
 
-		So(res[26].Result, ShouldHaveLength, 1)
+		So(res[26].Result, ShouldHaveLength, 0)
 		So(res[27].Result, ShouldHaveLength, 0)
 		So(res[28].Result, ShouldHaveLength, 0)
 		So(res[29].Result, ShouldHaveLength, 0)
