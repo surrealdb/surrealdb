@@ -33,7 +33,7 @@ func signup(c *fibre.Context) (err error) {
 
 	c.Bind(&vars)
 
-	str, err := signinInternal(c, vars)
+	str, err := signupInternal(c, vars)
 
 	switch err {
 	case nil:
