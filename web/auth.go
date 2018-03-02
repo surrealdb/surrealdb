@@ -354,7 +354,9 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 
 				c.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
 
-				qvars := map[string]interface{}{"id": auth.Data}
+				qvars := map[string]interface{}{
+					"id": auth.Data, "token": vars,
+				}
 
 				query := &sql.Query{Statements: []sql.Statement{exp.Expr}}
 
