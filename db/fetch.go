@@ -245,6 +245,8 @@ func (e *executor) fetchPaths(ctx context.Context, doc *data.Doc, exprs ...sql.E
 		}
 	case *sql.PartExpression:
 		switch val := val.Part.(type) {
+		case *sql.All:
+			return e.fetchPaths(ctx, doc, exprs...)
 		case *sql.Param:
 			res, err := e.fetch(ctx, val, doc)
 			if err != nil {

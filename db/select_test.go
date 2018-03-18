@@ -136,6 +136,150 @@ func TestSelect(t *testing.T) {
 
 	})
 
+	Convey("Select records with an embedded record field", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:a SET name="Tobias";
+		CREATE person:b SET name="Silvana";
+		CREATE person:c SET name="Jonathan", father=person:a, mother=person:b;
+		SELECT name, father, mother FROM person ORDER BY meta.id;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[4].Result[1]).Get("name").Data(), ShouldEqual, "Silvana")
+		So(data.Consume(res[4].Result[2]).Get("name").Data(), ShouldEqual, "Jonathan")
+		So(data.Consume(res[4].Result[2]).Get("father").Data(), ShouldResemble, &sql.Thing{"person", "a"})
+		So(data.Consume(res[4].Result[2]).Get("mother").Data(), ShouldResemble, &sql.Thing{"person", "b"})
+
+	})
+
+	Convey("Select '*' parameter from an embedded record field fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:a SET name="Tobias";
+		CREATE person:b SET name="Silvana";
+		CREATE person:c SET name="Jonathan", father=person:a, mother=person:b;
+		SELECT name, father.* AS father, mother.* AS mother FROM person ORDER BY meta.id;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[4].Result[1]).Get("name").Data(), ShouldEqual, "Silvana")
+		So(data.Consume(res[4].Result[2]).Get("name").Data(), ShouldEqual, "Jonathan")
+		So(data.Consume(res[4].Result[2]).Get("father").Data(), ShouldResemble, map[string]interface{}{
+			"id": &sql.Thing{"person", "a"},
+			"meta": map[string]interface{}{
+				"id": "a",
+				"tb": "person",
+			},
+			"name": "Tobias",
+		})
+		So(data.Consume(res[4].Result[2]).Get("mother").Data(), ShouldResemble, map[string]interface{}{
+			"id": &sql.Thing{"person", "b"},
+			"meta": map[string]interface{}{
+				"id": "b",
+				"tb": "person",
+			},
+			"name": "Silvana",
+		})
+
+	})
+
+	Convey("Select 'id' parameter from an embedded record field fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:a SET name="Tobias";
+		CREATE person:b SET name="Silvana";
+		CREATE person:c SET name="Jonathan", father=person:a, mother=person:b;
+		SELECT name, father.id AS father, mother.id AS mother FROM person ORDER BY meta.id;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[4].Result[1]).Get("name").Data(), ShouldEqual, "Silvana")
+		So(data.Consume(res[4].Result[2]).Get("name").Data(), ShouldEqual, "Jonathan")
+		So(data.Consume(res[4].Result[2]).Get("father").Data(), ShouldResemble, &sql.Thing{"person", "a"})
+		So(data.Consume(res[4].Result[2]).Get("mother").Data(), ShouldResemble, &sql.Thing{"person", "b"})
+
+	})
+
+	Convey("Select 'name' parameter from an embedded record field fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:a SET name="Tobias";
+		CREATE person:b SET name="Silvana";
+		CREATE person:c SET name="Jonathan", father=person:a, mother=person:b;
+		SELECT name, father.name AS father, mother.name AS mother FROM person ORDER BY meta.id;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[4].Result[1]).Get("name").Data(), ShouldEqual, "Silvana")
+		So(data.Consume(res[4].Result[2]).Get("name").Data(), ShouldEqual, "Jonathan")
+		So(data.Consume(res[4].Result[2]).Get("father").Data(), ShouldResemble, "Tobias")
+		So(data.Consume(res[4].Result[2]).Get("mother").Data(), ShouldResemble, "Silvana")
+
+	})
+
+	Convey("Select 'id.name' parameter from an embedded record field fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:a SET name="Tobias";
+		CREATE person:b SET name="Silvana";
+		CREATE person:c SET name="Jonathan", father=person:a, mother=person:b;
+		SELECT name, father.id.name AS father, mother.id.name AS mother FROM person ORDER BY meta.id;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+		So(data.Consume(res[4].Result[1]).Get("name").Data(), ShouldEqual, "Silvana")
+		So(data.Consume(res[4].Result[2]).Get("name").Data(), ShouldEqual, "Jonathan")
+		So(data.Consume(res[4].Result[2]).Get("father").Data(), ShouldResemble, "Tobias")
+		So(data.Consume(res[4].Result[2]).Get("mother").Data(), ShouldResemble, "Silvana")
+
+	})
+
 	Convey("Select records using variable for a `table`", t, func() {
 
 		setupDB()
@@ -384,6 +528,36 @@ func TestSelect(t *testing.T) {
 
 	})
 
+	Convey("Select '*' from a direct `thing` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, person:test.* AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldResemble, map[string]interface{}{
+			"id": &sql.Thing{"person", "test"},
+			"meta": map[string]interface{}{
+				"id": "test",
+				"tb": "person",
+			},
+			"name": "Tobias",
+		})
+
+	})
+
 	Convey("Select 'id' parameter from a direct `thing` record fetch", t, func() {
 
 		setupDB()
@@ -485,7 +659,7 @@ func TestSelect(t *testing.T) {
 		LET person = person:test;
 		CREATE tester:test;
 		CREATE person:test SET name="Tobias";
-		SELECT *, $person.id AS test FROM tester;
+		SELECT *, $person AS test FROM tester;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -497,6 +671,37 @@ func TestSelect(t *testing.T) {
 		So(data.Consume(res[4].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
 		So(data.Consume(res[4].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
 		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldResemble, &sql.Thing{"person", "test"})
+
+	})
+
+	Convey("Select '*' parameter from a direct `param` record fetch", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		LET person = person:test;
+		CREATE tester:test;
+		CREATE person:test SET name="Tobias";
+		SELECT *, $person.* AS test FROM tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[4].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldResemble, map[string]interface{}{
+			"id": &sql.Thing{"person", "test"},
+			"meta": map[string]interface{}{
+				"id": "test",
+				"tb": "person",
+			},
+			"name": "Tobias",
+		})
 
 	})
 

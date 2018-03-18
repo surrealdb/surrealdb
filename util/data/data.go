@@ -491,10 +491,15 @@ func (d *Doc) Get(path ...string) *Doc {
 		// to the next part of the path
 
 		if m, ok := object.(map[string]interface{}); ok {
-			if d.call != nil && len(path[k+1:]) > 0 {
-				object = d.call(p, m[p])
-			} else {
-				object = m[p]
+			switch p {
+			default:
+				if d.call != nil && len(path[k+1:]) > 0 {
+					object = d.call(p, m[p])
+				} else {
+					object = m[p]
+				}
+			case "*":
+				object = m
 			}
 			continue
 		}
