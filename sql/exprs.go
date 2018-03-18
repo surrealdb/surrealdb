@@ -552,36 +552,35 @@ func (p *parser) parsePart() (exp Expr, err error) {
 
 }
 
-func (p *parser) parseSubq() (sub *SubExpression, err error) {
+func (p *parser) parseSubq() (exp *SubExpression, err error) {
 
-	var exp Expr
-	var tok Token
+	exp = &SubExpression{}
 
-	tok, _, _ = p.mightBe(SELECT, CREATE, UPDATE, DELETE, RELATE, INSERT, UPSERT)
+	tok, _, _ := p.mightBe(SELECT, CREATE, UPDATE, DELETE, RELATE, INSERT, UPSERT)
 
 	switch tok {
 	case SELECT:
-		exp, err = p.parseSelectStatement()
+		exp.Expr, err = p.parseSelectStatement()
 	case CREATE:
 		p.buf.rw = true
-		exp, err = p.parseCreateStatement()
+		exp.Expr, err = p.parseCreateStatement()
 	case UPDATE:
 		p.buf.rw = true
-		exp, err = p.parseUpdateStatement()
+		exp.Expr, err = p.parseUpdateStatement()
 	case DELETE:
 		p.buf.rw = true
-		exp, err = p.parseDeleteStatement()
+		exp.Expr, err = p.parseDeleteStatement()
 	case RELATE:
 		p.buf.rw = true
-		exp, err = p.parseRelateStatement()
+		exp.Expr, err = p.parseRelateStatement()
 	case INSERT:
 		p.buf.rw = true
-		exp, err = p.parseInsertStatement()
+		exp.Expr, err = p.parseInsertStatement()
 	case UPSERT:
 		p.buf.rw = true
-		exp, err = p.parseUpsertStatement()
+		exp.Expr, err = p.parseUpsertStatement()
 	default:
-		exp, err = p.parseExpr()
+		exp.Expr, err = p.parseExpr()
 	}
 
 	if err != nil {
@@ -590,7 +589,7 @@ func (p *parser) parseSubq() (sub *SubExpression, err error) {
 
 	_, _, err = p.shouldBe(RPAREN)
 
-	return &SubExpression{Expr: exp}, err
+	return
 
 }
 
