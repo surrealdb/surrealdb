@@ -106,41 +106,6 @@ func Execute(fib *fibre.Context, txt interface{}, vars map[string]interface{}) (
 	fib = fib.WithContext(nctx)
 	defer span.Finish()
 
-	// If no preset variables have been defined
-	// then ensure that the variables is
-	// instantiated for future use.
-
-	if vars == nil {
-		vars = make(map[string]interface{})
-	}
-
-	// Ensure that we have a unique id assigned
-	// to this fibre connection, as we need it
-	// to detect unique websocket notifications.
-
-	if fib.Get(ctxKeyId) == nil {
-		fib.Set(ctxKeyId, uuid.New().String())
-	}
-
-	// Ensure that the IP address of the
-	// user signing in is available so that
-	// it can be used within signin queries.
-
-	vars[varKeyIp] = fib.IP().String()
-
-	// Ensure that the website origin of the
-	// user signing in is available so that
-	// it can be used within signin queries.
-
-	vars[varKeyOrigin] = fib.Origin()
-
-	// Ensure that the current authentication data
-	// is made available as a runtime variable to
-	// the query layer.
-
-	vars[varKeyAuth] = fib.Get(varKeyAuth).(*cnf.Auth).Data
-	vars[varKeyScope] = fib.Get(varKeyAuth).(*cnf.Auth).Scope
-
 	// Parse the received SQL batch query strings
 	// into SQL ASTs, using any immutable preset
 	// variables if set.
@@ -182,6 +147,30 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 	if fib.Get(ctxKeyId) == nil {
 		fib.Set(ctxKeyId, uuid.New().String())
 	}
+
+	// Ensure that the IP address of the
+	// user signing in is available so that
+	// it can be used within signin queries.
+
+	vars[varKeyIp] = fib.IP().String()
+
+	// Ensure that the website origin of the
+	// user signing in is available so that
+	// it can be used within signin queries.
+
+	vars[varKeyOrigin] = fib.Origin()
+
+	// Ensure that the current authentication
+	// data is made available as a runtime
+	// variable to the query layer.
+
+	vars[varKeyAuth] = fib.Get(varKeyAuth).(*cnf.Auth).Data
+
+	// Ensure that the current authentication
+	// scope is made available as a runtime
+	// variable to the query layer.
+
+	vars[varKeyScope] = fib.Get(varKeyAuth).(*cnf.Auth).Scope
 
 	// Create a new context so that we can quit
 	// all goroutine workers if the http client

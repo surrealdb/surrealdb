@@ -69,18 +69,6 @@ func signinInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 	d, dok := vars[varKeyDb].(string)
 	s, sok := vars[varKeySc].(string)
 
-	// Ensure that the IP address of the
-	// user signing in is available so that
-	// it can be used within signin queries.
-
-	vars[varKeyIp] = c.IP().String()
-
-	// Ensure that the website origin of the
-	// user signing in is available so that
-	// it can be used within signin queries.
-
-	vars[varKeyOrigin] = c.Origin()
-
 	// If we have a namespace, database, and
 	// scope defined, then we are logging in
 	// to the scope level.
