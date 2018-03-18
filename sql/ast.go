@@ -521,6 +521,11 @@ type SubExpression struct {
 	Expr Expr
 }
 
+// MultExpression represents multiple queries.
+type MultExpression struct {
+	Expr []Expr
+}
+
 // IfelExpression represents an if else clause.
 type IfelExpression struct {
 	Cond Exprs

@@ -263,6 +263,28 @@ func (this *SubExpression) UnmarshalCORK(r *cork.Reader) (err error) {
 }
 
 // --------------------------------------------------
+// MultExpression
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&MultExpression{})
+}
+
+func (this *MultExpression) ExtendCORK() byte {
+	return 0x22
+}
+
+func (this *MultExpression) MarshalCORK(w *cork.Writer) (err error) {
+	w.EncodeAny(this.Expr)
+	return
+}
+
+func (this *MultExpression) UnmarshalCORK(r *cork.Reader) (err error) {
+	r.DecodeAny(&this.Expr)
+	return
+}
+
+// --------------------------------------------------
 // IfelExpression
 // --------------------------------------------------
 
@@ -271,7 +293,7 @@ func init() {
 }
 
 func (this *IfelExpression) ExtendCORK() byte {
-	return 0x22
+	return 0x23
 }
 
 func (this *IfelExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -297,7 +319,7 @@ func init() {
 }
 
 func (this *FuncExpression) ExtendCORK() byte {
-	return 0x23
+	return 0x24
 }
 
 func (this *FuncExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -323,7 +345,7 @@ func init() {
 }
 
 func (this *ItemExpression) ExtendCORK() byte {
-	return 0x24
+	return 0x25
 }
 
 func (this *ItemExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -349,7 +371,7 @@ func init() {
 }
 
 func (this *BinaryExpression) ExtendCORK() byte {
-	return 0x25
+	return 0x26
 }
 
 func (this *BinaryExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -375,7 +397,7 @@ func init() {
 }
 
 func (this *PathExpression) ExtendCORK() byte {
-	return 0x26
+	return 0x27
 }
 
 func (this *PathExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -397,7 +419,7 @@ func init() {
 }
 
 func (this *PartExpression) ExtendCORK() byte {
-	return 0x27
+	return 0x28
 }
 
 func (this *PartExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -419,7 +441,7 @@ func init() {
 }
 
 func (this *JoinExpression) ExtendCORK() byte {
-	return 0x28
+	return 0x29
 }
 
 func (this *JoinExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -441,7 +463,7 @@ func init() {
 }
 
 func (this *SubpExpression) ExtendCORK() byte {
-	return 0x29
+	return 0x30
 }
 
 func (this *SubpExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -467,7 +489,7 @@ func init() {
 }
 
 func (this *PermExpression) ExtendCORK() byte {
-	return 0x30
+	return 0x31
 }
 
 func (this *PermExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -495,7 +517,7 @@ func init() {
 }
 
 func (this *DataExpression) ExtendCORK() byte {
-	return 0x31
+	return 0x32
 }
 
 func (this *DataExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -517,7 +539,7 @@ func init() {
 }
 
 func (this *DiffExpression) ExtendCORK() byte {
-	return 0x32
+	return 0x33
 }
 
 func (this *DiffExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -539,7 +561,7 @@ func init() {
 }
 
 func (this *MergeExpression) ExtendCORK() byte {
-	return 0x33
+	return 0x34
 }
 
 func (this *MergeExpression) MarshalCORK(w *cork.Writer) (err error) {
@@ -561,7 +583,7 @@ func init() {
 }
 
 func (this *ContentExpression) ExtendCORK() byte {
-	return 0x34
+	return 0x35
 }
 
 func (this *ContentExpression) MarshalCORK(w *cork.Writer) (err error) {

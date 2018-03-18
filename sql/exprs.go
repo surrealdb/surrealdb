@@ -593,6 +593,58 @@ func (p *parser) parseSubq() (exp *SubExpression, err error) {
 
 }
 
+func (p *parser) parseMult() (exp *MultExpression, err error) {
+
+	exp = &MultExpression{}
+
+	if _, _, err = p.shouldBe(LPAREN); err != nil {
+		return nil, err
+	}
+
+	for {
+
+		var stm Expr
+
+		tok, _, exi := p.mightBe(CREATE, UPDATE, DELETE, RELATE, INSERT, UPSERT)
+		if !exi {
+			break
+		}
+
+		switch tok {
+		case CREATE:
+			p.buf.rw = true
+			stm, err = p.parseCreateStatement()
+		case UPDATE:
+			p.buf.rw = true
+			stm, err = p.parseUpdateStatement()
+		case DELETE:
+			p.buf.rw = true
+			stm, err = p.parseDeleteStatement()
+		case RELATE:
+			p.buf.rw = true
+			stm, err = p.parseRelateStatement()
+		case INSERT:
+			p.buf.rw = true
+			stm, err = p.parseInsertStatement()
+		case UPSERT:
+			p.buf.rw = true
+			stm, err = p.parseUpsertStatement()
+		}
+
+		exp.Expr = append(exp.Expr, stm)
+
+		_, _, _ = p.mightBe(SEMICOLON)
+
+	}
+
+	if _, _, err = p.shouldBe(RPAREN); err != nil {
+		return nil, err
+	}
+
+	return
+
+}
+
 func (p *parser) parseIfel() (exp *IfelExpression, err error) {
 
 	exp = &IfelExpression{}
