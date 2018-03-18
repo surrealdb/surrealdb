@@ -28,6 +28,8 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return difference(ctx, args...)
 	case "distinct":
 		return distinct(ctx, args...)
+	case "either":
+		return either(ctx, args...)
 	case "get":
 		return get(ctx, args...)
 	case "if":

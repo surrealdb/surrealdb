@@ -103,6 +103,7 @@ var funcs = map[string]map[int]interface{}{
 	"binary":     {1: nil},
 	"difference": {-1: nil},
 	"distinct":   {1: nil},
+	"either":     {-1: nil},
 	"get":        {2: nil},
 	"if":         {3: nil},
 	"intersect":  {-1: nil},
