@@ -71,6 +71,14 @@ func TestDefine(t *testing.T) {
 			SIGNIN AS (
 				SELECT * FROM user WHERE email=$user AND bcrypt.compare(pass, $pass)
 			)
+			ON SIGNUP (
+				UPDATE $id SET times.created=time.now();
+				CREATE activity SET kind="signup", user=$id;
+			)
+			ON SIGNIN (
+				UPDATE $id SET times.login=time.now();
+				CREATE activity SET kind="signin", user=$id;
+			)
 		;
 		`
 

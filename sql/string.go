@@ -334,12 +334,14 @@ func (this RemoveTokenStatement) String() string {
 }
 
 func (this DefineScopeStatement) String() string {
-	return print("DEFINE SCOPE %v%v%v%v%v",
+	return print("DEFINE SCOPE %v%v%v%v%v%v%v",
 		this.Name,
 		maybe(this.Time > 0, print(" SESSION %v", this.Time)),
 		maybe(this.Signup != nil, print(" SIGNUP AS %v", this.Signup)),
 		maybe(this.Signin != nil, print(" SIGNIN AS %v", this.Signin)),
 		maybe(this.Connect != nil, print(" CONNECT AS %v", this.Connect)),
+		maybe(this.OnSignup != nil, print(" ON SIGNUP %v", this.OnSignup)),
+		maybe(this.OnSignin != nil, print(" ON SIGNIN %v", this.OnSignin)),
 	)
 }
 

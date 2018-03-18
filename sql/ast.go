@@ -335,15 +335,17 @@ type RemoveTokenStatement struct {
 
 // DefineScopeStatement represents an SQL DEFINE SCOPE statement.
 type DefineScopeStatement struct {
-	KV      string        `cork:"-" codec:"-"`
-	NS      string        `cork:"-" codec:"-"`
-	DB      string        `cork:"-" codec:"-"`
-	Name    *Ident        `cork:"name" codec:"name"`
-	Time    time.Duration `cork:"time" codec:"time"`
-	Code    []byte        `cork:"code" codec:"code"`
-	Signup  Expr          `cork:"signup" codec:"signup"`
-	Signin  Expr          `cork:"signin" codec:"signin"`
-	Connect Expr          `cork:"connect" codec:"connect"`
+	KV       string        `cork:"-" codec:"-"`
+	NS       string        `cork:"-" codec:"-"`
+	DB       string        `cork:"-" codec:"-"`
+	Name     *Ident        `cork:"name" codec:"name"`
+	Time     time.Duration `cork:"time" codec:"time"`
+	Code     []byte        `cork:"code" codec:"code"`
+	Signup   Expr          `cork:"signup" codec:"signup"`
+	Signin   Expr          `cork:"signin" codec:"signin"`
+	Connect  Expr          `cork:"connect" codec:"connect"`
+	OnSignup Expr          `cork:"onsignup" codec:"onsignup"`
+	OnSignin Expr          `cork:"onsignin" codec:"onsignin"`
 }
 
 // RemoveScopeStatement represents an SQL REMOVE SCOPE statement.

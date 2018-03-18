@@ -1569,6 +1569,8 @@ func (this *DefineScopeStatement) MarshalCORK(w *cork.Writer) (err error) {
 	w.EncodeAny(this.Signup)
 	w.EncodeAny(this.Signin)
 	w.EncodeAny(this.Connect)
+	w.EncodeAny(this.OnSignup)
+	w.EncodeAny(this.OnSignin)
 	return
 }
 
@@ -1579,6 +1581,8 @@ func (this *DefineScopeStatement) UnmarshalCORK(r *cork.Reader) (err error) {
 	r.DecodeAny(&this.Signup)
 	r.DecodeAny(&this.Signin)
 	r.DecodeAny(&this.Connect)
+	r.DecodeAny(&this.OnSignup)
+	r.DecodeAny(&this.OnSignin)
 	return
 }
 

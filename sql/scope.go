@@ -28,7 +28,7 @@ func (p *parser) parseDefineScopeStatement() (stmt *DefineScopeStatement, err er
 
 	for {
 
-		tok, _, exi := p.mightBe(SESSION, SIGNUP, SIGNIN, CONNECT)
+		tok, _, exi := p.mightBe(SESSION, SIGNUP, SIGNIN, CONNECT, ON)
 		if !exi {
 			break
 		}
@@ -58,6 +58,26 @@ func (p *parser) parseDefineScopeStatement() (stmt *DefineScopeStatement, err er
 			if stmt.Connect, err = p.parseExpr(); err != nil {
 				return nil, err
 			}
+		}
+
+		if is(tok, ON) {
+
+			tok, _, err = p.shouldBe(SIGNIN, SIGNUP)
+			if err != nil {
+				return nil, err
+			}
+
+			switch tok {
+			case SIGNUP:
+				if stmt.OnSignup, err = p.parseMult(); err != nil {
+					return nil, err
+				}
+			case SIGNIN:
+				if stmt.OnSignin, err = p.parseMult(); err != nil {
+					return nil, err
+				}
+			}
+
 		}
 
 	}

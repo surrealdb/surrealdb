@@ -91,6 +91,7 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 		var doc *sql.Thing
 		var res []*db.Response
 		var exp *sql.SubExpression
+		var evt *sql.MultExpression
 		var scp *sql.DefineScopeStatement
 
 		// Start a new read transaction.
@@ -102,6 +103,10 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 		// Ensure the transaction closes.
 
 		defer txn.Cancel()
+
+		// Give full permissions to scope.
+
+		c.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
 
 		// Specify fields to show in logs.
 
@@ -122,8 +127,6 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 		}
 
 		// Process the scope signup statement.
-
-		c.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
 
 		query := &sql.Query{Statements: []sql.Statement{exp.Expr}}
 
@@ -183,6 +186,31 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 		if str, err = signr.SignedString(scp.Code); err != nil {
 			m := "Problem with signing method: " + err.Error()
 			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
+		}
+
+		// Check that the scope allows signup.
+
+		if evt, ok = scp.OnSignup.(*sql.MultExpression); ok {
+
+			stmts := make([]sql.Statement, len(evt.Expr))
+
+			for k := range evt.Expr {
+				stmts[k] = evt.Expr[k]
+			}
+
+			query := &sql.Query{Statements: stmts}
+
+			qvars := map[string]interface{}{
+				"id": doc,
+			}
+
+			// If the query fails then return a 501 error.
+
+			if res, err = db.Process(c, query, qvars); err != nil {
+				m := "Authentication scope signup was unsuccessful: `ON SIGNUP` failed:" + err.Error()
+				return str, fibre.NewHTTPError(501).WithFields(f).WithMessage(m)
+			}
+
 		}
 
 		return str, err
