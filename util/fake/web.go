@@ -25,7 +25,7 @@ func Avatar() string {
 }
 
 func (f *Faker) Avatar() string {
-	return fmt.Sprintf("%s%d",
+	return fmt.Sprintf("%s%s",
 		"https://www.gravatar.com/avatar/",
 		f.StringLength(32),
 	)
