@@ -13,6 +13,7 @@
 # limitations under the License.
 
 GO ?= CGO_ENABLED=0 go
+CGO ?= CGO_ENABLED=1 go
 LDF :=
 
 .PHONY: default
@@ -37,6 +38,10 @@ setup:
 .PHONY: tests
 tests:
 	$(GO) test ./...
+
+.PHONY: racer
+racer:
+	$(CGO) test -race ./...
 
 .PHONY: build
 build: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
