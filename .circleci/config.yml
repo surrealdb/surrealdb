@@ -21,9 +21,6 @@ jobs:
           name: Tests
           command: make tests
       - run:
-          name: Racer
-          command: make racer
-      - run:
           name: Build
           command: make build
       - setup_remote_docker
