@@ -1,11 +1,7 @@
-FROM alpine:latest as builder
+FROM alpine:latest
 
 RUN apk add --update --no-cache ca-certificates
 
-FROM scratch
-
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-
 ADD surreal /usr/bin/
 
-ENTRYPOINT ["/usr/bin/surreal"]
+ENTRYPOINT ["surreal"]
