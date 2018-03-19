@@ -14,7 +14,7 @@
 
 GO ?= CGO_ENABLED=0 go
 CGO ?= CGO_ENABLED=1 go
-LDF :=
+LDF := -s -w
 
 .PHONY: default
 default:
@@ -46,12 +46,12 @@ racer:
 .PHONY: build
 build: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 build:
-	$(GO) build -v -ldflags '$(LDF)'
+	$(GO) build -v -installsuffix cgo -ldflags '$(LDF)'
 
 .PHONY: install
 install: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 install:
-	$(GO) install -v -ldflags '$(LDF)'
+	$(GO) install -v -installsuffix cgo -ldflags '$(LDF)'
 
 .PHONY: cover
 cover:
