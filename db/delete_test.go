@@ -134,13 +134,13 @@ func TestDelete(t *testing.T) {
 
 	})
 
-	Convey("Deleting with a timeout of 1ms returns an error", t, func() {
+	Convey("Deleting with a timeout of 1ns returns an error", t, func() {
 
 		setupDB()
 
 		txt := `
 		USE NS test DB test;
-		DELETE |person:1..1000| TIMEOUT 1ms;
+		DELETE |person:1..1000| TIMEOUT 1ns;
 		SELECT * FROM person;
 		`
 
@@ -150,7 +150,7 @@ func TestDelete(t *testing.T) {
 		So(res[1].Result, ShouldHaveLength, 0)
 		So(res[2].Result, ShouldHaveLength, 0)
 		So(res[1].Status, ShouldEqual, "ERR")
-		So(res[1].Detail, ShouldEqual, "Query timeout of 1ms exceeded")
+		So(res[1].Detail, ShouldEqual, "Query timeout of 1ns exceeded")
 
 	})
 
