@@ -518,4 +518,74 @@ func TestDefine(t *testing.T) {
 
 	})
 
+	Convey("Define a unique index on a table, and ensure it prevents duplicate record values", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE INDEX test ON person COLUMNS account, email UNIQUE;
+		UPDATE person:one SET account="demo", email="info@demo.com";
+		UPDATE person:two SET account="demo", email="info@demo.com";
+		UPDATE person:tre SET account="demo", email="info@demo.com";
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 6)
+		So(res[1].Status, ShouldEqual, "OK")
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[2].Status, ShouldEqual, "OK")
+		So(res[3].Result, ShouldHaveLength, 0)
+		So(res[3].Status, ShouldEqual, "ERR_IX")
+		So(res[4].Result, ShouldHaveLength, 0)
+		So(res[4].Status, ShouldEqual, "ERR_IX")
+		So(res[5].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[5].Result[0]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "one"})
+
+	})
+
+	Convey("Redefine a unique index on a table, and ensure it prevents duplicate record values", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE INDEX test ON person COLUMNS account, email UNIQUE;
+		UPDATE person:one SET account="demo", email="info@demo.com";
+		UPDATE person:two SET account="demo", email="info@demo.com";
+		UPDATE person:tre SET account="demo", email="info@demo.com";
+		SELECT * FROM person;
+		DEFINE INDEX test ON person COLUMNS account, email UNIQUE;
+		UPDATE person:one SET account="demo", email="info@demo.com";
+		UPDATE person:two SET account="demo", email="info@demo.com";
+		UPDATE person:tre SET account="demo", email="info@demo.com";
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 11)
+		So(res[1].Status, ShouldEqual, "OK")
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[2].Status, ShouldEqual, "OK")
+		So(res[3].Result, ShouldHaveLength, 0)
+		So(res[3].Status, ShouldEqual, "ERR_IX")
+		So(res[4].Result, ShouldHaveLength, 0)
+		So(res[4].Status, ShouldEqual, "ERR_IX")
+		So(res[5].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[5].Result[0]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "one"})
+		So(res[6].Status, ShouldEqual, "OK")
+		So(res[7].Result, ShouldHaveLength, 1)
+		So(res[7].Status, ShouldEqual, "OK")
+		So(res[8].Result, ShouldHaveLength, 0)
+		So(res[8].Status, ShouldEqual, "ERR_IX")
+		So(res[9].Result, ShouldHaveLength, 0)
+		So(res[9].Status, ShouldEqual, "ERR_IX")
+		So(res[10].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[10].Result[0]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "one"})
+
+	})
+
 }

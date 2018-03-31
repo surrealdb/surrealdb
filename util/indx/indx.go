@@ -21,28 +21,16 @@ import (
 	"github.com/abcum/surreal/util/data"
 )
 
-func Diff(old, now [][]interface{}) {
-
-	var d bool
+func Diff(old, now [][]interface{}) (_, _ [][]interface{}) {
 
 	for i := len(old) - 1; i >= 0; i-- {
-		o := old[i]
-		for j := len(now) - 1; j >= 0; j-- {
-			n := now[j]
-			if reflect.DeepEqual(o, n) {
-				d = true
-				copy(now[j:], now[j+1:])
-				now[len(now)-1] = nil
-				now = now[:len(now)-1]
-			}
-		}
-		if d {
-			d = false
-			copy(old[i:], old[i+1:])
-			old[len(old)-1] = nil
-			old = old[:len(old)-1]
+		if reflect.DeepEqual(old[i], now[i]) {
+			old = append(old[:i], old[i+1:]...)
+			now = append(now[:i], now[i+1:]...)
 		}
 	}
+
+	return old, now
 
 }
 

@@ -174,7 +174,8 @@ func (e *executor) executeDefineIndex(ctx context.Context, ast *sql.DefineIndexS
 			return nil, err
 		}
 
-		if _, err = e.executeUpdate(ctx, &sql.UpdateStatement{What: []sql.Expr{TB}}); err != nil {
+		ustm := &sql.UpdateStatement{KV: ast.KV, NS: ast.NS, DB: ast.DB, What: []sql.Expr{TB}}
+		if _, err = e.executeUpdate(ctx, ustm); err != nil {
 			return nil, err
 		}
 

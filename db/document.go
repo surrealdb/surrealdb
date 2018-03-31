@@ -387,33 +387,47 @@ func (d *document) storeIndex() (err error) {
 
 	for _, ix := range ixs {
 
-		old := indx.Build(ix.Cols, d.initial)
-		now := indx.Build(ix.Cols, d.current)
+		del := indx.Build(ix.Cols, d.initial)
+		add := indx.Build(ix.Cols, d.current)
 
-		indx.Diff(old, now)
+		// TODO use diffing to speed up indexes
+		// We need to use diffing so that only
+		// changed values are written to the
+		// storage layer. However if an index
+		// is redefined, then the diff does not
+		// return any changes, and the index is
+		// then corrupt. Maybe we could check
+		// when the index was created, and check
+		// if the d.initial change time is after
+		// the index creation time, then perform
+		// a diff on the old/new index values.
+
+		// if d.initial.Get("meta.time") > ix.Time {
+		// 	del, add = indx.Diff(old, now)
+		// }
 
 		if ix.Uniq == true {
-			for _, o := range old {
-				oidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: o}
-				d.i.e.dbo.DelC(d.now, oidx.Encode(), d.id.Bytes())
+			for _, v := range del {
+				didx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
+				d.i.e.dbo.DelC(d.now, didx.Encode(), d.id.Bytes())
 			}
-			for _, n := range now {
-				nidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: n}
-				if _, err = d.i.e.dbo.PutC(0, nidx.Encode(), d.id.Bytes(), nil); err != nil {
-					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: n}
+			for _, v := range add {
+				aidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
+				if _, err = d.i.e.dbo.PutC(0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
+					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: v}
 				}
 			}
 		}
 
 		if ix.Uniq == false {
-			for _, o := range old {
-				oidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: o, ID: d.key.ID}
-				d.i.e.dbo.DelC(d.now, oidx.Encode(), d.id.Bytes())
+			for _, v := range del {
+				didx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
+				d.i.e.dbo.DelC(d.now, didx.Encode(), d.id.Bytes())
 			}
-			for _, n := range now {
-				nidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: n, ID: d.key.ID}
-				if _, err = d.i.e.dbo.PutC(0, nidx.Encode(), d.id.Bytes(), nil); err != nil {
-					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: n}
+			for _, v := range add {
+				aidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
+				if _, err = d.i.e.dbo.PutC(0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
+					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: v}
 				}
 			}
 		}
@@ -444,18 +458,18 @@ func (d *document) purgeIndex() (err error) {
 
 	for _, ix := range ixs {
 
-		old := indx.Build(ix.Cols, d.initial)
+		del := indx.Build(ix.Cols, d.initial)
 
 		if ix.Uniq == true {
-			for _, o := range old {
-				key := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: o}
+			for _, v := range del {
+				key := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
 				d.i.e.dbo.DelC(0, key.Encode(), d.id.Bytes())
 			}
 		}
 
 		if ix.Uniq == false {
-			for _, o := range old {
-				key := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: o, ID: d.key.ID}
+			for _, v := range del {
+				key := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
 				d.i.e.dbo.DelC(0, key.Encode(), d.id.Bytes())
 			}
 		}
