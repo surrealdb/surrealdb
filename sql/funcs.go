@@ -208,7 +208,7 @@ var funcs = map[string]map[int]interface{}{
 	"string.lowercase":  {1: nil},
 	"string.repeat":     {2: nil},
 	"string.replace":    {3: nil},
-	"string.reverse":    {3: nil},
+	"string.reverse":    {1: nil},
 	"string.search":     {2: nil},
 	"string.slice":      {3: nil},
 	"string.split":      {2: nil},
