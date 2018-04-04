@@ -18,7 +18,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/asaskevich/govalidator"
+	"github.com/abcum/surreal/util/chck"
 )
 
 func emailUser(ctx context.Context, args ...interface{}) (string, error) {
@@ -39,5 +39,5 @@ func emailDomain(ctx context.Context, args ...interface{}) (string, error) {
 
 func emailValid(ctx context.Context, args ...interface{}) (bool, error) {
 	v, _ := ensureString(args[0])
-	return govalidator.IsEmail(v), nil
+	return chck.IsEmail(v), nil
 }

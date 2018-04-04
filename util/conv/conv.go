@@ -20,8 +20,7 @@ import (
 	"time"
 
 	"github.com/abcum/surreal/sql"
-
-	"github.com/asaskevich/govalidator"
+	"github.com/abcum/surreal/util/chck"
 )
 
 func toNumber(str string) (float64, error) {
@@ -122,7 +121,7 @@ func ConvertTo(t, k string, obj interface{}) (val interface{}, err error) {
 
 func ConvertToUuid(obj interface{}) (val string, err error) {
 	val = fmt.Sprintf("%v", obj)
-	if !govalidator.IsUUID(val) {
+	if !chck.IsUUID(val) {
 		err = fmt.Errorf("Expected a UUID, but found '%v'", obj)
 	}
 	return
@@ -130,15 +129,15 @@ func ConvertToUuid(obj interface{}) (val string, err error) {
 
 func ConvertToEmail(obj interface{}) (val string, err error) {
 	val = fmt.Sprintf("%v", obj)
-	if !govalidator.IsEmail(val) {
+	if !chck.IsEmail(val) {
 		err = fmt.Errorf("Expected an email address, but found '%v'", obj)
 	}
-	return govalidator.NormalizeEmail(val)
+	return
 }
 
 func ConvertToPhone(obj interface{}) (val string, err error) {
 	val = fmt.Sprintf("%v", obj)
-	if !govalidator.Matches(val, `^[\s\d\+\-\(\)]+$`) {
+	if !chck.IsPhone(val) {
 		err = fmt.Errorf("Expected a phone number, but found '%v'", obj)
 	}
 	return
@@ -164,7 +163,7 @@ func ConvertToObject(obj interface{}) (val map[string]interface{}, err error) {
 
 func ConvertToDomain(obj interface{}) (val string, err error) {
 	val = fmt.Sprintf("%v", obj)
-	if !govalidator.IsDNSName(val) {
+	if !chck.IsDomain(val) {
 		err = fmt.Errorf("Expected a domain name, but found '%v'", obj)
 	}
 	return
@@ -172,7 +171,7 @@ func ConvertToDomain(obj interface{}) (val string, err error) {
 
 func ConvertToBase64(obj interface{}) (val string, err error) {
 	val = fmt.Sprintf("%v", obj)
-	if !govalidator.IsBase64(val) {
+	if !chck.IsBase64(val) {
 		err = fmt.Errorf("Expected base64 data, but found '%v'", obj)
 	}
 	return
@@ -242,18 +241,18 @@ func ConvertToDatetime(obj interface{}) (val time.Time, err error) {
 
 func ConvertToLatitude(obj interface{}) (val float64, err error) {
 	str := fmt.Sprintf("%v", obj)
-	if !govalidator.IsLatitude(str) {
+	if !chck.IsLatitude(str) {
 		err = fmt.Errorf("Expected a latitude value, but found '%v'", obj)
 	}
-	return govalidator.ToFloat(str)
+	return toNumber(str)
 }
 
 func ConvertToLongitude(obj interface{}) (val float64, err error) {
 	str := fmt.Sprintf("%v", obj)
-	if !govalidator.IsLongitude(str) {
+	if !chck.IsLongitude(str) {
 		err = fmt.Errorf("Expected a longitude value, but found '%v'", obj)
 	}
-	return govalidator.ToFloat(str)
+	return toNumber(str)
 }
 
 func ConvertToRecord(obj interface{}, tb string) (val *sql.Thing, err error) {
