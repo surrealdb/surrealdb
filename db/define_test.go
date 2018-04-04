@@ -378,22 +378,24 @@ func TestDefine(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
-		DEFINE EVENT test ON person WHEN test > 1000 THEN (CREATE temp);
+		DEFINE EVENT test ON person WHEN test > 1000 THEN (CREATE temp; CREATE test);
 		UPDATE person:test SET test = 1000;
 		UPDATE person:test SET test = 4000;
 		UPDATE person:test SET test = 2000;
 		UPDATE person:test SET test = 6000;
 		SELECT * FROM temp;
+		SELECT * FROM test;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 7)
+		So(res, ShouldHaveLength, 8)
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(res[3].Result, ShouldHaveLength, 1)
 		So(res[4].Result, ShouldHaveLength, 1)
 		So(res[5].Result, ShouldHaveLength, 1)
 		So(res[6].Result, ShouldHaveLength, 3)
+		So(res[7].Result, ShouldHaveLength, 3)
 
 	})
 
@@ -403,22 +405,24 @@ func TestDefine(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
-		DEFINE EVENT test ON person WHEN $before.test < $after.test THEN (CREATE temp);
+		DEFINE EVENT test ON person WHEN $before.test < $after.test THEN (CREATE temp; CREATE test);
 		UPDATE person:test SET test = 1000;
 		UPDATE person:test SET test = 4000;
 		UPDATE person:test SET test = 2000;
 		UPDATE person:test SET test = 6000;
 		SELECT * FROM temp;
+		SELECT * FROM test;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 7)
+		So(res, ShouldHaveLength, 8)
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(res[3].Result, ShouldHaveLength, 1)
 		So(res[4].Result, ShouldHaveLength, 1)
 		So(res[5].Result, ShouldHaveLength, 1)
 		So(res[6].Result, ShouldHaveLength, 2)
+		So(res[7].Result, ShouldHaveLength, 2)
 
 	})
 
@@ -428,22 +432,24 @@ func TestDefine(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
-		DEFINE EVENT test ON person WHEN $before.test < 5000 AND $after.test > 5000 THEN (CREATE temp);
+		DEFINE EVENT test ON person WHEN $before.test < 5000 AND $after.test > 5000 THEN (CREATE temp; CREATE test);
 		UPDATE person:test SET test = 1000;
 		UPDATE person:test SET test = 4000;
 		UPDATE person:test SET test = 2000;
 		UPDATE person:test SET test = 6000;
 		SELECT * FROM temp;
+		SELECT * FROM test;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 7)
+		So(res, ShouldHaveLength, 8)
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(res[3].Result, ShouldHaveLength, 1)
 		So(res[4].Result, ShouldHaveLength, 1)
 		So(res[5].Result, ShouldHaveLength, 1)
 		So(res[6].Result, ShouldHaveLength, 1)
+		So(res[7].Result, ShouldHaveLength, 1)
 
 	})
 
@@ -473,7 +479,7 @@ func TestDefine(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
-		DEFINE EVENT test ON person WHEN true THEN false;
+		DEFINE EVENT test ON person WHEN true THEN (CREATE test);
 		SELECT * FROM person;
 		`
 

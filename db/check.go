@@ -192,9 +192,9 @@ func (d *document) allow(ctx context.Context, when method) (ok bool, err error) 
 // table, and executes them in name order.
 func (d *document) event(ctx context.Context, when method) (err error) {
 
-	// Get the index values specified
+	// Get the event values specified
 	// for this table, loop through
-	// them, and compute the changes.
+	// them, and compute the events.
 
 	evs, err := d.getEV()
 	if err != nil {

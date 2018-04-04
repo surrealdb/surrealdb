@@ -46,7 +46,7 @@ func (p *parser) parseDefineEventStatement() (stmt *DefineEventStatement, err er
 		return nil, err
 	}
 
-	if stmt.Then, err = p.parseExpr(); err != nil {
+	if stmt.Then, err = p.parseMult(); err != nil {
 		return nil, err
 	}
 

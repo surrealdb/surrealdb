@@ -2595,7 +2595,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE EVENT temp ON person WHEN $before.price < $after.price THEN`,
-			err: "Found `` but expected `expression`",
+			err: "Found `` but expected `(`",
 		},
 		{
 			sql: `DEFINE EVENT temp ON person WHEN $before.price < $after.price THEN (UPDATE $this SET increased = true)`,
@@ -2608,18 +2608,61 @@ func Test_Parse_Queries_Define(t *testing.T) {
 					Op:  LT,
 					RHS: &Param{"after.price"},
 				},
-				Then: &SubExpression{
-					Expr: &UpdateStatement{
-						KV: "*", NS: "*", DB: "*",
-						What: Exprs{&Param{"this"}},
-						Data: &DataExpression{[]*ItemExpression{
-							{
-								LHS: &Ident{"increased"},
-								Op:  EQ,
-								RHS: true,
-							},
-						}},
-						Echo: AFTER,
+				Then: &MultExpression{
+					Expr: []Expr{
+						&UpdateStatement{
+							KV: "*", NS: "*", DB: "*",
+							What: Exprs{&Param{"this"}},
+							Data: &DataExpression{[]*ItemExpression{
+								{
+									LHS: &Ident{"increased"},
+									Op:  EQ,
+									RHS: true,
+								},
+							}},
+							Echo: AFTER,
+						},
+					},
+				},
+			}}},
+		},
+		{
+			sql: `DEFINE EVENT temp ON person WHEN $before.price < $after.price THEN (UPDATE $this SET increased = true; UPDATE $this SET finished = true)`,
+			res: &Query{Statements: []Statement{&DefineEventStatement{
+				KV: "*", NS: "*", DB: "*",
+				Name: &Ident{"temp"},
+				What: Tables{&Table{"person"}},
+				When: &BinaryExpression{
+					LHS: &Param{"before.price"},
+					Op:  LT,
+					RHS: &Param{"after.price"},
+				},
+				Then: &MultExpression{
+					Expr: []Expr{
+						&UpdateStatement{
+							KV: "*", NS: "*", DB: "*",
+							What: Exprs{&Param{"this"}},
+							Data: &DataExpression{[]*ItemExpression{
+								{
+									LHS: &Ident{"increased"},
+									Op:  EQ,
+									RHS: true,
+								},
+							}},
+							Echo: AFTER,
+						},
+						&UpdateStatement{
+							KV: "*", NS: "*", DB: "*",
+							What: Exprs{&Param{"this"}},
+							Data: &DataExpression{[]*ItemExpression{
+								{
+									LHS: &Ident{"finished"},
+									Op:  EQ,
+									RHS: true,
+								},
+							}},
+							Echo: AFTER,
+						},
 					},
 				},
 			}}},

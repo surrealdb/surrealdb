@@ -741,10 +741,10 @@ func (this SubExpression) String() string {
 func (this MultExpression) String() string {
 	m := make([]string, len(this.Expr))
 	for k := range this.Expr {
-		m[k] = print("%v;", this.Expr[k])
+		m[k] = print("%v", this.Expr[k])
 	}
 	return print("(%v)",
-		strings.Join(m, " "),
+		strings.Join(m, "; "),
 	)
 }
 

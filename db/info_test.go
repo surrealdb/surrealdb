@@ -114,7 +114,7 @@ func TestInfo(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
-		DEFINE EVENT test ON test WHEN true THEN null;
+		DEFINE EVENT test ON test WHEN true THEN (CREATE test);
 		DEFINE FIELD test ON test;
 		DEFINE INDEX test ON test COLUMNS id;
 		INFO FOR TABLE test;
@@ -132,7 +132,7 @@ func TestInfo(t *testing.T) {
 		So(res[3].Status, ShouldEqual, "OK")
 		So(res[4].Status, ShouldEqual, "OK")
 		So(data.Consume(res[4].Result[0]).Get("event").Data(), ShouldHaveLength, 1)
-		So(data.Consume(res[4].Result[0]).Get("event.test").Data(), ShouldEqual, "DEFINE EVENT test ON test WHEN true THEN NULL")
+		So(data.Consume(res[4].Result[0]).Get("event.test").Data(), ShouldEqual, "DEFINE EVENT test ON test WHEN true THEN (CREATE test)")
 		So(data.Consume(res[4].Result[0]).Get("field").Data(), ShouldHaveLength, 1)
 		So(data.Consume(res[4].Result[0]).Get("field.test").Data(), ShouldEqual, "DEFINE FIELD test ON test")
 		So(data.Consume(res[4].Result[0]).Get("index").Data(), ShouldHaveLength, 1)

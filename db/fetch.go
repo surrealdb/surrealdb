@@ -180,6 +180,35 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 			return e.fetchUpsert(ctx, exp, doc)
 		}
 
+	case *sql.MultExpression:
+
+		for _, exp := range val.Expr {
+
+			switch exp := exp.(type) {
+			case *sql.SelectStatement:
+				out, err = e.fetchSelect(ctx, exp, doc)
+			case *sql.CreateStatement:
+				out, err = e.fetchCreate(ctx, exp, doc)
+			case *sql.UpdateStatement:
+				out, err = e.fetchUpdate(ctx, exp, doc)
+			case *sql.DeleteStatement:
+				out, err = e.fetchDelete(ctx, exp, doc)
+			case *sql.RelateStatement:
+				out, err = e.fetchRelate(ctx, exp, doc)
+			case *sql.InsertStatement:
+				out, err = e.fetchInsert(ctx, exp, doc)
+			case *sql.UpsertStatement:
+				out, err = e.fetchUpsert(ctx, exp, doc)
+			}
+
+			if err != nil {
+				return out, err
+			}
+
+		}
+
+		return nil, nil
+
 	case *sql.PathExpression:
 
 		return e.fetchPaths(ctx, doc, val.Expr...)

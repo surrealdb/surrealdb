@@ -605,10 +605,7 @@ func (p *parser) parseMult() (exp *MultExpression, err error) {
 
 		var stm Expr
 
-		tok, _, exi := p.mightBe(CREATE, UPDATE, DELETE, RELATE, INSERT, UPSERT)
-		if !exi {
-			break
-		}
+		tok, _, _ := p.mightBe(CREATE, UPDATE, DELETE, RELATE, INSERT, UPSERT)
 
 		switch tok {
 		case CREATE:
@@ -633,7 +630,9 @@ func (p *parser) parseMult() (exp *MultExpression, err error) {
 
 		exp.Expr = append(exp.Expr, stm)
 
-		_, _, _ = p.mightBe(SEMICOLON)
+		if _, _, exi := p.mightBe(SEMICOLON); !exi {
+			break
+		}
 
 	}
 
