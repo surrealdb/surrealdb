@@ -73,13 +73,6 @@ const sqlDel = `
 	LIMIT 1
 `
 
-const sqlDelC = `
-	DELETE FROM kv
-	WHERE t<=? AND k=? AND v=?
-	ORDER BY t DESC
-	LIMIT 1
-`
-
 const sqlDelP = `
 	DELETE q1 FROM kv
 	JOIN (
@@ -119,12 +112,4 @@ const sqlPutN = `
 	(t, k, v)
 	VALUES
 	(?, ?, ?)
-`
-
-const sqlPutC = `
-	UPDATE kv
-	SET v=?
-	WHERE t<=? AND k=? AND v=?
-	ORDER BY t DESC
-	LIMIT 1
 `

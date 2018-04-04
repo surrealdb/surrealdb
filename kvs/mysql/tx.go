@@ -36,12 +36,10 @@ type TX struct {
 		getP *sql.Stmt
 		getR *sql.Stmt
 		del  *sql.Stmt
-		delC *sql.Stmt
 		delP *sql.Stmt
 		delR *sql.Stmt
 		put  *sql.Stmt
 		putN *sql.Stmt
-		putC *sql.Stmt
 	}
 }
 
@@ -286,21 +284,41 @@ func (tx *TX) Del(ver int64, key []byte) (kvs.KV, error) {
 func (tx *TX) DelC(ver int64, key []byte, exp []byte) (kvs.KV, error) {
 
 	var err error
+	var now kvs.KV
 	var res *sql.Rows
-
-	exp, err = enc(exp)
-	if err != nil {
-		return nil, err
-	}
 
 	tx.lock.Lock()
 	defer tx.lock.Unlock()
 
-	if tx.stmt.delC == nil {
-		tx.stmt.delC, _ = tx.pntr.Prepare(sqlDelC)
+	// Get the item at the key
+
+	if tx.stmt.get == nil {
+		tx.stmt.get, _ = tx.pntr.Prepare(sqlGet)
 	}
 
-	res, err = tx.stmt.delC.Query(ver, key, exp)
+	res, err = tx.stmt.get.Query(ver, key)
+	if err != nil {
+		return nil, err
+	}
+
+	now, err = one(res, err)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if the values match
+
+	if !alter(now.Val(), exp) {
+		return nil, ErrTxNotExpectedValue
+	}
+
+	// If they match then delete
+
+	if tx.stmt.del == nil {
+		tx.stmt.del, _ = tx.pntr.Prepare(sqlDel)
+	}
+
+	res, err = tx.stmt.del.Query(ver, key)
 
 	return one(res, err)
 
@@ -376,20 +394,13 @@ func (tx *TX) Put(ver int64, key []byte, val []byte) (kvs.KV, error) {
 func (tx *TX) PutC(ver int64, key []byte, val []byte, exp []byte) (kvs.KV, error) {
 
 	var err error
+	var now kvs.KV
 	var res *sql.Rows
 
 	val, err = enc(val)
 	if err != nil {
 		return nil, err
 	}
-
-	exp, err = enc(exp)
-	if err != nil {
-		return nil, err
-	}
-
-	tx.lock.Lock()
-	defer tx.lock.Unlock()
 
 	switch exp {
 
@@ -405,11 +416,35 @@ func (tx *TX) PutC(ver int64, key []byte, val []byte, exp []byte) (kvs.KV, error
 
 	default:
 
-		if tx.stmt.putC == nil {
-			tx.stmt.putC, _ = tx.pntr.Prepare(sqlPutC)
+		// Get the item at the key
+
+		if tx.stmt.get == nil {
+			tx.stmt.get, _ = tx.pntr.Prepare(sqlGet)
 		}
 
-		res, err = tx.stmt.putC.Query(val, ver, key, exp)
+		res, err = tx.stmt.get.Query(ver, key)
+		if err != nil {
+			return nil, err
+		}
+
+		now, err = one(res, err)
+		if err != nil {
+			return nil, err
+		}
+
+		// Check if the values match
+
+		if !check(now.Val(), exp) {
+			return nil, ErrTxNotExpectedValue
+		}
+
+		// If they match then delete
+
+		if tx.stmt.del == nil {
+			tx.stmt.put, _ = tx.pntr.Prepare(sqlPut)
+		}
+
+		res, err = tx.stmt.put.Query(ver, key, val, val)
 
 		return one(res, err)
 

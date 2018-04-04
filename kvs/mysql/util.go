@@ -15,6 +15,7 @@
 package mysql
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -22,6 +23,28 @@ import (
 )
 
 var chars = []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+
+// Used to see if we can conditionally put a value. We can only put
+// a value if the value is the same, or if both items are nil.
+func check(a, b []byte) bool {
+	if a != nil && b != nil {
+		return bytes.Equal(a, b)
+	} else if a == nil && b == nil {
+		return true
+	}
+	return false
+}
+
+// Used to see if we can conditionally del a value. We can only del
+// a value if the value is the same, and neither item is nil.
+func alter(a, b []byte) bool {
+	if a != nil && b != nil {
+		return bytes.Equal(a, b)
+	} else if a == nil && b == nil {
+		return false
+	}
+	return false
+}
 
 func encrypt(key []byte, src []byte) (dst []byte, err error) {
 
