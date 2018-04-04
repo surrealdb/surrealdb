@@ -2694,20 +2694,11 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE`,
-			err: "Found `` but expected `array, boolean, circle, color, datetime, domain, double, email, latitude, longitude, number, object, password, phone, point, polygon, record, string, url, uuid`",
+			err: "Found `` but expected `array, boolean, circle, datetime, domain, double, email, latitude, longitude, number, object, password, phone, point, polygon, record, string, uuid`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE something`,
-			err: "Found `something` but expected `array, boolean, circle, color, datetime, domain, double, email, latitude, longitude, number, object, password, phone, point, polygon, record, string, url, uuid`",
-		},
-		{
-			sql: `DEFINE FIELD temp ON person TYPE url`,
-			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				KV: "*", NS: "*", DB: "*",
-				Name: &Ident{"temp"},
-				What: Tables{&Table{"person"}},
-				Type: "url",
-			}}},
+			err: "Found `something` but expected `array, boolean, circle, datetime, domain, double, email, latitude, longitude, number, object, password, phone, point, polygon, record, string, uuid`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE email`,

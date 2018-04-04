@@ -34,12 +34,11 @@ const (
 var (
 	allowedTypes = []string{
 		"array", "boolean", "circle",
-		"color", "datetime", "domain",
-		"double", "email", "latitude",
-		"longitude", "number", "object",
-		"password", "phone", "point",
-		"polygon", "record", "string",
-		"url", "uuid",
+		"datetime", "domain", "double",
+		"email", "latitude", "longitude",
+		"number", "object", "password",
+		"phone", "point", "polygon",
+		"record", "string", "uuid",
 	}
 
 	allowedAlgorithms = []string{

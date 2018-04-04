@@ -87,12 +87,8 @@ func ConvertTo(t, k string, obj interface{}) (val interface{}, err error) {
 	switch t {
 	default:
 		return obj, nil
-	case "url":
-		return ConvertToUrl(obj)
 	case "uuid":
 		return ConvertToUuid(obj)
-	case "color":
-		return ConvertToColor(obj)
 	case "email":
 		return ConvertToEmail(obj)
 	case "phone":
@@ -124,14 +120,6 @@ func ConvertTo(t, k string, obj interface{}) (val interface{}, err error) {
 	}
 }
 
-func ConvertToUrl(obj interface{}) (val string, err error) {
-	val = fmt.Sprintf("%v", obj)
-	if !govalidator.IsURL(val) {
-		err = fmt.Errorf("Expected a URL, but found '%v'", obj)
-	}
-	return
-}
-
 func ConvertToUuid(obj interface{}) (val string, err error) {
 	val = fmt.Sprintf("%v", obj)
 	if !govalidator.IsUUID(val) {
@@ -152,14 +140,6 @@ func ConvertToPhone(obj interface{}) (val string, err error) {
 	val = fmt.Sprintf("%v", obj)
 	if !govalidator.Matches(val, `^[\s\d\+\-\(\)]+$`) {
 		err = fmt.Errorf("Expected a phone number, but found '%v'", obj)
-	}
-	return
-}
-
-func ConvertToColor(obj interface{}) (val string, err error) {
-	val = fmt.Sprintf("%v", obj)
-	if !govalidator.IsHexcolor(val) && !govalidator.IsRGBcolor(val) {
-		err = fmt.Errorf("Expected a HEX or RGB color, but found '%v'", obj)
 	}
 	return
 }
