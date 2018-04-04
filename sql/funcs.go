@@ -26,15 +26,6 @@ var rolls = map[string]bool{
 
 	// Math implementation
 
-	"geometricmean": true,
-	"mean":          true,
-	"percentile":    true,
-	"stddev":        true,
-	"sum":           true,
-	"variance":      true,
-
-	// Math implementation
-
 	"math.geometricmean": true,
 	"math.mean":          true,
 	"math.percentile":    true,
@@ -52,27 +43,6 @@ var aggrs = map[string]bool{
 	"count":     true,
 	"count.if":  true,
 	"count.not": true,
-
-	// Math implementation
-
-	"bottom":        true,
-	"geometricmean": true,
-	"harmonicmean":  true,
-	"interquartile": true,
-	"max":           true,
-	"mean":          true,
-	"median":        true,
-	"midhinge":      true,
-	"min":           true,
-	"mode":          true,
-	"percentile":    true,
-	"sample":        true,
-	"spread":        true,
-	"stddev":        true,
-	"sum":           true,
-	"top":           true,
-	"trimean":       true,
-	"variance":      true,
 
 	// Math implementation
 
@@ -148,30 +118,6 @@ var funcs = map[string]map[int]interface{}{
 	"http.async.delete": {1: nil, 2: nil},
 
 	// Math implementation
-	"abs":                {1: nil},
-	"bottom":             {2: nil},
-	"ceil":               {1: nil},
-	"correlation":        {2: nil},
-	"covariance":         {2: nil},
-	"floor":              {1: nil},
-	"geometricmean":      {1: nil},
-	"harmonicmean":       {1: nil},
-	"interquartile":      {1: nil},
-	"max":                {1: nil},
-	"mean":               {1: nil},
-	"median":             {1: nil},
-	"midhinge":           {1: nil},
-	"min":                {1: nil},
-	"mode":               {1: nil},
-	"percentile":         {2: nil},
-	"round":              {2: nil},
-	"sample":             {2: nil},
-	"spread":             {1: nil},
-	"stddev":             {1: nil},
-	"sum":                {1: nil},
-	"top":                {2: nil},
-	"trimean":            {1: nil},
-	"variance":           {1: nil},
 	"math.abs":           {1: nil},
 	"math.bottom":        {2: nil},
 	"math.ceil":          {1: nil},

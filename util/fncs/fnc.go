@@ -106,53 +106,53 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return httpAsyncDelete(ctx, args...)
 
 	// Math implementation
-	case "math.abs", "abs":
+	case "math.abs":
 		return mathAbs(ctx, args...)
-	case "math.bottom", "bottom":
+	case "math.bottom":
 		return mathBottom(ctx, args...)
-	case "math.ceil", "ceil":
+	case "math.ceil":
 		return mathCeil(ctx, args...)
-	case "math.correlation", "correlation":
+	case "math.correlation":
 		return mathCorrelation(ctx, args...)
-	case "math.covariance", "covariance":
+	case "math.covariance":
 		return mathCovariance(ctx, args...)
-	case "math.floor", "floor":
+	case "math.floor":
 		return mathFloor(ctx, args...)
-	case "math.geometricmean", "geometricmean":
+	case "math.geometricmean":
 		return mathGeometricmean(ctx, args...)
-	case "math.harmonicmean", "harmonicmean":
+	case "math.harmonicmean":
 		return mathHarmonicmean(ctx, args...)
-	case "math.interquartile", "interquartile":
+	case "math.interquartile":
 		return mathInterquartile(ctx, args...)
-	case "math.max", "max":
+	case "math.max":
 		return mathMax(ctx, args...)
-	case "math.mean", "mean":
+	case "math.mean":
 		return mathMean(ctx, args...)
-	case "math.median", "median":
+	case "math.median":
 		return mathMedian(ctx, args...)
-	case "math.midhinge", "midhinge":
+	case "math.midhinge":
 		return mathMidhinge(ctx, args...)
-	case "math.min", "min":
+	case "math.min":
 		return mathMin(ctx, args...)
-	case "math.mode", "mode":
+	case "math.mode":
 		return mathMode(ctx, args...)
-	case "math.percentile", "percentile":
+	case "math.percentile":
 		return mathPercentile(ctx, args...)
-	case "math.round", "round":
+	case "math.round":
 		return mathRound(ctx, args...)
-	case "math.sample", "sample":
+	case "math.sample":
 		return mathSample(ctx, args...)
-	case "math.spread", "spread":
+	case "math.spread":
 		return mathSpread(ctx, args...)
-	case "math.stddev", "stddev":
+	case "math.stddev":
 		return mathStddev(ctx, args...)
-	case "math.sum", "sum":
+	case "math.sum":
 		return mathSum(ctx, args...)
-	case "math.top", "top":
+	case "math.top":
 		return mathTop(ctx, args...)
-	case "math.trimean", "trimean":
+	case "math.trimean":
 		return mathTrimean(ctx, args...)
-	case "math.variance", "variance":
+	case "math.variance":
 		return mathVariance(ctx, args...)
 
 	// String implementation

@@ -2521,7 +2521,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `DEFINE TABLE person AS SELECT nationality, midhinge(age) AS mid FROM users GROUP BY nationality`,
+			sql: `DEFINE TABLE person AS SELECT nationality, math.midhinge(age) AS mid FROM users GROUP BY nationality`,
 			err: "Found 'mid' but field is not an aggregate function, and is not present in GROUP expression",
 		},
 		{
