@@ -20,8 +20,6 @@ import (
 	"strings"
 
 	"github.com/abcum/fibre"
-
-	"cloud.google.com/go/trace"
 )
 
 // parser represents a parser.
@@ -41,8 +39,6 @@ type parser struct {
 
 // Parse parses sql from a []byte, string, or io.Reader.
 func Parse(c *fibre.Context, i interface{}) (*Query, error) {
-
-	defer trace.FromContext(c.Context()).NewChild("sql.Parse").Finish()
 
 	switch x := i.(type) {
 	default:

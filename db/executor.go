@@ -15,14 +15,11 @@
 package db
 
 import (
-	"fmt"
 	"time"
 
 	"context"
 
 	"runtime/debug"
-
-	"cloud.google.com/go/trace"
 
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/log"
@@ -109,9 +106,6 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 
 		default:
 
-			trc := trace.FromContext(ctx).NewChild(fmt.Sprint(stm))
-			ctx := trace.NewContext(ctx, trc)
-
 			// When in debugging mode, log every sql
 			// query, along with the query execution
 			// speed, so we can analyse slow queries.
@@ -145,7 +139,6 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 			switch stm.(type) {
 			case *sql.BeginStatement:
 				err = e.begin(ctx, true)
-				trc.Finish()
 				continue
 			case *sql.CancelStatement:
 				err, buf = e.cancel(buf, err, e.send)
@@ -154,7 +147,6 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 				} else {
 					clear(id)
 				}
-				trc.Finish()
 				continue
 			case *sql.CommitStatement:
 				err, buf = e.commit(buf, err, e.send)
@@ -163,7 +155,6 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 				} else {
 					flush(id)
 				}
-				trc.Finish()
 				continue
 			}
 
@@ -204,8 +195,6 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 					buf = append(buf, rsp)
 				}
 			}
-
-			trc.Finish()
 
 		}
 

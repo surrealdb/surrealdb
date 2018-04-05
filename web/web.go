@@ -43,10 +43,6 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Logs()) // Log requests
 	s.Use(mw.Sock()) // Setup sockets
 
-	// Add trace information
-
-	s.Use(tracer())
-
 	// Add cors headers
 
 	s.Use(mw.Cors(&mw.CorsOpts{

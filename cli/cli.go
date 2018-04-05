@@ -45,22 +45,6 @@ func init() {
 	mainCmd.PersistentFlags().StringVar(&opts.Logging.Output, "log-output", "stderr", "Specify log output destination")
 	mainCmd.PersistentFlags().StringVar(&opts.Logging.Format, "log-format", "text", "Specify log output format (text, json)")
 
-	mainCmd.PersistentFlags().StringVar(&opts.Logging.Google.Name, "log-driver-google-name", "surreal", "")
-	mainCmd.PersistentFlags().StringVar(&opts.Logging.Google.Project, "log-driver-google-project", "", "")
-	mainCmd.PersistentFlags().StringVar(&opts.Logging.Google.Credentials, "log-driver-google-credentials", "", "")
-	mainCmd.PersistentFlags().MarkHidden("log-driver-google-name")
-	mainCmd.PersistentFlags().MarkHidden("log-driver-google-project")
-	mainCmd.PersistentFlags().MarkHidden("log-driver-google-credentials")
-
-	mainCmd.PersistentFlags().StringVar(&opts.Logging.Syslog.Tag, "log-driver-syslog-tag", "surreal", "Specify a tag for the syslog driver")
-	mainCmd.PersistentFlags().StringVar(&opts.Logging.Syslog.Host, "log-driver-syslog-host", "localhost:514", "Specify a remote host:port for the syslog driver")
-	mainCmd.PersistentFlags().StringVar(&opts.Logging.Syslog.Protocol, "log-driver-syslog-protocol", "", "Specify the protocol to use for the syslog driver")
-	mainCmd.PersistentFlags().StringVar(&opts.Logging.Syslog.Priority, "log-driver-syslog-priority", "debug", "Specify the syslog priority for the syslog driver")
-	mainCmd.PersistentFlags().MarkHidden("log-driver-syslog-tag")
-	mainCmd.PersistentFlags().MarkHidden("log-driver-syslog-host")
-	mainCmd.PersistentFlags().MarkHidden("log-driver-syslog-protocol")
-	mainCmd.PersistentFlags().MarkHidden("log-driver-syslog-priority")
-
 	cobra.OnInitialize(setup)
 
 }

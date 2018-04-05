@@ -30,8 +30,6 @@ import (
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/uuid"
 
-	"cloud.google.com/go/trace"
-
 	_ "github.com/abcum/surreal/kvs/mysql"
 	_ "github.com/abcum/surreal/kvs/rixxdb"
 )
@@ -101,11 +99,6 @@ func Socket(fib *fibre.Context, id string) (beg, end func()) {
 // the underlying data layer.
 func Execute(fib *fibre.Context, txt interface{}, vars map[string]interface{}) (out []*Response, err error) {
 
-	span := trace.FromContext(fib.Context()).NewChild("db.Execute")
-	nctx := trace.NewContext(fib.Context(), span)
-	fib = fib.WithContext(nctx)
-	defer span.Finish()
-
 	// Parse the received SQL batch query strings
 	// into SQL ASTs, using any immutable preset
 	// variables if set.
@@ -126,11 +119,6 @@ func Execute(fib *fibre.Context, txt interface{}, vars map[string]interface{}) (
 // executes them serially against the underlying
 // data layer.
 func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (out []*Response, err error) {
-
-	span := trace.FromContext(fib.Context()).NewChild("db.Process")
-	nctx := trace.NewContext(fib.Context(), span)
-	fib = fib.WithContext(nctx)
-	defer span.Finish()
 
 	// If no preset variables have been defined
 	// then ensure that the variables is
