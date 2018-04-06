@@ -22,6 +22,8 @@ import (
 	"regexp"
 	"strings"
 
+	"encoding/pem"
+
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/util/rand"
@@ -56,7 +58,7 @@ func setup() {
 	}
 
 	if opts.DB.Path != "memory" {
-		if ok, _ := regexp.MatchString(`^(s3|gcs|logr|file|mysql|rixxdb|dendrodb)://(.+)$`, opts.DB.Path); !ok {
+		if ok, _ := regexp.MatchString(`^(logr|file|mysql|dendrodb)://(.+)$`, opts.DB.Path); !ok {
 			log.Fatalf("Invalid path %s. Specify a valid data store configuration path", opts.DB.Path)
 		}
 	}
@@ -69,53 +71,22 @@ func setup() {
 		log.Fatal("Specify a valid data file size policy. Valid sizes are greater than 0 and are specified in MB.")
 	}
 
-	if strings.HasPrefix(opts.DB.Cert.CA, "-----") {
-		var err error
-		var doc *os.File
-		if doc, err = os.Create("db.ca"); err != nil {
-			log.Fatal("Can not decode PEM encoded CA into db.ca")
-		}
-		doc.Write([]byte(opts.DB.Cert.CA))
-		doc.Close()
-		opts.Cert.Crt = "db.ca"
-	}
-
-	if strings.HasPrefix(opts.DB.Cert.Crt, "-----") {
-		var err error
-		var doc *os.File
-		if doc, err = os.Create("db.key"); err != nil {
-			log.Fatal("Can not decode PEM encoded certificate into db.crt")
-		}
-		doc.Write([]byte(opts.DB.Cert.Crt))
-		doc.Close()
-		opts.Cert.Crt = "db.crt"
-	}
-
-	if strings.HasPrefix(opts.DB.Cert.Key, "-----") {
-		var err error
-		var doc *os.File
-		if doc, err = os.Create("db.crt"); err != nil {
-			log.Fatal("Can not decode PEM encoded private key into db.key")
-		}
-		doc.Write([]byte(opts.DB.Cert.Key))
-		doc.Close()
-		opts.Cert.Crt = "db.key"
-	}
-
 	if opts.DB.Cert.CA != "" || opts.DB.Cert.Crt != "" || opts.DB.Cert.Key != "" {
+
 		opts.DB.Cert.SSL = true
-	}
 
-	if opts.DB.Cert.CA == "" && opts.DB.Cert.SSL {
-		log.Fatal("Specify a valid PEM encoded CA file.")
-	}
+		if dec, _ := pem.Decode([]byte(opts.DB.Cert.CA)); dec == nil || dec.Type != "CERTIFICATE" {
+			log.Fatal("Specify a valid PEM encoded CA file.")
+		}
 
-	if opts.DB.Cert.Crt == "" && opts.DB.Cert.SSL {
-		log.Fatal("Specify a valid PEM encoded certificate file.")
-	}
+		if dec, _ := pem.Decode([]byte(opts.DB.Cert.Crt)); dec == nil || dec.Type != "CERTIFICATE" {
+			log.Fatal("Specify a valid PEM encoded certificate file.")
+		}
 
-	if opts.DB.Cert.Key == "" && opts.DB.Cert.SSL {
-		log.Fatal("Specify a valid PEM encoded private key file.")
+		if dec, _ := pem.Decode([]byte(opts.DB.Cert.Key)); dec == nil || dec.Type != "RSA PRIVATE KEY" {
+			log.Fatal("Specify a valid PEM encoded private key file.")
+		}
+
 	}
 
 	// --------------------------------------------------

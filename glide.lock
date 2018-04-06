@@ -1,10 +1,6 @@
-hash: f40320fa34bbb59afd3c5b8720098d0639557fb70bea37d0b564b8a8d09c13e2
-updated: 2018-04-05T20:42:38.104761+01:00
+hash: cc325edb4f8ae4bfdaac8b068e01dfc5ed0d632d070c9d41181c32799e5449d3
+updated: 2018-04-06T00:06:11.90235+01:00
 imports:
-- name: cloud.google.com/go
-  version: 01301d1df8060594708d76bda9062b0205b77e8b
-  subpackages:
-  - compute/metadata
 - name: github.com/abcum/bump
   version: 526934c541e071b5a330671c76434b9e32d55638
 - name: github.com/abcum/cork
@@ -32,17 +28,6 @@ imports:
   version: d150773194090feb6c897805a7bcea8d49544e2c
 - name: github.com/go-sql-driver/mysql
   version: a0583e0143b1624142adab07e0e97fe106d99561
-- name: github.com/golang/protobuf
-  version: e09c5db296004fbe3f74490e84dcd62c3c5ddb1b
-  subpackages:
-  - proto
-- name: github.com/GoogleCloudPlatform/cloudsql-proxy
-  version: 61590edac4c769d295cc5f48140ebeff88ccc5bf
-  subpackages:
-  - logging
-  - proxy/certs
-  - proxy/proxy
-  - proxy/util
 - name: github.com/gorilla/websocket
   version: ea4d1f681babbce9545c9c5f3d5194a789c89f5b
 - name: github.com/hashicorp/errwrap
@@ -135,13 +120,6 @@ imports:
   - internal/socket
   - ipv4
   - ipv6
-- name: golang.org/x/oauth2
-  version: 921ae394b9430ed4fb549668d7b087601bd60a81
-  subpackages:
-  - google
-  - internal
-  - jws
-  - jwt
 - name: golang.org/x/sys
   version: 1d206c9fa8975fb4cf00df1dc8bf3283dc24ba0e
   subpackages:
@@ -156,25 +134,6 @@ imports:
   - language
   - transform
   - unicode/norm
-- name: google.golang.org/api
-  version: 3097bf831ede4a24e08a3316254e29ca726383e3
-  subpackages:
-  - gensupport
-  - googleapi
-  - googleapi/internal/uritemplates
-  - sqladmin/v1beta4
-- name: google.golang.org/appengine
-  version: ad39d7fab7c60b2493fdc318c3d2cdb2128f92a4
-  subpackages:
-  - internal
-  - internal/app_identity
-  - internal/base
-  - internal/datastore
-  - internal/log
-  - internal/modules
-  - internal/remote_api
-  - internal/urlfetch
-  - urlfetch
 - name: gopkg.in/tylerb/graceful.v1
   version: 4654dfbb6ad53cb5e27f37d99b02e16c1872fbbb
 testImports:

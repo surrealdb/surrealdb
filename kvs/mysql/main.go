@@ -17,6 +17,9 @@ package mysql
 import (
 	"strings"
 
+	"crypto/tls"
+	"crypto/x509"
+
 	"database/sql"
 
 	"github.com/abcum/surreal/cnf"
@@ -24,19 +27,40 @@ import (
 	"github.com/abcum/surreal/log"
 
 	"github.com/go-sql-driver/mysql"
-
-	"github.com/GoogleCloudPlatform/cloudsql-proxy/proxy/proxy"
 )
 
 func init() {
-
-	mysql.RegisterDial("cloudsql", proxy.Dial)
 
 	kvs.Register("mysql", func(opts *cnf.Options) (db kvs.DB, err error) {
 
 		var pntr *sql.DB
 
 		path := strings.TrimPrefix(opts.DB.Path, "mysql://")
+
+		if cnf.Settings.DB.Cert.SSL {
+
+			cas := x509.NewCertPool()
+			all := make([]tls.Certificate, 0, 1)
+			car := []byte(cnf.Settings.DB.Cert.CA)
+			crt := []byte(cnf.Settings.DB.Cert.Crt)
+			key := []byte(cnf.Settings.DB.Cert.Key)
+
+			if ok := cas.AppendCertsFromPEM(car); !ok {
+				log.WithPrefix("kvs").Errorln("Failed to append CA file.")
+			}
+
+			par, err := tls.X509KeyPair(crt, key)
+			if err != nil {
+				log.WithPrefix("kvs").Errorln(err)
+			}
+
+			mysql.RegisterTLSConfig("default", &tls.Config{
+				InsecureSkipVerify: true,
+				RootCAs:            cas,
+				Certificates:       append(all, par),
+			})
+
+		}
 
 		pntr, err = sql.Open("mysql", path)
 		if err != nil {

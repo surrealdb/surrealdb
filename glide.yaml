@@ -1,9 +1,5 @@
 package: github.com/abcum/surreal
 import:
-- package: github.com/GoogleCloudPlatform/cloudsql-proxy
-  version: ^1.11.0
-  subpackages:
-  - proxy/proxy
 - package: github.com/Sirupsen/logrus
   version: ^1.0.5
 - package: github.com/abcum/bump
