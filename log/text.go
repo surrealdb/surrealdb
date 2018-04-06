@@ -25,7 +25,7 @@ import (
 
 	"github.com/mgutz/ansi"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 
 	"golang.org/x/crypto/ssh/terminal"
 )

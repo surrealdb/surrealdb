@@ -1,12 +1,12 @@
-hash: cc325edb4f8ae4bfdaac8b068e01dfc5ed0d632d070c9d41181c32799e5449d3
-updated: 2018-04-06T00:06:11.90235+01:00
+hash: 78b2793cc6b44df21d4b96f19e3ca2d9ec1d3de7be1e0cba3a5087b5079abea4
+updated: 2018-04-06T09:47:33.423062+01:00
 imports:
 - name: github.com/abcum/bump
   version: 526934c541e071b5a330671c76434b9e32d55638
 - name: github.com/abcum/cork
   version: 6cbaf5d51f99013c103c95f336e98da8ef04f85d
 - name: github.com/abcum/fibre
-  version: 3a266fab93ddc90e098970e3a705c3adf6964843
+  version: 6c2189150be9541c7c1f1803b98c452e553fe6e2
   subpackages:
   - mw
 - name: github.com/abcum/ptree
@@ -90,7 +90,7 @@ imports:
   version: 1744e2970ca51c86172c8190fadad617561ed6e7
   subpackages:
   - diffmatchpatch
-- name: github.com/Sirupsen/logrus
+- name: github.com/sirupsen/logrus
   version: c155da19408a8799da419ed3eeb0cb5db0ad5dbc
 - name: github.com/spf13/cobra
   version: a1f051bc3eba734da4772d60e2d677f47cf93ef4

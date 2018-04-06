@@ -31,7 +31,7 @@ var startCmd = &cobra.Command{
 	Short: "Start the database and http server",
 	PreRun: func(cmd *cobra.Command, args []string) {
 
-		if opts.Logging.Output == "text" {
+		if opts.Logging.Output != "none" {
 			fmt.Print(logo)
 		}
 
