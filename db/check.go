@@ -221,6 +221,8 @@ func (d *document) event(ctx context.Context, when method) (err error) {
 		vars.Set(d.initial.Data(), varKeyBefore)
 		ctx = context.WithValue(ctx, ctxKeySpec, vars)
 
+		ctx = context.WithValue(ctx, ctxKeyKind, cnf.AuthDB)
+
 		for _, ev := range evs {
 
 			val, err := d.i.e.fetch(ctx, ev.When, d.current)
