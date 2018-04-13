@@ -19,7 +19,6 @@ import (
 
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/data"
 )
 
 func (d *document) check(ctx context.Context, cond sql.Expr) (ok bool, err error) {
@@ -185,66 +184,5 @@ func (d *document) allow(ctx context.Context, when method) (ok bool, err error) 
 	// document is unable to be viewed.
 
 	return false, err
-
-}
-
-// Event checks if any triggers are specified for this
-// table, and executes them in name order.
-func (d *document) event(ctx context.Context, when method) (err error) {
-
-	// Get the event values specified
-	// for this table, loop through
-	// them, and compute the events.
-
-	evs, err := d.getEV()
-	if err != nil {
-		return err
-	}
-
-	if len(evs) > 0 {
-
-		kind := ""
-
-		switch when {
-		case _CREATE:
-			kind = "CREATE"
-		case _UPDATE:
-			kind = "UPDATE"
-		case _DELETE:
-			kind = "DELETE"
-		}
-
-		vars := data.New()
-		vars.Set(d.id, varKeyThis)
-		vars.Set(kind, varKeyMethod)
-		vars.Set(d.current.Data(), varKeyAfter)
-		vars.Set(d.initial.Data(), varKeyBefore)
-		ctx = context.WithValue(ctx, ctxKeySpec, vars)
-
-		ctx = context.WithValue(ctx, ctxKeyKind, cnf.AuthDB)
-
-		for _, ev := range evs {
-
-			val, err := d.i.e.fetch(ctx, ev.When, d.current)
-			if err != nil {
-				return err
-			}
-
-			switch v := val.(type) {
-			case bool:
-				switch v {
-				case true:
-					_, err = d.i.e.fetch(ctx, ev.Then, d.current)
-					if err != nil {
-						return err
-					}
-				}
-			}
-
-		}
-
-	}
-
-	return
 
 }
