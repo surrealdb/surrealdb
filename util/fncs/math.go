@@ -54,6 +54,15 @@ func mathCovariance(ctx context.Context, args ...interface{}) (out interface{}, 
 	return outputFloat(math.Covariance(a, b))
 }
 
+func mathFixed(ctx context.Context, args ...interface{}) (out interface{}, err error) {
+	if val, ok := ensureFloat(args[0]); ok {
+		if pre, ok := ensureInt(args[1]); ok {
+			return outputFixed(val, pre)
+		}
+	}
+	return
+}
+
 func mathFloor(ctx context.Context, args ...interface{}) (out interface{}, err error) {
 	if val, ok := ensureFloat(args[0]); ok {
 		return outputFloat(math.Floor(val))

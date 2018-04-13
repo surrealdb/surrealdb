@@ -80,6 +80,15 @@ func TestMath(t *testing.T) {
 		So(res, ShouldEqual, -1)
 	})
 
+	Convey("math.fixed() works properly", t, func() {
+		res, _ = Run(context.Background(), "math.fixed", "test")
+		So(res, ShouldEqual, nil)
+		res, _ = Run(context.Background(), "math.fixed", 10, 2)
+		So(res, ShouldEqual, 10)
+		res, _ = Run(context.Background(), "math.fixed", 1.51837461, 2)
+		So(res, ShouldEqual, 1.52)
+	})
+
 	Convey("math.floor() works properly", t, func() {
 		res, _ = Run(context.Background(), "math.floor", "test")
 		So(res, ShouldEqual, nil)

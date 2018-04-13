@@ -36,6 +36,12 @@ func outputFloat(val float64) (interface{}, error) {
 	}
 }
 
+func outputFixed(val float64, pre int64) (interface{}, error) {
+	out := math.Pow(10, float64(pre))
+	rnd := int(val*out + math.Copysign(0.5, val*out))
+	return float64(rnd) / out, nil
+}
+
 func ensureString(val interface{}) (out string, ok bool) {
 	switch val := val.(type) {
 	case string:

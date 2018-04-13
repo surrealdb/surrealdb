@@ -116,6 +116,8 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return mathCorrelation(ctx, args...)
 	case "math.covariance":
 		return mathCovariance(ctx, args...)
+	case "math.fixed":
+		return mathFixed(ctx, args...)
 	case "math.floor":
 		return mathFloor(ctx, args...)
 	case "math.geometricmean":

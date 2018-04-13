@@ -123,6 +123,7 @@ var funcs = map[string]map[int]interface{}{
 	"math.ceil":          {1: nil},
 	"math.correlation":   {2: nil},
 	"math.covariance":    {2: nil},
+	"math.fixed":         {2: nil},
 	"math.floor":         {1: nil},
 	"math.geometricmean": {1: nil},
 	"math.harmonicmean":  {1: nil},
