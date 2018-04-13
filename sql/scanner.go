@@ -105,7 +105,7 @@ func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 	case '≥':
 		return GTE, string(ch), val
 	case '~':
-		return SIN, string(ch), val
+		return MAT, string(ch), val
 	case '∋':
 		return SIN, string(ch), val
 	case '∌':
@@ -166,7 +166,7 @@ func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 		chn := s.next()
 		switch {
 		case chn == '~':
-			return SIN, "=~", val
+			return MAT, "=~", val
 		case chn == '=':
 			return EEQ, "==", val
 		default:
@@ -178,6 +178,8 @@ func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 		switch {
 		case chn == '=':
 			return ANY, "?=", val
+		case chn == '~':
+			return MAY, "?~", val
 		default:
 			s.undo()
 			return QMARK, string(ch), val
@@ -193,7 +195,7 @@ func (s *scanner) scan() (tok Token, lit string, val interface{}) {
 				return NEQ, "!=", val
 			}
 		case chn == '~':
-			return SNI, "!~", val
+			return NAT, "!~", val
 		default:
 			s.undo()
 			return EXC, string(ch), val

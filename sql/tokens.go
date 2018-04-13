@@ -88,6 +88,9 @@ const (
 	SNI // ∌
 	INS // ∈
 	NIS // ∉
+	MAT // ~
+	NAT // !~
+	MAY // ?~
 
 	operatorEnd
 
@@ -259,6 +262,9 @@ var tokens = [...]string{
 	SNI: "∌",
 	INS: "∈",
 	NIS: "∉",
+	MAT: "~",
+	NAT: "!~",
+	MAY: "?~",
 
 	// keywords
 
@@ -400,7 +406,7 @@ func (tok Token) precedence() int {
 		return 1
 	case EQ, NEQ, EEQ, NEE,
 		LT, LTE, GT, GTE,
-		ANY, SIN, SNI, INS, NIS,
+		ANY, SIN, SNI, INS, NIS, MAT, NAT, MAY,
 		CONTAINSALL, CONTAINSNONE, CONTAINSSOME,
 		ALLCONTAINEDIN, NONECONTAINEDIN, SOMECONTAINEDIN:
 		return 2

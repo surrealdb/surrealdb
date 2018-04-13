@@ -23,6 +23,9 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/text/language"
+	"golang.org/x/text/search"
+
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
@@ -236,7 +239,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 			return binaryMath(val.Op, l, r), nil
 		case sql.EQ, sql.NEQ, sql.ANY, sql.LT, sql.LTE, sql.GT, sql.GTE:
 			return binaryCheck(val.Op, l, r, val.LHS, val.RHS, doc), nil
-		case sql.SIN, sql.SNI, sql.INS, sql.NIS:
+		case sql.SIN, sql.SNI, sql.INS, sql.NIS, sql.MAT, sql.NAT, sql.MAY:
 			return binaryCheck(val.Op, l, r, val.LHS, val.RHS, doc), nil
 		case sql.CONTAINSALL, sql.CONTAINSSOME, sql.CONTAINSNONE:
 			return binaryCheck(val.Op, l, r, val.LHS, val.RHS, doc), nil
@@ -783,9 +786,9 @@ func negOp(op sql.Token) bool {
 
 func chkOp(op sql.Token) int8 {
 	switch op {
-	case sql.EQ, sql.SIN, sql.INS:
+	case sql.EQ, sql.SIN, sql.INS, sql.MAT, sql.ANY:
 		return +1
-	case sql.NEQ, sql.SNI, sql.NIS:
+	case sql.NEQ, sql.SNI, sql.NIS, sql.NAT, sql.MAY:
 		return -1
 	case sql.CONTAINSALL:
 		return +1
@@ -846,6 +849,15 @@ func chkString(op sql.Token, a, b string) (val bool) {
 		return strings.Contains(a, b) == true
 	case sql.SNI:
 		return strings.Contains(a, b) == false
+	case sql.MAT:
+		b, e := search.New(language.Und, search.Loose).IndexString(a, b)
+		return b != -1 && e != -1
+	case sql.NAT:
+		b, e := search.New(language.Und, search.Loose).IndexString(a, b)
+		return b == -1 && e == -1
+	case sql.MAY:
+		b, e := search.New(language.Und, search.Loose).IndexString(a, b)
+		return b != -1 && e != -1
 	}
 	return negOp(op)
 }
@@ -958,6 +970,21 @@ func chkArrayL(op sql.Token, a []interface{}, i interface{}) (val bool) {
 		default:
 			return data.Consume(a).Contains(i) == false
 		}
+	case sql.MAT:
+		switch s := i.(type) {
+		case string:
+			return chkSearch(op, a, s)
+		}
+	case sql.NAT:
+		switch s := i.(type) {
+		case string:
+			return chkSearch(op, a, s)
+		}
+	case sql.MAY:
+		switch s := i.(type) {
+		case string:
+			return chkSearch(op, a, s)
+		}
 	}
 	return negOp(op)
 }
@@ -991,6 +1018,21 @@ func chkArrayR(op sql.Token, i interface{}, a []interface{}) (val bool) {
 			return data.Consume(a).Contains(nil) == false
 		default:
 			return data.Consume(a).Contains(i) == false
+		}
+	case sql.MAT:
+		switch s := i.(type) {
+		case string:
+			return chkSearch(op, a, s)
+		}
+	case sql.NAT:
+		switch s := i.(type) {
+		case string:
+			return chkSearch(op, a, s)
+		}
+	case sql.MAY:
+		switch s := i.(type) {
+		case string:
+			return chkSearch(op, a, s)
 		}
 	}
 	return negOp(op)
@@ -1062,6 +1104,10 @@ func chkArray(op sql.Token, a []interface{}, b []interface{}) (val bool) {
 
 func chkMatch(op sql.Token, a []interface{}, r *regexp.Regexp) (val bool) {
 
+	if len(a) == 0 {
+		return op == sql.NEQ
+	}
+
 	for _, v := range a {
 
 		var s string
@@ -1088,8 +1134,8 @@ func chkMatch(op sql.Token, a []interface{}, r *regexp.Regexp) (val bool) {
 		}
 
 		if op == sql.NEQ {
-			if chkRegex(sql.EQ, s, r) == true {
-				return false
+			if chkRegex(sql.EQ, s, r) == false {
+				return true
 			}
 		}
 
@@ -1105,8 +1151,69 @@ func chkMatch(op sql.Token, a []interface{}, r *regexp.Regexp) (val bool) {
 	case sql.EQ:
 		return true
 	case sql.NEQ:
-		return true
+		return false
 	case sql.ANY:
+		return false
+	}
+
+	return
+
+}
+
+func chkSearch(op sql.Token, a []interface{}, r string) (val bool) {
+
+	if len(a) == 0 {
+		return op == sql.NAT
+	}
+
+	for _, v := range a {
+
+		var s string
+
+		switch c := v.(type) {
+		default:
+			return false
+		case string:
+			s = c
+		case bool:
+			s = strconv.FormatBool(c)
+		case int64:
+			s = strconv.FormatInt(c, 10)
+		case float64:
+			s = strconv.FormatFloat(c, 'g', -1, 64)
+		case time.Time:
+			s = c.String()
+		}
+
+		if op == sql.MAT {
+			b, e := search.New(language.Und, search.Loose).IndexString(s, r)
+			if b == -1 && e == -1 {
+				return false
+			}
+		}
+
+		if op == sql.NAT {
+			b, e := search.New(language.Und, search.Loose).IndexString(s, r)
+			if b == -1 && e == -1 {
+				return true
+			}
+		}
+
+		if op == sql.MAY {
+			b, e := search.New(language.Und, search.Loose).IndexString(s, r)
+			if b != -1 && e != -1 {
+				return true
+			}
+		}
+
+	}
+
+	switch op {
+	case sql.MAT:
+		return true
+	case sql.NAT:
+		return false
+	case sql.MAY:
 		return false
 	}
 

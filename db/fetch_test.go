@@ -680,15 +680,28 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE "test" ∈ "a true test string";
 		SELECT * FROM "test" WHERE "test" ∉ "a true test string";
 
+		SELECT * FROM "test" WHERE "a true test string" ~ "test";
+		SELECT * FROM "test" WHERE "a true test string" ~ "Test";
+		SELECT * FROM "test" WHERE "a true test string" !~ "test";
+		SELECT * FROM "test" WHERE "a true test string" !~ "Test";
+		SELECT * FROM "test" WHERE "a true test string" ?~ "test";
+		SELECT * FROM "test" WHERE "a true test string" ?~ "Test";
+
 		SELECT * FROM "test" WHERE "a true test string" = /test/;
+		SELECT * FROM "test" WHERE "a true test string" = /Test/;
+		SELECT * FROM "test" WHERE "a true test string" = /(?i)Test/;
 		SELECT * FROM "test" WHERE "a true test string" != /test/;
+		SELECT * FROM "test" WHERE "a true test string" != /Test/;
+		SELECT * FROM "test" WHERE "a true test string" != /(?i)Test/;
 		SELECT * FROM "test" WHERE "a true test string" ?= /test/;
+		SELECT * FROM "test" WHERE "a true test string" ?= /Test/;
+		SELECT * FROM "test" WHERE "a true test string" ?= /(?i)Test/;
 
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 21)
+		So(res, ShouldHaveLength, 33)
 
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(res[3].Result, ShouldHaveLength, 1)
@@ -711,8 +724,21 @@ func TestFetch(t *testing.T) {
 		So(res[17].Result, ShouldHaveLength, 0)
 
 		So(res[18].Result, ShouldHaveLength, 1)
-		So(res[19].Result, ShouldHaveLength, 0)
-		So(res[20].Result, ShouldHaveLength, 1)
+		So(res[19].Result, ShouldHaveLength, 1)
+		So(res[20].Result, ShouldHaveLength, 0)
+		So(res[21].Result, ShouldHaveLength, 0)
+		So(res[22].Result, ShouldHaveLength, 1)
+		So(res[23].Result, ShouldHaveLength, 1)
+
+		So(res[24].Result, ShouldHaveLength, 1)
+		So(res[25].Result, ShouldHaveLength, 0)
+		So(res[26].Result, ShouldHaveLength, 1)
+		So(res[27].Result, ShouldHaveLength, 0)
+		So(res[28].Result, ShouldHaveLength, 1)
+		So(res[29].Result, ShouldHaveLength, 0)
+		So(res[30].Result, ShouldHaveLength, 1)
+		So(res[31].Result, ShouldHaveLength, 0)
+		So(res[32].Result, ShouldHaveLength, 1)
 
 	})
 
@@ -784,37 +810,58 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE [ [1,2,3] ] ∋ [1,2,3];
 		SELECT * FROM "test" WHERE [ [1,2,3] ] ∌ [1,2,3];
 
-		SELECT * FROM "test" WHERE [1,2,3,4,5] ⊇ [1,3,5];
+		SELECT * FROM "test" WHERE [1,2,3,4,5] ⊇ [1,2,3];
 		SELECT * FROM "test" WHERE [1,2,3,4,5] ⊇ [2,4,6];
-		SELECT * FROM "test" WHERE [1,3,5,7,9] ⊃ [1,3,5];
+		SELECT * FROM "test" WHERE [1,3,5,7,9] ⊃ [1,2,3];
 		SELECT * FROM "test" WHERE [1,3,5,7,9] ⊃ [2,4,6];
-		SELECT * FROM "test" WHERE [1,3,5,7,9] ⊅ [1,3,5];
+		SELECT * FROM "test" WHERE [1,3,5,7,9] ⊅ [1,2,3];
 		SELECT * FROM "test" WHERE [1,3,5,7,9] ⊅ [2,4,6];
 
-		SELECT * FROM "test" WHERE [1,3,5] ⊆ [1,2,3,4,5];
+		SELECT * FROM "test" WHERE [1,2,3] ⊆ [1,2,3,4,5];
 		SELECT * FROM "test" WHERE [2,4,6] ⊆ [1,2,3,4,5];
-		SELECT * FROM "test" WHERE [1,3,5] ⊂ [1,3,5,7,9];
+		SELECT * FROM "test" WHERE [1,2,3] ⊂ [1,3,5,7,9];
 		SELECT * FROM "test" WHERE [2,4,6] ⊂ [1,3,5,7,9];
-		SELECT * FROM "test" WHERE [1,3,5] ⊄ [1,3,5,7,9];
+		SELECT * FROM "test" WHERE [1,2,3] ⊄ [1,3,5,7,9];
 		SELECT * FROM "test" WHERE [2,4,6] ⊄ [1,3,5,7,9];
 
+		SELECT * FROM "test" WHERE [] = /[0-9]/;
 		SELECT * FROM "test" WHERE [1,2,3] = /[0-9]/;
 		SELECT * FROM "test" WHERE [1,"2",true] = /[0-9]/;
 		SELECT * FROM "test" WHERE ["a","b","c"] = /[0-9]/;
 
+		SELECT * FROM "test" WHERE [] != /[0-9]/;
 		SELECT * FROM "test" WHERE [1,2,3] != /[0-9]/;
 		SELECT * FROM "test" WHERE [1,"2",true] != /[0-9]/;
 		SELECT * FROM "test" WHERE ["a","b","c"] != /[0-9]/;
 
+		SELECT * FROM "test" WHERE [] ?= /[0-9]/;
 		SELECT * FROM "test" WHERE [1,2,3] ?= /[0-9]/;
 		SELECT * FROM "test" WHERE [1,"2",true] ?= /[0-9]/;
 		SELECT * FROM "test" WHERE ["a","b","c"] ?= /[0-9]/;
+
+		SELECT * FROM "test" WHERE [] ~ "pro";
+		SELECT * FROM "test" WHERE [1,2,3] ~ "pro";
+		SELECT * FROM "test" WHERE [1,"2","pro"] ~ "pro";
+		SELECT * FROM "test" WHERE ["a","b","c","gopros"] ~ "Pro";
+		SELECT * FROM "test" WHERE ["gopros","gopros","gopros"] ~ "Pro";
+
+		SELECT * FROM "test" WHERE [] !~ "pro";
+		SELECT * FROM "test" WHERE [1,2,3] !~ "pro";
+		SELECT * FROM "test" WHERE [1,"2","pro"] !~ "pro";
+		SELECT * FROM "test" WHERE ["a","b","c","gopros"] !~ "Pro";
+		SELECT * FROM "test" WHERE ["gopros","gopros","gopros"] !~ "Pro";
+
+		SELECT * FROM "test" WHERE [] ?~ "pro";
+		SELECT * FROM "test" WHERE [1,2,3] ?~ "pro";
+		SELECT * FROM "test" WHERE [1,"2","pro"] ?~ "pro";
+		SELECT * FROM "test" WHERE ["a","b","c","gopros"] ?~ "Pro";
+		SELECT * FROM "test" WHERE ["gopros","gopros","gopros"] ?~ "Pro";
 
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 39)
+		So(res, ShouldHaveLength, 57)
 
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(res[3].Result, ShouldHaveLength, 1)
@@ -850,16 +897,38 @@ func TestFetch(t *testing.T) {
 		So(res[28].Result, ShouldHaveLength, 0)
 		So(res[29].Result, ShouldHaveLength, 1)
 
-		So(res[30].Result, ShouldHaveLength, 1)
-		So(res[31].Result, ShouldHaveLength, 0)
+		So(res[30].Result, ShouldHaveLength, 0)
+		So(res[31].Result, ShouldHaveLength, 1)
 		So(res[32].Result, ShouldHaveLength, 0)
 		So(res[33].Result, ShouldHaveLength, 0)
-		So(res[34].Result, ShouldHaveLength, 0)
-		So(res[35].Result, ShouldHaveLength, 1)
 
+		So(res[34].Result, ShouldHaveLength, 1)
+		So(res[35].Result, ShouldHaveLength, 0)
 		So(res[36].Result, ShouldHaveLength, 1)
 		So(res[37].Result, ShouldHaveLength, 1)
+
 		So(res[38].Result, ShouldHaveLength, 0)
+		So(res[39].Result, ShouldHaveLength, 1)
+		So(res[40].Result, ShouldHaveLength, 1)
+		So(res[41].Result, ShouldHaveLength, 0)
+
+		So(res[42].Result, ShouldHaveLength, 0)
+		So(res[43].Result, ShouldHaveLength, 0)
+		So(res[44].Result, ShouldHaveLength, 0)
+		So(res[45].Result, ShouldHaveLength, 0)
+		So(res[46].Result, ShouldHaveLength, 1)
+
+		So(res[47].Result, ShouldHaveLength, 1)
+		So(res[48].Result, ShouldHaveLength, 1)
+		So(res[49].Result, ShouldHaveLength, 1)
+		So(res[50].Result, ShouldHaveLength, 1)
+		So(res[51].Result, ShouldHaveLength, 0)
+
+		So(res[52].Result, ShouldHaveLength, 0)
+		So(res[53].Result, ShouldHaveLength, 0)
+		So(res[54].Result, ShouldHaveLength, 1)
+		So(res[55].Result, ShouldHaveLength, 1)
+		So(res[56].Result, ShouldHaveLength, 1)
 
 	})
 
