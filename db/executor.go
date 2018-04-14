@@ -347,7 +347,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 	}
 
-	// If the context is already closed or errord,
+	// If the context is already closed or failed,
 	// then ignore this result, clear all queued
 	// changes, and reset the transaction.
 

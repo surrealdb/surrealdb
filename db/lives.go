@@ -94,14 +94,14 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 
 				// If the live query has specified to only
 				// receive diff changes, then there will be
-				// no project fields for this query.
+				// no projected fields for this query.
 
 				case true:
 
 					doc = d.diff()
 
-				// If the query has project fields which it
-				// wants to receive, then let's fetch thses
+				// If the query has projected fields which it
+				// wants to receive, then let's fetch these
 				// fields, and return them to the socket.
 
 				case false:
