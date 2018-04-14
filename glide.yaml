@@ -37,7 +37,7 @@ import:
 - package: github.com/spf13/cobra
   version: ^0.0.2
 - package: github.com/ugorji/go
-  version: ^1.1.0
+  version: ^1.1.1
   subpackages:
   - codec
 - package: golang.org/x/crypto
@@ -52,6 +52,7 @@ import:
   subpackages:
   - collate
   - language
+  - search
 testImport:
 - package: github.com/smartystreets/goconvey
   version: ^1.6.3

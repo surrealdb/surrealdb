@@ -1,12 +1,12 @@
-hash: 78b2793cc6b44df21d4b96f19e3ca2d9ec1d3de7be1e0cba3a5087b5079abea4
-updated: 2018-04-06T09:47:33.423062+01:00
+hash: c56e5bd935dd1933a6e7370fe3fc67ea26169ec91aa05c171543866c6c2490ed
+updated: 2018-04-14T19:22:29.284814+01:00
 imports:
 - name: github.com/abcum/bump
   version: 526934c541e071b5a330671c76434b9e32d55638
 - name: github.com/abcum/cork
   version: 6cbaf5d51f99013c103c95f336e98da8ef04f85d
 - name: github.com/abcum/fibre
-  version: 6c2189150be9541c7c1f1803b98c452e553fe6e2
+  version: 1b1947da964c0c0a244868279f9476df093eef34
   subpackages:
   - mw
 - name: github.com/abcum/ptree
@@ -97,7 +97,7 @@ imports:
 - name: github.com/spf13/pflag
   version: 1ce0cc6db4029d97571db82f85092fccedb572ce
 - name: github.com/ugorji/go
-  version: 9831f2c3ac1068a78f50999a30db84270f647af6
+  version: b4c50a2b199d93b13dc15e78929cfb23bfdf21ab
   subpackages:
   - codec
 - name: golang.org/x/crypto
@@ -132,6 +132,7 @@ imports:
   - internal/colltab
   - internal/tag
   - language
+  - search
   - transform
   - unicode/norm
 - name: gopkg.in/tylerb/graceful.v1
