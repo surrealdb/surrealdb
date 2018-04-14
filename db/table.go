@@ -19,7 +19,6 @@ import (
 
 	"context"
 
-	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/keys"
 )
@@ -135,7 +134,7 @@ func (d *document) table(ctx context.Context, when method) (err error) {
 func (d *document) tableDelete(ctx context.Context, id *sql.Thing, exp sql.Fields) (err error) {
 
 	stm := &sql.DeleteStatement{
-		KV:       cnf.Settings.DB.Base,
+		KV:       d.key.KV,
 		NS:       d.key.NS,
 		DB:       d.key.DB,
 		What:     sql.Exprs{id},
@@ -163,7 +162,7 @@ func (d *document) tableUpdate(ctx context.Context, id *sql.Thing, exp sql.Field
 	}
 
 	stm := &sql.UpdateStatement{
-		KV:       cnf.Settings.DB.Base,
+		KV:       d.key.KV,
 		NS:       d.key.NS,
 		DB:       d.key.DB,
 		What:     sql.Exprs{id},

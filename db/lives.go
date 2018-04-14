@@ -18,7 +18,6 @@ import (
 	"context"
 
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/data"
 )
 
 // Lives checks if any table views are specified for
@@ -54,7 +53,7 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 
 			var ok bool
 			var con *socket
-			var doc *data.Doc
+			var out interface{}
 
 			if con, ok = sockets[lv.FB]; ok {
 
@@ -98,7 +97,7 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 
 				case true:
 
-					doc = d.diff()
+					out, _ = d.yield(ctx, lv, sql.DIFF)
 
 				// If the query has projected fields which it
 				// wants to receive, then let's fetch these
@@ -106,39 +105,21 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 
 				case false:
 
-					for _, v := range lv.Expr {
-						if _, ok := v.Expr.(*sql.All); ok {
-							doc = d.current
-							break
-						}
-					}
-
-					if doc == nil {
-						doc = data.New()
-					}
-
-					for _, e := range lv.Expr {
-						switch v := e.Expr.(type) {
-						case *sql.All:
-							break
-						default:
-							v, err := d.i.e.fetch(ctx, v, d.current)
-							if err != nil {
-								continue
-							}
-							doc.Set(v, e.Field)
-						}
-					}
+					out, _ = d.yield(ctx, lv, sql.ILLEGAL)
 
 				}
 
 				switch when {
-				case _CREATE:
-					con.queue(id, lv.ID, "CREATE", doc.Data())
-				case _UPDATE:
-					con.queue(id, lv.ID, "UPDATE", doc.Data())
 				case _DELETE:
 					con.queue(id, lv.ID, "DELETE", d.id)
+				case _CREATE:
+					if out != nil {
+						con.queue(id, lv.ID, "CREATE", out)
+					}
+				case _UPDATE:
+					if out != nil {
+						con.queue(id, lv.ID, "UPDATE", out)
+					}
 				}
 
 			}

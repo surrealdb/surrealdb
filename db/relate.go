@@ -106,7 +106,7 @@ func (d *document) runRelate(ctx context.Context, stm *sql.RelateStatement) (int
 		met = _UPDATE
 	}
 
-	if err = d.merge(ctx, stm.Data); err != nil {
+	if err = d.merge(ctx, met, stm.Data); err != nil {
 		return nil, err
 	}
 

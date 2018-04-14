@@ -48,7 +48,7 @@ func (d *document) check(ctx context.Context, cond sql.Expr) (ok bool, err error
 // Grant checks to see if the table permissions allow
 // this record to be accessed for live queries, and
 // if not then it errors accordingly.
-func (d *document) grant(ctx context.Context, when method) (ok bool, err error) {
+func (d *document) grant(ctx context.Context, met method) (ok bool, err error) {
 
 	var val interface{}
 
@@ -86,16 +86,8 @@ func (d *document) grant(ctx context.Context, when method) (ok bool, err error) 
 	// for this table, then because this is
 	// a scoped request, return an error.
 
-	switch p := tb.Perms.(type) {
-	case *sql.PermExpression:
-		switch when {
-		case _CREATE:
-			val, err = d.i.e.fetch(ctx, p.Select, d.current)
-		case _UPDATE:
-			val, err = d.i.e.fetch(ctx, p.Select, d.current)
-		case _DELETE:
-			val, err = d.i.e.fetch(ctx, p.Select, d.initial)
-		}
+	if p, ok := tb.Perms.(*sql.PermExpression); ok {
+		val, err = d.i.e.fetch(ctx, p.Select, d.current)
 	}
 
 	// If the permissions expressions
@@ -103,8 +95,8 @@ func (d *document) grant(ctx context.Context, when method) (ok bool, err error) 
 	// return this, dictating whether the
 	// document is able to be viewed.
 
-	if val, ok := val.(bool); ok {
-		return val, err
+	if v, ok := val.(bool); ok {
+		return v, err
 	}
 
 	// Otherwise as this request is scoped,
@@ -118,7 +110,7 @@ func (d *document) grant(ctx context.Context, when method) (ok bool, err error) 
 // Query checks to see if the table permissions allow
 // this record to be accessed for normal queries, and
 // if not then it errors accordingly.
-func (d *document) allow(ctx context.Context, when method) (ok bool, err error) {
+func (d *document) allow(ctx context.Context, met method) (ok bool, err error) {
 
 	var val interface{}
 
@@ -156,9 +148,8 @@ func (d *document) allow(ctx context.Context, when method) (ok bool, err error) 
 	// for this table, then because this is
 	// a scoped request, return an error.
 
-	switch p := tb.Perms.(type) {
-	case *sql.PermExpression:
-		switch when {
+	if p, ok := tb.Perms.(*sql.PermExpression); ok {
+		switch met {
 		case _SELECT:
 			val, err = d.i.e.fetch(ctx, p.Select, d.current)
 		case _CREATE:
@@ -175,8 +166,8 @@ func (d *document) allow(ctx context.Context, when method) (ok bool, err error) 
 	// return this, dictating whether the
 	// document is able to be viewed.
 
-	if val, ok := val.(bool); ok {
-		return val, err
+	if v, ok := val.(bool); ok {
+		return v, err
 	}
 
 	// Otherwise as this request is scoped,

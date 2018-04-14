@@ -125,7 +125,7 @@ func (d *document) runUpdate(ctx context.Context, stm *sql.UpdateStatement) (int
 		return nil, nil
 	}
 
-	if err = d.merge(ctx, stm.Data); err != nil {
+	if err = d.merge(ctx, met, stm.Data); err != nil {
 		return nil, err
 	}
 

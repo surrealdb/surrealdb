@@ -17,92 +17,209 @@ package db
 import (
 	"context"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
+	"github.com/abcum/surreal/util/diff"
 )
+
+func (d *document) cold(ctx context.Context) (doc *data.Doc, err error) {
+
+	// If we are authenticated using DB, NS,
+	// or KV permissions level, then we can
+	// return the document without copying.
+
+	if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
+		if k < cnf.AuthSC {
+			return d.initial, nil
+		}
+	}
+
+	// Otherwise, we need to create a copy
+	// of the document so that we can add
+	// and remove fields before outputting.
+
+	doc = d.initial.Copy()
+
+	err = d.perms(ctx, doc)
+
+	return
+
+}
+
+func (d *document) cnow(ctx context.Context) (doc *data.Doc, err error) {
+
+	// If we are authenticated using DB, NS,
+	// or KV permissions level, then we can
+	// return the document without copying.
+
+	if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
+		if k < cnf.AuthSC {
+			return d.current, nil
+		}
+	}
+
+	// Otherwise, we need to create a copy
+	// of the document so that we can add
+	// and remove fields before outputting.
+
+	doc = d.current.Copy()
+
+	err = d.perms(ctx, doc)
+
+	return
+
+}
+
+func (d *document) diffs(initial, current *data.Doc) *data.Doc {
+
+	a, _ := initial.Data().(map[string]interface{})
+	b, _ := current.Data().(map[string]interface{})
+
+	if c := diff.Diff(a, b); len(c) > 0 {
+		return data.Consume(c)
+	}
+
+	return data.Consume(nil)
+
+}
 
 func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Token) (interface{}, error) {
 
+	var exps sql.Fields
+	var grps sql.Groups
+
 	switch stm := stm.(type) {
-
+	case *sql.LiveStatement:
+		exps = stm.Expr
 	case *sql.SelectStatement:
+		exps = stm.Expr
+		grps = stm.Group
+	}
 
-		var doc *data.Doc
+	// If there are no field expressions
+	// then this was not a LIVE or SELECT
+	// query, and therefore the query will
+	// have an output format specified.
 
-		for _, v := range stm.Expr {
-			if _, ok := v.Expr.(*sql.All); ok {
-				doc = d.current
-				break
-			}
-		}
-
-		if doc == nil {
-			doc = data.New()
-		}
-
-		for _, e := range stm.Expr {
-
-			switch v := e.Expr.(type) {
-			case *sql.All:
-				break
-			default:
-
-				// If the query has a GROUP BY expression
-				// then let's check if this is an aggregate
-				// function, and if it is then pass the
-				// first argument directly through.
-
-				if len(stm.Group) > 0 {
-					if f, ok := e.Expr.(*sql.FuncExpression); ok && f.Aggr {
-						v, err := d.i.e.fetch(ctx, f.Args[0], d.current)
-						if err != nil {
-							return nil, err
-						}
-						doc.Set(v, f.String())
-						continue
-					}
-				}
-
-				// Otherwise treat the field normally, and
-				// calculate the value to be inserted into
-				// the final output document.
-
-				v, err := d.i.e.fetch(ctx, v, d.current)
-				if err != nil {
-					return nil, err
-				}
-
-				switch v {
-				case d.current:
-					doc.Set(nil, e.Field)
-				default:
-					doc.Set(v, e.Field)
-				}
-
-			}
-
-		}
-
-		return doc.Data(), nil
-
-	default:
+	if len(exps) == 0 {
 
 		switch output {
 		default:
 			return nil, nil
 		case sql.DIFF:
-			return d.diff().Data(), nil
+
+			old, err := d.cold(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			now, err := d.cnow(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			return d.diffs(old, now).Data(), nil
+
 		case sql.AFTER:
-			return d.current.Data(), nil
+
+			doc, err := d.cnow(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return doc.Data(), nil
+
 		case sql.BEFORE:
-			return d.initial.Data(), nil
+
+			doc, err := d.cold(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return doc.Data(), nil
+
 		case sql.BOTH:
+
+			old, err := d.cold(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			now, err := d.cnow(ctx)
+			if err != nil {
+				return nil, err
+			}
+
 			return map[string]interface{}{
-				"after":  d.current.Data(),
-				"before": d.initial.Data(),
+				"after":  now.Data(),
+				"before": old.Data(),
 			}, nil
+
 		}
 
 	}
+
+	// But if there are field expresions
+	// then this query is a LIVE or SELECT
+	// query, and we must output only the
+	// desired fields in the output.
+
+	var out = data.New()
+
+	doc, err := d.cnow(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, e := range exps {
+		if _, ok := e.Expr.(*sql.All); ok {
+			out = doc
+			break
+		}
+	}
+
+	for _, e := range exps {
+
+		switch v := e.Expr.(type) {
+		case *sql.All:
+			break
+		default:
+
+			// If the query has a GROUP BY expression
+			// then let's check if this is an aggregate
+			// function, and if it is then pass the
+			// first argument directly through.
+
+			if len(grps) > 0 {
+				if f, ok := e.Expr.(*sql.FuncExpression); ok && f.Aggr {
+					v, err := d.i.e.fetch(ctx, f.Args[0], doc)
+					if err != nil {
+						return nil, err
+					}
+					out.Set(v, f.String())
+					continue
+				}
+			}
+
+			// Otherwise treat the field normally, and
+			// calculate the value to be inserted into
+			// the final output document.
+
+			v, err := d.i.e.fetch(ctx, v, doc)
+			if err != nil {
+				return nil, err
+			}
+
+			switch v {
+			case doc:
+				out.Set(nil, e.Field)
+			default:
+				out.Set(v, e.Field)
+			}
+
+		}
+
+	}
+
+	return out.Data(), nil
 
 }

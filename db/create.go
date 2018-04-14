@@ -114,7 +114,7 @@ func (d *document) runCreate(ctx context.Context, stm *sql.CreateStatement) (int
 		return nil, &ExistError{exist: d.id}
 	}
 
-	if err = d.merge(ctx, stm.Data); err != nil {
+	if err = d.merge(ctx, met, stm.Data); err != nil {
 		return nil, err
 	}
 

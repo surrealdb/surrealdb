@@ -282,15 +282,6 @@ func (d *document) changed() bool {
 	return len(c) > 0
 }
 
-func (d *document) diff() *data.Doc {
-	a, _ := d.initial.Data().(map[string]interface{})
-	b, _ := d.current.Data().(map[string]interface{})
-	if c := diff.Diff(a, b); len(c) > 0 {
-		return data.Consume(c)
-	}
-	return data.Consume(nil)
-}
-
 func (d *document) shouldDrop() (bool, error) {
 
 	// Check whether it is specified

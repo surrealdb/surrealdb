@@ -23,7 +23,7 @@ import (
 
 // Event checks if any triggers are specified for this
 // table, and executes them in name order.
-func (d *document) event(ctx context.Context, when method) (err error) {
+func (d *document) event(ctx context.Context, met method) (err error) {
 
 	// Get the event values specified
 	// for this table, loop through
@@ -38,7 +38,7 @@ func (d *document) event(ctx context.Context, when method) (err error) {
 
 		kind := ""
 
-		switch when {
+		switch met {
 		case _CREATE:
 			kind = "CREATE"
 		case _UPDATE:

@@ -19,6 +19,7 @@ import (
 
 	"context"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/conv"
 	"github.com/abcum/surreal/util/data"
@@ -32,44 +33,44 @@ var main = map[string]struct{}{
 	"meta.id": {},
 }
 
-func (d *document) merge(ctx context.Context, data sql.Expr) (err error) {
+func (d *document) merge(ctx context.Context, met method, data sql.Expr) (err error) {
 
-	if err = d.defFld(ctx); err != nil {
+	if err = d.defFld(ctx, met); err != nil {
 		return
 	}
 
 	switch expr := data.(type) {
 	case *sql.DataExpression:
-		if err = d.mrgSet(ctx, expr); err != nil {
+		if err = d.mrgSet(ctx, met, expr); err != nil {
 			return err
 		}
 	case *sql.DiffExpression:
-		if err = d.mrgDpm(ctx, expr); err != nil {
+		if err = d.mrgDpm(ctx, met, expr); err != nil {
 			return err
 		}
 	case *sql.MergeExpression:
-		if err = d.mrgAny(ctx, expr); err != nil {
+		if err = d.mrgAny(ctx, met, expr); err != nil {
 			return err
 		}
 	case *sql.ContentExpression:
-		if err = d.mrgAll(ctx, expr); err != nil {
+		if err = d.mrgAll(ctx, met, expr); err != nil {
 			return err
 		}
 	}
 
-	if err = d.defFld(ctx); err != nil {
+	if err = d.defFld(ctx, met); err != nil {
 		return
 	}
 
-	if err = d.mrgFld(ctx); err != nil {
+	if err = d.mrgFld(ctx, met); err != nil {
 		return
 	}
 
-	if err = d.defFld(ctx); err != nil {
+	if err = d.defFld(ctx, met); err != nil {
 		return
 	}
 
-	if err = d.delFld(ctx); err != nil {
+	if err = d.delFld(ctx, met); err != nil {
 		return
 	}
 
@@ -77,7 +78,7 @@ func (d *document) merge(ctx context.Context, data sql.Expr) (err error) {
 
 }
 
-func (d *document) defFld(ctx context.Context) (err error) {
+func (d *document) defFld(ctx context.Context, met method) (err error) {
 
 	d.current.Set(d.id, "id")
 	d.current.Set(d.md, "meta")
@@ -86,7 +87,7 @@ func (d *document) defFld(ctx context.Context) (err error) {
 
 }
 
-func (d *document) delFld(ctx context.Context) (err error) {
+func (d *document) delFld(ctx context.Context, met method) (err error) {
 
 	tb, err := d.getTB()
 	if err != nil {
@@ -130,7 +131,7 @@ func (d *document) delFld(ctx context.Context) (err error) {
 
 }
 
-func (d *document) mrgAll(ctx context.Context, expr *sql.ContentExpression) (err error) {
+func (d *document) mrgAll(ctx context.Context, met method, expr *sql.ContentExpression) (err error) {
 
 	var obj map[string]interface{}
 
@@ -161,7 +162,7 @@ func (d *document) mrgAll(ctx context.Context, expr *sql.ContentExpression) (err
 
 }
 
-func (d *document) mrgAny(ctx context.Context, expr *sql.MergeExpression) (err error) {
+func (d *document) mrgAny(ctx context.Context, met method, expr *sql.MergeExpression) (err error) {
 
 	var obj map[string]interface{}
 
@@ -190,7 +191,7 @@ func (d *document) mrgAny(ctx context.Context, expr *sql.MergeExpression) (err e
 
 }
 
-func (d *document) mrgDpm(ctx context.Context, expr *sql.DiffExpression) (err error) {
+func (d *document) mrgDpm(ctx context.Context, met method, expr *sql.DiffExpression) (err error) {
 
 	var obj []interface{}
 	var old map[string]interface{}
@@ -222,7 +223,7 @@ func (d *document) mrgDpm(ctx context.Context, expr *sql.DiffExpression) (err er
 
 }
 
-func (d *document) mrgSet(ctx context.Context, expr *sql.DataExpression) (err error) {
+func (d *document) mrgSet(ctx context.Context, met method, expr *sql.DataExpression) (err error) {
 
 	for _, v := range expr.Data {
 
@@ -255,7 +256,7 @@ func (d *document) mrgSet(ctx context.Context, expr *sql.DataExpression) (err er
 
 }
 
-func (d *document) mrgFld(ctx context.Context) (err error) {
+func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 	fds, err := d.getFD()
 	if err != nil {
@@ -306,39 +307,94 @@ func (d *document) mrgFld(ctx context.Context) (err error) {
 				}
 			}
 
-			// Reset the variables
-
-			vars.Set(val, varKeyValue)
-			vars.Set(val, varKeyAfter)
-			vars.Set(old, varKeyBefore)
-			ctx = context.WithValue(ctx, ctxKeySpec, vars)
-
 			// We are setting the value of the field
 
 			if fd.Value != nil {
+
+				// Reset the variables
+
+				vars.Set(val, varKeyValue)
+				vars.Set(val, varKeyAfter)
+				vars.Set(old, varKeyBefore)
+				ctx = context.WithValue(ctx, ctxKeySpec, vars)
+
 				if now, err := d.i.e.fetch(ctx, fd.Value, d.current); err != nil {
 					return err
 				} else {
 					val = now
 				}
+
 			}
-
-			// Reset the variables
-
-			vars.Set(val, varKeyValue)
-			vars.Set(val, varKeyAfter)
-			vars.Set(old, varKeyBefore)
-			ctx = context.WithValue(ctx, ctxKeySpec, vars)
 
 			// We are checking the value of the field
 
 			if fd.Assert != nil {
+
+				// Reset the variables
+
+				vars.Set(val, varKeyValue)
+				vars.Set(val, varKeyAfter)
+				vars.Set(old, varKeyBefore)
+				ctx = context.WithValue(ctx, ctxKeySpec, vars)
+
 				if chk, err := d.i.e.fetch(ctx, fd.Assert, d.current); err != nil {
 					return err
 				} else if chk, ok := chk.(bool); ok && !chk {
 					return &FieldError{field: key, found: val, check: fd.Assert}
 				}
+
 			}
+
+			// We are checking the permissions of the field
+
+			if fd.Perms != nil {
+
+				if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
+					if k > cnf.AuthDB {
+
+						// Reset the variables
+
+						vars.Set(val, varKeyValue)
+						vars.Set(val, varKeyAfter)
+						vars.Set(old, varKeyBefore)
+						ctx = context.WithValue(ctx, ctxKeySpec, vars)
+
+						switch p := fd.Perms.(type) {
+						case *sql.PermExpression:
+							switch met {
+							case _CREATE:
+								if v, err := d.i.e.fetch(ctx, p.Create, d.current); err != nil {
+									return err
+								} else {
+									if b, ok := v.(bool); !ok || !b {
+										val = old
+									}
+								}
+							case _UPDATE:
+								if v, err := d.i.e.fetch(ctx, p.Update, d.current); err != nil {
+									return err
+								} else {
+									if b, ok := v.(bool); !ok || !b {
+										val = old
+									}
+								}
+							case _DELETE:
+								if v, err := d.i.e.fetch(ctx, p.Delete, d.current); err != nil {
+									return err
+								} else {
+									if b, ok := v.(bool); !ok || !b {
+										val = old
+									}
+								}
+							}
+						}
+
+					}
+				}
+
+			}
+
+			// We are setting the value of the field
 
 			switch val.(type) {
 			default:

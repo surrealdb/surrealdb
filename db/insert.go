@@ -92,7 +92,7 @@ func (d *document) runInsert(ctx context.Context, stm *sql.InsertStatement) (int
 		return nil, &ExistError{exist: d.id}
 	}
 
-	if err = d.merge(ctx, nil); err != nil {
+	if err = d.merge(ctx, met, nil); err != nil {
 		return nil, err
 	}
 

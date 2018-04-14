@@ -98,7 +98,7 @@ func (d *document) runUpsert(ctx context.Context, stm *sql.UpsertStatement) (int
 		return nil, nil
 	}
 
-	if err = d.merge(ctx, nil); err != nil {
+	if err = d.merge(ctx, met, nil); err != nil {
 		return nil, err
 	}
 

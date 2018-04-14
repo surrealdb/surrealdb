@@ -212,6 +212,33 @@ func TestDefine(t *testing.T) {
 
 	})
 
+	Convey("Convert a schemaless to schemafull table, and ensure schemaless fields are still output", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE TABLE person SCHEMALESS;
+		UPDATE person:test SET test=true, other="text";
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD test ON person TYPE boolean;
+		SELECT * FROM person;
+		DEFINE FIELD other ON person TYPE string;
+		SELECT * FROM person;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 8)
+		So(data.Consume(res[2].Result[0]).Get("test").Data(), ShouldEqual, true)
+		So(data.Consume(res[2].Result[0]).Get("other").Data(), ShouldEqual, "text")
+		So(data.Consume(res[5].Result[0]).Get("test").Data(), ShouldEqual, true)
+		So(data.Consume(res[5].Result[0]).Get("other").Data(), ShouldEqual, "text")
+		So(data.Consume(res[7].Result[0]).Get("test").Data(), ShouldEqual, true)
+		So(data.Consume(res[7].Result[0]).Get("other").Data(), ShouldEqual, "text")
+
+	})
+
 	Convey("Define a drop table", t, func() {
 
 		setupDB()
@@ -369,6 +396,101 @@ func TestDefine(t *testing.T) {
 		So(data.Consume(res[5].Result[0]).Get("name.last").Data(), ShouldEqual, "Ottoman")
 		So(data.Consume(res[5].Result[0]).Get("name.full").Data(), ShouldEqual, "Tobias Ottoman")
 		So(data.Consume(res[5].Result[0]).Get("name.alias").Data(), ShouldEqual, "Tobias Ottoman (aka. Toboman)")
+
+	})
+
+	Convey("Specify the permissions of a field so that it is only visible to the correct authentication levels", t, func() {
+
+		setupDB()
+
+		func() {
+
+			txt := `
+			USE NS test DB test;
+			DEFINE TABLE person PERMISSIONS FULL;
+			DEFINE FIELD name ON person PERMISSIONS FULL;
+			DEFINE FIELD pass ON person PERMISSIONS NONE;
+			DEFINE FIELD test ON person PERMISSIONS FOR CREATE, UPDATE FULL FOR SELECT NONE;
+			DEFINE FIELD temp ON person PERMISSIONS NONE;
+			DEFINE FIELD temp.test ON person PERMISSIONS FULL;
+			UPDATE person:test SET name="Tobias", pass="qhmyjahdc4", test="k5n87urq8l", temp.test="zw3wf5ls39";
+			SELECT * FROM person;
+			`
+
+			res, err := Execute(setupKV(), txt, nil)
+			So(err, ShouldBeNil)
+			So(res, ShouldHaveLength, 9)
+			So(res[7].Result, ShouldHaveLength, 1)
+			So(data.Consume(res[7].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+			So(data.Consume(res[7].Result[0]).Get("pass").Data(), ShouldEqual, "qhmyjahdc4")
+			So(data.Consume(res[7].Result[0]).Get("test").Data(), ShouldEqual, "k5n87urq8l")
+			So(data.Consume(res[7].Result[0]).Get("temp.test").Data(), ShouldEqual, "zw3wf5ls39")
+			So(res[8].Result, ShouldHaveLength, 1)
+			So(data.Consume(res[8].Result[0]).Get("name").Data(), ShouldEqual, "Tobias")
+			So(data.Consume(res[8].Result[0]).Get("pass").Data(), ShouldEqual, "qhmyjahdc4")
+			So(data.Consume(res[8].Result[0]).Get("test").Data(), ShouldEqual, "k5n87urq8l")
+			So(data.Consume(res[8].Result[0]).Get("temp.test").Data(), ShouldEqual, "zw3wf5ls39")
+
+		}()
+
+		func() {
+
+			txt := `
+			USE NS test DB test;
+			CREATE person:1 SET name="Silvana", pass="1f65flhfvq", test="35aptguqoj", temp.test="h08ryx3519";
+			UPDATE person:2 SET name="Jonathan", pass="8k796m5mmj", test="1lzdhd6wzg", temp.test="xurnxp8a1e";
+			SELECT * FROM person ORDER BY name;
+			`
+
+			res, err := Execute(setupSC(), txt, nil)
+			So(err, ShouldBeNil)
+			So(res, ShouldHaveLength, 4)
+			So(res[1].Result, ShouldHaveLength, 1)
+			So(data.Consume(res[1].Result[0]).Get("name").Data(), ShouldEqual, "Silvana")
+			So(data.Consume(res[1].Result[0]).Get("pass").Data(), ShouldEqual, nil)
+			So(data.Consume(res[1].Result[0]).Get("test").Data(), ShouldEqual, nil)
+			So(data.Consume(res[1].Result[0]).Get("temp.test").Data(), ShouldEqual, nil)
+			So(res[2].Result, ShouldHaveLength, 1)
+			So(data.Consume(res[2].Result[0]).Get("name").Data(), ShouldEqual, "Jonathan")
+			So(data.Consume(res[2].Result[0]).Get("pass").Data(), ShouldEqual, nil)
+			So(data.Consume(res[2].Result[0]).Get("test").Data(), ShouldEqual, nil)
+			So(data.Consume(res[2].Result[0]).Get("temp.test").Data(), ShouldEqual, nil)
+			So(res[3].Result, ShouldHaveLength, 3)
+			So(data.Consume(res[3].Result[0]).Get("name").Data(), ShouldEqual, "Jonathan")
+			So(data.Consume(res[3].Result[0]).Get("pass").Data(), ShouldEqual, nil)
+			So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, nil)
+			So(data.Consume(res[3].Result[1]).Get("name").Data(), ShouldEqual, "Silvana")
+			So(data.Consume(res[3].Result[1]).Get("pass").Data(), ShouldEqual, nil)
+			So(data.Consume(res[3].Result[1]).Get("test").Data(), ShouldEqual, nil)
+			So(data.Consume(res[3].Result[2]).Get("name").Data(), ShouldEqual, "Tobias")
+			So(data.Consume(res[3].Result[2]).Get("pass").Data(), ShouldEqual, nil)
+			So(data.Consume(res[3].Result[2]).Get("test").Data(), ShouldEqual, nil)
+			So(data.Consume(res[3].Result[2]).Get("temp.test").Data(), ShouldEqual, nil)
+
+		}()
+
+		func() {
+
+			txt := `
+			USE NS test DB test;
+			SELECT * FROM person ORDER BY name;
+			`
+
+			res, err := Execute(setupKV(), txt, nil)
+			So(err, ShouldBeNil)
+			So(res, ShouldHaveLength, 2)
+			So(res[1].Result, ShouldHaveLength, 3)
+			So(data.Consume(res[1].Result[0]).Get("name").Data(), ShouldEqual, "Jonathan")
+			So(data.Consume(res[1].Result[0]).Get("pass").Data(), ShouldEqual, nil)
+			So(data.Consume(res[1].Result[0]).Get("test").Data(), ShouldEqual, "1lzdhd6wzg")
+			So(data.Consume(res[1].Result[1]).Get("name").Data(), ShouldEqual, "Silvana")
+			So(data.Consume(res[1].Result[1]).Get("pass").Data(), ShouldEqual, nil)
+			So(data.Consume(res[1].Result[1]).Get("test").Data(), ShouldEqual, "35aptguqoj")
+			So(data.Consume(res[1].Result[2]).Get("name").Data(), ShouldEqual, "Tobias")
+			So(data.Consume(res[1].Result[2]).Get("pass").Data(), ShouldEqual, "qhmyjahdc4")
+			So(data.Consume(res[1].Result[2]).Get("test").Data(), ShouldEqual, "k5n87urq8l")
+
+		}()
 
 	})
 
