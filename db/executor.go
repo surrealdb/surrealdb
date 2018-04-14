@@ -271,6 +271,9 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 	case *sql.IfStatement:
 		res, err = e.executeIf(ctx, stm)
 
+	case *sql.RunStatement:
+		res, err = e.executeRun(ctx, stm)
+
 	case *sql.InfoStatement:
 		res, err = e.executeInfo(ctx, stm)
 

@@ -120,6 +120,10 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 		return nil, nil
 
+	case *sql.RunStatement:
+
+		return e.fetch(ctx, val.Expr, doc)
+
 	case *sql.IfStatement:
 
 		for k, v := range val.Cond {
@@ -188,6 +192,8 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 		for _, exp := range val.Expr {
 
 			switch exp := exp.(type) {
+			default:
+				out, err = e.fetch(ctx, exp, doc)
 			case *sql.SelectStatement:
 				out, err = e.fetchSelect(ctx, exp, doc)
 			case *sql.CreateStatement:

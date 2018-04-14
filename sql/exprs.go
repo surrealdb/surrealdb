@@ -605,9 +605,13 @@ func (p *parser) parseMult() (exp *MultExpression, err error) {
 
 		var stm Expr
 
-		tok, _, _ := p.mightBe(CREATE, UPDATE, DELETE, RELATE, INSERT, UPSERT)
+		tok, _, _ := p.mightBe(IF, RUN, CREATE, UPDATE, DELETE, RELATE, INSERT, UPSERT)
 
 		switch tok {
+		case IF:
+			stm, err = p.parseIfel()
+		case RUN:
+			stm, err = p.parseRunStatement()
 		case CREATE:
 			p.buf.rw = true
 			stm, err = p.parseCreateStatement()
