@@ -400,9 +400,10 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 				if err = e.dbo.Commit(); err != nil {
 					clear(id)
 				} else {
-					shift(id)
+					flush(id)
 				}
 			}
+
 		}
 
 	}

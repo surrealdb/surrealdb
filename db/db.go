@@ -243,12 +243,6 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 
 	go executor.execute(ctx, ast)
 
-	// Ensure that we flush all websocket events
-	// once the query has been fully processed
-	// whilst ignoring this connection itself.
-
-	defer flush(id)
-
 	// Wait for all of the processed queries to
 	// return results, buffer the output, and
 	// return the output when finished.

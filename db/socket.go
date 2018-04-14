@@ -32,20 +32,13 @@ import (
 type socket struct {
 	mutex sync.Mutex
 	fibre *fibre.Context
-	holds map[string][]interface{}
-	waits map[string][]interface{}
+	items map[string][]interface{}
 	lives map[string]*sql.LiveStatement
 }
 
 func clear(id string) {
 	for _, s := range sockets {
 		s.clear(id)
-	}
-}
-
-func shift(id string) {
-	for _, s := range sockets {
-		s.shift(id)
 	}
 }
 
@@ -82,7 +75,7 @@ func (s *socket) queue(id, query, action string, result interface{}) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.holds[id] = append(s.holds[id], &Dispatch{
+	s.items[id] = append(s.items[id], &Dispatch{
 		Query:  query,
 		Action: action,
 		Result: result,
@@ -95,20 +88,7 @@ func (s *socket) clear(id string) (err error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.holds[id] = nil
-
-	return
-
-}
-
-func (s *socket) shift(id string) (err error) {
-
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	s.waits[id] = s.holds[id]
-
-	s.holds[id] = nil
+	s.items[id] = nil
 
 	return
 
@@ -123,7 +103,7 @@ func (s *socket) flush(id string) (err error) {
 	// notifications for this socket
 	// then ignore this method call.
 
-	if len(s.waits[id]) == 0 {
+	if len(s.items[id]) == 0 {
 		return nil
 	}
 
@@ -133,7 +113,7 @@ func (s *socket) flush(id string) (err error) {
 
 	obj := &fibre.RPCNotification{
 		Method: "notify",
-		Params: s.waits[id],
+		Params: s.items[id],
 	}
 
 	// Check the websocket subprotocol
@@ -157,7 +137,7 @@ func (s *socket) flush(id string) (err error) {
 	// pending message notifications
 	// for this socket when done.
 
-	s.waits[id] = nil
+	s.items[id] = nil
 
 	return
 
