@@ -102,6 +102,16 @@ type IfStatement struct {
 }
 
 // --------------------------------------------------
+// Run
+// --------------------------------------------------
+
+// RunStatement represents a run clause.
+type RunStatement struct {
+	RW   bool `cork:"-" codec:"-"`
+	Expr Expr `cork:"expr" codec:"expr"`
+}
+
+// --------------------------------------------------
 // LET
 // --------------------------------------------------
 

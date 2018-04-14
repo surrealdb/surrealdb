@@ -931,6 +931,36 @@ func (this *IfStatement) UnmarshalCORK(r *cork.Reader) (err error) {
 }
 
 // --------------------------------------------------
+// RunStatement
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&RunStatement{})
+}
+
+func (this *RunStatement) Decode(src []byte) {
+	pack.Decode(src, this)
+}
+
+func (this *RunStatement) Encode() (dst []byte) {
+	return pack.Encode(this)
+}
+
+func (this *RunStatement) ExtendCORK() byte {
+	return 0x72
+}
+
+func (this *RunStatement) MarshalCORK(w *cork.Writer) (err error) {
+	w.EncodeAny(this.Expr)
+	return
+}
+
+func (this *RunStatement) UnmarshalCORK(r *cork.Reader) (err error) {
+	r.DecodeAny(&this.Expr)
+	return
+}
+
+// --------------------------------------------------
 // LiveStatement
 // --------------------------------------------------
 
@@ -947,7 +977,7 @@ func (this *LiveStatement) Encode() (dst []byte) {
 }
 
 func (this *LiveStatement) ExtendCORK() byte {
-	return 0x72
+	return 0x73
 }
 
 func (this *LiveStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -987,7 +1017,7 @@ func (this *SelectStatement) Encode() (dst []byte) {
 }
 
 func (this *SelectStatement) ExtendCORK() byte {
-	return 0x73
+	return 0x74
 }
 
 func (this *SelectStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1041,7 +1071,7 @@ func (this *CreateStatement) Encode() (dst []byte) {
 }
 
 func (this *CreateStatement) ExtendCORK() byte {
-	return 0x74
+	return 0x75
 }
 
 func (this *CreateStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1083,7 +1113,7 @@ func (this *UpdateStatement) Encode() (dst []byte) {
 }
 
 func (this *UpdateStatement) ExtendCORK() byte {
-	return 0x75
+	return 0x76
 }
 
 func (this *UpdateStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1127,7 +1157,7 @@ func (this *DeleteStatement) Encode() (dst []byte) {
 }
 
 func (this *DeleteStatement) ExtendCORK() byte {
-	return 0x76
+	return 0x77
 }
 
 func (this *DeleteStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1171,7 +1201,7 @@ func (this *RelateStatement) Encode() (dst []byte) {
 }
 
 func (this *RelateStatement) ExtendCORK() byte {
-	return 0x77
+	return 0x78
 }
 
 func (this *RelateStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1219,7 +1249,7 @@ func (this *InsertStatement) Encode() (dst []byte) {
 }
 
 func (this *InsertStatement) ExtendCORK() byte {
-	return 0x78
+	return 0x79
 }
 
 func (this *InsertStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1261,7 +1291,7 @@ func (this *UpsertStatement) Encode() (dst []byte) {
 }
 
 func (this *UpsertStatement) ExtendCORK() byte {
-	return 0x79
+	return 0x80
 }
 
 func (this *UpsertStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1303,7 +1333,7 @@ func (this *DefineNamespaceStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineNamespaceStatement) ExtendCORK() byte {
-	return 0x80
+	return 0x81
 }
 
 func (this *DefineNamespaceStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1333,7 +1363,7 @@ func (this *RemoveNamespaceStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveNamespaceStatement) ExtendCORK() byte {
-	return 0x81
+	return 0x82
 }
 
 func (this *RemoveNamespaceStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1363,7 +1393,7 @@ func (this *DefineDatabaseStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineDatabaseStatement) ExtendCORK() byte {
-	return 0x82
+	return 0x83
 }
 
 func (this *DefineDatabaseStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1393,7 +1423,7 @@ func (this *RemoveDatabaseStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveDatabaseStatement) ExtendCORK() byte {
-	return 0x83
+	return 0x84
 }
 
 func (this *RemoveDatabaseStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1423,7 +1453,7 @@ func (this *DefineLoginStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineLoginStatement) ExtendCORK() byte {
-	return 0x84
+	return 0x85
 }
 
 func (this *DefineLoginStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1459,7 +1489,7 @@ func (this *RemoveLoginStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveLoginStatement) ExtendCORK() byte {
-	return 0x85
+	return 0x86
 }
 
 func (this *RemoveLoginStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1491,7 +1521,7 @@ func (this *DefineTokenStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineTokenStatement) ExtendCORK() byte {
-	return 0x86
+	return 0x87
 }
 
 func (this *DefineTokenStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1527,7 +1557,7 @@ func (this *RemoveTokenStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveTokenStatement) ExtendCORK() byte {
-	return 0x87
+	return 0x88
 }
 
 func (this *RemoveTokenStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1559,7 +1589,7 @@ func (this *DefineScopeStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineScopeStatement) ExtendCORK() byte {
-	return 0x88
+	return 0x89
 }
 
 func (this *DefineScopeStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1603,7 +1633,7 @@ func (this *RemoveScopeStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveScopeStatement) ExtendCORK() byte {
-	return 0x89
+	return 0x90
 }
 
 func (this *RemoveScopeStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1633,7 +1663,7 @@ func (this *DefineTableStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineTableStatement) ExtendCORK() byte {
-	return 0x90
+	return 0x91
 }
 
 func (this *DefineTableStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1679,7 +1709,7 @@ func (this *RemoveTableStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveTableStatement) ExtendCORK() byte {
-	return 0x91
+	return 0x92
 }
 
 func (this *RemoveTableStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1709,7 +1739,7 @@ func (this *DefineEventStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineEventStatement) ExtendCORK() byte {
-	return 0x92
+	return 0x93
 }
 
 func (this *DefineEventStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1745,7 +1775,7 @@ func (this *RemoveEventStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveEventStatement) ExtendCORK() byte {
-	return 0x93
+	return 0x94
 }
 
 func (this *RemoveEventStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1777,7 +1807,7 @@ func (this *DefineFieldStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineFieldStatement) ExtendCORK() byte {
-	return 0x94
+	return 0x95
 }
 
 func (this *DefineFieldStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1821,7 +1851,7 @@ func (this *RemoveFieldStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveFieldStatement) ExtendCORK() byte {
-	return 0x95
+	return 0x96
 }
 
 func (this *RemoveFieldStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1853,7 +1883,7 @@ func (this *DefineIndexStatement) Encode() (dst []byte) {
 }
 
 func (this *DefineIndexStatement) ExtendCORK() byte {
-	return 0x96
+	return 0x97
 }
 
 func (this *DefineIndexStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -1889,7 +1919,7 @@ func (this *RemoveIndexStatement) Encode() (dst []byte) {
 }
 
 func (this *RemoveIndexStatement) ExtendCORK() byte {
-	return 0x97
+	return 0x98
 }
 
 func (this *RemoveIndexStatement) MarshalCORK(w *cork.Writer) (err error) {

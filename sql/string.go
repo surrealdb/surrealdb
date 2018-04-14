@@ -168,6 +168,12 @@ func (this InfoStatement) String() string {
 	}
 }
 
+func (this RunStatement) String() string {
+	return print("RUN %v",
+		this.Expr,
+	)
+}
+
 func (this IfStatement) String() string {
 	m := make([]string, len(this.Cond))
 	for k := range this.Cond {

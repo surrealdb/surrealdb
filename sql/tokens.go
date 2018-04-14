@@ -169,6 +169,7 @@ const (
 	RELATE
 	REMOVE
 	RETURN
+	RUN
 	SCHEMAFULL
 	SCHEMALESS
 	SCOPE
@@ -339,6 +340,7 @@ var tokens = [...]string{
 	RELATE:          "RELATE",
 	REMOVE:          "REMOVE",
 	RETURN:          "RETURN",
+	RUN:             "RUN",
 	SCHEMAFULL:      "SCHEMAFULL",
 	SCHEMALESS:      "SCHEMALESS",
 	SCOPE:           "SCOPE",
