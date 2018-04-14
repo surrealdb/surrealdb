@@ -71,6 +71,10 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 	case map[string]interface{}:
 		return deep.Copy(val), nil
 
+	case *sql.Regex:
+
+		return regexp.Compile(val.ID)
+
 	case *sql.Ident:
 
 		switch {

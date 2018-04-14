@@ -887,8 +887,8 @@ func (s *scanner) scanRegexp(chp ...rune) (tok Token, lit string, val interface{
 		}
 	}
 
-	if val, err := regexp.Compile(buf.String()); err == nil {
-		return REGEX, buf.String(), val
+	if _, err := regexp.Compile(buf.String()); err == nil {
+		return REGEX, buf.String(), nil
 	}
 
 	return tok, buf.String(), val

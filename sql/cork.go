@@ -661,6 +661,32 @@ func (this Param) MarshalText() (data []byte, err error) {
 }
 
 // --------------------------------------------------
+// Regex
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&Regex{})
+}
+
+func (this *Regex) ExtendCORK() byte {
+	return 0x53
+}
+
+func (this *Regex) MarshalCORK(w *cork.Writer) (err error) {
+	w.EncodeString(this.ID)
+	return
+}
+
+func (this *Regex) UnmarshalCORK(r *cork.Reader) (err error) {
+	r.DecodeString(&this.ID)
+	return
+}
+
+func (this Regex) MarshalText() (data []byte, err error) {
+	return []byte("ID:" + this.ID), err
+}
+
+// --------------------------------------------------
 // Value
 // --------------------------------------------------
 
@@ -669,7 +695,7 @@ func init() {
 }
 
 func (this *Value) ExtendCORK() byte {
-	return 0x53
+	return 0x54
 }
 
 func (this *Value) MarshalCORK(w *cork.Writer) (err error) {
@@ -695,7 +721,7 @@ func init() {
 }
 
 func (this *Ident) ExtendCORK() byte {
-	return 0x54
+	return 0x55
 }
 
 func (this *Ident) MarshalCORK(w *cork.Writer) (err error) {
@@ -721,7 +747,7 @@ func init() {
 }
 
 func (this *Table) ExtendCORK() byte {
-	return 0x55
+	return 0x56
 }
 
 func (this *Table) MarshalCORK(w *cork.Writer) (err error) {
@@ -747,7 +773,7 @@ func init() {
 }
 
 func (this *Batch) ExtendCORK() byte {
-	return 0x56
+	return 0x57
 }
 
 func (this *Batch) MarshalCORK(w *cork.Writer) (err error) {
@@ -777,7 +803,7 @@ func (this Thing) Bytes() []byte {
 }
 
 func (this *Thing) ExtendCORK() byte {
-	return 0x57
+	return 0x58
 }
 
 func (this *Thing) MarshalCORK(w *cork.Writer) (err error) {
@@ -805,7 +831,7 @@ func init() {
 }
 
 func (this *Point) ExtendCORK() byte {
-	return 0x58
+	return 0x59
 }
 
 func (this *Point) MarshalCORK(w *cork.Writer) (err error) {
@@ -837,7 +863,7 @@ func init() {
 }
 
 func (this *Circle) ExtendCORK() byte {
-	return 0x59
+	return 0x60
 }
 
 func (this *Circle) MarshalCORK(w *cork.Writer) (err error) {
@@ -869,7 +895,7 @@ func init() {
 }
 
 func (this *Polygon) ExtendCORK() byte {
-	return 0x60
+	return 0x61
 }
 
 func (this *Polygon) MarshalCORK(w *cork.Writer) (err error) {

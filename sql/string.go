@@ -564,6 +564,22 @@ func (this Param) String() string {
 }
 
 // ---------------------------------------------
+// Regex
+// ---------------------------------------------
+
+func (this Regexs) String() string {
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
+	}
+	return strings.Join(m, ", ")
+}
+
+func (this Regex) String() string {
+	return print("/%v/", this.ID)
+}
+
+// ---------------------------------------------
 // Value
 // ---------------------------------------------
 

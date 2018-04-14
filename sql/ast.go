@@ -649,6 +649,22 @@ func NewParam(ID string) *Param {
 }
 
 // --------------------------------------------------
+// Regex
+// --------------------------------------------------
+
+// Params represents multiple Regex clauses.
+type Regexs []*Regex
+
+// Regex comment
+type Regex struct {
+	ID string
+}
+
+func NewRegex(ID string) *Regex {
+	return &Regex{ID}
+}
+
+// --------------------------------------------------
 // Value
 // --------------------------------------------------
 

@@ -16,7 +16,6 @@ package sql
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -110,14 +109,14 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 	case PARAM:
 		return &Param{lit}, nil
 
+	case REGEX:
+		return &Regex{lit}, nil
+
 	case DATE:
 		return time.Parse(RFCDate, lit)
 
 	case TIME:
 		return time.Parse(RFCTime, lit)
-
-	case REGEX:
-		return regexp.Compile(lit)
 
 	case NUMBER:
 		val, err := strconv.ParseFloat(lit, 64)
