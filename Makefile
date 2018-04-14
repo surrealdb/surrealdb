@@ -46,12 +46,12 @@ racer:
 .PHONY: build
 build: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 build:
-	$(GO) build -v -installsuffix cgo -ldflags '$(LDF)'
+	$(GO) build -v -ldflags '$(LDF)'
 
 .PHONY: install
 install: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 install:
-	$(GO) install -v -installsuffix cgo -ldflags '$(LDF)'
+	$(GO) install -v -ldflags '$(LDF)'
 
 .PHONY: cover
 cover:
