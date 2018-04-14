@@ -53,15 +53,25 @@ type Dispatch struct {
 
 // Setup sets up the connection with the data layer
 func Setup(opts *cnf.Options) (err error) {
+
 	log.WithPrefix("db").Infof("Starting database")
+
 	db, err = kvs.New(opts)
+
 	return
 }
 
 // Exit shuts down the connection with the data layer
-func Exit() error {
+func Exit() (err error) {
+
 	log.WithPrefix("db").Infof("Gracefully shutting down database")
+
+	for id, so := range sockets {
+		deregister(so.fibre, id)()
+	}
+
 	return db.Close()
+
 }
 
 // Import loads database operations from a reader.
