@@ -114,7 +114,9 @@ func many(res *sql.Rows, err error) ([]kvs.KV, error) {
 		if err != nil {
 			return nil, &kvs.DBError{}
 		}
-		out = append(out, kv)
+		if kv.val != nil {
+			out = append(out, kv)
+		}
 	}
 
 	if err = res.Err(); err != nil {
