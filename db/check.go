@@ -87,7 +87,16 @@ func (d *document) grant(ctx context.Context, met method) (ok bool, err error) {
 	// a scoped request, return an error.
 
 	if p, ok := tb.Perms.(*sql.PermExpression); ok {
-		val, err = d.i.e.fetch(ctx, p.Select, d.current)
+		switch met {
+		case _SELECT:
+			val, err = d.i.e.fetch(ctx, p.Select, d.current)
+		case _CREATE:
+			val, err = d.i.e.fetch(ctx, p.Select, d.current)
+		case _UPDATE:
+			val, err = d.i.e.fetch(ctx, p.Select, d.current)
+		case _DELETE:
+			val, err = d.i.e.fetch(ctx, p.Select, d.initial)
+		}
 	}
 
 	// If the permissions expressions
