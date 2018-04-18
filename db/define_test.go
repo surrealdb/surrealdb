@@ -575,6 +575,36 @@ func TestDefine(t *testing.T) {
 
 	})
 
+	Convey("Define an event for both CREATE and UPDATE events separately", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE EVENT created ON person WHEN $method = "CREATE" THEN (CREATE created);
+		DEFINE EVENT updated ON person WHEN $method = "UPDATE" THEN (CREATE updated);
+		CREATE person:test SET test = 1000;
+		UPDATE person:test SET test = 4000;
+		UPDATE person:test SET test = 2000;
+		UPDATE person:test SET test = 2000;
+		UPDATE person:test SET test = 6000;
+		SELECT * FROM created;
+		SELECT * FROM updated;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 10)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(res[5].Result, ShouldHaveLength, 1)
+		So(res[6].Result, ShouldHaveLength, 1)
+		So(res[7].Result, ShouldHaveLength, 1)
+		So(res[8].Result, ShouldHaveLength, 1)
+		So(res[9].Result, ShouldHaveLength, 4)
+
+	})
+
 	Convey("Define an event when a value changes and set a foreign key on another table", t, func() {
 
 		setupDB()
@@ -592,6 +622,61 @@ func TestDefine(t *testing.T) {
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(res[3].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[3].Result[0]).Get("fk").Data(), ShouldResemble, &sql.Thing{"person", "test"})
+
+	})
+
+	Convey("Define an event when a value changes and update a foreign key array on another table", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE EVENT test ON person WHEN $before.fk != $after.fk THEN (UPDATE $after.fk SET fks += $this);
+		UPDATE person:one SET fk = other:test;
+		UPDATE person:two SET fk = other:test;
+		SELECT * FROM other;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[4].Result[0]).Get("fks").Data(), ShouldResemble, []interface{}{
+			&sql.Thing{"person", "one"},
+			&sql.Thing{"person", "two"},
+		})
+
+	})
+
+	Convey("Define an event when a value changes and update and delete from a foreign key array on another table", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE EVENT test ON person WHEN $before.fk != $after.fk THEN (
+			IF $method != "DELETE" THEN
+				(UPDATE $after.fk SET fks += $this)
+			ELSE
+				(UPDATE $before.fk SET fks -= $this)
+			END
+		);
+		UPDATE person:one SET fk = other:test;
+		UPDATE person:two SET fk = other:test;
+		DELETE FROM person;
+		SELECT * FROM other;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 6)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 0)
+		So(res[5].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[5].Result[0]).Get("fks.length").Data(), ShouldEqual, 0)
 
 	})
 
