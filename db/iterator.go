@@ -232,14 +232,16 @@ func (i *iterator) checkState(ctx context.Context) bool {
 
 func (i *iterator) setupWorkers(ctx context.Context) {
 
+	count := ints.Between(1, maxWorkers, workerCount)
+
 	if i.checkState(ctx) {
 		switch {
 		case i.tasks == 0:
-			for w := 1; w <= workerCount; w++ {
+			for w := 1; w <= count; w++ {
 				go i.setupWorker(ctx, i.jobs, i.vals)
 			}
 		default:
-			for w := 1; w <= ints.Between(1, workerCount, i.tasks); w++ {
+			for w := 1; w <= ints.Between(1, count, i.tasks); w++ {
 				go i.setupWorker(ctx, i.jobs, i.vals)
 			}
 		}
