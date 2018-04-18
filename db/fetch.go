@@ -279,11 +279,11 @@ func (e *executor) fetchPaths(ctx context.Context, doc *data.Doc, exprs ...sql.E
 		case sql.DOT:
 			return e.fetchPaths(ctx, doc, exprs...)
 		case sql.OEDGE:
-			return nil, featureNotImplemented
+			return nil, errFeatureNotImplemented
 		case sql.IEDGE:
-			return nil, featureNotImplemented
+			return nil, errFeatureNotImplemented
 		case sql.BEDGE:
-			return nil, featureNotImplemented
+			return nil, errFeatureNotImplemented
 		}
 	case *sql.PartExpression:
 		switch val := val.Part.(type) {

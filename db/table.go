@@ -61,7 +61,7 @@ func (d *document) table(ctx context.Context, when method) (err error) {
 				// If there are GROUP BY clauses then
 				// let's calculate the
 
-				return featureNotImplemented
+				return errFeatureNotImplemented
 
 				ats := make([]interface{}, len(ft.Group))
 

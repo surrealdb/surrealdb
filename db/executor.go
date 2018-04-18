@@ -165,7 +165,7 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 			if err == nil {
 				res, err = e.operate(ctx, stm)
 			} else {
-				res, err = []interface{}{}, queryNotExecuted
+				res, err = []interface{}{}, errQueryNotExecuted
 			}
 
 			rsp = &Response{

@@ -63,9 +63,31 @@ const (
 )
 
 var (
-	workerCount           = runtime.NumCPU() * 2
-	queryNotExecuted      = errors.New("Query not executed")
-	queryIdentFailed      = errors.New("Found ident but no doc available")
-	featureNotImplemented = errors.New("Feature is not yet implemented")
-	paramSearchKeys       = []string{ctxKeySpec, ctxKeySubs, ctxKeyVars, ctxKeyKeep}
+	// workerCount specifies how many workers should be used
+	// to process each query statement concurrently.
+	workerCount = runtime.NumCPU() * 2
+
+	// queryIdentFailed occurs when a permission query asks
+	// for a field, meaning a document has to be fetched.
+	queryIdentFailed = errors.New("Found ident but no doc available")
+
+	// errQueryNotExecuted occurs when a transaction has
+	// failed, and the following queries are not executed.
+	errQueryNotExecuted = errors.New("Query not executed")
+
+	// errRaceCondition occurs when a record which is locked
+	// for editing, is updated from within a subquery.
+	errRaceCondition = errors.New("Failed to update the same document recursively")
+
+	// errRecursiveOverload occurs when too many subqueries
+	// are executed within one other, causing an endless loop.
+	errRecursiveOverload = errors.New("Infinite loop when running recursive subqueries")
+
+	// errFeatureNotImplemented occurs when a feature which
+	// has not yet been implemented, has been used in a query.
+	errFeatureNotImplemented = errors.New("Feature is not yet implemented")
+
+	// paramSearchKeys specifies the order in which context
+	// variables should be checked for any specified value.
+	paramSearchKeys = []string{ctxKeySpec, ctxKeySubs, ctxKeyVars, ctxKeyKeep}
 )
