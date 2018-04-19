@@ -25,6 +25,14 @@ import (
 // table, and executes them in name order.
 func (d *document) event(ctx context.Context, met method) (err error) {
 
+	// If this document has not changed
+	// then there is no need to perform
+	// any registered events.
+
+	if ok := d.changed(); !ok {
+		return
+	}
+
 	// Get the event values specified
 	// for this table, loop through
 	// them, and compute the events.

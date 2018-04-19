@@ -601,7 +601,7 @@ func TestDefine(t *testing.T) {
 		So(res[6].Result, ShouldHaveLength, 1)
 		So(res[7].Result, ShouldHaveLength, 1)
 		So(res[8].Result, ShouldHaveLength, 1)
-		So(res[9].Result, ShouldHaveLength, 4)
+		So(res[9].Result, ShouldHaveLength, 3)
 
 	})
 
