@@ -233,6 +233,17 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 			return nil, err
 		}
 
+		switch val.Op {
+		case sql.OR:
+			if calcAsBool(l) {
+				return true, nil
+			}
+		case sql.AND:
+			if !calcAsBool(l) {
+				return false, nil
+			}
+		}
+
 		r, err := e.fetch(ctx, val.RHS, doc)
 		if err != nil {
 			return nil, err
