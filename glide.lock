@@ -1,10 +1,10 @@
 hash: c56e5bd935dd1933a6e7370fe3fc67ea26169ec91aa05c171543866c6c2490ed
-updated: 2018-04-14T19:22:29.284814+01:00
+updated: 2018-04-20T16:39:21.326112+01:00
 imports:
 - name: github.com/abcum/bump
   version: 526934c541e071b5a330671c76434b9e32d55638
 - name: github.com/abcum/cork
-  version: 6cbaf5d51f99013c103c95f336e98da8ef04f85d
+  version: c246208017d0b81f2e9a3fc2fb7a993c89153839
 - name: github.com/abcum/fibre
   version: 1b1947da964c0c0a244868279f9476df093eef34
   subpackages:
@@ -66,7 +66,7 @@ imports:
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: 83c435cc65d2862736428b9b4d07d0ab10ad3e4d
+  version: 01d59357d468872339068bcd5d55a00e2463051f
 - name: github.com/mitchellh/mapstructure
   version: 00c29f56e2386353d58c599509e8dc3801b0d716
 - name: github.com/newrelic/go-agent
@@ -95,13 +95,13 @@ imports:
 - name: github.com/spf13/cobra
   version: a1f051bc3eba734da4772d60e2d677f47cf93ef4
 - name: github.com/spf13/pflag
-  version: 1ce0cc6db4029d97571db82f85092fccedb572ce
+  version: 583c0c0531f06d5278b7d917446061adc344b5cd
 - name: github.com/ugorji/go
   version: b4c50a2b199d93b13dc15e78929cfb23bfdf21ab
   subpackages:
   - codec
 - name: golang.org/x/crypto
-  version: b2aa35443fbc700ab74c586ae79b81c171851023
+  version: d6449816ce06963d9d136eee5a56fca5b0616e7e
   subpackages:
   - bcrypt
   - blowfish
@@ -111,7 +111,7 @@ imports:
   - scrypt
   - ssh/terminal
 - name: golang.org/x/net
-  version: b3c676e531a6dc479fa1b35ac961c13f5e2b4d2e
+  version: d41e8174641f662c5a2d1c7a5f9e828788eb8706
   subpackages:
   - bpf
   - context
@@ -121,7 +121,7 @@ imports:
   - ipv4
   - ipv6
 - name: golang.org/x/sys
-  version: 1d206c9fa8975fb4cf00df1dc8bf3283dc24ba0e
+  version: 79b0c6888797020a994db17c8510466c72fe75d9
   subpackages:
   - unix
   - windows
@@ -139,7 +139,7 @@ imports:
   version: 4654dfbb6ad53cb5e27f37d99b02e16c1872fbbb
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: 82b322028c96512b15077093b16a5f1c7ea897ac
+  version: e1d10e7424f54589aa3caa8f87ce2934d1890e45
   subpackages:
   - js
 - name: github.com/jtolds/gls

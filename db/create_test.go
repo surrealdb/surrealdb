@@ -306,4 +306,29 @@ func TestCreate(t *testing.T) {
 
 	})
 
+	Convey("Creating a record with unbounded map or array keys succeeds", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE |test:1000|;
+		CREATE person:test SET tests=(SELECT id FROM test);
+		SELECT * FROM person:test;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Status, ShouldEqual, "OK")
+		So(res[1].Result, ShouldHaveLength, 1000)
+		So(res[2].Status, ShouldEqual, "OK")
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person")
+		So(data.Consume(res[3].Result[0]).Get("tests").Data(), ShouldHaveLength, 1000)
+
+	})
+
 }
