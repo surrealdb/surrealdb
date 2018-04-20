@@ -75,8 +75,6 @@ func (e *executor) executeDelete(ctx context.Context, stm *sql.DeleteStatement) 
 
 func (e *executor) fetchDelete(ctx context.Context, stm *sql.DeleteStatement, doc *data.Doc) (interface{}, error) {
 
-	stm.Echo = sql.BEFORE
-
 	if doc != nil {
 		vars := data.New()
 		vars.Set(doc.Data(), varKeyParent)

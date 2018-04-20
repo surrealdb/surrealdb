@@ -76,8 +76,6 @@ func (e *executor) executeCreate(ctx context.Context, stm *sql.CreateStatement) 
 
 func (e *executor) fetchCreate(ctx context.Context, stm *sql.CreateStatement, doc *data.Doc) (interface{}, error) {
 
-	stm.Echo = sql.AFTER
-
 	if doc != nil {
 		vars := data.New()
 		vars.Set(doc.Data(), varKeyParent)

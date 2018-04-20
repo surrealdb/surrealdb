@@ -54,8 +54,6 @@ func (e *executor) executeUpsert(ctx context.Context, stm *sql.UpsertStatement) 
 
 func (e *executor) fetchUpsert(ctx context.Context, stm *sql.UpsertStatement, doc *data.Doc) (interface{}, error) {
 
-	stm.Echo = sql.AFTER
-
 	if doc != nil {
 		vars := data.New()
 		vars.Set(doc.Data(), varKeyParent)
