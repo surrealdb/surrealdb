@@ -418,10 +418,6 @@ func (d *Doc) Exists(path ...string) bool {
 
 		if a, ok := object.([]interface{}); ok {
 
-			if p == "length" {
-				return len(a) > 0
-			}
-
 			c, _, r := d.what(p, a, choose)
 
 			if len(c) == 0 {
@@ -509,10 +505,6 @@ func (d *Doc) Get(path ...string) *Doc {
 		// the query on the specified items
 
 		if a, ok := object.([]interface{}); ok {
-
-			if p == "length" {
-				return &Doc{data: len(a)}
-			}
 
 			c, _, r := d.what(p, a, choose)
 

@@ -676,7 +676,7 @@ func TestDefine(t *testing.T) {
 		So(res[3].Result, ShouldHaveLength, 1)
 		So(res[4].Result, ShouldHaveLength, 0)
 		So(res[5].Result, ShouldHaveLength, 1)
-		So(data.Consume(res[5].Result[0]).Get("fks.length").Data(), ShouldEqual, 0)
+		So(data.Consume(res[5].Result[0]).Get("fks").Data(), ShouldHaveLength, 0)
 
 	})
 

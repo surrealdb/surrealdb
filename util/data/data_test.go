@@ -363,20 +363,12 @@ func TestOperations(t *testing.T) {
 		So(doc.Exists("the.item"), ShouldBeTrue)
 	})
 
-	Convey("Does unset length of item exist", t, func() {
-		So(doc.Exists("the.item.emptys.length"), ShouldBeFalse)
-	})
-
 	Convey("Does unset array item exist", t, func() {
 		So(doc.Exists("the.item.emptys.0.id"), ShouldBeFalse)
 	})
 
 	Convey("Does unset multi array item exist", t, func() {
 		So(doc.Exists("the.item.emptys.*.id"), ShouldBeFalse)
-	})
-
-	Convey("Does length of item exist", t, func() {
-		So(doc.Exists("the.item.arrays.length"), ShouldBeTrue)
 	})
 
 	Convey("Does array item exist", t, func() {
@@ -614,7 +606,6 @@ func TestOperations(t *testing.T) {
 
 	Convey("Can get array", t, func() {
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 1)
 	})
 
 	Convey("Can set array", t, func() {
@@ -622,7 +613,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(set.Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm"})
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 4)
 	})
 
 	Convey("Can see if array contains valid", t, func() {
@@ -653,54 +643,46 @@ func TestOperations(t *testing.T) {
 		_, err := doc.Inc("Sunny", "the.item.tags")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm", "Sunny"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 5)
 	})
 
 	Convey("Can add duplicate to array", t, func() {
 		_, err := doc.Inc("Sunny", "the.item.tags")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm", "Sunny"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 5)
 	})
 
 	Convey("Can add multiple to array", t, func() {
 		_, err := doc.Inc([]interface{}{"Sunny", "Snowy", "Icy"}, "the.item.tags")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm", "Sunny", "Snowy", "Icy"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 7)
 	})
 
 	Convey("Can del single from array", t, func() {
 		_, err := doc.Dec("Sunny", "the.item.tags")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm", "Snowy", "Icy"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 6)
 	})
 
 	Convey("Can del multiple from array", t, func() {
 		_, err := doc.Dec([]interface{}{"Snowy", "Icy"}, "the.item.tags")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 4)
 	})
 
 	Convey("Can get array → *", t, func() {
 		So(doc.Get("the.item.tags.*").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 4)
 	})
 
 	Convey("Can del array → 2", t, func() {
 		err := doc.Del("the.item.tags.2")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Warm"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
 	})
 
 	Convey("Can't del array → 5", t, func() {
 		err := doc.Del("the.item.tags.5")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Warm"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
 	})
 
 	Convey("Can set array → 0", t, func() {
@@ -708,7 +690,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(set.Data(), ShouldResemble, "Tepid")
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Tepid", "Humid", "Warm"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
 	})
 
 	Convey("Can't set array → 5", t, func() {
@@ -716,7 +697,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(set.Data(), ShouldResemble, nil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Tepid", "Humid", "Warm"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
 	})
 
 	Convey("Can set array → first", t, func() {
@@ -725,7 +705,6 @@ func TestOperations(t *testing.T) {
 		So(set.Data(), ShouldResemble, "Test1")
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Test1", "Humid", "Warm"})
 		So(doc.Get("the.item.tags.0").Data(), ShouldResemble, doc.Get("the.item.tags.first").Data())
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
 	})
 
 	Convey("Can set array → last", t, func() {
@@ -734,7 +713,6 @@ func TestOperations(t *testing.T) {
 		So(set.Data(), ShouldResemble, "Test2")
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Test1", "Humid", "Test2"})
 		So(doc.Get("the.item.tags.2").Data(), ShouldResemble, doc.Get("the.item.tags.last").Data())
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
 	})
 
 	Convey("Can del array → first", t, func() {
@@ -742,7 +720,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Humid", "Test2"})
 		So(doc.Get("the.item.tags.0").Data(), ShouldResemble, doc.Get("the.item.tags.first").Data())
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 2)
 	})
 
 	Convey("Can del array → last", t, func() {
@@ -750,7 +727,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Humid"})
 		So(doc.Get("the.item.tags.0").Data(), ShouldResemble, doc.Get("the.item.tags.last").Data())
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 1)
 	})
 
 	Convey("Can set array → *", t, func() {
@@ -758,28 +734,24 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(set.Data(), ShouldResemble, []interface{}{"Unknown"})
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Unknown"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 1)
 	})
 
 	Convey("Can del array → *", t, func() {
 		err := doc.Del("the.item.tags.*")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 0)
 	})
 
 	Convey("Can del single from array", t, func() {
 		_, err := doc.Inc([]interface{}{"Hot", "Humid", "Sticky", "Warm", "Snowy", "Icy"}, "the.item.tags")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Hot", "Humid", "Sticky", "Warm", "Snowy", "Icy"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 6)
 	})
 
 	Convey("Can del single from array", t, func() {
 		err := doc.Del("the.item.tags[0:3]")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 2)
 	})
 
 	Convey("Can add to array", t, func() {
@@ -787,7 +759,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(set.Data(), ShouldHaveLength, 3)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy", "None"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
 	})
 
 	Convey("Can add to array", t, func() {
@@ -795,7 +766,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(set.Data(), ShouldHaveLength, 3)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy", "None"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
 	})
 
 	Convey("Can del from array", t, func() {
@@ -803,7 +773,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(set.Data(), ShouldHaveLength, 2)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 2)
 	})
 
 	Convey("Can append to array", t, func() {
@@ -811,7 +780,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(set.Data(), ShouldHaveLength, 3)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy", "None"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 3)
 	})
 
 	Convey("Can append to array", t, func() {
@@ -819,7 +787,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(set.Data(), ShouldHaveLength, 4)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy", "None", "None"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 4)
 	})
 
 	Convey("Can append to array", t, func() {
@@ -827,7 +794,6 @@ func TestOperations(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(set.Data(), ShouldHaveLength, 5)
 		So(doc.Get("the.item.tags").Data(), ShouldResemble, []interface{}{"Snowy", "Icy", "None", "None", "None"})
-		So(doc.Get("the.item.tags.length").Data(), ShouldResemble, 5)
 	})
 
 	Convey("Can del array", t, func() {
