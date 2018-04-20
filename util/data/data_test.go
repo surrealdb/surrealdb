@@ -872,36 +872,36 @@ func TestOperations(t *testing.T) {
 		err := doc.Del("the.item.arrays.0.id")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.arrays.0.id").Data(), ShouldResemble, nil)
-		So(doc.Get("the.item.arrays.*.id").Data(), ShouldResemble, []interface{}{"ID2"})
+		So(doc.Get("the.item.arrays.*.id").Data(), ShouldResemble, []interface{}{nil, "ID2"})
 	})
 
 	Convey("Can't del array → 5 → key", t, func() {
 		err := doc.Del("the.item.arrays.5.id")
 		So(err, ShouldBeNil)
-		So(doc.Get("the.item.arrays.*.id").Data(), ShouldResemble, []interface{}{"ID2"})
+		So(doc.Get("the.item.arrays.*.id").Data(), ShouldResemble, []interface{}{nil, "ID2"})
 	})
 
 	Convey("Can del array → * → key", t, func() {
 		err := doc.Del("the.item.arrays.*.id")
 		So(err, ShouldBeNil)
 		So(doc.Get("the.item.arrays.0.id").Data(), ShouldResemble, nil)
-		So(doc.Get("the.item.arrays.*.id").Data(), ShouldResemble, []interface{}{})
+		So(doc.Get("the.item.arrays.*.id").Data(), ShouldResemble, []interface{}{nil, nil})
 	})
 
 	// ----------------------------------------------------------------------------------------------------
 
 	Convey("Can get object → key", t, func() {
-		So(doc.Get("the.item.arrays.*.one").Data(), ShouldResemble, []interface{}{"one"})
+		So(doc.Get("the.item.arrays.*.one").Data(), ShouldResemble, []interface{}{"one", nil})
 	})
 
 	Convey("Can get object → key", t, func() {
-		So(doc.Get("the.item.arrays.*.two").Data(), ShouldResemble, []interface{}{"two"})
+		So(doc.Get("the.item.arrays.*.two").Data(), ShouldResemble, []interface{}{nil, "two"})
 	})
 
 	// ----------------------------------------------------------------------------------------------------
 
 	Convey("Can get array → * → object → !", t, func() {
-		So(doc.Get("the.item.arrays.*.selected.none").Data(), ShouldResemble, []interface{}{})
+		So(doc.Get("the.item.arrays.*.selected.none").Data(), ShouldResemble, []interface{}{nil, nil})
 	})
 
 	Convey("Can set array → * → object → !", t, func() {

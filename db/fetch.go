@@ -86,6 +86,9 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 			doc.Fetch(func(key string, val interface{}) interface{} {
 				switch res := val.(type) {
+				case []interface{}:
+					val, _ = e.fetchArray(ctx, res, doc)
+					return val
 				case *sql.Thing:
 					val, _ = e.fetchThing(ctx, res, doc)
 					return val
@@ -106,6 +109,9 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 				obj.Fetch(func(key string, val interface{}) interface{} {
 					switch res := val.(type) {
+					case []interface{}:
+						val, _ = e.fetchArray(ctx, res, doc)
+						return val
 					case *sql.Thing:
 						val, _ = e.fetchThing(ctx, res, doc)
 						return val
@@ -328,11 +334,12 @@ func (e *executor) fetchPaths(ctx context.Context, doc *data.Doc, exprs ...sql.E
 func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc) (interface{}, error) {
 
 	res, err := e.executeSelect(ctx, &sql.SelectStatement{
-		KV:   cnf.Settings.DB.Base,
-		NS:   ctx.Value(ctxKeyNs).(string),
-		DB:   ctx.Value(ctxKeyDb).(string),
-		Expr: []*sql.Field{{Expr: &sql.All{}}},
-		What: []sql.Expr{val},
+		KV:       cnf.Settings.DB.Base,
+		NS:       ctx.Value(ctxKeyNs).(string),
+		DB:       ctx.Value(ctxKeyDb).(string),
+		Expr:     []*sql.Field{{Expr: &sql.All{}}},
+		What:     []sql.Expr{val},
+		Parallel: 1,
 	})
 
 	if err != nil {
@@ -344,6 +351,25 @@ func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc
 	}
 
 	return nil, nil
+
+}
+
+func (e *executor) fetchArray(ctx context.Context, val []interface{}, doc *data.Doc) (interface{}, error) {
+
+	res, err := e.executeSelect(ctx, &sql.SelectStatement{
+		KV:       cnf.Settings.DB.Base,
+		NS:       ctx.Value(ctxKeyNs).(string),
+		DB:       ctx.Value(ctxKeyDb).(string),
+		Expr:     []*sql.Field{{Expr: &sql.All{}}},
+		What:     []sql.Expr{val},
+		Parallel: 1,
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return res, nil
 
 }
 

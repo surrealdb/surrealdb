@@ -58,6 +58,11 @@ func Consume(input interface{}) *Doc {
 	return &Doc{data: input}
 }
 
+// Consume converts a GO interface into a data object.
+func ConsumeWithFetch(input interface{}, fetcher Fetcher) *Doc {
+	return &Doc{data: input, call: fetcher}
+}
+
 // Data returns the internal data object as an interface.
 func (d *Doc) Data() interface{} {
 	return d.data
@@ -428,7 +433,7 @@ func (d *Doc) Exists(path ...string) bool {
 				if d.call != nil && len(path[k+1:]) > 0 {
 					c[0] = d.call(p, c[0])
 				}
-				return Consume(c[0]).Exists(path[k+1:]...)
+				return ConsumeWithFetch(c[0], d.call).Exists(path[k+1:]...)
 			}
 
 			if r == many {
@@ -436,7 +441,7 @@ func (d *Doc) Exists(path ...string) bool {
 					if d.call != nil && len(path[k+1:]) > 0 {
 						v = d.call(p, v)
 					}
-					if !Consume(v).Exists(path[k+1:]...) {
+					if !ConsumeWithFetch(v, d.call).Exists(path[k+1:]...) {
 						return false
 					}
 				}
@@ -516,7 +521,7 @@ func (d *Doc) Get(path ...string) *Doc {
 				if d.call != nil && len(path[k+1:]) > 0 {
 					c[0] = d.call(p, c[0])
 				}
-				return Consume(c[0]).Get(path[k+1:]...)
+				return ConsumeWithFetch(c[0], d.call).Get(path[k+1:]...)
 			}
 
 			if r == many {
@@ -525,10 +530,8 @@ func (d *Doc) Get(path ...string) *Doc {
 					if d.call != nil && len(path[k+1:]) > 0 {
 						v = d.call(p, v)
 					}
-					res := Consume(v).Get(path[k+1:]...)
-					if res.data != nil {
-						out = append(out, res.data)
-					}
+					res := ConsumeWithFetch(v, d.call).Get(path[k+1:]...)
+					out = append(out, res.data)
 				}
 				return &Doc{data: out}
 			}
@@ -608,7 +611,7 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 					a[i[0]] = value
 					object = a[i[0]]
 				} else {
-					return Consume(a[i[0]]).Set(value, path[k+1:]...)
+					return ConsumeWithFetch(a[i[0]], d.call).Set(value, path[k+1:]...)
 				}
 			}
 
@@ -619,7 +622,7 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 						a[i[j]] = value
 						out = append(out, value)
 					} else {
-						res, _ := Consume(v).Set(value, path[k+1:]...)
+						res, _ := ConsumeWithFetch(v, d.call).Set(value, path[k+1:]...)
 						if res.data != nil {
 							out = append(out, res.data)
 						}
@@ -699,7 +702,7 @@ func (d *Doc) Del(path ...string) error {
 					d.Set(c, path[:len(path)-1]...)
 				} else {
 					if len(c) != 0 {
-						return Consume(c[0]).Del(path[k+1:]...)
+						return ConsumeWithFetch(c[0], d.call).Del(path[k+1:]...)
 					}
 				}
 			}
@@ -709,7 +712,7 @@ func (d *Doc) Del(path ...string) error {
 					d.Set(c, path[:len(path)-1]...)
 				} else {
 					for _, v := range c {
-						Consume(v).Del(path[k+1:]...)
+						ConsumeWithFetch(v, d.call).Del(path[k+1:]...)
 					}
 					break
 				}
@@ -766,7 +769,7 @@ func (d *Doc) ArrayAdd(value interface{}, path ...string) (*Doc, error) {
 	} else {
 		for _, v := range a {
 			if reflect.DeepEqual(v, value) {
-				return Consume(a), nil
+				return ConsumeWithFetch(a, d.call), nil
 			}
 		}
 		a = append(a, value)
@@ -974,7 +977,7 @@ func (d *Doc) each(exec Iterator, prev []string) error {
 			var keep []string
 			keep = append(keep, prev...)
 			keep = append(keep, k)
-			Consume(v).each(exec, keep)
+			ConsumeWithFetch(v, d.call).each(exec, keep)
 		}
 		return nil
 	}
@@ -989,7 +992,7 @@ func (d *Doc) each(exec Iterator, prev []string) error {
 			var keep []string
 			keep = append(keep, prev...)
 			keep = append(keep, fmt.Sprintf("[%d]", i))
-			Consume(v).each(exec, keep)
+			ConsumeWithFetch(v, d.call).each(exec, keep)
 		}
 		return nil
 	}
@@ -1072,7 +1075,7 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 					keep = append(keep, prev...)
 					keep = append(keep, path[:k]...)
 					keep = append(keep, fmt.Sprintf("[%d]", i[0]))
-					return Consume(c[0]).walk(exec, keep, path[k+1:]...)
+					return ConsumeWithFetch(c[0], d.call).walk(exec, keep, path[k+1:]...)
 				}
 			}
 
@@ -1091,7 +1094,7 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 						keep = append(keep, prev...)
 						keep = append(keep, path[:k]...)
 						keep = append(keep, fmt.Sprintf("[%d]", i[j]))
-						if err := Consume(v).walk(exec, keep, path[k+1:]...); err != nil {
+						if err := ConsumeWithFetch(v, d.call).walk(exec, keep, path[k+1:]...); err != nil {
 							return err
 						}
 					}

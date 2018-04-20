@@ -1050,7 +1050,7 @@ func isThingChar(ch rune) bool {
 
 // isExprsChar returns true if the rune is allowed in a IDENT.
 func isExprsChar(ch rune) bool {
-	return isLetter(ch) || isNumber(ch) || ch == '.' || ch == '_' || ch == '*' || ch == '[' || ch == ']'
+	return isLetter(ch) || isNumber(ch) || ch == '.' || ch == '_' || ch == '*' || ch == '[' || ch == '$' || ch == ']'
 }
 
 // eof represents a marker rune for the end of the reader.
