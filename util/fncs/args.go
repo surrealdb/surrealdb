@@ -25,6 +25,12 @@ import (
 
 var defaultTime = time.Unix(0, 0)
 
+func copySlice(arr []interface{}) (out []interface{}) {
+	out = make([]interface{}, len(arr))
+	copy(out, arr)
+	return
+}
+
 func outputFloat(val float64) (interface{}, error) {
 	switch {
 	case math.IsNaN(val):
@@ -176,20 +182,18 @@ func ensureDuration(val interface{}) (out time.Duration, ok bool) {
 
 func ensureSlice(args interface{}) (out []interface{}, ok bool) {
 	if i, ok := args.([]interface{}); ok {
-		out = i
+		return i, true
 	} else {
-		out = []interface{}{args}
+		return []interface{}{args}, false
 	}
-	return out, true
 }
 
 func ensureObject(args interface{}) (out map[string]interface{}, ok bool) {
 	if i, ok := args.(map[string]interface{}); ok {
-		out = i
+		return i, true
 	} else {
-		out = map[string]interface{}{}
+		return map[string]interface{}{}, false
 	}
-	return out, true
 }
 
 func ensureInts(args interface{}) (out []int64) {

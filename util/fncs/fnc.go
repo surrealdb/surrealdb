@@ -55,6 +55,14 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 	case "count.not":
 		return countNot(ctx, args...)
 
+	// Purge implementation
+	case "purge":
+		return purge(ctx, args...)
+	case "purge.if":
+		return purgeIf(ctx, args...)
+	case "purge.not":
+		return purgeNot(ctx, args...)
+
 	// Json implementation
 	case "json.decode":
 		return jsonDecode(ctx, args...)

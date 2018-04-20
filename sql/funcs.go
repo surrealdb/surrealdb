@@ -88,6 +88,12 @@ var funcs = map[string]map[int]interface{}{
 	"count.if":  {2: nil},
 	"count.not": {2: nil},
 
+	// Purge implementation
+
+	"purge":     {1: nil},
+	"purge.if":  {2: nil},
+	"purge.not": {2: nil},
+
 	// Json implementation
 	"json.decode": {1: nil},
 	"json.encode": {1: nil},
