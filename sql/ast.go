@@ -749,7 +749,7 @@ type Thing struct {
 func ParseThing(val string) *Thing {
 	r := strings.NewReader(val)
 	s := newScanner(r)
-	if t, _, v := s.scanThing(); t == THING {
+	if t, _, v := s.scanIdiom(); t == THING {
 		return v.(*Thing)
 	}
 	return nil
