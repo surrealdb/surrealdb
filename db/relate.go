@@ -68,6 +68,8 @@ func (e *executor) executeRelate(ctx context.Context, stm *sql.RelateStatement) 
 
 func (e *executor) fetchRelate(ctx context.Context, stm *sql.RelateStatement, doc *data.Doc) (interface{}, error) {
 
+	ctx = dive(ctx)
+
 	if doc != nil {
 		vars := data.New()
 		vars.Set(doc.Data(), varKeyParent)

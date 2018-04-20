@@ -76,6 +76,8 @@ func (e *executor) executeCreate(ctx context.Context, stm *sql.CreateStatement) 
 
 func (e *executor) fetchCreate(ctx context.Context, stm *sql.CreateStatement, doc *data.Doc) (interface{}, error) {
 
+	ctx = dive(ctx)
+
 	if doc != nil {
 		vars := data.New()
 		vars.Set(doc.Data(), varKeyParent)

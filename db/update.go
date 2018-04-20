@@ -75,6 +75,8 @@ func (e *executor) executeUpdate(ctx context.Context, stm *sql.UpdateStatement) 
 
 func (e *executor) fetchUpdate(ctx context.Context, stm *sql.UpdateStatement, doc *data.Doc) (interface{}, error) {
 
+	ctx = dive(ctx)
+
 	if doc != nil {
 		vars := data.New()
 		vars.Set(doc.Data(), varKeyParent)

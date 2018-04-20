@@ -84,6 +84,8 @@ func (e *executor) executeSelect(ctx context.Context, stm *sql.SelectStatement) 
 
 func (e *executor) fetchSelect(ctx context.Context, stm *sql.SelectStatement, doc *data.Doc) (interface{}, error) {
 
+	ctx = dive(ctx)
+
 	if doc != nil {
 		vars := data.New()
 		vars.Set(doc.Data(), varKeyParent)

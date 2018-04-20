@@ -54,6 +54,8 @@ func (e *executor) executeInsert(ctx context.Context, stm *sql.InsertStatement) 
 
 func (e *executor) fetchInsert(ctx context.Context, stm *sql.InsertStatement, doc *data.Doc) (interface{}, error) {
 
+	ctx = dive(ctx)
+
 	if doc != nil {
 		vars := data.New()
 		vars.Set(doc.Data(), varKeyParent)
