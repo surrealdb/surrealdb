@@ -854,7 +854,7 @@ func (p *parser) parsePath(expr ...Expr) (path *PathExpression, err error) {
 
 		part, err = p.parseStep()
 		if err != nil {
-			return nil, err
+			return
 		}
 
 		if part == nil {
@@ -877,7 +877,7 @@ func (p *parser) parsePath(expr ...Expr) (path *PathExpression, err error) {
 
 		join, err = p.parseJoin()
 		if err != nil {
-			return nil, err
+			return
 		}
 
 		if join == nil {
@@ -893,7 +893,7 @@ func (p *parser) parsePath(expr ...Expr) (path *PathExpression, err error) {
 
 		part, err = p.parseStep()
 		if err != nil {
-			return nil, err
+			return
 		}
 
 		if part == nil {
