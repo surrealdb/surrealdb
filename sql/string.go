@@ -214,7 +214,7 @@ func (this KillStatement) String() string {
 }
 
 func (this SelectStatement) String() string {
-	return print("SELECT %v FROM %v%v%v%v%v%v%v%v",
+	return print("SELECT %v FROM %v%v%v%v%v%v%v%v%v",
 		this.Expr,
 		this.What,
 		maybe(this.Cond != nil, print(" WHERE %v", this.Cond)),
@@ -222,6 +222,7 @@ func (this SelectStatement) String() string {
 		this.Order,
 		maybe(this.Limit != nil, print(" LIMIT %v", this.Limit)),
 		maybe(this.Start != nil, print(" START %v", this.Start)),
+		this.Fetch,
 		maybe(this.Version != nil, print(" VERSION %v", this.Version)),
 		maybe(this.Timeout > 0, print(" TIMEOUT %v", this.Timeout.String())),
 	)
@@ -523,6 +524,29 @@ func (this Order) String() string {
 	return print("%v %v",
 		this.Expr,
 		maybe(this.Dir, "ASC", "DESC"),
+	)
+}
+
+// ---------------------------------------------
+// Fetch
+// ---------------------------------------------
+
+func (this Fetchs) String() string {
+	if len(this) == 0 {
+		return ""
+	}
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
+	}
+	return print(" FETCH %v",
+		strings.Join(m, ", "),
+	)
+}
+
+func (this Fetch) String() string {
+	return print("%v",
+		this.Expr,
 	)
 }
 

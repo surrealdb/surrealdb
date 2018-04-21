@@ -43,7 +43,7 @@ type Doc struct {
 }
 
 // Fetcher is used when fetching values.
-type Fetcher func(key string, val interface{}) interface{}
+type Fetcher func(key string, val interface{}, path []string) interface{}
 
 // Iterator is used when iterating over items.
 type Iterator func(key string, val interface{}) error
@@ -430,16 +430,16 @@ func (d *Doc) Exists(path ...string) bool {
 			}
 
 			if r == one {
-				if d.call != nil && len(path[k+1:]) > 0 {
-					c[0] = d.call(p, c[0])
+				if d.call != nil {
+					c[0] = d.call(p, c[0], path[k+1:])
 				}
 				return ConsumeWithFetch(c[0], d.call).Exists(path[k+1:]...)
 			}
 
 			if r == many {
 				for _, v := range c {
-					if d.call != nil && len(path[k+1:]) > 0 {
-						v = d.call(p, v)
+					if d.call != nil {
+						v = d.call(p, v, path[k+1:])
 					}
 					if !ConsumeWithFetch(v, d.call).Exists(path[k+1:]...) {
 						return false
@@ -494,8 +494,8 @@ func (d *Doc) Get(path ...string) *Doc {
 		if m, ok := object.(map[string]interface{}); ok {
 			switch p {
 			default:
-				if d.call != nil && len(path[k+1:]) > 0 {
-					object = d.call(p, m[p])
+				if d.call != nil {
+					object = d.call(p, m[p], path[k+1:])
 				} else {
 					object = m[p]
 				}
@@ -518,8 +518,8 @@ func (d *Doc) Get(path ...string) *Doc {
 			}
 
 			if r == one {
-				if d.call != nil && len(path[k+1:]) > 0 {
-					c[0] = d.call(p, c[0])
+				if d.call != nil {
+					c[0] = d.call(p, c[0], path[k+1:])
 				}
 				return ConsumeWithFetch(c[0], d.call).Get(path[k+1:]...)
 			}
@@ -527,8 +527,8 @@ func (d *Doc) Get(path ...string) *Doc {
 			if r == many {
 				out := []interface{}{}
 				for _, v := range c {
-					if d.call != nil && len(path[k+1:]) > 0 {
-						v = d.call(p, v)
+					if d.call != nil {
+						v = d.call(p, v, path[k+1:])
 					}
 					res := ConsumeWithFetch(v, d.call).Get(path[k+1:]...)
 					out = append(out, res.data)
@@ -610,6 +610,7 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 				if k == len(path)-1 {
 					a[i[0]] = value
 					object = a[i[0]]
+					continue
 				} else {
 					return ConsumeWithFetch(a[i[0]], d.call).Set(value, path[k+1:]...)
 				}
@@ -700,6 +701,7 @@ func (d *Doc) Del(path ...string) error {
 			if r == one {
 				if k == len(path)-1 {
 					d.Set(c, path[:len(path)-1]...)
+					continue
 				} else {
 					if len(c) != 0 {
 						return ConsumeWithFetch(c[0], d.call).Del(path[k+1:]...)
@@ -710,6 +712,7 @@ func (d *Doc) Del(path ...string) error {
 			if r == many {
 				if k == len(path)-1 {
 					d.Set(c, path[:len(path)-1]...)
+					continue
 				} else {
 					for _, v := range c {
 						ConsumeWithFetch(v, d.call).Del(path[k+1:]...)

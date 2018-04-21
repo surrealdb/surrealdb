@@ -1766,6 +1766,58 @@ func TestSelect(t *testing.T) {
 
 	})
 
+	Convey("Fetch records using a fetchplan to fetch remote records easily", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE person:test SET
+			one=tester:test,
+			mult=[],
+			mult+=temper:one,
+			mult+=temper:two,
+			mult+=temper:tre
+		;
+		CREATE tester:test SET tags=["some","tags"];
+		CREATE temper:one SET tester=tester:test;
+		CREATE temper:two SET tester=tester:test;
+		CREATE temper:tre SET tester=tester:test;
+		SELECT * FROM person:test FETCH one, mult, mult.*.tester;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 7)
+		So(res[1].Result, ShouldHaveLength, 1)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(res[5].Result, ShouldHaveLength, 1)
+		So(res[6].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[6].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[6].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person")
+		So(data.Consume(res[6].Result[0]).Get("one.meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[6].Result[0]).Get("one.meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[6].Result[0]).Get("one.tags").Data(), ShouldResemble, []interface{}{"some", "tags"})
+		So(data.Consume(res[6].Result[0]).Get("mult[0].meta.id").Data(), ShouldEqual, "one")
+		So(data.Consume(res[6].Result[0]).Get("mult[0].meta.tb").Data(), ShouldEqual, "temper")
+		So(data.Consume(res[6].Result[0]).Get("mult[0].tester.meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[6].Result[0]).Get("mult[0].tester.meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[6].Result[0]).Get("mult[0].tester.tags").Data(), ShouldResemble, []interface{}{"some", "tags"})
+		So(data.Consume(res[6].Result[0]).Get("mult[1].meta.id").Data(), ShouldEqual, "two")
+		So(data.Consume(res[6].Result[0]).Get("mult[1].meta.tb").Data(), ShouldEqual, "temper")
+		So(data.Consume(res[6].Result[0]).Get("mult[1].tester.meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[6].Result[0]).Get("mult[1].tester.meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[6].Result[0]).Get("mult[1].tester.tags").Data(), ShouldResemble, []interface{}{"some", "tags"})
+		So(data.Consume(res[6].Result[0]).Get("mult[2].meta.id").Data(), ShouldEqual, "tre")
+		So(data.Consume(res[6].Result[0]).Get("mult[2].meta.tb").Data(), ShouldEqual, "temper")
+		So(data.Consume(res[6].Result[0]).Get("mult[2].tester.meta.id").Data(), ShouldEqual, "test")
+		So(data.Consume(res[6].Result[0]).Get("mult[2].tester.meta.tb").Data(), ShouldEqual, "tester")
+		So(data.Consume(res[6].Result[0]).Get("mult[2].tester.tags").Data(), ShouldResemble, []interface{}{"some", "tags"})
+
+	})
+
 	Convey("Version records using a datetime", t, func() {
 
 		setupDB()

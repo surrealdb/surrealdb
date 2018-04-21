@@ -303,7 +303,7 @@ func TestOperations(t *testing.T) {
 	// ----------------------------------------------------------------------------------------------------
 
 	Convey("Can set fetcher function", t, func() {
-		doc.Fetch(func(key string, val interface{}) interface{} {
+		doc.Fetch(func(key string, val interface{}, path []string) interface{} {
 			return val
 		})
 	})

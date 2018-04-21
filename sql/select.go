@@ -55,6 +55,10 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 		return nil, err
 	}
 
+	if stmt.Fetch, err = p.parseFetch(); err != nil {
+		return nil, err
+	}
+
 	if stmt.Version, err = p.parseVersion(); err != nil {
 		return nil, err
 	}
@@ -310,6 +314,52 @@ func (p *parser) parseStart() (Expr, error) {
 	}
 
 	return p.declare(tok, lit)
+
+}
+
+func (p *parser) parseFetch() (mul Fetchs, err error) {
+
+	// The next token that we expect to see is a
+	// GROUP token, and if we don't find one then
+	// return nil, with no error.
+
+	if _, _, exi := p.mightBe(FETCH); !exi {
+		return nil, nil
+	}
+
+	for {
+
+		var tok Token
+		var lit string
+
+		one := &Fetch{}
+
+		tok, lit, err = p.shouldBe(IDENT, EXPR)
+		if err != nil {
+			return nil, &ParseError{Found: lit, Expected: []string{"field name"}}
+		}
+
+		one.Expr, err = p.declare(tok, lit)
+		if err != nil {
+			return nil, err
+		}
+
+		// Append the single expression to the array
+		// of return statement expressions.
+
+		mul = append(mul, one)
+
+		// Check to see if the next token is a comma
+		// and if not, then break out of the loop,
+		// otherwise repeat until we find no comma.
+
+		if _, _, exi := p.mightBe(COMMA); !exi {
+			break
+		}
+
+	}
+
+	return
 
 }
 

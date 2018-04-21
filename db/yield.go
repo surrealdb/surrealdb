@@ -88,6 +88,7 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 
 	var exps sql.Fields
 	var grps sql.Groups
+	var fchs sql.Fetchs
 
 	switch stm := stm.(type) {
 	case *sql.LiveStatement:
@@ -95,6 +96,7 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 	case *sql.SelectStatement:
 		exps = stm.Expr
 		grps = stm.Group
+		fchs = stm.Fetch
 	}
 
 	// If there are no field expressions
@@ -170,12 +172,20 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 		return nil, err
 	}
 
+	// First of all, check to see if an ALL
+	// expression has been specified, and if
+	// it has then use the full document.
+
 	for _, e := range exps {
 		if _, ok := e.Expr.(*sql.All); ok {
 			out = doc
 			break
 		}
 	}
+
+	// Next let's see the field expressions
+	// which have been requested, and add
+	// these to the output document.
 
 	for _, e := range exps {
 
@@ -204,17 +214,47 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 			// calculate the value to be inserted into
 			// the final output document.
 
-			v, err := d.i.e.fetch(ctx, v, doc)
+			o, err := d.i.e.fetch(ctx, v, doc)
 			if err != nil {
 				return nil, err
 			}
 
-			switch v {
+			switch o {
 			case doc:
 				out.Set(nil, e.Field)
 			default:
-				out.Set(v, e.Field)
+				out.Set(o, e.Field)
 			}
+
+		}
+
+	}
+
+	// Finally let's see if there are any
+	// FETCH expressions, so that we can
+	// follow links to other records.
+
+	for _, e := range fchs {
+
+		switch v := e.Expr.(type) {
+		case *sql.All:
+			break
+		case *sql.Ident:
+
+			out.Walk(func(key string, val interface{}) error {
+
+				switch res := val.(type) {
+				case []interface{}:
+					val, _ = d.i.e.fetchArray(ctx, res, doc)
+					out.Set(val, key)
+				case *sql.Thing:
+					val, _ = d.i.e.fetchThing(ctx, res, doc)
+					out.Set(val, key)
+				}
+
+				return nil
+
+			}, v.ID)
 
 		}
 

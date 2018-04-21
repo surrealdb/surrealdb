@@ -173,6 +173,7 @@ type SelectStatement struct {
 	Order    Orders        `cork:"order" codec:"order"`
 	Limit    Expr          `cork:"limit" codec:"limit"`
 	Start    Expr          `cork:"start" codec:"start"`
+	Fetch    Fetchs        `cork:"fetch" codec:"fetch"`
 	Version  Expr          `cork:"version" codec:"version"`
 	Timeout  time.Duration `cork:"timeout" codec:"timeout"`
 	Parallel int           `cork:"parallel" codec:"parallel"`
@@ -523,6 +524,14 @@ type Order struct {
 
 // Orders represents multiple ORDER BY clauses.
 type Orders []*Order
+
+// Fetch represents a FETCH AS clause.
+type Fetch struct {
+	Expr Expr
+}
+
+// Fetchs represents multiple FETCH AS clauses.
+type Fetchs []*Fetch
 
 // --------------------------------------------------
 // Expressions

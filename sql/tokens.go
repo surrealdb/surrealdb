@@ -133,6 +133,7 @@ const (
 	EVENT
 	EXPUNGE
 	FALSE
+	FETCH
 	FIELD
 	FOR
 	FROM
@@ -304,6 +305,7 @@ var tokens = [...]string{
 	EVENT:           "EVENT",
 	EXPUNGE:         "EXPUNGE",
 	FALSE:           "FALSE",
+	FETCH:           "FETCH",
 	FIELD:           "FIELD",
 	FOR:             "FOR",
 	FROM:            "FROM",

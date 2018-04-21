@@ -84,17 +84,18 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 			return val, queryIdentFailed
 		case doc != nil:
 
-			doc.Fetch(func(key string, val interface{}) interface{} {
-				switch res := val.(type) {
-				case []interface{}:
-					val, _ = e.fetchArray(ctx, res, doc)
-					return val
-				case *sql.Thing:
-					val, _ = e.fetchThing(ctx, res, doc)
-					return val
-				default:
-					return val
+			doc.Fetch(func(key string, val interface{}, path []string) interface{} {
+				if len(path) > 0 {
+					switch res := val.(type) {
+					case []interface{}:
+						val, _ = e.fetchArray(ctx, res, doc)
+						return val
+					case *sql.Thing:
+						val, _ = e.fetchThing(ctx, res, doc)
+						return val
+					}
 				}
+				return val
 			})
 
 			return e.fetch(ctx, doc.Get(val.ID).Data(), doc)
@@ -107,17 +108,18 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 			if obj, ok := ctx.Value(s).(*data.Doc); ok {
 
-				obj.Fetch(func(key string, val interface{}) interface{} {
-					switch res := val.(type) {
-					case []interface{}:
-						val, _ = e.fetchArray(ctx, res, doc)
-						return val
-					case *sql.Thing:
-						val, _ = e.fetchThing(ctx, res, doc)
-						return val
-					default:
-						return val
+				obj.Fetch(func(key string, val interface{}, path []string) interface{} {
+					if len(path) > 0 {
+						switch res := val.(type) {
+						case []interface{}:
+							val, _ = e.fetchArray(ctx, res, doc)
+							return val
+						case *sql.Thing:
+							val, _ = e.fetchThing(ctx, res, doc)
+							return val
+						}
 					}
+					return val
 				})
 
 				if res := obj.Get(val.ID).Data(); res != nil {

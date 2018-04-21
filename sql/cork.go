@@ -234,6 +234,28 @@ func (this *Order) UnmarshalCORK(r *cork.Reader) (err error) {
 	return
 }
 
+// --------------------------------------------------
+// FETCH
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&Fetch{})
+}
+
+func (this *Fetch) ExtendCORK() byte {
+	return 0x11
+}
+
+func (this *Fetch) MarshalCORK(w *cork.Writer) (dst []byte, err error) {
+	w.EncodeAny(this.Expr)
+	return
+}
+
+func (this *Fetch) UnmarshalCORK(r *cork.Reader) (err error) {
+	r.DecodeAny(&this.Expr)
+	return
+}
+
 // ##################################################
 // ##################################################
 // ##################################################
