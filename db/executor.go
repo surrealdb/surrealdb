@@ -488,7 +488,7 @@ func status(e error) (s string) {
 	case *PermsError:
 		return "ERR_PE"
 	case *ExistError:
-		return "ERR_KV"
+		return "ERR_EX"
 	case *FieldError:
 		return "ERR_FD"
 	case *IndexError:
