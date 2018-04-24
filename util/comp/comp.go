@@ -124,7 +124,12 @@ func Comp(a, b interface{}, expr *sql.Order) int {
 			if expr.Tag.IsRoot() {
 				return strings.Compare(x, y)
 			} else {
-				c := collate.New(expr.Tag, collate.OptionsFromTag(expr.Tag), collate.Loose)
+				c := collate.New(
+					expr.Tag,
+					collate.Loose,
+					collate.Force,
+					collate.OptionsFromTag(expr.Tag),
+				)
 				return c.CompareString(x, y)
 			}
 		}

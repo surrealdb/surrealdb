@@ -521,9 +521,10 @@ func (this Orders) String() string {
 }
 
 func (this Order) String() string {
-	return print("%v %v",
+	return print("%v %v%v",
 		this.Expr,
 		maybe(this.Dir, "ASC", "DESC"),
+		maybe(!this.Tag.IsRoot(), print(" COLLATE %s", this.Tag.String())),
 	)
 }
 

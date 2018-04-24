@@ -145,7 +145,7 @@ func TestSelect(t *testing.T) {
 		CREATE person:a SET name="Tobias";
 		CREATE person:b SET name="Silvana";
 		CREATE person:c SET name="Jonathan", father=person:a, mother=person:b;
-		SELECT name, father, mother FROM person ORDER BY meta.id;
+		SELECT meta, name, father, mother FROM person ORDER BY meta.id;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -171,7 +171,7 @@ func TestSelect(t *testing.T) {
 		CREATE person:a SET name="Tobias";
 		CREATE person:b SET name="Silvana";
 		CREATE person:c SET name="Jonathan", father=person:a, mother=person:b;
-		SELECT name, father.* AS father, mother.* AS mother FROM person ORDER BY meta.id;
+		SELECT meta, name, father.* AS father, mother.* AS mother FROM person ORDER BY meta.id;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -211,7 +211,7 @@ func TestSelect(t *testing.T) {
 		CREATE person:a SET name="Tobias";
 		CREATE person:b SET name="Silvana";
 		CREATE person:c SET name="Jonathan", father=person:a, mother=person:b;
-		SELECT name, father.id AS father, mother.id AS mother FROM person ORDER BY meta.id;
+		SELECT meta, name, father.id AS father, mother.id AS mother FROM person ORDER BY meta.id;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -237,7 +237,7 @@ func TestSelect(t *testing.T) {
 		CREATE person:a SET name="Tobias";
 		CREATE person:b SET name="Silvana";
 		CREATE person:c SET name="Jonathan", father=person:a, mother=person:b;
-		SELECT name, father.name AS father, mother.name AS mother FROM person ORDER BY meta.id;
+		SELECT meta, name, father.name AS father, mother.name AS mother FROM person ORDER BY meta.id;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -263,7 +263,7 @@ func TestSelect(t *testing.T) {
 		CREATE person:a SET name="Tobias";
 		CREATE person:b SET name="Silvana";
 		CREATE person:c SET name="Jonathan", father=person:a, mother=person:b;
-		SELECT name, father.id.name AS father, mother.id.name AS mother FROM person ORDER BY meta.id;
+		SELECT meta, name, father.id.name AS father, mother.id.name AS mother FROM person ORDER BY meta.id;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
@@ -1278,7 +1278,7 @@ func TestSelect(t *testing.T) {
 
 	})
 
-	Convey("Group and retrieve more than 1000 records to test incremental processing", t, func() {
+	Convey("Group and retrieve more than 10000 records to test incremental processing", t, func() {
 
 		setupDB()
 
@@ -1437,7 +1437,7 @@ func TestSelect(t *testing.T) {
 
 	})
 
-	Convey("Order records with collation and numeric sorting using unicode definition", t, func() {
+	Convey("Order records with collation and numeric and insensitive sorting using unicode definition", t, func() {
 
 		setupDB()
 
@@ -1452,7 +1452,7 @@ func TestSelect(t *testing.T) {
 		UPDATE person:4 SET test = "1000";
 		UPDATE person:6 SET test = "2";
 		UPDATE person:8 SET test = null;
-		SELECT test FROM person ORDER BY test COLLATE 'en-GB-u-kn-true' ASC;
+		SELECT test FROM person ORDER BY test COLLATE 'en-GB-u-kn-true-kc-false' ASC;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
