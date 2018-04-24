@@ -29,6 +29,7 @@ import (
 
 type executor struct {
 	dbo  *mem.Cache
+	time int64
 	send chan *Response
 }
 
@@ -255,6 +256,12 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 			}()
 		}
 	}
+
+	// Specify a new time for the current executor
+	// iteration, so that all subqueries and async
+	// events are saved with the same version time.
+
+	e.time = time.Now().UnixNano()
 
 	// Get the fibre context ID so that we can use
 	// it to clear or flush websocket notification

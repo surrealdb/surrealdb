@@ -15,7 +15,6 @@
 package db
 
 import (
-	"time"
 
 	"context"
 
@@ -36,7 +35,6 @@ type document struct {
 	id      *sql.Thing
 	key     *keys.Thing
 	val     kvs.KV
-	now     int64
 	doc     *data.Doc
 	initial *data.Doc
 	current *data.Doc
@@ -69,7 +67,6 @@ func newDocument(i *iterator, key *keys.Thing, val kvs.KV, doc *data.Doc) (d *do
 	d.val = val
 	d.doc = doc
 
-	d.now = time.Now().UnixNano()
 
 	return
 
@@ -316,7 +313,7 @@ func (d *document) storeThing() (err error) {
 	// Write the value to the data
 	// layer and return any errors.
 
-	_, err = d.i.e.dbo.Put(d.now, d.key.Encode(), d.current.Encode())
+	_, err = d.i.e.dbo.Put(d.i.e.time, d.key.Encode(), d.current.Encode())
 
 	return
 
@@ -334,7 +331,7 @@ func (d *document) purgeThing() (err error) {
 	// Reset the item by writing a
 	// nil value to the storage.
 
-	_, err = d.i.e.dbo.Put(d.now, d.key.Encode(), nil)
+	_, err = d.i.e.dbo.Put(d.i.e.time, d.key.Encode(), nil)
 
 	return
 
@@ -400,7 +397,7 @@ func (d *document) storeIndex() (err error) {
 		if ix.Uniq == true {
 			for _, v := range del {
 				didx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
-				d.i.e.dbo.DelC(d.now, didx.Encode(), d.id.Bytes())
+				d.i.e.dbo.DelC(d.i.e.time, didx.Encode(), d.id.Bytes())
 			}
 			for _, v := range add {
 				aidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
@@ -413,7 +410,7 @@ func (d *document) storeIndex() (err error) {
 		if ix.Uniq == false {
 			for _, v := range del {
 				didx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
-				d.i.e.dbo.DelC(d.now, didx.Encode(), d.id.Bytes())
+				d.i.e.dbo.DelC(d.i.e.time, didx.Encode(), d.id.Bytes())
 			}
 			for _, v := range add {
 				aidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
