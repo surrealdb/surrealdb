@@ -93,6 +93,7 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 	switch stm := stm.(type) {
 	case *sql.LiveStatement:
 		exps = stm.Expr
+		fchs = stm.Fetch
 	case *sql.SelectStatement:
 		exps = stm.Expr
 		grps = stm.Group

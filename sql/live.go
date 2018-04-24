@@ -50,6 +50,10 @@ func (p *parser) parseLiveStatement() (stmt *LiveStatement, err error) {
 		return nil, err
 	}
 
+	if stmt.Fetch, err = p.parseFetch(); err != nil {
+		return nil, err
+	}
+
 	return
 
 }

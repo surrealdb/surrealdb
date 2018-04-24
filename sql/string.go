@@ -199,11 +199,12 @@ func (this ReturnStatement) String() string {
 }
 
 func (this LiveStatement) String() string {
-	return print("LIVE SELECT %v%v FROM %v%v",
+	return print("LIVE SELECT %v%v FROM %v%v%v",
 		maybe(this.Diff, "DIFF"),
 		this.Expr,
 		this.What,
 		maybe(this.Cond != nil, print(" WHERE %v", this.Cond)),
+		this.Fetch,
 	)
 }
 

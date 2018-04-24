@@ -140,15 +140,16 @@ type ReturnStatement struct {
 
 // LiveStatement represents a SQL LIVE statement.
 type LiveStatement struct {
-	ID   string `cork:"ID" codec:"ID"`
-	FB   string `cork:"FB" codec:"FB"`
-	KV   string `cork:"KV" codec:"KV"`
-	NS   string `cork:"NS" codec:"NS"`
-	DB   string `cork:"DB" codec:"DB"`
-	Diff bool   `cork:"diff" codec:"diff"`
-	Expr Fields `cork:"expr" codec:"expr"`
-	What Exprs  `cork:"what" codec:"what"`
-	Cond Expr   `cork:"cond" codec:"cond"`
+	ID    string `cork:"ID" codec:"ID"`
+	FB    string `cork:"FB" codec:"FB"`
+	KV    string `cork:"KV" codec:"KV"`
+	NS    string `cork:"NS" codec:"NS"`
+	DB    string `cork:"DB" codec:"DB"`
+	Diff  bool   `cork:"diff" codec:"diff"`
+	Expr  Fields `cork:"expr" codec:"expr"`
+	What  Exprs  `cork:"what" codec:"what"`
+	Cond  Expr   `cork:"cond" codec:"cond"`
+	Fetch Fetchs `cork:"fetch" codec:"fetch"`
 }
 
 // KillStatement represents a SQL KILL statement.

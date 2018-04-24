@@ -1035,6 +1035,7 @@ func (this *LiveStatement) MarshalCORK(w *cork.Writer) (err error) {
 	w.EncodeAny(this.Expr)
 	w.EncodeAny(this.What)
 	w.EncodeAny(this.Cond)
+	w.EncodeAny(this.Fetch)
 	return
 }
 
@@ -1045,6 +1046,7 @@ func (this *LiveStatement) UnmarshalCORK(r *cork.Reader) (err error) {
 	r.DecodeAny(&this.Expr)
 	r.DecodeAny(&this.What)
 	r.DecodeAny(&this.Cond)
+	r.DecodeAny(&this.Fetch)
 	return
 }
 
@@ -1080,6 +1082,7 @@ func (this *SelectStatement) MarshalCORK(w *cork.Writer) (err error) {
 	w.EncodeAny(this.Order)
 	w.EncodeAny(this.Limit)
 	w.EncodeAny(this.Start)
+	w.EncodeAny(this.Fetch)
 	w.EncodeAny(this.Version)
 	w.EncodeAny(this.Timeout)
 	return
@@ -1097,6 +1100,7 @@ func (this *SelectStatement) UnmarshalCORK(r *cork.Reader) (err error) {
 	r.DecodeAny(&this.Order)
 	r.DecodeAny(&this.Limit)
 	r.DecodeAny(&this.Start)
+	r.DecodeAny(&this.Fetch)
 	r.DecodeAny(&this.Version)
 	r.DecodeAny(&this.Timeout)
 	return
