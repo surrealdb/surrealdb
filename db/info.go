@@ -55,20 +55,24 @@ func (e *executor) executeInfoNS(ctx context.Context, ast *sql.InfoStatement) (o
 
 	res := data.New()
 
-	res.Object("database")
+	dbase := make(map[string]interface{})
 	for _, v := range db {
-		res.Set(v.String(), "database", v.Name.ID)
+		dbase[v.Name.ID] = v.String()
 	}
 
-	res.Object("token")
+	token := make(map[string]interface{})
 	for _, v := range nt {
-		res.Set(v.String(), "token", v.Name.ID)
+		token[v.Name.ID] = v.String()
 	}
 
-	res.Object("login")
+	login := make(map[string]interface{})
 	for _, v := range nu {
-		res.Set(v.String(), "login", v.User.ID)
+		login[v.User.ID] = v.String()
 	}
+
+	res.Set(dbase, "database")
+	res.Set(token, "token")
+	res.Set(login, "login")
 
 	return []interface{}{res.Data()}, nil
 
@@ -98,25 +102,30 @@ func (e *executor) executeInfoDB(ctx context.Context, ast *sql.InfoStatement) (o
 
 	res := data.New()
 
-	res.Object("table")
+	table := make(map[string]interface{})
 	for _, v := range tb {
-		res.Set(v.String(), "table", v.Name.ID)
+		table[v.Name.ID] = v.String()
 	}
 
-	res.Object("token")
+	token := make(map[string]interface{})
 	for _, v := range dt {
-		res.Set(v.String(), "token", v.Name.ID)
+		token[v.Name.ID] = v.String()
 	}
 
-	res.Object("login")
+	login := make(map[string]interface{})
 	for _, v := range du {
-		res.Set(v.String(), "login", v.User.ID)
+		login[v.User.ID] = v.String()
 	}
 
-	res.Object("scope")
+	scope := make(map[string]interface{})
 	for _, v := range sc {
-		res.Set(v.String(), "scope", v.Name.ID)
+		scope[v.Name.ID] = v.String()
 	}
+
+	res.Set(table, "table")
+	res.Set(token, "token")
+	res.Set(login, "login")
+	res.Set(scope, "scope")
 
 	return []interface{}{res.Data()}, nil
 
@@ -139,22 +148,37 @@ func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (o
 		return nil, err
 	}
 
+	lv, err := e.dbo.AllLV(ast.NS, ast.DB, ast.What.TB)
+	if err != nil {
+		return nil, err
+	}
+
 	res := data.New()
 
-	res.Object("event")
+	event := make(map[string]interface{})
 	for _, v := range ev {
-		res.Set(v.String(), "event", v.Name.ID)
+		event[v.Name.ID] = v.String()
 	}
 
-	res.Object("field")
+	field := make(map[string]interface{})
 	for _, v := range fd {
-		res.Set(v.String(), "field", v.Name.ID)
+		field[v.Name.ID] = v.String()
 	}
 
-	res.Object("index")
+	index := make(map[string]interface{})
 	for _, v := range ix {
-		res.Set(v.String(), "index", v.Name.ID)
+		index[v.Name.ID] = v.String()
 	}
+
+	lives := make(map[string]interface{})
+	for _, v := range lv {
+		lives[v.ID] = v.String()
+	}
+
+	res.Set(event, "event")
+	res.Set(field, "field")
+	res.Set(index, "index")
+	res.Set(lives, "lives")
 
 	return []interface{}{res.Data()}, nil
 
