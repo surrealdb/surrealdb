@@ -1,5 +1,5 @@
 hash: c56e5bd935dd1933a6e7370fe3fc67ea26169ec91aa05c171543866c6c2490ed
-updated: 2018-04-20T16:39:21.326112+01:00
+updated: 2018-04-24T13:32:49.661918+01:00
 imports:
 - name: github.com/abcum/bump
   version: 526934c541e071b5a330671c76434b9e32d55638
@@ -101,7 +101,7 @@ imports:
   subpackages:
   - codec
 - name: golang.org/x/crypto
-  version: d6449816ce06963d9d136eee5a56fca5b0616e7e
+  version: 2b6c08872f4b66da917bb4ce98df4f0307330f78
   subpackages:
   - bcrypt
   - blowfish
@@ -111,7 +111,7 @@ imports:
   - scrypt
   - ssh/terminal
 - name: golang.org/x/net
-  version: d41e8174641f662c5a2d1c7a5f9e828788eb8706
+  version: 5f9ae10d9af5b1c89ae6904293b14b064d4ada23
   subpackages:
   - bpf
   - context
@@ -139,7 +139,7 @@ imports:
   version: 4654dfbb6ad53cb5e27f37d99b02e16c1872fbbb
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: e1d10e7424f54589aa3caa8f87ce2934d1890e45
+  version: 1daac00a5961469351b87e7ac223239c37938d2a
   subpackages:
   - js
 - name: github.com/jtolds/gls
