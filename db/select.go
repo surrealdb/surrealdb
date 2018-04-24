@@ -141,9 +141,15 @@ func (d *document) runSelect(ctx context.Context, stm *sql.SelectStatement) (int
 	var err error
 	var met = _SELECT
 
-	defer d.close()
+	if err = d.init(ctx); err != nil {
+		return nil, err
+	}
 
-	if err = d.setup(); err != nil {
+	if err = d.rlock(ctx); err != nil {
+		return nil, err
+	}
+
+	if err = d.setup(ctx); err != nil {
 		return nil, err
 	}
 

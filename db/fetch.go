@@ -379,6 +379,27 @@ func (e *executor) fetchArray(ctx context.Context, val []interface{}, doc *data.
 
 }
 
+func (e *executor) fetchPerms(ctx context.Context, val sql.Expr, tb *sql.Ident) error {
+
+	res, err := e.fetch(ctx, val, ign)
+
+	// If we receive an 'ident failed' error
+	// it is because the table permission
+	// expression contains a field check,
+	// and therefore we must check each
+	// record individually to see if it can
+	// be accessed or not.
+
+	if err != queryIdentFailed {
+		if res, ok := res.(bool); ok && !res {
+			return &PermsError{table: tb.ID}
+		}
+	}
+
+	return nil
+
+}
+
 func (e *executor) fetchLimit(ctx context.Context, val sql.Expr) (int, error) {
 
 	v, err := e.fetch(ctx, val, nil)

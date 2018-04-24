@@ -45,6 +45,12 @@ type iterator struct {
 	stm sql.Statement
 	res []interface{}
 
+	wait sync.WaitGroup
+	fail chan error
+	stop chan struct{}
+	jobs chan *workable
+	vals chan *doneable
+
 	expr  sql.Fields
 	what  sql.Exprs
 	cond  sql.Expr
@@ -54,14 +60,6 @@ type iterator struct {
 	start int
 	versn int64
 	tasks int
-
-	wait sync.WaitGroup
-	fail chan error
-	full chan struct{}
-	stop chan struct{}
-	done chan struct{}
-	jobs chan *workable
-	vals chan *doneable
 }
 
 type workable struct {
@@ -99,8 +97,7 @@ func newIterator(e *executor, ctx context.Context, stm sql.Statement, vir bool) 
 	i.res = make([]interface{}, 0)
 
 	i.wait = sync.WaitGroup{}
-	i.fail = make(chan error)
-	i.full = make(chan struct{})
+	i.fail = make(chan error, 1)
 	i.stop = make(chan struct{})
 	i.jobs = make(chan *workable, 1000)
 	i.vals = make(chan *doneable, 1000)
@@ -115,7 +112,7 @@ func newIterator(e *executor, ctx context.Context, stm sql.Statement, vir bool) 
 
 	// Comment here ...
 
-	i.checkWorker(ctx)
+	i.watchVals(ctx)
 
 	return
 
@@ -127,6 +124,11 @@ func (i *iterator) Close() {
 	i.err = nil
 	i.stm = nil
 	i.res = nil
+
+	i.fail = nil
+	i.stop = nil
+	i.jobs = nil
+	i.vals = nil
 
 	i.expr = nil
 	i.what = nil
@@ -222,8 +224,6 @@ func (i *iterator) checkState(ctx context.Context) bool {
 		return false
 	case <-i.stop:
 		return false
-	case <-i.full:
-		return false
 	default:
 		return true
 	}
@@ -269,35 +269,17 @@ func (i *iterator) submitTask(key *keys.Thing, val kvs.KV, doc *data.Doc) {
 
 }
 
-func (i *iterator) checkWorker(ctx context.Context) {
+func (i *iterator) watchVals(ctx context.Context) {
 
-	go func(fail chan error) {
-		for err := range fail {
-			i.receivedError(err)
-		}
-	}(i.fail)
-
-	go func(vals chan *doneable) {
+	go func(vals <-chan *doneable) {
 		for val := range vals {
-			i.receivedResult(val)
+			i.receive(val)
 		}
 	}(i.vals)
 
 }
 
-func (i *iterator) receivedError(err error) {
-
-	select {
-	case <-i.stop:
-		return
-	default:
-		i.err = err
-		close(i.stop)
-	}
-
-}
-
-func (i *iterator) receivedResult(val *doneable) {
+func (i *iterator) receive(val *doneable) {
 
 	defer i.wait.Done()
 
@@ -310,8 +292,9 @@ func (i *iterator) receivedResult(val *doneable) {
 		case <-i.stop:
 			return
 		default:
-			i.err = val.err
+			i.fail <- val.err
 			close(i.stop)
+			return
 		}
 	}
 
@@ -356,16 +339,16 @@ func (i *iterator) receivedResult(val *doneable) {
 	// query statement.
 
 	select {
-	case <-i.full:
+	case <-i.stop:
 		return
 	default:
 		if i.start >= 0 {
 			if len(i.res) == i.limit+i.start {
-				close(i.full)
+				close(i.stop)
 			}
 		} else {
 			if len(i.res) == i.limit {
-				close(i.full)
+				close(i.stop)
 			}
 		}
 	}
@@ -373,8 +356,6 @@ func (i *iterator) receivedResult(val *doneable) {
 }
 
 func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
-
-	var err error
 
 	var tb *sql.DefineTableStatement
 
@@ -407,33 +388,37 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 		// we need to fetch the table to ensure
 		// that the table is not a view table.
 
-		tb, err = i.e.dbo.AddTB(nsv, dbv, tbv)
-		if err != nil {
-			i.fail <- err
+		tb, i.err = i.e.dbo.AddTB(nsv, dbv, tbv)
+		if i.err != nil {
+			close(i.stop)
 			return
 		}
 
 		// If the table is locked (because it
 		// has been specified as a view), then
 		// check to see what query type it is
-		// and return an error, if it attempts
+		// and return an error if it attempts
 		// to alter the table in any way.
 
 		if tb.Lock && i.vir == false {
 			switch i.stm.(type) {
 			case *sql.CreateStatement:
-				i.fail <- &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.ID}
 			case *sql.UpdateStatement:
-				i.fail <- &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.ID}
 			case *sql.DeleteStatement:
-				i.fail <- &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.ID}
 			case *sql.RelateStatement:
-				i.fail <- &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.ID}
 			case *sql.InsertStatement:
-				i.fail <- &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.ID}
 			case *sql.UpsertStatement:
-				i.fail <- &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.ID}
 			}
+		}
+
+		if i.err != nil {
+			close(i.stop)
 		}
 
 		return
@@ -444,9 +429,9 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	_, err = i.e.dbo.GetNS(nsv)
-	if err != nil {
-		i.fail <- err
+	_, i.err = i.e.dbo.GetNS(nsv)
+	if i.err != nil {
+		close(i.stop)
 		return
 	}
 
@@ -454,9 +439,9 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	_, err = i.e.dbo.GetDB(nsv, dbv)
-	if err != nil {
-		i.fail <- err
+	_, i.err = i.e.dbo.GetDB(nsv, dbv)
+	if i.err != nil {
+		close(i.stop)
 		return
 	}
 
@@ -473,9 +458,9 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	tb, err = i.e.dbo.GetTB(nsv, dbv, tbv)
-	if err != nil {
-		i.fail <- err
+	tb, i.err = i.e.dbo.GetTB(nsv, dbv, tbv)
+	if i.err != nil {
+		close(i.stop)
 		return
 	}
 
@@ -488,18 +473,23 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	if tb.Lock && i.vir == false {
 		switch i.stm.(type) {
 		case *sql.CreateStatement:
-			i.fail <- &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.ID}
 		case *sql.UpdateStatement:
-			i.fail <- &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.ID}
 		case *sql.DeleteStatement:
-			i.fail <- &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.ID}
 		case *sql.RelateStatement:
-			i.fail <- &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.ID}
 		case *sql.InsertStatement:
-			i.fail <- &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.ID}
 		case *sql.UpsertStatement:
-			i.fail <- &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.ID}
 		}
+	}
+
+	if i.err != nil {
+		close(i.stop)
+		return
 	}
 
 	// If the table does exist we reset the
@@ -514,43 +504,31 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	// expression, but only if they don't
 	// reference any document fields.
 
-	var val interface{}
-
 	switch p := tb.Perms.(type) {
+	default:
+		i.err = &PermsError{table: tb.Name.ID}
 	case *sql.PermExpression:
 		switch i.stm.(type) {
 		case *sql.SelectStatement:
-			val, err = i.e.fetch(ctx, p.Select, ign)
+			i.err = i.e.fetchPerms(ctx, p.Select, tb.Name)
 		case *sql.CreateStatement:
-			val, err = i.e.fetch(ctx, p.Create, ign)
+			i.err = i.e.fetchPerms(ctx, p.Create, tb.Name)
 		case *sql.UpdateStatement:
-			val, err = i.e.fetch(ctx, p.Update, ign)
+			i.err = i.e.fetchPerms(ctx, p.Update, tb.Name)
 		case *sql.DeleteStatement:
-			val, err = i.e.fetch(ctx, p.Delete, ign)
+			i.err = i.e.fetchPerms(ctx, p.Delete, tb.Name)
 		case *sql.RelateStatement:
-			val, err = i.e.fetch(ctx, p.Create, ign)
+			i.err = i.e.fetchPerms(ctx, p.Create, tb.Name)
 		case *sql.InsertStatement:
-			val, err = i.e.fetch(ctx, p.Create, ign)
+			i.err = i.e.fetchPerms(ctx, p.Create, tb.Name)
 		case *sql.UpsertStatement:
-			val, err = i.e.fetch(ctx, p.Update, ign)
+			i.err = i.e.fetchPerms(ctx, p.Update, tb.Name)
 		}
-	default:
-		i.fail <- &PermsError{table: tb.Name.ID}
-		return
 	}
 
-	// If we receive an 'ident failed' error
-	// it is because the table permission
-	// expression contains a field check,
-	// and therefore we must check each
-	// record individually to see if it can
-	// be accessed or not.
-
-	if err != queryIdentFailed {
-		if val, ok := val.(bool); ok && !val {
-			i.fail <- &PermsError{table: tb.Name.ID}
-			return
-		}
+	if i.err != nil {
+		close(i.stop)
+		return
 	}
 
 	return
@@ -585,13 +563,15 @@ func (i *iterator) processTable(ctx context.Context, key *keys.Table) {
 
 	for x := 0; ; x = 1 {
 
+		var vals []kvs.KV
+
 		if !i.checkState(ctx) {
 			return
 		}
 
-		vals, err := i.e.dbo.GetR(i.versn, min, max, 10000)
-		if err != nil {
-			i.fail <- err
+		vals, i.err = i.e.dbo.GetR(i.versn, min, max, 10000)
+		if i.err != nil {
+			close(i.stop)
 			return
 		}
 
@@ -840,12 +820,20 @@ func (i *iterator) Yield(ctx context.Context) (out []interface{}, err error) {
 	defer i.Close()
 
 	i.wait.Wait()
+
 	close(i.jobs)
-	close(i.fail)
 	close(i.vals)
 
 	if i.err != nil {
 		return nil, i.err
+	}
+
+	if i.err == nil {
+		select {
+		default:
+		case i.err = <-i.fail:
+			return nil, i.err
+		}
 	}
 
 	if len(i.group) > 0 {

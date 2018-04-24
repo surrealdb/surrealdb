@@ -26,7 +26,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a namespace", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -42,7 +42,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a database", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -58,7 +58,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a scope", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -91,7 +91,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a schemaless table", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -110,7 +110,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a schemafull table", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -135,7 +135,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a schemafull table with nil values", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -160,7 +160,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a schemafull table with nested records", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -185,7 +185,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a schemafull table with nested set records", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -214,7 +214,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Convert a schemaless to schemafull table, and ensure schemaless fields are still output", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -241,7 +241,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a drop table", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -260,7 +260,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a foreign table", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -289,7 +289,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a table with permission specified so only specified records are visible", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		func() {
 
@@ -327,7 +327,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Assert the value of a field", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -350,7 +350,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Assert the value of a field if it has been set", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -373,7 +373,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Specify the priority of a field so that it is processed after any dependent fields", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -401,7 +401,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Specify the permissions of a field so that it is only visible to the correct authentication levels", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		func() {
 
@@ -496,7 +496,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value changes", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -523,7 +523,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value increases", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -550,7 +550,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value increases beyond a threshold", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -577,7 +577,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event for both CREATE and UPDATE events separately", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -607,7 +607,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value changes and set a foreign key on another table", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -627,7 +627,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value changes and update a foreign key array on another table", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -652,7 +652,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value changes and update and delete from a foreign key array on another table", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -665,24 +665,26 @@ func TestDefine(t *testing.T) {
 		);
 		UPDATE person:one SET fk = other:test;
 		UPDATE person:two SET fk = other:test;
+		UPDATE person:tre SET fk = other:test;
 		DELETE FROM person;
 		SELECT * FROM other;
 		`
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 6)
+		So(res, ShouldHaveLength, 7)
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[4].Result, ShouldHaveLength, 0)
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(data.Consume(res[5].Result[0]).Get("fks").Data(), ShouldHaveLength, 0)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(res[5].Result, ShouldHaveLength, 0)
+		So(res[6].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[6].Result[0]).Get("fks").Data(), ShouldHaveLength, 0)
 
 	})
 
 	Convey("Define an event on a table, and ensure it is not output with records", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -699,7 +701,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an field on a table, and ensure it is not output with records", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -716,7 +718,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an index on a table, and ensure it is not output with records", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -733,7 +735,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an index on a table, and ensure it allows duplicate record values", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -769,7 +771,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a unique index on a table, and ensure it prevents duplicate record values", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -803,7 +805,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Redefine a unique index on a table, and ensure it prevents duplicate record values", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;

@@ -25,7 +25,7 @@ func TestRemove(t *testing.T) {
 
 	Convey("Remove a namespace", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -46,7 +46,7 @@ func TestRemove(t *testing.T) {
 
 	Convey("Remove a database", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
@@ -71,7 +71,7 @@ func TestRemove(t *testing.T) {
 
 	Convey("Remove a table", t, func() {
 
-		setupDB()
+		setupDB(20)
 
 		txt := `
 		USE NS test DB test;

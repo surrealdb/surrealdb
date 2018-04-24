@@ -66,7 +66,7 @@ const (
 var (
 	// maxWorkers enables limiting the maximum number of
 	// workers to start, regardless of the CPU count.
-	maxWorkers = 1
+	maxWorkers = 20
 
 	// workerCount specifies how many workers should be used
 	// to process each query statement concurrently.
@@ -74,7 +74,7 @@ var (
 
 	// maxRecursiveQueries specifies how many queries will be
 	// processed recursively before the query is cancelled.
-	maxRecursiveQueries = 50
+	maxRecursiveQueries = 16
 
 	// queryIdentFailed occurs when a permission query asks
 	// for a field, meaning a document has to be fetched.

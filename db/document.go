@@ -15,6 +15,7 @@
 package db
 
 import (
+	"fmt"
 
 	"context"
 
@@ -38,7 +39,11 @@ type document struct {
 	doc     *data.Doc
 	initial *data.Doc
 	current *data.Doc
-	store   struct {
+	locks   struct {
+		r bool
+		w bool
+	}
+	store struct {
 		id int
 		tb bool
 		ev bool
@@ -67,6 +72,8 @@ func newDocument(i *iterator, key *keys.Thing, val kvs.KV, doc *data.Doc) (d *do
 	d.val = val
 	d.doc = doc
 
+	d.locks.r = false
+	d.locks.w = false
 
 	return
 
@@ -138,7 +145,22 @@ func (d *document) getLV() (out []*sql.LiveStatement, err error) {
 	return d.cache.lv, err
 }
 
-func (d *document) query(ctx context.Context, stm sql.Statement) (interface{}, error) {
+func (d *document) query(ctx context.Context, stm sql.Statement) (val interface{}, err error) {
+
+	defer func() {
+
+		if r := recover(); r != nil {
+			var ok bool
+			if err, ok = r.(error); !ok {
+				err = fmt.Errorf("%v", r)
+			}
+		}
+
+		d.ulock(ctx)
+
+		d.close()
+
+	}()
 
 	switch stm := stm.(type) {
 	default:
@@ -161,7 +183,7 @@ func (d *document) query(ctx context.Context, stm sql.Statement) (interface{}, e
 
 }
 
-func (d *document) setup() (err error) {
+func (d *document) init(ctx context.Context) (err error) {
 
 	// A table of records were requested
 	// so we have the values, but no key
@@ -172,6 +194,50 @@ func (d *document) setup() (err error) {
 		d.key = &keys.Thing{}
 		d.key.Decode(d.val.Key())
 	}
+
+	return
+
+}
+
+func (d *document) wlock(ctx context.Context) (err error) {
+
+	if d.key != nil {
+		d.locks.w = true
+		d.i.e.lock.Lock(ctx, d.key)
+	}
+
+	return
+
+}
+
+func (d *document) rlock(ctx context.Context) (err error) {
+
+	if d.key != nil {
+		d.locks.r = true
+		d.i.e.lock.RLock(ctx, d.key)
+	}
+
+	return
+
+}
+
+func (d *document) ulock(ctx context.Context) (err error) {
+
+	if d.key != nil && d.locks.w {
+		d.locks.w = false
+		d.i.e.lock.Unlock(ctx, d.key)
+	}
+
+	if d.key != nil && d.locks.r {
+		d.locks.r = false
+		d.i.e.lock.RUnlock(ctx, d.key)
+	}
+
+	return
+
+}
+
+func (d *document) setup(ctx context.Context) (err error) {
 
 	// A specific record has been requested
 	// and we have a key, but no value has
@@ -294,7 +360,9 @@ func (d *document) shouldDrop() (bool, error) {
 
 }
 
-func (d *document) storeThing() (err error) {
+func (d *document) storeThing(ctx context.Context) (err error) {
+
+	defer d.ulock(ctx)
 
 	// Check that the table should
 	// drop data being written.
@@ -319,7 +387,9 @@ func (d *document) storeThing() (err error) {
 
 }
 
-func (d *document) purgeThing() (err error) {
+func (d *document) purgeThing(ctx context.Context) (err error) {
+
+	defer d.ulock(ctx)
 
 	// Check that the table should
 	// drop data being written.
@@ -337,7 +407,9 @@ func (d *document) purgeThing() (err error) {
 
 }
 
-func (d *document) eraseThing() (err error) {
+func (d *document) eraseThing(ctx context.Context) (err error) {
+
+	defer d.ulock(ctx)
 
 	// Check that the table should
 	// drop data being written.
@@ -355,7 +427,7 @@ func (d *document) eraseThing() (err error) {
 
 }
 
-func (d *document) storeIndex() (err error) {
+func (d *document) storeIndex(ctx context.Context) (err error) {
 
 	// Check that the table should
 	// drop data being written.
@@ -426,7 +498,7 @@ func (d *document) storeIndex() (err error) {
 
 }
 
-func (d *document) purgeIndex() (err error) {
+func (d *document) purgeIndex(ctx context.Context) (err error) {
 
 	// Check that the table should
 	// drop data being written.

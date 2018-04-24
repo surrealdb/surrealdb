@@ -23,7 +23,7 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-var lock sync.Mutex
+var locker sync.Mutex
 
 var sockets map[string]*socket
 
@@ -34,8 +34,8 @@ func init() {
 func register(fib *fibre.Context, id string) func() {
 	return func() {
 
-		lock.Lock()
-		defer lock.Unlock()
+		locker.Lock()
+		defer locker.Unlock()
 
 		sockets[id] = &socket{
 			fibre: fib,
@@ -49,8 +49,8 @@ func register(fib *fibre.Context, id string) func() {
 func deregister(fib *fibre.Context, id string) func() {
 	return func() {
 
-		lock.Lock()
-		defer lock.Unlock()
+		locker.Lock()
+		defer locker.Unlock()
 
 		if sck, ok := sockets[id]; ok {
 			sck.deregister(id)

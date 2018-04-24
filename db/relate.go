@@ -96,9 +96,15 @@ func (d *document) runRelate(ctx context.Context, stm *sql.RelateStatement) (int
 	var err error
 	var met = _CREATE
 
-	defer d.close()
+	if err = d.init(ctx); err != nil {
+		return nil, err
+	}
 
-	if err = d.setup(); err != nil {
+	if err = d.wlock(ctx); err != nil {
+		return nil, err
+	}
+
+	if err = d.setup(ctx); err != nil {
 		return nil, err
 	}
 
@@ -116,11 +122,11 @@ func (d *document) runRelate(ctx context.Context, stm *sql.RelateStatement) (int
 		return nil, nil
 	}
 
-	if err = d.storeIndex(); err != nil {
+	if err = d.storeIndex(ctx); err != nil {
 		return nil, err
 	}
 
-	if err = d.storeThing(); err != nil {
+	if err = d.storeThing(ctx); err != nil {
 		return nil, err
 	}
 

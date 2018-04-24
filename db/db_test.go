@@ -22,14 +22,19 @@ import (
 	"github.com/abcum/surreal/util/data"
 )
 
-func setupDB() {
+func setupDB(workers ...int) {
 
 	cnf.Settings = &cnf.Options{}
 	cnf.Settings.DB.Path = "memory"
 	cnf.Settings.DB.Base = "*"
 	cnf.Settings.DB.Proc.Size = 5
 
-	workerCount = 1
+	switch len(workers) {
+	default:
+		workerCount = workers[0]
+	case 0:
+		workerCount = 1
+	}
 
 	Setup(cnf.Settings)
 

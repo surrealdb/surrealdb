@@ -104,9 +104,15 @@ func (d *document) runCreate(ctx context.Context, stm *sql.CreateStatement) (int
 	var err error
 	var met = _CREATE
 
-	defer d.close()
+	if err = d.init(ctx); err != nil {
+		return nil, err
+	}
 
-	if err = d.setup(); err != nil {
+	if err = d.wlock(ctx); err != nil {
+		return nil, err
+	}
+
+	if err = d.setup(ctx); err != nil {
 		return nil, err
 	}
 
@@ -124,11 +130,11 @@ func (d *document) runCreate(ctx context.Context, stm *sql.CreateStatement) (int
 		return nil, nil
 	}
 
-	if err = d.storeIndex(); err != nil {
+	if err = d.storeIndex(ctx); err != nil {
 		return nil, err
 	}
 
-	if err = d.storeThing(); err != nil {
+	if err = d.storeThing(ctx); err != nil {
 		return nil, err
 	}
 

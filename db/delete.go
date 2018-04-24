@@ -103,9 +103,15 @@ func (d *document) runDelete(ctx context.Context, stm *sql.DeleteStatement) (int
 	var err error
 	var met = _DELETE
 
-	defer d.close()
+	if err = d.init(ctx); err != nil {
+		return nil, err
+	}
 
-	if err = d.setup(); err != nil {
+	if err = d.wlock(ctx); err != nil {
+		return nil, err
+	}
+
+	if err = d.setup(ctx); err != nil {
 		return nil, err
 	}
 
@@ -129,16 +135,16 @@ func (d *document) runDelete(ctx context.Context, stm *sql.DeleteStatement) (int
 		return nil, err
 	}
 
-	if err = d.purgeIndex(); err != nil {
+	if err = d.purgeIndex(ctx); err != nil {
 		return nil, err
 	}
 
 	if stm.Hard {
-		if err = d.eraseThing(); err != nil {
+		if err = d.eraseThing(ctx); err != nil {
 			return nil, err
 		}
 	} else {
-		if err = d.purgeThing(); err != nil {
+		if err = d.purgeThing(ctx); err != nil {
 			return nil, err
 		}
 	}

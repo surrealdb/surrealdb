@@ -30,6 +30,7 @@ import (
 type executor struct {
 	dbo  *mem.Cache
 	time int64
+	lock *mutex
 	send chan *Response
 }
 
@@ -139,6 +140,7 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 
 			switch stm.(type) {
 			case *sql.BeginStatement:
+				e.lock = new(mutex)
 				err = e.begin(ctx, true)
 				continue
 			case *sql.CancelStatement:
@@ -238,6 +240,12 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 		}
 
 		defer e.dbo.Cancel()
+
+		// Let's create a new mutex for just this
+		// local transaction, so we can track any
+		// recursive queries and race errors.
+
+		e.lock = new(mutex)
 
 	}
 
@@ -421,6 +429,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 func (e *executor) begin(ctx context.Context, rw bool) (err error) {
 	if e.dbo.TX == nil {
+		e.dbo = mem.New()
 		e.dbo.TX, err = db.Begin(ctx, rw)
 	}
 	return
