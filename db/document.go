@@ -364,18 +364,18 @@ func (d *document) storeThing(ctx context.Context) (err error) {
 
 	defer d.ulock(ctx)
 
-	// Check that the table should
-	// drop data being written.
-
-	if ok, err := d.shouldDrop(); ok {
-		return err
-	}
-
 	// Check that the rcord has been
 	// changed, and if not, return.
 
 	if ok := d.changed(); !ok {
 		return
+	}
+
+	// Check that the table should
+	// drop data being written.
+
+	if ok, err := d.shouldDrop(); ok {
+		return err
 	}
 
 	// Write the value to the data

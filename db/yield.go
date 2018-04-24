@@ -25,23 +25,23 @@ import (
 
 func (d *document) cold(ctx context.Context) (doc *data.Doc, err error) {
 
-	// If we are authenticated using DB, NS,
-	// or KV permissions level, then we can
-	// return the document without copying.
+	// If we are not authenticated using DB,
+	// NS, or KV level, then we need to check
+	// document permissions for this query.
 
 	if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
-		if k < cnf.AuthSC {
-			return d.initial, nil
+		if k == cnf.AuthSC {
+			if err = d.perms(ctx, d.initial); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	// Otherwise, we need to create a copy
-	// of the document so that we can add
-	// and remove fields before outputting.
+	// We need to copy the document so that
+	// we can add and remove the fields which
+	// are relevant to the particular query.
 
 	doc = d.initial.Copy()
-
-	err = d.perms(ctx, doc)
 
 	return
 
@@ -49,23 +49,23 @@ func (d *document) cold(ctx context.Context) (doc *data.Doc, err error) {
 
 func (d *document) cnow(ctx context.Context) (doc *data.Doc, err error) {
 
-	// If we are authenticated using DB, NS,
-	// or KV permissions level, then we can
-	// return the document without copying.
+	// If we are not authenticated using DB,
+	// NS, or KV level, then we need to check
+	// document permissions for this query.
 
 	if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
-		if k < cnf.AuthSC {
-			return d.current, nil
+		if k == cnf.AuthSC {
+			if err = d.perms(ctx, d.current); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	// Otherwise, we need to create a copy
-	// of the document so that we can add
-	// and remove fields before outputting.
+	// We need to copy the document so that
+	// we can add and remove the fields which
+	// are relevant to the particular query.
 
 	doc = d.current.Copy()
-
-	err = d.perms(ctx, doc)
 
 	return
 

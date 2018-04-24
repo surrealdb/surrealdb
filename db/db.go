@@ -255,12 +255,7 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 			if !open {
 				return
 			}
-			out = append(out, &Response{
-				Time:   res.Time,
-				Status: res.Status,
-				Detail: res.Detail,
-				Result: res.Result,
-			})
+			out = append(out, res)
 		}
 	}
 

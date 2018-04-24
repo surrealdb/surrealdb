@@ -24,12 +24,6 @@ import (
 // this table, and executes them in name order.
 func (d *document) lives(ctx context.Context, when method) (err error) {
 
-	// Get the ID of the current fibre
-	// connection so that we can check
-	// against the ID of live queries.
-
-	id := ctx.Value(ctxKeyId).(string)
-
 	// If this document has not changed
 	// then there is no need to update
 	// any registered live queries.
@@ -37,6 +31,12 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 	if !d.changed() {
 		return nil
 	}
+
+	// Get the ID of the current fibre
+	// connection so that we can check
+	// against the ID of live queries.
+
+	id := ctx.Value(ctxKeyId).(string)
 
 	// Get the foreign read-only tables
 	// specified for this table, and
