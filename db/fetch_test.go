@@ -20,6 +20,11 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
+func inc(val *int) int {
+	*val++
+	return *val
+}
+
 func TestFetch(t *testing.T) {
 
 	Convey("Check calc-as-bool expressions", t, func() {
@@ -54,31 +59,32 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 0
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 18)
 
-		So(res[1].Result, ShouldHaveLength, 0)
-		So(res[2].Result, ShouldHaveLength, 1)
-		So(res[3].Result, ShouldHaveLength, 0)
-		So(res[4].Result, ShouldHaveLength, 0)
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(res[6].Result, ShouldHaveLength, 1)
-		So(res[7].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[8].Result, ShouldHaveLength, 0)
-		So(res[9].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[10].Result, ShouldHaveLength, 0)
-		So(res[11].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[12].Result, ShouldHaveLength, 0)
-		So(res[13].Result, ShouldHaveLength, 1)
-		So(res[14].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[15].Result, ShouldHaveLength, 0)
-		So(res[16].Result, ShouldHaveLength, 1)
-		So(res[17].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
 	})
 
@@ -103,20 +109,21 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 0
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 
-		So(res[1].Result, ShouldHaveLength, 0)
-		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[4].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[5].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[6].Result, ShouldHaveLength, 0)
-		So(res[7].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
 	})
 
@@ -143,22 +150,23 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 0
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 11)
 
-		So(res[1].Result, ShouldHaveLength, 1)
-		So(res[2].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[4].Result, ShouldHaveLength, 0)
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(res[6].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[7].Result, ShouldHaveLength, 1)
-		So(res[8].Result, ShouldHaveLength, 1)
-		So(res[9].Result, ShouldHaveLength, 1)
-		So(res[10].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
 	})
 
@@ -180,6 +188,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE NULL = NULL;
 		SELECT * FROM "test" WHERE NULL = EMPTY;
 		SELECT * FROM "test" WHERE NULL = something;
+		SELECT * FROM { test: [] } WHERE NULL = test;
+		SELECT * FROM { test: {} } WHERE NULL = test;
 
 		SELECT * FROM "test" WHERE "" = NULL;
 		SELECT * FROM "test" WHERE [] = NULL;
@@ -189,6 +199,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE NULL = NULL;
 		SELECT * FROM "test" WHERE EMPTY = NULL;
 		SELECT * FROM "test" WHERE something = NULL;
+		SELECT * FROM { test: [] } WHERE test = NULL;
+		SELECT * FROM { test: {} } WHERE test = NULL;
 
 		SELECT * FROM "test" WHERE NULL != "";
 		SELECT * FROM "test" WHERE NULL != [];
@@ -198,6 +210,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE NULL != NULL;
 		SELECT * FROM "test" WHERE NULL != EMPTY;
 		SELECT * FROM "test" WHERE NULL != something;
+		SELECT * FROM { test: [] } WHERE NULL != test;
+		SELECT * FROM { test: {} } WHERE NULL != test;
 
 		SELECT * FROM "test" WHERE "" != NULL;
 		SELECT * FROM "test" WHERE [] != NULL;
@@ -207,6 +221,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE NULL != NULL;
 		SELECT * FROM "test" WHERE EMPTY != NULL;
 		SELECT * FROM "test" WHERE something != NULL;
+		SELECT * FROM { test: [] } WHERE test != NULL;
+		SELECT * FROM { test: {} } WHERE test != NULL;
 
 		SELECT * FROM "test" WHERE NULL ∈ [];
 		SELECT * FROM "test" WHERE NULL ∉ [];
@@ -225,60 +241,69 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 1
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 46)
+		So(res, ShouldHaveLength, 54)
 
-		So(res[2].Result, ShouldHaveLength, 0)
-		So(res[3].Result, ShouldHaveLength, 0)
-		So(res[4].Result, ShouldHaveLength, 0)
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(res[6].Result, ShouldHaveLength, 0)
-		So(res[7].Result, ShouldHaveLength, 1)
-		So(res[8].Result, ShouldHaveLength, 1)
-		So(res[9].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[10].Result, ShouldHaveLength, 0)
-		So(res[11].Result, ShouldHaveLength, 0)
-		So(res[12].Result, ShouldHaveLength, 0)
-		So(res[13].Result, ShouldHaveLength, 1)
-		So(res[14].Result, ShouldHaveLength, 0)
-		So(res[15].Result, ShouldHaveLength, 1)
-		So(res[16].Result, ShouldHaveLength, 1)
-		So(res[17].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[18].Result, ShouldHaveLength, 1)
-		So(res[19].Result, ShouldHaveLength, 1)
-		So(res[20].Result, ShouldHaveLength, 1)
-		So(res[21].Result, ShouldHaveLength, 0)
-		So(res[22].Result, ShouldHaveLength, 1)
-		So(res[23].Result, ShouldHaveLength, 0)
-		So(res[24].Result, ShouldHaveLength, 0)
-		So(res[25].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[26].Result, ShouldHaveLength, 1)
-		So(res[27].Result, ShouldHaveLength, 1)
-		So(res[28].Result, ShouldHaveLength, 1)
-		So(res[29].Result, ShouldHaveLength, 0)
-		So(res[30].Result, ShouldHaveLength, 1)
-		So(res[31].Result, ShouldHaveLength, 0)
-		So(res[32].Result, ShouldHaveLength, 0)
-		So(res[33].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[34].Result, ShouldHaveLength, 0)
-		So(res[35].Result, ShouldHaveLength, 1)
-		So(res[36].Result, ShouldHaveLength, 0)
-		So(res[37].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[38].Result, ShouldHaveLength, 0)
-		So(res[39].Result, ShouldHaveLength, 1)
-		So(res[40].Result, ShouldHaveLength, 0)
-		So(res[41].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[42].Result, ShouldHaveLength, 1)
-		So(res[43].Result, ShouldHaveLength, 0)
-		So(res[44].Result, ShouldHaveLength, 1)
-		So(res[45].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
 	})
 
@@ -298,6 +323,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE VOID = VOID;
 		SELECT * FROM "test" WHERE VOID = EMPTY;
 		SELECT * FROM "test" WHERE VOID = something;
+		SELECT * FROM { test: [] } WHERE VOID = test;
+		SELECT * FROM { test: {} } WHERE VOID = test;
 
 		SELECT * FROM "test" WHERE "" = VOID;
 		SELECT * FROM "test" WHERE [] = VOID;
@@ -307,6 +334,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE VOID = VOID;
 		SELECT * FROM "test" WHERE EMPTY = VOID;
 		SELECT * FROM "test" WHERE something = VOID;
+		SELECT * FROM { test: [] } WHERE test = VOID;
+		SELECT * FROM { test: {} } WHERE test = VOID;
 
 		SELECT * FROM "test" WHERE VOID != "";
 		SELECT * FROM "test" WHERE VOID != [];
@@ -316,6 +345,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE VOID != VOID;
 		SELECT * FROM "test" WHERE VOID != EMPTY;
 		SELECT * FROM "test" WHERE VOID != something;
+		SELECT * FROM { test: [] } WHERE VOID != test;
+		SELECT * FROM { test: {} } WHERE VOID != test;
 
 		SELECT * FROM "test" WHERE "" != VOID;
 		SELECT * FROM "test" WHERE [] != VOID;
@@ -325,6 +356,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE VOID != VOID;
 		SELECT * FROM "test" WHERE EMPTY != VOID;
 		SELECT * FROM "test" WHERE something != VOID;
+		SELECT * FROM { test: [] } WHERE test != VOID;
+		SELECT * FROM { test: {} } WHERE test != VOID;
 
 		SELECT * FROM "test" WHERE VOID ∈ [];
 		SELECT * FROM "test" WHERE VOID ∉ [];
@@ -343,60 +376,69 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 1
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 46)
+		So(res, ShouldHaveLength, 54)
 
-		So(res[2].Result, ShouldHaveLength, 0)
-		So(res[3].Result, ShouldHaveLength, 0)
-		So(res[4].Result, ShouldHaveLength, 0)
-		So(res[5].Result, ShouldHaveLength, 0)
-		So(res[6].Result, ShouldHaveLength, 0)
-		So(res[7].Result, ShouldHaveLength, 1)
-		So(res[8].Result, ShouldHaveLength, 1)
-		So(res[9].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[10].Result, ShouldHaveLength, 0)
-		So(res[11].Result, ShouldHaveLength, 0)
-		So(res[12].Result, ShouldHaveLength, 0)
-		So(res[13].Result, ShouldHaveLength, 0)
-		So(res[14].Result, ShouldHaveLength, 0)
-		So(res[15].Result, ShouldHaveLength, 1)
-		So(res[16].Result, ShouldHaveLength, 1)
-		So(res[17].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[18].Result, ShouldHaveLength, 1)
-		So(res[19].Result, ShouldHaveLength, 1)
-		So(res[20].Result, ShouldHaveLength, 1)
-		So(res[21].Result, ShouldHaveLength, 1)
-		So(res[22].Result, ShouldHaveLength, 1)
-		So(res[23].Result, ShouldHaveLength, 0)
-		So(res[24].Result, ShouldHaveLength, 0)
-		So(res[25].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[26].Result, ShouldHaveLength, 1)
-		So(res[27].Result, ShouldHaveLength, 1)
-		So(res[28].Result, ShouldHaveLength, 1)
-		So(res[29].Result, ShouldHaveLength, 1)
-		So(res[30].Result, ShouldHaveLength, 1)
-		So(res[31].Result, ShouldHaveLength, 0)
-		So(res[32].Result, ShouldHaveLength, 0)
-		So(res[33].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[34].Result, ShouldHaveLength, 0)
-		So(res[35].Result, ShouldHaveLength, 1)
-		So(res[36].Result, ShouldHaveLength, 0)
-		So(res[37].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[38].Result, ShouldHaveLength, 0)
-		So(res[39].Result, ShouldHaveLength, 1)
-		So(res[40].Result, ShouldHaveLength, 0)
-		So(res[41].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[42].Result, ShouldHaveLength, 0)
-		So(res[43].Result, ShouldHaveLength, 1)
-		So(res[44].Result, ShouldHaveLength, 0)
-		So(res[45].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
 	})
 
@@ -418,6 +460,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE EMPTY = VOID;
 		SELECT * FROM "test" WHERE EMPTY = EMPTY;
 		SELECT * FROM "test" WHERE EMPTY = something;
+		SELECT * FROM { test: [] } WHERE EMPTY = test;
+		SELECT * FROM { test: {} } WHERE EMPTY = test;
 
 		SELECT * FROM "test" WHERE "" = EMPTY;
 		SELECT * FROM "test" WHERE [] = EMPTY;
@@ -427,6 +471,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE VOID = EMPTY;
 		SELECT * FROM "test" WHERE EMPTY = EMPTY;
 		SELECT * FROM "test" WHERE something = EMPTY;
+		SELECT * FROM { test: [] } WHERE test = EMPTY;
+		SELECT * FROM { test: {} } WHERE test = EMPTY;
 
 		SELECT * FROM "test" WHERE EMPTY != "";
 		SELECT * FROM "test" WHERE EMPTY != [];
@@ -436,6 +482,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE EMPTY != VOID;
 		SELECT * FROM "test" WHERE EMPTY != EMPTY;
 		SELECT * FROM "test" WHERE EMPTY != something;
+		SELECT * FROM { test: [] } WHERE EMPTY != test;
+		SELECT * FROM { test: {} } WHERE EMPTY != test;
 
 		SELECT * FROM "test" WHERE "" != EMPTY;
 		SELECT * FROM "test" WHERE [] != EMPTY;
@@ -445,6 +493,8 @@ func TestFetch(t *testing.T) {
 		SELECT * FROM "test" WHERE VOID != EMPTY;
 		SELECT * FROM "test" WHERE EMPTY != EMPTY;
 		SELECT * FROM "test" WHERE something != EMPTY;
+		SELECT * FROM { test: [] } WHERE test != EMPTY;
+		SELECT * FROM { test: {} } WHERE test != EMPTY;
 
 		SELECT * FROM "test" WHERE EMPTY ∈ [];
 		SELECT * FROM "test" WHERE EMPTY ∉ [];
@@ -463,60 +513,69 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 1
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 46)
+		So(res, ShouldHaveLength, 54)
 
-		So(res[2].Result, ShouldHaveLength, 1)
-		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[4].Result, ShouldHaveLength, 1)
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(res[6].Result, ShouldHaveLength, 1)
-		So(res[7].Result, ShouldHaveLength, 1)
-		So(res[8].Result, ShouldHaveLength, 1)
-		So(res[9].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[10].Result, ShouldHaveLength, 1)
-		So(res[11].Result, ShouldHaveLength, 1)
-		So(res[12].Result, ShouldHaveLength, 1)
-		So(res[13].Result, ShouldHaveLength, 1)
-		So(res[14].Result, ShouldHaveLength, 1)
-		So(res[15].Result, ShouldHaveLength, 1)
-		So(res[16].Result, ShouldHaveLength, 1)
-		So(res[17].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[18].Result, ShouldHaveLength, 0)
-		So(res[19].Result, ShouldHaveLength, 0)
-		So(res[20].Result, ShouldHaveLength, 0)
-		So(res[21].Result, ShouldHaveLength, 0)
-		So(res[22].Result, ShouldHaveLength, 0)
-		So(res[23].Result, ShouldHaveLength, 0)
-		So(res[24].Result, ShouldHaveLength, 0)
-		So(res[25].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[26].Result, ShouldHaveLength, 0)
-		So(res[27].Result, ShouldHaveLength, 0)
-		So(res[28].Result, ShouldHaveLength, 0)
-		So(res[29].Result, ShouldHaveLength, 0)
-		So(res[30].Result, ShouldHaveLength, 0)
-		So(res[31].Result, ShouldHaveLength, 0)
-		So(res[32].Result, ShouldHaveLength, 0)
-		So(res[33].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[34].Result, ShouldHaveLength, 0)
-		So(res[35].Result, ShouldHaveLength, 1)
-		So(res[36].Result, ShouldHaveLength, 0)
-		So(res[37].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[38].Result, ShouldHaveLength, 0)
-		So(res[39].Result, ShouldHaveLength, 1)
-		So(res[40].Result, ShouldHaveLength, 0)
-		So(res[41].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[42].Result, ShouldHaveLength, 0)
-		So(res[43].Result, ShouldHaveLength, 1)
-		So(res[44].Result, ShouldHaveLength, 0)
-		So(res[45].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
 	})
 
@@ -543,18 +602,19 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 0
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 
-		So(res[1].Result, ShouldHaveLength, 1)
-		So(res[2].Result, ShouldHaveLength, 1)
-		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[4].Result, ShouldHaveLength, 1)
-		So(res[5].Result, ShouldHaveLength, 0)
-		So(res[6].Result, ShouldHaveLength, 0)
-		So(res[7].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
 	})
 
@@ -582,19 +642,20 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 0
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 9)
 
-		So(res[1].Result, ShouldHaveLength, 1)
-		So(res[2].Result, ShouldHaveLength, 1)
-		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[4].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(res[6].Result, ShouldHaveLength, 0)
-		So(res[7].Result, ShouldHaveLength, 1)
-		So(res[8].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
 	})
 
@@ -627,22 +688,23 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 1
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 12)
 
-		So(res[2].Result, ShouldHaveLength, 1)
-		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[4].Result, ShouldHaveLength, 1)
-		So(res[5].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[6].Result, ShouldHaveLength, 1)
-		So(res[7].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[8].Result, ShouldHaveLength, 1)
-		So(res[9].Result, ShouldHaveLength, 0)
-		So(res[10].Result, ShouldHaveLength, 1)
-		So(res[11].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
 	})
 
@@ -699,46 +761,47 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 1
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 33)
 
-		So(res[2].Result, ShouldHaveLength, 1)
-		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[4].Result, ShouldHaveLength, 1)
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(res[6].Result, ShouldHaveLength, 1)
-		So(res[7].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[8].Result, ShouldHaveLength, 1)
-		So(res[9].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[10].Result, ShouldHaveLength, 1)
-		So(res[11].Result, ShouldHaveLength, 0)
-		So(res[12].Result, ShouldHaveLength, 1)
-		So(res[13].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[14].Result, ShouldHaveLength, 1)
-		So(res[15].Result, ShouldHaveLength, 0)
-		So(res[16].Result, ShouldHaveLength, 1)
-		So(res[17].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[18].Result, ShouldHaveLength, 1)
-		So(res[19].Result, ShouldHaveLength, 1)
-		So(res[20].Result, ShouldHaveLength, 0)
-		So(res[21].Result, ShouldHaveLength, 0)
-		So(res[22].Result, ShouldHaveLength, 1)
-		So(res[23].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[24].Result, ShouldHaveLength, 1)
-		So(res[25].Result, ShouldHaveLength, 0)
-		So(res[26].Result, ShouldHaveLength, 1)
-		So(res[27].Result, ShouldHaveLength, 0)
-		So(res[28].Result, ShouldHaveLength, 1)
-		So(res[29].Result, ShouldHaveLength, 0)
-		So(res[30].Result, ShouldHaveLength, 1)
-		So(res[31].Result, ShouldHaveLength, 0)
-		So(res[32].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
 	})
 
@@ -764,15 +827,16 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 1
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 
-		So(res[2].Result, ShouldHaveLength, 1)
-		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[4].Result, ShouldHaveLength, 1)
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(res[6].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
 	})
 
@@ -859,76 +923,77 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 1
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 57)
 
-		So(res[2].Result, ShouldHaveLength, 1)
-		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[4].Result, ShouldHaveLength, 1)
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(res[6].Result, ShouldHaveLength, 1)
-		So(res[7].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[8].Result, ShouldHaveLength, 1)
-		So(res[9].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[10].Result, ShouldHaveLength, 1)
-		So(res[11].Result, ShouldHaveLength, 0)
-		So(res[12].Result, ShouldHaveLength, 0)
-		So(res[13].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[14].Result, ShouldHaveLength, 1)
-		So(res[15].Result, ShouldHaveLength, 0)
-		So(res[16].Result, ShouldHaveLength, 1)
-		So(res[17].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[18].Result, ShouldHaveLength, 1)
-		So(res[19].Result, ShouldHaveLength, 0)
-		So(res[20].Result, ShouldHaveLength, 1)
-		So(res[21].Result, ShouldHaveLength, 0)
-		So(res[22].Result, ShouldHaveLength, 0)
-		So(res[23].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[24].Result, ShouldHaveLength, 1)
-		So(res[25].Result, ShouldHaveLength, 0)
-		So(res[26].Result, ShouldHaveLength, 1)
-		So(res[27].Result, ShouldHaveLength, 0)
-		So(res[28].Result, ShouldHaveLength, 0)
-		So(res[29].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[30].Result, ShouldHaveLength, 0)
-		So(res[31].Result, ShouldHaveLength, 1)
-		So(res[32].Result, ShouldHaveLength, 0)
-		So(res[33].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[34].Result, ShouldHaveLength, 1)
-		So(res[35].Result, ShouldHaveLength, 0)
-		So(res[36].Result, ShouldHaveLength, 1)
-		So(res[37].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[38].Result, ShouldHaveLength, 0)
-		So(res[39].Result, ShouldHaveLength, 1)
-		So(res[40].Result, ShouldHaveLength, 1)
-		So(res[41].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[42].Result, ShouldHaveLength, 0)
-		So(res[43].Result, ShouldHaveLength, 0)
-		So(res[44].Result, ShouldHaveLength, 0)
-		So(res[45].Result, ShouldHaveLength, 0)
-		So(res[46].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[47].Result, ShouldHaveLength, 1)
-		So(res[48].Result, ShouldHaveLength, 1)
-		So(res[49].Result, ShouldHaveLength, 1)
-		So(res[50].Result, ShouldHaveLength, 1)
-		So(res[51].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
 
-		So(res[52].Result, ShouldHaveLength, 0)
-		So(res[53].Result, ShouldHaveLength, 0)
-		So(res[54].Result, ShouldHaveLength, 1)
-		So(res[55].Result, ShouldHaveLength, 1)
-		So(res[56].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
 	})
 
@@ -954,17 +1019,18 @@ func TestFetch(t *testing.T) {
 
 		`
 
+		i := 0
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 
-		So(res[1].Result, ShouldHaveLength, 1)
-		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
-		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[4].Result, ShouldHaveLength, 0)
-		So(res[5].Result, ShouldHaveLength, 0)
-		So(res[6].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 0)
+		So(res[inc(&i)].Result, ShouldHaveLength, 1)
 
 	})
 

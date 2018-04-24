@@ -593,15 +593,6 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 					return d.Exists(r.ID) == true
 				}
 			}
-		case *sql.Empty:
-			switch r := ro.(type) {
-			case *sql.Ident:
-				if op == sql.EQ {
-					return d.Exists(r.ID) == false || d.Get(r.ID).Data() == nil
-				} else if op == sql.NEQ {
-					return d.Exists(r.ID) == true && d.Get(r.ID).Data() != nil
-				}
-			}
 		case *sql.Null:
 			switch r := ro.(type) {
 			case *sql.Ident:
@@ -621,15 +612,6 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 					return d.Exists(l.ID) == false
 				} else if op == sql.NEQ {
 					return d.Exists(l.ID) == true
-				}
-			}
-		case *sql.Empty:
-			switch l := lo.(type) {
-			case *sql.Ident:
-				if op == sql.EQ {
-					return d.Exists(l.ID) == false || d.Get(l.ID).Data() == nil
-				} else if op == sql.NEQ {
-					return d.Exists(l.ID) == true && d.Get(l.ID).Data() != nil
 				}
 			}
 		case *sql.Null:
