@@ -84,7 +84,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 			return val, queryIdentFailed
 		case doc != nil:
 
-			doc.Fetch(func(key string, val interface{}, path []string) interface{} {
+			fnc := func(key string, val interface{}, path []string) interface{} {
 				if len(path) > 0 {
 					switch res := val.(type) {
 					case []interface{}:
@@ -96,9 +96,11 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 					}
 				}
 				return val
-			})
+			}
 
-			return e.fetch(ctx, doc.Get(val.ID).Data(), doc)
+			res := doc.Fetch(fnc, val.ID).Data()
+
+			return e.fetch(ctx, res, doc)
 
 		}
 
@@ -108,7 +110,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 			if obj, ok := ctx.Value(s).(*data.Doc); ok {
 
-				obj.Fetch(func(key string, val interface{}, path []string) interface{} {
+				fnc := func(key string, val interface{}, path []string) interface{} {
 					if len(path) > 0 {
 						switch res := val.(type) {
 						case []interface{}:
@@ -120,9 +122,11 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 						}
 					}
 					return val
-				})
+				}
 
-				if res := obj.Get(val.ID).Data(); res != nil {
+				res := obj.Fetch(fnc, val.ID).Data()
+
+				if res != nil {
 					return e.fetch(ctx, res, doc)
 				}
 
