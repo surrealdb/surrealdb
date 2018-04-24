@@ -51,13 +51,15 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 
 		for _, lv := range lvs {
 
-			var ok bool
-			var con *socket
-			var out interface{}
+			if sck, ok := sockets.Load(lv.FB); ok {
 
-			if con, ok = sockets[lv.FB]; ok {
+				var out interface{}
 
-				ctx = con.ctx(d.ns, d.db)
+				// Create a new context for this socket
+				// which has the correct connection
+				// variables, and auth levels.
+
+				ctx = sck.(*socket).ctx(d.ns, d.db)
 
 				// Check whether the change was made by
 				// the same connection as the live query,
@@ -111,14 +113,14 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 
 				switch when {
 				case _DELETE:
-					con.queue(id, lv.ID, "DELETE", d.id)
+					sck.(*socket).queue(id, lv.ID, "DELETE", d.id)
 				case _CREATE:
 					if out != nil {
-						con.queue(id, lv.ID, "CREATE", out)
+						sck.(*socket).queue(id, lv.ID, "CREATE", out)
 					}
 				case _UPDATE:
 					if out != nil {
-						con.queue(id, lv.ID, "UPDATE", out)
+						sck.(*socket).queue(id, lv.ID, "UPDATE", out)
 					}
 				}
 

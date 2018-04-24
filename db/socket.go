@@ -37,15 +37,21 @@ type socket struct {
 }
 
 func clear(id string) {
-	for _, s := range sockets {
-		s.clear(id)
-	}
+	go func() {
+		sockets.Range(func(key, val interface{}) bool {
+			val.(*socket).clear(id)
+			return true
+		})
+	}()
 }
 
 func flush(id string) {
-	for _, s := range sockets {
-		s.flush(id)
-	}
+	go func() {
+		sockets.Range(func(key, val interface{}) bool {
+			val.(*socket).flush(id)
+			return true
+		})
+	}()
 }
 
 func (s *socket) ctx(ns, db string) (ctx context.Context) {
@@ -119,22 +125,11 @@ func (s *socket) flush(id string) (err error) {
 		Params: s.items[id],
 	}
 
-	// Check the websocket subprotocol
-	// and send the relevant message
-	// type containing the notification.
+	// Notify the websocket connection
+	// y sending an RPCNotification type
+	// to the notify channel.
 
-	sock := s.fibre.Socket()
-
-	switch sock.Subprotocol() {
-	default:
-		err = sock.SendJSON(obj)
-	case "json":
-		err = sock.SendJSON(obj)
-	case "cbor":
-		err = sock.SendCBOR(obj)
-	case "pack":
-		err = sock.SendPACK(obj)
-	}
+	s.fibre.Socket().Notify(obj)
 
 	// Make sure that we clear all the
 	// pending message notifications
@@ -225,7 +220,7 @@ func (s *socket) check(e *executor, ctx context.Context, ns, db, tb string) (err
 
 func (s *socket) deregister(id string) {
 
-	delete(sockets, id)
+	sockets.Delete(id)
 
 	txn, _ := db.Begin(context.Background(), true)
 

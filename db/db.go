@@ -66,9 +66,11 @@ func Exit() (err error) {
 
 	log.WithPrefix("db").Infof("Gracefully shutting down database")
 
-	for id, so := range sockets {
+	sockets.Range(func(key, val interface{}) bool {
+		id, so := key.(string), val.(*socket)
 		deregister(so.fibre, id)()
-	}
+		return true
+	})
 
 	return db.Close()
 

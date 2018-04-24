@@ -23,25 +23,16 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-var locker sync.Mutex
-
-var sockets map[string]*socket
-
-func init() {
-	sockets = make(map[string]*socket)
-}
+var sockets sync.Map
 
 func register(fib *fibre.Context, id string) func() {
 	return func() {
 
-		locker.Lock()
-		defer locker.Unlock()
-
-		sockets[id] = &socket{
+		sockets.LoadOrStore(id, &socket{
 			fibre: fib,
 			items: make(map[string][]interface{}),
 			lives: make(map[string]*sql.LiveStatement),
-		}
+		})
 
 	}
 }
@@ -49,11 +40,8 @@ func register(fib *fibre.Context, id string) func() {
 func deregister(fib *fibre.Context, id string) func() {
 	return func() {
 
-		locker.Lock()
-		defer locker.Unlock()
-
-		if sck, ok := sockets[id]; ok {
-			sck.deregister(id)
+		if sck, ok := sockets.Load(id); ok {
+			sck.(*socket).deregister(id)
 		}
 
 	}
@@ -63,8 +51,8 @@ func (e *executor) executeLive(ctx context.Context, stm *sql.LiveStatement) (out
 
 	stm.FB = ctx.Value(ctxKeyId).(string)
 
-	if sck, ok := sockets[stm.FB]; ok {
-		return sck.executeLive(e, ctx, stm)
+	if sck, ok := sockets.Load(stm.FB); ok {
+		return sck.(*socket).executeLive(e, ctx, stm)
 	}
 
 	return nil, &QueryError{}
@@ -75,8 +63,8 @@ func (e *executor) executeKill(ctx context.Context, stm *sql.KillStatement) (out
 
 	stm.FB = ctx.Value(ctxKeyId).(string)
 
-	if sck, ok := sockets[stm.FB]; ok {
-		return sck.executeKill(e, ctx, stm)
+	if sck, ok := sockets.Load(stm.FB); ok {
+		return sck.(*socket).executeKill(e, ctx, stm)
 	}
 
 	return nil, &QueryError{}

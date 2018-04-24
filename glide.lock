@@ -1,12 +1,12 @@
 hash: c56e5bd935dd1933a6e7370fe3fc67ea26169ec91aa05c171543866c6c2490ed
-updated: 2018-04-24T13:32:49.661918+01:00
+updated: 2018-04-24T23:43:27.310737+01:00
 imports:
 - name: github.com/abcum/bump
   version: 526934c541e071b5a330671c76434b9e32d55638
 - name: github.com/abcum/cork
   version: c246208017d0b81f2e9a3fc2fb7a993c89153839
 - name: github.com/abcum/fibre
-  version: 1b1947da964c0c0a244868279f9476df093eef34
+  version: 24b2157453a929f7a86616c415d01b94916b3ed5
   subpackages:
   - mw
 - name: github.com/abcum/ptree
