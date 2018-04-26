@@ -3189,7 +3189,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 		// ----------------------------------------------------------------------
 		{
 			sql: `REMOVE FIELD`,
-			err: "Found `` but expected `name`",
+			err: "Found `` but expected `name, or expression`",
 		},
 		{
 			sql: `REMOVE FIELD temp`,

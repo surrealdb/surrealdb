@@ -85,7 +85,7 @@ func (p *parser) parseRemoveFieldStatement() (stmt *RemoveFieldStatement, err er
 		return nil, err
 	}
 
-	if stmt.Name, err = p.parseIdent(); err != nil {
+	if stmt.Name, err = p.parseIdiom(); err != nil {
 		return nil, err
 	}
 
