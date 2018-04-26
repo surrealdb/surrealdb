@@ -108,7 +108,7 @@ func (d *document) delFld(ctx context.Context, met method) (err error) {
 		// Loop over the allowed keys
 
 		for _, fd := range fds {
-			d.current.Walk(func(key string, val interface{}) (err error) {
+			d.current.Walk(func(key string, val interface{}, ok bool) (err error) {
 				keys[key] = struct{}{}
 				return
 			}, fd.Name.ID)
@@ -291,9 +291,7 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 	for _, fd := range fds {
 
-		err = d.current.Walk(func(key string, val interface{}) error {
-
-			vars := data.New()
+		err = d.current.Walk(func(key string, val interface{}, exi bool) error {
 
 			var old = d.initial.Get(key).Data()
 
@@ -313,6 +311,7 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 				// Reset the variables
 
+				vars := data.New()
 				vars.Set(val, varKeyValue)
 				vars.Set(val, varKeyAfter)
 				vars.Set(old, varKeyBefore)
@@ -332,6 +331,7 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 				// Reset the variables
 
+				vars := data.New()
 				vars.Set(val, varKeyValue)
 				vars.Set(val, varKeyAfter)
 				vars.Set(old, varKeyBefore)
@@ -354,6 +354,7 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 						// Reset the variables
 
+						vars := data.New()
 						vars.Set(val, varKeyValue)
 						vars.Set(val, varKeyAfter)
 						vars.Set(old, varKeyBefore)
@@ -398,7 +399,11 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 			switch val.(type) {
 			default:
-				d.current.Iff(val, key)
+				if exi {
+					d.current.Set(val, key)
+				} else {
+					d.current.Iff(val, key)
+				}
 			case *sql.Void:
 				d.current.Del(key)
 			}

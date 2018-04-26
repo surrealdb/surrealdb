@@ -47,6 +47,9 @@ type Fetcher func(key string, val interface{}, path []string) interface{}
 // Iterator is used when iterating over items.
 type Iterator func(key string, val interface{}) error
 
+// Walker is used when walking over items.
+type Walker func(key string, val interface{}, exi bool) error
+
 // New creates a new data object.
 func New() *Doc {
 	return &Doc{data: map[string]interface{}{}}
@@ -995,7 +998,7 @@ func (d *Doc) each(exec Iterator, prev []string) error {
 // --------------------------------------------------------------------------------
 
 // Walk walks the value or values at a specified path.
-func (d *Doc) Walk(exec Iterator, path ...string) error {
+func (d *Doc) Walk(exec Walker, path ...string) error {
 
 	path = d.path(path...)
 
@@ -1003,7 +1006,7 @@ func (d *Doc) Walk(exec Iterator, path ...string) error {
 
 }
 
-func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
+func (d *Doc) walk(exec Walker, prev []string, path ...string) error {
 
 	if len(path) == 0 {
 		return nil
@@ -1037,7 +1040,7 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 
 		if m, ok := object.(map[string]interface{}); ok {
 			if object, ok = m[p]; !ok {
-				return exec(d.join(prev, path), nil)
+				return exec(d.join(prev, path), nil, false)
 			}
 			continue
 		}
@@ -1051,7 +1054,7 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 			c, i, r := d.what(p, a, choose)
 
 			if r == one && len(c) == 0 {
-				return fmt.Errorf("No item with index %s in array, using path %s", p, path)
+				return nil
 			}
 
 			if r == one {
@@ -1060,7 +1063,7 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 					keep = append(keep, prev...)
 					keep = append(keep, path[:k]...)
 					keep = append(keep, fmt.Sprintf("[%d]", i[0]))
-					return exec(d.join(keep), c[0])
+					return exec(d.join(keep), c[0], true)
 				} else {
 					var keep []string
 					keep = append(keep, prev...)
@@ -1077,7 +1080,7 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 						keep = append(keep, prev...)
 						keep = append(keep, path[:k]...)
 						keep = append(keep, fmt.Sprintf("[%d]", i[j]))
-						if err := exec(d.join(keep), v); err != nil {
+						if err := exec(d.join(keep), v, true); err != nil {
 							return err
 						}
 					} else {
@@ -1098,10 +1101,10 @@ func (d *Doc) walk(exec Iterator, prev []string, path ...string) error {
 		// The current path item is not an object or an array
 		// but there are still other items in the search path.
 
-		return fmt.Errorf("Can not get path %s from %v", path, object)
+		return nil
 
 	}
 
-	return exec(d.join(prev, path), object)
+	return exec(d.join(prev, path), object, true)
 
 }

@@ -51,7 +51,7 @@ func (d *document) perms(ctx context.Context, doc *data.Doc) (err error) {
 
 		if fd.Perms != nil {
 
-			err = doc.Walk(func(key string, val interface{}) error {
+			err = doc.Walk(func(key string, val interface{}, exi bool) error {
 
 				// We are checking the permissions of the field
 

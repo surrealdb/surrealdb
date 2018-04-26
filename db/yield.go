@@ -242,7 +242,7 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 			break
 		case *sql.Ident:
 
-			out.Walk(func(key string, val interface{}) error {
+			out.Walk(func(key string, val interface{}, exi bool) error {
 
 				switch res := val.(type) {
 				case []interface{}:
