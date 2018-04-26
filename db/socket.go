@@ -97,7 +97,7 @@ func (s *socket) clear(id string) (err error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	s.items[id] = nil
+	delete(s.items, id)
 
 	return
 
@@ -135,7 +135,7 @@ func (s *socket) flush(id string) (err error) {
 	// pending message notifications
 	// for this socket when done.
 
-	s.items[id] = nil
+	delete(s.items, id)
 
 	return
 

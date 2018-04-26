@@ -28,7 +28,7 @@ var sockets sync.Map
 func register(fib *fibre.Context, id string) func() {
 	return func() {
 
-		sockets.LoadOrStore(id, &socket{
+		sockets.Store(id, &socket{
 			fibre: fib,
 			items: make(map[string][]interface{}),
 			lives: make(map[string]*sql.LiveStatement),
