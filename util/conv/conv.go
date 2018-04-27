@@ -53,6 +53,37 @@ func toBoolean(str string) (bool, error) {
 
 // --------------------------------------------------
 
+func MustBe(t, obj interface{}) (val interface{}) {
+	switch t {
+	default:
+		return obj
+	case "array":
+		return MustBeArray(obj)
+	case "object":
+		return MustBeObject(obj)
+	}
+}
+
+func MustBeArray(obj interface{}) (val interface{}) {
+	if now, ok := obj.([]interface{}); ok {
+		val = now
+	} else {
+		val = make([]interface{}, 0)
+	}
+	return
+}
+
+func MustBeObject(obj interface{}) (val interface{}) {
+	if now, ok := obj.(map[string]interface{}); ok {
+		val = now
+	} else {
+		val = make(map[string]interface{})
+	}
+	return
+}
+
+// --------------------------------------------------
+
 func MightBe(obj interface{}) (val interface{}, ok bool) {
 	switch now := obj.(type) {
 	case string:

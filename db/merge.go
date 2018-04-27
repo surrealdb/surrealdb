@@ -295,6 +295,10 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 			var old = d.initial.Get(key).Data()
 
+			// Ensure object and arrays are set
+
+			val = conv.MustBe(fd.Type, val)
+
 			// Ensure the field is the correct type
 
 			if val != nil {
