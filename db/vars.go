@@ -35,17 +35,18 @@ const (
 )
 
 const (
-	ctxKeyId    = "id"
-	ctxKeyNs    = "ns"
-	ctxKeyDb    = "db"
-	ctxKeyDive  = "dive"
-	ctxKeyVars  = "vars"
-	ctxKeySubs  = "subs"
-	ctxKeySpec  = "spec"
-	ctxKeyKeep  = "keep"
-	ctxKeyAuth  = "auth"
-	ctxKeyKind  = "kind"
-	ctxKeyScope = "scope"
+	ctxKeyId      = "id"
+	ctxKeyNs      = "ns"
+	ctxKeyDb      = "db"
+	ctxKeyDive    = "dive"
+	ctxKeyVars    = "vars"
+	ctxKeySubs    = "subs"
+	ctxKeySpec    = "spec"
+	ctxKeyKeep    = "keep"
+	ctxKeyAuth    = "auth"
+	ctxKeyKind    = "kind"
+	ctxKeyScope   = "scope"
+	ctxKeyVersion = "version"
 )
 
 const (

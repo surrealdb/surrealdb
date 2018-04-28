@@ -24,6 +24,8 @@ import (
 
 func (e *executor) executeSelect(ctx context.Context, stm *sql.SelectStatement) ([]interface{}, error) {
 
+	ctx = context.WithValue(ctx, ctxKeyVersion, stm.Version)
+
 	var what sql.Exprs
 
 	for _, val := range stm.What {

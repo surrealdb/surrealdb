@@ -339,12 +339,18 @@ func (e *executor) fetchPaths(ctx context.Context, doc *data.Doc, exprs ...sql.E
 
 func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc) (interface{}, error) {
 
+	ver, err := e.fetchVersion(ctx, ctx.Value(ctxKeyVersion))
+	if err != nil {
+		return nil, err
+	}
+
 	res, err := e.executeSelect(ctx, &sql.SelectStatement{
 		KV:       cnf.Settings.DB.Base,
 		NS:       ctx.Value(ctxKeyNs).(string),
 		DB:       ctx.Value(ctxKeyDb).(string),
 		Expr:     []*sql.Field{{Expr: &sql.All{}}},
 		What:     []sql.Expr{val},
+		Version:  sql.Expr(ver),
 		Parallel: 1,
 	})
 
@@ -362,12 +368,18 @@ func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc
 
 func (e *executor) fetchArray(ctx context.Context, val []interface{}, doc *data.Doc) (interface{}, error) {
 
+	ver, err := e.fetchVersion(ctx, ctx.Value(ctxKeyVersion))
+	if err != nil {
+		return nil, err
+	}
+
 	res, err := e.executeSelect(ctx, &sql.SelectStatement{
 		KV:       cnf.Settings.DB.Base,
 		NS:       ctx.Value(ctxKeyNs).(string),
 		DB:       ctx.Value(ctxKeyDb).(string),
 		Expr:     []*sql.Field{{Expr: &sql.All{}}},
 		What:     []sql.Expr{val},
+		Version:  sql.Expr(ver),
 		Parallel: 1,
 	})
 
@@ -441,6 +453,10 @@ func (e *executor) fetchStart(ctx context.Context, val sql.Expr) (int, error) {
 }
 
 func (e *executor) fetchVersion(ctx context.Context, val sql.Expr) (int64, error) {
+
+	if v, ok := val.(int64); ok {
+		return v, nil
+	}
 
 	v, err := e.fetch(ctx, val, nil)
 	if err != nil {
