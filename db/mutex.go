@@ -23,62 +23,58 @@ import (
 
 type mutex struct {
 	m sync.Map
-	l sync.Mutex
 }
 
 type value struct {
-	v int
-	r int64
-	w int64
-	l sync.RWMutex
+	v uint32
+	q chan struct{}
+	l chan struct{}
 }
 
 func (m *mutex) Lock(ctx context.Context, key fmt.Stringer) {
-	m.l.Lock()
-	_, v := m.item(ctx, key)
-	if v.v < vers(ctx) {
-		m.l.Unlock()
-		panic(errRaceCondition)
-	}
-	atomic.AddInt64(&v.w, 1)
-	m.l.Unlock()
-	v.l.Lock()
-}
 
-func (m *mutex) RLock(ctx context.Context, key fmt.Stringer) {
-	m.l.Lock()
 	_, v := m.item(ctx, key)
-	atomic.AddInt64(&v.r, 1)
-	m.l.Unlock()
-	v.l.RLock()
+
+	for {
+		select {
+		default:
+			if atomic.LoadUint32(&v.v) < vers(ctx) {
+				close(v.q)
+				panic(errRaceCondition)
+			}
+		case <-ctx.Done():
+			return
+		case <-v.q:
+			return
+		case v.l <- struct{}{}:
+			atomic.StoreUint32(&v.v, vers(ctx))
+			return
+		}
+	}
+
 }
 
 func (m *mutex) Unlock(ctx context.Context, key fmt.Stringer) {
-	m.l.Lock()
-	defer m.l.Unlock()
-	k, v := m.item(ctx, key)
-	if w := atomic.LoadInt64(&v.w); w > 0 {
-		if w := atomic.AddInt64(&v.w, -1); w <= 0 {
-			m.m.Delete(k)
-		}
-		v.l.Unlock()
-	}
-}
 
-func (m *mutex) RUnlock(ctx context.Context, key fmt.Stringer) {
-	m.l.Lock()
-	defer m.l.Unlock()
-	k, v := m.item(ctx, key)
-	if r := atomic.LoadInt64(&v.r); r > 0 {
-		if r := atomic.AddInt64(&v.r, -1); r <= 0 {
-			m.m.Delete(k)
-		}
-		v.l.RUnlock()
+	_, v := m.item(ctx, key)
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-v.q:
+		return
+	case <-v.l:
+		return
 	}
+
 }
 
 func (m *mutex) item(ctx context.Context, key fmt.Stringer) (string, *value) {
 	k := key.String()
-	v, _ := m.m.LoadOrStore(k, &value{v: vers(ctx)})
+	v, _ := m.m.LoadOrStore(k, &value{
+		v: vers(ctx),
+		q: make(chan struct{}),
+		l: make(chan struct{}, 1),
+	})
 	return k, v.(*value)
 }

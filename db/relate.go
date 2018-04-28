@@ -100,7 +100,7 @@ func (d *document) runRelate(ctx context.Context, stm *sql.RelateStatement) (int
 		return nil, err
 	}
 
-	if err = d.wlock(ctx); err != nil {
+	if err = d.lock(ctx); err != nil {
 		return nil, err
 	}
 

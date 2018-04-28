@@ -18,7 +18,7 @@ import (
 	"context"
 )
 
-func vers(ctx context.Context) int {
+func vers(ctx context.Context) uint32 {
 
 	v := ctx.Value(ctxKeyDive)
 
@@ -26,7 +26,7 @@ func vers(ctx context.Context) int {
 	case nil:
 		return 0
 	default:
-		return v.(int)
+		return v.(uint32)
 	}
 
 }
@@ -37,12 +37,12 @@ func dive(ctx context.Context) context.Context {
 
 	switch v {
 	case nil:
-		return context.WithValue(ctx, ctxKeyDive, 1)
+		return context.WithValue(ctx, ctxKeyDive, uint32(1))
 	default:
-		if v.(int) > maxRecursiveQueries {
+		if v.(uint32) > maxRecursiveQueries {
 			panic(errRecursiveOverload)
 		}
-		return context.WithValue(ctx, ctxKeyDive, v.(int)+1)
+		return context.WithValue(ctx, ctxKeyDive, v.(uint32)+1)
 	}
 
 }

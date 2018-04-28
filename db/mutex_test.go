@@ -100,13 +100,11 @@ func TestMutex(t *testing.T) {
 		m := new(mutex)
 		ctx := context.Background()
 
-		for i := 0; i < n; i++ {
-			m.Lock(ctx, new(stringer))
-			ctx = dive(ctx)
-			So(func() { m.Lock(ctx, new(stringer)) }, ShouldPanic)
-			So(func() { m.Unlock(ctx, new(stringer)) }, ShouldNotPanic)
-			So(func() { m.Unlock(ctx, new(stringer)) }, ShouldNotPanic)
-		}
+		m.Lock(ctx, new(stringer))
+		ctx = dive(ctx)
+		So(func() { m.Lock(ctx, new(stringer)) }, ShouldPanic)
+		So(func() { m.Unlock(ctx, new(stringer)) }, ShouldNotPanic)
+		So(func() { m.Unlock(ctx, new(stringer)) }, ShouldNotPanic)
 
 		So(nil, ShouldBeNil)
 
@@ -191,7 +189,7 @@ func TestMutex(t *testing.T) {
 
 	})
 
-	Convey("Inability to update the same document in a SELECT subquery", t, func() {
+	Convey("Ability to update the same document in a SELECT subquery", t, func() {
 
 		setupDB(20)
 
@@ -207,12 +205,12 @@ func TestMutex(t *testing.T) {
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")
 		So(res[1].Result, ShouldHaveLength, 1)
-		So(res[2].Status, ShouldEqual, "ERR")
-		So(res[2].Detail, ShouldEqual, "Failed to update the same document recursively")
+		So(res[2].Status, ShouldEqual, "OK")
+		So(res[2].Result, ShouldHaveLength, 1)
 		So(res[3].Status, ShouldEqual, "OK")
 		So(res[3].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[3].Result[0]).Get("temp").Data(), ShouldBeNil)
-		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldBeNil)
+		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, true)
 
 	})
 

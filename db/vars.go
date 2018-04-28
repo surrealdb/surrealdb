@@ -75,7 +75,7 @@ var (
 
 	// maxRecursiveQueries specifies how many queries will be
 	// processed recursively before the query is cancelled.
-	maxRecursiveQueries = 16
+	maxRecursiveQueries = uint32(16)
 
 	// queryIdentFailed occurs when a permission query asks
 	// for a field, meaning a document has to be fetched.

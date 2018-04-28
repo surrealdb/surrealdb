@@ -107,7 +107,7 @@ func (d *document) runDelete(ctx context.Context, stm *sql.DeleteStatement) (int
 		return nil, err
 	}
 
-	if err = d.wlock(ctx); err != nil {
+	if err = d.lock(ctx); err != nil {
 		return nil, err
 	}
 

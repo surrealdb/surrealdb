@@ -36,14 +36,11 @@ type document struct {
 	id      *sql.Thing
 	key     *keys.Thing
 	val     kvs.KV
+	lck     bool
 	doc     *data.Doc
 	initial *data.Doc
 	current *data.Doc
-	locks   struct {
-		r bool
-		w bool
-	}
-	store struct {
+	store   struct {
 		id int
 		tb bool
 		ev bool
@@ -71,9 +68,7 @@ func newDocument(i *iterator, key *keys.Thing, val kvs.KV, doc *data.Doc) (d *do
 	d.key = key
 	d.val = val
 	d.doc = doc
-
-	d.locks.r = false
-	d.locks.w = false
+	d.lck = false
 
 	return
 
@@ -199,22 +194,11 @@ func (d *document) init(ctx context.Context) (err error) {
 
 }
 
-func (d *document) wlock(ctx context.Context) (err error) {
+func (d *document) lock(ctx context.Context) (err error) {
 
 	if d.key != nil {
-		d.locks.w = true
+		d.lck = true
 		d.i.e.lock.Lock(ctx, d.key)
-	}
-
-	return
-
-}
-
-func (d *document) rlock(ctx context.Context) (err error) {
-
-	if d.key != nil {
-		d.locks.r = true
-		d.i.e.lock.RLock(ctx, d.key)
 	}
 
 	return
@@ -223,14 +207,9 @@ func (d *document) rlock(ctx context.Context) (err error) {
 
 func (d *document) ulock(ctx context.Context) (err error) {
 
-	if d.key != nil && d.locks.w {
-		d.locks.w = false
+	if d.key != nil && d.lck {
+		d.lck = false
 		d.i.e.lock.Unlock(ctx, d.key)
-	}
-
-	if d.key != nil && d.locks.r {
-		d.locks.r = false
-		d.i.e.lock.RUnlock(ctx, d.key)
 	}
 
 	return

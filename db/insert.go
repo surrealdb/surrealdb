@@ -86,7 +86,7 @@ func (d *document) runInsert(ctx context.Context, stm *sql.InsertStatement) (int
 		return nil, err
 	}
 
-	if err = d.wlock(ctx); err != nil {
+	if err = d.lock(ctx); err != nil {
 		return nil, err
 	}
 

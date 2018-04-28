@@ -108,7 +108,7 @@ func (d *document) runCreate(ctx context.Context, stm *sql.CreateStatement) (int
 		return nil, err
 	}
 
-	if err = d.wlock(ctx); err != nil {
+	if err = d.lock(ctx); err != nil {
 		return nil, err
 	}
 

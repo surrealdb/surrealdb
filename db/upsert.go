@@ -86,7 +86,7 @@ func (d *document) runUpsert(ctx context.Context, stm *sql.UpsertStatement) (int
 		return nil, err
 	}
 
-	if err = d.wlock(ctx); err != nil {
+	if err = d.lock(ctx); err != nil {
 		return nil, err
 	}
 
