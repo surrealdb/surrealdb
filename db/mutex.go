@@ -35,21 +35,29 @@ func (m *mutex) Lock(ctx context.Context, key fmt.Stringer) {
 
 	_, v := m.item(ctx, key)
 
-	for {
-		select {
-		default:
-			if atomic.LoadUint32(&v.v) < vers(ctx) {
-				close(v.q)
-				panic(errRaceCondition)
-			}
-		case <-ctx.Done():
-			return
-		case <-v.q:
-			return
-		case v.l <- struct{}{}:
-			atomic.StoreUint32(&v.v, vers(ctx))
-			return
+	select {
+	case <-ctx.Done():
+		return
+	case <-v.q:
+		return
+	case v.l <- struct{}{}:
+		atomic.StoreUint32(&v.v, vers(ctx))
+		return
+	default:
+		if atomic.LoadUint32(&v.v) < vers(ctx) {
+			close(v.q)
+			panic(errRaceCondition)
 		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-v.q:
+		return
+	case v.l <- struct{}{}:
+		atomic.StoreUint32(&v.v, vers(ctx))
+		return
 	}
 
 }
