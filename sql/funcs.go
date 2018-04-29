@@ -27,8 +27,9 @@ var rolls = map[string]bool{
 	// Math implementation
 
 	"math.geometricmean": true,
+	"math.max":           true,
 	"math.mean":          true,
-	"math.percentile":    true,
+	"math.min":           true,
 	"math.stddev":        true,
 	"math.sum":           true,
 	"math.variance":      true,
