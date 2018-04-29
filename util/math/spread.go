@@ -36,6 +36,6 @@ func Spread(vals []float64) float64 {
 		}
 	}
 
-	return max - min
+	return (max - min) - 1
 
 }

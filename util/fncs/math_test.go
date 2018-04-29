@@ -227,7 +227,7 @@ func TestMath(t *testing.T) {
 		res, _ = Run(context.Background(), "math.spread", 10)
 		So(res, ShouldEqual, 0)
 		res, _ = Run(context.Background(), "math.spread", test)
-		So(res, ShouldEqual, 4.5)
+		So(res, ShouldEqual, 3.5)
 	})
 
 	Convey("math.sqrt() works properly", t, func() {
