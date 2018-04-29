@@ -146,6 +146,8 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return mathMin(ctx, args...)
 	case "math.mode":
 		return mathMode(ctx, args...)
+	case "math.nearestrank":
+		return mathNearestRank(ctx, args...)
 	case "math.percentile":
 		return mathPercentile(ctx, args...)
 	case "math.round":

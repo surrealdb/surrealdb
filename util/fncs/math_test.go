@@ -179,6 +179,17 @@ func TestMath(t *testing.T) {
 		So(res, ShouldResemble, []float64{1})
 	})
 
+	Convey("math.nearestrank() works properly", t, func() {
+		res, _ = Run(context.Background(), "math.nearestrank", "test", 90)
+		So(res, ShouldEqual, nil)
+		res, _ = Run(context.Background(), "math.nearestrank", 10, "oops")
+		So(res, ShouldEqual, nil)
+		res, _ = Run(context.Background(), "math.nearestrank", 10, 90)
+		So(res, ShouldEqual, 10)
+		res, _ = Run(context.Background(), "math.nearestrank", test, 90)
+		So(res, ShouldEqual, 4.5)
+	})
+
 	Convey("math.percentile() works properly", t, func() {
 		res, _ = Run(context.Background(), "math.percentile", "test", 90)
 		So(res, ShouldEqual, nil)
@@ -232,9 +243,9 @@ func TestMath(t *testing.T) {
 		res, _ = Run(context.Background(), "math.stddev", "test")
 		So(res, ShouldEqual, nil)
 		res, _ = Run(context.Background(), "math.stddev", 10)
-		So(res, ShouldEqual, 0)
+		So(res, ShouldEqual, nil)
 		res, _ = Run(context.Background(), "math.stddev", test)
-		So(res, ShouldEqual, 1.2747548783981961)
+		So(res, ShouldEqual, 1.4719601443879744)
 	})
 
 	Convey("math.sum() works properly", t, func() {
@@ -274,9 +285,9 @@ func TestMath(t *testing.T) {
 		res, _ = Run(context.Background(), "math.variance", "test")
 		So(res, ShouldEqual, nil)
 		res, _ = Run(context.Background(), "math.variance", 10)
-		So(res, ShouldEqual, 0)
+		So(res, ShouldEqual, nil)
 		res, _ = Run(context.Background(), "math.variance", test)
-		So(res, ShouldEqual, 1.625)
+		So(res, ShouldEqual, 2.1666666666666665)
 	})
 
 }

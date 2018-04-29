@@ -115,6 +115,14 @@ func mathMode(ctx context.Context, args ...interface{}) (out []float64, err erro
 	return math.Mode(vals), nil
 }
 
+func mathNearestRank(ctx context.Context, args ...interface{}) (out interface{}, err error) {
+	vals := ensureFloats(args[0])
+	if perc, ok := ensureFloat(args[1]); ok {
+		return outputFloat(math.NearestRankPercentile(vals, perc))
+	}
+	return
+}
+
 func mathPercentile(ctx context.Context, args ...interface{}) (out interface{}, err error) {
 	vals := ensureFloats(args[0])
 	if perc, ok := ensureFloat(args[1]); ok {
@@ -152,7 +160,7 @@ func mathSqrt(ctx context.Context, args ...interface{}) (out interface{}, err er
 
 func mathStddev(ctx context.Context, args ...interface{}) (out interface{}, err error) {
 	vals := ensureFloats(args[0])
-	return outputFloat(math.PopulationStandardDeviation(vals))
+	return outputFloat(math.SampleStandardDeviation(vals))
 }
 
 func mathSum(ctx context.Context, args ...interface{}) (out interface{}, err error) {
@@ -175,5 +183,5 @@ func mathTrimean(ctx context.Context, args ...interface{}) (out interface{}, err
 
 func mathVariance(ctx context.Context, args ...interface{}) (out interface{}, err error) {
 	vals := ensureFloats(args[0])
-	return outputFloat(math.PopulationVariance(vals))
+	return outputFloat(math.SampleVariance(vals))
 }
