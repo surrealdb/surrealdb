@@ -219,6 +219,15 @@ func TestMath(t *testing.T) {
 		So(res, ShouldEqual, 4.5)
 	})
 
+	Convey("math.sqrt() works properly", t, func() {
+		res, _ = Run(context.Background(), "math.sqrt", "test")
+		So(res, ShouldEqual, nil)
+		res, _ = Run(context.Background(), "math.sqrt", test)
+		So(res, ShouldEqual, nil)
+		res, _ = Run(context.Background(), "math.sqrt", 10)
+		So(res, ShouldEqual, 3.1622776601683795)
+	})
+
 	Convey("math.stddev() works properly", t, func() {
 		res, _ = Run(context.Background(), "math.stddev", "test")
 		So(res, ShouldEqual, nil)

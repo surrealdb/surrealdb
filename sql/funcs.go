@@ -143,6 +143,7 @@ var funcs = map[string]map[int]interface{}{
 	"math.round":         {1: nil},
 	"math.sample":        {2: nil},
 	"math.spread":        {1: nil},
+	"math.sqrt":          {1: nil},
 	"math.stddev":        {1: nil},
 	"math.sum":           {1: nil},
 	"math.top":           {2: nil},

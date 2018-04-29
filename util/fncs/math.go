@@ -143,6 +143,13 @@ func mathSpread(ctx context.Context, args ...interface{}) (out interface{}, err 
 	return outputFloat(math.Spread(vals))
 }
 
+func mathSqrt(ctx context.Context, args ...interface{}) (out interface{}, err error) {
+	if val, ok := ensureFloat(args[0]); ok {
+		return outputFloat(math.Sqrt(val))
+	}
+	return
+}
+
 func mathStddev(ctx context.Context, args ...interface{}) (out interface{}, err error) {
 	vals := ensureFloats(args[0])
 	return outputFloat(math.PopulationStandardDeviation(vals))

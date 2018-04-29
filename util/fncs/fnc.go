@@ -154,6 +154,8 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return mathSample(ctx, args...)
 	case "math.spread":
 		return mathSpread(ctx, args...)
+	case "math.sqrt":
+		return mathSqrt(ctx, args...)
 	case "math.stddev":
 		return mathStddev(ctx, args...)
 	case "math.sum":
