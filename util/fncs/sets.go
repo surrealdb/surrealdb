@@ -40,7 +40,7 @@ func difference(ctx context.Context, args ...interface{}) ([]interface{}, error)
 
 }
 
-func distinct(ctx context.Context, args ...interface{}) (interface{}, error) {
+func distinct(ctx context.Context, args ...interface{}) ([]interface{}, error) {
 
 	d := make([]interface{}, 0)
 	c := make(map[interface{}]bool)
