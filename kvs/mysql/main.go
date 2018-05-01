@@ -15,6 +15,8 @@
 package mysql
 
 import (
+	"time"
+
 	"strings"
 
 	"crypto/tls"
@@ -67,6 +69,20 @@ func init() {
 			log.WithPrefix("kvs").Errorln(err)
 			return
 		}
+
+		// Set the maximum connection lifetime
+
+		pntr.SetConnMaxLifetime(1 * time.Hour)
+
+		// Set the max number of idle connections
+
+		pntr.SetMaxIdleConns(350)
+
+		// Set the max number of open connections
+
+		pntr.SetMaxOpenConns(350)
+
+		// Return the database pointer
 
 		return &DB{pntr: pntr}, err
 
