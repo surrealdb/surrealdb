@@ -92,7 +92,7 @@ func TestSelect(t *testing.T) {
 
 	})
 
-	Convey("Select records from multiple things", t, func() {
+	Convey("Select records from multiple tables", t, func() {
 
 		setupDB()
 
@@ -133,6 +133,105 @@ func TestSelect(t *testing.T) {
 		So(res[3].Result, ShouldHaveLength, 10)
 		So(res[4].Result, ShouldHaveLength, 10)
 		So(res[5].Result, ShouldHaveLength, 24)
+
+	})
+
+	Convey("Select records from an array of strings", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		SELECT * FROM ["one", "two", "tre"];
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 2)
+		So(res[1].Result, ShouldHaveLength, 3)
+		So(data.Consume(res[1].Result[0]).Data(), ShouldResemble, "one")
+		So(data.Consume(res[1].Result[1]).Data(), ShouldResemble, "two")
+		So(data.Consume(res[1].Result[2]).Data(), ShouldResemble, "tre")
+
+	})
+
+	Convey("Select records from an array of objects with an id key", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		SELECT * FROM [{ id: "one" }, { id: "two" }, { id: "tre" }];
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 2)
+		So(res[1].Result, ShouldHaveLength, 3)
+		So(data.Consume(res[1].Result[0]).Data(), ShouldResemble, map[string]interface{}{"id": "one"})
+		So(data.Consume(res[1].Result[1]).Data(), ShouldResemble, map[string]interface{}{"id": "two"})
+		So(data.Consume(res[1].Result[2]).Data(), ShouldResemble, map[string]interface{}{"id": "tre"})
+
+	})
+
+	Convey("Select records from an array of objects with no id key", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		SELECT * FROM [{ test: "one" }, { test: "two" }, { test: "tre" }];
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 2)
+		So(res[1].Result, ShouldHaveLength, 3)
+		So(data.Consume(res[1].Result[0]).Data(), ShouldResemble, map[string]interface{}{"test": "one"})
+		So(data.Consume(res[1].Result[1]).Data(), ShouldResemble, map[string]interface{}{"test": "two"})
+		So(data.Consume(res[1].Result[2]).Data(), ShouldResemble, map[string]interface{}{"test": "tre"})
+
+	})
+
+	Convey("Select records from an array of virtual record things", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		CREATE test:one, test:two, test:tre;
+		SELECT * FROM array(
+			thing("test", "one"),
+			thing("test", "two"),
+			thing("test", "tre")
+		);
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 3)
+		So(res[1].Result, ShouldHaveLength, 3)
+		So(data.Consume(res[1].Result[0]).Data(), ShouldResemble, map[string]interface{}{
+			"id": sql.NewThing("test", "one"),
+			"meta": map[string]interface{}{
+				"tb": "test",
+				"id": "one",
+			},
+		})
+		So(data.Consume(res[1].Result[1]).Data(), ShouldResemble, map[string]interface{}{
+			"id": sql.NewThing("test", "two"),
+			"meta": map[string]interface{}{
+				"tb": "test",
+				"id": "two",
+			},
+		})
+		So(data.Consume(res[1].Result[2]).Data(), ShouldResemble, map[string]interface{}{
+			"id": sql.NewThing("test", "tre"),
+			"meta": map[string]interface{}{
+				"tb": "test",
+				"id": "tre",
+			},
+		})
 
 	})
 

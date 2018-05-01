@@ -52,6 +52,15 @@ func (d *document) grant(ctx context.Context, met method) (ok bool, err error) {
 
 	var val interface{}
 
+	// If this is a document loaded from
+	// a subquery or data param, and not
+	// from the KV store, then there is
+	// no need to check permissions.
+
+	if d.key == nil {
+		return false, nil
+	}
+
 	// If we are authenticated using DB, NS,
 	// or KV permissions level, then we can
 	// ignore all permissions checks, but we
@@ -122,6 +131,15 @@ func (d *document) grant(ctx context.Context, met method) (ok bool, err error) {
 func (d *document) allow(ctx context.Context, met method) (ok bool, err error) {
 
 	var val interface{}
+
+	// If this is a document loaded from
+	// a subquery or data param, and not
+	// from the KV store, then there is
+	// no need to check permissions.
+
+	if d.key == nil {
+		return true, nil
+	}
 
 	// If we are authenticated using DB, NS,
 	// or KV permissions level, then we can

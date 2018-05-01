@@ -24,6 +24,15 @@ import (
 
 func (d *document) perms(ctx context.Context, doc *data.Doc) (err error) {
 
+	// If this is a document loaded from
+	// a subquery or data param, and not
+	// from the KV store, then there is
+	// no need to check permissions.
+
+	if d.key == nil {
+		return nil
+	}
+
 	// Get the field definitions so we can
 	// check if the permissions allow us
 	// to view each field.
