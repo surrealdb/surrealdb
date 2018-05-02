@@ -1,8 +1,18 @@
 hash: c56e5bd935dd1933a6e7370fe3fc67ea26169ec91aa05c171543866c6c2490ed
-updated: 2018-04-24T23:43:27.310737+01:00
+updated: 2018-05-02T12:28:08.963393+01:00
 imports:
+- name: cloud.google.com/go
+  version: 29f476ffa9c4cd4fd14336b6043090ac1ad76733
+  subpackages:
+  - compute/metadata
+  - iam
+  - internal
+  - internal/optional
+  - internal/trace
+  - internal/version
+  - storage
 - name: github.com/abcum/bump
-  version: 526934c541e071b5a330671c76434b9e32d55638
+  version: 6b53cd9c55bca5bf7cbd659737c682d6736f3dde
 - name: github.com/abcum/cork
   version: c246208017d0b81f2e9a3fc2fb7a993c89153839
 - name: github.com/abcum/fibre
@@ -12,22 +22,69 @@ imports:
 - name: github.com/abcum/ptree
   version: e5b90ab2c1e2a1b7acf0c922aea0c1e72888154e
 - name: github.com/abcum/rixxdb
-  version: 011abb719aeb9346ef78191b82f07ade0fec70e1
+  version: dca1e2d2d3017745924f91b428bad19fe384d597
 - name: github.com/abcum/syncr
-  version: cfe07cfc618896cf9e07b842310b3cb20159d8c8
+  version: 3de0d6c3e77f36f06e10fcb67b59f3ab15420d73
   subpackages:
   - file
+  - gcs
   - logr
+  - s3
 - name: github.com/abcum/tlist
   version: 555faebc1115b203cdb7aac00178d8f59bb4f186
 - name: github.com/armon/go-metrics
   version: 783273d703149aaeb9897cf58613d5af48861c25
+- name: github.com/aws/aws-sdk-go
+  version: 236a3fce423171d03ae327a8aa2512e6fb24df36
+  subpackages:
+  - aws
+  - aws/awserr
+  - aws/awsutil
+  - aws/client
+  - aws/client/metadata
+  - aws/corehandlers
+  - aws/credentials
+  - aws/credentials/ec2rolecreds
+  - aws/credentials/endpointcreds
+  - aws/credentials/stscreds
+  - aws/defaults
+  - aws/ec2metadata
+  - aws/endpoints
+  - aws/request
+  - aws/session
+  - aws/signer/v4
+  - internal/sdkio
+  - internal/sdkrand
+  - internal/shareddefaults
+  - private/protocol
+  - private/protocol/query
+  - private/protocol/query/queryutil
+  - private/protocol/rest
+  - private/protocol/restxml
+  - private/protocol/xml/xmlutil
+  - service/s3
+  - service/s3/s3iface
+  - service/s3/s3manager
+  - service/sts
 - name: github.com/dgrijalva/jwt-go
   version: 06ea1031745cb8b3dab3f6a236daf2b0aa468b7e
 - name: github.com/elithrar/simple-scrypt
   version: d150773194090feb6c897805a7bcea8d49544e2c
+- name: github.com/go-ini/ini
+  version: bda519ae5f4cbc60d391ff8610711627a08b86ae
 - name: github.com/go-sql-driver/mysql
   version: a0583e0143b1624142adab07e0e97fe106d99561
+- name: github.com/golang/protobuf
+  version: b4deda0973fb4c70b50d226b1af49f3da59f5265
+  subpackages:
+  - proto
+  - protoc-gen-go/descriptor
+  - ptypes
+  - ptypes/any
+  - ptypes/duration
+  - ptypes/timestamp
+- name: github.com/googleapis/gax-go
+  version: de2cc08e690b99dd3f7d19937d80d3d54e04682f
 - name: github.com/gorilla/websocket
   version: ea4d1f681babbce9545c9c5f3d5194a789c89f5b
 - name: github.com/hashicorp/errwrap
@@ -57,6 +114,8 @@ imports:
   version: d8adb1bb23adb87a63c2d1f3c0237a0a313b69a6
 - name: github.com/inconshreveable/mousetrap
   version: 76626ae9c91c4f2a10f34cad8ce83ea42c93bb75
+- name: github.com/jmespath/go-jmespath
+  version: c2b33e8439af944379acbdd9c3a5fe0bc44bd8a5
 - name: github.com/kr/text
   version: 7cafcd837844e784b526369c9bce262804aebc60
 - name: github.com/mattn/go-colorable
@@ -100,8 +159,23 @@ imports:
   version: b4c50a2b199d93b13dc15e78929cfb23bfdf21ab
   subpackages:
   - codec
+- name: go.opencensus.io
+  version: 10cec2c05ea2cfb8b0d856711daedc49d8a45c56
+  subpackages:
+  - exporter/stackdriver/propagation
+  - internal
+  - internal/tagencoding
+  - plugin/ochttp
+  - plugin/ochttp/propagation/b3
+  - stats
+  - stats/internal
+  - stats/view
+  - tag
+  - trace
+  - trace/internal
+  - trace/propagation
 - name: golang.org/x/crypto
-  version: 2b6c08872f4b66da917bb4ce98df4f0307330f78
+  version: 613d6eafa307c6881a737a3c35c0e312e8d3a8c5
   subpackages:
   - bcrypt
   - blowfish
@@ -116,12 +190,26 @@ imports:
   - bpf
   - context
   - context/ctxhttp
+  - http/httpguts
+  - http2
+  - http2/hpack
+  - idna
   - internal/iana
   - internal/socket
+  - internal/timeseries
   - ipv4
   - ipv6
+  - lex/httplex
+  - trace
+- name: golang.org/x/oauth2
+  version: 6881fee410a5daf86371371f9ad451b95e168b71
+  subpackages:
+  - google
+  - internal
+  - jws
+  - jwt
 - name: golang.org/x/sys
-  version: 79b0c6888797020a994db17c8510466c72fe75d9
+  version: 78d5f264b493f125018180c204871ecf58a2dce1
   subpackages:
   - unix
   - windows
@@ -133,13 +221,73 @@ imports:
   - internal/tag
   - language
   - search
+  - secure/bidirule
   - transform
+  - unicode/bidi
   - unicode/norm
+- name: google.golang.org/api
+  version: ce90db2c36a2cb8c9c06779ed8bb96f92ea6e3b8
+  subpackages:
+  - gensupport
+  - googleapi
+  - googleapi/internal/uritemplates
+  - googleapi/transport
+  - internal
+  - iterator
+  - option
+  - storage/v1
+  - transport/http
+- name: google.golang.org/appengine
+  version: 962cbd1200af94a5a35ba8d512e9f91271b4d01a
+  subpackages:
+  - internal
+  - internal/app_identity
+  - internal/base
+  - internal/datastore
+  - internal/log
+  - internal/modules
+  - internal/remote_api
+  - internal/urlfetch
+  - urlfetch
+- name: google.golang.org/genproto
+  version: 86e600f69ee4704c6efbf6a2a40a5c10700e76c2
+  subpackages:
+  - googleapis/api/annotations
+  - googleapis/iam/v1
+  - googleapis/rpc/code
+  - googleapis/rpc/status
+- name: google.golang.org/grpc
+  version: e538e04cad1b83e47b2ccbbbfe6d5fd5a816d290
+  subpackages:
+  - balancer
+  - balancer/base
+  - balancer/roundrobin
+  - channelz
+  - codes
+  - connectivity
+  - credentials
+  - encoding
+  - encoding/proto
+  - grpclb/grpc_lb_v1/messages
+  - grpclog
+  - internal
+  - internal/msgdecoder
+  - keepalive
+  - metadata
+  - naming
+  - peer
+  - resolver
+  - resolver/dns
+  - resolver/passthrough
+  - stats
+  - status
+  - tap
+  - transport
 - name: gopkg.in/tylerb/graceful.v1
   version: 4654dfbb6ad53cb5e27f37d99b02e16c1872fbbb
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: 1daac00a5961469351b87e7ac223239c37938d2a
+  version: 8dffc02ea1cb8398bb73f30424697c60fcf8d4c5
   subpackages:
   - js
 - name: github.com/jtolds/gls
