@@ -157,7 +157,7 @@ func (s *socket) check(e *executor, ctx context.Context, ns, db, tb string) (err
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	_, err = e.dbo.GetNS(ns)
+	_, err = e.dbo.GetNS(ctx, ns)
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func (s *socket) check(e *executor, ctx context.Context, ns, db, tb string) (err
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	_, err = e.dbo.GetDB(ns, db)
+	_, err = e.dbo.GetDB(ctx, ns, db)
 	if err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func (s *socket) check(e *executor, ctx context.Context, ns, db, tb string) (err
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	tbv, err = e.dbo.GetTB(ns, db, tb)
+	tbv, err = e.dbo.GetTB(ctx, ns, db, tb)
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,9 @@ func (s *socket) deregister(id string) {
 
 	sockets.Delete(id)
 
-	txn, _ := db.Begin(context.Background(), true)
+	ctx := context.Background()
+
+	txn, _ := db.Begin(ctx, true)
 
 	defer txn.Commit()
 
@@ -235,12 +237,12 @@ func (s *socket) deregister(id string) {
 			case *sql.Table:
 
 				key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, LV: id}
-				txn.Clr(key.Encode())
+				txn.Clr(ctx, key.Encode())
 
 			case *sql.Ident:
 
 				key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, LV: id}
-				txn.Clr(key.Encode())
+				txn.Clr(ctx, key.Encode())
 
 			}
 
@@ -291,7 +293,7 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 			}
 
 			key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, LV: stm.ID}
-			if _, err = e.dbo.Put(0, key.Encode(), stm.Encode()); err != nil {
+			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
 				return nil, err
 			}
 
@@ -302,7 +304,7 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 			}
 
 			key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, LV: stm.ID}
-			if _, err = e.dbo.Put(0, key.Encode(), stm.Encode()); err != nil {
+			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
 				return nil, err
 			}
 
@@ -352,11 +354,11 @@ func (s *socket) executeKill(e *executor, ctx context.Context, stm *sql.KillStat
 
 					case *sql.Table:
 						key := &keys.LV{KV: qry.KV, NS: qry.NS, DB: qry.DB, TB: what.TB, LV: qry.ID}
-						_, err = e.dbo.Clr(key.Encode())
+						_, err = e.dbo.Clr(ctx, key.Encode())
 
 					case *sql.Ident:
 						key := &keys.LV{KV: qry.KV, NS: qry.NS, DB: qry.DB, TB: what.ID, LV: qry.ID}
-						_, err = e.dbo.Clr(key.Encode())
+						_, err = e.dbo.Clr(ctx, key.Encode())
 
 					}
 

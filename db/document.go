@@ -92,50 +92,50 @@ func (d *document) erase() (err error) {
 	return
 }
 
-func (d *document) getTB() (out *sql.DefineTableStatement, err error) {
+func (d *document) getTB(ctx context.Context) (out *sql.DefineTableStatement, err error) {
 	if !d.store.tb {
 		d.store.tb = true
-		d.cache.tb, err = d.i.e.dbo.GetTB(d.key.NS, d.key.DB, d.key.TB)
+		d.cache.tb, err = d.i.e.dbo.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
 	}
 	return d.cache.tb, err
 }
 
-func (d *document) getEV() (out []*sql.DefineEventStatement, err error) {
+func (d *document) getEV(ctx context.Context) (out []*sql.DefineEventStatement, err error) {
 	if !d.store.ev {
 		d.store.ev = true
-		d.cache.ev, err = d.i.e.dbo.AllEV(d.key.NS, d.key.DB, d.key.TB)
+		d.cache.ev, err = d.i.e.dbo.AllEV(ctx, d.key.NS, d.key.DB, d.key.TB)
 	}
 	return d.cache.ev, err
 }
 
-func (d *document) getFD() (out []*sql.DefineFieldStatement, err error) {
+func (d *document) getFD(ctx context.Context) (out []*sql.DefineFieldStatement, err error) {
 	if !d.store.fd {
 		d.store.fd = true
-		d.cache.fd, err = d.i.e.dbo.AllFD(d.key.NS, d.key.DB, d.key.TB)
+		d.cache.fd, err = d.i.e.dbo.AllFD(ctx, d.key.NS, d.key.DB, d.key.TB)
 	}
 	return d.cache.fd, err
 }
 
-func (d *document) getIX() (out []*sql.DefineIndexStatement, err error) {
+func (d *document) getIX(ctx context.Context) (out []*sql.DefineIndexStatement, err error) {
 	if !d.store.ix {
 		d.store.ix = true
-		d.cache.ix, err = d.i.e.dbo.AllIX(d.key.NS, d.key.DB, d.key.TB)
+		d.cache.ix, err = d.i.e.dbo.AllIX(ctx, d.key.NS, d.key.DB, d.key.TB)
 	}
 	return d.cache.ix, err
 }
 
-func (d *document) getFT() (out []*sql.DefineTableStatement, err error) {
+func (d *document) getFT(ctx context.Context) (out []*sql.DefineTableStatement, err error) {
 	if !d.store.ft {
 		d.store.ft = true
-		d.cache.ft, err = d.i.e.dbo.AllFT(d.key.NS, d.key.DB, d.key.TB)
+		d.cache.ft, err = d.i.e.dbo.AllFT(ctx, d.key.NS, d.key.DB, d.key.TB)
 	}
 	return d.cache.ft, err
 }
 
-func (d *document) getLV() (out []*sql.LiveStatement, err error) {
+func (d *document) getLV(ctx context.Context) (out []*sql.LiveStatement, err error) {
 	if !d.store.lv {
 		d.store.lv = true
-		d.cache.lv, err = d.i.e.dbo.AllLV(d.key.NS, d.key.DB, d.key.TB)
+		d.cache.lv, err = d.i.e.dbo.AllLV(ctx, d.key.NS, d.key.DB, d.key.TB)
 	}
 	return d.cache.lv, err
 }
@@ -224,7 +224,7 @@ func (d *document) setup(ctx context.Context) (err error) {
 	// to be loaded from the KV store.
 
 	if d.key != nil && d.val == nil {
-		d.val, err = d.i.e.dbo.Get(d.i.versn, d.key.Encode())
+		d.val, err = d.i.e.dbo.Get(ctx, d.i.versn, d.key.Encode())
 		if err != nil {
 			return
 		}
@@ -332,7 +332,7 @@ func (d *document) shouldDrop(ctx context.Context) (bool, error) {
 	// that the table should drop
 	// writes, and if so, then return.
 
-	tb, err := d.getTB()
+	tb, err := d.getTB(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -362,7 +362,7 @@ func (d *document) storeThing(ctx context.Context) (err error) {
 	// Write the value to the data
 	// layer and return any errors.
 
-	_, err = d.i.e.dbo.Put(d.i.e.time, d.key.Encode(), d.current.Encode())
+	_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.key.Encode(), d.current.Encode())
 
 	return
 
@@ -382,7 +382,7 @@ func (d *document) purgeThing(ctx context.Context) (err error) {
 	// Reset the item by writing a
 	// nil value to the storage.
 
-	_, err = d.i.e.dbo.Put(d.i.e.time, d.key.Encode(), nil)
+	_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.key.Encode(), nil)
 
 	return
 
@@ -402,7 +402,7 @@ func (d *document) eraseThing(ctx context.Context) (err error) {
 	// Delete the item entirely from
 	// storage, so no versions exist.
 
-	_, err = d.i.e.dbo.Clr(d.key.Encode())
+	_, err = d.i.e.dbo.Clr(ctx, d.key.Encode())
 
 	return
 
@@ -433,7 +433,7 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 	// for this table, loop through
 	// them, and compute the changes.
 
-	ixs, err := d.getIX()
+	ixs, err := d.getIX(ctx)
 	if err != nil {
 		return err
 	}
@@ -450,11 +450,11 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 		if ix.Uniq == true {
 			for _, v := range del {
 				didx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
-				d.i.e.dbo.DelC(d.i.e.time, didx.Encode(), d.id.Bytes())
+				d.i.e.dbo.DelC(ctx, d.i.e.time, didx.Encode(), d.id.Bytes())
 			}
 			for _, v := range add {
 				aidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
-				if _, err = d.i.e.dbo.PutC(0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
+				if _, err = d.i.e.dbo.PutC(ctx, 0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
 					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: v}
 				}
 			}
@@ -463,11 +463,11 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 		if ix.Uniq == false {
 			for _, v := range del {
 				didx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
-				d.i.e.dbo.DelC(d.i.e.time, didx.Encode(), d.id.Bytes())
+				d.i.e.dbo.DelC(ctx, d.i.e.time, didx.Encode(), d.id.Bytes())
 			}
 			for _, v := range add {
 				aidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
-				if _, err = d.i.e.dbo.PutC(0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
+				if _, err = d.i.e.dbo.PutC(ctx, 0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
 					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: v}
 				}
 			}
@@ -504,7 +504,7 @@ func (d *document) purgeIndex(ctx context.Context) (err error) {
 	// for this table, loop through
 	// them, and compute the changes.
 
-	ixs, err := d.getIX()
+	ixs, err := d.getIX(ctx)
 	if err != nil {
 		return err
 	}
@@ -516,14 +516,14 @@ func (d *document) purgeIndex(ctx context.Context) (err error) {
 		if ix.Uniq == true {
 			for _, v := range del {
 				key := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
-				d.i.e.dbo.DelC(0, key.Encode(), d.id.Bytes())
+				d.i.e.dbo.DelC(ctx, 0, key.Encode(), d.id.Bytes())
 			}
 		}
 
 		if ix.Uniq == false {
 			for _, v := range del {
 				key := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
-				d.i.e.dbo.DelC(0, key.Encode(), d.id.Bytes())
+				d.i.e.dbo.DelC(ctx, 0, key.Encode(), d.id.Bytes())
 			}
 		}
 

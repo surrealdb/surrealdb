@@ -43,7 +43,7 @@ func (d *document) event(ctx context.Context, met method) (err error) {
 	// for this table, loop through
 	// them, and compute the events.
 
-	evs, err := d.getEV()
+	evs, err := d.getEV(ctx)
 	if err != nil {
 		return err
 	}

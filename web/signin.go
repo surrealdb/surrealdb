@@ -93,6 +93,10 @@ func signinInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 		defer txn.Cancel()
 
+		// Get the current context.
+
+		ctx := c.Context()
+
 		// Give full permissions to scope.
 
 		c.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
@@ -103,7 +107,7 @@ func signinInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 		// Get the specified signin scope.
 
-		if scp, err = mem.NewWithTX(txn).GetSC(n, d, s); err != nil {
+		if scp, err = mem.NewWithTX(txn).GetSC(ctx, n, d, s); err != nil {
 			m := "Authentication scope does not exist"
 			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
@@ -233,7 +237,7 @@ func signinInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 		// Start a new read transaction.
 
-		if usr, err = signinDB(n, d, u, p); err != nil {
+		if usr, err = signinDB(c, n, d, u, p); err != nil {
 			return str, err
 		}
 
@@ -287,7 +291,7 @@ func signinInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}
 
-		if usr, err = signinNS(n, u, p); err != nil {
+		if usr, err = signinNS(c, n, u, p); err != nil {
 			return str, err
 		}
 
@@ -319,7 +323,7 @@ func signinInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 }
 
-func signinDB(n, d, u, p string) (usr *sql.DefineLoginStatement, err error) {
+func signinDB(c *fibre.Context, n, d, u, p string) (usr *sql.DefineLoginStatement, err error) {
 
 	var txn kvs.TX
 
@@ -332,6 +336,10 @@ func signinDB(n, d, u, p string) (usr *sql.DefineLoginStatement, err error) {
 	// Ensure the transaction closes.
 
 	defer txn.Cancel()
+
+	// Get the current context.
+
+	ctx := c.Context()
 
 	// Specify fields to show in logs.
 
@@ -346,7 +354,7 @@ func signinDB(n, d, u, p string) (usr *sql.DefineLoginStatement, err error) {
 
 	// Get the specified namespace login.
 
-	if usr, err = mem.NewWithTX(txn).GetDU(n, d, u); err != nil {
+	if usr, err = mem.NewWithTX(txn).GetDU(ctx, n, d, u); err != nil {
 		m := "Database login does not exist"
 		return nil, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 	}
@@ -362,7 +370,7 @@ func signinDB(n, d, u, p string) (usr *sql.DefineLoginStatement, err error) {
 
 }
 
-func signinNS(n, u, p string) (usr *sql.DefineLoginStatement, err error) {
+func signinNS(c *fibre.Context, n, u, p string) (usr *sql.DefineLoginStatement, err error) {
 
 	var txn kvs.TX
 
@@ -375,6 +383,10 @@ func signinNS(n, u, p string) (usr *sql.DefineLoginStatement, err error) {
 	// Ensure the transaction closes.
 
 	defer txn.Cancel()
+
+	// Get the current context.
+
+	ctx := c.Context()
 
 	// Specify fields to show in logs.
 
@@ -389,7 +401,7 @@ func signinNS(n, u, p string) (usr *sql.DefineLoginStatement, err error) {
 
 	// Get the specified namespace login.
 
-	if usr, err = mem.NewWithTX(txn).GetNU(n, u); err != nil {
+	if usr, err = mem.NewWithTX(txn).GetNU(ctx, n, u); err != nil {
 		m := "Namespace login does not exist"
 		return nil, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 	}

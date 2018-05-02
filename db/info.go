@@ -38,17 +38,17 @@ func (e *executor) executeInfo(ctx context.Context, ast *sql.InfoStatement) (out
 
 func (e *executor) executeInfoNS(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	db, err := e.dbo.AllDB(ast.NS)
+	db, err := e.dbo.AllDB(ctx, ast.NS)
 	if err != nil {
 		return nil, err
 	}
 
-	nt, err := e.dbo.AllNT(ast.NS)
+	nt, err := e.dbo.AllNT(ctx, ast.NS)
 	if err != nil {
 		return nil, err
 	}
 
-	nu, err := e.dbo.AllNU(ast.NS)
+	nu, err := e.dbo.AllNU(ctx, ast.NS)
 	if err != nil {
 		return nil, err
 	}
@@ -80,22 +80,22 @@ func (e *executor) executeInfoNS(ctx context.Context, ast *sql.InfoStatement) (o
 
 func (e *executor) executeInfoDB(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	tb, err := e.dbo.AllTB(ast.NS, ast.DB)
+	tb, err := e.dbo.AllTB(ctx, ast.NS, ast.DB)
 	if err != nil {
 		return nil, err
 	}
 
-	dt, err := e.dbo.AllDT(ast.NS, ast.DB)
+	dt, err := e.dbo.AllDT(ctx, ast.NS, ast.DB)
 	if err != nil {
 		return nil, err
 	}
 
-	du, err := e.dbo.AllDU(ast.NS, ast.DB)
+	du, err := e.dbo.AllDU(ctx, ast.NS, ast.DB)
 	if err != nil {
 		return nil, err
 	}
 
-	sc, err := e.dbo.AllSC(ast.NS, ast.DB)
+	sc, err := e.dbo.AllSC(ctx, ast.NS, ast.DB)
 	if err != nil {
 		return nil, err
 	}
@@ -133,27 +133,27 @@ func (e *executor) executeInfoDB(ctx context.Context, ast *sql.InfoStatement) (o
 
 func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	ev, err := e.dbo.AllEV(ast.NS, ast.DB, ast.What.TB)
+	ev, err := e.dbo.AllEV(ctx, ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}
 
-	fd, err := e.dbo.AllFD(ast.NS, ast.DB, ast.What.TB)
+	fd, err := e.dbo.AllFD(ctx, ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}
 
-	ix, err := e.dbo.AllIX(ast.NS, ast.DB, ast.What.TB)
+	ix, err := e.dbo.AllIX(ctx, ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}
 
-	lv, err := e.dbo.AllLV(ast.NS, ast.DB, ast.What.TB)
+	lv, err := e.dbo.AllLV(ctx, ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}
 
-	ft, err := e.dbo.AllFT(ast.NS, ast.DB, ast.What.TB)
+	ft, err := e.dbo.AllFT(ctx, ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
 	}

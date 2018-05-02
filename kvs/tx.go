@@ -14,25 +14,27 @@
 
 package kvs
 
+import "context"
+
 // TX represents a database transaction
 type TX interface {
 	Closed() bool
 	Cancel() error
 	Commit() error
 
-	Clr([]byte) (KV, error)
-	ClrP([]byte, uint64) ([]KV, error)
-	ClrR([]byte, []byte, uint64) ([]KV, error)
+	Clr(context.Context, []byte) (KV, error)
+	ClrP(context.Context, []byte, uint64) ([]KV, error)
+	ClrR(context.Context, []byte, []byte, uint64) ([]KV, error)
 
-	Get(int64, []byte) (KV, error)
-	GetP(int64, []byte, uint64) ([]KV, error)
-	GetR(int64, []byte, []byte, uint64) ([]KV, error)
+	Get(context.Context, int64, []byte) (KV, error)
+	GetP(context.Context, int64, []byte, uint64) ([]KV, error)
+	GetR(context.Context, int64, []byte, []byte, uint64) ([]KV, error)
 
-	Del(int64, []byte) (KV, error)
-	DelC(int64, []byte, []byte) (KV, error)
-	DelP(int64, []byte, uint64) ([]KV, error)
-	DelR(int64, []byte, []byte, uint64) ([]KV, error)
+	Del(context.Context, int64, []byte) (KV, error)
+	DelC(context.Context, int64, []byte, []byte) (KV, error)
+	DelP(context.Context, int64, []byte, uint64) ([]KV, error)
+	DelR(context.Context, int64, []byte, []byte, uint64) ([]KV, error)
 
-	Put(int64, []byte, []byte) (KV, error)
-	PutC(int64, []byte, []byte, []byte) (KV, error)
+	Put(context.Context, int64, []byte, []byte) (KV, error)
+	PutC(context.Context, int64, []byte, []byte, []byte) (KV, error)
 }

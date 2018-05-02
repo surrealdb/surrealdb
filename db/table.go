@@ -47,7 +47,7 @@ func (d *document) table(ctx context.Context, when method) (err error) {
 	// specified for this table, and
 	// update values which have changed.
 
-	fts, err := d.getFT()
+	fts, err := d.getFT(ctx)
 	if err != nil {
 		return err
 	}

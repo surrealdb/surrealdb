@@ -18,6 +18,8 @@ import (
 	"math"
 	"sync"
 
+	"context"
+
 	"database/sql"
 
 	"github.com/abcum/surreal/cnf"
@@ -141,7 +143,7 @@ func (tx *TX) Commit() error {
 	return tx.pntr.Commit()
 }
 
-func (tx *TX) Clr(key []byte) (kvs.KV, error) {
+func (tx *TX) Clr(ctx context.Context, key []byte) (kvs.KV, error) {
 
 	var err error
 	var res *sql.Rows
@@ -150,16 +152,16 @@ func (tx *TX) Clr(key []byte) (kvs.KV, error) {
 	defer tx.lock.Unlock()
 
 	if tx.stmt.clr == nil {
-		tx.stmt.clr, _ = tx.pntr.Prepare(sqlClr)
+		tx.stmt.clr, _ = tx.pntr.PrepareContext(ctx, sqlClr)
 	}
 
-	res, err = tx.stmt.clr.Query(key)
+	res, err = tx.stmt.clr.QueryContext(ctx, key)
 
 	return one(res, err)
 
 }
 
-func (tx *TX) ClrP(key []byte, max uint64) ([]kvs.KV, error) {
+func (tx *TX) ClrP(ctx context.Context, key []byte, max uint64) ([]kvs.KV, error) {
 
 	var err error
 	var res *sql.Rows
@@ -172,16 +174,16 @@ func (tx *TX) ClrP(key []byte, max uint64) ([]kvs.KV, error) {
 	defer tx.lock.Unlock()
 
 	if tx.stmt.clrP == nil {
-		tx.stmt.clrP, _ = tx.pntr.Prepare(sqlClrP)
+		tx.stmt.clrP, _ = tx.pntr.PrepareContext(ctx, sqlClrP)
 	}
 
-	res, err = tx.stmt.clrP.Query(key, max)
+	res, err = tx.stmt.clrP.QueryContext(ctx, key, max)
 
 	return many(res, err)
 
 }
 
-func (tx *TX) ClrR(beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
+func (tx *TX) ClrR(ctx context.Context, beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
 
 	var err error
 	var res *sql.Rows
@@ -194,16 +196,16 @@ func (tx *TX) ClrR(beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
 	defer tx.lock.Unlock()
 
 	if tx.stmt.clrR == nil {
-		tx.stmt.clrR, _ = tx.pntr.Prepare(sqlClrR)
+		tx.stmt.clrR, _ = tx.pntr.PrepareContext(ctx, sqlClrR)
 	}
 
-	res, err = tx.stmt.clrR.Query(beg, end, max)
+	res, err = tx.stmt.clrR.QueryContext(ctx, beg, end, max)
 
 	return many(res, err)
 
 }
 
-func (tx *TX) Get(ver int64, key []byte) (kvs.KV, error) {
+func (tx *TX) Get(ctx context.Context, ver int64, key []byte) (kvs.KV, error) {
 
 	var err error
 	var res *sql.Rows
@@ -212,16 +214,16 @@ func (tx *TX) Get(ver int64, key []byte) (kvs.KV, error) {
 	defer tx.lock.Unlock()
 
 	if tx.stmt.get == nil {
-		tx.stmt.get, _ = tx.pntr.Prepare(sqlGet)
+		tx.stmt.get, _ = tx.pntr.PrepareContext(ctx, sqlGet)
 	}
 
-	res, err = tx.stmt.get.Query(ver, key)
+	res, err = tx.stmt.get.QueryContext(ctx, ver, key)
 
 	return one(res, err)
 
 }
 
-func (tx *TX) GetP(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
+func (tx *TX) GetP(ctx context.Context, ver int64, key []byte, max uint64) ([]kvs.KV, error) {
 
 	var err error
 	var res *sql.Rows
@@ -234,16 +236,16 @@ func (tx *TX) GetP(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
 	defer tx.lock.Unlock()
 
 	if tx.stmt.getP == nil {
-		tx.stmt.getP, _ = tx.pntr.Prepare(sqlGetP)
+		tx.stmt.getP, _ = tx.pntr.PrepareContext(ctx, sqlGetP)
 	}
 
-	res, err = tx.stmt.getP.Query(ver, key, max)
+	res, err = tx.stmt.getP.QueryContext(ctx, ver, key, max)
 
 	return many(res, err)
 
 }
 
-func (tx *TX) GetR(ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
+func (tx *TX) GetR(ctx context.Context, ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
 
 	var err error
 	var res *sql.Rows
@@ -256,16 +258,16 @@ func (tx *TX) GetR(ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, err
 	defer tx.lock.Unlock()
 
 	if tx.stmt.getR == nil {
-		tx.stmt.getR, _ = tx.pntr.Prepare(sqlGetR)
+		tx.stmt.getR, _ = tx.pntr.PrepareContext(ctx, sqlGetR)
 	}
 
-	res, err = tx.stmt.getR.Query(ver, beg, end, max)
+	res, err = tx.stmt.getR.QueryContext(ctx, ver, beg, end, max)
 
 	return many(res, err)
 
 }
 
-func (tx *TX) Del(ver int64, key []byte) (kvs.KV, error) {
+func (tx *TX) Del(ctx context.Context, ver int64, key []byte) (kvs.KV, error) {
 
 	var err error
 	var res *sql.Rows
@@ -274,16 +276,16 @@ func (tx *TX) Del(ver int64, key []byte) (kvs.KV, error) {
 	defer tx.lock.Unlock()
 
 	if tx.stmt.del == nil {
-		tx.stmt.del, _ = tx.pntr.Prepare(sqlDel)
+		tx.stmt.del, _ = tx.pntr.PrepareContext(ctx, sqlDel)
 	}
 
-	res, err = tx.stmt.del.Query(ver, key)
+	res, err = tx.stmt.del.QueryContext(ctx, ver, key)
 
 	return one(res, err)
 
 }
 
-func (tx *TX) DelC(ver int64, key []byte, exp []byte) (kvs.KV, error) {
+func (tx *TX) DelC(ctx context.Context, ver int64, key []byte, exp []byte) (kvs.KV, error) {
 
 	var err error
 	var now kvs.KV
@@ -295,10 +297,10 @@ func (tx *TX) DelC(ver int64, key []byte, exp []byte) (kvs.KV, error) {
 	// Get the item at the key
 
 	if tx.stmt.get == nil {
-		tx.stmt.get, _ = tx.pntr.Prepare(sqlGet)
+		tx.stmt.get, _ = tx.pntr.PrepareContext(ctx, sqlGet)
 	}
 
-	res, err = tx.stmt.get.Query(ver, key)
+	res, err = tx.stmt.get.QueryContext(ctx, ver, key)
 	if err != nil {
 		return nil, err
 	}
@@ -317,16 +319,16 @@ func (tx *TX) DelC(ver int64, key []byte, exp []byte) (kvs.KV, error) {
 	// If they match then delete
 
 	if tx.stmt.del == nil {
-		tx.stmt.del, _ = tx.pntr.Prepare(sqlDel)
+		tx.stmt.del, _ = tx.pntr.PrepareContext(ctx, sqlDel)
 	}
 
-	res, err = tx.stmt.del.Query(ver, key)
+	res, err = tx.stmt.del.QueryContext(ctx, ver, key)
 
 	return one(res, err)
 
 }
 
-func (tx *TX) DelP(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
+func (tx *TX) DelP(ctx context.Context, ver int64, key []byte, max uint64) ([]kvs.KV, error) {
 
 	var err error
 	var res *sql.Rows
@@ -339,16 +341,16 @@ func (tx *TX) DelP(ver int64, key []byte, max uint64) ([]kvs.KV, error) {
 	defer tx.lock.Unlock()
 
 	if tx.stmt.delP == nil {
-		tx.stmt.delP, _ = tx.pntr.Prepare(sqlDelP)
+		tx.stmt.delP, _ = tx.pntr.PrepareContext(ctx, sqlDelP)
 	}
 
-	res, err = tx.stmt.delP.Query(ver, key, max)
+	res, err = tx.stmt.delP.QueryContext(ctx, ver, key, max)
 
 	return many(res, err)
 
 }
 
-func (tx *TX) DelR(ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
+func (tx *TX) DelR(ctx context.Context, ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
 
 	var err error
 	var res *sql.Rows
@@ -361,16 +363,16 @@ func (tx *TX) DelR(ver int64, beg []byte, end []byte, max uint64) ([]kvs.KV, err
 	defer tx.lock.Unlock()
 
 	if tx.stmt.delR == nil {
-		tx.stmt.delR, _ = tx.pntr.Prepare(sqlDelR)
+		tx.stmt.delR, _ = tx.pntr.PrepareContext(ctx, sqlDelR)
 	}
 
-	res, err = tx.stmt.delR.Query(ver, beg, end, max)
+	res, err = tx.stmt.delR.QueryContext(ctx, ver, beg, end, max)
 
 	return many(res, err)
 
 }
 
-func (tx *TX) Put(ver int64, key []byte, val []byte) (kvs.KV, error) {
+func (tx *TX) Put(ctx context.Context, ver int64, key []byte, val []byte) (kvs.KV, error) {
 
 	var err error
 	var res *sql.Rows
@@ -384,16 +386,16 @@ func (tx *TX) Put(ver int64, key []byte, val []byte) (kvs.KV, error) {
 	defer tx.lock.Unlock()
 
 	if tx.stmt.put == nil {
-		tx.stmt.put, _ = tx.pntr.Prepare(sqlPut)
+		tx.stmt.put, _ = tx.pntr.PrepareContext(ctx, sqlPut)
 	}
 
-	res, err = tx.stmt.put.Query(ver, key, val, val)
+	res, err = tx.stmt.put.QueryContext(ctx, ver, key, val, val)
 
 	return one(res, err)
 
 }
 
-func (tx *TX) PutC(ver int64, key []byte, val []byte, exp []byte) (kvs.KV, error) {
+func (tx *TX) PutC(ctx context.Context, ver int64, key []byte, val []byte, exp []byte) (kvs.KV, error) {
 
 	var err error
 	var now kvs.KV
@@ -409,10 +411,10 @@ func (tx *TX) PutC(ver int64, key []byte, val []byte, exp []byte) (kvs.KV, error
 	case nil:
 
 		if tx.stmt.putN == nil {
-			tx.stmt.putN, _ = tx.pntr.Prepare(sqlPutN)
+			tx.stmt.putN, _ = tx.pntr.PrepareContext(ctx, sqlPutN)
 		}
 
-		res, err = tx.stmt.putN.Query(ver, key, val)
+		res, err = tx.stmt.putN.QueryContext(ctx, ver, key, val)
 
 		return one(res, err)
 
@@ -421,10 +423,10 @@ func (tx *TX) PutC(ver int64, key []byte, val []byte, exp []byte) (kvs.KV, error
 		// Get the item at the key
 
 		if tx.stmt.get == nil {
-			tx.stmt.get, _ = tx.pntr.Prepare(sqlGet)
+			tx.stmt.get, _ = tx.pntr.PrepareContext(ctx, sqlGet)
 		}
 
-		res, err = tx.stmt.get.Query(ver, key)
+		res, err = tx.stmt.get.QueryContext(ctx, ver, key)
 		if err != nil {
 			return nil, err
 		}
@@ -443,10 +445,10 @@ func (tx *TX) PutC(ver int64, key []byte, val []byte, exp []byte) (kvs.KV, error
 		// If they match then delete
 
 		if tx.stmt.del == nil {
-			tx.stmt.put, _ = tx.pntr.Prepare(sqlPut)
+			tx.stmt.put, _ = tx.pntr.PrepareContext(ctx, sqlPut)
 		}
 
-		res, err = tx.stmt.put.Query(ver, key, val, val)
+		res, err = tx.stmt.put.QueryContext(ctx, ver, key, val, val)
 
 		return one(res, err)
 

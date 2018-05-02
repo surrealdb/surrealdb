@@ -37,7 +37,7 @@ func (d *document) perms(ctx context.Context, doc *data.Doc) (err error) {
 	// check if the permissions allow us
 	// to view each field.
 
-	fds, err := d.getFD()
+	fds, err := d.getFD(ctx)
 	if err != nil {
 		return err
 	}

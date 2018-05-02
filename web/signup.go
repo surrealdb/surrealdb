@@ -92,6 +92,10 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 		defer txn.Cancel()
 
+		// Get the current context.
+
+		ctx := c.Context()
+
 		// Give full permissions to scope.
 
 		c.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
@@ -102,7 +106,7 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 		// Get the specified signin scope.
 
-		if scp, err = mem.NewWithTX(txn).GetSC(n, d, s); err != nil {
+		if scp, err = mem.NewWithTX(txn).GetSC(ctx, n, d, s); err != nil {
 			m := "Authentication scope does not exist"
 			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}

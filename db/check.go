@@ -76,7 +76,7 @@ func (d *document) grant(ctx context.Context, met method) (ok bool, err error) {
 	// so we can check if the permissions
 	// allow us to view this document.
 
-	tb, err := d.getTB()
+	tb, err := d.getTB(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -156,7 +156,7 @@ func (d *document) allow(ctx context.Context, met method) (ok bool, err error) {
 	// so we can check if the permissions
 	// allow us to view this document.
 
-	tb, err := d.getTB()
+	tb, err := d.getTB(ctx)
 	if err != nil {
 		return false, err
 	}

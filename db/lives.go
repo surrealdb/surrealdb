@@ -48,7 +48,7 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 	// specified for this table, and
 	// update values which have changed.
 
-	lvs, err := d.getLV()
+	lvs, err := d.getLV(ctx)
 	if err != nil {
 		return err
 	}

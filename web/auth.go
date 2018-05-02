@@ -248,7 +248,7 @@ func checkBasics(c *fibre.Context, info string, callback func() error) (err erro
 		u := string(cred[0])
 		p := string(cred[1])
 
-		if _, err = signinNS(n, u, p); err == nil {
+		if _, err = signinNS(c, n, u, p); err == nil {
 			auth.Kind = cnf.AuthNS
 			auth.Possible.NS = n
 			auth.Possible.DB = "*"
@@ -264,7 +264,7 @@ func checkBasics(c *fibre.Context, info string, callback func() error) (err erro
 			u := string(cred[0])
 			p := string(cred[1])
 
-			if _, err = signinDB(n, d, u, p); err == nil {
+			if _, err = signinDB(c, n, d, u, p); err == nil {
 				auth.Kind = cnf.AuthDB
 				auth.Possible.NS = n
 				auth.Possible.DB = d
@@ -296,6 +296,10 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 	// Ensure the transaction closes.
 
 	defer txn.Cancel()
+
+	// Get the current context.
+
+	ctx := c.Context()
 
 	// Setup the kvs layer cache.
 
@@ -331,7 +335,7 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 
 		if nsk && dbk && sck && tkk {
 
-			scp, err := cache.GetSC(nsv, dbv, scv)
+			scp, err := cache.GetSC(ctx, nsv, dbv, scv)
 			if err != nil {
 				return nil, fmt.Errorf("Credentials failed")
 			}
@@ -377,7 +381,7 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 			}
 
 			if tkv != "default" {
-				key, err := cache.GetST(nsv, dbv, scv, tkv)
+				key, err := cache.GetST(ctx, nsv, dbv, scv, tkv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
@@ -394,7 +398,7 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 		} else if nsk && dbk && tkk {
 
 			if tkv != "default" {
-				key, err := cache.GetDT(nsv, dbv, tkv)
+				key, err := cache.GetDT(ctx, nsv, dbv, tkv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
@@ -404,7 +408,7 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 				auth.Kind = cnf.AuthDB
 				return key.Code, nil
 			} else if usk {
-				usr, err := cache.GetDU(nsv, dbv, usv)
+				usr, err := cache.GetDU(ctx, nsv, dbv, usv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
@@ -415,7 +419,7 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 		} else if nsk && tkk {
 
 			if tkv != "default" {
-				key, err := cache.GetNT(nsv, tkv)
+				key, err := cache.GetNT(ctx, nsv, tkv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}
@@ -425,7 +429,7 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 				auth.Kind = cnf.AuthNS
 				return key.Code, nil
 			} else if usk {
-				usr, err := cache.GetNU(nsv, usv)
+				usr, err := cache.GetNU(ctx, nsv, usv)
 				if err != nil {
 					return nil, fmt.Errorf("Credentials failed")
 				}

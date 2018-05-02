@@ -17,6 +17,8 @@ package mem
 import (
 	"sync"
 
+	"context"
+
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
@@ -72,7 +74,7 @@ func (c *Cache) del(key keys.Key) {
 
 // --------------------------------------------------
 
-func (c *Cache) AllNS() (out []*sql.DefineNamespaceStatement, err error) {
+func (c *Cache) AllNS(ctx context.Context) (out []*sql.DefineNamespaceStatement, err error) {
 
 	var kvs []kvs.KV
 
@@ -85,7 +87,7 @@ func (c *Cache) AllNS() (out []*sql.DefineNamespaceStatement, err error) {
 		return out.([]*sql.DefineNamespaceStatement), nil
 	}
 
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -101,7 +103,7 @@ func (c *Cache) AllNS() (out []*sql.DefineNamespaceStatement, err error) {
 
 }
 
-func (c *Cache) GetNS(ns string) (val *sql.DefineNamespaceStatement, err error) {
+func (c *Cache) GetNS(ctx context.Context, ns string) (val *sql.DefineNamespaceStatement, err error) {
 
 	var kv kvs.KV
 
@@ -114,7 +116,7 @@ func (c *Cache) GetNS(ns string) (val *sql.DefineNamespaceStatement, err error) 
 		return out.(*sql.DefineNamespaceStatement), nil
 	}
 
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -131,7 +133,7 @@ func (c *Cache) GetNS(ns string) (val *sql.DefineNamespaceStatement, err error) 
 
 }
 
-func (c *Cache) AddNS(ns string) (val *sql.DefineNamespaceStatement, err error) {
+func (c *Cache) AddNS(ctx context.Context, ns string) (val *sql.DefineNamespaceStatement, err error) {
 
 	var kv kvs.KV
 
@@ -144,7 +146,7 @@ func (c *Cache) AddNS(ns string) (val *sql.DefineNamespaceStatement, err error) 
 		return out.(*sql.DefineNamespaceStatement), nil
 	}
 
-	if kv, _ = c.TX.Get(0, key.Encode()); kv.Exi() {
+	if kv, _ = c.TX.Get(ctx, 0, key.Encode()); kv.Exi() {
 		val = &sql.DefineNamespaceStatement{}
 		val.Decode(kv.Val())
 		c.put(key, val)
@@ -152,7 +154,7 @@ func (c *Cache) AddNS(ns string) (val *sql.DefineNamespaceStatement, err error) 
 	}
 
 	val = &sql.DefineNamespaceStatement{Name: sql.NewIdent(ns)}
-	c.TX.PutC(0, key.Encode(), val.Encode(), nil)
+	c.TX.PutC(ctx, 0, key.Encode(), val.Encode(), nil)
 
 	c.put(key, val)
 
@@ -170,12 +172,12 @@ func (c *Cache) DelNS(ns string) {
 
 // --------------------------------------------------
 
-func (c *Cache) AllNT(ns string) (out []*sql.DefineTokenStatement, err error) {
+func (c *Cache) AllNT(ctx context.Context, ns string) (out []*sql.DefineTokenStatement, err error) {
 
 	var kvs []kvs.KV
 
 	key := &keys.NT{KV: cnf.Settings.DB.Base, NS: ns, TK: keys.Ignore}
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -189,12 +191,12 @@ func (c *Cache) AllNT(ns string) (out []*sql.DefineTokenStatement, err error) {
 
 }
 
-func (c *Cache) GetNT(ns, tk string) (val *sql.DefineTokenStatement, err error) {
+func (c *Cache) GetNT(ctx context.Context, ns, tk string) (val *sql.DefineTokenStatement, err error) {
 
 	var kv kvs.KV
 
 	key := &keys.NT{KV: cnf.Settings.DB.Base, NS: ns, TK: tk}
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -211,12 +213,12 @@ func (c *Cache) GetNT(ns, tk string) (val *sql.DefineTokenStatement, err error) 
 
 // --------------------------------------------------
 
-func (c *Cache) AllNU(ns string) (out []*sql.DefineLoginStatement, err error) {
+func (c *Cache) AllNU(ctx context.Context, ns string) (out []*sql.DefineLoginStatement, err error) {
 
 	var kvs []kvs.KV
 
 	key := &keys.NU{KV: cnf.Settings.DB.Base, NS: ns, US: keys.Ignore}
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -230,12 +232,12 @@ func (c *Cache) AllNU(ns string) (out []*sql.DefineLoginStatement, err error) {
 
 }
 
-func (c *Cache) GetNU(ns, us string) (val *sql.DefineLoginStatement, err error) {
+func (c *Cache) GetNU(ctx context.Context, ns, us string) (val *sql.DefineLoginStatement, err error) {
 
 	var kv kvs.KV
 
 	key := &keys.NU{KV: cnf.Settings.DB.Base, NS: ns, US: us}
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -252,7 +254,7 @@ func (c *Cache) GetNU(ns, us string) (val *sql.DefineLoginStatement, err error) 
 
 // --------------------------------------------------
 
-func (c *Cache) AllDB(ns string) (out []*sql.DefineDatabaseStatement, err error) {
+func (c *Cache) AllDB(ctx context.Context, ns string) (out []*sql.DefineDatabaseStatement, err error) {
 
 	var kvs []kvs.KV
 
@@ -265,7 +267,7 @@ func (c *Cache) AllDB(ns string) (out []*sql.DefineDatabaseStatement, err error)
 		return out.([]*sql.DefineDatabaseStatement), nil
 	}
 
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -281,7 +283,7 @@ func (c *Cache) AllDB(ns string) (out []*sql.DefineDatabaseStatement, err error)
 
 }
 
-func (c *Cache) GetDB(ns, db string) (val *sql.DefineDatabaseStatement, err error) {
+func (c *Cache) GetDB(ctx context.Context, ns, db string) (val *sql.DefineDatabaseStatement, err error) {
 
 	var kv kvs.KV
 
@@ -294,7 +296,7 @@ func (c *Cache) GetDB(ns, db string) (val *sql.DefineDatabaseStatement, err erro
 		return out.(*sql.DefineDatabaseStatement), nil
 	}
 
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -311,9 +313,9 @@ func (c *Cache) GetDB(ns, db string) (val *sql.DefineDatabaseStatement, err erro
 
 }
 
-func (c *Cache) AddDB(ns, db string) (val *sql.DefineDatabaseStatement, err error) {
+func (c *Cache) AddDB(ctx context.Context, ns, db string) (val *sql.DefineDatabaseStatement, err error) {
 
-	if _, err = c.AddNS(ns); err != nil {
+	if _, err = c.AddNS(ctx, ns); err != nil {
 		return
 	}
 
@@ -328,7 +330,7 @@ func (c *Cache) AddDB(ns, db string) (val *sql.DefineDatabaseStatement, err erro
 		return out.(*sql.DefineDatabaseStatement), nil
 	}
 
-	if kv, _ = c.TX.Get(0, key.Encode()); kv.Exi() {
+	if kv, _ = c.TX.Get(ctx, 0, key.Encode()); kv.Exi() {
 		val = &sql.DefineDatabaseStatement{}
 		val.Decode(kv.Val())
 		c.put(key, val)
@@ -336,7 +338,7 @@ func (c *Cache) AddDB(ns, db string) (val *sql.DefineDatabaseStatement, err erro
 	}
 
 	val = &sql.DefineDatabaseStatement{Name: sql.NewIdent(db)}
-	c.TX.PutC(0, key.Encode(), val.Encode(), nil)
+	c.TX.PutC(ctx, 0, key.Encode(), val.Encode(), nil)
 
 	c.put(key, val)
 
@@ -354,12 +356,12 @@ func (c *Cache) DelDB(ns, db string) {
 
 // --------------------------------------------------
 
-func (c *Cache) AllDT(ns, db string) (out []*sql.DefineTokenStatement, err error) {
+func (c *Cache) AllDT(ctx context.Context, ns, db string) (out []*sql.DefineTokenStatement, err error) {
 
 	var kvs []kvs.KV
 
 	key := &keys.DT{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TK: keys.Ignore}
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -373,12 +375,12 @@ func (c *Cache) AllDT(ns, db string) (out []*sql.DefineTokenStatement, err error
 
 }
 
-func (c *Cache) GetDT(ns, db, tk string) (val *sql.DefineTokenStatement, err error) {
+func (c *Cache) GetDT(ctx context.Context, ns, db, tk string) (val *sql.DefineTokenStatement, err error) {
 
 	var kv kvs.KV
 
 	key := &keys.DT{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TK: tk}
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -395,12 +397,12 @@ func (c *Cache) GetDT(ns, db, tk string) (val *sql.DefineTokenStatement, err err
 
 // --------------------------------------------------
 
-func (c *Cache) AllDU(ns, db string) (out []*sql.DefineLoginStatement, err error) {
+func (c *Cache) AllDU(ctx context.Context, ns, db string) (out []*sql.DefineLoginStatement, err error) {
 
 	var kvs []kvs.KV
 
 	key := &keys.DU{KV: cnf.Settings.DB.Base, NS: ns, DB: db, US: keys.Ignore}
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -414,12 +416,12 @@ func (c *Cache) AllDU(ns, db string) (out []*sql.DefineLoginStatement, err error
 
 }
 
-func (c *Cache) GetDU(ns, db, us string) (val *sql.DefineLoginStatement, err error) {
+func (c *Cache) GetDU(ctx context.Context, ns, db, us string) (val *sql.DefineLoginStatement, err error) {
 
 	var kv kvs.KV
 
 	key := &keys.DU{KV: cnf.Settings.DB.Base, NS: ns, DB: db, US: us}
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -436,12 +438,12 @@ func (c *Cache) GetDU(ns, db, us string) (val *sql.DefineLoginStatement, err err
 
 // --------------------------------------------------
 
-func (c *Cache) AllSC(ns, db string) (out []*sql.DefineScopeStatement, err error) {
+func (c *Cache) AllSC(ctx context.Context, ns, db string) (out []*sql.DefineScopeStatement, err error) {
 
 	var kvs []kvs.KV
 
 	key := &keys.SC{KV: cnf.Settings.DB.Base, NS: ns, DB: db, SC: keys.Ignore}
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -455,12 +457,12 @@ func (c *Cache) AllSC(ns, db string) (out []*sql.DefineScopeStatement, err error
 
 }
 
-func (c *Cache) GetSC(ns, db, sc string) (val *sql.DefineScopeStatement, err error) {
+func (c *Cache) GetSC(ctx context.Context, ns, db, sc string) (val *sql.DefineScopeStatement, err error) {
 
 	var kv kvs.KV
 
 	key := &keys.SC{KV: cnf.Settings.DB.Base, NS: ns, DB: db, SC: sc}
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -477,12 +479,12 @@ func (c *Cache) GetSC(ns, db, sc string) (val *sql.DefineScopeStatement, err err
 
 // --------------------------------------------------
 
-func (c *Cache) AllST(ns, db, sc string) (out []*sql.DefineTokenStatement, err error) {
+func (c *Cache) AllST(ctx context.Context, ns, db, sc string) (out []*sql.DefineTokenStatement, err error) {
 
 	var kvs []kvs.KV
 
 	key := &keys.ST{KV: cnf.Settings.DB.Base, NS: ns, DB: db, SC: sc, TK: keys.Ignore}
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -496,12 +498,12 @@ func (c *Cache) AllST(ns, db, sc string) (out []*sql.DefineTokenStatement, err e
 
 }
 
-func (c *Cache) GetST(ns, db, sc, tk string) (val *sql.DefineTokenStatement, err error) {
+func (c *Cache) GetST(ctx context.Context, ns, db, sc, tk string) (val *sql.DefineTokenStatement, err error) {
 
 	var kv kvs.KV
 
 	key := &keys.ST{KV: cnf.Settings.DB.Base, NS: ns, DB: db, SC: sc, TK: tk}
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -518,7 +520,7 @@ func (c *Cache) GetST(ns, db, sc, tk string) (val *sql.DefineTokenStatement, err
 
 // --------------------------------------------------
 
-func (c *Cache) AllTB(ns, db string) (out []*sql.DefineTableStatement, err error) {
+func (c *Cache) AllTB(ctx context.Context, ns, db string) (out []*sql.DefineTableStatement, err error) {
 
 	var kvs []kvs.KV
 
@@ -531,7 +533,7 @@ func (c *Cache) AllTB(ns, db string) (out []*sql.DefineTableStatement, err error
 		return out.([]*sql.DefineTableStatement), nil
 	}
 
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -547,7 +549,7 @@ func (c *Cache) AllTB(ns, db string) (out []*sql.DefineTableStatement, err error
 
 }
 
-func (c *Cache) GetTB(ns, db, tb string) (val *sql.DefineTableStatement, err error) {
+func (c *Cache) GetTB(ctx context.Context, ns, db, tb string) (val *sql.DefineTableStatement, err error) {
 
 	var kv kvs.KV
 
@@ -560,7 +562,7 @@ func (c *Cache) GetTB(ns, db, tb string) (val *sql.DefineTableStatement, err err
 		return out.(*sql.DefineTableStatement), nil
 	}
 
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -577,9 +579,9 @@ func (c *Cache) GetTB(ns, db, tb string) (val *sql.DefineTableStatement, err err
 
 }
 
-func (c *Cache) AddTB(ns, db, tb string) (val *sql.DefineTableStatement, err error) {
+func (c *Cache) AddTB(ctx context.Context, ns, db, tb string) (val *sql.DefineTableStatement, err error) {
 
-	if _, err = c.AddDB(ns, db); err != nil {
+	if _, err = c.AddDB(ctx, ns, db); err != nil {
 		return
 	}
 
@@ -594,7 +596,7 @@ func (c *Cache) AddTB(ns, db, tb string) (val *sql.DefineTableStatement, err err
 		return out.(*sql.DefineTableStatement), nil
 	}
 
-	if kv, _ = c.TX.Get(0, key.Encode()); kv.Exi() {
+	if kv, _ = c.TX.Get(ctx, 0, key.Encode()); kv.Exi() {
 		val = &sql.DefineTableStatement{}
 		val.Decode(kv.Val())
 		c.put(key, val)
@@ -602,7 +604,7 @@ func (c *Cache) AddTB(ns, db, tb string) (val *sql.DefineTableStatement, err err
 	}
 
 	val = &sql.DefineTableStatement{Name: sql.NewIdent(tb)}
-	c.TX.PutC(0, key.Encode(), val.Encode(), nil)
+	c.TX.PutC(ctx, 0, key.Encode(), val.Encode(), nil)
 
 	c.put(key, val)
 
@@ -620,7 +622,7 @@ func (c *Cache) DelTB(ns, db, tb string) {
 
 // --------------------------------------------------
 
-func (c *Cache) AllEV(ns, db, tb string) (out []*sql.DefineEventStatement, err error) {
+func (c *Cache) AllEV(ctx context.Context, ns, db, tb string) (out []*sql.DefineEventStatement, err error) {
 
 	var kvs []kvs.KV
 
@@ -630,7 +632,7 @@ func (c *Cache) AllEV(ns, db, tb string) (out []*sql.DefineEventStatement, err e
 		return out.([]*sql.DefineEventStatement), nil
 	}
 
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -646,7 +648,7 @@ func (c *Cache) AllEV(ns, db, tb string) (out []*sql.DefineEventStatement, err e
 
 }
 
-func (c *Cache) GetEV(ns, db, tb, ev string) (val *sql.DefineEventStatement, err error) {
+func (c *Cache) GetEV(ctx context.Context, ns, db, tb, ev string) (val *sql.DefineEventStatement, err error) {
 
 	var kv kvs.KV
 
@@ -656,7 +658,7 @@ func (c *Cache) GetEV(ns, db, tb, ev string) (val *sql.DefineEventStatement, err
 		return out.(*sql.DefineEventStatement), nil
 	}
 
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -683,7 +685,7 @@ func (c *Cache) DelEV(ns, db, tb, ev string) {
 
 // --------------------------------------------------
 
-func (c *Cache) AllFD(ns, db, tb string) (out []*sql.DefineFieldStatement, err error) {
+func (c *Cache) AllFD(ctx context.Context, ns, db, tb string) (out []*sql.DefineFieldStatement, err error) {
 
 	var kvs []kvs.KV
 
@@ -693,7 +695,7 @@ func (c *Cache) AllFD(ns, db, tb string) (out []*sql.DefineFieldStatement, err e
 		return out.([]*sql.DefineFieldStatement), nil
 	}
 
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -709,7 +711,7 @@ func (c *Cache) AllFD(ns, db, tb string) (out []*sql.DefineFieldStatement, err e
 
 }
 
-func (c *Cache) GetFD(ns, db, tb, fd string) (val *sql.DefineFieldStatement, err error) {
+func (c *Cache) GetFD(ctx context.Context, ns, db, tb, fd string) (val *sql.DefineFieldStatement, err error) {
 
 	var kv kvs.KV
 
@@ -719,7 +721,7 @@ func (c *Cache) GetFD(ns, db, tb, fd string) (val *sql.DefineFieldStatement, err
 		return out.(*sql.DefineFieldStatement), nil
 	}
 
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -746,7 +748,7 @@ func (c *Cache) DelFD(ns, db, tb, fd string) {
 
 // --------------------------------------------------
 
-func (c *Cache) AllIX(ns, db, tb string) (out []*sql.DefineIndexStatement, err error) {
+func (c *Cache) AllIX(ctx context.Context, ns, db, tb string) (out []*sql.DefineIndexStatement, err error) {
 
 	var kvs []kvs.KV
 
@@ -756,7 +758,7 @@ func (c *Cache) AllIX(ns, db, tb string) (out []*sql.DefineIndexStatement, err e
 		return out.([]*sql.DefineIndexStatement), nil
 	}
 
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -772,7 +774,7 @@ func (c *Cache) AllIX(ns, db, tb string) (out []*sql.DefineIndexStatement, err e
 
 }
 
-func (c *Cache) GetIX(ns, db, tb, ix string) (val *sql.DefineIndexStatement, err error) {
+func (c *Cache) GetIX(ctx context.Context, ns, db, tb, ix string) (val *sql.DefineIndexStatement, err error) {
 
 	var kv kvs.KV
 
@@ -782,7 +784,7 @@ func (c *Cache) GetIX(ns, db, tb, ix string) (val *sql.DefineIndexStatement, err
 		return out.(*sql.DefineIndexStatement), nil
 	}
 
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -809,7 +811,7 @@ func (c *Cache) DelIX(ns, db, tb, ix string) {
 
 // --------------------------------------------------
 
-func (c *Cache) AllFT(ns, db, tb string) (out []*sql.DefineTableStatement, err error) {
+func (c *Cache) AllFT(ctx context.Context, ns, db, tb string) (out []*sql.DefineTableStatement, err error) {
 
 	var kvs []kvs.KV
 
@@ -819,7 +821,7 @@ func (c *Cache) AllFT(ns, db, tb string) (out []*sql.DefineTableStatement, err e
 		return out.([]*sql.DefineTableStatement), nil
 	}
 
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -835,7 +837,7 @@ func (c *Cache) AllFT(ns, db, tb string) (out []*sql.DefineTableStatement, err e
 
 }
 
-func (c *Cache) GetFT(ns, db, tb, ft string) (val *sql.DefineTableStatement, err error) {
+func (c *Cache) GetFT(ctx context.Context, ns, db, tb, ft string) (val *sql.DefineTableStatement, err error) {
 
 	var kv kvs.KV
 
@@ -845,7 +847,7 @@ func (c *Cache) GetFT(ns, db, tb, ft string) (val *sql.DefineTableStatement, err
 		return out.(*sql.DefineTableStatement), nil
 	}
 
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 
@@ -872,7 +874,7 @@ func (c *Cache) DelFT(ns, db, tb, ft string) {
 
 // --------------------------------------------------
 
-func (c *Cache) AllLV(ns, db, tb string) (out []*sql.LiveStatement, err error) {
+func (c *Cache) AllLV(ctx context.Context, ns, db, tb string) (out []*sql.LiveStatement, err error) {
 
 	var kvs []kvs.KV
 
@@ -882,7 +884,7 @@ func (c *Cache) AllLV(ns, db, tb string) (out []*sql.LiveStatement, err error) {
 		return out.([]*sql.LiveStatement), nil
 	}
 
-	if kvs, err = c.TX.GetP(0, key.Encode(), 0); err != nil {
+	if kvs, err = c.TX.GetP(ctx, 0, key.Encode(), 0); err != nil {
 		return
 	}
 
@@ -898,7 +900,7 @@ func (c *Cache) AllLV(ns, db, tb string) (out []*sql.LiveStatement, err error) {
 
 }
 
-func (c *Cache) GetLV(ns, db, tb, lv string) (val *sql.LiveStatement, err error) {
+func (c *Cache) GetLV(ctx context.Context, ns, db, tb, lv string) (val *sql.LiveStatement, err error) {
 
 	var kv kvs.KV
 
@@ -908,7 +910,7 @@ func (c *Cache) GetLV(ns, db, tb, lv string) (val *sql.LiveStatement, err error)
 		return out.(*sql.LiveStatement), nil
 	}
 
-	if kv, err = c.TX.Get(0, key.Encode()); err != nil {
+	if kv, err = c.TX.Get(ctx, 0, key.Encode()); err != nil {
 		return nil, err
 	}
 

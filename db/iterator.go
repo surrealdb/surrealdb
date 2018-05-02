@@ -388,7 +388,7 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 		// we need to fetch the table to ensure
 		// that the table is not a view table.
 
-		tb, i.err = i.e.dbo.AddTB(nsv, dbv, tbv)
+		tb, i.err = i.e.dbo.AddTB(ctx, nsv, dbv, tbv)
 		if i.err != nil {
 			close(i.stop)
 			return
@@ -429,7 +429,7 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	_, i.err = i.e.dbo.GetNS(nsv)
+	_, i.err = i.e.dbo.GetNS(ctx, nsv)
 	if i.err != nil {
 		close(i.stop)
 		return
@@ -439,7 +439,7 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	_, i.err = i.e.dbo.GetDB(nsv, dbv)
+	_, i.err = i.e.dbo.GetDB(ctx, nsv, dbv)
 	if i.err != nil {
 		close(i.stop)
 		return
@@ -458,7 +458,7 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	tb, i.err = i.e.dbo.GetTB(nsv, dbv, tbv)
+	tb, i.err = i.e.dbo.GetTB(ctx, nsv, dbv, tbv)
 	if i.err != nil {
 		close(i.stop)
 		return
@@ -569,7 +569,7 @@ func (i *iterator) processTable(ctx context.Context, key *keys.Table) {
 			return
 		}
 
-		vals, i.err = i.e.dbo.GetR(i.versn, min, max, 10000)
+		vals, i.err = i.e.dbo.GetR(ctx, i.versn, min, max, 10000)
 		if i.err != nil {
 			close(i.stop)
 			return
