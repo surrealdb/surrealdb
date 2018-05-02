@@ -95,6 +95,8 @@ func init() {
 	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Sync, "db-sync", 0, flag("sync"))
 	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Shrink, "db-shrink", 0, flag("shrink"))
 
+	startCmd.PersistentFlags().DurationVar(&opts.Query.Timeout, "query-timeout", 0, "")
+
 	startCmd.PersistentFlags().StringSliceVarP(&opts.Node.Join, "join", "j", nil, flag("join"))
 
 	startCmd.PersistentFlags().StringVarP(&opts.DB.Code, "key", "k", "", flag("key"))

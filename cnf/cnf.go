@@ -74,6 +74,10 @@ type Options struct {
 		Join []string // Slice of cluster peers to join
 	}
 
+	Query struct {
+		Timeout time.Duration // Fixed query timeout
+	}
+
 	Format struct {
 		Type string // Stores the cli output format
 	}
