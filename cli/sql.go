@@ -133,15 +133,6 @@ var sqlCmd = &cobra.Command{
 			return
 		}
 
-		// Otherwise let's output the whole response
-		// body to the terminal, using the output
-		// format specified in the request.
-
-		if bdy, _ := ioutil.ReadAll(res.Body); len(bdy) > 0 {
-			log.SetLevel("INFO")
-			log.Infof("%s", bdy)
-		}
-
 		return
 
 	},

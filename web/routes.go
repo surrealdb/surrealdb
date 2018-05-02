@@ -81,6 +81,14 @@ func routes(s *fibre.Fibre) {
 	// Endpoints for authentication signup
 	// --------------------------------------------------
 
+	s.Get("/logs", func(c *fibre.Context) error {
+		return logger(c)
+	})
+
+	// --------------------------------------------------
+	// Endpoints for authentication signup
+	// --------------------------------------------------
+
 	s.Options("/signup", func(c *fibre.Context) error {
 		return c.Code(200)
 	})

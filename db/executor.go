@@ -115,6 +115,8 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 			log := log.WithPrefix("sql").WithFields(map[string]interface{}{
 				"id":   ctx.Value(ctxKeyId),
 				"kind": ctx.Value(ctxKeyKind),
+				"vars": ctx.Value(ctxKeyVars),
+				"keep": ctx.Value(ctxKeyKeep),
 			})
 
 			if stm, ok := stm.(sql.AuthableStatement); ok {
@@ -123,8 +125,6 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 				ctx = context.WithValue(ctx, ctxKeyDb, db)
 				log = log.WithField("ns", ns).WithField("db", db)
 			}
-
-			log.Debugln(stm)
 
 			// If we are not inside a global transaction
 			// then reset the error to nil so that the
@@ -176,6 +176,22 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 				Status: status(err),
 				Detail: detail(err),
 				Result: append([]interface{}{}, res...),
+			}
+
+			// Log the sql statement along with the
+			// query duration time, and mark it as
+			// an error if the query failed.
+
+			switch err.(type) {
+			default:
+				log.WithFields(map[string]interface{}{
+					"time": time.Since(now).String(),
+				}).Debugln(stm)
+			case error:
+				log.WithFields(map[string]interface{}{
+					"time":  time.Since(now).String(),
+					"error": detail(err),
+				}).Errorln(stm)
 			}
 
 			// If we are not inside a global transaction

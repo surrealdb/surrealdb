@@ -15,7 +15,6 @@
 package cli
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -31,9 +30,7 @@ var startCmd = &cobra.Command{
 	Short: "Start the database and http server",
 	PreRun: func(cmd *cobra.Command, args []string) {
 
-		if opts.Logging.Output != "none" {
-			fmt.Print(logo)
-		}
+		log.Display(logo)
 
 	},
 	RunE: func(cmd *cobra.Command, args []string) (err error) {

@@ -74,6 +74,10 @@ func init() {
 
 		pntr.SetConnMaxLifetime(1 * time.Hour)
 
+		// Output logs to the default logger
+
+		mysql.SetLogger(log.Instance())
+
 		// Set the max number of idle connections
 
 		pntr.SetMaxIdleConns(350)

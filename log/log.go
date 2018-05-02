@@ -15,9 +15,7 @@
 package log
 
 import (
-	"os"
-	"time"
-
+	"fmt"
 	"io/ioutil"
 
 	"github.com/sirupsen/logrus"
@@ -32,6 +30,42 @@ const (
 	DebugLevel = logrus.DebugLevel
 )
 
+var (
+	PanicLevels = []logrus.Level{
+		PanicLevel,
+	}
+	FatalLevels = []logrus.Level{
+		PanicLevel,
+		FatalLevel,
+	}
+	ErrorLevels = []logrus.Level{
+		PanicLevel,
+		FatalLevel,
+		ErrorLevel,
+	}
+	WarnLevels = []logrus.Level{
+		PanicLevel,
+		FatalLevel,
+		ErrorLevel,
+		WarnLevel,
+	}
+	InfoLevels = []logrus.Level{
+		PanicLevel,
+		FatalLevel,
+		ErrorLevel,
+		WarnLevel,
+		InfoLevel,
+	}
+	DebugLevels = []logrus.Level{
+		PanicLevel,
+		FatalLevel,
+		ErrorLevel,
+		WarnLevel,
+		InfoLevel,
+		DebugLevel,
+	}
+)
+
 var log *Logger
 
 // Logger ...
@@ -40,7 +74,14 @@ type Logger struct {
 }
 
 func init() {
-	log = New()
+	log = &Logger{
+		&logrus.Logger{
+			Out:       ioutil.Discard,
+			Level:     logrus.DebugLevel,
+			Hooks:     logrus.LevelHooks{},
+			Formatter: &logrus.TextFormatter{},
+		},
+	}
 }
 
 // Instance returns the underlying logger instance
@@ -48,19 +89,15 @@ func Instance() *logrus.Logger {
 	return log.Logger
 }
 
-// SetLevel sets the level of the standard logger
-func SetLevel(v string) {
-	log.SetLevel(v)
+// Hook adds a logging hook to the logger instance
+func Hook(hook logrus.Hook) {
+	log.AddHook(hook)
 }
 
-// SetFormat sets the format of the standard logger
-func SetFormat(v string) {
-	log.SetFormat(v)
-}
-
-// SetOutput sets the output of the standard logger
-func SetOutput(v string) {
-	log.SetOutput(v)
+func Display(v ...interface{}) {
+	if isTerminal {
+		fmt.Print(v...)
+	}
 }
 
 // Debug logs a message at level Debug on the standard logger.
@@ -181,65 +218,4 @@ func WithField(key string, value interface{}) *logrus.Entry {
 // WithFields prepares a log entry with multiple data fields.
 func WithFields(fields map[string]interface{}) *logrus.Entry {
 	return log.WithFields(fields)
-}
-
-// New returns a new Logger instance.
-func New() *Logger {
-	return &Logger{
-		&logrus.Logger{
-			Out:   os.Stderr,
-			Level: logrus.ErrorLevel,
-			Hooks: logrus.LevelHooks{},
-			Formatter: &TextFormatter{
-				IgnoreFields:    []string{"ctx"},
-				TimestampFormat: time.RFC3339,
-			},
-		},
-	}
-}
-
-// SetLevel sets the logging level of the logger instance.
-func (l *Logger) SetLevel(v string) {
-	switch v {
-	case "debug", "DEBUG":
-		l.Level = logrus.DebugLevel
-	case "info", "INFO":
-		l.Level = logrus.InfoLevel
-	case "warning", "WARNING":
-		l.Level = logrus.WarnLevel
-	case "error", "ERROR":
-		l.Level = logrus.ErrorLevel
-	case "fatal", "FATAL":
-		l.Level = logrus.FatalLevel
-	case "panic", "PANIC":
-		l.Level = logrus.PanicLevel
-	}
-}
-
-// SetFormat sets the logging format of the logger instance.
-func (l *Logger) SetFormat(v string) {
-	switch v {
-	case "json":
-		l.Formatter = &JSONFormatter{
-			IgnoreFields:    []string{"ctx"},
-			TimestampFormat: time.RFC3339,
-		}
-	case "text":
-		l.Formatter = &TextFormatter{
-			IgnoreFields:    []string{"ctx"},
-			TimestampFormat: time.RFC3339,
-		}
-	}
-}
-
-// SetOutput sets the logging output of the logger instance.
-func (l *Logger) SetOutput(v string) {
-	switch v {
-	case "none":
-		l.Out = ioutil.Discard
-	case "stdout":
-		l.Out = os.Stdout
-	case "stderr":
-		l.Out = os.Stderr
-	}
 }

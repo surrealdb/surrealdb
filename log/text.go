@@ -17,8 +17,6 @@ package log
 import (
 	"bytes"
 	"fmt"
-	"os"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -26,21 +24,9 @@ import (
 	"github.com/mgutz/ansi"
 
 	"github.com/sirupsen/logrus"
-
-	"golang.org/x/crypto/ssh/terminal"
 )
 
 const clear = ansi.Reset
-
-var (
-	isTerminal bool
-	isColoured bool
-)
-
-func init() {
-	isTerminal = terminal.IsTerminal(int(os.Stdout.Fd()))
-	isColoured = isTerminal && (runtime.GOOS != "windows")
-}
 
 type TextFormatter struct {
 	IgnoreFields    []string
