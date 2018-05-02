@@ -840,7 +840,12 @@ func (d *Doc) Inc(value interface{}, path ...string) (*Doc, error) {
 		case float64:
 			return d.Set(0+inc, path...)
 		default:
-			return d.Set([]interface{}{value}, path...)
+			switch value.(type) {
+			case []interface{}:
+				return d.Set(value, path...)
+			default:
+				return d.Set([]interface{}{value}, path...)
+			}
 		}
 	case int64:
 		switch inc := value.(type) {

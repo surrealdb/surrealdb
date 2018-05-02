@@ -306,25 +306,27 @@ func (d *document) setup(ctx context.Context) (err error) {
 
 		d.id = sql.NewThing(d.key.TB, d.key.ID)
 
-		d.md = map[string]interface{}{
-			"tb": d.key.TB,
-			"id": d.key.ID,
-		}
-
 	}
 
 	return
 
 }
 
-func (d *document) changed() bool {
+func (d *document) forced(ctx context.Context) bool {
+	if val := ctx.Value(ctxKeyForce); val != nil {
+		return val.(bool)
+	}
+	return false
+}
+
+func (d *document) changed(ctx context.Context) bool {
 	a, _ := d.initial.Data().(map[string]interface{})
 	b, _ := d.current.Data().(map[string]interface{})
 	c := diff.Diff(a, b)
 	return len(c) > 0
 }
 
-func (d *document) shouldDrop() (bool, error) {
+func (d *document) shouldDrop(ctx context.Context) (bool, error) {
 
 	// Check whether it is specified
 	// that the table should drop
@@ -346,14 +348,14 @@ func (d *document) storeThing(ctx context.Context) (err error) {
 	// Check that the rcord has been
 	// changed, and if not, return.
 
-	if ok := d.changed(); !ok {
+	if ok := d.changed(ctx); !ok {
 		return
 	}
 
 	// Check that the table should
 	// drop data being written.
 
-	if ok, err := d.shouldDrop(); ok {
+	if ok, err := d.shouldDrop(ctx); ok {
 		return err
 	}
 
@@ -373,7 +375,7 @@ func (d *document) purgeThing(ctx context.Context) (err error) {
 	// Check that the table should
 	// drop data being written.
 
-	if ok, err := d.shouldDrop(); ok {
+	if ok, err := d.shouldDrop(ctx); ok {
 		return err
 	}
 
@@ -393,7 +395,7 @@ func (d *document) eraseThing(ctx context.Context) (err error) {
 	// Check that the table should
 	// drop data being written.
 
-	if ok, err := d.shouldDrop(); ok {
+	if ok, err := d.shouldDrop(ctx); ok {
 		return err
 	}
 
@@ -408,10 +410,22 @@ func (d *document) eraseThing(ctx context.Context) (err error) {
 
 func (d *document) storeIndex(ctx context.Context) (err error) {
 
+	// Check if this query has been run
+	// in forced mode, or return.
+
+	forced := d.forced(ctx)
+
+	// Check that the rcord has been
+	// changed, and if not, return.
+
+	if !forced && !d.changed(ctx) {
+		return
+	}
+
 	// Check that the table should
 	// drop data being written.
 
-	if ok, err := d.shouldDrop(); ok {
+	if ok, err := d.shouldDrop(ctx); ok {
 		return err
 	}
 
@@ -429,21 +443,9 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 		del := indx.Build(ix.Cols, d.initial)
 		add := indx.Build(ix.Cols, d.current)
 
-		// TODO use diffing to speed up indexes
-		// We need to use diffing so that only
-		// changed values are written to the
-		// storage layer. However if an index
-		// is redefined, then the diff does not
-		// return any changes, and the index is
-		// then corrupt. Maybe we could check
-		// when the index was created, and check
-		// if the d.initial change time is after
-		// the index creation time, then perform
-		// a diff on the old/new index values.
-
-		// if d.initial.Get("meta.time") > ix.Time {
-		// 	del, add = indx.Diff(old, now)
-		// }
+		if !forced {
+			del, add = indx.Diff(del, add)
+		}
 
 		if ix.Uniq == true {
 			for _, v := range del {
@@ -479,10 +481,22 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 
 func (d *document) purgeIndex(ctx context.Context) (err error) {
 
+	// Check if this query has been run
+	// in forced mode, or return.
+
+	forced := d.forced(ctx)
+
+	// Check that the rcord has been
+	// changed, and if not, return.
+
+	if !forced && !d.changed(ctx) {
+		return
+	}
+
 	// Check that the table should
 	// drop data being written.
 
-	if ok, err := d.shouldDrop(); ok {
+	if ok, err := d.shouldDrop(ctx); ok {
 		return err
 	}
 

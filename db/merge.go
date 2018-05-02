@@ -80,8 +80,17 @@ func (d *document) merge(ctx context.Context, met method, data sql.Expr) (err er
 
 func (d *document) defFld(ctx context.Context, met method) (err error) {
 
-	d.current.Set(d.id, "id")
-	d.current.Set(d.md, "meta")
+	switch d.i.vir {
+	case true:
+		d.current.Set(d.id, "id")
+		d.current.Set(d.id.TB, "meta.tb")
+		d.current.Set(d.id.ID, "meta.id")
+	case false:
+		d.current.Del("meta")
+		d.current.Set(d.id, "id")
+		d.current.Set(d.id.TB, "meta.tb")
+		d.current.Set(d.id.ID, "meta.id")
+	}
 
 	return
 

@@ -275,15 +275,321 @@ func TestDefine(t *testing.T) {
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
 		So(res[3].Result, ShouldHaveLength, 1)
-		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
-		So(data.Consume(res[3].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person")
-		So(data.Consume(res[3].Result[0]).Get("name").Data(), ShouldEqual, "Test")
-		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, true)
 		So(res[4].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[4].Result[0]).Get("meta.id").Data(), ShouldEqual, "test")
 		So(data.Consume(res[4].Result[0]).Get("meta.tb").Data(), ShouldEqual, "temp")
 		So(data.Consume(res[4].Result[0]).Get("name").Data(), ShouldEqual, "Test")
 		So(data.Consume(res[4].Result[0]).Get("test").Data(), ShouldEqual, nil)
+
+	})
+
+	Convey("Define a foreign table with a where clause", t, func() {
+
+		setupDB(20)
+
+		txt := `
+		USE NS test DB test;
+		DEFINE TABLE temp AS SELECT name FROM person WHERE test=true;
+		UPDATE person:one SET name="Test", test=true;
+		UPDATE person:two SET name="Test", test=false;
+		SELECT * FROM person;
+		SELECT * FROM temp;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 6)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 2)
+		So(res[5].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[5].Result[0]).Get("meta.id").Data(), ShouldEqual, "one")
+		So(data.Consume(res[5].Result[0]).Get("meta.tb").Data(), ShouldEqual, "temp")
+		So(data.Consume(res[5].Result[0]).Get("name").Data(), ShouldEqual, "Test")
+		So(data.Consume(res[5].Result[0]).Get("test").Data(), ShouldEqual, nil)
+
+	})
+
+	Convey("Define a foreign table with a group by clause", t, func() {
+
+		setupDB(20)
+
+		txt := `
+		USE NS test DB test;
+		DEFINE TABLE person_age AS SELECT count(*) AS count, age FROM person WHERE test=true GROUP BY age;
+		UPDATE person:1 SET name="Test", test=true, age=30;
+		UPDATE person:2 SET name="Test", test=true, age=32;
+		UPDATE person:3 SET name="Test", test=true, age=30;
+		SELECT * FROM person ORDER BY meta.id;
+		SELECT * FROM person_age ORDER BY meta.id;
+		UPDATE person:3 SET name="Test", test=true, age=32;
+		SELECT * FROM person_age ORDER BY meta.id;
+		UPDATE person:3 SET name="Test", test=false, age=32;
+		SELECT * FROM person_age ORDER BY meta.id;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 11)
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(res[5].Result, ShouldHaveLength, 3)
+		So(res[6].Result, ShouldHaveLength, 2)
+		So(data.Consume(res[6].Result[0]).Get("meta.id").Data(), ShouldEqual, "[30]")
+		So(data.Consume(res[6].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person_age")
+		So(data.Consume(res[6].Result[0]).Get("count").Data(), ShouldEqual, 2)
+		So(data.Consume(res[6].Result[0]).Get("name").Data(), ShouldBeNil)
+		So(data.Consume(res[6].Result[0]).Get("test").Data(), ShouldBeNil)
+		So(data.Consume(res[6].Result[1]).Get("meta.id").Data(), ShouldEqual, "[32]")
+		So(data.Consume(res[6].Result[1]).Get("meta.tb").Data(), ShouldEqual, "person_age")
+		So(data.Consume(res[6].Result[1]).Get("count").Data(), ShouldEqual, 1)
+		So(data.Consume(res[6].Result[1]).Get("name").Data(), ShouldBeNil)
+		So(data.Consume(res[6].Result[1]).Get("test").Data(), ShouldBeNil)
+		So(res[7].Result, ShouldHaveLength, 1)
+		So(res[8].Result, ShouldHaveLength, 2)
+		So(data.Consume(res[8].Result[0]).Get("meta.id").Data(), ShouldEqual, "[30]")
+		So(data.Consume(res[8].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person_age")
+		So(data.Consume(res[8].Result[0]).Get("count").Data(), ShouldEqual, 1)
+		So(data.Consume(res[8].Result[0]).Get("name").Data(), ShouldBeNil)
+		So(data.Consume(res[8].Result[0]).Get("test").Data(), ShouldBeNil)
+		So(data.Consume(res[8].Result[1]).Get("meta.id").Data(), ShouldEqual, "[32]")
+		So(data.Consume(res[8].Result[1]).Get("meta.tb").Data(), ShouldEqual, "person_age")
+		So(data.Consume(res[8].Result[1]).Get("count").Data(), ShouldEqual, 2)
+		So(data.Consume(res[8].Result[1]).Get("name").Data(), ShouldBeNil)
+		So(data.Consume(res[8].Result[1]).Get("test").Data(), ShouldBeNil)
+		So(res[9].Result, ShouldHaveLength, 1)
+		So(res[10].Result, ShouldHaveLength, 2)
+		So(data.Consume(res[10].Result[0]).Get("meta.id").Data(), ShouldEqual, "[30]")
+		So(data.Consume(res[10].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person_age")
+		So(data.Consume(res[10].Result[0]).Get("count").Data(), ShouldEqual, 1)
+		So(data.Consume(res[10].Result[0]).Get("name").Data(), ShouldBeNil)
+		So(data.Consume(res[10].Result[0]).Get("test").Data(), ShouldBeNil)
+		So(data.Consume(res[10].Result[1]).Get("meta.id").Data(), ShouldEqual, "[32]")
+		So(data.Consume(res[10].Result[1]).Get("meta.tb").Data(), ShouldEqual, "person_age")
+		So(data.Consume(res[10].Result[1]).Get("count").Data(), ShouldEqual, 1)
+		So(data.Consume(res[10].Result[1]).Get("name").Data(), ShouldBeNil)
+		So(data.Consume(res[10].Result[1]).Get("test").Data(), ShouldBeNil)
+
+	})
+
+	Convey("Define multiple foreign tables with group by clauses", t, func() {
+
+		setupDB(20)
+
+		txt := `
+		USE NS test DB test;
+		DEFINE TABLE person_f AS SELECT * FROM person WHERE gender='f';
+		DEFINE TABLE person_m AS SELECT * FROM person WHERE gender='m';
+		DEFINE TABLE person_age AS
+			SELECT count(*) AS count,
+			distinct(id),
+			distinct(age),
+			math.min(age),
+			math.max(age),
+			math.sum(age),
+			math.mean(age),
+			math.stddev(age),
+			math.variance(age),
+			age
+			FROM person GROUP BY age
+		;
+		DEFINE TABLE person_gender AS
+			SELECT count(*) AS count,
+			distinct(id),
+			distinct(age),
+			math.min(age),
+			math.max(age),
+			math.sum(age),
+			math.mean(age),
+			math.stddev(age),
+			math.variance(age),
+			gender
+			FROM person GROUP BY gender
+		;
+		DEFINE TABLE person_age_gender AS
+			SELECT count(*) AS count,
+			distinct(id),
+			distinct(age),
+			math.min(age),
+			math.max(age),
+			math.sum(age),
+			math.mean(age),
+			math.stddev(age),
+			math.variance(age),
+			age, gender
+			FROM person GROUP BY age, gender
+		;
+		UPDATE |person:10| SET name="Test", test=true, age=30, gender='f';
+		UPDATE |person:10| SET name="Test", test=true, age=32, gender='m';
+		UPDATE |person:10| SET name="Test", test=true, age=30, gender='m';
+		UPDATE |person:10| SET name="Test", test=true, age=31, gender='f';
+		UPDATE |person:10| SET name="Test", test=true, age=29, gender='m';
+		SELECT * FROM person ORDER BY meta.id;
+		SELECT * FROM person_f ORDER BY meta.id;
+		SELECT * FROM person_m ORDER BY meta.id;
+		SELECT * FROM person_age ORDER BY meta.id;
+		SELECT * FROM person_gender ORDER BY meta.id;
+		SELECT * FROM person_age_gender ORDER BY meta.id;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 17)
+		So(res[6].Result, ShouldHaveLength, 10)
+		So(res[7].Result, ShouldHaveLength, 10)
+		So(res[8].Result, ShouldHaveLength, 10)
+		So(res[9].Result, ShouldHaveLength, 10)
+		So(res[10].Result, ShouldHaveLength, 10)
+		So(res[11].Result, ShouldHaveLength, 50)
+		So(res[12].Result, ShouldHaveLength, 20)
+		So(res[13].Result, ShouldHaveLength, 30)
+		So(res[14].Result, ShouldHaveLength, 4)
+		So(data.Consume(res[14].Result[0]).Get("meta.id").Data(), ShouldEqual, "[29]")
+		So(data.Consume(res[14].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person_age")
+		So(data.Consume(res[14].Result[0]).Get("count").Data(), ShouldEqual, 10)
+		So(data.Consume(res[14].Result[0]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[14].Result[0]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 10)
+		So(data.Consume(res[14].Result[0]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[14].Result[0]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 1)
+		So(data.Consume(res[14].Result[0]).Get("math.min(age)").Data(), ShouldEqual, 29)
+		So(data.Consume(res[14].Result[0]).Get("math.max(age)").Data(), ShouldEqual, 29)
+		So(data.Consume(res[14].Result[0]).Get("math.sum(age)").Data(), ShouldEqual, 290)
+		So(data.Consume(res[14].Result[0]).Get("math.mean(age)").Data(), ShouldEqual, 29)
+		So(data.Consume(res[14].Result[0]).Get("math.stddev(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[14].Result[0]).Get("math.variance(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[14].Result[1]).Get("meta.id").Data(), ShouldEqual, "[30]")
+		So(data.Consume(res[14].Result[1]).Get("meta.tb").Data(), ShouldEqual, "person_age")
+		So(data.Consume(res[14].Result[1]).Get("count").Data(), ShouldEqual, 20)
+		So(data.Consume(res[14].Result[1]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[14].Result[1]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 20)
+		So(data.Consume(res[14].Result[1]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[14].Result[1]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 1)
+		So(data.Consume(res[14].Result[1]).Get("math.min(age)").Data(), ShouldEqual, 30)
+		So(data.Consume(res[14].Result[1]).Get("math.max(age)").Data(), ShouldEqual, 30)
+		So(data.Consume(res[14].Result[1]).Get("math.sum(age)").Data(), ShouldEqual, 600)
+		So(data.Consume(res[14].Result[1]).Get("math.mean(age)").Data(), ShouldEqual, 30)
+		So(data.Consume(res[14].Result[1]).Get("math.stddev(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[14].Result[1]).Get("math.variance(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[14].Result[2]).Get("meta.id").Data(), ShouldEqual, "[31]")
+		So(data.Consume(res[14].Result[2]).Get("meta.tb").Data(), ShouldEqual, "person_age")
+		So(data.Consume(res[14].Result[2]).Get("count").Data(), ShouldEqual, 10)
+		So(data.Consume(res[14].Result[2]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[14].Result[2]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 10)
+		So(data.Consume(res[14].Result[2]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[14].Result[2]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 1)
+		So(data.Consume(res[14].Result[2]).Get("math.min(age)").Data(), ShouldEqual, 31)
+		So(data.Consume(res[14].Result[2]).Get("math.max(age)").Data(), ShouldEqual, 31)
+		So(data.Consume(res[14].Result[2]).Get("math.sum(age)").Data(), ShouldEqual, 310)
+		So(data.Consume(res[14].Result[2]).Get("math.mean(age)").Data(), ShouldEqual, 31)
+		So(data.Consume(res[14].Result[2]).Get("math.stddev(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[14].Result[2]).Get("math.variance(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[14].Result[3]).Get("meta.id").Data(), ShouldEqual, "[32]")
+		So(data.Consume(res[14].Result[3]).Get("meta.tb").Data(), ShouldEqual, "person_age")
+		So(data.Consume(res[14].Result[3]).Get("count").Data(), ShouldEqual, 10)
+		So(data.Consume(res[14].Result[3]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[14].Result[3]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 10)
+		So(data.Consume(res[14].Result[3]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[14].Result[3]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 1)
+		So(data.Consume(res[14].Result[3]).Get("math.min(age)").Data(), ShouldEqual, 32)
+		So(data.Consume(res[14].Result[3]).Get("math.max(age)").Data(), ShouldEqual, 32)
+		So(data.Consume(res[14].Result[3]).Get("math.sum(age)").Data(), ShouldEqual, 320)
+		So(data.Consume(res[14].Result[3]).Get("math.mean(age)").Data(), ShouldEqual, 32)
+		So(data.Consume(res[14].Result[3]).Get("math.stddev(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[14].Result[3]).Get("math.variance(age)").Data(), ShouldEqual, 0)
+		So(res[15].Result, ShouldHaveLength, 2)
+		So(data.Consume(res[15].Result[0]).Get("meta.id").Data(), ShouldEqual, "[f]")
+		So(data.Consume(res[15].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person_gender")
+		So(data.Consume(res[15].Result[0]).Get("count").Data(), ShouldEqual, 20)
+		So(data.Consume(res[15].Result[0]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[15].Result[0]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 20)
+		So(data.Consume(res[15].Result[0]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[15].Result[0]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 2)
+		So(data.Consume(res[15].Result[0]).Get("math.min(age)").Data(), ShouldEqual, 30)
+		So(data.Consume(res[15].Result[0]).Get("math.max(age)").Data(), ShouldEqual, 31)
+		So(data.Consume(res[15].Result[0]).Get("math.sum(age)").Data(), ShouldEqual, 610)
+		So(data.Consume(res[15].Result[0]).Get("math.mean(age)").Data(), ShouldEqual, 30.5)
+		So(data.Consume(res[15].Result[0]).Get("math.stddev(age)").Data(), ShouldEqual, 0.512989176042577)
+		So(data.Consume(res[15].Result[0]).Get("math.variance(age)").Data(), ShouldEqual, 0.26315789473684215)
+		So(data.Consume(res[15].Result[1]).Get("meta.id").Data(), ShouldEqual, "[m]")
+		So(data.Consume(res[15].Result[1]).Get("meta.tb").Data(), ShouldEqual, "person_gender")
+		So(data.Consume(res[15].Result[1]).Get("count").Data(), ShouldEqual, 30)
+		So(data.Consume(res[15].Result[1]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[15].Result[1]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 30)
+		So(data.Consume(res[15].Result[1]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[15].Result[1]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 3)
+		So(data.Consume(res[15].Result[1]).Get("math.min(age)").Data(), ShouldEqual, 29)
+		So(data.Consume(res[15].Result[1]).Get("math.max(age)").Data(), ShouldEqual, 32)
+		So(data.Consume(res[15].Result[1]).Get("math.sum(age)").Data(), ShouldEqual, 910)
+		So(data.Consume(res[15].Result[1]).Get("math.mean(age)").Data(), ShouldEqual, 30.333333333333332)
+		So(data.Consume(res[15].Result[1]).Get("math.stddev(age)").Data(), ShouldEqual, 1.2685406585123122)
+		So(data.Consume(res[15].Result[1]).Get("math.variance(age)").Data(), ShouldEqual, 1.6091954022988506)
+		So(res[16].Result, ShouldHaveLength, 5)
+		So(data.Consume(res[16].Result[0]).Get("meta.id").Data(), ShouldEqual, "[29 m]")
+		So(data.Consume(res[16].Result[0]).Get("meta.tb").Data(), ShouldEqual, "person_age_gender")
+		So(data.Consume(res[16].Result[0]).Get("count").Data(), ShouldEqual, 10)
+		So(data.Consume(res[16].Result[0]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[16].Result[0]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 10)
+		So(data.Consume(res[16].Result[0]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[16].Result[0]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 1)
+		So(data.Consume(res[16].Result[0]).Get("math.min(age)").Data(), ShouldEqual, 29)
+		So(data.Consume(res[16].Result[0]).Get("math.max(age)").Data(), ShouldEqual, 29)
+		So(data.Consume(res[16].Result[0]).Get("math.sum(age)").Data(), ShouldEqual, 290)
+		So(data.Consume(res[16].Result[0]).Get("math.mean(age)").Data(), ShouldEqual, 29)
+		So(data.Consume(res[16].Result[0]).Get("math.stddev(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[16].Result[0]).Get("math.variance(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[16].Result[1]).Get("meta.id").Data(), ShouldEqual, "[30 f]")
+		So(data.Consume(res[16].Result[1]).Get("meta.tb").Data(), ShouldEqual, "person_age_gender")
+		So(data.Consume(res[16].Result[1]).Get("count").Data(), ShouldEqual, 10)
+		So(data.Consume(res[16].Result[1]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[16].Result[1]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 10)
+		So(data.Consume(res[16].Result[1]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[16].Result[1]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 1)
+		So(data.Consume(res[16].Result[1]).Get("math.min(age)").Data(), ShouldEqual, 30)
+		So(data.Consume(res[16].Result[1]).Get("math.max(age)").Data(), ShouldEqual, 30)
+		So(data.Consume(res[16].Result[1]).Get("math.sum(age)").Data(), ShouldEqual, 300)
+		So(data.Consume(res[16].Result[1]).Get("math.mean(age)").Data(), ShouldEqual, 30)
+		So(data.Consume(res[16].Result[1]).Get("math.stddev(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[16].Result[1]).Get("math.variance(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[16].Result[2]).Get("meta.id").Data(), ShouldEqual, "[30 m]")
+		So(data.Consume(res[16].Result[2]).Get("meta.tb").Data(), ShouldEqual, "person_age_gender")
+		So(data.Consume(res[16].Result[2]).Get("count").Data(), ShouldEqual, 10)
+		So(data.Consume(res[16].Result[2]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[16].Result[2]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 10)
+		So(data.Consume(res[16].Result[2]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[16].Result[2]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 1)
+		So(data.Consume(res[16].Result[2]).Get("math.min(age)").Data(), ShouldEqual, 30)
+		So(data.Consume(res[16].Result[2]).Get("math.max(age)").Data(), ShouldEqual, 30)
+		So(data.Consume(res[16].Result[2]).Get("math.sum(age)").Data(), ShouldEqual, 300)
+		So(data.Consume(res[16].Result[2]).Get("math.mean(age)").Data(), ShouldEqual, 30)
+		So(data.Consume(res[16].Result[2]).Get("math.stddev(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[16].Result[2]).Get("math.variance(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[16].Result[3]).Get("meta.id").Data(), ShouldEqual, "[31 f]")
+		So(data.Consume(res[16].Result[3]).Get("meta.tb").Data(), ShouldEqual, "person_age_gender")
+		So(data.Consume(res[16].Result[3]).Get("count").Data(), ShouldEqual, 10)
+		So(data.Consume(res[16].Result[3]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[16].Result[3]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 10)
+		So(data.Consume(res[16].Result[3]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[16].Result[3]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 1)
+		So(data.Consume(res[16].Result[3]).Get("math.min(age)").Data(), ShouldEqual, 31)
+		So(data.Consume(res[16].Result[3]).Get("math.max(age)").Data(), ShouldEqual, 31)
+		So(data.Consume(res[16].Result[3]).Get("math.sum(age)").Data(), ShouldEqual, 310)
+		So(data.Consume(res[16].Result[3]).Get("math.mean(age)").Data(), ShouldEqual, 31)
+		So(data.Consume(res[16].Result[3]).Get("math.stddev(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[16].Result[3]).Get("math.variance(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[16].Result[4]).Get("meta.id").Data(), ShouldEqual, "[32 m]")
+		So(data.Consume(res[16].Result[4]).Get("meta.tb").Data(), ShouldEqual, "person_age_gender")
+		So(data.Consume(res[16].Result[4]).Get("count").Data(), ShouldEqual, 10)
+		So(data.Consume(res[16].Result[4]).Get("distinct(id)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[16].Result[4]).Get("distinct(id)").Data().([]interface{}), ShouldHaveLength, 10)
+		So(data.Consume(res[16].Result[4]).Get("distinct(age)").Data(), ShouldHaveSameTypeAs, []interface{}{})
+		So(data.Consume(res[16].Result[4]).Get("distinct(age)").Data().([]interface{}), ShouldHaveLength, 1)
+		So(data.Consume(res[16].Result[4]).Get("math.min(age)").Data(), ShouldEqual, 32)
+		So(data.Consume(res[16].Result[4]).Get("math.max(age)").Data(), ShouldEqual, 32)
+		So(data.Consume(res[16].Result[4]).Get("math.sum(age)").Data(), ShouldEqual, 320)
+		So(data.Consume(res[16].Result[4]).Get("math.mean(age)").Data(), ShouldEqual, 32)
+		So(data.Consume(res[16].Result[4]).Get("math.stddev(age)").Data(), ShouldEqual, 0)
+		So(data.Consume(res[16].Result[4]).Get("math.variance(age)").Data(), ShouldEqual, 0)
 
 	})
 

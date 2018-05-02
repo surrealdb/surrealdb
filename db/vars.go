@@ -19,13 +19,20 @@ import (
 	"runtime"
 )
 
-type method int
+type method int8
 
 const (
 	_SELECT method = iota
 	_CREATE
 	_UPDATE
 	_DELETE
+)
+
+type modify int8
+
+const (
+	_REMOVE modify = iota
+	_CHANGE
 )
 
 const (
@@ -46,6 +53,7 @@ const (
 	ctxKeyAuth    = "auth"
 	ctxKeyKind    = "kind"
 	ctxKeyScope   = "scope"
+	ctxKeyForce   = "force"
 	ctxKeyVersion = "version"
 )
 

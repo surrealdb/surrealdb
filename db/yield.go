@@ -261,6 +261,16 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 
 	}
 
+	// Remove all temporary metadata from
+	// the record. This is not visible when
+	// outputting, but is stored in the DB.
+
+	doc.Del("meta.__")
+
+	// Output the document with the correct
+	// specified fields, linked records and
+	// any aggregated group by clauses.
+
 	return out.Data(), nil
 
 }

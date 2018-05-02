@@ -26,13 +26,12 @@ var rolls = map[string]bool{
 
 	// Math implementation
 
-	"math.geometricmean": true,
-	"math.max":           true,
-	"math.mean":          true,
-	"math.min":           true,
-	"math.stddev":        true,
-	"math.sum":           true,
-	"math.variance":      true,
+	"math.max":      true,
+	"math.mean":     true,
+	"math.min":      true,
+	"math.stddev":   true,
+	"math.sum":      true,
+	"math.variance": true,
 }
 
 var aggrs = map[string]bool{

@@ -24,11 +24,17 @@ import (
 // this table, and executes them in name order.
 func (d *document) lives(ctx context.Context, when method) (err error) {
 
+	// Check if this query has been run
+	// in forced mode, because of an
+	// index or foreign table update.
+
+	forced := d.forced(ctx)
+
 	// If this document has not changed
 	// then there is no need to update
 	// any registered live queries.
 
-	if !d.changed() {
+	if !forced && !d.changed(ctx) {
 		return nil
 	}
 

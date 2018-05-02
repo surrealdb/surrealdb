@@ -25,12 +25,18 @@ import (
 // table, and executes them in name order.
 func (d *document) event(ctx context.Context, met method) (err error) {
 
+	// Check if this query has been run
+	// in forced mode, because of an
+	// index or foreign table update.
+
+	forced := d.forced(ctx)
+
 	// If this document has not changed
 	// then there is no need to perform
 	// any registered events.
 
-	if ok := d.changed(); !ok {
-		return
+	if !forced && !d.changed(ctx) {
+		return nil
 	}
 
 	// Get the event values specified
