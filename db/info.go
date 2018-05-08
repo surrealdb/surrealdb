@@ -148,11 +148,6 @@ func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (o
 		return nil, err
 	}
 
-	lv, err := e.dbo.AllLV(ctx, ast.NS, ast.DB, ast.What.TB)
-	if err != nil {
-		return nil, err
-	}
-
 	ft, err := e.dbo.AllFT(ctx, ast.NS, ast.DB, ast.What.TB)
 	if err != nil {
 		return nil, err
@@ -175,11 +170,6 @@ func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (o
 		index[v.Name.ID] = v.String()
 	}
 
-	lives := make(map[string]interface{})
-	for _, v := range lv {
-		lives[v.ID] = v.String()
-	}
-
 	table := make(map[string]interface{})
 	for _, v := range ft {
 		table[v.Name.ID] = v.String()
@@ -188,7 +178,6 @@ func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (o
 	res.Set(event, "event")
 	res.Set(field, "field")
 	res.Set(index, "index")
-	res.Set(lives, "lives")
 	res.Set(table, "table")
 
 	return []interface{}{res.Data()}, nil
