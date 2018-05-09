@@ -68,8 +68,7 @@ func (s *socket) ctx(ns, db string) (ctx context.Context) {
 	vars := data.New()
 	vars.Set(auth.Data, varKeyAuth)
 	vars.Set(auth.Scope, varKeyScope)
-	vars.Set(s.fibre.Origin(), varKeyOrigin)
-	vars.Set(s.fibre.IP().String(), varKeyIp)
+	vars.Set(session(s.fibre), varKeySession)
 	ctx = context.WithValue(ctx, ctxKeyVars, vars)
 
 	return

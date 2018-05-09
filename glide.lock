@@ -1,8 +1,8 @@
 hash: c56e5bd935dd1933a6e7370fe3fc67ea26169ec91aa05c171543866c6c2490ed
-updated: 2018-05-02T12:28:08.963393+01:00
+updated: 2018-05-09T23:03:18.058567+01:00
 imports:
 - name: cloud.google.com/go
-  version: 29f476ffa9c4cd4fd14336b6043090ac1ad76733
+  version: 056a55f54a6cc77b440b31a56a5e7c3982d32811
   subpackages:
   - compute/metadata
   - iam
@@ -16,7 +16,7 @@ imports:
 - name: github.com/abcum/cork
   version: c246208017d0b81f2e9a3fc2fb7a993c89153839
 - name: github.com/abcum/fibre
-  version: 24b2157453a929f7a86616c415d01b94916b3ed5
+  version: 58f82632f8a973b56347ffdb5632674cd22686c1
   subpackages:
   - mw
 - name: github.com/abcum/ptree
@@ -35,7 +35,7 @@ imports:
 - name: github.com/armon/go-metrics
   version: 783273d703149aaeb9897cf58613d5af48861c25
 - name: github.com/aws/aws-sdk-go
-  version: 236a3fce423171d03ae327a8aa2512e6fb24df36
+  version: 31bd69f7db00cbf3d85d129e16d42304cb6e455f
   subpackages:
   - aws
   - aws/awserr
@@ -117,7 +117,7 @@ imports:
 - name: github.com/jmespath/go-jmespath
   version: c2b33e8439af944379acbdd9c3a5fe0bc44bd8a5
 - name: github.com/kr/text
-  version: 7cafcd837844e784b526369c9bce262804aebc60
+  version: e2ffdb16a802fe2bb95e2e35ff34f0e53aeef34f
 - name: github.com/mattn/go-colorable
   version: efa589957cd060542a26d2dd7832fd6a6c6c3ade
 - name: github.com/mattn/go-isatty
@@ -125,7 +125,7 @@ imports:
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: 01d59357d468872339068bcd5d55a00e2463051f
+  version: eac804ceef194db2da6ee80c728d7658c8c805ff
 - name: github.com/mitchellh/mapstructure
   version: 00c29f56e2386353d58c599509e8dc3801b0d716
 - name: github.com/newrelic/go-agent
@@ -160,7 +160,7 @@ imports:
   subpackages:
   - codec
 - name: go.opencensus.io
-  version: 10cec2c05ea2cfb8b0d856711daedc49d8a45c56
+  version: c11636694056ed1d664b058521f3aa61016da8ba
   subpackages:
   - exporter/stackdriver/propagation
   - internal
@@ -175,7 +175,7 @@ imports:
   - trace/internal
   - trace/propagation
 - name: golang.org/x/crypto
-  version: 613d6eafa307c6881a737a3c35c0e312e8d3a8c5
+  version: 2d027ae1dddd4694d54f7a8b6cbe78dca8720226
   subpackages:
   - bcrypt
   - blowfish
@@ -185,7 +185,7 @@ imports:
   - scrypt
   - ssh/terminal
 - name: golang.org/x/net
-  version: 5f9ae10d9af5b1c89ae6904293b14b064d4ada23
+  version: f73e4c9ed3b7ebdd5f699a16a880c2b1994e50dd
   subpackages:
   - bpf
   - context
@@ -199,17 +199,16 @@ imports:
   - internal/timeseries
   - ipv4
   - ipv6
-  - lex/httplex
   - trace
 - name: golang.org/x/oauth2
-  version: 6881fee410a5daf86371371f9ad451b95e168b71
+  version: cdc340f7c179dbbfa4afd43b7614e8fcadde4269
   subpackages:
   - google
   - internal
   - jws
   - jwt
 - name: golang.org/x/sys
-  version: 78d5f264b493f125018180c204871ecf58a2dce1
+  version: 64746a42f36bf0832f86b76004f1699dbeb33e4f
   subpackages:
   - unix
   - windows
@@ -226,7 +225,7 @@ imports:
   - unicode/bidi
   - unicode/norm
 - name: google.golang.org/api
-  version: ce90db2c36a2cb8c9c06779ed8bb96f92ea6e3b8
+  version: 4bd7f4beb291148443ed4553071c4e0697ff4afb
   subpackages:
   - gensupport
   - googleapi
@@ -257,7 +256,7 @@ imports:
   - googleapis/rpc/code
   - googleapis/rpc/status
 - name: google.golang.org/grpc
-  version: e538e04cad1b83e47b2ccbbbfe6d5fd5a816d290
+  version: 45d7f3a23f0b937ba711aa0e3e3426325d3b9ae4
   subpackages:
   - balancer
   - balancer/base
@@ -271,7 +270,6 @@ imports:
   - grpclb/grpc_lb_v1/messages
   - grpclog
   - internal
-  - internal/msgdecoder
   - keepalive
   - metadata
   - naming

@@ -149,17 +149,11 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 		fib.Set(ctxKeyId, uuid.New().String())
 	}
 
-	// Ensure that the IP address of the
-	// user signing in is available so that
-	// it can be used within signin queries.
+	// Ensure that the session details, such
+	// as id, ip, and origin, are available on
+	// the 'conn' object on each query.
 
-	vars[varKeyIp] = fib.IP().String()
-
-	// Ensure that the website origin of the
-	// user signing in is available so that
-	// it can be used within signin queries.
-
-	vars[varKeyOrigin] = fib.Origin()
+	vars[varKeySession] = session(fib)
 
 	// Ensure that the specified environment
 	// variable 'ENV' is available to the

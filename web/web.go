@@ -46,7 +46,7 @@ func Setup(opts *cnf.Options) (err error) {
 	// Add cors headers
 
 	s.Use(mw.Cors(&mw.CorsOpts{
-		AllowedOrigin: "*",
+		AllowedOrigin: "=",
 		AllowedMethods: []string{
 			"GET",
 			"PUT",
@@ -63,8 +63,10 @@ func Setup(opts *cnf.Options) (err error) {
 			"Origin",
 			"NS",
 			"DB",
+			"ID",
 		},
-		AccessControlMaxAge: 600,
+		AccessControlMaxAge:           1800,
+		AccessControlAllowCredentials: true,
 	}))
 
 	// Check body size
@@ -72,6 +74,10 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Size(&mw.SizeOpts{
 		AllowedLength: 1 << 20, // 1mb
 	}))
+
+	// Setup session cookie
+
+	s.Use(sess())
 
 	// Setup authentication
 

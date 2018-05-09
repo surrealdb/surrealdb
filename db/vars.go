@@ -57,18 +57,20 @@ const (
 )
 
 const (
-	varKeyId     = "id"
-	varKeyIp     = "ip"
-	varKeyEnv    = "ENV"
-	varKeyAuth   = "auth"
-	varKeyThis   = "this"
-	varKeyScope  = "scope"
-	varKeyValue  = "value"
-	varKeyAfter  = "after"
-	varKeyBefore = "before"
-	varKeyMethod = "method"
-	varKeyParent = "parent"
-	varKeyOrigin = "origin"
+	varKeyId      = "id"
+	varKeyIp      = "ip"
+	varKeyEnv     = "ENV"
+	varKeyAuth    = "auth"
+	varKeyCook    = "cook"
+	varKeyThis    = "this"
+	varKeyScope   = "scope"
+	varKeyValue   = "value"
+	varKeyAfter   = "after"
+	varKeyBefore  = "before"
+	varKeyMethod  = "method"
+	varKeyParent  = "parent"
+	varKeyOrigin  = "origin"
+	varKeySession = "session"
 )
 
 var (

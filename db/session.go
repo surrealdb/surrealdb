@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package web
+package db
 
-const (
-	varKeyNs   = "NS"
-	varKeyDb   = "DB"
-	varKeySc   = "SC"
-	varKeyTk   = "TK"
-	varKeyUs   = "US"
-	varKeyTb   = "TB"
-	varKeyId   = "ID"
-	varKeyAuth = "auth"
-	varKeyUser = "user"
-	varKeyPass = "pass"
-	varKeyCook = "cook"
+import (
+	"github.com/abcum/fibre"
 )
+
+func session(c *fibre.Context) (out map[string]interface{}) {
+
+	out = make(map[string]interface{})
+
+	out[varKeyIp] = c.IP().String()
+
+	out[varKeyId] = c.Get(varKeyCook)
+
+	out[varKeyOrigin] = c.Origin()
+
+	return
+
+}
