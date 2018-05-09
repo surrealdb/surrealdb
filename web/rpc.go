@@ -31,6 +31,8 @@ type rpc struct{}
 
 func (r *rpc) Uniq(c *fibre.Context) (interface{}, error) {
 	return rand.String(64), nil
+func (r *rpc) Ping(c *fibre.Context) (interface{}, error) {
+	return "OK", nil
 }
 
 func (r *rpc) Info(c *fibre.Context) (interface{}, error) {
