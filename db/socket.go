@@ -61,9 +61,6 @@ func (s *socket) ctx(ns, db string) (ctx context.Context) {
 	ctx = context.WithValue(ctx, ctxKeyNs, ns)
 	ctx = context.WithValue(ctx, ctxKeyDb, db)
 
-	keep := s.fibre.Get(ctxKeyKeep)
-	ctx = context.WithValue(ctx, ctxKeyKeep, keep)
-
 	auth := s.fibre.Get(ctxKeyAuth).(*cnf.Auth)
 	ctx = context.WithValue(ctx, ctxKeyAuth, auth.Data)
 	ctx = context.WithValue(ctx, ctxKeyKind, auth.Kind)

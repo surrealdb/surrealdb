@@ -49,7 +49,6 @@ const (
 	ctxKeyVars    = "vars"
 	ctxKeySubs    = "subs"
 	ctxKeySpec    = "spec"
-	ctxKeyKeep    = "keep"
 	ctxKeyAuth    = "auth"
 	ctxKeyKind    = "kind"
 	ctxKeyScope   = "scope"
@@ -62,7 +61,6 @@ const (
 	varKeyIp     = "ip"
 	varKeyEnv    = "ENV"
 	varKeyAuth   = "auth"
-	varKeyKeep   = "keep"
 	varKeyThis   = "this"
 	varKeyScope  = "scope"
 	varKeyValue  = "value"
@@ -108,5 +106,5 @@ var (
 
 	// paramSearchKeys specifies the order in which context
 	// variables should be checked for any specified value.
-	paramSearchKeys = []string{ctxKeySpec, ctxKeySubs, ctxKeyVars, ctxKeyKeep}
+	paramSearchKeys = []string{ctxKeySpec, ctxKeySubs, ctxKeyVars}
 )

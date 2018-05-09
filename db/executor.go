@@ -117,7 +117,6 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 				"id":   ctx.Value(ctxKeyId),
 				"kind": ctx.Value(ctxKeyKind),
 				"vars": ctx.Value(ctxKeyVars),
-				"keep": ctx.Value(ctxKeyKeep),
 			})
 
 			if stm, ok := stm.(sql.AuthableStatement); ok {

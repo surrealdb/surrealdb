@@ -31,29 +31,11 @@ import (
 	"github.com/abcum/surreal/sql"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/websocket"
-
-	"github.com/abcum/surreal/util/data"
 )
 
 var ignore = func() error {
 	return nil
 }
-
-const (
-	varKeyIp     = "ip"
-	varKeyNs     = "NS"
-	varKeyDb     = "DB"
-	varKeySc     = "SC"
-	varKeyTk     = "TK"
-	varKeyUs     = "US"
-	varKeyTb     = "TB"
-	varKeyId     = "ID"
-	varKeyAuth   = "auth"
-	varKeyKeep   = "keep"
-	varKeyUser   = "user"
-	varKeyPass   = "pass"
-	varKeyOrigin = "origin"
-)
 
 func cidr(ip net.IP, networks []*net.IPNet) bool {
 	for _, network := range networks {
@@ -67,13 +49,6 @@ func cidr(ip net.IP, networks []*net.IPNet) bool {
 func auth() fibre.MiddlewareFunc {
 	return func(h fibre.HandlerFunc) fibre.HandlerFunc {
 		return func(c *fibre.Context) (err error) {
-
-			// Initialise any session level variables
-			// which will be valid across all requests
-			// which are made over this connection.
-
-			vars := new(data.Doc)
-			c.Set(varKeyKeep, vars)
 
 			// Initialise the connection authentication
 			// information which will store whether the

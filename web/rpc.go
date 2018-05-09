@@ -19,8 +19,6 @@ import (
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/data"
-	"github.com/abcum/surreal/util/rand"
 )
 
 type rpc struct{}
@@ -29,8 +27,6 @@ type rpc struct{}
 // Methods for authentication
 // --------------------------------------------------
 
-func (r *rpc) Uniq(c *fibre.Context) (interface{}, error) {
-	return rand.String(64), nil
 func (r *rpc) Ping(c *fibre.Context) (interface{}, error) {
 	return "OK", nil
 }
@@ -74,10 +70,6 @@ func (r *rpc) Live(c *fibre.Context, class string) (interface{}, error) {
 // --------------------------------------------------
 // Methods for static queries
 // --------------------------------------------------
-
-func (r *rpc) Let(c *fibre.Context, key string, val interface{}) (interface{}, error) {
-	return c.Get("keep").(*data.Doc).Set(val, key)
-}
 
 func (r *rpc) Query(c *fibre.Context, sql string, vars map[string]interface{}) (interface{}, error) {
 	return db.Execute(c, sql, vars)
