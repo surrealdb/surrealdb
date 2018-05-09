@@ -60,6 +60,7 @@ const (
 const (
 	varKeyId     = "id"
 	varKeyIp     = "ip"
+	varKeyEnv    = "ENV"
 	varKeyAuth   = "auth"
 	varKeyKeep   = "keep"
 	varKeyThis   = "this"

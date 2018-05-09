@@ -16,6 +16,7 @@ package db
 
 import (
 	"io"
+	"os"
 
 	"context"
 
@@ -159,6 +160,12 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 	// it can be used within signin queries.
 
 	vars[varKeyOrigin] = fib.Origin()
+
+	// Ensure that the specified environment
+	// variable 'ENV' is available to the
+	// request, to detect the environment.
+
+	vars[varKeyEnv] = os.Getenv(varKeyEnv)
 
 	// Ensure that the current authentication
 	// data is made available as a runtime
