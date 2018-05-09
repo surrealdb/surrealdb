@@ -542,6 +542,8 @@ func status(e error) (s string) {
 		return "ERR_FD"
 	case *IndexError:
 		return "ERR_IX"
+	case *TimerError:
+		return "ERR_TO"
 	case error:
 		return "ERR"
 	}

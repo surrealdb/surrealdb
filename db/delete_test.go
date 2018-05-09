@@ -149,7 +149,7 @@ func TestDelete(t *testing.T) {
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 0)
 		So(res[2].Result, ShouldHaveLength, 0)
-		So(res[1].Status, ShouldEqual, "ERR")
+		So(res[1].Status, ShouldEqual, "ERR_TO")
 		So(res[1].Detail, ShouldEqual, "Query timeout of 1ns exceeded")
 
 	})

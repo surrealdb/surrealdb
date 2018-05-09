@@ -99,6 +99,8 @@ func OutputBase(c *fibre.Context, t string, d Display, m Method, res []*db.Respo
 		return fibre.NewHTTPError(422, ret.Detail)
 	case "ERR_IX":
 		return fibre.NewHTTPError(422, ret.Detail)
+	case "ERR_TO":
+		return fibre.NewHTTPError(504, ret.Detail)
 	default:
 		return fibre.NewHTTPError(400, ret.Detail)
 	}
@@ -125,6 +127,8 @@ func OutputRest(c *fibre.Context, t string, d Display, m Method, res []*db.Respo
 		return fibre.NewHTTPError(422, ret.Detail)
 	case "ERR_IX":
 		return fibre.NewHTTPError(422, ret.Detail)
+	case "ERR_TO":
+		return fibre.NewHTTPError(504, ret.Detail)
 	default:
 		return fibre.NewHTTPError(400, ret.Detail)
 	}
@@ -197,6 +201,8 @@ func OutputJson(c *fibre.Context, t string, d Display, m Method, res []*db.Respo
 		return fibre.NewHTTPError(422, ret.Detail)
 	case "ERR_IX":
 		return fibre.NewHTTPError(422, ret.Detail)
+	case "ERR_TO":
+		return fibre.NewHTTPError(504, ret.Detail)
 	default:
 		return fibre.NewHTTPError(400, ret.Detail)
 	}
