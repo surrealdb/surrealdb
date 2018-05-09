@@ -49,7 +49,6 @@ func (h *stream) Fire(entry *logrus.Entry) error {
 
 		select {
 		case <-ws.quit:
-			close(ws.msgs)
 			break
 		case ws.msgs <- h.Format(entry):
 			break
