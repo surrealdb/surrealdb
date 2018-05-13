@@ -489,14 +489,17 @@ func (s *scanner) scanIdiom(chp ...rune) (tok Token, lit string, val interface{}
 			break
 		} else if isIdentChar(ch) {
 			buf.WriteRune(ch)
+		} else if isArrayChar(ch) {
+			tok = EXPR
+			buf.WriteRune(ch)
 		} else if isExprsChar(ch) {
 			tok = EXPR
 			buf.WriteRune(ch)
 		} else if ch == ':' {
 
 			if tok == EXPR {
-				s.undo()
-				break
+				buf.WriteRune(ch)
+				continue
 			}
 
 			tbv = buf.String()
@@ -1048,9 +1051,14 @@ func isThingChar(ch rune) bool {
 	return isLetter(ch) || isNumber(ch) || ch == '_'
 }
 
+// isArrayChar returns true if the rune is allowed in an ARRAY.
+func isArrayChar(ch rune) bool {
+	return ch == '[' || ch == ']'
+}
+
 // isExprsChar returns true if the rune is allowed in a IDENT.
 func isExprsChar(ch rune) bool {
-	return isLetter(ch) || isNumber(ch) || ch == '.' || ch == '_' || ch == '*' || ch == '[' || ch == '$' || ch == ']'
+	return isLetter(ch) || isNumber(ch) || ch == '.' || ch == '_' || ch == '*' || ch == '$'
 }
 
 // eof represents a marker rune for the end of the reader.
