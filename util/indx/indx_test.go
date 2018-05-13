@@ -36,12 +36,14 @@ func TestDiff(t *testing.T) {
 		}
 		So(old, ShouldHaveLength, 2)
 		So(now, ShouldHaveLength, 2)
-		old, now = Diff(old, now)
-		So(old, ShouldHaveLength, 0)
-		So(now, ShouldHaveLength, 0)
+		del, add := Diff(old, now)
+		So(del, ShouldHaveLength, 0)
+		So(del, ShouldResemble, [][]interface{}(nil))
+		So(add, ShouldHaveLength, 0)
+		So(add, ShouldResemble, [][]interface{}(nil))
 	})
 
-	Convey("Perform diff of different arrays", t, func() {
+	Convey("Perform diff of reversed arrays", t, func() {
 		old := [][]interface{}{
 			{"one", "two"},
 			{"two", "tre"},
@@ -52,9 +54,11 @@ func TestDiff(t *testing.T) {
 		}
 		So(old, ShouldHaveLength, 2)
 		So(now, ShouldHaveLength, 2)
-		old, now = Diff(old, now)
-		So(old, ShouldHaveLength, 2)
-		So(now, ShouldHaveLength, 2)
+		del, add := Diff(old, now)
+		So(del, ShouldHaveLength, 0)
+		So(del, ShouldResemble, [][]interface{}(nil))
+		So(add, ShouldHaveLength, 0)
+		So(add, ShouldResemble, [][]interface{}(nil))
 	})
 
 	Convey("Perform diff of same and different arrays", t, func() {
@@ -64,13 +68,33 @@ func TestDiff(t *testing.T) {
 		}
 		now := [][]interface{}{
 			{"two", "tre"},
-			{"two", "tre"},
+			{"one", "tre"},
 		}
 		So(old, ShouldHaveLength, 2)
 		So(now, ShouldHaveLength, 2)
-		old, now = Diff(old, now)
-		So(old, ShouldHaveLength, 1)
+		del, add := Diff(old, now)
+		So(del, ShouldHaveLength, 1)
+		So(del, ShouldResemble, [][]interface{}{{"one", "two"}})
+		So(add, ShouldHaveLength, 1)
+		So(add, ShouldResemble, [][]interface{}{{"one", "tre"}})
+	})
+
+	Convey("Perform diff of same and different length arrays", t, func() {
+		old := [][]interface{}{
+			{"one", "two"},
+			{"two", "tre"},
+			{"one", "tre"},
+		}
+		now := [][]interface{}{
+			{"two", "tre"},
+		}
+		So(old, ShouldHaveLength, 3)
 		So(now, ShouldHaveLength, 1)
+		del, add := Diff(old, now)
+		So(del, ShouldHaveLength, 2)
+		So(del, ShouldResemble, [][]interface{}{{"one", "two"}, {"one", "tre"}})
+		So(add, ShouldHaveLength, 0)
+		So(add, ShouldResemble, [][]interface{}(nil))
 	})
 
 }
@@ -136,6 +160,42 @@ func TestBuild(t *testing.T) {
 			{"ONE", "TWO", 1},
 			{"ONE", "TWO", 2},
 			{"ONE", "TWO", 3},
+		})
+
+	})
+
+	Convey("Perform build with empty array field", t, func() {
+
+		col := sql.Idents{
+			sql.NewIdent("test.*"),
+		}
+
+		doc := data.Consume(map[string]interface{}{
+			"test": []interface{}{},
+		})
+
+		out := Build(col, doc)
+
+		So(out, ShouldResemble, [][]interface{}(nil))
+
+	})
+
+	Convey("Perform build with non-empty array field", t, func() {
+
+		col := sql.Idents{
+			sql.NewIdent("test.*"),
+		}
+
+		doc := data.Consume(map[string]interface{}{
+			"test": []interface{}{"one", "two", "tre"},
+		})
+
+		out := Build(col, doc)
+
+		So(out, ShouldResemble, [][]interface{}{
+			{"one"},
+			{"two"},
+			{"tre"},
 		})
 
 	})
