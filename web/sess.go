@@ -26,25 +26,27 @@ import (
 
 const cookie = "surreal"
 
+func uniq(val *http.Cookie) string {
+	if val != nil && len(val.Value) == 64 {
+		return val.Value
+	}
+	return rand.String(64)
+}
+
 func sess() fibre.MiddlewareFunc {
 	return func(h fibre.HandlerFunc) fibre.HandlerFunc {
 		return func(c *fibre.Context) (err error) {
 
-			val, err := c.Request().Cookie(cookie)
+			val, _ := c.Request().Cookie(cookie)
+			crt := len(cnf.Settings.Cert.Crt) != 0
+			key := len(cnf.Settings.Cert.Key) != 0
 
-			if err != nil {
-
-				crt := len(cnf.Settings.Cert.Crt) != 0
-				key := len(cnf.Settings.Cert.Key) != 0
-
-				val = &http.Cookie{
-					Name:     cookie,
-					Value:    rand.String(64),
-					Secure:   (crt && key),
-					HttpOnly: true,
-					Expires:  time.Now().Add(365 * 24 * time.Hour),
-				}
-
+			val = &http.Cookie{
+				Name:     cookie,
+				Value:    uniq(val),
+				Secure:   (crt && key),
+				HttpOnly: true,
+				Expires:  time.Now().Add(365 * 24 * time.Hour),
 			}
 
 			c.Response().Header().Set("Set-Cookie", val.String())
