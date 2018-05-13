@@ -505,7 +505,12 @@ func (d *Doc) Fetch(call Fetcher, path ...string) *Doc {
 			c, _, r := d.what(p, a, choose)
 
 			if len(c) == 0 {
-				return &Doc{data: nil}
+				switch r {
+				case one:
+					return &Doc{data: nil}
+				case many:
+					return &Doc{data: []interface{}{}}
+				}
 			}
 
 			if r == one {
@@ -594,7 +599,12 @@ func (d *Doc) Set(value interface{}, path ...string) (*Doc, error) {
 			c, i, r := d.what(p, a, choose)
 
 			if len(c) == 0 {
-				return &Doc{data: nil}, nil
+				switch r {
+				case one:
+					return &Doc{data: nil}, nil
+				case many:
+					return &Doc{data: []interface{}{}}, nil
+				}
 			}
 
 			if r == one {

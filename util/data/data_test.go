@@ -633,10 +633,10 @@ func TestOperations(t *testing.T) {
 		So(doc.Get("the.item.tags[2:4]").Data(), ShouldResemble, []interface{}{"Sticky", "Warm"})
 		So(doc.Get("the.item.tags[2:5]").Data(), ShouldResemble, []interface{}{"Sticky", "Warm"})
 		So(doc.Get("the.item.tags[2:9]").Data(), ShouldResemble, []interface{}{"Sticky", "Warm"})
-		So(doc.Get("the.item.tags[4:5]").Data(), ShouldResemble, nil)
-		So(doc.Get("the.item.tags[8:9]").Data(), ShouldResemble, nil)
-		So(doc.Get("the.item.tags[0:none]").Data(), ShouldResemble, nil)
-		So(doc.Get("the.item.tags[0:none:some]").Data(), ShouldResemble, nil)
+		So(doc.Get("the.item.tags[4:5]").Data(), ShouldResemble, []interface{}{})
+		So(doc.Get("the.item.tags[8:9]").Data(), ShouldResemble, []interface{}{})
+		So(doc.Get("the.item.tags[0:none]").Data(), ShouldResemble, []interface{}{})
+		So(doc.Get("the.item.tags[0:none:some]").Data(), ShouldResemble, []interface{}{})
 	})
 
 	Convey("Can add single to array", t, func() {
