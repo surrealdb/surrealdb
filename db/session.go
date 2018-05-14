@@ -24,7 +24,7 @@ func session(c *fibre.Context) (out map[string]interface{}) {
 
 	out[varKeyIp] = c.IP().String()
 
-	out[varKeyId] = c.Get(varKeyCook)
+	out[varKeyId] = c.Get(varKeyUniq)
 
 	out[varKeyOrigin] = c.Origin()
 

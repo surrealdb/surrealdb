@@ -61,7 +61,7 @@ const (
 	varKeyIp      = "ip"
 	varKeyEnv     = "ENV"
 	varKeyAuth    = "auth"
-	varKeyCook    = "cook"
+	varKeyUniq    = "uniq"
 	varKeyThis    = "this"
 	varKeyScope   = "scope"
 	varKeyValue   = "value"

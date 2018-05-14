@@ -65,8 +65,7 @@ func Setup(opts *cnf.Options) (err error) {
 			"DB",
 			"ID",
 		},
-		AccessControlMaxAge:           1800,
-		AccessControlAllowCredentials: true,
+		AccessControlMaxAge: 1800,
 	}))
 
 	// Check body size
@@ -74,10 +73,6 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Size(&mw.SizeOpts{
 		AllowedLength: 1 << 20, // 1mb
 	}))
-
-	// Setup session cookie
-
-	s.Use(sess())
 
 	// Setup authentication
 

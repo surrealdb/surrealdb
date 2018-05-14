@@ -86,6 +86,14 @@ func auth() fibre.MiddlewareFunc {
 				auth.Selected.DB = subs[1]
 			}
 
+			// If there is a Session ID specified in
+			// the request headers, then mark it as
+			// the connection Session ID.
+
+			if id := c.Request().Header().Get(varKeyId); len(id) != 0 {
+				c.Set(varKeyUniq, id)
+			}
+
 			// If there is a namespace specified in
 			// the request headers, then mark it as
 			// the selected namespace.
@@ -135,6 +143,16 @@ func auth() fibre.MiddlewareFunc {
 			// options specified in the socket protocols.
 
 			if len(head) == 0 {
+
+				// If there is a Session ID specified as
+				// one of the socket protocols then use
+				// this as the connection Session ID.
+
+				for _, prot := range websocket.Subprotocols(c.Request().Request) {
+					if len(prot) > 3 && prot[0:3] == "id-" {
+						c.Set(varKeyUniq, prot[3:])
+					}
+				}
 
 				// If there is a NS configuration option
 				// defined as one of the socket protocols

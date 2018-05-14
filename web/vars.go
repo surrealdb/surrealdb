@@ -25,5 +25,5 @@ const (
 	varKeyAuth = "auth"
 	varKeyUser = "user"
 	varKeyPass = "pass"
-	varKeyCook = "cook"
+	varKeyUniq = "uniq"
 )
