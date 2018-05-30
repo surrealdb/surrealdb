@@ -98,7 +98,7 @@ func (p *parser) parseFields() (mul Fields, err error) {
 
 		if _, _, exi := p.mightBe(AS); exi {
 
-			if _, one.Alias, err = p.shouldBe(IDENT); err != nil {
+			if _, one.Alias, err = p.shouldBe(IDENT, EXPR); err != nil {
 				return nil, &ParseError{Found: one.Alias, Expected: []string{"alias name"}}
 			}
 
