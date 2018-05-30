@@ -369,11 +369,6 @@ func (p *parser) parseVersion() (Expr, error) {
 		return nil, nil
 	}
 
-	tok, lit, err := p.shouldBe(DATE, TIME, PARAM)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"version date or time"}}
-	}
-
-	return p.declare(tok, lit)
+	return p.parseExpr()
 
 }
