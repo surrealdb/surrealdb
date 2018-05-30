@@ -393,6 +393,18 @@ func (e *executor) fetchArray(ctx context.Context, val []interface{}, doc *data.
 
 func (e *executor) fetchPerms(ctx context.Context, val sql.Expr, tb *sql.Ident) error {
 
+	// If the table does exist we reset the
+	// context to DB level so that no other
+	// embedded permissions are checked on
+	// records within these permissions.
+
+	ctx = context.WithValue(ctx, ctxKeyKind, cnf.AuthDB)
+
+	// We then try to process the relevant
+	// permissions expression, but only if
+	// the specified expression doesn't
+	// reference any document fields.
+
 	res, err := e.fetch(ctx, val, ign)
 
 	// If we receive an 'ident failed' error

@@ -492,13 +492,6 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 		return
 	}
 
-	// If the table does exist we reset the
-	// context to DB level so that no other
-	// embedded permissions are checked on
-	// records within these permissions.
-
-	ctx = context.WithValue(ctx, ctxKeyKind, cnf.AuthDB)
-
 	// If the table does exist we then try
 	// to process the relevant permissions
 	// expression, but only if they don't

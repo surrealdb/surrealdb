@@ -176,41 +176,16 @@ func (s *socket) check(e *executor, ctx context.Context, ns, db, tb string) (err
 		return err
 	}
 
-	// Once we have the table we reset the
-	// context to DB level so that no other
-	// embedded permissions are checked on
-	// records within these permissions.
-
-	ctx = context.WithValue(ctx, ctxKeyKind, cnf.AuthDB)
-
-	// If the table does exist we then try
-	// to process the relevant permissions
-	// expression, but only if they don't
-	// reference any document fields.
-
-	var val interface{}
+	// If the table has any permissions
+	// specified, then let's check if this
+	// query is allowed access to the table.
 
 	switch p := tbv.Perms.(type) {
 	case *sql.PermExpression:
-		val, err = e.fetch(ctx, p.Select, ign)
+		return e.fetchPerms(ctx, p.Select, tbv.Name)
 	default:
 		return &PermsError{table: tb}
 	}
-
-	// If we receive an 'ident failed' error
-	// it is because the table permission
-	// expression contains a field check,
-	// and therefore we must check each
-	// record individually to see if it can
-	// be accessed or not.
-
-	if err != queryIdentFailed {
-		if val, ok := val.(bool); ok && !val {
-			return &PermsError{table: tb}
-		}
-	}
-
-	return nil
 
 }
 
@@ -284,9 +259,9 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 
 		case *sql.Table:
 
-			if err = s.check(e, ctx, stm.NS, stm.DB, what.TB); err != nil {
+			/*if err = s.check(e, ctx, stm.NS, stm.DB, what.TB); err != nil {
 				return nil, err
-			}
+			}*/
 
 			key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, LV: stm.ID}
 			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
@@ -295,9 +270,9 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 
 		case *sql.Ident:
 
-			if err = s.check(e, ctx, stm.NS, stm.DB, what.ID); err != nil {
+			/*if err = s.check(e, ctx, stm.NS, stm.DB, what.ID); err != nil {
 				return nil, err
-			}
+			}*/
 
 			key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, LV: stm.ID}
 			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
