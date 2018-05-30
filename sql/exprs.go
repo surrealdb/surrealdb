@@ -47,19 +47,6 @@ func (p *parser) parseWhat() (mul []Expr, err error) {
 
 }
 
-func (p *parser) parseValue() (*Value, error) {
-
-	tok, lit, err := p.shouldBe(STRING, REGION)
-	if err != nil {
-		return nil, &ParseError{Found: lit, Expected: []string{"string"}}
-	}
-
-	val, err := p.declare(tok, lit)
-
-	return val.(*Value), err
-
-}
-
 func (p *parser) parseIdent() (*Ident, error) {
 
 	_, lit, err := p.shouldBe(IDENT)
