@@ -106,28 +106,32 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 	case *sql.Param:
 
-		for _, s := range paramSearchKeys {
+		if len(val.ID) > 0 {
 
-			if obj, ok := ctx.Value(s).(*data.Doc); ok {
+			for _, s := range paramSearchKeys {
 
-				fnc := func(key string, val interface{}, path []string) interface{} {
-					if len(path) > 0 {
-						switch res := val.(type) {
-						case []interface{}:
-							val, _ = e.fetchArray(ctx, res, doc)
-							return val
-						case *sql.Thing:
-							val, _ = e.fetchThing(ctx, res, doc)
-							return val
+				if obj, ok := ctx.Value(s).(*data.Doc); ok {
+
+					fnc := func(key string, val interface{}, path []string) interface{} {
+						if len(path) > 0 {
+							switch res := val.(type) {
+							case []interface{}:
+								val, _ = e.fetchArray(ctx, res, doc)
+								return val
+							case *sql.Thing:
+								val, _ = e.fetchThing(ctx, res, doc)
+								return val
+							}
 						}
+						return val
 					}
-					return val
-				}
 
-				res := obj.Fetch(fnc, val.ID).Data()
+					res := obj.Fetch(fnc, val.ID).Data()
 
-				if res != nil {
-					return e.fetch(ctx, res, doc)
+					if res != nil {
+						return e.fetch(ctx, res, doc)
+					}
+
 				}
 
 			}
