@@ -184,6 +184,14 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 		}
 	}
 
+	// Ensure that all output fields are
+	// available in subsequent expressions
+	// using the $this parameter.
+
+	vars := data.New()
+	vars.Set(out.Data(), varKeyThis)
+	ctx = context.WithValue(ctx, ctxKeySpec, vars)
+
 	// Next let's see the field expressions
 	// which have been requested, and add
 	// these to the output document.
