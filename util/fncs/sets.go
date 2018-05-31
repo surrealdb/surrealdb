@@ -48,7 +48,14 @@ func distinct(ctx context.Context, args ...interface{}) ([]interface{}, error) {
 	for _, x := range args {
 		a, _ := ensureSlice(x)
 		for _, v := range a {
-			c[v] = true
+			switch v := v.(type) {
+			case []interface{}:
+				for _, v := range v {
+					c[v] = true
+				}
+			default:
+				c[v] = true
+			}
 		}
 	}
 
