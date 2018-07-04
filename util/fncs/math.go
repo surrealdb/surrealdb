@@ -110,7 +110,7 @@ func mathMin(ctx context.Context, args ...interface{}) (out interface{}, err err
 	return outputFloat(math.Min(vals))
 }
 
-func mathMode(ctx context.Context, args ...interface{}) (out []float64, err error) {
+func mathMode(ctx context.Context, args ...interface{}) (out interface{}, err error) {
 	vals := ensureFloats(args[0])
 	return math.Mode(vals), nil
 }
