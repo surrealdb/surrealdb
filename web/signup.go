@@ -96,9 +96,21 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 		ctx := c.Context()
 
+		// Create a temporary context.
+
+		t := fibre.NewContext(
+			c.Request(),
+			c.Response(),
+			c.Fibre(),
+		)
+
+		// Ensure we copy the session od.
+
+		t.Set(varKeyUniq, c.Get(varKeyUniq))
+
 		// Give full permissions to scope.
 
-		c.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
+		t.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
 
 		// Specify fields to show in logs.
 
@@ -124,7 +136,7 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 		// If the query fails then return a 501 error.
 
-		if res, err = db.Process(c, query, vars); err != nil {
+		if res, err = db.Process(t, query, vars); err != nil {
 			m := "Authentication scope signup was unsuccessful: Query failed"
 			return str, fibre.NewHTTPError(501).WithFields(f).WithMessage(m)
 		}
@@ -198,7 +210,7 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 			// If the query fails then return a 501 error.
 
-			if res, err = db.Process(c, query, qvars); err != nil {
+			if res, err = db.Process(t, query, qvars); err != nil {
 				m := "Authentication scope signup was unsuccessful: `ON SIGNUP` failed:" + err.Error()
 				return str, fibre.NewHTTPError(501).WithFields(f).WithMessage(m)
 			}
