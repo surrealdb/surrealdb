@@ -19,7 +19,6 @@ import (
 
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
-	"github.com/abcum/surreal/util/data"
 )
 
 func setupDB(workers ...int) {
@@ -42,8 +41,6 @@ func setupDB(workers ...int) {
 
 func setupKV() *fibre.Context {
 
-	keep := new(data.Doc)
-
 	auth := new(cnf.Auth)
 	auth.Kind = cnf.AuthKV
 	auth.Possible.NS = "*"
@@ -56,15 +53,12 @@ func setupKV() *fibre.Context {
 
 	ctx := fibre.NewContext(req, res, nil)
 	ctx.Set("auth", auth)
-	ctx.Set("keep", keep)
 
 	return ctx
 
 }
 
 func setupSC() *fibre.Context {
-
-	keep := new(data.Doc)
 
 	auth := new(cnf.Auth)
 	auth.Kind = cnf.AuthSC
@@ -78,7 +72,6 @@ func setupSC() *fibre.Context {
 
 	ctx := fibre.NewContext(req, res, nil)
 	ctx.Set("auth", auth)
-	ctx.Set("keep", keep)
 
 	return ctx
 

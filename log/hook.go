@@ -80,7 +80,6 @@ func (h *DefaultHook) SetFormat(v string) {
 			IgnoreFields: []string{
 				"ctx",
 				"vars",
-				"keep",
 			},
 			TimestampFormat: time.RFC3339,
 		}
@@ -89,7 +88,6 @@ func (h *DefaultHook) SetFormat(v string) {
 			IgnoreFields: []string{
 				"ctx",
 				"vars",
-				"keep",
 			},
 			TimestampFormat: time.RFC3339,
 		}
