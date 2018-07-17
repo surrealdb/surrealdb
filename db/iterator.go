@@ -693,13 +693,13 @@ func (i *iterator) processModel(ctx context.Context, key *keys.Thing, qry *sql.M
 
 }
 
-func (i *iterator) processQuery(ctx context.Context, key *keys.Thing, val []interface{}) {
+func (i *iterator) processOther(ctx context.Context, key *keys.Thing, val []interface{}) {
 
 	i.processPerms(ctx, key.NS, key.DB, key.TB)
 
-	for _, val := range val {
+	for _, v := range val {
 
-		switch val := val.(type) {
+		switch v := v.(type) {
 
 		case *sql.Thing:
 
@@ -710,7 +710,52 @@ func (i *iterator) processQuery(ctx context.Context, key *keys.Thing, val []inte
 
 			if i.checkState(ctx) {
 				key := key.Copy()
-				key.TB, key.ID = val.TB, val.ID
+				key.TB, key.ID = v.TB, v.ID
+				i.submitTask(key, nil, nil)
+				continue
+			}
+
+		default:
+
+			switch i.stm.(type) {
+			case *sql.CreateStatement:
+				i.fail <- fmt.Errorf("Can not execute CREATE query using value '%v'", val)
+			case *sql.UpdateStatement:
+				i.fail <- fmt.Errorf("Can not execute UPDATE query using value '%v'", val)
+			case *sql.DeleteStatement:
+				i.fail <- fmt.Errorf("Can not execute DELETE query using value '%v'", val)
+			case *sql.RelateStatement:
+				i.fail <- fmt.Errorf("Can not execute RELATE query using value '%v'", val)
+			}
+
+			close(i.stop)
+
+		}
+
+		break
+
+	}
+
+}
+
+func (i *iterator) processQuery(ctx context.Context, key *keys.Thing, val []interface{}) {
+
+	i.processPerms(ctx, key.NS, key.DB, key.TB)
+
+	for _, v := range val {
+
+		switch v := v.(type) {
+
+		case *sql.Thing:
+
+			// If the item is a *sql.Thing then
+			// this was a subquery which projected
+			// the ID only, and we can query the
+			// record further after loading it.
+
+			if i.checkState(ctx) {
+				key := key.Copy()
+				key.TB, key.ID = v.TB, v.ID
 				i.submitTask(key, nil, nil)
 				continue
 			}
@@ -721,7 +766,7 @@ func (i *iterator) processQuery(ctx context.Context, key *keys.Thing, val []inte
 			// of the data so we can process it.
 
 			if i.checkState(ctx) {
-				i.submitTask(nil, nil, data.Consume(val))
+				i.submitTask(nil, nil, data.Consume(v))
 				continue
 			}
 
@@ -737,9 +782,9 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 
 	i.processPerms(ctx, key.NS, key.DB, key.TB)
 
-	for _, val := range val {
+	for _, v := range val {
 
-		switch val := val.(type) {
+		switch v := v.(type) {
 
 		case *sql.Thing:
 
@@ -748,7 +793,7 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 
 			if i.checkState(ctx) {
 				key := key.Copy()
-				key.ID = val.ID
+				key.ID = v.ID
 				i.submitTask(key, nil, nil)
 				continue
 			}
@@ -758,9 +803,9 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 			// If the data item has an ID field,
 			// then use this as the new record ID.
 
-			if fld, ok := val["id"]; ok {
+			if fld, ok := v["id"]; ok {
 
-				if thg, ok := val["id"].(*sql.Thing); ok {
+				if thg, ok := v["id"].(*sql.Thing); ok {
 
 					// If the ID is a *sql.Thing then this
 					// was a subquery, so use the ID.
@@ -768,7 +813,7 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 					if i.checkState(ctx) {
 						key := key.Copy()
 						key.ID = thg.ID
-						i.submitTask(key, nil, data.Consume(val))
+						i.submitTask(key, nil, data.Consume(v))
 						continue
 					}
 
@@ -780,7 +825,7 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 					if i.checkState(ctx) {
 						key := key.Copy()
 						key.ID = fld
-						i.submitTask(key, nil, data.Consume(val))
+						i.submitTask(key, nil, data.Consume(v))
 						continue
 					}
 
@@ -794,7 +839,7 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 				if i.checkState(ctx) {
 					key := key.Copy()
 					key.ID = guid.New().String()
-					i.submitTask(key, nil, data.Consume(val))
+					i.submitTask(key, nil, data.Consume(v))
 					continue
 				}
 

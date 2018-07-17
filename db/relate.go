@@ -60,6 +60,16 @@ func (e *executor) executeRelate(ctx context.Context, stm *sql.RelateStatement) 
 		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, ID: guid.New().String()}
 		i.processThing(ctx, key)
 
+	// Result of subquery
+	case []interface{}:
+		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB}
+		i.processOther(ctx, key, what)
+
+	// Result of subquery with LIMIT 1
+	case map[string]interface{}:
+		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB}
+		i.processOther(ctx, key, []interface{}{what})
+
 	}
 
 	return i.Yield(ctx)

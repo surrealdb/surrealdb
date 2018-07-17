@@ -65,6 +65,16 @@ func (e *executor) executeUpdate(ctx context.Context, stm *sql.UpdateStatement) 
 			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: nil}
 			i.processBatch(ctx, key, what)
 
+		// Result of subquery
+		case []interface{}:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB}
+			i.processOther(ctx, key, what)
+
+		// Result of subquery with LIMIT 1
+		case map[string]interface{}:
+			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB}
+			i.processOther(ctx, key, []interface{}{what})
+
 		}
 
 	}
