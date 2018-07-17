@@ -47,6 +47,10 @@ func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
 		return nil, err
 	}
 
+	if stmt.Parallel, err = p.parseParallel(); err != nil {
+		return nil, err
+	}
+
 	return
 
 }

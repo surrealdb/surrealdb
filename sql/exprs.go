@@ -218,6 +218,23 @@ func (p *parser) parsePriority() (float64, error) {
 
 }
 
+func (p *parser) parseParallel() (int, error) {
+
+	if _, _, exi := p.mightBe(PARALLEL); !exi {
+		return 0, nil
+	}
+
+	tok, lit, err := p.shouldBe(NUMBER)
+	if err != nil {
+		return 0, &ParseError{Found: lit, Expected: []string{"number"}}
+	}
+
+	val, err := p.declare(tok, lit)
+
+	return int(val.(float64)), err
+
+}
+
 func (p *parser) parseType() (t, k string, err error) {
 
 	_, t, err = p.shouldBe(IDENT, STRING, PASSWORD)
