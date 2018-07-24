@@ -31,7 +31,6 @@ import (
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/uuid"
 
-	_ "github.com/abcum/surreal/kvs/mysql"
 	_ "github.com/abcum/surreal/kvs/rixxdb"
 )
 

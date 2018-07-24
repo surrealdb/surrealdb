@@ -45,8 +45,6 @@ func New(opts *cnf.Options) (ds *DS, err error) {
 		db, err = stores["rixxdb"](opts)
 	case strings.HasPrefix(opts.DB.Path, "file://"):
 		db, err = stores["rixxdb"](opts)
-	case strings.HasPrefix(opts.DB.Path, "mysql://"):
-		db, err = stores["mysql"](opts)
 	case strings.HasPrefix(opts.DB.Path, "rixxdb://"):
 		db, err = stores["rixxdb"](opts)
 	case strings.HasPrefix(opts.DB.Path, "dendrodb://"):
