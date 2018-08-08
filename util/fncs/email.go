@@ -21,23 +21,23 @@ import (
 	"github.com/abcum/surreal/util/chck"
 )
 
-func emailUser(ctx context.Context, args ...interface{}) (string, error) {
+func emailUser(ctx context.Context, args ...interface{}) (interface{}, error) {
 	v, _ := ensureString(args[0])
 	if p := strings.LastIndexByte(v, '@'); p > 0 {
 		return v[:p], nil
 	}
-	return "", nil
+	return nil, nil
 }
 
-func emailDomain(ctx context.Context, args ...interface{}) (string, error) {
+func emailDomain(ctx context.Context, args ...interface{}) (interface{}, error) {
 	v, _ := ensureString(args[0])
 	if p := strings.LastIndexByte(v, '@'); p > 0 {
 		return v[p+1:], nil
 	}
-	return "", nil
+	return nil, nil
 }
 
-func emailValid(ctx context.Context, args ...interface{}) (bool, error) {
+func emailValid(ctx context.Context, args ...interface{}) (interface{}, error) {
 	v, _ := ensureString(args[0])
 	return chck.IsEmail(v), nil
 }

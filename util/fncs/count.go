@@ -18,32 +18,35 @@ import (
 	"context"
 )
 
-func count(ctx context.Context, args ...interface{}) (out float64, err error) {
+func count(ctx context.Context, args ...interface{}) (interface{}, error) {
+	var out float64
 	arr, _ := ensureSlice(args[0])
 	for _, v := range arr {
 		if v != nil {
 			out++
 		}
 	}
-	return
+	return out, nil
 }
 
-func countIf(ctx context.Context, args ...interface{}) (out float64, err error) {
+func countIf(ctx context.Context, args ...interface{}) (interface{}, error) {
+	var out float64
 	arr, _ := ensureSlice(args[0])
 	for _, v := range arr {
 		if v == args[1] {
 			out++
 		}
 	}
-	return
+	return out, nil
 }
 
-func countNot(ctx context.Context, args ...interface{}) (out float64, err error) {
+func countNot(ctx context.Context, args ...interface{}) (interface{}, error) {
+	var out float64
 	arr, _ := ensureSlice(args[0])
 	for _, v := range arr {
 		if v != args[1] {
 			out++
 		}
 	}
-	return
+	return out, nil
 }

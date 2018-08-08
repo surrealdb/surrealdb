@@ -31,8 +31,8 @@ func TestEmail(t *testing.T) {
 
 	Convey("email.user(a) errors properly", t, func() {
 		res, _ := Run(context.Background(), "email.user", "test")
-		So(res, ShouldHaveSameTypeAs, "test")
-		So(res, ShouldEqual, "")
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("email.domain(a) works properly", t, func() {
@@ -43,8 +43,8 @@ func TestEmail(t *testing.T) {
 
 	Convey("email.domain(a) errors properly", t, func() {
 		res, _ := Run(context.Background(), "email.domain", "test")
-		So(res, ShouldHaveSameTypeAs, "test")
-		So(res, ShouldEqual, "")
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("email.valid(a) works properly", t, func() {

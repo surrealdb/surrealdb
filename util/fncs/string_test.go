@@ -54,7 +54,7 @@ func TestString(t *testing.T) {
 
 	Convey("string.format() errors properly", t, func() {
 		res, _ = Run(context.Background(), "string.format", "%.9d")
-		So(res, ShouldEqual, "")
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("string.includes() works properly", t, func() {
@@ -66,9 +66,9 @@ func TestString(t *testing.T) {
 
 	Convey("string.join() works properly", t, func() {
 		res, _ = Run(context.Background(), "string.join")
-		So(res, ShouldEqual, "")
+		So(res, ShouldEqual, nil)
 		res, _ = Run(context.Background(), "string.join", ",")
-		So(res, ShouldEqual, "")
+		So(res, ShouldEqual, nil)
 		res, _ = Run(context.Background(), "string.join", ",", nil, 1, 1.5, "2", true, false)
 		So(res, ShouldEqual, "1,1.5,2,true,false")
 	})

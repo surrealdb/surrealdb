@@ -18,7 +18,7 @@ import (
 	"context"
 )
 
-func difference(ctx context.Context, args ...interface{}) ([]interface{}, error) {
+func difference(ctx context.Context, args ...interface{}) (interface{}, error) {
 
 	d := make([]interface{}, 0)
 	c := make(map[interface{}]int)
@@ -40,7 +40,7 @@ func difference(ctx context.Context, args ...interface{}) ([]interface{}, error)
 
 }
 
-func distinct(ctx context.Context, args ...interface{}) ([]interface{}, error) {
+func distinct(ctx context.Context, args ...interface{}) (interface{}, error) {
 
 	d := make([]interface{}, 0)
 	c := make(map[interface{}]bool)
@@ -67,7 +67,7 @@ func distinct(ctx context.Context, args ...interface{}) ([]interface{}, error) {
 
 }
 
-func intersect(ctx context.Context, args ...interface{}) ([]interface{}, error) {
+func intersect(ctx context.Context, args ...interface{}) (interface{}, error) {
 
 	l := len(args)
 	d := make([]interface{}, 0)
@@ -90,7 +90,7 @@ func intersect(ctx context.Context, args ...interface{}) ([]interface{}, error) 
 
 }
 
-func union(ctx context.Context, args ...interface{}) ([]interface{}, error) {
+func union(ctx context.Context, args ...interface{}) (interface{}, error) {
 
 	d := make([]interface{}, 0)
 	c := make(map[interface{}]bool)

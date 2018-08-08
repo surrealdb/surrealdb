@@ -84,7 +84,7 @@ func TestGeo(t *testing.T) {
 
 	Convey("geo.hash.encode(a, b, c) errors properly", t, func() {
 		res, _ = Run(context.Background(), "geo.hash.encode", 0, 0, "null")
-		So(res, ShouldEqual, "")
+		So(res, ShouldEqual, nil)
 	})
 
 }

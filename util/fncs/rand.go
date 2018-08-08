@@ -16,24 +16,23 @@ package fncs
 
 import (
 	"context"
-	"time"
 
 	"github.com/abcum/surreal/util/fake"
 )
 
-func rand(ctx context.Context, args ...interface{}) (float64, error) {
+func rand(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.DecimalBetween(0, 1), nil
 }
 
-func randBool(ctx context.Context, args ...interface{}) (bool, error) {
+func randBool(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.Bool(), nil
 }
 
-func randGuid(ctx context.Context, args ...interface{}) (string, error) {
+func randGuid(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.Guid(), nil
 }
 
-func randUuid(ctx context.Context, args ...interface{}) (string, error) {
+func randUuid(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.Uuid(), nil
 }
 
@@ -46,7 +45,7 @@ func randEnum(ctx context.Context, args ...interface{}) (interface{}, error) {
 	}
 }
 
-func randTime(ctx context.Context, args ...interface{}) (time.Time, error) {
+func randTime(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 2:
 		if b, ok := ensureTime(args[0]); ok {
@@ -58,7 +57,7 @@ func randTime(ctx context.Context, args ...interface{}) (time.Time, error) {
 	return fake.Time(), nil
 }
 
-func randString(ctx context.Context, args ...interface{}) (string, error) {
+func randString(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 1:
 		if l, ok := ensureInt(args[0]); ok {
@@ -74,7 +73,7 @@ func randString(ctx context.Context, args ...interface{}) (string, error) {
 	return fake.String(), nil
 }
 
-func randInteger(ctx context.Context, args ...interface{}) (float64, error) {
+func randInteger(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 2:
 		if b, ok := ensureInt(args[0]); ok {
@@ -86,7 +85,7 @@ func randInteger(ctx context.Context, args ...interface{}) (float64, error) {
 	return float64(fake.Integer()), nil
 }
 
-func randDecimal(ctx context.Context, args ...interface{}) (float64, error) {
+func randDecimal(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 2:
 		if b, ok := ensureFloat(args[0]); ok {
@@ -98,11 +97,11 @@ func randDecimal(ctx context.Context, args ...interface{}) (float64, error) {
 	return fake.Decimal(), nil
 }
 
-func randWord(ctx context.Context, args ...interface{}) (string, error) {
+func randWord(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.Word(), nil
 }
 
-func randSentence(ctx context.Context, args ...interface{}) (string, error) {
+func randSentence(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 2:
 		if b, ok := ensureInt(args[0]); ok {
@@ -114,7 +113,7 @@ func randSentence(ctx context.Context, args ...interface{}) (string, error) {
 	return fake.Sentence(), nil
 }
 
-func randParagraph(ctx context.Context, args ...interface{}) (string, error) {
+func randParagraph(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 2:
 		if b, ok := ensureInt(args[0]); ok {
@@ -126,86 +125,86 @@ func randParagraph(ctx context.Context, args ...interface{}) (string, error) {
 	return fake.Paragraph(), nil
 }
 
-func randPersonEmail(ctx context.Context, args ...interface{}) (string, error) {
+func randPersonEmail(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.PersonEmail(), nil
 }
 
-func randPersonPhone(ctx context.Context, args ...interface{}) (string, error) {
+func randPersonPhone(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.PersonPhone(), nil
 }
 
-func randPersonFullname(ctx context.Context, args ...interface{}) (string, error) {
+func randPersonFullname(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.PersonFullname(), nil
 }
 
-func randPersonFirstname(ctx context.Context, args ...interface{}) (string, error) {
+func randPersonFirstname(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.PersonFirstname(), nil
 }
 
-func randPersonLastname(ctx context.Context, args ...interface{}) (string, error) {
+func randPersonLastname(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.PersonLastname(), nil
 }
 
-func randPersonUsername(ctx context.Context, args ...interface{}) (string, error) {
+func randPersonUsername(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.PersonUsername(), nil
 }
 
-func randPersonJobtitle(ctx context.Context, args ...interface{}) (string, error) {
+func randPersonJobtitle(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.PersonJobtitle(), nil
 }
 
-func randCompanyName(ctx context.Context, args ...interface{}) (string, error) {
+func randCompanyName(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.CompanyName(), nil
 }
 
-func randCompanyIndustry(ctx context.Context, args ...interface{}) (string, error) {
+func randCompanyIndustry(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.CompanyIndustry(), nil
 }
 
-func randLocationName(ctx context.Context, args ...interface{}) (string, error) {
+func randLocationName(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationName(), nil
 }
 
-func randLocationAddress(ctx context.Context, args ...interface{}) (string, error) {
+func randLocationAddress(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationAddress(), nil
 }
 
-func randLocationStreet(ctx context.Context, args ...interface{}) (string, error) {
+func randLocationStreet(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationStreet(), nil
 }
 
-func randLocationCity(ctx context.Context, args ...interface{}) (string, error) {
+func randLocationCity(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationCity(), nil
 }
 
-func randLocationState(ctx context.Context, args ...interface{}) (string, error) {
+func randLocationState(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationState(), nil
 }
 
-func randLocationCounty(ctx context.Context, args ...interface{}) (string, error) {
+func randLocationCounty(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationCounty(), nil
 }
 
-func randLocationZipcode(ctx context.Context, args ...interface{}) (string, error) {
+func randLocationZipcode(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationZipcode(), nil
 }
 
-func randLocationPostcode(ctx context.Context, args ...interface{}) (string, error) {
+func randLocationPostcode(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationPostcode(), nil
 }
 
-func randLocationCountry(ctx context.Context, args ...interface{}) (string, error) {
+func randLocationCountry(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationCountry(), nil
 }
 
-func randLocationAltitude(ctx context.Context, args ...interface{}) (float64, error) {
+func randLocationAltitude(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationAltitude(), nil
 }
 
-func randLocationLatitude(ctx context.Context, args ...interface{}) (float64, error) {
+func randLocationLatitude(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationLatitude(), nil
 }
 
-func randLocationLongitude(ctx context.Context, args ...interface{}) (float64, error) {
+func randLocationLongitude(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return fake.LocationLongitude(), nil
 }

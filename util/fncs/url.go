@@ -19,7 +19,7 @@ import (
 	"net/url"
 )
 
-func urlHost(ctx context.Context, args ...interface{}) (string, error) {
+func urlHost(ctx context.Context, args ...interface{}) (interface{}, error) {
 	v, _ := ensureString(args[0])
 	u, err := url.Parse(v)
 	if err != nil || !u.IsAbs() {
@@ -28,7 +28,7 @@ func urlHost(ctx context.Context, args ...interface{}) (string, error) {
 	return u.Hostname(), nil
 }
 
-func urlPort(ctx context.Context, args ...interface{}) (string, error) {
+func urlPort(ctx context.Context, args ...interface{}) (interface{}, error) {
 	v, _ := ensureString(args[0])
 	u, err := url.Parse(v)
 	if err != nil || !u.IsAbs() {
@@ -37,7 +37,7 @@ func urlPort(ctx context.Context, args ...interface{}) (string, error) {
 	return u.Port(), nil
 }
 
-func urlPath(ctx context.Context, args ...interface{}) (string, error) {
+func urlPath(ctx context.Context, args ...interface{}) (interface{}, error) {
 	v, _ := ensureString(args[0])
 	u, err := url.Parse(v)
 	if err != nil || !u.IsAbs() {

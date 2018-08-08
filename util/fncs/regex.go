@@ -19,7 +19,7 @@ import (
 	"regexp"
 )
 
-func regex(ctx context.Context, args ...interface{}) (*regexp.Regexp, error) {
+func regex(ctx context.Context, args ...interface{}) (interface{}, error) {
 	reg, _ := ensureString(args[0])
 	return regexp.Compile(reg)
 }

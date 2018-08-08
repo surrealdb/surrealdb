@@ -20,7 +20,7 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func model(ctx context.Context, args ...interface{}) (*sql.Model, error) {
+func model(ctx context.Context, args ...interface{}) (interface{}, error) {
 	tb, _ := ensureString(args[0])
 	switch len(args) {
 	case 2:

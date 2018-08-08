@@ -20,7 +20,7 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func table(ctx context.Context, args ...interface{}) (*sql.Table, error) {
+func table(ctx context.Context, args ...interface{}) (interface{}, error) {
 	tb, _ := ensureString(args[0])
 	return sql.NewTable(tb), nil
 }

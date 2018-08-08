@@ -23,7 +23,7 @@ import (
 	"encoding/hex"
 )
 
-func hashMd5(ctx context.Context, args ...interface{}) (string, error) {
+func hashMd5(ctx context.Context, args ...interface{}) (interface{}, error) {
 	v, _ := ensureString(args[0])
 	h := md5.New()
 	h.Write([]byte(v))
@@ -31,7 +31,7 @@ func hashMd5(ctx context.Context, args ...interface{}) (string, error) {
 	return hex.EncodeToString(s), nil
 }
 
-func hashSha1(ctx context.Context, args ...interface{}) (string, error) {
+func hashSha1(ctx context.Context, args ...interface{}) (interface{}, error) {
 	v, _ := ensureString(args[0])
 	h := sha1.New()
 	h.Write([]byte(v))
@@ -39,7 +39,7 @@ func hashSha1(ctx context.Context, args ...interface{}) (string, error) {
 	return hex.EncodeToString(s), nil
 }
 
-func hashSha256(ctx context.Context, args ...interface{}) (string, error) {
+func hashSha256(ctx context.Context, args ...interface{}) (interface{}, error) {
 	v, _ := ensureString(args[0])
 	h := sha256.New()
 	h.Write([]byte(v))
@@ -47,7 +47,7 @@ func hashSha256(ctx context.Context, args ...interface{}) (string, error) {
 	return hex.EncodeToString(s), nil
 }
 
-func hashSha512(ctx context.Context, args ...interface{}) (string, error) {
+func hashSha512(ctx context.Context, args ...interface{}) (interface{}, error) {
 	v, _ := ensureString(args[0])
 	h := sha512.New()
 	h.Write([]byte(v))

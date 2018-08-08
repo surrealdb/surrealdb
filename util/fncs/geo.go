@@ -21,7 +21,7 @@ import (
 	"github.com/abcum/surreal/util/geof"
 )
 
-func geoPoint(ctx context.Context, args ...interface{}) (*sql.Point, error) {
+func geoPoint(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 1:
 		if p, ok := ensurePoint(args[0]); ok {
@@ -40,14 +40,14 @@ func geoPoint(ctx context.Context, args ...interface{}) (*sql.Point, error) {
 	return nil, nil
 }
 
-func geoCircle(ctx context.Context, args ...interface{}) (*sql.Circle, error) {
+func geoCircle(ctx context.Context, args ...interface{}) (interface{}, error) {
 	if cen, ok := ensurePoint(args[0]); ok {
 		if rad, ok := ensureFloat(args[1]); ok {
 			return sql.NewCircle(cen, rad), nil
 		}
 	}
 	if val := ensureFloats(args[0]); len(val) == 2 {
-		cen, _ := geoPoint(ctx, val[0], val[1])
+		cen := sql.NewPoint(val[0], val[1])
 		if rad, ok := ensureFloat(args[1]); ok {
 			return sql.NewCircle(cen, rad), nil
 		}
@@ -55,14 +55,14 @@ func geoCircle(ctx context.Context, args ...interface{}) (*sql.Circle, error) {
 	return nil, nil
 }
 
-func geoPolygon(ctx context.Context, args ...interface{}) (*sql.Polygon, error) {
+func geoPolygon(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 0, 1, 2:
 		// Not enough arguments, so just ignore
 	default:
-		var pnts sql.Points
+		var pnts []*sql.Point
 		for _, a := range args {
-			if p, _ := geoPoint(ctx, a); p != nil {
+			if p, _ := ensurePoint(a); p != nil {
 				pnts = append(pnts, p)
 			} else {
 				return nil, nil
@@ -73,7 +73,7 @@ func geoPolygon(ctx context.Context, args ...interface{}) (*sql.Polygon, error) 
 	return nil, nil
 }
 
-func geoDistance(ctx context.Context, args ...interface{}) (float64, error) {
+func geoDistance(ctx context.Context, args ...interface{}) (interface{}, error) {
 	if pnt, ok := ensurePoint(args[0]); ok {
 		if frm, ok := ensurePoint(args[1]); ok {
 			return geof.Haversine(pnt, frm), nil
@@ -82,7 +82,7 @@ func geoDistance(ctx context.Context, args ...interface{}) (float64, error) {
 	return -1, nil
 }
 
-func geoInside(ctx context.Context, args ...interface{}) (bool, error) {
+func geoInside(ctx context.Context, args ...interface{}) (interface{}, error) {
 	if a, ok := ensureGeometry(args[0]); ok {
 		if b, ok := ensureGeometry(args[1]); ok {
 			return geof.Inside(a, b), nil
@@ -91,7 +91,7 @@ func geoInside(ctx context.Context, args ...interface{}) (bool, error) {
 	return false, nil
 }
 
-func geoIntersects(ctx context.Context, args ...interface{}) (bool, error) {
+func geoIntersects(ctx context.Context, args ...interface{}) (interface{}, error) {
 	if a, ok := ensureGeometry(args[0]); ok {
 		if b, ok := ensureGeometry(args[1]); ok {
 			return geof.Intersects(a, b), nil
@@ -100,16 +100,16 @@ func geoIntersects(ctx context.Context, args ...interface{}) (bool, error) {
 	return false, nil
 }
 
-func geoHashDecode(ctx context.Context, args ...interface{}) (*sql.Point, error) {
+func geoHashDecode(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	return geof.GeohashDecode(s), nil
 }
 
-func geoHashEncode(ctx context.Context, args ...interface{}) (string, error) {
+func geoHashEncode(ctx context.Context, args ...interface{}) (interface{}, error) {
 	if pnt, ok := ensurePoint(args[0]); ok {
 		if acc, ok := ensureInt(args[1]); ok {
 			return geof.GeohashEncode(pnt, acc), nil
 		}
 	}
-	return "", nil
+	return nil, nil
 }

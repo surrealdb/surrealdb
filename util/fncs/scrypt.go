@@ -20,7 +20,7 @@ import (
 	"github.com/elithrar/simple-scrypt"
 )
 
-func scryptCompare(ctx context.Context, args ...interface{}) (bool, error) {
+func scryptCompare(ctx context.Context, args ...interface{}) (interface{}, error) {
 	if h, ok := ensureString(args[0]); ok {
 		if s, ok := ensureString(args[1]); ok {
 			e := scrypt.CompareHashAndPassword([]byte(h), []byte(s))
@@ -32,7 +32,7 @@ func scryptCompare(ctx context.Context, args ...interface{}) (bool, error) {
 	return false, nil
 }
 
-func scryptGenerate(ctx context.Context, args ...interface{}) ([]byte, error) {
+func scryptGenerate(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	p := []byte(s)
 	o := scrypt.DefaultParams

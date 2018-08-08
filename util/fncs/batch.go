@@ -20,7 +20,7 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func batch(ctx context.Context, args ...interface{}) (*sql.Batch, error) {
+func batch(ctx context.Context, args ...interface{}) (interface{}, error) {
 	tb, _ := ensureString(args[0])
 	id, _ := ensureSlice(args[1])
 	return sql.NewBatch(tb, id), nil

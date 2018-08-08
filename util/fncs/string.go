@@ -23,43 +23,44 @@ import (
 	"github.com/abcum/surreal/util/text"
 )
 
-func stringConcat(ctx context.Context, args ...interface{}) (str string, err error) {
+func stringConcat(ctx context.Context, args ...interface{}) (interface{}, error) {
+	var str string
 	for _, v := range args {
 		str = str + fmt.Sprint(v)
 	}
-	return
+	return str, nil
 }
 
-func stringContains(ctx context.Context, args ...interface{}) (bool, error) {
+func stringContains(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	p, _ := ensureString(args[1])
 	return strings.Contains(s, p), nil
 }
 
-func stringEndsWith(ctx context.Context, args ...interface{}) (bool, error) {
+func stringEndsWith(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	p, _ := ensureString(args[1])
 	return strings.HasSuffix(s, p), nil
 }
 
-func stringFormat(ctx context.Context, args ...interface{}) (str string, err error) {
+func stringFormat(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 0, 1:
 		// Not enough arguments, so just ignore
 	default:
 		s, _ := ensureString(args[0])
-		str = fmt.Sprintf(s, args[1:]...)
+		return fmt.Sprintf(s, args[1:]...), nil
 	}
-	return
+	return nil, nil
 }
 
-func stringIncludes(ctx context.Context, args ...interface{}) (bool, error) {
+func stringIncludes(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	p, _ := ensureString(args[1])
 	return strings.Contains(s, p), nil
 }
 
-func stringJoin(ctx context.Context, args ...interface{}) (str string, err error) {
+func stringJoin(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 0, 1:
 		// Not enough arguments, so just ignore
@@ -71,28 +72,28 @@ func stringJoin(ctx context.Context, args ...interface{}) (str string, err error
 				a = append(a, fmt.Sprint(v))
 			}
 		}
-		str = strings.Join(a, j)
+		return strings.Join(a, j), nil
 	}
-	return
+	return nil, nil
 }
 
-func stringLength(ctx context.Context, args ...interface{}) (float64, error) {
+func stringLength(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	return float64(len(s)), nil
 }
 
-func stringLevenshtein(ctx context.Context, args ...interface{}) (float64, error) {
+func stringLevenshtein(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	c, _ := ensureString(args[1])
 	return float64(text.Levenshtein(s, c)), nil
 }
 
-func stringLowercase(ctx context.Context, args ...interface{}) (string, error) {
+func stringLowercase(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	return strings.ToLower(s), nil
 }
 
-func stringRepeat(ctx context.Context, args ...interface{}) (string, error) {
+func stringRepeat(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	if c, ok := ensureInt(args[1]); ok {
 		return strings.Repeat(s, int(c)), nil
@@ -100,14 +101,14 @@ func stringRepeat(ctx context.Context, args ...interface{}) (string, error) {
 	return s, nil
 }
 
-func stringReplace(ctx context.Context, args ...interface{}) (string, error) {
+func stringReplace(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	o, _ := ensureString(args[1])
 	n, _ := ensureString(args[2])
 	return strings.Replace(s, o, n, -1), nil
 }
 
-func stringReverse(ctx context.Context, args ...interface{}) (string, error) {
+func stringReverse(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	r := []rune(s)
 	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
@@ -116,13 +117,13 @@ func stringReverse(ctx context.Context, args ...interface{}) (string, error) {
 	return string(r), nil
 }
 
-func stringSearch(ctx context.Context, args ...interface{}) (float64, error) {
+func stringSearch(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	p, _ := ensureString(args[1])
 	return float64(strings.Index(s, p)), nil
 }
 
-func stringSlice(ctx context.Context, args ...interface{}) (string, error) {
+func stringSlice(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	b, bk := ensureInt(args[1])
 	e, ek := ensureInt(args[2])
@@ -137,19 +138,19 @@ func stringSlice(ctx context.Context, args ...interface{}) (string, error) {
 	return s, nil
 }
 
-func stringSplit(ctx context.Context, args ...interface{}) ([]string, error) {
+func stringSplit(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	p, _ := ensureString(args[1])
 	return strings.Split(s, p), nil
 }
 
-func stringStartsWith(ctx context.Context, args ...interface{}) (bool, error) {
+func stringStartsWith(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	p, _ := ensureString(args[1])
 	return strings.HasPrefix(s, p), nil
 }
 
-func stringSubstr(ctx context.Context, args ...interface{}) (string, error) {
+func stringSubstr(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	b, bk := ensureInt(args[1])
 	e, ek := ensureInt(args[2])
@@ -164,17 +165,17 @@ func stringSubstr(ctx context.Context, args ...interface{}) (string, error) {
 	return s, nil
 }
 
-func stringTrim(ctx context.Context, args ...interface{}) (string, error) {
+func stringTrim(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	return strings.TrimSpace(s), nil
 }
 
-func stringUppercase(ctx context.Context, args ...interface{}) (string, error) {
+func stringUppercase(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	return strings.ToUpper(s), nil
 }
 
-func stringWords(ctx context.Context, args ...interface{}) ([]string, error) {
+func stringWords(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	return strings.Fields(s), nil
 }

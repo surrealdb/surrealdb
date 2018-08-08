@@ -18,7 +18,7 @@ import (
 	"context"
 )
 
-func array(ctx context.Context, args ...interface{}) ([]interface{}, error) {
+func array(ctx context.Context, args ...interface{}) (interface{}, error) {
 	out := make([]interface{}, len(args))
 	for i, arg := range args {
 		out[i] = arg

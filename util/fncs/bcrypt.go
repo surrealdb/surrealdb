@@ -20,7 +20,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func bcryptCompare(ctx context.Context, args ...interface{}) (bool, error) {
+func bcryptCompare(ctx context.Context, args ...interface{}) (interface{}, error) {
 	if h, ok := ensureString(args[0]); ok {
 		if s, ok := ensureString(args[1]); ok {
 			e := bcrypt.CompareHashAndPassword([]byte(h), []byte(s))
@@ -32,7 +32,7 @@ func bcryptCompare(ctx context.Context, args ...interface{}) (bool, error) {
 	return false, nil
 }
 
-func bcryptGenerate(ctx context.Context, args ...interface{}) ([]byte, error) {
+func bcryptGenerate(ctx context.Context, args ...interface{}) (interface{}, error) {
 	s, _ := ensureString(args[0])
 	p := []byte(s)
 	o := bcrypt.DefaultCost

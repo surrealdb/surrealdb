@@ -48,11 +48,11 @@ func TestTime(t *testing.T) {
 
 	Convey("time.add(a, b) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.add", now, nil)
-		So(res, ShouldHaveSameTypeAs, org)
-		So(res, ShouldEqual, org)
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
-	Convey("time.age(a, b) errors properly", t, func() {
+	Convey("time.age(a, b) works properly", t, func() {
 		dur, _ := time.ParseDuration("1h")
 		res, _ := Run(context.Background(), "time.age", now, dur)
 		So(res, ShouldHaveSameTypeAs, now)
@@ -61,8 +61,8 @@ func TestTime(t *testing.T) {
 
 	Convey("time.age(a, b) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.age", now, nil)
-		So(res, ShouldHaveSameTypeAs, org)
-		So(res, ShouldEqual, org)
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("time.floor(a,b) works properly", t, func() {
@@ -101,8 +101,8 @@ func TestTime(t *testing.T) {
 
 	Convey("time.day(a,b,c) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.day", "one", "two")
-		So(res, ShouldHaveSameTypeAs, float64(0))
-		So(res, ShouldEqual, 0)
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("time.hour() works properly", t, func() {
@@ -119,8 +119,8 @@ func TestTime(t *testing.T) {
 
 	Convey("time.hour(a,b,c) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.hour", "one", "two")
-		So(res, ShouldHaveSameTypeAs, float64(0))
-		So(res, ShouldEqual, 0)
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("time.mins() works properly", t, func() {
@@ -137,8 +137,8 @@ func TestTime(t *testing.T) {
 
 	Convey("time.mins(a,b,c) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.mins", "one", "two")
-		So(res, ShouldHaveSameTypeAs, float64(0))
-		So(res, ShouldEqual, 0)
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("time.month() works properly", t, func() {
@@ -155,8 +155,8 @@ func TestTime(t *testing.T) {
 
 	Convey("time.month(a,b,c) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.month", "one", "two")
-		So(res, ShouldHaveSameTypeAs, float64(0))
-		So(res, ShouldEqual, 0)
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("time.nano() works properly", t, func() {
@@ -173,8 +173,8 @@ func TestTime(t *testing.T) {
 
 	Convey("time.nano(a,b,c) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.nano", "one", "two")
-		So(res, ShouldHaveSameTypeAs, float64(0))
-		So(res, ShouldEqual, 0)
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("time.secs() works properly", t, func() {
@@ -191,8 +191,8 @@ func TestTime(t *testing.T) {
 
 	Convey("time.secs(a,b,c) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.secs", "one", "two")
-		So(res, ShouldHaveSameTypeAs, float64(0))
-		So(res, ShouldEqual, 0)
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("time.unix() works properly", t, func() {
@@ -209,8 +209,8 @@ func TestTime(t *testing.T) {
 
 	Convey("time.unix(a,b,c) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.unix", "one", "two")
-		So(res, ShouldHaveSameTypeAs, float64(0))
-		So(res, ShouldEqual, 0)
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 	Convey("time.year() works properly", t, func() {
@@ -227,8 +227,8 @@ func TestTime(t *testing.T) {
 
 	Convey("time.year(a,b,c) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.year", "one", "two")
-		So(res, ShouldHaveSameTypeAs, float64(0))
-		So(res, ShouldEqual, 0)
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
 	})
 
 }
