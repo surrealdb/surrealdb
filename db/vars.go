@@ -74,10 +74,6 @@ const (
 )
 
 var (
-	// maxWorkers enables limiting the maximum number of
-	// workers to start, regardless of the CPU count.
-	maxWorkers = 20
-
 	// workerCount specifies how many workers should be used
 	// to process each query statement concurrently.
 	workerCount = runtime.NumCPU() * 2
