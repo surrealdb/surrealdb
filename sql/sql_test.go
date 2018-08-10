@@ -440,7 +440,7 @@ func Test_Parse_Queries_Let(t *testing.T) {
 			res: &Query{Statements: []Statement{&LetStatement{
 				RW: false, KV: "*", NS: "*", DB: "*",
 				Name: &Ident{"name"},
-				What: &Param{ID: "test"},
+				What: &Param{"test"},
 			}}},
 		},
 		{
@@ -450,7 +450,7 @@ func Test_Parse_Queries_Let(t *testing.T) {
 				Name: &Ident{"name"},
 				What: &SubExpression{Expr: &CreateStatement{
 					KV: "*", NS: "*", DB: "*",
-					What: Exprs{&Ident{ID: "person"}},
+					What: Exprs{&Ident{"person"}},
 					Echo: AFTER,
 				}},
 			}}},
@@ -552,7 +552,7 @@ func Test_Parse_Queries_Return(t *testing.T) {
 			sql: `RETURN $test`,
 			res: &Query{Statements: []Statement{&ReturnStatement{
 				RW: false, KV: "*", NS: "*", DB: "*",
-				What: Exprs{&Param{ID: "test"}},
+				What: Exprs{&Param{"test"}},
 			}}},
 		},
 		{
@@ -561,7 +561,7 @@ func Test_Parse_Queries_Return(t *testing.T) {
 				RW: true, KV: "*", NS: "*", DB: "*",
 				What: Exprs{&SubExpression{Expr: &CreateStatement{
 					KV: "*", NS: "*", DB: "*",
-					What: Exprs{&Ident{ID: "person"}},
+					What: Exprs{&Ident{"person"}},
 					Echo: AFTER,
 				}}},
 			}}},
@@ -850,7 +850,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 				},
 				What: Exprs{&SubExpression{Expr: &CreateStatement{
 					KV: "*", NS: "*", DB: "*",
-					What: Exprs{&Ident{ID: "person"}},
+					What: Exprs{&Ident{"person"}},
 					Echo: AFTER,
 				}}},
 			}}},
@@ -1039,7 +1039,7 @@ func Test_Parse_Queries_Select(t *testing.T) {
 								},
 								Op: AND,
 								RHS: &BinaryExpression{
-									LHS: &Ident{ID: "id"},
+									LHS: &Ident{"id"},
 									Op:  LTE,
 									RHS: float64(29.9),
 								},
@@ -1151,27 +1151,27 @@ func Test_Parse_Queries_Select(t *testing.T) {
 				LHS: &BinaryExpression{
 					LHS: &BinaryExpression{
 						LHS: &BinaryExpression{
-							LHS: &Ident{ID: "bday"},
+							LHS: &Ident{"bday"},
 							Op:  GTE,
 							RHS: bday1,
 						},
 						Op: AND,
 						RHS: &BinaryExpression{
-							LHS: &Ident{ID: "bday"},
+							LHS: &Ident{"bday"},
 							Op:  GTE,
 							RHS: bday2,
 						},
 					},
 					Op: AND,
 					RHS: &BinaryExpression{
-						LHS: &Ident{ID: "bday"},
+						LHS: &Ident{"bday"},
 						Op:  GTE,
 						RHS: bday3,
 					},
 				},
 				Op: AND,
 				RHS: &BinaryExpression{
-					LHS: &Ident{ID: "bday"},
+					LHS: &Ident{"bday"},
 					Op:  LTE,
 					RHS: bday4,
 				},
@@ -2347,7 +2347,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 				Signup: &SubExpression{
 					Expr: &CreateStatement{
 						KV: "*", NS: "*", DB: "*",
-						What: Exprs{&Ident{ID: "person"}},
+						What: Exprs{&Ident{"person"}},
 						Echo: AFTER,
 					},
 				},
@@ -2532,7 +2532,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 				Lock: true,
 				Expr: Fields{
 					&Field{
-						Expr:  &Ident{ID: "nationality"},
+						Expr:  &Ident{"nationality"},
 						Field: "nationality",
 					},
 					&Field{
@@ -2549,13 +2549,13 @@ func Test_Parse_Queries_Define(t *testing.T) {
 					&Table{TB: "users"},
 				},
 				Cond: &BinaryExpression{
-					LHS: &Ident{ID: "public"},
+					LHS: &Ident{"public"},
 					Op:  EQ,
 					RHS: true,
 				},
 				Group: Groups{
 					&Group{
-						Expr: &Ident{ID: "nationality"},
+						Expr: &Ident{"nationality"},
 					},
 				},
 			}}},

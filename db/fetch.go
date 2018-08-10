@@ -42,30 +42,14 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 		return val, nil
 	case *sql.Null:
 		return nil, nil
-	case *sql.Thing:
-		return val, nil
 	case *sql.Value:
-		return val.ID, nil
+		return val.VA, nil
 	case int:
-		return float64(val), nil
-	case int8:
-		return float64(val), nil
-	case int16:
-		return float64(val), nil
-	case int32:
 		return float64(val), nil
 	case int64:
 		return float64(val), nil
-	case uint:
+	case float64:
 		return float64(val), nil
-	case uint16:
-		return float64(val), nil
-	case uint32:
-		return float64(val), nil
-	case uint64:
-		return float64(val), nil
-	case []byte:
-		return string(val), nil
 	case []interface{}:
 		return deep.Copy(val), nil
 	case map[string]interface{}:
@@ -73,7 +57,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 	case *sql.Regex:
 
-		return regexp.Compile(val.ID)
+		return regexp.Compile(val.VA)
 
 	case *sql.Ident:
 
@@ -98,7 +82,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 				return val
 			}
 
-			res := doc.Fetch(fnc, val.ID).Data()
+			res := doc.Fetch(fnc, val.VA).Data()
 
 			return e.fetch(ctx, res, doc)
 
@@ -106,7 +90,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 	case *sql.Param:
 
-		if len(val.ID) > 0 {
+		if len(val.VA) > 0 {
 
 			for _, s := range paramSearchKeys {
 
@@ -126,7 +110,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 						return val
 					}
 
-					res := obj.Fetch(fnc, val.ID).Data()
+					res := obj.Fetch(fnc, val.VA).Data()
 
 					if res != nil {
 						return e.fetch(ctx, res, doc)
@@ -420,7 +404,7 @@ func (e *executor) fetchPerms(ctx context.Context, val sql.Expr, tb *sql.Ident) 
 
 	if err != queryIdentFailed {
 		if res, ok := res.(bool); ok && !res {
-			return &PermsError{table: tb.ID}
+			return &PermsError{table: tb.VA}
 		}
 	}
 
@@ -641,18 +625,18 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 			switch r := ro.(type) {
 			case *sql.Ident:
 				if op == sql.EQ {
-					return d.Exists(r.ID) == false
+					return d.Exists(r.VA) == false
 				} else if op == sql.NEQ {
-					return d.Exists(r.ID) == true
+					return d.Exists(r.VA) == true
 				}
 			}
 		case *sql.Null:
 			switch r := ro.(type) {
 			case *sql.Ident:
 				if op == sql.EQ {
-					return d.Exists(r.ID) == true && d.Get(r.ID).Data() == nil
+					return d.Exists(r.VA) == true && d.Get(r.VA).Data() == nil
 				} else if op == sql.NEQ {
-					return d.Exists(r.ID) == false || d.Get(r.ID).Data() != nil
+					return d.Exists(r.VA) == false || d.Get(r.VA).Data() != nil
 				}
 			}
 		}
@@ -662,18 +646,18 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 			switch l := lo.(type) {
 			case *sql.Ident:
 				if op == sql.EQ {
-					return d.Exists(l.ID) == false
+					return d.Exists(l.VA) == false
 				} else if op == sql.NEQ {
-					return d.Exists(l.ID) == true
+					return d.Exists(l.VA) == true
 				}
 			}
 		case *sql.Null:
 			switch l := lo.(type) {
 			case *sql.Ident:
 				if op == sql.EQ {
-					return d.Exists(l.ID) == true && d.Get(l.ID).Data() == nil
+					return d.Exists(l.VA) == true && d.Get(l.VA).Data() == nil
 				} else if op == sql.NEQ {
-					return d.Exists(l.ID) == false || d.Get(l.ID).Data() != nil
+					return d.Exists(l.VA) == false || d.Get(l.VA).Data() != nil
 				}
 			}
 		}

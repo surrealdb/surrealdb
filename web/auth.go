@@ -335,7 +335,7 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 
 			// Store the authenticated scope.
 
-			auth.Scope = scp.Name.ID
+			auth.Scope = scp.Name.VA
 
 			// Store the authenticated thing.
 

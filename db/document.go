@@ -32,7 +32,6 @@ type document struct {
 	ns      string
 	db      string
 	tb      string
-	md      map[string]interface{}
 	id      *sql.Thing
 	key     *keys.Thing
 	val     kvs.KV
@@ -449,11 +448,11 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 
 		if ix.Uniq == true {
 			for _, v := range del {
-				didx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
+				didx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v}
 				d.i.e.dbo.DelC(ctx, d.i.e.time, didx.Encode(), d.id.Bytes())
 			}
 			for _, v := range add {
-				aidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
+				aidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v}
 				if _, err = d.i.e.dbo.PutC(ctx, 0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
 					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: v}
 				}
@@ -462,11 +461,11 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 
 		if ix.Uniq == false {
 			for _, v := range del {
-				didx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
+				didx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v, ID: d.key.ID}
 				d.i.e.dbo.DelC(ctx, d.i.e.time, didx.Encode(), d.id.Bytes())
 			}
 			for _, v := range add {
-				aidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
+				aidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v, ID: d.key.ID}
 				if _, err = d.i.e.dbo.PutC(ctx, 0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
 					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: v}
 				}
@@ -515,14 +514,14 @@ func (d *document) purgeIndex(ctx context.Context) (err error) {
 
 		if ix.Uniq == true {
 			for _, v := range del {
-				key := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v}
+				key := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v}
 				d.i.e.dbo.DelC(ctx, 0, key.Encode(), d.id.Bytes())
 			}
 		}
 
 		if ix.Uniq == false {
 			for _, v := range del {
-				key := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.ID, FD: v, ID: d.key.ID}
+				key := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v, ID: d.key.ID}
 				d.i.e.dbo.DelC(ctx, 0, key.Encode(), d.id.Bytes())
 			}
 		}

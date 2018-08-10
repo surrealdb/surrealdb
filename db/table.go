@@ -76,8 +76,8 @@ func (d *document) table(ctx context.Context, when method) (err error) {
 				now[k], _ = d.i.e.fetch(ctx, e.Expr, d.current)
 			}
 
-			prv = sql.NewThing(ft.Name.ID, fmt.Sprintf("%v", old))
-			doc = sql.NewThing(ft.Name.ID, fmt.Sprintf("%v", now))
+			prv = sql.NewThing(ft.Name.VA, fmt.Sprintf("%v", old))
+			doc = sql.NewThing(ft.Name.VA, fmt.Sprintf("%v", now))
 
 		} else {
 
@@ -85,7 +85,7 @@ func (d *document) table(ctx context.Context, when method) (err error) {
 			// current record as the basis of the
 			// new record in the other table.
 
-			doc = sql.NewThing(ft.Name.ID, d.id.ID)
+			doc = sql.NewThing(ft.Name.VA, d.id.ID)
 
 		}
 

@@ -27,15 +27,15 @@ func (e *executor) executeLet(ctx context.Context, stm *sql.LetStatement) (out [
 
 	switch what := stm.What.(type) {
 	case *sql.Void:
-		vars.Del(stm.Name.ID)
+		vars.Del(stm.Name.VA)
 	case *sql.Empty:
-		vars.Del(stm.Name.ID)
+		vars.Del(stm.Name.VA)
 	default:
 		val, err := e.fetch(ctx, what, nil)
 		if err != nil {
 			return nil, err
 		}
-		vars.Set(val, stm.Name.ID)
+		vars.Set(val, stm.Name.VA)
 	}
 
 	return

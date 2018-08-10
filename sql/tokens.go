@@ -426,13 +426,6 @@ func (tok Token) precedence() int {
 
 }
 
-func (tok Token) String() string {
-	if tok >= 0 && tok < Token(len(tokens)) {
-		return tokens[tok]
-	}
-	return ""
-}
-
 func newToken(s string) Token {
 	for k, v := range tokens {
 		if len(v) == len(s) {
@@ -442,6 +435,26 @@ func newToken(s string) Token {
 		}
 	}
 	return ILLEGAL
+}
+
+func (tok Token) String() string {
+	if tok >= 0 && tok < Token(len(tokens)) {
+		return tokens[tok]
+	}
+	return ""
+}
+
+func (this Token) MarshalText() (data []byte, err error) {
+	return []byte(this.String()), err
+}
+
+func (this Token) MarshalBinary() (data []byte, err error) {
+	return []byte(this.String()), err
+}
+
+func (this *Token) UnmarshalBinary(data []byte) (err error) {
+	*this = newToken(string(data))
+	return err
 }
 
 func (tok Token) isLiteral() bool { return tok > literalsBeg && tok < literalsEnd }

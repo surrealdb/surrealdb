@@ -112,11 +112,11 @@ func (p *parser) parseFields() (mul Fields, err error) {
 
 			switch v := one.Expr.(type) {
 			case *Param:
-				one.Field = v.ID
-			case *Value:
-				one.Field = v.ID
+				one.Field = v.VA
 			case *Ident:
-				one.Field = v.ID
+				one.Field = v.VA
+			case *Value:
+				one.Field = v.VA
 			default:
 				one.Field = one.String()
 			}

@@ -394,17 +394,17 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 		if tb.Lock && i.vir == false {
 			switch i.stm.(type) {
 			case *sql.CreateStatement:
-				i.err = &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.VA}
 			case *sql.UpdateStatement:
-				i.err = &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.VA}
 			case *sql.DeleteStatement:
-				i.err = &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.VA}
 			case *sql.RelateStatement:
-				i.err = &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.VA}
 			case *sql.InsertStatement:
-				i.err = &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.VA}
 			case *sql.UpsertStatement:
-				i.err = &TableError{table: tb.Name.ID}
+				i.err = &TableError{table: tb.Name.VA}
 			}
 		}
 
@@ -464,17 +464,17 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	if tb.Lock && i.vir == false {
 		switch i.stm.(type) {
 		case *sql.CreateStatement:
-			i.err = &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.VA}
 		case *sql.UpdateStatement:
-			i.err = &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.VA}
 		case *sql.DeleteStatement:
-			i.err = &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.VA}
 		case *sql.RelateStatement:
-			i.err = &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.VA}
 		case *sql.InsertStatement:
-			i.err = &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.VA}
 		case *sql.UpsertStatement:
-			i.err = &TableError{table: tb.Name.ID}
+			i.err = &TableError{table: tb.Name.VA}
 		}
 	}
 
@@ -490,7 +490,7 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 
 	switch p := tb.Perms.(type) {
 	default:
-		i.err = &PermsError{table: tb.Name.ID}
+		i.err = &PermsError{table: tb.Name.VA}
 	case *sql.PermExpression:
 		switch i.stm.(type) {
 		case *sql.SelectStatement:

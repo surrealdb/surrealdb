@@ -212,7 +212,7 @@ func (s *socket) deregister(id string) {
 
 			case *sql.Ident:
 
-				key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, LV: id}
+				key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.VA, LV: id}
 				txn.Clr(ctx, key.Encode())
 
 			}
@@ -274,7 +274,7 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 				return nil, err
 			}*/
 
-			key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, LV: stm.ID}
+			key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.VA, LV: stm.ID}
 			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
 				return nil, err
 			}
@@ -328,7 +328,7 @@ func (s *socket) executeKill(e *executor, ctx context.Context, stm *sql.KillStat
 						_, err = e.dbo.Clr(ctx, key.Encode())
 
 					case *sql.Ident:
-						key := &keys.LV{KV: qry.KV, NS: qry.NS, DB: qry.DB, TB: what.ID, LV: qry.ID}
+						key := &keys.LV{KV: qry.KV, NS: qry.NS, DB: qry.DB, TB: what.VA, LV: qry.ID}
 						_, err = e.dbo.Clr(ctx, key.Encode())
 
 					}

@@ -50,7 +50,7 @@ func (e *executor) executeDelete(ctx context.Context, stm *sql.DeleteStatement) 
 			i.processTable(ctx, key)
 
 		case *sql.Ident:
-			key := &keys.Table{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID}
+			key := &keys.Table{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.VA}
 			i.processTable(ctx, key)
 
 		case *sql.Thing:

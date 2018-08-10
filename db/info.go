@@ -57,17 +57,17 @@ func (e *executor) executeInfoNS(ctx context.Context, ast *sql.InfoStatement) (o
 
 	dbase := make(map[string]interface{})
 	for _, v := range db {
-		dbase[v.Name.ID] = v.String()
+		dbase[v.Name.VA] = v.String()
 	}
 
 	token := make(map[string]interface{})
 	for _, v := range nt {
-		token[v.Name.ID] = v.String()
+		token[v.Name.VA] = v.String()
 	}
 
 	login := make(map[string]interface{})
 	for _, v := range nu {
-		login[v.User.ID] = v.String()
+		login[v.User.VA] = v.String()
 	}
 
 	res.Set(dbase, "database")
@@ -104,22 +104,22 @@ func (e *executor) executeInfoDB(ctx context.Context, ast *sql.InfoStatement) (o
 
 	table := make(map[string]interface{})
 	for _, v := range tb {
-		table[v.Name.ID] = v.String()
+		table[v.Name.VA] = v.String()
 	}
 
 	token := make(map[string]interface{})
 	for _, v := range dt {
-		token[v.Name.ID] = v.String()
+		token[v.Name.VA] = v.String()
 	}
 
 	login := make(map[string]interface{})
 	for _, v := range du {
-		login[v.User.ID] = v.String()
+		login[v.User.VA] = v.String()
 	}
 
 	scope := make(map[string]interface{})
 	for _, v := range sc {
-		scope[v.Name.ID] = v.String()
+		scope[v.Name.VA] = v.String()
 	}
 
 	res.Set(table, "table")
@@ -157,22 +157,22 @@ func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (o
 
 	event := make(map[string]interface{})
 	for _, v := range ev {
-		event[v.Name.ID] = v.String()
+		event[v.Name.VA] = v.String()
 	}
 
 	field := make(map[string]interface{})
 	for _, v := range fd {
-		field[v.Name.ID] = v.String()
+		field[v.Name.VA] = v.String()
 	}
 
 	index := make(map[string]interface{})
 	for _, v := range ix {
-		index[v.Name.ID] = v.String()
+		index[v.Name.VA] = v.String()
 	}
 
 	table := make(map[string]interface{})
 	for _, v := range ft {
-		table[v.Name.ID] = v.String()
+		table[v.Name.VA] = v.String()
 	}
 
 	res.Set(event, "event")

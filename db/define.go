@@ -27,7 +27,7 @@ import (
 func (e *executor) executeDefineNamespace(ctx context.Context, ast *sql.DefineNamespaceStatement) (out []interface{}, err error) {
 
 	// Save the namespace definition
-	nkey := &keys.NS{KV: ast.KV, NS: ast.Name.ID}
+	nkey := &keys.NS{KV: ast.KV, NS: ast.Name.VA}
 	_, err = e.dbo.Put(ctx, 0, nkey.Encode(), ast.Encode())
 
 	return
@@ -39,7 +39,7 @@ func (e *executor) executeDefineDatabase(ctx context.Context, ast *sql.DefineDat
 	e.dbo.AddNS(ctx, ast.NS)
 
 	// Save the database definition
-	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name.ID}
+	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name.VA}
 	_, err = e.dbo.Put(ctx, 0, dkey.Encode(), ast.Encode())
 
 	return
@@ -58,7 +58,7 @@ func (e *executor) executeDefineLogin(ctx context.Context, ast *sql.DefineLoginS
 		e.dbo.AddNS(ctx, ast.NS)
 
 		// Save the login definition
-		ukey := &keys.NU{KV: ast.KV, NS: ast.NS, US: ast.User.ID}
+		ukey := &keys.NU{KV: ast.KV, NS: ast.NS, US: ast.User.VA}
 		_, err = e.dbo.Put(ctx, 0, ukey.Encode(), ast.Encode())
 
 	case sql.DATABASE:
@@ -66,7 +66,7 @@ func (e *executor) executeDefineLogin(ctx context.Context, ast *sql.DefineLoginS
 		e.dbo.AddDB(ctx, ast.NS, ast.DB)
 
 		// Save the login definition
-		ukey := &keys.DU{KV: ast.KV, NS: ast.NS, DB: ast.DB, US: ast.User.ID}
+		ukey := &keys.DU{KV: ast.KV, NS: ast.NS, DB: ast.DB, US: ast.User.VA}
 		_, err = e.dbo.Put(ctx, 0, ukey.Encode(), ast.Encode())
 
 	}
@@ -83,7 +83,7 @@ func (e *executor) executeDefineToken(ctx context.Context, ast *sql.DefineTokenS
 		e.dbo.AddNS(ctx, ast.NS)
 
 		// Save the token definition
-		tkey := &keys.NT{KV: ast.KV, NS: ast.NS, TK: ast.Name.ID}
+		tkey := &keys.NT{KV: ast.KV, NS: ast.NS, TK: ast.Name.VA}
 		_, err = e.dbo.Put(ctx, 0, tkey.Encode(), ast.Encode())
 
 	case sql.DATABASE:
@@ -91,7 +91,7 @@ func (e *executor) executeDefineToken(ctx context.Context, ast *sql.DefineTokenS
 		e.dbo.AddDB(ctx, ast.NS, ast.DB)
 
 		// Save the token definition
-		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name.ID}
+		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name.VA}
 		_, err = e.dbo.Put(ctx, 0, tkey.Encode(), ast.Encode())
 
 	}
@@ -107,7 +107,7 @@ func (e *executor) executeDefineScope(ctx context.Context, ast *sql.DefineScopeS
 	e.dbo.AddDB(ctx, ast.NS, ast.DB)
 
 	// Remove the scope definition
-	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name.ID}
+	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name.VA}
 	_, err = e.dbo.Put(ctx, 0, skey.Encode(), ast.Encode())
 
 	return
@@ -121,7 +121,7 @@ func (e *executor) executeDefineEvent(ctx context.Context, ast *sql.DefineEventS
 		e.dbo.AddTB(ctx, ast.NS, ast.DB, TB.TB)
 
 		// Remove the event definition
-		ekey := &keys.EV{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, EV: ast.Name.ID}
+		ekey := &keys.EV{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, EV: ast.Name.VA}
 		if _, err = e.dbo.Put(ctx, 0, ekey.Encode(), ast.Encode()); err != nil {
 			return nil, err
 		}
@@ -139,7 +139,7 @@ func (e *executor) executeDefineField(ctx context.Context, ast *sql.DefineFieldS
 		e.dbo.AddTB(ctx, ast.NS, ast.DB, TB.TB)
 
 		// Save the field definition
-		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, FD: ast.Name.ID}
+		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, FD: ast.Name.VA}
 		if _, err = e.dbo.Put(ctx, 0, fkey.Encode(), ast.Encode()); err != nil {
 			return nil, err
 		}
@@ -157,13 +157,13 @@ func (e *executor) executeDefineIndex(ctx context.Context, ast *sql.DefineIndexS
 		e.dbo.AddTB(ctx, ast.NS, ast.DB, TB.TB)
 
 		// Save the index definition
-		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: ast.Name.ID}
+		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: ast.Name.VA}
 		if _, err = e.dbo.Put(ctx, 0, ikey.Encode(), ast.Encode()); err != nil {
 			return nil, err
 		}
 
 		// Remove the index resource data
-		dkey := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: ast.Name.ID, FD: keys.Ignore}
+		dkey := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: ast.Name.VA, FD: keys.Ignore}
 		if _, err = e.dbo.ClrP(ctx, dkey.Encode(), 0); err != nil {
 			return nil, err
 		}

@@ -120,7 +120,7 @@ func (d *document) delFld(ctx context.Context, met method) (err error) {
 			d.current.Walk(func(key string, val interface{}, ok bool) (err error) {
 				keys[key] = struct{}{}
 				return
-			}, fd.Name.ID)
+			}, fd.Name.VA)
 		}
 
 		// Delete any keys which aren't allowed
@@ -247,14 +247,14 @@ func (d *document) mrgSet(ctx context.Context, met method, expr *sql.DataExpress
 			case sql.EQ:
 				switch n.(type) {
 				default:
-					d.current.Set(n, i.ID)
+					d.current.Set(n, i.VA)
 				case *sql.Void:
-					d.current.Del(i.ID)
+					d.current.Del(i.VA)
 				}
 			case sql.INC:
-				d.current.Inc(n, i.ID)
+				d.current.Inc(n, i.VA)
 			case sql.DEC:
-				d.current.Dec(n, i.ID)
+				d.current.Dec(n, i.VA)
 			}
 
 		}
@@ -286,6 +286,8 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 	// This is because when updating records
 	// using json, there is no specific type
 	// for a 'datetime' and 'record'.
+
+	// IMPORTANT remove this, and put it in SQL parser
 
 	d.current.Each(func(key string, val interface{}) (err error) {
 		if val, ok := conv.MightBe(val); ok {
@@ -423,7 +425,7 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 			return nil
 
-		}, fd.Name.ID)
+		}, fd.Name.VA)
 
 		if err != nil {
 			return

@@ -24,10 +24,10 @@ import (
 func get(ctx context.Context, args ...interface{}) (interface{}, error) {
 	doc := data.Consume(args[0])
 	switch fld := args[1].(type) {
-	case *sql.Value:
-		return doc.Get(fld.ID).Data(), nil
 	case string:
 		return doc.Get(fld).Data(), nil
+	case *sql.Value:
+		return doc.Get(fld.VA).Data(), nil
 	}
 	return nil, nil
 }

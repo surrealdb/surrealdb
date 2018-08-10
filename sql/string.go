@@ -553,27 +553,6 @@ func (this Fetch) String() string {
 }
 
 // ---------------------------------------------
-// Model
-// ---------------------------------------------
-
-func (this Model) String() string {
-	switch {
-	case this.INC == 0:
-		max := strconv.FormatFloat(this.MAX, 'f', -1, 64)
-		return print("|%s:%s|", quote(this.TB), max)
-	case this.INC == 1:
-		min := strconv.FormatFloat(this.MIN, 'f', -1, 64)
-		max := strconv.FormatFloat(this.MAX, 'f', -1, 64)
-		return print("|%s:%s..%s|", quote(this.TB), min, max)
-	default:
-		inc := strconv.FormatFloat(this.INC, 'f', -1, 64)
-		min := strconv.FormatFloat(this.MIN, 'f', -1, 64)
-		max := strconv.FormatFloat(this.MAX, 'f', -1, 64)
-		return print("|%s:%s,%s..%s|", quote(this.TB), min, inc, max)
-	}
-}
-
-// ---------------------------------------------
 // Param
 // ---------------------------------------------
 
@@ -586,39 +565,7 @@ func (this Params) String() string {
 }
 
 func (this Param) String() string {
-	return print("$%v", this.ID)
-}
-
-// ---------------------------------------------
-// Regex
-// ---------------------------------------------
-
-func (this Regexs) String() string {
-	m := make([]string, len(this))
-	for k, v := range this {
-		m[k] = v.String()
-	}
-	return strings.Join(m, ", ")
-}
-
-func (this Regex) String() string {
-	return print("/%v/", this.ID)
-}
-
-// ---------------------------------------------
-// Value
-// ---------------------------------------------
-
-func (this Values) String() string {
-	m := make([]string, len(this))
-	for k, v := range this {
-		m[k] = v.String()
-	}
-	return strings.Join(m, ", ")
-}
-
-func (this Value) String() string {
-	return print("\"%v\"", this.ID)
+	return print("$%v", this.VA)
 }
 
 // ---------------------------------------------
@@ -634,7 +581,39 @@ func (this Idents) String() string {
 }
 
 func (this Ident) String() string {
-	return quote(this.ID)
+	return quote(this.VA)
+}
+
+// ---------------------------------------------
+// Value
+// ---------------------------------------------
+
+func (this Values) String() string {
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
+	}
+	return strings.Join(m, ", ")
+}
+
+func (this Value) String() string {
+	return print(`"%v"`, this.VA)
+}
+
+// ---------------------------------------------
+// Regex
+// ---------------------------------------------
+
+func (this Regexs) String() string {
+	m := make([]string, len(this))
+	for k, v := range this {
+		m[k] = v.String()
+	}
+	return strings.Join(m, ", ")
+}
+
+func (this Regex) String() string {
+	return print("/%v/", this.VA)
 }
 
 // ---------------------------------------------
@@ -667,6 +646,27 @@ func (this Batchs) String() string {
 
 func (this Batch) String() string {
 	return print("batch(%v, [%v]", this.TB, this.BA)
+}
+
+// ---------------------------------------------
+// Model
+// ---------------------------------------------
+
+func (this Model) String() string {
+	switch {
+	case this.INC == 0:
+		max := strconv.FormatFloat(this.MAX, 'f', -1, 64)
+		return print("|%s:%s|", quote(this.TB), max)
+	case this.INC == 1:
+		min := strconv.FormatFloat(this.MIN, 'f', -1, 64)
+		max := strconv.FormatFloat(this.MAX, 'f', -1, 64)
+		return print("|%s:%s..%s|", quote(this.TB), min, max)
+	default:
+		inc := strconv.FormatFloat(this.INC, 'f', -1, 64)
+		min := strconv.FormatFloat(this.MIN, 'f', -1, 64)
+		max := strconv.FormatFloat(this.MAX, 'f', -1, 64)
+		return print("|%s:%s,%s..%s|", quote(this.TB), min, inc, max)
+	}
 }
 
 // ---------------------------------------------

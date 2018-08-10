@@ -88,7 +88,7 @@ func (d *document) perms(ctx context.Context, doc *data.Doc) (err error) {
 
 				return nil
 
-			}, fd.Name.ID)
+			}, fd.Name.VA)
 
 		}
 

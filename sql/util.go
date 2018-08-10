@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	json "github.com/hjson/hjson-go"
+	"github.com/hjson/hjson-go"
 )
 
 func in(token Token, tokens []Token) bool {
@@ -73,44 +73,44 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 	case FALSE:
 		return false, nil
 
-	case NULL:
-		return &Null{}, nil
-
-	case VOID:
-		return &Void{}, nil
-
-	case MISSING:
-		return &Void{}, nil
-
-	case EMPTY:
-		return &Empty{}, nil
-
 	case MUL:
-		return &All{}, nil
+		return new(All), nil
 
 	case QMARK:
-		return &Any{}, nil
+		return new(Any), nil
 
-	case STRING:
-		return &Value{lit}, nil
+	case NULL:
+		return new(Null), nil
 
-	case REGION:
-		return &Value{lit}, nil
+	case VOID:
+		return new(Void), nil
+
+	case MISSING:
+		return new(Void), nil
+
+	case EMPTY:
+		return new(Empty), nil
 
 	case EXPR:
-		return &Ident{lit}, nil
+		return NewIdent(lit), nil
 
 	case IDENT:
-		return &Ident{lit}, nil
+		return NewIdent(lit), nil
 
 	case TABLE:
-		return &Table{lit}, nil
+		return NewTable(lit), nil
 
 	case PARAM:
-		return &Param{lit}, nil
+		return NewParam(lit), nil
 
 	case REGEX:
-		return &Regex{lit}, nil
+		return NewRegex(lit), nil
+
+	case STRING:
+		return NewValue(lit), nil
+
+	case REGION:
+		return NewValue(lit), nil
 
 	case DATE:
 		return time.Parse(RFCDate, lit)
@@ -150,7 +150,7 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 
 	case ARRAY:
 		var j []interface{}
-		json.Unmarshal([]byte(lit), &j)
+		hjson.Unmarshal([]byte(lit), &j)
 		if j == nil {
 			return j, fmt.Errorf("Invalid JSON: %s", lit)
 		}
@@ -158,7 +158,7 @@ func (p *parser) declare(tok Token, lit string) (interface{}, error) {
 
 	case JSON:
 		var j map[string]interface{}
-		json.Unmarshal([]byte(lit), &j)
+		hjson.Unmarshal([]byte(lit), &j)
 		if j == nil {
 			return j, fmt.Errorf("Invalid JSON: %s", lit)
 		}

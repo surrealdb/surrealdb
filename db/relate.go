@@ -57,7 +57,7 @@ func (e *executor) executeRelate(ctx context.Context, stm *sql.RelateStatement) 
 		i.processThing(ctx, key)
 
 	case *sql.Ident:
-		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.ID, ID: guid.New().String()}
+		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.VA, ID: guid.New().String()}
 		i.processThing(ctx, key)
 
 	// Result of subquery

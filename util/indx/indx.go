@@ -57,7 +57,7 @@ func Build(cols sql.Idents, item *data.Doc) (out [][]interface{}) {
 
 	sub := Build(cols, item)
 
-	if arr, ok := item.Get(col.ID).Data().([]interface{}); ok {
+	if arr, ok := item.Get(col.VA).Data().([]interface{}); ok {
 		for _, s := range sub {
 			for _, a := range arr {
 				idx := []interface{}{}
@@ -69,7 +69,7 @@ func Build(cols sql.Idents, item *data.Doc) (out [][]interface{}) {
 	} else {
 		for _, s := range sub {
 			idx := []interface{}{}
-			idx = append(idx, item.Get(col.ID).Data())
+			idx = append(idx, item.Get(col.VA).Data())
 			idx = append(idx, s...)
 			out = append(out, idx)
 		}

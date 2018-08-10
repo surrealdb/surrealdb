@@ -28,7 +28,7 @@ func checkExpression(allowed map[string]bool, expr Fields, grps Groups) error {
 				// see if it exists in the GROUP BY.
 
 				if i, ok := g.Expr.(*Ident); ok {
-					if e.Field == i.ID {
+					if e.Field == i.VA {
 						continue skip
 					}
 				}

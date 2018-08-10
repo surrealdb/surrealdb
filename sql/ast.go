@@ -72,8 +72,8 @@ type CommitStatement struct{}
 
 // UseStatement represents a SQL USE statement.
 type UseStatement struct {
-	NS string `cork:"-" codec:"-"`
-	DB string `cork:"-" codec:"-"`
+	NS string
+	DB string
 }
 
 // --------------------------------------------------
@@ -82,11 +82,11 @@ type UseStatement struct {
 
 // InfoStatement represents an SQL INFO statement.
 type InfoStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Kind Token  `cork:"-" codec:"-"`
-	What *Table `cork:"-" codec:"-"`
+	KV   string
+	NS   string
+	DB   string
+	Kind Token
+	What *Table
 }
 
 // --------------------------------------------------
@@ -95,10 +95,10 @@ type InfoStatement struct {
 
 // IfStatement represents an if else clause.
 type IfStatement struct {
-	RW   bool  `cork:"-" codec:"-"`
-	Cond Exprs `cork:"cond" codec:"cond"`
-	Then Exprs `cork:"then" codec:"then"`
-	Else Expr  `cork:"else" codec:"else"`
+	RW   bool
+	Cond Exprs
+	Then Exprs
+	Else Expr
 }
 
 // --------------------------------------------------
@@ -107,8 +107,8 @@ type IfStatement struct {
 
 // RunStatement represents a run clause.
 type RunStatement struct {
-	RW   bool `cork:"-" codec:"-"`
-	Expr Expr `cork:"expr" codec:"expr"`
+	RW   bool
+	Expr Expr
 }
 
 // --------------------------------------------------
@@ -117,21 +117,21 @@ type RunStatement struct {
 
 // LetStatement represents a SQL LET statement.
 type LetStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"-" codec:"-"`
-	What Expr   `cork:"-" codec:"-"`
+	RW   bool
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
+	What Expr
 }
 
 // ReturnStatement represents a SQL RETURN statement.
 type ReturnStatement struct {
-	RW   bool   `cork:"-" codec:"-"`
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	What Exprs  `cork:"-" codec:"-"`
+	RW   bool
+	KV   string
+	NS   string
+	DB   string
+	What Exprs
 }
 
 // --------------------------------------------------
@@ -140,121 +140,121 @@ type ReturnStatement struct {
 
 // LiveStatement represents a SQL LIVE statement.
 type LiveStatement struct {
-	ID    string `cork:"ID" codec:"ID"`
-	FB    string `cork:"FB" codec:"FB"`
-	KV    string `cork:"KV" codec:"KV"`
-	NS    string `cork:"NS" codec:"NS"`
-	DB    string `cork:"DB" codec:"DB"`
-	Diff  bool   `cork:"diff" codec:"diff"`
-	Expr  Fields `cork:"expr" codec:"expr"`
-	What  Exprs  `cork:"what" codec:"what"`
-	Cond  Expr   `cork:"cond" codec:"cond"`
-	Fetch Fetchs `cork:"fetch" codec:"fetch"`
+	ID    string
+	FB    string
+	KV    string
+	NS    string
+	DB    string
+	Diff  bool
+	Expr  Fields
+	What  Exprs
+	Cond  Expr
+	Fetch Fetchs
 }
 
 // KillStatement represents a SQL KILL statement.
 type KillStatement struct {
-	FB   string `cork:"FB" codec:"FB"`
-	KV   string `cork:"KV" codec:"KV"`
-	NS   string `cork:"NS" codec:"NS"`
-	DB   string `cork:"DB" codec:"DB"`
-	What Exprs  `cork:"what" codec:"what"`
+	FB   string
+	KV   string
+	NS   string
+	DB   string
+	What Exprs
 }
 
 // SelectStatement represents a SQL SELECT statement.
 type SelectStatement struct {
-	RW       bool          `cork:"-" codec:"-"`
-	KV       string        `cork:"KV" codec:"KV"`
-	NS       string        `cork:"NS" codec:"NS"`
-	DB       string        `cork:"DB" codec:"DB"`
-	Expr     Fields        `cork:"expr" codec:"expr"`
-	What     Exprs         `cork:"what" codec:"what"`
-	Cond     Expr          `cork:"cond" codec:"cond"`
-	Group    Groups        `cork:"group" codec:"group"`
-	Order    Orders        `cork:"order" codec:"order"`
-	Limit    Expr          `cork:"limit" codec:"limit"`
-	Start    Expr          `cork:"start" codec:"start"`
-	Fetch    Fetchs        `cork:"fetch" codec:"fetch"`
-	Version  Expr          `cork:"version" codec:"version"`
-	Timeout  time.Duration `cork:"timeout" codec:"timeout"`
-	Parallel int           `cork:"parallel" codec:"parallel"`
+	RW       bool
+	KV       string
+	NS       string
+	DB       string
+	Expr     Fields
+	What     Exprs
+	Cond     Expr
+	Group    Groups
+	Order    Orders
+	Limit    Expr
+	Start    Expr
+	Fetch    Fetchs
+	Version  Expr
+	Timeout  time.Duration
+	Parallel int
 }
 
 // CreateStatement represents a SQL CREATE statement.
 type CreateStatement struct {
-	KV       string        `cork:"KV" codec:"KV"`
-	NS       string        `cork:"NS" codec:"NS"`
-	DB       string        `cork:"DB" codec:"DB"`
-	What     Exprs         `cork:"what" codec:"what"`
-	Data     Expr          `cork:"data" codec:"data"`
-	Echo     Token         `cork:"echo" codec:"echo"`
-	Timeout  time.Duration `cork:"timeout" codec:"timeout"`
-	Parallel int           `cork:"parallel" codec:"parallel"`
+	KV       string
+	NS       string
+	DB       string
+	What     Exprs
+	Data     Expr
+	Echo     Token
+	Timeout  time.Duration
+	Parallel int
 }
 
 // UpdateStatement represents a SQL UPDATE statement.
 type UpdateStatement struct {
-	KV       string        `cork:"KV" codec:"KV"`
-	NS       string        `cork:"NS" codec:"NS"`
-	DB       string        `cork:"DB" codec:"DB"`
-	What     Exprs         `cork:"what" codec:"what"`
-	Data     Expr          `cork:"data" codec:"data"`
-	Cond     Expr          `cork:"cond" codec:"cond"`
-	Echo     Token         `cork:"echo" codec:"echo"`
-	Timeout  time.Duration `cork:"timeout" codec:"timeout"`
-	Parallel int           `cork:"parallel" codec:"parallel"`
+	KV       string
+	NS       string
+	DB       string
+	What     Exprs
+	Data     Expr
+	Cond     Expr
+	Echo     Token
+	Timeout  time.Duration
+	Parallel int
 }
 
 // DeleteStatement represents a SQL DELETE statement.
 type DeleteStatement struct {
-	KV       string        `cork:"KV" codec:"KV"`
-	NS       string        `cork:"NS" codec:"NS"`
-	DB       string        `cork:"DB" codec:"DB"`
-	Hard     bool          `cork:"hard" codec:"hard"`
-	What     Exprs         `cork:"what" codec:"what"`
-	Cond     Expr          `cork:"cond" codec:"cond"`
-	Echo     Token         `cork:"echo" codec:"echo"`
-	Timeout  time.Duration `cork:"timeout" codec:"timeout"`
-	Parallel int           `cork:"parallel" codec:"parallel"`
+	KV       string
+	NS       string
+	DB       string
+	Hard     bool
+	What     Exprs
+	Cond     Expr
+	Echo     Token
+	Timeout  time.Duration
+	Parallel int
 }
 
 // RelateStatement represents a SQL RELATE statement.
 type RelateStatement struct {
-	KV       string        `cork:"KV" codec:"KV"`
-	NS       string        `cork:"NS" codec:"NS"`
-	DB       string        `cork:"DB" codec:"DB"`
-	Type     Expr          `cork:"type" codec:"type"`
-	From     Exprs         `cork:"from" codec:"from"`
-	With     Exprs         `cork:"with" codec:"with"`
-	Data     Expr          `cork:"data" codec:"data"`
-	Uniq     bool          `cork:"uniq" codec:"uniq"`
-	Echo     Token         `cork:"echo" codec:"echo"`
-	Timeout  time.Duration `cork:"timeout" codec:"timeout"`
-	Parallel int           `cork:"parallel" codec:"parallel"`
+	KV       string
+	NS       string
+	DB       string
+	Type     Expr
+	From     Exprs
+	With     Exprs
+	Data     Expr
+	Uniq     bool
+	Echo     Token
+	Timeout  time.Duration
+	Parallel int
 }
 
 // InsertStatement represents a SQL INSERT statement.
 type InsertStatement struct {
-	KV       string        `cork:"KV" codec:"KV"`
-	NS       string        `cork:"NS" codec:"NS"`
-	DB       string        `cork:"DB" codec:"DB"`
-	Data     Expr          `cork:"data" codec:"data"`
-	Into     *Table        `cork:"into" codec:"into"`
-	Echo     Token         `cork:"echo" codec:"echo"`
-	Timeout  time.Duration `cork:"timeout" codec:"timeout"`
-	Parallel int           `cork:"parallel" codec:"parallel"`
+	KV       string
+	NS       string
+	DB       string
+	Data     Expr
+	Into     *Table
+	Echo     Token
+	Timeout  time.Duration
+	Parallel int
 }
 
 // UpsertStatement represents a SQL UPSERT statement.
 type UpsertStatement struct {
-	KV       string        `cork:"KV" codec:"KV"`
-	NS       string        `cork:"NS" codec:"NS"`
-	DB       string        `cork:"DB" codec:"DB"`
-	Data     Expr          `cork:"data" codec:"data"`
-	Into     *Table        `cork:"into" codec:"into"`
-	Echo     Token         `cork:"echo" codec:"echo"`
-	Timeout  time.Duration `cork:"timeout" codec:"timeout"`
-	Parallel int           `cork:"parallel" codec:"parallel"`
+	KV       string
+	NS       string
+	DB       string
+	Data     Expr
+	Into     *Table
+	Echo     Token
+	Timeout  time.Duration
+	Parallel int
 }
 
 // --------------------------------------------------
@@ -262,17 +262,17 @@ type UpsertStatement struct {
 // --------------------------------------------------
 
 type DefineNamespaceStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"name" codec:"name"`
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
 }
 
 type RemoveNamespaceStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"name" codec:"name"`
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
 }
 
 // --------------------------------------------------
@@ -280,17 +280,17 @@ type RemoveNamespaceStatement struct {
 // --------------------------------------------------
 
 type DefineDatabaseStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"name" codec:"name"`
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
 }
 
 type RemoveDatabaseStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"name" codec:"name"`
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
 }
 
 // --------------------------------------------------
@@ -299,22 +299,22 @@ type RemoveDatabaseStatement struct {
 
 // DefineLoginStatement represents an SQL DEFINE LOGIN statement.
 type DefineLoginStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Kind Token  `cork:"kind" codec:"kind"`
-	User *Ident `cork:"user" codec:"user"`
-	Pass []byte `cork:"pass" codec:"pass"`
-	Code []byte `cork:"code" codec:"code"`
+	KV   string
+	NS   string
+	DB   string
+	Kind Token
+	User *Ident
+	Pass []byte
+	Code []byte
 }
 
 // RemoveLoginStatement represents an SQL REMOVE LOGIN statement.
 type RemoveLoginStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Kind Token  `cork:"kind" codec:"kind"`
-	User *Ident `cork:"user" codec:"user"`
+	KV   string
+	NS   string
+	DB   string
+	Kind Token
+	User *Ident
 }
 
 // --------------------------------------------------
@@ -323,22 +323,22 @@ type RemoveLoginStatement struct {
 
 // DefineTokenStatement represents an SQL DEFINE TOKEN statement.
 type DefineTokenStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Kind Token  `cork:"kind" codec:"kind"`
-	Name *Ident `cork:"name" codec:"name"`
-	Type string `cork:"type" codec:"type"`
-	Code []byte `cork:"code" codec:"code"`
+	KV   string
+	NS   string
+	DB   string
+	Kind Token
+	Name *Ident
+	Type string
+	Code []byte
 }
 
 // RemoveTokenStatement represents an SQL REMOVE TOKEN statement.
 type RemoveTokenStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Kind Token  `cork:"kind" codec:"kind"`
-	Name *Ident `cork:"name" codec:"name"`
+	KV   string
+	NS   string
+	DB   string
+	Kind Token
+	Name *Ident
 }
 
 // --------------------------------------------------
@@ -347,25 +347,25 @@ type RemoveTokenStatement struct {
 
 // DefineScopeStatement represents an SQL DEFINE SCOPE statement.
 type DefineScopeStatement struct {
-	KV       string        `cork:"-" codec:"-"`
-	NS       string        `cork:"-" codec:"-"`
-	DB       string        `cork:"-" codec:"-"`
-	Name     *Ident        `cork:"name" codec:"name"`
-	Time     time.Duration `cork:"time" codec:"time"`
-	Code     []byte        `cork:"code" codec:"code"`
-	Signup   Expr          `cork:"signup" codec:"signup"`
-	Signin   Expr          `cork:"signin" codec:"signin"`
-	Connect  Expr          `cork:"connect" codec:"connect"`
-	OnSignup Expr          `cork:"onsignup" codec:"onsignup"`
-	OnSignin Expr          `cork:"onsignin" codec:"onsignin"`
+	KV       string
+	NS       string
+	DB       string
+	Name     *Ident
+	Time     time.Duration
+	Code     []byte
+	Signup   Expr
+	Signin   Expr
+	Connect  Expr
+	OnSignup Expr
+	OnSignin Expr
 }
 
 // RemoveScopeStatement represents an SQL REMOVE SCOPE statement.
 type RemoveScopeStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"name" codec:"name"`
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
 }
 
 // --------------------------------------------------
@@ -374,27 +374,28 @@ type RemoveScopeStatement struct {
 
 // DefineTableStatement represents an SQL DEFINE TABLE statement.
 type DefineTableStatement struct {
-	KV    string `cork:"-" codec:"-"`
-	NS    string `cork:"-" codec:"-"`
-	DB    string `cork:"-" codec:"-"`
-	Name  *Ident `cork:"name" codec:"name"`
-	What  Tables `cork:"-" codec:"-"`
-	Full  bool   `cork:"full" codec:"full"`
-	Drop  bool   `cork:"drop" codec:"drop"`
-	Lock  bool   `cork:"lock" codec:"lock"`
-	Expr  Fields `cork:"expr" codec:"expr"`
-	From  Tables `cork:"from" codec:"from"`
-	Cond  Expr   `cork:"cond" codec:"cond"`
-	Group Groups `cork:"group" codec:"group"`
-	Perms Expr   `cork:"perms" codec:"perms"`
+	KV    string
+	NS    string
+	DB    string
+	Name  *Ident
+	What  Tables
+	Full  bool
+	Vers  bool
+	Drop  bool
+	Lock  bool
+	Expr  Fields
+	From  Tables
+	Cond  Expr
+	Group Groups
+	Perms Expr
 }
 
 // RemoveTableStatement represents an SQL REMOVE TABLE statement.
 type RemoveTableStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	What Tables `cork:"-" codec:"-"`
+	KV   string
+	NS   string
+	DB   string
+	What Tables
 }
 
 // --------------------------------------------------
@@ -403,22 +404,22 @@ type RemoveTableStatement struct {
 
 // DefineEventStatement represents an SQL DEFINE EVENT statement.
 type DefineEventStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"name" codec:"name"`
-	What Tables `cork:"-" codec:"-"`
-	When Expr   `cork:"when" codec:"when"`
-	Then Expr   `cork:"then" codec:"then"`
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
+	What Tables
+	When Expr
+	Then Expr
 }
 
 // RemoveEventStatement represents an SQL REMOVE EVENT statement.
 type RemoveEventStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"-" codec:"-"`
-	What Tables `cork:"-" codec:"-"`
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
+	What Tables
 }
 
 // --------------------------------------------------
@@ -427,26 +428,26 @@ type RemoveEventStatement struct {
 
 // DefineFieldStatement represents an SQL DEFINE FIELD statement.
 type DefineFieldStatement struct {
-	KV       string  `cork:"-" codec:"-"`
-	NS       string  `cork:"-" codec:"-"`
-	DB       string  `cork:"-" codec:"-"`
-	Name     *Ident  `cork:"name" codec:"name"`
-	What     Tables  `cork:"-" codec:"-"`
-	Perms    Expr    `cork:"perms" codec:"perms"`
-	Type     string  `cork:"type" codec:"type"`
-	Kind     string  `cork:"kind" codec:"kind"`
-	Value    Expr    `cork:"value" codec:"value"`
-	Assert   Expr    `cork:"assert" codec:"assert"`
-	Priority float64 `cork:"priority" codec:"priority"`
+	KV       string
+	NS       string
+	DB       string
+	Name     *Ident
+	What     Tables
+	Perms    Expr
+	Type     string
+	Kind     string
+	Value    Expr
+	Assert   Expr
+	Priority float64
 }
 
 // RemoveFieldStatement represents an SQL REMOVE FIELD statement.
 type RemoveFieldStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"-" codec:"-"`
-	What Tables `cork:"-" codec:"-"`
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
+	What Tables
 }
 
 // --------------------------------------------------
@@ -455,22 +456,22 @@ type RemoveFieldStatement struct {
 
 // DefineIndexStatement represents an SQL DEFINE INDEX statement.
 type DefineIndexStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"name" codec:"name"`
-	What Tables `cork:"-" codec:"-"`
-	Cols Idents `cork:"cols" codec:"cols"`
-	Uniq bool   `cork:"uniq" codec:"uniq"`
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
+	What Tables
+	Cols Idents
+	Uniq bool
 }
 
 // RemoveIndexStatement represents an SQL REMOVE INDEX statement.
 type RemoveIndexStatement struct {
-	KV   string `cork:"-" codec:"-"`
-	NS   string `cork:"-" codec:"-"`
-	DB   string `cork:"-" codec:"-"`
-	Name *Ident `cork:"-" codec:"-"`
-	What Tables `cork:"-" codec:"-"`
+	KV   string
+	NS   string
+	DB   string
+	Name *Ident
+	What Tables
 }
 
 // --------------------------------------------------
@@ -627,22 +628,6 @@ type ContentExpression struct {
 }
 
 // --------------------------------------------------
-// Model
-// --------------------------------------------------
-
-// Model comment
-type Model struct {
-	TB  string
-	MIN float64
-	INC float64
-	MAX float64
-}
-
-func NewModel(TB string, MIN, INC, MAX float64) *Model {
-	return &Model{TB: TB, MIN: MIN, INC: INC, MAX: MAX}
-}
-
-// --------------------------------------------------
 // Param
 // --------------------------------------------------
 
@@ -651,43 +636,11 @@ type Params []*Param
 
 // Param comment
 type Param struct {
-	ID string
+	VA string
 }
 
-func NewParam(ID string) *Param {
-	return &Param{ID}
-}
-
-// --------------------------------------------------
-// Regex
-// --------------------------------------------------
-
-// Params represents multiple Regex clauses.
-type Regexs []*Regex
-
-// Regex comment
-type Regex struct {
-	ID string
-}
-
-func NewRegex(ID string) *Regex {
-	return &Regex{ID}
-}
-
-// --------------------------------------------------
-// Value
-// --------------------------------------------------
-
-// Values represents multiple Value clauses.
-type Values []*Value
-
-// Value comment
-type Value struct {
-	ID string
-}
-
-func NewValue(ID string) *Value {
-	return &Value{ID}
+func NewParam(VA string) *Param {
+	return &Param{VA}
 }
 
 // --------------------------------------------------
@@ -699,11 +652,43 @@ type Idents []*Ident
 
 // Ident comment
 type Ident struct {
-	ID string
+	VA string
 }
 
-func NewIdent(ID string) *Ident {
-	return &Ident{ID}
+func NewIdent(VA string) *Ident {
+	return &Ident{VA}
+}
+
+// --------------------------------------------------
+// Value
+// --------------------------------------------------
+
+// Values represents multiple Value clauses.
+type Values []*Value
+
+// Value comment
+type Value struct {
+	VA string
+}
+
+func NewValue(VA string) *Value {
+	return &Value{VA}
+}
+
+// --------------------------------------------------
+// Regex
+// --------------------------------------------------
+
+// Regexs represents multiple Regex clauses.
+type Regexs []*Regex
+
+// Regex comment
+type Regex struct {
+	VA string
+}
+
+func NewRegex(VA string) *Regex {
+	return &Regex{VA}
 }
 
 // --------------------------------------------------
@@ -741,6 +726,25 @@ func NewBatch(TB string, BA []interface{}) *Batch {
 		b.BA = append(b.BA, NewThing(TB, ID))
 	}
 	return b
+}
+
+// --------------------------------------------------
+// Model
+// --------------------------------------------------
+
+// Models represents multiple Model clauses.
+type Models []*Model
+
+// Model comment
+type Model struct {
+	TB  string
+	MIN float64
+	INC float64
+	MAX float64
+}
+
+func NewModel(TB string, MIN, INC, MAX float64) *Model {
+	return &Model{TB: TB, MIN: MIN, INC: INC, MAX: MAX}
 }
 
 // --------------------------------------------------
@@ -831,7 +835,7 @@ type Polygons []*Polygon
 
 // Polygon comment
 type Polygon struct {
-	PS Points
+	PS []*Point
 }
 
 func NewPolygon(PS ...*Point) *Polygon {

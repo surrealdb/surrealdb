@@ -263,7 +263,7 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 
 				return nil
 
-			}, v.ID)
+			}, v.VA)
 
 		}
 
