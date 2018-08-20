@@ -20,7 +20,7 @@ import (
 	"github.com/abcum/surreal/db"
 )
 
-func exporter(c *fibre.Context) (err error) {
+func export(c *fibre.Context) (err error) {
 
 	if c.Get("auth").(*cnf.Auth).Kind != cnf.AuthKV {
 		return fibre.NewHTTPError(401)
@@ -28,6 +28,6 @@ func exporter(c *fibre.Context) (err error) {
 
 	c.Response().Header().Set("Content-Type", "application/octet-stream")
 
-	return db.Export(c.Response())
+	return db.Export(c, c.Request().Header().Get("NS"), c.Request().Header().Get("DB"))
 
 }

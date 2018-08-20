@@ -26,10 +26,19 @@ import (
 	"github.com/abcum/surreal/log"
 )
 
+var (
+	sqlForm string
+	sqlUser string
+	sqlPass string
+	sqlConn string
+	sqlNS   string
+	sqlDB   string
+)
+
 var sqlCmd = &cobra.Command{
 	Use:     "sql [flags] <file>",
 	Short:   "Execute a SQL script against an existing database",
-	Example: "  surreal sql --auth root:root script.sql",
+	Example: "  surreal sql --auth root:root backup.sql",
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
 
 		var fle *os.File
@@ -54,41 +63,36 @@ var sqlCmd = &cobra.Command{
 			return
 		}
 
-		// Ensure that we properly close the file handle
-		// when we have finished with the file so that
-		// the file descriptor is released.
-
 		defer fle.Close()
 
-		// Check to see if the http request type has
-		// been specified as eith 'http' or 'https'
-		// as these are the only supported schemes.
-
-		if opts.DB.Type != "http" && opts.DB.Type != "https" {
-			log.Fatalln("Connection failed - please specify 'http' or 'https' for the scheme.")
-			return
-		}
-
-		// Configure the export connection endpoint url
+		// Configure the sql connection endpoint url
 		// and specify the authentication header using
 		// basic auth for root login.
 
-		url := fmt.Sprintf("%s://%s@%s:%s/sql", opts.DB.Type, opts.Auth.Auth, opts.DB.Host, opts.DB.Port)
-
-		// Create a new http request object that we
-		// can use to connect to the import endpoint
-		// using a POST http request type.
+		url := fmt.Sprintf("%s/sql", sqlConn)
 
 		if req, err = http.NewRequest("POST", url, fle); err != nil {
 			log.Fatalln("Connection failed - check the connection details and try again.")
 			return
 		}
 
+		// Specify the db authentication settings
+
+		req.SetBasicAuth(sqlUser, sqlPass)
+
+		// Specify the namespace to import
+
+		req.Header.Set("NS", sqlNS)
+
+		// Specify the database to import
+
+		req.Header.Set("DB", sqlDB)
+
 		// Specify that the request is an octet stream
 		// so that we can stream the file contents to
 		// the server without reading the whole file.
 
-		switch opts.Format.Type {
+		switch sqlForm {
 		case "pack":
 			req.Header.Set("Content-Type", "application/msgpack")
 		case "json":
@@ -99,7 +103,7 @@ var sqlCmd = &cobra.Command{
 			req.Header.Set("Content-Type", "text/plain")
 		}
 
-		// Attempt to dial the import endpoint and
+		// Attempt to dial the sql endpoint and
 		// if there is an error then stop execution
 		// and return the connection error.
 
@@ -140,11 +144,11 @@ var sqlCmd = &cobra.Command{
 
 func init() {
 
-	sqlCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master authentication details to use when connecting.")
-	sqlCmd.PersistentFlags().StringVar(&opts.DB.Type, "scheme", "https", "HTTP connection scheme to use to connect to the database.")
-	sqlCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "surreal.io", "Database server host to connect to.")
-	sqlCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "443", "Database server port to connect to.")
-
-	sqlCmd.PersistentFlags().StringVar(&opts.Format.Type, "format", "text", "The output format for the server response data.")
+	sqlCmd.PersistentFlags().StringVarP(&sqlUser, "user", "u", "root", "Database authentication username to use when connecting.")
+	sqlCmd.PersistentFlags().StringVarP(&sqlPass, "pass", "p", "pass", "Database authentication password to use when connecting.")
+	sqlCmd.PersistentFlags().StringVarP(&sqlConn, "conn", "c", "https://surreal.io", "Remote database server url to connect to.")
+	sqlCmd.PersistentFlags().StringVarP(&sqlForm, "format", "f", "text", "The output format for the server response data.")
+	sqlCmd.PersistentFlags().StringVar(&sqlNS, "ns", "", "Master authentication details to use when connecting.")
+	sqlCmd.PersistentFlags().StringVar(&sqlDB, "db", "", "Master authentication details to use when connecting.")
 
 }

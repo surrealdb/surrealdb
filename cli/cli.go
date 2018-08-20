@@ -34,7 +34,6 @@ func init() {
 	mainCmd.AddCommand(
 		sqlCmd,
 		startCmd,
-		importCmd,
 		exportCmd,
 		versionCmd,
 	)

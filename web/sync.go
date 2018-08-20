@@ -20,7 +20,7 @@ import (
 	"github.com/abcum/surreal/db"
 )
 
-func importer(c *fibre.Context) (err error) {
+func syncer(c *fibre.Context, sync bool) (err error) {
 
 	if c.Get("auth").(*cnf.Auth).Kind != cnf.AuthKV {
 		return fibre.NewHTTPError(401)
@@ -28,6 +28,13 @@ func importer(c *fibre.Context) (err error) {
 
 	c.Response().Header().Set("Content-Type", "application/octet-stream")
 
-	return db.Import(c.Request().Body)
+	switch sync {
+	case true:
+		return db.Sync(c.Response())
+	case false:
+		return db.Sync(c.Request().Body)
+	}
+
+	return nil
 
 }

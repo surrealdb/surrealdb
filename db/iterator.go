@@ -416,6 +416,15 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 
 	}
 
+	// If we do not have a specified table
+	// value, because we are processing a
+	// subquery, then there is no need to
+	// check if the table exists or not.
+
+	if len(tbv) == 0 {
+		return
+	}
+
 	// First check that the NS exists, as
 	// otherwise, the scoped authentication
 	// request can not do anything.
@@ -433,15 +442,6 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	_, i.err = i.e.dbo.GetDB(ctx, nsv, dbv)
 	if i.err != nil {
 		close(i.stop)
-		return
-	}
-
-	// If we do not have a specified table
-	// value, because we are processing a
-	// subquery, then there is no need to
-	// check if the table exists or not.
-
-	if len(tbv) == 0 {
 		return
 	}
 

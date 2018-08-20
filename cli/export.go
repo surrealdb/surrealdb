@@ -27,10 +27,18 @@ import (
 	"github.com/abcum/surreal/log"
 )
 
+var (
+	exportUser string
+	exportPass string
+	exportConn string
+	exportNS   string
+	exportDB   string
+)
+
 var exportCmd = &cobra.Command{
 	Use:     "export [flags] <file>",
 	Short:   "Export data from an existing database",
-	Example: "  surreal export --auth root:root backup.db",
+	Example: "  surreal export --auth root:root backup.sql",
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
 
 		var fle *os.File
@@ -55,30 +63,13 @@ var exportCmd = &cobra.Command{
 			return
 		}
 
-		// Ensure that we properly close the file handle
-		// when we have finished with the file so that
-		// the file descriptor is released.
-
 		defer fle.Close()
-
-		// Check to see if the http request type has
-		// been specified as eith 'http' or 'https'
-		// as these are the only supported schemes.
-
-		if opts.DB.Type != "http" && opts.DB.Type != "https" {
-			log.Fatalln("Connection failed - please specify 'http' or 'https' for the scheme.")
-			return
-		}
-
-		// Configure the export connection endpoint url
-		// and specify the authentication header using
-		// basic auth for root login.
-
-		url := fmt.Sprintf("%s://%s@%s:%s/export", opts.DB.Type, opts.Auth.Auth, opts.DB.Host, opts.DB.Port)
 
 		// Create a new http request object that we
 		// can use to connect to the export endpoint
 		// using a GET http request type.
+
+		url := fmt.Sprintf("%s/export", exportConn)
 
 		if req, err = http.NewRequest("GET", url, nil); err != nil {
 			log.Fatalln("Connection failed - check the connection details and try again.")
@@ -86,10 +77,20 @@ var exportCmd = &cobra.Command{
 		}
 
 		// Specify that the request is an octet stream
-		// so that we can stream the file contents to
-		// the server without reading the whole file.
 
 		req.Header.Set("Content-Type", "application/octet-stream")
+
+		// Specify the db authentication settings
+
+		req.SetBasicAuth(exportUser, exportPass)
+
+		// Specify the namespace to export
+
+		req.Header.Set("NS", exportNS)
+
+		// Specify the database to export
+
+		req.Header.Set("DB", exportDB)
 
 		// Attempt to dial the export endpoint and
 		// if there is an error then stop execution
@@ -141,9 +142,10 @@ var exportCmd = &cobra.Command{
 
 func init() {
 
-	exportCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master authentication details to use when connecting.")
-	exportCmd.PersistentFlags().StringVar(&opts.DB.Type, "scheme", "https", "HTTP connection scheme to use to connect to the database.")
-	exportCmd.PersistentFlags().StringVar(&opts.DB.Host, "host", "surreal.io", "Database server host to connect to.")
-	exportCmd.PersistentFlags().StringVar(&opts.DB.Port, "port", "443", "Database server port to connect to.")
+	exportCmd.PersistentFlags().StringVarP(&exportUser, "user", "u", "root", "Database authentication username to use when connecting.")
+	exportCmd.PersistentFlags().StringVarP(&exportPass, "pass", "p", "pass", "Database authentication password to use when connecting.")
+	exportCmd.PersistentFlags().StringVarP(&exportConn, "conn", "c", "https://surreal.io", "Remote database server url to connect to.")
+	exportCmd.PersistentFlags().StringVar(&exportNS, "ns", "", "Master authentication details to use when connecting.")
+	exportCmd.PersistentFlags().StringVar(&exportDB, "db", "", "Master authentication details to use when connecting.")
 
 }

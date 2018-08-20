@@ -22,6 +22,10 @@ type TX interface {
 	Cancel() error
 	Commit() error
 
+	All(context.Context, []byte) ([]KV, error)
+	AllP(context.Context, []byte, uint64) ([]KV, error)
+	AllR(context.Context, []byte, []byte, uint64) ([]KV, error)
+
 	Clr(context.Context, []byte) (KV, error)
 	ClrP(context.Context, []byte, uint64) ([]KV, error)
 	ClrR(context.Context, []byte, []byte, uint64) ([]KV, error)

@@ -86,6 +86,28 @@ func routes(s *fibre.Fibre) {
 	})
 
 	// --------------------------------------------------
+	// Endpoints for syncing data
+	// --------------------------------------------------
+
+	s.Get("/sync", func(c *fibre.Context) error {
+		return syncer(c, true) // Export
+	})
+
+	s.Post("/sync", func(c *fibre.Context) error {
+		return syncer(c, false) // Import
+	})
+
+	s.Get("/export", func(c *fibre.Context) error {
+		return export(c)
+	})
+
+	s.Use(mw.Type(&mw.TypeOpts{
+		AllowedContent: map[string]bool{
+			"application/octet-stream": true,
+		},
+	}).PathIs("/sync", "/export"))
+
+	// --------------------------------------------------
 	// Endpoints for authentication signup
 	// --------------------------------------------------
 
@@ -134,24 +156,6 @@ func routes(s *fibre.Fibre) {
 			"application/x-www-form-urlencoded": true,
 		},
 	}).PathIs("/signin").MethodIsNot("OPTIONS"))
-
-	// --------------------------------------------------
-	// Endpoints for import and exporting data
-	// --------------------------------------------------
-
-	s.Get("/export", func(c *fibre.Context) error {
-		return exporter(c)
-	})
-
-	s.Post("/import", func(c *fibre.Context) error {
-		return importer(c)
-	})
-
-	s.Use(mw.Type(&mw.TypeOpts{
-		AllowedContent: map[string]bool{
-			"application/octet-stream": true,
-		},
-	}).PathIs("/export", "/import"))
 
 	// --------------------------------------------------
 	// Endpoints for submitting sql queries

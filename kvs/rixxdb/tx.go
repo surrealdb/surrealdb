@@ -73,6 +73,21 @@ func (tx *TX) Commit() error {
 	return tx.pntr.Commit()
 }
 
+func (tx *TX) All(ctx context.Context, key []byte) ([]kvs.KV, error) {
+	res, err := tx.pntr.All(key)
+	return many(res, err)
+}
+
+func (tx *TX) AllP(ctx context.Context, key []byte, max uint64) ([]kvs.KV, error) {
+	res, err := tx.pntr.AllP(key, max)
+	return many(res, err)
+}
+
+func (tx *TX) AllR(ctx context.Context, beg []byte, end []byte, max uint64) ([]kvs.KV, error) {
+	res, err := tx.pntr.AllR(beg, end, max)
+	return many(res, err)
+}
+
 func (tx *TX) Clr(ctx context.Context, key []byte) (kvs.KV, error) {
 	res, err := tx.pntr.Clr(key)
 	return one(res, err)

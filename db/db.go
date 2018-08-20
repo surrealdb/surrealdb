@@ -79,15 +79,15 @@ func Exit() (err error) {
 // Import loads database operations from a reader.
 // This can be used to playback a database snapshot
 // into an already running database.
-func Import(r io.Reader) (err error) {
-	return db.Import(r)
-}
-
-// Export saves all database operations to a writer.
-// This can be used to save a database snapshot
-// to a secondary file or stream.
-func Export(w io.Writer) (err error) {
-	return db.Export(w)
+func Sync(rw interface{}) (err error) {
+	switch v := rw.(type) {
+	case io.Reader:
+		return db.Import(v)
+	case io.Writer:
+		return db.Export(v)
+	default:
+		return nil
+	}
 }
 
 // Begin begins a new read / write transaction
@@ -95,6 +95,13 @@ func Export(w io.Writer) (err error) {
 // the transaction, or any error which occured.
 func Begin(rw bool) (txn kvs.TX, err error) {
 	return db.Begin(context.Background(), rw)
+}
+
+// Export saves all database operations to a writer.
+// This can be used to save a database snapshot
+// to a secondary file or stream.
+func Export(fib *fibre.Context, ns, db string) (err error) {
+	return export(fib, ns, db)
 }
 
 // Socket registers a websocket for live queries

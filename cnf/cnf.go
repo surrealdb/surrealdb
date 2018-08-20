@@ -27,9 +27,6 @@ type Options struct {
 		Key  []byte // Data encryption key
 		Code string // Data encryption key string
 		Path string // Path to store the data file
-		Type string // HTTP scheme type to use
-		Host string // Surreal host to connect to
-		Port string // Surreal port to connect to
 		Base string // Base key to use in KV stores
 		Proc struct {
 			Size   int           // Policy for data file size
@@ -76,10 +73,6 @@ type Options struct {
 
 	Query struct {
 		Timeout time.Duration // Fixed query timeout
-	}
-
-	Format struct {
-		Type string // Stores the cli output format
 	}
 
 	Logging struct {

@@ -398,7 +398,7 @@ func (this DefineFieldStatement) String() string {
 		this.Name,
 		this.What,
 		maybe(this.Type != "", print(" TYPE %v", this.Type)),
-		maybe(this.Kind != "", print(" (%v)", this.Kind)),
+		maybe(this.Kind != "", print(" (%v)", quote(this.Kind))),
 		maybe(this.Value != nil, print(" VALUE %v", this.Value)),
 		maybe(this.Assert != nil, print(" ASSERT %v", this.Assert)),
 		maybe(this.Priority != 0, print(" PRIORITY %v", this.Priority)),
