@@ -62,7 +62,7 @@ func TestDefine(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
-		DEFINE SCOPE test SESSION 1h
+		DEFINE SCOPE test SESSION 1h0m0s
 			SIGNUP AS (
 				IF $ip IN ["127.0.0.1", "213.172.165.134"] THEN
 					(CREATE user SET email=$user, pass=bcrypt.generate($pass))

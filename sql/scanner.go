@@ -748,7 +748,7 @@ func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{
 		} else if isNumber(ch) {
 			buf.WriteRune(ch)
 		} else if isLetter(ch) {
-			if tok == NUMBER || tok == DOUBLE {
+			if tok == NUMBER || tok == DOUBLE || tok == DURATION {
 				tok = IDENT
 				buf.WriteRune(ch)
 				switch ch {
