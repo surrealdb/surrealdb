@@ -947,7 +947,7 @@ func (s *scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{
 			switch chn := s.next(); chn {
 			default:
 				return ILLEGAL, buf.String(), val
-			case 'b', 't', 'r', 'n', 'f', '"', '\\':
+			case 'b', 't', 'r', 'n', 'f', 'u', '"', '\\':
 				buf.WriteRune(ch)
 				buf.WriteRune(chn)
 			}
