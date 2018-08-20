@@ -236,8 +236,9 @@ func (d *document) setup(ctx context.Context) (err error) {
 	// maniuplate the virtual document.
 
 	if d.doc != nil {
-		d.initial = d.doc
-		d.current = d.doc.Copy()
+		enc := d.doc.Encode()
+		d.initial = data.New().Decode(enc)
+		d.current = data.New().Decode(enc)
 	}
 
 	// The requested record has been loaded

@@ -22,7 +22,6 @@ import (
 
 	"encoding/json"
 
-	"github.com/abcum/surreal/util/deep"
 	"github.com/abcum/surreal/util/pack"
 )
 
@@ -67,7 +66,7 @@ func (d *Doc) Data() interface{} {
 
 // Copy returns a duplicated copy of the internal data object.
 func (d *Doc) Copy() *Doc {
-	return &Doc{data: deep.Copy(d.data)}
+	return new(Doc).Decode(d.Encode())
 }
 
 // Encode encodes the data object to a byte slice.
