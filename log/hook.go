@@ -49,7 +49,7 @@ func (h *DefaultHook) SetLevel(v string) {
 		h.l = DebugLevels
 	case "info":
 		h.l = InfoLevels
-	case "warning":
+	case "warn":
 		h.l = WarnLevels
 	case "error":
 		h.l = ErrorLevels
