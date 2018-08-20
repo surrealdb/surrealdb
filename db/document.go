@@ -341,6 +341,21 @@ func (d *document) shouldDrop(ctx context.Context) (bool, error) {
 
 }
 
+func (d *document) shouldVersn(ctx context.Context) (bool, error) {
+
+	// Check whether it is specified
+	// that the table should drop
+	// writes, and if so, then return.
+
+	tb, err := d.getTB(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	return tb.Vers, err
+
+}
+
 func (d *document) storeThing(ctx context.Context) (err error) {
 
 	defer d.ulock(ctx)
@@ -362,7 +377,13 @@ func (d *document) storeThing(ctx context.Context) (err error) {
 	// Write the value to the data
 	// layer and return any errors.
 
-	_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.key.Encode(), d.current.Encode())
+	if ok, err := d.shouldVersn(ctx); err != nil {
+		return err
+	} else if ok == true {
+		_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.key.Encode(), d.current.Encode())
+	} else if ok == false {
+		_, err = d.i.e.dbo.Put(ctx, 0, d.key.Encode(), d.current.Encode())
+	}
 
 	return
 
@@ -382,7 +403,13 @@ func (d *document) purgeThing(ctx context.Context) (err error) {
 	// Reset the item by writing a
 	// nil value to the storage.
 
-	_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.key.Encode(), nil)
+	if ok, err := d.shouldVersn(ctx); err != nil {
+		return err
+	} else if ok == true {
+		_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.key.Encode(), nil)
+	} else if ok == false {
+		_, err = d.i.e.dbo.Clr(ctx, d.key.Encode())
+	}
 
 	return
 

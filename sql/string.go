@@ -361,9 +361,10 @@ func (this RemoveScopeStatement) String() string {
 
 func (this DefineTableStatement) String() (s string) {
 	w := maybe(this.Cond != nil, print(" WHERE %v", this.Cond))
-	return print("DEFINE TABLE %v%v%v%v%v",
+	return print("DEFINE TABLE %v%v%v%v%v%v",
 		maybe(this.Name != nil, print("%s", this.Name), print("%s", this.What)),
 		maybe(this.Full, " SCHEMAFULL"),
+		maybe(this.Vers, " VERSIONED"),
 		maybe(this.Drop, " DROP"),
 		maybe(this.Lock, print(" AS SELECT %v FROM %v%v%v", this.Expr, this.From, w, this.Group)),
 		maybe(this.Perms != nil, this.Perms),

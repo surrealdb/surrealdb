@@ -28,7 +28,7 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 
 	for {
 
-		tok, _, exi := p.mightBe(DROP, SCHEMAFULL, SCHEMALESS, PERMISSIONS, AS)
+		tok, _, exi := p.mightBe(DROP, SCHEMAFULL, SCHEMALESS, VERSIONED, UNVERSIONED, PERMISSIONS, AS)
 		if !exi {
 			break
 		}
@@ -43,6 +43,14 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 
 		if is(tok, SCHEMALESS) {
 			stmt.Full = false
+		}
+
+		if is(tok, VERSIONED) {
+			stmt.Vers = true
+		}
+
+		if is(tok, UNVERSIONED) {
+			stmt.Vers = false
 		}
 
 		if is(tok, PERMISSIONS) {

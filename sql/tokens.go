@@ -191,11 +191,13 @@ const (
 	TRUE
 	TYPE
 	UNIQUE
+	UNVERSIONED
 	UPDATE
 	UPSERT
 	USE
 	VALUE
 	VERSION
+	VERSIONED
 	VOID
 	WHEN
 	WHERE
@@ -364,11 +366,13 @@ var tokens = [...]string{
 	TRUE:            "TRUE",
 	TYPE:            "TYPE",
 	UNIQUE:          "UNIQUE",
+	UNVERSIONED:     "UNVERSIONED",
 	UPDATE:          "UPDATE",
 	UPSERT:          "UPSERT",
 	USE:             "USE",
 	VALUE:           "VALUE",
 	VERSION:         "VERSION",
+	VERSIONED:       "VERSIONED",
 	VOID:            "VOID",
 	WHEN:            "WHEN",
 	WHERE:           "WHERE",

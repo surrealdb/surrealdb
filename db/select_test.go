@@ -1923,6 +1923,7 @@ func TestSelect(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
+		DEFINE TABLE person VERSIONED;
 		CREATE |person:1..10|;
 		SELECT * FROM person VERSION "2017-01-01";
 		SELECT * FROM person;
@@ -1930,10 +1931,10 @@ func TestSelect(t *testing.T) {
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 4)
-		So(res[1].Result, ShouldHaveLength, 10)
-		So(res[2].Result, ShouldHaveLength, 0)
-		So(res[3].Result, ShouldHaveLength, 10)
+		So(res, ShouldHaveLength, 5)
+		So(res[2].Result, ShouldHaveLength, 10)
+		So(res[3].Result, ShouldHaveLength, 0)
+		So(res[4].Result, ShouldHaveLength, 10)
 
 	})
 
@@ -1943,6 +1944,7 @@ func TestSelect(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
+		DEFINE TABLE person VERSIONED;
 		LET date = "2017-01-01";
 		CREATE |person:1..10|;
 		SELECT * FROM person VERSION $date;
@@ -1951,10 +1953,10 @@ func TestSelect(t *testing.T) {
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 5)
-		So(res[2].Result, ShouldHaveLength, 10)
-		So(res[3].Result, ShouldHaveLength, 0)
-		So(res[4].Result, ShouldHaveLength, 10)
+		So(res, ShouldHaveLength, 6)
+		So(res[3].Result, ShouldHaveLength, 10)
+		So(res[4].Result, ShouldHaveLength, 0)
+		So(res[5].Result, ShouldHaveLength, 10)
 
 	})
 
@@ -1964,6 +1966,7 @@ func TestSelect(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
+		DEFINE TABLE person VERSIONED;
 		LET time = "2017-01-01T15:04:05+07:00";
 		CREATE |person:1..10|;
 		SELECT * FROM person VERSION $time;
@@ -1972,10 +1975,10 @@ func TestSelect(t *testing.T) {
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 5)
-		So(res[2].Result, ShouldHaveLength, 10)
-		So(res[3].Result, ShouldHaveLength, 0)
-		So(res[4].Result, ShouldHaveLength, 10)
+		So(res, ShouldHaveLength, 6)
+		So(res[3].Result, ShouldHaveLength, 10)
+		So(res[4].Result, ShouldHaveLength, 0)
+		So(res[5].Result, ShouldHaveLength, 10)
 
 	})
 
@@ -1985,6 +1988,7 @@ func TestSelect(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
+		DEFINE TABLE person VERSIONED;
 		LET time = "test";
 		CREATE |person:1..10|;
 		SELECT * FROM person VERSION $time;
@@ -1993,12 +1997,12 @@ func TestSelect(t *testing.T) {
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 5)
-		So(res[2].Result, ShouldHaveLength, 10)
-		So(res[3].Result, ShouldHaveLength, 0)
-		So(res[3].Status, ShouldEqual, "ERR")
-		So(res[3].Detail, ShouldEqual, "Found 'test' but VERSION expression must be a date or time")
-		So(res[4].Result, ShouldHaveLength, 10)
+		So(res, ShouldHaveLength, 6)
+		So(res[3].Result, ShouldHaveLength, 10)
+		So(res[4].Result, ShouldHaveLength, 0)
+		So(res[4].Status, ShouldEqual, "ERR")
+		So(res[4].Detail, ShouldEqual, "Found 'test' but VERSION expression must be a date or time")
+		So(res[5].Result, ShouldHaveLength, 10)
 
 	})
 
@@ -2008,6 +2012,7 @@ func TestSelect(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
+		DEFINE TABLE person VERSIONED;
 		LET old = time.now();
 		CREATE person:test;
 		UPDATE person:test SET test = 1;
@@ -2025,19 +2030,19 @@ func TestSelect(t *testing.T) {
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 14)
-		So(res[3].Result, ShouldHaveLength, 1)
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(res[7].Result, ShouldHaveLength, 1)
-		So(res[9].Result, ShouldHaveLength, 0)
-		So(res[10].Result, ShouldHaveLength, 1)
-		So(data.Consume(res[10].Result[0]).Get("test").Data(), ShouldEqual, 1)
+		So(res, ShouldHaveLength, 15)
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(res[6].Result, ShouldHaveLength, 1)
+		So(res[8].Result, ShouldHaveLength, 1)
+		So(res[10].Result, ShouldHaveLength, 0)
 		So(res[11].Result, ShouldHaveLength, 1)
-		So(data.Consume(res[11].Result[0]).Get("test").Data(), ShouldEqual, 2)
+		So(data.Consume(res[11].Result[0]).Get("test").Data(), ShouldEqual, 1)
 		So(res[12].Result, ShouldHaveLength, 1)
-		So(data.Consume(res[12].Result[0]).Get("test").Data(), ShouldEqual, 3)
+		So(data.Consume(res[12].Result[0]).Get("test").Data(), ShouldEqual, 2)
 		So(res[13].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[13].Result[0]).Get("test").Data(), ShouldEqual, 3)
+		So(res[14].Result, ShouldHaveLength, 1)
+		So(data.Consume(res[14].Result[0]).Get("test").Data(), ShouldEqual, 3)
 
 	})
 
@@ -2047,6 +2052,7 @@ func TestSelect(t *testing.T) {
 
 		txt := `
 		USE NS test DB test;
+		DEFINE TABLE person VERSIONED;
 		LET old = time.now();
 		CREATE |person:1..3|;
 		UPDATE person:1, person:2, person:3 SET test = 1;
@@ -2064,27 +2070,27 @@ func TestSelect(t *testing.T) {
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 14)
-		So(res[3].Result, ShouldHaveLength, 3)
-		So(res[5].Result, ShouldHaveLength, 3)
-		So(res[7].Result, ShouldHaveLength, 3)
-		So(res[9].Result, ShouldHaveLength, 0)
-		So(res[10].Result, ShouldHaveLength, 3)
-		So(data.Consume(res[10].Result).Get("0.test").Data(), ShouldEqual, 1)
-		So(data.Consume(res[10].Result).Get("1.test").Data(), ShouldEqual, 1)
-		So(data.Consume(res[10].Result).Get("2.test").Data(), ShouldEqual, 1)
+		So(res, ShouldHaveLength, 15)
+		So(res[4].Result, ShouldHaveLength, 3)
+		So(res[6].Result, ShouldHaveLength, 3)
+		So(res[8].Result, ShouldHaveLength, 3)
+		So(res[10].Result, ShouldHaveLength, 0)
 		So(res[11].Result, ShouldHaveLength, 3)
-		So(data.Consume(res[11].Result).Get("0.test").Data(), ShouldEqual, 2)
-		So(data.Consume(res[11].Result).Get("1.test").Data(), ShouldEqual, 2)
-		So(data.Consume(res[11].Result).Get("2.test").Data(), ShouldEqual, 2)
+		So(data.Consume(res[11].Result).Get("0.test").Data(), ShouldEqual, 1)
+		So(data.Consume(res[11].Result).Get("1.test").Data(), ShouldEqual, 1)
+		So(data.Consume(res[11].Result).Get("2.test").Data(), ShouldEqual, 1)
 		So(res[12].Result, ShouldHaveLength, 3)
-		So(data.Consume(res[12].Result).Get("0.test").Data(), ShouldEqual, 3)
-		So(data.Consume(res[12].Result).Get("1.test").Data(), ShouldEqual, 3)
-		So(data.Consume(res[12].Result).Get("2.test").Data(), ShouldEqual, 3)
+		So(data.Consume(res[12].Result).Get("0.test").Data(), ShouldEqual, 2)
+		So(data.Consume(res[12].Result).Get("1.test").Data(), ShouldEqual, 2)
+		So(data.Consume(res[12].Result).Get("2.test").Data(), ShouldEqual, 2)
 		So(res[13].Result, ShouldHaveLength, 3)
 		So(data.Consume(res[13].Result).Get("0.test").Data(), ShouldEqual, 3)
 		So(data.Consume(res[13].Result).Get("1.test").Data(), ShouldEqual, 3)
 		So(data.Consume(res[13].Result).Get("2.test").Data(), ShouldEqual, 3)
+		So(res[14].Result, ShouldHaveLength, 3)
+		So(data.Consume(res[14].Result).Get("0.test").Data(), ShouldEqual, 3)
+		So(data.Consume(res[14].Result).Get("1.test").Data(), ShouldEqual, 3)
+		So(data.Consume(res[14].Result).Get("2.test").Data(), ShouldEqual, 3)
 
 	})
 
