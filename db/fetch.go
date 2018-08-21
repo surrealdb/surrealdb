@@ -44,6 +44,8 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 		return nil, nil
 	case *sql.Value:
 		return val.VA, nil
+	case []byte:
+		return string(val), nil
 	case int:
 		return float64(val), nil
 	case int8:
