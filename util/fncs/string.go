@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/abcum/surreal/util/ints"
+	"github.com/abcum/surreal/util/slug"
 	"github.com/abcum/surreal/util/text"
 )
 
@@ -136,6 +137,19 @@ func stringSlice(ctx context.Context, args ...interface{}) (interface{}, error) 
 		return s[:f], nil
 	}
 	return s, nil
+}
+
+func stringSlug(ctx context.Context, args ...interface{}) (interface{}, error) {
+	switch len(args) {
+	case 1:
+		s, _ := ensureString(args[0])
+		return slug.Make(s), nil
+	case 2:
+		s, _ := ensureString(args[0])
+		l, _ := ensureString(args[1])
+		return slug.MakeLang(s, l), nil
+	}
+	return nil, nil
 }
 
 func stringSplit(ctx context.Context, args ...interface{}) (interface{}, error) {

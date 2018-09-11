@@ -198,6 +198,8 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return stringSearch(ctx, args...)
 	case "string.slice":
 		return stringSlice(ctx, args...)
+	case "string.slug":
+		return stringSlug(ctx, args...)
 	case "string.split":
 		return stringSplit(ctx, args...)
 	case "string.startsWith":

@@ -166,6 +166,7 @@ var funcs = map[string]map[int]interface{}{
 	"string.reverse":    {1: nil},
 	"string.search":     {2: nil},
 	"string.slice":      {3: nil},
+	"string.slug":       {1: nil, 2: nil},
 	"string.split":      {2: nil},
 	"string.startsWith": {2: nil},
 	"string.substr":     {3: nil},
