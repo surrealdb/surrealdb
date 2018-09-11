@@ -1,8 +1,8 @@
-hash: dfd07578dd849c38fa697bf043f5eb71ed030da33e588c8b57e4401891a78769
-updated: 2018-08-20T01:16:54.755576+01:00
+hash: 7227d566f4817cbb8b1eb609aeb5928f1bc420f763fbf387d5effcfa2e8e6509
+updated: 2018-09-11T13:25:49.903968+01:00
 imports:
 - name: cloud.google.com/go
-  version: 64a2037ec6be8a4b0c1d1f706ed35b428b989239
+  version: c728a003b238b26cef9ab6753a5dc424b331c3ad
   subpackages:
   - compute/metadata
   - iam
@@ -12,7 +12,7 @@ imports:
   - internal/version
   - storage
 - name: contrib.go.opencensus.io/exporter/stackdriver
-  version: f7f5758592258ab71384efef9cdb0daf785a9ab1
+  version: 9f333b48d3826fe9ed540ba2095c1fbd8514f750
   subpackages:
   - propagation
 - name: github.com/abcum/bump
@@ -39,7 +39,7 @@ imports:
 - name: github.com/armon/go-metrics
   version: 3c58d8115a78a6879e5df75ae900846768d36895
 - name: github.com/aws/aws-sdk-go
-  version: ca229c7730be9278527fbb287f5a26c91e328d86
+  version: 71a2a92b0063297b055b6f5a014d441c142da2ce
   subpackages:
   - aws
   - aws/awserr
@@ -74,17 +74,30 @@ imports:
   - service/s3/s3iface
   - service/s3/s3manager
   - service/sts
+- name: github.com/client9/misspell
+  version: c0b55c8239520f6b5aa15a0207ca8b28027ba49e
+  subpackages:
+  - cmd/misspell
 - name: github.com/dgrijalva/jwt-go
   version: 06ea1031745cb8b3dab3f6a236daf2b0aa468b7e
 - name: github.com/elithrar/simple-scrypt
   version: d150773194090feb6c897805a7bcea8d49544e2c
 - name: github.com/go-ini/ini
-  version: 5cf292cae48347c2490ac1a58fe36735fb78df7e
+  version: fa25069db393aecc09b71267d0489b357781c860
+- name: github.com/golang/lint
+  version: 06c8688daad7faa9da5a0c2f163a3d14aac986ca
+  subpackages:
+  - golint
 - name: github.com/golang/protobuf
-  version: aa810b61a9c79d51363740d207bb46cf8e620ed5
+  version: e344474228f55cc8e5f2342b0493b71bcdd258f4
   subpackages:
   - proto
+  - protoc-gen-go
   - protoc-gen-go/descriptor
+  - protoc-gen-go/generator
+  - protoc-gen-go/generator/internal/remap
+  - protoc-gen-go/grpc
+  - protoc-gen-go/plugin
   - ptypes
   - ptypes/any
   - ptypes/duration
@@ -92,21 +105,21 @@ imports:
 - name: github.com/googleapis/gax-go
   version: 1ef592c90f479e3ab30c6c2312e20e13881b7ea6
 - name: github.com/gorilla/websocket
-  version: ea4d1f681babbce9545c9c5f3d5194a789c89f5b
+  version: 66b9c49e59c6c48f0ffce28c2d8b8a5678502c6d
 - name: github.com/hashicorp/errwrap
-  version: d6c0cd88035724dd42e0f335ae30161c20575ecc
+  version: 8a6fb523712970c966eefc6b39ed2c5e74880354
 - name: github.com/hashicorp/go-immutable-radix
-  version: 7f3cd4390caab3250a57f30efdb2a65dd7649ecf
+  version: 27df80928bb34bb1b0d6d0e01b9e679902e7a6b5
 - name: github.com/hashicorp/go-msgpack
   version: fa3f63826f7c23912c15263591e65d54d080b458
   subpackages:
   - codec
 - name: github.com/hashicorp/go-multierror
-  version: 3d5d8f294aa03d8e98859feac328afbdf1ae0703
+  version: 886a7fbe3eb1c874d46f623bfa70af45f425b3d1
 - name: github.com/hashicorp/go-sockaddr
   version: 6d291a969b86c4b633730bfc6b8b9d64c3aafed9
 - name: github.com/hashicorp/golang-lru
-  version: 0fb14efe8c47ae851c0034ed7a448854d3d34cf3
+  version: 20f1fb78b0740ba8c3cb143a61e86ba5c8669768
   subpackages:
   - simplelru
 - name: github.com/hashicorp/memberlist
@@ -122,18 +135,22 @@ imports:
   version: 76626ae9c91c4f2a10f34cad8ce83ea42c93bb75
 - name: github.com/jmespath/go-jmespath
   version: c2b33e8439af944379acbdd9c3a5fe0bc44bd8a5
+- name: github.com/kisielk/gotool
+  version: 80517062f582ea3340cd4baf70e86d539ae7d84d
+  subpackages:
+  - internal/load
 - name: github.com/kr/text
   version: e2ffdb16a802fe2bb95e2e35ff34f0e53aeef34f
 - name: github.com/mattn/go-colorable
   version: efa589957cd060542a26d2dd7832fd6a6c6c3ade
 - name: github.com/mattn/go-isatty
-  version: 6ca4dbf54d38eea1a992b3c722a76a5d1c4cb25c
+  version: 3fb116b820352b7f0c281308a4d6250c22d94e27
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: 4bda1db8399af2743f88be0ddb0761dfa89f2853
+  version: e875a31a5cfbcd646131e625f24818cbae228913
 - name: github.com/mitchellh/mapstructure
-  version: f15292f7a699fcc1a38a80977f80a046874ba8ac
+  version: fa473d140ef3c6adf42d6b391fe76707f1f243c8
 - name: github.com/newrelic/go-agent
   version: f5bce3387232559bcbe6a5f8227c4bf508dac1ba
   subpackages:
@@ -145,8 +162,10 @@ imports:
   - internal/utilization
 - name: github.com/pkg/profile
   version: 5b67d428864e92711fcbd2f8629456121a56d91f
+- name: github.com/rainycape/unidecode
+  version: cb7f23ec59bec0d61b19c56cd88cee3d0cc1870c
 - name: github.com/rs/xid
-  version: 2c7e97ce663ff82c49656bca3048df0fdd83c5f9
+  version: 15d26544def341f036c5f8dca987a4cbe575032c
 - name: github.com/satori/go.uuid
   version: f58768cc1a7a7e77a3bd49e98cdd21419399b6a3
 - name: github.com/sean-/seed
@@ -160,13 +179,13 @@ imports:
 - name: github.com/spf13/cobra
   version: ef82de70bb3f60c65fb8eebacbb2d122ef517385
 - name: github.com/spf13/pflag
-  version: 947b89bd1b7dabfed991ac30e1a56f5193f0c88b
+  version: 298182f68c66c05229eb03ac171abe6e309ee79a
 - name: github.com/ugorji/go
   version: b4c50a2b199d93b13dc15e78929cfb23bfdf21ab
   subpackages:
   - codec
 - name: go.opencensus.io
-  version: 1789eaf7638d6f16d055afd35654928c04663cfc
+  version: f21fe3feadc5461b952191052818685a410428d4
   subpackages:
   - internal
   - internal/tagencoding
@@ -179,8 +198,9 @@ imports:
   - trace
   - trace/internal
   - trace/propagation
+  - trace/tracestate
 - name: golang.org/x/crypto
-  version: aabede6cba87e37f413b3e60ebfc214f8eeca1b0
+  version: 0e37d006457bf46f9e6692014ba72ef82c33022c
   subpackages:
   - bcrypt
   - blowfish
@@ -189,8 +209,10 @@ imports:
   - pbkdf2
   - scrypt
   - ssh/terminal
+- name: golang.org/x/lint
+  version: 06c8688daad7faa9da5a0c2f163a3d14aac986ca
 - name: golang.org/x/net
-  version: aaf60122140d3fcf75376d319f0554393160eb50
+  version: 161cd47e91fd58ac17490ef4d742dc98bb4cf60e
   subpackages:
   - bpf
   - context
@@ -206,14 +228,14 @@ imports:
   - ipv6
   - trace
 - name: golang.org/x/oauth2
-  version: 3d292e4d0cdc3a0113e6d207bb137145ef1de42f
+  version: d2e6202438beef2727060aa7cabdd924d92ebfd9
   subpackages:
   - google
   - internal
   - jws
   - jwt
 - name: golang.org/x/sys
-  version: 1c9583448a9c3aa0f9a6a5241bf73c0bd8aafded
+  version: d0be0721c37eeb5299f245a996a483160fc36940
   subpackages:
   - unix
   - windows
@@ -229,8 +251,21 @@ imports:
   - transform
   - unicode/bidi
   - unicode/norm
+- name: golang.org/x/tools
+  version: 18207bb12d3a3338e74403fed8ca1ba866dd3a57
+  subpackages:
+  - cmd/goimports
+  - go/ast/astutil
+  - go/buildutil
+  - go/gcexportdata
+  - go/internal/cgo
+  - go/internal/gcimporter
+  - go/loader
+  - go/types/typeutil
+  - imports
+  - internal/fastwalk
 - name: google.golang.org/api
-  version: e21acd801f91da814261b938941d193bb036441a
+  version: 7ca32eb868bf53ea2fc406698eb98583a8073d19
   subpackages:
   - gensupport
   - googleapi
@@ -242,7 +277,7 @@ imports:
   - storage/v1
   - transport/http
 - name: google.golang.org/appengine
-  version: 4216e58b9158e5f1c906f1aca75162a46a2ec88a
+  version: 03cac3b07182cfb08c0d0c0b6ee72a1ceb151c92
   subpackages:
   - internal
   - internal/app_identity
@@ -254,14 +289,14 @@ imports:
   - internal/urlfetch
   - urlfetch
 - name: google.golang.org/genproto
-  version: c66870c02cf823ceb633bcd05be3c7cda29976f4
+  version: 11092d34479b07829b72e10713b159248caf5dad
   subpackages:
   - googleapis/api/annotations
   - googleapis/iam/v1
   - googleapis/rpc/code
   - googleapis/rpc/status
 - name: google.golang.org/grpc
-  version: 9907ae0e57ce159e835381ed54eb271206bf7b12
+  version: 46ee6abebf62241b49973422c42250327bb94169
   subpackages:
   - balancer
   - balancer/base
@@ -290,15 +325,32 @@ imports:
   - tap
 - name: gopkg.in/tylerb/graceful.v1
   version: 4654dfbb6ad53cb5e27f37d99b02e16c1872fbbb
+- name: honnef.co/go/tools
+  version: 88497007e8588ea5b6baee991f74a1607e809487
+  subpackages:
+  - callgraph
+  - callgraph/static
+  - cmd/staticcheck
+  - deprecated
+  - functions
+  - internal/sharedcheck
+  - lint
+  - lint/lintdsl
+  - lint/lintutil
+  - ssa
+  - ssa/ssautil
+  - staticcheck
+  - staticcheck/vrp
+  - version
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: 0892b62f0d9fb5857760c3cfca837207185117ee
+  version: 0210a2f0f73c96103378b0b935f39868e5731809
   subpackages:
   - js
 - name: github.com/jtolds/gls
   version: 77f18212c9c7edc9bd6a33d383a7b545ce62f064
 - name: github.com/smartystreets/assertions
-  version: 886ec427f6b97ea7c207ab54f4045050647c2820
+  version: 7c9eb446e3cf06e83049467a5f25c38730ce7034
   subpackages:
   - internal/go-render/render
   - internal/oglematchers
