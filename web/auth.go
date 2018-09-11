@@ -339,7 +339,9 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 
 			// Store the authenticated thing.
 
-			auth.Data = sql.NewThing(tbv, idv)
+			if tbk && idk {
+				auth.Data = sql.NewThing(tbv, idv)
+			}
 
 			// Check that the scope specifies connect.
 
