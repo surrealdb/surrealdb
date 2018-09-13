@@ -28,6 +28,8 @@ func (e *executor) executeInfo(ctx context.Context, ast *sql.InfoStatement) (out
 		return e.executeInfoNS(ctx, ast)
 	case sql.DATABASE:
 		return e.executeInfoDB(ctx, ast)
+	case sql.SCOPE:
+		return e.executeInfoSC(ctx, ast)
 	case sql.TABLE:
 		return e.executeInfoTB(ctx, ast)
 	}
@@ -131,24 +133,44 @@ func (e *executor) executeInfoDB(ctx context.Context, ast *sql.InfoStatement) (o
 
 }
 
+func (e *executor) executeInfoSC(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
+
+	st, err := e.dbo.AllST(ctx, ast.NS, ast.DB, ast.What.VA)
+	if err != nil {
+		return nil, err
+	}
+
+	res := data.New()
+
+	token := make(map[string]interface{})
+	for _, v := range st {
+		token[v.Name.VA] = v.String()
+	}
+
+	res.Set(token, "token")
+
+	return []interface{}{res.Data()}, nil
+
+}
+
 func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	ev, err := e.dbo.AllEV(ctx, ast.NS, ast.DB, ast.What.TB)
+	ev, err := e.dbo.AllEV(ctx, ast.NS, ast.DB, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
 
-	fd, err := e.dbo.AllFD(ctx, ast.NS, ast.DB, ast.What.TB)
+	fd, err := e.dbo.AllFD(ctx, ast.NS, ast.DB, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
 
-	ix, err := e.dbo.AllIX(ctx, ast.NS, ast.DB, ast.What.TB)
+	ix, err := e.dbo.AllIX(ctx, ast.NS, ast.DB, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
 
-	ft, err := e.dbo.AllFT(ctx, ast.NS, ast.DB, ast.What.TB)
+	ft, err := e.dbo.AllFT(ctx, ast.NS, ast.DB, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}

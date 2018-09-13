@@ -108,6 +108,32 @@ func TestInfo(t *testing.T) {
 
 	})
 
+	Convey("Info for scope", t, func() {
+
+		setupDB()
+
+		txt := `
+		USE NS test DB test;
+		DEFINE SCOPE test;
+		DEFINE TOKEN test ON SCOPE test TYPE HS512 VALUE "test";
+		INFO FOR SCOPE test;
+		REMOVE TOKEN test ON SCOPE test;
+		INFO FOR SCOPE test;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 6)
+		So(res[1].Status, ShouldEqual, "OK")
+		So(res[2].Status, ShouldEqual, "OK")
+		So(data.Consume(res[3].Result[0]).Get("token").Data(), ShouldHaveLength, 1)
+		So(data.Consume(res[3].Result[0]).Get("token.test").Data(), ShouldEqual, "DEFINE TOKEN test ON SCOPE test TYPE HS512 VALUE ********")
+		So(res[4].Status, ShouldEqual, "OK")
+		So(res[5].Status, ShouldEqual, "OK")
+		So(data.Consume(res[5].Result[0]).Get("token").Data(), ShouldHaveLength, 0)
+
+	})
+
 	Convey("Info for table", t, func() {
 
 		setupDB()

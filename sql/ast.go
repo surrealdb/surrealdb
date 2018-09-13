@@ -86,7 +86,7 @@ type InfoStatement struct {
 	NS   string
 	DB   string
 	Kind Token
-	What *Table
+	What *Ident
 }
 
 // --------------------------------------------------

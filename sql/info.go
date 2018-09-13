@@ -22,7 +22,7 @@ func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 		return nil, err
 	}
 
-	if stmt.Kind, _, err = p.shouldBe(NAMESPACE, DATABASE, TABLE); err != nil {
+	if stmt.Kind, _, err = p.shouldBe(NAMESPACE, DATABASE, SCOPE, TABLE); err != nil {
 		return nil, err
 	}
 
@@ -38,11 +38,20 @@ func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 		}
 	}
 
+	if is(stmt.Kind, SCOPE) {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+			return nil, err
+		}
+		if stmt.What, err = p.parseIdent(); err != nil {
+			return nil, err
+		}
+	}
+
 	if is(stmt.Kind, TABLE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
-		if stmt.What, err = p.parseTable(); err != nil {
+		if stmt.What, err = p.parseIdent(); err != nil {
 			return nil, err
 		}
 	}

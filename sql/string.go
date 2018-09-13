@@ -163,6 +163,8 @@ func (this InfoStatement) String() string {
 		return "INFO FOR NAMESPACE"
 	case DATABASE:
 		return "INFO FOR DATABASE"
+	case SCOPE:
+		return print("INFO FOR SCOPE %s", this.What)
 	default:
 		return print("INFO FOR TABLE %s", this.What)
 	}
