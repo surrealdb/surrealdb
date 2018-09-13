@@ -126,7 +126,7 @@ func TestMain(t *testing.T) {
 			new: &SC{},
 		},
 		{
-			str: "/surreal/*/abcum/*/database/!/s/admin/!/k/default",
+			str: "/surreal/*/abcum/*/database/!/st/admin/!/k/default",
 			obj: &ST{KV: "surreal", NS: "abcum", DB: "database", SC: "admin", TK: "default"},
 			new: &ST{},
 		},

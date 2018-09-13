@@ -89,6 +89,12 @@ func (e *executor) executeRemoveToken(ctx context.Context, ast *sql.RemoveTokenS
 		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name.VA}
 		_, err = e.dbo.ClrP(ctx, tkey.Encode(), 0)
 
+	case sql.SCOPE:
+
+		// Remove the token definition
+		tkey := &keys.ST{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.What.VA, TK: ast.Name.VA}
+		_, err = e.dbo.ClrP(ctx, tkey.Encode(), 0)
+
 	}
 
 	return

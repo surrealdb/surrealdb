@@ -328,6 +328,7 @@ type DefineTokenStatement struct {
 	DB   string
 	Kind Token
 	Name *Ident
+	What *Ident
 	Type string
 	Code []byte
 }
@@ -339,6 +340,7 @@ type RemoveTokenStatement struct {
 	DB   string
 	Kind Token
 	Name *Ident
+	What *Ident
 }
 
 // --------------------------------------------------

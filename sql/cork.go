@@ -1406,6 +1406,7 @@ func (this *DefineTokenStatement) ExtendCORK() byte {
 func (this *DefineTokenStatement) MarshalCORK(w *cork.Writer) (err error) {
 	w.EncodeAny(this.Kind)
 	w.EncodeAny(this.Name)
+	w.EncodeAny(this.What)
 	w.EncodeAny(this.Type)
 	w.EncodeBytes(this.Code)
 	return
@@ -1414,6 +1415,7 @@ func (this *DefineTokenStatement) MarshalCORK(w *cork.Writer) (err error) {
 func (this *DefineTokenStatement) UnmarshalCORK(r *cork.Reader) (err error) {
 	r.DecodeAny(&this.Kind)
 	r.DecodeAny(&this.Name)
+	r.DecodeAny(&this.What)
 	r.DecodeAny(&this.Type)
 	r.DecodeBytes(&this.Code)
 	return

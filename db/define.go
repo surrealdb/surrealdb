@@ -94,6 +94,14 @@ func (e *executor) executeDefineToken(ctx context.Context, ast *sql.DefineTokenS
 		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name.VA}
 		_, err = e.dbo.Put(ctx, 0, tkey.Encode(), ast.Encode())
 
+	case sql.SCOPE:
+
+		e.dbo.AddDB(ctx, ast.NS, ast.DB)
+
+		// Save the token definition
+		tkey := &keys.ST{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.What.VA, TK: ast.Name.VA}
+		_, err = e.dbo.Put(ctx, 0, tkey.Encode(), ast.Encode())
+
 	}
 
 	return

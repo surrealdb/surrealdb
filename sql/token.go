@@ -18,6 +18,8 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 
 	stmt = &DefineTokenStatement{}
 
+	stmt.What = &Ident{}
+
 	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
@@ -44,6 +46,9 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 
 	if is(stmt.Kind, SCOPE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+			return nil, err
+		}
+		if stmt.What, err = p.parseIdent(); err != nil {
 			return nil, err
 		}
 	}
@@ -85,6 +90,8 @@ func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err er
 
 	stmt = &RemoveTokenStatement{}
 
+	stmt.What = &Ident{}
+
 	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
@@ -111,6 +118,9 @@ func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err er
 
 	if is(stmt.Kind, SCOPE) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+			return nil, err
+		}
+		if stmt.What, err = p.parseIdent(); err != nil {
 			return nil, err
 		}
 	}

@@ -2266,6 +2266,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				Kind: NAMESPACE,
 				Name: &Ident{"test"},
+				What: &Ident{""},
 				Type: "HS512",
 				Code: []byte("secret"),
 			}}},
@@ -2277,23 +2278,25 @@ func Test_Parse_Queries_Define(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				Kind: DATABASE,
 				Name: &Ident{"test"},
+				What: &Ident{""},
 				Type: "HS512",
 				Code: []byte("secret"),
 			}}},
 		},
 		{
-			sql: `DEFINE TOKEN test ON SCOPE TYPE HS512 VALUE "secret"`,
-			str: `DEFINE TOKEN test ON SCOPE TYPE HS512 VALUE ********`,
+			sql: `DEFINE TOKEN test ON SCOPE test TYPE HS512 VALUE "secret"`,
+			str: `DEFINE TOKEN test ON SCOPE test TYPE HS512 VALUE ********`,
 			res: &Query{Statements: []Statement{&DefineTokenStatement{
 				KV: "*", NS: "*", DB: "*",
 				Kind: SCOPE,
 				Name: &Ident{"test"},
+				What: &Ident{"test"},
 				Type: "HS512",
 				Code: []byte("secret"),
 			}}},
 		},
 		{
-			sql: `DEFINE TOKEN test ON SCOPE TYPE HS512 VALUE "secret" something`,
+			sql: `DEFINE TOKEN test ON SCOPE test TYPE HS512 VALUE "secret" something`,
 			err: "Found `something` but expected `;`",
 		},
 		// ----------------------------------------------------------------------
@@ -3104,6 +3107,7 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				Kind: NAMESPACE,
 				Name: &Ident{"test"},
+				What: &Ident{""},
 			}}},
 		},
 		{
@@ -3112,14 +3116,20 @@ func Test_Parse_Queries_Remove(t *testing.T) {
 				KV: "*", NS: "*", DB: "*",
 				Kind: DATABASE,
 				Name: &Ident{"test"},
+				What: &Ident{""},
 			}}},
 		},
 		{
 			sql: `REMOVE TOKEN test ON SCOPE`,
+			err: "Found `` but expected `name`",
+		},
+		{
+			sql: `REMOVE TOKEN test ON SCOPE test`,
 			res: &Query{Statements: []Statement{&RemoveTokenStatement{
 				KV: "*", NS: "*", DB: "*",
 				Kind: SCOPE,
 				Name: &Ident{"test"},
+				What: &Ident{"test"},
 			}}},
 		},
 		{
