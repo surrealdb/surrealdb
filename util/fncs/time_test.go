@@ -213,6 +213,25 @@ func TestTime(t *testing.T) {
 		So(res, ShouldEqual, nil)
 	})
 
+	Convey("time.week() works properly", t, func() {
+		res, _ := Run(context.Background(), "time.week")
+		So(res, ShouldHaveSameTypeAs, float64(0))
+		_, val := now.ISOWeek()
+		So(res, ShouldBeGreaterThanOrEqualTo, val)
+	})
+
+	Convey("time.week(a) works properly", t, func() {
+		res, _ := Run(context.Background(), "time.week", old)
+		So(res, ShouldHaveSameTypeAs, float64(0))
+		So(res, ShouldEqual, 1)
+	})
+
+	Convey("time.week(a,b,c) errors properly", t, func() {
+		res, _ := Run(context.Background(), "time.week", "one", "two")
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
+	})
+
 	Convey("time.year() works properly", t, func() {
 		res, _ := Run(context.Background(), "time.year")
 		So(res, ShouldHaveSameTypeAs, float64(0))

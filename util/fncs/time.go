@@ -143,6 +143,20 @@ func timeUnix(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return nil, nil
 }
 
+func timeWeek(ctx context.Context, args ...interface{}) (interface{}, error) {
+	switch len(args) {
+	case 0:
+		_, w := time.Now().ISOWeek()
+		return float64(w), nil
+	case 1:
+		if v, ok := ensureTime(args[0]); ok {
+			_, w := v.ISOWeek()
+			return float64(w), nil
+		}
+	}
+	return nil, nil
+}
+
 func timeYear(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 0:
