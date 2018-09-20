@@ -193,7 +193,9 @@ var funcs = map[string]map[int]interface{}{
 	"time.nano":  {0: nil, 1: nil},
 	"time.secs":  {0: nil, 1: nil},
 	"time.unix":  {0: nil, 1: nil},
+	"time.wday":  {0: nil, 1: nil},
 	"time.week":  {0: nil, 1: nil},
+	"time.yday":  {0: nil, 1: nil},
 	"time.year":  {0: nil, 1: nil},
 
 	// Url implementation

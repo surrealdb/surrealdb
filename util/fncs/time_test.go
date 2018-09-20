@@ -213,6 +213,24 @@ func TestTime(t *testing.T) {
 		So(res, ShouldEqual, nil)
 	})
 
+	Convey("time.wday() works properly", t, func() {
+		res, _ := Run(context.Background(), "time.wday")
+		So(res, ShouldHaveSameTypeAs, float64(0))
+		So(res, ShouldBeGreaterThanOrEqualTo, now.Weekday())
+	})
+
+	Convey("time.wday(a) works properly", t, func() {
+		res, _ := Run(context.Background(), "time.wday", old)
+		So(res, ShouldHaveSameTypeAs, float64(0))
+		So(res, ShouldEqual, 1)
+	})
+
+	Convey("time.wday(a,b,c) errors properly", t, func() {
+		res, _ := Run(context.Background(), "time.wday", "one", "two")
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
+	})
+
 	Convey("time.week() works properly", t, func() {
 		res, _ := Run(context.Background(), "time.week")
 		So(res, ShouldHaveSameTypeAs, float64(0))
@@ -228,6 +246,24 @@ func TestTime(t *testing.T) {
 
 	Convey("time.week(a,b,c) errors properly", t, func() {
 		res, _ := Run(context.Background(), "time.week", "one", "two")
+		So(res, ShouldHaveSameTypeAs, nil)
+		So(res, ShouldEqual, nil)
+	})
+
+	Convey("time.yday() works properly", t, func() {
+		res, _ := Run(context.Background(), "time.yday")
+		So(res, ShouldHaveSameTypeAs, float64(0))
+		So(res, ShouldEqual, now.YearDay())
+	})
+
+	Convey("time.yday(a) works properly", t, func() {
+		res, _ := Run(context.Background(), "time.yday", old)
+		So(res, ShouldHaveSameTypeAs, float64(0))
+		So(res, ShouldEqual, 2)
+	})
+
+	Convey("time.yday(a,b,c) errors properly", t, func() {
+		res, _ := Run(context.Background(), "time.yday", "one", "two")
 		So(res, ShouldHaveSameTypeAs, nil)
 		So(res, ShouldEqual, nil)
 	})

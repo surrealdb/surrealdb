@@ -248,8 +248,12 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return timeSecs(ctx, args...)
 	case "time.unix":
 		return timeUnix(ctx, args...)
+	case "time.wday":
+		return timeWday(ctx, args...)
 	case "time.week":
 		return timeWeek(ctx, args...)
+	case "time.yday":
+		return timeYday(ctx, args...)
 	case "time.year":
 		return timeYear(ctx, args...)
 

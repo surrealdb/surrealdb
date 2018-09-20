@@ -143,6 +143,18 @@ func timeUnix(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return nil, nil
 }
 
+func timeWday(ctx context.Context, args ...interface{}) (interface{}, error) {
+	switch len(args) {
+	case 0:
+		return float64(time.Now().Weekday()), nil
+	case 1:
+		if v, ok := ensureTime(args[0]); ok {
+			return float64(v.Weekday()), nil
+		}
+	}
+	return nil, nil
+}
+
 func timeWeek(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
 	case 0:
@@ -152,6 +164,18 @@ func timeWeek(ctx context.Context, args ...interface{}) (interface{}, error) {
 		if v, ok := ensureTime(args[0]); ok {
 			_, w := v.ISOWeek()
 			return float64(w), nil
+		}
+	}
+	return nil, nil
+}
+
+func timeYday(ctx context.Context, args ...interface{}) (interface{}, error) {
+	switch len(args) {
+	case 0:
+		return float64(time.Now().YearDay()), nil
+	case 1:
+		if v, ok := ensureTime(args[0]); ok {
+			return float64(v.YearDay()), nil
 		}
 	}
 	return nil, nil
