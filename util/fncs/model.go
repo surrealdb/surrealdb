@@ -17,11 +17,18 @@ package fncs
 import (
 	"context"
 
+	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 )
 
 func model(ctx context.Context, args ...interface{}) (interface{}, error) {
+
 	tb, _ := ensureString(args[0])
+
+	if len(tb) == 0 {
+		return nil, mem.ErrorTBNotFound
+	}
+
 	switch len(args) {
 	case 2:
 		if max, ok := ensureFloat(args[1]); ok {
@@ -42,5 +49,7 @@ func model(ctx context.Context, args ...interface{}) (interface{}, error) {
 			}
 		}
 	}
+
 	return nil, nil
+
 }

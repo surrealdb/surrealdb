@@ -17,10 +17,18 @@ package fncs
 import (
 	"context"
 
+	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 )
 
 func thing(ctx context.Context, args ...interface{}) (interface{}, error) {
+
 	tb, _ := ensureString(args[0])
+
+	if len(tb) == 0 {
+		return nil, mem.ErrorTBNotFound
+	}
+
 	return sql.NewThing(tb, args[1]), nil
+
 }

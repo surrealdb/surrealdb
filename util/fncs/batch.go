@@ -17,11 +17,19 @@ package fncs
 import (
 	"context"
 
+	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 )
 
 func batch(ctx context.Context, args ...interface{}) (interface{}, error) {
+
 	tb, _ := ensureString(args[0])
 	id, _ := ensureSlice(args[1])
+
+	if len(tb) == 0 {
+		return nil, mem.ErrorTBNotFound
+	}
+
 	return sql.NewBatch(tb, id), nil
+
 }
