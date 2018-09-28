@@ -29,10 +29,11 @@ import (
 )
 
 type executor struct {
-	dbo  *mem.Cache
-	time int64
-	lock *mutex
-	send chan *Response
+	dbo   *mem.Cache
+	time  int64
+	lock  *mutex
+	send  chan *Response
+	cache *cache
 }
 
 func newExecutor() (e *executor) {
@@ -42,6 +43,8 @@ func newExecutor() (e *executor) {
 	e.dbo = mem.New()
 
 	e.send = make(chan *Response)
+
+	e.cache = new(cache)
 
 	return
 

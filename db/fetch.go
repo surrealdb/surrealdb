@@ -16,6 +16,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"reflect"
 	"regexp"
@@ -350,6 +351,12 @@ func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc
 		return nil, err
 	}
 
+	key := fmt.Sprintf("%d %s", ver, val)
+
+	if e.cache.Has(key) {
+		return e.cache.Get(key), nil
+	}
+
 	res, err := e.executeSelect(ctx, &sql.SelectStatement{
 		KV:       cnf.Settings.DB.Base,
 		NS:       ctx.Value(ctxKeyNs).(string),
@@ -365,6 +372,7 @@ func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc
 	}
 
 	if len(res) > 0 {
+		e.cache.Put(key, res[0])
 		return res[0], nil
 	}
 
@@ -377,6 +385,12 @@ func (e *executor) fetchArray(ctx context.Context, val []interface{}, doc *data.
 	ver, err := e.fetchVersion(ctx, ctx.Value(ctxKeyVersion))
 	if err != nil {
 		return nil, err
+	}
+
+	key := fmt.Sprintf("%d %s", ver, val)
+
+	if e.cache.Has(key) {
+		return e.cache.Get(key), nil
 	}
 
 	res, err := e.executeSelect(ctx, &sql.SelectStatement{
@@ -393,7 +407,12 @@ func (e *executor) fetchArray(ctx context.Context, val []interface{}, doc *data.
 		return nil, err
 	}
 
-	return res, nil
+	if len(res) > 0 {
+		e.cache.Put(key, res)
+		return res, nil
+	}
+
+	return nil, nil
 
 }
 
@@ -1063,17 +1082,17 @@ func chkArrayL(op sql.Token, a []interface{}, i interface{}) (val bool) {
 	case sql.MAT:
 		switch s := i.(type) {
 		case string:
-			return chkSearch(op, a, s)
+			return chkSearchL(op, a, s)
 		}
 	case sql.NAT:
 		switch s := i.(type) {
 		case string:
-			return chkSearch(op, a, s)
+			return chkSearchL(op, a, s)
 		}
 	case sql.MAY:
 		switch s := i.(type) {
 		case string:
-			return chkSearch(op, a, s)
+			return chkSearchL(op, a, s)
 		}
 	}
 	return negOp(op)
@@ -1112,17 +1131,17 @@ func chkArrayR(op sql.Token, i interface{}, a []interface{}) (val bool) {
 	case sql.MAT:
 		switch s := i.(type) {
 		case string:
-			return chkSearch(op, a, s)
+			return chkSearchR(op, a, s)
 		}
 	case sql.NAT:
 		switch s := i.(type) {
 		case string:
-			return chkSearch(op, a, s)
+			return chkSearchR(op, a, s)
 		}
 	case sql.MAY:
 		switch s := i.(type) {
 		case string:
-			return chkSearch(op, a, s)
+			return chkSearchR(op, a, s)
 		}
 	}
 	return negOp(op)
@@ -1250,7 +1269,7 @@ func chkMatch(op sql.Token, a []interface{}, r *regexp.Regexp) (val bool) {
 
 }
 
-func chkSearch(op sql.Token, a []interface{}, r string) (val bool) {
+func chkSearchL(op sql.Token, a []interface{}, p string) (val bool) {
 
 	if len(a) == 0 {
 		return op == sql.NAT
@@ -1276,21 +1295,82 @@ func chkSearch(op sql.Token, a []interface{}, r string) (val bool) {
 		}
 
 		if op == sql.MAT {
-			b, e := search.New(language.Und, search.Loose).IndexString(s, r)
+			b, e := search.New(language.Und, search.Loose).IndexString(s, p)
 			if b == -1 && e == -1 {
 				return false
 			}
 		}
 
 		if op == sql.NAT {
-			b, e := search.New(language.Und, search.Loose).IndexString(s, r)
+			b, e := search.New(language.Und, search.Loose).IndexString(s, p)
 			if b == -1 && e == -1 {
 				return true
 			}
 		}
 
 		if op == sql.MAY {
-			b, e := search.New(language.Und, search.Loose).IndexString(s, r)
+			b, e := search.New(language.Und, search.Loose).IndexString(s, p)
+			if b != -1 && e != -1 {
+				return true
+			}
+		}
+
+	}
+
+	switch op {
+	case sql.MAT:
+		return true
+	case sql.NAT:
+		return false
+	case sql.MAY:
+		return false
+	}
+
+	return
+
+}
+
+func chkSearchR(op sql.Token, a []interface{}, p string) (val bool) {
+
+	if len(a) == 0 {
+		return op == sql.NAT
+	}
+
+	for _, v := range a {
+
+		var s string
+
+		switch c := v.(type) {
+		default:
+			return false
+		case string:
+			s = c
+		case bool:
+			s = strconv.FormatBool(c)
+		case int64:
+			s = strconv.FormatInt(c, 10)
+		case float64:
+			s = strconv.FormatFloat(c, 'g', -1, 64)
+		case time.Time:
+			s = c.String()
+		}
+
+		if op == sql.MAT {
+			b, e := search.New(language.Und, search.Loose).IndexString(p, s)
+			if b == -1 && e == -1 {
+				return false
+			}
+		}
+
+		if op == sql.NAT {
+			b, e := search.New(language.Und, search.Loose).IndexString(p, s)
+			if b == -1 && e == -1 {
+				return true
+			}
+		}
+
+		if op == sql.MAY {
+			b, e := search.New(language.Und, search.Loose).IndexString(p, s)
 			if b != -1 && e != -1 {
 				return true
 			}
