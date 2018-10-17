@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/chck"
 )
 
 func toNumber(str string) (float64, error) {
@@ -29,15 +28,6 @@ func toNumber(str string) (float64, error) {
 		val = 0.0
 		err = fmt.Errorf("Expected a number, but found '%v'", str)
 
-	}
-	return float64(int64(val)), err
-}
-
-func toDouble(str string) (float64, error) {
-	val, err := strconv.ParseFloat(str, 64)
-	if err != nil {
-		val = 0.0
-		err = fmt.Errorf("Expected a number, but found '%v'", str)
 	}
 	return float64(val), err
 }
@@ -117,61 +107,21 @@ func ConvertTo(t, k string, obj interface{}) (val interface{}, err error) {
 	switch t {
 	default:
 		return obj, nil
-	case "uuid":
-		return ConvertToUuid(obj)
-	case "email":
-		return ConvertToEmail(obj)
-	case "phone":
-		return ConvertToPhone(obj)
 	case "array":
 		return ConvertToArray(obj)
 	case "object":
 		return ConvertToObject(obj)
-	case "domain":
-		return ConvertToDomain(obj)
-	case "base64":
-		return ConvertToBase64(obj)
 	case "string":
 		return ConvertToString(obj)
 	case "number":
 		return ConvertToNumber(obj)
-	case "double":
-		return ConvertToDouble(obj)
 	case "boolean":
 		return ConvertToBoolean(obj)
 	case "datetime":
 		return ConvertToDatetime(obj)
-	case "latitude":
-		return ConvertToLatitude(obj)
-	case "longitude":
-		return ConvertToLongitude(obj)
 	case "record":
 		return ConvertToRecord(obj, k)
 	}
-}
-
-func ConvertToUuid(obj interface{}) (val string, err error) {
-	val = fmt.Sprintf("%v", obj)
-	if !chck.IsUUID(val) {
-		err = fmt.Errorf("Expected a UUID, but found '%v'", obj)
-	}
-	return
-}
-
-func ConvertToEmail(obj interface{}) (val string, err error) {
-	val = fmt.Sprintf("%v", obj)
-	if !chck.IsEmail(val) {
-		err = fmt.Errorf("Expected an email address, but found '%v'", obj)
-	}
-	return
-}
-
-func ConvertToPhone(obj interface{}) (val string, err error) {
-	val = fmt.Sprintf("%v", obj)
-	if !chck.IsPhone(val) {
-		err = fmt.Errorf("Expected a phone number, but found '%v'", obj)
-	}
-	return
 }
 
 func ConvertToArray(obj interface{}) (val []interface{}, err error) {
@@ -188,22 +138,6 @@ func ConvertToObject(obj interface{}) (val map[string]interface{}, err error) {
 		val = now
 	} else {
 		err = fmt.Errorf("Expected an object, but found '%v'", obj)
-	}
-	return
-}
-
-func ConvertToDomain(obj interface{}) (val string, err error) {
-	val = fmt.Sprintf("%v", obj)
-	if !chck.IsDomain(val) {
-		err = fmt.Errorf("Expected a domain name, but found '%v'", obj)
-	}
-	return
-}
-
-func ConvertToBase64(obj interface{}) (val string, err error) {
-	val = fmt.Sprintf("%v", obj)
-	if !chck.IsBase64(val) {
-		err = fmt.Errorf("Expected base64 data, but found '%v'", obj)
 	}
 	return
 }
@@ -232,19 +166,6 @@ func ConvertToNumber(obj interface{}) (val float64, err error) {
 	}
 }
 
-func ConvertToDouble(obj interface{}) (val float64, err error) {
-	switch now := obj.(type) {
-	case int64:
-		return float64(now), err
-	case float64:
-		return float64(now), err
-	case string:
-		return toDouble(now)
-	default:
-		return toDouble(fmt.Sprintf("%v", obj))
-	}
-}
-
 func ConvertToBoolean(obj interface{}) (val bool, err error) {
 	switch now := obj.(type) {
 	case int64:
@@ -268,22 +189,6 @@ func ConvertToDatetime(obj interface{}) (val time.Time, err error) {
 		err = fmt.Errorf("Expected a datetime, but found '%v'", obj)
 	}
 	return
-}
-
-func ConvertToLatitude(obj interface{}) (val float64, err error) {
-	str := fmt.Sprintf("%v", obj)
-	if !chck.IsLatitude(str) {
-		err = fmt.Errorf("Expected a latitude value, but found '%v'", obj)
-	}
-	return toNumber(str)
-}
-
-func ConvertToLongitude(obj interface{}) (val float64, err error) {
-	str := fmt.Sprintf("%v", obj)
-	if !chck.IsLongitude(str) {
-		err = fmt.Errorf("Expected a longitude value, but found '%v'", obj)
-	}
-	return toNumber(str)
 }
 
 func ConvertToRecord(obj interface{}, tb string) (val *sql.Thing, err error) {

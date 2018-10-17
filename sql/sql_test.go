@@ -2709,29 +2709,11 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE`,
-			err: "Found `` but expected `array, boolean, circle, datetime, domain, double, email, latitude, longitude, number, object, password, phone, point, polygon, record, string, uuid`",
+			err: "Found `` but expected `array, boolean, circle, datetime, number, object, point, polygon, record, string, uuid`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE something`,
-			err: "Found `something` but expected `array, boolean, circle, datetime, domain, double, email, latitude, longitude, number, object, password, phone, point, polygon, record, string, uuid`",
-		},
-		{
-			sql: `DEFINE FIELD temp ON person TYPE email`,
-			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				KV: "*", NS: "*", DB: "*",
-				Name: &Ident{"temp"},
-				What: Tables{&Table{"person"}},
-				Type: "email",
-			}}},
-		},
-		{
-			sql: `DEFINE FIELD temp ON person TYPE phone`,
-			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				KV: "*", NS: "*", DB: "*",
-				Name: &Ident{"temp"},
-				What: Tables{&Table{"person"}},
-				Type: "phone",
-			}}},
+			err: "Found `something` but expected `array, boolean, circle, datetime, number, object, point, polygon, record, string, uuid`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE array`,
@@ -2767,15 +2749,6 @@ func Test_Parse_Queries_Define(t *testing.T) {
 				Name: &Ident{"temp"},
 				What: Tables{&Table{"person"}},
 				Type: "number",
-			}}},
-		},
-		{
-			sql: `DEFINE FIELD temp ON person TYPE double`,
-			res: &Query{Statements: []Statement{&DefineFieldStatement{
-				KV: "*", NS: "*", DB: "*",
-				Name: &Ident{"temp"},
-				What: Tables{&Table{"person"}},
-				Type: "double",
 			}}},
 		},
 		{

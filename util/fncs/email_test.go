@@ -47,14 +47,4 @@ func TestEmail(t *testing.T) {
 		So(res, ShouldEqual, nil)
 	})
 
-	Convey("email.valid(a) works properly", t, func() {
-		res, _ := Run(context.Background(), "email.valid", "tobie@abcum.com")
-		So(res, ShouldEqual, true)
-	})
-
-	Convey("email.valid(a) errors properly", t, func() {
-		res, _ := Run(context.Background(), "email.valid", "test")
-		So(res, ShouldEqual, false)
-	})
-
 }

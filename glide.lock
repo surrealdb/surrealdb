@@ -1,8 +1,8 @@
-hash: 7227d566f4817cbb8b1eb609aeb5928f1bc420f763fbf387d5effcfa2e8e6509
-updated: 2018-09-11T13:25:49.903968+01:00
+hash: bb2fdd0ae1ce4cc20cd04c5fb3720722f46051ec869b6e61e21d9b8e7f020081
+updated: 2018-10-17T23:52:04.807878+01:00
 imports:
 - name: cloud.google.com/go
-  version: c728a003b238b26cef9ab6753a5dc424b331c3ad
+  version: dfffe386c33fb24c34ee501e5723df5b97b98514
   subpackages:
   - compute/metadata
   - iam
@@ -39,7 +39,7 @@ imports:
 - name: github.com/armon/go-metrics
   version: 3c58d8115a78a6879e5df75ae900846768d36895
 - name: github.com/aws/aws-sdk-go
-  version: 71a2a92b0063297b055b6f5a014d441c142da2ce
+  version: 66832f7f150914a46ffbfc03210f3b9cb0e4c005
   subpackages:
   - aws
   - aws/awserr
@@ -58,6 +58,7 @@ imports:
   - aws/request
   - aws/session
   - aws/signer/v4
+  - internal/s3err
   - internal/sdkio
   - internal/sdkrand
   - internal/sdkuri
@@ -139,6 +140,8 @@ imports:
   version: 80517062f582ea3340cd4baf70e86d539ae7d84d
   subpackages:
   - internal/load
+- name: github.com/konsorten/go-windows-terminal-sequences
+  version: 5c8c8bd35d3832f5d134ae1e1e375b69a4d25242
 - name: github.com/kr/text
   version: e2ffdb16a802fe2bb95e2e35ff34f0e53aeef34f
 - name: github.com/mattn/go-colorable
@@ -175,7 +178,7 @@ imports:
   subpackages:
   - diffmatchpatch
 - name: github.com/sirupsen/logrus
-  version: 3e01752db0189b9157070a0e1668a620f9a85da2
+  version: ad15b42461921f1fb3529b058c6786c6a45d5162
 - name: github.com/spf13/cobra
   version: ef82de70bb3f60c65fb8eebacbb2d122ef517385
 - name: github.com/spf13/pflag

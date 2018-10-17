@@ -272,8 +272,6 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return emailUser(ctx, args...)
 	case "email.domain":
 		return emailDomain(ctx, args...)
-	case "email.valid":
-		return emailValid(ctx, args...)
 
 	// Bcrypt implementation
 	case "bcrypt.compare":
@@ -286,6 +284,30 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return scryptCompare(ctx, args...)
 	case "scrypt.generate":
 		return scryptGenerate(ctx, args...)
+
+	// Check implementation
+	case "is.alpha":
+		return isAlpha(ctx, args...)
+	case "is.alphanum":
+		return isAlphanum(ctx, args...)
+	case "is.ascii":
+		return isAscii(ctx, args...)
+	case "is.domain":
+		return isDomain(ctx, args...)
+	case "is.email":
+		return isEmail(ctx, args...)
+	case "is.hexadecimal":
+		return isHexadecimal(ctx, args...)
+	case "is.latitude":
+		return isLatitude(ctx, args...)
+	case "is.longitude":
+		return isLongitude(ctx, args...)
+	case "is.numeric":
+		return isNumeric(ctx, args...)
+	case "is.semver":
+		return isSemver(ctx, args...)
+	case "is.uuid":
+		return isUuid(ctx, args...)
 
 	// Rand implementation
 	case "rand":

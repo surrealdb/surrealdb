@@ -17,8 +17,6 @@ package fncs
 import (
 	"context"
 	"strings"
-
-	"github.com/abcum/surreal/util/chck"
 )
 
 func emailUser(ctx context.Context, args ...interface{}) (interface{}, error) {
@@ -35,9 +33,4 @@ func emailDomain(ctx context.Context, args ...interface{}) (interface{}, error) 
 		return v[p+1:], nil
 	}
 	return nil, nil
-}
-
-func emailValid(ctx context.Context, args ...interface{}) (interface{}, error) {
-	v, _ := ensureString(args[0])
-	return chck.IsEmail(v), nil
 }

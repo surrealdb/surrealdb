@@ -84,13 +84,11 @@ var funcs = map[string]map[int]interface{}{
 	"union":      {-1: nil},
 
 	// Count implementation
-
 	"count":     {1: nil},
 	"count.if":  {2: nil},
 	"count.not": {2: nil},
 
 	// Purge implementation
-
 	"purge":     {1: nil},
 	"purge.if":  {2: nil},
 	"purge.not": {2: nil},
@@ -216,6 +214,19 @@ var funcs = map[string]map[int]interface{}{
 	// Scrypt implementation
 	"scrypt.compare":  {2: nil},
 	"scrypt.generate": {1: nil},
+
+	// Check implementation
+	"is.alpha":       {1: nil},
+	"is.alphanum":    {1: nil},
+	"is.ascii":       {1: nil},
+	"is.domain":      {1: nil},
+	"is.email":       {1: nil},
+	"is.hexadecimal": {1: nil},
+	"is.latitude":    {1: nil},
+	"is.longitude":   {1: nil},
+	"is.numeric":     {1: nil},
+	"is.semver":      {1: nil},
+	"is.uuid":        {1: nil},
 
 	// Random implementation
 	"rand":                    {0: nil},

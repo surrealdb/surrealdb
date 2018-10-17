@@ -33,7 +33,7 @@ import:
   subpackages:
   - diffmatchpatch
 - package: github.com/sirupsen/logrus
-  version: ^1.0.6
+  version: ^1.1.1
 - package: github.com/spf13/cobra
   version: ^0.0.3
 - package: github.com/ugorji/go

@@ -127,6 +127,8 @@ func toQuote(s string) bool {
 			continue
 		case c == '.', c == '*':
 			continue
+		case c == '_':
+			continue
 		default:
 			return true
 		}
