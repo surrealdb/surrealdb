@@ -42,12 +42,21 @@ func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err er
 		}
 	}
 
-	if _, _, err := p.shouldBe(PASSWORD); err != nil {
+	tok, _, err := p.shouldBe(PASSWORD, PASSHASH)
+	if err != nil {
 		return nil, err
 	}
 
-	if stmt.Pass, err = p.parseBinary(); err != nil {
-		return nil, err
+	if is(tok, PASSWORD) {
+		if stmt.Pass, err = p.parseBinary(); err != nil {
+			return nil, err
+		}
+	}
+
+	if is(tok, PASSHASH) {
+		if stmt.Hash, err = p.parseBinary(); err != nil {
+			return nil, err
+		}
 	}
 
 	return

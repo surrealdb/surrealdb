@@ -30,6 +30,7 @@ func TestInfo(t *testing.T) {
 		txt := `
 		USE NS test DB test;
 		DEFINE LOGIN test ON NAMESPACE PASSWORD "test";
+		DEFINE LOGIN test ON NAMESPACE PASSHASH "$2a$10$mofTMm4nilzRSZuU0GyuCuAgHy2mEPeNRqHZH9ETnh.O1MBjy2PDO";
 		DEFINE TOKEN test ON NAMESPACE TYPE HS512 VALUE "test";
 		DEFINE DATABASE test;
 		INFO FOR NAMESPACE;
@@ -41,24 +42,25 @@ func TestInfo(t *testing.T) {
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 9)
+		So(res, ShouldHaveLength, 10)
 		So(res[1].Status, ShouldEqual, "OK")
 		So(res[2].Status, ShouldEqual, "OK")
 		So(res[3].Status, ShouldEqual, "OK")
 		So(res[4].Status, ShouldEqual, "OK")
-		So(data.Consume(res[4].Result[0]).Get("login").Data(), ShouldHaveLength, 1)
-		So(data.Consume(res[4].Result[0]).Get("login.test").Data(), ShouldEqual, "DEFINE LOGIN test ON NAMESPACE PASSWORD ********")
-		So(data.Consume(res[4].Result[0]).Get("token").Data(), ShouldHaveLength, 1)
-		So(data.Consume(res[4].Result[0]).Get("token.test").Data(), ShouldEqual, "DEFINE TOKEN test ON NAMESPACE TYPE HS512 VALUE ********")
-		So(data.Consume(res[4].Result[0]).Get("database").Data(), ShouldHaveLength, 1)
-		So(data.Consume(res[4].Result[0]).Get("database.test").Data(), ShouldEqual, "DEFINE DATABASE test")
 		So(res[5].Status, ShouldEqual, "OK")
+		So(data.Consume(res[5].Result[0]).Get("login").Data(), ShouldHaveLength, 1)
+		So(data.Consume(res[5].Result[0]).Get("login.test").Data(), ShouldEqual, `DEFINE LOGIN test ON NAMESPACE PASSHASH "$2a$10$mofTMm4nilzRSZuU0GyuCuAgHy2mEPeNRqHZH9ETnh.O1MBjy2PDO"`)
+		So(data.Consume(res[5].Result[0]).Get("token").Data(), ShouldHaveLength, 1)
+		So(data.Consume(res[5].Result[0]).Get("token.test").Data(), ShouldEqual, `DEFINE TOKEN test ON NAMESPACE TYPE HS512 VALUE "test"`)
+		So(data.Consume(res[5].Result[0]).Get("database").Data(), ShouldHaveLength, 1)
+		So(data.Consume(res[5].Result[0]).Get("database.test").Data(), ShouldEqual, "DEFINE DATABASE test")
 		So(res[6].Status, ShouldEqual, "OK")
 		So(res[7].Status, ShouldEqual, "OK")
 		So(res[8].Status, ShouldEqual, "OK")
-		So(data.Consume(res[8].Result[0]).Get("login").Data(), ShouldHaveLength, 0)
-		So(data.Consume(res[8].Result[0]).Get("token").Data(), ShouldHaveLength, 0)
-		So(data.Consume(res[8].Result[0]).Get("database").Data(), ShouldHaveLength, 0)
+		So(res[9].Status, ShouldEqual, "OK")
+		So(data.Consume(res[9].Result[0]).Get("login").Data(), ShouldHaveLength, 0)
+		So(data.Consume(res[9].Result[0]).Get("token").Data(), ShouldHaveLength, 0)
+		So(data.Consume(res[9].Result[0]).Get("database").Data(), ShouldHaveLength, 0)
 
 	})
 
@@ -69,6 +71,7 @@ func TestInfo(t *testing.T) {
 		txt := `
 		USE NS test DB test;
 		DEFINE LOGIN test ON DATABASE PASSWORD "test";
+		DEFINE LOGIN test ON DATABASE PASSHASH "$2a$10$mofTMm4nilzRSZuU0GyuCuAgHy2mEPeNRqHZH9ETnh.O1MBjy2PDO";
 		DEFINE TOKEN test ON DATABASE TYPE HS512 VALUE "test";
 		DEFINE SCOPE test;
 		DEFINE TABLE test;
@@ -82,29 +85,30 @@ func TestInfo(t *testing.T) {
 
 		res, err := Execute(setupKV(), txt, nil)
 		So(err, ShouldBeNil)
-		So(res, ShouldHaveLength, 11)
+		So(res, ShouldHaveLength, 12)
 		So(res[1].Status, ShouldEqual, "OK")
 		So(res[2].Status, ShouldEqual, "OK")
 		So(res[3].Status, ShouldEqual, "OK")
 		So(res[4].Status, ShouldEqual, "OK")
 		So(res[5].Status, ShouldEqual, "OK")
-		So(data.Consume(res[5].Result[0]).Get("login").Data(), ShouldHaveLength, 1)
-		So(data.Consume(res[5].Result[0]).Get("login.test").Data(), ShouldEqual, "DEFINE LOGIN test ON DATABASE PASSWORD ********")
-		So(data.Consume(res[5].Result[0]).Get("token").Data(), ShouldHaveLength, 1)
-		So(data.Consume(res[5].Result[0]).Get("token.test").Data(), ShouldEqual, "DEFINE TOKEN test ON DATABASE TYPE HS512 VALUE ********")
-		So(data.Consume(res[5].Result[0]).Get("scope").Data(), ShouldHaveLength, 1)
-		So(data.Consume(res[5].Result[0]).Get("scope.test").Data(), ShouldEqual, "DEFINE SCOPE test")
-		So(data.Consume(res[5].Result[0]).Get("table").Data(), ShouldHaveLength, 1)
-		So(data.Consume(res[5].Result[0]).Get("table.test").Data(), ShouldEqual, "DEFINE TABLE test")
 		So(res[6].Status, ShouldEqual, "OK")
+		So(data.Consume(res[6].Result[0]).Get("login").Data(), ShouldHaveLength, 1)
+		So(data.Consume(res[6].Result[0]).Get("login.test").Data(), ShouldEqual, `DEFINE LOGIN test ON DATABASE PASSHASH "$2a$10$mofTMm4nilzRSZuU0GyuCuAgHy2mEPeNRqHZH9ETnh.O1MBjy2PDO"`)
+		So(data.Consume(res[6].Result[0]).Get("token").Data(), ShouldHaveLength, 1)
+		So(data.Consume(res[6].Result[0]).Get("token.test").Data(), ShouldEqual, `DEFINE TOKEN test ON DATABASE TYPE HS512 VALUE "test"`)
+		So(data.Consume(res[6].Result[0]).Get("scope").Data(), ShouldHaveLength, 1)
+		So(data.Consume(res[6].Result[0]).Get("scope.test").Data(), ShouldEqual, "DEFINE SCOPE test")
+		So(data.Consume(res[6].Result[0]).Get("table").Data(), ShouldHaveLength, 1)
+		So(data.Consume(res[6].Result[0]).Get("table.test").Data(), ShouldEqual, "DEFINE TABLE test")
 		So(res[7].Status, ShouldEqual, "OK")
 		So(res[8].Status, ShouldEqual, "OK")
 		So(res[9].Status, ShouldEqual, "OK")
 		So(res[10].Status, ShouldEqual, "OK")
-		So(data.Consume(res[10].Result[0]).Get("login").Data(), ShouldHaveLength, 0)
-		So(data.Consume(res[10].Result[0]).Get("token").Data(), ShouldHaveLength, 0)
-		So(data.Consume(res[10].Result[0]).Get("scope").Data(), ShouldHaveLength, 0)
-		So(data.Consume(res[10].Result[0]).Get("table").Data(), ShouldHaveLength, 0)
+		So(res[11].Status, ShouldEqual, "OK")
+		So(data.Consume(res[11].Result[0]).Get("login").Data(), ShouldHaveLength, 0)
+		So(data.Consume(res[11].Result[0]).Get("token").Data(), ShouldHaveLength, 0)
+		So(data.Consume(res[11].Result[0]).Get("scope").Data(), ShouldHaveLength, 0)
+		So(data.Consume(res[11].Result[0]).Get("table").Data(), ShouldHaveLength, 0)
 
 	})
 
@@ -127,7 +131,7 @@ func TestInfo(t *testing.T) {
 		So(res[1].Status, ShouldEqual, "OK")
 		So(res[2].Status, ShouldEqual, "OK")
 		So(data.Consume(res[3].Result[0]).Get("token").Data(), ShouldHaveLength, 1)
-		So(data.Consume(res[3].Result[0]).Get("token.test").Data(), ShouldEqual, "DEFINE TOKEN test ON SCOPE test TYPE HS512 VALUE ********")
+		So(data.Consume(res[3].Result[0]).Get("token.test").Data(), ShouldEqual, `DEFINE TOKEN test ON SCOPE test TYPE HS512 VALUE "test"`)
 		So(res[4].Status, ShouldEqual, "OK")
 		So(res[5].Status, ShouldEqual, "OK")
 		So(data.Consume(res[5].Result[0]).Get("token").Data(), ShouldHaveLength, 0)

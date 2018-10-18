@@ -92,7 +92,7 @@ func maybe(b bool, v ...interface{}) string {
 }
 
 func binar(b []byte) string {
-	return fmt.Sprintf(`"%s"`, b)
+	return fmt.Sprintf("%q", b)
 }
 
 func quote(s string) string {
@@ -321,9 +321,10 @@ func (this RemoveDatabaseStatement) String() string {
 }
 
 func (this DefineLoginStatement) String() string {
-	return print("DEFINE LOGIN %v ON %v PASSWORD ********",
+	return print("DEFINE LOGIN %v ON %v PASSHASH %s",
 		this.User,
 		this.Kind,
+		binar(this.Pass),
 	)
 }
 
@@ -335,10 +336,11 @@ func (this RemoveLoginStatement) String() string {
 }
 
 func (this DefineTokenStatement) String() string {
-	return print("DEFINE TOKEN %v ON %v TYPE %v VALUE ********",
+	return print("DEFINE TOKEN %v ON %v TYPE %v VALUE %s",
 		this.Name,
 		maybe(this.Kind == SCOPE, print("%v %v", this.Kind, this.What), print("%v", this.Kind)),
 		this.Type,
+		binar(this.Code),
 	)
 }
 

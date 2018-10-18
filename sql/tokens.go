@@ -164,6 +164,7 @@ const (
 	OR
 	ORDER
 	PARALLEL
+	PASSHASH
 	PASSWORD
 	PERMISSIONS
 	PRIORITY
@@ -339,6 +340,7 @@ var tokens = [...]string{
 	OR:              "OR",
 	ORDER:           "ORDER",
 	PARALLEL:        "PARALLEL",
+	PASSHASH:        "PASSHASH",
 	PASSWORD:        "PASSWORD",
 	PERMISSIONS:     "PERMISSIONS",
 	PRIORITY:        "PRIORITY",

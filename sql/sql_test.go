@@ -2180,7 +2180,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE LOGIN test ON NAMESPACE`,
-			err: "Found `` but expected `PASSWORD`",
+			err: "Found `` but expected `PASSWORD, PASSHASH`",
 		},
 		{
 			sql: `DEFINE LOGIN test ON NAMESPACE PASSWORD`,
@@ -2188,7 +2188,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE LOGIN test ON NAMESPACE PASSWORD "123456"`,
-			str: `DEFINE LOGIN test ON NAMESPACE PASSWORD ********`,
+			str: `DEFINE LOGIN test ON NAMESPACE PASSHASH "123456"`,
 			res: &Query{Statements: []Statement{&DefineLoginStatement{
 				KV: "*", NS: "*", DB: "*",
 				Kind: NAMESPACE,
@@ -2198,7 +2198,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE LOGIN test ON DATABASE PASSWORD "123456"`,
-			str: `DEFINE LOGIN test ON DATABASE PASSWORD ********`,
+			str: `DEFINE LOGIN test ON DATABASE PASSHASH "123456"`,
 			res: &Query{Statements: []Statement{&DefineLoginStatement{
 				KV: "*", NS: "*", DB: "*",
 				Kind: DATABASE,
@@ -2261,7 +2261,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE TOKEN test ON NAMESPACE TYPE HS512 VALUE "secret"`,
-			str: `DEFINE TOKEN test ON NAMESPACE TYPE HS512 VALUE ********`,
+			str: `DEFINE TOKEN test ON NAMESPACE TYPE HS512 VALUE "secret"`,
 			res: &Query{Statements: []Statement{&DefineTokenStatement{
 				KV: "*", NS: "*", DB: "*",
 				Kind: NAMESPACE,
@@ -2273,7 +2273,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE TOKEN test ON DATABASE TYPE HS512 VALUE "secret"`,
-			str: `DEFINE TOKEN test ON DATABASE TYPE HS512 VALUE ********`,
+			str: `DEFINE TOKEN test ON DATABASE TYPE HS512 VALUE "secret"`,
 			res: &Query{Statements: []Statement{&DefineTokenStatement{
 				KV: "*", NS: "*", DB: "*",
 				Kind: DATABASE,
@@ -2285,7 +2285,7 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE TOKEN test ON SCOPE test TYPE HS512 VALUE "secret"`,
-			str: `DEFINE TOKEN test ON SCOPE test TYPE HS512 VALUE ********`,
+			str: `DEFINE TOKEN test ON SCOPE test TYPE HS512 VALUE "secret"`,
 			res: &Query{Statements: []Statement{&DefineTokenStatement{
 				KV: "*", NS: "*", DB: "*",
 				Kind: SCOPE,

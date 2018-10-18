@@ -50,7 +50,12 @@ func (e *executor) executeDefineLogin(ctx context.Context, ast *sql.DefineLoginS
 
 	ast.Code = rand.New(128)
 
-	ast.Pass, _ = bcrypt.GenerateFromPassword(ast.Pass, bcrypt.DefaultCost)
+	switch len(ast.Hash) {
+	default:
+		ast.Pass = ast.Hash
+	case 0:
+		ast.Pass, _ = bcrypt.GenerateFromPassword(ast.Pass, bcrypt.DefaultCost)
+	}
 
 	switch ast.Kind {
 	case sql.NAMESPACE:

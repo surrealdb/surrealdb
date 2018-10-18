@@ -305,6 +305,7 @@ type DefineLoginStatement struct {
 	Kind Token
 	User *Ident
 	Pass []byte
+	Hash []byte
 	Code []byte
 }
 
