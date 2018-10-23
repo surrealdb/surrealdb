@@ -82,7 +82,7 @@ func init() {
 	startCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master database authentication details.")
 	startCmd.PersistentFlags().StringVar(&opts.Auth.User, "auth-user", "", "The master username for the database. Use this as an alternative to the --auth flag.")
 	startCmd.PersistentFlags().StringVar(&opts.Auth.Pass, "auth-pass", "", "The master password for the database. Use this as an alternative to the --auth flag.")
-	startCmd.PersistentFlags().StringSliceVar(&opts.Auth.Addr, "auth-addr", []string{"0.0.0.0/0"}, "The IP address ranges from which master authentication is possible.")
+	startCmd.PersistentFlags().StringSliceVar(&opts.Auth.Addr, "auth-addr", []string{"0.0.0.0/0", "0:0:0:0:0:0:0:0/0"}, "The IP address ranges from which master authentication is possible.")
 
 	startCmd.PersistentFlags().StringVar(&opts.Cert.Crt, "cert-crt", "", "Path to the server certificate. Needed when running in secure mode.")
 	startCmd.PersistentFlags().StringVar(&opts.Cert.Key, "cert-key", "", "Path to the server private key. Needed when running in secure mode.")
