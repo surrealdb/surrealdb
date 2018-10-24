@@ -1,5 +1,5 @@
 hash: bb2fdd0ae1ce4cc20cd04c5fb3720722f46051ec869b6e61e21d9b8e7f020081
-updated: 2018-10-24T01:27:31.706936+01:00
+updated: 2018-10-24T10:49:53.527294+01:00
 imports:
 - name: cloud.google.com/go
   version: debcad1964693daf8ef4bc06292d7e828e075130
@@ -20,9 +20,9 @@ imports:
   subpackages:
   - mw
 - name: github.com/abcum/ptree
-  version: 7fa43c5232463e3d13faca7ecbb3d05f82bc4fab
+  version: 6e72a70c6993da70827df66d1a13f4223ffc5e07
 - name: github.com/abcum/rixxdb
-  version: de99373ba693a533f36811c70c7245b74d3f632f
+  version: 85415565fc5359ff1b34f3d7cd60523d5746fa91
 - name: github.com/abcum/syncr
   version: bde76fc324fe1a758165e2ea95c8a31d40cbad8d
   subpackages:
