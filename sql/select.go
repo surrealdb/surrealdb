@@ -158,6 +158,24 @@ func (p *parser) parseGroup() (mul Groups, err error) {
 
 	_, _, _ = p.mightBe(BY)
 
+	// If the next token is the ALL keyword then
+	// we will group all records together, which
+	// will prevent grouping by other fields.
+
+	if _, _, exi := p.mightBe(ALL); exi {
+
+		mul = append(mul, &Group{
+			Expr: new(All),
+		})
+
+		return
+
+	}
+
+	// Otherwise let's parse the fields with which
+	// we will group the selected data, with
+	// multiple fields grouped by commas.
+
 	for {
 
 		var tok Token
