@@ -99,6 +99,7 @@ const (
 	keywordsBeg
 
 	AFTER
+	ALL
 	ALLCONTAINEDIN
 	AND
 	AS
@@ -275,6 +276,7 @@ var tokens = [...]string{
 	// keywords
 
 	AFTER:           "AFTER",
+	ALL:             "ALL",
 	ALLCONTAINEDIN:  "ALLCONTAINEDIN",
 	AND:             "AND",
 	AS:              "AS",

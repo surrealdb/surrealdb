@@ -165,9 +165,11 @@ func (this UseStatement) String() string {
 
 func (this InfoStatement) String() string {
 	switch this.Kind {
-	case NAMESPACE:
+	case ALL:
+		return "INFO FOR ALL"
+	case NAMESPACE, NS:
 		return "INFO FOR NAMESPACE"
-	case DATABASE:
+	case DATABASE, DB:
 		return "INFO FOR DATABASE"
 	case SCOPE:
 		return print("INFO FOR SCOPE %s", this.What)

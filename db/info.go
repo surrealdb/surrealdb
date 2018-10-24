@@ -24,9 +24,11 @@ import (
 func (e *executor) executeInfo(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
 	switch ast.Kind {
-	case sql.NAMESPACE:
+	case sql.ALL:
+		return e.executeInfoKV(ctx, ast)
+	case sql.NAMESPACE, sql.NS:
 		return e.executeInfoNS(ctx, ast)
-	case sql.DATABASE:
+	case sql.DATABASE, sql.DB:
 		return e.executeInfoDB(ctx, ast)
 	case sql.SCOPE:
 		return e.executeInfoSC(ctx, ast)
@@ -35,6 +37,26 @@ func (e *executor) executeInfo(ctx context.Context, ast *sql.InfoStatement) (out
 	}
 
 	return
+
+}
+
+func (e *executor) executeInfoKV(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
+
+	ns, err := e.dbo.AllNS(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	res := data.New()
+
+	nspac := make(map[string]interface{})
+	for _, v := range ns {
+		nspac[v.Name.VA] = v.String()
+	}
+
+	res.Set(nspac, "namespace")
+
+	return []interface{}{res.Data()}, nil
 
 }
 

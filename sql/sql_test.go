@@ -288,7 +288,14 @@ func Test_Parse_Queries_Info(t *testing.T) {
 		},
 		{
 			sql: `INFO FOR`,
-			err: "Found `` but expected `NAMESPACE, DATABASE, SCOPE, TABLE`",
+			err: "Found `` but expected `ALL, NAMESPACE, DATABASE, SCOPE, TABLE, NS, DB`",
+		},
+		{
+			sql: `INFO FOR ALL`,
+			res: &Query{Statements: []Statement{&InfoStatement{
+				KV: "*", NS: "*", DB: "*",
+				Kind: ALL,
+			}}},
 		},
 		{
 			sql: `INFO FOR NAMESPACE`,
@@ -298,10 +305,26 @@ func Test_Parse_Queries_Info(t *testing.T) {
 			}}},
 		},
 		{
+			sql: `INFO FOR NS`,
+			str: `INFO FOR NAMESPACE`,
+			res: &Query{Statements: []Statement{&InfoStatement{
+				KV: "*", NS: "*", DB: "*",
+				Kind: NS,
+			}}},
+		},
+		{
 			sql: `INFO FOR DATABASE`,
 			res: &Query{Statements: []Statement{&InfoStatement{
 				KV: "*", NS: "*", DB: "*",
 				Kind: DATABASE,
+			}}},
+		},
+		{
+			sql: `INFO FOR DB`,
+			str: `INFO FOR DATABASE`,
+			res: &Query{Statements: []Statement{&InfoStatement{
+				KV: "*", NS: "*", DB: "*",
+				Kind: DB,
 			}}},
 		},
 		{

@@ -22,17 +22,23 @@ func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 		return nil, err
 	}
 
-	if stmt.Kind, _, err = p.shouldBe(NAMESPACE, DATABASE, SCOPE, TABLE); err != nil {
+	if stmt.Kind, _, err = p.shouldBe(ALL, NAMESPACE, DATABASE, SCOPE, TABLE, NS, DB); err != nil {
 		return nil, err
 	}
 
-	if is(stmt.Kind, NAMESPACE) {
+	if is(stmt.Kind, ALL) {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthKV); err != nil {
+			return nil, err
+		}
+	}
+
+	if is(stmt.Kind, NAMESPACE, NS) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
 			return nil, err
 		}
 	}
 
-	if is(stmt.Kind, DATABASE) {
+	if is(stmt.Kind, DATABASE, DB) {
 		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
 			return nil, err
 		}
