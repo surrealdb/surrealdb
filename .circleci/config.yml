@@ -29,9 +29,9 @@ jobs:
           command: |
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
               docker login -u $DOCKER_USER -p $DOCKER_PASS
-              docker build -t abcum/surreal .
-              docker push abcum/surreal
-              gcloud docker -- build -t abcum/surreal .
-              gcloud docker -- tag abcum/surreal:latest eu.gcr.io/surreal-io/surreal:latest
+              docker build -t surreal/surreal .
+              docker push surreal/surreal
+              gcloud docker -- build -t surreal/surreal .
+              gcloud docker -- tag surreal/surreal:latest eu.gcr.io/surreal-io/surreal:latest
               gcloud docker -- push eu.gcr.io/surreal-io/surreal:latest
             fi
