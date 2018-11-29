@@ -277,7 +277,7 @@ func (o *operations) vals(old, now interface{}, path string) {
 		}
 	case *sql.Thing:
 		nv := now.(*sql.Thing)
-		if ov.TB != nv.TB && ov.ID != nv.ID {
+		if ov.TB != nv.TB || ov.ID != nv.ID {
 			o.op("replace", "", path, old, now)
 		}
 	case bool:

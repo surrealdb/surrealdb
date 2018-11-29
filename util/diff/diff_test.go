@@ -17,11 +17,14 @@ package diff
 import (
 	"testing"
 
+	"github.com/abcum/surreal/sql"
+
 	. "github.com/smartystreets/goconvey/convey"
 )
 
 var old = map[string]interface{}{
-	"age": 18,
+	"age":  18,
+	"item": sql.NewThing("test", 1),
 	"name": map[string]interface{}{
 		"first": "T",
 		"last":  "M H",
@@ -32,7 +35,8 @@ var old = map[string]interface{}{
 }
 
 var now = map[string]interface{}{
-	"age": 29,
+	"age":  29,
+	"item": sql.NewThing("test", 2),
 	"name": map[string]interface{}{
 		"first": "Tobie",
 		"last":  "Morgan Hitchcock",
@@ -96,6 +100,11 @@ var chg = []interface{}{
 		"op":    "replace",
 		"path":  "/different",
 		"value": true,
+	},
+	map[string]interface{}{
+		"op":    "replace",
+		"path":  "/item",
+		"value": sql.NewThing("test", 2),
 	},
 	map[string]interface{}{
 		"op":    "change",
