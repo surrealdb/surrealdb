@@ -32,6 +32,6 @@ jobs:
               docker build -t abcum/surreal .
               docker push abcum/surreal
               gcloud docker -- build -t abcum/surreal .
-              gcloud docker -- tag abcum/surreal:latest eu.gcr.io/abcum-ltd/surreal:latest
-              gcloud docker -- push eu.gcr.io/abcum-ltd/surreal:latest
+              gcloud docker -- tag abcum/surreal:latest eu.gcr.io/surreal-io/surreal:latest
+              gcloud docker -- push eu.gcr.io/surreal-io/surreal:latest
             fi
