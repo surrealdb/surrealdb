@@ -1075,14 +1075,14 @@ func TestDefine(t *testing.T) {
 
 	})
 
-	Convey("Define a unique index on a table, and ensure it prevents duplicate record values", t, func() {
+	Convey("Define a single-field unique index on a table, and ensure it prevents duplicate record values", t, func() {
 
 		setupDB(20)
 
 		txt := `
 		USE NS test DB test;
-		DEFINE INDEX test ON person COLUMNS account, email UNIQUE;
-		UPDATE person:one SET account="demo", email="info@demo.com";
+		DEFINE INDEX test ON person COLUMNS email UNIQUE;
+		UPDATE person:one SET account="one", email="info@demo.com";
 		UPDATE person:one SET account="demo", email="info@demo.com";
 		UPDATE person:one SET account="demo", email="info@demo.com";
 		UPDATE person:two SET account="demo", email="info@demo.com";
@@ -1106,6 +1106,78 @@ func TestDefine(t *testing.T) {
 		So(res[6].Status, ShouldEqual, "ERR_IX")
 		So(res[7].Result, ShouldHaveLength, 1)
 		So(data.Consume(res[7].Result[0]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "one"})
+
+	})
+
+	Convey("Define a multiple-field unique index on a table, and ensure it prevents duplicate record values", t, func() {
+
+		setupDB(20)
+
+		txt := `
+		USE NS test DB test;
+		DEFINE INDEX test ON person COLUMNS account, email UNIQUE;
+		UPDATE person:one SET account="one", email="info@demo.com";
+		UPDATE person:one SET account="one", email="info@demo.com";
+		UPDATE person:one SET account="one", email="info@demo.com";
+		UPDATE person:two SET account="two", email="info@demo.com";
+		UPDATE person:tre SET account="tre", email="info@demo.com";
+		SELECT * FROM person ORDER BY meta.id;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 8)
+		So(res[1].Status, ShouldEqual, "OK")
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[2].Status, ShouldEqual, "OK")
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[3].Status, ShouldEqual, "OK")
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(res[4].Status, ShouldEqual, "OK")
+		So(res[5].Result, ShouldHaveLength, 1)
+		So(res[5].Status, ShouldEqual, "OK")
+		So(res[6].Result, ShouldHaveLength, 1)
+		So(res[6].Status, ShouldEqual, "OK")
+		So(res[7].Result, ShouldHaveLength, 3)
+		So(data.Consume(res[7].Result[0]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "one"})
+		So(data.Consume(res[7].Result[1]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "tre"})
+		So(data.Consume(res[7].Result[2]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "two"})
+
+	})
+
+	Convey("Define a multiple-field foreign record unique index on a table, and ensure it prevents duplicate record values", t, func() {
+
+		setupDB(20)
+
+		txt := `
+		USE NS test DB test;
+		DEFINE INDEX test ON person COLUMNS account, email UNIQUE;
+		UPDATE person:one SET account=tester:one, email="info@demo.com";
+		UPDATE person:one SET account=tester:one, email="info@demo.com";
+		UPDATE person:one SET account=tester:one, email="info@demo.com";
+		UPDATE person:two SET account=tester:two, email="info@demo.com";
+		UPDATE person:tre SET account=tester:tre, email="info@demo.com";
+		SELECT * FROM person ORDER BY meta.id;
+		`
+
+		res, err := Execute(setupKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 8)
+		So(res[1].Status, ShouldEqual, "OK")
+		So(res[2].Result, ShouldHaveLength, 1)
+		So(res[2].Status, ShouldEqual, "OK")
+		So(res[3].Result, ShouldHaveLength, 1)
+		So(res[3].Status, ShouldEqual, "OK")
+		So(res[4].Result, ShouldHaveLength, 1)
+		So(res[4].Status, ShouldEqual, "OK")
+		So(res[5].Result, ShouldHaveLength, 1)
+		So(res[5].Status, ShouldEqual, "OK")
+		So(res[6].Result, ShouldHaveLength, 1)
+		So(res[6].Status, ShouldEqual, "OK")
+		So(res[7].Result, ShouldHaveLength, 3)
+		So(data.Consume(res[7].Result[0]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "one"})
+		So(data.Consume(res[7].Result[1]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "tre"})
+		So(data.Consume(res[7].Result[2]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "two"})
 
 	})
 

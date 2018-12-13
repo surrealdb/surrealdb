@@ -360,7 +360,7 @@ func (d *document) storeThing(ctx context.Context) (err error) {
 
 	defer d.ulock(ctx)
 
-	// Check that the rcord has been
+	// Check that the record has been
 	// changed, and if not, return.
 
 	if ok := d.changed(ctx); !ok {
@@ -475,27 +475,31 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 		}
 
 		if ix.Uniq == true {
-			for _, v := range del {
-				didx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v}
+			for _, f := range del {
+				enfd := data.Consume(f).Encode()
+				didx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd}
 				d.i.e.dbo.DelC(ctx, d.i.e.time, didx.Encode(), d.id.Bytes())
 			}
-			for _, v := range add {
-				aidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v}
+			for _, f := range add {
+				enfd := data.Consume(f).Encode()
+				aidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd}
 				if _, err = d.i.e.dbo.PutC(ctx, 0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
-					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: v}
+					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: f}
 				}
 			}
 		}
 
 		if ix.Uniq == false {
-			for _, v := range del {
-				didx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v, ID: d.key.ID}
+			for _, f := range del {
+				enfd := data.Consume(f).Encode()
+				didx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd, ID: d.key.ID}
 				d.i.e.dbo.DelC(ctx, d.i.e.time, didx.Encode(), d.id.Bytes())
 			}
-			for _, v := range add {
-				aidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v, ID: d.key.ID}
+			for _, f := range add {
+				enfd := data.Consume(f).Encode()
+				aidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd, ID: d.key.ID}
 				if _, err = d.i.e.dbo.PutC(ctx, 0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
-					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: v}
+					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: f}
 				}
 			}
 		}
