@@ -141,6 +141,15 @@ func (d *document) allow(ctx context.Context, met method) (ok bool, err error) {
 		return true, nil
 	}
 
+	// If this document is being created
+	// for the first time, then allow this
+	// check, and recheck after the fields
+	// have been merged into the document.
+
+	if met == _CREATE && !d.current.Exists("id") {
+		return true, nil
+	}
+
 	// If we are authenticated using DB, NS,
 	// or KV permissions level, then we can
 	// ignore all permissions checks, but we

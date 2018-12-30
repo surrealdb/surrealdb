@@ -118,8 +118,14 @@ func (d *document) runRelate(ctx context.Context, stm *sql.RelateStatement) (int
 		return nil, err
 	}
 
-	if d.val.Exi() == false {
+	if d.val.Exi() == true {
 		met = _UPDATE
+	}
+
+	if ok, err = d.allow(ctx, met); err != nil {
+		return nil, err
+	} else if ok == false {
+		return nil, nil
 	}
 
 	if err = d.merge(ctx, met, stm.Data); err != nil {

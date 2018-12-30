@@ -111,7 +111,7 @@ func (d *document) runUpdate(ctx context.Context, stm *sql.UpdateStatement) (int
 
 	var ok bool
 	var err error
-	var met = _UPDATE
+	var met = _CREATE
 
 	if err = d.init(ctx); err != nil {
 		return nil, err
@@ -125,8 +125,8 @@ func (d *document) runUpdate(ctx context.Context, stm *sql.UpdateStatement) (int
 		return nil, err
 	}
 
-	if d.val.Exi() == false {
-		met = _CREATE
+	if d.val.Exi() == true {
+		met = _UPDATE
 	}
 
 	if ok, err = d.allow(ctx, met); err != nil {
@@ -143,6 +143,12 @@ func (d *document) runUpdate(ctx context.Context, stm *sql.UpdateStatement) (int
 
 	if err = d.merge(ctx, met, stm.Data); err != nil {
 		return nil, err
+	}
+
+	if ok, err = d.allow(ctx, met); err != nil {
+		return nil, err
+	} else if ok == false {
+		return nil, nil
 	}
 
 	if err = d.storeIndex(ctx); err != nil {
