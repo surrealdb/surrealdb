@@ -344,8 +344,8 @@ func (d *document) shouldDrop(ctx context.Context) (bool, error) {
 func (d *document) shouldVersn(ctx context.Context) (bool, error) {
 
 	// Check whether it is specified
-	// that the table should drop
-	// writes, and if so, then return.
+	// that the table should keep
+	// all document versions.
 
 	tb, err := d.getTB(ctx)
 	if err != nil {
