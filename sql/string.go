@@ -259,8 +259,7 @@ func (this UpdateStatement) String() string {
 }
 
 func (this DeleteStatement) String() string {
-	return print("DELETE %v%v%v%v%v",
-		maybe(this.Hard, "AND EXPUNGE "),
+	return print("DELETE %v%v%v%v",
 		this.What,
 		maybe(this.Cond != nil, print(" WHERE %v", this.Cond)),
 		maybe(this.Echo != NONE, print(" RETURN %v", this.Echo)),

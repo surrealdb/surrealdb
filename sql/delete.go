@@ -22,13 +22,6 @@ func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
 		return nil, err
 	}
 
-	if _, _, exi := p.mightBe(AND); exi {
-		if _, _, err = p.shouldBe(EXPUNGE); err != nil {
-			return nil, err
-		}
-		stmt.Hard = true
-	}
-
 	_, _, _ = p.mightBe(FROM)
 
 	if stmt.What, err = p.parseWhat(); err != nil {

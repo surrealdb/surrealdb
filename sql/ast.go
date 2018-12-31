@@ -210,7 +210,6 @@ type DeleteStatement struct {
 	KV       string
 	NS       string
 	DB       string
-	Hard     bool
 	What     Exprs
 	Cond     Expr
 	Echo     Token

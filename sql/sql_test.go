@@ -1593,15 +1593,6 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `DELETE AND EXPUNGE person`,
-			res: &Query{Statements: []Statement{&DeleteStatement{
-				KV: "*", NS: "*", DB: "*",
-				What: []Expr{&Ident{"person"}},
-				Hard: true,
-				Echo: NONE,
-			}}},
-		},
-		{
 			sql: `DELETE person RETURN`,
 			err: "Found `` but expected `NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
 		},

@@ -415,26 +415,6 @@ func (d *document) purgeThing(ctx context.Context) (err error) {
 
 }
 
-func (d *document) eraseThing(ctx context.Context) (err error) {
-
-	defer d.ulock(ctx)
-
-	// Check that the table should
-	// drop data being written.
-
-	if ok, err := d.shouldDrop(ctx); ok {
-		return err
-	}
-
-	// Delete the item entirely from
-	// storage, so no versions exist.
-
-	_, err = d.i.e.dbo.Clr(ctx, d.key.Encode())
-
-	return
-
-}
-
 func (d *document) storeIndex(ctx context.Context) (err error) {
 
 	// Check if this query has been run

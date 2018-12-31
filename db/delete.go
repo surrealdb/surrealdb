@@ -149,14 +149,8 @@ func (d *document) runDelete(ctx context.Context, stm *sql.DeleteStatement) (int
 		return nil, err
 	}
 
-	if stm.Hard {
-		if err = d.eraseThing(ctx); err != nil {
-			return nil, err
-		}
-	} else {
-		if err = d.purgeThing(ctx); err != nil {
-			return nil, err
-		}
+	if err = d.purgeThing(ctx); err != nil {
+		return nil, err
 	}
 
 	if err = d.table(ctx, met); err != nil {

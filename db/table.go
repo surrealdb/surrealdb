@@ -161,7 +161,6 @@ func (d *document) tableDelete(ctx context.Context, tng *sql.Thing, exp sql.Fiel
 		NS:       d.key.NS,
 		DB:       d.key.DB,
 		What:     sql.Exprs{tng},
-		Hard:     false,
 		Parallel: 1,
 	}
 
