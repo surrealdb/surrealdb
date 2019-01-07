@@ -1155,8 +1155,8 @@ func TestDefine(t *testing.T) {
 		UPDATE person:one SET account=tester:one, email="info@demo.com";
 		UPDATE person:one SET account=tester:one, email="info@demo.com";
 		UPDATE person:one SET account=tester:one, email="info@demo.com";
-		UPDATE person:two SET account=tester:two, email="info@demo.com";
-		UPDATE person:tre SET account=tester:tre, email="info@demo.com";
+		UPDATE person:two SET account=tester:one, email="info@demo.com";
+		UPDATE person:tre SET account=tester:two, email="info@demo.com";
 		SELECT * FROM person ORDER BY meta.id;
 		`
 
@@ -1170,14 +1170,13 @@ func TestDefine(t *testing.T) {
 		So(res[3].Status, ShouldEqual, "OK")
 		So(res[4].Result, ShouldHaveLength, 1)
 		So(res[4].Status, ShouldEqual, "OK")
-		So(res[5].Result, ShouldHaveLength, 1)
-		So(res[5].Status, ShouldEqual, "OK")
+		So(res[5].Result, ShouldHaveLength, 0)
+		So(res[5].Status, ShouldEqual, "ERR_IX")
 		So(res[6].Result, ShouldHaveLength, 1)
 		So(res[6].Status, ShouldEqual, "OK")
-		So(res[7].Result, ShouldHaveLength, 3)
+		So(res[7].Result, ShouldHaveLength, 2)
 		So(data.Consume(res[7].Result[0]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "one"})
 		So(data.Consume(res[7].Result[1]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "tre"})
-		So(data.Consume(res[7].Result[2]).Get("id").Data(), ShouldResemble, &sql.Thing{"person", "two"})
 
 	})
 
