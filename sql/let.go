@@ -26,7 +26,7 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 	// always be an identifier, specifying a
 	// variable name to set.
 
-	stmt.Name, err = p.parseIdent()
+	stmt.Name, err = p.parseParam()
 	if err != nil {
 		return nil, err
 	}

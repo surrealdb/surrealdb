@@ -149,6 +149,19 @@ func (p *parser) parseIdioms() (mul Idents, err error) {
 
 }
 
+func (p *parser) parseParam() (*Ident, error) {
+
+	_, lit, err := p.shouldBe(IDENT, PARAM)
+	if err != nil {
+		return nil, &ParseError{Found: lit, Expected: []string{"name"}}
+	}
+
+	val, err := p.declare(IDENT, lit)
+
+	return val.(*Ident), err
+
+}
+
 // --------------------------------------------------
 //
 // --------------------------------------------------
