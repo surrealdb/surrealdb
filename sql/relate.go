@@ -18,7 +18,7 @@ func (p *parser) parseRelateStatement() (stmt *RelateStatement, err error) {
 
 	stmt = &RelateStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
 		return nil, err
 	}
 

@@ -27,25 +27,25 @@ func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 	}
 
 	if is(stmt.Kind, ALL) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthKV); err != nil {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthKV); err != nil {
 			return nil, err
 		}
 	}
 
 	if is(stmt.Kind, NAMESPACE, NS) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNS); err != nil {
 			return nil, err
 		}
 	}
 
 	if is(stmt.Kind, DATABASE, DB) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 			return nil, err
 		}
 	}
 
 	if is(stmt.Kind, SCOPE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 			return nil, err
 		}
 		if stmt.What, err = p.parseIdent(); err != nil {
@@ -54,7 +54,7 @@ func (p *parser) parseInfoStatement() (stmt *InfoStatement, err error) {
 	}
 
 	if is(stmt.Kind, TABLE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 			return nil, err
 		}
 		if stmt.What, err = p.parseIdent(); err != nil {

@@ -31,13 +31,13 @@ func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err er
 	}
 
 	if is(stmt.Kind, NAMESPACE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNS); err != nil {
 			return nil, err
 		}
 	}
 
 	if is(stmt.Kind, DATABASE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 			return nil, err
 		}
 	}
@@ -80,13 +80,13 @@ func (p *parser) parseRemoveLoginStatement() (stmt *RemoveLoginStatement, err er
 	}
 
 	if is(stmt.Kind, NAMESPACE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNS); err != nil {
 			return nil, err
 		}
 	}
 
 	if is(stmt.Kind, DATABASE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 			return nil, err
 		}
 	}

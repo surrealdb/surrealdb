@@ -25,7 +25,7 @@ import (
 // parser represents a parser.
 type parser struct {
 	s   *scanner
-	o   *options
+	a   *access
 	c   *fibre.Context
 	buf struct {
 		n   int         // buffer size
@@ -55,7 +55,7 @@ func Parse(c *fibre.Context, i interface{}) (*Query, error) {
 
 // newParser returns a new instance of Parser.
 func newParser(c *fibre.Context) *parser {
-	return &parser{c: c, o: newOptions(c)}
+	return &parser{c: c, a: newAccess(c)}
 }
 
 // parseBytes parses a byte array.

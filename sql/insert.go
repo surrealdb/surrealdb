@@ -18,7 +18,7 @@ func (p *parser) parseInsertStatement() (stmt *InsertStatement, err error) {
 
 	stmt = &InsertStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
 		return nil, err
 	}
 

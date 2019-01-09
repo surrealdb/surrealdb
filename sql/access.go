@@ -33,17 +33,17 @@ const (
 )
 
 // options represents context runtime config.
-type options struct {
+type access struct {
 	auth *cnf.Auth
 }
 
-func newOptions(c *fibre.Context) *options {
-	return &options{
+func newAccess(c *fibre.Context) *access {
+	return &access{
 		auth: c.Get("auth").(*cnf.Auth),
 	}
 }
 
-func (o *options) get(kind int) (kv, ns, db string, err error) {
+func (o *access) get(kind int) (kv, ns, db string, err error) {
 
 	kv = cnf.Settings.DB.Base
 	ns = o.auth.Selected.NS
@@ -68,7 +68,7 @@ func (o *options) get(kind int) (kv, ns, db string, err error) {
 
 }
 
-func (o *options) ns(ns string) (err error) {
+func (o *access) ns(ns string) (err error) {
 
 	// Check to see that the current user has
 	// the necessary authentication privileges
@@ -94,7 +94,7 @@ func (o *options) ns(ns string) (err error) {
 
 }
 
-func (o *options) db(db string) (err error) {
+func (o *access) db(db string) (err error) {
 
 	// Check to see that the current user has
 	// the necessary authentication privileges

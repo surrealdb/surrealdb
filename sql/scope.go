@@ -18,7 +18,7 @@ func (p *parser) parseDefineScopeStatement() (stmt *DefineScopeStatement, err er
 
 	stmt = &DefineScopeStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 		return nil, err
 	}
 
@@ -90,7 +90,7 @@ func (p *parser) parseRemoveScopeStatement() (stmt *RemoveScopeStatement, err er
 
 	stmt = &RemoveScopeStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 		return nil, err
 	}
 

@@ -18,7 +18,7 @@ func (p *parser) parseLiveStatement() (stmt *LiveStatement, err error) {
 
 	stmt = &LiveStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
 		return nil, err
 	}
 
@@ -62,7 +62,7 @@ func (p *parser) parseKillStatement() (stmt *KillStatement, err error) {
 
 	stmt = &KillStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNO); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
 		return nil, err
 	}
 

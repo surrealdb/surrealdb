@@ -43,7 +43,7 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 				return nil, &ParseError{Expected: []string{"namespace name"}, Found: stmt.NS}
 			}
 
-			if err = p.o.ns(stmt.NS); err != nil {
+			if err = p.a.ns(stmt.NS); err != nil {
 				return nil, err
 			}
 
@@ -60,7 +60,7 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 				return nil, &ParseError{Expected: []string{"database name"}, Found: stmt.DB}
 			}
 
-			if err = p.o.db(stmt.DB); err != nil {
+			if err = p.a.db(stmt.DB); err != nil {
 				return nil, err
 			}
 

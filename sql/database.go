@@ -18,7 +18,7 @@ func (p *parser) parseDefineDatabaseStatement() (stmt *DefineDatabaseStatement, 
 
 	stmt = &DefineDatabaseStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNS); err != nil {
 		return nil, err
 	}
 
@@ -34,7 +34,7 @@ func (p *parser) parseRemoveDatabaseStatement() (stmt *RemoveDatabaseStatement, 
 
 	stmt = &RemoveDatabaseStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthNS); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNS); err != nil {
 		return nil, err
 	}
 

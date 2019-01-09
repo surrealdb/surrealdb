@@ -18,7 +18,7 @@ func (p *parser) parseDefineEventStatement() (stmt *DefineEventStatement, err er
 
 	stmt = &DefineEventStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 		return nil, err
 	}
 
@@ -58,7 +58,7 @@ func (p *parser) parseRemoveEventStatement() (stmt *RemoveEventStatement, err er
 
 	stmt = &RemoveEventStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 		return nil, err
 	}
 

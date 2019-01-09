@@ -18,7 +18,7 @@ func (p *parser) parseDefineTableStatement() (stmt *DefineTableStatement, err er
 
 	stmt = &DefineTableStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 		return nil, err
 	}
 
@@ -109,7 +109,7 @@ func (p *parser) parseRemoveTableStatement() (stmt *RemoveTableStatement, err er
 
 	stmt = &RemoveTableStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.o.get(AuthDB); err != nil {
+	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
 		return nil, err
 	}
 
