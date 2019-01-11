@@ -183,6 +183,7 @@ const (
 	SIGNIN
 	SIGNUP
 	SOMECONTAINEDIN
+	SPLIT
 	START
 	TABLE
 	THEN
@@ -360,6 +361,7 @@ var tokens = [...]string{
 	SIGNIN:          "SIGNIN",
 	SIGNUP:          "SIGNUP",
 	SOMECONTAINEDIN: "SOMECONTAINEDIN",
+	SPLIT:           "SPLIT",
 	START:           "START",
 	TABLE:           "TABLE",
 	THEN:            "THEN",

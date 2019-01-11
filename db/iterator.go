@@ -54,6 +54,7 @@ type iterator struct {
 	expr  sql.Fields
 	what  sql.Exprs
 	cond  sql.Expr
+	split sql.Idents
 	group sql.Groups
 	order sql.Orders
 	limit int
@@ -133,6 +134,7 @@ func (i *iterator) Close() {
 	i.expr = nil
 	i.what = nil
 	i.cond = nil
+	i.split = nil
 	i.group = nil
 	i.order = nil
 	i.limit = -1
@@ -149,8 +151,10 @@ func (i *iterator) setupState(ctx context.Context) {
 	i.expr = nil
 	i.what = nil
 	i.cond = nil
+	i.split = nil
 	i.group = nil
 	i.order = nil
+	i.split = nil
 	i.limit = -1
 	i.start = -1
 	i.versn = math.MaxInt64
@@ -160,6 +164,7 @@ func (i *iterator) setupState(ctx context.Context) {
 		i.expr = stm.Expr
 		i.what = stm.What
 		i.cond = stm.Cond
+		i.split = stm.Split
 		i.group = stm.Group
 		i.order = stm.Order
 		i.tasks = stm.Parallel
@@ -865,6 +870,10 @@ func (i *iterator) Yield(ctx context.Context) (out []interface{}, err error) {
 		}
 	}
 
+	if len(i.split) > 0 {
+		i.res = i.Split(ctx, i.res)
+	}
+
 	if len(i.group) > 0 {
 		i.res = i.Group(ctx, i.res)
 	}
@@ -884,6 +893,42 @@ func (i *iterator) Yield(ctx context.Context) (out []interface{}, err error) {
 	}
 
 	return i.res, i.err
+
+}
+
+func (i *iterator) Split(ctx context.Context, arr []interface{}) (out []interface{}) {
+
+	for _, s := range i.split {
+
+		out = make([]interface{}, 0)
+
+		for _, a := range arr {
+
+			doc := data.Consume(a)
+
+			pth := make([]string, 0)
+
+			switch doc.Get(s.VA).Data().(type) {
+			case []interface{}:
+				pth = append(pth, s.VA, "*")
+			default:
+				pth = append(pth, s.VA)
+			}
+
+			doc.Walk(func(key string, val interface{}, exi bool) error {
+				doc := doc.Copy()
+				doc.Set(val, s.VA)
+				out = append(out, doc.Data())
+				return nil
+			}, pth...)
+
+		}
+
+		arr = out
+
+	}
+
+	return out
 
 }
 

@@ -170,6 +170,7 @@ type SelectStatement struct {
 	Expr     Fields
 	What     Exprs
 	Cond     Expr
+	Split    Idents
 	Group    Groups
 	Order    Orders
 	Limit    Expr

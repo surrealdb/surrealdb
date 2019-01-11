@@ -225,10 +225,11 @@ func (this KillStatement) String() string {
 }
 
 func (this SelectStatement) String() string {
-	return print("SELECT %v FROM %v%v%v%v%v%v%v%v%v",
+	return print("SELECT %v FROM %v%v%v%v%v%v%v%v%v%v",
 		this.Expr,
 		this.What,
 		maybe(this.Cond != nil, print(" WHERE %v", this.Cond)),
+		maybe(this.Split != nil, print(" SPLIT %v", this.Split)),
 		this.Group,
 		this.Order,
 		maybe(this.Limit != nil, print(" LIMIT %v", this.Limit)),

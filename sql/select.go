@@ -39,6 +39,10 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 		return nil, err
 	}
 
+	if stmt.Split, err = p.parseSplit(); err != nil {
+		return nil, err
+	}
+
 	if stmt.Group, err = p.parseGroup(); err != nil {
 		return nil, err
 	}
@@ -139,6 +143,26 @@ func (p *parser) parseFields() (mul Fields, err error) {
 	}
 
 	return
+
+}
+
+func (p *parser) parseSplit() (Idents, error) {
+
+	// The next token that we expect to see is a
+	// SPLIT token, and if we don't find one then
+	// return nil, with no error.
+
+	if _, _, exi := p.mightBe(SPLIT); !exi {
+		return nil, nil
+	}
+
+	// We don't need to have a ON token, but we
+	// allow it so that the SQL query would read
+	// better when compared to english.
+
+	_, _, _ = p.mightBe(ON)
+
+	return p.parseIdioms()
 
 }
 
