@@ -910,7 +910,7 @@ func (i *iterator) Split(ctx context.Context, arr []interface{}) (out []interfac
 
 			switch doc.Get(s.VA).Data().(type) {
 			case []interface{}:
-				pth = append(pth, s.VA, "*")
+				pth = append(pth, s.VA, docKeyAll)
 			default:
 				pth = append(pth, s.VA)
 			}
