@@ -28,6 +28,7 @@ const (
 	WarnLevel  = logrus.WarnLevel
 	InfoLevel  = logrus.InfoLevel
 	DebugLevel = logrus.DebugLevel
+	TraceLevel = logrus.TraceLevel
 )
 
 var (
@@ -64,6 +65,15 @@ var (
 		InfoLevel,
 		DebugLevel,
 	}
+	TraceLevels = []logrus.Level{
+		PanicLevel,
+		FatalLevel,
+		ErrorLevel,
+		WarnLevel,
+		InfoLevel,
+		DebugLevel,
+		TraceLevel,
+	}
 )
 
 var log *Logger
@@ -77,7 +87,7 @@ func init() {
 	log = &Logger{
 		&logrus.Logger{
 			Out:       ioutil.Discard,
-			Level:     logrus.DebugLevel,
+			Level:     logrus.TraceLevel,
 			Hooks:     logrus.LevelHooks{},
 			Formatter: &logrus.TextFormatter{},
 		},

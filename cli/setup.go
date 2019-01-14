@@ -227,6 +227,7 @@ func setup() {
 	if opts.Logging.Level != "" {
 
 		chk = map[string]bool{
+			"trace": true,
 			"debug": true,
 			"info":  true,
 			"warn":  true,

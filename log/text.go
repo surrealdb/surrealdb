@@ -126,8 +126,12 @@ func (f *TextFormatter) printColored(b *bytes.Buffer, entry *logrus.Entry, keys 
 	var prefix string
 
 	switch entry.Level {
+	case logrus.TraceLevel:
+		color = ansi.White
+	case logrus.DebugLevel:
+		color = ansi.Magenta
 	case logrus.InfoLevel:
-		color = ansi.Green
+		color = ansi.Blue
 	case logrus.WarnLevel:
 		color = ansi.Yellow
 	case logrus.ErrorLevel:

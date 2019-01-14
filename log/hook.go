@@ -45,6 +45,8 @@ func (h *DefaultHook) Fire(entry *logrus.Entry) error {
 // SetLevel sets the logging level of the logger instance.
 func (h *DefaultHook) SetLevel(v string) {
 	switch v {
+	case "trace":
+		h.l = TraceLevels
 	case "debug":
 		h.l = DebugLevels
 	case "info":
