@@ -24,6 +24,7 @@ import (
 	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
+	"github.com/abcum/surreal/util/uuid"
 	"github.com/dgrijalva/jwt-go"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -105,9 +106,13 @@ func signinInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 			c.Fibre(),
 		)
 
-		// Ensure we copy the session od.
+		// Ensure we copy the session id.
 
 		t.Set(varKeyUniq, c.Get(varKeyUniq))
+
+		// Create a new socket request id.
+
+		t.Set(varKeySock, uuid.New().String())
 
 		// Give full permissions to scope.
 

@@ -19,6 +19,7 @@ import (
 
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/util/uuid"
 )
 
 func setupDB(workers ...int) {
@@ -52,6 +53,7 @@ func setupKV() *fibre.Context {
 	res := &fibre.Response{}
 
 	ctx := fibre.NewContext(req, res, nil)
+	ctx.Set("id", uuid.New().String())
 	ctx.Set("auth", auth)
 
 	return ctx
@@ -71,6 +73,7 @@ func setupSC() *fibre.Context {
 	res := &fibre.Response{}
 
 	ctx := fibre.NewContext(req, res, nil)
+	ctx.Set("id", uuid.New().String())
 	ctx.Set("auth", auth)
 
 	return ctx

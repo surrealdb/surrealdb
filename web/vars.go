@@ -22,6 +22,7 @@ const (
 	varKeyUs   = "US"
 	varKeyTb   = "TB"
 	varKeyId   = "ID"
+	varKeySock = "id"
 	varKeyAuth = "auth"
 	varKeyUser = "user"
 	varKeyPass = "pass"
