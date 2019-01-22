@@ -60,7 +60,6 @@ type iterator struct {
 	limit int
 	start int
 	versn int64
-	tasks int
 }
 
 type workable struct {
@@ -100,8 +99,8 @@ func newIterator(e *executor, ctx context.Context, stm sql.Statement, vir bool) 
 	i.wait = sync.WaitGroup{}
 	i.fail = make(chan error, 1)
 	i.stop = make(chan struct{})
-	i.jobs = make(chan *workable, 1000)
-	i.vals = make(chan *doneable, 1000)
+	i.jobs = make(chan *workable, workerCount)
+	i.vals = make(chan *doneable, workerCount)
 
 	// Comment here
 
@@ -110,10 +109,6 @@ func newIterator(e *executor, ctx context.Context, stm sql.Statement, vir bool) 
 	// Comment here ...
 
 	i.setupWorkers(ctx)
-
-	// Comment here ...
-
-	i.watchVals(ctx)
 
 	return
 
@@ -140,7 +135,6 @@ func (i *iterator) Close() {
 	i.limit = -1
 	i.start = -1
 	i.versn = 0
-	i.tasks = 0
 
 	iteratorPool.Put(i)
 
@@ -167,26 +161,18 @@ func (i *iterator) setupState(ctx context.Context) {
 		i.split = stm.Split
 		i.group = stm.Group
 		i.order = stm.Order
-		i.tasks = stm.Parallel
 	case *sql.CreateStatement:
 		i.what = stm.What
-		i.tasks = stm.Parallel
 	case *sql.UpdateStatement:
 		i.what = stm.What
 		i.cond = stm.Cond
-		i.tasks = stm.Parallel
 	case *sql.DeleteStatement:
 		i.what = stm.What
 		i.cond = stm.Cond
-		i.tasks = stm.Parallel
-	case *sql.RelateStatement:
-		i.tasks = stm.Parallel
 	case *sql.InsertStatement:
 		i.what = sql.Exprs{stm.Data}
-		i.tasks = stm.Parallel
 	case *sql.UpsertStatement:
 		i.what = sql.Exprs{stm.Data}
-		i.tasks = stm.Parallel
 	}
 
 	if stm, ok := i.stm.(*sql.SelectStatement); ok {
@@ -237,41 +223,32 @@ func (i *iterator) checkState(ctx context.Context) bool {
 
 func (i *iterator) setupWorkers(ctx context.Context) {
 
-	if i.checkState(ctx) {
-		for w := 1; w <= ints.Between(1, workerCount, i.tasks); w++ {
-			go i.setupWorker(ctx, i.jobs, i.vals)
+	if !i.checkState(ctx) {
+		return
+	}
+
+	go func(vals <-chan *doneable) {
+		for v := range vals {
+			i.receive(v)
 		}
+	}(i.vals)
+
+	for w := 1; w <= workerCount; w++ {
+		go func(jobs <-chan *workable, vals chan<- *doneable) {
+			for j := range jobs {
+				res, err := newDocument(i, j.key, j.val, j.doc).query(ctx, i.stm)
+				vals <- &doneable{res: res, err: err}
+			}
+		}(i.jobs, i.vals)
 	}
 
 }
 
-func (i *iterator) setupWorker(ctx context.Context, jobs chan *workable, vals chan *doneable) {
-
-	for j := range jobs {
-
-		res, err := newDocument(i, j.key, j.val, j.doc).query(ctx, i.stm)
-
-		vals <- &doneable{res: res, err: err}
-
-	}
-
-}
-
-func (i *iterator) submitTask(key *keys.Thing, val kvs.KV, doc *data.Doc) {
+func (i *iterator) deliver(key *keys.Thing, val kvs.KV, doc *data.Doc) {
 
 	i.wait.Add(1)
 
 	i.jobs <- &workable{key: key, val: val, doc: doc}
-
-}
-
-func (i *iterator) watchVals(ctx context.Context) {
-
-	go func(vals <-chan *doneable) {
-		for val := range vals {
-			i.receive(val)
-		}
-	}(i.vals)
 
 }
 
@@ -529,7 +506,7 @@ func (i *iterator) processThing(ctx context.Context, key *keys.Thing) {
 	i.processPerms(ctx, key.NS, key.DB, key.TB)
 
 	if i.checkState(ctx) {
-		i.submitTask(key, nil, nil)
+		i.deliver(key, nil, nil)
 	}
 
 }
@@ -578,7 +555,7 @@ func (i *iterator) processTable(ctx context.Context, key *keys.Table) {
 
 		for _, val := range vals {
 			if i.checkState(ctx) {
-				i.submitTask(nil, val, nil)
+				i.deliver(nil, val, nil)
 				continue
 			}
 		}
@@ -608,7 +585,7 @@ func (i *iterator) processBatch(ctx context.Context, key *keys.Thing, qry *sql.B
 		if i.checkState(ctx) {
 			key := key.Copy()
 			key.TB, key.ID = val.TB, val.ID
-			i.submitTask(key, nil, nil)
+			i.deliver(key, nil, nil)
 			continue
 		}
 
@@ -635,7 +612,7 @@ func (i *iterator) processModel(ctx context.Context, key *keys.Thing, qry *sql.M
 			if i.checkState(ctx) {
 				key := key.Copy()
 				key.ID = guid.New().String()
-				i.submitTask(key, nil, nil)
+				i.deliver(key, nil, nil)
 				continue
 			}
 
@@ -656,7 +633,7 @@ func (i *iterator) processModel(ctx context.Context, key *keys.Thing, qry *sql.M
 			if i.checkState(ctx) {
 				key := key.Copy()
 				key.ID = num
-				i.submitTask(key, nil, nil)
+				i.deliver(key, nil, nil)
 				continue
 			}
 
@@ -677,7 +654,7 @@ func (i *iterator) processModel(ctx context.Context, key *keys.Thing, qry *sql.M
 			if i.checkState(ctx) {
 				key := key.Copy()
 				key.ID = num
-				i.submitTask(key, nil, nil)
+				i.deliver(key, nil, nil)
 				continue
 			}
 
@@ -707,7 +684,7 @@ func (i *iterator) processOther(ctx context.Context, key *keys.Thing, val []inte
 			if i.checkState(ctx) {
 				key := key.Copy()
 				key.TB, key.ID = v.TB, v.ID
-				i.submitTask(key, nil, nil)
+				i.deliver(key, nil, nil)
 				continue
 			}
 
@@ -752,7 +729,7 @@ func (i *iterator) processQuery(ctx context.Context, key *keys.Thing, val []inte
 			if i.checkState(ctx) {
 				key := key.Copy()
 				key.TB, key.ID = v.TB, v.ID
-				i.submitTask(key, nil, nil)
+				i.deliver(key, nil, nil)
 				continue
 			}
 
@@ -762,7 +739,7 @@ func (i *iterator) processQuery(ctx context.Context, key *keys.Thing, val []inte
 			// of the data so we can process it.
 
 			if i.checkState(ctx) {
-				i.submitTask(nil, nil, data.Consume(v))
+				i.deliver(nil, nil, data.Consume(v))
 				continue
 			}
 
@@ -790,7 +767,7 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 			if i.checkState(ctx) {
 				key := key.Copy()
 				key.ID = v.ID
-				i.submitTask(key, nil, nil)
+				i.deliver(key, nil, nil)
 				continue
 			}
 
@@ -809,7 +786,7 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 					if i.checkState(ctx) {
 						key := key.Copy()
 						key.ID = thg.ID
-						i.submitTask(key, nil, data.Consume(v))
+						i.deliver(key, nil, data.Consume(v))
 						continue
 					}
 
@@ -821,7 +798,7 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 					if i.checkState(ctx) {
 						key := key.Copy()
 						key.ID = fld
-						i.submitTask(key, nil, data.Consume(v))
+						i.deliver(key, nil, data.Consume(v))
 						continue
 					}
 
@@ -835,7 +812,7 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 				if i.checkState(ctx) {
 					key := key.Copy()
 					key.ID = guid.New().String()
-					i.submitTask(key, nil, data.Consume(v))
+					i.deliver(key, nil, data.Consume(v))
 					continue
 				}
 

@@ -163,98 +163,91 @@ type KillStatement struct {
 
 // SelectStatement represents a SQL SELECT statement.
 type SelectStatement struct {
-	RW       bool
-	KV       string
-	NS       string
-	DB       string
-	Expr     Fields
-	What     Exprs
-	Cond     Expr
-	Split    Idents
-	Group    Groups
-	Order    Orders
-	Limit    Expr
-	Start    Expr
-	Fetch    Fetchs
-	Version  Expr
-	Timeout  time.Duration
-	Parallel int
+	RW      bool
+	KV      string
+	NS      string
+	DB      string
+	Expr    Fields
+	What    Exprs
+	Cond    Expr
+	Split   Idents
+	Group   Groups
+	Order   Orders
+	Limit   Expr
+	Start   Expr
+	Fetch   Fetchs
+	Version Expr
+	Timeout time.Duration
 }
 
 // CreateStatement represents a SQL CREATE statement.
 type CreateStatement struct {
-	KV       string
-	NS       string
-	DB       string
-	What     Exprs
-	Data     Expr
-	Echo     Token
-	Timeout  time.Duration
-	Parallel int
+	KV      string
+	NS      string
+	DB      string
+	What    Exprs
+	Data    Expr
+	Echo    Token
+	Timeout time.Duration
 }
 
 // UpdateStatement represents a SQL UPDATE statement.
 type UpdateStatement struct {
-	KV       string
-	NS       string
-	DB       string
-	What     Exprs
-	Data     Expr
-	Cond     Expr
-	Echo     Token
-	Timeout  time.Duration
-	Parallel int
+	KV      string
+	NS      string
+	DB      string
+	What    Exprs
+	Data    Expr
+	Cond    Expr
+	Echo    Token
+	Timeout time.Duration
 }
 
 // DeleteStatement represents a SQL DELETE statement.
 type DeleteStatement struct {
-	KV       string
-	NS       string
-	DB       string
-	What     Exprs
-	Cond     Expr
-	Echo     Token
-	Timeout  time.Duration
-	Parallel int
+	KV      string
+	NS      string
+	DB      string
+	What    Exprs
+	Cond    Expr
+	Echo    Token
+	Timeout time.Duration
 }
 
 // RelateStatement represents a SQL RELATE statement.
 type RelateStatement struct {
-	KV       string
-	NS       string
-	DB       string
-	Type     Expr
-	From     Exprs
-	With     Exprs
-	Data     Expr
-	Uniq     bool
-	Echo     Token
-	Timeout  time.Duration
-	Parallel int
+	KV      string
+	NS      string
+	DB      string
+	Type    Expr
+	From    Exprs
+	With    Exprs
+	Data    Expr
+	Uniq    bool
+	Echo    Token
+	Timeout time.Duration
 }
 
 // InsertStatement represents a SQL INSERT statement.
 type InsertStatement struct {
-	KV       string
-	NS       string
-	DB       string
-	Data     Expr
-	Into     *Table
-	Echo     Token
-	Timeout  time.Duration
-	Parallel int
+	KV      string
+	NS      string
+	DB      string
+	Data    Expr
+	Into    *Table
+	Echo    Token
+	Timeout time.Duration
 }
 
 // UpsertStatement represents a SQL UPSERT statement.
 type UpsertStatement struct {
-	KV       string
-	NS       string
-	DB       string
-	Data     Expr
-	Into     *Table
-	Echo     Token
-	Timeout  time.Duration
-	Parallel int
+	KV      string
+	NS      string
+	DB      string
+	Data    Expr
+	Into    *Table
+	Echo    Token
+	Timeout time.Duration
 }
 
 // --------------------------------------------------

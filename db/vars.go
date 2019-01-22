@@ -76,7 +76,7 @@ const (
 var (
 	// workerCount specifies how many workers should be used
 	// to process each query statement concurrently.
-	workerCount = runtime.NumCPU() * 2
+	workerCount = runtime.NumCPU()
 
 	// maxRecursiveQueries specifies how many queries will be
 	// processed recursively before the query is cancelled.

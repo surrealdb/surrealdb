@@ -358,13 +358,12 @@ func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc
 	}
 
 	res, err := e.executeSelect(ctx, &sql.SelectStatement{
-		KV:       cnf.Settings.DB.Base,
-		NS:       ctx.Value(ctxKeyNs).(string),
-		DB:       ctx.Value(ctxKeyDb).(string),
-		Expr:     []*sql.Field{{Expr: &sql.All{}}},
-		What:     []sql.Expr{val},
-		Version:  sql.Expr(ver),
-		Parallel: 1,
+		KV:      cnf.Settings.DB.Base,
+		NS:      ctx.Value(ctxKeyNs).(string),
+		DB:      ctx.Value(ctxKeyDb).(string),
+		Expr:    []*sql.Field{{Expr: &sql.All{}}},
+		What:    []sql.Expr{val},
+		Version: sql.Expr(ver),
 	})
 
 	if err != nil {
@@ -394,13 +393,12 @@ func (e *executor) fetchArray(ctx context.Context, val []interface{}, doc *data.
 	}
 
 	res, err := e.executeSelect(ctx, &sql.SelectStatement{
-		KV:       cnf.Settings.DB.Base,
-		NS:       ctx.Value(ctxKeyNs).(string),
-		DB:       ctx.Value(ctxKeyDb).(string),
-		Expr:     []*sql.Field{{Expr: &sql.All{}}},
-		What:     []sql.Expr{val},
-		Version:  sql.Expr(ver),
-		Parallel: 1,
+		KV:      cnf.Settings.DB.Base,
+		NS:      ctx.Value(ctxKeyNs).(string),
+		DB:      ctx.Value(ctxKeyDb).(string),
+		Expr:    []*sql.Field{{Expr: &sql.All{}}},
+		What:    []sql.Expr{val},
+		Version: sql.Expr(ver),
 	})
 
 	if err != nil {
