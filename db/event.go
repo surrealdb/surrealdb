@@ -25,6 +25,10 @@ import (
 // table, and executes them in name order.
 func (d *document) event(ctx context.Context, met method) (err error) {
 
+	if !d.i.e.opts.events {
+		return nil
+	}
+
 	// Check if this query has been run
 	// in forced mode, because of an
 	// index or foreign table update.

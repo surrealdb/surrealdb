@@ -140,16 +140,11 @@ func toQuote(s string) bool {
 // Statements
 // ---------------------------------------------
 
-func (this BeginStatement) String() string {
-	return "BEGIN TRANSACTION"
-}
-
-func (this CancelStatement) String() string {
-	return "CANCEL TRANSACTION"
-}
-
-func (this CommitStatement) String() string {
-	return "COMMIT TRANSACTION"
+func (this OptStatement) String() string {
+	return print("OPTION %v%v",
+		quote(this.Name),
+		maybe(this.What == false, print(" = %v", this.What)),
+	)
 }
 
 func (this UseStatement) String() string {
@@ -161,6 +156,18 @@ func (this UseStatement) String() string {
 	default:
 		return print("USE NAMESPACE %v DATABASE %v", quote(this.NS), quote(this.DB))
 	}
+}
+
+func (this BeginStatement) String() string {
+	return "BEGIN TRANSACTION"
+}
+
+func (this CancelStatement) String() string {
+	return "CANCEL TRANSACTION"
+}
+
+func (this CommitStatement) String() string {
+	return "COMMIT TRANSACTION"
 }
 
 func (this InfoStatement) String() string {

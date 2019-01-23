@@ -269,7 +269,7 @@ func Test_Parse_Queries_Malformed(t *testing.T) {
 		},
 		{
 			sql: `!`,
-			err: "Found `!` but expected `USE, INFO, BEGIN, CANCEL, COMMIT, IF, LET, RETURN, LIVE, KILL, SELECT, CREATE, UPDATE, DELETE, RELATE, INSERT, UPSERT, DEFINE, REMOVE`",
+			err: "Found `!` but expected `USE, INFO, BEGIN, CANCEL, COMMIT, IF, LET, RETURN, LIVE, KILL, SELECT, CREATE, UPDATE, DELETE, RELATE, INSERT, UPSERT, DEFINE, REMOVE, OPTION`",
 		},
 	}
 

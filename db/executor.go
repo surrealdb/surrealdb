@@ -32,6 +32,7 @@ type executor struct {
 	dbo   *mem.Cache
 	time  int64
 	lock  *mutex
+	opts  *options
 	send  chan *Response
 	cache *cache
 }
@@ -41,6 +42,8 @@ func newExecutor() (e *executor) {
 	e = executorPool.Get().(*executor)
 
 	e.dbo = mem.New()
+
+	e.opts = newOptions()
 
 	e.send = make(chan *Response)
 

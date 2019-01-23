@@ -21,9 +21,16 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-// QueryError occurs when a query can not be run.
-type QueryError struct {
+// OptsError occurs when a query can not be run.
+type OptsError struct{}
+
+// Error returns the string representation of the error.
+func (e *OptsError) Error() string {
+	return fmt.Sprintf("Unable to set database options.")
 }
+
+// QueryError occurs when a query can not be run.
+type QueryError struct{}
 
 // Error returns the string representation of the error.
 func (e *QueryError) Error() string {

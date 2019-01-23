@@ -167,6 +167,7 @@ func (p *parser) parseSingle() (stmt Statement, err error) {
 		UPSERT,
 		DEFINE,
 		REMOVE,
+		OPTION,
 	)
 
 	switch tok {
@@ -218,6 +219,8 @@ func (p *parser) parseSingle() (stmt Statement, err error) {
 		return p.parseDefineStatement()
 	case REMOVE:
 		return p.parseRemoveStatement()
+	case OPTION:
+		return p.parseOptionStatement()
 
 	default:
 		return nil, err

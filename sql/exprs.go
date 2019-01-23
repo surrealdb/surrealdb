@@ -184,6 +184,19 @@ func (p *parser) parseCond() (exp Expr, err error) {
 //
 // --------------------------------------------------
 
+func (p *parser) parseBool() (bool, error) {
+
+	tok, lit, err := p.shouldBe(TRUE, FALSE)
+	if err != nil {
+		return false, &ParseError{Found: lit, Expected: []string{"true", "false"}}
+	}
+
+	val, err := p.declare(tok, lit)
+
+	return val.(bool), err
+
+}
+
 func (p *parser) parseBinary() ([]byte, error) {
 
 	_, lit, err := p.shouldBe(STRING, REGION)

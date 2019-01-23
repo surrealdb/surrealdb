@@ -54,19 +54,6 @@ type WriteableStatement interface {
 }
 
 // --------------------------------------------------
-// Trans
-// --------------------------------------------------
-
-// UseStatement represents a SQL BEGIN TRANSACTION statement.
-type BeginStatement struct{}
-
-// UseStatement represents a SQL CANCEL TRANSACTION statement.
-type CancelStatement struct{}
-
-// UseStatement represents a SQL COMMIT TRANSACTION statement.
-type CommitStatement struct{}
-
-// --------------------------------------------------
 // Use
 // --------------------------------------------------
 
@@ -75,6 +62,29 @@ type UseStatement struct {
 	NS string
 	DB string
 }
+
+// --------------------------------------------------
+// Options
+// --------------------------------------------------
+
+// OptStatement represents a SQL OPTION statement.
+type OptStatement struct {
+	Name string
+	What bool
+}
+
+// --------------------------------------------------
+// Trans
+// --------------------------------------------------
+
+// BeginStatement represents a SQL BEGIN TRANSACTION statement.
+type BeginStatement struct{}
+
+// CancelStatement represents a SQL CANCEL TRANSACTION statement.
+type CancelStatement struct{}
+
+// CommitStatement represents a SQL COMMIT TRANSACTION statement.
+type CommitStatement struct{}
 
 // --------------------------------------------------
 // Info

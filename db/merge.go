@@ -322,7 +322,7 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 			// We are setting the value of the field
 
-			if fd.Value != nil {
+			if fd.Value != nil && d.i.e.opts.fields {
 
 				// Reset the variables
 
@@ -342,7 +342,7 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 			// We are checking the value of the field
 
-			if fd.Assert != nil {
+			if fd.Assert != nil && d.i.e.opts.fields {
 
 				// Reset the variables
 

@@ -162,6 +162,7 @@ const (
 	NULL
 	NUMERIC
 	ON
+	OPTION
 	OR
 	ORDER
 	PARALLEL
@@ -340,6 +341,7 @@ var tokens = [...]string{
 	NULL:            "NULL",
 	NUMERIC:         "NUMERIC",
 	ON:              "ON",
+	OPTION:          "OPTION",
 	OR:              "OR",
 	ORDER:           "ORDER",
 	PARALLEL:        "PARALLEL",
