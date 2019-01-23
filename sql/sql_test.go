@@ -176,10 +176,6 @@ func TestMain(t *testing.T) {
 			err: "Found `something` but expected `;`",
 		},
 		{
-			sql: `BEGIN; USE NS name DB name; COMMIT;`,
-			err: "You can't change NAMESPACE or DATABASE inside of a transaction",
-		},
-		{
 			sql: "USE NS `*` DB `*`",
 			str: "USE NAMESPACE `*` DATABASE `*`",
 			res: &Query{Statements: []Statement{&UseStatement{

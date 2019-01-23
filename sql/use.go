@@ -21,10 +21,6 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 	var tok Token
 	var exi bool
 
-	if p.buf.txn {
-		return nil, &TransError{}
-	}
-
 	tok, _, err = p.shouldBe(NAMESPACE, DATABASE, NS, DB)
 	if err != nil {
 		return nil, err

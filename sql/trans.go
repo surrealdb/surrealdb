@@ -20,8 +20,6 @@ func (p *parser) parseBeginStatement() (stmt *BeginStatement, err error) {
 
 	_, _, _ = p.mightBe(TRANSACTION)
 
-	p.buf.txn = true
-
 	return
 
 }
@@ -32,8 +30,6 @@ func (p *parser) parseCancelStatement() (stmt *CancelStatement, err error) {
 
 	_, _, _ = p.mightBe(TRANSACTION)
 
-	p.buf.txn = false
-
 	return
 
 }
@@ -43,8 +39,6 @@ func (p *parser) parseCommitStatement() (stmt *CommitStatement, err error) {
 	stmt = &CommitStatement{}
 
 	_, _, _ = p.mightBe(TRANSACTION)
-
-	p.buf.txn = false
 
 	return
 

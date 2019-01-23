@@ -30,7 +30,6 @@ type parser struct {
 	buf struct {
 		n   int         // buffer size
 		rw  bool        // writeable
-		txn bool        // inside txn
 		tok Token       // last read token
 		lit string      // last read literal
 		val interface{} // Last read value

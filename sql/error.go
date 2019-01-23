@@ -43,14 +43,6 @@ func (e *BlankError) Error() string {
 	return fmt.Sprint("You need to specify a namespace and a database to use")
 }
 
-// TransError represents an error that occured when switching access.
-type TransError struct{}
-
-// Error returns the string representation of the error.
-func (e *TransError) Error() string {
-	return fmt.Sprintf("You can't change NAMESPACE or DATABASE inside of a transaction")
-}
-
 // PermsError represents an error that occured when switching access.
 type PermsError struct {
 	Resource string
