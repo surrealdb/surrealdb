@@ -132,7 +132,6 @@ const (
 	EMPTY
 	END
 	EVENT
-	EXPUNGE
 	FALSE
 	FETCH
 	FIELD
@@ -311,7 +310,6 @@ var tokens = [...]string{
 	EMPTY:           "EMPTY",
 	END:             "END",
 	EVENT:           "EVENT",
-	EXPUNGE:         "EXPUNGE",
 	FALSE:           "FALSE",
 	FETCH:           "FETCH",
 	FIELD:           "FIELD",

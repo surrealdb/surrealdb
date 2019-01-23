@@ -51,7 +51,6 @@ const (
 	ctxKeySpec    = "spec"
 	ctxKeyAuth    = "auth"
 	ctxKeyKind    = "kind"
-	ctxKeyScope   = "scope"
 	ctxKeyForce   = "force"
 	ctxKeyVersion = "version"
 )

@@ -2719,11 +2719,11 @@ func Test_Parse_Queries_Define(t *testing.T) {
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE`,
-			err: "Found `` but expected `array, boolean, circle, datetime, number, object, point, polygon, record, string, uuid`",
+			err: "Found `` but expected `array, boolean, circle, datetime, number, object, point, polygon, record, string`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE something`,
-			err: "Found `something` but expected `array, boolean, circle, datetime, number, object, point, polygon, record, string, uuid`",
+			err: "Found `something` but expected `array, boolean, circle, datetime, number, object, point, polygon, record, string`",
 		},
 		{
 			sql: `DEFINE FIELD temp ON person TYPE array`,

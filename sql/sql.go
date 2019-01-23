@@ -21,22 +21,19 @@ import (
 const (
 	// Parsing format for date times
 	RFCDate = "2006-01-02"
-	// Parsing format for normal times
-	RFCNorm = time.RFC1123
 	// Parsing format for json date times
 	RFCTime = time.RFC3339
 	// Parsing format for json nanosecond times
 	RFCNano = time.RFC3339Nano
-	// Parsing format for readable text format date times
-	RFCText = "2006-01-02 15:04:05.999999999 -0700 MST"
 )
 
 var (
 	allowedTypes = []string{
-		"array", "boolean", "circle",
-		"datetime", "number", "object",
-		"point", "polygon", "record",
-		"string", "uuid",
+		"array", "boolean",
+		"circle", "datetime",
+		"number", "object",
+		"point", "polygon",
+		"record", "string",
 	}
 
 	allowedAlgorithms = []string{
