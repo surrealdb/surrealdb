@@ -109,12 +109,12 @@ var chg = []interface{}{
 	map[string]interface{}{
 		"op":    "change",
 		"path":  "/name/first",
-		"value": "=1\t+obie",
+		"value": "@@ -1 +1,5 @@\n T\n+obie\n",
 	},
 	map[string]interface{}{
 		"op":    "change",
 		"path":  "/name/last",
-		"value": "=1\t+organ\t=2\t+itchcock",
+		"value": "@@ -1,3 +1,16 @@\n M\n- H\n+organ Hitchcock\n",
 	},
 }
 

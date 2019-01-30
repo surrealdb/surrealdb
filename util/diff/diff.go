@@ -239,9 +239,9 @@ func (o *operations) patch(old map[string]interface{}) (now map[string]interface
 		case "change":
 			if txt, ok := obj.Get(path...).Data().(string); ok {
 				dmp := diffmatchpatch.New()
-				if dif, err := dmp.DiffFromDelta(txt, v.value.(string)); err == nil {
-					str := dmp.DiffText2(dif)
-					obj.Set(str, path...)
+				if pch, err := dmp.PatchFromText(v.value.(string)); err == nil {
+					txt, _ := dmp.PatchApply(pch, txt)
+					obj.Set(txt, path...)
 				}
 			}
 		}
@@ -256,9 +256,9 @@ func (o *operations) text(old, now string, path string) {
 
 	dmp := diffmatchpatch.New()
 
-	dif := dmp.DiffMain(old, now, false)
+	pch := dmp.PatchMake(old, now)
 
-	txt := dmp.DiffToDelta(dif)
+	txt := dmp.PatchToText(pch)
 
 	o.op("change", "", path, old, txt)
 
