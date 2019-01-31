@@ -18,10 +18,6 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 
 	stmt = &SelectStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
-		return nil, err
-	}
-
 	if stmt.Expr, err = p.parseFields(); err != nil {
 		return nil, err
 	}

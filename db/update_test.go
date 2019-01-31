@@ -28,7 +28,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update with invalid value", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -38,7 +38,7 @@ func TestUpdate(t *testing.T) {
 		UPDATE [{value:"one"}];
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Status, ShouldEqual, "ERR")
@@ -54,7 +54,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update record when it exists", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -62,7 +62,7 @@ func TestUpdate(t *testing.T) {
 		UPDATE person:test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -72,14 +72,14 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update unique record using `table`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		UPDATE person, table("person");
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 0)
@@ -88,14 +88,14 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update specific record using `thing`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		UPDATE person:test, thing("person", "test");
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 2)
@@ -108,14 +108,14 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update unique records using `batch`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		UPDATE batch("person", ["1", "2", "person:3"]);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 3)
@@ -126,14 +126,14 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update unique records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		UPDATE |person:100|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 100)
@@ -144,14 +144,14 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update sequential ascending records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		UPDATE |person:1..100|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 100)
@@ -162,14 +162,14 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update sequential descending records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		UPDATE |person:100..1|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 100)
@@ -180,14 +180,14 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update sequential ascending negative-to-positive records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		UPDATE |person:-50..50|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 101)
@@ -199,14 +199,14 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update sequential ascending decimal records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		UPDATE |person:1,0.5..50|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 99)
@@ -218,14 +218,14 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update sequential descending decimal records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		UPDATE |person:50,0.5..1|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 99)
@@ -237,14 +237,14 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update sequential ascending decimal negative-to-positive records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		UPDATE |person:-50,0.5..50|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 201)
@@ -256,7 +256,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Parsing same ID using ints, floats, and strings", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -268,7 +268,7 @@ func TestUpdate(t *testing.T) {
 		SELECT name FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -282,7 +282,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Updating with a timeout of 1ms returns an error", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -290,7 +290,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 0)
@@ -302,7 +302,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update a record using CONTENT", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -311,7 +311,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -328,7 +328,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update records using CONTENT", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -339,7 +339,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -370,7 +370,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update a record using CONTENT stored in a $param", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -380,7 +380,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -397,7 +397,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update a record using MERGE", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -406,7 +406,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -423,7 +423,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update records using MERGE", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -434,7 +434,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -459,7 +459,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update a record using MERGE stored in a $param", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -469,7 +469,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -486,7 +486,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update a record using DIFF", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -495,7 +495,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -512,7 +512,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update a record using DIFF stored in a $param", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -522,7 +522,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -539,7 +539,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update records using DIFF", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -550,7 +550,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -575,7 +575,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update a record using NULL to unset a field", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -583,7 +583,7 @@ func TestUpdate(t *testing.T) {
 		UPDATE person:test SET test = NULL;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -597,7 +597,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update a record using VOID to remove a field", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -605,7 +605,7 @@ func TestUpdate(t *testing.T) {
 		UPDATE person:test SET test = VOID;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -619,7 +619,7 @@ func TestUpdate(t *testing.T) {
 
 	Convey("Update a set of records, but only if they exist", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -627,7 +627,7 @@ func TestUpdate(t *testing.T) {
 		UPDATE |person:1..3| SET test = false WHERE id != VOID;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -641,7 +641,7 @@ func TestUpdate(t *testing.T) {
 
 		clock, _ := time.Parse(time.RFC3339, "1987-06-22T08:00:00.123456789Z")
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -649,7 +649,7 @@ func TestUpdate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 1)

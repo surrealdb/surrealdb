@@ -112,7 +112,7 @@ func TestMutex(t *testing.T) {
 
 	Convey("Ensure document locking when multiple events attempt to write to the same document", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -124,7 +124,7 @@ func TestMutex(t *testing.T) {
 		SELECT * FROM other;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -144,7 +144,7 @@ func TestMutex(t *testing.T) {
 
 	Convey("Ability to select the same document in a SELECT subquery", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -153,7 +153,7 @@ func TestMutex(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -166,7 +166,7 @@ func TestMutex(t *testing.T) {
 
 	Convey("Ability to update the same document in a SELECT subquery", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -175,7 +175,7 @@ func TestMutex(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -191,7 +191,7 @@ func TestMutex(t *testing.T) {
 
 	Convey("Ability to update the same document in a SELECT subquery", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -200,7 +200,7 @@ func TestMutex(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -216,7 +216,7 @@ func TestMutex(t *testing.T) {
 
 	Convey("Inability to update the same document in an UPDATE subquery", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -225,7 +225,7 @@ func TestMutex(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -241,7 +241,7 @@ func TestMutex(t *testing.T) {
 
 	Convey("Ability to update the same document in an event", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -250,7 +250,7 @@ func TestMutex(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -265,7 +265,7 @@ func TestMutex(t *testing.T) {
 
 	Convey("Subqueries for an event should be on the same level", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -275,7 +275,7 @@ func TestMutex(t *testing.T) {
 		SELECT * FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -290,7 +290,7 @@ func TestMutex(t *testing.T) {
 
 	Convey("Subqueries for an event on a different level create an infinite loop", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -300,7 +300,7 @@ func TestMutex(t *testing.T) {
 		SELECT * FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -315,7 +315,7 @@ func TestMutex(t *testing.T) {
 
 	Convey("Subqueries for recursive events on a different level create an infinite loop", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -327,7 +327,7 @@ func TestMutex(t *testing.T) {
 		SELECT * FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -344,7 +344,7 @@ func TestMutex(t *testing.T) {
 
 	Convey("Ability to define complex dependent events which should run consecutively and succeed", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -363,7 +363,7 @@ func TestMutex(t *testing.T) {
 		SELECT * FROM temper;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 9)
 		So(res[1].Status, ShouldEqual, "OK")

@@ -20,7 +20,7 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func (e *executor) executeIf(ctx context.Context, stm *sql.IfStatement) (out []interface{}, err error) {
+func (e *executor) executeIfelse(ctx context.Context, stm *sql.IfelseStatement) (out []interface{}, err error) {
 
 	val, err := e.fetch(ctx, stm, nil)
 	if err != nil {

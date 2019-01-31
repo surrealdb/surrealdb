@@ -161,13 +161,10 @@ func (d *document) table(ctx context.Context, when method) (err error) {
 func (d *document) tableDelete(ctx context.Context, tng *sql.Thing, exp sql.Fields) (err error) {
 
 	stm := &sql.DeleteStatement{
-		KV:   d.key.KV,
-		NS:   d.key.NS,
-		DB:   d.key.DB,
 		What: sql.Exprs{tng},
 	}
 
-	key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: tng.TB, ID: tng.ID}
+	key := &keys.Thing{KV: KV, NS: d.i.e.ns, DB: d.i.e.db, TB: tng.TB, ID: tng.ID}
 
 	i := newIterator(d.i.e, ctx, stm, true)
 
@@ -187,14 +184,11 @@ func (d *document) tableUpdate(ctx context.Context, tng *sql.Thing, exp sql.Fiel
 	}
 
 	stm := &sql.UpdateStatement{
-		KV:   d.key.KV,
-		NS:   d.key.NS,
-		DB:   d.key.DB,
 		What: sql.Exprs{tng},
 		Data: &sql.ContentExpression{Data: res},
 	}
 
-	key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: tng.TB, ID: tng.ID}
+	key := &keys.Thing{KV: KV, NS: d.i.e.ns, DB: d.i.e.db, TB: tng.TB, ID: tng.ID}
 
 	i := newIterator(d.i.e, ctx, stm, true)
 
@@ -299,14 +293,11 @@ func (d *document) tableModify(ctx context.Context, tng *sql.Thing, exp sql.Fiel
 	}
 
 	stm := &sql.UpdateStatement{
-		KV:   d.key.KV,
-		NS:   d.key.NS,
-		DB:   d.key.DB,
 		What: sql.Exprs{tng},
 		Data: set,
 	}
 
-	key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: tng.TB, ID: tng.ID}
+	key := &keys.Thing{KV: KV, NS: d.i.e.ns, DB: d.i.e.db, TB: tng.TB, ID: tng.ID}
 
 	i := newIterator(d.i.e, ctx, stm, true)
 

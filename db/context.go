@@ -16,6 +16,8 @@ package db
 
 import (
 	"context"
+
+	"github.com/abcum/surreal/cnf"
 )
 
 func vers(ctx context.Context) uint32 {
@@ -27,6 +29,19 @@ func vers(ctx context.Context) uint32 {
 		return 0
 	default:
 		return v.(uint32)
+	}
+
+}
+
+func perm(ctx context.Context) cnf.Kind {
+
+	v := ctx.Value(ctxKeyKind)
+
+	switch v {
+	case nil:
+		return cnf.AuthNO
+	default:
+		return v.(cnf.Kind)
 	}
 
 }

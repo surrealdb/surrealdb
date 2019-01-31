@@ -29,12 +29,17 @@ import (
 	"github.com/abcum/surreal/sql"
 
 	"github.com/abcum/surreal/util/data"
-	"github.com/abcum/surreal/util/uuid"
 
 	_ "github.com/abcum/surreal/kvs/rixxdb"
 )
 
 var db *kvs.DS
+
+var KV string
+
+var NIL string
+
+var ENV string
 
 // Response is a response from the database
 type Response struct {
@@ -51,10 +56,16 @@ type Dispatch struct {
 	Result interface{} `codec:"result,omitempty"`
 }
 
+func init() {
+	ENV = os.Getenv(varKeyEnv)
+}
+
 // Setup sets up the connection with the data layer
 func Setup(opts *cnf.Options) (err error) {
 
 	log.WithPrefix("db").Infof("Starting database")
+
+	KV = cnf.Settings.DB.Base
 
 	db, err = kvs.New(opts)
 
@@ -122,7 +133,7 @@ func Execute(fib *fibre.Context, txt interface{}, vars map[string]interface{}) (
 	// into SQL ASTs, using any immutable preset
 	// variables if set.
 
-	ast, err := sql.Parse(fib, txt)
+	ast, err := sql.Parse(txt)
 	if err != nil {
 		return
 	}
@@ -147,37 +158,41 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 		vars = make(map[string]interface{})
 	}
 
-	// Ensure that we have a unique id assigned
-	// to this fibre connection, as we need it
-	// to detect unique websocket notifications.
+	// Get the unique id for this connection
+	// so that we can assign it to the context
+	// and detect any websocket notifications.
 
-	if fib.Get(ctxKeyId) == nil {
-		fib.Set(ctxKeyId, uuid.New().String())
-	}
+	id := fib.Get(ctxKeyId).(string)
+
+	// Assign the authentication data to the
+	// context so that we can log the auth kind
+	// and the auth variable data to the request.
+
+	auth := fib.Get(ctxKeyAuth).(*cnf.Auth)
+
+	// Ensure that the specified environment
+	// variable 'ENV' is available to the
+	// request, to detect the environment.
+
+	vars[varKeyEnv] = ENV
+
+	// Ensure that the current authentication
+	// data is made available as a runtime
+	// variable to the query layer.
+
+	vars[varKeyAuth] = auth.Data
+
+	// Ensure that the current authentication
+	// scope is made available as a runtime
+	// variable to the query layer.
+
+	vars[varKeyScope] = auth.Scope
 
 	// Ensure that the session details, such
 	// as id, ip, and origin, are available on
 	// the 'conn' object on each query.
 
 	vars[varKeySession] = session(fib)
-
-	// Ensure that the specified environment
-	// variable 'ENV' is available to the
-	// request, to detect the environment.
-
-	vars[varKeyEnv] = os.Getenv(varKeyEnv)
-
-	// Ensure that the current authentication
-	// data is made available as a runtime
-	// variable to the query layer.
-
-	vars[varKeyAuth] = fib.Get(varKeyAuth).(*cnf.Auth).Data
-
-	// Ensure that the current authentication
-	// scope is made available as a runtime
-	// variable to the query layer.
-
-	vars[varKeyScope] = fib.Get(varKeyAuth).(*cnf.Auth).Scope
 
 	// Create a new context so that we can quit
 	// all goroutine workers if the http client
@@ -191,24 +206,10 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 
 	defer quit()
 
-	// Get the unique id for this connection
-	// so that we can assign it to the context
-	// and detect any websocket notifications.
-
-	id := fib.Get(ctxKeyId).(string)
-
-	// Assign the fibre request context id to
-	// the context so that we can log the id
-	// together with the request.
-
-	ctx = context.WithValue(ctx, ctxKeyId, id)
-
 	// Assign the authentication data to the
 	// context so that we can log the auth kind
 	// and the auth variable data to the request.
 
-	auth := fib.Get(varKeyAuth).(*cnf.Auth)
-	ctx = context.WithValue(ctx, ctxKeyAuth, auth.Data)
 	ctx = context.WithValue(ctx, ctxKeyKind, auth.Kind)
 
 	// Add the request variables to the context
@@ -241,7 +242,11 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 	// details, and the current runtime variables
 	// and execute the queries within.
 
-	executor := newExecutor()
+	executor := newExecutor(id, auth.NS, auth.DB)
+
+	// Execute the parsed SQL syntax tree in a
+	// separate goroutine so that we can send
+	// the output in chunks to the client.
 
 	go executor.execute(ctx, ast)
 

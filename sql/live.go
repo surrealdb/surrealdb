@@ -18,10 +18,6 @@ func (p *parser) parseLiveStatement() (stmt *LiveStatement, err error) {
 
 	stmt = &LiveStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
-		return nil, err
-	}
-
 	_, _, err = p.shouldBe(SELECT)
 	if err != nil {
 		return nil, err
@@ -61,10 +57,6 @@ func (p *parser) parseLiveStatement() (stmt *LiveStatement, err error) {
 func (p *parser) parseKillStatement() (stmt *KillStatement, err error) {
 
 	stmt = &KillStatement{}
-
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
-		return nil, err
-	}
 
 	if stmt.What, err = p.parseWhat(); err != nil {
 		return nil, err

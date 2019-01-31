@@ -46,7 +46,7 @@ func TestRun(t *testing.T) {
 
 	Convey("Run statement which runs http requests", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		func() {
 
@@ -67,7 +67,7 @@ func TestRun(t *testing.T) {
 			);
 			`
 
-			res, err := Execute(setupKV(), txt, nil)
+			res, err := Execute(permsKV(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 4)
 			So(res[1].Status, ShouldEqual, "OK")
@@ -84,7 +84,7 @@ func TestRun(t *testing.T) {
 			SELECT * FROM test, temp;
 			`
 
-			res, err := Execute(setupSC(), txt, nil)
+			res, err := Execute(permsSC(), txt, nil)
 			time.Sleep(1 * time.Second)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 4)

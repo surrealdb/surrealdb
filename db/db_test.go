@@ -22,59 +22,49 @@ import (
 	"github.com/abcum/surreal/util/uuid"
 )
 
-func setupDB(workers ...int) {
+var req *fibre.Request
+var res *fibre.Response
+
+func init() {
+	req = &fibre.Request{Request: httptest.NewRequest("GET", "/", nil)}
+	res = &fibre.Response{}
+}
+
+func setupDB(workers int) {
 
 	cnf.Settings = &cnf.Options{}
 	cnf.Settings.DB.Path = "memory"
-	cnf.Settings.DB.Base = "*"
+	cnf.Settings.DB.Base = "surreal"
 	cnf.Settings.DB.Proc.Size = 5
-
-	switch len(workers) {
-	default:
-		workerCount = workers[0]
-	case 0:
-		workerCount = 1
-	}
+	workerCount = workers
 
 	Setup(cnf.Settings)
 
 }
 
-func setupKV() *fibre.Context {
+func permsKV() (ctx *fibre.Context) {
 
-	auth := new(cnf.Auth)
-	auth.Kind = cnf.AuthKV
-	auth.Possible.NS = "*"
-	auth.Selected.NS = "*"
-	auth.Possible.DB = "*"
-	auth.Selected.DB = "*"
-
-	req := &fibre.Request{Request: httptest.NewRequest("GET", "/", nil)}
-	res := &fibre.Response{}
-
-	ctx := fibre.NewContext(req, res, nil)
+	ctx = fibre.NewContext(req, res, nil)
 	ctx.Set("id", uuid.New().String())
-	ctx.Set("auth", auth)
+	ctx.Set("auth", &cnf.Auth{
+		Kind: cnf.AuthKV,
+		NS:   "test",
+		DB:   "test",
+	})
 
 	return ctx
 
 }
 
-func setupSC() *fibre.Context {
+func permsSC() (ctx *fibre.Context) {
 
-	auth := new(cnf.Auth)
-	auth.Kind = cnf.AuthSC
-	auth.Possible.NS = "*"
-	auth.Selected.NS = "*"
-	auth.Possible.DB = "*"
-	auth.Selected.DB = "*"
-
-	req := &fibre.Request{Request: httptest.NewRequest("GET", "/", nil)}
-	res := &fibre.Response{}
-
-	ctx := fibre.NewContext(req, res, nil)
+	ctx = fibre.NewContext(req, res, nil)
 	ctx.Set("id", uuid.New().String())
-	ctx.Set("auth", auth)
+	ctx.Set("auth", &cnf.Auth{
+		Kind: cnf.AuthSC,
+		NS:   "test",
+		DB:   "test",
+	})
 
 	return ctx
 

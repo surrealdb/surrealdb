@@ -26,7 +26,7 @@ func TestScope(t *testing.T) {
 
 	Convey("Select records from an array of strings", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		func() {
 
@@ -36,7 +36,7 @@ func TestScope(t *testing.T) {
 			DEFINE DATABASE test;
 			`
 
-			res, err := Execute(setupKV(), txt, nil)
+			res, err := Execute(permsKV(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 3)
 
@@ -53,7 +53,7 @@ func TestScope(t *testing.T) {
 			];
 			`
 
-			res, err := Execute(setupSC(), txt, nil)
+			res, err := Execute(permsSC(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 2)
 			So(res[1].Result, ShouldHaveLength, 3)
@@ -67,7 +67,7 @@ func TestScope(t *testing.T) {
 
 	Convey("Select records from an array of objects with an id key", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		func() {
 
@@ -77,7 +77,7 @@ func TestScope(t *testing.T) {
 			DEFINE DATABASE test;
 			`
 
-			res, err := Execute(setupKV(), txt, nil)
+			res, err := Execute(permsKV(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 3)
 
@@ -94,7 +94,7 @@ func TestScope(t *testing.T) {
 			];
 			`
 
-			res, err := Execute(setupSC(), txt, nil)
+			res, err := Execute(permsSC(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 2)
 			So(res[1].Result, ShouldHaveLength, 3)
@@ -108,7 +108,7 @@ func TestScope(t *testing.T) {
 
 	Convey("Select records from an array of objects with no id key", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		func() {
 
@@ -118,7 +118,7 @@ func TestScope(t *testing.T) {
 			DEFINE DATABASE test;
 			`
 
-			res, err := Execute(setupKV(), txt, nil)
+			res, err := Execute(permsKV(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 3)
 
@@ -135,7 +135,7 @@ func TestScope(t *testing.T) {
 			];
 			`
 
-			res, err := Execute(setupSC(), txt, nil)
+			res, err := Execute(permsSC(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 2)
 			So(res[1].Result, ShouldHaveLength, 3)
@@ -149,7 +149,7 @@ func TestScope(t *testing.T) {
 
 	Convey("Select records from an array of virtual record things with no permissions", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		func() {
 
@@ -160,7 +160,7 @@ func TestScope(t *testing.T) {
 			CREATE test:one, test:two, test:tre;
 			`
 
-			res, err := Execute(setupKV(), txt, nil)
+			res, err := Execute(permsKV(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 4)
 
@@ -177,7 +177,7 @@ func TestScope(t *testing.T) {
 			);
 			`
 
-			res, err := Execute(setupSC(), txt, nil)
+			res, err := Execute(permsSC(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 2)
 			So(res[1].Result, ShouldHaveLength, 0)
@@ -188,7 +188,7 @@ func TestScope(t *testing.T) {
 
 	Convey("Select records from an array of virtual record things with full permissions", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		func() {
 
@@ -200,7 +200,7 @@ func TestScope(t *testing.T) {
 			CREATE test:one, test:two, test:tre;
 			`
 
-			res, err := Execute(setupKV(), txt, nil)
+			res, err := Execute(permsKV(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 5)
 
@@ -217,7 +217,7 @@ func TestScope(t *testing.T) {
 			);
 			`
 
-			res, err := Execute(setupSC(), txt, nil)
+			res, err := Execute(permsSC(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 2)
 			So(res[1].Result, ShouldHaveLength, 3)

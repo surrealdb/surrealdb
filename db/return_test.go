@@ -24,14 +24,14 @@ func TestReturn(t *testing.T) {
 
 	Convey("Return a string", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		RETURN "test";
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -41,14 +41,14 @@ func TestReturn(t *testing.T) {
 
 	Convey("Return a number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		RETURN 33693;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -58,14 +58,14 @@ func TestReturn(t *testing.T) {
 
 	Convey("Return a VOID expression", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		RETURN VOID;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -75,14 +75,14 @@ func TestReturn(t *testing.T) {
 
 	Convey("Return an EMPTY expression", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		RETURN EMPTY;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Status, ShouldEqual, "OK")

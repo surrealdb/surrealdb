@@ -337,7 +337,7 @@ func (i *iterator) processPerms(ctx context.Context, nsv, dbv, tbv string) {
 	// ignore all permissions checks, but we
 	// must ensure the TB, DB, and NS exist.
 
-	if ctx.Value(ctxKeyKind).(cnf.Kind) < cnf.AuthSC {
+	if perm(ctx) < cnf.AuthSC {
 
 		// If we do not have a specified table
 		// value, because we are processing a

@@ -15,17 +15,11 @@
 package cnf
 
 type Auth struct {
-	Data     interface{} `json:"id" msgpack:"id"`
-	Kind     Kind        `json:"-" msgpack:"-"`
-	Scope    string      `json:"-" msgpack:"-"`
-	Possible struct {
-		NS string
-		DB string
-	} `json:"-" msgpack:"-"`
-	Selected struct {
-		NS string
-		DB string
-	} `json:"-" msgpack:"-"`
+	Data  interface{} `json:"id" msgpack:"id"`
+	Kind  Kind        `json:"-" msgpack:"-"`
+	Scope string      `json:"-" msgpack:"-"`
+	NS    string      `json:"-" msgpack:"-"`
+	DB    string      `json:"-" msgpack:"-"`
 }
 
 // Reset resets the authentication data.

@@ -14,9 +14,9 @@
 
 package sql
 
-func (p *parser) parseIfStatement() (stmt *IfStatement, err error) {
+func (p *parser) parseIfelseStatement() (stmt *IfelseStatement, err error) {
 
-	stmt = &IfStatement{}
+	stmt = &IfelseStatement{}
 
 	for {
 

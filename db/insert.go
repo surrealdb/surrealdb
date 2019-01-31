@@ -19,12 +19,17 @@ import (
 
 	"context"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/keys"
 )
 
 func (e *executor) executeInsert(ctx context.Context, stm *sql.InsertStatement) ([]interface{}, error) {
+
+	if err := e.access(ctx, cnf.AuthNO); err != nil {
+		return nil, err
+	}
 
 	data, err := e.fetch(ctx, stm.Data, nil)
 	if err != nil {
@@ -39,11 +44,11 @@ func (e *executor) executeInsert(ctx context.Context, stm *sql.InsertStatement) 
 		return nil, fmt.Errorf("Can not execute INSERT query using value '%v'", data)
 
 	case []interface{}:
-		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: stm.Into.TB}
+		key := &keys.Thing{KV: KV, NS: e.ns, DB: e.db, TB: stm.Into.TB}
 		i.processArray(ctx, key, data)
 
 	case map[string]interface{}:
-		key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: stm.Into.TB}
+		key := &keys.Thing{KV: KV, NS: e.ns, DB: e.db, TB: stm.Into.TB}
 		i.processArray(ctx, key, []interface{}{data})
 
 	}

@@ -362,49 +362,43 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 			// We are checking the permissions of the field
 
-			if fd.Perms != nil {
+			if fd.Perms != nil && perm(ctx) > cnf.AuthDB {
 
-				if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
-					if k > cnf.AuthDB {
+				// Reset the variables
 
-						// Reset the variables
+				vars := data.New()
+				vars.Set(val, varKeyValue)
+				vars.Set(val, varKeyAfter)
+				vars.Set(old, varKeyBefore)
+				ctx = context.WithValue(ctx, ctxKeySpec, vars)
 
-						vars := data.New()
-						vars.Set(val, varKeyValue)
-						vars.Set(val, varKeyAfter)
-						vars.Set(old, varKeyBefore)
-						ctx = context.WithValue(ctx, ctxKeySpec, vars)
-
-						switch p := fd.Perms.(type) {
-						case *sql.PermExpression:
-							switch met {
-							case _CREATE:
-								if v, err := d.i.e.fetch(ctx, p.Create, d.current); err != nil {
-									return err
-								} else {
-									if b, ok := v.(bool); !ok || !b {
-										val = old
-									}
-								}
-							case _UPDATE:
-								if v, err := d.i.e.fetch(ctx, p.Update, d.current); err != nil {
-									return err
-								} else {
-									if b, ok := v.(bool); !ok || !b {
-										val = old
-									}
-								}
-							case _DELETE:
-								if v, err := d.i.e.fetch(ctx, p.Delete, d.current); err != nil {
-									return err
-								} else {
-									if b, ok := v.(bool); !ok || !b {
-										val = old
-									}
-								}
+				switch p := fd.Perms.(type) {
+				case *sql.PermExpression:
+					switch met {
+					case _CREATE:
+						if v, err := d.i.e.fetch(ctx, p.Create, d.current); err != nil {
+							return err
+						} else {
+							if b, ok := v.(bool); !ok || !b {
+								val = old
 							}
 						}
-
+					case _UPDATE:
+						if v, err := d.i.e.fetch(ctx, p.Update, d.current); err != nil {
+							return err
+						} else {
+							if b, ok := v.(bool); !ok || !b {
+								val = old
+							}
+						}
+					case _DELETE:
+						if v, err := d.i.e.fetch(ctx, p.Delete, d.current); err != nil {
+							return err
+						} else {
+							if b, ok := v.(bool); !ok || !b {
+								val = old
+							}
+						}
 					}
 				}
 

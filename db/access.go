@@ -12,12 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sql
+package db
 
-{{with $types := .}}{{range $k := $types}}
+import (
+	"context"
 
-func (s *{{$k.name}}Statement) Auth() (string, string) {
-	return s.NS, s.DB
+	"github.com/abcum/surreal/cnf"
+)
+
+func (e *executor) access(ctx context.Context, kind cnf.Kind) (err error) {
+
+	if perm(ctx) > kind {
+		return new(QueryError)
+	}
+
+	if kind > cnf.AuthKV && len(e.ns) == 0 {
+		return new(BlankError)
+	}
+
+	if kind > cnf.AuthNS && len(e.db) == 0 {
+		return new(BlankError)
+	}
+
+	return
+
 }
-
-{{end}}{{end}}

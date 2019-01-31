@@ -29,7 +29,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check calc-as-bool expressions", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -60,7 +60,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 0
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 18)
 
@@ -90,7 +90,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check calc-as-math expressions", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -110,7 +110,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 0
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 
@@ -129,7 +129,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check binary math comparisons", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -151,7 +151,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 0
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 11)
 
@@ -172,7 +172,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check binary NULL comparisons", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -242,7 +242,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 1
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 54)
 
@@ -377,7 +377,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 1
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 54)
 
@@ -444,7 +444,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check binary EMPTY comparisons", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -514,7 +514,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 1
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 54)
 
@@ -581,7 +581,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check binary thing comparisons", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -603,7 +603,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 0
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 
@@ -620,7 +620,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check binary bool comparisons", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -643,7 +643,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 0
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 9)
 
@@ -661,7 +661,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check binary float comparisons", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -689,7 +689,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 1
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 12)
 
@@ -710,7 +710,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check binary string comparisons", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -762,7 +762,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 1
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 33)
 
@@ -807,7 +807,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check binary time.Time comparisons", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -828,7 +828,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 1
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 
@@ -842,7 +842,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check binary array comparisons", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -924,7 +924,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 1
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 57)
 
@@ -999,7 +999,7 @@ func TestFetch(t *testing.T) {
 
 	Convey("Check binary object comparisons", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 
@@ -1020,7 +1020,7 @@ func TestFetch(t *testing.T) {
 		`
 
 		i := 0
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 

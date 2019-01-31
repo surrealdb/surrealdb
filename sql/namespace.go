@@ -18,10 +18,6 @@ func (p *parser) parseDefineNamespaceStatement() (stmt *DefineNamespaceStatement
 
 	stmt = &DefineNamespaceStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthKV); err != nil {
-		return nil, err
-	}
-
 	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
@@ -33,10 +29,6 @@ func (p *parser) parseDefineNamespaceStatement() (stmt *DefineNamespaceStatement
 func (p *parser) parseRemoveNamespaceStatement() (stmt *RemoveNamespaceStatement, err error) {
 
 	stmt = &RemoveNamespaceStatement{}
-
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthKV); err != nil {
-		return nil, err
-	}
 
 	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err

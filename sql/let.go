@@ -18,10 +18,6 @@ func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 
 	stmt = &LetStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
-		return nil, err
-	}
-
 	// The first part of a LET expression must
 	// always be an identifier, specifying a
 	// variable name to set.

@@ -39,10 +39,6 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 				return nil, &ParseError{Expected: []string{"namespace name"}, Found: stmt.NS}
 			}
 
-			if err = p.a.ns(stmt.NS); err != nil {
-				return nil, err
-			}
-
 		}
 
 		if is(tok, DATABASE, DB) {
@@ -54,10 +50,6 @@ func (p *parser) parseUseStatement() (stmt *UseStatement, err error) {
 
 			if len(stmt.DB) == 0 {
 				return nil, &ParseError{Expected: []string{"database name"}, Found: stmt.DB}
-			}
-
-			if err = p.a.db(stmt.DB); err != nil {
-				return nil, err
 			}
 
 		}

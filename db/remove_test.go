@@ -25,7 +25,7 @@ func TestRemove(t *testing.T) {
 
 	Convey("Remove a namespace", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -34,7 +34,7 @@ func TestRemove(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -46,7 +46,7 @@ func TestRemove(t *testing.T) {
 
 	Convey("Remove a database", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -56,7 +56,7 @@ func TestRemove(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -71,7 +71,7 @@ func TestRemove(t *testing.T) {
 
 	Convey("Remove a table", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -81,7 +81,7 @@ func TestRemove(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Status, ShouldEqual, "OK")

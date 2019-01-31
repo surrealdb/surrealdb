@@ -35,11 +35,9 @@ func (d *document) cold(ctx context.Context) (doc *data.Doc, err error) {
 	// NS, or KV level, then we need to check
 	// document permissions for this query.
 
-	if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
-		if k == cnf.AuthSC {
-			if err = d.perms(ctx, doc); err != nil {
-				return nil, err
-			}
+	if perm(ctx) == cnf.AuthSC {
+		if err = d.perms(ctx, doc); err != nil {
+			return nil, err
 		}
 	}
 
@@ -59,11 +57,9 @@ func (d *document) cnow(ctx context.Context) (doc *data.Doc, err error) {
 	// NS, or KV level, then we need to check
 	// document permissions for this query.
 
-	if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
-		if k == cnf.AuthSC {
-			if err = d.perms(ctx, doc); err != nil {
-				return nil, err
-			}
+	if perm(ctx) == cnf.AuthSC {
+		if err = d.perms(ctx, doc); err != nil {
+			return nil, err
 		}
 	}
 

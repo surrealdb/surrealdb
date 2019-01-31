@@ -26,7 +26,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records from one thing", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -36,7 +36,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person:test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -50,7 +50,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records from one thing using quotes", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -60,7 +60,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person:⟨test⟩;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -74,7 +74,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records from one table", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -83,7 +83,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -94,7 +94,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records from multiple tables", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -103,7 +103,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person, entity;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -114,7 +114,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records from multiple things and tables", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -125,7 +125,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person:test, entity:test, person, entity;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -138,14 +138,14 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records from an array of strings", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		SELECT * FROM ["one", "two", "tre"];
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 3)
@@ -157,14 +157,14 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records from an array of objects with an id key", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		SELECT * FROM [{ id: "one" }, { id: "two" }, { id: "tre" }];
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 3)
@@ -176,14 +176,14 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records from an array of objects with no id key", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		SELECT * FROM [{ test: "one" }, { test: "two" }, { test: "tre" }];
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 3)
@@ -195,7 +195,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records from an array of virtual record things", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -207,7 +207,7 @@ func TestSelect(t *testing.T) {
 		);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 3)
@@ -237,7 +237,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records with an embedded record field", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -247,7 +247,7 @@ func TestSelect(t *testing.T) {
 		SELECT meta, name, father, mother FROM person ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -263,7 +263,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select '*' parameter from an embedded record field fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -273,7 +273,7 @@ func TestSelect(t *testing.T) {
 		SELECT meta, name, father.* AS father, mother.* AS mother FROM person ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -303,7 +303,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id' parameter from an embedded record field fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -313,7 +313,7 @@ func TestSelect(t *testing.T) {
 		SELECT meta, name, father.id AS father, mother.id AS mother FROM person ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -329,7 +329,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'name' parameter from an embedded record field fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -339,7 +339,7 @@ func TestSelect(t *testing.T) {
 		SELECT meta, name, father.name AS father, mother.name AS mother FROM person ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -355,7 +355,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id.name' parameter from an embedded record field fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -365,7 +365,7 @@ func TestSelect(t *testing.T) {
 		SELECT meta, name, father.id.name AS father, mother.id.name AS mother FROM person ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -381,7 +381,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records using variable for a `table`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -389,7 +389,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM $tb;
 		`
 
-		res, err := Execute(setupKV(), txt, map[string]interface{}{
+		res, err := Execute(permsKV(), txt, map[string]interface{}{
 			"tb": sql.NewTable("person"),
 		})
 
@@ -404,7 +404,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records using variable for a `thing`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -412,7 +412,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM $id;
 		`
 
-		res, err := Execute(setupKV(), txt, map[string]interface{}{
+		res, err := Execute(permsKV(), txt, map[string]interface{}{
 			"id": sql.NewThing("person", "test"),
 		})
 
@@ -427,7 +427,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records using an * subquery", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -439,7 +439,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM (SELECT * FROM person ORDER BY name);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 5)
@@ -450,7 +450,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records using an * subquery, with a limit of 1", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -462,7 +462,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM (SELECT * FROM person ORDER BY name LIMIT 1);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 1)
@@ -472,7 +472,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records using an * subquery, specifying a single record", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -484,7 +484,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM (SELECT * FROM person:5);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 1)
@@ -494,7 +494,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records using an id subquery", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -506,7 +506,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM (SELECT id FROM (SELECT * FROM person ORDER BY name));
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 5)
@@ -517,7 +517,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records using an id subquery, with a limit of 1", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -529,7 +529,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM (SELECT id FROM (SELECT * FROM person ORDER BY name) LIMIT 1);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 1)
@@ -539,7 +539,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records using an id subquery, specifying a single record", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -551,7 +551,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM (SELECT id FROM (SELECT * FROM person:5));
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 1)
@@ -561,7 +561,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records using a single field subquery", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -573,7 +573,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM (SELECT name FROM person ORDER BY name);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 5)
@@ -584,7 +584,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select records using a single field subquery, with a limit of 1", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -596,7 +596,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM (SELECT name FROM person ORDER BY name LIMIT 1);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 1)
@@ -606,7 +606,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select $thing from a direct `thing` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -615,7 +615,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, person:test AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -629,7 +629,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select '*' from a direct `thing` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -638,7 +638,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, person:test.* AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -659,7 +659,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id' parameter from a direct `thing` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -668,7 +668,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, person:test.id AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -682,7 +682,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'name' parameter from a direct `thing` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -691,7 +691,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, person:test.name AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -705,7 +705,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id.name' parameter from a direct `thing` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -714,7 +714,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, person:test.id.name AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -728,7 +728,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id.id.id.name' parameter from a direct `thing` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -737,7 +737,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, person:test.id.id.id.name AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -751,7 +751,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select $param parameter from a direct `param` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -761,7 +761,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, $person AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -775,7 +775,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select '*' parameter from a direct `param` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -785,7 +785,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, $person.* AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -806,7 +806,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id' parameter from a direct `param` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -816,7 +816,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, $person.id AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -830,7 +830,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'name' parameter from a direct `param` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -840,7 +840,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, $person.name AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -854,7 +854,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id.name' parameter from a direct `param` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -864,7 +864,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, $person.id.name AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -878,7 +878,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id.id.id.name' parameter from a direct `param` record fetch", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -888,7 +888,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, $person.id.id.id.name AS test FROM tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -902,7 +902,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select $parent parameter from a subquery `param`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -911,7 +911,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, (SELECT $parent FROM tester LIMIT 1) AS test FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -933,7 +933,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id' parameter from a subquery `param`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -942,7 +942,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, (SELECT $parent.id FROM tester LIMIT 1) AS test FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -957,7 +957,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'name' parameter from a subquery `param`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -966,7 +966,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, (SELECT $parent.name FROM tester LIMIT 1) AS test FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -981,7 +981,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id.name' parameter from a subquery `param`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -990,7 +990,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, (SELECT $parent.id.name FROM tester LIMIT 1) AS test FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -1005,7 +1005,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Select 'id.id.id.name' parameter from a subquery `param`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1014,7 +1014,7 @@ func TestSelect(t *testing.T) {
 		SELECT *, (SELECT $parent.id.id.id.name FROM tester LIMIT 1) AS test FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -1029,7 +1029,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Filter using VOID to find records where the field is not set", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1042,7 +1042,7 @@ func TestSelect(t *testing.T) {
 		SELECT test FROM person WHERE test IS NOT VOID;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[6].Result, ShouldHaveLength, 1)
@@ -1052,7 +1052,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Filter using NULL to find records where the field is `null`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1065,7 +1065,7 @@ func TestSelect(t *testing.T) {
 		SELECT test FROM person WHERE test IS NOT NULL;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[6].Result, ShouldHaveLength, 1)
@@ -1075,7 +1075,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Filter using EMPTY to find records where the field is not set or `null`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1088,7 +1088,7 @@ func TestSelect(t *testing.T) {
 		SELECT test FROM person WHERE test IS NOT EMPTY;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[6].Result, ShouldHaveLength, 2)
@@ -1098,7 +1098,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Filter using boolean logic to find records", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1123,7 +1123,7 @@ func TestSelect(t *testing.T) {
 		SELECT test FROM person WHERE ( (test = "one") AND (test != "two") AND (test != "tre") );
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 17)
 
@@ -1147,7 +1147,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Filter records using an id subquery", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1159,7 +1159,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person WHERE id IN (SELECT id FROM person);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 5)
@@ -1170,7 +1170,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Filter records using an id subquery, with a limit of 1", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1182,7 +1182,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person WHERE id = (SELECT id FROM person LIMIT 1);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 1)
@@ -1192,7 +1192,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Filter records using an single field subquery", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1204,7 +1204,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person WHERE name IN (SELECT name FROM person ORDER BY name);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 5)
@@ -1215,7 +1215,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Filter records using a single field subquery, with a limit of 1", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1227,7 +1227,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person WHERE name = (SELECT name FROM person ORDER BY name LIMIT 1);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[6].Result, ShouldHaveLength, 1)
@@ -1237,7 +1237,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Filter records using a single field subquery, with a limit of 1", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1251,7 +1251,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person WHERE age >= person:test.age ORDER BY name;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 9)
 		So(res[7].Result, ShouldHaveLength, 4)
@@ -1269,7 +1269,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Group records by field", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1282,7 +1282,7 @@ func TestSelect(t *testing.T) {
 		SELECT test FROM person GROUP BY test ORDER BY test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[7].Result, ShouldHaveLength, 3)
@@ -1294,7 +1294,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Group and count records by field", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1307,7 +1307,7 @@ func TestSelect(t *testing.T) {
 		SELECT test, count(*) AS total FROM person GROUP BY test ORDER BY test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[7].Result, ShouldHaveLength, 3)
@@ -1322,7 +1322,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Group and count records by field with alias", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1335,7 +1335,7 @@ func TestSelect(t *testing.T) {
 		SELECT string.length(test) AS test, count(*) AS total FROM person GROUP BY test ORDER BY test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[7].Result, ShouldHaveLength, 3)
@@ -1350,7 +1350,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Group and retrieve distinct records by field", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1363,7 +1363,7 @@ func TestSelect(t *testing.T) {
 		SELECT test, distinct(id) AS docs FROM person GROUP BY test ORDER BY test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[7].Result, ShouldHaveLength, 2)
@@ -1379,7 +1379,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Group and retrieve more than 10000 records to test incremental processing", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1387,7 +1387,7 @@ func TestSelect(t *testing.T) {
 		SELECT meta.tb, count(*) AS test FROM person GROUP BY meta.tb;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10000)
@@ -1398,7 +1398,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Order records ascending", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1414,7 +1414,7 @@ func TestSelect(t *testing.T) {
 		SELECT test FROM person ORDER BY test ASC;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 11)
 		So(res[10].Result, ShouldHaveLength, 10)
@@ -1433,7 +1433,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Order records descending", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1449,7 +1449,7 @@ func TestSelect(t *testing.T) {
 		SELECT test FROM person ORDER BY test DESC;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 11)
 		So(res[10].Result, ShouldHaveLength, 10)
@@ -1468,7 +1468,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Order records with collation", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1484,7 +1484,7 @@ func TestSelect(t *testing.T) {
 		SELECT test FROM person ORDER BY test COLLATE 'en-GB' ASC;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 11)
 		So(res[10].Result, ShouldHaveLength, 10)
@@ -1503,7 +1503,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Order records with collation and numeric sorting", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1519,7 +1519,7 @@ func TestSelect(t *testing.T) {
 		SELECT test FROM person ORDER BY test COLLATE 'en-GB' NUMERIC ASC;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 11)
 		So(res[10].Result, ShouldHaveLength, 10)
@@ -1538,7 +1538,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Order records with collation and numeric and insensitive sorting using unicode definition", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1554,7 +1554,7 @@ func TestSelect(t *testing.T) {
 		SELECT test FROM person ORDER BY test COLLATE 'en-GB-u-kn-true-kc-false' ASC;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 11)
 		So(res[10].Result, ShouldHaveLength, 10)
@@ -1573,7 +1573,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Order records from multiple tables", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1582,7 +1582,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person, entity ORDER BY id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -1595,7 +1595,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Limit records using a number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1603,7 +1603,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person LIMIT BY 5;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -1615,7 +1615,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Limit records using a parameter", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1624,7 +1624,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person LIMIT BY $count;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[2].Result, ShouldHaveLength, 10)
@@ -1636,7 +1636,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Limit records using an invalid parameter", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1645,7 +1645,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person LIMIT BY $count;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[2].Result, ShouldHaveLength, 10)
@@ -1657,7 +1657,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Limit records using a negative number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1665,7 +1665,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person LIMIT BY -10;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -1675,7 +1675,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Limit records using a minimum number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1683,7 +1683,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person LIMIT BY 0;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -1693,7 +1693,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Limit records using a maximum number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1701,7 +1701,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person LIMIT BY 100;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -1711,7 +1711,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Limit records using a number and start records at a number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1719,7 +1719,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person LIMIT BY 5 START AT 5;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -1731,7 +1731,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Start records using a number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1739,7 +1739,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person START AT 5;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -1751,7 +1751,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Start records using a parameter", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1760,7 +1760,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person START AT $count;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[2].Result, ShouldHaveLength, 10)
@@ -1772,7 +1772,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Start records using an invalid parameter", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1781,7 +1781,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person START AT $count;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[2].Result, ShouldHaveLength, 10)
@@ -1793,7 +1793,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Start records using a negative number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1801,7 +1801,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person START AT -10;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -1811,7 +1811,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Start records using a lower minimum number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1819,7 +1819,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person START AT 0;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -1829,7 +1829,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Start records using a greater maximum number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1837,7 +1837,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person START AT 100;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -1847,7 +1847,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Start records using a number and limit records by a number", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1855,7 +1855,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person LIMIT BY 5 START AT 5;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -1867,7 +1867,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Fetch records using a fetchplan to fetch remote records easily", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1885,7 +1885,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person:test FETCH one, mult, mult.*.tester;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -1919,7 +1919,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Version records using a datetime", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1929,7 +1929,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 10)
@@ -1940,7 +1940,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Version records using a date parameter", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1951,7 +1951,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[3].Result, ShouldHaveLength, 10)
@@ -1962,7 +1962,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Version records using a time parameter", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1973,7 +1973,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[3].Result, ShouldHaveLength, 10)
@@ -1984,7 +1984,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Version records using an invalid parameter", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -1995,7 +1995,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[3].Result, ShouldHaveLength, 10)
@@ -2008,7 +2008,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Test version on a thing", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -2028,7 +2028,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 15)
 		So(res[4].Result, ShouldHaveLength, 1)
@@ -2048,7 +2048,7 @@ func TestSelect(t *testing.T) {
 
 	Convey("Test version on a table", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -2068,7 +2068,7 @@ func TestSelect(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 15)
 		So(res[4].Result, ShouldHaveLength, 3)

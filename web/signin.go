@@ -116,7 +116,7 @@ func signinInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 		// Give full permissions to scope.
 
-		t.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
+		t.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB, NS: n, DB: d})
 
 		// Specify fields to show in logs.
 

@@ -27,32 +27,6 @@ func (e *EmptyError) Error() string {
 	return fmt.Sprint("Your SQL query is empty")
 }
 
-// QueryError represents an error that occured when switching access.
-type QueryError struct{}
-
-// Error returns the string representation of the error.
-func (e *QueryError) Error() string {
-	return fmt.Sprint("You don't have permission to perform this query type")
-}
-
-// BlankError represents an error that occured when switching access.
-type BlankError struct{}
-
-// Error returns the string representation of the error.
-func (e *BlankError) Error() string {
-	return fmt.Sprint("You need to specify a namespace and a database to use")
-}
-
-// PermsError represents an error that occured when switching access.
-type PermsError struct {
-	Resource string
-}
-
-// Error returns the string representation of the error.
-func (e *PermsError) Error() string {
-	return fmt.Sprintf("You don't have permission to access the '%s' resource", e.Resource)
-}
-
 // GroupError occurs when a 'group' expression is invalid.
 type GroupError struct {
 	found interface{}

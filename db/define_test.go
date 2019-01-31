@@ -26,14 +26,14 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a namespace", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
 		DEFINE NAMESPACE test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -42,14 +42,14 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a database", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
 		DEFINE DATABASE test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -58,7 +58,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a scope", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -82,7 +82,7 @@ func TestDefine(t *testing.T) {
 		;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -91,7 +91,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a schemaless table", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -100,7 +100,7 @@ func TestDefine(t *testing.T) {
 		UPDATE person:test SET test=true, other="text";
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(data.Consume(res[3].Result[0]).Get("test").Data(), ShouldEqual, true)
@@ -110,7 +110,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a schemafull table", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -119,7 +119,7 @@ func TestDefine(t *testing.T) {
 		UPDATE person:test SET test=true, other="text";
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(data.Consume(res[3].Result[0]).Data(), ShouldResemble, map[string]interface{}{
@@ -135,7 +135,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a schemafull table with nil values", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -144,7 +144,7 @@ func TestDefine(t *testing.T) {
 		UPDATE person:test SET test=true, other=NULL;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(data.Consume(res[3].Result[0]).Data(), ShouldResemble, map[string]interface{}{
@@ -160,7 +160,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a schemafull table with nested records", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -169,7 +169,7 @@ func TestDefine(t *testing.T) {
 		UPDATE person:test SET test=person:other;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(data.Consume(res[3].Result[0]).Data(), ShouldResemble, map[string]interface{}{
@@ -185,7 +185,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a schemafull table with nested set records", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -195,7 +195,7 @@ func TestDefine(t *testing.T) {
 		UPDATE person:test SET test=[], test+=person:one, test+=person:two;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(data.Consume(res[4].Result[0]).Data(), ShouldResemble, map[string]interface{}{
@@ -214,7 +214,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Convert a schemaless to schemafull table, and ensure schemaless fields are still output", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -227,7 +227,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(data.Consume(res[2].Result[0]).Get("test").Data(), ShouldEqual, true)
@@ -241,7 +241,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a drop table", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -250,7 +250,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -260,7 +260,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a foreign table", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -270,7 +270,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM temp;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -285,7 +285,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a foreign table with a where clause", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -296,7 +296,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM temp;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -312,7 +312,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a foreign table with a group by clause", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -328,7 +328,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person_age ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 11)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -375,7 +375,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define multiple foreign tables with group by clauses", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -433,7 +433,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person_age_gender ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 17)
 		So(res[6].Result, ShouldHaveLength, 10)
@@ -595,7 +595,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a table with permission specified so only specified records are visible", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		func() {
 
@@ -604,7 +604,7 @@ func TestDefine(t *testing.T) {
 			DEFINE TABLE person PERMISSIONS FOR SELECT WHERE string.startsWith(name, "J") FOR CREATE, UPDATE FULL;
 			`
 
-			res, err := Execute(setupKV(), txt, nil)
+			res, err := Execute(permsKV(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 2)
 
@@ -619,7 +619,7 @@ func TestDefine(t *testing.T) {
 			SELECT * FROM person;
 			`
 
-			res, err := Execute(setupSC(), txt, nil)
+			res, err := Execute(permsSC(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 4)
 			So(res[1].Result, ShouldHaveLength, 1)
@@ -633,7 +633,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Assert the value of a field", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -644,7 +644,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[2].Status, ShouldEqual, "ERR_FD")
@@ -656,7 +656,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Assert the value of a field if it has been set", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -667,7 +667,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[2].Status, ShouldEqual, "OK")
@@ -679,7 +679,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Specify the priority of a field so that it is processed after any dependent fields", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -690,7 +690,7 @@ func TestDefine(t *testing.T) {
 		UPDATE person:test SET name.first="Tobias", name.last="Ottoman";
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -707,7 +707,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Specify the permissions of a field so that it is only visible to the correct authentication levels", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		func() {
 
@@ -723,7 +723,7 @@ func TestDefine(t *testing.T) {
 			SELECT * FROM person;
 			`
 
-			res, err := Execute(setupKV(), txt, nil)
+			res, err := Execute(permsKV(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 9)
 			So(res[7].Result, ShouldHaveLength, 1)
@@ -748,7 +748,7 @@ func TestDefine(t *testing.T) {
 			SELECT * FROM person ORDER BY name;
 			`
 
-			res, err := Execute(setupSC(), txt, nil)
+			res, err := Execute(permsSC(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 4)
 			So(res[1].Result, ShouldHaveLength, 1)
@@ -782,7 +782,7 @@ func TestDefine(t *testing.T) {
 			SELECT * FROM person ORDER BY name;
 			`
 
-			res, err := Execute(setupKV(), txt, nil)
+			res, err := Execute(permsKV(), txt, nil)
 			So(err, ShouldBeNil)
 			So(res, ShouldHaveLength, 2)
 			So(res[1].Result, ShouldHaveLength, 3)
@@ -802,7 +802,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value changes", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -815,7 +815,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -829,7 +829,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value increases", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -842,7 +842,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -856,7 +856,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value increases beyond a threshold", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -869,7 +869,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -883,7 +883,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event for both CREATE and UPDATE events separately", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -898,7 +898,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM updated;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 10)
 		So(res[3].Result, ShouldHaveLength, 1)
@@ -913,7 +913,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value changes and set a foreign key on another table", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -922,7 +922,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM other;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -933,7 +933,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value changes and update a foreign key array on another table", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -943,7 +943,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM other;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -958,7 +958,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event when a value changes and update and delete from a foreign key array on another table", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -976,7 +976,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM other;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -990,7 +990,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an event on a table, and ensure it is not output with records", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -998,7 +998,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[2].Result, ShouldHaveLength, 0)
@@ -1007,7 +1007,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an field on a table, and ensure it is not output with records", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -1015,7 +1015,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[2].Result, ShouldHaveLength, 0)
@@ -1024,7 +1024,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an index on a table, and ensure it is not output with records", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -1032,7 +1032,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[2].Result, ShouldHaveLength, 0)
@@ -1041,7 +1041,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define an index on a table, and ensure it allows duplicate record values", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -1054,7 +1054,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -1077,7 +1077,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a single-field unique index on a table, and ensure it prevents duplicate record values", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -1090,7 +1090,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -1111,7 +1111,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a multiple-field unique index on a table, and ensure it prevents duplicate record values", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -1124,7 +1124,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -1147,7 +1147,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Define a multiple-field foreign record unique index on a table, and ensure it prevents duplicate record values", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -1160,7 +1160,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -1182,7 +1182,7 @@ func TestDefine(t *testing.T) {
 
 	Convey("Redefine a unique index on a table, and ensure it prevents duplicate record values", t, func() {
 
-		setupDB(20)
+		setupDB(workerCount)
 
 		txt := `
 		USE NS test DB test;
@@ -1198,7 +1198,7 @@ func TestDefine(t *testing.T) {
 		SELECT * FROM person ORDER BY meta.id;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 11)
 		So(res[1].Status, ShouldEqual, "OK")

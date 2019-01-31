@@ -45,14 +45,10 @@ func Output(c *fibre.Context, t string, d Display, m Method, res []*db.Response,
 	switch err.(type) {
 	case *sql.ParseError:
 		return fibre.NewHTTPError(400) // Will happen if invalid json
-	case *sql.BlankError:
+	case *db.BlankError:
 		return fibre.NewHTTPError(403) // Will happen if invalid auth
-	case *sql.QueryError:
-		return fibre.NewHTTPError(403) // Should not happen
-	case *sql.PermsError:
-		return fibre.NewHTTPError(403) // Should not happen
-	case *sql.EmptyError:
-		return fibre.NewHTTPError(500) // Should not happen
+	case *db.PermsError:
+		return fibre.NewHTTPError(403) // Will happen if invalid auth
 	case *fibre.HTTPError:
 		return err // Probably a timeout error
 	}

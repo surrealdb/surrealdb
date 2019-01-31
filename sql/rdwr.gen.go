@@ -22,15 +22,7 @@ func (s *InfoStatement) Writeable() bool {
 	return false
 }
 
-func (s *IfStatement) Writeable() bool {
-	return s.RW
-}
-
 func (s *LetStatement) Writeable() bool {
-	return s.RW
-}
-
-func (s *ReturnStatement) Writeable() bool {
 	return s.RW
 }
 
@@ -40,6 +32,14 @@ func (s *LiveStatement) Writeable() bool {
 
 func (s *KillStatement) Writeable() bool {
 	return true
+}
+
+func (s *ReturnStatement) Writeable() bool {
+	return s.RW
+}
+
+func (s *IfelseStatement) Writeable() bool {
+	return s.RW
 }
 
 func (s *SelectStatement) Writeable() bool {

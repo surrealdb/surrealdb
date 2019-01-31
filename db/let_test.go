@@ -24,7 +24,7 @@ func TestLet(t *testing.T) {
 
 	Convey("Let to create a new variable", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -32,7 +32,7 @@ func TestLet(t *testing.T) {
 		RETURN $temp;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -43,7 +43,7 @@ func TestLet(t *testing.T) {
 
 	Convey("Let to create and VOID a variable", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -52,7 +52,7 @@ func TestLet(t *testing.T) {
 		RETURN $temp;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -64,7 +64,7 @@ func TestLet(t *testing.T) {
 
 	Convey("Let to create and EMPTY a variable", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -73,7 +73,7 @@ func TestLet(t *testing.T) {
 		RETURN $temp;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")

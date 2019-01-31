@@ -19,6 +19,7 @@ import (
 
 	"context"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/guid"
@@ -26,6 +27,10 @@ import (
 )
 
 func (e *executor) executeCreate(ctx context.Context, stm *sql.CreateStatement) ([]interface{}, error) {
+
+	if err := e.access(ctx, cnf.AuthNO); err != nil {
+		return nil, err
+	}
 
 	var what sql.Exprs
 
@@ -47,33 +52,33 @@ func (e *executor) executeCreate(ctx context.Context, stm *sql.CreateStatement) 
 			return nil, fmt.Errorf("Can not execute CREATE query using value '%v'", what)
 
 		case *sql.Table:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: guid.New().String()}
+			key := &keys.Thing{KV: KV, NS: e.ns, DB: e.db, TB: what.TB, ID: guid.New().String()}
 			i.processThing(ctx, key)
 
 		case *sql.Ident:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.VA, ID: guid.New().String()}
+			key := &keys.Thing{KV: KV, NS: e.ns, DB: e.db, TB: what.VA, ID: guid.New().String()}
 			i.processThing(ctx, key)
 
 		case *sql.Thing:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: what.ID}
+			key := &keys.Thing{KV: KV, NS: e.ns, DB: e.db, TB: what.TB, ID: what.ID}
 			i.processThing(ctx, key)
 
 		case *sql.Model:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: nil}
+			key := &keys.Thing{KV: KV, NS: e.ns, DB: e.db, TB: what.TB, ID: nil}
 			i.processModel(ctx, key, what)
 
 		case *sql.Batch:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, ID: nil}
+			key := &keys.Thing{KV: KV, NS: e.ns, DB: e.db, TB: what.TB, ID: nil}
 			i.processBatch(ctx, key, what)
 
 		// Result of subquery
 		case []interface{}:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB}
+			key := &keys.Thing{KV: KV, NS: e.ns, DB: e.db}
 			i.processOther(ctx, key, what)
 
 		// Result of subquery with LIMIT 1
 		case map[string]interface{}:
-			key := &keys.Thing{KV: stm.KV, NS: stm.NS, DB: stm.DB}
+			key := &keys.Thing{KV: KV, NS: e.ns, DB: e.db}
 			i.processOther(ctx, key, []interface{}{what})
 
 		}

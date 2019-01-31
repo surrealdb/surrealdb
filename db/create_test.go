@@ -25,7 +25,7 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create with invalid value", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -35,7 +35,7 @@ func TestCreate(t *testing.T) {
 		CREATE [{value:"one"}];
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Status, ShouldEqual, "ERR")
@@ -51,7 +51,7 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create record when it exists", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -59,7 +59,7 @@ func TestCreate(t *testing.T) {
 		CREATE person:test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -71,14 +71,14 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create unique record using `table`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		CREATE person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -89,14 +89,14 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create specific record using `thing`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		CREATE person:test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -107,14 +107,14 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create unique records using `batch`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		CREATE batch("person", ["1", "2", "person:3"]);
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 3)
@@ -125,14 +125,14 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create unique records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		CREATE |person:100|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 100)
@@ -143,14 +143,14 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create sequential ascending records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		CREATE |person:1..100|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 100)
@@ -161,14 +161,14 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create sequential descending records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		CREATE |person:100..1|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 100)
@@ -179,14 +179,14 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create sequential ascending negative-to-positive records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		CREATE |person:-50..50|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 101)
@@ -198,14 +198,14 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create sequential ascending decimal records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		CREATE |person:1,0.5..50|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 99)
@@ -217,14 +217,14 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create sequential descending decimal records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		CREATE |person:50,0.5..1|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 99)
@@ -236,14 +236,14 @@ func TestCreate(t *testing.T) {
 
 	Convey("Create sequential ascending decimal negative-to-positive records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
 		CREATE |person:-50,0.5..50|;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 2)
 		So(res[1].Result, ShouldHaveLength, 201)
@@ -255,7 +255,7 @@ func TestCreate(t *testing.T) {
 
 	Convey("Parsing same ID using ints, floats, and strings", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -268,7 +268,7 @@ func TestCreate(t *testing.T) {
 		SELECT id FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 8)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -288,7 +288,7 @@ func TestCreate(t *testing.T) {
 
 	Convey("Creating with a timeout of 1ms returns an error", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -296,7 +296,7 @@ func TestCreate(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 0)
@@ -308,7 +308,7 @@ func TestCreate(t *testing.T) {
 
 	Convey("Creating a record with unbounded map or array keys succeeds", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -317,7 +317,7 @@ func TestCreate(t *testing.T) {
 		SELECT * FROM person:test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")

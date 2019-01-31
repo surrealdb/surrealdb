@@ -38,10 +38,8 @@ func newOptions() *options {
 
 func (e *executor) executeOpt(ctx context.Context, stm *sql.OptStatement) (out []interface{}, err error) {
 
-	if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
-		if k >= cnf.AuthSC {
-			return nil, new(OptsError)
-		}
+	if perm(ctx) >= cnf.AuthSC {
+		return nil, new(QueryError)
 	}
 
 	switch strings.ToUpper(stm.Name) {

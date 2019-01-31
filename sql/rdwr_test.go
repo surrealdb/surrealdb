@@ -32,20 +32,8 @@ func TestRdwr(t *testing.T) {
 		So(w, ShouldEqual, false)
 	})
 
-	Convey("IfStatement should rdwr correctly", t, func() {
-		s := &IfStatement{RW: true}
-		w := s.Writeable()
-		So(w, ShouldEqual, true)
-	})
-
 	Convey("LetStatement should rdwr correctly", t, func() {
 		s := &LetStatement{RW: true}
-		w := s.Writeable()
-		So(w, ShouldEqual, true)
-	})
-
-	Convey("ReturnStatement should rdwr correctly", t, func() {
-		s := &ReturnStatement{RW: true}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})
@@ -58,6 +46,18 @@ func TestRdwr(t *testing.T) {
 
 	Convey("KillStatement should rdwr correctly", t, func() {
 		s := &KillStatement{}
+		w := s.Writeable()
+		So(w, ShouldEqual, true)
+	})
+
+	Convey("ReturnStatement should rdwr correctly", t, func() {
+		s := &ReturnStatement{RW: true}
+		w := s.Writeable()
+		So(w, ShouldEqual, true)
+	})
+
+	Convey("IfelseStatement should rdwr correctly", t, func() {
+		s := &IfelseStatement{RW: true}
 		w := s.Writeable()
 		So(w, ShouldEqual, true)
 	})

@@ -18,10 +18,6 @@ func (p *parser) parseOptionStatement() (stmt *OptStatement, err error) {
 
 	stmt = &OptStatement{What: true}
 
-	if _, _, _, err = p.a.get(AuthDB); err != nil {
-		return nil, err
-	}
-
 	_, lit, err := p.shouldBe(IDENT, STRING)
 	if err != nil {
 		return nil, &ParseError{Found: lit, Expected: []string{"name"}}

@@ -41,7 +41,7 @@ func export(c *fibre.Context, NS, DB string) error {
 
 	ctx := c.Context()
 
-	exe := newExecutor()
+	exe := newExecutor(NIL, NS, DB)
 
 	err := exe.begin(ctx, false)
 

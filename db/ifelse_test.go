@@ -25,7 +25,7 @@ func TestIf(t *testing.T) {
 
 	Convey("If statement which runs if clause", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -40,7 +40,7 @@ func TestIf(t *testing.T) {
 		END;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -52,7 +52,7 @@ func TestIf(t *testing.T) {
 
 	Convey("If statement which runs elif clause", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -67,7 +67,7 @@ func TestIf(t *testing.T) {
 		END;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -79,7 +79,7 @@ func TestIf(t *testing.T) {
 
 	Convey("If statement which runs else clause", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -94,7 +94,7 @@ func TestIf(t *testing.T) {
 		END;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[1].Status, ShouldEqual, "OK")

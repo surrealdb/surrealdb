@@ -18,10 +18,6 @@ func (p *parser) parseUpdateStatement() (stmt *UpdateStatement, err error) {
 
 	stmt = &UpdateStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
-		return nil, err
-	}
-
 	if stmt.What, err = p.parseWhat(); err != nil {
 		return nil, err
 	}

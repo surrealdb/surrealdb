@@ -28,6 +28,7 @@ import (
 	"golang.org/x/text/search"
 
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/deep"
@@ -147,7 +148,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 		return e.fetch(ctx, val.Expr, doc)
 
-	case *sql.IfStatement:
+	case *sql.IfelseStatement:
 
 		for k, v := range val.Cond {
 			ife, err := e.fetch(ctx, v, doc)
@@ -357,15 +358,19 @@ func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc
 		return e.cache.Get(key), nil
 	}
 
-	res, err := e.executeSelect(ctx, &sql.SelectStatement{
-		KV:      cnf.Settings.DB.Base,
-		NS:      ctx.Value(ctxKeyNs).(string),
-		DB:      ctx.Value(ctxKeyDb).(string),
+	stm := &sql.SelectStatement{
 		Expr:    []*sql.Field{{Expr: &sql.All{}}},
 		What:    []sql.Expr{val},
 		Version: sql.Expr(ver),
-	})
+	}
 
+	log.WithPrefix(logKeyExe).WithFields(map[string]interface{}{
+		logKeyId: e.id,
+		logKeyNS: e.ns,
+		logKeyDB: e.db,
+	}).Traceln(stm)
+
+	res, err := e.executeSelect(ctx, stm)
 	if err != nil {
 		return nil, err
 	}
@@ -392,15 +397,19 @@ func (e *executor) fetchArray(ctx context.Context, val []interface{}, doc *data.
 		return e.cache.Get(key), nil
 	}
 
-	res, err := e.executeSelect(ctx, &sql.SelectStatement{
-		KV:      cnf.Settings.DB.Base,
-		NS:      ctx.Value(ctxKeyNs).(string),
-		DB:      ctx.Value(ctxKeyDb).(string),
+	stm := &sql.SelectStatement{
 		Expr:    []*sql.Field{{Expr: &sql.All{}}},
 		What:    []sql.Expr{val},
 		Version: sql.Expr(ver),
-	})
+	}
 
+	log.WithPrefix(logKeyExe).WithFields(map[string]interface{}{
+		logKeyId: e.id,
+		logKeyNS: e.ns,
+		logKeyDB: e.db,
+	}).Traceln(stm)
+
+	res, err := e.executeSelect(ctx, stm)
 	if err != nil {
 		return nil, err
 	}

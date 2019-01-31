@@ -21,19 +21,11 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-// OptsError occurs when a query can not be run.
-type OptsError struct{}
+// LiveError occurs when a query can not be run.
+type LiveError struct{}
 
 // Error returns the string representation of the error.
-func (e *OptsError) Error() string {
-	return fmt.Sprintf("Unable to set database options.")
-}
-
-// QueryError occurs when a query can not be run.
-type QueryError struct{}
-
-// Error returns the string representation of the error.
-func (e *QueryError) Error() string {
+func (e *LiveError) Error() string {
 	return fmt.Sprintf("Unable to perform live query.")
 }
 
@@ -55,6 +47,22 @@ type TableError struct {
 // Error returns the string representation of the error.
 func (e *TableError) Error() string {
 	return fmt.Sprintf("Unable to write to the '%v' table while it is setup as a view", e.table)
+}
+
+// QueryError represents an error that occured when switching access.
+type QueryError struct{}
+
+// Error returns the string representation of the error.
+func (e *QueryError) Error() string {
+	return fmt.Sprint("You don't have permission to perform this query type")
+}
+
+// BlankError represents an error that occured when switching access.
+type BlankError struct{}
+
+// Error returns the string representation of the error.
+func (e *BlankError) Error() string {
+	return fmt.Sprint("You need to specify a namespace and a database to use")
 }
 
 // PermsError occurs when a table query is not allowed.

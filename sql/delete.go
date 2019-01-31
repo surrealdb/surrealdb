@@ -18,10 +18,6 @@ func (p *parser) parseDeleteStatement() (stmt *DeleteStatement, err error) {
 
 	stmt = &DeleteStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
-		return nil, err
-	}
-
 	_, _, _ = p.mightBe(FROM)
 
 	if stmt.What, err = p.parseWhat(); err != nil {

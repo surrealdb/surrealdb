@@ -30,18 +30,6 @@ func (p *parser) parseDefineLoginStatement() (stmt *DefineLoginStatement, err er
 		return nil, err
 	}
 
-	if is(stmt.Kind, NAMESPACE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNS); err != nil {
-			return nil, err
-		}
-	}
-
-	if is(stmt.Kind, DATABASE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
-			return nil, err
-		}
-	}
-
 	tok, _, err := p.shouldBe(PASSWORD, PASSHASH)
 	if err != nil {
 		return nil, err
@@ -77,18 +65,6 @@ func (p *parser) parseRemoveLoginStatement() (stmt *RemoveLoginStatement, err er
 
 	if stmt.Kind, _, err = p.shouldBe(NAMESPACE, DATABASE); err != nil {
 		return nil, err
-	}
-
-	if is(stmt.Kind, NAMESPACE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNS); err != nil {
-			return nil, err
-		}
-	}
-
-	if is(stmt.Kind, DATABASE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
-			return nil, err
-		}
 	}
 
 	return

@@ -66,10 +66,8 @@ func (d *document) grant(ctx context.Context, met method) (ok bool, err error) {
 	// ignore all permissions checks, but we
 	// must ensure the TB, DB, and NS exist.
 
-	if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
-		if k < cnf.AuthSC {
-			return true, nil
-		}
+	if perm(ctx) < cnf.AuthSC {
+		return true, nil
 	}
 
 	// Otherwise, get the table definition
@@ -155,10 +153,8 @@ func (d *document) allow(ctx context.Context, met method) (ok bool, err error) {
 	// ignore all permissions checks, but we
 	// must ensure the TB, DB, and NS exist.
 
-	if k, ok := ctx.Value(ctxKeyKind).(cnf.Kind); ok {
-		if k < cnf.AuthSC {
-			return true, nil
-		}
+	if perm(ctx) < cnf.AuthSC {
+		return true, nil
 	}
 
 	// Otherwise, get the table definition

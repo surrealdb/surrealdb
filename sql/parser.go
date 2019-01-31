@@ -18,15 +18,11 @@ import (
 	"bytes"
 	"io"
 	"strings"
-
-	"github.com/abcum/fibre"
 )
 
 // parser represents a parser.
 type parser struct {
 	s   *scanner
-	a   *access
-	c   *fibre.Context
 	buf struct {
 		n   int         // buffer size
 		rw  bool        // writeable
@@ -37,45 +33,45 @@ type parser struct {
 }
 
 // Parse parses sql from a []byte, string, or io.Reader.
-func Parse(c *fibre.Context, i interface{}) (*Query, error) {
+func Parse(i interface{}) (*Query, error) {
 
 	switch x := i.(type) {
 	default:
 		return nil, &EmptyError{}
 	case []byte:
-		return parseBytes(c, x)
+		return parseBytes(x)
 	case string:
-		return parseString(c, x)
+		return parseString(x)
 	case io.Reader:
-		return parseBuffer(c, x)
+		return parseBuffer(x)
 	}
 
 }
 
 // newParser returns a new instance of Parser.
-func newParser(c *fibre.Context) *parser {
-	return &parser{c: c, a: newAccess(c)}
+func newParser() *parser {
+	return &parser{}
 }
 
 // parseBytes parses a byte array.
-func parseBytes(c *fibre.Context, i []byte) (*Query, error) {
-	p := newParser(c)
+func parseBytes(i []byte) (*Query, error) {
+	p := newParser()
 	r := bytes.NewReader(i)
 	p.s = newScanner(r)
 	return p.parse()
 }
 
 // parseString parses a string.
-func parseString(c *fibre.Context, i string) (*Query, error) {
-	p := newParser(c)
+func parseString(i string) (*Query, error) {
+	p := newParser()
 	r := strings.NewReader(i)
 	p.s = newScanner(r)
 	return p.parse()
 }
 
 // parseBuffer parses a buffer.
-func parseBuffer(c *fibre.Context, r io.Reader) (*Query, error) {
-	p := newParser(c)
+func parseBuffer(r io.Reader) (*Query, error) {
+	p := newParser()
 	p.s = newScanner(r)
 	return p.parse()
 }
@@ -171,9 +167,6 @@ func (p *parser) parseSingle() (stmt Statement, err error) {
 
 	switch tok {
 
-	case IF:
-		return p.parseIfStatement()
-
 	case USE:
 		return p.parseUseStatement()
 
@@ -194,10 +187,11 @@ func (p *parser) parseSingle() (stmt Statement, err error) {
 		return p.parseCancelStatement()
 	case COMMIT:
 		return p.parseCommitStatement()
-
 	case RETURN:
 		return p.parseReturnStatement()
 
+	case IF:
+		return p.parseIfelseStatement()
 	case SELECT:
 		return p.parseSelectStatement()
 	case CREATE:
@@ -208,7 +202,6 @@ func (p *parser) parseSingle() (stmt Statement, err error) {
 		return p.parseDeleteStatement()
 	case RELATE:
 		return p.parseRelateStatement()
-
 	case INSERT:
 		return p.parseInsertStatement()
 	case UPSERT:

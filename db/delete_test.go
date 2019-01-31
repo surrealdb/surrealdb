@@ -24,7 +24,7 @@ func TestDelete(t *testing.T) {
 
 	Convey("Delete with invalid value", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -34,7 +34,7 @@ func TestDelete(t *testing.T) {
 		DELETE [{value:"one"}];
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Status, ShouldEqual, "ERR")
@@ -50,7 +50,7 @@ func TestDelete(t *testing.T) {
 
 	Convey("Delete records using `table`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -60,7 +60,7 @@ func TestDelete(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -71,7 +71,7 @@ func TestDelete(t *testing.T) {
 
 	Convey("Delete specific record using `thing`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -81,7 +81,7 @@ func TestDelete(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -92,7 +92,7 @@ func TestDelete(t *testing.T) {
 
 	Convey("Delete unique records using `batch`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -102,7 +102,7 @@ func TestDelete(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -114,7 +114,7 @@ func TestDelete(t *testing.T) {
 
 	Convey("Delete unique records using `model`", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -124,7 +124,7 @@ func TestDelete(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[1].Result, ShouldHaveLength, 10)
@@ -136,7 +136,7 @@ func TestDelete(t *testing.T) {
 
 	Convey("Deleting with a timeout of 1ns returns an error", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -144,7 +144,7 @@ func TestDelete(t *testing.T) {
 		SELECT * FROM person;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Result, ShouldHaveLength, 0)

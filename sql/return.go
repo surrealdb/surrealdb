@@ -18,10 +18,6 @@ func (p *parser) parseReturnStatement() (stmt *ReturnStatement, err error) {
 
 	stmt = &ReturnStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNO); err != nil {
-		return nil, err
-	}
-
 	// The next query part can be any expression
 	// including a parenthesised expression or a
 	// binary expression so handle accordingly.

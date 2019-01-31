@@ -25,7 +25,7 @@ func TestYield(t *testing.T) {
 
 	Convey("Yield different responses when modifying a record", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -37,7 +37,7 @@ func TestYield(t *testing.T) {
 		DELETE person:test RETURN BEFORE;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 7)
 		So(res[1].Result, ShouldHaveLength, 1)

@@ -26,7 +26,7 @@ func TestUpsert(t *testing.T) {
 
 	Convey("Upsert with invalid value", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -34,7 +34,7 @@ func TestUpsert(t *testing.T) {
 		UPSERT "one" INTO user;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 3)
 		So(res[1].Status, ShouldEqual, "ERR")
@@ -46,7 +46,7 @@ func TestUpsert(t *testing.T) {
 
 	Convey("Upsert a set of ids from one table to another table", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -57,7 +57,7 @@ func TestUpsert(t *testing.T) {
 		SELECT * FROM person, user;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -88,7 +88,7 @@ func TestUpsert(t *testing.T) {
 
 	Convey("Upsert a set of records from one table to another table", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -99,7 +99,7 @@ func TestUpsert(t *testing.T) {
 		SELECT * FROM person, user;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[1].Result, ShouldHaveLength, 1)
@@ -130,7 +130,7 @@ func TestUpsert(t *testing.T) {
 
 	Convey("Upsert a set of records from data with an ID", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -140,7 +140,7 @@ func TestUpsert(t *testing.T) {
 		SELECT * FROM users;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -157,7 +157,7 @@ func TestUpsert(t *testing.T) {
 
 	Convey("Upsert a set of records from data without an ID", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -166,7 +166,7 @@ func TestUpsert(t *testing.T) {
 		SELECT * FROM users;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[2].Result, ShouldHaveLength, 1)
@@ -180,7 +180,7 @@ func TestUpsert(t *testing.T) {
 
 	Convey("Upsert a set of records from an array of data with IDs", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -194,7 +194,7 @@ func TestUpsert(t *testing.T) {
 		SELECT * FROM users;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 5)
 		So(res[2].Result, ShouldHaveLength, 3)
@@ -223,7 +223,7 @@ func TestUpsert(t *testing.T) {
 
 	Convey("Upsert a set of records from an array of data without IDs", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -234,7 +234,7 @@ func TestUpsert(t *testing.T) {
 		SELECT * FROM users;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 4)
 		So(res[2].Result, ShouldHaveLength, 1)

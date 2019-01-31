@@ -1,12 +1,11 @@
 [
   { "n": true, "name": "Info" },
 
-  { "a": true, "name": "If" },
   { "a": true, "name": "Let" },
-  { "a": true, "name": "Return" },
-
   { "y": true, "name": "Live" },
   { "y": true, "name": "Kill" },
+  { "a": true, "name": "Return" },
+  { "a": true, "name": "Ifelse" },
   { "a": true, "name": "Select" },
   { "y": true, "name": "Create" },
   { "y": true, "name": "Update" },

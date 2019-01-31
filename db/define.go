@@ -19,6 +19,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/keys"
 	"github.com/abcum/surreal/util/rand"
@@ -26,8 +27,12 @@ import (
 
 func (e *executor) executeDefineNamespace(ctx context.Context, ast *sql.DefineNamespaceStatement) (out []interface{}, err error) {
 
+	if err := e.access(ctx, cnf.AuthKV); err != nil {
+		return nil, err
+	}
+
 	// Save the namespace definition
-	nkey := &keys.NS{KV: ast.KV, NS: ast.Name.VA}
+	nkey := &keys.NS{KV: KV, NS: ast.Name.VA}
 	_, err = e.dbo.Put(ctx, 0, nkey.Encode(), ast.Encode())
 
 	return
@@ -36,10 +41,14 @@ func (e *executor) executeDefineNamespace(ctx context.Context, ast *sql.DefineNa
 
 func (e *executor) executeDefineDatabase(ctx context.Context, ast *sql.DefineDatabaseStatement) (out []interface{}, err error) {
 
-	e.dbo.AddNS(ctx, ast.NS)
+	if err := e.access(ctx, cnf.AuthNS); err != nil {
+		return nil, err
+	}
+
+	e.dbo.AddNS(ctx, e.ns)
 
 	// Save the database definition
-	dkey := &keys.DB{KV: ast.KV, NS: ast.NS, DB: ast.Name.VA}
+	dkey := &keys.DB{KV: KV, NS: e.ns, DB: ast.Name.VA}
 	_, err = e.dbo.Put(ctx, 0, dkey.Encode(), ast.Encode())
 
 	return
@@ -60,18 +69,26 @@ func (e *executor) executeDefineLogin(ctx context.Context, ast *sql.DefineLoginS
 	switch ast.Kind {
 	case sql.NAMESPACE:
 
-		e.dbo.AddNS(ctx, ast.NS)
+		if err := e.access(ctx, cnf.AuthNS); err != nil {
+			return nil, err
+		}
+
+		e.dbo.AddNS(ctx, e.ns)
 
 		// Save the login definition
-		ukey := &keys.NU{KV: ast.KV, NS: ast.NS, US: ast.User.VA}
+		ukey := &keys.NU{KV: KV, NS: e.ns, US: ast.User.VA}
 		_, err = e.dbo.Put(ctx, 0, ukey.Encode(), ast.Encode())
 
 	case sql.DATABASE:
 
-		e.dbo.AddDB(ctx, ast.NS, ast.DB)
+		if err := e.access(ctx, cnf.AuthDB); err != nil {
+			return nil, err
+		}
+
+		e.dbo.AddDB(ctx, e.ns, e.db)
 
 		// Save the login definition
-		ukey := &keys.DU{KV: ast.KV, NS: ast.NS, DB: ast.DB, US: ast.User.VA}
+		ukey := &keys.DU{KV: KV, NS: e.ns, DB: e.db, US: ast.User.VA}
 		_, err = e.dbo.Put(ctx, 0, ukey.Encode(), ast.Encode())
 
 	}
@@ -85,26 +102,38 @@ func (e *executor) executeDefineToken(ctx context.Context, ast *sql.DefineTokenS
 	switch ast.Kind {
 	case sql.NAMESPACE:
 
-		e.dbo.AddNS(ctx, ast.NS)
+		if err := e.access(ctx, cnf.AuthNS); err != nil {
+			return nil, err
+		}
+
+		e.dbo.AddNS(ctx, e.ns)
 
 		// Save the token definition
-		tkey := &keys.NT{KV: ast.KV, NS: ast.NS, TK: ast.Name.VA}
+		tkey := &keys.NT{KV: KV, NS: e.ns, TK: ast.Name.VA}
 		_, err = e.dbo.Put(ctx, 0, tkey.Encode(), ast.Encode())
 
 	case sql.DATABASE:
 
-		e.dbo.AddDB(ctx, ast.NS, ast.DB)
+		if err := e.access(ctx, cnf.AuthDB); err != nil {
+			return nil, err
+		}
+
+		e.dbo.AddDB(ctx, e.ns, e.db)
 
 		// Save the token definition
-		tkey := &keys.DT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TK: ast.Name.VA}
+		tkey := &keys.DT{KV: KV, NS: e.ns, DB: e.db, TK: ast.Name.VA}
 		_, err = e.dbo.Put(ctx, 0, tkey.Encode(), ast.Encode())
 
 	case sql.SCOPE:
 
-		e.dbo.AddDB(ctx, ast.NS, ast.DB)
+		if err := e.access(ctx, cnf.AuthDB); err != nil {
+			return nil, err
+		}
+
+		e.dbo.AddDB(ctx, e.ns, e.db)
 
 		// Save the token definition
-		tkey := &keys.ST{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.What.VA, TK: ast.Name.VA}
+		tkey := &keys.ST{KV: KV, NS: e.ns, DB: e.db, SC: ast.What.VA, TK: ast.Name.VA}
 		_, err = e.dbo.Put(ctx, 0, tkey.Encode(), ast.Encode())
 
 	}
@@ -115,12 +144,16 @@ func (e *executor) executeDefineToken(ctx context.Context, ast *sql.DefineTokenS
 
 func (e *executor) executeDefineScope(ctx context.Context, ast *sql.DefineScopeStatement) (out []interface{}, err error) {
 
+	if err := e.access(ctx, cnf.AuthDB); err != nil {
+		return nil, err
+	}
+
 	ast.Code = rand.New(128)
 
-	e.dbo.AddDB(ctx, ast.NS, ast.DB)
+	e.dbo.AddDB(ctx, e.ns, e.db)
 
 	// Remove the scope definition
-	skey := &keys.SC{KV: ast.KV, NS: ast.NS, DB: ast.DB, SC: ast.Name.VA}
+	skey := &keys.SC{KV: KV, NS: e.ns, DB: e.db, SC: ast.Name.VA}
 	_, err = e.dbo.Put(ctx, 0, skey.Encode(), ast.Encode())
 
 	return
@@ -129,12 +162,16 @@ func (e *executor) executeDefineScope(ctx context.Context, ast *sql.DefineScopeS
 
 func (e *executor) executeDefineEvent(ctx context.Context, ast *sql.DefineEventStatement) (out []interface{}, err error) {
 
+	if err := e.access(ctx, cnf.AuthDB); err != nil {
+		return nil, err
+	}
+
 	for _, TB := range ast.What {
 
-		e.dbo.AddTB(ctx, ast.NS, ast.DB, TB.TB)
+		e.dbo.AddTB(ctx, e.ns, e.db, TB.TB)
 
 		// Remove the event definition
-		ekey := &keys.EV{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, EV: ast.Name.VA}
+		ekey := &keys.EV{KV: KV, NS: e.ns, DB: e.db, TB: TB.TB, EV: ast.Name.VA}
 		if _, err = e.dbo.Put(ctx, 0, ekey.Encode(), ast.Encode()); err != nil {
 			return nil, err
 		}
@@ -147,12 +184,16 @@ func (e *executor) executeDefineEvent(ctx context.Context, ast *sql.DefineEventS
 
 func (e *executor) executeDefineField(ctx context.Context, ast *sql.DefineFieldStatement) (out []interface{}, err error) {
 
+	if err := e.access(ctx, cnf.AuthDB); err != nil {
+		return nil, err
+	}
+
 	for _, TB := range ast.What {
 
-		e.dbo.AddTB(ctx, ast.NS, ast.DB, TB.TB)
+		e.dbo.AddTB(ctx, e.ns, e.db, TB.TB)
 
 		// Save the field definition
-		fkey := &keys.FD{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, FD: ast.Name.VA}
+		fkey := &keys.FD{KV: KV, NS: e.ns, DB: e.db, TB: TB.TB, FD: ast.Name.VA}
 		if _, err = e.dbo.Put(ctx, 0, fkey.Encode(), ast.Encode()); err != nil {
 			return nil, err
 		}
@@ -165,25 +206,29 @@ func (e *executor) executeDefineField(ctx context.Context, ast *sql.DefineFieldS
 
 func (e *executor) executeDefineIndex(ctx context.Context, ast *sql.DefineIndexStatement) (out []interface{}, err error) {
 
+	if err := e.access(ctx, cnf.AuthDB); err != nil {
+		return nil, err
+	}
+
 	for _, TB := range ast.What {
 
-		e.dbo.AddTB(ctx, ast.NS, ast.DB, TB.TB)
+		e.dbo.AddTB(ctx, e.ns, e.db, TB.TB)
 
 		// Save the index definition
-		ikey := &keys.IX{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: ast.Name.VA}
+		ikey := &keys.IX{KV: KV, NS: e.ns, DB: e.db, TB: TB.TB, IX: ast.Name.VA}
 		if _, err = e.dbo.Put(ctx, 0, ikey.Encode(), ast.Encode()); err != nil {
 			return nil, err
 		}
 
 		// Remove the index resource data
-		dkey := &keys.Index{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB, IX: ast.Name.VA, FD: keys.Ignore}
+		dkey := &keys.Index{KV: KV, NS: e.ns, DB: e.db, TB: TB.TB, IX: ast.Name.VA, FD: keys.Ignore}
 		if _, err = e.dbo.ClrP(ctx, dkey.Encode(), 0); err != nil {
 			return nil, err
 		}
 
 		// Process the index resource data
 		uctx := context.WithValue(ctx, ctxKeyForce, true)
-		ustm := &sql.UpdateStatement{KV: ast.KV, NS: ast.NS, DB: ast.DB, What: []sql.Expr{TB}}
+		ustm := &sql.UpdateStatement{What: []sql.Expr{TB}}
 		if _, err = e.executeUpdate(uctx, ustm); err != nil {
 			return nil, err
 		}
@@ -196,14 +241,18 @@ func (e *executor) executeDefineIndex(ctx context.Context, ast *sql.DefineIndexS
 
 func (e *executor) executeDefineTable(ctx context.Context, ast *sql.DefineTableStatement) (out []interface{}, err error) {
 
-	e.dbo.AddDB(ctx, ast.NS, ast.DB)
+	if err := e.access(ctx, cnf.AuthDB); err != nil {
+		return nil, err
+	}
+
+	e.dbo.AddDB(ctx, e.ns, e.db)
 
 	for _, TB := range ast.What {
 
 		ast.Name = sql.NewIdent(TB.TB)
 
 		// Save the table definition
-		tkey := &keys.TB{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB}
+		tkey := &keys.TB{KV: KV, NS: e.ns, DB: e.db, TB: TB.TB}
 		if _, err = e.dbo.Put(ctx, 0, tkey.Encode(), ast.Encode()); err != nil {
 			return nil, err
 		}
@@ -211,7 +260,7 @@ func (e *executor) executeDefineTable(ctx context.Context, ast *sql.DefineTableS
 		if ast.Lock {
 
 			// Remove the table resource data
-			dkey := &keys.Table{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: TB.TB}
+			dkey := &keys.Table{KV: KV, NS: e.ns, DB: e.db, TB: TB.TB}
 			if _, err = e.dbo.ClrP(ctx, dkey.Encode(), 0); err != nil {
 				return nil, err
 			}
@@ -219,14 +268,14 @@ func (e *executor) executeDefineTable(ctx context.Context, ast *sql.DefineTableS
 			for _, FT := range ast.From {
 
 				// Save the foreign table definition
-				tkey := &keys.FT{KV: ast.KV, NS: ast.NS, DB: ast.DB, TB: FT.TB, FT: TB.TB}
+				tkey := &keys.FT{KV: KV, NS: e.ns, DB: e.db, TB: FT.TB, FT: TB.TB}
 				if _, err = e.dbo.Put(ctx, 0, tkey.Encode(), ast.Encode()); err != nil {
 					return nil, err
 				}
 
 				// Process the table resource data
 				uctx := context.WithValue(ctx, ctxKeyForce, true)
-				ustm := &sql.UpdateStatement{KV: ast.KV, NS: ast.NS, DB: ast.DB, What: []sql.Expr{FT}}
+				ustm := &sql.UpdateStatement{What: []sql.Expr{FT}}
 				if _, err = e.executeUpdate(uctx, ustm); err != nil {
 					return nil, err
 				}

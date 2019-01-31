@@ -92,23 +92,8 @@ type CommitStatement struct{}
 
 // InfoStatement represents an SQL INFO statement.
 type InfoStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Kind Token
 	What *Ident
-}
-
-// --------------------------------------------------
-// If
-// --------------------------------------------------
-
-// IfStatement represents an if else clause.
-type IfStatement struct {
-	RW   bool
-	Cond Exprs
-	Then Exprs
-	Else Expr
 }
 
 // --------------------------------------------------
@@ -122,39 +107,24 @@ type RunStatement struct {
 }
 
 // --------------------------------------------------
-// LET
+// Let
 // --------------------------------------------------
 
 // LetStatement represents a SQL LET statement.
 type LetStatement struct {
 	RW   bool
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 	What Expr
 }
 
-// ReturnStatement represents a SQL RETURN statement.
-type ReturnStatement struct {
-	RW   bool
-	KV   string
-	NS   string
-	DB   string
-	What Exprs
-}
-
 // --------------------------------------------------
-// Normal
+// Live
 // --------------------------------------------------
 
 // LiveStatement represents a SQL LIVE statement.
 type LiveStatement struct {
 	ID    string
 	FB    string
-	KV    string
-	NS    string
-	DB    string
 	Diff  bool
 	Expr  Fields
 	What  Exprs
@@ -165,18 +135,30 @@ type LiveStatement struct {
 // KillStatement represents a SQL KILL statement.
 type KillStatement struct {
 	FB   string
-	KV   string
-	NS   string
-	DB   string
 	What Exprs
+}
+
+// --------------------------------------------------
+// Normal
+// --------------------------------------------------
+
+// ReturnStatement represents a SQL RETURN statement.
+type ReturnStatement struct {
+	RW   bool
+	What Exprs
+}
+
+// IfelseStatement represents a SQL IFELSE statement.
+type IfelseStatement struct {
+	RW   bool
+	Cond Exprs
+	Then Exprs
+	Else Expr
 }
 
 // SelectStatement represents a SQL SELECT statement.
 type SelectStatement struct {
 	RW      bool
-	KV      string
-	NS      string
-	DB      string
 	Expr    Fields
 	What    Exprs
 	Cond    Expr
@@ -192,9 +174,6 @@ type SelectStatement struct {
 
 // CreateStatement represents a SQL CREATE statement.
 type CreateStatement struct {
-	KV      string
-	NS      string
-	DB      string
 	What    Exprs
 	Data    Expr
 	Echo    Token
@@ -203,9 +182,6 @@ type CreateStatement struct {
 
 // UpdateStatement represents a SQL UPDATE statement.
 type UpdateStatement struct {
-	KV      string
-	NS      string
-	DB      string
 	What    Exprs
 	Data    Expr
 	Cond    Expr
@@ -215,9 +191,6 @@ type UpdateStatement struct {
 
 // DeleteStatement represents a SQL DELETE statement.
 type DeleteStatement struct {
-	KV      string
-	NS      string
-	DB      string
 	What    Exprs
 	Cond    Expr
 	Echo    Token
@@ -226,9 +199,6 @@ type DeleteStatement struct {
 
 // RelateStatement represents a SQL RELATE statement.
 type RelateStatement struct {
-	KV      string
-	NS      string
-	DB      string
 	Type    Expr
 	From    Exprs
 	With    Exprs
@@ -240,9 +210,6 @@ type RelateStatement struct {
 
 // InsertStatement represents a SQL INSERT statement.
 type InsertStatement struct {
-	KV      string
-	NS      string
-	DB      string
 	Data    Expr
 	Into    *Table
 	Echo    Token
@@ -251,9 +218,6 @@ type InsertStatement struct {
 
 // UpsertStatement represents a SQL UPSERT statement.
 type UpsertStatement struct {
-	KV      string
-	NS      string
-	DB      string
 	Data    Expr
 	Into    *Table
 	Echo    Token
@@ -265,16 +229,10 @@ type UpsertStatement struct {
 // --------------------------------------------------
 
 type DefineNamespaceStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 }
 
 type RemoveNamespaceStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 }
 
@@ -283,16 +241,10 @@ type RemoveNamespaceStatement struct {
 // --------------------------------------------------
 
 type DefineDatabaseStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 }
 
 type RemoveDatabaseStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 }
 
@@ -302,9 +254,6 @@ type RemoveDatabaseStatement struct {
 
 // DefineLoginStatement represents an SQL DEFINE LOGIN statement.
 type DefineLoginStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Kind Token
 	User *Ident
 	Pass []byte
@@ -314,9 +263,6 @@ type DefineLoginStatement struct {
 
 // RemoveLoginStatement represents an SQL REMOVE LOGIN statement.
 type RemoveLoginStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Kind Token
 	User *Ident
 }
@@ -327,9 +273,6 @@ type RemoveLoginStatement struct {
 
 // DefineTokenStatement represents an SQL DEFINE TOKEN statement.
 type DefineTokenStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Kind Token
 	Name *Ident
 	What *Ident
@@ -339,9 +282,6 @@ type DefineTokenStatement struct {
 
 // RemoveTokenStatement represents an SQL REMOVE TOKEN statement.
 type RemoveTokenStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Kind Token
 	Name *Ident
 	What *Ident
@@ -353,9 +293,6 @@ type RemoveTokenStatement struct {
 
 // DefineScopeStatement represents an SQL DEFINE SCOPE statement.
 type DefineScopeStatement struct {
-	KV       string
-	NS       string
-	DB       string
 	Name     *Ident
 	Time     time.Duration
 	Code     []byte
@@ -368,9 +305,6 @@ type DefineScopeStatement struct {
 
 // RemoveScopeStatement represents an SQL REMOVE SCOPE statement.
 type RemoveScopeStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 }
 
@@ -380,9 +314,6 @@ type RemoveScopeStatement struct {
 
 // DefineTableStatement represents an SQL DEFINE TABLE statement.
 type DefineTableStatement struct {
-	KV    string
-	NS    string
-	DB    string
 	Name  *Ident
 	What  Tables
 	Full  bool
@@ -398,9 +329,6 @@ type DefineTableStatement struct {
 
 // RemoveTableStatement represents an SQL REMOVE TABLE statement.
 type RemoveTableStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	What Tables
 }
 
@@ -410,9 +338,6 @@ type RemoveTableStatement struct {
 
 // DefineEventStatement represents an SQL DEFINE EVENT statement.
 type DefineEventStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 	What Tables
 	When Expr
@@ -421,9 +346,6 @@ type DefineEventStatement struct {
 
 // RemoveEventStatement represents an SQL REMOVE EVENT statement.
 type RemoveEventStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 	What Tables
 }
@@ -434,9 +356,6 @@ type RemoveEventStatement struct {
 
 // DefineFieldStatement represents an SQL DEFINE FIELD statement.
 type DefineFieldStatement struct {
-	KV       string
-	NS       string
-	DB       string
 	Name     *Ident
 	What     Tables
 	Perms    Expr
@@ -449,9 +368,6 @@ type DefineFieldStatement struct {
 
 // RemoveFieldStatement represents an SQL REMOVE FIELD statement.
 type RemoveFieldStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 	What Tables
 }
@@ -462,9 +378,6 @@ type RemoveFieldStatement struct {
 
 // DefineIndexStatement represents an SQL DEFINE INDEX statement.
 type DefineIndexStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 	What Tables
 	Cols Idents
@@ -473,9 +386,6 @@ type DefineIndexStatement struct {
 
 // RemoveIndexStatement represents an SQL REMOVE INDEX statement.
 type RemoveIndexStatement struct {
-	KV   string
-	NS   string
-	DB   string
 	Name *Ident
 	What Tables
 }

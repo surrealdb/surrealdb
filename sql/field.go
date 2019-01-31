@@ -18,10 +18,6 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 
 	stmt = &DefineFieldStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
-		return nil, err
-	}
-
 	if stmt.Name, err = p.parseIdiom(); err != nil {
 		return nil, err
 	}
@@ -80,10 +76,6 @@ func (p *parser) parseDefineFieldStatement() (stmt *DefineFieldStatement, err er
 func (p *parser) parseRemoveFieldStatement() (stmt *RemoveFieldStatement, err error) {
 
 	stmt = &RemoveFieldStatement{}
-
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
-		return nil, err
-	}
 
 	if stmt.Name, err = p.parseIdiom(); err != nil {
 		return nil, err

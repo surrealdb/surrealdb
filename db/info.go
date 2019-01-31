@@ -17,6 +17,7 @@ package db
 import (
 	"context"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 )
@@ -42,6 +43,10 @@ func (e *executor) executeInfo(ctx context.Context, ast *sql.InfoStatement) (out
 
 func (e *executor) executeInfoKV(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
+	if err := e.access(ctx, cnf.AuthKV); err != nil {
+		return nil, err
+	}
+
 	ns, err := e.dbo.AllNS(ctx)
 	if err != nil {
 		return nil, err
@@ -62,17 +67,21 @@ func (e *executor) executeInfoKV(ctx context.Context, ast *sql.InfoStatement) (o
 
 func (e *executor) executeInfoNS(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	db, err := e.dbo.AllDB(ctx, ast.NS)
+	if err := e.access(ctx, cnf.AuthNS); err != nil {
+		return nil, err
+	}
+
+	db, err := e.dbo.AllDB(ctx, e.ns)
 	if err != nil {
 		return nil, err
 	}
 
-	nt, err := e.dbo.AllNT(ctx, ast.NS)
+	nt, err := e.dbo.AllNT(ctx, e.ns)
 	if err != nil {
 		return nil, err
 	}
 
-	nu, err := e.dbo.AllNU(ctx, ast.NS)
+	nu, err := e.dbo.AllNU(ctx, e.ns)
 	if err != nil {
 		return nil, err
 	}
@@ -104,22 +113,26 @@ func (e *executor) executeInfoNS(ctx context.Context, ast *sql.InfoStatement) (o
 
 func (e *executor) executeInfoDB(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	tb, err := e.dbo.AllTB(ctx, ast.NS, ast.DB)
+	if err := e.access(ctx, cnf.AuthDB); err != nil {
+		return nil, err
+	}
+
+	tb, err := e.dbo.AllTB(ctx, e.ns, e.db)
 	if err != nil {
 		return nil, err
 	}
 
-	dt, err := e.dbo.AllDT(ctx, ast.NS, ast.DB)
+	dt, err := e.dbo.AllDT(ctx, e.ns, e.db)
 	if err != nil {
 		return nil, err
 	}
 
-	du, err := e.dbo.AllDU(ctx, ast.NS, ast.DB)
+	du, err := e.dbo.AllDU(ctx, e.ns, e.db)
 	if err != nil {
 		return nil, err
 	}
 
-	sc, err := e.dbo.AllSC(ctx, ast.NS, ast.DB)
+	sc, err := e.dbo.AllSC(ctx, e.ns, e.db)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +170,11 @@ func (e *executor) executeInfoDB(ctx context.Context, ast *sql.InfoStatement) (o
 
 func (e *executor) executeInfoSC(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	st, err := e.dbo.AllST(ctx, ast.NS, ast.DB, ast.What.VA)
+	if err := e.access(ctx, cnf.AuthDB); err != nil {
+		return nil, err
+	}
+
+	st, err := e.dbo.AllST(ctx, e.ns, e.db, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
@@ -177,22 +194,26 @@ func (e *executor) executeInfoSC(ctx context.Context, ast *sql.InfoStatement) (o
 
 func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (out []interface{}, err error) {
 
-	ev, err := e.dbo.AllEV(ctx, ast.NS, ast.DB, ast.What.VA)
+	if err := e.access(ctx, cnf.AuthDB); err != nil {
+		return nil, err
+	}
+
+	ev, err := e.dbo.AllEV(ctx, e.ns, e.db, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
 
-	fd, err := e.dbo.AllFD(ctx, ast.NS, ast.DB, ast.What.VA)
+	fd, err := e.dbo.AllFD(ctx, e.ns, e.db, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
 
-	ix, err := e.dbo.AllIX(ctx, ast.NS, ast.DB, ast.What.VA)
+	ix, err := e.dbo.AllIX(ctx, e.ns, e.db, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
 
-	ft, err := e.dbo.AllFT(ctx, ast.NS, ast.DB, ast.What.VA)
+	ft, err := e.dbo.AllFT(ctx, e.ns, e.db, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}

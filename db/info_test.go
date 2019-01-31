@@ -25,7 +25,7 @@ func TestInfo(t *testing.T) {
 
 	Convey("Info for namespace", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -40,7 +40,7 @@ func TestInfo(t *testing.T) {
 		INFO FOR NAMESPACE;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 10)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -66,7 +66,7 @@ func TestInfo(t *testing.T) {
 
 	Convey("Info for database", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -83,7 +83,7 @@ func TestInfo(t *testing.T) {
 		INFO FOR DATABASE;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 12)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -114,7 +114,7 @@ func TestInfo(t *testing.T) {
 
 	Convey("Info for scope", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -125,7 +125,7 @@ func TestInfo(t *testing.T) {
 		INFO FOR SCOPE test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 6)
 		So(res[1].Status, ShouldEqual, "OK")
@@ -140,7 +140,7 @@ func TestInfo(t *testing.T) {
 
 	Convey("Info for table", t, func() {
 
-		setupDB()
+		setupDB(1)
 
 		txt := `
 		USE NS test DB test;
@@ -154,7 +154,7 @@ func TestInfo(t *testing.T) {
 		INFO FOR TABLE test;
 		`
 
-		res, err := Execute(setupKV(), txt, nil)
+		res, err := Execute(permsKV(), txt, nil)
 		So(err, ShouldBeNil)
 		So(res, ShouldHaveLength, 9)
 		So(res[1].Status, ShouldEqual, "OK")

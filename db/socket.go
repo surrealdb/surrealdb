@@ -30,6 +30,8 @@ import (
 )
 
 type socket struct {
+	ns    string
+	db    string
 	mutex sync.Mutex
 	fibre *fibre.Context
 	items map[string][]interface{}
@@ -54,22 +56,19 @@ func flush(id string) {
 	}()
 }
 
-func (s *socket) ctx(ns, db string) (ctx context.Context) {
+func (s *socket) ctx() (ctx context.Context) {
 
 	ctx = context.Background()
 
-	ctx = context.WithValue(ctx, ctxKeyNs, ns)
-	ctx = context.WithValue(ctx, ctxKeyDb, db)
-
 	auth := s.fibre.Get(ctxKeyAuth).(*cnf.Auth)
-	ctx = context.WithValue(ctx, ctxKeyAuth, auth.Data)
-	ctx = context.WithValue(ctx, ctxKeyKind, auth.Kind)
 
 	vars := data.New()
+	vars.Set(ENV, varKeyEnv)
 	vars.Set(auth.Data, varKeyAuth)
 	vars.Set(auth.Scope, varKeyScope)
 	vars.Set(session(s.fibre), varKeySession)
 	ctx = context.WithValue(ctx, ctxKeyVars, vars)
+	ctx = context.WithValue(ctx, ctxKeyKind, auth.Kind)
 
 	return
 
@@ -145,7 +144,7 @@ func (s *socket) check(e *executor, ctx context.Context, ns, db, tb string) (err
 	// or KV permissions level, then we can
 	// ignore all permissions checks.
 
-	if ctx.Value(ctxKeyKind).(cnf.Kind) < cnf.AuthSC {
+	if perm(ctx) < cnf.AuthSC {
 		return nil
 	}
 
@@ -207,12 +206,12 @@ func (s *socket) deregister(id string) {
 
 			case *sql.Table:
 
-				key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, LV: id}
+				key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.TB, LV: id}
 				txn.Clr(ctx, key.Encode())
 
 			case *sql.Ident:
 
-				key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.VA, LV: id}
+				key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.VA, LV: id}
 				txn.Clr(ctx, key.Encode())
 
 			}
@@ -259,22 +258,14 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 
 		case *sql.Table:
 
-			/*if err = s.check(e, ctx, stm.NS, stm.DB, what.TB); err != nil {
-				return nil, err
-			}*/
-
-			key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.TB, LV: stm.ID}
+			key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.TB, LV: stm.ID}
 			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
 				return nil, err
 			}
 
 		case *sql.Ident:
 
-			/*if err = s.check(e, ctx, stm.NS, stm.DB, what.ID); err != nil {
-				return nil, err
-			}*/
-
-			key := &keys.LV{KV: stm.KV, NS: stm.NS, DB: stm.DB, TB: what.VA, LV: stm.ID}
+			key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.VA, LV: stm.ID}
 			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
 				return nil, err
 			}
@@ -324,11 +315,11 @@ func (s *socket) executeKill(e *executor, ctx context.Context, stm *sql.KillStat
 					switch what := w.(type) {
 
 					case *sql.Table:
-						key := &keys.LV{KV: qry.KV, NS: qry.NS, DB: qry.DB, TB: what.TB, LV: qry.ID}
+						key := &keys.LV{TB: what.TB, LV: qry.ID}
 						_, err = e.dbo.Clr(ctx, key.Encode())
 
 					case *sql.Ident:
-						key := &keys.LV{KV: qry.KV, NS: qry.NS, DB: qry.DB, TB: what.VA, LV: qry.ID}
+						key := &keys.LV{TB: what.VA, LV: qry.ID}
 						_, err = e.dbo.Clr(ctx, key.Encode())
 
 					}

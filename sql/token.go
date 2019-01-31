@@ -32,22 +32,7 @@ func (p *parser) parseDefineTokenStatement() (stmt *DefineTokenStatement, err er
 		return nil, err
 	}
 
-	if is(stmt.Kind, NAMESPACE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNS); err != nil {
-			return nil, err
-		}
-	}
-
-	if is(stmt.Kind, DATABASE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
-			return nil, err
-		}
-	}
-
 	if is(stmt.Kind, SCOPE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
-			return nil, err
-		}
 		if stmt.What, err = p.parseIdent(); err != nil {
 			return nil, err
 		}
@@ -104,22 +89,7 @@ func (p *parser) parseRemoveTokenStatement() (stmt *RemoveTokenStatement, err er
 		return nil, err
 	}
 
-	if is(stmt.Kind, NAMESPACE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthNS); err != nil {
-			return nil, err
-		}
-	}
-
-	if is(stmt.Kind, DATABASE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
-			return nil, err
-		}
-	}
-
 	if is(stmt.Kind, SCOPE) {
-		if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
-			return nil, err
-		}
 		if stmt.What, err = p.parseIdent(); err != nil {
 			return nil, err
 		}

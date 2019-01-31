@@ -15,7 +15,6 @@
 package sql
 
 //go:generate go get -u github.com/abcum/tmpl
-//go:generate tmpl -file=auth.gen.json auth.gen.go.tmpl
 //go:generate tmpl -file=kill.gen.json kill.gen.go.tmpl
 //go:generate tmpl -file=rdwr.gen.json rdwr.gen.go.tmpl
 

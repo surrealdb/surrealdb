@@ -63,15 +63,6 @@ func auth() fibre.MiddlewareFunc {
 
 			auth.Kind = cnf.AuthNO
 
-			// Set the default possible values for the
-			// possible and selected namespace / database
-			// so that they can be overridden.
-
-			auth.Possible.NS = ""
-			auth.Selected.NS = ""
-			auth.Possible.DB = ""
-			auth.Selected.DB = ""
-
 			// Retrieve the current domain host and
 			// if we are using a subdomain then set
 			// the NS and DB to the subdomain bits.
@@ -80,10 +71,8 @@ func auth() fibre.MiddlewareFunc {
 			subs := strings.Split(bits[0], "-")
 
 			if len(subs) == 2 {
-				auth.Possible.NS = subs[0]
-				auth.Selected.NS = subs[0]
-				auth.Possible.DB = subs[1]
-				auth.Selected.DB = subs[1]
+				auth.NS = subs[0]
+				auth.DB = subs[1]
 			}
 
 			// If there is a Session ID specified in
@@ -99,8 +88,7 @@ func auth() fibre.MiddlewareFunc {
 			// the selected namespace.
 
 			if ns := c.Request().Header().Get(varKeyNs); len(ns) != 0 {
-				auth.Possible.NS = ns
-				auth.Selected.NS = ns
+				auth.NS = ns
 			}
 
 			// If there is a database specified in
@@ -108,8 +96,7 @@ func auth() fibre.MiddlewareFunc {
 			// the selected database.
 
 			if db := c.Request().Header().Get(varKeyDb); len(db) != 0 {
-				auth.Possible.DB = db
-				auth.Selected.DB = db
+				auth.DB = db
 			}
 
 			// Retrieve the HTTP Authorization header
@@ -160,7 +147,7 @@ func auth() fibre.MiddlewareFunc {
 
 				for _, prot := range websocket.Subprotocols(c.Request().Request) {
 					if len(prot) > 3 && prot[0:3] == "ns-" {
-						auth.Selected.NS = prot[3:]
+						auth.NS = prot[3:]
 					}
 				}
 
@@ -170,7 +157,7 @@ func auth() fibre.MiddlewareFunc {
 
 				for _, prot := range websocket.Subprotocols(c.Request().Request) {
 					if len(prot) > 3 && prot[0:3] == "db-" {
-						auth.Selected.DB = prot[3:]
+						auth.DB = prot[3:]
 					}
 				}
 
@@ -222,10 +209,10 @@ func checkBasics(c *fibre.Context, info string, callback func() error) (err erro
 
 	if bytes.Equal(cred[0], user) && bytes.Equal(cred[1], pass) {
 
+		// FIXME does not work for IPv6 addresses
+
 		if cidr(c.IP(), cnf.Settings.Auth.Nets) {
 			auth.Kind = cnf.AuthKV
-			auth.Possible.NS = "*"
-			auth.Possible.DB = "*"
 			return callback()
 		}
 
@@ -235,32 +222,31 @@ func checkBasics(c *fibre.Context, info string, callback func() error) (err erro
 
 	// If no KV authentication, then try to authenticate as NS user
 
-	if auth.Selected.NS != "" {
+	if auth.NS != "" {
 
-		n := auth.Selected.NS
+		n := auth.NS
 		u := string(cred[0])
 		p := string(cred[1])
 
 		if _, err = signinNS(c, n, u, p); err == nil {
 			auth.Kind = cnf.AuthNS
-			auth.Possible.NS = n
-			auth.Possible.DB = "*"
+			auth.NS = n
 			return callback()
 		}
 
 		// If no NS authentication, then try to authenticate as DB user
 
-		if auth.Selected.DB != "" {
+		if auth.DB != "" {
 
-			n := auth.Selected.NS
-			d := auth.Selected.DB
+			n := auth.NS
+			d := auth.DB
 			u := string(cred[0])
 			p := string(cred[1])
 
 			if _, err = signinDB(c, n, d, u, p); err == nil {
 				auth.Kind = cnf.AuthDB
-				auth.Possible.NS = n
-				auth.Possible.DB = d
+				auth.NS = n
+				auth.DB = d
 				return callback()
 			}
 
@@ -351,7 +337,7 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 
 				c := fibre.NewContext(c.Request(), c.Response(), c.Fibre())
 
-				c.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB})
+				c.Set(varKeyAuth, &cnf.Auth{Kind: cnf.AuthDB, NS: nsv, DB: dbv})
 
 				qvars := map[string]interface{}{
 					"id": auth.Data, "token": vars,
@@ -441,23 +427,17 @@ func checkBearer(c *fibre.Context, info string, callback func() error) (err erro
 	if err == nil && token.Valid {
 
 		if auth.Kind == cnf.AuthNS {
-			auth.Possible.NS = nsv
-			auth.Selected.NS = nsv
-			auth.Possible.DB = "*"
+			auth.NS = nsv
 		}
 
 		if auth.Kind == cnf.AuthDB {
-			auth.Possible.NS = nsv
-			auth.Selected.NS = nsv
-			auth.Possible.DB = dbv
-			auth.Selected.DB = dbv
+			auth.NS = nsv
+			auth.DB = dbv
 		}
 
 		if auth.Kind == cnf.AuthSC {
-			auth.Possible.NS = nsv
-			auth.Selected.NS = nsv
-			auth.Possible.DB = dbv
-			auth.Selected.DB = dbv
+			auth.NS = nsv
+			auth.DB = dbv
 		}
 
 		return callback()

@@ -191,26 +191,9 @@ func (this RunStatement) String() string {
 	)
 }
 
-func (this IfStatement) String() string {
-	m := make([]string, len(this.Cond))
-	for k := range this.Cond {
-		m[k] = print("%v THEN %v", this.Cond[k], this.Then[k])
-	}
-	return print("IF %v%v END",
-		strings.Join(m, " ELSE IF "),
-		maybe(this.Else != nil, print(" ELSE %v", this.Else)),
-	)
-}
-
 func (this LetStatement) String() string {
 	return print("LET %v = %v",
 		this.Name,
-		this.What,
-	)
-}
-
-func (this ReturnStatement) String() string {
-	return print("RETURN %v",
 		this.What,
 	)
 }
@@ -228,6 +211,23 @@ func (this LiveStatement) String() string {
 func (this KillStatement) String() string {
 	return print("KILL %v",
 		this.What,
+	)
+}
+
+func (this ReturnStatement) String() string {
+	return print("RETURN %v",
+		this.What,
+	)
+}
+
+func (this IfelseStatement) String() string {
+	m := make([]string, len(this.Cond))
+	for k := range this.Cond {
+		m[k] = print("%v THEN %v", this.Cond[k], this.Then[k])
+	}
+	return print("IF %v%v END",
+		strings.Join(m, " ELSE IF "),
+		maybe(this.Else != nil, print(" ELSE %v", this.Else)),
 	)
 }
 

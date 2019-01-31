@@ -38,12 +38,6 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 		return nil
 	}
 
-	// Get the ID of the current fibre
-	// connection so that we can check
-	// against the ID of live queries.
-
-	id := ctx.Value(ctxKeyId).(string)
-
 	// Get the foreign read-only tables
 	// specified for this table, and
 	// update values which have changed.
@@ -63,7 +57,7 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 		// the same connection as the live query,
 		// and if it is then don't notify changes.
 
-		if id == lv.FB {
+		if d.i.e.id == lv.FB {
 			continue
 		}
 
@@ -79,7 +73,7 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 			// which has the correct connection
 			// variables, and auth levels.
 
-			ctx = sck.(*socket).ctx(d.ns, d.db)
+			ctx = sck.(*socket).ctx()
 
 			// Check whether this live query has the
 			// necessary permissions to view this
@@ -125,14 +119,14 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 
 			switch when {
 			case _DELETE:
-				sck.(*socket).queue(id, lv.ID, "DELETE", d.id)
+				sck.(*socket).queue(d.i.e.id, lv.ID, "DELETE", d.id)
 			case _CREATE:
 				if out != nil {
-					sck.(*socket).queue(id, lv.ID, "CREATE", out)
+					sck.(*socket).queue(d.i.e.id, lv.ID, "CREATE", out)
 				}
 			case _UPDATE:
 				if out != nil {
-					sck.(*socket).queue(id, lv.ID, "UPDATE", out)
+					sck.(*socket).queue(d.i.e.id, lv.ID, "UPDATE", out)
 				}
 			}
 

@@ -864,40 +864,6 @@ func (this *ContentExpression) UnmarshalCORK(r *cork.Reader) (err error) {
 }
 
 // --------------------------------------------------
-// IfStatement
-// --------------------------------------------------
-
-func init() {
-	cork.Register(&IfStatement{})
-}
-
-func (this *IfStatement) Decode(src []byte) {
-	pack.Decode(src, this)
-}
-
-func (this *IfStatement) Encode() (dst []byte) {
-	return pack.Encode(this)
-}
-
-func (this *IfStatement) ExtendCORK() byte {
-	return 0x36
-}
-
-func (this *IfStatement) MarshalCORK(w *cork.Writer) (err error) {
-	w.EncodeAny(this.Cond)
-	w.EncodeAny(this.Then)
-	w.EncodeAny(this.Else)
-	return
-}
-
-func (this *IfStatement) UnmarshalCORK(r *cork.Reader) (err error) {
-	r.DecodeAny(&this.Cond)
-	r.DecodeAny(&this.Then)
-	r.DecodeAny(&this.Else)
-	return
-}
-
-// --------------------------------------------------
 // RunStatement
 // --------------------------------------------------
 
@@ -914,7 +880,7 @@ func (this *RunStatement) Encode() (dst []byte) {
 }
 
 func (this *RunStatement) ExtendCORK() byte {
-	return 0x37
+	return 0x36
 }
 
 func (this *RunStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -944,7 +910,7 @@ func (this *LiveStatement) Encode() (dst []byte) {
 }
 
 func (this *LiveStatement) ExtendCORK() byte {
-	return 0x38
+	return 0x37
 }
 
 func (this *LiveStatement) MarshalCORK(w *cork.Writer) (err error) {
@@ -970,6 +936,40 @@ func (this *LiveStatement) UnmarshalCORK(r *cork.Reader) (err error) {
 }
 
 // --------------------------------------------------
+// IfelseStatement
+// --------------------------------------------------
+
+func init() {
+	cork.Register(&IfelseStatement{})
+}
+
+func (this *IfelseStatement) Decode(src []byte) {
+	pack.Decode(src, this)
+}
+
+func (this *IfelseStatement) Encode() (dst []byte) {
+	return pack.Encode(this)
+}
+
+func (this *IfelseStatement) ExtendCORK() byte {
+	return 0x38
+}
+
+func (this *IfelseStatement) MarshalCORK(w *cork.Writer) (err error) {
+	w.EncodeAny(this.Cond)
+	w.EncodeAny(this.Then)
+	w.EncodeAny(this.Else)
+	return
+}
+
+func (this *IfelseStatement) UnmarshalCORK(r *cork.Reader) (err error) {
+	r.DecodeAny(&this.Cond)
+	r.DecodeAny(&this.Then)
+	r.DecodeAny(&this.Else)
+	return
+}
+
+// --------------------------------------------------
 // SelectStatement
 // --------------------------------------------------
 
@@ -991,9 +991,6 @@ func (this *SelectStatement) ExtendCORK() byte {
 
 func (this *SelectStatement) MarshalCORK(w *cork.Writer) (err error) {
 	w.EncodeBool(this.RW)
-	w.EncodeString(this.KV)
-	w.EncodeString(this.NS)
-	w.EncodeString(this.DB)
 	w.EncodeAny(this.Expr)
 	w.EncodeAny(this.What)
 	w.EncodeAny(this.Cond)
@@ -1009,9 +1006,6 @@ func (this *SelectStatement) MarshalCORK(w *cork.Writer) (err error) {
 
 func (this *SelectStatement) UnmarshalCORK(r *cork.Reader) (err error) {
 	r.DecodeBool(&this.RW)
-	r.DecodeString(&this.KV)
-	r.DecodeString(&this.NS)
-	r.DecodeString(&this.DB)
 	r.DecodeAny(&this.Expr)
 	r.DecodeAny(&this.What)
 	r.DecodeAny(&this.Cond)
@@ -1046,9 +1040,6 @@ func (this *CreateStatement) ExtendCORK() byte {
 }
 
 func (this *CreateStatement) MarshalCORK(w *cork.Writer) (err error) {
-	w.EncodeString(this.KV)
-	w.EncodeString(this.NS)
-	w.EncodeString(this.DB)
 	w.EncodeAny(this.What)
 	w.EncodeAny(this.Data)
 	w.EncodeAny(this.Echo)
@@ -1057,9 +1048,6 @@ func (this *CreateStatement) MarshalCORK(w *cork.Writer) (err error) {
 }
 
 func (this *CreateStatement) UnmarshalCORK(r *cork.Reader) (err error) {
-	r.DecodeString(&this.KV)
-	r.DecodeString(&this.NS)
-	r.DecodeString(&this.DB)
 	r.DecodeAny(&this.What)
 	r.DecodeAny(&this.Data)
 	r.DecodeAny(&this.Echo)
@@ -1088,9 +1076,6 @@ func (this *UpdateStatement) ExtendCORK() byte {
 }
 
 func (this *UpdateStatement) MarshalCORK(w *cork.Writer) (err error) {
-	w.EncodeString(this.KV)
-	w.EncodeString(this.NS)
-	w.EncodeString(this.DB)
 	w.EncodeAny(this.What)
 	w.EncodeAny(this.Data)
 	w.EncodeAny(this.Cond)
@@ -1100,9 +1085,6 @@ func (this *UpdateStatement) MarshalCORK(w *cork.Writer) (err error) {
 }
 
 func (this *UpdateStatement) UnmarshalCORK(r *cork.Reader) (err error) {
-	r.DecodeString(&this.KV)
-	r.DecodeString(&this.NS)
-	r.DecodeString(&this.DB)
 	r.DecodeAny(&this.What)
 	r.DecodeAny(&this.Data)
 	r.DecodeAny(&this.Cond)
@@ -1132,9 +1114,6 @@ func (this *DeleteStatement) ExtendCORK() byte {
 }
 
 func (this *DeleteStatement) MarshalCORK(w *cork.Writer) (err error) {
-	w.EncodeString(this.KV)
-	w.EncodeString(this.NS)
-	w.EncodeString(this.DB)
 	w.EncodeAny(this.What)
 	w.EncodeAny(this.Cond)
 	w.EncodeAny(this.Echo)
@@ -1143,9 +1122,6 @@ func (this *DeleteStatement) MarshalCORK(w *cork.Writer) (err error) {
 }
 
 func (this *DeleteStatement) UnmarshalCORK(r *cork.Reader) (err error) {
-	r.DecodeString(&this.KV)
-	r.DecodeString(&this.NS)
-	r.DecodeString(&this.DB)
 	r.DecodeAny(&this.What)
 	r.DecodeAny(&this.Cond)
 	r.DecodeAny(&this.Echo)
@@ -1174,9 +1150,6 @@ func (this *RelateStatement) ExtendCORK() byte {
 }
 
 func (this *RelateStatement) MarshalCORK(w *cork.Writer) (err error) {
-	w.EncodeString(this.KV)
-	w.EncodeString(this.NS)
-	w.EncodeString(this.DB)
 	w.EncodeAny(this.Type)
 	w.EncodeAny(this.From)
 	w.EncodeAny(this.With)
@@ -1188,9 +1161,6 @@ func (this *RelateStatement) MarshalCORK(w *cork.Writer) (err error) {
 }
 
 func (this *RelateStatement) UnmarshalCORK(r *cork.Reader) (err error) {
-	r.DecodeString(&this.KV)
-	r.DecodeString(&this.NS)
-	r.DecodeString(&this.DB)
 	r.DecodeAny(&this.Type)
 	r.DecodeAny(&this.From)
 	r.DecodeAny(&this.With)
@@ -1222,9 +1192,6 @@ func (this *InsertStatement) ExtendCORK() byte {
 }
 
 func (this *InsertStatement) MarshalCORK(w *cork.Writer) (err error) {
-	w.EncodeString(this.KV)
-	w.EncodeString(this.NS)
-	w.EncodeString(this.DB)
 	w.EncodeAny(this.Data)
 	w.EncodeAny(this.Into)
 	w.EncodeAny(this.Echo)
@@ -1233,9 +1200,6 @@ func (this *InsertStatement) MarshalCORK(w *cork.Writer) (err error) {
 }
 
 func (this *InsertStatement) UnmarshalCORK(r *cork.Reader) (err error) {
-	r.DecodeString(&this.KV)
-	r.DecodeString(&this.NS)
-	r.DecodeString(&this.DB)
 	r.DecodeAny(&this.Data)
 	r.DecodeAny(&this.Into)
 	r.DecodeAny(&this.Echo)
@@ -1264,9 +1228,6 @@ func (this *UpsertStatement) ExtendCORK() byte {
 }
 
 func (this *UpsertStatement) MarshalCORK(w *cork.Writer) (err error) {
-	w.EncodeString(this.KV)
-	w.EncodeString(this.NS)
-	w.EncodeString(this.DB)
 	w.EncodeAny(this.Data)
 	w.EncodeAny(this.Into)
 	w.EncodeAny(this.Echo)
@@ -1275,9 +1236,6 @@ func (this *UpsertStatement) MarshalCORK(w *cork.Writer) (err error) {
 }
 
 func (this *UpsertStatement) UnmarshalCORK(r *cork.Reader) (err error) {
-	r.DecodeString(&this.KV)
-	r.DecodeString(&this.NS)
-	r.DecodeString(&this.DB)
 	r.DecodeAny(&this.Data)
 	r.DecodeAny(&this.Into)
 	r.DecodeAny(&this.Echo)

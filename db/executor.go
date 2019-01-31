@@ -29,6 +29,9 @@ import (
 )
 
 type executor struct {
+	id    string
+	ns    string
+	db    string
 	dbo   *mem.Cache
 	time  int64
 	lock  *mutex
@@ -37,9 +40,13 @@ type executor struct {
 	cache *cache
 }
 
-func newExecutor() (e *executor) {
+func newExecutor(id, ns, db string) (e *executor) {
 
 	e = executorPool.Get().(*executor)
+
+	e.id = id
+	e.ns = ns
+	e.db = db
 
 	e.dbo = mem.New()
 
@@ -54,18 +61,6 @@ func newExecutor() (e *executor) {
 }
 
 func (e *executor) execute(ctx context.Context, ast *sql.Query) {
-
-	var err error
-	var now time.Time
-	var rsp *Response
-	var buf []*Response
-	var res []interface{}
-
-	// Get the fibre context ID so that we can use
-	// it to clear or flush websocket notification
-	// changes linked to this context.
-
-	id := ctx.Value(ctxKeyId).(string)
 
 	// Ensure that the executor is added back into
 	// the executor pool when the executor has
@@ -86,7 +81,7 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 	defer func() {
 		if e.dbo.TX != nil {
 			e.dbo.Cancel()
-			clear(id)
+			clear(e.id)
 		}
 	}()
 
@@ -96,8 +91,8 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 
 	defer func() {
 		if err := recover(); err != nil {
-			log.WithPrefix("db").WithFields(map[string]interface{}{
-				"id": ctx.Value(ctxKeyId), "stack": string(debug.Stack()),
+			log.WithPrefix(logKeyDB).WithFields(map[string]interface{}{
+				logKeyId: e.id, logKeyStack: string(debug.Stack()),
 			}).Errorln(err)
 		}
 	}()
@@ -107,122 +102,129 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 	// channel to see if the client has gone away.
 
 	for _, stm := range ast.Statements {
-
 		select {
-
 		case <-ctx.Done():
 			return
-
 		default:
-
-			// When in debugging mode, log every sql
-			// query, along with the query execution
-			// speed, so we can analyse slow queries.
-
-			log := log.WithPrefix("sql").WithFields(map[string]interface{}{
-				"id":   ctx.Value(ctxKeyId),
-				"kind": ctx.Value(ctxKeyKind),
-				"vars": ctx.Value(ctxKeyVars),
-			})
-
-			if stm, ok := stm.(sql.AuthableStatement); ok {
-				ns, db := stm.Auth()
-				ctx = context.WithValue(ctx, ctxKeyNs, ns)
-				ctx = context.WithValue(ctx, ctxKeyDb, db)
-				log = log.WithField("ns", ns).WithField("db", db)
-			}
-
-			// If we are not inside a global transaction
-			// then reset the error to nil so that the
-			// next statement is not ignored.
-
-			if e.dbo.TX == nil {
-				err, now = nil, time.Now()
-			}
-
-			// Check to see if the current statement is
-			// a TRANSACTION statement, and if it is
-			// then deal with it and move on to the next.
-
-			switch stm.(type) {
-			case *sql.BeginStatement:
-				e.lock = new(mutex)
-				err = e.begin(ctx, true)
-				continue
-			case *sql.CancelStatement:
-				err, buf = e.cancel(buf, err, e.send)
-				if err != nil {
-					clear(id)
-				} else {
-					clear(id)
-				}
-				continue
-			case *sql.CommitStatement:
-				err, buf = e.commit(buf, err, e.send)
-				if err != nil {
-					clear(id)
-				} else {
-					flush(id)
-				}
-				continue
-			}
-
-			// If an error has occured and we are inside
-			// a global transaction, then ignore all
-			// subsequent statements in the transaction.
-
-			if err == nil {
-				res, err = e.operate(ctx, stm)
-			} else {
-				res, err = []interface{}{}, errQueryNotExecuted
-			}
-
-			rsp = &Response{
-				Time:   time.Since(now).String(),
-				Status: status(err),
-				Detail: detail(err),
-				Result: append([]interface{}{}, res...),
-			}
-
-			// Log the sql statement along with the
-			// query duration time, and mark it as
-			// an error if the query failed.
-
-			switch err.(type) {
-			default:
-				log.WithFields(map[string]interface{}{
-					"time": time.Since(now).String(),
-				}).Debugln(stm)
-			case error:
-				log.WithFields(map[string]interface{}{
-					"time":  time.Since(now).String(),
-					"error": detail(err),
-				}).Errorln(stm)
-			}
-
-			// If we are not inside a global transaction
-			// then we can output the statement response
-			// immediately to the channel.
-
-			if e.dbo.TX == nil {
-				e.send <- rsp
-			}
-
-			// If we are inside a global transaction we
-			// must buffer the responses for output at
-			// the end of the transaction.
-
-			if e.dbo.TX != nil {
-				switch stm.(type) {
-				case *sql.ReturnStatement:
-					buf = groupd(buf, rsp)
-				default:
-					buf = append(buf, rsp)
-				}
-			}
-
+			e.conduct(ctx, stm)
 		}
+	}
 
+}
+
+func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
+
+	var err error
+	var now time.Time
+	var rsp *Response
+	var buf []*Response
+	var res []interface{}
+
+	// When in debugging mode, log every sql
+	// query, along with the query execution
+	// speed, so we can analyse slow queries.
+
+	log := log.WithPrefix(logKeySql).WithFields(map[string]interface{}{
+		logKeyId:   e.id,
+		logKeyKind: ctx.Value(ctxKeyKind),
+		logKeyVars: ctx.Value(ctxKeyVars),
+	})
+
+	if len(e.ns) != 0 {
+		log = log.WithField(logKeyNS, e.ns)
+	}
+
+	if len(e.db) != 0 {
+		log = log.WithField(logKeyDB, e.db)
+	}
+
+	// If we are not inside a global transaction
+	// then reset the error to nil so that the
+	// next statement is not ignored.
+
+	if e.dbo.TX == nil {
+		err, now = nil, time.Now()
+	}
+
+	// Check to see if the current statement is
+	// a TRANSACTION statement, and if it is
+	// then deal with it and move on to the next.
+
+	switch stm.(type) {
+	case *sql.BeginStatement:
+		e.lock = new(mutex)
+		err = e.begin(ctx, true)
+		return
+	case *sql.CancelStatement:
+		err, buf = e.cancel(buf, err, e.send)
+		if err != nil {
+			clear(e.id)
+		} else {
+			clear(e.id)
+		}
+		return
+	case *sql.CommitStatement:
+		err, buf = e.commit(buf, err, e.send)
+		if err != nil {
+			clear(e.id)
+		} else {
+			flush(e.id)
+		}
+		return
+	}
+
+	// If an error has occured and we are inside
+	// a global transaction, then ignore all
+	// subsequent statements in the transaction.
+
+	if err == nil {
+		res, err = e.operate(ctx, stm)
+	} else {
+		res, err = []interface{}{}, errQueryNotExecuted
+	}
+
+	rsp = &Response{
+		Time:   time.Since(now).String(),
+		Status: status(err),
+		Detail: detail(err),
+		Result: append([]interface{}{}, res...),
+	}
+
+	// Log the sql statement along with the
+	// query duration time, and mark it as
+	// an error if the query failed.
+
+	switch err.(type) {
+	default:
+		log.WithFields(map[string]interface{}{
+			logKeyTime: time.Since(now).String(),
+		}).Debugln(stm)
+	case error:
+		log.WithFields(map[string]interface{}{
+			logKeyTime:  time.Since(now).String(),
+			logKeyError: detail(err),
+		}).Errorln(stm)
+	}
+
+	// If we are not inside a global transaction
+	// then we can output the statement response
+	// immediately to the channel.
+
+	if e.dbo.TX == nil {
+		e.send <- rsp
+	}
+
+	// If we are inside a global transaction we
+	// must buffer the responses for output at
+	// the end of the transaction.
+
+	if e.dbo.TX != nil {
+		switch stm.(type) {
+		case *sql.ReturnStatement:
+			buf = groupd(buf, rsp)
+		default:
+			buf = append(buf, rsp)
+		}
 	}
 
 }
@@ -232,14 +234,6 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 	var loc bool
 	var trw bool
 	var canc context.CancelFunc
-
-	// If the statement is a UseStatement then
-	// there is no need to create a transaction
-	// as the query does not do anything.
-
-	if _, ok := stm.(*sql.UseStatement); ok {
-		return
-	}
 
 	// If we are not inside a global transaction
 	// then grab a new transaction, ensuring that
@@ -276,7 +270,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 	// it runs no longer than specified.
 
 	if cnf.Settings.Query.Timeout > 0 {
-		if ctx.Value(ctxKeyKind) != cnf.AuthKV {
+		if perm(ctx) != cnf.AuthKV {
 			ctx, canc = context.WithTimeout(ctx, cnf.Settings.Query.Timeout)
 			defer func() {
 				if tim := ctx.Err(); err == nil && tim != nil {
@@ -309,20 +303,17 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 	e.time = time.Now().UnixNano()
 
-	// Get the fibre context ID so that we can use
-	// it to clear or flush websocket notification
-	// changes linked to this context.
-
-	id := ctx.Value(ctxKeyId).(string)
-
 	// Execute the defined statement, receiving the
 	// result set, and any errors which occured
 	// while processing the query.
 
 	switch stm := stm.(type) {
 
-	case *sql.IfStatement:
-		res, err = e.executeIf(ctx, stm)
+	case *sql.OptStatement:
+		res, err = e.executeOpt(ctx, stm)
+
+	case *sql.UseStatement:
+		res, err = e.executeUse(ctx, stm)
 
 	case *sql.RunStatement:
 		res, err = e.executeRun(ctx, stm)
@@ -339,6 +330,9 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 		res, err = e.executeLive(ctx, stm)
 	case *sql.KillStatement:
 		res, err = e.executeKill(ctx, stm)
+
+	case *sql.IfelseStatement:
+		res, err = e.executeIfelse(ctx, stm)
 
 	case *sql.SelectStatement:
 		res, err = e.executeSelect(ctx, stm)
@@ -413,7 +407,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 		e.dbo.Cancel()
 		e.dbo.Reset()
-		clear(id)
+		clear(e.id)
 
 	default:
 
@@ -435,7 +429,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 			if err != nil {
 				e.dbo.Cancel()
-				clear(id)
+				clear(e.id)
 				return
 			}
 
@@ -445,15 +439,15 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 			if !trw {
 				if err = e.dbo.Cancel(); err != nil {
-					clear(id)
+					clear(e.id)
 				} else {
-					clear(id)
+					clear(e.id)
 				}
 			} else {
 				if err = e.dbo.Commit(); err != nil {
-					clear(id)
+					clear(e.id)
 				} else {
-					flush(id)
+					flush(e.id)
 				}
 			}
 

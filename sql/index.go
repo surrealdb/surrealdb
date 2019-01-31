@@ -18,10 +18,6 @@ func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err er
 
 	stmt = &DefineIndexStatement{}
 
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
-		return nil, err
-	}
-
 	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err
 	}
@@ -51,10 +47,6 @@ func (p *parser) parseDefineIndexStatement() (stmt *DefineIndexStatement, err er
 func (p *parser) parseRemoveIndexStatement() (stmt *RemoveIndexStatement, err error) {
 
 	stmt = &RemoveIndexStatement{}
-
-	if stmt.KV, stmt.NS, stmt.DB, err = p.a.get(AuthDB); err != nil {
-		return nil, err
-	}
 
 	if stmt.Name, err = p.parseIdent(); err != nil {
 		return nil, err

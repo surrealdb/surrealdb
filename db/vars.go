@@ -42,9 +42,20 @@ const (
 )
 
 const (
+	logKeyId    = "id"
+	logKeyNS    = "ns"
+	logKeyDB    = "db"
+	logKeySql   = "sql"
+	logKeyExe   = "exe"
+	logKeyKind  = "kind"
+	logKeyVars  = "vars"
+	logKeyTime  = "time"
+	logKeyError = "error"
+	logKeyStack = "stack"
+)
+
+const (
 	ctxKeyId      = "id"
-	ctxKeyNs      = "ns"
-	ctxKeyDb      = "db"
 	ctxKeyDive    = "dive"
 	ctxKeyVars    = "vars"
 	ctxKeySubs    = "subs"
