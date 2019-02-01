@@ -18,6 +18,7 @@ import (
 	"sort"
 
 	"context"
+	"reflect"
 
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
@@ -73,6 +74,8 @@ func (d *document) merge(ctx context.Context, met method, data sql.Expr) (err er
 	if err = d.delFld(ctx, met); err != nil {
 		return
 	}
+
+	d.changed = !reflect.DeepEqual(d.initial, d.current)
 
 	return
 
@@ -286,8 +289,6 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 	// This is because when updating records
 	// using json, there is no specific type
 	// for a 'datetime' and 'record'.
-
-	// IMPORTANT remove this, and put it in SQL parser
 
 	d.current.Each(func(key string, val interface{}) (err error) {
 		if val, ok := conv.MightBe(val); ok {

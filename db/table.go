@@ -43,7 +43,7 @@ func (d *document) table(ctx context.Context, when method) (err error) {
 	// then there is no need to update
 	// any registered foreign tables.
 
-	if !forced && !d.changed(ctx) {
+	if !forced && !d.changed {
 		return nil
 	}
 

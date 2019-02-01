@@ -22,7 +22,6 @@ import (
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
-	"github.com/abcum/surreal/util/diff"
 	"github.com/abcum/surreal/util/indx"
 	"github.com/abcum/surreal/util/keys"
 )
@@ -36,6 +35,7 @@ type document struct {
 	doc     *data.Doc
 	initial *data.Doc
 	current *data.Doc
+	changed bool
 }
 
 func newDocument(i *iterator, key *keys.Thing, val kvs.KV, doc *data.Doc) (d *document) {
@@ -58,7 +58,7 @@ func (d *document) close() {
 }
 
 func (d *document) erase() (err error) {
-	d.current = data.Consume(nil)
+	d.changed, d.current = true, data.Consume(nil)
 	return
 }
 
@@ -205,13 +205,6 @@ func (d *document) forced(ctx context.Context) bool {
 	return false
 }
 
-func (d *document) changed(ctx context.Context) bool {
-	a, _ := d.initial.Data().(map[string]interface{})
-	b, _ := d.current.Data().(map[string]interface{})
-	c := diff.Diff(a, b)
-	return len(c) > 0
-}
-
 func (d *document) shouldDrop(ctx context.Context) (bool, error) {
 
 	// Check whether it is specified
@@ -249,7 +242,7 @@ func (d *document) storeThing(ctx context.Context) (err error) {
 	// Check that the record has been
 	// changed, and if not, return.
 
-	if ok := d.changed(ctx); !ok {
+	if !d.changed {
 		return
 	}
 
@@ -311,7 +304,7 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 	// Check that the rcord has been
 	// changed, and if not, return.
 
-	if !forced && !d.changed(ctx) {
+	if !forced && !d.changed {
 		return
 	}
 
@@ -386,7 +379,7 @@ func (d *document) purgeIndex(ctx context.Context) (err error) {
 	// Check that the rcord has been
 	// changed, and if not, return.
 
-	if !forced && !d.changed(ctx) {
+	if !forced && !d.changed {
 		return
 	}
 

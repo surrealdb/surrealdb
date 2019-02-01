@@ -39,7 +39,7 @@ func (d *document) event(ctx context.Context, met method) (err error) {
 	// then there is no need to perform
 	// any registered events.
 
-	if !forced && !d.changed(ctx) {
+	if !forced && !d.changed {
 		return nil
 	}
 
