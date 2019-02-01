@@ -315,11 +315,11 @@ func (s *socket) executeKill(e *executor, ctx context.Context, stm *sql.KillStat
 					switch what := w.(type) {
 
 					case *sql.Table:
-						key := &keys.LV{TB: what.TB, LV: qry.ID}
+						key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.TB, LV: qry.ID}
 						_, err = e.dbo.Clr(ctx, key.Encode())
 
 					case *sql.Ident:
-						key := &keys.LV{TB: what.VA, LV: qry.ID}
+						key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.VA, LV: qry.ID}
 						_, err = e.dbo.Clr(ctx, key.Encode())
 
 					}
