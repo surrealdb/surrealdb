@@ -92,8 +92,15 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 				if len(path) > 0 {
 					switch res := val.(type) {
 					case []interface{}:
-						val, _ = e.fetchArray(ctx, res, doc)
-						return val
+						for k, v := range res {
+							switch val := v.(type) {
+							case *sql.Thing:
+								res[k], _ = e.fetchThing(ctx, val, doc)
+							default:
+								res[k] = v
+							}
+						}
+						return res
 					case *sql.Thing:
 						val, _ = e.fetchThing(ctx, res, doc)
 						return val
@@ -120,8 +127,15 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 						if len(path) > 0 {
 							switch res := val.(type) {
 							case []interface{}:
-								val, _ = e.fetchArray(ctx, res, doc)
-								return val
+								for k, v := range res {
+									switch val := v.(type) {
+									case *sql.Thing:
+										res[k], _ = e.fetchThing(ctx, val, doc)
+									default:
+										res[k] = v
+									}
+								}
+								return res
 							case *sql.Thing:
 								val, _ = e.fetchThing(ctx, res, doc)
 								return val
