@@ -48,21 +48,12 @@ func export(c *fibre.Context, NS, DB string) error {
 	defer executorPool.Put(exe)
 
 	// ------------------------------
-	// Databases
+	// Options
 	// ------------------------------
 
-	dbs, err := exe.dbo.AllDB(ctx, NS)
-	if err != nil {
-		return err
-	}
-
-	if len(dbs) > 0 {
-		fmt.Fprintf(w, sep, "DATABASE")
-		fmt.Fprintln(w)
-		for _, v := range dbs {
-			fmt.Fprintf(w, "%s;\n", v)
-		}
-	}
+	fmt.Fprintf(w, sep, "OPTION")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "OPTION IMPORT;\n")
 
 	// ------------------------------
 	// Tokens
@@ -131,9 +122,8 @@ func export(c *fibre.Context, NS, DB string) error {
 				for _, v := range sct {
 					fmt.Fprintf(w, "%s;\n", v)
 				}
+				fmt.Fprintln(w)
 			}
-
-			fmt.Fprintln(w)
 
 		}
 
@@ -182,7 +172,7 @@ func export(c *fibre.Context, NS, DB string) error {
 		if len(evs) > 0 {
 			fmt.Fprintln(w)
 			for _, v := range evs {
-				fmt.Fprintf(w, "-- %s;\n", v)
+				fmt.Fprintf(w, "%s;\n", v)
 			}
 		}
 
