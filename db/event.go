@@ -47,7 +47,7 @@ func (d *document) event(ctx context.Context, met method) (err error) {
 	// for this table, loop through
 	// them, and compute the events.
 
-	evs, err := d.getEV(ctx)
+	evs, err := d.i.e.dbo.AllEV(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return err
 	}

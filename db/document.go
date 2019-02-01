@@ -29,9 +29,6 @@ import (
 
 type document struct {
 	i       *iterator
-	ns      string
-	db      string
-	tb      string
 	id      *sql.Thing
 	key     *keys.Thing
 	val     kvs.KV
@@ -39,23 +36,6 @@ type document struct {
 	doc     *data.Doc
 	initial *data.Doc
 	current *data.Doc
-	store   struct {
-		id int
-		tb bool
-		ev bool
-		fd bool
-		ix bool
-		ft bool
-		lv bool
-	}
-	cache struct {
-		tb *sql.DefineTableStatement
-		ev []*sql.DefineEventStatement
-		fd []*sql.DefineFieldStatement
-		ix []*sql.DefineIndexStatement
-		ft []*sql.DefineTableStatement
-		lv []*sql.LiveStatement
-	}
 }
 
 func newDocument(i *iterator, key *keys.Thing, val kvs.KV, doc *data.Doc) (d *document) {
@@ -77,66 +57,9 @@ func (d *document) close() {
 	documentPool.Put(d)
 }
 
-func (d *document) clear() {
-	d.store.tb = false
-	d.store.ev = false
-	d.store.fd = false
-	d.store.ix = false
-	d.store.ft = false
-	d.store.lv = false
-}
-
 func (d *document) erase() (err error) {
 	d.current = data.Consume(nil)
 	return
-}
-
-func (d *document) getTB(ctx context.Context) (out *sql.DefineTableStatement, err error) {
-	if !d.store.tb {
-		d.store.tb = true
-		d.cache.tb, err = d.i.e.dbo.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
-	}
-	return d.cache.tb, err
-}
-
-func (d *document) getEV(ctx context.Context) (out []*sql.DefineEventStatement, err error) {
-	if !d.store.ev {
-		d.store.ev = true
-		d.cache.ev, err = d.i.e.dbo.AllEV(ctx, d.key.NS, d.key.DB, d.key.TB)
-	}
-	return d.cache.ev, err
-}
-
-func (d *document) getFD(ctx context.Context) (out []*sql.DefineFieldStatement, err error) {
-	if !d.store.fd {
-		d.store.fd = true
-		d.cache.fd, err = d.i.e.dbo.AllFD(ctx, d.key.NS, d.key.DB, d.key.TB)
-	}
-	return d.cache.fd, err
-}
-
-func (d *document) getIX(ctx context.Context) (out []*sql.DefineIndexStatement, err error) {
-	if !d.store.ix {
-		d.store.ix = true
-		d.cache.ix, err = d.i.e.dbo.AllIX(ctx, d.key.NS, d.key.DB, d.key.TB)
-	}
-	return d.cache.ix, err
-}
-
-func (d *document) getFT(ctx context.Context) (out []*sql.DefineTableStatement, err error) {
-	if !d.store.ft {
-		d.store.ft = true
-		d.cache.ft, err = d.i.e.dbo.AllFT(ctx, d.key.NS, d.key.DB, d.key.TB)
-	}
-	return d.cache.ft, err
-}
-
-func (d *document) getLV(ctx context.Context) (out []*sql.LiveStatement, err error) {
-	if !d.store.lv {
-		d.store.lv = true
-		d.cache.lv, err = d.i.e.dbo.AllLV(ctx, d.key.NS, d.key.DB, d.key.TB)
-	}
-	return d.cache.lv, err
 }
 
 func (d *document) query(ctx context.Context, stm sql.Statement) (val interface{}, err error) {
@@ -265,47 +188,10 @@ func (d *document) setup(ctx context.Context) (err error) {
 
 	// Finally if we are dealing with a record
 	// which is not data from the result of a
-	// subquery, then generate the ID from the
-	// key and re-calculate any cached data.
+	// subquery, then generate the ID.
 
 	if d.key != nil {
-
-		// Check that the cached data for the
-		// current document belongs to the same
-		// NS, DB, and TB as the pooled document.
-		// If it doesn't then reset the cached data.
-
-		if d.ns != d.key.NS {
-			d.ns = d.key.NS
-			d.clear()
-		}
-
-		if d.db != d.key.DB {
-			d.db = d.key.DB
-			d.clear()
-		}
-
-		if d.tb != d.key.TB {
-			d.tb = d.key.TB
-			d.clear()
-		}
-
-		// Check that the cached data for the
-		// current document belongs to the same
-		// iterator as the pooled document. If
-		// it doesn't then reset the cached data.
-
-		if d.i.id != d.store.id {
-			d.store.id = d.i.id
-			d.clear()
-		}
-
-		// Finally, let's specify the ID of the
-		// current document, so we can use it
-		// for getting and setting data.
-
 		d.id = sql.NewThing(d.key.TB, d.key.ID)
-
 	}
 
 	return
@@ -332,7 +218,7 @@ func (d *document) shouldDrop(ctx context.Context) (bool, error) {
 	// that the table should drop
 	// writes, and if so, then return.
 
-	tb, err := d.getTB(ctx)
+	tb, err := d.i.e.dbo.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return false, err
 	}
@@ -347,7 +233,7 @@ func (d *document) shouldVersn(ctx context.Context) (bool, error) {
 	// that the table should keep
 	// all document versions.
 
-	tb, err := d.getTB(ctx)
+	tb, err := d.i.e.dbo.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return false, err
 	}
@@ -440,7 +326,7 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 	// for this table, loop through
 	// them, and compute the changes.
 
-	ixs, err := d.getIX(ctx)
+	ixs, err := d.i.e.dbo.AllIX(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return err
 	}
@@ -515,7 +401,7 @@ func (d *document) purgeIndex(ctx context.Context) (err error) {
 	// for this table, loop through
 	// them, and compute the changes.
 
-	ixs, err := d.getIX(ctx)
+	ixs, err := d.i.e.dbo.AllIX(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return err
 	}
