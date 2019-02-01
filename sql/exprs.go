@@ -289,23 +289,23 @@ func (p *parser) parseType() (t, k string, err error) {
 
 }
 
-func (p *parser) parseLanguage() (language.Tag, error) {
+func (p *parser) parseLanguage() (tag language.Tag, err error) {
 
-	_, lit, err := p.shouldBe(IDENT, STRING)
-	if err != nil {
-		return language.English, &ParseError{Found: lit, Expected: []string{"string"}}
-	}
+	tag = language.English
 
-	tag, err := language.Parse(lit)
-	if err != nil {
-		return language.English, &ParseError{Found: lit, Expected: []string{"BCP47 language"}}
+	if _, lit, exi := p.mightBe(IDENT, STRING); exi {
+
+		if tag, err = language.Parse(lit); err != nil {
+			return tag, &ParseError{Found: lit, Expected: []string{"BCP47 language"}}
+		}
+
 	}
 
 	if _, _, exi := p.mightBe(NUMERIC); exi {
 		tag, _ = tag.SetTypeForKey("kn", "true")
 	}
 
-	return tag, err
+	return tag, nil
 
 }
 

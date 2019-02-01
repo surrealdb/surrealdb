@@ -1481,6 +1481,41 @@ func TestSelect(t *testing.T) {
 		UPDATE person:4 SET test = "1000";
 		UPDATE person:6 SET test = "2";
 		UPDATE person:8 SET test = null;
+		SELECT test FROM person ORDER BY test COLLATE ASC;
+		`
+
+		res, err := Execute(permsKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 11)
+		So(res[10].Result, ShouldHaveLength, 10)
+		So(data.Consume(res[10].Result[0]).Get("test").Data(), ShouldEqual, nil)
+		So(data.Consume(res[10].Result[1]).Get("test").Data(), ShouldEqual, nil)
+		So(data.Consume(res[10].Result[2]).Get("test").Data(), ShouldEqual, nil)
+		So(data.Consume(res[10].Result[3]).Get("test").Data(), ShouldEqual, "1000")
+		So(data.Consume(res[10].Result[4]).Get("test").Data(), ShouldEqual, "2")
+		So(data.Consume(res[10].Result[5]).Get("test").Data(), ShouldEqual, "Alexander")
+		So(data.Consume(res[10].Result[6]).Get("test").Data(), ShouldEqual, "alexander")
+		So(data.Consume(res[10].Result[7]).Get("test").Data(), ShouldEqual, "ändrew")
+		So(data.Consume(res[10].Result[8]).Get("test").Data(), ShouldEqual, "Another")
+		So(data.Consume(res[10].Result[9]).Get("test").Data(), ShouldEqual, "Tobie")
+
+	})
+
+	Convey("Order records with en-GB collation", t, func() {
+
+		setupDB(1)
+
+		txt := `
+		USE NS test DB test;
+		CREATE |person:1..10|;
+		UPDATE person:3 SET test = "ändrew";
+		UPDATE person:5 SET test = "Another";
+		UPDATE person:7 SET test = "alexander";
+		UPDATE person:9 SET test = "Alexander";
+		UPDATE person:2 SET test = "Tobie";
+		UPDATE person:4 SET test = "1000";
+		UPDATE person:6 SET test = "2";
+		UPDATE person:8 SET test = null;
 		SELECT test FROM person ORDER BY test COLLATE 'en-GB' ASC;
 		`
 
@@ -1516,6 +1551,41 @@ func TestSelect(t *testing.T) {
 		UPDATE person:4 SET test = "1000";
 		UPDATE person:6 SET test = "2";
 		UPDATE person:8 SET test = null;
+		SELECT test FROM person ORDER BY test COLLATE NUMERIC ASC;
+		`
+
+		res, err := Execute(permsKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 11)
+		So(res[10].Result, ShouldHaveLength, 10)
+		So(data.Consume(res[10].Result[0]).Get("test").Data(), ShouldEqual, nil)
+		So(data.Consume(res[10].Result[1]).Get("test").Data(), ShouldEqual, nil)
+		So(data.Consume(res[10].Result[2]).Get("test").Data(), ShouldEqual, nil)
+		So(data.Consume(res[10].Result[3]).Get("test").Data(), ShouldEqual, "2")
+		So(data.Consume(res[10].Result[4]).Get("test").Data(), ShouldEqual, "1000")
+		So(data.Consume(res[10].Result[5]).Get("test").Data(), ShouldEqual, "Alexander")
+		So(data.Consume(res[10].Result[6]).Get("test").Data(), ShouldEqual, "alexander")
+		So(data.Consume(res[10].Result[7]).Get("test").Data(), ShouldEqual, "ändrew")
+		So(data.Consume(res[10].Result[8]).Get("test").Data(), ShouldEqual, "Another")
+		So(data.Consume(res[10].Result[9]).Get("test").Data(), ShouldEqual, "Tobie")
+
+	})
+
+	Convey("Order records with en-GB collation and numeric sorting", t, func() {
+
+		setupDB(1)
+
+		txt := `
+		USE NS test DB test;
+		CREATE |person:1..10|;
+		UPDATE person:3 SET test = "ändrew";
+		UPDATE person:5 SET test = "Another";
+		UPDATE person:7 SET test = "alexander";
+		UPDATE person:9 SET test = "Alexander";
+		UPDATE person:2 SET test = "Tobie";
+		UPDATE person:4 SET test = "1000";
+		UPDATE person:6 SET test = "2";
+		UPDATE person:8 SET test = null;
 		SELECT test FROM person ORDER BY test COLLATE 'en-GB' NUMERIC ASC;
 		`
 
@@ -1536,7 +1606,7 @@ func TestSelect(t *testing.T) {
 
 	})
 
-	Convey("Order records with collation and numeric and insensitive sorting using unicode definition", t, func() {
+	Convey("Order records with en-GB collation and numeric and insensitive sorting using unicode definition", t, func() {
 
 		setupDB(1)
 
