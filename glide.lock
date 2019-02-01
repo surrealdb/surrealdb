@@ -1,8 +1,8 @@
-hash: bb2fdd0ae1ce4cc20cd04c5fb3720722f46051ec869b6e61e21d9b8e7f020081
-updated: 2018-10-24T10:49:53.527294+01:00
+hash: b110faf4648fcc984e222eb3126a2bcb13c2a9f1a44a603fb1b9bd9ea89f1d12
+updated: 2019-01-31T13:54:33.345734Z
 imports:
 - name: cloud.google.com/go
-  version: debcad1964693daf8ef4bc06292d7e828e075130
+  version: 28a4bc8c44b3acbcc482cff0cdf7de29a4688b61
   subpackages:
   - compute/metadata
   - iam
@@ -35,7 +35,7 @@ imports:
 - name: github.com/armon/go-metrics
   version: f0300d1749da6fa982027e449ec0c7a145510c3c
 - name: github.com/aws/aws-sdk-go
-  version: 9a79cc876234949427d966249a09fc98e7864bde
+  version: 81f3829f5a9d041041bdf56e55926691309d7699
   subpackages:
   - aws
   - aws/awserr
@@ -46,6 +46,7 @@ imports:
   - aws/credentials
   - aws/credentials/ec2rolecreds
   - aws/credentials/endpointcreds
+  - aws/credentials/processcreds
   - aws/credentials/stscreds
   - aws/csm
   - aws/defaults
@@ -77,7 +78,7 @@ imports:
 - name: github.com/elithrar/simple-scrypt
   version: d150773194090feb6c897805a7bcea8d49544e2c
 - name: github.com/golang/protobuf
-  version: d7fc20193620986259ffb1f9b9da752114ee14a4
+  version: 347cf4a86c1cb8d262994d8ef5924d4576c5b331
   subpackages:
   - proto
   - protoc-gen-go/descriptor
@@ -85,8 +86,12 @@ imports:
   - ptypes/any
   - ptypes/duration
   - ptypes/timestamp
+- name: github.com/google/btree
+  version: 4030bb1f1f0c35b30ca7009e9ebd06849dd45306
 - name: github.com/googleapis/gax-go
-  version: 1ef592c90f479e3ab30c6c2312e20e13881b7ea6
+  version: ddfab93c3faef4935403ac75a7c11f0e731dc181
+  subpackages:
+  - v2
 - name: github.com/gorilla/websocket
   version: 66b9c49e59c6c48f0ffce28c2d8b8a5678502c6d
 - name: github.com/hashicorp/errwrap
@@ -94,21 +99,21 @@ imports:
 - name: github.com/hashicorp/go-immutable-radix
   version: 27df80928bb34bb1b0d6d0e01b9e679902e7a6b5
 - name: github.com/hashicorp/go-msgpack
-  version: fa3f63826f7c23912c15263591e65d54d080b458
+  version: be3a5be7ee2202386d02936a19ae4fbde1c77800
   subpackages:
   - codec
 - name: github.com/hashicorp/go-multierror
   version: 886a7fbe3eb1c874d46f623bfa70af45f425b3d1
 - name: github.com/hashicorp/go-sockaddr
-  version: 6d291a969b86c4b633730bfc6b8b9d64c3aafed9
+  version: 3aed17b5ee41761cc2b04f2a94c7107d428967e5
 - name: github.com/hashicorp/golang-lru
   version: 20f1fb78b0740ba8c3cb143a61e86ba5c8669768
   subpackages:
   - simplelru
 - name: github.com/hashicorp/memberlist
-  version: b195c8e4fcc6284fff1583fd6ab09e68ca207551
+  version: a9da52f0668fc4321ec18e9e28dd8141621a808f
 - name: github.com/hashicorp/serf
-  version: d6574a5bb1226678d7010325fb6c985db20ee458
+  version: b89a09ebd4b1b570e0076d5097272e67c10ac4f6
   subpackages:
   - coordinate
   - serf
@@ -129,7 +134,7 @@ imports:
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/miekg/dns
-  version: 915ca3d5ffd945235828a097c917311a9d86ebb4
+  version: 8fc2e5773bbd308ca2fcc962fd8d25c1bd0f6743
 - name: github.com/mitchellh/mapstructure
   version: 3536a929edddb9a5b34bd6861dc4a9647cb459fe
 - name: github.com/newrelic/go-agent
@@ -156,17 +161,17 @@ imports:
   subpackages:
   - diffmatchpatch
 - name: github.com/sirupsen/logrus
-  version: ad15b42461921f1fb3529b058c6786c6a45d5162
+  version: e1e72e9de974bd926e5c56f83753fba2df402ce5
 - name: github.com/spf13/cobra
   version: ef82de70bb3f60c65fb8eebacbb2d122ef517385
 - name: github.com/spf13/pflag
-  version: 298182f68c66c05229eb03ac171abe6e309ee79a
+  version: 24fa6976df40757dce6aea913e7b81ade90530e1
 - name: github.com/ugorji/go
-  version: b4c50a2b199d93b13dc15e78929cfb23bfdf21ab
+  version: 8fd0f8d918c8f0b52d0af210a812ba882cc31a1e
   subpackages:
   - codec
 - name: go.opencensus.io
-  version: 96e75b88df843315da521168a0e3b11792088728
+  version: 3cbb6ce43853260092b2858e37d5b692b57b432b
   subpackages:
   - exemplar
   - internal
@@ -182,7 +187,7 @@ imports:
   - trace/propagation
   - trace/tracestate
 - name: golang.org/x/crypto
-  version: 0c41d7ab0a0ee717d4590a44bcb987dfd9e183eb
+  version: b01c7a72566457eb1420261cdafef86638fc3861
   subpackages:
   - bcrypt
   - blowfish
@@ -192,7 +197,7 @@ imports:
   - scrypt
   - ssh/terminal
 - name: golang.org/x/net
-  version: 9b4f9f5ad5197c79fd623a3638e70d8b26cef344
+  version: d26f9f9a57f3fab6a695bec0d84433c2c50f8bbf
   subpackages:
   - bpf
   - context
@@ -208,14 +213,14 @@ imports:
   - ipv6
   - trace
 - name: golang.org/x/oauth2
-  version: 9dcd33a902f40452422c2367fefcb95b54f9f8f8
+  version: 99b60b757ec124ebb7d6b7e97f153b19c10ce163
   subpackages:
   - google
   - internal
   - jws
   - jwt
 - name: golang.org/x/sys
-  version: 44b849a8bc13eb42e95e6c6c5e360481b73ec710
+  version: aca44879d5644da7c5b8ec6a1115e9b6ea6c40d9
   subpackages:
   - unix
   - windows
@@ -232,7 +237,7 @@ imports:
   - unicode/bidi
   - unicode/norm
 - name: google.golang.org/api
-  version: a2651947f503a1793446d4058bb073a6fdf99e53
+  version: d236112f57134c870530b511f69766d9805df835
   subpackages:
   - gensupport
   - googleapi
@@ -245,7 +250,7 @@ imports:
   - transport/http
   - transport/http/internal/propagation
 - name: google.golang.org/appengine
-  version: ae0ab99deb4dc413a2b4bd6c8bdd0eb67f1e4d06
+  version: e9657d882bb81064595ca3b56cbe2546bbabf7b1
   subpackages:
   - internal
   - internal/app_identity
@@ -257,29 +262,34 @@ imports:
   - internal/urlfetch
   - urlfetch
 - name: google.golang.org/genproto
-  version: 94acd270e44e65579b9ee3cdab25034d33fed608
+  version: 8ac453e89fca495c0d17f98932642f392e2a11f3
   subpackages:
   - googleapis/api/annotations
   - googleapis/iam/v1
   - googleapis/rpc/code
   - googleapis/rpc/status
 - name: google.golang.org/grpc
-  version: d7518259e000d23a615e7caa4812dd15f2fd3b46
+  version: 1925e2441e117612f6e937446c35fd95bf4ac285
   subpackages:
   - balancer
   - balancer/base
   - balancer/roundrobin
+  - binarylog/grpc_binarylog_v1
   - codes
   - connectivity
   - credentials
+  - credentials/internal
   - encoding
   - encoding/proto
   - grpclog
   - internal
   - internal/backoff
+  - internal/binarylog
   - internal/channelz
   - internal/envconfig
   - internal/grpcrand
+  - internal/grpcsync
+  - internal/syscall
   - internal/transport
   - keepalive
   - metadata
@@ -295,13 +305,13 @@ imports:
   version: 4654dfbb6ad53cb5e27f37d99b02e16c1872fbbb
 testImports:
 - name: github.com/gopherjs/gopherjs
-  version: 0766667cb4d1cfb8d5fde1fe210ae41ead3cf589
+  version: d547d1d9531ed93dbdebcbff7f83e7c876a1e0ee
   subpackages:
   - js
 - name: github.com/jtolds/gls
-  version: 77f18212c9c7edc9bd6a33d383a7b545ce62f064
+  version: b4936e06046bbecbb94cae9c18127ebe510a2cb9
 - name: github.com/smartystreets/assertions
-  version: b2de0cb4f26d0705483a2f495d89896d0b808573
+  version: b6c0e53d73045618965505ac26ff7864fe3ab2b2
   subpackages:
   - internal/go-render/render
   - internal/oglematchers

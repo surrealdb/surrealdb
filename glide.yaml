@@ -13,7 +13,7 @@ import:
 - package: github.com/gorilla/websocket
   version: ^1.4.0
 - package: github.com/hashicorp/serf
-  version: ^0.8.1
+  version: ^0.8.2
   subpackages:
   - serf
 - package: github.com/hjson/hjson-go
@@ -33,11 +33,11 @@ import:
   subpackages:
   - diffmatchpatch
 - package: github.com/sirupsen/logrus
-  version: ^1.1.1
+  version: ^1.3.0
 - package: github.com/spf13/cobra
   version: ^0.0.3
 - package: github.com/ugorji/go
-  version: ^1.1.1
+  version: ^1.1.2
   subpackages:
   - codec
 - package: golang.org/x/crypto
