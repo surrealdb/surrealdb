@@ -27,8 +27,8 @@ import (
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
-
 	"github.com/abcum/surreal/util/data"
+	"github.com/abcum/surreal/util/uuid"
 
 	_ "github.com/abcum/surreal/kvs/rixxdb"
 )
@@ -156,6 +156,14 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 
 	if vars == nil {
 		vars = make(map[string]interface{})
+	}
+
+	// Ensure that we have a unique id assigned
+	// to this fibre connection, as we need it
+	// to detect unique websocket notifications.
+
+	if fib.Get(ctxKeyId) == nil {
+		fib.Set(ctxKeyId, uuid.New().String())
 	}
 
 	// Get the unique id for this connection
