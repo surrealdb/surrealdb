@@ -171,7 +171,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 			if err != nil {
 				return nil, err
 			}
-			if chk, ok := ife.(bool); ok && chk {
+			if calcAsBool(ife) {
 				return e.fetch(ctx, val.Then[k], doc)
 			}
 		}
@@ -184,7 +184,7 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 			if err != nil {
 				return nil, err
 			}
-			if chk, ok := ife.(bool); ok && chk {
+			if calcAsBool(ife) {
 				return e.fetch(ctx, val.Then[k], doc)
 			}
 		}
