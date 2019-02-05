@@ -250,7 +250,15 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 
 				switch res := val.(type) {
 				case []interface{}:
-					val, _ = d.i.e.fetchArray(ctx, res, doc)
+					val := make([]interface{}, len(res))
+					for k, v := range res {
+						switch tng := v.(type) {
+						case *sql.Thing:
+							val[k], _ = d.i.e.fetchThing(ctx, tng, doc)
+						default:
+							val[k] = v
+						}
+					}
 					out.Set(val, key)
 				case *sql.Thing:
 					val, _ = d.i.e.fetchThing(ctx, res, doc)

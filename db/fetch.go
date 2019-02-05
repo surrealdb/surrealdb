@@ -92,15 +92,16 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 				if len(path) > 0 {
 					switch res := val.(type) {
 					case []interface{}:
+						val := make([]interface{}, len(res))
 						for k, v := range res {
-							switch val := v.(type) {
+							switch tng := v.(type) {
 							case *sql.Thing:
-								res[k], _ = e.fetchThing(ctx, val, doc)
+								val[k], _ = e.fetchThing(ctx, tng, doc)
 							default:
-								res[k] = v
+								val[k] = v
 							}
 						}
-						return res
+						return val
 					case *sql.Thing:
 						val, _ = e.fetchThing(ctx, res, doc)
 						return val
@@ -127,15 +128,16 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 						if len(path) > 0 {
 							switch res := val.(type) {
 							case []interface{}:
+								val := make([]interface{}, len(res))
 								for k, v := range res {
-									switch val := v.(type) {
+									switch tng := v.(type) {
 									case *sql.Thing:
-										res[k], _ = e.fetchThing(ctx, val, doc)
+										val[k], _ = e.fetchThing(ctx, tng, doc)
 									default:
-										res[k] = v
+										val[k] = v
 									}
 								}
-								return res
+								return val
 							case *sql.Thing:
 								val, _ = e.fetchThing(ctx, res, doc)
 								return val
