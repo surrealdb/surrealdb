@@ -30,8 +30,6 @@ import (
 )
 
 type socket struct {
-	ns    string
-	db    string
 	mutex sync.Mutex
 	fibre *fibre.Context
 	items map[string][]interface{}
@@ -206,12 +204,12 @@ func (s *socket) deregister(id string) {
 
 			case *sql.Table:
 
-				key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.TB, LV: id}
+				key := &keys.LV{KV: KV, NS: stm.NS, DB: stm.DB, TB: what.TB, LV: id}
 				txn.Clr(ctx, key.Encode())
 
 			case *sql.Ident:
 
-				key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.VA, LV: id}
+				key := &keys.LV{KV: KV, NS: stm.NS, DB: stm.DB, TB: what.VA, LV: id}
 				txn.Clr(ctx, key.Encode())
 
 			}
@@ -223,6 +221,10 @@ func (s *socket) deregister(id string) {
 }
 
 func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStatement) (out []interface{}, err error) {
+
+	stm.FB = e.id
+	stm.NS = e.ns
+	stm.DB = e.db
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -241,15 +243,17 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 
 	// Store the live query in the database layer.
 
-	for key, val := range stm.What {
+	var what sql.Exprs
+
+	for _, val := range stm.What {
 		w, err := e.fetch(ctx, val, nil)
 		if err != nil {
 			return nil, err
 		}
-		stm.What[key] = w
+		what = append(what, w)
 	}
 
-	for _, w := range stm.What {
+	for _, w := range what {
 
 		switch what := w.(type) {
 
@@ -258,14 +262,14 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 
 		case *sql.Table:
 
-			key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.TB, LV: stm.ID}
+			key := &keys.LV{KV: KV, NS: stm.NS, DB: stm.DB, TB: what.TB, LV: stm.ID}
 			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
 				return nil, err
 			}
 
 		case *sql.Ident:
 
-			key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.VA, LV: stm.ID}
+			key := &keys.LV{KV: KV, NS: stm.NS, DB: stm.DB, TB: what.VA, LV: stm.ID}
 			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
 				return nil, err
 			}
@@ -285,15 +289,17 @@ func (s *socket) executeKill(e *executor, ctx context.Context, stm *sql.KillStat
 
 	// Remove the live query from the database layer.
 
-	for key, val := range stm.What {
+	var what sql.Exprs
+
+	for _, val := range stm.What {
 		w, err := e.fetch(ctx, val, nil)
 		if err != nil {
 			return nil, err
 		}
-		stm.What[key] = w
+		what = append(what, w)
 	}
 
-	for _, w := range stm.What {
+	for _, w := range what {
 
 		switch what := w.(type) {
 
@@ -315,11 +321,11 @@ func (s *socket) executeKill(e *executor, ctx context.Context, stm *sql.KillStat
 					switch what := w.(type) {
 
 					case *sql.Table:
-						key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.TB, LV: qry.ID}
+						key := &keys.LV{KV: KV, NS: qry.NS, DB: qry.DB, TB: what.TB, LV: qry.ID}
 						_, err = e.dbo.Clr(ctx, key.Encode())
 
 					case *sql.Ident:
-						key := &keys.LV{KV: KV, NS: s.ns, DB: s.db, TB: what.VA, LV: qry.ID}
+						key := &keys.LV{KV: KV, NS: qry.NS, DB: qry.DB, TB: what.VA, LV: qry.ID}
 						_, err = e.dbo.Clr(ctx, key.Encode())
 
 					}

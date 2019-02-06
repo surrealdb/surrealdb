@@ -125,6 +125,8 @@ type LetStatement struct {
 type LiveStatement struct {
 	ID    string
 	FB    string
+	NS    string
+	DB    string
 	Diff  bool
 	Expr  Fields
 	What  Exprs

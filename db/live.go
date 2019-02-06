@@ -29,11 +29,7 @@ var sockets sync.Map
 func register(fib *fibre.Context, id string) func() {
 	return func() {
 
-		auth := fib.Get(varKeyAuth).(*cnf.Auth)
-
 		sockets.Store(id, &socket{
-			ns:    auth.NS,
-			db:    auth.DB,
 			fibre: fib,
 			items: make(map[string][]interface{}),
 			lives: make(map[string]*sql.LiveStatement),
@@ -54,13 +50,11 @@ func deregister(fib *fibre.Context, id string) func() {
 
 func (e *executor) executeLive(ctx context.Context, stm *sql.LiveStatement) (out []interface{}, err error) {
 
-	stm.FB = e.id
-
 	if err := e.access(ctx, cnf.AuthNO); err != nil {
 		return nil, err
 	}
 
-	if sck, ok := sockets.Load(stm.FB); ok {
+	if sck, ok := sockets.Load(e.id); ok {
 		return sck.(*socket).executeLive(e, ctx, stm)
 	}
 
@@ -70,13 +64,11 @@ func (e *executor) executeLive(ctx context.Context, stm *sql.LiveStatement) (out
 
 func (e *executor) executeKill(ctx context.Context, stm *sql.KillStatement) (out []interface{}, err error) {
 
-	stm.FB = e.id
-
 	if err := e.access(ctx, cnf.AuthNO); err != nil {
 		return nil, err
 	}
 
-	if sck, ok := sockets.Load(stm.FB); ok {
+	if sck, ok := sockets.Load(e.id); ok {
 		return sck.(*socket).executeKill(e, ctx, stm)
 	}
 
