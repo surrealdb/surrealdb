@@ -18,7 +18,6 @@ import (
 	"sort"
 
 	"context"
-	"reflect"
 
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
@@ -75,7 +74,7 @@ func (d *document) merge(ctx context.Context, met method, data sql.Expr) (err er
 		return
 	}
 
-	d.changed = !reflect.DeepEqual(d.initial, d.current)
+	d.changed = d.hasChanged(ctx)
 
 	return
 

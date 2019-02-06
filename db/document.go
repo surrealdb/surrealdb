@@ -22,6 +22,7 @@ import (
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
+	"github.com/abcum/surreal/util/diff"
 	"github.com/abcum/surreal/util/indx"
 	"github.com/abcum/surreal/util/keys"
 )
@@ -203,6 +204,13 @@ func (d *document) forced(ctx context.Context) bool {
 		return val.(bool)
 	}
 	return false
+}
+
+func (d *document) hasChanged(ctx context.Context) bool {
+	a, _ := d.initial.Data().(map[string]interface{})
+	b, _ := d.current.Data().(map[string]interface{})
+	c := diff.Diff(a, b)
+	return len(c) > 0
 }
 
 func (d *document) shouldDrop(ctx context.Context) (bool, error) {
