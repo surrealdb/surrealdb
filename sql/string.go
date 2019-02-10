@@ -816,17 +816,6 @@ func (this MultExpression) String() string {
 	)
 }
 
-func (this IfelExpression) String() string {
-	m := make([]string, len(this.Cond))
-	for k := range this.Cond {
-		m[k] = print("%v THEN %v", this.Cond[k], this.Then[k])
-	}
-	return print("IF %v%v END",
-		strings.Join(m, " ELSE IF "),
-		maybe(this.Else != nil, print(" ELSE %v", this.Else)),
-	)
-}
-
 func (this FuncExpression) String() string {
 	return print("%v(%v)",
 		this.Name,

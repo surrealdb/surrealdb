@@ -333,7 +333,6 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 	case *sql.IfelseStatement:
 		res, err = e.executeIfelse(ctx, stm)
-
 	case *sql.SelectStatement:
 		res, err = e.executeSelect(ctx, stm)
 	case *sql.CreateStatement:

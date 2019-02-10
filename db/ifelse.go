@@ -18,11 +18,12 @@ import (
 	"context"
 
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/data"
 )
 
 func (e *executor) executeIfelse(ctx context.Context, stm *sql.IfelseStatement) (out []interface{}, err error) {
 
-	val, err := e.fetch(ctx, stm, nil)
+	val, err := e.fetchIfelse(ctx, stm, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -35,5 +36,21 @@ func (e *executor) executeIfelse(ctx context.Context, stm *sql.IfelseStatement) 
 	}
 
 	return
+
+}
+
+func (e *executor) fetchIfelse(ctx context.Context, stm *sql.IfelseStatement, doc *data.Doc) (interface{}, error) {
+
+	for k, v := range stm.Cond {
+		ife, err := e.fetch(ctx, v, doc)
+		if err != nil {
+			return nil, err
+		}
+		if calcAsBool(ife) {
+			return e.fetch(ctx, stm.Then[k], doc)
+		}
+	}
+
+	return e.fetch(ctx, stm.Else, doc)
 
 }

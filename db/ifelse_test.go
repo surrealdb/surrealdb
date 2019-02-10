@@ -31,6 +31,31 @@ func TestIf(t *testing.T) {
 		USE NS test DB test;
 		CREATE |person:1..3|;
 		LET temp = 13.753;
+		IF $temp THEN
+			(SELECT * FROM person:1)
+		ELSE
+			(SELECT * FROM person:3)
+		END;
+		`
+
+		res, err := Execute(permsKV(), txt, nil)
+		So(err, ShouldBeNil)
+		So(res, ShouldHaveLength, 4)
+		So(res[1].Status, ShouldEqual, "OK")
+		So(res[2].Status, ShouldEqual, "OK")
+		So(res[3].Status, ShouldEqual, "OK")
+		So(data.Consume(res[3].Result[0]).Get("meta.id").Data(), ShouldEqual, 1)
+
+	})
+
+	Convey("If statement which runs if clause", t, func() {
+
+		setupDB(1)
+
+		txt := `
+		USE NS test DB test;
+		CREATE |person:1..3|;
+		LET temp = 13.753;
 		IF $temp > 10 THEN
 			(SELECT * FROM person:1)
 		ELSE IF $temp > 5 THEN

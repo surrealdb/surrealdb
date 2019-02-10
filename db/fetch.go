@@ -164,32 +164,6 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 
 		return e.fetch(ctx, val.Expr, doc)
 
-	case *sql.IfelseStatement:
-
-		for k, v := range val.Cond {
-			ife, err := e.fetch(ctx, v, doc)
-			if err != nil {
-				return nil, err
-			}
-			if calcAsBool(ife) {
-				return e.fetch(ctx, val.Then[k], doc)
-			}
-		}
-		return e.fetch(ctx, val.Else, doc)
-
-	case *sql.IfelExpression:
-
-		for k, v := range val.Cond {
-			ife, err := e.fetch(ctx, v, doc)
-			if err != nil {
-				return nil, err
-			}
-			if calcAsBool(ife) {
-				return e.fetch(ctx, val.Then[k], doc)
-			}
-		}
-		return e.fetch(ctx, val.Else, doc)
-
 	case *sql.FuncExpression:
 
 		var args []interface{}
@@ -211,6 +185,8 @@ func (e *executor) fetch(ctx context.Context, val interface{}, doc *data.Doc) (o
 		switch exp := val.Expr.(type) {
 		default:
 			return e.fetch(ctx, exp, doc)
+		case *sql.IfelseStatement:
+			return e.fetchIfelse(ctx, exp, doc)
 		case *sql.SelectStatement:
 			return e.fetchSelect(ctx, exp, doc)
 		case *sql.CreateStatement:

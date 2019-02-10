@@ -467,13 +467,6 @@ type MultExpression struct {
 	Expr []Expr
 }
 
-// IfelExpression represents an if else clause.
-type IfelExpression struct {
-	Cond Exprs
-	Then Exprs
-	Else Expr
-}
-
 // FuncExpression represents a function call.
 type FuncExpression struct {
 	Name string

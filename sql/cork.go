@@ -552,32 +552,6 @@ func (this *MultExpression) UnmarshalCORK(r *cork.Reader) (err error) {
 }
 
 // --------------------------------------------------
-// IfelExpression
-// --------------------------------------------------
-
-func init() {
-	cork.Register(&IfelExpression{})
-}
-
-func (this *IfelExpression) ExtendCORK() byte {
-	return 0x23
-}
-
-func (this *IfelExpression) MarshalCORK(w *cork.Writer) (err error) {
-	w.EncodeAny(this.Cond)
-	w.EncodeAny(this.Then)
-	w.EncodeAny(this.Else)
-	return
-}
-
-func (this *IfelExpression) UnmarshalCORK(r *cork.Reader) (err error) {
-	r.DecodeAny(&this.Cond)
-	r.DecodeAny(&this.Then)
-	r.DecodeAny(&this.Else)
-	return
-}
-
-// --------------------------------------------------
 // FuncExpression
 // --------------------------------------------------
 

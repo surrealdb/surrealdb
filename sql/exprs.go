@@ -582,6 +582,19 @@ func (p *parser) parsePart() (exp Expr, err error) {
 
 }
 
+func (p *parser) parseIfel() (exp *SubExpression, err error) {
+
+	exp = &SubExpression{}
+
+	exp.Expr, err = p.parseIfelseStatement()
+	if err != nil {
+		return nil, err
+	}
+
+	return
+
+}
+
 func (p *parser) parseSubq() (exp *SubExpression, err error) {
 
 	exp = &SubExpression{}
@@ -671,64 +684,6 @@ func (p *parser) parseMult() (exp *MultExpression, err error) {
 	}
 
 	if _, _, err = p.shouldBe(RPAREN); err != nil {
-		return nil, err
-	}
-
-	return
-
-}
-
-func (p *parser) parseIfel() (exp *IfelExpression, err error) {
-
-	exp = &IfelExpression{}
-
-	for {
-
-		var tok Token
-
-		if cond, err := p.parseExpr(); err != nil {
-			return nil, err
-		} else {
-			exp.Cond = append(exp.Cond, cond)
-		}
-
-		if _, _, err = p.shouldBe(THEN); err != nil {
-			return nil, err
-		}
-
-		if then, err := p.parseExpr(); err != nil {
-			return nil, err
-		} else {
-			exp.Then = append(exp.Then, then)
-		}
-
-		// Check to see if the next token is an
-		// ELSE keyword and if it is then check to
-		// see if there is another if statement.
-
-		if tok, _, err = p.shouldBe(ELSE, END); err != nil {
-			return nil, err
-		}
-
-		if tok == END {
-			return
-		}
-
-		if tok == ELSE {
-			if _, _, exi := p.mightBe(IF); !exi {
-				break
-			}
-		}
-
-	}
-
-	if then, err := p.parseExpr(); err != nil {
-		return nil, err
-	} else {
-		exp.Else = then
-	}
-
-	if _, _, err = p.shouldBe(END); err != nil {
 		return nil, err
 	}
 

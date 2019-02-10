@@ -345,26 +345,28 @@ func tableMin(set *sql.DataExpression, key string, val interface{}, when modify)
 		set.Data = append(set.Data, &sql.ItemExpression{
 			LHS: sql.NewIdent(key),
 			Op:  sql.EQ,
-			RHS: &sql.IfelExpression{
-				Cond: sql.Exprs{
-					&sql.BinaryExpression{
-						LHS: &sql.BinaryExpression{
-							LHS: sql.NewIdent(key),
-							Op:  sql.EQ,
-							RHS: &sql.Empty{},
-						},
-						Op: sql.OR,
-						RHS: &sql.BinaryExpression{
-							LHS: sql.NewIdent(key),
-							Op:  sql.GT,
-							RHS: val,
+			RHS: &sql.SubExpression{
+				&sql.IfelseStatement{
+					Cond: sql.Exprs{
+						&sql.BinaryExpression{
+							LHS: &sql.BinaryExpression{
+								LHS: sql.NewIdent(key),
+								Op:  sql.EQ,
+								RHS: &sql.Empty{},
+							},
+							Op: sql.OR,
+							RHS: &sql.BinaryExpression{
+								LHS: sql.NewIdent(key),
+								Op:  sql.GT,
+								RHS: val,
+							},
 						},
 					},
+					Then: sql.Exprs{
+						val,
+					},
+					Else: sql.NewIdent(key),
 				},
-				Then: sql.Exprs{
-					val,
-				},
-				Else: sql.NewIdent(key),
 			},
 		})
 
@@ -379,26 +381,28 @@ func tableMax(set *sql.DataExpression, key string, val interface{}, when modify)
 		set.Data = append(set.Data, &sql.ItemExpression{
 			LHS: sql.NewIdent(key),
 			Op:  sql.EQ,
-			RHS: &sql.IfelExpression{
-				Cond: sql.Exprs{
-					&sql.BinaryExpression{
-						LHS: &sql.BinaryExpression{
-							LHS: sql.NewIdent(key),
-							Op:  sql.EQ,
-							RHS: &sql.Empty{},
-						},
-						Op: sql.OR,
-						RHS: &sql.BinaryExpression{
-							LHS: sql.NewIdent(key),
-							Op:  sql.LT,
-							RHS: val,
+			RHS: &sql.SubExpression{
+				&sql.IfelseStatement{
+					Cond: sql.Exprs{
+						&sql.BinaryExpression{
+							LHS: &sql.BinaryExpression{
+								LHS: sql.NewIdent(key),
+								Op:  sql.EQ,
+								RHS: &sql.Empty{},
+							},
+							Op: sql.OR,
+							RHS: &sql.BinaryExpression{
+								LHS: sql.NewIdent(key),
+								Op:  sql.LT,
+								RHS: val,
+							},
 						},
 					},
+					Then: sql.Exprs{
+						val,
+					},
+					Else: sql.NewIdent(key),
 				},
-				Then: sql.Exprs{
-					val,
-				},
-				Else: sql.NewIdent(key),
 			},
 		})
 
@@ -457,16 +461,18 @@ func tableMean(set *sql.DataExpression, key string, val interface{}, when modify
 	set.Data = append(set.Data, &sql.ItemExpression{
 		LHS: sql.NewIdent(key),
 		Op:  sql.EQ,
-		RHS: &sql.IfelExpression{
-			Cond: sql.Exprs{
-				&sql.BinaryExpression{
-					LHS: sql.NewIdent(key),
-					Op:  sql.EQ,
-					RHS: &sql.Empty{},
+		RHS: &sql.SubExpression{
+			&sql.IfelseStatement{
+				Cond: sql.Exprs{
+					&sql.BinaryExpression{
+						LHS: sql.NewIdent(key),
+						Op:  sql.EQ,
+						RHS: &sql.Empty{},
+					},
 				},
+				Then: sql.Exprs{0},
+				Else: sql.NewIdent(key),
 			},
-			Then: sql.Exprs{0},
-			Else: sql.NewIdent(key),
 		},
 	})
 
@@ -552,16 +558,18 @@ func tableStddev(set *sql.DataExpression, key string, val interface{}, when modi
 	set.Data = append(set.Data, &sql.ItemExpression{
 		LHS: sql.NewIdent(key),
 		Op:  sql.EQ,
-		RHS: &sql.IfelExpression{
-			Cond: sql.Exprs{
-				&sql.BinaryExpression{
-					LHS: sql.NewIdent(key),
-					Op:  sql.EQ,
-					RHS: &sql.Empty{},
+		RHS: &sql.SubExpression{
+			&sql.IfelseStatement{
+				Cond: sql.Exprs{
+					&sql.BinaryExpression{
+						LHS: sql.NewIdent(key),
+						Op:  sql.EQ,
+						RHS: &sql.Empty{},
+					},
 				},
+				Then: sql.Exprs{0},
+				Else: sql.NewIdent(key),
 			},
-			Then: sql.Exprs{0},
-			Else: sql.NewIdent(key),
 		},
 	})
 
@@ -642,16 +650,18 @@ func tableVariance(set *sql.DataExpression, key string, val interface{}, when mo
 	set.Data = append(set.Data, &sql.ItemExpression{
 		LHS: sql.NewIdent(key),
 		Op:  sql.EQ,
-		RHS: &sql.IfelExpression{
-			Cond: sql.Exprs{
-				&sql.BinaryExpression{
-					LHS: sql.NewIdent(key),
-					Op:  sql.EQ,
-					RHS: &sql.Empty{},
+		RHS: &sql.SubExpression{
+			&sql.IfelseStatement{
+				Cond: sql.Exprs{
+					&sql.BinaryExpression{
+						LHS: sql.NewIdent(key),
+						Op:  sql.EQ,
+						RHS: &sql.Empty{},
+					},
 				},
+				Then: sql.Exprs{0},
+				Else: sql.NewIdent(key),
 			},
-			Then: sql.Exprs{0},
-			Else: sql.NewIdent(key),
 		},
 	})
 
