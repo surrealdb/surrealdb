@@ -243,17 +243,15 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 
 	// Store the live query in the database layer.
 
-	var what sql.Exprs
-
-	for _, val := range stm.What {
+	for key, val := range stm.What {
 		w, err := e.fetch(ctx, val, nil)
 		if err != nil {
 			return nil, err
 		}
-		what = append(what, w)
+		stm.What[key] = w
 	}
 
-	for _, w := range what {
+	for _, w := range stm.What {
 
 		switch what := w.(type) {
 
