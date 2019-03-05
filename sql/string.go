@@ -801,9 +801,12 @@ func (this Polygon) JSON() string {
 // ---------------------------------------------
 
 func (this SubExpression) String() string {
-	return print("(%v)",
-		this.Expr,
-	)
+	switch this.Expr.(type) {
+	case IfelseStatement:
+		return print("%v", this.Expr)
+	default:
+		return print("(%v)", this.Expr)
+	}
 }
 
 func (this MultExpression) String() string {
