@@ -64,6 +64,8 @@ func geoPolygon(ctx context.Context, args ...interface{}) (interface{}, error) {
 		for _, a := range args {
 			if p, _ := ensurePoint(a); p != nil {
 				pnts = append(pnts, p)
+			} else if p := ensureFloats(a); len(p) == 2 {
+				pnts = append(pnts, sql.NewPoint(p[0], p[1]))
 			} else {
 				return nil, nil
 			}
