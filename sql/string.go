@@ -802,7 +802,7 @@ func (this Polygon) JSON() string {
 
 func (this SubExpression) String() string {
 	switch this.Expr.(type) {
-	case IfelseStatement:
+	case *IfelseStatement:
 		return print("%v", this.Expr)
 	default:
 		return print("(%v)", this.Expr)
