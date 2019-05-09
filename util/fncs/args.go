@@ -132,6 +132,10 @@ func ensureTime(val interface{}) (out time.Time, ok bool) {
 	switch val := val.(type) {
 	case time.Time:
 		return val, true
+	case string:
+		if val, err := time.Parse(time.RFC3339Nano, val); err == nil {
+			return val, true
+		}
 	}
 	return defaultTime, false
 }
