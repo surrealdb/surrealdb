@@ -21,7 +21,6 @@ import (
 
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/log"
-	"github.com/abcum/surreal/tcp"
 	"github.com/abcum/surreal/web"
 )
 
@@ -40,11 +39,6 @@ var startCmd = &cobra.Command{
 			return
 		}
 
-		if err = tcp.Setup(opts); err != nil {
-			log.Fatal(err)
-			return
-		}
-
 		if err = web.Setup(opts); err != nil {
 			log.Fatal(err)
 			return
@@ -56,11 +50,6 @@ var startCmd = &cobra.Command{
 	PostRunE: func(cmd *cobra.Command, args []string) (err error) {
 
 		if err = web.Exit(); err != nil {
-			log.Fatal(err)
-			return
-		}
-
-		if err = tcp.Exit(); err != nil {
 			log.Fatal(err)
 			return
 		}
@@ -96,8 +85,6 @@ func init() {
 	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Shrink, "db-shrink", 0, flag("shrink"))
 
 	startCmd.PersistentFlags().DurationVar(&opts.Query.Timeout, "query-timeout", 0, "")
-
-	startCmd.PersistentFlags().StringSliceVarP(&opts.Node.Join, "join", "j", nil, flag("join"))
 
 	startCmd.PersistentFlags().StringVarP(&opts.DB.Code, "key", "k", "", flag("key"))
 

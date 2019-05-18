@@ -20,7 +20,6 @@ var flags = map[string]string{
 	"size":   `A size in MB which determines the minimum or maximum file size for streaming data file storage. This is used for specifying maximum cached data sizes when using remote streaming storage. (default "5")`,
 	"sync":   `A time duration to use when syncing data to persistent storage. To sync data with every write specify '0', otherwise the data will be persisted asynchronously after the specified duration. (default "0s")`,
 	"shrink": `A time duration to use when shrinking data on persistent storage. To shrink data asynchronously after a repeating period of time, specify a duration. Disabled by default. (default "0s")`,
-	"join":   `A comma-separated list of addresses to use when a new node is joining an existing cluster. For the first node in a cluster, --join should NOT be specified.`,
 }
 
 var usage = map[string][]string{
@@ -48,11 +47,5 @@ var usage = map[string][]string{
 	"shrink": {
 		"--db-shrink 30m",
 		"--db-shrink 24h",
-	},
-	"join": {
-		"--join 10.0.0.1",
-		"--join 10.0.0.1:33693",
-		"--join 10.0.0.1:33693,10.0.0.2:33693",
-		"--join 89.13.7.33:33693,example.com:33693",
 	},
 }
