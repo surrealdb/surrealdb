@@ -27,18 +27,17 @@ import (
 )
 
 var (
-	sqlForm string
-	sqlUser string
-	sqlPass string
-	sqlConn string
-	sqlNS   string
-	sqlDB   string
+	importUser string
+	importPass string
+	importConn string
+	importNS   string
+	importDB   string
 )
 
-var sqlCmd = &cobra.Command{
-	Use:     "sql [flags] <file>",
+var importCmd = &cobra.Command{
+	Use:     "import [flags] <file>",
 	Short:   "Execute a SQL script against an existing database",
-	Example: "  surreal sql --auth root:root backup.sql",
+	Example: "  surreal import --auth root:root backup.sql",
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
 
 		var fle *os.File
@@ -69,39 +68,28 @@ var sqlCmd = &cobra.Command{
 		// and specify the authentication header using
 		// basic auth for root login.
 
-		url := fmt.Sprintf("%s/sql", sqlConn)
+		url := fmt.Sprintf("%s/sql", importConn)
 
 		if req, err = http.NewRequest("POST", url, fle); err != nil {
 			log.Fatalln("Connection failed - check the connection details and try again.")
 			return
 		}
 
+		// Specify that the request is plain text
+
+		req.Header.Set("Content-Type", "text/plain")
+
 		// Specify the db authentication settings
 
-		req.SetBasicAuth(sqlUser, sqlPass)
+		req.SetBasicAuth(importUser, importPass)
 
 		// Specify the namespace to import
 
-		req.Header.Set("NS", sqlNS)
+		req.Header.Set("NS", importNS)
 
 		// Specify the database to import
 
-		req.Header.Set("DB", sqlDB)
-
-		// Specify that the request is an octet stream
-		// so that we can stream the file contents to
-		// the server without reading the whole file.
-
-		switch sqlForm {
-		case "pack":
-			req.Header.Set("Content-Type", "application/msgpack")
-		case "json":
-			req.Header.Set("Content-Type", "application/json")
-		case "cork":
-			req.Header.Set("Content-Type", "application/cork")
-		default:
-			req.Header.Set("Content-Type", "text/plain")
-		}
+		req.Header.Set("DB", importDB)
 
 		// Attempt to dial the sql endpoint and
 		// if there is an error then stop execution
@@ -144,11 +132,10 @@ var sqlCmd = &cobra.Command{
 
 func init() {
 
-	sqlCmd.PersistentFlags().StringVarP(&sqlUser, "user", "u", "root", "Database authentication username to use when connecting.")
-	sqlCmd.PersistentFlags().StringVarP(&sqlPass, "pass", "p", "pass", "Database authentication password to use when connecting.")
-	sqlCmd.PersistentFlags().StringVarP(&sqlConn, "conn", "c", "https://surreal.io", "Remote database server url to connect to.")
-	sqlCmd.PersistentFlags().StringVarP(&sqlForm, "format", "f", "text", "The output format for the server response data.")
-	sqlCmd.PersistentFlags().StringVar(&sqlNS, "ns", "", "Master authentication details to use when connecting.")
-	sqlCmd.PersistentFlags().StringVar(&sqlDB, "db", "", "Master authentication details to use when connecting.")
+	importCmd.PersistentFlags().StringVarP(&importUser, "user", "u", "root", "Database authentication username to use when connecting.")
+	importCmd.PersistentFlags().StringVarP(&importPass, "pass", "p", "pass", "Database authentication password to use when connecting.")
+	importCmd.PersistentFlags().StringVarP(&importConn, "conn", "c", "https://surreal.io", "Remote database server url to connect to.")
+	importCmd.PersistentFlags().StringVar(&importNS, "ns", "", "Master authentication details to use when connecting.")
+	importCmd.PersistentFlags().StringVar(&importDB, "db", "", "Master authentication details to use when connecting.")
 
 }
