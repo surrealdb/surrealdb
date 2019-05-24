@@ -152,20 +152,20 @@ func (r *rpc) Change(c *fibre.Context, class string, thing interface{}, data map
 	}
 }
 
-func (r *rpc) Modify(c *fibre.Context, class string, thing interface{}, data map[string]interface{}) (interface{}, error) {
+func (r *rpc) Modify(c *fibre.Context, class string, thing interface{}, data []interface{}) (interface{}, error) {
 	switch thing := thing.(type) {
 	case *fibre.RPCNull:
-		return db.Execute(c, "UPDATE $class DIFF $data RETURN AFTER", map[string]interface{}{
+		return db.Execute(c, "UPDATE $class DIFF $data RETURN DIFF", map[string]interface{}{
 			"class": sql.NewTable(class),
 			"data":  data,
 		})
 	case []interface{}:
-		return db.Execute(c, "UPDATE $batch DIFF $data RETURN AFTER", map[string]interface{}{
+		return db.Execute(c, "UPDATE $batch DIFF $data RETURN DIFF", map[string]interface{}{
 			"batch": sql.NewBatch(class, thing),
 			"data":  data,
 		})
 	default:
-		return db.Execute(c, "UPDATE $thing DIFF $data RETURN AFTER", map[string]interface{}{
+		return db.Execute(c, "UPDATE $thing DIFF $data RETURN DIFF", map[string]interface{}{
 			"thing": sql.NewThing(class, thing),
 			"data":  data,
 		})
