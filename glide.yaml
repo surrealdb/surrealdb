@@ -12,17 +12,13 @@ import:
   version: ^1.3.0
 - package: github.com/gorilla/websocket
   version: ^1.4.0
-- package: github.com/hashicorp/serf
-  version: ^0.8.2
-  subpackages:
-  - serf
 - package: github.com/hjson/hjson-go
   version: ^3.0.0
 - package: github.com/kr/text
   version: ^0.1.0
 - package: github.com/mgutz/ansi
 - package: github.com/pkg/profile
-  version: ^1.2.1
+  version: ^1.3.0
 - package: github.com/rainycape/unidecode
 - package: github.com/rs/xid
   version: ^1.2.1
@@ -33,11 +29,11 @@ import:
   subpackages:
   - diffmatchpatch
 - package: github.com/sirupsen/logrus
-  version: ^1.3.0
+  version: ^1.4.2
 - package: github.com/spf13/cobra
-  version: ^0.0.3
+  version: ^0.0.5
 - package: github.com/ugorji/go
-  version: ^1.1.2
+  version: ^1.1.4
   subpackages:
   - codec
 - package: golang.org/x/crypto
@@ -48,7 +44,7 @@ import:
   subpackages:
   - context/ctxhttp
 - package: golang.org/x/text
-  version: ^0.3.0
+  version: ^0.3.2
   subpackages:
   - collate
   - language
