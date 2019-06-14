@@ -16,6 +16,7 @@ package db
 
 import (
 	"errors"
+	"runtime"
 )
 
 type method int8
@@ -85,7 +86,7 @@ const (
 var (
 	// workerCount specifies how many workers should be used
 	// to process each query statement concurrently.
-	workerCount = 1
+	workerCount = runtime.NumCPU()
 
 	// maxRecursiveQueries specifies how many queries will be
 	// processed recursively before the query is cancelled.

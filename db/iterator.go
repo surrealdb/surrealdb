@@ -60,6 +60,7 @@ type iterator struct {
 	limit int
 	start int
 	versn int64
+	async bool
 }
 
 type workable struct {
@@ -135,6 +136,7 @@ func (i *iterator) Close() {
 	i.limit = -1
 	i.start = -1
 	i.versn = 0
+	i.async = false
 
 	iteratorPool.Put(i)
 
@@ -161,18 +163,24 @@ func (i *iterator) setupState(ctx context.Context) {
 		i.split = stm.Split
 		i.group = stm.Group
 		i.order = stm.Order
+		i.async = stm.Parallel
 	case *sql.CreateStatement:
 		i.what = stm.What
+		i.async = stm.Parallel
 	case *sql.UpdateStatement:
 		i.what = stm.What
 		i.cond = stm.Cond
+		i.async = stm.Parallel
 	case *sql.DeleteStatement:
 		i.what = stm.What
 		i.cond = stm.Cond
+		i.async = stm.Parallel
 	case *sql.InsertStatement:
 		i.what = sql.Exprs{stm.Data}
+		i.async = stm.Parallel
 	case *sql.UpsertStatement:
 		i.what = sql.Exprs{stm.Data}
+		i.async = stm.Parallel
 	}
 
 	if stm, ok := i.stm.(*sql.SelectStatement); ok {
@@ -233,7 +241,13 @@ func (i *iterator) setupWorkers(ctx context.Context) {
 		}
 	}(i.vals)
 
-	for w := 1; w <= workerCount; w++ {
+	workers := 1
+
+	if i.async {
+		workers = workerCount
+	}
+
+	for w := 1; w <= workers; w++ {
 		go func(jobs <-chan *workable, vals chan<- *doneable) {
 			for j := range jobs {
 				res, err := newDocument(i, j.key, j.val, j.doc).query(ctx, i.stm)
