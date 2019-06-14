@@ -106,6 +106,7 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 		switch output {
 		default:
 			return nil, nil
+
 		case sql.DIFF:
 
 			old, err := d.cold(ctx)
