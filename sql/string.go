@@ -276,9 +276,9 @@ func (this DeleteStatement) String() string {
 }
 
 func (this RelateStatement) String() string {
-	return print("RELATE %v FROM %v WITH %v%v%v%v%v",
-		this.Type,
+	return print("RELATE %v -> %v -> %v%v%v%v%v",
 		this.From,
+		this.Type,
 		this.With,
 		maybe(this.Data != nil, print("%v", this.Data)),
 		maybe(this.Uniq, " UNIQUE"),

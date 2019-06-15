@@ -16,26 +16,52 @@ package sql
 
 func (p *parser) parseRelateStatement() (stmt *RelateStatement, err error) {
 
+	tok := ILLEGAL
+
 	stmt = &RelateStatement{}
-
-	if stmt.Type, err = p.parseTable(); err != nil {
-		return nil, err
-	}
-
-	if _, _, err = p.shouldBe(FROM); err != nil {
-		return nil, err
-	}
 
 	if stmt.From, err = p.parseWhat(); err != nil {
 		return nil, err
 	}
 
-	if _, _, err = p.shouldBe(TO, WITH); err != nil {
+	if tok, _, err = p.shouldBe(OEDGE, IEDGE); err != nil {
 		return nil, err
 	}
 
-	if stmt.With, err = p.parseWhat(); err != nil {
-		return nil, err
+	if tok == OEDGE {
+
+		stmt.From = stmt.From
+
+		if stmt.Type, err = p.parseTable(); err != nil {
+			return nil, err
+		}
+
+		if _, _, err = p.shouldBe(OEDGE); err != nil {
+			return nil, err
+		}
+
+		if stmt.With, err = p.parseWhat(); err != nil {
+			return nil, err
+		}
+
+	}
+
+	if tok == IEDGE {
+
+		stmt.With = stmt.From
+
+		if stmt.Type, err = p.parseTable(); err != nil {
+			return nil, err
+		}
+
+		if _, _, err = p.shouldBe(IEDGE); err != nil {
+			return nil, err
+		}
+
+		if stmt.From, err = p.parseWhat(); err != nil {
+			return nil, err
+		}
+
 	}
 
 	_, _, stmt.Uniq = p.mightBe(UNIQUE)

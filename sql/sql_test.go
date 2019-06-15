@@ -1813,26 +1813,34 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 	var tests = []tester{
 		{
 			sql: `RELATE`,
+			err: "Found `` but expected `expression`",
+		},
+		{
+			sql: `RELATE person`,
+			err: "Found `` but expected `->, <-`",
+		},
+		{
+			sql: `RELATE person ->`,
 			err: "Found `` but expected `table`",
 		},
 		{
-			sql: `RELATE purchase`,
-			err: "Found `` but expected `FROM`",
+			sql: `RELATE person -> purchase`,
+			err: "Found `` but expected `->`",
 		},
 		{
-			sql: `RELATE purchase FROM`,
+			sql: `RELATE item <- purchase`,
+			err: "Found `` but expected `<-`",
+		},
+		{
+			sql: `RELATE person -> purchase -> `,
 			err: "Found `` but expected `expression`",
 		},
 		{
-			sql: `RELATE purchase FROM person`,
-			err: "Found `` but expected `TO, WITH`",
-		},
-		{
-			sql: `RELATE purchase FROM person WITH`,
+			sql: `RELATE item <- purchase <- `,
 			err: "Found `` but expected `expression`",
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item`,
+			sql: `RELATE person -> purchase -> item`,
 			res: &Query{Statements: []Statement{&RelateStatement{
 				Type:     &Table{"purchase"},
 				From:     []Expr{&Ident{"person"}},
@@ -1842,7 +1850,18 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item UNIQUE`,
+			sql: `RELATE item <- purchase <- person`,
+			str: `RELATE person -> purchase -> item`,
+			res: &Query{Statements: []Statement{&RelateStatement{
+				Type:     &Table{"purchase"},
+				From:     []Expr{&Ident{"person"}},
+				With:     []Expr{&Ident{"item"}},
+				Echo:     AFTER,
+				Parallel: true,
+			}}},
+		},
+		{
+			sql: `RELATE person -> purchase -> item UNIQUE`,
 			res: &Query{Statements: []Statement{&RelateStatement{
 				Type:     &Table{"purchase"},
 				From:     []Expr{&Ident{"person"}},
@@ -1853,15 +1872,27 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item SET 123`,
+			sql: `RELATE item <- purchase <- person UNIQUE`,
+			str: `RELATE person -> purchase -> item UNIQUE`,
+			res: &Query{Statements: []Statement{&RelateStatement{
+				Type:     &Table{"purchase"},
+				From:     []Expr{&Ident{"person"}},
+				With:     []Expr{&Ident{"item"}},
+				Uniq:     true,
+				Echo:     AFTER,
+				Parallel: true,
+			}}},
+		},
+		{
+			sql: `RELATE person -> purchase -> item SET 123`,
 			err: "Found `123` but expected `field name`",
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item SET firstname`,
+			sql: `RELATE person -> purchase -> item SET firstname`,
 			err: "Found `` but expected `=, +=, -=`",
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item SET public = true`,
+			sql: `RELATE person -> purchase -> item SET public = true`,
 			res: &Query{Statements: []Statement{&RelateStatement{
 				Type:     &Table{"purchase"},
 				From:     []Expr{&Ident{"person"}},
@@ -1872,11 +1903,11 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item RETURN`,
+			sql: `RELATE person -> purchase -> item RETURN`,
 			err: "Found `` but expected `NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item RETURN NONE`,
+			sql: `RELATE person -> purchase -> item RETURN NONE`,
 			res: &Query{Statements: []Statement{&RelateStatement{
 				Type:     &Table{"purchase"},
 				From:     []Expr{&Ident{"person"}},
@@ -1886,7 +1917,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item RETURN BOTH`,
+			sql: `RELATE person -> purchase -> item RETURN BOTH`,
 			res: &Query{Statements: []Statement{&RelateStatement{
 				Type:     &Table{"purchase"},
 				From:     []Expr{&Ident{"person"}},
@@ -1896,7 +1927,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item RETURN DIFF`,
+			sql: `RELATE person -> purchase -> item RETURN DIFF`,
 			res: &Query{Statements: []Statement{&RelateStatement{
 				Type:     &Table{"purchase"},
 				From:     []Expr{&Ident{"person"}},
@@ -1906,7 +1937,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item RETURN BEFORE`,
+			sql: `RELATE person -> purchase -> item RETURN BEFORE`,
 			res: &Query{Statements: []Statement{&RelateStatement{
 				Type:     &Table{"purchase"},
 				From:     []Expr{&Ident{"person"}},
@@ -1916,8 +1947,8 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item RETURN AFTER`,
-			str: `RELATE purchase FROM person WITH item`,
+			sql: `RELATE person -> purchase -> item RETURN AFTER`,
+			str: `RELATE person -> purchase -> item`,
 			res: &Query{Statements: []Statement{&RelateStatement{
 				Type:     &Table{"purchase"},
 				From:     []Expr{&Ident{"person"}},
@@ -1927,7 +1958,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item TIMEOUT 1s`,
+			sql: `RELATE person -> purchase -> item TIMEOUT 1s`,
 			res: &Query{Statements: []Statement{&RelateStatement{
 				Type:     &Table{"purchase"},
 				From:     []Expr{&Ident{"person"}},
@@ -1938,11 +1969,11 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 			}}},
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item TIMEOUT null`,
+			sql: `RELATE person -> purchase -> item TIMEOUT null`,
 			err: "Found `null` but expected `duration`",
 		},
 		{
-			sql: `RELATE purchase FROM person WITH item something`,
+			sql: `RELATE person -> purchase -> item something`,
 			err: "Found `something` but expected `;`",
 		},
 	}
