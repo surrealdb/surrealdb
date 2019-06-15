@@ -43,11 +43,11 @@ func (e *executor) executeOpt(ctx context.Context, stm *sql.OptStatement) (out [
 	}
 
 	switch strings.ToUpper(stm.Name) {
-	case "PROCESS_FIELD_QUERIES":
+	case "FIELD_QUERIES":
 		e.opts.fields = stm.What
-	case "TRIGGER_EVENT_QUERIES":
+	case "EVENT_QUERIES":
 		e.opts.events = stm.What
-	case "TRIGGER_TABLE_QUERIES":
+	case "TABLE_QUERIES":
 		e.opts.tables = stm.What
 	case "IMPORT":
 		switch stm.What {
