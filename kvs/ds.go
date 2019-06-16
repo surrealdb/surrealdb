@@ -37,15 +37,7 @@ func New(opts *cnf.Options) (ds *DS, err error) {
 	switch {
 	case opts.DB.Path == "memory":
 		db, err = stores["rixxdb"](opts)
-	case strings.HasPrefix(opts.DB.Path, "s3://"):
-		db, err = stores["rixxdb"](opts)
-	case strings.HasPrefix(opts.DB.Path, "gcs://"):
-		db, err = stores["rixxdb"](opts)
-	case strings.HasPrefix(opts.DB.Path, "logr://"):
-		db, err = stores["rixxdb"](opts)
 	case strings.HasPrefix(opts.DB.Path, "file://"):
-		db, err = stores["rixxdb"](opts)
-	case strings.HasPrefix(opts.DB.Path, "rixxdb://"):
 		db, err = stores["rixxdb"](opts)
 	case strings.HasPrefix(opts.DB.Path, "dendrodb://"):
 		db, err = stores["dendro"](opts)

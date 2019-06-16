@@ -15,8 +15,6 @@
 package rixxdb
 
 import (
-	"strings"
-
 	"github.com/abcum/rixxdb"
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
@@ -29,13 +27,9 @@ func init() {
 
 		var pntr *rixxdb.DB
 
-		path := strings.TrimPrefix(opts.DB.Path, "rixxdb://")
-
-		pntr, err = rixxdb.Open(path, &rixxdb.Config{
+		pntr, err = rixxdb.Open(opts.DB.Path, &rixxdb.Config{
 			// Set the encryption key
 			EncryptionKey: opts.DB.Key,
-			// Set the file size policy
-			SizePolicy: opts.DB.Proc.Size,
 			// Set the sync offset duration
 			SyncPolicy: opts.DB.Proc.Sync,
 			// Set the shrink offset duration

@@ -35,7 +35,6 @@ func setupDB(workers int) {
 	cnf.Settings = &cnf.Options{}
 	cnf.Settings.DB.Path = "memory"
 	cnf.Settings.DB.Base = "surreal"
-	cnf.Settings.DB.Proc.Size = 5
 	workerCount = workers
 
 	Setup(cnf.Settings)

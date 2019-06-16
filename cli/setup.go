@@ -57,17 +57,9 @@ func setup() {
 	}
 
 	if opts.DB.Path != "memory" {
-		if ok, _ := regexp.MatchString(`^(s3|gcs|logr|file|dendrodb)://(.+)$`, opts.DB.Path); !ok {
+		if ok, _ := regexp.MatchString(`^(file|dendrodb)://(.+)$`, opts.DB.Path); !ok {
 			log.Fatalf("Invalid path %s. Specify a valid data store configuration path", opts.DB.Path)
 		}
-	}
-
-	if opts.DB.Proc.Size == 0 {
-		opts.DB.Proc.Size = 5
-	}
-
-	if opts.DB.Proc.Size < 0 {
-		log.Fatal("Specify a valid data file size policy. Valid sizes are greater than 0 and are specified in MB.")
 	}
 
 	if opts.DB.Cert.CA != "" || opts.DB.Cert.Crt != "" || opts.DB.Cert.Key != "" {
