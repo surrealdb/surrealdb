@@ -36,7 +36,7 @@ var (
 
 var importCmd = &cobra.Command{
 	Use:     "import [flags] <file>",
-	Short:   "Execute a SQL script against an existing database",
+	Short:   "Import a SQL script into an existing database",
 	Example: "  surreal import --auth root:root backup.sql",
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
 

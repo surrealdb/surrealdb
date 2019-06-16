@@ -41,15 +41,11 @@ type Options struct {
 		}
 	}
 
-	Port struct {
-		Web int // Web port as an number
-		Tcp int // Tcp port as an number
-	}
+	Port int // Port as an number
 
-	Conn struct {
-		Web string // Web port as a string
-		Tcp string // Tcp port as a string
-	}
+	Conn string // Port as a string
+
+	Bind string // Hostname of the node
 
 	Cert struct {
 		Crt string // File location of server crt
@@ -62,17 +58,6 @@ type Options struct {
 		Pass string       // Master authentication password
 		Addr []string     // Allowed ip ranges for authentication
 		Nets []*net.IPNet // Allowed cidr ranges for authentication
-	}
-
-	Node struct {
-		Host string   // Node hostname
-		Name string   // Name of this node
-		UUID string   // UUID of this node
-		Join []string // Slice of cluster peers to join
-	}
-
-	Query struct {
-		Timeout time.Duration // Fixed query timeout
 	}
 
 	Logging struct {

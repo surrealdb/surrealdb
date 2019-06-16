@@ -15,8 +15,6 @@
 package cli
 
 import (
-	"os"
-
 	"github.com/spf13/cobra"
 
 	"github.com/abcum/surreal/db"
@@ -66,32 +64,25 @@ var startCmd = &cobra.Command{
 
 func init() {
 
-	host, _ := os.Hostname()
+	startCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master database authentication details")
+	startCmd.PersistentFlags().StringVar(&opts.Auth.User, "auth-user", "", "The master username for the database. Use this as an alternative to the --auth flag")
+	startCmd.PersistentFlags().StringVar(&opts.Auth.Pass, "auth-pass", "", "The master password for the database. Use this as an alternative to the --auth flag")
+	startCmd.PersistentFlags().StringSliceVar(&opts.Auth.Addr, "auth-addr", []string{"0.0.0.0/0", "0:0:0:0:0:0:0:0/0"}, "The IP address ranges from which master authentication is possible")
 
-	startCmd.PersistentFlags().StringVarP(&opts.Auth.Auth, "auth", "a", "root:root", "Master database authentication details.")
-	startCmd.PersistentFlags().StringVar(&opts.Auth.User, "auth-user", "", "The master username for the database. Use this as an alternative to the --auth flag.")
-	startCmd.PersistentFlags().StringVar(&opts.Auth.Pass, "auth-pass", "", "The master password for the database. Use this as an alternative to the --auth flag.")
-	startCmd.PersistentFlags().StringSliceVar(&opts.Auth.Addr, "auth-addr", []string{"0.0.0.0/0", "0:0:0:0:0:0:0:0/0"}, "The IP address ranges from which master authentication is possible.")
+	startCmd.PersistentFlags().StringVar(&opts.DB.Path, "path", "", "Database path used for storing data")
+	startCmd.PersistentFlags().IntVar(&opts.Port, "port", 8000, "The port on which to serve the web server")
+	startCmd.PersistentFlags().StringVarP(&opts.Bind, "bind", "b", "0.0.0.0", "The hostname or ip address to listen for connections on")
 
-	startCmd.PersistentFlags().StringVar(&opts.Cert.Crt, "cert-crt", "", "Path to the server certificate. Needed when running in secure mode.")
-	startCmd.PersistentFlags().StringVar(&opts.Cert.Key, "cert-key", "", "Path to the server private key. Needed when running in secure mode.")
+	startCmd.PersistentFlags().StringVarP(&opts.DB.Code, "key", "k", "", "Encryption key to use for on-disk encryption")
 
-	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.CA, "db-ca", "", "Path to the CA file used to connect to the remote database.")
-	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Crt, "db-crt", "", "Path to the certificate file used to connect to the remote database.")
-	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Key, "db-key", "", "Path to the private key file used to connect to the remote database.")
-	startCmd.PersistentFlags().StringVar(&opts.DB.Path, "db-path", "", flag("db"))
-	startCmd.PersistentFlags().IntVar(&opts.DB.Proc.Size, "db-size", 0, flag("size"))
-	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Sync, "db-sync", 0, flag("sync"))
-	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Shrink, "db-shrink", 0, flag("shrink"))
+	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Sync, "db-sync", 0, "A time duration to use when syncing data to persistent storage")
+	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Shrink, "db-shrink", 0, "A time duration to use when shrinking data on persistent storage")
 
-	startCmd.PersistentFlags().DurationVar(&opts.Query.Timeout, "query-timeout", 0, "")
+	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.CA, "kvs-ca", "", "Path to the CA file used to connect to the remote database")
+	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Crt, "kvs-crt", "", "Path to the certificate file used to connect to the remote database")
+	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.Key, "kvs-key", "", "Path to the private key file used to connect to the remote database")
 
-	startCmd.PersistentFlags().StringVarP(&opts.DB.Code, "key", "k", "", flag("key"))
-
-	startCmd.PersistentFlags().StringVarP(&opts.Node.Host, "bind", "b", "0.0.0.0", "The hostname or ip address to listen for connections on.")
-	startCmd.PersistentFlags().StringVarP(&opts.Node.Name, "name", "n", host, "The name of this node, used for logs and statistics.")
-
-	startCmd.PersistentFlags().IntVar(&opts.Port.Tcp, "port-tcp", 33693, "The port on which to serve the tcp server.")
-	startCmd.PersistentFlags().IntVar(&opts.Port.Web, "port-web", 8000, "The port on which to serve the web server.")
+	startCmd.PersistentFlags().StringVar(&opts.Cert.Crt, "web-crt", "", "Path to the server certificate. Needed when running in secure mode")
+	startCmd.PersistentFlags().StringVar(&opts.Cert.Key, "web-key", "", "Path to the server private key. Needed when running in secure mode")
 
 }

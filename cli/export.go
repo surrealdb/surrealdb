@@ -37,7 +37,7 @@ var (
 
 var exportCmd = &cobra.Command{
 	Use:     "export [flags] <file>",
-	Short:   "Export data from an existing database",
+	Short:   "Export an existing database into a SQL script",
 	Example: "  surreal export --auth root:root backup.sql",
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
 

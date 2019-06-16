@@ -14,8 +14,6 @@ import:
   version: ^1.4.0
 - package: github.com/hjson/hjson-go
   version: ^3.0.0
-- package: github.com/kr/text
-  version: ^0.1.0
 - package: github.com/mgutz/ansi
 - package: github.com/pkg/profile
   version: ^1.3.0

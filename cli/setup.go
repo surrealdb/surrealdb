@@ -27,7 +27,6 @@ import (
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/util/rand"
-	"github.com/abcum/surreal/util/uuid"
 )
 
 func setup() {
@@ -90,6 +89,28 @@ func setup() {
 	}
 
 	// --------------------------------------------------
+	// Ports
+	// --------------------------------------------------
+
+	// Specify default port
+	if opts.Port == 0 {
+		opts.Port = 8000
+	}
+
+	// Specift default host
+	if opts.Bind == "" {
+		opts.Bind = "0.0.0.0"
+	}
+
+	// Ensure port number is valid
+	if opts.Port < 0 || opts.Port > 65535 {
+		log.Fatalf("Invalid port %d. Please specify a valid port number for --port-web", opts.Port)
+	}
+
+	// Store the ports in host:port string format
+	opts.Conn = fmt.Sprintf("%s:%d", opts.Bind, opts.Port)
+
+	// --------------------------------------------------
 	// Auth
 	// --------------------------------------------------
 
@@ -134,53 +155,6 @@ func setup() {
 		}
 		opts.Auth.Nets = append(opts.Auth.Nets, subn)
 	}
-
-	// --------------------------------------------------
-	// Nodes
-	// --------------------------------------------------
-
-	// Ensure that the default
-	// node details are defined
-
-	if opts.Node.Host == "" {
-		opts.Node.Host, _ = os.Hostname()
-	}
-
-	if opts.Node.Name == "" {
-		opts.Node.Name = opts.Node.Host
-	}
-
-	if opts.Node.UUID == "" {
-		opts.Node.UUID = opts.Node.Name + "-" + uuid.New().String()
-	}
-
-	// --------------------------------------------------
-	// Ports
-	// --------------------------------------------------
-
-	// Specify default port
-	if opts.Port.Web == 0 {
-		opts.Port.Web = 8000
-	}
-
-	// Specify default port
-	if opts.Port.Tcp == 0 {
-		opts.Port.Tcp = 33693
-	}
-
-	// Ensure port number is valid
-	if opts.Port.Web < 0 || opts.Port.Web > 65535 {
-		log.Fatalf("Invalid port %d. Please specify a valid port number for --port-web", opts.Port.Web)
-	}
-
-	// Ensure port number is valid
-	if opts.Port.Tcp < 0 || opts.Port.Tcp > 65535 {
-		log.Fatalf("Invalid port %d. Please specify a valid port number for --port-tcp", opts.Port.Tcp)
-	}
-
-	// Store the ports in host:port string format
-	opts.Conn.Web = fmt.Sprintf("%s:%d", opts.Node.Host, opts.Port.Web)
-	opts.Conn.Tcp = fmt.Sprintf("%s:%d", opts.Node.Host, opts.Port.Tcp)
 
 	// --------------------------------------------------
 	// Certs
