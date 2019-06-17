@@ -29,6 +29,7 @@ import (
 type document struct {
 	i       *iterator
 	id      *sql.Thing
+	enc     []byte
 	key     *keys.Thing
 	val     kvs.KV
 	lck     bool
@@ -44,6 +45,7 @@ func newDocument(i *iterator, key *keys.Thing, val kvs.KV, doc *data.Doc) (d *do
 
 	d.i = i
 	d.id = nil
+	d.enc = nil
 	d.key = key
 	d.val = val
 	d.doc = doc
@@ -108,8 +110,9 @@ func (d *document) init(ctx context.Context) (err error) {
 	// store key into a Thing key.
 
 	if d.key == nil && d.val != nil {
+		d.enc = d.val.Key()
 		d.key = &keys.Thing{}
-		d.key.Decode(d.val.Key())
+		d.key.Decode(d.enc)
 	}
 
 	return
@@ -146,7 +149,8 @@ func (d *document) setup(ctx context.Context) (err error) {
 	// to be loaded from the KV store.
 
 	if d.key != nil && d.val == nil {
-		d.val, err = d.i.e.dbo.Get(ctx, d.i.versn, d.key.Encode())
+		d.enc = d.key.Encode()
+		d.val, err = d.i.e.dbo.Get(ctx, d.i.versn, d.enc)
 		if err != nil {
 			return
 		}
@@ -263,9 +267,9 @@ func (d *document) storeThing(ctx context.Context) (err error) {
 	if ok, err := d.shouldVersn(ctx); err != nil {
 		return err
 	} else if ok == true {
-		_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.key.Encode(), d.current.Encode())
+		_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.enc, d.current.Encode())
 	} else if ok == false {
-		_, err = d.i.e.dbo.Put(ctx, 0, d.key.Encode(), d.current.Encode())
+		_, err = d.i.e.dbo.Put(ctx, 0, d.enc, d.current.Encode())
 	}
 
 	return
@@ -289,9 +293,9 @@ func (d *document) purgeThing(ctx context.Context) (err error) {
 	if ok, err := d.shouldVersn(ctx); err != nil {
 		return err
 	} else if ok == true {
-		_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.key.Encode(), nil)
+		_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.enc, nil)
 	} else if ok == false {
-		_, err = d.i.e.dbo.Clr(ctx, d.key.Encode())
+		_, err = d.i.e.dbo.Clr(ctx, d.enc)
 	}
 
 	return
