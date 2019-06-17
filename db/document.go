@@ -18,7 +18,6 @@ import (
 	"fmt"
 
 	"context"
-	"reflect"
 
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
@@ -207,7 +206,7 @@ func (d *document) forced(ctx context.Context) bool {
 }
 
 func (d *document) hasChanged(ctx context.Context) bool {
-	return reflect.DeepEqual(d.initial, d.current) == false
+	return d.initial.Same(d.current) == false
 }
 
 func (d *document) shouldDrop(ctx context.Context) (bool, error) {

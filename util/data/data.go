@@ -913,6 +913,35 @@ func (d *Doc) Dec(value interface{}, path ...string) (*Doc, error) {
 
 // --------------------------------------------------------------------------------
 
+func (d *Doc) Same(n *Doc) bool {
+
+	switch a := d.data.(type) {
+	case []interface{}:
+		switch b := n.data.(type) {
+		case map[string]interface{}:
+			return false
+		case []interface{}:
+			if len(a) != len(b) {
+				return false
+			}
+			break
+		}
+	case map[string]interface{}:
+		switch b := n.data.(type) {
+		case []interface{}:
+			return false
+		case map[string]interface{}:
+			if len(a) != len(b) {
+				return false
+			}
+			break
+		}
+	}
+
+	return reflect.DeepEqual(d, n)
+
+}
+
 func (d *Doc) Diff(n *Doc) map[string]interface{} {
 
 	var initial = make(map[string]interface{})
