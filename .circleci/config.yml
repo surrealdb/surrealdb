@@ -15,9 +15,6 @@ jobs:
           name: Clean
           command: make clean
       - run:
-          name: Setup
-          command: make setup
-      - run:
           name: Tests
           command: make tests
       - run:
