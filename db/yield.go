@@ -17,7 +17,6 @@ package db
 import (
 	"context"
 
-	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/diff"
@@ -35,10 +34,8 @@ func (d *document) cold(ctx context.Context) (doc *data.Doc, err error) {
 	// NS, or KV level, then we need to check
 	// document permissions for this query.
 
-	if perm(ctx) == cnf.AuthSC {
-		if err = d.perms(ctx, doc); err != nil {
-			return nil, err
-		}
+	if err = d.perms(ctx, doc); err != nil {
+		return nil, err
 	}
 
 	return
@@ -57,10 +54,8 @@ func (d *document) cnow(ctx context.Context) (doc *data.Doc, err error) {
 	// NS, or KV level, then we need to check
 	// document permissions for this query.
 
-	if perm(ctx) == cnf.AuthSC {
-		if err = d.perms(ctx, doc); err != nil {
-			return nil, err
-		}
+	if err = d.perms(ctx, doc); err != nil {
+		return nil, err
 	}
 
 	return

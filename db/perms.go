@@ -33,6 +33,14 @@ func (d *document) perms(ctx context.Context, doc *data.Doc) (err error) {
 		return nil
 	}
 
+	// If we are authenticated using DB, NS,
+	// or KV permissions level, then we can
+	// ignore all permissions checks.
+
+	if perm(ctx) < cnf.AuthSC {
+		return nil
+	}
+
 	// Get the field definitions so we can
 	// check if the permissions allow us
 	// to view each field.
