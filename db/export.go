@@ -18,14 +18,11 @@ import (
 	"fmt"
 	"math"
 
-	"encoding/json"
-
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
-	"github.com/abcum/surreal/util/diff"
 	"github.com/abcum/surreal/util/keys"
 )
 
@@ -260,9 +257,7 @@ TB:
 			// then loop over all the items and
 			// process the records.
 
-			o := data.New()
 			n := data.New()
-			p := new(keys.Thing)
 
 			for _, kv := range vls {
 
@@ -275,29 +270,12 @@ TB:
 
 					n = data.New().Decode(kv.Val())
 
-					if p.TB != k.TB || p.ID != k.ID {
+					j, _ := n.MarshalJSON()
 
-						j, _ := n.MarshalJSON()
-
-						if TB.Vers {
-							fmt.Fprintf(w, "UPDATE ⟨%s⟩:⟨%s⟩ CONTENT %s VERSION %d;\n", k.TB, k.ID, j, v)
-						} else {
-							fmt.Fprintf(w, "UPDATE ⟨%s⟩:⟨%s⟩ CONTENT %s;\n", k.TB, k.ID, j)
-						}
-
+					if TB.Vers {
+						fmt.Fprintf(w, "UPDATE ⟨%s⟩:⟨%s⟩ CONTENT %s VERSION %d;\n", k.TB, k.ID, j, v)
 					} else {
-
-						a, _ := o.Data().(map[string]interface{})
-						b, _ := n.Data().(map[string]interface{})
-						c := diff.Diff(a, b)
-						j, _ := json.Marshal(c)
-
-						if TB.Vers {
-							fmt.Fprintf(w, "UPDATE ⟨%s⟩:⟨%s⟩ DIFF %s VERSION %d;\n", k.TB, k.ID, j, v)
-						} else {
-							fmt.Fprintf(w, "UPDATE ⟨%s⟩:⟨%s⟩ DIFF %s;\n", k.TB, k.ID, j)
-						}
-
+						fmt.Fprintf(w, "UPDATE ⟨%s⟩:⟨%s⟩ CONTENT %s;\n", k.TB, k.ID, j)
 					}
 
 				} else {
@@ -309,8 +287,6 @@ TB:
 					}
 
 				}
-
-				p, o = k, n
 
 			}
 
