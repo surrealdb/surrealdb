@@ -75,7 +75,7 @@ func init() {
 
 	startCmd.PersistentFlags().StringVarP(&opts.DB.Code, "key", "k", "", "Encryption key to use for on-disk encryption")
 
-	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Sync, "db-sync", 0, "A time duration to use when syncing data to persistent storage")
+	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Flush, "db-flush", 0, "A time duration to use when syncing data to persistent storage")
 	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Shrink, "db-shrink", 0, "A time duration to use when shrinking data on persistent storage")
 
 	startCmd.PersistentFlags().StringVar(&opts.DB.Cert.CA, "kvs-ca", "", "Path to the CA file used to connect to the remote database")

@@ -29,7 +29,7 @@ type Options struct {
 		Path string // Path to store the data file
 		Base string // Base key to use in KV stores
 		Proc struct {
-			Sync   time.Duration // Timeframe for syncing data
+			Flush  time.Duration // Timeframe for flushing data
 			Shrink time.Duration // Timeframe for shrinking data
 		}
 		Cert struct {

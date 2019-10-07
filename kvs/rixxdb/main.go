@@ -28,14 +28,16 @@ func init() {
 		var pntr *rixxdb.DB
 
 		pntr, err = rixxdb.Open(opts.DB.Path, &rixxdb.Config{
+			// Explicitly sync writes
+			SyncWrites: true,
 			// Set the encryption key
 			EncryptionKey: opts.DB.Key,
 			// Set the sync offset duration
-			SyncPolicy: opts.DB.Proc.Sync,
+			FlushPolicy: opts.DB.Proc.Flush,
 			// Set the shrink offset duration
 			ShrinkPolicy: opts.DB.Proc.Shrink,
 			// Don't wait for syncing if shrinking
-			IgnoreSyncPolicyWhenShrinking: true,
+			IgnorePolicyWhenShrinking: true,
 		})
 
 		if err != nil {

@@ -6,7 +6,7 @@ require (
 	github.com/abcum/bump v0.0.0-20190929092354-46a9c9dbf9ab
 	github.com/abcum/cork v0.0.0-20190929093632-f45e788b8f1b
 	github.com/abcum/fibre v0.0.0-20191003170635-45f18bd55f9a
-	github.com/abcum/rixxdb v0.0.0-20191003170549-44f889db956a
+	github.com/abcum/rixxdb v0.0.0-20191007234208-a644cc21c6bd
 	github.com/abcum/tmpl v0.0.0-20190929092451-4b08f6027ed1 // indirect
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/elithrar/simple-scrypt v1.3.0
