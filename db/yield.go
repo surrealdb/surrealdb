@@ -19,7 +19,6 @@ import (
 
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
-	"github.com/abcum/surreal/util/diff"
 )
 
 func (d *document) cold(ctx context.Context) (doc *data.Doc, err error) {
@@ -62,19 +61,6 @@ func (d *document) cnow(ctx context.Context) (doc *data.Doc, err error) {
 
 }
 
-func (d *document) diffs(initial, current *data.Doc) *data.Doc {
-
-	a, _ := initial.Data().(map[string]interface{})
-	b, _ := current.Data().(map[string]interface{})
-
-	if c := diff.Diff(a, b); len(c) > 0 {
-		return data.Consume(c)
-	}
-
-	return data.Consume(nil)
-
-}
-
 func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Token) (interface{}, error) {
 
 	var exps sql.Fields
@@ -102,20 +88,6 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 		default:
 			return nil, nil
 
-		case sql.DIFF:
-
-			old, err := d.cold(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			now, err := d.cnow(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			return d.diffs(old, now).Data(), nil
-
 		case sql.AFTER:
 
 			doc, err := d.cnow(ctx)
@@ -131,23 +103,6 @@ func (d *document) yield(ctx context.Context, stm sql.Statement, output sql.Toke
 				return nil, err
 			}
 			return doc.Data(), nil
-
-		case sql.BOTH:
-
-			old, err := d.cold(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			now, err := d.cnow(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			return map[string]interface{}{
-				"after":  now.Data(),
-				"before": old.Data(),
-			}, nil
 
 		}
 

@@ -1464,29 +1464,13 @@ func Test_Parse_Queries_Create(t *testing.T) {
 		},
 		{
 			sql: `CREATE person RETURN`,
-			err: "Found `` but expected `NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `` but expected `NONE, BEFORE, AFTER`",
 		},
 		{
 			sql: `CREATE person RETURN NONE`,
 			res: &Query{Statements: []Statement{&CreateStatement{
 				What:     []Expr{&Ident{"person"}},
 				Echo:     NONE,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `CREATE person RETURN BOTH`,
-			res: &Query{Statements: []Statement{&CreateStatement{
-				What:     []Expr{&Ident{"person"}},
-				Echo:     BOTH,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `CREATE person RETURN DIFF`,
-			res: &Query{Statements: []Statement{&CreateStatement{
-				What:     []Expr{&Ident{"person"}},
-				Echo:     DIFF,
 				Parallel: true,
 			}}},
 		},
@@ -1651,29 +1635,13 @@ func Test_Parse_Queries_Update(t *testing.T) {
 		},
 		{
 			sql: `UPDATE person RETURN`,
-			err: "Found `` but expected `NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `` but expected `NONE, BEFORE, AFTER`",
 		},
 		{
 			sql: `UPDATE person RETURN NONE`,
 			res: &Query{Statements: []Statement{&UpdateStatement{
 				What:     []Expr{&Ident{"person"}},
 				Echo:     NONE,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `UPDATE person RETURN BOTH`,
-			res: &Query{Statements: []Statement{&UpdateStatement{
-				What:     []Expr{&Ident{"person"}},
-				Echo:     BOTH,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `UPDATE person RETURN DIFF`,
-			res: &Query{Statements: []Statement{&UpdateStatement{
-				What:     []Expr{&Ident{"person"}},
-				Echo:     DIFF,
 				Parallel: true,
 			}}},
 		},
@@ -1740,7 +1708,7 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 		},
 		{
 			sql: `DELETE person RETURN`,
-			err: "Found `` but expected `NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `` but expected `NONE, BEFORE, AFTER`",
 		},
 		{
 			sql: `DELETE person RETURN NONE`,
@@ -1748,22 +1716,6 @@ func Test_Parse_Queries_Delete(t *testing.T) {
 			res: &Query{Statements: []Statement{&DeleteStatement{
 				What:     []Expr{&Ident{"person"}},
 				Echo:     NONE,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `DELETE person RETURN BOTH`,
-			res: &Query{Statements: []Statement{&DeleteStatement{
-				What:     []Expr{&Ident{"person"}},
-				Echo:     BOTH,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `DELETE person RETURN DIFF`,
-			res: &Query{Statements: []Statement{&DeleteStatement{
-				What:     []Expr{&Ident{"person"}},
-				Echo:     DIFF,
 				Parallel: true,
 			}}},
 		},
@@ -1904,7 +1856,7 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 		},
 		{
 			sql: `RELATE person -> purchase -> item RETURN`,
-			err: "Found `` but expected `NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `` but expected `NONE, BEFORE, AFTER`",
 		},
 		{
 			sql: `RELATE person -> purchase -> item RETURN NONE`,
@@ -1913,26 +1865,6 @@ func Test_Parse_Queries_Relate(t *testing.T) {
 				From:     []Expr{&Ident{"person"}},
 				With:     []Expr{&Ident{"item"}},
 				Echo:     NONE,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `RELATE person -> purchase -> item RETURN BOTH`,
-			res: &Query{Statements: []Statement{&RelateStatement{
-				Type:     &Table{"purchase"},
-				From:     []Expr{&Ident{"person"}},
-				With:     []Expr{&Ident{"item"}},
-				Echo:     BOTH,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `RELATE person -> purchase -> item RETURN DIFF`,
-			res: &Query{Statements: []Statement{&RelateStatement{
-				Type:     &Table{"purchase"},
-				From:     []Expr{&Ident{"person"}},
-				With:     []Expr{&Ident{"item"}},
-				Echo:     DIFF,
 				Parallel: true,
 			}}},
 		},
@@ -2010,7 +1942,7 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 		},
 		{
 			sql: `INSERT ["one","two","tre"] INTO person RETURN`,
-			err: "Found `` but expected `NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `` but expected `NONE, BEFORE, AFTER`",
 		},
 		{
 			sql: `INSERT ["one","two","tre"] INTO person RETURN NONE`,
@@ -2018,33 +1950,6 @@ func Test_Parse_Queries_Insert(t *testing.T) {
 				Data:     []interface{}{"one", "two", "tre"},
 				Into:     &Table{"person"},
 				Echo:     NONE,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `INSERT ["one","two","tre"] INTO person RETURN INFO`,
-			res: &Query{Statements: []Statement{&InsertStatement{
-				Data:     []interface{}{"one", "two", "tre"},
-				Into:     &Table{"person"},
-				Echo:     INFO,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `INSERT ["one","two","tre"] INTO person RETURN BOTH`,
-			res: &Query{Statements: []Statement{&InsertStatement{
-				Data:     []interface{}{"one", "two", "tre"},
-				Into:     &Table{"person"},
-				Echo:     BOTH,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `INSERT ["one","two","tre"] INTO person RETURN DIFF`,
-			res: &Query{Statements: []Statement{&InsertStatement{
-				Data:     []interface{}{"one", "two", "tre"},
-				Into:     &Table{"person"},
-				Echo:     DIFF,
 				Parallel: true,
 			}}},
 		},
@@ -2119,7 +2024,7 @@ func Test_Parse_Queries_Upsert(t *testing.T) {
 		},
 		{
 			sql: `UPSERT ["one","two","tre"] INTO person RETURN`,
-			err: "Found `` but expected `NONE, INFO, BOTH, DIFF, BEFORE, AFTER`",
+			err: "Found `` but expected `NONE, BEFORE, AFTER`",
 		},
 		{
 			sql: `UPSERT ["one","two","tre"] INTO person RETURN NONE`,
@@ -2127,33 +2032,6 @@ func Test_Parse_Queries_Upsert(t *testing.T) {
 				Data:     []interface{}{"one", "two", "tre"},
 				Into:     &Table{"person"},
 				Echo:     NONE,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `UPSERT ["one","two","tre"] INTO person RETURN INFO`,
-			res: &Query{Statements: []Statement{&UpsertStatement{
-				Data:     []interface{}{"one", "two", "tre"},
-				Into:     &Table{"person"},
-				Echo:     INFO,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `UPSERT ["one","two","tre"] INTO person RETURN BOTH`,
-			res: &Query{Statements: []Statement{&UpsertStatement{
-				Data:     []interface{}{"one", "two", "tre"},
-				Into:     &Table{"person"},
-				Echo:     BOTH,
-				Parallel: true,
-			}}},
-		},
-		{
-			sql: `UPSERT ["one","two","tre"] INTO person RETURN DIFF`,
-			res: &Query{Statements: []Statement{&UpsertStatement{
-				Data:     []interface{}{"one", "two", "tre"},
-				Into:     &Table{"person"},
-				Echo:     DIFF,
 				Parallel: true,
 			}}},
 		},

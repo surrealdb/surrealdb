@@ -24,7 +24,7 @@ func (p *parser) parseEcho(fallback Token) (exp Token, err error) {
 
 	if _, _, exi := p.mightBe(RETURN); exi {
 
-		exp, _, err = p.shouldBe(NONE, INFO, BOTH, DIFF, BEFORE, AFTER)
+		exp, _, err = p.shouldBe(NONE, BEFORE, AFTER)
 		if err != nil {
 			return 0, err
 		}
