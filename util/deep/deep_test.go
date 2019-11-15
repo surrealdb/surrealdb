@@ -33,7 +33,7 @@ func TestMain(t *testing.T) {
 		var item interface{}
 		item = nil
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 }
@@ -43,31 +43,31 @@ func TestSimple(t *testing.T) {
 	Convey("Can copy bool", t, func() {
 		item := true
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy int64", t, func() {
 		item := int64(1)
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy float64", t, func() {
 		item := float64(1)
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy string", t, func() {
 		item := "string"
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy time.Time", t, func() {
 		item := time.Now()
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 }
@@ -80,7 +80,7 @@ func TestSlices(t *testing.T) {
 			false,
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy slice of int64s", t, func() {
@@ -90,7 +90,7 @@ func TestSlices(t *testing.T) {
 			3,
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy slice of float64s", t, func() {
@@ -100,7 +100,7 @@ func TestSlices(t *testing.T) {
 			3,
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy slice of strings", t, func() {
@@ -110,7 +110,7 @@ func TestSlices(t *testing.T) {
 			"str",
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy slice of time.Times", t, func() {
@@ -120,7 +120,7 @@ func TestSlices(t *testing.T) {
 			time.Now(),
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy slice of interfaces", t, func() {
@@ -132,7 +132,7 @@ func TestSlices(t *testing.T) {
 			time.Now(),
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 }
@@ -145,7 +145,7 @@ func TestObjects(t *testing.T) {
 			"b": false,
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy map of int64s", t, func() {
@@ -155,7 +155,7 @@ func TestObjects(t *testing.T) {
 			"c": 3,
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy map of float64s", t, func() {
@@ -165,7 +165,7 @@ func TestObjects(t *testing.T) {
 			"c": 3,
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy map of strings", t, func() {
@@ -175,7 +175,7 @@ func TestObjects(t *testing.T) {
 			"c": "str",
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy map of time.Times", t, func() {
@@ -185,7 +185,7 @@ func TestObjects(t *testing.T) {
 			"c": time.Now(),
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 	Convey("Can copy map of interfaces", t, func() {
@@ -197,7 +197,7 @@ func TestObjects(t *testing.T) {
 			"e":  time.Now(),
 		}
 		done := Copy(item)
-		So(item, ShouldResemble, done)
+		So(done, ShouldResemble, item)
 	})
 
 }
@@ -241,25 +241,25 @@ func TestStructs(t *testing.T) {
 	Convey("Can copy struct", t, func() {
 		item := full
 		done := Copy(item)
-		So(done, ShouldResemble, show)
+		So(show, ShouldResemble, done)
 	})
 
 	Convey("Can copy pointer", t, func() {
 		item := &full
 		done := Copy(item)
-		So(done, ShouldResemble, &show)
+		So(&show, ShouldResemble, done)
 	})
 
 	Convey("Can copy slice of structs", t, func() {
 		item := []interface{}{full, full}
 		done := Copy(item)
-		So(done, ShouldResemble, []interface{}{show, show})
+		So([]interface{}{show, show}, ShouldResemble, done)
 	})
 
 	Convey("Can copy slice of pointers", t, func() {
 		item := []interface{}{&full, &full}
 		done := Copy(item)
-		So(done, ShouldResemble, []interface{}{&show, &show})
+		So([]interface{}{&show, &show}, ShouldResemble, done)
 	})
 
 }
