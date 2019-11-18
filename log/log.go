@@ -104,6 +104,34 @@ func Hook(hook logrus.Hook) {
 	log.AddHook(hook)
 }
 
+func IsPanic() bool {
+	return log.IsLevelEnabled(PanicLevel)
+}
+
+func IsFatal() bool {
+	return log.IsLevelEnabled(FatalLevel)
+}
+
+func IsError() bool {
+	return log.IsLevelEnabled(ErrorLevel)
+}
+
+func IsWarn() bool {
+	return log.IsLevelEnabled(WarnLevel)
+}
+
+func IsInfo() bool {
+	return log.IsLevelEnabled(InfoLevel)
+}
+
+func IsDebug() bool {
+	return log.IsLevelEnabled(DebugLevel)
+}
+
+func IsTrace() bool {
+	return log.IsLevelEnabled(TraceLevel)
+}
+
 func Display(v ...interface{}) {
 	if isTerminal {
 		fmt.Print(v...)

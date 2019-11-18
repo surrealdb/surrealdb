@@ -356,11 +356,13 @@ func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc
 		Version: sql.Expr(ver),
 	}
 
-	log.WithPrefix(logKeyExe).WithFields(map[string]interface{}{
-		logKeyId: e.id,
-		logKeyNS: e.ns,
-		logKeyDB: e.db,
-	}).Traceln(stm)
+	if log.IsTrace() {
+		log.WithPrefix(logKeyExe).WithFields(map[string]interface{}{
+			logKeyId: e.id,
+			logKeyNS: e.ns,
+			logKeyDB: e.db,
+		}).Traceln(stm)
+	}
 
 	res, err := e.executeSelect(ctx, stm)
 	if err != nil {
@@ -395,11 +397,13 @@ func (e *executor) fetchArray(ctx context.Context, val []interface{}, doc *data.
 		Version: sql.Expr(ver),
 	}
 
-	log.WithPrefix(logKeyExe).WithFields(map[string]interface{}{
-		logKeyId: e.id,
-		logKeyNS: e.ns,
-		logKeyDB: e.db,
-	}).Traceln(stm)
+	if log.IsTrace() {
+		log.WithPrefix(logKeyExe).WithFields(map[string]interface{}{
+			logKeyId: e.id,
+			logKeyNS: e.ns,
+			logKeyDB: e.db,
+		}).Traceln(stm)
+	}
 
 	res, err := e.executeSelect(ctx, stm)
 	if err != nil {

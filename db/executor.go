@@ -90,9 +90,11 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 
 	defer func() {
 		if err := recover(); err != nil {
-			log.WithPrefix(logKeyDB).WithFields(map[string]interface{}{
-				logKeyId: e.id, logKeyStack: string(debug.Stack()),
-			}).Errorln(err)
+			if log.IsError() {
+				log.WithPrefix(logKeyDB).WithFields(map[string]interface{}{
+					logKeyId: e.id, logKeyStack: string(debug.Stack()),
+				}).Errorln(err)
+			}
 		}
 	}()
 
@@ -118,24 +120,6 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 	var rsp *Response
 	var buf []*Response
 	var res []interface{}
-
-	// When in debugging mode, log every sql
-	// query, along with the query execution
-	// speed, so we can analyse slow queries.
-
-	log := log.WithPrefix(logKeySql).WithFields(map[string]interface{}{
-		logKeyId:   e.id,
-		logKeyKind: ctx.Value(ctxKeyKind),
-		logKeyVars: ctx.Value(ctxKeyVars),
-	})
-
-	if len(e.ns) != 0 {
-		log = log.WithField(logKeyNS, e.ns)
-	}
-
-	if len(e.db) != 0 {
-		log = log.WithField(logKeyDB, e.db)
-	}
 
 	// If we are not inside a global transaction
 	// then reset the error to nil so that the
@@ -195,14 +179,28 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 
 	switch err.(type) {
 	default:
-		log.WithFields(map[string]interface{}{
-			logKeyTime: time.Since(now).String(),
-		}).Debugln(stm)
+		if log.IsDebug() {
+			log.WithPrefix(logKeySql).WithFields(map[string]interface{}{
+				logKeyId:   e.id,
+				logKeyNS:   e.ns,
+				logKeyDB:   e.db,
+				logKeyKind: ctx.Value(ctxKeyKind),
+				logKeyVars: ctx.Value(ctxKeyVars),
+				logKeyTime: time.Since(now).String(),
+			}).Debugln(stm)
+		}
 	case error:
-		log.WithFields(map[string]interface{}{
-			logKeyTime:  time.Since(now).String(),
-			logKeyError: detail(err),
-		}).Errorln(stm)
+		if log.IsError() {
+			log.WithPrefix(logKeySql).WithFields(map[string]interface{}{
+				logKeyId:    e.id,
+				logKeyNS:    e.ns,
+				logKeyDB:    e.db,
+				logKeyKind:  ctx.Value(ctxKeyKind),
+				logKeyVars:  ctx.Value(ctxKeyVars),
+				logKeyTime:  time.Since(now).String(),
+				logKeyError: detail(err),
+			}).Errorln(stm)
+		}
 	}
 
 	// If we are not inside a global transaction
