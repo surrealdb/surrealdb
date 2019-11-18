@@ -127,6 +127,7 @@ func routes(s *fibre.Fibre) {
 		AllowedContent: map[string]bool{
 			"application/json":                  true,
 			"application/cork":                  true,
+			"application/cbor":                  true,
 			"application/msgpack":               true,
 			"application/x-www-form-urlencoded": true,
 		},
@@ -152,6 +153,7 @@ func routes(s *fibre.Fibre) {
 		AllowedContent: map[string]bool{
 			"application/json":                  true,
 			"application/cork":                  true,
+			"application/cbor":                  true,
 			"application/msgpack":               true,
 			"application/x-www-form-urlencoded": true,
 		},
@@ -178,6 +180,7 @@ func routes(s *fibre.Fibre) {
 			"text/plain":          true,
 			"application/json":    true,
 			"application/cork":    true,
+			"application/cbor":    true,
 			"application/msgpack": true,
 		},
 	}).PathIs("/sql").MethodIsNot("OPTIONS"))
@@ -363,6 +366,7 @@ func routes(s *fibre.Fibre) {
 		AllowedContent: map[string]bool{
 			"application/json":         true,
 			"application/cork":         true,
+			"application/cbor":         true,
 			"application/msgpack":      true,
 			"application/vnd.api+json": true,
 		},
