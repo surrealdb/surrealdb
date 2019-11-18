@@ -74,16 +74,8 @@ func (d *document) perms(ctx context.Context, doc *data.Doc) (err error) {
 
 				if p, ok := fd.Perms.(*sql.PermExpression); ok {
 
-					// Get the old value
-
-					old := d.initial.Get(key).Data()
-
-					// Reset the variables
-
 					vars := data.New()
 					vars.Set(val, varKeyValue)
-					vars.Set(val, varKeyAfter)
-					vars.Set(old, varKeyBefore)
 					ctx = context.WithValue(ctx, ctxKeySpec, vars)
 
 					if v, err := d.i.e.fetch(ctx, p.Select, doc); err != nil {
