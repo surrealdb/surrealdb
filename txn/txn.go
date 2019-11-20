@@ -86,35 +86,3 @@ func (t *TX) get(s symbol, key string) (val interface{}, ok bool) {
 	t.lock.RUnlock()
 	return
 }
-
-// --------------------------------------------------
-
-/*func (t *TX) _put(key []byte, val interface{}) {
-	t.mem(_kv)
-	t.lock.Lock()
-	t.data[_kv][string(key)] = val
-	t.lock.Unlock()
-}
-
-func (t *TX) _get(key []byte) (val interface{}, ok bool) {
-	t.mem(_kv)
-	t.lock.RLock()
-	val, ok = t.data[_kv][string(key)]
-	t.lock.RUnlock()
-	return
-}
-
-func (t *TX) Get(ctx context.Context, ver int64, key []byte) (kvs.KV, error) {
-
-	if kv, ok := t._get(key); ok {
-		fmt.Println(key)
-		return kv.(kvs.KV), nil
-	}
-
-	kv, err := t.TX.Get(ctx, ver, key)
-
-	t._put(key, kv)
-
-	return kv, err
-
-}*/
