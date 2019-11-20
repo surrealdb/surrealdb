@@ -93,6 +93,14 @@ func (d *Doc) UnmarshalJSON(data []byte) error {
 
 func (d *Doc) path(path ...string) (paths []string) {
 
+	l := len(path)
+	for _, p := range path {
+		l += strings.Count(p, ".")
+		l += strings.Count(p, "[")
+	}
+
+	paths = make([]string, 0, l)
+
 	for _, p := range path {
 		for j, i, o := 0, 0, false; i < len(p); i++ {
 			switch {
