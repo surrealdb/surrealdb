@@ -25,14 +25,11 @@ import (
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
-	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 
 	_ "github.com/abcum/surreal/kvs/rixxdb"
 )
-
-var db *kvs.DS
 
 var KV string
 
@@ -61,28 +58,18 @@ func init() {
 
 // Setup sets up the connection with the data layer
 func Setup(opts *cnf.Options) (err error) {
-
-	log.WithPrefix("db").Infof("Starting database")
-
 	KV = cnf.Settings.DB.Base
-
-	db, err = kvs.New(opts)
-
 	return
 }
 
 // Exit shuts down the connection with the data layer
-func Exit() (err error) {
-
-	log.WithPrefix("db").Infof("Gracefully shutting down database")
-
+func Exit(opts *cnf.Options) (err error) {
 	sockets.Range(func(key, val interface{}) bool {
 		id, so := key.(string), val.(*socket)
 		deregister(so.fibre, id)()
 		return true
 	})
-
-	return db.Close()
+	return
 
 }
 
@@ -92,19 +79,12 @@ func Exit() (err error) {
 func Sync(rw interface{}) (err error) {
 	switch v := rw.(type) {
 	case io.Reader:
-		return db.Import(v)
+		return kvs.Import(v)
 	case io.Writer:
-		return db.Export(v)
+		return kvs.Export(v)
 	default:
 		return nil
 	}
-}
-
-// Begin begins a new read / write transaction
-// with the underlying database, and returns
-// the transaction, or any error which occured.
-func Begin(rw bool) (txn kvs.TX, err error) {
-	return db.Begin(context.Background(), rw)
 }
 
 // Export saves all database operations to a writer.
@@ -157,19 +137,11 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 		vars = make(map[string]interface{})
 	}
 
-	// Ensure that we have a unique id assigned
-	// to this fibre connection, as we need it
-	// to detect unique websocket notifications.
-
-	if fib.Get(ctxKeyId) == nil {
-		fib.Set(ctxKeyId, "background")
-	}
-
 	// Get the unique id for this connection
 	// so that we can assign it to the context
 	// and detect any websocket notifications.
 
-	id := fib.Get(ctxKeyId).(string)
+	id := fib.Uniq()
 
 	// Assign the authentication data to the
 	// context so that we can log the auth kind

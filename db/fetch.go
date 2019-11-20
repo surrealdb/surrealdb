@@ -16,7 +16,6 @@ package db
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"reflect"
 	"regexp"
@@ -28,7 +27,6 @@ import (
 	"golang.org/x/text/search"
 
 	"github.com/abcum/surreal/cnf"
-	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/deep"
@@ -344,10 +342,8 @@ func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc
 		return nil, err
 	}
 
-	key := fmt.Sprintf("%d %s", ver, val)
-
-	if e.cache.Has(key) {
-		return e.cache.Get(key), nil
+	if val, ok := e.data.Load(val.String()); ok {
+		return val, nil
 	}
 
 	stm := &sql.SelectStatement{
@@ -356,63 +352,14 @@ func (e *executor) fetchThing(ctx context.Context, val *sql.Thing, doc *data.Doc
 		Version: sql.Expr(ver),
 	}
 
-	if log.IsTrace() {
-		log.WithPrefix(logKeyExe).WithFields(map[string]interface{}{
-			logKeyId: e.id,
-			logKeyNS: e.ns,
-			logKeyDB: e.db,
-		}).Traceln(stm)
-	}
-
 	res, err := e.executeSelect(ctx, stm)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(res) > 0 {
-		e.cache.Put(key, res[0])
+		e.data.Store(val.String(), res[0])
 		return res[0], nil
-	}
-
-	return nil, nil
-
-}
-
-func (e *executor) fetchArray(ctx context.Context, val []interface{}, doc *data.Doc) (interface{}, error) {
-
-	ver, err := e.fetchVersion(ctx, ctx.Value(ctxKeyVersion))
-	if err != nil {
-		return nil, err
-	}
-
-	key := fmt.Sprintf("%d %s", ver, val)
-
-	if e.cache.Has(key) {
-		return e.cache.Get(key), nil
-	}
-
-	stm := &sql.SelectStatement{
-		Expr:    []*sql.Field{{Expr: &sql.All{}}},
-		What:    []sql.Expr{val},
-		Version: sql.Expr(ver),
-	}
-
-	if log.IsTrace() {
-		log.WithPrefix(logKeyExe).WithFields(map[string]interface{}{
-			logKeyId: e.id,
-			logKeyNS: e.ns,
-			logKeyDB: e.db,
-		}).Traceln(stm)
-	}
-
-	res, err := e.executeSelect(ctx, stm)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(res) > 0 {
-		e.cache.Put(key, res)
-		return res, nil
 	}
 
 	return nil, nil

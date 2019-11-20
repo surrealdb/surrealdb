@@ -111,8 +111,13 @@ func (d *document) init(ctx context.Context) (err error) {
 
 	if d.key == nil && d.val != nil {
 		d.enc = d.val.Key()
-		d.key = &keys.Thing{}
-		d.key.Decode(d.enc)
+		if val, ok := keyCache.Get(d.val.Key()); ok {
+			d.key = val.(*keys.Thing)
+		} else {
+			d.key = &keys.Thing{}
+			d.key.Decode(d.enc)
+			keyCache.Set(d.val.Key(), d.key, 0)
+		}
 	}
 
 	return
@@ -150,7 +155,7 @@ func (d *document) setup(ctx context.Context) (err error) {
 
 	if d.key != nil && d.val == nil {
 		d.enc = d.key.Encode()
-		d.val, err = d.i.e.dbo.Get(ctx, d.i.versn, d.enc)
+		d.val, err = d.i.e.tx.Get(ctx, d.i.versn, d.enc)
 		if err != nil {
 			return
 		}
@@ -163,9 +168,8 @@ func (d *document) setup(ctx context.Context) (err error) {
 	// maniuplate the virtual document.
 
 	if d.doc != nil {
-		enc := d.doc.Encode()
-		d.initial = data.New().Decode(enc)
-		d.current = data.New().Decode(enc)
+		d.initial = d.doc
+		d.current = d.doc
 	}
 
 	// The requested record has been loaded
@@ -186,8 +190,14 @@ func (d *document) setup(ctx context.Context) (err error) {
 	// processing any record changes.
 
 	if d.doc == nil && d.val != nil && d.val.Exi() == true {
-		d.initial = data.New().Decode(d.val.Val())
-		d.current = data.New().Decode(d.val.Val())
+		if val, ok := valCache.Get(d.val.Val()); ok {
+			d.initial = val.(*data.Doc)
+			d.current = d.initial
+		} else {
+			d.initial = data.New().Decode(d.val.Val())
+			d.current = d.initial
+			valCache.Set(d.val.Val(), d.current, 0)
+		}
 	}
 
 	// Finally if we are dealing with a record
@@ -219,7 +229,7 @@ func (d *document) shouldDrop(ctx context.Context) (bool, error) {
 	// that the table should drop
 	// writes, and if so, then return.
 
-	tb, err := d.i.e.dbo.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
+	tb, err := d.i.e.tx.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return false, err
 	}
@@ -234,7 +244,7 @@ func (d *document) shouldVersn(ctx context.Context) (bool, error) {
 	// that the table should keep
 	// all document versions.
 
-	tb, err := d.i.e.dbo.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
+	tb, err := d.i.e.tx.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return false, err
 	}
@@ -267,9 +277,9 @@ func (d *document) storeThing(ctx context.Context) (err error) {
 	if ok, err := d.shouldVersn(ctx); err != nil {
 		return err
 	} else if ok == true {
-		_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.enc, d.current.Encode())
+		_, err = d.i.e.tx.Put(ctx, d.i.e.time.UnixNano(), d.enc, d.current.Encode())
 	} else if ok == false {
-		_, err = d.i.e.dbo.Put(ctx, 0, d.enc, d.current.Encode())
+		_, err = d.i.e.tx.Put(ctx, 0, d.enc, d.current.Encode())
 	}
 
 	return
@@ -293,9 +303,9 @@ func (d *document) purgeThing(ctx context.Context) (err error) {
 	if ok, err := d.shouldVersn(ctx); err != nil {
 		return err
 	} else if ok == true {
-		_, err = d.i.e.dbo.Put(ctx, d.i.e.time, d.enc, nil)
+		_, err = d.i.e.tx.Put(ctx, d.i.e.time.UnixNano(), d.enc, nil)
 	} else if ok == false {
-		_, err = d.i.e.dbo.Clr(ctx, d.enc)
+		_, err = d.i.e.tx.Clr(ctx, d.enc)
 	}
 
 	return
@@ -327,7 +337,7 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 	// for this table, loop through
 	// them, and compute the changes.
 
-	ixs, err := d.i.e.dbo.AllIX(ctx, d.key.NS, d.key.DB, d.key.TB)
+	ixs, err := d.i.e.tx.AllIX(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return err
 	}
@@ -345,12 +355,12 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 			for _, f := range del {
 				enfd := data.Consume(f).Encode()
 				didx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd}
-				d.i.e.dbo.DelC(ctx, d.i.e.time, didx.Encode(), d.id.Bytes())
+				d.i.e.tx.DelC(ctx, d.i.e.time.UnixNano(), didx.Encode(), d.id.Bytes())
 			}
 			for _, f := range add {
 				enfd := data.Consume(f).Encode()
 				aidx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd}
-				if _, err = d.i.e.dbo.PutC(ctx, 0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
+				if _, err = d.i.e.tx.PutC(ctx, 0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
 					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: f}
 				}
 			}
@@ -360,12 +370,12 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 			for _, f := range del {
 				enfd := data.Consume(f).Encode()
 				didx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd, ID: d.key.ID}
-				d.i.e.dbo.DelC(ctx, d.i.e.time, didx.Encode(), d.id.Bytes())
+				d.i.e.tx.DelC(ctx, d.i.e.time.UnixNano(), didx.Encode(), d.id.Bytes())
 			}
 			for _, f := range add {
 				enfd := data.Consume(f).Encode()
 				aidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd, ID: d.key.ID}
-				if _, err = d.i.e.dbo.PutC(ctx, 0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
+				if _, err = d.i.e.tx.PutC(ctx, 0, aidx.Encode(), d.id.Bytes(), nil); err != nil {
 					return &IndexError{tb: d.key.TB, name: ix.Name, cols: ix.Cols, vals: f}
 				}
 			}
@@ -402,7 +412,7 @@ func (d *document) purgeIndex(ctx context.Context) (err error) {
 	// for this table, loop through
 	// them, and compute the changes.
 
-	ixs, err := d.i.e.dbo.AllIX(ctx, d.key.NS, d.key.DB, d.key.TB)
+	ixs, err := d.i.e.tx.AllIX(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return err
 	}
@@ -414,14 +424,14 @@ func (d *document) purgeIndex(ctx context.Context) (err error) {
 		if ix.Uniq == true {
 			for _, v := range del {
 				key := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v}
-				d.i.e.dbo.DelC(ctx, 0, key.Encode(), d.id.Bytes())
+				d.i.e.tx.DelC(ctx, 0, key.Encode(), d.id.Bytes())
 			}
 		}
 
 		if ix.Uniq == false {
 			for _, v := range del {
 				key := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v, ID: d.key.ID}
-				d.i.e.dbo.DelC(ctx, 0, key.Encode(), d.id.Bytes())
+				d.i.e.tx.DelC(ctx, 0, key.Encode(), d.id.Bytes())
 			}
 		}
 

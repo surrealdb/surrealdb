@@ -78,14 +78,6 @@ func routes(s *fibre.Fibre) {
 	s.Rpc("/rpc", &rpc{})
 
 	// --------------------------------------------------
-	// Endpoints for authentication signup
-	// --------------------------------------------------
-
-	s.Get("/logs", func(c *fibre.Context) error {
-		return logger(c)
-	})
-
-	// --------------------------------------------------
 	// Endpoints for syncing data
 	// --------------------------------------------------
 

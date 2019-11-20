@@ -24,13 +24,11 @@ func live() fibre.MiddlewareFunc {
 		return func(c *fibre.Context) (err error) {
 
 			if c.IsSocket() {
-				if id, ok := c.Get("id").(string); ok {
-					beg, end := db.Socket(c, id)
-					beg()
-					err = h(c)
-					end()
-					return err
-				}
+				beg, end := db.Socket(c, c.Uniq())
+				beg()
+				err = h(c)
+				end()
+				return err
 			}
 
 			return h(c)

@@ -47,7 +47,7 @@ func (e *executor) executeInfoKV(ctx context.Context, ast *sql.InfoStatement) (o
 		return nil, err
 	}
 
-	ns, err := e.dbo.AllNS(ctx)
+	ns, err := e.tx.AllNS(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -71,17 +71,17 @@ func (e *executor) executeInfoNS(ctx context.Context, ast *sql.InfoStatement) (o
 		return nil, err
 	}
 
-	db, err := e.dbo.AllDB(ctx, e.ns)
+	db, err := e.tx.AllDB(ctx, e.ns)
 	if err != nil {
 		return nil, err
 	}
 
-	nt, err := e.dbo.AllNT(ctx, e.ns)
+	nt, err := e.tx.AllNT(ctx, e.ns)
 	if err != nil {
 		return nil, err
 	}
 
-	nu, err := e.dbo.AllNU(ctx, e.ns)
+	nu, err := e.tx.AllNU(ctx, e.ns)
 	if err != nil {
 		return nil, err
 	}
@@ -117,22 +117,22 @@ func (e *executor) executeInfoDB(ctx context.Context, ast *sql.InfoStatement) (o
 		return nil, err
 	}
 
-	tb, err := e.dbo.AllTB(ctx, e.ns, e.db)
+	tb, err := e.tx.AllTB(ctx, e.ns, e.db)
 	if err != nil {
 		return nil, err
 	}
 
-	dt, err := e.dbo.AllDT(ctx, e.ns, e.db)
+	dt, err := e.tx.AllDT(ctx, e.ns, e.db)
 	if err != nil {
 		return nil, err
 	}
 
-	du, err := e.dbo.AllDU(ctx, e.ns, e.db)
+	du, err := e.tx.AllDU(ctx, e.ns, e.db)
 	if err != nil {
 		return nil, err
 	}
 
-	sc, err := e.dbo.AllSC(ctx, e.ns, e.db)
+	sc, err := e.tx.AllSC(ctx, e.ns, e.db)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +174,7 @@ func (e *executor) executeInfoSC(ctx context.Context, ast *sql.InfoStatement) (o
 		return nil, err
 	}
 
-	st, err := e.dbo.AllST(ctx, e.ns, e.db, ast.What.VA)
+	st, err := e.tx.AllST(ctx, e.ns, e.db, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
@@ -198,22 +198,27 @@ func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (o
 		return nil, err
 	}
 
-	ev, err := e.dbo.AllEV(ctx, e.ns, e.db, ast.What.VA)
+	ev, err := e.tx.AllEV(ctx, e.ns, e.db, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
 
-	fd, err := e.dbo.AllFD(ctx, e.ns, e.db, ast.What.VA)
+	fd, err := e.tx.AllFD(ctx, e.ns, e.db, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
 
-	ix, err := e.dbo.AllIX(ctx, e.ns, e.db, ast.What.VA)
+	ix, err := e.tx.AllIX(ctx, e.ns, e.db, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
 
-	ft, err := e.dbo.AllFT(ctx, e.ns, e.db, ast.What.VA)
+	ft, err := e.tx.AllFT(ctx, e.ns, e.db, ast.What.VA)
+	if err != nil {
+		return nil, err
+	}
+
+	lv, err := e.tx.AllLV(ctx, e.ns, e.db, ast.What.VA)
 	if err != nil {
 		return nil, err
 	}
@@ -240,10 +245,16 @@ func (e *executor) executeInfoTB(ctx context.Context, ast *sql.InfoStatement) (o
 		table[v.Name.VA] = v.String()
 	}
 
+	lives := make(map[string]interface{})
+	for _, v := range lv {
+		lives[v.ID] = v.String()
+	}
+
 	res.Set(event, "event")
 	res.Set(field, "field")
 	res.Set(index, "index")
 	res.Set(table, "table")
+	res.Set(lives, "lives")
 
 	return []interface{}{res.Data()}, nil
 

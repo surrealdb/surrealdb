@@ -56,7 +56,7 @@ func export(c *fibre.Context, NS, DB string) error {
 	// Tokens
 	// ------------------------------
 
-	dts, err := exe.dbo.AllDT(ctx, NS, DB)
+	dts, err := exe.tx.AllDT(ctx, NS, DB)
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func export(c *fibre.Context, NS, DB string) error {
 	// Logins
 	// ------------------------------
 
-	dus, err := exe.dbo.AllDU(ctx, NS, DB)
+	dus, err := exe.tx.AllDU(ctx, NS, DB)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func export(c *fibre.Context, NS, DB string) error {
 	// Scopes
 	// ------------------------------
 
-	scs, err := exe.dbo.AllSC(ctx, NS, DB)
+	scs, err := exe.tx.AllSC(ctx, NS, DB)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func export(c *fibre.Context, NS, DB string) error {
 			// Tokens
 			// ------------------------------
 
-			sct, err := exe.dbo.AllST(ctx, NS, DB, v.Name.VA)
+			sct, err := exe.tx.AllST(ctx, NS, DB, v.Name.VA)
 			if err != nil {
 				return err
 			}
@@ -130,7 +130,7 @@ func export(c *fibre.Context, NS, DB string) error {
 	// Tables
 	// ------------------------------
 
-	tbs, err := exe.dbo.AllTB(ctx, NS, DB)
+	tbs, err := exe.tx.AllTB(ctx, NS, DB)
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func export(c *fibre.Context, NS, DB string) error {
 		// Events
 		// ------------------------------
 
-		evs, err := exe.dbo.AllEV(ctx, NS, DB, TB.Name.VA)
+		evs, err := exe.tx.AllEV(ctx, NS, DB, TB.Name.VA)
 		if err != nil {
 			return err
 		}
@@ -177,7 +177,7 @@ func export(c *fibre.Context, NS, DB string) error {
 		// Fields
 		// ------------------------------
 
-		fds, err := exe.dbo.AllFD(ctx, NS, DB, TB.Name.VA)
+		fds, err := exe.tx.AllFD(ctx, NS, DB, TB.Name.VA)
 		if err != nil {
 			return err
 		}
@@ -193,7 +193,7 @@ func export(c *fibre.Context, NS, DB string) error {
 		// Indexes
 		// ------------------------------
 
-		ixs, err := exe.dbo.AllIX(ctx, NS, DB, TB.Name.VA)
+		ixs, err := exe.tx.AllIX(ctx, NS, DB, TB.Name.VA)
 		if err != nil {
 			return err
 		}
@@ -236,9 +236,9 @@ TB:
 			var vls []kvs.KV
 
 			if TB.Vers {
-				vls, err = exe.dbo.AllR(ctx, min, max, 10000)
+				vls, err = exe.tx.AllR(ctx, min, max, 10000)
 			} else {
-				vls, err = exe.dbo.GetR(ctx, math.MaxInt64, min, max, 10000)
+				vls, err = exe.tx.GetR(ctx, math.MaxInt64, min, max, 10000)
 			}
 
 			if err != nil {

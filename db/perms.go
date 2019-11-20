@@ -45,7 +45,7 @@ func (d *document) perms(ctx context.Context, doc *data.Doc) (err error) {
 	// check if the permissions allow us
 	// to view each field.
 
-	fds, err := d.i.e.dbo.AllFD(ctx, d.key.NS, d.key.DB, d.key.TB)
+	fds, err := d.i.e.tx.AllFD(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return err
 	}

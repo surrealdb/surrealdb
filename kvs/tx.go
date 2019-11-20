@@ -30,6 +30,9 @@ type TX interface {
 	ClrP(context.Context, []byte, uint64) ([]KV, error)
 	ClrR(context.Context, []byte, []byte, uint64) ([]KV, error)
 
+	Put(context.Context, int64, []byte, []byte) (KV, error)
+	PutC(context.Context, int64, []byte, []byte, []byte) (KV, error)
+
 	Get(context.Context, int64, []byte) (KV, error)
 	GetP(context.Context, int64, []byte, uint64) ([]KV, error)
 	GetR(context.Context, int64, []byte, []byte, uint64) ([]KV, error)
@@ -38,7 +41,4 @@ type TX interface {
 	DelC(context.Context, int64, []byte, []byte) (KV, error)
 	DelP(context.Context, int64, []byte, uint64) ([]KV, error)
 	DelR(context.Context, int64, []byte, []byte, uint64) ([]KV, error)
-
-	Put(context.Context, int64, []byte, []byte) (KV, error)
-	PutC(context.Context, int64, []byte, []byte, []byte) (KV, error)
 }

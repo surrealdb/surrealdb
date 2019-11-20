@@ -20,9 +20,8 @@ import (
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/db"
-	"github.com/abcum/surreal/kvs"
-	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/txn"
 	"github.com/abcum/surreal/util/data"
 	"github.com/dgrijalva/jwt-go"
 )
@@ -75,7 +74,7 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 	if nok && len(n) > 0 && dok && len(d) > 0 && sok && len(s) > 0 {
 
 		var ok bool
-		var txn kvs.TX
+		var tx *txn.TX
 		var doc *sql.Thing
 		var res []*db.Response
 		var exp *sql.SubExpression
@@ -84,13 +83,13 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 		// Start a new read transaction.
 
-		if txn, err = db.Begin(false); err != nil {
+		if tx, err = txn.New(c.Context(), false); err != nil {
 			return str, fibre.NewHTTPError(500)
 		}
 
 		// Ensure the transaction closes.
 
-		defer txn.Cancel()
+		defer tx.Cancel()
 
 		// Get the current context.
 
@@ -118,7 +117,7 @@ func signupInternal(c *fibre.Context, vars map[string]interface{}) (str string, 
 
 		// Get the specified signin scope.
 
-		if scp, err = mem.NewWithTX(txn).GetSC(ctx, n, d, s); err != nil {
+		if scp, err = tx.GetSC(ctx, n, d, s); err != nil {
 			m := "Authentication scope does not exist"
 			return str, fibre.NewHTTPError(403).WithFields(f).WithMessage(m)
 		}

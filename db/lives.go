@@ -42,7 +42,7 @@ func (d *document) lives(ctx context.Context, when method) (err error) {
 	// specified for this table, and
 	// update values which have changed.
 
-	lvs, err := d.i.e.dbo.AllLV(ctx, d.key.NS, d.key.DB, d.key.TB)
+	lvs, err := d.i.e.tx.AllLV(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return err
 	}

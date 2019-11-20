@@ -23,6 +23,7 @@ import (
 	"github.com/abcum/fibre"
 
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/keys"
@@ -150,7 +151,7 @@ func (s *socket) check(e *executor, ctx context.Context, ns, db, tb string) (err
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	_, err = e.dbo.GetNS(ctx, ns)
+	_, err = e.tx.GetNS(ctx, ns)
 	if err != nil {
 		return err
 	}
@@ -159,7 +160,7 @@ func (s *socket) check(e *executor, ctx context.Context, ns, db, tb string) (err
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	_, err = e.dbo.GetDB(ctx, ns, db)
+	_, err = e.tx.GetDB(ctx, ns, db)
 	if err != nil {
 		return err
 	}
@@ -168,7 +169,7 @@ func (s *socket) check(e *executor, ctx context.Context, ns, db, tb string) (err
 	// otherwise, the scoped authentication
 	// request can not do anything.
 
-	tbv, err = e.dbo.GetTB(ctx, ns, db, tb)
+	tbv, err = e.tx.GetTB(ctx, ns, db, tb)
 	if err != nil {
 		return err
 	}
@@ -192,7 +193,7 @@ func (s *socket) deregister(id string) {
 
 	ctx := context.Background()
 
-	txn, _ := db.Begin(ctx, true)
+	txn, _ := kvs.Begin(ctx, true)
 
 	defer txn.Commit()
 
@@ -261,14 +262,14 @@ func (s *socket) executeLive(e *executor, ctx context.Context, stm *sql.LiveStat
 		case *sql.Table:
 
 			key := &keys.LV{KV: KV, NS: stm.NS, DB: stm.DB, TB: what.TB, LV: stm.ID}
-			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
+			if _, err = e.tx.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
 				return nil, err
 			}
 
 		case *sql.Ident:
 
 			key := &keys.LV{KV: KV, NS: stm.NS, DB: stm.DB, TB: what.VA, LV: stm.ID}
-			if _, err = e.dbo.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
+			if _, err = e.tx.Put(ctx, 0, key.Encode(), stm.Encode()); err != nil {
 				return nil, err
 			}
 
@@ -320,11 +321,11 @@ func (s *socket) executeKill(e *executor, ctx context.Context, stm *sql.KillStat
 
 					case *sql.Table:
 						key := &keys.LV{KV: KV, NS: qry.NS, DB: qry.DB, TB: what.TB, LV: qry.ID}
-						_, err = e.dbo.Clr(ctx, key.Encode())
+						_, err = e.tx.Clr(ctx, key.Encode())
 
 					case *sql.Ident:
 						key := &keys.LV{KV: KV, NS: qry.NS, DB: qry.DB, TB: what.VA, LV: qry.ID}
-						_, err = e.dbo.Clr(ctx, key.Encode())
+						_, err = e.tx.Clr(ctx, key.Encode())
 
 					}
 

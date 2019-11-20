@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/abcum/surreal/db"
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/web"
 )
@@ -26,11 +27,14 @@ var startCmd = &cobra.Command{
 	Use:   "start [flags]",
 	Short: "Start the database and http server",
 	PreRun: func(cmd *cobra.Command, args []string) {
-
 		log.Display(logo)
-
 	},
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
+
+		if err = kvs.Setup(opts); err != nil {
+			log.Fatal(err)
+			return
+		}
 
 		if err = db.Setup(opts); err != nil {
 			log.Fatal(err)
@@ -47,12 +51,17 @@ var startCmd = &cobra.Command{
 	},
 	PostRunE: func(cmd *cobra.Command, args []string) (err error) {
 
-		if err = web.Exit(); err != nil {
+		if err = web.Exit(opts); err != nil {
 			log.Fatal(err)
 			return
 		}
 
-		if err = db.Exit(); err != nil {
+		if err = db.Exit(opts); err != nil {
+			log.Fatal(err)
+			return
+		}
+
+		if err = kvs.Exit(opts); err != nil {
 			log.Fatal(err)
 			return
 		}

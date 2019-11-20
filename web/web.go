@@ -30,9 +30,10 @@ func Setup(opts *cnf.Options) (err error) {
 	s := fibre.Server()
 
 	routes(s)
-	s.SetWait("15s")
 	s.SetName("web")
 	s.SetIdleTimeout("60s")
+	s.SetReadTimeout("60s")
+	s.SetWriteTimeout("60s")
 	s.SetHTTPErrorHandler(errors)
 	s.Logger().SetLogger(log.Instance())
 
@@ -41,7 +42,6 @@ func Setup(opts *cnf.Options) (err error) {
 	s.Use(mw.Uniq()) // Add uniq id
 	s.Use(mw.Fail()) // Catch panics
 	s.Use(mw.Logs()) // Log requests
-	s.Use(mw.Sock()) // Setup sockets
 
 	// Add cors headers
 
@@ -82,10 +82,6 @@ func Setup(opts *cnf.Options) (err error) {
 
 	s.Use(live())
 
-	// Compress responses
-
-	s.Use(mw.Gzip())
-
 	// Redirect non-https
 
 	s.Use(mw.Secure(&mw.SecureOpts{
@@ -111,10 +107,7 @@ func Setup(opts *cnf.Options) (err error) {
 }
 
 // Exit tears down the server gracefully
-func Exit() (err error) {
-
-	log.WithPrefix("web").Infof("Gracefully shutting down %s protocol", "web")
-
+func Exit(opts *cnf.Options) (err error) {
+	log.WithPrefix("web").Infof("Shutting down web server on %s", opts.Conn)
 	return
-
 }

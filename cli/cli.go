@@ -51,6 +51,6 @@ func init() {
 // Init runs the cli app
 func Init() {
 	if err := mainCmd.Execute(); err != nil {
-		os.Exit(-1)
+		os.Exit(1)
 	}
 }

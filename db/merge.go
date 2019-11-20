@@ -35,6 +35,10 @@ var main = map[string]struct{}{
 
 func (d *document) merge(ctx context.Context, met method, data sql.Expr) (err error) {
 
+	if err = d.defDoc(ctx, met); err != nil {
+		return
+	}
+
 	if err = d.defFld(ctx, met); err != nil {
 		return
 	}
@@ -80,6 +84,14 @@ func (d *document) merge(ctx context.Context, met method, data sql.Expr) (err er
 
 }
 
+func (d *document) defDoc(ctx context.Context, met method) (err error) {
+
+	d.current = d.current.Copy()
+
+	return
+
+}
+
 func (d *document) defFld(ctx context.Context, met method) (err error) {
 
 	switch d.i.vir {
@@ -100,7 +112,7 @@ func (d *document) defFld(ctx context.Context, met method) (err error) {
 
 func (d *document) delFld(ctx context.Context, met method) (err error) {
 
-	tb, err := d.i.e.dbo.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
+	tb, err := d.i.e.tx.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return err
 	}
@@ -111,7 +123,7 @@ func (d *document) delFld(ctx context.Context, met method) (err error) {
 
 		// Get the defined fields
 
-		fds, err := d.i.e.dbo.AllFD(ctx, d.key.NS, d.key.DB, d.key.TB)
+		fds, err := d.i.e.tx.AllFD(ctx, d.key.NS, d.key.DB, d.key.TB)
 		if err != nil {
 			return err
 		}
@@ -269,7 +281,7 @@ func (d *document) mrgSet(ctx context.Context, met method, expr *sql.DataExpress
 
 func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
-	fds, err := d.i.e.dbo.AllFD(ctx, d.key.NS, d.key.DB, d.key.TB)
+	fds, err := d.i.e.tx.AllFD(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return err
 	}

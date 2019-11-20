@@ -17,64 +17,61 @@ package kvs
 import (
 	"context"
 	"io"
-	"strings"
 
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/log"
 )
 
-// DB represents a backing datastore.
-type DS struct {
-	db DB
+var ds *DS
+
+// Stores the different backend implementations
+var stores = make(map[string]func(*cnf.Options) (DB, error))
+
+// Setup sets up the connection with the data layer
+func Setup(opts *cnf.Options) (err error) {
+	log.WithPrefix("kvs").Infof("Starting kvs storage at %s", opts.DB.Path)
+	ds, err = New(opts)
+	log.WithPrefix("kvs").Infof("Started kvs storage at %s", opts.DB.Path)
+	return
 }
 
-// New sets up the underlying key-value store
-func New(opts *cnf.Options) (ds *DS, err error) {
-
-	var db DB
-
-	switch {
-	case opts.DB.Path == "memory":
-		db, err = stores["rixxdb"](opts)
-	case strings.HasPrefix(opts.DB.Path, "file://"):
-		db, err = stores["rixxdb"](opts)
-	case strings.HasPrefix(opts.DB.Path, "dendrodb://"):
-		db, err = stores["dendro"](opts)
-	}
-
-	if err != nil {
-		return
-	}
-
-	ds = &DS{db: db}
-
-	return
-
+// Exit shuts down the connection with the data layer
+func Exit(opts *cnf.Options) (err error) {
+	log.WithPrefix("kvs").Infof("Shutting down kvs storage at %s", opts.DB.Path)
+	return ds.Close()
 }
 
 // Begin begins a new read / write transaction
 // with the underlying database, and returns
 // the transaction, or any error which occured.
-func (ds *DS) Begin(ctx context.Context, writable bool) (txn TX, err error) {
+func Begin(ctx context.Context, writable bool) (txn TX, err error) {
 	return ds.db.Begin(ctx, writable)
 }
 
 // Import loads database operations from a reader.
 // This can be used to playback a database snapshot
 // into an already running database.
-func (ds *DS) Import(r io.Reader) (err error) {
+func Import(r io.Reader) (err error) {
 	return ds.db.Import(r)
 }
 
 // Export saves all database operations to a writer.
 // This can be used to save a database snapshot
 // to a secondary file or stream.
-func (ds *DS) Export(w io.Writer) (err error) {
+func Export(w io.Writer) (err error) {
 	return ds.db.Export(w)
 }
 
 // Close closes the underlying rixxdb / dendrodb
 // database connection, enabling the underlying
 // database to clean up remainging transactions.
-func (ds *DS) Close() (err error) {
+func Close() (err error) {
 	return ds.db.Close()
+}
+
+// Register registers a new database type with
+// the kvs package, enabling it's use as a
+// backing datastore within SurrealDB.
+func Register(name string, constructor func(*cnf.Options) (DB, error)) {
+	stores[name] = constructor
 }

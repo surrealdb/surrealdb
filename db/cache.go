@@ -15,34 +15,44 @@
 package db
 
 import (
-	"sync"
+	"github.com/dgraph-io/ristretto"
 )
 
-type cache struct {
-	items sync.Map
-}
+var keyCache *ristretto.Cache
+var valCache *ristretto.Cache
 
-func (c *cache) Clr() {
-	c.items.Range(func(key interface{}, _ interface{}) bool {
-		c.items.Delete(key)
-		return true
+func init() {
+
+	keyCache, _ = ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,
+		MaxCost:     1 << 32,
+		BufferItems: 64,
+		Cost: func(i interface{}) int64 {
+			switch v := i.(type) {
+			case string:
+				return int64(len(v))
+			case []byte:
+				return int64(len(v))
+			default:
+				return 1
+			}
+		},
 	})
-}
 
-func (c *cache) Del(key string) {
-	c.items.Delete(key)
-}
+	valCache, _ = ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,
+		MaxCost:     1 << 32,
+		BufferItems: 64,
+		Cost: func(i interface{}) int64 {
+			switch v := i.(type) {
+			case string:
+				return int64(len(v))
+			case []byte:
+				return int64(len(v))
+			default:
+				return 1
+			}
+		},
+	})
 
-func (c *cache) Has(key string) bool {
-	_, ok := c.items.Load(key)
-	return ok
-}
-
-func (c *cache) Get(key string) interface{} {
-	val, _ := c.items.Load(key)
-	return val
-}
-
-func (c *cache) Put(key string, val interface{}) {
-	c.items.Store(key, val)
 }

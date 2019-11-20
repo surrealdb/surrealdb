@@ -74,7 +74,7 @@ func (d *document) grant(ctx context.Context, met method) (ok bool, err error) {
 	// so we can check if the permissions
 	// allow us to view this document.
 
-	tb, err := d.i.e.dbo.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
+	tb, err := d.i.e.tx.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return false, err
 	}
@@ -161,7 +161,7 @@ func (d *document) allow(ctx context.Context, met method) (ok bool, err error) {
 	// so we can check if the permissions
 	// allow us to view this document.
 
-	tb, err := d.i.e.dbo.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
+	tb, err := d.i.e.tx.GetTB(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return false, err
 	}

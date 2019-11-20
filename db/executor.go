@@ -15,6 +15,7 @@
 package db
 
 import (
+	"sync"
 	"time"
 
 	"context"
@@ -23,20 +24,22 @@ import (
 
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/log"
-	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/txn"
 )
 
 type executor struct {
-	id    string
-	ns    string
-	db    string
-	dbo   *mem.Cache
-	time  int64
-	lock  *mutex
-	opts  *options
-	send  chan *Response
-	cache *cache
+	id   string
+	ns   string
+	db   string
+	tx   *txn.TX
+	err  error
+	buf  []*Response
+	time time.Time
+	lock *mutex
+	opts *options
+	data sync.Map
+	send chan *Response
 }
 
 func newExecutor(id, ns, db string) (e *executor) {
@@ -47,13 +50,13 @@ func newExecutor(id, ns, db string) (e *executor) {
 	e.ns = ns
 	e.db = db
 
-	e.dbo = mem.New()
+	e.err = nil
+
+	e.data = sync.Map{}
 
 	e.opts = newOptions()
 
 	e.send = make(chan *Response)
-
-	e.cache = new(cache)
 
 	return
 
@@ -78,8 +81,8 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 	// query set, then cancel the transaction.
 
 	defer func() {
-		if e.dbo.TX != nil {
-			e.dbo.Cancel()
+		if e.tx != nil {
+			e.tx.Cancel()
 			clear(e.id)
 		}
 	}()
@@ -115,18 +118,15 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 
 func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 
-	var err error
-	var now time.Time
 	var rsp *Response
-	var buf []*Response
 	var res []interface{}
 
 	// If we are not inside a global transaction
 	// then reset the error to nil so that the
 	// next statement is not ignored.
 
-	if e.dbo.TX == nil {
-		err, now = nil, time.Now()
+	if e.tx == nil {
+		e.err = nil
 	}
 
 	// Check to see if the current statement is
@@ -135,20 +135,22 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 
 	switch stm.(type) {
 	case *sql.BeginStatement:
-		e.lock = new(mutex)
-		err = e.begin(ctx, true)
+		e.err = e.begin(ctx, true)
+		if e.err != nil {
+			clear(e.id)
+		}
 		return
 	case *sql.CancelStatement:
-		err, buf = e.cancel(buf, err, e.send)
-		if err != nil {
+		e.err = e.cancel(e.send)
+		if e.err != nil {
 			clear(e.id)
 		} else {
 			clear(e.id)
 		}
 		return
 	case *sql.CommitStatement:
-		err, buf = e.commit(buf, err, e.send)
-		if err != nil {
+		e.err = e.commit(e.send)
+		if e.err != nil {
 			clear(e.id)
 		} else {
 			flush(e.id)
@@ -160,16 +162,18 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 	// a global transaction, then ignore all
 	// subsequent statements in the transaction.
 
-	if err == nil {
-		res, err = e.operate(ctx, stm)
+	if e.err == nil {
+		res, e.err = e.operate(ctx, stm)
 	} else {
-		res, err = []interface{}{}, errQueryNotExecuted
+		res, e.err = []interface{}{}, errQueryNotExecuted
 	}
 
+	// Generate the response
+
 	rsp = &Response{
-		Time:   time.Since(now).String(),
-		Status: status(err),
-		Detail: detail(err),
+		Time:   time.Since(e.time).String(),
+		Status: status(e.err),
+		Detail: detail(e.err),
 		Result: append([]interface{}{}, res...),
 	}
 
@@ -177,7 +181,7 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 	// query duration time, and mark it as
 	// an error if the query failed.
 
-	switch err.(type) {
+	switch e.err.(type) {
 	default:
 		if log.IsDebug() {
 			log.WithPrefix(logKeySql).WithFields(map[string]interface{}{
@@ -186,7 +190,7 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 				logKeyDB:   e.db,
 				logKeyKind: ctx.Value(ctxKeyKind),
 				logKeyVars: ctx.Value(ctxKeyVars),
-				logKeyTime: time.Since(now).String(),
+				logKeyTime: time.Since(e.time).String(),
 			}).Debugln(stm)
 		}
 	case error:
@@ -197,8 +201,8 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 				logKeyDB:    e.db,
 				logKeyKind:  ctx.Value(ctxKeyKind),
 				logKeyVars:  ctx.Value(ctxKeyVars),
-				logKeyTime:  time.Since(now).String(),
-				logKeyError: detail(err),
+				logKeyTime:  time.Since(e.time).String(),
+				logKeyError: detail(e.err),
 			}).Errorln(stm)
 		}
 	}
@@ -207,7 +211,7 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 	// then we can output the statement response
 	// immediately to the channel.
 
-	if e.dbo.TX == nil {
+	if e.tx == nil {
 		e.send <- rsp
 	}
 
@@ -215,12 +219,16 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 	// must buffer the responses for output at
 	// the end of the transaction.
 
-	if e.dbo.TX != nil {
+	if e.tx != nil {
 		switch stm.(type) {
 		case *sql.ReturnStatement:
-			buf = groupd(buf, rsp)
+			for i := len(e.buf) - 1; i >= 0; i-- {
+				e.buf[len(e.buf)-1] = nil
+				e.buf = e.buf[:len(e.buf)-1]
+			}
+			e.buf = append(e.buf, rsp)
 		default:
-			buf = append(buf, rsp)
+			e.buf = append(e.buf, rsp)
 		}
 	}
 
@@ -236,15 +244,13 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 	// then grab a new transaction, ensuring that
 	// it is closed at the end.
 
-	if e.dbo.TX == nil {
-
-		loc = true
+	if e.tx == nil {
 
 		switch stm := stm.(type) {
 		case sql.WriteableStatement:
-			trw = stm.Writeable()
+			loc, trw = true, stm.Writeable()
 		default:
-			trw = false
+			loc, trw = true, false
 		}
 
 		err = e.begin(ctx, trw)
@@ -252,13 +258,10 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 			return
 		}
 
-		defer e.dbo.Cancel()
-
-		// Let's create a new mutex for just this
-		// local transaction, so we can track any
-		// recursive queries and race errors.
-
-		e.lock = new(mutex)
+		defer func() {
+			e.tx.Cancel()
+			e.tx = nil
+		}()
 
 	}
 
@@ -277,12 +280,6 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 			}()
 		}
 	}
-
-	// Specify a new time for the current executor
-	// iteration, so that all subqueries and async
-	// events are saved with the same version time.
-
-	e.time = time.Now().UnixNano()
 
 	// Execute the defined statement, receiving the
 	// result set, and any errors which occured
@@ -385,8 +382,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 	case <-ctx.Done():
 
-		e.dbo.Cancel()
-		e.dbo.Reset()
+		e.tx.Cancel()
 		clear(e.id)
 
 	default:
@@ -395,20 +391,14 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 		// current statement, then commit or cancel
 		// depending on the result error.
 
-		if loc && e.dbo.Closed() == false {
-
-			// As this is a local transaction then
-			// make sure we reset the transaction
-			// context.
-
-			defer e.dbo.Reset()
+		if loc {
 
 			// If there was an error with the query
 			// then clear the queued changes and
 			// return immediately.
 
 			if err != nil {
-				e.dbo.Cancel()
+				e.tx.Cancel()
 				clear(e.id)
 				return
 			}
@@ -418,13 +408,13 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 			// Cancel or Commit, returning any errors.
 
 			if !trw {
-				if err = e.dbo.Cancel(); err != nil {
+				if err = e.tx.Cancel(); err != nil {
 					clear(e.id)
 				} else {
 					clear(e.id)
 				}
 			} else {
-				if err = e.dbo.Commit(); err != nil {
+				if err = e.tx.Commit(); err != nil {
 					clear(e.id)
 				} else {
 					flush(e.id)
@@ -440,55 +430,51 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 }
 
 func (e *executor) begin(ctx context.Context, rw bool) (err error) {
-	if e.dbo.TX == nil {
-		e.dbo = mem.New()
-		e.dbo.TX, err = db.Begin(ctx, rw)
-	}
+	e.tx, err = txn.New(ctx, rw)
+	e.time = time.Now()
+	e.lock = new(mutex)
 	return
 }
 
-func (e *executor) cancel(buf []*Response, err error, chn chan<- *Response) (error, []*Response) {
+func (e *executor) cancel(chn chan<- *Response) (err error) {
 
-	defer e.dbo.Reset()
+	defer func() {
+		e.tx.Cancel()
+		e.tx = nil
+		e.buf = nil
+		e.err = nil
+	}()
 
-	if e.dbo.TX == nil {
-		return nil, buf
-	}
-
-	err = e.dbo.Cancel()
-
-	for _, v := range buf {
+	for _, v := range e.buf {
+		v.Time = time.Since(e.time).String()
 		v.Status = "ERR"
 		v.Result = []interface{}{}
 		v.Detail = "Transaction cancelled"
 		chn <- v
 	}
 
-	for i := len(buf) - 1; i >= 0; i-- {
-		buf[len(buf)-1] = nil
-		buf = buf[:len(buf)-1]
-	}
-
-	return err, buf
+	return
 
 }
 
-func (e *executor) commit(buf []*Response, err error, chn chan<- *Response) (error, []*Response) {
+func (e *executor) commit(chn chan<- *Response) (err error) {
 
-	defer e.dbo.Reset()
+	defer func() {
+		e.tx.Cancel()
+		e.tx = nil
+		e.buf = nil
+		e.err = nil
+	}()
 
-	if e.dbo.TX == nil {
-		return nil, buf
-	}
-
-	if err != nil {
-		err = e.dbo.Cancel()
+	if e.err != nil {
+		err = e.tx.Cancel()
 	} else {
-		err = e.dbo.Commit()
+		err = e.tx.Commit()
 	}
 
-	for _, v := range buf {
+	for _, v := range e.buf {
 		if err != nil {
+			v.Time = time.Since(e.time).String()
 			v.Status = "ERR"
 			v.Result = []interface{}{}
 			v.Detail = "Transaction failed: " + err.Error()
@@ -496,12 +482,7 @@ func (e *executor) commit(buf []*Response, err error, chn chan<- *Response) (err
 		chn <- v
 	}
 
-	for i := len(buf) - 1; i >= 0; i-- {
-		buf[len(buf)-1] = nil
-		buf = buf[:len(buf)-1]
-	}
-
-	return err, buf
+	return
 
 }
 
@@ -535,12 +516,4 @@ func detail(e error) (s string) {
 	case error:
 		return err.Error()
 	}
-}
-
-func groupd(buf []*Response, rsp *Response) []*Response {
-	for i := len(buf) - 1; i >= 0; i-- {
-		buf[len(buf)-1] = nil
-		buf = buf[:len(buf)-1]
-	}
-	return append(buf, rsp)
 }

@@ -19,6 +19,7 @@ import (
 
 	"github.com/abcum/fibre"
 	"github.com/abcum/surreal/cnf"
+	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/util/uuid"
 )
 
@@ -36,6 +37,8 @@ func setupDB(workers int) {
 	cnf.Settings.DB.Path = "memory"
 	cnf.Settings.DB.Base = "surreal"
 	workerCount = workers
+
+	kvs.Setup(cnf.Settings)
 
 	Setup(cnf.Settings)
 

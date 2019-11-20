@@ -51,7 +51,7 @@ func (d *document) table(ctx context.Context, when method) (err error) {
 	// specified for this table, and
 	// update values which have changed.
 
-	fts, err := d.i.e.dbo.AllFT(ctx, d.key.NS, d.key.DB, d.key.TB)
+	fts, err := d.i.e.tx.AllFT(ctx, d.key.NS, d.key.DB, d.key.TB)
 	if err != nil {
 		return err
 	}

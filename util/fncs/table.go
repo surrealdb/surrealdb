@@ -17,8 +17,8 @@ package fncs
 import (
 	"context"
 
-	"github.com/abcum/surreal/mem"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/txn"
 )
 
 func table(ctx context.Context, args ...interface{}) (interface{}, error) {
@@ -26,7 +26,7 @@ func table(ctx context.Context, args ...interface{}) (interface{}, error) {
 	tb, _ := ensureString(args[0])
 
 	if len(tb) == 0 {
-		return nil, mem.ErrorTBNotFound
+		return nil, txn.ErrorTBNotFound
 	}
 
 	return sql.NewTable(tb), nil
