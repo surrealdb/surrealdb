@@ -355,7 +355,7 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 			for _, f := range del {
 				enfd := data.Consume(f).Encode()
 				didx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd}
-				d.i.e.tx.DelC(ctx, d.i.e.time.UnixNano(), didx.Encode(), d.id.Bytes())
+				d.i.e.tx.DelC(ctx, 0, didx.Encode(), d.id.Bytes())
 			}
 			for _, f := range add {
 				enfd := data.Consume(f).Encode()
@@ -370,7 +370,7 @@ func (d *document) storeIndex(ctx context.Context) (err error) {
 			for _, f := range del {
 				enfd := data.Consume(f).Encode()
 				didx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd, ID: d.key.ID}
-				d.i.e.tx.DelC(ctx, d.i.e.time.UnixNano(), didx.Encode(), d.id.Bytes())
+				d.i.e.tx.DelC(ctx, 0, didx.Encode(), d.id.Bytes())
 			}
 			for _, f := range add {
 				enfd := data.Consume(f).Encode()
