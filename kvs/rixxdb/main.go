@@ -36,8 +36,6 @@ func init() {
 			FlushPolicy: opts.DB.Proc.Flush,
 			// Set the shrink offset duration
 			ShrinkPolicy: opts.DB.Proc.Shrink,
-			// Don't wait for syncing if shrinking
-			IgnorePolicyWhenShrinking: true,
 		})
 
 		if err != nil {
