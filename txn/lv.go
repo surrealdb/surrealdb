@@ -25,7 +25,6 @@ import (
 
 func (t *TX) AllLV(ctx context.Context, ns, db, tb string) (out []*sql.LiveStatement, err error) {
 
-	return
 	if out, ok := t.get(_lv, tb); ok {
 		return out.([]*sql.LiveStatement), nil
 	}
