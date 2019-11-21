@@ -77,6 +77,10 @@ func routes(s *fibre.Fibre) {
 
 	s.Rpc("/rpc", &rpc{})
 
+	s.Use(mw.Quit(&mw.QuitOpts{
+		Timeout: 15 * time.Second,
+	}).PathIs("/rpc"))
+
 	// --------------------------------------------------
 	// Endpoints for syncing data
 	// --------------------------------------------------
@@ -166,6 +170,10 @@ func routes(s *fibre.Fibre) {
 		}
 		return c.Send(200, res)
 	})
+
+	s.Use(mw.Quit(&mw.QuitOpts{
+		Timeout: 15 * time.Second,
+	}).PathIs("/sql"))
 
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{
@@ -353,6 +361,10 @@ func routes(s *fibre.Fibre) {
 		return show.Output(c, c.Param("class"), show.One, show.Delete, res, err)
 
 	})
+
+	s.Use(mw.Quit(&mw.QuitOpts{
+		Timeout: 5 * time.Second,
+	}).PathBegsWith("/key/"))
 
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{
