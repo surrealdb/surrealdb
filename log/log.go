@@ -17,6 +17,8 @@ package log
 import (
 	"fmt"
 	"io/ioutil"
+	"os"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -99,11 +101,6 @@ func Instance() *logrus.Logger {
 	return log.Logger
 }
 
-// Hook adds a logging hook to the logger instance
-func Hook(hook logrus.Hook) {
-	log.AddHook(hook)
-}
-
 func IsPanic() bool {
 	return log.IsLevelEnabled(PanicLevel)
 }
@@ -130,6 +127,60 @@ func IsDebug() bool {
 
 func IsTrace() bool {
 	return log.IsLevelEnabled(TraceLevel)
+}
+
+// SetLevel sets the logging level of the logger instance.
+func SetLevel(v string) {
+	switch v {
+	case "trace":
+		log.Logger.SetLevel(TraceLevel)
+	case "debug":
+		log.Logger.SetLevel(DebugLevel)
+	case "info":
+		log.Logger.SetLevel(InfoLevel)
+	case "warn":
+		log.Logger.SetLevel(WarnLevel)
+	case "error":
+		log.Logger.SetLevel(ErrorLevel)
+	case "fatal":
+		log.Logger.SetLevel(FatalLevel)
+	case "panic":
+		log.Logger.SetLevel(PanicLevel)
+	}
+}
+
+// SetOutput sets the logging output of the logger instance.
+func SetOutput(v string) {
+	switch v {
+	case "none":
+		log.Logger.SetOutput(ioutil.Discard)
+	case "stdout":
+		log.Logger.SetOutput(os.Stdout)
+	case "stderr":
+		log.Logger.SetOutput(os.Stderr)
+	}
+}
+
+// SetFormat sets the logging format of the logger instance.
+func SetFormat(v string) {
+	switch v {
+	case "json":
+		log.Logger.SetFormatter(&JSONFormatter{
+			IgnoreFields: []string{
+				"ctx",
+				"vars",
+			},
+			TimestampFormat: time.RFC3339,
+		})
+	case "text":
+		log.Logger.SetFormatter(&TextFormatter{
+			IgnoreFields: []string{
+				"ctx",
+				"vars",
+			},
+			TimestampFormat: time.RFC3339,
+		})
+	}
 }
 
 func Display(v ...interface{}) {

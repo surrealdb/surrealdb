@@ -182,11 +182,6 @@ func setup() {
 
 	var chk map[string]bool
 
-	// Setup a default logging
-	// hook for cli output
-
-	logger := &log.DefaultHook{}
-
 	// Ensure that the specified
 	// logging level is allowed
 
@@ -206,7 +201,7 @@ func setup() {
 			log.Fatal("Incorrect log level specified")
 		}
 
-		logger.SetLevel(opts.Logging.Level)
+		log.SetLevel(opts.Logging.Level)
 
 	}
 
@@ -224,7 +219,7 @@ func setup() {
 			log.Fatal("Incorrect log format specified")
 		}
 
-		logger.SetFormat(opts.Logging.Format)
+		log.SetFormat(opts.Logging.Format)
 
 	}
 
@@ -243,14 +238,9 @@ func setup() {
 			log.Fatal("Incorrect log output specified")
 		}
 
-		logger.SetOutput(opts.Logging.Output)
+		log.SetOutput(opts.Logging.Output)
 
 	}
-
-	// Add the default logging hook
-	// to the logger instance
-
-	log.Hook(logger)
 
 	// Enable global options object
 
