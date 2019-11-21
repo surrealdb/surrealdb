@@ -59,6 +59,7 @@ func init() {
 // Setup sets up the connection with the data layer
 func Setup(opts *cnf.Options) (err error) {
 	KV = cnf.Settings.DB.Base
+	err = tidy()
 	return
 }
 

@@ -25,6 +25,7 @@ import (
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/txn"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/keys"
 	"github.com/abcum/surreal/util/uuid"
@@ -53,6 +54,57 @@ func flush(id string) {
 			return true
 		})
 	}()
+}
+
+// IMPORTANT remove this when distributed
+// We need to remove this when moving
+// to a distributed cluster as
+// websockets might be managed by an
+// alternative server, and should not
+// be removed on node startup.
+
+func tidy() error {
+
+	ctx := context.Background()
+
+	txn, _ := txn.New(ctx, true)
+
+	defer txn.Commit()
+
+	nss, err := txn.AllNS(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, ns := range nss {
+
+		dbs, err := txn.AllDB(ctx, ns.Name.VA)
+		if err != nil {
+			return err
+		}
+
+		for _, db := range dbs {
+
+			tbs, err := txn.AllTB(ctx, ns.Name.VA, db.Name.VA)
+			if err != nil {
+				return err
+			}
+
+			for _, tb := range tbs {
+
+				key := &keys.LV{KV: KV, NS: ns.Name.VA, DB: db.Name.VA, TB: tb.Name.VA, LV: keys.Ignore}
+				if _, err = txn.ClrP(ctx, key.Encode(), 0); err != nil {
+					return err
+				}
+
+			}
+
+		}
+
+	}
+
+	return nil
+
 }
 
 func (s *socket) ctx() (ctx context.Context) {
