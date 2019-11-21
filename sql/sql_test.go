@@ -2450,6 +2450,36 @@ func Test_Parse_Queries_Define(t *testing.T) {
 				Name: &Ident{"test"},
 				Connect: &SubExpression{
 					Expr: &SelectStatement{
+						RW:       false,
+						Expr:     []*Field{{Expr: &All{}, Field: "*"}},
+						What:     []Expr{&Param{"id"}},
+						Parallel: true,
+					},
+				},
+			}}},
+		},
+		{
+			sql: `DEFINE SCOPE test SIGNUP AS (CREATE tester) SIGNIN AS (SELECT * FROM tester) CONNECT AS (SELECT * FROM $id)`,
+			res: &Query{Statements: []Statement{&DefineScopeStatement{
+				Name: &Ident{"test"},
+				Signup: &SubExpression{
+					Expr: &CreateStatement{
+						What:     []Expr{&Ident{"tester"}},
+						Echo:     AFTER,
+						Parallel: true,
+					},
+				},
+				Signin: &SubExpression{
+					Expr: &SelectStatement{
+						RW:       false,
+						Expr:     []*Field{{Expr: &All{}, Field: "*"}},
+						What:     []Expr{&Ident{"tester"}},
+						Parallel: true,
+					},
+				},
+				Connect: &SubExpression{
+					Expr: &SelectStatement{
+						RW:       false,
 						Expr:     []*Field{{Expr: &All{}, Field: "*"}},
 						What:     []Expr{&Param{"id"}},
 						Parallel: true,

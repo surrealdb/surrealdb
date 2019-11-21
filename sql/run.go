@@ -16,6 +16,14 @@ package sql
 
 func (p *parser) parseRunStatement() (stmt *RunStatement, err error) {
 
+	grw := p.buf.rw
+
+	p.buf.rw = false
+
+	defer func() {
+		p.buf.rw = grw
+	}()
+
 	stmt = &RunStatement{}
 
 	stmt.Expr, err = p.parseExpr()

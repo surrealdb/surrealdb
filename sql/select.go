@@ -16,6 +16,14 @@ package sql
 
 func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 
+	grw := p.buf.rw
+
+	p.buf.rw = false
+
+	defer func() {
+		p.buf.rw = grw
+	}()
+
 	stmt = &SelectStatement{}
 
 	if stmt.Expr, err = p.parseFields(); err != nil {

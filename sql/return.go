@@ -16,6 +16,14 @@ package sql
 
 func (p *parser) parseReturnStatement() (stmt *ReturnStatement, err error) {
 
+	grw := p.buf.rw
+
+	p.buf.rw = false
+
+	defer func() {
+		p.buf.rw = grw
+	}()
+
 	stmt = &ReturnStatement{}
 
 	// The next query part can be any expression

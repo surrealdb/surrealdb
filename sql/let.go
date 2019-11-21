@@ -16,6 +16,14 @@ package sql
 
 func (p *parser) parseLetStatement() (stmt *LetStatement, err error) {
 
+	grw := p.buf.rw
+
+	p.buf.rw = false
+
+	defer func() {
+		p.buf.rw = grw
+	}()
+
 	stmt = &LetStatement{}
 
 	// The first part of a LET expression must

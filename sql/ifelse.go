@@ -16,6 +16,14 @@ package sql
 
 func (p *parser) parseIfelseStatement() (stmt *IfelseStatement, err error) {
 
+	grw := p.buf.rw
+
+	p.buf.rw = false
+
+	defer func() {
+		p.buf.rw = grw
+	}()
+
 	stmt = &IfelseStatement{}
 
 	for {
