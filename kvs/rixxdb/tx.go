@@ -27,13 +27,8 @@ type TX struct {
 
 func one(res *rixxdb.KV, err error) (kvs.KV, error) {
 
-	switch err {
-	case nil:
-		break
-	default:
-		return nil, &kvs.DBError{}
-	case rixxdb.ErrTxNotExpectedValue:
-		return nil, &kvs.KVError{}
+	if err != nil {
+		return nil, &kvs.DBError{Err: err}
 	}
 
 	return res, err
@@ -42,13 +37,8 @@ func one(res *rixxdb.KV, err error) (kvs.KV, error) {
 
 func many(res []*rixxdb.KV, err error) ([]kvs.KV, error) {
 
-	switch err {
-	case nil:
-		break
-	default:
-		return nil, &kvs.DBError{}
-	case rixxdb.ErrTxNotExpectedValue:
-		return nil, &kvs.KVError{}
+	if err != nil {
+		return nil, &kvs.DBError{Err: err}
 	}
 
 	var out = make([]kvs.KV, len(res))

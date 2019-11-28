@@ -24,19 +24,5 @@ type DBError struct {
 
 // Error returns the string representation of the error.
 func (e *DBError) Error() string {
-	return fmt.Sprintf("Unable to write to the database")
-}
-
-// KVError is an error which occurs when there is a
-// problem with a conditional put or delete.
-type KVError struct {
-	Err error
-	Key []byte
-	Val []byte
-	Exp []byte
-}
-
-// Error returns the string representation of the error.
-func (e *KVError) Error() string {
-	return fmt.Sprintf("Database record already exists")
+	return fmt.Sprintf("Unable to write to the database: %s", e.Err)
 }

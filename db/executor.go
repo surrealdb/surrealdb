@@ -492,8 +492,6 @@ func status(e error) (s string) {
 		return "OK"
 	case *kvs.DBError:
 		return "ERR_DB"
-	case *kvs.KVError:
-		return "ERR_KV"
 	case *PermsError:
 		return "ERR_PE"
 	case *ExistError:
