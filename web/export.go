@@ -22,7 +22,7 @@ import (
 
 func export(c *fibre.Context) (err error) {
 
-	if c.Get("auth").(*cnf.Auth).Kind != cnf.AuthKV {
+	if c.Get("auth").(*cnf.Auth).Kind >= cnf.AuthSC {
 		return fibre.NewHTTPError(401)
 	}
 
