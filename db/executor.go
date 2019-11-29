@@ -51,6 +51,7 @@ func newExecutor(id, ns, db string) (e *executor) {
 	e.db = db
 
 	e.err = nil
+	e.buf = nil
 
 	e.data = sync.Map{}
 
@@ -203,6 +204,7 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 				logKeyVars:  ctx.Value(ctxKeyVars),
 				logKeyTime:  time.Since(e.time).String(),
 				logKeyError: detail(e.err),
+				logKeyStack: string(debug.Stack()),
 			}).Errorln(stm)
 		}
 	}
