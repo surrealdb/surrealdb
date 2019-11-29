@@ -3,6 +3,8 @@ module github.com/abcum/surreal
 go 1.13
 
 require (
+	cloud.google.com/go v0.49.0
+	cloud.google.com/go/logging v1.0.0
 	github.com/abcum/bump v0.0.0-20190929092354-46a9c9dbf9ab
 	github.com/abcum/cork v0.0.0-20190929093632-f45e788b8f1b
 	github.com/abcum/fibre v0.0.0-20191120141235-91225f7e723a

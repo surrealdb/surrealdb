@@ -229,9 +229,10 @@ func setup() {
 	if opts.Logging.Output != "" {
 
 		chk = map[string]bool{
-			"none":   true,
-			"stdout": true,
-			"stderr": true,
+			"none":        true,
+			"stdout":      true,
+			"stderr":      true,
+			"stackdriver": true,
 		}
 
 		if _, ok := chk[opts.Logging.Output]; !ok {

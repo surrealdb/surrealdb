@@ -87,12 +87,7 @@ type Logger struct {
 
 func init() {
 	log = &Logger{
-		&logrus.Logger{
-			Out:       ioutil.Discard,
-			Level:     logrus.TraceLevel,
-			Hooks:     logrus.LevelHooks{},
-			Formatter: &logrus.TextFormatter{},
-		},
+		logrus.New(),
 	}
 }
 
@@ -101,30 +96,42 @@ func Instance() *logrus.Logger {
 	return log.Logger
 }
 
+// Hook adds a logging hook to the logger instance
+func Hook(hook logrus.Hook) {
+	log.AddHook(hook)
+}
+
+// IsPanic returns whether panic level logs are enabled
 func IsPanic() bool {
 	return log.IsLevelEnabled(PanicLevel)
 }
 
+// IsFatal returns whether fatal level logs are enabled
 func IsFatal() bool {
 	return log.IsLevelEnabled(FatalLevel)
 }
 
+// IsError returns whether error level logs are enabled
 func IsError() bool {
 	return log.IsLevelEnabled(ErrorLevel)
 }
 
+// IsWarn returns whether warning level logs are enabled
 func IsWarn() bool {
 	return log.IsLevelEnabled(WarnLevel)
 }
 
+// IsInfo returns whether info level logs are enabled
 func IsInfo() bool {
 	return log.IsLevelEnabled(InfoLevel)
 }
 
+// IsDebug returns whether debug level logs are enabled
 func IsDebug() bool {
 	return log.IsLevelEnabled(DebugLevel)
 }
 
+// IsTrace returns whether trace level logs are enabled
 func IsTrace() bool {
 	return log.IsLevelEnabled(TraceLevel)
 }
@@ -158,6 +165,9 @@ func SetOutput(v string) {
 		log.Logger.SetOutput(os.Stdout)
 	case "stderr":
 		log.Logger.SetOutput(os.Stderr)
+	case "stackdriver":
+		log.Logger.SetOutput(ioutil.Discard)
+		log.Logger.AddHook(NewStackDriver())
 	}
 }
 
