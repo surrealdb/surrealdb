@@ -14,4 +14,4 @@
 
 package log
 
-const name = "Surreal"
+const name = "surreal"
