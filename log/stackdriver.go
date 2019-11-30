@@ -25,7 +25,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/abcum/surreal/util/build"
+
 	"cloud.google.com/go/compute/metadata"
+	"cloud.google.com/go/errorreporting"
 	"cloud.google.com/go/logging"
 )
 
@@ -34,6 +37,7 @@ type StackdriverLogger struct {
 	levels []logrus.Level
 	client *logging.Client
 	logger *logging.Logger
+	errors *errorreporting.Client
 }
 
 func NewStackDriver() *StackdriverLogger {
@@ -46,6 +50,11 @@ func NewStackDriver() *StackdriverLogger {
 
 	hook := new(StackdriverLogger)
 
+	conf := errorreporting.Config{
+		ServiceName:    name,
+		ServiceVersion: build.GetInfo().Ver,
+	}
+
 	// If no project id has been set
 	// then attempt to pull this from
 	// machine metadata if on GCE.
@@ -56,14 +65,27 @@ func NewStackDriver() *StackdriverLogger {
 		}
 	}
 
-	// Connect to Stackdriver using a
-	// credentials file if one has been
-	// specified, or metadata if not.
+	// Connect to Stackdriver logging
+	// using the project name retrieved
+	// from the machine metadata.
 
 	hook.client, err = logging.NewClient(ctx, proj)
 	if err != nil {
 		log.Fatalf("Failed to connect to Stackdriver: %v", err)
 	}
+
+	// Connect to Stackdriver errors
+	// using the project name retrieved
+	// from the machine metadata.
+
+	hook.errors, err = errorreporting.NewClient(ctx, proj, conf)
+	if err != nil {
+		log.Fatalf("Failed to connect to Stackdriver: %v", err)
+	}
+
+	// Attempt to ping the Stackdriver
+	// endpoint to ensure the settings
+	// and authentication are correct.
 
 	err = hook.client.Ping(ctx)
 	if err != nil {
@@ -98,6 +120,32 @@ func (h *StackdriverLogger) Levels() []logrus.Level {
 }
 
 func (h *StackdriverLogger) Fire(entry *logrus.Entry) error {
+
+	// If we receive an error, fatal, or
+	// panic - then log the error to GCE
+	// with a full stack trace.
+
+	if entry.Level <= logrus.ErrorLevel {
+
+		e := errorreporting.Entry{
+			Error: fmt.Errorf("%s", entry.Message),
+		}
+
+		for _, v := range entry.Data {
+			switch i := v.(type) {
+			case *http.Request:
+				e.Req = i
+			case *fibre.Context:
+				e.Req = i.Request().Request
+			}
+		}
+
+		h.errors.Report(e)
+	}
+
+	// Otherwise just log the entry to
+	// Stackdriver, and attach any http
+	// request data to it if available.
 
 	e := logging.Entry{
 		Timestamp: entry.Time,
