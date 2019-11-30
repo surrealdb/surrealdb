@@ -393,7 +393,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 		// current statement, then commit or cancel
 		// depending on the result error.
 
-		if loc {
+		if loc && e.tx.Closed() == false {
 
 			// If there was an error with the query
 			// then clear the queued changes and
