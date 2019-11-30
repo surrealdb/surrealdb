@@ -106,6 +106,13 @@ func (h *StackdriverLogger) Fire(entry *logrus.Entry) error {
 		Severity:  logging.ParseSeverity(entry.Level.String()),
 	}
 
+	if p, ok := entry.Data["prefix"]; ok && p == "sql" {
+		e.Payload = map[string]interface{}{
+			"sql":  entry.Message,
+			"vars": entry.Data["vars"],
+		}
+	}
+
 	for k, v := range entry.Data {
 		switch i := v.(type) {
 		default:
