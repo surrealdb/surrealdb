@@ -34,7 +34,6 @@ import (
 
 type StackdriverLogger struct {
 	name   string
-	levels []logrus.Level
 	client *logging.Client
 	logger *logging.Logger
 	errors *errorreporting.Client
@@ -141,6 +140,7 @@ func (h *StackdriverLogger) Fire(entry *logrus.Entry) error {
 		}
 
 		h.errors.Report(e)
+
 	}
 
 	// Otherwise just log the entry to
