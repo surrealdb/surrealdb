@@ -80,7 +80,11 @@ func (t *TX) AddNS(ctx context.Context, ns string) (val *sql.DefineNamespaceStat
 
 	key := &keys.NS{KV: cnf.Settings.DB.Base, NS: ns}
 
-	if kv, _ = t.Get(ctx, 0, key.Encode()); kv.Exi() {
+	if kv, err = t.Get(ctx, 0, key.Encode()); err != nil {
+		return
+	}
+
+	if kv != nil && kv.Exi() {
 		val = &sql.DefineNamespaceStatement{}
 		val.Decode(kv.Val())
 		t.set(_ns, ns, val)

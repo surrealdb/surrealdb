@@ -84,7 +84,11 @@ func (t *TX) AddTB(ctx context.Context, ns, db, tb string) (val *sql.DefineTable
 
 	key := &keys.TB{KV: cnf.Settings.DB.Base, NS: ns, DB: db, TB: tb}
 
-	if kv, _ = t.Get(ctx, 0, key.Encode()); kv.Exi() {
+	if kv, err = t.Get(ctx, 0, key.Encode()); err != nil {
+		return
+	}
+
+	if kv != nil && kv.Exi() {
 		val = &sql.DefineTableStatement{}
 		val.Decode(kv.Val())
 		t.set(_tb, tb, val)

@@ -84,7 +84,11 @@ func (t *TX) AddDB(ctx context.Context, ns, db string) (val *sql.DefineDatabaseS
 
 	key := &keys.DB{KV: cnf.Settings.DB.Base, NS: ns, DB: db}
 
-	if kv, _ = t.Get(ctx, 0, key.Encode()); kv.Exi() {
+	if kv, err = t.Get(ctx, 0, key.Encode()); err != nil {
+		return
+	}
+
+	if kv != nil && kv.Exi() {
 		val = &sql.DefineDatabaseStatement{}
 		val.Decode(kv.Val())
 		t.set(_db, db, val)
