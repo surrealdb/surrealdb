@@ -19,7 +19,6 @@ import (
 
 	"github.com/abcum/rixxdb"
 	"github.com/abcum/surreal/kvs"
-	"github.com/abcum/surreal/log"
 )
 
 type TX struct {
@@ -29,7 +28,6 @@ type TX struct {
 func one(res *rixxdb.KV, err error) (kvs.KV, error) {
 
 	if err != nil {
-		log.WithPrefix("kvs").Errorln(err)
 		return nil, &kvs.DBError{Err: err}
 	}
 
@@ -40,7 +38,6 @@ func one(res *rixxdb.KV, err error) (kvs.KV, error) {
 func many(res []*rixxdb.KV, err error) ([]kvs.KV, error) {
 
 	if err != nil {
-		log.WithPrefix("kvs").Errorln(err)
 		return nil, &kvs.DBError{Err: err}
 	}
 
