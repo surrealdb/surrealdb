@@ -50,6 +50,7 @@ func newExecutor(id, ns, db string) (e *executor) {
 	e.ns = ns
 	e.db = db
 
+	e.tx = nil
 	e.err = nil
 	e.buf = nil
 
