@@ -85,6 +85,7 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 		if e.tx != nil {
 			e.tx.Cancel()
 			clear(e.id)
+			e.tx = nil
 		}
 	}()
 
@@ -255,15 +256,18 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 			loc, trw = true, false
 		}
 
+		defer func() {
+			if e.tx != nil {
+				e.tx.Cancel()
+				clear(e.id)
+				e.tx = nil
+			}
+		}()
+
 		err = e.begin(ctx, trw)
 		if err != nil {
 			return
 		}
-
-		defer func() {
-			e.tx.Cancel()
-			e.tx = nil
-		}()
 
 	}
 
