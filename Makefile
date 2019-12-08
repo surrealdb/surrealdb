@@ -46,3 +46,9 @@ build:
 install: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 install:
 	$(GO) install -v -ldflags '$(LDF)'
+
+.PHONY: deploy
+deploy:
+	build/macos.sh
+	build/linux.sh
+	build/windows.sh
