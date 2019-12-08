@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 VERS=$(git describe --tags --abbrev=0)
 NAME=surreal-${VERS}.linux-amd64
