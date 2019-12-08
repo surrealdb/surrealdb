@@ -19,9 +19,9 @@ import (
 )
 
 var (
-	ver  = "0.1.0" // Version number
-	rev  string    // Git revision of this build
-	time string    // Build time in UTC (year/month/day hour:min:sec)
+	ver  string // Version number
+	rev  string // Git revision of this build
+	time string // Build time in UTC (year/month/day hour:min:sec)
 )
 
 // Info holds information about the current build
