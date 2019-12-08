@@ -56,7 +56,7 @@ func flush(id string) {
 	}()
 }
 
-// IMPORTANT remove this when distributed
+// TODO remove this when distributed
 // We need to remove this when moving
 // to a distributed cluster as
 // websockets might be managed by an

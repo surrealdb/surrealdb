@@ -950,8 +950,6 @@ func (p *parser) parseSubp() (stmt *SubpExpression, err error) {
 
 	stmt = &SubpExpression{}
 
-	// IMPORTANT maybe we should not accept any expression here
-
 	if stmt.What, err = p.parseWhat(); err != nil {
 		return nil, err
 	}
