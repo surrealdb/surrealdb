@@ -116,7 +116,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Use(mw.Quit(&mw.QuitOpts{
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second,
 	}).PathIs("/signup"))
 
 	s.Use(mw.Type(&mw.TypeOpts{
@@ -142,7 +142,7 @@ func routes(s *fibre.Fibre) {
 	})
 
 	s.Use(mw.Quit(&mw.QuitOpts{
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second,
 	}).PathIs("/signin"))
 
 	s.Use(mw.Type(&mw.TypeOpts{
@@ -170,10 +170,6 @@ func routes(s *fibre.Fibre) {
 		}
 		return c.Send(200, res)
 	})
-
-	s.Use(mw.Quit(&mw.QuitOpts{
-		Timeout: 15 * time.Second,
-	}).PathIs("/sql"))
 
 	s.Use(mw.Type(&mw.TypeOpts{
 		AllowedContent: map[string]bool{
