@@ -6,7 +6,7 @@ HASH=${NAME}.txt
 FILE=${NAME}.tgz
 
 GOOS=windows GOARCH=amd64 go build -v -ldflags "$(bash build/flags.sh)"
-tar -zcvf $FILE -s "#^#${NAME}/#" surreal
+tar -zcvf $FILE -s "#^#${NAME}/#" surreal.exe
 
 echo $(shasum -a 256 $FILE | cut -f1 -d' ') > $HASH
 
