@@ -168,11 +168,11 @@ func (d *document) runUpdate(ctx context.Context, stm *sql.UpdateStatement) (int
 		return nil, err
 	}
 
-	if err = d.event(ctx, met); err != nil {
+	if err = d.lives(ctx, met); err != nil {
 		return nil, err
 	}
 
-	if err = d.lives(ctx, met); err != nil {
+	if err = d.event(ctx, met); err != nil {
 		return nil, err
 	}
 

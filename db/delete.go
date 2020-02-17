@@ -162,11 +162,11 @@ func (d *document) runDelete(ctx context.Context, stm *sql.DeleteStatement) (int
 		return nil, err
 	}
 
-	if err = d.event(ctx, met); err != nil {
+	if err = d.lives(ctx, met); err != nil {
 		return nil, err
 	}
 
-	if err = d.lives(ctx, met); err != nil {
+	if err = d.event(ctx, met); err != nil {
 		return nil, err
 	}
 

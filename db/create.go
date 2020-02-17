@@ -157,11 +157,11 @@ func (d *document) runCreate(ctx context.Context, stm *sql.CreateStatement) (int
 		return nil, err
 	}
 
-	if err = d.event(ctx, met); err != nil {
+	if err = d.lives(ctx, met); err != nil {
 		return nil, err
 	}
 
-	if err = d.lives(ctx, met); err != nil {
+	if err = d.event(ctx, met); err != nil {
 		return nil, err
 	}
 

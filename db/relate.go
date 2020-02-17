@@ -155,11 +155,11 @@ func (d *document) runRelate(ctx context.Context, stm *sql.RelateStatement) (int
 		return nil, err
 	}
 
-	if err = d.event(ctx, met); err != nil {
+	if err = d.lives(ctx, met); err != nil {
 		return nil, err
 	}
 
-	if err = d.lives(ctx, met); err != nil {
+	if err = d.event(ctx, met); err != nil {
 		return nil, err
 	}
 
