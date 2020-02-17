@@ -257,14 +257,6 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 			loc, trw = true, false
 		}
 
-		defer func() {
-			if e.tx != nil {
-				e.tx.Cancel()
-				clear(e.id)
-				e.tx = nil
-			}
-		}()
-
 		err = e.begin(ctx, trw)
 		if err != nil {
 			return
@@ -391,6 +383,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 
 		e.tx.Cancel()
 		clear(e.id)
+		e.tx = nil
 
 	default:
 
@@ -407,6 +400,7 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 			if err != nil {
 				e.tx.Cancel()
 				clear(e.id)
+				e.tx = nil
 				return
 			}
 
@@ -417,14 +411,18 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 			if !trw {
 				if err = e.tx.Cancel(); err != nil {
 					clear(e.id)
+					e.tx = nil
 				} else {
 					clear(e.id)
+					e.tx = nil
 				}
 			} else {
 				if err = e.tx.Commit(); err != nil {
 					clear(e.id)
+					e.tx = nil
 				} else {
 					flush(e.id)
+					e.tx = nil
 				}
 			}
 
