@@ -63,12 +63,6 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 	case "purge.not":
 		return purgeNot(ctx, args...)
 
-	// Json implementation
-	case "json.decode":
-		return jsonDecode(ctx, args...)
-	case "json.encode":
-		return jsonEncode(ctx, args...)
-
 	// Geo implementation
 	case "geo.point":
 		return geoPoint(ctx, args...)
