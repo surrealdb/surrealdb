@@ -41,6 +41,7 @@ type socket struct {
 func clear(id string) {
 	go func() {
 		sockets.Range(func(key, val interface{}) bool {
+			val.(*socket).clear(id + "-bg")
 			val.(*socket).clear(id)
 			return true
 		})
@@ -50,6 +51,7 @@ func clear(id string) {
 func flush(id string) {
 	go func() {
 		sockets.Range(func(key, val interface{}) bool {
+			val.(*socket).flush(id + "-bg")
 			val.(*socket).flush(id)
 			return true
 		})

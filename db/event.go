@@ -65,6 +65,10 @@ func (d *document) event(ctx context.Context, met method) (err error) {
 			kind = "DELETE"
 		}
 
+		var id = d.i.e.id
+		d.i.e.id = d.i.e.id + "-bg"
+		defer func() { d.i.e.id = id }()
+
 		vars := data.New()
 		vars.Set(d.id, varKeyThis)
 		vars.Set(kind, varKeyMethod)
