@@ -75,10 +75,6 @@ func (p *parser) parseSelectStatement() (stmt *SelectStatement, err error) {
 		return nil, err
 	}
 
-	if stmt.Parallel, err = p.parseParallel(); err != nil {
-		return nil, err
-	}
-
 	if err = checkExpression(aggrs, stmt.Expr, stmt.Group); err != nil {
 		return nil, err
 	}

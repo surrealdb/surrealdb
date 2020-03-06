@@ -38,10 +38,6 @@ func (p *parser) parseUpdateStatement() (stmt *UpdateStatement, err error) {
 		return nil, err
 	}
 
-	if stmt.Parallel, err = p.parseParallel(); err != nil {
-		return nil, err
-	}
-
 	return
 
 }
