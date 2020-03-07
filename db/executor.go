@@ -269,11 +269,11 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 	// it runs no longer than specified.
 
 	if stm, ok := stm.(sql.KillableStatement); ok {
-		if stm.Duration() > 0 {
-			ctx, canc = context.WithTimeout(ctx, stm.Duration())
+		if dur := stm.Duration(); dur > 0 {
+			ctx, canc = context.WithTimeout(ctx, dur)
 			defer func() {
 				if tim := ctx.Err(); err == nil && tim != nil {
-					res, err = nil, &TimerError{timer: stm.Duration()}
+					res, err = nil, &TimerError{timer: dur}
 				}
 				canc()
 			}()
