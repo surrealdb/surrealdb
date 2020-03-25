@@ -22,8 +22,6 @@ import (
 	"github.com/pkg/profile"
 
 	"github.com/abcum/surreal/cli"
-
-	"github.com/stackimpact/stackimpact-go"
 )
 
 func main() {
@@ -36,11 +34,6 @@ func main() {
 	case "block":
 		defer profile.Start(profile.BlockProfile, profile.ProfilePath("."), profile.NoShutdownHook).Stop()
 	}
-
-	stackimpact.Start(stackimpact.Options{
-		AgentKey: "3326cc7b7c7de70cf2a29f8320c42c31149f39da",
-		AppName:  "Surreal",
-	})
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
