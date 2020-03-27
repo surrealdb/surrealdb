@@ -58,7 +58,7 @@ func (d *document) grant(ctx context.Context, met method) (ok bool, err error) {
 	// no need to check permissions.
 
 	if d.key == nil {
-		return false, nil
+		return true, nil
 	}
 
 	// If we are authenticated using DB, NS,
