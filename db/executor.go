@@ -206,7 +206,6 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 				logKeyVars:  ctx.Value(ctxKeyVars),
 				logKeyTime:  time.Since(e.time).String(),
 				logKeyError: detail(e.err),
-				logKeyStack: string(debug.Stack()),
 			}).Errorln(stm)
 		}
 	}
