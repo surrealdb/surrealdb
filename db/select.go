@@ -96,6 +96,13 @@ func (e *executor) fetchSelect(ctx context.Context, stm *sql.SelectStatement, do
 	if doc != nil {
 		vars := data.New()
 		vars.Set(doc.Data(), varKeyParent)
+		vars.Array(varKeyParents)
+		if subs := ctx.Value(ctxKeySubs); subs != nil {
+			if subs, ok := subs.(*data.Doc); ok {
+				vars.Append(subs.Get(varKeyParents).Data(), varKeyParents)
+			}
+		}
+		vars.Append(doc.Data(), varKeyParents)
 		ctx = context.WithValue(ctx, ctxKeySubs, vars)
 	}
 

@@ -78,8 +78,9 @@ const (
 	varKeyAfter   = "after"
 	varKeyBefore  = "before"
 	varKeyMethod  = "method"
-	varKeyParent  = "parent"
 	varKeyOrigin  = "origin"
+	varKeyParent  = "parent"
+	varKeyParents = "parents"
 	varKeySession = "session"
 )
 
