@@ -22,6 +22,7 @@ import (
 
 	"runtime/debug"
 
+	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
@@ -261,6 +262,22 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 			return
 		}
 
+	}
+
+	// Mark the beginning of this statement so we
+	// can monitor the running time, and ensure
+	// it runs no longer than specified.
+
+	if cnf.Settings.Query.Timeout > 0 {
+		if perm(ctx) != cnf.AuthKV {
+			ctx, canc = context.WithTimeout(ctx, cnf.Settings.Query.Timeout)
+			defer func() {
+				if tim := ctx.Err(); err == nil && tim != nil {
+					res, err = nil, &TimerError{timer: cnf.Settings.Query.Timeout}
+				}
+				canc()
+			}()
+		}
 	}
 
 	// Mark the beginning of this statement so we

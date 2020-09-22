@@ -59,6 +59,10 @@ type Options struct {
 		Nets []*net.IPNet // Allowed cidr ranges for authentication
 	}
 
+	Query struct {
+		Timeout time.Duration // Fixed query timeout
+	}
+
 	Logging struct {
 		Level  string // Stores the configured logging level
 		Output string // Stores the configured logging output

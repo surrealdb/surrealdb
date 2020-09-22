@@ -82,6 +82,8 @@ func init() {
 	startCmd.PersistentFlags().IntVar(&opts.Port, "port", 8000, "The port on which to serve the web server")
 	startCmd.PersistentFlags().StringVarP(&opts.Bind, "bind", "b", "0.0.0.0", "The hostname or ip address to listen for connections on")
 
+	startCmd.PersistentFlags().DurationVar(&opts.Query.Timeout, "timeout", 0, "")
+
 	startCmd.PersistentFlags().StringVarP(&opts.DB.Code, "key", "k", "", "Encryption key to use for on-disk encryption")
 
 	startCmd.PersistentFlags().DurationVar(&opts.DB.Proc.Flush, "db-flush", 0, "A time duration to use when syncing data to persistent storage")
