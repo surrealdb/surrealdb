@@ -18,5 +18,5 @@ package sql
 //go:generate tmpl -file=kill.gen.json kill.gen.go.tmpl
 //go:generate tmpl -file=rdwr.gen.json rdwr.gen.go.tmpl
 
-//go:generate go get -u github.com/ugorji/go/codec/codecgen@v0.0.0-20181204163529-d75b2dcb6bc8
+//go:generate go get -u github.com/ugorji/go/codec/codecgen
 //go:generate codecgen -o ast.gen.go ast.go

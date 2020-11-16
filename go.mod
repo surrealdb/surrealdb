@@ -1,34 +1,38 @@
 module github.com/abcum/surreal
 
-go 1.13
+go 1.15
 
 require (
-	cloud.google.com/go v0.49.0
-	cloud.google.com/go/logging v1.0.0
-	github.com/abcum/bump v0.0.0-20190929092354-46a9c9dbf9ab
-	github.com/abcum/cork v0.0.0-20190929093632-f45e788b8f1b
-	github.com/abcum/fibre v0.0.0-20200111125510-14091e123593
-	github.com/abcum/rixxdb v0.0.0-20191128162642-00f52d16d2d3
+	cloud.google.com/go v0.72.0
+	cloud.google.com/go/logging v1.1.2
+	github.com/abcum/bump v0.0.0-20201116071400-31a74cba5f19
+	github.com/abcum/cork v0.0.0-20201116072055-6b3677fdfab1
+	github.com/abcum/fibre v0.0.0-20201116072313-07fa416362b2
+	github.com/abcum/rixxdb v0.0.0-20201116083534-c988f1e5d2bb
 	github.com/abcum/tmpl v0.0.0-20190929092451-4b08f6027ed1 // indirect
-	github.com/dgraph-io/ristretto v0.0.0-20191114170855-99d1bbbf28e6
+	github.com/dgraph-io/ristretto v0.0.3
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/elithrar/simple-scrypt v1.3.0
-	github.com/gorilla/websocket v1.4.1
-	github.com/hjson/hjson-go v3.0.1+incompatible
-	github.com/mattn/go-colorable v0.1.4 // indirect
-	github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b
-	github.com/pkg/profile v1.3.0
+	github.com/google/go-cmp v0.5.3 // indirect
+	github.com/gorilla/websocket v1.4.2
+	github.com/hjson/hjson-go v3.1.0+incompatible
+	github.com/mattn/go-colorable v0.1.8 // indirect
+	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
+	github.com/pkg/profile v1.5.0
 	github.com/rainycape/unidecode v0.0.0-20150907023854-cb7f23ec59be
 	github.com/rs/xid v1.2.1
 	github.com/satori/go.uuid v1.2.0
-	github.com/sergi/go-diff v1.0.0
-	github.com/sirupsen/logrus v1.4.2
+	github.com/sergi/go-diff v1.1.0
+	github.com/sirupsen/logrus v1.7.0
 	github.com/smartystreets/goconvey v1.6.4
-	github.com/spf13/cobra v0.0.5
-	github.com/stackimpact/stackimpact-go v2.3.10+incompatible
-	github.com/ugorji/go/codec v0.0.0-20181204163529-d75b2dcb6bc8
-	golang.org/x/crypto v0.0.0-20191119213627-4f8c1d86b1ba
-	golang.org/x/net v0.0.0-20191119073136-fc4aabc6c914
-	golang.org/x/text v0.3.2
-	golang.org/x/tools v0.0.0-20200110213125-a7a6caa82ab2 // indirect
+	github.com/spf13/cobra v1.1.1
+	github.com/ugorji/go/codec v1.2.0
+	github.com/ugorji/go/codec/codecgen v1.2.0 // indirect
+	golang.org/x/crypto v0.0.0-20201112155050-0c6587e931a9
+	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
+	golang.org/x/oauth2 v0.0.0-20201109201403-9fd604954f58 // indirect
+	golang.org/x/text v0.3.4
+	golang.org/x/tools v0.0.0-20201116002733-ac45abd4c88c // indirect
+	google.golang.org/appengine v1.6.7 // indirect
+	google.golang.org/genproto v0.0.0-20201113130914-ce600e9a6f9e // indirect
 )
