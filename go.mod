@@ -14,6 +14,7 @@ require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/elithrar/simple-scrypt v1.3.0
 	github.com/google/go-cmp v0.5.3 // indirect
+	github.com/google/pprof v0.0.0-20201109224723-20978b51388d // indirect
 	github.com/gorilla/websocket v1.4.2
 	github.com/hjson/hjson-go v3.1.0+incompatible
 	github.com/mattn/go-colorable v0.1.8 // indirect
@@ -34,5 +35,5 @@ require (
 	golang.org/x/text v0.3.4
 	golang.org/x/tools v0.0.0-20201116002733-ac45abd4c88c // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20201113130914-ce600e9a6f9e // indirect
+	google.golang.org/genproto v0.0.0-20201116123041-bf037d74fda1 // indirect
 )
