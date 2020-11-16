@@ -7,7 +7,7 @@ require (
 	cloud.google.com/go/logging v1.1.2
 	github.com/abcum/bump v0.0.0-20201116071400-31a74cba5f19
 	github.com/abcum/cork v0.0.0-20201116072055-6b3677fdfab1
-	github.com/abcum/fibre v0.0.0-20201116072313-07fa416362b2
+	github.com/abcum/fibre v0.0.0-20201116105551-0b75e530e0cd
 	github.com/abcum/rixxdb v0.0.0-20201116083534-c988f1e5d2bb
 	github.com/abcum/tmpl v0.0.0-20190929092451-4b08f6027ed1 // indirect
 	github.com/dgraph-io/ristretto v0.0.3
