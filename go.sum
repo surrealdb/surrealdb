@@ -44,8 +44,8 @@ github.com/abcum/bump v0.0.0-20201116071400-31a74cba5f19 h1:FmvfNT034i2bxnBu18IL
 github.com/abcum/bump v0.0.0-20201116071400-31a74cba5f19/go.mod h1:4I2T23JoKcYIVfkro3Y5Lkay4kqEyna5FmLfkHgcTb8=
 github.com/abcum/cork v0.0.0-20201116072055-6b3677fdfab1 h1:HRy+gOcIbmHi2CHY/kVgbqJN0igBNj20Cl4u4Eg9d2g=
 github.com/abcum/cork v0.0.0-20201116072055-6b3677fdfab1/go.mod h1:4NyuORcAT6R8JYsS+CDcBa0TmSPnP7n0Kxrxiq9EZLw=
-github.com/abcum/fibre v0.0.0-20201116105551-0b75e530e0cd h1:fLIbWEyjW1FVN1DCKS465Dayc6ZEdQpYvn4AALm4udg=
-github.com/abcum/fibre v0.0.0-20201116105551-0b75e530e0cd/go.mod h1:naD9ybsRTyR816GnsLj4QQsh9fKfQSutemK/zrTYJto=
+github.com/abcum/fibre v0.0.0-20201119203109-73d003882014 h1:B07xkdBnfhExy+flpLfB/VUCbmZn+7q7TNOZ0obDgC8=
+github.com/abcum/fibre v0.0.0-20201119203109-73d003882014/go.mod h1:naD9ybsRTyR816GnsLj4QQsh9fKfQSutemK/zrTYJto=
 github.com/abcum/rixxdb v0.0.0-20201116083534-c988f1e5d2bb h1:iS1RpYDGSvhFoCzO2zTMMXLPNG7KS+ezm38i9rpDwuM=
 github.com/abcum/rixxdb v0.0.0-20201116083534-c988f1e5d2bb/go.mod h1:/n9dcXlrp22Yy2p+0n9DynExr5Ne/VVuGvQfdgC7U3I=
 github.com/abcum/tmpl v0.0.0-20190929092451-4b08f6027ed1 h1:hRp2bOK7p4HTCCFl4v0apR309NuN1qpKnWnX21JSCHQ=
@@ -454,6 +454,8 @@ golang.org/x/sys v0.0.0-20200905004654-be1d3432aa8f/go.mod h1:h1NjWce9XRLGQEsW7w
 golang.org/x/sys v0.0.0-20200930185726-fdedc70b468f/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/sys v0.0.0-20201113233024-12cec1faf1ba h1:xmhUJGQGbxlod18iJGqVEp9cHIPLl7QiX2aA3to708s=
 golang.org/x/sys v0.0.0-20201113233024-12cec1faf1ba/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/sys v0.0.0-20201119102817-f84b799fce68 h1:nxC68pudNYkKU6jWhgrqdreuFiOQWj1Fs7T3VrH4Pjw=
+golang.org/x/sys v0.0.0-20201119102817-f84b799fce68/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/text v0.0.0-20170915032832-14c0d48ead0c/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 golang.org/x/text v0.3.1-0.20180807135948-17ff2d5776d2/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=

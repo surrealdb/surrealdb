@@ -7,7 +7,7 @@ require (
 	cloud.google.com/go/logging v1.1.2
 	github.com/abcum/bump v0.0.0-20201116071400-31a74cba5f19
 	github.com/abcum/cork v0.0.0-20201116072055-6b3677fdfab1
-	github.com/abcum/fibre v0.0.0-20201116105551-0b75e530e0cd
+	github.com/abcum/fibre v0.0.0-20201119203109-73d003882014
 	github.com/abcum/rixxdb v0.0.0-20201116083534-c988f1e5d2bb
 	github.com/abcum/tmpl v0.0.0-20190929092451-4b08f6027ed1 // indirect
 	github.com/dgraph-io/ristretto v0.0.3
@@ -32,6 +32,7 @@ require (
 	golang.org/x/crypto v0.0.0-20201112155050-0c6587e931a9
 	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
 	golang.org/x/oauth2 v0.0.0-20201109201403-9fd604954f58 // indirect
+	golang.org/x/sys v0.0.0-20201119102817-f84b799fce68 // indirect
 	golang.org/x/text v0.3.4
 	golang.org/x/tools v0.0.0-20201116002733-ac45abd4c88c // indirect
 	google.golang.org/appengine v1.6.7 // indirect
