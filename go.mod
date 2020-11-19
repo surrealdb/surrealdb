@@ -14,7 +14,6 @@ require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/elithrar/simple-scrypt v1.3.0
 	github.com/google/go-cmp v0.5.3 // indirect
-	github.com/google/pprof v0.0.0-20201109224723-20978b51388d // indirect
 	github.com/gorilla/websocket v1.4.2
 	github.com/hjson/hjson-go v3.1.0+incompatible
 	github.com/mattn/go-colorable v0.1.8 // indirect
@@ -29,12 +28,12 @@ require (
 	github.com/spf13/cobra v1.1.1
 	github.com/ugorji/go/codec v1.2.0
 	github.com/ugorji/go/codec/codecgen v1.2.0 // indirect
-	golang.org/x/crypto v0.0.0-20201112155050-0c6587e931a9
+	golang.org/x/crypto v0.0.0-20201117144127-c1f2f97bffc9
 	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
 	golang.org/x/oauth2 v0.0.0-20201109201403-9fd604954f58 // indirect
 	golang.org/x/sys v0.0.0-20201119102817-f84b799fce68 // indirect
 	golang.org/x/text v0.3.4
-	golang.org/x/tools v0.0.0-20201116002733-ac45abd4c88c // indirect
+	golang.org/x/tools v0.0.0-20201119191246-c0d5e8918928 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20201116123041-bf037d74fda1 // indirect
+	google.golang.org/genproto v0.0.0-20201119123407-9b1e624d6bc4 // indirect
 )
