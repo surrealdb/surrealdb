@@ -1378,6 +1378,14 @@ func Test_Parse_Queries_Create(t *testing.T) {
 			}}},
 		},
 		{
+			sql: `CREATE person CONTENT {"test":"{{{"}`,
+			res: &Query{Statements: []Statement{&CreateStatement{
+				What: []Expr{&Ident{"person"}},
+				Data: &ContentExpression{Data: map[string]interface{}{"test": "{{{"}},
+				Echo: AFTER,
+			}}},
+		},
+		{
 			sql: `CREATE person CONTENT something`,
 			err: "Found `something` but expected `json`",
 		},
@@ -1554,6 +1562,14 @@ func Test_Parse_Queries_Update(t *testing.T) {
 			res: &Query{Statements: []Statement{&UpdateStatement{
 				What: []Expr{&Ident{"person"}},
 				Data: &ContentExpression{Data: map[string]interface{}{"firstname": "Tobie"}},
+				Echo: AFTER,
+			}}},
+		},
+		{
+			sql: `UPDATE person CONTENT {"test":"{{{"}`,
+			res: &Query{Statements: []Statement{&UpdateStatement{
+				What: []Expr{&Ident{"person"}},
+				Data: &ContentExpression{Data: map[string]interface{}{"test": "{{{"}},
 				Echo: AFTER,
 			}}},
 		},

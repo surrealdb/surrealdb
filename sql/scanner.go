@@ -928,10 +928,10 @@ func (s *scanner) scanObject(chp ...rune) (tok Token, lit string, val interface{
 		if ch := s.next(); ch == end && sub == 0 && qut == 0 {
 			buf.WriteRune(ch)
 			break
-		} else if ch == beg {
+		} else if ch == beg && qut == 0 {
 			sub++
 			buf.WriteRune(ch)
-		} else if ch == end {
+		} else if ch == end && qut == 0 {
 			sub--
 			buf.WriteRune(ch)
 		} else if ch == eof {
