@@ -525,14 +525,19 @@ func calcAsMath(i interface{}) float64 {
 
 func binaryBool(op sql.Token, l, r interface{}) interface{} {
 
-	a := calcAsBool(l)
-	b := calcAsBool(r)
-
 	switch op {
 	case sql.AND:
-		return a && b
+		if calcAsBool(l) && calcAsBool(r) {
+			return l
+		} else {
+			return r
+		}
 	case sql.OR:
-		return a || b
+		if calcAsBool(l) {
+			return l
+		} else {
+			return r
+		}
 	}
 
 	return nil
