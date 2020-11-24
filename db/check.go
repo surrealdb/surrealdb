@@ -111,15 +111,7 @@ func (d *document) grant(ctx context.Context, met method) (ok bool, err error) {
 	// return this, dictating whether the
 	// document is able to be viewed.
 
-	if v, ok := val.(bool); ok {
-		return v, err
-	}
-
-	// Otherwise as this request is scoped,
-	// return an error, so that the
-	// document is unable to be viewed.
-
-	return false, err
+	return calcAsBool(val), err
 
 }
 
@@ -198,14 +190,6 @@ func (d *document) allow(ctx context.Context, met method) (ok bool, err error) {
 	// return this, dictating whether the
 	// document is able to be viewed.
 
-	if v, ok := val.(bool); ok {
-		return v, err
-	}
-
-	// Otherwise as this request is scoped,
-	// return an error, so that the
-	// document is unable to be viewed.
-
-	return false, err
+	return calcAsBool(val), err
 
 }
