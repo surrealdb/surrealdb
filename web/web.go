@@ -30,6 +30,7 @@ func Setup(opts *cnf.Options) (err error) {
 	s := fibre.Server()
 
 	routes(s)
+	s.Pprof()
 	s.SetName("web")
 	s.SetIdleTimeout("5s")
 	s.SetReadTimeout("30s")
