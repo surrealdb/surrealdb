@@ -125,16 +125,6 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 	var rsp *Response
 	var res []interface{}
 
-	if log.IsDebug() {
-		log.WithPrefix(logKeySql).WithFields(map[string]interface{}{
-			logKeyId:   e.id,
-			logKeyNS:   e.ns,
-			logKeyDB:   e.db,
-			logKeyKind: ctx.Value(ctxKeyKind),
-			logKeyVars: ctx.Value(ctxKeyVars),
-		}).Debugln("Running", stm)
-	}
-
 	// If we are not inside a global transaction
 	// then reset the error to nil so that the
 	// next statement is not ignored.
