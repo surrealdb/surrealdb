@@ -154,6 +154,14 @@ func (h *StackdriverLogger) Fire(entry *logrus.Entry) error {
 		Severity:  logging.ParseSeverity(entry.Level.String()),
 	}
 
+	if v, ok := entry.Data["trace"].(string); ok {
+		e.Trace = fmt.Sprintf("projects/%s/traces/%s", proj, v)
+	}
+
+	if v, ok := entry.Data["span"].(string); ok {
+		e.SpanID = v
+	}
+
 	if p, ok := entry.Data["prefix"]; ok && p == "sql" {
 		e.Payload = map[string]interface{}{
 			"sql":  entry.Message,

@@ -50,8 +50,11 @@ const (
 	logKeyKind  = "kind"
 	logKeyVars  = "vars"
 	logKeyTime  = "time"
+	logKeySpan  = "span"
+	logKeyTrace = "trace"
 	logKeyError = "error"
 	logKeyStack = "stack"
+	logKeyFibre = "fibre"
 )
 
 const (
@@ -63,6 +66,7 @@ const (
 	ctxKeyAuth    = "auth"
 	ctxKeyKind    = "kind"
 	ctxKeyForce   = "force"
+	ctxKeyFibre   = "fibre"
 	ctxKeyVersion = "version"
 )
 

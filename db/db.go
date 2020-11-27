@@ -186,6 +186,12 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 
 	defer quit()
 
+	// Assign the Fibre http request data to the
+	// context so that we can trace all subsequent
+	// queries to alongside the http request.
+
+	ctx = context.WithValue(ctx, ctxKeyFibre, fib)
+
 	// Assign the authentication data to the
 	// context so that we can log the auth kind
 	// and the auth variable data to the request.

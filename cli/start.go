@@ -20,6 +20,7 @@ import (
 	"github.com/abcum/surreal/db"
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/log"
+	"github.com/abcum/surreal/trc"
 	"github.com/abcum/surreal/web"
 )
 
@@ -30,6 +31,11 @@ var startCmd = &cobra.Command{
 		log.Display(logo)
 	},
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
+
+		if err = trc.Setup(opts); err != nil {
+			log.Fatal(err)
+			return
+		}
 
 		if err = kvs.Setup(opts); err != nil {
 			log.Fatal(err)

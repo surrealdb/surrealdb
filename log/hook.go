@@ -81,7 +81,10 @@ func (h *DefaultHook) SetFormat(v string) {
 		h.f = &JSONFormatter{
 			IgnoreFields: []string{
 				"ctx",
-				"vars",
+				"span",
+				"trace",
+				"fibre",
+				"prefix",
 			},
 			TimestampFormat: time.RFC3339,
 		}
@@ -90,6 +93,10 @@ func (h *DefaultHook) SetFormat(v string) {
 			IgnoreFields: []string{
 				"ctx",
 				"vars",
+				"span",
+				"trace",
+				"fibre",
+				"prefix",
 			},
 			TimestampFormat: time.RFC3339,
 		}

@@ -5,6 +5,7 @@ go 1.15
 require (
 	cloud.google.com/go v0.72.0
 	cloud.google.com/go/logging v1.1.2
+	contrib.go.opencensus.io/exporter/stackdriver v0.13.4
 	github.com/abcum/bump v0.0.0-20201116071400-31a74cba5f19
 	github.com/abcum/cork v0.0.0-20201116072055-6b3677fdfab1
 	github.com/abcum/fibre v0.0.0-20201123182515-d9eac7ca56b5
@@ -29,6 +30,7 @@ require (
 	github.com/spf13/cobra v1.1.1
 	github.com/ugorji/go/codec v1.2.0
 	github.com/ugorji/go/codec/codecgen v1.2.0 // indirect
+	go.opencensus.io v0.22.5
 	golang.org/x/crypto v0.0.0-20201124201722-c8d3bf9c5392
 	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
 	golang.org/x/oauth2 v0.0.0-20201109201403-9fd604954f58 // indirect

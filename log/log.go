@@ -178,7 +178,10 @@ func SetFormat(v string) {
 		log.Logger.SetFormatter(&JSONFormatter{
 			IgnoreFields: []string{
 				"ctx",
-				"vars",
+				"span",
+				"trace",
+				"fibre",
+				"prefix",
 			},
 			TimestampFormat: time.RFC3339,
 		})
@@ -187,6 +190,10 @@ func SetFormat(v string) {
 			IgnoreFields: []string{
 				"ctx",
 				"vars",
+				"span",
+				"trace",
+				"fibre",
+				"prefix",
 			},
 			TimestampFormat: time.RFC3339,
 		})

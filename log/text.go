@@ -61,9 +61,7 @@ func (f *TextFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 	for k := range entry.Data {
 		if f.include(k) {
-			if k != "prefix" {
-				keys = append(keys, k)
-			}
+			keys = append(keys, k)
 		}
 	}
 
