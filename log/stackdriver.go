@@ -32,6 +32,8 @@ import (
 	"cloud.google.com/go/logging"
 )
 
+var proj = os.Getenv("PROJECT")
+
 type StackdriverLogger struct {
 	name   string
 	client *logging.Client
@@ -45,12 +47,10 @@ func NewStackDriver() *StackdriverLogger {
 
 	ctx := context.Background()
 
-	proj := os.Getenv("PROJECT")
-
 	hook := new(StackdriverLogger)
 
 	conf := errorreporting.Config{
-		ServiceName:    name,
+		ServiceName:    "surreal",
 		ServiceVersion: build.GetInfo().Ver,
 	}
 
@@ -91,7 +91,7 @@ func NewStackDriver() *StackdriverLogger {
 		log.Fatalf("Failed to connect to Stackdriver: %v", err)
 	}
 
-	hook.logger = hook.client.Logger(name)
+	hook.logger = hook.client.Logger("surreal")
 
 	return hook
 
