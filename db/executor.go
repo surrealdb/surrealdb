@@ -142,7 +142,7 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 	// the execution time of this method, and
 	// detect problems with long-running queries.
 
-	ctx, span := trc.Start(ctx, "db::execute")
+	ctx, span := trc.Start(ctx, "db::conduct")
 	defer span.End()
 
 	// If we are not inside a global transaction
