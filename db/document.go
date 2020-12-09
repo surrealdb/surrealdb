@@ -422,16 +422,18 @@ func (d *document) purgeIndex(ctx context.Context) (err error) {
 		del := indx.Build(ix.Cols, d.initial)
 
 		if ix.Uniq == true {
-			for _, v := range del {
-				key := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v}
-				d.i.e.tx.DelC(ctx, 0, key.Encode(), d.id.Bytes())
+			for _, f := range del {
+				enfd := data.Consume(f).Encode()
+				didx := &keys.Index{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd}
+				d.i.e.tx.DelC(ctx, 0, didx.Encode(), d.id.Bytes())
 			}
 		}
 
 		if ix.Uniq == false {
-			for _, v := range del {
-				key := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: v, ID: d.key.ID}
-				d.i.e.tx.DelC(ctx, 0, key.Encode(), d.id.Bytes())
+			for _, f := range del {
+				enfd := data.Consume(f).Encode()
+				aidx := &keys.Point{KV: d.key.KV, NS: d.key.NS, DB: d.key.DB, TB: d.key.TB, IX: ix.Name.VA, FD: enfd, ID: d.key.ID}
+				d.i.e.tx.DelC(ctx, 0, aidx.Encode(), d.id.Bytes())
 			}
 		}
 
