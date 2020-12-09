@@ -15,6 +15,8 @@
 package diff
 
 import (
+	"fmt"
+
 	"reflect"
 	"sort"
 	"strconv"
@@ -237,12 +239,21 @@ func (o *operations) patch(old map[string]interface{}) (now map[string]interface
 		case "replace":
 			obj.Set(v.value, path...)
 		case "change":
-			if txt, ok := obj.Get(path...).Data().(string); ok {
+			switch val := obj.Get(path...).Data().(type) {
+			case fmt.Stringer:
+				txt := val.String()
 				dmp := diffmatchpatch.New()
 				if pch, err := dmp.PatchFromText(v.value.(string)); err == nil {
 					txt, _ := dmp.PatchApply(pch, txt)
 					obj.Set(txt, path...)
 				}
+			case string:
+				dmp := diffmatchpatch.New()
+				if pch, err := dmp.PatchFromText(v.value.(string)); err == nil {
+					txt, _ := dmp.PatchApply(pch, val)
+					obj.Set(txt, path...)
+				}
+
 			}
 		}
 
