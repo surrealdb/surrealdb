@@ -748,13 +748,7 @@ func (d *Doc) Append(value interface{}, path ...string) (*Doc, error) {
 		return &Doc{data: nil}, fmt.Errorf("Not an array")
 	}
 
-	if values, ok := value.([]interface{}); ok {
-		for _, value := range values {
-			a = append(a, value)
-		}
-	} else {
-		a = append(a, value)
-	}
+	a = append(a, value)
 
 	return d.Set(a, path...)
 
