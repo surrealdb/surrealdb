@@ -95,11 +95,12 @@ func (e *executor) fetchDelete(ctx context.Context, stm *sql.DeleteStatement, do
 	if doc != nil {
 		vars := data.New()
 		vars.Set(doc.Data(), varKeyParent)
-		vars.Array(varKeyParents)
 		if subs := ctx.Value(ctxKeySubs); subs != nil {
 			if subs, ok := subs.(*data.Doc); ok {
-				vars.Append(subs.Get(varKeyParents).Data(), varKeyParents)
+				vars.Set(subs.Get(varKeyParents).Data(), varKeyParents)
 			}
+		} else {
+			vars.Array(varKeyParents)
 		}
 		vars.Append(doc.Data(), varKeyParents)
 		ctx = context.WithValue(ctx, ctxKeySubs, vars)
