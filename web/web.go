@@ -46,7 +46,7 @@ func Setup(opts *cnf.Options) (err error) {
 	// Add cors headers
 
 	s.Use(mw.Cors(&mw.CorsOpts{
-		AllowedOrigin: "=",
+		AllowedOrigin: "*",
 		AllowedMethods: []string{
 			"GET",
 			"PUT",
