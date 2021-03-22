@@ -60,7 +60,7 @@ func TestGeo(t *testing.T) {
 
 	Convey("geo.distance(a, b, c, d) works properly", t, func() {
 		res, _ = Run(context.Background(), "geo.distance", &sql.Point{38.898556, -77.037852}, &sql.Point{38.897147, -77.043934})
-		So(res, ShouldEqual, 549.1557912048178)
+		So(res, ShouldEqual, 549.1557912042738)
 	})
 
 	Convey("geo.distance(a, b, c, d) errors properly", t, func() {

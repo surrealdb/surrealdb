@@ -104,7 +104,7 @@ func TestMath(t *testing.T) {
 		res, _ = Run(context.Background(), "math.geometricmean", 10)
 		So(res, ShouldEqual, 10)
 		res, _ = Run(context.Background(), "math.geometricmean", test)
-		So(res, ShouldEqual, 2.621805397514041)
+		So(res, ShouldEqual, 2.6218053975140414)
 	})
 
 	Convey("math.harmonicmean() works properly", t, func() {
