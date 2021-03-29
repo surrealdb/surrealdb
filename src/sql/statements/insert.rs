@@ -1,5 +1,12 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::dbs::Iterator;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::expression::{expression, Expression};
+use crate::sql::literal::Literal;
 use crate::sql::output::{output, Output};
 use crate::sql::table::{table, Table};
 use crate::sql::timeout::{timeout, Timeout};
@@ -11,7 +18,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
 	pub data: Expression,
 	pub into: Table,
@@ -31,6 +38,32 @@ impl fmt::Display for InsertStatement {
 			write!(f, " {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl dbs::Process for InsertStatement {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		// Create a new iterator
+		let i = Iterator::new();
+		// LooParse the expression
+		match self.data.process(ctx, exe, doc)? {
+			Literal::Object(_) => {
+				i.process_object(ctx, exe);
+			}
+			Literal::Array(_) => {
+				i.process_array(ctx, exe);
+			}
+			_ => {
+				todo!() // Return error
+			}
+		};
+		// Output the results
+		i.output(ctx, exe)
 	}
 }
 

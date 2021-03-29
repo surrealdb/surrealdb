@@ -1,6 +1,6 @@
-use reqwest::header::CONTENT_TYPE;
+use anyhow::Error;
 use reqwest::blocking::Client;
-use failure::Error;
+use reqwest::header::CONTENT_TYPE;
 use std::fs::OpenOptions;
 use std::io::copy;
 
@@ -15,11 +15,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// and if there is a problem opening
 	// the file, then return an error.
 
-	let mut file = OpenOptions::new()
-		.write(true)
-		.create(true)
-		.truncate(true)
-		.open(file)?;
+	let mut file = OpenOptions::new().write(true).create(true).truncate(true).open(file)?;
 
 	// Parse all other cli arguments
 

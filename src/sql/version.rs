@@ -5,7 +5,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Version {
 	pub expr: Datetime,
 }
@@ -20,7 +20,12 @@ pub fn version(i: &str) -> IResult<&str, Version> {
 	let (i, _) = tag_no_case("VERSION")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = datetime(i)?;
-	Ok((i, Version { expr: v }))
+	Ok((
+		i,
+		Version {
+			expr: v,
+		},
+	))
 }
 
 #[cfg(test)]

@@ -2,12 +2,12 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::idiom::{idiom, Idiom};
 use nom::bytes::complete::tag_no_case;
-use nom::multi::separated_nonempty_list;
+use nom::multi::separated_list1;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Fetchs(Vec<Fetch>);
 
 impl fmt::Display for Fetchs {
@@ -15,16 +15,12 @@ impl fmt::Display for Fetchs {
 		write!(
 			f,
 			"FETCH {}",
-			self.0
-				.iter()
-				.map(|ref v| format!("{}", v))
-				.collect::<Vec<_>>()
-				.join(", ")
+			self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", ")
 		)
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Fetch {
 	pub fetch: Idiom,
 }
@@ -38,13 +34,18 @@ impl fmt::Display for Fetch {
 pub fn fetch(i: &str) -> IResult<&str, Fetchs> {
 	let (i, _) = tag_no_case("FETCH")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = separated_nonempty_list(commas, fetch_raw)(i)?;
+	let (i, v) = separated_list1(commas, fetch_raw)(i)?;
 	Ok((i, Fetchs(v)))
 }
 
 fn fetch_raw(i: &str) -> IResult<&str, Fetch> {
 	let (i, v) = idiom(i)?;
-	Ok((i, Fetch { fetch: v }))
+	Ok((
+		i,
+		Fetch {
+			fetch: v,
+		},
+	))
 }
 
 #[cfg(test)]

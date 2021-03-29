@@ -1,5 +1,5 @@
+use anyhow::Error;
 use clap;
-use failure::Error;
 
 const NAME: &'static str = env!("CARGO_PKG_NAME");
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -15,13 +15,7 @@ pub fn init(_: &clap::ArgMatches) -> Result<(), Error> {
 
 	get_cfg!(target_arch: "x86", "x86_64", "mips", "powerpc", "powerpc64", "arm", "aarch64");
 
-	println!(
-		"{} {} for {} on {}",
-		NAME,
-		VERSION,
-		target_os(),
-		target_arch()
-	);
+	println!("{} {} for {} on {}", NAME, VERSION, target_os(), target_arch());
 
 	Ok(())
 }

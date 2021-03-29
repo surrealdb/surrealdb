@@ -1,26 +1,36 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::expression::{expression, Expression};
+use crate::sql::literal::Literal;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
-use nom::multi::many0;
+use nom::multi::separated_list0;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct IfelseStatement {
-	pub first: (Expression, Expression),
-	pub other: Vec<(Expression, Expression)>,
+	pub exprs: Vec<(Expression, Expression)>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub close: Option<Expression>,
 }
 
 impl fmt::Display for IfelseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "IF {} THEN {}", self.first.0, self.first.1)?;
-		for ref o in self.other.iter() {
-			write!(f, " ELSE IF {} THEN {}", o.0, o.1)?
-		}
+		write!(
+			f,
+			"{}",
+			self.exprs
+				.iter()
+				.map(|(ref cond, ref then)| format!("IF {} THEN {}", cond, then))
+				.collect::<Vec<_>>()
+				.join(" ELSE ")
+		)?;
 		if let Some(ref v) = self.close {
 			write!(f, " ELSE {}", v)?
 		}
@@ -29,36 +39,42 @@ impl fmt::Display for IfelseStatement {
 	}
 }
 
+impl dbs::Process for IfelseStatement {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		for (ref cond, ref then) in &self.exprs {
+			let v = cond.process(ctx, exe, doc)?;
+			if v.as_bool() {
+				return then.process(ctx, exe, doc);
+			}
+		}
+		match self.close {
+			Some(ref v) => v.process(ctx, exe, doc),
+			None => Ok(Literal::None),
+		}
+	}
+}
+
 pub fn ifelse(i: &str) -> IResult<&str, IfelseStatement> {
-	let (i, _) = tag_no_case("IF")(i)?;
-	let (i, first) = first(i)?;
-	let (i, other) = many0(other)(i)?;
+	let (i, exprs) = separated_list0(split, exprs)(i)?;
 	let (i, close) = opt(close)(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("END")(i)?;
 	Ok((
 		i,
 		IfelseStatement {
-			first,
-			other,
+			exprs,
 			close,
 		},
 	))
 }
 
-fn first(i: &str) -> IResult<&str, (Expression, Expression)> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, cond) = expression(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("THEN")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, then) = expression(i)?;
-	Ok((i, (cond, then)))
-}
-
-fn other(i: &str) -> IResult<&str, (Expression, Expression)> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ELSE IF")(i)?;
+fn exprs(i: &str) -> IResult<&str, (Expression, Expression)> {
+	let (i, _) = tag_no_case("IF")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, cond) = expression(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -74,6 +90,13 @@ fn close(i: &str) -> IResult<&str, Expression> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, then) = expression(i)?;
 	Ok((i, then))
+}
+
+fn split(i: &str) -> IResult<&str, ()> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ELSE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	Ok((i, ()))
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
-use reqwest::header::CONTENT_TYPE;
+use anyhow::Error;
 use reqwest::blocking::Client;
-use failure::Error;
+use reqwest::header::CONTENT_TYPE;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 

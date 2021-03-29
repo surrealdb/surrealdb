@@ -12,7 +12,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(warp::post())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(warp::body::content_length_limit(1024 * 1)) // 1MiB
-		.and(warp::body::aggregate())
+		.and(warp::body::bytes())
 		.and_then(handler);
 	// Set sock method
 	let sock = base.and(warp::ws()).map(|ws: warp::ws::Ws| {
@@ -30,8 +30,8 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	opts.or(post).or(sock).with(head::cors())
 }
 
-async fn handler(out: String, sql: impl bytes::Buf) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = std::str::from_utf8(sql.bytes()).unwrap();
+async fn handler(out: String, sql: bytes::Bytes) -> Result<impl warp::Reply, warp::Rejection> {
+	let sql = std::str::from_utf8(&sql).unwrap();
 	let res = crate::dbs::execute(sql, None).unwrap();
 	match out.as_ref() {
 		"application/json" => Ok(warp::reply::json(&res)),

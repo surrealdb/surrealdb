@@ -1,5 +1,7 @@
 use crate::web::head;
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::str;
 use warp::path;
 use warp::Filter;
 
@@ -78,25 +80,34 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 
 async fn select_all(table: String, query: Query) -> Result<impl warp::Reply, warp::Rejection> {
 	let sql = format!(
-		"SELECT * FROM type::table('{t}') LIMIT {l} START {s}",
-		t = table,
+		"SELECT * FROM type::table($table) LIMIT {l} START {s}",
 		l = query.limit.unwrap_or(String::from("100")),
 		s = query.start.unwrap_or(String::from("0")),
 	);
-	Ok(warp::reply::with_status(sql, http::StatusCode::OK))
+	let mut var = HashMap::new();
+	var.insert("table", table);
+	let res = crate::dbs::execute(sql.as_str(), Some(var)).unwrap();
+	Ok(warp::reply::json(&res))
 }
 
 async fn create_all(
 	table: String,
 	body: bytes::Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = format!("CREATE type::table('{t}') CONTENT $data", t = table);
-	Ok(warp::reply::with_status(sql, http::StatusCode::OK))
+	let sql = "CREATE type::table($table) CONTENT $data";
+	let mut var = HashMap::new();
+	var.insert("table", table);
+	var.insert("data", str::from_utf8(&body).unwrap().to_owned());
+	let res = crate::dbs::execute(sql, Some(var)).unwrap();
+	Ok(warp::reply::json(&res))
 }
 
 async fn delete_all(table: String) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = format!("DELETE type::table('{t}')", t = table);
-	Ok(warp::reply::with_status(sql, http::StatusCode::OK))
+	let sql = "DELETE type::table($table)";
+	let mut var = HashMap::new();
+	var.insert("table", table);
+	let res = crate::dbs::execute(sql, Some(var)).unwrap();
+	Ok(warp::reply::json(&res))
 }
 
 // ------------------------------
@@ -104,8 +115,12 @@ async fn delete_all(table: String) -> Result<impl warp::Reply, warp::Rejection> 
 // ------------------------------
 
 async fn select_one(table: String, id: String) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = format!("SELECT * FROM type::thing('{t}', '{i}')", t = table, i = id);
-	Ok(warp::reply::with_status(sql, http::StatusCode::OK))
+	let sql = "SELECT * FROM type::thing($table, $id)";
+	let mut var = HashMap::new();
+	var.insert("table", table);
+	var.insert("id", id);
+	let res = crate::dbs::execute(sql, Some(var)).unwrap();
+	Ok(warp::reply::json(&res))
 }
 
 async fn create_one(
@@ -113,8 +128,13 @@ async fn create_one(
 	id: String,
 	body: bytes::Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = format!("UPDATE type::thing('{t}', '{i}') CONTENT $data", t = table, i = id);
-	Ok(warp::reply::with_status(sql, http::StatusCode::OK))
+	let sql = "CREATE type::thing($table, $id) CONTENT $data";
+	let mut var = HashMap::new();
+	var.insert("table", table);
+	var.insert("id", id);
+	var.insert("data", str::from_utf8(&body).unwrap().to_owned());
+	let res = crate::dbs::execute(sql, Some(var)).unwrap();
+	Ok(warp::reply::json(&res))
 }
 
 async fn update_one(
@@ -122,8 +142,13 @@ async fn update_one(
 	id: String,
 	body: bytes::Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = format!("UPDATE type::thing('{t}', '{i}') CONTENT $data", t = table, i = id);
-	Ok(warp::reply::with_status(sql, http::StatusCode::OK))
+	let sql = "UPDATE type::thing($table, $id) CONTENT $data";
+	let mut var = HashMap::new();
+	var.insert("table", table);
+	var.insert("id", id);
+	var.insert("data", str::from_utf8(&body).unwrap().to_owned());
+	let res = crate::dbs::execute(sql, Some(var)).unwrap();
+	Ok(warp::reply::json(&res))
 }
 
 async fn modify_one(
@@ -131,11 +156,20 @@ async fn modify_one(
 	id: String,
 	body: bytes::Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = format!("UPDATE type::thing('{t}', '{i}') MERGE $data", t = table, i = id);
-	Ok(warp::reply::with_status(sql, http::StatusCode::OK))
+	let sql = "UPDATE type::thing($table, $id) MERGE $data";
+	let mut var = HashMap::new();
+	var.insert("table", table);
+	var.insert("id", id);
+	var.insert("data", str::from_utf8(&body).unwrap().to_owned());
+	let res = crate::dbs::execute(sql, Some(var)).unwrap();
+	Ok(warp::reply::json(&res))
 }
 
 async fn delete_one(table: String, id: String) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = format!("DELETE type::thing('{t}', '{i}')", t = table, i = id);
-	Ok(warp::reply::with_status(sql, http::StatusCode::OK))
+	let sql = "DELETE type::thing($table, $id)";
+	let mut var = HashMap::new();
+	var.insert("table", table);
+	var.insert("id", id);
+	let res = crate::dbs::execute(sql, Some(var)).unwrap();
+	Ok(warp::reply::json(&res))
 }

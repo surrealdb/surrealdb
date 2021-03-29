@@ -2,13 +2,13 @@ use crate::sql::common::commas;
 use crate::sql::common::escape;
 use crate::sql::common::val_char;
 use crate::sql::ident::ident_raw;
-use nom::multi::separated_nonempty_list;
+use nom::multi::separated_list1;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Tables(Vec<Table>);
 
 impl fmt::Display for Tables {
@@ -18,11 +18,11 @@ impl fmt::Display for Tables {
 }
 
 pub fn tables(i: &str) -> IResult<&str, Tables> {
-	let (i, v) = separated_nonempty_list(commas, table)(i)?;
+	let (i, v) = separated_list1(commas, table)(i)?;
 	Ok((i, Tables(v)))
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Table {
 	pub name: String,
 }

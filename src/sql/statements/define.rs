@@ -1,18 +1,22 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::take_u64;
+use crate::sql::duration::{duration, Duration};
 use crate::sql::expression::{expression, Expression};
 use crate::sql::ident::ident_raw;
 use crate::sql::idiom::{idiom, idioms, Idiom, Idioms};
+use crate::sql::kind::{kind, Kind};
+use crate::sql::literal::Literal;
+use crate::sql::permission::{permissions, Permissions};
 use crate::sql::statement::{statements, Statements};
 use crate::sql::strand::strand_raw;
 use crate::sql::view::{view, View};
-use crate::sql::{
-	duration::{duration, Duration},
-	kind::{kind, Kind},
-	permission::{permissions, Permissions},
-};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
@@ -20,7 +24,7 @@ use nom::{multi::many0, IResult};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
@@ -49,6 +53,17 @@ impl fmt::Display for DefineStatement {
 	}
 }
 
+impl dbs::Process for DefineStatement {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		todo!()
+	}
+}
+
 pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 	alt((
 		map(namespace, |v| DefineStatement::Namespace(v)),
@@ -67,7 +82,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DefineNamespaceStatement {
 	pub name: String,
 }
@@ -96,7 +111,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DefineDatabaseStatement {
 	pub name: String,
 }
@@ -125,7 +140,7 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DefineLoginStatement {
 	pub name: String,
 	pub base: Base,
@@ -176,7 +191,7 @@ fn login(i: &str) -> IResult<&str, DefineLoginStatement> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum DefineLoginOption {
 	Password(String),
 	Passhash(String),
@@ -206,7 +221,7 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DefineTokenStatement {
 	pub name: String,
 	pub base: Base,
@@ -257,7 +272,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DefineScopeStatement {
 	pub name: String,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -320,7 +335,7 @@ fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum DefineScopeOption {
 	Session(Duration),
 	Signup(Expression),
@@ -368,7 +383,7 @@ fn scope_connect(i: &str) -> IResult<&str, DefineScopeOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DefineTableStatement {
 	pub name: String,
 	pub drop: bool,
@@ -389,9 +404,6 @@ impl fmt::Display for DefineTableStatement {
 		}
 		if self.full == false {
 			write!(f, " SCHEMALESS")?
-		}
-		if self.drop == true {
-			write!(f, " DROP")?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {}", v)?
@@ -442,7 +454,7 @@ fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum DefineTableOption {
 	Drop,
 	View(View),
@@ -489,7 +501,7 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DefineEventStatement {
 	pub name: String,
 	pub what: String,
@@ -540,7 +552,7 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: String,
@@ -615,7 +627,7 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum DefineFieldOption {
 	Kind(Kind),
 	Value(Expression),
@@ -670,7 +682,7 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DefineIndexStatement {
 	pub name: String,
 	pub what: String,
@@ -702,7 +714,7 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let (i, _) = tag_no_case("COLUMNS")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, cols) = idioms(i)?;
-	let (i, uniq) = opt(|i: &str| {
+	let (i, uniq) = opt(|i| {
 		shouldbespace(i)?;
 		tag_no_case("UNIQUE")(i)?;
 		Ok((i, true))

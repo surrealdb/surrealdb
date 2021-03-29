@@ -1,6 +1,12 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::ident::{ident, Ident};
+use crate::sql::literal::Literal;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
@@ -10,7 +16,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct OptionStatement {
 	pub name: Ident,
 	pub what: bool,
@@ -26,19 +32,24 @@ impl fmt::Display for OptionStatement {
 	}
 }
 
+impl dbs::Process for OptionStatement {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		todo!()
+	}
+}
+
 pub fn option(i: &str) -> IResult<&str, OptionStatement> {
 	let (i, _) = tag_no_case("OPTION")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, n) = ident(i)?;
 	let (i, v) = opt(alt((
-		map(
-			tuple((mightbespace, tag("="), mightbespace, tag_no_case("TRUE"))),
-			|_| true,
-		),
-		map(
-			tuple((mightbespace, tag("="), mightbespace, tag_no_case("FALSE"))),
-			|_| false,
-		),
+		map(tuple((mightbespace, tag("="), mightbespace, tag_no_case("TRUE"))), |_| true),
+		map(tuple((mightbespace, tag("="), mightbespace, tag_no_case("FALSE"))), |_| false),
 	)))(i)?;
 	Ok((
 		i,

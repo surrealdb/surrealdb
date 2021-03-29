@@ -3,10 +3,11 @@ use crate::sql::common::val_char;
 use crate::sql::ident::ident_raw;
 use nom::bytes::complete::tag;
 use nom::IResult;
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
 pub struct Thing {
 	pub table: String,
 	pub id: String,
@@ -14,12 +15,26 @@ pub struct Thing {
 
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"{}:{}",
-			escape(&self.table, &val_char, "`"),
-			escape(&self.id, &val_char, "`"),
-		)
+		let t = escape(&self.table, &val_char, "`");
+		let i = escape(&self.id, &val_char, "`");
+		write!(f, "{}:{}", t, i)
+	}
+}
+
+impl Serialize for Thing {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		if serializer.is_human_readable() {
+			let output = format!("{}:{}", self.table, self.id);
+			serializer.serialize_some(&output)
+		} else {
+			let mut val = serializer.serialize_struct("Thing", 2)?;
+			val.serialize_field("table", &self.table)?;
+			val.serialize_field("id", &self.id)?;
+			val.end()
+		}
 	}
 }
 

@@ -7,7 +7,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Start {
 	pub expr: u64,
 }
@@ -23,7 +23,12 @@ pub fn start(i: &str) -> IResult<&str, Start> {
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("AT"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = take_u64(i)?;
-	Ok((i, Start { expr: v }))
+	Ok((
+		i,
+		Start {
+			expr: v,
+		},
+	))
 }
 
 #[cfg(test)]
@@ -37,7 +42,12 @@ mod tests {
 		let res = start(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, Start { expr: 100 });
+		assert_eq!(
+			out,
+			Start {
+				expr: 100
+			}
+		);
 		assert_eq!("START 100", format!("{}", out));
 	}
 
@@ -47,7 +57,12 @@ mod tests {
 		let res = start(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, Start { expr: 100 });
+		assert_eq!(
+			out,
+			Start {
+				expr: 100
+			}
+		);
 		assert_eq!("START 100", format!("{}", out));
 	}
 }

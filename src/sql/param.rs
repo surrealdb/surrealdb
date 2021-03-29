@@ -1,4 +1,10 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::common::val_char;
+use crate::sql::literal::Literal;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::IResult;
@@ -6,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Param {
 	pub name: String,
 }
@@ -22,6 +28,21 @@ impl<'a> From<&'a str> for Param {
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "${}", &self.name)
+	}
+}
+
+impl dbs::Process for Param {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		// 1. Loop through the context variables
+		// 2. Find a variable with the right name
+		// 3. Process the variable value
+		// 4. Return the processed value
+		todo!()
 	}
 }
 

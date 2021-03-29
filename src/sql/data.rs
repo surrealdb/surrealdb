@@ -8,12 +8,12 @@ use crate::sql::object::{object, Object};
 use crate::sql::operator::{assigner, Operator};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::multi::separated_nonempty_list;
+use nom::multi::separated_list1;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Data {
 	SetExpression(Vec<(Idiom, Operator, Expression)>),
 	DiffExpression(Array),
@@ -46,7 +46,7 @@ pub fn data(i: &str) -> IResult<&str, Data> {
 fn set(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("SET")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = separated_nonempty_list(commas, |i| {
+	let (i, v) = separated_list1(commas, |i| {
 		let (i, l) = idiom(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, o) = assigner(i)?;

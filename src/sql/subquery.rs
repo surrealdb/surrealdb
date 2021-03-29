@@ -1,4 +1,11 @@
+use crate::ctx::Context;
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::expression::{expression, Expression};
+use crate::sql::literal::Literal;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
@@ -12,9 +19,10 @@ use nom::bytes::complete::tag;
 use nom::combinator::map;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Subquery {
 	Expression(Expression),
 	Select(SelectStatement),
@@ -25,6 +33,13 @@ pub enum Subquery {
 	Insert(InsertStatement),
 	Upsert(UpsertStatement),
 	Ifelse(IfelseStatement),
+}
+
+impl PartialOrd for Subquery {
+	#[inline]
+	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
+		unreachable!()
+	}
 }
 
 impl fmt::Display for Subquery {
@@ -39,6 +54,83 @@ impl fmt::Display for Subquery {
 			Subquery::Insert(v) => write!(f, "({})", v),
 			Subquery::Upsert(v) => write!(f, "({})", v),
 			Subquery::Ifelse(v) => write!(f, "{}", v),
+		}
+	}
+}
+
+impl dbs::Process for Subquery {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		match self {
+			Subquery::Expression(ref v) => v.process(ctx, exe, doc),
+			Subquery::Ifelse(ref v) => v.process(ctx, exe, doc),
+			Subquery::Select(ref v) => {
+				let mut ctx = Context::new(ctx);
+				if doc.is_some() {
+					let doc = doc.unwrap().clone();
+					ctx.add_value("parent", doc);
+				}
+				let ctx = ctx.freeze();
+				v.process(&ctx, exe, doc)
+			}
+			Subquery::Create(ref v) => {
+				let mut ctx = Context::new(ctx);
+				if doc.is_some() {
+					let doc = doc.unwrap().clone();
+					ctx.add_value("parent", doc);
+				}
+				let ctx = ctx.freeze();
+				v.process(&ctx, exe, doc)
+			}
+			Subquery::Update(ref v) => {
+				let mut ctx = Context::new(ctx);
+				if doc.is_some() {
+					let doc = doc.unwrap().clone();
+					ctx.add_value("parent", doc);
+				}
+				let ctx = ctx.freeze();
+				v.process(&ctx, exe, doc)
+			}
+			Subquery::Delete(ref v) => {
+				let mut ctx = Context::new(ctx);
+				if doc.is_some() {
+					let doc = doc.unwrap().clone();
+					ctx.add_value("parent", doc);
+				}
+				let ctx = ctx.freeze();
+				v.process(&ctx, exe, doc)
+			}
+			Subquery::Relate(ref v) => {
+				let mut ctx = Context::new(ctx);
+				if doc.is_some() {
+					let doc = doc.unwrap().clone();
+					ctx.add_value("parent", doc);
+				}
+				let ctx = ctx.freeze();
+				v.process(&ctx, exe, doc)
+			}
+			Subquery::Insert(ref v) => {
+				let mut ctx = Context::new(ctx);
+				if doc.is_some() {
+					let doc = doc.unwrap().clone();
+					ctx.add_value("parent", doc);
+				}
+				let ctx = ctx.freeze();
+				v.process(&ctx, exe, doc)
+			}
+			Subquery::Upsert(ref v) => {
+				let mut ctx = Context::new(ctx);
+				if doc.is_some() {
+					let doc = doc.unwrap().clone();
+					ctx.add_value("parent", doc);
+				}
+				let ctx = ctx.freeze();
+				v.process(&ctx, exe, doc)
+			}
 		}
 	}
 }

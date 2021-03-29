@@ -3,25 +3,45 @@ use nom::bytes::complete::tag;
 use nom::sequence::delimited;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Regex {
-	pub value: String,
+	pub input: String,
+	#[serde(skip)]
+	pub value: Option<regex::Regex>,
 }
 
 impl<'a> From<&'a str> for Regex {
 	fn from(r: &str) -> Regex {
 		Regex {
-			value: String::from(r),
+			input: String::from(r),
+			value: match regex::Regex::new(r) {
+				Ok(v) => Some(v),
+				Err(_) => None,
+			},
 		}
+	}
+}
+
+impl PartialEq for Regex {
+	fn eq(&self, other: &Self) -> bool {
+		self.input == other.input
+	}
+}
+
+impl PartialOrd for Regex {
+	#[inline]
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.input.cmp(&other.input))
 	}
 }
 
 impl fmt::Display for Regex {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "/{}/", &self.value)
+		write!(f, "/{}/", &self.input)
 	}
 }
 

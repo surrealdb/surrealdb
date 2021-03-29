@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Filter {
 	All,
 	Last,

@@ -1,7 +1,7 @@
-extern crate std;
-extern crate log;
-extern crate fern;
 extern crate chrono;
+extern crate fern;
+extern crate log;
+extern crate std;
 
 use self::fern::colors::Color;
 use self::fern::colors::ColoredLevelConfig;

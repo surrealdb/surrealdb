@@ -1,4 +1,4 @@
-use failure::Error;
+use anyhow::Error;
 
 pub fn init(opts: &clap::ArgMatches) -> Result<(), Error> {
 	let pth = opts.value_of("path").unwrap();

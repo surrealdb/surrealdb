@@ -1,8 +1,14 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Fields};
-use crate::sql::what::{whats, Whats};
+use crate::sql::literal::Literal;
+use crate::sql::literal::{whats, Literals};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
@@ -10,10 +16,10 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LiveStatement {
 	pub expr: Fields,
-	pub what: Whats,
+	pub what: Literals,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cond: Option<Cond>,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -30,6 +36,17 @@ impl fmt::Display for LiveStatement {
 			write!(f, " {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl dbs::Process for LiveStatement {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		todo!()
 	}
 }
 

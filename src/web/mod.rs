@@ -11,9 +11,12 @@ mod status;
 mod sync;
 mod version;
 
-use failure::Error;
+use anyhow::Error;
 use std::net::SocketAddr;
 use warp::Filter;
+use uuid::Uuid;
+
+const ID: &'static str = "Request-Id";
 
 #[tokio::main]
 pub async fn init(opts: &clap::ArgMatches) -> Result<(), Error> {
@@ -46,11 +49,17 @@ pub async fn init(opts: &clap::ArgMatches) -> Result<(), Error> {
 
 	let web = web.with(warp::compression::gzip());
 
+	let web = web.with(head::server());
+
 	let web = web.with(head::version());
 
-	let web = web.with(head::unique());
+	let web = web.map(|reply| {
+		let val = Uuid::new_v4().to_string();
+        warp::reply::with_header(reply, ID, val)
+    });
 
 	let web = web.with(log::write());
+
 
 	info!("Starting web server on {}", adr);
 

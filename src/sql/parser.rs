@@ -13,13 +13,13 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 				Ok(query)
 			}
 		}
-		Err(Err::Error((i, _))) => Err(Error::ParseError {
-			pos: input.len() - i.len(),
-			sql: String::from(i),
+		Err(Err::Error(e)) => Err(Error::ParseError {
+			pos: input.len() - e.input.len(),
+			sql: String::from(e.input),
 		}),
-		Err(Err::Failure((i, _))) => Err(Error::ParseError {
-			pos: input.len() - i.len(),
-			sql: String::from(i),
+		Err(Err::Failure(e)) => Err(Error::ParseError {
+			pos: input.len() - e.input.len(),
+			sql: String::from(e.input),
 		}),
 		Err(Err::Incomplete(_)) => Err(Error::EmptyError),
 	}
@@ -78,9 +78,10 @@ mod tests {
 				test AS `some thing`,
 				'2012-04-23T18:25:43.511Z' AS utctime,
 				'2012-04-23T18:25:43.511-08:00' AS pacifictime,
-				{ key: (3 + 1 + 2), 'some thing': { otherkey: 'text', } } AS object
+				{ key: (3 + 1 + 2), other: 9 * 7, 'some thing': { otherkey: 'text', } } AS object
 			FROM $param, test, temp, test:thingy, |test:10|, |test:1..10|
 			WHERE IF true THEN 'YAY' ELSE 'OOPS' END
+				AND (0.1341, 0.5719) INSIDE ( (0.1341, 0.5719), (0.1341, 0.5719) )
 				AND (3 + 3 * 4)=6
 				AND 3 + 3 * 4 = 6
 				AND ages CONTAINS 18
@@ -94,8 +95,9 @@ mod tests {
 		let res = parse(sql);
 		assert!(res.is_ok());
 		let tmp = res.unwrap();
-		println!("{:#?}", serde_json::to_string(&tmp).unwrap());
-		println!("{}", serde_cbor::to_vec(&tmp).unwrap().len());
-		println!("{}", tmp)
+
+		let enc = serde_cbor::to_vec(&tmp).unwrap();
+		let dec: Query = serde_cbor::from_slice(&enc).unwrap();
+		assert_eq!(tmp, dec);
 	}
 }

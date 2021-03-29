@@ -10,7 +10,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct View {
 	pub expr: Fields,
 	pub what: Tables,
@@ -83,19 +83,19 @@ mod tests {
 
 	#[test]
 	fn view_brackets_where() {
-		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT EMPTY)";
+		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT NONE)";
 		let res = view(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("AS SELECT temp FROM test WHERE temp != EMPTY", format!("{}", out))
+		assert_eq!("AS SELECT temp FROM test WHERE temp != NONE", format!("{}", out))
 	}
 
 	#[test]
 	fn view_brackets_group() {
-		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT EMPTY GROUP BY temp)";
+		let sql = "AS (SELECT temp FROM test WHERE temp IS NOT NONE GROUP BY temp)";
 		let res = view(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("AS SELECT temp FROM test WHERE temp != EMPTY GROUP BY temp", format!("{}", out))
+		assert_eq!("AS SELECT temp FROM test WHERE temp != NONE GROUP BY temp", format!("{}", out))
 	}
 }

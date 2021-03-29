@@ -5,7 +5,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Timeout {
 	pub expr: Duration,
 }
@@ -20,7 +20,12 @@ pub fn timeout(i: &str) -> IResult<&str, Timeout> {
 	let (i, _) = tag_no_case("TIMEOUT")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = duration(i)?;
-	Ok((i, Timeout { expr: v }))
+	Ok((
+		i,
+		Timeout {
+			expr: v,
+		},
+	))
 }
 
 #[cfg(test)]

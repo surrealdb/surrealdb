@@ -1,16 +1,22 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::common::{escape, val_char};
 use crate::sql::filter::{filter, Filter};
 use crate::sql::ident::ident_raw;
+use crate::sql::literal::Literal;
 use nom::bytes::complete::tag;
 use nom::combinator::opt;
-use nom::multi::separated_nonempty_list;
+use nom::multi::separated_list1;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Idioms(Vec<Idiom>);
 
 impl fmt::Display for Idioms {
@@ -20,11 +26,11 @@ impl fmt::Display for Idioms {
 }
 
 pub fn idioms(i: &str) -> IResult<&str, Idioms> {
-	let (i, v) = separated_nonempty_list(commas, idiom)(i)?;
+	let (i, v) = separated_list1(commas, idiom)(i)?;
 	Ok((i, Idioms(v)))
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Idiom {
 	pub parts: Vec<(String, Option<Filter>)>,
 }
@@ -67,8 +73,19 @@ impl fmt::Display for Idiom {
 	}
 }
 
+impl dbs::Process for Idiom {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		todo!()
+	}
+}
+
 pub fn idiom(i: &str) -> IResult<&str, Idiom> {
-	let (i, v) = separated_nonempty_list(tag("."), all)(i)?;
+	let (i, v) = separated_list1(tag("."), all)(i)?;
 	Ok((i, Idiom::from(v)))
 }
 

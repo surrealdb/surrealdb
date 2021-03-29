@@ -4,12 +4,12 @@ use crate::sql::expression::{expression, Expression};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
-use nom::{multi::separated_list, sequence::tuple, IResult};
+use nom::{multi::separated_list0, sequence::tuple, IResult};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
@@ -85,7 +85,7 @@ fn full(i: &str) -> IResult<&str, Permissions> {
 }
 
 fn specific(i: &str) -> IResult<&str, Permissions> {
-	let (i, perms) = separated_list(commas, permission)(i)?;
+	let (i, perms) = separated_list0(commas, permission)(i)?;
 	Ok((
 		i,
 		Permissions {
@@ -129,7 +129,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Permission {
 	None,
 	Full,
@@ -160,7 +160,7 @@ impl fmt::Display for Permission {
 fn permission(i: &str) -> IResult<&str, Vec<(Permission, Permission)>> {
 	let (i, _) = tag_no_case("FOR")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, kind) = separated_list(
+	let (i, kind) = separated_list0(
 		commas,
 		alt((
 			map(tag_no_case("SELECT"), |_| Permission::Select),

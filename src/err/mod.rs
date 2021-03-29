@@ -1,67 +1,68 @@
 use crate::sql::duration::Duration;
 use crate::sql::thing::Thing;
-use serde::{Deserialize, Serialize};
 use serde_cbor::error::Error as CborError;
-use serde_json::Error as JsonError;
+use serde_json::error::Error as JsonError;
+use thiserror::Error;
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-	#[fail(display = "Specify a namespace to use")]
-	NSError,
+	#[error("Specify a namespace to use")]
+	NsError,
 
-	#[fail(display = "Specify a database to use")]
-	DBError,
+	#[error("Specify a database to use")]
+	DbError,
 
-	#[fail(display = "Specify some SQL code to execute")]
+	#[error("Specify some SQL code to execute")]
 	EmptyError,
 
-	#[fail(display = "Parse error at position {} when parsing '{}'", pos, sql)]
-	ParseError { pos: usize, sql: String },
+	#[error("Parse error at position {pos} when parsing '{sql}'")]
+	ParseError {
+		pos: usize,
+		sql: String,
+	},
 
-	#[fail(display = "Query timeout of {} exceeded", timer)]
-	TimerError { timer: Duration },
+	#[error("Wrong number of arguments at position {pos} when parsing '{sql}'")]
+	CountError {
+		pos: usize,
+		sql: String,
+	},
 
-	#[fail(display = "Database record `{}` already exists", thing)]
-	ExistError { thing: Thing },
+	#[error("Query timeout of {timer} exceeded")]
+	TimerError {
+		timer: Duration,
+	},
 
-	#[fail(display = "Database index `{}` already contains `{}`", index, thing)]
-	IndexError { index: String, thing: Thing },
+	#[error("Database record `{thing}` already exists")]
+	ExistError {
+		thing: Thing,
+	},
 
-	#[fail(display = "You don't have permission to perform the query `{}`", query)]
-	PermsError { query: String },
+	#[error("Database index `{index}` already contains `{thing}`")]
+	IndexError {
+		index: String,
+		thing: Thing,
+	},
 
-	#[fail(
-		display = "Unable to write to the `{}` table while setup as a view",
-		table
-	)]
-	WriteError { table: String },
+	#[error("You don't have permission to perform the query `{query}`")]
+	PermsError {
+		query: String,
+	},
 
-	#[fail(
-		display = "You don't have permission to perform this query on the `{}` table",
-		table
-	)]
-	TableError { table: String },
+	#[error("Unable to write to the `{table}` table while setup as a view")]
+	WriteError {
+		table: String,
+	},
 
-	#[fail(display = "JSON Error: {}", _0)]
-	JsonError(#[cause] JsonError),
+	#[error("You don't have permission to perform this query on the `{table}` table")]
+	TableError {
+		table: String,
+	},
 
-	#[fail(display = "CBOR Error: {}", _0)]
-	CborError(#[cause] CborError),
-}
+	#[error("JSON Error: {0}")]
+	JsonError(JsonError),
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct Message {
-	pub code: usize,
-	pub info: String,
-}
-
-impl Error {
-	pub fn build(&self) -> Message {
-		Message {
-			code: 400,
-			info: format!("{}", self),
-		}
-	}
+	#[error("CBOR Error: {0}")]
+	CborError(CborError),
 }
 
 impl From<JsonError> for Error {

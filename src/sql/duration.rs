@@ -2,12 +2,13 @@ use nom::branch::alt;
 use nom::bytes::complete::is_a;
 use nom::bytes::complete::tag;
 use nom::IResult;
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use std::time;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
 pub struct Duration {
 	pub input: String,
 	pub value: time::Duration,
@@ -15,7 +16,10 @@ pub struct Duration {
 
 impl<'a> From<&'a str> for Duration {
 	fn from(s: &str) -> Self {
-		duration(s).unwrap().1
+		match duration(s) {
+			Ok((_, v)) => v,
+			Err(_) => Duration::default(),
+		}
 	}
 }
 
@@ -25,7 +29,27 @@ impl fmt::Display for Duration {
 	}
 }
 
+impl Serialize for Duration {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		if serializer.is_human_readable() {
+			serializer.serialize_some(&self.value)
+		} else {
+			let mut val = serializer.serialize_struct("Duration", 2)?;
+			val.serialize_field("input", &self.input)?;
+			val.serialize_field("value", &self.value)?;
+			val.end()
+		}
+	}
+}
+
 pub fn duration(i: &str) -> IResult<&str, Duration> {
+	duration_raw(i)
+}
+
+pub fn duration_raw(i: &str) -> IResult<&str, Duration> {
 	let (i, v) = part(i)?;
 	let (i, u) = unit(i)?;
 	Ok((
@@ -54,16 +78,7 @@ fn part(i: &str) -> IResult<&str, u64> {
 }
 
 fn unit(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("ns"),
-		tag("µs"),
-		tag("ms"),
-		tag("s"),
-		tag("m"),
-		tag("h"),
-		tag("d"),
-		tag("w"),
-	))(i)
+	alt((tag("ns"), tag("µs"), tag("ms"), tag("s"), tag("m"), tag("h"), tag("d"), tag("w")))(i)
 }
 
 #[cfg(test)]
@@ -109,5 +124,25 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("86400s", format!("{}", out));
 		assert_eq!(out.value, Duration::from("1d").value);
+	}
+
+	#[test]
+	fn duration_days() {
+		let sql = "5d";
+		let res = duration(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("5d", format!("{}", out));
+		assert_eq!(out.value, Duration::from("5d").value);
+	}
+
+	#[test]
+	fn duration_weeks() {
+		let sql = "4w";
+		let res = duration(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("4w", format!("{}", out));
+		assert_eq!(out.value, Duration::from("4w").value);
 	}
 }

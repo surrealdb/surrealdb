@@ -1,9 +1,15 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::dbs::Iterator;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::data::{data, Data};
+use crate::sql::literal::{whats, Literal, Literals};
 use crate::sql::output::{output, Output};
 use crate::sql::timeout::{timeout, Timeout};
-use crate::sql::what::{whats, Whats};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
@@ -11,9 +17,9 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct UpdateStatement {
-	pub what: Whats,
+	pub what: Literals,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub data: Option<Data>,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -40,6 +46,43 @@ impl fmt::Display for UpdateStatement {
 			write!(f, " {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl dbs::Process for UpdateStatement {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		// Create a new iterator
+		let i = Iterator::new();
+		// Loop over the select targets
+		for w in self.what.to_owned() {
+			match w.process(ctx, exe, doc)? {
+				Literal::Table(_) => {
+					i.process_table(ctx, exe);
+				}
+				Literal::Thing(_) => {
+					i.process_thing(ctx, exe);
+				}
+				Literal::Model(_) => {
+					i.process_model(ctx, exe);
+				}
+				Literal::Array(_) => {
+					i.process_array(ctx, exe);
+				}
+				Literal::Object(_) => {
+					i.process_object(ctx, exe);
+				}
+				_ => {
+					todo!() // Return error
+				}
+			};
+		}
+		// Output the results
+		i.output(ctx, exe)
 	}
 }
 

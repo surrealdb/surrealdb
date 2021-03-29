@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Query {
 	statements: Statements,
 }
@@ -28,7 +28,12 @@ impl fmt::Display for Query {
 
 pub fn query(i: &str) -> IResult<&str, Query> {
 	let (i, v) = all_consuming(statements)(i)?;
-	Ok((i, Query { statements: v }))
+	Ok((
+		i,
+		Query {
+			statements: v,
+		},
+	))
 }
 
 #[cfg(test)]

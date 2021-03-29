@@ -6,10 +6,10 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Operator {
-	And, // &&
 	Or,  // ||
+	And, // &&
 	//
 	Add, // +
 	Sub, // -
@@ -17,9 +17,6 @@ pub enum Operator {
 	Div, // /
 	Inc, // +=
 	Dec, // -=
-	//
-	Exact,    // ==
-	NotExact, // !==
 	//
 	Equal,    // =
 	NotEqual, // !=
@@ -58,16 +55,14 @@ impl Default for Operator {
 impl fmt::Display for Operator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Operator::And => write!(f, "AND"),
 			Operator::Or => write!(f, "OR"),
+			Operator::And => write!(f, "AND"),
 			Operator::Add => write!(f, "+"),
 			Operator::Sub => write!(f, "-"),
 			Operator::Mul => write!(f, "*"),
 			Operator::Div => write!(f, "/"),
 			Operator::Inc => write!(f, "+="),
 			Operator::Dec => write!(f, "-="),
-			Operator::Exact => write!(f, "=="),
-			Operator::NotExact => write!(f, "!=="),
 			Operator::Equal => write!(f, "="),
 			Operator::NotEqual => write!(f, "!="),
 			Operator::AllEqual => write!(f, "*="),
@@ -119,8 +114,6 @@ pub fn operator(i: &str) -> IResult<&str, Operator> {
 			map(tag("!="), |_| Operator::NotEqual),
 			map(tag("*="), |_| Operator::AllEqual),
 			map(tag("?="), |_| Operator::AnyEqual),
-			map(tag("=="), |_| Operator::Exact),
-			map(tag("!=="), |_| Operator::NotExact),
 		)),
 		alt((
 			map(tag("~"), |_| Operator::Like),

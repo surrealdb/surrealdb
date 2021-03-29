@@ -8,7 +8,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Model {
 	pub table: String,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -19,14 +19,20 @@ pub struct Model {
 
 impl fmt::Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "|{}:", escape(&self.table, &val_char, "`"))?;
-		if let Some(ref v) = self.count {
-			write!(f, "{}", v)?
+		match self.count {
+			Some(ref c) => {
+				let t = escape(&self.table, &val_char, "`");
+				write!(f, "|{}:{}|", t, c)?;
+			}
+			None => {}
 		}
-		if let Some(ref v) = self.range {
-			write!(f, "{}..{}", v.0, v.1)?
+		match self.range {
+			Some((ref b, ref e)) => {
+				let t = escape(&self.table, &val_char, "`");
+				write!(f, "|{}:{}..{}|", t, b, e)?;
+			}
+			None => {}
 		}
-		write!(f, "|")?;
 		Ok(())
 	}
 }

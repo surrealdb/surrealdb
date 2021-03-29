@@ -5,6 +5,7 @@ use nom::character::complete::multispace0;
 use nom::character::is_alphanumeric;
 use nom::combinator::map;
 use nom::error::ErrorKind;
+use nom::error::Error;
 use nom::multi::many1;
 use nom::IResult;
 use std::ops::RangeBounds;
@@ -75,6 +76,6 @@ pub fn take_digits_range(i: &str, n: usize, range: impl RangeBounds<u32>) -> IRe
 	if range.contains(&v) {
 		Ok((i, v))
 	} else {
-		Err(nom::Err::Error((i, ErrorKind::Eof)))
+		Err(nom::Err::Error(Error::new(i, ErrorKind::Eof)))
 	}
 }

@@ -1,0 +1,30 @@
+use std::error::Error;
+use std::fmt;
+use std::io;
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum Reason {
+	Timedout,
+	Canceled,
+}
+
+impl Error for Reason {}
+
+impl fmt::Display for Reason {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match *self {
+			Reason::Timedout => write!(f, "Context timedout"),
+			Reason::Canceled => write!(f, "Context canceled"),
+		}
+	}
+}
+
+impl From<Reason> for io::Error {
+	fn from(reason: Reason) -> Self {
+		let kind = match reason {
+			Reason::Timedout => io::ErrorKind::TimedOut,
+			Reason::Canceled => io::ErrorKind::Other,
+		};
+		io::Error::new(kind, reason.to_string())
+	}
+}

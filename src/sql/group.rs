@@ -3,13 +3,13 @@ use crate::sql::common::commas;
 use crate::sql::idiom::{idiom, Idiom};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
-use nom::multi::separated_nonempty_list;
+use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Groups(Vec<Group>);
 
 impl fmt::Display for Groups {
@@ -22,7 +22,7 @@ impl fmt::Display for Groups {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Group {
 	pub group: Idiom,
 }
@@ -37,7 +37,7 @@ pub fn group(i: &str) -> IResult<&str, Groups> {
 	let (i, _) = tag_no_case("GROUP")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = separated_nonempty_list(commas, group_raw)(i)?;
+	let (i, v) = separated_list1(commas, group_raw)(i)?;
 	Ok((i, Groups(v)))
 }
 

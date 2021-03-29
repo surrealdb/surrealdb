@@ -1,6 +1,12 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::base::{base, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::ident::ident_raw;
+use crate::sql::literal::Literal;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
@@ -8,7 +14,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
@@ -37,6 +43,17 @@ impl fmt::Display for RemoveStatement {
 	}
 }
 
+impl dbs::Process for RemoveStatement {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		todo!()
+	}
+}
+
 pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 	alt((
 		map(namespace, |v| RemoveStatement::Namespace(v)),
@@ -55,7 +72,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoveNamespaceStatement {
 	pub name: String,
 }
@@ -84,7 +101,7 @@ fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoveDatabaseStatement {
 	pub name: String,
 }
@@ -113,7 +130,7 @@ fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoveLoginStatement {
 	pub name: String,
 	pub base: Base,
@@ -148,7 +165,7 @@ fn login(i: &str) -> IResult<&str, RemoveLoginStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoveTokenStatement {
 	pub name: String,
 	pub base: Base,
@@ -183,7 +200,7 @@ fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoveScopeStatement {
 	pub name: String,
 }
@@ -212,7 +229,7 @@ fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoveTableStatement {
 	pub name: String,
 }
@@ -241,7 +258,7 @@ fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoveEventStatement {
 	pub name: String,
 	pub what: String,
@@ -276,7 +293,7 @@ fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoveFieldStatement {
 	pub name: String,
 	pub what: String,
@@ -311,7 +328,7 @@ fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RemoveIndexStatement {
 	pub name: String,
 	pub what: String,

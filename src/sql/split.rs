@@ -3,13 +3,13 @@ use crate::sql::common::commas;
 use crate::sql::idiom::{idiom, Idiom};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
-use nom::multi::separated_nonempty_list;
+use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Splits(Vec<Split>);
 
 impl fmt::Display for Splits {
@@ -17,16 +17,12 @@ impl fmt::Display for Splits {
 		write!(
 			f,
 			"SPLIT ON {}",
-			self.0
-				.iter()
-				.map(|ref v| format!("{}", v))
-				.collect::<Vec<_>>()
-				.join(", ")
+			self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", ")
 		)
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Split {
 	pub split: Idiom,
 }
@@ -41,13 +37,18 @@ pub fn split(i: &str) -> IResult<&str, Splits> {
 	let (i, _) = tag_no_case("SPLIT")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("ON"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = separated_nonempty_list(commas, split_raw)(i)?;
+	let (i, v) = separated_list1(commas, split_raw)(i)?;
 	Ok((i, Splits(v)))
 }
 
 fn split_raw(i: &str) -> IResult<&str, Split> {
 	let (i, v) = idiom(i)?;
-	Ok((i, Split { split: v }))
+	Ok((
+		i,
+		Split {
+			split: v,
+		},
+	))
 }
 
 #[cfg(test)]

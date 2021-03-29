@@ -5,7 +5,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Cond {
 	pub expr: Expression,
 }
@@ -20,7 +20,12 @@ pub fn cond(i: &str) -> IResult<&str, Cond> {
 	let (i, _) = tag_no_case("WHERE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = expression(i)?;
-	Ok((i, Cond { expr: v }))
+	Ok((
+		i,
+		Cond {
+			expr: v,
+		},
+	))
 }
 
 #[cfg(test)]
@@ -43,9 +48,6 @@ mod tests {
 		let res = cond(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(
-			"WHERE field = true AND other.field = false",
-			format!("{}", out)
-		);
+		assert_eq!("WHERE field = true AND other.field = false", format!("{}", out));
 	}
 }

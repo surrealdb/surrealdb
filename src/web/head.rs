@@ -1,5 +1,3 @@
-use uuid::Uuid;
-
 const NAME: &'static str = env!("CARGO_PKG_NAME");
 const VERS: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -8,9 +6,8 @@ pub fn version() -> warp::filters::reply::WithHeader {
 	warp::reply::with::header("Version", val)
 }
 
-pub fn unique() -> warp::filters::reply::WithHeader {
-	let val = Uuid::new_v4().to_string();
-	warp::reply::with::header("Request-Id", val)
+pub fn server() -> warp::filters::reply::WithHeader {
+	warp::reply::with::header("Server", "SurrealDB")
 }
 
 pub fn cors() -> warp::filters::cors::Builder {

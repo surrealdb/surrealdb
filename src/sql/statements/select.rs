@@ -1,10 +1,16 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::dbs::Iterator;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Fields};
 use crate::sql::group::{group, Groups};
 use crate::sql::limit::{limit, Limit};
-use crate::sql::literal::{literals, Literals};
+use crate::sql::literal::{literals, Literal, Literals};
 use crate::sql::order::{order, Orders};
 use crate::sql::split::{split, Splits};
 use crate::sql::start::{start, Start};
@@ -17,7 +23,7 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub what: Literals,
@@ -72,6 +78,40 @@ impl fmt::Display for SelectStatement {
 			write!(f, " {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl dbs::Process for SelectStatement {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		// Create a new iterator
+		let i = Iterator::new();
+		// Loop over the select targets
+		for w in self.what.to_owned() {
+			match w.process(ctx, exe, doc)? {
+				Literal::Table(_) => {
+					i.process_table(ctx, exe);
+				}
+				Literal::Thing(_) => {
+					i.process_thing(ctx, exe);
+				}
+				Literal::Model(_) => {
+					i.process_model(ctx, exe);
+				}
+				Literal::Array(_) => {
+					i.process_array(ctx, exe);
+				}
+				_ => {
+					i.process_query(ctx, exe);
+				}
+			};
+		}
+		// Output the results
+		i.output(ctx, exe)
 	}
 }
 

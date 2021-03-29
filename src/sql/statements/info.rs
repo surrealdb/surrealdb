@@ -1,12 +1,18 @@
+use crate::ctx::Parent;
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::doc::Document;
+use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::ident::ident_raw;
+use crate::sql::literal::Literal;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum InfoStatement {
 	Namespace,
 	Database,
@@ -22,6 +28,17 @@ impl fmt::Display for InfoStatement {
 			InfoStatement::Scope(ref s) => write!(f, "INFO FOR SCOPE {}", s),
 			InfoStatement::Table(ref t) => write!(f, "INFO FOR TABLE {}", t),
 		}
+	}
+}
+
+impl dbs::Process for InfoStatement {
+	fn process(
+		&self,
+		ctx: &Parent,
+		exe: &Executor,
+		doc: Option<&Document>,
+	) -> Result<Literal, Error> {
+		todo!()
 	}
 }
 

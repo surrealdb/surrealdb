@@ -4,13 +4,13 @@ use crate::sql::idiom::{idiom, Idiom};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
-use nom::multi::separated_nonempty_list;
+use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Orders(Vec<Order>);
 
 impl fmt::Display for Orders {
@@ -23,7 +23,7 @@ impl fmt::Display for Orders {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Order {
 	pub order: Idiom,
 	pub random: bool,
@@ -56,7 +56,7 @@ pub fn order(i: &str) -> IResult<&str, Orders> {
 	let (i, _) = tag_no_case("ORDER")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = alt((order_rand, separated_nonempty_list(commas, order_raw)))(i)?;
+	let (i, v) = alt((order_rand, separated_list1(commas, order_raw)))(i)?;
 	Ok((i, Orders(v)))
 }
 

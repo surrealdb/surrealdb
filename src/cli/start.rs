@@ -1,7 +1,7 @@
 use crate::kvs;
 use crate::web;
+use anyhow::Error;
 use clap;
-use failure::Error;
 
 const LOGO: &'static str = "
  .d8888b.                                             888 8888888b.  888888b.

@@ -1,7 +1,7 @@
-use reqwest::header::CONTENT_TYPE;
+use anyhow::Error;
 use reqwest::blocking::Body;
 use reqwest::blocking::Client;
-use failure::Error;
+use reqwest::header::CONTENT_TYPE;
 use std::fs::OpenOptions;
 use std::io::copy;
 
@@ -38,11 +38,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 fn backup_file_to_file(_: &clap::ArgMatches, from: &str, into: &str) -> Result<(), Error> {
 	let mut from = OpenOptions::new().read(true).open(from)?;
 
-	let mut into = OpenOptions::new()
-		.write(true)
-		.create(true)
-		.truncate(true)
-		.open(into)?;
+	let mut into = OpenOptions::new().write(true).create(true).truncate(true).open(into)?;
 
 	copy(&mut from, &mut into)?;
 
@@ -63,11 +59,7 @@ fn backup_http_to_file(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 		.send()?
 		.error_for_status()?;
 
-	let mut into = OpenOptions::new()
-		.write(true)
-		.create(true)
-		.truncate(true)
-		.open(into)?;
+	let mut into = OpenOptions::new().write(true).create(true).truncate(true).open(into)?;
 
 	copy(&mut from, &mut into)?;
 
