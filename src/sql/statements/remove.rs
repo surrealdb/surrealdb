@@ -1,6 +1,6 @@
-use crate::ctx::Parent;
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Runtime;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::base::{base, Base};
@@ -46,7 +46,7 @@ impl fmt::Display for RemoveStatement {
 impl dbs::Process for RemoveStatement {
 	fn process(
 		&self,
-		ctx: &Parent,
+		ctx: &Runtime,
 		exe: &Executor,
 		doc: Option<&Document>,
 	) -> Result<Literal, Error> {

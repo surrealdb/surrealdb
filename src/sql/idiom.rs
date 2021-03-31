@@ -1,6 +1,6 @@
-use crate::ctx::Parent;
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Runtime;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::common::commas;
@@ -76,7 +76,7 @@ impl fmt::Display for Idiom {
 impl dbs::Process for Idiom {
 	fn process(
 		&self,
-		ctx: &Parent,
+		ctx: &Runtime,
 		exe: &Executor,
 		doc: Option<&Document>,
 	) -> Result<Literal, Error> {

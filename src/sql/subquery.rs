@@ -1,7 +1,7 @@
 use crate::ctx::Context;
-use crate::ctx::Parent;
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Runtime;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::expression::{expression, Expression};
@@ -61,7 +61,7 @@ impl fmt::Display for Subquery {
 impl dbs::Process for Subquery {
 	fn process(
 		&self,
-		ctx: &Parent,
+		ctx: &Runtime,
 		exe: &Executor,
 		doc: Option<&Document>,
 	) -> Result<Literal, Error> {

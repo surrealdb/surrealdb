@@ -1,6 +1,6 @@
-use crate::ctx::Parent;
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Runtime;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
@@ -36,7 +36,7 @@ impl fmt::Display for Array {
 impl dbs::Process for Array {
 	fn process(
 		&self,
-		ctx: &Parent,
+		ctx: &Runtime,
 		exe: &Executor,
 		doc: Option<&Document>,
 	) -> Result<Literal, Error> {

@@ -1,6 +1,6 @@
-use crate::ctx::Parent;
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Runtime;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::fnc;
@@ -349,7 +349,7 @@ impl fmt::Display for Literal {
 impl dbs::Process for Literal {
 	fn process(
 		&self,
-		ctx: &Parent,
+		ctx: &Runtime,
 		exe: &Executor,
 		doc: Option<&Document>,
 	) -> Result<Literal, Error> {

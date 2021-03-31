@@ -1,7 +1,7 @@
-use crate::ctx::Parent;
 use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
+use crate::dbs::Runtime;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
@@ -44,7 +44,7 @@ impl fmt::Display for UpsertStatement {
 impl dbs::Process for UpsertStatement {
 	fn process(
 		&self,
-		ctx: &Parent,
+		ctx: &Runtime,
 		exe: &Executor,
 		doc: Option<&Document>,
 	) -> Result<Literal, Error> {

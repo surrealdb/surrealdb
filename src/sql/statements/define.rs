@@ -1,6 +1,6 @@
-use crate::ctx::Parent;
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Runtime;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
@@ -56,7 +56,7 @@ impl fmt::Display for DefineStatement {
 impl dbs::Process for DefineStatement {
 	fn process(
 		&self,
-		ctx: &Parent,
+		ctx: &Runtime,
 		exe: &Executor,
 		doc: Option<&Document>,
 	) -> Result<Literal, Error> {

@@ -1,6 +1,6 @@
-use crate::ctx::Parent;
 use crate::dbs::response::{Response, Responses};
 use crate::dbs::Process;
+use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::query::Query;
 use std::time::Instant;
@@ -21,7 +21,7 @@ impl Executor {
 		}
 	}
 
-	pub fn execute(&self, ctx: &Parent, qry: Query) -> Result<Responses, Error> {
+	pub fn execute(&self, ctx: &Runtime, qry: Query) -> Result<Responses, Error> {
 		let mut r: Vec<Response> = vec![];
 
 		for stm in qry.statements().iter() {

@@ -1,7 +1,7 @@
-use crate::ctx::Parent;
+use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::literal::Literal;
 
-pub fn run(ctx: &Parent, args: Literal) -> Result<Literal, Error> {
+pub fn run(ctx: &Runtime, args: Literal) -> Result<Literal, Error> {
 	todo!()
 }

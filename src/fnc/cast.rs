@@ -1,8 +1,8 @@
-use crate::ctx::Context;
+use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::literal::Literal;
 
-pub fn run(ctx: &Context, name: &String, val: Literal) -> Result<Literal, Error> {
+pub fn run(ctx: &Runtime, name: &String, val: Literal) -> Result<Literal, Error> {
 	match name.as_str() {
 		"bool" => bool(ctx, val),
 		"int" => int(ctx, val),
@@ -16,33 +16,33 @@ pub fn run(ctx: &Context, name: &String, val: Literal) -> Result<Literal, Error>
 	}
 }
 
-pub fn bool(ctx: &Context, val: Literal) -> Result<Literal, Error> {
+pub fn bool(ctx: &Runtime, val: Literal) -> Result<Literal, Error> {
 	match val.as_bool() {
 		true => Ok(Literal::True),
 		false => Ok(Literal::False),
 	}
 }
 
-pub fn int(ctx: &Context, val: Literal) -> Result<Literal, Error> {
+pub fn int(ctx: &Runtime, val: Literal) -> Result<Literal, Error> {
 	Ok(Literal::Int(val.as_int()))
 }
 
-pub fn float(ctx: &Context, val: Literal) -> Result<Literal, Error> {
+pub fn float(ctx: &Runtime, val: Literal) -> Result<Literal, Error> {
 	Ok(Literal::Float(val.as_float()))
 }
 
-pub fn string(ctx: &Context, val: Literal) -> Result<Literal, Error> {
+pub fn string(ctx: &Runtime, val: Literal) -> Result<Literal, Error> {
 	Ok(Literal::Strand(val.as_strand()))
 }
 
-pub fn number(ctx: &Context, val: Literal) -> Result<Literal, Error> {
+pub fn number(ctx: &Runtime, val: Literal) -> Result<Literal, Error> {
 	Ok(Literal::Number(val.as_number()))
 }
 
-pub fn datetime(ctx: &Context, val: Literal) -> Result<Literal, Error> {
+pub fn datetime(ctx: &Runtime, val: Literal) -> Result<Literal, Error> {
 	Ok(Literal::Datetime(val.as_datetime()))
 }
 
-pub fn duration(ctx: &Context, val: Literal) -> Result<Literal, Error> {
+pub fn duration(ctx: &Runtime, val: Literal) -> Result<Literal, Error> {
 	Ok(Literal::Duration(val.as_duration()))
 }
