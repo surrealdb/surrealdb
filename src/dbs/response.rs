@@ -10,6 +10,5 @@ pub struct Response {
 	pub time: String,
 	pub status: String,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	// pub result: Option<String>,
 	pub result: Option<Literal>,
 }
