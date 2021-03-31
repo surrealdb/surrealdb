@@ -4,6 +4,7 @@ use crate::dbs::Executor;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::common::val_char;
+use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::literal::Literal;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
@@ -14,13 +15,21 @@ use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Param {
-	pub name: String,
+	pub name: Idiom,
+}
+
+impl From<Idiom> for Param {
+	fn from(p: Idiom) -> Param {
+		Param {
+			name: p,
+		}
+	}
 }
 
 impl<'a> From<&'a str> for Param {
 	fn from(p: &str) -> Param {
 		Param {
-			name: String::from(p),
+			name: Idiom::from(p),
 		}
 	}
 }
@@ -48,7 +57,7 @@ impl dbs::Process for Param {
 
 pub fn param(i: &str) -> IResult<&str, Param> {
 	let (i, _) = tag("$")(i)?;
-	let (i, v) = take_while1(val_char)(i)?;
+	let (i, v) = idiom(i)?;
 	Ok((i, Param::from(v)))
 }
 
@@ -75,5 +84,15 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("$test_and_deliver", format!("{}", out));
 		assert_eq!(out, Param::from("test_and_deliver"));
+	}
+
+	#[test]
+	fn param_embedded() {
+		let sql = "$test.temporary[0].embedded";
+		let res = param(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("$test.temporary[0].embedded", format!("{}", out));
+		assert_eq!(out, Param::from("test.temporary[0].embedded"));
 	}
 }
