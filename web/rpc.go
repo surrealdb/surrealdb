@@ -71,6 +71,21 @@ func (r *rpc) Live(c *fibre.Context, class string) (interface{}, error) {
 // Methods for static queries
 // --------------------------------------------------
 
+func (r *rpc) Let(c *fibre.Context, key string, val interface{}) (interface{}, error) {
+	switch val := val.(type) {
+	case *fibre.RPCNull:
+		vars := c.Get("vars").(map[string]interface{})
+		delete(vars, key)
+		c.Set("vars", vars)
+		return vars, nil
+	default:
+		vars := c.Get("vars").(map[string]interface{})
+		vars[key] = val
+		c.Set("vars", vars)
+		return vars, nil
+	}
+}
+
 func (r *rpc) Query(c *fibre.Context, sql string, vars map[string]interface{}) (interface{}, error) {
 	return db.Execute(c, sql, vars)
 }

@@ -138,6 +138,16 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 		vars = make(map[string]interface{})
 	}
 
+	// Fetch any variables which have been set
+	// on the connection. These might have been
+	// set on the WebSocket or using HTTP Headers.
+
+	if sess := fib.Get(ctxKeyVars); sess != nil {
+		for key, val := range sess.(map[string]interface{}) {
+			vars[key] = val
+		}
+	}
+
 	// Get the unique id for this connection
 	// so that we can assign it to the context
 	// and detect any websocket notifications.

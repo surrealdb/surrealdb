@@ -14,17 +14,16 @@
 
 package web
 
-const (
-	varKeyNs   = "NS"
-	varKeyDb   = "DB"
-	varKeySc   = "SC"
-	varKeyTk   = "TK"
-	varKeyUs   = "US"
-	varKeyTb   = "TB"
-	varKeyId   = "ID"
-	varKeyAuth = "auth"
-	varKeyVars = "vars"
-	varKeyUser = "user"
-	varKeyPass = "pass"
-	varKeyUniq = "uniq"
+import (
+	"github.com/abcum/fibre"
 )
+
+func sess() fibre.MiddlewareFunc {
+	return func(h fibre.HandlerFunc) fibre.HandlerFunc {
+		return func(c *fibre.Context) (err error) {
+			vars := make(map[string]interface{})
+			c.Set(varKeyVars, vars)
+			return h(c)
+		}
+	}
+}

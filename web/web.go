@@ -76,6 +76,10 @@ func Setup(opts *cnf.Options) (err error) {
 
 	// Setup authentication
 
+	s.Use(sess())
+
+	// Setup authentication
+
 	s.Use(auth())
 
 	// Setup live queries
