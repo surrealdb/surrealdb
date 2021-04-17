@@ -114,8 +114,9 @@ func (s *socket) ctx() (ctx context.Context) {
 	ctx = context.Background()
 
 	auth := s.fibre.Get(ctxKeyAuth).(*cnf.Auth)
+	sess := s.fibre.Get(ctxKeyVars).(map[string]interface{})
 
-	vars := data.New()
+	vars := data.Consume(sess)
 	vars.Set(ENV, varKeyEnv)
 	vars.Set(auth.Data, varKeyAuth)
 	vars.Set(auth.Scope, varKeyScope)
