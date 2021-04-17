@@ -202,6 +202,10 @@ func ConvertToRecord(obj interface{}, tb string) (val *sql.Thing, err error) {
 		default:
 			err = fmt.Errorf("Expected a record of type '%s', but found '%v'", tb, obj)
 		}
+	case string:
+		if val = sql.ParseThing(now); val == nil {
+			err = fmt.Errorf("Expected a record of type '%s', but found '%v'", tb, obj)
+		}
 	default:
 		switch tb {
 		default:
