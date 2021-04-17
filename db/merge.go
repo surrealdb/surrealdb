@@ -322,16 +322,6 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 
 			val = conv.MustBe(fd.Type, val)
 
-			// Ensure the field is the correct type
-
-			if val != nil {
-				if now, err := conv.ConvertTo(fd.Type, fd.Kind, val); err != nil {
-					val = nil
-				} else {
-					val = now
-				}
-			}
-
 			// We are setting the value of the field
 
 			if fd.Value != nil && d.i.e.opts.fields {
@@ -350,6 +340,16 @@ func (d *document) mrgFld(ctx context.Context, met method) (err error) {
 					val = now
 				}
 
+			}
+
+			// Ensure the field is the correct type
+
+			if val != nil {
+				if now, err := conv.ConvertTo(fd.Type, fd.Kind, val); err != nil {
+					val = nil
+				} else {
+					val = now
+				}
 			}
 
 			// We are checking the value of the field
