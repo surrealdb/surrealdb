@@ -180,6 +180,46 @@ func TestMain(t *testing.T) {
 
 }
 
+func Test_Parse_IDs(t *testing.T) {
+
+	Convey("All IDs should parse correctly", t, func() {
+		So(ParseThing("test:tester"), ShouldResemble, &Thing{
+			TB: "test",
+			ID: string("tester"),
+		})
+		So(ParseThing("test:123456"), ShouldResemble, &Thing{
+			TB: "test",
+			ID: float64(123456),
+		})
+		So(ParseThing("test:abcdef"), ShouldResemble, &Thing{
+			TB: "test",
+			ID: string("abcdef"),
+		})
+		So(ParseThing("test:a1b2c3"), ShouldResemble, &Thing{
+			TB: "test",
+			ID: string("a1b2c3"),
+		})
+		So(ParseThing("test:1a2b3c"), ShouldResemble, &Thing{
+			TB: "test",
+			ID: string("1a2b3c"),
+		})
+		So(ParseThing("test:4m9sms"), ShouldResemble, &Thing{
+			TB: "test",
+			ID: string("4m9sms"),
+		})
+		So(ParseThing("test:4m98m85ms"), ShouldResemble, &Thing{
+			TB: "test",
+			ID: string("4m98m85ms"),
+		})
+		So(ParseThing("test:00s5w36sm"), ShouldResemble, &Thing{
+			TB: "test",
+			ID: string("00s5w36sm"),
+		})
+	})
+
+}
+
+
 // Ensure the parser can parse a multi-statement query.
 func Test_Parse_General(t *testing.T) {
 

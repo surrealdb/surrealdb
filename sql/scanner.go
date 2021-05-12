@@ -756,7 +756,7 @@ func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{
 					if chn := s.next(); chn == '+' {
 						tok = DOUBLE
 						buf.WriteRune(chn)
-					} else if ch == '-' {
+					} else if chn == '-' {
 						tok = DOUBLE
 						buf.WriteRune(chn)
 					} else {
@@ -765,7 +765,10 @@ func (s *scanner) scanNumber(chp ...rune) (tok Token, lit string, val interface{
 				case 's', 'h', 'd', 'w':
 					tok = DURATION
 				case 'n', 'u', 'µ', 'm':
-					if chn := s.next(); chn == 's' {
+					tok = DURATION
+					if chn := s.next(); chn == eof {
+						break
+					} else if chn == 's' {
 						tok = DURATION
 						buf.WriteRune(chn)
 					} else if ch == 'm' {
@@ -975,7 +978,7 @@ func (s *scanner) part() (tok Token, lit string, val interface{}) {
 		tok = ILLEGAL
 	}
 
-	if tok != IDENT && tok != NUMBER && tok != DOUBLE {
+	if tok != IDENT && tok != NUMBER && tok != DOUBLE && tok != DURATION {
 		tok = ILLEGAL
 	}
 
