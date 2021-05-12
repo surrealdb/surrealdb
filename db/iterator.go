@@ -630,6 +630,77 @@ func (i *iterator) processOther(ctx context.Context, key *keys.Thing, val []inte
 				continue
 			}
 
+		case map[string]interface{}:
+
+			// If the data item has an ID field,
+			// then use this as the new record ID.
+
+			if fld, ok := v["id"]; ok {
+
+				switch thg := fld.(type) {
+
+				case *sql.Thing:
+
+					// If the ID is a *sql.Thing then this
+					// was a subquery, so use the ID.
+
+					if i.check(ctx) {
+						key := key.Copy()
+						key.ID = thg.ID
+						i.process(ctx, key, nil, data.Consume(v))
+						continue
+					}
+
+				case string:
+
+					// If not, then take the whole ID and
+					// use that as the ID of the new record.
+
+					if i.check(ctx) {
+						if thg := sql.ParseThing(thg); thg != nil {
+							key := key.Copy()
+							key.TB = thg.TB
+							key.ID = thg.ID
+							fmt.Println(thg)
+							i.process(ctx, key, nil, data.Consume(v))
+							continue
+						}
+					}
+
+				default:
+
+					switch i.stm.(type) {
+					case *sql.CreateStatement:
+						i.err = fmt.Errorf("Can not execute CREATE query using value '%v'", val)
+					case *sql.UpdateStatement:
+						i.err = fmt.Errorf("Can not execute UPDATE query using value '%v'", val)
+					case *sql.DeleteStatement:
+						i.err = fmt.Errorf("Can not execute DELETE query using value '%v'", val)
+					case *sql.RelateStatement:
+						i.err = fmt.Errorf("Can not execute RELATE query using value '%v'", val)
+					}
+
+					close(i.stop)
+
+				}
+
+			} else {
+
+				switch i.stm.(type) {
+				case *sql.CreateStatement:
+					i.err = fmt.Errorf("Can not execute CREATE query using value '%v'", val)
+				case *sql.UpdateStatement:
+					i.err = fmt.Errorf("Can not execute UPDATE query using value '%v'", val)
+				case *sql.DeleteStatement:
+					i.err = fmt.Errorf("Can not execute DELETE query using value '%v'", val)
+				case *sql.RelateStatement:
+					i.err = fmt.Errorf("Can not execute RELATE query using value '%v'", val)
+				}
+
+				close(i.stop)
+
+			}
+
 		default:
 
 			switch i.stm.(type) {
@@ -720,7 +791,9 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 
 			if fld, ok := v["id"]; ok {
 
-				if thg, ok := v["id"].(*sql.Thing); ok {
+				switch thg := fld.(type) {
+
+				case *sql.Thing:
 
 					// If the ID is a *sql.Thing then this
 					// was a subquery, so use the ID.
@@ -732,7 +805,24 @@ func (i *iterator) processArray(ctx context.Context, key *keys.Thing, val []inte
 						continue
 					}
 
-				} else {
+				case string:
+
+					// If not, then take the whole ID and
+					// use that as the ID of the new record.
+
+					if i.check(ctx) {
+						key := key.Copy()
+						if thg := sql.ParseThing(thg); thg != nil {
+							key.TB = thg.TB
+							key.ID = thg.ID
+						} else {
+							key.ID = fld
+						}
+						i.process(ctx, key, nil, data.Consume(v))
+						continue
+					}
+
+				default:
 
 					// If not, then take the whole ID and
 					// use that as the ID of the new record.
