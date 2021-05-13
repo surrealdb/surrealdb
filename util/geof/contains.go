@@ -18,12 +18,12 @@ import (
 	"github.com/abcum/surreal/sql"
 )
 
-func Inside(a *sql.Point, b *sql.Polygon) bool {
-	beg := len(b.PS) - 1
+func Contains(a *sql.Polygon, b *sql.Point) bool {
+	beg := len(a.PS) - 1
 	end := 0
-	contains := raycast(a, b.PS[beg], b.PS[end])
-	for i := 1; i < len(b.PS); i++ {
-		if raycast(a, b.PS[i-1], b.PS[i]) {
+	contains := raycast(b, a.PS[beg], a.PS[end])
+	for i := 1; i < len(a.PS); i++ {
+		if raycast(b, a.PS[i-1], a.PS[i]) {
 			contains = !contains
 		}
 	}

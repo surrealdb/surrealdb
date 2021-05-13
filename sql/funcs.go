@@ -97,6 +97,7 @@ var funcs = map[string]map[int]interface{}{
 	"geo.point":       {1: nil, 2: nil},
 	"geo.circle":      {2: nil},
 	"geo.polygon":     {-1: nil},
+	"geo.contains":    {2: nil},
 	"geo.distance":    {2: nil},
 	"geo.inside":      {2: nil},
 	"geo.intersects":  {2: nil},

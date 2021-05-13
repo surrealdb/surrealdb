@@ -15,6 +15,7 @@
 package fncs
 
 import (
+
 	"context"
 
 	"github.com/abcum/surreal/sql"
@@ -57,8 +58,22 @@ func geoCircle(ctx context.Context, args ...interface{}) (interface{}, error) {
 
 func geoPolygon(ctx context.Context, args ...interface{}) (interface{}, error) {
 	switch len(args) {
-	case 0, 1, 2:
+	case 0, 2:
 		// Not enough arguments, so just ignore
+	case 1:
+		var pnts []*sql.Point
+		if a, ok := ensureSlice(args[0]); ok {
+			for _, a := range a {
+				if p, _ := ensurePoint(a); p != nil {
+					pnts = append(pnts, p)
+				} else if p := ensureFloats(a); len(p) == 2 {
+					pnts = append(pnts, sql.NewPoint(p[0], p[1]))
+				} else {
+					return nil, nil
+				}
+			}
+			return sql.NewPolygon(pnts...), nil
+		}
 	default:
 		var pnts []*sql.Point
 		for _, a := range args {
@@ -75,6 +90,15 @@ func geoPolygon(ctx context.Context, args ...interface{}) (interface{}, error) {
 	return nil, nil
 }
 
+func geoContains(ctx context.Context, args ...interface{}) (interface{}, error) {
+	if a, ok := ensurePolygon(args[0]); ok {
+		if b, ok := ensurePoint(args[1]); ok {
+			return geof.Contains(a, b), nil
+		}
+	}
+	return false, nil
+}
+
 func geoDistance(ctx context.Context, args ...interface{}) (interface{}, error) {
 	if pnt, ok := ensurePoint(args[0]); ok {
 		if frm, ok := ensurePoint(args[1]); ok {
@@ -85,8 +109,8 @@ func geoDistance(ctx context.Context, args ...interface{}) (interface{}, error) 
 }
 
 func geoInside(ctx context.Context, args ...interface{}) (interface{}, error) {
-	if a, ok := ensureGeometry(args[0]); ok {
-		if b, ok := ensureGeometry(args[1]); ok {
+	if a, ok := ensurePoint(args[0]); ok {
+		if b, ok := ensurePolygon(args[1]); ok {
 			return geof.Inside(a, b), nil
 		}
 	}

@@ -70,6 +70,8 @@ func Run(ctx context.Context, name string, args ...interface{}) (interface{}, er
 		return geoCircle(ctx, args...)
 	case "geo.polygon":
 		return geoPolygon(ctx, args...)
+	case "geo.contains":
+		return geoContains(ctx, args...)
 	case "geo.distance":
 		return geoDistance(ctx, args...)
 	case "geo.inside":
