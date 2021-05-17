@@ -2,7 +2,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::point::{point, Point};
 use nom::bytes::complete::tag;
-use nom::multi::separated_list0;
+use nom::multi::separated_list1;
 use nom::IResult;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -41,7 +41,7 @@ impl Serialize for Polygon {
 pub fn polygon(i: &str) -> IResult<&str, Polygon> {
 	let (i, _) = tag("(")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list0(commas, point)(i)?;
+	let (i, v) = separated_list1(commas, point)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag(")")(i)?;
 	Ok((
@@ -59,19 +59,22 @@ mod tests {
 
 	#[test]
 	fn polygon_simple() {
-		let sql = "( (0, 0), (0, 0) )";
+		let sql = "( (0, 0), (0, 0), (0, 0) )";
 		let res = polygon(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("( (0, 0), (0, 0) )", format!("{}", out));
+		assert_eq!("( (0, 0), (0, 0), (0, 0) )", format!("{}", out));
 	}
 
 	#[test]
 	fn polygon_complex() {
-		let sql = "( (51.509865, -0.118092), (51.509865, -0.118092) )";
+		let sql = "( (51.509865, -0.118092), (51.509865, -0.118092), (51.509865, -0.118092) )";
 		let res = polygon(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("( (51.509865, -0.118092), (51.509865, -0.118092) )", format!("{}", out));
+		assert_eq!(
+			"( (51.509865, -0.118092), (51.509865, -0.118092), (51.509865, -0.118092) )",
+			format!("{}", out)
+		);
 	}
 }
