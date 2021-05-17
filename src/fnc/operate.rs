@@ -42,6 +42,10 @@ pub fn div(a: &Literal, b: &Literal) -> Result<Literal, Error> {
 	Ok(Literal::from(a / b))
 }
 
+pub fn exact(a: &Literal, b: &Literal) -> Result<Literal, Error> {
+	Ok(Literal::from(a == b))
+}
+
 pub fn equal(a: &Literal, b: &Literal) -> Result<Literal, Error> {
 	match a {
 		Literal::None => Ok(Literal::from(b.is_none() == true)),

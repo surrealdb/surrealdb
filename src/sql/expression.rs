@@ -77,6 +77,7 @@ impl dbs::Process for Expression {
 					Operator::Mul => fnc::operate::mul(&l, &r),
 					Operator::Div => fnc::operate::div(&l, &r),
 					Operator::Equal => fnc::operate::equal(&l, &r),
+					Operator::Exact => fnc::operate::exact(&l, &r),
 					Operator::NotEqual => fnc::operate::not_equal(&l, &r),
 					Operator::AllEqual => fnc::operate::all_equal(&l, &r),
 					Operator::AnyEqual => fnc::operate::any_equal(&l, &r),

@@ -19,6 +19,7 @@ pub enum Operator {
 	Dec, // -=
 	//
 	Equal,    // =
+	Exact,    // ==
 	NotEqual, // !=
 	AllEqual, // *=
 	AnyEqual, // ?=
@@ -64,6 +65,7 @@ impl fmt::Display for Operator {
 			Operator::Inc => write!(f, "+="),
 			Operator::Dec => write!(f, "-="),
 			Operator::Equal => write!(f, "="),
+			Operator::Exact => write!(f, "=="),
 			Operator::NotEqual => write!(f, "!="),
 			Operator::AllEqual => write!(f, "*="),
 			Operator::AnyEqual => write!(f, "?="),
@@ -111,6 +113,7 @@ pub fn operator(i: &str) -> IResult<&str, Operator> {
 		)),
 		alt((
 			map(tag("="), |_| Operator::Equal),
+			map(tag("=="), |_| Operator::Exact),
 			map(tag("!="), |_| Operator::NotEqual),
 			map(tag("*="), |_| Operator::AllEqual),
 			map(tag("?="), |_| Operator::AnyEqual),
