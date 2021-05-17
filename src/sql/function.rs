@@ -161,9 +161,15 @@ fn function_count(i: &str) -> IResult<&str, &str> {
 
 fn function_geo(i: &str) -> IResult<&str, &str> {
 	alt((
+		tag("geo::area"),
+		tag("geo::bearing"),
+		tag("geo::center"),
+		tag("geo::centroid"),
+		tag("geo::circle"),
 		tag("geo::distance"),
 		tag("geo::latitude"),
 		tag("geo::longitude"),
+		tag("geo::midpoint"),
 		tag("geo::hash::decode"),
 		tag("geo::hash::encode"),
 	))(i)
