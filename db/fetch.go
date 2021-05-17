@@ -28,6 +28,7 @@ import (
 
 	"github.com/abcum/surreal/cnf"
 	"github.com/abcum/surreal/sql"
+	"github.com/abcum/surreal/util/geof"
 	"github.com/abcum/surreal/util/data"
 	"github.com/abcum/surreal/util/deep"
 	"github.com/abcum/surreal/util/fncs"
@@ -708,6 +709,41 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 			return chkArrayR(op, l, r)
 		}
 
+	case *sql.Point:
+		switch r := r.(type) {
+		case *sql.Point:
+			return chkPoint(op, l, r)
+		case *sql.Polygon:
+			switch op {
+			case sql.INS:
+				return geof.Inside(l, r) == true
+			case sql.NIS:
+				return geof.Inside(l, r) == false
+			}
+		}
+
+	case *sql.Polygon:
+		switch r := r.(type) {
+		case *sql.Point:
+			switch op {
+			case sql.SIN:
+				return geof.Contains(l, r) == true
+			case sql.SNI:
+				return geof.Contains(l, r) == false
+			}
+		case []interface{}:
+			if p, ok := geof.Point(r); ok {
+				switch op {
+				case sql.SIN:
+					return geof.Contains(l, p) == true
+				case sql.SNI:
+					return geof.Contains(l, p) == false
+				}
+			} else {
+				return chkPolygonL(op, l, r)
+			}
+		}
+
 	case bool:
 		switch r := r.(type) {
 		case bool:
@@ -822,6 +858,8 @@ func binaryCheck(op sql.Token, l, r, lo, ro interface{}, d *data.Doc) interface{
 			return chkArray(op, l, r)
 		case map[string]interface{}:
 			return chkArrayL(op, l, r)
+		case *sql.Polygon:
+			return chkPolygonR(op, l, r)
 		}
 
 	case map[string]interface{}:
@@ -972,6 +1010,16 @@ func chkThing(op sql.Token, a, b *sql.Thing) (val bool) {
 	return negOp(op)
 }
 
+func chkPoint(op sql.Token, a, b *sql.Point) (val bool) {
+	switch op {
+	case sql.EQ:
+		return a.LA == b.LA && a.LO == b.LO
+	case sql.NEQ:
+		return a.LA != b.LA || a.LO != b.LO
+	}
+	return negOp(op)
+}
+
 func chkRegex(op sql.Token, a string, r *regexp.Regexp) (val bool) {
 	switch op {
 	case sql.EQ:
@@ -1002,6 +1050,72 @@ func chkObject(op sql.Token, m map[string]interface{}, i interface{}) (val bool)
 		}
 	}
 	return negOp(op)
+}
+
+func chkPolygonL(op sql.Token, a *sql.Polygon, b []interface{}) (val bool) {
+	switch op {
+	case sql.CONTAINSALL:
+		for _, v := range b {
+			if p, ok := geof.Point(v); ok {
+				if geof.Contains(a, p) == false {
+					return false
+				}
+			}
+		}
+		return true
+	case sql.CONTAINSSOME:
+		for _, v := range b {
+			if p, ok := geof.Point(v); ok {
+				if geof.Contains(a, p) == true {
+					return true
+				}
+			}
+		}
+		return false
+	case sql.CONTAINSNONE:
+		for _, v := range b {
+			if p, ok := geof.Point(v); ok {
+				if geof.Contains(a, p) == true {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return
+}
+
+func chkPolygonR(op sql.Token, a []interface{}, b *sql.Polygon) (val bool) {
+	switch op {
+	case sql.ALLCONTAINEDIN:
+		for _, v := range a {
+			if p, ok := geof.Point(v); ok {
+				if geof.Contains(b, p) == false {
+					return false
+				}
+			}
+		}
+		return true
+	case sql.SOMECONTAINEDIN:
+		for _, v := range a {
+			if p, ok := geof.Point(v); ok {
+				if geof.Contains(b, p) == true {
+					return true
+				}
+			}
+		}
+		return false
+	case sql.NONECONTAINEDIN:
+		for _, v := range a {
+			if p, ok := geof.Point(v); ok {
+				if geof.Contains(b, p) == true {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return
 }
 
 func chkArrayL(op sql.Token, a []interface{}, i interface{}) (val bool) {

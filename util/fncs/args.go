@@ -144,6 +144,10 @@ func ensurePoint(val interface{}) (out *sql.Point, ok bool) {
 	switch val := val.(type) {
 	case *sql.Point:
 		return val, true
+	case []interface{}:
+		if p := ensureFloats(val); len(p) == 2 {
+			return sql.NewPoint(p[0], p[1]), true
+		}
 	}
 	return nil, false
 }
