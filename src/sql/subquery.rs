@@ -147,7 +147,6 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 fn subquery_others(i: &str) -> IResult<&str, Subquery> {
 	let (i, _) = tag("(")(i)?;
 	let (i, v) = alt((
-		map(expression, |v| Subquery::Expression(v)),
 		map(select, |v| Subquery::Select(v)),
 		map(create, |v| Subquery::Create(v)),
 		map(update, |v| Subquery::Update(v)),
@@ -155,7 +154,41 @@ fn subquery_others(i: &str) -> IResult<&str, Subquery> {
 		map(relate, |v| Subquery::Relate(v)),
 		map(insert, |v| Subquery::Insert(v)),
 		map(upsert, |v| Subquery::Upsert(v)),
+		map(expression, |v| Subquery::Expression(v)),
 	))(i)?;
 	let (i, _) = tag(")")(i)?;
 	Ok((i, v))
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn subquery_expression_statement() {
+		let sql = "(1 + 2 + 3)";
+		let res = subquery(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("(1 + 2 + 3)", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_ifelse_statement() {
+		let sql = "IF true THEN false END";
+		let res = subquery(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("IF true THEN false END", format!("{}", out))
+	}
+
+	#[test]
+	fn subquery_select_statement() {
+		let sql = "(SELECT * FROM test)";
+		let res = subquery(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("(SELECT * FROM test)", format!("{}", out))
+	}
 }
