@@ -6,7 +6,7 @@ use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
-use crate::sql::expression::{expression, Expression};
+use crate::sql::expression::{expression, single, Expression};
 use crate::sql::literal::Literal;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -95,7 +95,7 @@ fn casts(i: &str) -> IResult<&str, Function> {
 	let (i, s) = function_casts(i)?;
 	let (i, _) = tag(">")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = expression(i)?;
+	let (i, v) = single(i)?;
 	Ok((i, Function::Cast(s.to_string(), v)))
 }
 

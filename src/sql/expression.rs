@@ -111,7 +111,7 @@ pub fn expression(i: &str) -> IResult<&str, Expression> {
 	alt((binary, single))(i)
 }
 
-fn binary(i: &str) -> IResult<&str, Expression> {
+pub fn binary(i: &str) -> IResult<&str, Expression> {
 	let (i, l) = literal(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, o) = operator(i)?;
@@ -120,7 +120,7 @@ fn binary(i: &str) -> IResult<&str, Expression> {
 	Ok((i, Expression::Binary(Box::new(l), o, Box::new(r))))
 }
 
-fn single(i: &str) -> IResult<&str, Expression> {
+pub fn single(i: &str) -> IResult<&str, Expression> {
 	let (i, l) = literal(i)?;
 	Ok((i, Expression::Single(Box::new(l))))
 }
