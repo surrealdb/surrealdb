@@ -1,6 +1,7 @@
+use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::tag;
-use nom::sequence::delimited;
+use nom::character::complete::one_of;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -16,6 +17,8 @@ pub struct Regex {
 
 impl<'a> From<&'a str> for Regex {
 	fn from(r: &str) -> Regex {
+		let r = r.replace("\\/", "/");
+		let r = r.as_str();
 		Regex {
 			input: String::from(r),
 			value: match regex::Regex::new(r) {
@@ -46,7 +49,9 @@ impl fmt::Display for Regex {
 }
 
 pub fn regex(i: &str) -> IResult<&str, Regex> {
-	let (i, v) = delimited(tag("/"), is_not("/"), tag("/"))(i)?;
+	let (i, _) = tag("/")(i)?;
+	let (i, v) = escaped(is_not("\\/"), '\\', one_of("/"))(i)?;
+	let (i, _) = tag("/")(i)?;
 	Ok((i, Regex::from(v)))
 }
 
@@ -67,11 +72,11 @@ mod tests {
 
 	#[test]
 	fn regex_complex() {
-		let sql = "/test.*/";
+		let sql = r"/test\/[a-z]+\/.*/";
 		let res = regex(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("/test.*/", format!("{}", out));
-		assert_eq!(out, Regex::from("test.*"));
+		assert_eq!(r"/test/[a-z]+/.*/", format!("{}", out));
+		assert_eq!(out, Regex::from("test/[a-z]+/.*"));
 	}
 }

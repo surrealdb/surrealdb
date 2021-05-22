@@ -471,6 +471,7 @@ pub fn literal(i: &str) -> IResult<&str, Literal> {
 		map(array, |v| Literal::Array(v)),
 		map(point, |v| Literal::Point(v)),
 		map(param, |v| Literal::Param(v)),
+		map(regex, |v| Literal::Regex(v)),
 		map(thing, |v| Literal::Thing(v)),
 		map(model, |v| Literal::Model(v)),
 		map(idiom, |v| Literal::Idiom(v)),
