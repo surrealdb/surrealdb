@@ -103,6 +103,25 @@ pub fn assigner(i: &str) -> IResult<&str, Operator> {
 pub fn operator(i: &str) -> IResult<&str, Operator> {
 	alt((
 		alt((
+			map(tag("=="), |_| Operator::Exact),
+			map(tag("!="), |_| Operator::NotEqual),
+			map(tag("*="), |_| Operator::AllEqual),
+			map(tag("?="), |_| Operator::AnyEqual),
+			map(tag("="), |_| Operator::Equal),
+		)),
+		alt((
+			map(tag("!~"), |_| Operator::NotLike),
+			map(tag("*~"), |_| Operator::AllLike),
+			map(tag("?~"), |_| Operator::AnyLike),
+			map(tag("~"), |_| Operator::Like),
+		)),
+		alt((
+			map(tag("<="), |_| Operator::LessThanOrEqual),
+			map(tag("<"), |_| Operator::LessThan),
+			map(tag(">="), |_| Operator::MoreThanOrEqual),
+			map(tag(">"), |_| Operator::MoreThan),
+		)),
+		alt((
 			map(tag("+"), |_| Operator::Add),
 			map(tag("-"), |_| Operator::Sub),
 			map(tag("*"), |_| Operator::Mul),
@@ -110,25 +129,6 @@ pub fn operator(i: &str) -> IResult<&str, Operator> {
 			map(tag("∙"), |_| Operator::Mul),
 			map(tag("/"), |_| Operator::Div),
 			map(tag("÷"), |_| Operator::Div),
-		)),
-		alt((
-			map(tag("="), |_| Operator::Equal),
-			map(tag("=="), |_| Operator::Exact),
-			map(tag("!="), |_| Operator::NotEqual),
-			map(tag("*="), |_| Operator::AllEqual),
-			map(tag("?="), |_| Operator::AnyEqual),
-		)),
-		alt((
-			map(tag("~"), |_| Operator::Like),
-			map(tag("!~"), |_| Operator::NotLike),
-			map(tag("*~"), |_| Operator::AllLike),
-			map(tag("?~"), |_| Operator::AnyLike),
-		)),
-		alt((
-			map(tag("<="), |_| Operator::LessThanOrEqual),
-			map(tag("<"), |_| Operator::LessThan),
-			map(tag(">="), |_| Operator::MoreThanOrEqual),
-			map(tag(">"), |_| Operator::MoreThan),
 		)),
 		alt((
 			map(tag("∋"), |_| Operator::Contain),
@@ -141,8 +141,6 @@ pub fn operator(i: &str) -> IResult<&str, Operator> {
 			map(tag("⊆"), |_| Operator::AllInside),
 			map(tag("⊂"), |_| Operator::SomeInside),
 			map(tag("⊄"), |_| Operator::NoneInside),
-			map(tag("<•>"), |_| Operator::Inside),
-			map(tag("<|>"), |_| Operator::Intersects),
 		)),
 		alt((
 			map(tag_no_case("&&"), |_| Operator::And),
