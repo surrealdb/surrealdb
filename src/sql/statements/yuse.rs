@@ -61,8 +61,8 @@ fn both(i: &str) -> IResult<&str, UseStatement> {
 	Ok((
 		i,
 		UseStatement {
-			ns: Some(String::from(ns)),
-			db: Some(String::from(db)),
+			ns: Some(ns),
+			db: Some(db),
 		},
 	))
 }
@@ -76,7 +76,7 @@ fn ns(i: &str) -> IResult<&str, UseStatement> {
 	Ok((
 		i,
 		UseStatement {
-			ns: Some(String::from(ns)),
+			ns: Some(ns),
 			db: None,
 		},
 	))
@@ -92,7 +92,7 @@ fn db(i: &str) -> IResult<&str, UseStatement> {
 		i,
 		UseStatement {
 			ns: None,
-			db: Some(String::from(db)),
+			db: Some(db),
 		},
 	))
 }

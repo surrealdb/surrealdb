@@ -102,7 +102,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 	Ok((
 		i,
 		DefineNamespaceStatement {
-			name: String::from(name),
+			name,
 		},
 	))
 }
@@ -131,7 +131,7 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 	Ok((
 		i,
 		DefineDatabaseStatement {
-			name: String::from(name),
+			name,
 		},
 	))
 }
@@ -177,7 +177,7 @@ fn login(i: &str) -> IResult<&str, DefineLoginStatement> {
 	Ok((
 		i,
 		DefineLoginStatement {
-			name: String::from(name),
+			name,
 			base,
 			pass: match opts {
 				DefineLoginOption::Password(ref v) => Some(v.to_owned()),
@@ -206,7 +206,7 @@ fn login_pass(i: &str) -> IResult<&str, DefineLoginOption> {
 	let (i, _) = tag_no_case("PASSWORD")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = strand_raw(i)?;
-	Ok((i, DefineLoginOption::Password(String::from(v))))
+	Ok((i, DefineLoginOption::Password(v)))
 }
 
 fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
@@ -214,7 +214,7 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 	let (i, _) = tag_no_case("PASSHASH")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = strand_raw(i)?;
-	Ok((i, DefineLoginOption::Passhash(String::from(v))))
+	Ok((i, DefineLoginOption::Passhash(v)))
 }
 
 // --------------------------------------------------
@@ -260,10 +260,10 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	Ok((
 		i,
 		DefineTokenStatement {
-			name: String::from(name),
+			name,
 			base,
 			kind,
-			code: String::from(code),
+			code,
 		},
 	))
 }
@@ -314,7 +314,7 @@ fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	Ok((
 		i,
 		DefineScopeStatement {
-			name: String::from(name),
+			name,
 			session: opts.iter().find_map(|x| match x {
 				DefineScopeOption::Session(ref v) => Some(v.to_owned()),
 				_ => None,
@@ -423,7 +423,7 @@ fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	Ok((
 		i,
 		DefineTableStatement {
-			name: String::from(name),
+			name,
 			drop: opts
 				.iter()
 				.find_map(|x| match x {
@@ -540,8 +540,8 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 	Ok((
 		i,
 		DefineEventStatement {
-			name: String::from(name),
-			what: String::from(what),
+			name,
+			what,
 			when,
 			then,
 		},
@@ -599,7 +599,7 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 		i,
 		DefineFieldStatement {
 			name,
-			what: String::from(what),
+			what,
 			kind: opts.iter().find_map(|x| match x {
 				DefineFieldOption::Kind(ref v) => Some(v.to_owned()),
 				_ => None,
@@ -722,8 +722,8 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	Ok((
 		i,
 		DefineIndexStatement {
-			name: String::from(name),
-			what: String::from(what),
+			name,
+			what,
 			cols,
 			uniq: uniq.is_some(),
 		},

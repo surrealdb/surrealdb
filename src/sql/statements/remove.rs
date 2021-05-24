@@ -92,7 +92,7 @@ fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 	Ok((
 		i,
 		RemoveNamespaceStatement {
-			name: String::from(name),
+			name,
 		},
 	))
 }
@@ -121,7 +121,7 @@ fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 	Ok((
 		i,
 		RemoveDatabaseStatement {
-			name: String::from(name),
+			name,
 		},
 	))
 }
@@ -155,7 +155,7 @@ fn login(i: &str) -> IResult<&str, RemoveLoginStatement> {
 	Ok((
 		i,
 		RemoveLoginStatement {
-			name: String::from(name),
+			name,
 			base,
 		},
 	))
@@ -190,7 +190,7 @@ fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 	Ok((
 		i,
 		RemoveTokenStatement {
-			name: String::from(name),
+			name,
 			base,
 		},
 	))
@@ -220,7 +220,7 @@ fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 	Ok((
 		i,
 		RemoveScopeStatement {
-			name: String::from(name),
+			name,
 		},
 	))
 }
@@ -249,7 +249,7 @@ fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 	Ok((
 		i,
 		RemoveTableStatement {
-			name: String::from(name),
+			name,
 		},
 	))
 }
@@ -283,8 +283,8 @@ fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 	Ok((
 		i,
 		RemoveEventStatement {
-			name: String::from(name),
-			what: String::from(what),
+			name,
+			what,
 		},
 	))
 }
@@ -318,8 +318,8 @@ fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 	Ok((
 		i,
 		RemoveFieldStatement {
-			name: String::from(name),
-			what: String::from(what),
+			name,
+			what,
 		},
 	))
 }
@@ -353,8 +353,8 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 	Ok((
 		i,
 		RemoveIndexStatement {
-			name: String::from(name),
-			what: String::from(what),
+			name,
+			what,
 		},
 	))
 }

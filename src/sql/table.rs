@@ -27,6 +27,14 @@ pub struct Table {
 	pub name: String,
 }
 
+impl From<String> for Table {
+	fn from(s: String) -> Self {
+		Table {
+			name: s,
+		}
+	}
+}
+
 impl<'a> From<&'a str> for Table {
 	fn from(t: &str) -> Table {
 		Table {

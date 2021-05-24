@@ -15,6 +15,14 @@ pub struct Ident {
 	pub name: String,
 }
 
+impl From<String> for Ident {
+	fn from(s: String) -> Self {
+		Ident {
+			name: s,
+		}
+	}
+}
+
 impl<'a> From<&'a str> for Ident {
 	fn from(i: &str) -> Ident {
 		Ident {
@@ -34,20 +42,24 @@ pub fn ident(i: &str) -> IResult<&str, Ident> {
 	Ok((i, Ident::from(v)))
 }
 
-pub fn ident_raw(i: &str) -> IResult<&str, &str> {
-	alt((ident_default, ident_backtick, ident_brackets))(i)
+pub fn ident_raw(i: &str) -> IResult<&str, String> {
+	let (i, v) = alt((ident_default, ident_backtick, ident_brackets))(i)?;
+	Ok((i, String::from(v)))
 }
 
-fn ident_default(i: &str) -> IResult<&str, &str> {
-	take_while1(val_char)(i)
+fn ident_default(i: &str) -> IResult<&str, String> {
+	let (i, v) = take_while1(val_char)(i)?;
+	Ok((i, String::from(v)))
 }
 
-fn ident_backtick(i: &str) -> IResult<&str, &str> {
-	delimited(tag("`"), is_not("`"), tag("`"))(i)
+fn ident_backtick(i: &str) -> IResult<&str, String> {
+	let (i, v) = delimited(tag("`"), is_not("`"), tag("`"))(i)?;
+	Ok((i, String::from(v)))
 }
 
-fn ident_brackets(i: &str) -> IResult<&str, &str> {
-	delimited(tag("⟨"), is_not("⟩"), tag("⟩"))(i)
+fn ident_brackets(i: &str) -> IResult<&str, String> {
+	let (i, v) = delimited(tag("⟨"), is_not("⟩"), tag("⟩"))(i)?;
+	Ok((i, String::from(v)))
 }
 
 #[cfg(test)]

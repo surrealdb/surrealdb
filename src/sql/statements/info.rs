@@ -64,14 +64,14 @@ fn scope(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("SCOPE"), tag_no_case("SC")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, scope) = ident_raw(i)?;
-	Ok((i, InfoStatement::Scope(String::from(scope))))
+	Ok((i, InfoStatement::Scope(scope)))
 }
 
 fn table(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("TABLE"), tag_no_case("TB")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, table) = ident_raw(i)?;
-	Ok((i, InfoStatement::Table(String::from(table))))
+	Ok((i, InfoStatement::Table(table)))
 }
 
 #[cfg(test)]

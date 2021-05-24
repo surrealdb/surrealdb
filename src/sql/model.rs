@@ -50,7 +50,7 @@ fn model_count(i: &str) -> IResult<&str, Model> {
 	Ok((
 		i,
 		Model {
-			table: String::from(t),
+			table: t,
 			count: Some(c),
 			range: None,
 		},
@@ -68,7 +68,7 @@ fn model_range(i: &str) -> IResult<&str, Model> {
 	Ok((
 		i,
 		Model {
-			table: String::from(t),
+			table: t,
 			count: None,
 			range: Some((b, e)),
 		},

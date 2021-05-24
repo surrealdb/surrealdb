@@ -9,13 +9,13 @@ use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
 pub struct Thing {
-	pub table: String,
+	pub tb: String,
 	pub id: String,
 }
 
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let t = escape(&self.table, &val_char, "`");
+		let t = escape(&self.tb, &val_char, "`");
 		let i = escape(&self.id, &val_char, "`");
 		write!(f, "{}:{}", t, i)
 	}
@@ -27,11 +27,11 @@ impl Serialize for Thing {
 		S: serde::Serializer,
 	{
 		if serializer.is_human_readable() {
-			let output = format!("{}:{}", self.table, self.id);
+			let output = format!("{}:{}", self.tb, self.id);
 			serializer.serialize_some(&output)
 		} else {
 			let mut val = serializer.serialize_struct("Thing", 2)?;
-			val.serialize_field("table", &self.table)?;
+			val.serialize_field("tb", &self.tb)?;
 			val.serialize_field("id", &self.id)?;
 			val.end()
 		}
@@ -45,8 +45,8 @@ pub fn thing(i: &str) -> IResult<&str, Thing> {
 	Ok((
 		i,
 		Thing {
-			table: String::from(t),
-			id: String::from(v),
+			tb: t,
+			id: v,
 		},
 	))
 }
@@ -66,7 +66,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Thing {
-				table: String::from("test"),
+				tb: String::from("test"),
 				id: String::from("id"),
 			}
 		);
@@ -82,7 +82,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Thing {
-				table: String::from("test"),
+				tb: String::from("test"),
 				id: String::from("id"),
 			}
 		);
@@ -98,7 +98,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Thing {
-				table: String::from("test"),
+				tb: String::from("test"),
 				id: String::from("id"),
 			}
 		);
