@@ -11,7 +11,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let post = base
 		.and(warp::post())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
-		.and(warp::body::content_length_limit(1024 * 1)) // 1MiB
+		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
 		.and(warp::body::bytes())
 		.and_then(handler);
 	// Set sock method

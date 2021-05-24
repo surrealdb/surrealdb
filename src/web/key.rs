@@ -27,7 +27,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set create method
 	let create = base
 		.and(warp::post())
-		.and(warp::body::content_length_limit(1024 * 1)) // 1MiB
+		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
 		.and(warp::body::bytes())
 		.and_then(create_all);
 	// Set delete method
@@ -46,19 +46,19 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set create method
 	let create = base
 		.and(warp::post())
-		.and(warp::body::content_length_limit(1024 * 1)) // 1MiB
+		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
 		.and(warp::body::bytes())
 		.and_then(create_one);
 	// Set update method
 	let update = base
 		.and(warp::put())
-		.and(warp::body::content_length_limit(1024 * 1)) // 1MiB
+		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
 		.and(warp::body::bytes())
 		.and_then(update_one);
 	// Set modify method
 	let modify = base
 		.and(warp::patch())
-		.and(warp::body::content_length_limit(1024 * 1)) // 1MiB
+		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
 		.and(warp::body::bytes())
 		.and_then(modify_one);
 	// Set delete method
