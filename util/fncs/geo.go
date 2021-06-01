@@ -32,9 +32,9 @@ func geoPoint(ctx context.Context, args ...interface{}) (interface{}, error) {
 			return sql.NewPoint(p[0], p[1]), nil
 		}
 	case 2:
-		if lat, ok := ensureFloat(args[0]); ok {
-			if lng, ok := ensureFloat(args[1]); ok {
-				return sql.NewPoint(lat, lng), nil
+		if lng, ok := ensureFloat(args[0]); ok {
+			if lat, ok := ensureFloat(args[1]); ok {
+				return sql.NewPoint(lng, lat), nil
 			}
 		}
 	}

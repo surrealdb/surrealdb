@@ -712,11 +712,11 @@ type Points []*Point
 
 // Point comment
 type Point struct {
-	LA float64
 	LO float64
+	LA float64
 }
 
-func NewPoint(LA, LO float64) *Point {
+func NewPoint(LO, LA float64) *Point {
 	return &Point{LA: LA, LO: LO}
 }
 

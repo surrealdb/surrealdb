@@ -30,21 +30,21 @@ func TestGeo(t *testing.T) {
 	Convey("geo.point(a, b) works properly", t, func() {
 		res, _ = Run(context.Background(), "geo.point", "test", "test")
 		So(res, ShouldEqual, nil)
-		res, _ = Run(context.Background(), "geo.point", &sql.Point{38.898556, -77.037852})
-		So(res, ShouldResemble, &sql.Point{38.898556, -77.037852})
-		res, _ = Run(context.Background(), "geo.point", []interface{}{38.898556, -77.037852})
-		So(res, ShouldResemble, &sql.Point{38.898556, -77.037852})
-		res, _ = Run(context.Background(), "geo.point", 38.898556, -77.037852)
-		So(res, ShouldResemble, &sql.Point{38.898556, -77.037852})
+		res, _ = Run(context.Background(), "geo.point", &sql.Point{-77.037852, 38.898556})
+		So(res, ShouldResemble, &sql.Point{-77.037852, 38.898556})
+		res, _ = Run(context.Background(), "geo.point", []interface{}{-77.037852, 38.898556})
+		So(res, ShouldResemble, &sql.Point{-77.037852, 38.898556})
+		res, _ = Run(context.Background(), "geo.point", -77.037852, 38.898556)
+		So(res, ShouldResemble, &sql.Point{-77.037852, 38.898556})
 	})
 
 	Convey("geo.circle(a, b) works properly", t, func() {
 		res, _ = Run(context.Background(), "geo.circle", "test", "test")
 		So(res, ShouldEqual, nil)
-		res, _ = Run(context.Background(), "geo.circle", &sql.Point{38.898556, -77.037852}, 100)
-		So(res, ShouldResemble, &sql.Circle{&sql.Point{38.898556, -77.037852}, 100})
-		res, _ = Run(context.Background(), "geo.circle", []interface{}{38.898556, -77.037852}, 100)
-		So(res, ShouldResemble, &sql.Circle{&sql.Point{38.898556, -77.037852}, 100})
+		res, _ = Run(context.Background(), "geo.circle", &sql.Point{-77.037852, 38.898556}, 100)
+		So(res, ShouldResemble, &sql.Circle{&sql.Point{-77.037852, 38.898556}, 100})
+		res, _ = Run(context.Background(), "geo.circle", []interface{}{-77.037852, 38.898556}, 100)
+		So(res, ShouldResemble, &sql.Circle{&sql.Point{-77.037852, 38.898556}, 100})
 	})
 
 	Convey("geo.polygon(a, b) works properly", t, func() {
@@ -59,12 +59,12 @@ func TestGeo(t *testing.T) {
 	})
 
 	Convey("geo.distance(a, b, c, d) works properly", t, func() {
-		res, _ = Run(context.Background(), "geo.distance", &sql.Point{38.898556, -77.037852}, &sql.Point{38.897147, -77.043934})
+		res, _ = Run(context.Background(), "geo.distance", &sql.Point{-77.037852, 38.898556}, &sql.Point{-77.043934, 38.897147})
 		So(res, ShouldEqual, 549.1557912042738)
 	})
 
 	Convey("geo.distance(a, b, c, d) errors properly", t, func() {
-		res, _ = Run(context.Background(), "geo.distance", &sql.Point{38.898556, -77.037852}, "null")
+		res, _ = Run(context.Background(), "geo.distance", &sql.Point{-77.037852, 38.898556}, "null")
 		So(res, ShouldEqual, -1)
 	})
 
@@ -76,9 +76,9 @@ func TestGeo(t *testing.T) {
 	})
 
 	Convey("geo.hash.encode(a, b, c) works properly", t, func() {
-		res, _ = Run(context.Background(), "geo.hash.encode", &sql.Point{38.898556, -77.037852}, 5)
+		res, _ = Run(context.Background(), "geo.hash.encode", &sql.Point{-77.037852, 38.898556}, 5)
 		So(res, ShouldEqual, "dqcjq")
-		res, _ = Run(context.Background(), "geo.hash.encode", &sql.Point{38.898556, -77.037852}, 9)
+		res, _ = Run(context.Background(), "geo.hash.encode", &sql.Point{-77.037852, 38.898556}, 9)
 		So(res, ShouldEqual, "dqcjqcq8x")
 	})
 
