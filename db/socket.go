@@ -34,6 +34,7 @@ import (
 type socket struct {
 	mutex sync.Mutex
 	fibre *fibre.Context
+	sends map[string][]interface{}
 	items map[string][]interface{}
 	lives map[string]*sql.LiveStatement
 }
@@ -53,6 +54,16 @@ func flush(id string) {
 		sockets.Range(func(key, val interface{}) bool {
 			val.(*socket).flush(id + "-bg")
 			val.(*socket).flush(id)
+			return true
+		})
+	}()
+}
+
+func send(id string) {
+	go func() {
+		sockets.Range(func(key, val interface{}) bool {
+			val.(*socket).send(id + "-bg")
+			val.(*socket).send(id)
 			return true
 		})
 	}()
@@ -157,11 +168,24 @@ func (s *socket) flush(id string) (err error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
+	s.sends[id] = append(s.sends[id], s.items[id]...)
+
+	delete(s.items, id)
+
+	return
+
+}
+
+func (s *socket) send(id string) (err error) {
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	// If there are no pending message
 	// notifications for this socket
 	// then ignore this method call.
 
-	if len(s.items[id]) == 0 {
+	if len(s.sends[id]) == 0 {
 		return nil
 	}
 
@@ -171,7 +195,7 @@ func (s *socket) flush(id string) (err error) {
 
 	obj := &fibre.RPCNotification{
 		Method: "notify",
-		Params: s.items[id],
+		Params: s.sends[id],
 	}
 
 	// Notify the websocket connection
@@ -184,7 +208,7 @@ func (s *socket) flush(id string) (err error) {
 	// pending message notifications
 	// for this socket when done.
 
-	delete(s.items, id)
+	delete(s.sends, id)
 
 	return
 

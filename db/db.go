@@ -246,6 +246,12 @@ func Process(fib *fibre.Context, ast *sql.Query, vars map[string]interface{}) (o
 
 	go executor.execute(ctx, ast)
 
+	// Send all flushed asynchronous messages
+	// to the websocket connections which are
+	// listening to the queries.
+
+	defer send(id)
+
 	// Wait for all of the processed queries to
 	// return results, buffer the output, and
 	// return the output when finished.

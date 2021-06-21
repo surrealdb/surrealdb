@@ -31,6 +31,7 @@ func register(fib *fibre.Context, id string) func() {
 
 		sockets.Store(id, &socket{
 			fibre: fib,
+			sends: make(map[string][]interface{}),
 			items: make(map[string][]interface{}),
 			lives: make(map[string]*sql.LiveStatement),
 		})
