@@ -27,7 +27,6 @@ import (
 	"github.com/abcum/surreal/kvs"
 	"github.com/abcum/surreal/log"
 	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/trc"
 	"github.com/abcum/surreal/txn"
 )
 
@@ -69,13 +68,6 @@ func newExecutor(id, ns, db string) (e *executor) {
 
 func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 
-	// Create a new trace span so we can analyse
-	// the execution time of this method, and
-	// detect problems with long-running queries.
-
-	ctx, span := trc.Start(ctx, "db::execute")
-	defer span.End()
-
 	// Ensure that the executor is added back into
 	// the executor pool when the executor has
 	// finished processing the request.
@@ -109,8 +101,6 @@ func (e *executor) execute(ctx context.Context, ast *sql.Query) {
 			if log.IsError() {
 				log.WithPrefix(logKeyDB).WithFields(map[string]interface{}{
 					logKeyId:    e.id,
-					logKeySpan:  span.SpanContext().SpanID.String(),
-					logKeyTrace: span.SpanContext().TraceID.String(),
 					logKeyStack: string(debug.Stack()),
 					logKeyFibre: ctx.Value(ctxKeyFibre).(*fibre.Context),
 				}).Errorln(err)
@@ -137,13 +127,6 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 
 	var rsp *Response
 	var res []interface{}
-
-	// Create a new trace span so we can analyse
-	// the execution time of this method, and
-	// detect problems with long-running queries.
-
-	ctx, span := trc.Start(ctx, "db::conduct")
-	defer span.End()
 
 	// If we are not inside a global transaction
 	// then reset the error to nil so that the
@@ -215,8 +198,6 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 				logKeyKind:  ctx.Value(ctxKeyKind),
 				logKeyVars:  ctx.Value(ctxKeyVars),
 				logKeyTime:  time.Since(e.time).String(),
-				logKeySpan:  span.SpanContext().SpanID.String(),
-				logKeyTrace: span.SpanContext().TraceID.String(),
 				logKeyFibre: ctx.Value(ctxKeyFibre).(*fibre.Context),
 			}).Debugln(stm)
 		}
@@ -229,8 +210,6 @@ func (e *executor) conduct(ctx context.Context, stm sql.Statement) {
 				logKeyKind:  ctx.Value(ctxKeyKind),
 				logKeyVars:  ctx.Value(ctxKeyVars),
 				logKeyTime:  time.Since(e.time).String(),
-				logKeySpan:  span.SpanContext().SpanID.String(),
-				logKeyTrace: span.SpanContext().TraceID.String(),
 				logKeyFibre: ctx.Value(ctxKeyFibre).(*fibre.Context),
 				logKeyError: detail(e.err),
 			}).Errorln(stm)
@@ -269,13 +248,6 @@ func (e *executor) operate(ctx context.Context, stm sql.Statement) (res []interf
 	var loc bool
 	var trw bool
 	var canc context.CancelFunc
-
-	// Create a new trace span so we can analyse
-	// the execution time of this method, and
-	// detect problems with long-running queries.
-
-	ctx, span := trc.Start(ctx, "db::operate")
-	defer span.End()
 
 	// If we are not inside a global transaction
 	// then grab a new transaction, ensuring that

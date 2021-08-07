@@ -21,10 +21,7 @@ import (
 
 	"github.com/pkg/profile"
 
-	"cloud.google.com/go/profiler"
-
 	"github.com/abcum/surreal/cli"
-	"github.com/abcum/surreal/util/build"
 )
 
 func main() {
@@ -39,12 +36,6 @@ func main() {
 	}
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	profiler.Start(profiler.Config{
-		ProjectID:      "surreal-io",
-		Service:        "surreal",
-		ServiceVersion: build.GetInfo().Ver,
-	})
 
 	cli.Init()
 
