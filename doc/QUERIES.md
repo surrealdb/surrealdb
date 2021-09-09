@@ -101,6 +101,11 @@ DEFINE TABLE items SCHEMALESS;
 -- Define a new table as schemafull
 DEFINE TABLE items SCHEMAFULL;
 
+DEFINE TABLE shot SHARD ON course, hole;
+
+SELECT * FROM shot::{course=$course, hole=$hole};
+SELECT * FROM shot WHERE course = $course AND hole = $hole;
+
 -- Define a new table as with no scope permissions
 DEFINE TABLE items PERMISSIONS NONE;
 -- Define a new table as with full scope permissions
@@ -334,7 +339,9 @@ SELECT * FROM person WHERE age > 18;
 -- Select all records and specify a dynamically calculated field
 SELECT ((celsius*2)+30) AS fahrenheit FROM temperatues;
 -- Select all records where the age is greater than the age of another specific record
-SELECT * FROM person WHERE age >= @person:tobie.age;
+SELECT * FROM person WHERE age >= person:tobie;
+
+SELECT * FROM shot::{course=$course, hole=$hole}
 
 -- Select all records where the `tags` set contains "tag"
 SELECT * FROM person WHERE tags ∋ "tag";
@@ -372,11 +379,11 @@ SELECT ->friend->person FROM person;
 -- Select all person records, and all of the friends and followers
 SELECT <->(friend, follow)->person FROM person;
 -- Select all person records, and the ids of people who like each person
-SELECT *, <-likes<-person.id;
+SELECT *, <-likes<-person.id FROM person;
 -- Select all person records, and the people who like this person, who are older than 18
-SELECT *, <-friend<-person[age>=18] AS friends;
+SELECT *, <-friend<-person[age>=18] AS friends FROM person;
 -- Select only person records where a friend likes chocolate
-SELECT * FROM person WHERE ->friend->person->likes->@food:chocolate;
+SELECT * FROM person WHERE ->friend->person->likes->food:chocolate;
 -- Select the products purchased by friends of a specific person record
 SELECT ->friend->person{1..3}->purchased->product FROM @person:tobie;
 -- Select all 1st, 2nd, or 3rd level people who this specific person record knows
