@@ -51,12 +51,8 @@ install:
 compile: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 compile:
 	GOOS=linux GOARCH=amd64 $(GO) build -v -ldflags '$(LDF)'
-	docker build --tag surreal/surreal:latest .
-	docker build --tag eu.gcr.io/surreal-io/surreal:latest .
-	docker build --tag us.gcr.io/surreal-io/surreal:latest .
-	docker push surreal/surreal:latest
-	docker push eu.gcr.io/surreal-io/surreal:latest
-	docker push us.gcr.io/surreal-io/surreal:latest
+	docker build --tag surrealdb/surrealdb:latest .
+	docker push surrealdb/surrealdb:latest
 
 .PHONY: deploy
 deploy:
