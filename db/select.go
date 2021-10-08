@@ -168,13 +168,13 @@ func (d *document) runSelect(ctx context.Context, stm *sql.SelectStatement) (int
 		return nil, nil
 	}
 
-	if ok, err = d.allow(ctx, met); err != nil {
+	if ok, err = d.check(ctx, stm.Cond); err != nil {
 		return nil, err
 	} else if ok == false {
 		return nil, nil
 	}
 
-	if ok, err = d.check(ctx, stm.Cond); err != nil {
+	if ok, err = d.allow(ctx, met); err != nil {
 		return nil, err
 	} else if ok == false {
 		return nil, nil
