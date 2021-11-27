@@ -33,7 +33,7 @@ func Setup(opts *cnf.Options) (err error) {
 	s.SetName("web")
 	s.SetIdleTimeout("5s")
 	s.SetReadTimeout("30s")
-	s.SetWriteTimeout("60s")
+	s.SetWriteTimeout("300s")
 	s.SetHTTPErrorHandler(errors)
 	s.Logger().SetLogger(log.Instance())
 
