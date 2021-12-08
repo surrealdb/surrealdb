@@ -34,9 +34,6 @@ Temporary Items
 
 app/
 dev/
-vendor/
-node_modules/
-bower_components/
 
 # -----------------------------------
 # Specific
