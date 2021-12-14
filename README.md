@@ -2,7 +2,7 @@
 
 Surreal is a scalable, distributed, strongly-consistent, collaborative document-graph database.
 
-[![](https://img.shields.io/circleci/token/adb5ca379a334a4011fa894275c312fe35833d6d/project/abcum/surreal/master.svg?style=flat-square)](https://circleci.com/gh/abcum/surreal) [![](https://img.shields.io/badge/status-alpha-ff00bb.svg?style=flat-square)](https://github.com/abcum/surreal) [![](https://img.shields.io/badge/godoc-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/abcum/surreal) [![](https://goreportcard.com/badge/github.com/abcum/surreal?style=flat-square)](https://goreportcard.com/report/github.com/abcum/surreal) [![](https://img.shields.io/badge/license-Apache_License_2.0-00bfff.svg?style=flat-square)](https://github.com/abcum/surreal) 
+[![](https://img.shields.io/badge/status-alpha-ff00bb.svg?style=flat-square)](https://github.com/surrealdb/surrealdb) [![](https://img.shields.io/badge/godoc-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/surrealdb/surrealdb) [![](https://goreportcard.com/badge/github.com/surrealdb/surrealdb?style=flat-square)](https://goreportcard.com/report/github.com/surrealdb/surrealdb) [![](https://img.shields.io/badge/license-Apache_License_2.0-00bfff.svg?style=flat-square)](https://github.com/surrealdb/surrealdb) 
 
 #### Features
 
@@ -51,7 +51,7 @@ Surreal is a scalable, distributed, strongly-consistent, collaborative document-
 #### Installation
 
 ```bash
-go get github.com/abcum/surreal
+go get github.com/surrealdb/surrealdb
 ```
 
 #### Running

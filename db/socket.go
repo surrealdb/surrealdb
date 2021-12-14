@@ -1,4 +1,4 @@
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,15 +20,15 @@ import (
 
 	"context"
 
-	"github.com/abcum/fibre"
+	"github.com/surrealdb/fibre"
 
-	"github.com/abcum/surreal/cnf"
-	"github.com/abcum/surreal/kvs"
-	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/txn"
-	"github.com/abcum/surreal/util/data"
-	"github.com/abcum/surreal/util/keys"
-	"github.com/abcum/surreal/util/uuid"
+	"github.com/surrealdb/surrealdb/cnf"
+	"github.com/surrealdb/surrealdb/kvs"
+	"github.com/surrealdb/surrealdb/sql"
+	"github.com/surrealdb/surrealdb/txn"
+	"github.com/surrealdb/surrealdb/util/data"
+	"github.com/surrealdb/surrealdb/util/keys"
+	"github.com/surrealdb/surrealdb/util/uuid"
 )
 
 type socket struct {

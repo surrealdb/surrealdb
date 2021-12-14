@@ -1,4 +1,4 @@
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,11 @@ import (
 
 	"encoding/base64"
 
-	"github.com/abcum/fibre"
-	"github.com/abcum/surreal/cnf"
-	"github.com/abcum/surreal/db"
-	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/txn"
+	"github.com/surrealdb/fibre"
+	"github.com/surrealdb/surrealdb/cnf"
+	"github.com/surrealdb/surrealdb/db"
+	"github.com/surrealdb/surrealdb/sql"
+	"github.com/surrealdb/surrealdb/txn"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/websocket"
 )

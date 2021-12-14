@@ -1,4 +1,4 @@
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,8 +27,8 @@ import (
 
 	"golang.org/x/net/context/ctxhttp"
 
-	"github.com/abcum/surreal/util/build"
-	"github.com/abcum/surreal/util/hook"
+	"github.com/surrealdb/surrealdb/util/build"
+	"github.com/surrealdb/surrealdb/util/hook"
 )
 
 type opts map[string]interface{}

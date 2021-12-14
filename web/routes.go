@@ -1,4 +1,4 @@
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/abcum/fibre"
-	"github.com/abcum/fibre/mw"
-	"github.com/abcum/surreal/db"
-	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/build"
-	"github.com/abcum/surreal/util/show"
+	"github.com/surrealdb/fibre"
+	"github.com/surrealdb/fibre/mw"
+	"github.com/surrealdb/surrealdb/db"
+	"github.com/surrealdb/surrealdb/sql"
+	"github.com/surrealdb/surrealdb/util/build"
+	"github.com/surrealdb/surrealdb/util/show"
 )
 
 func limit(c *fibre.Context, i int64) int64 {

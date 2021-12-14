@@ -1,4 +1,4 @@
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ package db
 import (
 	"context"
 
-	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/data"
+	"github.com/surrealdb/surrealdb/sql"
+	"github.com/surrealdb/surrealdb/util/data"
 )
 
 func (e *executor) executeIfelse(ctx context.Context, stm *sql.IfelseStatement) (out []interface{}, err error) {

@@ -2,7 +2,7 @@
 // Source file: rdwr.gen.go.tmpl
 // DO NOT EDIT!
 
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.

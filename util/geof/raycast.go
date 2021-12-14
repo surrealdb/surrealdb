@@ -1,4 +1,4 @@
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package geof
 import (
 	"math"
 
-	"github.com/abcum/surreal/sql"
+	"github.com/surrealdb/surrealdb/sql"
 )
 
 func raycast(point, beg, end *sql.Point) bool {

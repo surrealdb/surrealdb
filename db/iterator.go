@@ -1,4 +1,4 @@
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,17 +21,17 @@ import (
 
 	"context"
 
-	"github.com/abcum/surreal/cnf"
-	"github.com/abcum/surreal/kvs"
-	"github.com/abcum/surreal/sql"
-	"github.com/abcum/surreal/util/comp"
-	"github.com/abcum/surreal/util/data"
-	"github.com/abcum/surreal/util/fncs"
-	"github.com/abcum/surreal/util/guid"
-	"github.com/abcum/surreal/util/ints"
-	"github.com/abcum/surreal/util/keys"
-	"github.com/abcum/surreal/util/nums"
-	"github.com/abcum/surreal/util/rand"
+	"github.com/surrealdb/surrealdb/cnf"
+	"github.com/surrealdb/surrealdb/kvs"
+	"github.com/surrealdb/surrealdb/sql"
+	"github.com/surrealdb/surrealdb/util/comp"
+	"github.com/surrealdb/surrealdb/util/data"
+	"github.com/surrealdb/surrealdb/util/fncs"
+	"github.com/surrealdb/surrealdb/util/guid"
+	"github.com/surrealdb/surrealdb/util/ints"
+	"github.com/surrealdb/surrealdb/util/keys"
+	"github.com/surrealdb/surrealdb/util/nums"
+	"github.com/surrealdb/surrealdb/util/rand"
 )
 
 type iterator struct {

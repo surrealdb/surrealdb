@@ -1,4 +1,4 @@
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import (
 
 	"github.com/pkg/profile"
 
-	"github.com/abcum/surreal/cli"
+	"github.com/surrealdb/surrealdb/cli"
 )
 
 func main() {

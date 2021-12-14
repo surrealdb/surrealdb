@@ -1,4 +1,4 @@
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,9 +24,9 @@ import (
 
 	"encoding/pem"
 
-	"github.com/abcum/surreal/cnf"
-	"github.com/abcum/surreal/log"
-	"github.com/abcum/surreal/util/rand"
+	"github.com/surrealdb/surrealdb/cnf"
+	"github.com/surrealdb/surrealdb/log"
+	"github.com/surrealdb/surrealdb/util/rand"
 )
 
 func setup() {

@@ -1,4 +1,4 @@
-// Copyright © 2016 Abcum Ltd
+// Copyright © 2016 SurrealDB Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/abcum/surreal/util/ints"
-	"github.com/abcum/surreal/util/slug"
-	"github.com/abcum/surreal/util/text"
+	"github.com/surrealdb/surrealdb/util/ints"
+	"github.com/surrealdb/surrealdb/util/slug"
+	"github.com/surrealdb/surrealdb/util/text"
 )
 
 func stringConcat(ctx context.Context, args ...interface{}) (interface{}, error) {
