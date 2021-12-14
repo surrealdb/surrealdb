@@ -7,21 +7,11 @@
 <br>
 
 <p align="center">
-    <a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
-        <img width="300" src="https://github.com/surrealdb/surrealdb/blob/main/img/white/logo.svg?raw=true" alt="SurrealDB Logo">
-    </a>
-    <a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
-        <img width="300" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/logo.svg?raw=true" alt="SurrealDB Logo">
-    </a>
+    <img width="300" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/logo.svg?raw=true" alt="SurrealDB Logo">
 </p>
 
 <h3 align="center">
-    <a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
-        <img src="https://github.com/surrealdb/surrealdb/blob/main/img/white/text.svg?raw=true" height="15" alt="SurrealDB">
-    </a>
-    <a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
-        <img src="https://github.com/surrealdb/surrealdb/blob/main/img/black/text.svg?raw=true" height="15" alt="SurrealDB">
-    </a>
+    <img src="https://github.com/surrealdb/surrealdb/blob/main/img/black/text.svg?raw=true" height="15" alt="SurrealDB">
     is the ultimate cloud <br> database for tomorrow's applications
 </h3>
 
@@ -113,12 +103,7 @@ For guidance on installation, development, deployment, and administration, see o
 SurrealDB is designed to be simple to install and simple to run - using just one command from your terminal. In addition to traditional installation, SurrealDB can be installed and run with HomeBrew, Docker, or using any other container orchestration tool such as Docker Compose, Docker Swarm, Rancher, or in Kubernetes.
 
 <h4>
-    <a href="https://surrealdb.com/install#gh-dark-mode-only">
-        <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/white/apple.svg?raw=true">
-    </a>
-    <a href="https://surrealdb.com/install#gh-light-mode-only">
-        <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/apple.svg?raw=true">
-    </a>
+    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/apple.svg?raw=true">
     &nbsp; Install on macOS
 </h4>
 
@@ -129,12 +114,7 @@ brew install surrealdb/tap/surreal
 ```
 
 <h4>
-    <a href="https://surrealdb.com/install#gh-dark-mode-only">
-        <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/white/linux.svg?raw=true">
-    </a>
-    <a href="https://surrealdb.com/install#gh-light-mode-only">
-        <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/linux.svg?raw=true">
-    </a>
+    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/linux.svg?raw=true">
     &nbsp; Install on Linux
 </h4>
 
@@ -145,12 +125,7 @@ curl -L https://install.surrealdb.com | sh
 ```
 
 <h4>
-    <a href="https://surrealdb.com/install#gh-dark-mode-only">
-        <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/white/windows.svg?raw=true">
-    </a>
-    <a href="https://surrealdb.com/install#gh-light-mode-only">
-        <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/windows.svg?raw=true">
-    </a>
+    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/windows.svg?raw=true">
     &nbsp; Install on Windows
 </h4>
 
@@ -161,12 +136,7 @@ iwr https://ps1.surrealdb.com -useb | iex
 ```
 
 <h4>
-    <a href="https://surrealdb.com/install#gh-dark-mode-only">
-        <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/white/docker.svg?raw=true">
-    </a>
-    <a href="https://surrealdb.com/install#gh-light-mode-only">
-        <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/docker.svg?raw=true">
-    </a>
+    <img width="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/black/docker.svg?raw=true">
     &nbsp; Run using Docker
 </h4>
 
