@@ -11,7 +11,7 @@
 </p>
 
 <h3 align="center">
-    <img src="https://github.com/surrealdb/surrealdb/blob/main/img/black/text.svg?raw=true" height="15" alt="SurrealDB">
+    <img src="https://github.com/surrealdb/surrealdb/blob/main/img/black/text.svg?raw=true" height="12" alt="SurrealDB">
     is the ultimate cloud <br> database for tomorrow's applications
 </h3>
 
