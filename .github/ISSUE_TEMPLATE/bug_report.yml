@@ -1,0 +1,67 @@
+name: Bug report
+description: File a bug report
+title: "Bug: "
+labels: ["bug", "triage"]
+assignees:
+  - octocat
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  - type: textarea
+    id: what
+    attributes:
+      label: Describe the bug
+      description: What exactly is going wrong?
+      placeholder: A short description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What are the steps necessary to reproduce this bug?
+      placeholder: Detail the steps taken to reproduce the behaviour.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What is the behaviour that you would expect to see?
+      placeholder: A clear and concise description of what you expected to happen.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: SurrealDB version
+      description: Copy and paste the output of `surreal version`
+      placeholder: surreal 0.0.0 for macOS on aarch64
+    validations:
+      required: true
+  - type: input
+    id: contact
+    attributes:
+      label: Contact Details
+      description: How can we get in touch with you if we need more info?
+      placeholder: email@example.com
+    validations:
+      required: false
+  - type: checkboxes
+    id: check
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search [our issues](https://github.com/surrealdb/surrealdb/issues) to see if this bug already exists.
+      options:
+      - label: I have searched the existing issues
+        required: true
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our [Code of Conduct](https://github.com/surrealdb/surrealdb)
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true

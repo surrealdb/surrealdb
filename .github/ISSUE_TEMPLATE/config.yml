@@ -2,4 +2,7 @@ blank_issues_enabled: false
 contact_links:
   - name: Question or idea
     url: https://github.com/surrealdb/surrealdb/discussions
-    about: Ask questions and discuss ideas.
+    about: Ask questions and discuss ideas here.
+  - name: Security issues
+    url: https://surrealdb.com/security
+    about: Report security vulnerabilities here.
