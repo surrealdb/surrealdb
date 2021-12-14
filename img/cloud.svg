@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generator: Adobe Illustrator 25.4.1, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<svg version="1.1" id="SurrealDB" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 840 979.9" style="enable-background:new 0 0 840 979.9;" xml:space="preserve">
+<style type="text/css">
+	.st0{fill-rule:evenodd;clip-rule:evenodd;fill:url(#Shape_00000152245537862431398460000007046895009603046020_);}
+</style>
+<g id="Page-1">
+	<g id="Core" transform="translate(-378.000000, -88.000000)">
+		<g id="cloud" transform="translate(378.000000, 88.000000)">
+			
+				<linearGradient id="Shape_00000124152936539864393180000013812753857728307599_" gradientUnits="userSpaceOnUse" x1="240.6383" y1="272.0151" x2="574.5428" y2="850.3545">
+				<stop  offset="0" style="stop-color:#FF00A0"/>
+				<stop  offset="1" style="stop-color:#9600FF"/>
+			</linearGradient>
+			
+				<path id="Shape" style="fill-rule:evenodd;clip-rule:evenodd;fill:url(#Shape_00000124152936539864393180000013812753857728307599_);" d="
+				M679.2,419.9C654.7,300.8,549.6,209.7,420,209.7c-101.6,0-189.2,56.1-231.2,140.1C80.2,363.8-0.4,451.4-0.4,560
+				c0,115.6,94.6,210.2,210.2,210.2h455.4c98.1,0,175.2-77.1,175.2-175.2C840.4,504,766.8,426.9,679.2,419.9L679.2,419.9z"/>
+		</g>
+	</g>
+</g>
+</svg>
