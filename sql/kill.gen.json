@@ -1,9 +1,0 @@
-[
-  { "name": "Select" },
-  { "name": "Create" },
-  { "name": "Update" },
-  { "name": "Delete" },
-  { "name": "Relate" },
-  { "name": "Insert" },
-  { "name": "Upsert" }
-]
