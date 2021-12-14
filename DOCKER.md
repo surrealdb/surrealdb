@@ -20,7 +20,7 @@
 <br>
 
 <p align="center">
-    <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/version-0.1.30-ff00a0.svg?style=flat-square"></a>
+	<a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/version-1.0.0--dev-ff00a0.svg?style=flat-square"></a>
     &nbsp;
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/language-Rust-dca282.svg?style=flat-square"></a>
 	&nbsp;
