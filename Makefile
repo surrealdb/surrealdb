@@ -50,9 +50,12 @@ install:
 .PHONY: compile
 compile: LDF += $(shell GOPATH=${GOPATH} build/flags.sh)
 compile:
+	docker buildx create --use
 	GOOS=linux GOARCH=amd64 $(GO) build -v -ldflags '$(LDF)'
-	docker build --tag surrealdb/surrealdb:latest .
-	docker push surrealdb/surrealdb:latest
+	docker build --tag "surrealdb/surrealdb-amd64:latest" .
+	GOOS=linux GOARCH=arm64 $(GO) build -v -ldflags '$(LDF)'
+	docker build --tag "surrealdb/surrealdb-arm64:latest" .
+	docker buildx build --push --pull --cache-from surrealdb/surrealdb-amd64 --cache-from surrealdb/surrealdb-arm64 --build-arg BUILDKIT_INLINE_CACHE=1 --platform linux/amd64,linux/arm64 --tag surrealdb/surrealdb:latest .
 
 .PHONY: deploy
 deploy:

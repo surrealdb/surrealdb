@@ -2,6 +2,6 @@ FROM alpine:latest
 
 RUN apk add --update --no-cache ca-certificates
 
-ADD surreal /usr/bin/
+ADD surrealdb /usr/bin/
 
-ENTRYPOINT ["surreal"]
+ENTRYPOINT ["surrealdb"]
