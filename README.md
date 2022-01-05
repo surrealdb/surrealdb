@@ -74,7 +74,7 @@
 
 SurrealDB is an end-to-end cloud native database for web, mobile, serverless, jamstack, backend, and traditional applications. SurrealDB reduces the development time of modern applications by simplifying your database and API stack, removing the need for most server-side components, allowing you to build secure, performant apps quicker and cheaper. SurrealDB acts as both a database and a modern, realtime, collaborative API backend layer. SurrealDB can run as a single server or in a highly-available, highly-scalable distributed mode - with support for SQL querying from client devices, GraphQL, ACID transactions, WebSocket connections, structured and unstructured data, graph querying, full-text indexing, geospatial querying, and row-by-row permissions-based access.
 
-For more details see the [features](https://surrealdb.com/features), [documentation](https://surrealdb.com/docs), or [roadmap](https://surrealdb.com/roadmap).
+For more details see [why](https://surrealdb.com/why), [features](https://surrealdb.com/features), or [documentation](https://surrealdb.com/docs).
 
 <h2><img height="20" src="/img/cloud.svg">&nbsp;&nbsp;SurrealDB Cloud</h2>
 
