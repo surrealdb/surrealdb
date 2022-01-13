@@ -1,13 +1,71 @@
-use anyhow::Error;
+mod file;
+mod kv;
+mod mem;
+mod tikv;
+mod tx;
 
-pub fn init(opts: &clap::ArgMatches) -> Result<(), Error> {
-	let pth = opts.value_of("path").unwrap();
+pub use self::kv::*;
+pub use self::tx::*;
 
-	if pth == "memory" {
-		info!("Starting kvs store in {}", pth);
-	} else {
-		info!("Starting kvs store at {}", pth);
+use crate::err::Error;
+use once_cell::sync::OnceCell;
+
+pub enum Datastore {
+	Mem(mem::Datastore),
+	File(file::Datastore),
+	TiKV(tikv::Datastore),
+}
+
+pub enum Transaction<'a> {
+	Mem(mem::Transaction<'a>),
+	File(file::Transaction<'a>),
+	TiKV(tikv::Transaction),
+}
+
+static DB: OnceCell<Datastore> = OnceCell::new();
+
+pub fn init(conf: &clap::ArgMatches) -> Result<(), Error> {
+	// Parse the database endpoint path
+	let path = conf.value_of("path").unwrap();
+	// Instantiate the database endpoint
+	match path {
+		"memory" => {
+			info!("Starting kvs store in {}", path);
+			let ds = mem::Datastore::new()?;
+			let _ = DB.set(Datastore::Mem(ds));
+			Ok(())
+		}
+		s if s.starts_with("file:") => {
+			info!("Starting kvs store at {}", path);
+			let s = s.trim_start_matches("file://");
+			let ds = file::Datastore::new(s)?;
+			let _ = DB.set(Datastore::File(ds));
+			Ok(())
+		}
+		s if s.starts_with("tikv:") => {
+			info!("Starting kvs store at {}", path);
+			let s = s.trim_start_matches("tikv://");
+			let ds = tikv::Datastore::new(s)?;
+			let _ = DB.set(Datastore::TiKV(ds));
+			Ok(())
+		}
+		_ => unreachable!(),
 	}
+}
 
-	Ok(())
+pub async fn transaction<'a>(write: bool, lock: bool) -> Result<Transaction<'a>, Error> {
+	match DB.get().unwrap() {
+		Datastore::Mem(v) => {
+			let tx = v.transaction(write, lock)?;
+			Ok(Transaction::Mem(tx))
+		}
+		Datastore::File(v) => {
+			let tx = v.transaction(write, lock)?;
+			Ok(Transaction::File(tx))
+		}
+		Datastore::TiKV(v) => {
+			let tx = v.transaction(write, lock).await?;
+			Ok(Transaction::TiKV(tx))
+		}
+	}
 }
