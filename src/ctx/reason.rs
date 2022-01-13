@@ -1,4 +1,4 @@
-use std::error::Error;
+use crate::err::Error;
 use std::fmt;
 use std::io;
 
@@ -8,13 +8,20 @@ pub enum Reason {
 	Canceled,
 }
 
-impl Error for Reason {}
-
 impl fmt::Display for Reason {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
 			Reason::Timedout => write!(f, "Context timedout"),
 			Reason::Canceled => write!(f, "Context canceled"),
+		}
+	}
+}
+
+impl From<Reason> for Error {
+	fn from(reason: Reason) -> Error {
+		match reason {
+			Reason::Timedout => Error::TimeoutError,
+			Reason::Canceled => Error::CancelledError,
 		}
 	}
 }

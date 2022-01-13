@@ -15,6 +15,12 @@ pub enum Error {
 	#[error("Specify some SQL code to execute")]
 	EmptyError,
 
+	#[error("The query failed to complete in time")]
+	TimeoutError,
+
+	#[error("The query was cancelled before completion")]
+	CancelledError,
+
 	#[error("Parse error at position {pos} when parsing '{sql}'")]
 	ParseError {
 		pos: usize,
