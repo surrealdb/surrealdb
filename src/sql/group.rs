@@ -9,8 +9,8 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Groups(Vec<Group>);
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Groups(pub Vec<Group>);
 
 impl fmt::Display for Groups {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -22,7 +22,7 @@ impl fmt::Display for Groups {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Group {
 	pub group: Idiom,
 }
@@ -55,6 +55,7 @@ fn group_raw(i: &str) -> IResult<&str, Group> {
 mod tests {
 
 	use super::*;
+	use crate::sql::test::Parse;
 
 	#[test]
 	fn group_statement() {
@@ -65,7 +66,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Groups(vec![Group {
-				group: Idiom::from("field")
+				group: Idiom::parse("field")
 			}])
 		);
 		assert_eq!("GROUP BY field", format!("{}", out));
@@ -80,7 +81,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Groups(vec![Group {
-				group: Idiom::from("field")
+				group: Idiom::parse("field")
 			}])
 		);
 		assert_eq!("GROUP BY field", format!("{}", out));
@@ -96,10 +97,10 @@ mod tests {
 			out,
 			Groups(vec![
 				Group {
-					group: Idiom::from("field")
+					group: Idiom::parse("field")
 				},
 				Group {
-					group: Idiom::from("other.field")
+					group: Idiom::parse("other.field")
 				},
 			])
 		);

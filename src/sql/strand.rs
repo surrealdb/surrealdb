@@ -7,6 +7,7 @@ use nom::IResult;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops;
 use std::str;
 
 const SINGLE: &str = r#"'"#;
@@ -36,6 +37,12 @@ impl<'a> From<&'a str> for Strand {
 	}
 }
 
+impl Strand {
+	pub fn as_str(&self) -> &str {
+		self.value.as_str()
+	}
+}
+
 impl fmt::Display for Strand {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "\"{}\"", self.value)
@@ -54,6 +61,13 @@ impl Serialize for Strand {
 			val.serialize_field("value", &self.value)?;
 			val.end()
 		}
+	}
+}
+
+impl ops::Add for Strand {
+	type Output = Self;
+	fn add(self, other: Self) -> Self {
+		Strand::from(self.value + &other.value)
 	}
 }
 

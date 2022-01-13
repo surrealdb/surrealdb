@@ -1,3 +1,5 @@
+use crate::sql::comment::mightbespace;
+use crate::sql::comment::shouldbespace;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
@@ -18,8 +20,9 @@ pub enum Operator {
 	Inc, // +=
 	Dec, // -=
 	//
+	Exact, // ==
+	//
 	Equal,    // =
-	Exact,    // ==
 	NotEqual, // !=
 	AllEqual, // *=
 	AnyEqual, // ?=
@@ -37,12 +40,12 @@ pub enum Operator {
 	Contain,     // ∋
 	NotContain,  // ∌
 	ContainAll,  // ⊇
-	ContainSome, // ⊃
+	ContainAny,  // ⊃
 	ContainNone, // ⊅
 	Inside,      // ∈
 	NotInside,   // ∉
 	AllInside,   // ⊆
-	SomeInside,  // ⊂
+	AnyInside,   // ⊂
 	NoneInside,  // ⊄
 	Intersects,  // ∩
 }
@@ -64,8 +67,8 @@ impl fmt::Display for Operator {
 			Operator::Div => write!(f, "/"),
 			Operator::Inc => write!(f, "+="),
 			Operator::Dec => write!(f, "-="),
-			Operator::Equal => write!(f, "="),
 			Operator::Exact => write!(f, "=="),
+			Operator::Equal => write!(f, "="),
 			Operator::NotEqual => write!(f, "!="),
 			Operator::AllEqual => write!(f, "*="),
 			Operator::AnyEqual => write!(f, "?="),
@@ -80,12 +83,12 @@ impl fmt::Display for Operator {
 			Operator::Contain => write!(f, "CONTAINS"),
 			Operator::NotContain => write!(f, "CONTAINS NOT"),
 			Operator::ContainAll => write!(f, "CONTAINS ALL"),
-			Operator::ContainSome => write!(f, "CONTAINS SOME"),
+			Operator::ContainAny => write!(f, "CONTAINS ANY"),
 			Operator::ContainNone => write!(f, "CONTAINS NONE"),
 			Operator::Inside => write!(f, "INSIDE"),
 			Operator::NotInside => write!(f, "NOT INSIDE"),
 			Operator::AllInside => write!(f, "ALL INSIDE"),
-			Operator::SomeInside => write!(f, "SOME INSIDE"),
+			Operator::AnyInside => write!(f, "ANY INSIDE"),
 			Operator::NoneInside => write!(f, "NONE INSIDE"),
 			Operator::Intersects => write!(f, "INTERSECTS"),
 		}
@@ -101,7 +104,12 @@ pub fn assigner(i: &str) -> IResult<&str, Operator> {
 }
 
 pub fn operator(i: &str) -> IResult<&str, Operator> {
-	alt((
+	alt((symbols, phrases))(i)
+}
+
+pub fn symbols(i: &str) -> IResult<&str, Operator> {
+	let (i, _) = mightbespace(i)?;
+	let (i, v) = alt((
 		alt((
 			map(tag("=="), |_| Operator::Exact),
 			map(tag("!="), |_| Operator::NotEqual),
@@ -136,12 +144,20 @@ pub fn operator(i: &str) -> IResult<&str, Operator> {
 			map(tag("∈"), |_| Operator::Inside),
 			map(tag("∉"), |_| Operator::NotInside),
 			map(tag("⊇"), |_| Operator::ContainAll),
-			map(tag("⊃"), |_| Operator::ContainSome),
+			map(tag("⊃"), |_| Operator::ContainAny),
 			map(tag("⊅"), |_| Operator::ContainNone),
 			map(tag("⊆"), |_| Operator::AllInside),
-			map(tag("⊂"), |_| Operator::SomeInside),
+			map(tag("⊂"), |_| Operator::AnyInside),
 			map(tag("⊄"), |_| Operator::NoneInside),
 		)),
+	))(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, v))
+}
+
+pub fn phrases(i: &str) -> IResult<&str, Operator> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = alt((
 		alt((
 			map(tag_no_case("&&"), |_| Operator::And),
 			map(tag_no_case("AND"), |_| Operator::And),
@@ -154,17 +170,19 @@ pub fn operator(i: &str) -> IResult<&str, Operator> {
 		)),
 		alt((
 			map(tag_no_case("CONTAINS ALL"), |_| Operator::ContainAll),
+			map(tag_no_case("CONTAINS ANY"), |_| Operator::ContainAny),
 			map(tag_no_case("CONTAINS NONE"), |_| Operator::ContainNone),
-			map(tag_no_case("CONTAINS SOME"), |_| Operator::ContainSome),
 			map(tag_no_case("CONTAINS NOT"), |_| Operator::NotContain),
 			map(tag_no_case("CONTAINS"), |_| Operator::Contain),
 			map(tag_no_case("ALL INSIDE"), |_| Operator::AllInside),
+			map(tag_no_case("ANY INSIDE"), |_| Operator::AnyInside),
 			map(tag_no_case("NONE INSIDE"), |_| Operator::NoneInside),
-			map(tag_no_case("SOME INSIDE"), |_| Operator::SomeInside),
 			map(tag_no_case("NOT INSIDE"), |_| Operator::NotInside),
 			map(tag_no_case("INSIDE"), |_| Operator::Inside),
 			map(tag_no_case("OUTSIDE"), |_| Operator::NotInside),
 			map(tag_no_case("INTERSECTS"), |_| Operator::Intersects),
 		)),
-	))(i)
+	))(i)?;
+	let (i, _) = shouldbespace(i)?;
+	Ok((i, v))
 }

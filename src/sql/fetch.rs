@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Fetchs(Vec<Fetch>);
+pub struct Fetchs(pub Vec<Fetch>);
 
 impl fmt::Display for Fetchs {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -52,6 +52,7 @@ fn fetch_raw(i: &str) -> IResult<&str, Fetch> {
 mod tests {
 
 	use super::*;
+	use crate::sql::test::Parse;
 
 	#[test]
 	fn fetch_statement() {
@@ -62,7 +63,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Fetchs(vec![Fetch {
-				fetch: Idiom::from("field")
+				fetch: Idiom::parse("field")
 			}])
 		);
 		assert_eq!("FETCH field", format!("{}", out));
@@ -78,10 +79,10 @@ mod tests {
 			out,
 			Fetchs(vec![
 				Fetch {
-					fetch: Idiom::from("field")
+					fetch: Idiom::parse("field")
 				},
 				Fetch {
-					fetch: Idiom::from("other.field")
+					fetch: Idiom::parse("other.field")
 				},
 			])
 		);

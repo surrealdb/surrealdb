@@ -1,10 +1,12 @@
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::idiom::{idiom, Idiom};
-use crate::sql::literal::Literal;
+use crate::sql::idiom;
+use crate::sql::idiom::Idiom;
+use crate::sql::part::Part;
+use crate::sql::value::Value;
 use nom::bytes::complete::tag;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
@@ -24,14 +26,6 @@ impl From<Idiom> for Param {
 	}
 }
 
-impl<'a> From<&'a str> for Param {
-	fn from(p: &str) -> Param {
-		Param {
-			name: Idiom::from(p),
-		}
-	}
-}
-
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "${}", &self.name)
@@ -42,20 +36,32 @@ impl dbs::Process for Param {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
-		// 1. Loop through the context variables
-		// 2. Find a variable with the right name
-		// 3. Process the variable value
-		// 4. Return the processed value
-		todo!()
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Find a base variable by name
+		match self.name.parts.first() {
+			// The first part will be a field
+			Some(Part::Field(v)) => match ctx.value::<Value>(v.name.clone()) {
+				// The base variable exists
+				Some(v) => {
+					// Process the paramater value
+					let res = v.process(ctx, opt, exe, doc)?;
+					// Return the desired field
+					res.get(ctx, opt, exe, &self.name.next()).ok()
+				}
+				// The base variable does not exist
+				None => Ok(Value::None),
+			},
+			_ => unreachable!(),
+		}
 	}
 }
 
 pub fn param(i: &str) -> IResult<&str, Param> {
 	let (i, _) = tag("$")(i)?;
-	let (i, v) = idiom(i)?;
+	let (i, v) = idiom::param(i)?;
 	Ok((i, Param::from(v)))
 }
 
@@ -63,6 +69,7 @@ pub fn param(i: &str) -> IResult<&str, Param> {
 mod tests {
 
 	use super::*;
+	use crate::sql::test::Parse;
 
 	#[test]
 	fn param_normal() {
@@ -71,7 +78,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("$test", format!("{}", out));
-		assert_eq!(out, Param::from("test"));
+		assert_eq!(out, Param::parse("$test"));
 	}
 
 	#[test]
@@ -81,7 +88,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("$test_and_deliver", format!("{}", out));
-		assert_eq!(out, Param::from("test_and_deliver"));
+		assert_eq!(out, Param::parse("$test_and_deliver"));
 	}
 
 	#[test]
@@ -91,6 +98,6 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("$test.temporary[0].embedded", format!("{}", out));
-		assert_eq!(out, Param::from("test.temporary[0].embedded"));
+		assert_eq!(out, Param::parse("$test.temporary[0].embedded"));
 	}
 }

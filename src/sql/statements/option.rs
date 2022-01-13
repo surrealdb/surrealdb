@@ -1,12 +1,13 @@
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Level;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::ident::{ident, Ident};
-use crate::sql::literal::Literal;
+use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
@@ -35,11 +36,15 @@ impl fmt::Display for OptionStatement {
 impl dbs::Process for OptionStatement {
 	fn process(
 		&self,
-		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
-		todo!()
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Return nothing
+		Ok(Value::None)
 	}
 }
 

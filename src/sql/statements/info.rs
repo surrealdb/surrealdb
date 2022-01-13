@@ -1,11 +1,12 @@
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Level;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::ident::ident_raw;
-use crate::sql::literal::Literal;
+use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::IResult;
@@ -35,9 +36,18 @@ impl dbs::Process for InfoStatement {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		match self {
+			InfoStatement::Namespace => exe.check(opt, Level::Ns)?,
+			InfoStatement::Database => exe.check(opt, Level::Db)?,
+			InfoStatement::Scope(_) => exe.check(opt, Level::Db)?,
+			InfoStatement::Table(_) => exe.check(opt, Level::Db)?,
+		}
+		// Continue
 		todo!()
 	}
 }

@@ -16,5 +16,4 @@ pub mod remove;
 pub mod select;
 pub mod set;
 pub mod update;
-pub mod upsert;
 pub mod yuse;

@@ -12,13 +12,11 @@ pub enum Kind {
 	Any,
 	Array,
 	Bool,
-	Circle,
 	Datetime,
 	Number,
 	Object,
-	Point,
-	Polygon,
 	String,
+	Geometry(String),
 	Record(Vec<Table>),
 }
 
@@ -34,17 +32,15 @@ impl fmt::Display for Kind {
 			Kind::Any => write!(f, "any"),
 			Kind::Array => write!(f, "array"),
 			Kind::Bool => write!(f, "bool"),
-			Kind::Circle => write!(f, "circle"),
 			Kind::Datetime => write!(f, "datetime"),
 			Kind::Number => write!(f, "number"),
 			Kind::Object => write!(f, "object"),
-			Kind::Point => write!(f, "point"),
-			Kind::Polygon => write!(f, "polygon"),
 			Kind::String => write!(f, "string"),
-			Kind::Record(t) => write!(
+			Kind::Geometry(v) => write!(f, "geometry({})", v),
+			Kind::Record(v) => write!(
 				f,
 				"record({})",
-				t.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", ")
+				v.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", ")
 			),
 		}
 	}
@@ -52,17 +48,33 @@ impl fmt::Display for Kind {
 
 pub fn kind(i: &str) -> IResult<&str, Kind> {
 	alt((
+		map(tag("any"), |_| Kind::Any),
 		map(tag("array"), |_| Kind::Array),
 		map(tag("bool"), |_| Kind::Bool),
-		map(tag("circle"), |_| Kind::Circle),
 		map(tag("datetime"), |_| Kind::Datetime),
 		map(tag("number"), |_| Kind::Number),
 		map(tag("object"), |_| Kind::Object),
-		map(tag("point"), |_| Kind::Point),
-		map(tag("polygon"), |_| Kind::Polygon),
 		map(tag("string"), |_| Kind::String),
+		map(geometry, |v| Kind::Geometry(v)),
 		map(record, |v| Kind::Record(v)),
 	))(i)
+}
+
+fn geometry(i: &str) -> IResult<&str, String> {
+	let (i, _) = tag("geometry")(i)?;
+	let (i, _) = tag("(")(i)?;
+	let (i, v) = alt((
+		tag("feature"),
+		tag("point"),
+		tag("line"),
+		tag("polygon"),
+		tag("multipoint"),
+		tag("multiline"),
+		tag("multipolygon"),
+		tag("collection"),
+	))(i)?;
+	let (i, _) = tag(")")(i)?;
+	Ok((i, String::from(v)))
 }
 
 fn record(i: &str) -> IResult<&str, Vec<Table>> {

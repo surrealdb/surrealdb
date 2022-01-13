@@ -1,27 +1,31 @@
 use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
+use crate::dbs::Level;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
-use crate::sql::expression::{expression, Expression};
-use crate::sql::literal::Literal;
+use crate::sql::data::{single, update, values, Data};
 use crate::sql::output::{output, Output};
 use crate::sql::table::{table, Table};
 use crate::sql::timeout::{timeout, Timeout};
+use crate::sql::value::Value;
+use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
-use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct InsertStatement {
-	pub data: Expression,
 	pub into: Table,
+	pub data: Data,
+	pub ignore: bool,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub update: Option<Data>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub output: Option<Output>,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -30,7 +34,11 @@ pub struct InsertStatement {
 
 impl fmt::Display for InsertStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "INSERT {} INTO {}", self.data, self.into)?;
+		write!(f, "INSERT")?;
+		if self.ignore {
+			write!(f, " IGNORE")?
+		}
+		write!(f, " INTO {} {}", self.into, self.data)?;
 		if let Some(ref v) = self.output {
 			write!(f, " {}", v)?
 		}
@@ -45,23 +53,39 @@ impl dbs::Process for InsertStatement {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::No)?;
 		// Create a new iterator
-		let i = Iterator::new();
-		// LooParse the expression
-		match self.data.process(ctx, exe, doc)? {
-			Literal::Object(_) => {
-				i.process_object(ctx, exe);
+		let mut i = Iterator::new();
+		// Pass in statement config
+		i.into = Some(&self.into);
+		i.data = Some(&self.data);
+		// Ensure futures are stored
+		let opt = &opt.futures(false);
+		// Parse the expression
+		match &self.data {
+			Data::ValuesExpression(_) => {
+				todo!() // TODO: loop over each
 			}
-			Literal::Array(_) => {
-				i.process_array(ctx, exe);
-			}
-			_ => {
-				todo!() // Return error
-			}
-		};
+			Data::SingleExpression(v) => match v.process(ctx, opt, exe, doc)? {
+				Value::Array(v) => {
+					i.process_array(ctx, exe, v);
+				}
+				Value::Object(v) => {
+					i.process_object(ctx, exe, v);
+				}
+				v => {
+					return Err(Error::InsertStatementError {
+						value: v,
+					})
+				}
+			},
+			_ => unreachable!(),
+		}
 		// Output the results
 		i.output(ctx, exe)
 	}
@@ -69,20 +93,20 @@ impl dbs::Process for InsertStatement {
 
 pub fn insert(i: &str) -> IResult<&str, InsertStatement> {
 	let (i, _) = tag_no_case("INSERT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, data) = expression(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("INTO")(i)?;
-	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, into) = table(i)?;
+	let (i, ignore) = opt(preceded(shouldbespace, tag_no_case("IGNORE")))(i)?;
+	let (i, _) = preceded(shouldbespace, tag_no_case("INTO"))(i)?;
+	let (i, into) = preceded(shouldbespace, table)(i)?;
+	let (i, data) = preceded(shouldbespace, alt((values, single)))(i)?;
+	let (i, update) = opt(preceded(shouldbespace, update))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	Ok((
 		i,
 		InsertStatement {
-			data,
 			into,
+			data,
+			ignore: ignore.is_some(),
+			update,
 			output,
 			timeout,
 		},
@@ -95,11 +119,20 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn insert_statement() {
-		let sql = "INSERT [1,2,3] INTO test";
+	fn insert_statement_basic() {
+		let sql = "INSERT INTO test (field) VALUES ($value)";
 		let res = insert(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("INSERT [1, 2, 3] INTO test", format!("{}", out))
+		assert_eq!("INSERT INTO test (field) VALUES ($value)", format!("{}", out))
+	}
+
+	#[test]
+	fn insert_statement_ignore() {
+		let sql = "INSERT IGNORE INTO test (field) VALUES ($value)";
+		let res = insert(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("INSERT IGNORE INTO test (field) VALUES ($value)", format!("{}", out))
 	}
 }

@@ -1,3 +1,5 @@
+use crate::sql::datetime::Datetime;
+use chrono::DurationRound;
 use nom::branch::alt;
 use nom::bytes::complete::is_a;
 use nom::bytes::complete::tag;
@@ -5,6 +7,7 @@ use nom::IResult;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops;
 use std::str::FromStr;
 use std::time;
 
@@ -12,6 +15,15 @@ use std::time;
 pub struct Duration {
 	pub input: String,
 	pub value: time::Duration,
+}
+
+impl From<time::Duration> for Duration {
+	fn from(t: time::Duration) -> Self {
+		Duration {
+			input: format!("{:?}", t),
+			value: t,
+		}
+	}
 }
 
 impl<'a> From<&'a str> for Duration {
@@ -35,12 +47,59 @@ impl Serialize for Duration {
 		S: serde::Serializer,
 	{
 		if serializer.is_human_readable() {
-			serializer.serialize_some(&self.value)
+			serializer.serialize_some(&self.input)
 		} else {
 			let mut val = serializer.serialize_struct("Duration", 2)?;
 			val.serialize_field("input", &self.input)?;
 			val.serialize_field("value", &self.value)?;
 			val.end()
+		}
+	}
+}
+
+impl ops::Add for Duration {
+	type Output = Self;
+	fn add(self, other: Self) -> Self {
+		Duration::from(self.value + other.value)
+	}
+}
+
+impl ops::Sub for Duration {
+	type Output = Self;
+	fn sub(self, other: Self) -> Self {
+		Duration::from(self.value - other.value)
+	}
+}
+
+impl ops::Add<Datetime> for Duration {
+	type Output = Datetime;
+	fn add(self, other: Datetime) -> Datetime {
+		match chrono::Duration::from_std(self.value) {
+			Ok(d) => Datetime::from(other.value + d),
+			Err(_) => Datetime::default(),
+		}
+	}
+}
+
+impl ops::Sub<Datetime> for Duration {
+	type Output = Datetime;
+	fn sub(self, other: Datetime) -> Datetime {
+		match chrono::Duration::from_std(self.value) {
+			Ok(d) => Datetime::from(other.value - d),
+			Err(_) => Datetime::default(),
+		}
+	}
+}
+
+impl ops::Div<Datetime> for Duration {
+	type Output = Datetime;
+	fn div(self, other: Datetime) -> Datetime {
+		match chrono::Duration::from_std(self.value) {
+			Ok(d) => match other.value.duration_trunc(d) {
+				Ok(v) => Datetime::from(v),
+				Err(_) => Datetime::default(),
+			},
+			Err(_) => Datetime::default(),
 		}
 	}
 }

@@ -23,6 +23,22 @@ impl Default for Datetime {
 	}
 }
 
+impl From<i64> for Datetime {
+	fn from(v: i64) -> Self {
+		Datetime {
+			value: Utc.timestamp(v, 0),
+		}
+	}
+}
+
+impl From<DateTime<Utc>> for Datetime {
+	fn from(v: DateTime<Utc>) -> Self {
+		Datetime {
+			value: v,
+		}
+	}
+}
+
 impl<'a> From<&'a str> for Datetime {
 	fn from(s: &str) -> Self {
 		match datetime_raw(s) {

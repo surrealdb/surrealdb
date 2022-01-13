@@ -1,11 +1,10 @@
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
-use crate::sql::expression::{expression, Expression};
-use crate::sql::literal::Literal;
+use crate::sql::value::{value, Value};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
@@ -15,9 +14,9 @@ use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct IfelseStatement {
-	pub exprs: Vec<(Expression, Expression)>,
+	pub exprs: Vec<(Value, Value)>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub close: Option<Expression>,
+	pub close: Option<Value>,
 }
 
 impl fmt::Display for IfelseStatement {
@@ -43,18 +42,19 @@ impl dbs::Process for IfelseStatement {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
 		for (ref cond, ref then) in &self.exprs {
-			let v = cond.process(ctx, exe, doc)?;
-			if v.as_bool() {
-				return then.process(ctx, exe, doc);
+			let v = cond.process(ctx, opt, exe, doc)?;
+			if v.is_truthy() {
+				return then.process(ctx, opt, exe, doc);
 			}
 		}
 		match self.close {
-			Some(ref v) => v.process(ctx, exe, doc),
-			None => Ok(Literal::None),
+			Some(ref v) => v.process(ctx, opt, exe, doc),
+			None => Ok(Value::None),
 		}
 	}
 }
@@ -73,22 +73,22 @@ pub fn ifelse(i: &str) -> IResult<&str, IfelseStatement> {
 	))
 }
 
-fn exprs(i: &str) -> IResult<&str, (Expression, Expression)> {
+fn exprs(i: &str) -> IResult<&str, (Value, Value)> {
 	let (i, _) = tag_no_case("IF")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, cond) = expression(i)?;
+	let (i, cond) = value(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("THEN")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, then) = expression(i)?;
+	let (i, then) = value(i)?;
 	Ok((i, (cond, then)))
 }
 
-fn close(i: &str) -> IResult<&str, Expression> {
+fn close(i: &str) -> IResult<&str, Value> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ELSE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, then) = expression(i)?;
+	let (i, then) = value(i)?;
 	Ok((i, then))
 }
 

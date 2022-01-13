@@ -1,3 +1,4 @@
+mod conf;
 mod export;
 mod head;
 mod import;
@@ -13,18 +14,18 @@ mod version;
 
 use anyhow::Error;
 use std::net::SocketAddr;
-use warp::Filter;
 use uuid::Uuid;
+use warp::Filter;
 
 const ID: &'static str = "Request-Id";
 
 #[tokio::main]
-pub async fn init(opts: &clap::ArgMatches) -> Result<(), Error> {
+pub async fn init(conf: &clap::ArgMatches) -> Result<(), Error> {
 	//
-	let adr = opts.value_of("bind").unwrap();
+	let adr = conf.value_of("bind").unwrap();
 	//
 	let adr: SocketAddr = adr.parse().expect("Unable to parse socket address");
-
+	//
 	let web = root::config()
 		// Version endpoint
 		.or(version::config())
@@ -40,9 +41,9 @@ pub async fn init(opts: &clap::ArgMatches) -> Result<(), Error> {
 		.or(import::config())
 		// Backup endpoint
 		.or(sync::config())
-		// Endpoints for sql queries
+		// SQL query endpoint
 		.or(sql::config())
-		// Key for key queries
+		// API query endpoint
 		.or(key::config())
 		// End routes setup
 	;
@@ -55,11 +56,10 @@ pub async fn init(opts: &clap::ArgMatches) -> Result<(), Error> {
 
 	let web = web.map(|reply| {
 		let val = Uuid::new_v4().to_string();
-        warp::reply::with_header(reply, ID, val)
-    });
+		warp::reply::with_header(reply, ID, val)
+	});
 
 	let web = web.with(log::write());
-
 
 	info!("Starting web server on {}", adr);
 

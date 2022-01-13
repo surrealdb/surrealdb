@@ -1,4 +1,7 @@
+use crate::dbs::Session;
+use crate::web::conf;
 use crate::web::head;
+use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
 use warp::Filter;
 
@@ -10,6 +13,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set post method
 	let post = base
 		.and(warp::post())
+		.and(conf::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
 		.and(warp::body::bytes())
@@ -30,10 +34,14 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	opts.or(post).or(sock).with(head::cors())
 }
 
-async fn handler(out: String, sql: bytes::Bytes) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handler(
+	session: Session,
+	output: String,
+	sql: Bytes,
+) -> Result<impl warp::Reply, warp::Rejection> {
 	let sql = std::str::from_utf8(&sql).unwrap();
-	let res = crate::dbs::execute(sql, None).unwrap();
-	match out.as_ref() {
+	let res = crate::dbs::execute(sql, session, None).await.unwrap();
+	match output.as_ref() {
 		"application/json" => Ok(warp::reply::json(&res)),
 		"application/cbor" => Ok(warp::reply::json(&res)),
 		_ => Err(warp::reject::not_found()),

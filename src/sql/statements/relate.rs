@@ -1,22 +1,22 @@
 use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
+use crate::dbs::Level;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::data::{data, Data};
-use crate::sql::literal::{whats, Literal, Literals};
 use crate::sql::output::{output, Output};
 use crate::sql::table::{table, Table};
 use crate::sql::timeout::{timeout, Timeout};
+use crate::sql::value::{whats, Value, Values};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
-use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -24,8 +24,8 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RelateStatement {
 	pub kind: Table,
-	pub from: Literals,
-	pub with: Literals,
+	pub from: Values,
+	pub with: Values,
 	pub uniq: bool,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub data: Option<Data>,
@@ -58,31 +58,38 @@ impl dbs::Process for RelateStatement {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::No)?;
 		// Create a new iterator
-		let i = Iterator::new();
+		let mut i = Iterator::new();
+		// Ensure futures are stored
+		let opt = &opt.futures(false);
 		// Loop over the select targets
-		for f in self.from.to_owned() {
-			match f.process(ctx, exe, doc)? {
-				Literal::Table(_) => {
-					i.process_table(ctx, exe);
+		for f in self.from.0.iter() {
+			match f.process(ctx, opt, exe, doc)? {
+				Value::Table(v) => {
+					i.process_table(ctx, exe, v);
 				}
-				Literal::Thing(_) => {
-					i.process_thing(ctx, exe);
+				Value::Thing(v) => {
+					i.process_thing(ctx, exe, v);
 				}
-				Literal::Model(_) => {
-					i.process_model(ctx, exe);
+				Value::Model(v) => {
+					i.process_model(ctx, exe, v);
 				}
-				Literal::Array(_) => {
-					i.process_array(ctx, exe);
+				Value::Array(v) => {
+					i.process_array(ctx, exe, v);
 				}
-				Literal::Object(_) => {
-					i.process_object(ctx, exe);
+				Value::Object(v) => {
+					i.process_object(ctx, exe, v);
 				}
-				_ => {
-					todo!() // Return error
+				v => {
+					return Err(Error::RelateStatementError {
+						value: v,
+					})
 				}
 			};
 		}
@@ -95,7 +102,7 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	let (i, _) = tag_no_case("RELATE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, path) = alt((relate_o, relate_i))(i)?;
-	let (i, uniq) = opt(tuple((shouldbespace, tag_no_case("UNIQUE"))))(i)?;
+	let (i, uniq) = opt(preceded(shouldbespace, tag_no_case("UNIQUE")))(i)?;
 	let (i, data) = opt(preceded(shouldbespace, data))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
@@ -113,7 +120,7 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	))
 }
 
-fn relate_o(i: &str) -> IResult<&str, (Table, Literals, Literals)> {
+fn relate_o(i: &str) -> IResult<&str, (Table, Values, Values)> {
 	let (i, from) = whats(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("->")(i)?;
@@ -126,7 +133,7 @@ fn relate_o(i: &str) -> IResult<&str, (Table, Literals, Literals)> {
 	Ok((i, (kind, from, with)))
 }
 
-fn relate_i(i: &str) -> IResult<&str, (Table, Literals, Literals)> {
+fn relate_i(i: &str) -> IResult<&str, (Table, Values, Values)> {
 	let (i, with) = whats(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("<-")(i)?;
@@ -160,5 +167,14 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("RELATE person -> like -> animal", format!("{}", out))
+	}
+
+	#[test]
+	fn relate_statement_thing() {
+		let sql = "RELATE person:tobie->like->person:jaime";
+		let res = relate(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("RELATE person:tobie -> like -> person:jaime", format!("{}", out))
 	}
 }

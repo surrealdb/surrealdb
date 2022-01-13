@@ -1,6 +1,6 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
-use crate::sql::expression::{expression, Expression};
+use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
@@ -137,7 +137,7 @@ pub enum Permission {
 	Create,
 	Update,
 	Delete,
-	Specific(Expression),
+	Specific(Value),
 }
 
 impl Default for Permission {
@@ -173,7 +173,7 @@ fn permission(i: &str) -> IResult<&str, Vec<(Permission, Permission)>> {
 	let (i, expr) = alt((
 		map(tag_no_case("NONE"), |_| Permission::None),
 		map(tag_no_case("FULL"), |_| Permission::Full),
-		map(tuple((tag_no_case("WHERE"), shouldbespace, expression)), |(_, _, v)| {
+		map(tuple((tag_no_case("WHERE"), shouldbespace, value)), |(_, _, v)| {
 			Permission::Specific(v)
 		}),
 	))(i)?;
@@ -184,6 +184,8 @@ fn permission(i: &str) -> IResult<&str, Vec<(Permission, Permission)>> {
 mod tests {
 
 	use super::*;
+	use crate::sql::expression::Expression;
+	use crate::sql::test::Parse;
 
 	#[test]
 	fn permissions_none() {
@@ -220,8 +222,8 @@ mod tests {
 			out,
 			Permissions {
 				select: Permission::Full,
-				create: Permission::Specific(Expression::from("public = true")),
-				update: Permission::Specific(Expression::from("public = true")),
+				create: Permission::Specific(Value::from(Expression::parse("public = true"))),
+				update: Permission::Specific(Value::from(Expression::parse("public = true"))),
 				delete: Permission::None,
 			}
 		);

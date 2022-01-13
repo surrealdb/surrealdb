@@ -10,8 +10,8 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Orders(Vec<Order>);
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Orders(pub Vec<Order>);
 
 impl fmt::Display for Orders {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -23,7 +23,7 @@ impl fmt::Display for Orders {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Order {
 	pub order: Idiom,
 	pub random: bool,
@@ -98,6 +98,7 @@ fn order_raw(i: &str) -> IResult<&str, Order> {
 mod tests {
 
 	use super::*;
+	use crate::sql::test::Parse;
 
 	#[test]
 	fn order_statement() {
@@ -108,7 +109,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Orders(vec![Order {
-				order: Idiom::from("field"),
+				order: Idiom::parse("field"),
 				random: false,
 				collate: false,
 				numeric: false,
@@ -127,7 +128,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Orders(vec![Order {
-				order: Idiom::from("field"),
+				order: Idiom::parse("field"),
 				random: false,
 				collate: false,
 				numeric: false,
@@ -166,14 +167,14 @@ mod tests {
 			out,
 			Orders(vec![
 				Order {
-					order: Idiom::from("field"),
+					order: Idiom::parse("field"),
 					random: false,
 					collate: false,
 					numeric: false,
 					direction: true,
 				},
 				Order {
-					order: Idiom::from("other.field"),
+					order: Idiom::parse("other.field"),
 					random: false,
 					collate: false,
 					numeric: false,
@@ -193,7 +194,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Orders(vec![Order {
-				order: Idiom::from("field"),
+				order: Idiom::parse("field"),
 				random: false,
 				collate: true,
 				numeric: false,
@@ -212,7 +213,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Orders(vec![Order {
-				order: Idiom::from("field"),
+				order: Idiom::parse("field"),
 				random: false,
 				collate: false,
 				numeric: true,
@@ -231,7 +232,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Orders(vec![Order {
-				order: Idiom::from("field"),
+				order: Idiom::parse("field"),
 				random: false,
 				collate: false,
 				numeric: false,
@@ -250,7 +251,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Orders(vec![Order {
-				order: Idiom::from("field"),
+				order: Idiom::parse("field"),
 				random: false,
 				collate: true,
 				numeric: true,

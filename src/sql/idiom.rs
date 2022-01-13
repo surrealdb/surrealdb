@@ -1,23 +1,21 @@
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::common::commas;
-use crate::sql::common::{escape, val_char};
-use crate::sql::filter::{filter, Filter};
-use crate::sql::ident::ident_raw;
-use crate::sql::literal::Literal;
-use nom::bytes::complete::tag;
-use nom::combinator::opt;
+use crate::sql::part::{all, field, first, graph, index, part, Part};
+use crate::sql::value::Value;
+use nom::branch::alt;
+use nom::multi::many0;
 use nom::multi::separated_list1;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Idioms(Vec<Idiom>);
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Idioms(pub Vec<Idiom>);
 
 impl fmt::Display for Idioms {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -25,51 +23,48 @@ impl fmt::Display for Idioms {
 	}
 }
 
-pub fn idioms(i: &str) -> IResult<&str, Idioms> {
-	let (i, v) = separated_list1(commas, idiom)(i)?;
+pub fn locals(i: &str) -> IResult<&str, Idioms> {
+	let (i, v) = separated_list1(commas, local)(i)?;
 	Ok((i, Idioms(v)))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Idiom {
-	pub parts: Vec<(String, Option<Filter>)>,
+	pub parts: Vec<Part>,
 }
 
-impl<'a> From<&'a str> for Idiom {
-	fn from(s: &str) -> Self {
-		idiom(s).unwrap().1
-	}
-}
-
-impl From<Vec<(String, Option<Filter>)>> for Idiom {
-	fn from(v: Vec<(String, Option<Filter>)>) -> Self {
+impl From<Vec<Part>> for Idiom {
+	fn from(v: Vec<Part>) -> Self {
 		Idiom {
 			parts: v,
 		}
 	}
 }
 
+impl Idiom {
+	pub fn next(&self) -> Idiom {
+		match self.parts.len() {
+			0 => Idiom::from(vec![]),
+			_ => Idiom::from(self.parts[1..].to_vec()),
+		}
+	}
+}
+
 impl fmt::Display for Idiom {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		if self.parts.len() == 1 {
-			match self.parts.first().unwrap() {
-				(i, Some(ref a)) => write!(f, "{}[{}]", i, a),
-				(i, None) => write!(f, "{}", escape(&i, &val_char, "`")),
-			}
-		} else {
-			write!(
-				f,
-				"{}",
-				self.parts
-					.iter()
-					.map(|(ref i, ref a)| match a {
-						Some(ref a) => format!("{}[{}]", i, a),
-						None => format!("{}", escape(&i, &val_char, "`")),
-					})
-					.collect::<Vec<_>>()
-					.join(".")
-			)
-		}
+		write!(
+			f,
+			"{}",
+			self.parts
+				.iter()
+				.enumerate()
+				.map(|(i, p)| match (i, p) {
+					(0, Part::Field(v)) => format!("{}", v),
+					_ => format!("{}", p),
+				})
+				.collect::<Vec<_>>()
+				.join("")
+		)
 	}
 }
 
@@ -77,40 +72,48 @@ impl dbs::Process for Idiom {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
-		todo!()
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		match doc {
+			// There is a current document
+			Some(v) => v.get(ctx, opt, exe, self).ok(),
+			// There isn't any document
+			None => Ok(Value::None),
+		}
 	}
 }
 
-pub fn idiom(i: &str) -> IResult<&str, Idiom> {
-	let (i, v) = separated_list1(tag("."), all)(i)?;
+// Used in a DEFINE FIELD and DEFINE INDEX clause
+pub fn local(i: &str) -> IResult<&str, Idiom> {
+	let (i, p) = first(i)?;
+	let (i, mut v) = many0(alt((all, index, field)))(i)?;
+	v.insert(0, p);
 	Ok((i, Idiom::from(v)))
 }
 
-fn all(i: &str) -> IResult<&str, (String, Option<Filter>)> {
-	let (i, v) = raw(i)?;
-	let (i, a) = opt(fil)(i)?;
-	Ok((i, (v, a)))
+// Used in a $param definition
+pub fn param(i: &str) -> IResult<&str, Idiom> {
+	let (i, p) = first(i)?;
+	let (i, mut v) = many0(part)(i)?;
+	v.insert(0, p);
+	Ok((i, Idiom::from(v)))
 }
 
-fn raw(i: &str) -> IResult<&str, String> {
-	let (i, v) = ident_raw(i)?;
-	Ok((i, String::from(v)))
-}
-
-fn fil(i: &str) -> IResult<&str, Filter> {
-	let (i, _) = tag("[")(i)?;
-	let (i, v) = filter(i)?;
-	let (i, _) = tag("]")(i)?;
-	Ok((i, v))
+pub fn idiom(i: &str) -> IResult<&str, Idiom> {
+	let (i, p) = alt((first, graph))(i)?;
+	let (i, mut v) = many0(part)(i)?;
+	v.insert(0, p);
+	Ok((i, Idiom::from(v)))
 }
 
 #[cfg(test)]
 mod tests {
 
 	use super::*;
+	use crate::sql::expression::Expression;
+	use crate::sql::test::Parse;
 
 	#[test]
 	fn idiom_normal() {
@@ -122,7 +125,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Idiom {
-				parts: vec![(String::from("test"), None),],
+				parts: vec![Part::from("test")],
 			}
 		);
 	}
@@ -137,7 +140,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Idiom {
-				parts: vec![(String::from("test"), None),],
+				parts: vec![Part::from("test")],
 			}
 		);
 	}
@@ -152,7 +155,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Idiom {
-				parts: vec![(String::from("test"), None),],
+				parts: vec![Part::from("test")],
 			}
 		);
 	}
@@ -167,7 +170,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Idiom {
-				parts: vec![(String::from("test"), None), (String::from("temp"), None),],
+				parts: vec![Part::from("test"), Part::from("temp"),],
 			}
 		);
 	}
@@ -182,7 +185,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Idiom {
-				parts: vec![(String::from("test"), None), (String::from("some key"), None),],
+				parts: vec![Part::from("test"), Part::from("some key"),],
 			}
 		);
 	}
@@ -197,10 +200,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Idiom {
-				parts: vec![
-					(String::from("test"), None),
-					(String::from("temp"), Some(Filter::from("*"))),
-				],
+				parts: vec![Part::from("test"), Part::from("temp"), Part::All,],
 			}
 		);
 	}
@@ -215,10 +215,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Idiom {
-				parts: vec![
-					(String::from("test"), None),
-					(String::from("temp"), Some(Filter::from("$"))),
-				],
+				parts: vec![Part::from("test"), Part::from("temp"), Part::Last,],
 			}
 		);
 	}
@@ -233,11 +230,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Idiom {
-				parts: vec![
-					(String::from("test"), None),
-					(String::from("temp"), Some(Filter::from("*"))),
-					(String::from("text"), None),
-				],
+				parts: vec![Part::from("test"), Part::from("temp"), Part::All, Part::from("text")],
 			}
 		);
 	}
@@ -253,9 +246,10 @@ mod tests {
 			out,
 			Idiom {
 				parts: vec![
-					(String::from("test"), None),
-					(String::from("temp"), Some(Filter::from("WHERE test = true"))),
-					(String::from("text"), None),
+					Part::from("test"),
+					Part::from("temp"),
+					Part::from(Value::from(Expression::parse("test = true"))),
+					Part::from("text")
 				],
 			}
 		);
@@ -272,9 +266,10 @@ mod tests {
 			out,
 			Idiom {
 				parts: vec![
-					(String::from("test"), None),
-					(String::from("temp"), Some(Filter::from("WHERE test = true"))),
-					(String::from("text"), None),
+					Part::from("test"),
+					Part::from("temp"),
+					Part::from(Value::from(Expression::parse("test = true"))),
+					Part::from("text")
 				],
 			}
 		);

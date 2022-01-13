@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Tables(Vec<Table>);
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Tables(pub Vec<Table>);
 
 impl fmt::Display for Tables {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

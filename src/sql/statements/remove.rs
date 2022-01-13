@@ -1,15 +1,17 @@
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Level;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::base::{base, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::ident::ident_raw;
-use crate::sql::literal::Literal;
+use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::map;
+use nom::combinator::{map, opt};
+use nom::sequence::tuple;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -47,10 +49,21 @@ impl dbs::Process for RemoveStatement {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
-		todo!()
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		match self {
+			RemoveStatement::Namespace(ref v) => v.process(ctx, opt, exe, doc),
+			RemoveStatement::Database(ref v) => v.process(ctx, opt, exe, doc),
+			RemoveStatement::Login(ref v) => v.process(ctx, opt, exe, doc),
+			RemoveStatement::Token(ref v) => v.process(ctx, opt, exe, doc),
+			RemoveStatement::Scope(ref v) => v.process(ctx, opt, exe, doc),
+			RemoveStatement::Table(ref v) => v.process(ctx, opt, exe, doc),
+			RemoveStatement::Event(ref v) => v.process(ctx, opt, exe, doc),
+			RemoveStatement::Field(ref v) => v.process(ctx, opt, exe, doc),
+			RemoveStatement::Index(ref v) => v.process(ctx, opt, exe, doc),
+		}
 	}
 }
 
@@ -83,6 +96,21 @@ impl fmt::Display for RemoveNamespaceStatement {
 	}
 }
 
+impl dbs::Process for RemoveNamespaceStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Kv)?;
+		// Continue
+		todo!()
+	}
+}
+
 fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 	let (i, _) = tag_no_case("REMOVE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -109,6 +137,21 @@ pub struct RemoveDatabaseStatement {
 impl fmt::Display for RemoveDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "REMOVE DATABASE {}", self.name)
+	}
+}
+
+impl dbs::Process for RemoveDatabaseStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Ns)?;
+		// Continue
+		todo!()
 	}
 }
 
@@ -139,6 +182,25 @@ pub struct RemoveLoginStatement {
 impl fmt::Display for RemoveLoginStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "REMOVE LOGIN {} ON {}", self.name, self.base)
+	}
+}
+
+impl dbs::Process for RemoveLoginStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		match self.base {
+			Base::Ns => exe.check(opt, Level::Kv)?,
+			Base::Db => exe.check(opt, Level::Ns)?,
+			_ => unreachable!(),
+		}
+		// Continue
+		todo!()
 	}
 }
 
@@ -177,6 +239,25 @@ impl fmt::Display for RemoveTokenStatement {
 	}
 }
 
+impl dbs::Process for RemoveTokenStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		match self.base {
+			Base::Ns => exe.check(opt, Level::Kv)?,
+			Base::Db => exe.check(opt, Level::Ns)?,
+			_ => unreachable!(),
+		}
+		// Continue
+		todo!()
+	}
+}
+
 fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 	let (i, _) = tag_no_case("REMOVE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -211,6 +292,21 @@ impl fmt::Display for RemoveScopeStatement {
 	}
 }
 
+impl dbs::Process for RemoveScopeStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
+	}
+}
+
 fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 	let (i, _) = tag_no_case("REMOVE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -237,6 +333,21 @@ pub struct RemoveTableStatement {
 impl fmt::Display for RemoveTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "REMOVE TABLE {}", self.name)
+	}
+}
+
+impl dbs::Process for RemoveTableStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
 	}
 }
 
@@ -270,6 +381,21 @@ impl fmt::Display for RemoveEventStatement {
 	}
 }
 
+impl dbs::Process for RemoveEventStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
+	}
+}
+
 fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 	let (i, _) = tag_no_case("REMOVE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -278,6 +404,7 @@ fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 	let (i, name) = ident_raw(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = ident_raw(i)?;
 	Ok((
@@ -305,6 +432,21 @@ impl fmt::Display for RemoveFieldStatement {
 	}
 }
 
+impl dbs::Process for RemoveFieldStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
+	}
+}
+
 fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 	let (i, _) = tag_no_case("REMOVE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -313,6 +455,7 @@ fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 	let (i, name) = ident_raw(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = ident_raw(i)?;
 	Ok((
@@ -340,6 +483,21 @@ impl fmt::Display for RemoveIndexStatement {
 	}
 }
 
+impl dbs::Process for RemoveIndexStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
+	}
+}
+
 fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 	let (i, _) = tag_no_case("REMOVE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -348,6 +506,7 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 	let (i, name) = ident_raw(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = ident_raw(i)?;
 	Ok((

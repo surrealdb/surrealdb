@@ -1,4 +1,10 @@
+use crate::dbs;
+use crate::dbs::Executor;
+use crate::dbs::Options;
+use crate::dbs::Runtime;
+use crate::err::Error;
 use crate::sql::comment::shouldbespace;
+use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -13,6 +19,18 @@ pub struct CommitStatement;
 impl fmt::Display for CommitStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "COMMIT TRANSACTION")
+	}
+}
+
+impl dbs::Process for CommitStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		_opt: &Options,
+		_exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		Ok(Value::None)
 	}
 }
 

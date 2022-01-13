@@ -1,11 +1,9 @@
 use crate::ctx::Context;
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::expression::{expression, Expression};
-use crate::sql::literal::Literal;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
@@ -13,7 +11,7 @@ use crate::sql::statements::insert::{insert, InsertStatement};
 use crate::sql::statements::relate::{relate, RelateStatement};
 use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
-use crate::sql::statements::upsert::{upsert, UpsertStatement};
+use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::map;
@@ -24,14 +22,13 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Subquery {
-	Expression(Expression),
+	Value(Value),
 	Select(SelectStatement),
 	Create(CreateStatement),
 	Update(UpdateStatement),
 	Delete(DeleteStatement),
 	Relate(RelateStatement),
 	Insert(InsertStatement),
-	Upsert(UpsertStatement),
 	Ifelse(IfelseStatement),
 }
 
@@ -45,14 +42,13 @@ impl PartialOrd for Subquery {
 impl fmt::Display for Subquery {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Subquery::Expression(v) => write!(f, "({})", v),
+			Subquery::Value(v) => write!(f, "({})", v),
 			Subquery::Select(v) => write!(f, "({})", v),
 			Subquery::Create(v) => write!(f, "({})", v),
 			Subquery::Update(v) => write!(f, "({})", v),
 			Subquery::Delete(v) => write!(f, "({})", v),
 			Subquery::Relate(v) => write!(f, "({})", v),
 			Subquery::Insert(v) => write!(f, "({})", v),
-			Subquery::Upsert(v) => write!(f, "({})", v),
 			Subquery::Ifelse(v) => write!(f, "{}", v),
 		}
 	}
@@ -62,74 +58,143 @@ impl dbs::Process for Subquery {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
 		match self {
-			Subquery::Expression(ref v) => v.process(ctx, exe, doc),
-			Subquery::Ifelse(ref v) => v.process(ctx, exe, doc),
+			Subquery::Value(ref v) => v.process(ctx, opt, exe, doc),
+			Subquery::Ifelse(ref v) => v.process(ctx, opt, exe, doc),
 			Subquery::Select(ref v) => {
+				// Duplicate options
+				let opt = opt.dive()?;
+				// Duplicate context
 				let mut ctx = Context::new(ctx);
+				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value("parent", doc);
+					ctx.add_value(String::from("parent"), doc);
 				}
+				// Prepare context
 				let ctx = ctx.freeze();
-				v.process(&ctx, exe, doc)
+				// Process subquery
+				let res = v.process(&ctx, &opt, exe, doc)?;
+				// Process result
+				match v.limit() {
+					1 => match v.expr.single() {
+						Some(v) => res.first(&ctx, &opt, exe).get(&ctx, &opt, exe, &v).ok(),
+						None => res.first(&ctx, &opt, exe).ok(),
+					},
+					_ => match v.expr.single() {
+						Some(v) => res.get(&ctx, &opt, exe, &v).ok(),
+						None => res.ok(),
+					},
+				}
 			}
 			Subquery::Create(ref v) => {
+				// Duplicate options
+				let opt = opt.dive()?;
+				// Duplicate context
 				let mut ctx = Context::new(ctx);
+				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value("parent", doc);
+					ctx.add_value(String::from("parent"), doc);
 				}
+				// Prepare context
 				let ctx = ctx.freeze();
-				v.process(&ctx, exe, doc)
+				// Process subquery
+				match v.process(&ctx, &opt, exe, doc)? {
+					Value::Array(mut v) => match v.len() {
+						1 => Ok(v.value.remove(0)),
+						_ => Ok(v.into()),
+					},
+					v => Ok(v),
+				}
 			}
 			Subquery::Update(ref v) => {
+				// Duplicate options
+				let opt = opt.dive()?;
+				// Duplicate context
 				let mut ctx = Context::new(ctx);
+				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value("parent", doc);
+					ctx.add_value(String::from("parent"), doc);
 				}
+				// Prepare context
 				let ctx = ctx.freeze();
-				v.process(&ctx, exe, doc)
+				// Process subquery
+				match v.process(&ctx, &opt, exe, doc)? {
+					Value::Array(mut v) => match v.len() {
+						1 => Ok(v.value.remove(0)),
+						_ => Ok(v.into()),
+					},
+					v => Ok(v),
+				}
 			}
 			Subquery::Delete(ref v) => {
+				// Duplicate options
+				let opt = opt.dive()?;
+				// Duplicate context
 				let mut ctx = Context::new(ctx);
+				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value("parent", doc);
+					ctx.add_value(String::from("parent"), doc);
 				}
+				// Prepare context
 				let ctx = ctx.freeze();
-				v.process(&ctx, exe, doc)
+				// Process subquery
+				match v.process(&ctx, &opt, exe, doc)? {
+					Value::Array(mut v) => match v.len() {
+						1 => Ok(v.value.remove(0)),
+						_ => Ok(v.into()),
+					},
+					v => Ok(v),
+				}
 			}
 			Subquery::Relate(ref v) => {
+				// Duplicate options
+				let opt = opt.dive()?;
+				// Duplicate context
 				let mut ctx = Context::new(ctx);
+				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value("parent", doc);
+					ctx.add_value(String::from("parent"), doc);
 				}
+				// Prepare context
 				let ctx = ctx.freeze();
-				v.process(&ctx, exe, doc)
+				// Process subquery
+				match v.process(&ctx, &opt, exe, doc)? {
+					Value::Array(mut v) => match v.len() {
+						1 => Ok(v.value.remove(0)),
+						_ => Ok(v.into()),
+					},
+					v => Ok(v),
+				}
 			}
 			Subquery::Insert(ref v) => {
+				// Duplicate options
+				let opt = opt.dive()?;
+				// Duplicate context
 				let mut ctx = Context::new(ctx);
+				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value("parent", doc);
+					ctx.add_value(String::from("parent"), doc);
 				}
+				// Prepare context
 				let ctx = ctx.freeze();
-				v.process(&ctx, exe, doc)
-			}
-			Subquery::Upsert(ref v) => {
-				let mut ctx = Context::new(ctx);
-				if doc.is_some() {
-					let doc = doc.unwrap().clone();
-					ctx.add_value("parent", doc);
+				// Process subquery
+				match v.process(&ctx, &opt, exe, doc)? {
+					Value::Array(mut v) => match v.len() {
+						1 => Ok(v.value.remove(0)),
+						_ => Ok(v.into()),
+					},
+					v => Ok(v),
 				}
-				let ctx = ctx.freeze();
-				v.process(&ctx, exe, doc)
 			}
 		}
 	}
@@ -153,8 +218,7 @@ fn subquery_others(i: &str) -> IResult<&str, Subquery> {
 		map(delete, |v| Subquery::Delete(v)),
 		map(relate, |v| Subquery::Relate(v)),
 		map(insert, |v| Subquery::Insert(v)),
-		map(upsert, |v| Subquery::Upsert(v)),
-		map(expression, |v| Subquery::Expression(v)),
+		map(value, |v| Subquery::Value(v)),
 	))(i)?;
 	let (i, _) = tag(")")(i)?;
 	Ok((i, v))

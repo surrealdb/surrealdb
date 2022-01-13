@@ -1,27 +1,27 @@
+use crate::sql::comment::mightbespace;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while;
 use nom::bytes::complete::take_while_m_n;
-use nom::character::complete::multispace0;
 use nom::character::is_alphanumeric;
 use nom::combinator::map;
-use nom::error::ErrorKind;
 use nom::error::Error;
+use nom::error::ErrorKind;
 use nom::multi::many1;
 use nom::IResult;
 use std::ops::RangeBounds;
 use std::str;
 
 pub fn colons(i: &str) -> IResult<&str, ()> {
-	let (i, _) = multispace0(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = many1(tag(";"))(i)?;
-	let (i, _) = multispace0(i)?;
+	let (i, _) = mightbespace(i)?;
 	Ok((i, ()))
 }
 
 pub fn commas(i: &str) -> IResult<&str, ()> {
-	let (i, _) = multispace0(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag(",")(i)?;
-	let (i, _) = multispace0(i)?;
+	let (i, _) = mightbespace(i)?;
 	Ok((i, ()))
 }
 

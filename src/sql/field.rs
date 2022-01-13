@@ -1,7 +1,7 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
-use crate::sql::expression::{expression, Expression};
 use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
@@ -9,8 +9,22 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Fields(Vec<Field>);
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Fields(pub Vec<Field>);
+
+impl Fields {
+	pub fn single(&self) -> Option<Idiom> {
+		match self.0.len() {
+			1 => match self.0.first() {
+				Some(Field::All) => None,
+				Some(Field::Alone(e)) => Some(e.to_idiom()),
+				Some(Field::Alias(_, i)) => Some(i.to_owned()),
+				_ => None,
+			},
+			_ => None,
+		}
+	}
+}
 
 impl fmt::Display for Fields {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -23,11 +37,11 @@ pub fn fields(i: &str) -> IResult<&str, Fields> {
 	Ok((i, Fields(v)))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Field {
 	All,
-	Alone(Expression),
-	Alias(Expression, Idiom),
+	Alone(Value),
+	Alias(Value, Idiom),
 }
 
 impl Default for Field {
@@ -40,8 +54,8 @@ impl fmt::Display for Field {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Field::All => write!(f, "*"),
-			Field::Alone(ref e) => write!(f, "{}", e),
-			Field::Alias(ref e, ref a) => write!(f, "{} AS {}", e, a),
+			Field::Alone(e) => write!(f, "{}", e),
+			Field::Alias(e, a) => write!(f, "{} AS {}", e, a),
 		}
 	}
 }
@@ -50,18 +64,18 @@ pub fn field(i: &str) -> IResult<&str, Field> {
 	alt((all, alias, alone))(i)
 }
 
-fn all(i: &str) -> IResult<&str, Field> {
+pub fn all(i: &str) -> IResult<&str, Field> {
 	let (i, _) = tag_no_case("*")(i)?;
 	Ok((i, Field::All))
 }
 
-fn alone(i: &str) -> IResult<&str, Field> {
-	let (i, f) = expression(i)?;
+pub fn alone(i: &str) -> IResult<&str, Field> {
+	let (i, f) = value(i)?;
 	Ok((i, Field::Alone(f)))
 }
 
-fn alias(i: &str) -> IResult<&str, Field> {
-	let (i, f) = expression(i)?;
+pub fn alias(i: &str) -> IResult<&str, Field> {
+	let (i, f) = value(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("AS")(i)?;
 	let (i, _) = shouldbespace(i)?;

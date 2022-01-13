@@ -17,3 +17,6 @@ pub use self::process::*;
 pub use self::response::*;
 pub use self::runtime::*;
 pub use self::session::*;
+
+#[cfg(test)]
+pub(crate) mod test;

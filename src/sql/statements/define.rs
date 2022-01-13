@@ -1,25 +1,26 @@
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Level;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::take_u64;
 use crate::sql::duration::{duration, Duration};
-use crate::sql::expression::{expression, Expression};
 use crate::sql::ident::ident_raw;
-use crate::sql::idiom::{idiom, idioms, Idiom, Idioms};
+use crate::sql::idiom;
+use crate::sql::idiom::{Idiom, Idioms};
 use crate::sql::kind::{kind, Kind};
-use crate::sql::literal::Literal;
 use crate::sql::permission::{permissions, Permissions};
-use crate::sql::statement::{statements, Statements};
 use crate::sql::strand::strand_raw;
+use crate::sql::value::{value, values, Value, Values};
 use crate::sql::view::{view, View};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
+use nom::sequence::tuple;
 use nom::{multi::many0, IResult};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -57,10 +58,21 @@ impl dbs::Process for DefineStatement {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
-		todo!()
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		match self {
+			DefineStatement::Namespace(ref v) => v.process(ctx, opt, exe, doc),
+			DefineStatement::Database(ref v) => v.process(ctx, opt, exe, doc),
+			DefineStatement::Login(ref v) => v.process(ctx, opt, exe, doc),
+			DefineStatement::Token(ref v) => v.process(ctx, opt, exe, doc),
+			DefineStatement::Scope(ref v) => v.process(ctx, opt, exe, doc),
+			DefineStatement::Table(ref v) => v.process(ctx, opt, exe, doc),
+			DefineStatement::Event(ref v) => v.process(ctx, opt, exe, doc),
+			DefineStatement::Field(ref v) => v.process(ctx, opt, exe, doc),
+			DefineStatement::Index(ref v) => v.process(ctx, opt, exe, doc),
+		}
 	}
 }
 
@@ -93,6 +105,21 @@ impl fmt::Display for DefineNamespaceStatement {
 	}
 }
 
+impl dbs::Process for DefineNamespaceStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Kv)?;
+		// Continue
+		todo!()
+	}
+}
+
 fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 	let (i, _) = tag_no_case("DEFINE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -119,6 +146,21 @@ pub struct DefineDatabaseStatement {
 impl fmt::Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE DATABASE {}", self.name)
+	}
+}
+
+impl dbs::Process for DefineDatabaseStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Ns)?;
+		// Continue
+		todo!()
 	}
 }
 
@@ -160,6 +202,25 @@ impl fmt::Display for DefineLoginStatement {
 			write!(f, " PASSHASH {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl dbs::Process for DefineLoginStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		match self.base {
+			Base::Ns => exe.check(opt, Level::Kv)?,
+			Base::Db => exe.check(opt, Level::Ns)?,
+			_ => unreachable!(),
+		}
+		// Continue
+		todo!()
 	}
 }
 
@@ -239,6 +300,25 @@ impl fmt::Display for DefineTokenStatement {
 	}
 }
 
+impl dbs::Process for DefineTokenStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		match self.base {
+			Base::Ns => exe.check(opt, Level::Kv)?,
+			Base::Db => exe.check(opt, Level::Ns)?,
+			_ => unreachable!(),
+		}
+		// Continue
+		todo!()
+	}
+}
+
 fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = tag_no_case("DEFINE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -278,11 +358,11 @@ pub struct DefineScopeStatement {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub session: Option<Duration>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub signup: Option<Expression>,
+	pub signup: Option<Value>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub signin: Option<Expression>,
+	pub signin: Option<Value>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub connect: Option<Expression>,
+	pub connect: Option<Value>,
 }
 
 impl fmt::Display for DefineScopeStatement {
@@ -301,6 +381,21 @@ impl fmt::Display for DefineScopeStatement {
 			write!(f, " {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl dbs::Process for DefineScopeStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
 	}
 }
 
@@ -338,9 +433,9 @@ fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum DefineScopeOption {
 	Session(Duration),
-	Signup(Expression),
-	Signin(Expression),
-	Connect(Expression),
+	Signup(Value),
+	Signin(Value),
+	Connect(Value),
 }
 
 fn scope_opts(i: &str) -> IResult<&str, DefineScopeOption> {
@@ -359,7 +454,7 @@ fn scope_signup(i: &str) -> IResult<&str, DefineScopeOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("SIGNUP")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = expression(i)?;
+	let (i, v) = value(i)?;
 	Ok((i, DefineScopeOption::Signup(v)))
 }
 
@@ -367,7 +462,7 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("SIGNIN")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = expression(i)?;
+	let (i, v) = value(i)?;
 	Ok((i, DefineScopeOption::Signin(v)))
 }
 
@@ -375,7 +470,7 @@ fn scope_connect(i: &str) -> IResult<&str, DefineScopeOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("CONNECT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = expression(i)?;
+	let (i, v) = value(i)?;
 	Ok((i, DefineScopeOption::Connect(v)))
 }
 
@@ -410,6 +505,21 @@ impl fmt::Display for DefineTableStatement {
 		}
 		write!(f, "{}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl dbs::Process for DefineTableStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
 	}
 }
 
@@ -505,8 +615,8 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 pub struct DefineEventStatement {
 	pub name: String,
 	pub what: String,
-	pub when: Expression,
-	pub then: Statements,
+	pub when: Value,
+	pub then: Values,
 }
 
 impl fmt::Display for DefineEventStatement {
@@ -519,6 +629,21 @@ impl fmt::Display for DefineEventStatement {
 	}
 }
 
+impl dbs::Process for DefineEventStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
+	}
+}
+
 fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 	let (i, _) = tag_no_case("DEFINE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -527,16 +652,17 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 	let (i, name) = ident_raw(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = ident_raw(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("WHEN")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, when) = expression(i)?;
+	let (i, when) = value(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("THEN")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, then) = statements(i)?;
+	let (i, then) = values(i)?;
 	Ok((
 		i,
 		DefineEventStatement {
@@ -559,9 +685,9 @@ pub struct DefineFieldStatement {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub kind: Option<Kind>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub value: Option<Expression>,
+	pub value: Option<Value>,
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub assert: Option<Expression>,
+	pub assert: Option<Value>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub priority: Option<u64>,
 	pub permissions: Permissions,
@@ -584,14 +710,30 @@ impl fmt::Display for DefineFieldStatement {
 	}
 }
 
+impl dbs::Process for DefineFieldStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
+	}
+}
+
 fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	let (i, _) = tag_no_case("DEFINE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FIELD")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = idiom(i)?;
+	let (i, name) = idiom::local(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = ident_raw(i)?;
 	let (i, opts) = many0(field_opts)(i)?;
@@ -630,8 +772,8 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum DefineFieldOption {
 	Kind(Kind),
-	Value(Expression),
-	Assert(Expression),
+	Value(Value),
+	Assert(Value),
 	Priority(u64),
 	Permissions(Permissions),
 }
@@ -652,7 +794,7 @@ fn field_value(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("VALUE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = expression(i)?;
+	let (i, v) = value(i)?;
 	Ok((i, DefineFieldOption::Value(v)))
 }
 
@@ -660,7 +802,7 @@ fn field_assert(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ASSERT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = expression(i)?;
+	let (i, v) = value(i)?;
 	Ok((i, DefineFieldOption::Assert(v)))
 }
 
@@ -700,6 +842,21 @@ impl fmt::Display for DefineIndexStatement {
 	}
 }
 
+impl dbs::Process for DefineIndexStatement {
+	fn process(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
+	}
+}
+
 fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let (i, _) = tag_no_case("DEFINE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -708,12 +865,13 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let (i, name) = ident_raw(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
+	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = ident_raw(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("COLUMNS")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, cols) = idioms(i)?;
+	let (i, cols) = idiom::locals(i)?;
 	let (i, uniq) = opt(|i| {
 		shouldbespace(i)?;
 		tag_no_case("UNIQUE")(i)?;

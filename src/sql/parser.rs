@@ -63,7 +63,6 @@ mod tests {
 		let sql = "    SELECT    *    FROM    { }} ";
 		let res = parse(sql);
 		assert!(res.is_err());
-		println!("{}", res.err().unwrap())
 	}
 
 	#[test]
@@ -81,7 +80,7 @@ mod tests {
 				{ key: (3 + 1 + 2), other: 9 * 7, 'some thing': { otherkey: 'text', } } AS object
 			FROM $param, test, temp, test:thingy, |test:10|, |test:1..10|
 			WHERE IF true THEN 'YAY' ELSE 'OOPS' END
-				AND (0.1341, 0.5719) INSIDE ( (0.1341, 0.5719), (0.1341, 0.5719) )
+				AND (0.1341, 0.5719) INSIDE { type: 'Polygon', coordinates: [[[0.1341, 0.5719], [0.1341, 0.5719]]] }
 				AND (3 + 3 * 4)=6
 				AND 3 + 3 * 4 = 6
 				AND ages CONTAINS 18

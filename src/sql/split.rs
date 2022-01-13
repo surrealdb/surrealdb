@@ -9,8 +9,8 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Splits(Vec<Split>);
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Splits(pub Vec<Split>);
 
 impl fmt::Display for Splits {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -22,7 +22,7 @@ impl fmt::Display for Splits {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Split {
 	pub split: Idiom,
 }
@@ -55,6 +55,7 @@ fn split_raw(i: &str) -> IResult<&str, Split> {
 mod tests {
 
 	use super::*;
+	use crate::sql::test::Parse;
 
 	#[test]
 	fn split_statement() {
@@ -65,7 +66,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Splits(vec![Split {
-				split: Idiom::from("field")
+				split: Idiom::parse("field")
 			}])
 		);
 		assert_eq!("SPLIT ON field", format!("{}", out));
@@ -80,7 +81,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Splits(vec![Split {
-				split: Idiom::from("field")
+				split: Idiom::parse("field")
 			}])
 		);
 		assert_eq!("SPLIT ON field", format!("{}", out));
@@ -96,10 +97,10 @@ mod tests {
 			out,
 			Splits(vec![
 				Split {
-					split: Idiom::from("field")
+					split: Idiom::parse("field")
 				},
 				Split {
-					split: Idiom::from("other.field")
+					split: Idiom::parse("other.field")
 				},
 			])
 		);

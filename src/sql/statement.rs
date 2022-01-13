@@ -1,11 +1,10 @@
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
 use crate::sql::common::colons;
-use crate::sql::literal::Literal;
 use crate::sql::statements::begin::{begin, BeginStatement};
 use crate::sql::statements::cancel::{cancel, CancelStatement};
 use crate::sql::statements::commit::{commit, CommitStatement};
@@ -24,8 +23,8 @@ use crate::sql::statements::remove::{remove, RemoveStatement};
 use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::set::{set, SetStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
-use crate::sql::statements::upsert::{upsert, UpsertStatement};
 use crate::sql::statements::yuse::{yuse, UseStatement};
+use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::combinator::map;
 use nom::multi::many0;
@@ -34,6 +33,7 @@ use nom::sequence::delimited;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::time::Duration;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Statements(pub Vec<Statement>);
@@ -74,10 +74,41 @@ pub enum Statement {
 	Relate(RelateStatement),
 	Delete(DeleteStatement),
 	Insert(InsertStatement),
-	Upsert(UpsertStatement),
 	Define(DefineStatement),
 	Remove(RemoveStatement),
 	Option(OptionStatement),
+}
+
+impl Statement {
+	pub fn timeout(&self) -> Option<Duration> {
+		match self {
+			Statement::Select(ref v) => match &v.timeout {
+				Some(v) => Some(v.expr.value),
+				None => None,
+			},
+			Statement::Create(ref v) => match &v.timeout {
+				Some(v) => Some(v.expr.value),
+				None => None,
+			},
+			Statement::Update(ref v) => match &v.timeout {
+				Some(v) => Some(v.expr.value),
+				None => None,
+			},
+			Statement::Relate(ref v) => match &v.timeout {
+				Some(v) => Some(v.expr.value),
+				None => None,
+			},
+			Statement::Delete(ref v) => match &v.timeout {
+				Some(v) => Some(v.expr.value),
+				None => None,
+			},
+			Statement::Insert(ref v) => match &v.timeout {
+				Some(v) => Some(v.expr.value),
+				None => None,
+			},
+			_ => None,
+		}
+	}
 }
 
 impl fmt::Display for Statement {
@@ -96,10 +127,9 @@ impl fmt::Display for Statement {
 			Statement::Select(ref v) => write!(f, "{}", v),
 			Statement::Create(ref v) => write!(f, "{}", v),
 			Statement::Update(ref v) => write!(f, "{}", v),
-			Statement::Delete(ref v) => write!(f, "{}", v),
 			Statement::Relate(ref v) => write!(f, "{}", v),
+			Statement::Delete(ref v) => write!(f, "{}", v),
 			Statement::Insert(ref v) => write!(f, "{}", v),
-			Statement::Upsert(ref v) => write!(f, "{}", v),
 			Statement::Define(ref v) => write!(f, "{}", v),
 			Statement::Remove(ref v) => write!(f, "{}", v),
 			Statement::Option(ref v) => write!(f, "{}", v),
@@ -111,27 +141,29 @@ impl dbs::Process for Statement {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
 		match *self {
-			Statement::Use(ref v) => v.process(ctx, exe, doc),
-			Statement::Set(ref v) => v.process(ctx, exe, doc),
-			Statement::Info(ref v) => v.process(ctx, exe, doc),
-			Statement::Live(ref v) => v.process(ctx, exe, doc),
-			Statement::Kill(ref v) => v.process(ctx, exe, doc),
-			Statement::Output(ref v) => v.process(ctx, exe, doc),
-			Statement::Ifelse(ref v) => v.process(ctx, exe, doc),
-			Statement::Select(ref v) => v.process(ctx, exe, doc),
-			Statement::Create(ref v) => v.process(ctx, exe, doc),
-			Statement::Update(ref v) => v.process(ctx, exe, doc),
-			Statement::Delete(ref v) => v.process(ctx, exe, doc),
-			Statement::Relate(ref v) => v.process(ctx, exe, doc),
-			Statement::Insert(ref v) => v.process(ctx, exe, doc),
-			Statement::Upsert(ref v) => v.process(ctx, exe, doc),
-			Statement::Define(ref v) => v.process(ctx, exe, doc),
-			Statement::Remove(ref v) => v.process(ctx, exe, doc),
-			Statement::Option(ref v) => v.process(ctx, exe, doc),
+			Statement::Use(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Set(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Info(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Live(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Kill(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Begin(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Cancel(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Commit(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Output(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Ifelse(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Select(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Create(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Update(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Relate(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Delete(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Insert(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Define(ref v) => v.process(ctx, opt, exe, doc),
+			Statement::Remove(ref v) => v.process(ctx, opt, exe, doc),
 			_ => unreachable!(),
 		}
 	}
@@ -154,10 +186,9 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 			map(select, |v| Statement::Select(v)),
 			map(create, |v| Statement::Create(v)),
 			map(update, |v| Statement::Update(v)),
-			map(delete, |v| Statement::Delete(v)),
 			map(relate, |v| Statement::Relate(v)),
+			map(delete, |v| Statement::Delete(v)),
 			map(insert, |v| Statement::Insert(v)),
-			map(upsert, |v| Statement::Upsert(v)),
 			map(define, |v| Statement::Define(v)),
 			map(remove, |v| Statement::Remove(v)),
 			map(option, |v| Statement::Option(v)),

@@ -1,13 +1,11 @@
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{commas, escape, val_char};
-use crate::sql::expression::expression;
-use crate::sql::literal::Literal;
-use crate::sql::value::Value;
+use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::tag;
@@ -19,13 +17,40 @@ use nom::IResult;
 use serde::ser::SerializeMap;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
-
-const NAME: &'static str = "Object";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
 pub struct Object {
-	pub value: Vec<(String, Value)>,
+	pub value: BTreeMap<String, Value>,
+}
+
+impl From<BTreeMap<String, Value>> for Object {
+	fn from(v: BTreeMap<String, Value>) -> Self {
+		Object {
+			value: v,
+		}
+	}
+}
+
+impl From<HashMap<String, Value>> for Object {
+	fn from(v: HashMap<String, Value>) -> Self {
+		Object {
+			value: v.into_iter().collect(),
+		}
+	}
+}
+
+impl Object {
+	pub fn remove(&mut self, key: &String) {
+		self.value.remove(key);
+		()
+	}
+	pub fn insert(&mut self, key: &String, val: Value) {
+		self.value.insert(key.to_owned(), val);
+		()
+	}
 }
 
 impl fmt::Display for Object {
@@ -46,18 +71,19 @@ impl dbs::Process for Object {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
 		self.value
 			.iter()
-			.map(|(k, v)| match v.process(ctx, exe, doc) {
-				Ok(v) => Ok((k.clone(), Value::from(v))),
+			.map(|(k, v)| match v.process(ctx, opt, exe, doc) {
+				Ok(v) => Ok((k.clone(), v)),
 				Err(e) => Err(e),
 			})
-			.collect::<Result<Vec<_>, _>>()
+			.collect::<Result<BTreeMap<_, _>, _>>()
 			.map(|v| {
-				Literal::Object(Object {
+				Value::Object(Object {
 					value: v,
 				})
 			})
@@ -77,7 +103,7 @@ impl Serialize for Object {
 			}
 			map.end()
 		} else {
-			let mut val = serializer.serialize_struct(NAME, 1)?;
+			let mut val = serializer.serialize_struct("Object", 1)?;
 			val.serialize_field("value", &self.value)?;
 			val.end()
 		}
@@ -95,7 +121,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	Ok((
 		i,
 		Object {
-			value: v,
+			value: v.into_iter().collect(),
 		},
 	))
 }
@@ -105,8 +131,8 @@ fn item(i: &str) -> IResult<&str, (String, Value)> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag(":")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = expression(i)?;
-	Ok((i, (String::from(k), Value::from(v))))
+	let (i, v) = value(i)?;
+	Ok((i, (String::from(k), v)))
 }
 
 fn key(i: &str) -> IResult<&str, &str> {
@@ -118,11 +144,11 @@ fn key_none(i: &str) -> IResult<&str, &str> {
 }
 
 fn key_single(i: &str) -> IResult<&str, &str> {
-	delimited(tag("\""), is_not("\""), tag("\""))(i)
+	delimited(tag("\'"), is_not("\'"), tag("\'"))(i)
 }
 
 fn key_double(i: &str) -> IResult<&str, &str> {
-	delimited(tag("\'"), is_not("\'"), tag("\'"))(i)
+	delimited(tag("\""), is_not("\""), tag("\""))(i)
 }
 
 #[cfg(test)]
@@ -136,7 +162,7 @@ mod tests {
 		let res = object(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("{ one: 1, two: 2, tre: 3 }", format!("{}", out));
+		assert_eq!("{ one: 1, tre: 3, two: 2 }", format!("{}", out));
 		assert_eq!(out.value.len(), 3);
 	}
 
@@ -146,7 +172,7 @@ mod tests {
 		let res = object(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("{ one: 1, two: 2, tre: 3 }", format!("{}", out));
+		assert_eq!("{ one: 1, tre: 3, two: 2 }", format!("{}", out));
 		assert_eq!(out.value.len(), 3);
 	}
 
@@ -156,7 +182,7 @@ mod tests {
 		let res = object(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("{ one: 1, two: 2, tre: 3 + 1 }", format!("{}", out));
+		assert_eq!("{ one: 1, tre: 3 + 1, two: 2 }", format!("{}", out));
 		assert_eq!(out.value.len(), 3);
 	}
 }

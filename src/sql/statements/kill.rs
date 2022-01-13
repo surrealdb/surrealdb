@@ -1,11 +1,11 @@
 use crate::dbs;
 use crate::dbs::Executor;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::ident::{ident, Ident};
-use crate::sql::literal::Literal;
+use crate::sql::value::Value;
 use nom::bytes::complete::tag_no_case;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
@@ -25,10 +25,11 @@ impl fmt::Display for KillStatement {
 impl dbs::Process for KillStatement {
 	fn process(
 		&self,
-		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
+		_ctx: &Runtime,
+		_opt: &Options,
+		_exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
 		todo!()
 	}
 }

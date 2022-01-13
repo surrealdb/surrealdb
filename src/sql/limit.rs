@@ -7,14 +7,12 @@ use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Limit {
-	pub expr: u64,
-}
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Limit(pub u64);
 
 impl fmt::Display for Limit {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LIMIT {}", self.expr)
+		write!(f, "LIMIT {}", self.0)
 	}
 }
 
@@ -23,12 +21,7 @@ pub fn limit(i: &str) -> IResult<&str, Limit> {
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = take_u64(i)?;
-	Ok((
-		i,
-		Limit {
-			expr: v,
-		},
-	))
+	Ok((i, Limit(v)))
 }
 
 #[cfg(test)]
@@ -42,12 +35,7 @@ mod tests {
 		let res = limit(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(
-			out,
-			Limit {
-				expr: 100
-			}
-		);
+		assert_eq!(out, Limit(100));
 		assert_eq!("LIMIT 100", format!("{}", out));
 	}
 
@@ -57,12 +45,7 @@ mod tests {
 		let res = limit(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(
-			out,
-			Limit {
-				expr: 100
-			}
-		);
+		assert_eq!(out, Limit(100));
 		assert_eq!("LIMIT 100", format!("{}", out));
 	}
 }

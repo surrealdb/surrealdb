@@ -1,11 +1,12 @@
 use crate::dbs;
+use crate::dbs::Auth;
 use crate::dbs::Executor;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::ident::ident_raw;
-use crate::sql::literal::Literal;
+use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::IResult;
@@ -36,11 +37,39 @@ impl fmt::Display for UseStatement {
 impl dbs::Process for UseStatement {
 	fn process(
 		&self,
-		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
-		todo!()
+		_ctx: &Runtime,
+		opt: &Options,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		if let Some(ns) = &self.ns {
+			match opt.auth {
+				Auth::No => exe.ns = Some(ns.to_owned()),
+				Auth::Kv => exe.ns = Some(ns.to_owned()),
+				Auth::Ns(v) if v == ns => exe.ns = Some(ns.to_owned()),
+				_ => {
+					exe.ns = None;
+					return Err(Error::NsAuthenticationError {
+						ns: ns.to_owned(),
+					});
+				}
+			}
+		}
+		if let Some(db) = &self.db {
+			match opt.auth {
+				Auth::No => exe.db = Some(db.to_owned()),
+				Auth::Kv => exe.db = Some(db.to_owned()),
+				Auth::Ns(_) => exe.db = Some(db.to_owned()),
+				Auth::Db(_, v) if v == db => exe.db = Some(db.to_owned()),
+				_ => {
+					exe.db = None;
+					return Err(Error::DbAuthenticationError {
+						db: db.to_owned(),
+					});
+				}
+			}
+		}
+		Ok(Value::None)
 	}
 }
 

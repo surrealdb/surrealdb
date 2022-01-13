@@ -1,14 +1,15 @@
 use crate::dbs::executor::Executor;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::literal::Literal;
+use crate::sql::value::Value;
 
 pub trait Process {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error>;
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error>;
 }

@@ -1,14 +1,15 @@
 use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
+use crate::dbs::Level;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
-use crate::sql::literal::{whats, Literal, Literals};
 use crate::sql::output::{output, Output};
 use crate::sql::timeout::{timeout, Timeout};
+use crate::sql::value::{whats, Value, Values};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
@@ -19,7 +20,7 @@ use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DeleteStatement {
-	pub what: Literals,
+	pub what: Values,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cond: Option<Cond>,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -48,31 +49,40 @@ impl dbs::Process for DeleteStatement {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::No)?;
 		// Create a new iterator
-		let i = Iterator::new();
-		// Loop over the select targets
-		for w in self.what.to_owned() {
-			match w.process(ctx, exe, doc)? {
-				Literal::Table(_) => {
-					i.process_table(ctx, exe);
+		let mut i = Iterator::new();
+		// Pass in statement config
+		i.cond = self.cond.as_ref();
+		// Ensure futures are stored
+		let opt = &opt.futures(false);
+		// Loop over the delete targets
+		for w in self.what.0.iter() {
+			match w.process(ctx, opt, exe, doc)? {
+				Value::Table(v) => {
+					i.process_table(ctx, exe, v);
 				}
-				Literal::Thing(_) => {
-					i.process_thing(ctx, exe);
+				Value::Thing(v) => {
+					i.process_thing(ctx, exe, v);
 				}
-				Literal::Model(_) => {
-					i.process_model(ctx, exe);
+				Value::Model(v) => {
+					i.process_model(ctx, exe, v);
 				}
-				Literal::Array(_) => {
-					i.process_array(ctx, exe);
+				Value::Array(v) => {
+					i.process_array(ctx, exe, v);
 				}
-				Literal::Object(_) => {
-					i.process_object(ctx, exe);
+				Value::Object(v) => {
+					i.process_object(ctx, exe, v);
 				}
-				_ => {
-					todo!() // Return error
+				v => {
+					return Err(Error::DeleteStatementError {
+						value: v,
+					})
 				}
 			};
 		}

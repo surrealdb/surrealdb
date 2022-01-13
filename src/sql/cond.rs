@@ -1,13 +1,13 @@
 use crate::sql::comment::shouldbespace;
-use crate::sql::expression::{expression, Expression};
+use crate::sql::value::{value, Value};
 use nom::bytes::complete::tag_no_case;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Cond {
-	pub expr: Expression,
+	pub expr: Value,
 }
 
 impl fmt::Display for Cond {
@@ -19,7 +19,7 @@ impl fmt::Display for Cond {
 pub fn cond(i: &str) -> IResult<&str, Cond> {
 	let (i, _) = tag_no_case("WHERE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = expression(i)?;
+	let (i, v) = value(i)?;
 	Ok((
 		i,
 		Cond {

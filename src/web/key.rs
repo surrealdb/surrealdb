@@ -1,4 +1,8 @@
+use crate::dbs::Session;
+use crate::sql::value::Value;
+use crate::web::conf;
 use crate::web::head;
+use bytes::Bytes;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::str;
@@ -12,6 +16,10 @@ pub struct Query {
 }
 
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+	// ------------------------------
+	// Routes for OPTIONS
+	// ------------------------------
+
 	let base = warp::path("key");
 	// Set opts method
 	let opts = base.and(warp::options()).map(warp::reply);
@@ -20,8 +28,12 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Routes for a table
 	// ------------------------------
 
+	// All methods
+	let base = warp::any();
+	// Get session config
+	let base = base.and(conf::build());
 	// Set base path for all
-	let base = path!("key" / String).and(warp::path::end());
+	let base = base.and(path!("key" / String).and(warp::path::end()));
 	// Set select method
 	let select = base.and(warp::get()).and(warp::query()).and_then(select_all);
 	// Set create method
@@ -39,8 +51,12 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Routes for a thing
 	// ------------------------------
 
+	// All methods
+	let base = warp::any();
+	// Get session config
+	let base = base.and(conf::build());
 	// Set base path for one
-	let base = path!("key" / String / String).and(warp::path::end());
+	let base = base.and(path!("key" / String / String).and(warp::path::end()));
 	// Set select method
 	let select = base.and(warp::get()).and_then(select_one);
 	// Set create method
@@ -78,35 +94,46 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 // Routes for a table
 // ------------------------------
 
-async fn select_all(table: String, query: Query) -> Result<impl warp::Reply, warp::Rejection> {
+async fn select_all(
+	session: Session,
+	table: String,
+	query: Query,
+) -> Result<impl warp::Reply, warp::Rejection> {
 	let sql = format!(
 		"SELECT * FROM type::table($table) LIMIT {l} START {s}",
 		l = query.limit.unwrap_or(String::from("100")),
 		s = query.start.unwrap_or(String::from("0")),
 	);
-	let mut var = HashMap::new();
-	var.insert("table", table);
-	let res = crate::dbs::execute(sql.as_str(), Some(var)).unwrap();
+	let mut vars = HashMap::new();
+	vars.insert(String::from("table"), Value::from(table));
+	let res = crate::dbs::execute(sql.as_str(), session, Some(vars)).await.unwrap();
 	Ok(warp::reply::json(&res))
 }
 
 async fn create_all(
+	session: Session,
 	table: String,
-	body: bytes::Bytes,
+	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = "CREATE type::table($table) CONTENT $data";
-	let mut var = HashMap::new();
-	var.insert("table", table);
-	var.insert("data", str::from_utf8(&body).unwrap().to_owned());
-	let res = crate::dbs::execute(sql, Some(var)).unwrap();
-	Ok(warp::reply::json(&res))
+	let data = str::from_utf8(&body).unwrap();
+	match crate::sql::value::json(data) {
+		Ok((_, data)) => {
+			let sql = "CREATE type::table($table) CONTENT $data";
+			let mut vars = HashMap::new();
+			vars.insert(String::from("table"), Value::from(table));
+			vars.insert(String::from("data"), Value::from(data));
+			let res = crate::dbs::execute(sql, session, Some(vars)).await.unwrap();
+			Ok(warp::reply::json(&res))
+		}
+		Err(_) => todo!(),
+	}
 }
 
-async fn delete_all(table: String) -> Result<impl warp::Reply, warp::Rejection> {
+async fn delete_all(session: Session, table: String) -> Result<impl warp::Reply, warp::Rejection> {
 	let sql = "DELETE type::table($table)";
-	let mut var = HashMap::new();
-	var.insert("table", table);
-	let res = crate::dbs::execute(sql, Some(var)).unwrap();
+	let mut vars = HashMap::new();
+	vars.insert(String::from("table"), Value::from(table));
+	let res = crate::dbs::execute(sql, session, Some(vars)).await.unwrap();
 	Ok(warp::reply::json(&res))
 }
 
@@ -114,62 +141,91 @@ async fn delete_all(table: String) -> Result<impl warp::Reply, warp::Rejection> 
 // Routes for a thing
 // ------------------------------
 
-async fn select_one(table: String, id: String) -> Result<impl warp::Reply, warp::Rejection> {
+async fn select_one(
+	session: Session,
+	table: String,
+	id: String,
+) -> Result<impl warp::Reply, warp::Rejection> {
 	let sql = "SELECT * FROM type::thing($table, $id)";
-	let mut var = HashMap::new();
-	var.insert("table", table);
-	var.insert("id", id);
-	let res = crate::dbs::execute(sql, Some(var)).unwrap();
+	let mut vars = HashMap::new();
+	vars.insert(String::from("table"), Value::from(table));
+	vars.insert(String::from("id"), Value::from(id));
+	let res = crate::dbs::execute(sql, session, Some(vars)).await.unwrap();
 	Ok(warp::reply::json(&res))
 }
 
 async fn create_one(
+	session: Session,
 	table: String,
 	id: String,
-	body: bytes::Bytes,
+	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = "CREATE type::thing($table, $id) CONTENT $data";
-	let mut var = HashMap::new();
-	var.insert("table", table);
-	var.insert("id", id);
-	var.insert("data", str::from_utf8(&body).unwrap().to_owned());
-	let res = crate::dbs::execute(sql, Some(var)).unwrap();
-	Ok(warp::reply::json(&res))
+	let data = str::from_utf8(&body).unwrap();
+	match crate::sql::value::json(data) {
+		Ok((_, data)) => {
+			let sql = "CREATE type::thing($table, $id) CONTENT $data";
+			let mut vars = HashMap::new();
+			vars.insert(String::from("table"), Value::from(table));
+			vars.insert(String::from("id"), Value::from(id));
+			vars.insert(String::from("data"), Value::from(data));
+			let res = crate::dbs::execute(sql, session, Some(vars)).await.unwrap();
+			Ok(warp::reply::json(&res))
+		}
+		Err(_) => todo!(),
+	}
 }
 
 async fn update_one(
+	session: Session,
 	table: String,
 	id: String,
-	body: bytes::Bytes,
+	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = "UPDATE type::thing($table, $id) CONTENT $data";
-	let mut var = HashMap::new();
-	var.insert("table", table);
-	var.insert("id", id);
-	var.insert("data", str::from_utf8(&body).unwrap().to_owned());
-	let res = crate::dbs::execute(sql, Some(var)).unwrap();
-	Ok(warp::reply::json(&res))
+	let data = str::from_utf8(&body).unwrap();
+	match crate::sql::value::json(data) {
+		Ok((_, data)) => {
+			let sql = "UPDATE type::thing($table, $id) CONTENT $data";
+			let mut vars = HashMap::new();
+			vars.insert(String::from("table"), Value::from(table));
+			vars.insert(String::from("id"), Value::from(id));
+			vars.insert(String::from("data"), Value::from(data));
+			let res = crate::dbs::execute(sql, session, Some(vars)).await.unwrap();
+			Ok(warp::reply::json(&res))
+		}
+		Err(_) => todo!(),
+	}
 }
 
 async fn modify_one(
+	session: Session,
 	table: String,
 	id: String,
-	body: bytes::Bytes,
+	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let sql = "UPDATE type::thing($table, $id) MERGE $data";
-	let mut var = HashMap::new();
-	var.insert("table", table);
-	var.insert("id", id);
-	var.insert("data", str::from_utf8(&body).unwrap().to_owned());
-	let res = crate::dbs::execute(sql, Some(var)).unwrap();
-	Ok(warp::reply::json(&res))
+	let data = str::from_utf8(&body).unwrap();
+	match crate::sql::value::json(data) {
+		Ok((_, data)) => {
+			let sql = "UPDATE type::thing($table, $id) MERGE $data";
+			let mut vars = HashMap::new();
+			vars.insert(String::from("table"), Value::from(table));
+			vars.insert(String::from("id"), Value::from(id));
+			vars.insert(String::from("data"), Value::from(data));
+			let res = crate::dbs::execute(sql, session, Some(vars)).await.unwrap();
+			Ok(warp::reply::json(&res))
+		}
+		Err(_) => todo!(),
+	}
 }
 
-async fn delete_one(table: String, id: String) -> Result<impl warp::Reply, warp::Rejection> {
+async fn delete_one(
+	session: Session,
+	table: String,
+	id: String,
+) -> Result<impl warp::Reply, warp::Rejection> {
 	let sql = "DELETE type::thing($table, $id)";
-	let mut var = HashMap::new();
-	var.insert("table", table);
-	var.insert("id", id);
-	let res = crate::dbs::execute(sql, Some(var)).unwrap();
+	let mut vars = HashMap::new();
+	vars.insert(String::from("table"), Value::from(table));
+	vars.insert(String::from("id"), Value::from(id));
+	let res = crate::dbs::execute(sql, session, Some(vars)).await.unwrap();
 	Ok(warp::reply::json(&res))
 }

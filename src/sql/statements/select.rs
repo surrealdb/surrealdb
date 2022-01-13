@@ -1,8 +1,9 @@
 use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
+use crate::dbs::Level;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -10,11 +11,11 @@ use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Fields};
 use crate::sql::group::{group, Groups};
 use crate::sql::limit::{limit, Limit};
-use crate::sql::literal::{literals, Literal, Literals};
 use crate::sql::order::{order, Orders};
 use crate::sql::split::{split, Splits};
 use crate::sql::start::{start, Start};
 use crate::sql::timeout::{timeout, Timeout};
+use crate::sql::value::{selects, Value, Values};
 use crate::sql::version::{version, Version};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -26,7 +27,7 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SelectStatement {
 	pub expr: Fields,
-	pub what: Literals,
+	pub what: Values,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cond: Option<Cond>,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -45,6 +46,21 @@ pub struct SelectStatement {
 	pub version: Option<Version>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub timeout: Option<Timeout>,
+}
+
+impl SelectStatement {
+	pub fn limit(&self) -> u64 {
+		match self.limit {
+			Some(Limit(v)) => v,
+			None => 0,
+		}
+	}
+	pub fn start(&self) -> u64 {
+		match self.start {
+			Some(Start(v)) => v,
+			None => 0,
+		}
+	}
 }
 
 impl fmt::Display for SelectStatement {
@@ -85,28 +101,46 @@ impl dbs::Process for SelectStatement {
 	fn process(
 		&self,
 		ctx: &Runtime,
-		exe: &Executor,
-		doc: Option<&Document>,
-	) -> Result<Literal, Error> {
+		opt: &Options,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::No)?;
 		// Create a new iterator
-		let i = Iterator::new();
+		let mut i = Iterator::new();
+		// Pass in statement config
+		i.expr = Some(&self.expr);
+		i.cond = self.cond.as_ref();
+		i.split = self.split.as_ref();
+		i.group = self.group.as_ref();
+		i.order = self.order.as_ref();
+		i.limit = self.limit.as_ref();
+		i.start = self.start.as_ref();
+		// Ensure futures are processed
+		let opt = &opt.futures(true);
+		// Specify the document version
+		let opt = &opt.version(self.version.as_ref());
 		// Loop over the select targets
-		for w in self.what.to_owned() {
-			match w.process(ctx, exe, doc)? {
-				Literal::Table(_) => {
-					i.process_table(ctx, exe);
+		for w in self.what.0.iter() {
+			match w.process(ctx, opt, exe, doc)? {
+				Value::Table(v) => {
+					i.process_table(ctx, exe, v);
 				}
-				Literal::Thing(_) => {
-					i.process_thing(ctx, exe);
+				Value::Thing(v) => {
+					i.process_thing(ctx, exe, v);
 				}
-				Literal::Model(_) => {
-					i.process_model(ctx, exe);
+				Value::Model(v) => {
+					i.process_model(ctx, exe, v);
 				}
-				Literal::Array(_) => {
-					i.process_array(ctx, exe);
+				Value::Array(v) => {
+					i.process_array(ctx, exe, v);
 				}
-				_ => {
-					i.process_query(ctx, exe);
+				Value::Object(v) => {
+					i.process_object(ctx, exe, v);
+				}
+				v => {
+					i.process_value(ctx, exe, v);
 				}
 			};
 		}
@@ -122,7 +156,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FROM")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, what) = literals(i)?;
+	let (i, what) = selects(i)?;
 	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
 	let (i, split) = opt(preceded(shouldbespace, split))(i)?;
 	let (i, group) = opt(preceded(shouldbespace, group))(i)?;

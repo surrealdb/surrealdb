@@ -1,30 +1,46 @@
 [package]
 name = "surreal"
 publish = false
-edition = "2018"
+edition = "2021"
 version = "0.0.0"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [dependencies]
-anyhow = "1.0.40"
-bytes = "1.0.1"
+anyhow = "1.0.44"
+argon2 = "0.3.1"
+byteorder = "1.4.3"
+bytes = "1.1.0"
 clap = "2.33.3"
-futures = "0.3.13"
-http = "0.2.3"
+futures = "0.3.17"
+fuzzy-matcher = "0.3.7"
+http = "0.2.5"
 log = "0.4.14"
-maplit = "1.0.2"
-nom = "6.1.2"
-regex = "1.4.5"
-thiserror = "1.0.24"
-wasm-bindgen = "0.2.72"
+md-5 = "0.9.1"
+nom = "7.0.0"
+once_cell = "1.8.0"
+pbkdf2 = "0.9.0"
+rand = "0.8.4"
+regex = "1.5.4"
+scrypt = "0.8.0"
+sha-1 = "0.9.8"
+sha2 = "0.9.8"
+slug = "0.1.4"
+thiserror = "1.0.29"
+url = "2.2.2"
+utf-8 = "0.7.6"
 xid = "1.0.0"
 
+[dependencies.echodb]
+path = "../echodb"
+
 [dependencies.dec]
-version = "1.10.3"
+version = "1.16.0"
 package = "rust_decimal"
+features = ["maths", "serde-float"]
+
+[dependencies.geo]
+version = "0.18.0"
+features = ["use-serde"]
 
 [dependencies.fern]
 version = "0.6.0"
@@ -38,12 +54,16 @@ features = ["serde", "v4"]
 version = "0.3.1"
 features = ["compression", "websocket"]
 
+[dependencies.tikv]
+version = "0.1.0"
+package = "tikv-client"
+
 [dependencies.tokio]
-version = "1.4.0"
+version = "1.12.0"
 features = ["macros"]
 
 [dependencies.reqwest]
-version = "0.11.2"
+version = "0.11.5"
 features = ["blocking"]
 
 [dependencies.chrono]
@@ -51,11 +71,11 @@ version = "0.4.19"
 features = ["serde"]
 
 [dependencies.serde]
-version = "1.0.125"
+version = "1.0.130"
 features = ["derive"]
 
 [dependencies.serde_cbor]
-version = "0.11.1"
+version = "0.11.2"
 
 [dependencies.serde_json]
-version = "1.0.64"
+version = "1.0.68"
