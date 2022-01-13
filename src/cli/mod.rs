@@ -30,6 +30,23 @@ fn file_valid(v: String) -> Result<(), String> {
 	))
 }
 
+fn path_valid(v: String) -> Result<(), String> {
+	if v == "memory" {
+		return Ok(());
+	}
+	if v.starts_with("file://") {
+		return Ok(());
+	}
+	if v.starts_with("tikv://") {
+		return Ok(());
+	}
+	Err(String::from(
+		"\
+		Provide a valid database path paramater\
+	",
+	))
+}
+
 fn conn_valid(v: String) -> Result<(), String> {
 	if v.starts_with("https://") {
 		return Ok(());
@@ -116,6 +133,7 @@ pub fn init() {
 				Arg::with_name("path")
 					.index(1)
 					.required(true)
+					.validator(path_valid)
 					.default_value("memory")
 					.help("Database path used for storing data"),
 			)
