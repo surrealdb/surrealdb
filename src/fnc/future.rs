@@ -1,7 +1,7 @@
 use crate::dbs::Runtime;
 use crate::err::Error;
-use crate::sql::literal::Literal;
+use crate::sql::value::Value;
 
-pub fn run(ctx: &Runtime, args: Literal) -> Result<Literal, Error> {
-	todo!()
+pub fn run(_: &Runtime, expr: Value) -> Result<Value, Error> {
+	Ok(expr)
 }
