@@ -17,7 +17,13 @@ pub struct Context {
 	// Wether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
-	values: Option<HashMap<&'static str, Box<dyn Any + Send + Sync>>>,
+	values: Option<HashMap<String, Box<dyn Any + Send + Sync>>>,
+}
+
+impl Default for Context {
+	fn default() -> Self {
+		Context::background()
+	}
 }
 
 impl Context {
@@ -74,7 +80,7 @@ impl Context {
 
 	// Add a value to the context. It overwrites any previously set values
 	// with the same key.
-	pub fn add_value<V>(&mut self, key: &'static str, value: V)
+	pub fn add_value<V>(&mut self, key: String, value: V)
 	where
 		V: Any + Send + Sync + Sized,
 	{
@@ -148,7 +154,7 @@ impl Context {
 
 	// Get a value from the context. If no value is stored under the
 	// provided key, then this will return None.
-	pub fn value<V>(&self, key: &'static str) -> Option<&V>
+	pub fn value<V>(&self, key: String) -> Option<&V>
 	where
 		V: Any + Send + Sync + Sized,
 	{
