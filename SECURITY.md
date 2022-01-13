@@ -5,7 +5,7 @@
 | Version    | Supported                                       |
 | ---------- | ----------------------------------------------- |
 | < 1.0      | :x:                                             |
-| >= 1.0.0   | <img width="20" src="/img/tick.svg"> |
+| >= 1.0.0   | <img width="20" src="/img/tick.svg">            |
 
 ## Reporting a Vulnerability
 
