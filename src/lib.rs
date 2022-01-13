@@ -1,6 +1,9 @@
 #[macro_use]
 extern crate log;
 
+#[macro_use]
+mod mac;
+
 mod cnf;
 mod ctx;
 mod dbs;
