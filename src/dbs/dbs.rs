@@ -1,29 +1,45 @@
-use crate::ctx::Context;
 use crate::dbs::executor::Executor;
 use crate::dbs::response::Responses;
+use crate::dbs::session::Session;
 use crate::err::Error;
 use crate::sql;
 use crate::sql::query::Query;
+use crate::sql::value::Value;
 use std::collections::HashMap;
 
-pub type Vars<'a> = Option<HashMap<&'a str, String>>;
+pub type Variables = Option<HashMap<String, Value>>;
 
-pub fn execute(txt: &str, vars: Vars) -> Result<Responses, Error> {
-	// Parse the SQL query into an AST
-	let ast = sql::parse(txt)?;
-	// Create a new execution context
-	let ctx = Context::background().freeze();
+pub async fn execute(txt: &str, session: Session, vars: Variables) -> Result<Responses, Error> {
 	// Create a new query executor
-	let exe = Executor::new();
-	// Process all of the queries
-	exe.execute(&ctx, ast)
+	let mut exe = Executor::new();
+	// Create a new execution context
+	let ctx = session.context();
+	// Parse the SQL query text
+	let ast = sql::parse(txt)?;
+	// Process all statements
+	exe.ns = session.ns;
+	exe.db = session.db;
+	exe.execute(ctx, ast)
 }
 
-pub fn process(ast: Query, vars: Vars) -> Result<Responses, Error> {
-	// Create a new execution context
-	let ctx = Context::background().freeze();
+pub async fn process(ast: Query, session: Session, vars: Variables) -> Result<Responses, Error> {
 	// Create a new query executor
-	let exe = Executor::new();
-	// Process all of the queries
-	exe.execute(&ctx, ast)
+	let mut exe = Executor::new();
+	// Store session info on context
+	let ctx = session.context();
+	// Process all statements
+	exe.ns = session.ns;
+	exe.db = session.db;
+	exe.execute(ctx, ast)
+}
+
+pub fn export(session: Session) -> Result<String, Error> {
+	// Create a new query executor
+	let mut exe = Executor::new();
+	// Create a new execution context
+	let ctx = session.context();
+	// Process database export
+	exe.ns = session.ns;
+	exe.db = session.db;
+	exe.export(ctx)
 }
