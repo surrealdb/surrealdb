@@ -147,3 +147,5 @@ pub enum Error {
 	#[error("CBOR Error: {0}")]
 	CborError(#[from] CborError),
 }
+
+impl warp::reject::Reject for Error {}

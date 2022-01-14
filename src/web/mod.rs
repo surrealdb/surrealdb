@@ -1,5 +1,6 @@
 mod conf;
 mod export;
+mod fail;
 mod head;
 mod import;
 mod key;
@@ -45,6 +46,8 @@ pub async fn init(conf: &clap::ArgMatches) -> Result<(), Error> {
 		.or(sql::config())
 		// API query endpoint
 		.or(key::config())
+		// Catch all errors
+		.recover(fail::recover)
 		// End routes setup
 	;
 

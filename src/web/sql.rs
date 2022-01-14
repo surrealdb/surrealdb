@@ -40,10 +40,12 @@ async fn handler(
 	sql: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let sql = std::str::from_utf8(&sql).unwrap();
-	let res = crate::dbs::execute(sql, session, None).await.unwrap();
-	match output.as_ref() {
-		"application/json" => Ok(warp::reply::json(&res)),
-		"application/cbor" => Ok(warp::reply::json(&res)),
-		_ => Err(warp::reject::not_found()),
+	match crate::dbs::execute(sql, session, None).await {
+		Ok(res) => match output.as_ref() {
+			"application/json" => Ok(warp::reply::json(&res)),
+			"application/cbor" => Ok(warp::reply::json(&res)),
+			_ => Err(warp::reject::not_found()),
+		},
+		Err(err) => Err(warp::reject::custom(err)),
 	}
 }
