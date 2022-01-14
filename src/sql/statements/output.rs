@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -15,24 +14,24 @@ pub struct OutputStatement {
 	pub what: Value,
 }
 
-impl fmt::Display for OutputStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RETURN {}", self.what)
-	}
-}
-
-impl dbs::Process for OutputStatement {
-	fn process(
+impl OutputStatement {
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Ensure futures are processed
 		let opt = &opt.futures(true);
 		// Process the output value
-		self.what.process(ctx, opt, exe, doc)
+		self.what.compute(ctx, opt, exe, doc).await
+	}
+}
+
+impl fmt::Display for OutputStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "RETURN {}", self.what)
 	}
 }
 

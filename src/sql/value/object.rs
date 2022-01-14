@@ -6,8 +6,14 @@ use crate::sql::object::Object;
 use crate::sql::value::Value;
 
 impl Value {
-	pub fn object(&mut self, ctx: &Runtime, opt: &Options, exe: &mut Executor, path: &Idiom) {
+	pub async fn object(
+		&mut self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		path: &Idiom,
+	) {
 		let val = Value::from(Object::default());
-		self.set(ctx, opt, exe, path, val)
+		self.set(ctx, opt, exe, path, val).await
 	}
 }

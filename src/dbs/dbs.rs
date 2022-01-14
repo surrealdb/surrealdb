@@ -19,7 +19,7 @@ pub async fn execute(txt: &str, session: Session, vars: Variables) -> Result<Res
 	// Process all statements
 	exe.ns = session.ns;
 	exe.db = session.db;
-	exe.execute(ctx, ast)
+	exe.execute(ctx, ast).await
 }
 
 pub async fn process(ast: Query, session: Session, vars: Variables) -> Result<Responses, Error> {
@@ -30,7 +30,7 @@ pub async fn process(ast: Query, session: Session, vars: Variables) -> Result<Re
 	// Process all statements
 	exe.ns = session.ns;
 	exe.db = session.db;
-	exe.execute(ctx, ast)
+	exe.execute(ctx, ast).await
 }
 
 pub fn export(session: Session) -> Result<String, Error> {

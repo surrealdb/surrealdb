@@ -1,5 +1,4 @@
 use crate::ctx::Context;
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -39,32 +38,17 @@ impl PartialOrd for Subquery {
 	}
 }
 
-impl fmt::Display for Subquery {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Subquery::Value(v) => write!(f, "({})", v),
-			Subquery::Select(v) => write!(f, "({})", v),
-			Subquery::Create(v) => write!(f, "({})", v),
-			Subquery::Update(v) => write!(f, "({})", v),
-			Subquery::Delete(v) => write!(f, "({})", v),
-			Subquery::Relate(v) => write!(f, "({})", v),
-			Subquery::Insert(v) => write!(f, "({})", v),
-			Subquery::Ifelse(v) => write!(f, "{}", v),
-		}
-	}
-}
-
-impl dbs::Process for Subquery {
-	fn process(
+impl Subquery {
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			Subquery::Value(ref v) => v.process(ctx, opt, exe, doc),
-			Subquery::Ifelse(ref v) => v.process(ctx, opt, exe, doc),
+			Subquery::Value(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Subquery::Ifelse(ref v) => v.compute(ctx, opt, exe, doc).await,
 			Subquery::Select(ref v) => {
 				// Duplicate options
 				let opt = opt.dive()?;
@@ -78,15 +62,17 @@ impl dbs::Process for Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				let res = v.process(&ctx, &opt, exe, doc)?;
+				let res = v.compute(&ctx, &opt, exe, doc).await?;
 				// Process result
 				match v.limit() {
 					1 => match v.expr.single() {
-						Some(v) => res.first(&ctx, &opt, exe).get(&ctx, &opt, exe, &v).ok(),
-						None => res.first(&ctx, &opt, exe).ok(),
+						Some(v) => {
+							res.first(&ctx, &opt, exe).await.get(&ctx, &opt, exe, &v).await.ok()
+						}
+						None => res.first(&ctx, &opt, exe).await.ok(),
 					},
 					_ => match v.expr.single() {
-						Some(v) => res.get(&ctx, &opt, exe, &v).ok(),
+						Some(v) => res.get(&ctx, &opt, exe, &v).await.ok(),
 						None => res.ok(),
 					},
 				}
@@ -104,7 +90,7 @@ impl dbs::Process for Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.process(&ctx, &opt, exe, doc)? {
+				match v.compute(&ctx, &opt, exe, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -125,7 +111,7 @@ impl dbs::Process for Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.process(&ctx, &opt, exe, doc)? {
+				match v.compute(&ctx, &opt, exe, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -146,7 +132,7 @@ impl dbs::Process for Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.process(&ctx, &opt, exe, doc)? {
+				match v.compute(&ctx, &opt, exe, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -167,7 +153,7 @@ impl dbs::Process for Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.process(&ctx, &opt, exe, doc)? {
+				match v.compute(&ctx, &opt, exe, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -188,7 +174,7 @@ impl dbs::Process for Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.process(&ctx, &opt, exe, doc)? {
+				match v.compute(&ctx, &opt, exe, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -196,6 +182,21 @@ impl dbs::Process for Subquery {
 					v => Ok(v),
 				}
 			}
+		}
+	}
+}
+
+impl fmt::Display for Subquery {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Subquery::Value(v) => write!(f, "({})", v),
+			Subquery::Select(v) => write!(f, "({})", v),
+			Subquery::Create(v) => write!(f, "({})", v),
+			Subquery::Update(v) => write!(f, "({})", v),
+			Subquery::Delete(v) => write!(f, "({})", v),
+			Subquery::Relate(v) => write!(f, "({})", v),
+			Subquery::Insert(v) => write!(f, "({})", v),
+			Subquery::Ifelse(v) => write!(f, "{}", v),
 		}
 	}
 }

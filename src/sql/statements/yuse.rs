@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Auth;
 use crate::dbs::Executor;
 use crate::dbs::Options;
@@ -21,24 +20,11 @@ pub struct UseStatement {
 	pub db: Option<String>,
 }
 
-impl fmt::Display for UseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "USE")?;
-		if let Some(ref ns) = self.ns {
-			write!(f, " NS {}", ns)?;
-		}
-		if let Some(ref db) = self.db {
-			write!(f, " DB {}", db)?;
-		}
-		Ok(())
-	}
-}
-
-impl dbs::Process for UseStatement {
-	fn process(
+impl UseStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -70,6 +56,19 @@ impl dbs::Process for UseStatement {
 			}
 		}
 		Ok(Value::None)
+	}
+}
+
+impl fmt::Display for UseStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "USE")?;
+		if let Some(ref ns) = self.ns {
+			write!(f, " NS {}", ns)?;
+		}
+		if let Some(ref db) = self.db {
+			write!(f, " DB {}", db)?;
+		}
+		Ok(())
 	}
 }
 

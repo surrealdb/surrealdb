@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -53,6 +52,27 @@ impl Object {
 	}
 }
 
+impl Object {
+	pub async fn compute(
+		&self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		let mut x = BTreeMap::new();
+		for (k, v) in &self.value {
+			match v.compute(ctx, opt, exe, doc).await {
+				Ok(v) => x.insert(k.clone(), v),
+				Err(e) => return Err(e),
+			};
+		}
+		Ok(Value::Object(Object {
+			value: x,
+		}))
+	}
+}
+
 impl fmt::Display for Object {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
@@ -64,29 +84,6 @@ impl fmt::Display for Object {
 				.collect::<Vec<_>>()
 				.join(", ")
 		)
-	}
-}
-
-impl dbs::Process for Object {
-	fn process(
-		&self,
-		ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		self.value
-			.iter()
-			.map(|(k, v)| match v.process(ctx, opt, exe, doc) {
-				Ok(v) => Ok((k.clone(), v)),
-				Err(e) => Err(e),
-			})
-			.collect::<Result<BTreeMap<_, _>, _>>()
-			.map(|v| {
-				Value::Object(Object {
-					value: v,
-				})
-			})
 	}
 }
 

@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -16,21 +15,21 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CancelStatement;
 
-impl fmt::Display for CancelStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "CANCEL TRANSACTION")
-	}
-}
-
-impl dbs::Process for CancelStatement {
-	fn process(
+impl CancelStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		_opt: &Options,
+		_opt: &Options<'_>,
 		_exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		Ok(Value::None)
+	}
+}
+
+impl fmt::Display for CancelStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "CANCEL TRANSACTION")
 	}
 }
 

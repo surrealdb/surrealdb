@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -21,6 +20,7 @@ use crate::sql::strand::{strand, Strand};
 use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
+use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use dec::Decimal;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -762,13 +762,14 @@ impl fmt::Display for Value {
 	}
 }
 
-impl dbs::Process for Value {
-	fn process(
+impl Value {
+	#[async_recursion]
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
-		doc: Option<&Value>,
+		doc: Option<&'async_recursion Value>,
 	) -> Result<Value, Error> {
 		match self {
 			Value::None => Ok(Value::None),
@@ -776,13 +777,13 @@ impl dbs::Process for Value {
 			Value::Null => Ok(Value::Null),
 			Value::True => Ok(Value::True),
 			Value::False => Ok(Value::False),
-			Value::Param(v) => v.process(ctx, opt, exe, doc),
-			Value::Idiom(v) => v.process(ctx, opt, exe, doc),
-			Value::Array(v) => v.process(ctx, opt, exe, doc),
-			Value::Object(v) => v.process(ctx, opt, exe, doc),
-			Value::Function(v) => v.process(ctx, opt, exe, doc),
-			Value::Subquery(v) => v.process(ctx, opt, exe, doc),
-			Value::Expression(v) => v.process(ctx, opt, exe, doc),
+			Value::Param(v) => v.compute(ctx, opt, exe, doc).await,
+			Value::Idiom(v) => v.compute(ctx, opt, exe, doc).await,
+			Value::Array(v) => v.compute(ctx, opt, exe, doc).await,
+			Value::Object(v) => v.compute(ctx, opt, exe, doc).await,
+			Value::Function(v) => v.compute(ctx, opt, exe, doc).await,
+			Value::Subquery(v) => v.compute(ctx, opt, exe, doc).await,
+			Value::Expression(v) => v.compute(ctx, opt, exe, doc).await,
 			_ => Ok(self.to_owned()),
 		}
 	}

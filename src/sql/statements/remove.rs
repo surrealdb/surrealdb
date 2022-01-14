@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Level;
 use crate::dbs::Options;
@@ -29,6 +28,28 @@ pub enum RemoveStatement {
 	Index(RemoveIndexStatement),
 }
 
+impl RemoveStatement {
+	pub async fn compute(
+		&self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		match self {
+			RemoveStatement::Namespace(ref v) => v.compute(ctx, opt, exe, doc).await,
+			RemoveStatement::Database(ref v) => v.compute(ctx, opt, exe, doc).await,
+			RemoveStatement::Login(ref v) => v.compute(ctx, opt, exe, doc).await,
+			RemoveStatement::Token(ref v) => v.compute(ctx, opt, exe, doc).await,
+			RemoveStatement::Scope(ref v) => v.compute(ctx, opt, exe, doc).await,
+			RemoveStatement::Table(ref v) => v.compute(ctx, opt, exe, doc).await,
+			RemoveStatement::Event(ref v) => v.compute(ctx, opt, exe, doc).await,
+			RemoveStatement::Field(ref v) => v.compute(ctx, opt, exe, doc).await,
+			RemoveStatement::Index(ref v) => v.compute(ctx, opt, exe, doc).await,
+		}
+	}
+}
+
 impl fmt::Display for RemoveStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -41,28 +62,6 @@ impl fmt::Display for RemoveStatement {
 			RemoveStatement::Event(v) => write!(f, "{}", v),
 			RemoveStatement::Field(v) => write!(f, "{}", v),
 			RemoveStatement::Index(v) => write!(f, "{}", v),
-		}
-	}
-}
-
-impl dbs::Process for RemoveStatement {
-	fn process(
-		&self,
-		ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		match self {
-			RemoveStatement::Namespace(ref v) => v.process(ctx, opt, exe, doc),
-			RemoveStatement::Database(ref v) => v.process(ctx, opt, exe, doc),
-			RemoveStatement::Login(ref v) => v.process(ctx, opt, exe, doc),
-			RemoveStatement::Token(ref v) => v.process(ctx, opt, exe, doc),
-			RemoveStatement::Scope(ref v) => v.process(ctx, opt, exe, doc),
-			RemoveStatement::Table(ref v) => v.process(ctx, opt, exe, doc),
-			RemoveStatement::Event(ref v) => v.process(ctx, opt, exe, doc),
-			RemoveStatement::Field(ref v) => v.process(ctx, opt, exe, doc),
-			RemoveStatement::Index(ref v) => v.process(ctx, opt, exe, doc),
 		}
 	}
 }
@@ -90,17 +89,11 @@ pub struct RemoveNamespaceStatement {
 	pub name: String,
 }
 
-impl fmt::Display for RemoveNamespaceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REMOVE NAMESPACE {}", self.name)
-	}
-}
-
-impl dbs::Process for RemoveNamespaceStatement {
-	fn process(
+impl RemoveNamespaceStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -108,6 +101,12 @@ impl dbs::Process for RemoveNamespaceStatement {
 		exe.check(opt, Level::Kv)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for RemoveNamespaceStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE NAMESPACE {}", self.name)
 	}
 }
 
@@ -134,17 +133,11 @@ pub struct RemoveDatabaseStatement {
 	pub name: String,
 }
 
-impl fmt::Display for RemoveDatabaseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REMOVE DATABASE {}", self.name)
-	}
-}
-
-impl dbs::Process for RemoveDatabaseStatement {
-	fn process(
+impl RemoveDatabaseStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -152,6 +145,12 @@ impl dbs::Process for RemoveDatabaseStatement {
 		exe.check(opt, Level::Ns)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for RemoveDatabaseStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE DATABASE {}", self.name)
 	}
 }
 
@@ -179,17 +178,11 @@ pub struct RemoveLoginStatement {
 	pub base: Base,
 }
 
-impl fmt::Display for RemoveLoginStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REMOVE LOGIN {} ON {}", self.name, self.base)
-	}
-}
-
-impl dbs::Process for RemoveLoginStatement {
-	fn process(
+impl RemoveLoginStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -201,6 +194,12 @@ impl dbs::Process for RemoveLoginStatement {
 		}
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for RemoveLoginStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE LOGIN {} ON {}", self.name, self.base)
 	}
 }
 
@@ -233,17 +232,11 @@ pub struct RemoveTokenStatement {
 	pub base: Base,
 }
 
-impl fmt::Display for RemoveTokenStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REMOVE TOKEN {} ON {}", self.name, self.base)
-	}
-}
-
-impl dbs::Process for RemoveTokenStatement {
-	fn process(
+impl RemoveTokenStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -255,6 +248,12 @@ impl dbs::Process for RemoveTokenStatement {
 		}
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for RemoveTokenStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE TOKEN {} ON {}", self.name, self.base)
 	}
 }
 
@@ -286,17 +285,11 @@ pub struct RemoveScopeStatement {
 	pub name: String,
 }
 
-impl fmt::Display for RemoveScopeStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REMOVE SCOPE {}", self.name)
-	}
-}
-
-impl dbs::Process for RemoveScopeStatement {
-	fn process(
+impl RemoveScopeStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -304,6 +297,12 @@ impl dbs::Process for RemoveScopeStatement {
 		exe.check(opt, Level::Db)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for RemoveScopeStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE SCOPE {}", self.name)
 	}
 }
 
@@ -330,17 +329,11 @@ pub struct RemoveTableStatement {
 	pub name: String,
 }
 
-impl fmt::Display for RemoveTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REMOVE TABLE {}", self.name)
-	}
-}
-
-impl dbs::Process for RemoveTableStatement {
-	fn process(
+impl RemoveTableStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -348,6 +341,12 @@ impl dbs::Process for RemoveTableStatement {
 		exe.check(opt, Level::Db)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for RemoveTableStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE TABLE {}", self.name)
 	}
 }
 
@@ -375,17 +374,11 @@ pub struct RemoveEventStatement {
 	pub what: String,
 }
 
-impl fmt::Display for RemoveEventStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REMOVE EVENT {} ON {}", self.name, self.what)
-	}
-}
-
-impl dbs::Process for RemoveEventStatement {
-	fn process(
+impl RemoveEventStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -393,6 +386,12 @@ impl dbs::Process for RemoveEventStatement {
 		exe.check(opt, Level::Db)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for RemoveEventStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE EVENT {} ON {}", self.name, self.what)
 	}
 }
 
@@ -426,17 +425,11 @@ pub struct RemoveFieldStatement {
 	pub what: String,
 }
 
-impl fmt::Display for RemoveFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REMOVE FIELD {} ON {}", self.name, self.what)
-	}
-}
-
-impl dbs::Process for RemoveFieldStatement {
-	fn process(
+impl RemoveFieldStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -444,6 +437,12 @@ impl dbs::Process for RemoveFieldStatement {
 		exe.check(opt, Level::Db)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for RemoveFieldStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE FIELD {} ON {}", self.name, self.what)
 	}
 }
 
@@ -477,17 +476,11 @@ pub struct RemoveIndexStatement {
 	pub what: String,
 }
 
-impl fmt::Display for RemoveIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "REMOVE INDEX {} ON {}", self.name, self.what)
-	}
-}
-
-impl dbs::Process for RemoveIndexStatement {
-	fn process(
+impl RemoveIndexStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -495,6 +488,12 @@ impl dbs::Process for RemoveIndexStatement {
 		exe.check(opt, Level::Db)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for RemoveIndexStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE INDEX {} ON {}", self.name, self.what)
 	}
 }
 

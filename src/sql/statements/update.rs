@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
@@ -31,30 +30,11 @@ pub struct UpdateStatement {
 	pub timeout: Option<Timeout>,
 }
 
-impl fmt::Display for UpdateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "UPDATE {}", self.what)?;
-		if let Some(ref v) = self.data {
-			write!(f, " {}", v)?
-		}
-		if let Some(ref v) = self.cond {
-			write!(f, " {}", v)?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {}", v)?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
-		}
-		Ok(())
-	}
-}
-
-impl dbs::Process for UpdateStatement {
-	fn process(
+impl UpdateStatement {
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -69,7 +49,7 @@ impl dbs::Process for UpdateStatement {
 		let opt = &opt.futures(false);
 		// Loop over the update targets
 		for w in self.what.0.iter() {
-			match w.process(ctx, opt, exe, doc)? {
+			match w.compute(ctx, opt, exe, doc).await? {
 				Value::Table(v) => {
 					i.process_table(ctx, exe, v);
 				}
@@ -94,6 +74,25 @@ impl dbs::Process for UpdateStatement {
 		}
 		// Output the results
 		i.output(ctx, exe)
+	}
+}
+
+impl fmt::Display for UpdateStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "UPDATE {}", self.what)?;
+		if let Some(ref v) = self.data {
+			write!(f, " {}", v)?
+		}
+		if let Some(ref v) = self.cond {
+			write!(f, " {}", v)?
+		}
+		if let Some(ref v) = self.output {
+			write!(f, " {}", v)?
+		}
+		if let Some(ref v) = self.timeout {
+			write!(f, " {}", v)?
+		}
+		Ok(())
 	}
 }
 

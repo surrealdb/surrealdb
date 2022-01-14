@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -28,21 +27,15 @@ impl Default for Expression {
 	}
 }
 
-impl fmt::Display for Expression {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{} {} {}", self.l, self.o, self.r)
-	}
-}
-
-impl dbs::Process for Expression {
-	fn process(
+impl Expression {
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		let l = self.l.process(ctx, opt, exe, doc)?;
+		let l = self.l.compute(ctx, opt, exe, doc).await?;
 		match self.o {
 			Operator::Or => match l.is_truthy() {
 				true => return Ok(l), // No need to continue
@@ -54,7 +47,7 @@ impl dbs::Process for Expression {
 			},
 			_ => {} // Continue
 		}
-		let r = self.r.process(ctx, opt, exe, doc)?;
+		let r = self.r.compute(ctx, opt, exe, doc).await?;
 		match self.o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
@@ -88,6 +81,12 @@ impl dbs::Process for Expression {
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
 			_ => unreachable!(),
 		}
+	}
+}
+
+impl fmt::Display for Expression {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{} {} {}", self.l, self.o, self.r)
 	}
 }
 

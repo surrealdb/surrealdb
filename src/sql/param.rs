@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -26,17 +25,11 @@ impl From<Idiom> for Param {
 	}
 }
 
-impl fmt::Display for Param {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", &self.name)
-	}
-}
-
-impl dbs::Process for Param {
-	fn process(
+impl Param {
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -47,15 +40,21 @@ impl dbs::Process for Param {
 				// The base variable exists
 				Some(v) => {
 					// Process the paramater value
-					let res = v.process(ctx, opt, exe, doc)?;
+					let res = v.compute(ctx, opt, exe, doc).await?;
 					// Return the desired field
-					res.get(ctx, opt, exe, &self.name.next()).ok()
+					res.get(ctx, opt, exe, &self.name.next()).await.ok()
 				}
 				// The base variable does not exist
 				None => Ok(Value::None),
 			},
 			_ => unreachable!(),
 		}
+	}
+}
+
+impl fmt::Display for Param {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "${}", &self.name)
 	}
 }
 

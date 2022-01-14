@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
@@ -32,28 +31,11 @@ pub struct InsertStatement {
 	pub timeout: Option<Timeout>,
 }
 
-impl fmt::Display for InsertStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "INSERT")?;
-		if self.ignore {
-			write!(f, " IGNORE")?
-		}
-		write!(f, " INTO {} {}", self.into, self.data)?;
-		if let Some(ref v) = self.output {
-			write!(f, " {}", v)?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
-		}
-		Ok(())
-	}
-}
-
-impl dbs::Process for InsertStatement {
-	fn process(
+impl InsertStatement {
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -71,7 +53,7 @@ impl dbs::Process for InsertStatement {
 			Data::ValuesExpression(_) => {
 				todo!() // TODO: loop over each
 			}
-			Data::SingleExpression(v) => match v.process(ctx, opt, exe, doc)? {
+			Data::SingleExpression(v) => match v.compute(ctx, opt, exe, doc).await? {
 				Value::Array(v) => {
 					i.process_array(ctx, exe, v);
 				}
@@ -88,6 +70,23 @@ impl dbs::Process for InsertStatement {
 		}
 		// Output the results
 		i.output(ctx, exe)
+	}
+}
+
+impl fmt::Display for InsertStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "INSERT")?;
+		if self.ignore {
+			write!(f, " IGNORE")?
+		}
+		write!(f, " INTO {} {}", self.into, self.data)?;
+		if let Some(ref v) = self.output {
+			write!(f, " {}", v)?
+		}
+		if let Some(ref v) = self.timeout {
+			write!(f, " {}", v)?
+		}
+		Ok(())
 	}
 }
 

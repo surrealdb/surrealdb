@@ -3,7 +3,6 @@ use crate::dbs::response::{Response, Responses};
 use crate::dbs::Auth;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Process;
 use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::query::Query;
@@ -47,7 +46,7 @@ impl Executor {
 		todo!()
 	}
 
-	pub fn execute(&mut self, mut ctx: Runtime, qry: Query) -> Result<Responses, Error> {
+	pub async fn execute(&mut self, mut ctx: Runtime, qry: Query) -> Result<Responses, Error> {
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
 		// Create a new options
@@ -75,25 +74,25 @@ impl Executor {
 				}
 				// Begin a new transaction
 				Statement::Begin(stm) => {
-					let res = stm.process(&ctx, &opt, self, None);
+					let res = stm.compute(&ctx, &opt, self, None).await;
 					self.err = res.err();
 					continue;
 				}
 				// Cancel a running transaction
 				Statement::Cancel(stm) => {
-					let res = stm.process(&ctx, &opt, self, None);
+					let res = stm.compute(&ctx, &opt, self, None).await;
 					self.err = res.err();
 					continue;
 				}
 				// Commit a running transaction
 				Statement::Commit(stm) => {
-					let res = stm.process(&ctx, &opt, self, None);
+					let res = stm.compute(&ctx, &opt, self, None).await;
 					self.err = res.err();
 					continue;
 				}
 				// Process param definition statements
 				Statement::Set(stm) => {
-					match stm.process(&ctx, &opt, self, None) {
+					match stm.compute(&ctx, &opt, self, None).await {
 						Ok(val) => {
 							let mut new = Context::new(&ctx);
 							let key = stm.name.to_owned();
@@ -115,7 +114,7 @@ impl Executor {
 						ctx = new.freeze();
 					}
 					// Process statement
-					let res = stm.process(&ctx, &opt, self, None);
+					let res = stm.compute(&ctx, &opt, self, None).await;
 					// Catch statement timeout
 					if let Some(timeout) = stm.timeout() {
 						if ctx.is_timedout() {

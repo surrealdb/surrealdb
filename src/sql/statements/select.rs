@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
@@ -63,6 +62,58 @@ impl SelectStatement {
 	}
 }
 
+impl SelectStatement {
+	pub async fn compute(
+		&self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::No)?;
+		// Create a new iterator
+		let mut i = Iterator::new();
+		// Pass in statement config
+		i.expr = Some(&self.expr);
+		i.cond = self.cond.as_ref();
+		i.split = self.split.as_ref();
+		i.group = self.group.as_ref();
+		i.order = self.order.as_ref();
+		i.limit = self.limit.as_ref();
+		i.start = self.start.as_ref();
+		// Ensure futures are processed
+		let opt = &opt.futures(true);
+		// Specify the document version
+		let opt = &opt.version(self.version.as_ref());
+		// Loop over the select targets
+		for w in self.what.0.iter() {
+			match w.compute(ctx, opt, exe, doc).await? {
+				Value::Table(v) => {
+					i.process_table(ctx, exe, v);
+				}
+				Value::Thing(v) => {
+					i.process_thing(ctx, exe, v);
+				}
+				Value::Model(v) => {
+					i.process_model(ctx, exe, v);
+				}
+				Value::Array(v) => {
+					i.process_array(ctx, exe, v);
+				}
+				Value::Object(v) => {
+					i.process_object(ctx, exe, v);
+				}
+				v => {
+					i.process_value(ctx, exe, v);
+				}
+			};
+		}
+		// Output the results
+		i.output(ctx, exe)
+	}
+}
+
 impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {} FROM {}", self.expr, self.what)?;
@@ -94,58 +145,6 @@ impl fmt::Display for SelectStatement {
 			write!(f, " {}", v)?
 		}
 		Ok(())
-	}
-}
-
-impl dbs::Process for SelectStatement {
-	fn process(
-		&self,
-		ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		exe.check(opt, Level::No)?;
-		// Create a new iterator
-		let mut i = Iterator::new();
-		// Pass in statement config
-		i.expr = Some(&self.expr);
-		i.cond = self.cond.as_ref();
-		i.split = self.split.as_ref();
-		i.group = self.group.as_ref();
-		i.order = self.order.as_ref();
-		i.limit = self.limit.as_ref();
-		i.start = self.start.as_ref();
-		// Ensure futures are processed
-		let opt = &opt.futures(true);
-		// Specify the document version
-		let opt = &opt.version(self.version.as_ref());
-		// Loop over the select targets
-		for w in self.what.0.iter() {
-			match w.process(ctx, opt, exe, doc)? {
-				Value::Table(v) => {
-					i.process_table(ctx, exe, v);
-				}
-				Value::Thing(v) => {
-					i.process_thing(ctx, exe, v);
-				}
-				Value::Model(v) => {
-					i.process_model(ctx, exe, v);
-				}
-				Value::Array(v) => {
-					i.process_array(ctx, exe, v);
-				}
-				Value::Object(v) => {
-					i.process_object(ctx, exe, v);
-				}
-				v => {
-					i.process_value(ctx, exe, v);
-				}
-			};
-		}
-		// Output the results
-		i.output(ctx, exe)
 	}
 }
 

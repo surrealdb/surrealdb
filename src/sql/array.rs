@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -92,6 +91,27 @@ impl Array {
 	}
 }
 
+impl Array {
+	pub async fn compute(
+		&self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		let mut x = Vec::new();
+		for v in &self.value {
+			match v.compute(ctx, opt, exe, doc).await {
+				Ok(v) => x.push(v),
+				Err(e) => return Err(e),
+			};
+		}
+		Ok(Value::Array(Array {
+			value: x,
+		}))
+	}
+}
+
 impl fmt::Display for Array {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
@@ -99,29 +119,6 @@ impl fmt::Display for Array {
 			"[{}]",
 			self.value.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", ")
 		)
-	}
-}
-
-impl dbs::Process for Array {
-	fn process(
-		&self,
-		ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		self.value
-			.iter()
-			.map(|v| match v.process(ctx, opt, exe, doc) {
-				Ok(v) => Ok(v),
-				Err(e) => Err(e),
-			})
-			.collect::<Result<Vec<_>, _>>()
-			.map(|v| {
-				Value::Array(Array {
-					value: v,
-				})
-			})
 	}
 }
 
@@ -185,6 +182,38 @@ impl ops::Sub for Array {
 			}
 		}
 		self
+	}
+}
+
+// ------------------------------
+
+pub trait Abolish<T> {
+	fn abolish<F>(&mut self, f: F)
+	where
+		F: FnMut(usize) -> bool;
+}
+
+impl<T> Abolish<T> for Vec<T> {
+	fn abolish<F>(&mut self, mut f: F)
+	where
+		F: FnMut(usize) -> bool,
+	{
+		let len = self.len();
+		let mut del = 0;
+		{
+			let v = &mut **self;
+
+			for i in 0..len {
+				if f(i) {
+					del += 1;
+				} else if del > 0 {
+					v.swap(i - del, i);
+				}
+			}
+		}
+		if del > 0 {
+			self.truncate(len - del);
+		}
 	}
 }
 

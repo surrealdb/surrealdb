@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -50,6 +49,23 @@ impl Idiom {
 	}
 }
 
+impl Idiom {
+	pub async fn compute(
+		&self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		match doc {
+			// There is a current document
+			Some(v) => v.get(ctx, opt, exe, self).await.ok(),
+			// There isn't any document
+			None => Ok(Value::None),
+		}
+	}
+}
+
 impl fmt::Display for Idiom {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
@@ -65,23 +81,6 @@ impl fmt::Display for Idiom {
 				.collect::<Vec<_>>()
 				.join("")
 		)
-	}
-}
-
-impl dbs::Process for Idiom {
-	fn process(
-		&self,
-		ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		match doc {
-			// There is a current document
-			Some(v) => v.get(ctx, opt, exe, self).ok(),
-			// There isn't any document
-			None => Ok(Value::None),
-		}
 	}
 }
 

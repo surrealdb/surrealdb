@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
@@ -29,27 +28,11 @@ pub struct DeleteStatement {
 	pub timeout: Option<Timeout>,
 }
 
-impl fmt::Display for DeleteStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DELETE {}", self.what)?;
-		if let Some(ref v) = self.cond {
-			write!(f, " {}", v)?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {}", v)?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
-		}
-		Ok(())
-	}
-}
-
-impl dbs::Process for DeleteStatement {
-	fn process(
+impl DeleteStatement {
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -63,7 +46,7 @@ impl dbs::Process for DeleteStatement {
 		let opt = &opt.futures(false);
 		// Loop over the delete targets
 		for w in self.what.0.iter() {
-			match w.process(ctx, opt, exe, doc)? {
+			match w.compute(ctx, opt, exe, doc).await? {
 				Value::Table(v) => {
 					i.process_table(ctx, exe, v);
 				}
@@ -88,6 +71,22 @@ impl dbs::Process for DeleteStatement {
 		}
 		// Output the results
 		i.output(ctx, exe)
+	}
+}
+
+impl fmt::Display for DeleteStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DELETE {}", self.what)?;
+		if let Some(ref v) = self.cond {
+			write!(f, " {}", v)?
+		}
+		if let Some(ref v) = self.output {
+			write!(f, " {}", v)?
+		}
+		if let Some(ref v) = self.timeout {
+			write!(f, " {}", v)?
+		}
+		Ok(())
 	}
 }
 

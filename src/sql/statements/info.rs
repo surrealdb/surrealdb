@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Level;
 use crate::dbs::Options;
@@ -21,22 +20,11 @@ pub enum InfoStatement {
 	Table(String),
 }
 
-impl fmt::Display for InfoStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			InfoStatement::Namespace => write!(f, "INFO FOR NAMESPACE"),
-			InfoStatement::Database => write!(f, "INFO FOR DATABASE"),
-			InfoStatement::Scope(ref s) => write!(f, "INFO FOR SCOPE {}", s),
-			InfoStatement::Table(ref t) => write!(f, "INFO FOR TABLE {}", t),
-		}
-	}
-}
-
-impl dbs::Process for InfoStatement {
-	fn process(
+impl InfoStatement {
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -49,6 +37,17 @@ impl dbs::Process for InfoStatement {
 		}
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for InfoStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			InfoStatement::Namespace => write!(f, "INFO FOR NAMESPACE"),
+			InfoStatement::Database => write!(f, "INFO FOR DATABASE"),
+			InfoStatement::Scope(ref s) => write!(f, "INFO FOR SCOPE {}", s),
+			InfoStatement::Table(ref t) => write!(f, "INFO FOR TABLE {}", t),
+		}
 	}
 }
 

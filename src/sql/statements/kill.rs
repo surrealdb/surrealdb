@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -16,21 +15,21 @@ pub struct KillStatement {
 	pub id: Ident,
 }
 
-impl fmt::Display for KillStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "KILL {}", self.id)
-	}
-}
-
-impl dbs::Process for KillStatement {
-	fn process(
+impl KillStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		_opt: &Options,
+		_opt: &Options<'_>,
 		_exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		todo!()
+	}
+}
+
+impl fmt::Display for KillStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "KILL {}", self.id)
 	}
 }
 

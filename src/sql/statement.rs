@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -111,6 +110,38 @@ impl Statement {
 	}
 }
 
+impl Statement {
+	pub async fn compute(
+		&self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		match *self {
+			Statement::Use(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Set(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Info(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Live(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Kill(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Begin(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Cancel(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Commit(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Output(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Ifelse(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Select(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Create(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Update(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Relate(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Delete(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Insert(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Define(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Remove(ref v) => v.compute(ctx, opt, exe, doc).await,
+			_ => unreachable!(),
+		}
+	}
+}
+
 impl fmt::Display for Statement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match *self {
@@ -133,38 +164,6 @@ impl fmt::Display for Statement {
 			Statement::Define(ref v) => write!(f, "{}", v),
 			Statement::Remove(ref v) => write!(f, "{}", v),
 			Statement::Option(ref v) => write!(f, "{}", v),
-		}
-	}
-}
-
-impl dbs::Process for Statement {
-	fn process(
-		&self,
-		ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		match *self {
-			Statement::Use(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Set(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Info(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Live(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Kill(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Begin(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Cancel(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Commit(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Output(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Ifelse(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Select(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Create(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Update(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Relate(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Delete(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Insert(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Define(ref v) => v.process(ctx, opt, exe, doc),
-			Statement::Remove(ref v) => v.process(ctx, opt, exe, doc),
-			_ => unreachable!(),
 		}
 	}
 }

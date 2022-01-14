@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -31,6 +30,42 @@ impl PartialOrd for Function {
 	}
 }
 
+impl Function {
+	pub async fn compute(
+		&self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		match self {
+			Function::Future(ref e) => match opt.futures {
+				true => {
+					let a = e.compute(ctx, opt, exe, doc).await?;
+					fnc::future::run(ctx, a)
+				}
+				false => Ok(self.to_owned().into()),
+			},
+			Function::Script(ref s) => {
+				let a = s.to_owned();
+				fnc::script::run(ctx, a)
+			}
+			Function::Cast(ref s, ref e) => {
+				let a = e.compute(ctx, opt, exe, doc).await?;
+				fnc::cast::run(ctx, s, a)
+			}
+			Function::Normal(ref s, ref e) => {
+				let mut a: Vec<Value> = vec![];
+				for v in e {
+					let v = v.compute(ctx, opt, exe, doc).await?;
+					a.push(v);
+				}
+				fnc::run(ctx, s, a)
+			}
+		}
+	}
+}
+
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -43,42 +78,6 @@ impl fmt::Display for Function {
 				s,
 				e.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", ")
 			),
-		}
-	}
-}
-
-impl dbs::Process for Function {
-	fn process(
-		&self,
-		ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		match self {
-			Function::Future(ref e) => match opt.futures {
-				true => {
-					let a = e.process(ctx, opt, exe, doc)?;
-					fnc::future::run(ctx, a)
-				}
-				false => Ok(self.to_owned().into()),
-			},
-			Function::Script(ref s) => {
-				let a = s.to_owned();
-				fnc::script::run(ctx, a)
-			}
-			Function::Cast(ref s, ref e) => {
-				let a = e.process(ctx, opt, exe, doc)?;
-				fnc::cast::run(ctx, s, a)
-			}
-			Function::Normal(ref s, ref e) => {
-				let mut a: Vec<Value> = vec![];
-				for v in e {
-					let v = v.process(ctx, opt, exe, doc)?;
-					a.push(v);
-				}
-				fnc::run(ctx, s, a)
-			}
 		}
 	}
 }
@@ -397,7 +396,7 @@ mod tests {
 		let res = function(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<int>1.2345", format!("{}", out));
+		assert_eq!("<int> 1.2345", format!("{}", out));
 		assert_eq!(out, Function::Cast(String::from("int"), 1.2345.into()));
 	}
 
@@ -407,7 +406,7 @@ mod tests {
 		let res = function(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("<string>1.2345", format!("{}", out));
+		assert_eq!("<string> 1.2345", format!("{}", out));
 		assert_eq!(out, Function::Cast(String::from("string"), 1.2345.into()));
 	}
 

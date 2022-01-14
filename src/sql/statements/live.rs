@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -26,6 +25,18 @@ pub struct LiveStatement {
 	pub fetch: Option<Fetchs>,
 }
 
+impl LiveStatement {
+	pub async fn compute(
+		&self,
+		_ctx: &Runtime,
+		_opt: &Options<'_>,
+		_exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		todo!()
+	}
+}
+
 impl fmt::Display for LiveStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "LIVE SELECT {} FROM {}", self.expr, self.what)?;
@@ -36,18 +47,6 @@ impl fmt::Display for LiveStatement {
 			write!(f, " {}", v)?
 		}
 		Ok(())
-	}
-}
-
-impl dbs::Process for LiveStatement {
-	fn process(
-		&self,
-		_ctx: &Runtime,
-		_opt: &Options,
-		_exe: &mut Executor,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		todo!()
 	}
 }
 

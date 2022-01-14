@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Level;
 use crate::dbs::Options;
@@ -38,6 +37,28 @@ pub enum DefineStatement {
 	Index(DefineIndexStatement),
 }
 
+impl DefineStatement {
+	pub async fn compute(
+		&self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		match self {
+			DefineStatement::Namespace(ref v) => v.compute(ctx, opt, exe, doc).await,
+			DefineStatement::Database(ref v) => v.compute(ctx, opt, exe, doc).await,
+			DefineStatement::Login(ref v) => v.compute(ctx, opt, exe, doc).await,
+			DefineStatement::Token(ref v) => v.compute(ctx, opt, exe, doc).await,
+			DefineStatement::Scope(ref v) => v.compute(ctx, opt, exe, doc).await,
+			DefineStatement::Table(ref v) => v.compute(ctx, opt, exe, doc).await,
+			DefineStatement::Event(ref v) => v.compute(ctx, opt, exe, doc).await,
+			DefineStatement::Field(ref v) => v.compute(ctx, opt, exe, doc).await,
+			DefineStatement::Index(ref v) => v.compute(ctx, opt, exe, doc).await,
+		}
+	}
+}
+
 impl fmt::Display for DefineStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -50,28 +71,6 @@ impl fmt::Display for DefineStatement {
 			DefineStatement::Event(v) => write!(f, "{}", v),
 			DefineStatement::Field(v) => write!(f, "{}", v),
 			DefineStatement::Index(v) => write!(f, "{}", v),
-		}
-	}
-}
-
-impl dbs::Process for DefineStatement {
-	fn process(
-		&self,
-		ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		match self {
-			DefineStatement::Namespace(ref v) => v.process(ctx, opt, exe, doc),
-			DefineStatement::Database(ref v) => v.process(ctx, opt, exe, doc),
-			DefineStatement::Login(ref v) => v.process(ctx, opt, exe, doc),
-			DefineStatement::Token(ref v) => v.process(ctx, opt, exe, doc),
-			DefineStatement::Scope(ref v) => v.process(ctx, opt, exe, doc),
-			DefineStatement::Table(ref v) => v.process(ctx, opt, exe, doc),
-			DefineStatement::Event(ref v) => v.process(ctx, opt, exe, doc),
-			DefineStatement::Field(ref v) => v.process(ctx, opt, exe, doc),
-			DefineStatement::Index(ref v) => v.process(ctx, opt, exe, doc),
 		}
 	}
 }
@@ -99,17 +98,11 @@ pub struct DefineNamespaceStatement {
 	pub name: String,
 }
 
-impl fmt::Display for DefineNamespaceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE NAMESPACE {}", self.name)
-	}
-}
-
-impl dbs::Process for DefineNamespaceStatement {
-	fn process(
+impl DefineNamespaceStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -117,6 +110,12 @@ impl dbs::Process for DefineNamespaceStatement {
 		exe.check(opt, Level::Kv)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for DefineNamespaceStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE NAMESPACE {}", self.name)
 	}
 }
 
@@ -143,17 +142,11 @@ pub struct DefineDatabaseStatement {
 	pub name: String,
 }
 
-impl fmt::Display for DefineDatabaseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE DATABASE {}", self.name)
-	}
-}
-
-impl dbs::Process for DefineDatabaseStatement {
-	fn process(
+impl DefineDatabaseStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -161,6 +154,12 @@ impl dbs::Process for DefineDatabaseStatement {
 		exe.check(opt, Level::Ns)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for DefineDatabaseStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE DATABASE {}", self.name)
 	}
 }
 
@@ -192,24 +191,11 @@ pub struct DefineLoginStatement {
 	pub hash: Option<String>,
 }
 
-impl fmt::Display for DefineLoginStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE LOGIN {} ON {}", self.name, self.base)?;
-		if let Some(ref v) = self.pass {
-			write!(f, " PASSWORD {}", v)?
-		}
-		if let Some(ref v) = self.hash {
-			write!(f, " PASSHASH {}", v)?
-		}
-		Ok(())
-	}
-}
-
-impl dbs::Process for DefineLoginStatement {
-	fn process(
+impl DefineLoginStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -221,6 +207,19 @@ impl dbs::Process for DefineLoginStatement {
 		}
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for DefineLoginStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE LOGIN {} ON {}", self.name, self.base)?;
+		if let Some(ref v) = self.pass {
+			write!(f, " PASSWORD {}", v)?
+		}
+		if let Some(ref v) = self.hash {
+			write!(f, " PASSHASH {}", v)?
+		}
+		Ok(())
 	}
 }
 
@@ -290,21 +289,11 @@ pub struct DefineTokenStatement {
 	pub code: String,
 }
 
-impl fmt::Display for DefineTokenStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"DEFINE TOKEN {} ON {} TYPE {} VALUE {}",
-			self.name, self.base, self.kind, self.code
-		)
-	}
-}
-
-impl dbs::Process for DefineTokenStatement {
-	fn process(
+impl DefineTokenStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -316,6 +305,16 @@ impl dbs::Process for DefineTokenStatement {
 		}
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for DefineTokenStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"DEFINE TOKEN {} ON {} TYPE {} VALUE {}",
+			self.name, self.base, self.kind, self.code
+		)
 	}
 }
 
@@ -365,6 +364,21 @@ pub struct DefineScopeStatement {
 	pub connect: Option<Value>,
 }
 
+impl DefineScopeStatement {
+	pub async fn compute(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
+	}
+}
+
 impl fmt::Display for DefineScopeStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE SCOPE {}", self.name)?;
@@ -381,21 +395,6 @@ impl fmt::Display for DefineScopeStatement {
 			write!(f, " {}", v)?
 		}
 		Ok(())
-	}
-}
-
-impl dbs::Process for DefineScopeStatement {
-	fn process(
-		&self,
-		_ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		exe.check(opt, Level::Db)?;
-		// Continue
-		todo!()
 	}
 }
 
@@ -488,6 +487,21 @@ pub struct DefineTableStatement {
 	pub permissions: Permissions,
 }
 
+impl DefineTableStatement {
+	pub async fn compute(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
+	}
+}
+
 impl fmt::Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE TABLE {}", self.name)?;
@@ -505,21 +519,6 @@ impl fmt::Display for DefineTableStatement {
 		}
 		write!(f, "{}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl dbs::Process for DefineTableStatement {
-	fn process(
-		&self,
-		_ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		exe.check(opt, Level::Db)?;
-		// Continue
-		todo!()
 	}
 }
 
@@ -619,21 +618,11 @@ pub struct DefineEventStatement {
 	pub then: Values,
 }
 
-impl fmt::Display for DefineEventStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"DEFINE EVENT {} ON {} WHEN {} THEN {}",
-			self.name, self.what, self.when, self.then
-		)
-	}
-}
-
-impl dbs::Process for DefineEventStatement {
-	fn process(
+impl DefineEventStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -641,6 +630,16 @@ impl dbs::Process for DefineEventStatement {
 		exe.check(opt, Level::Db)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for DefineEventStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"DEFINE EVENT {} ON {} WHEN {} THEN {}",
+			self.name, self.what, self.when, self.then
+		)
 	}
 }
 
@@ -693,6 +692,21 @@ pub struct DefineFieldStatement {
 	pub permissions: Permissions,
 }
 
+impl DefineFieldStatement {
+	pub async fn compute(
+		&self,
+		_ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Allowed to run?
+		exe.check(opt, Level::Db)?;
+		// Continue
+		todo!()
+	}
+}
+
 impl fmt::Display for DefineFieldStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FIELD {} ON {}", self.name, self.what)?;
@@ -707,21 +721,6 @@ impl fmt::Display for DefineFieldStatement {
 		}
 		write!(f, "{}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl dbs::Process for DefineFieldStatement {
-	fn process(
-		&self,
-		_ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		exe.check(opt, Level::Db)?;
-		// Continue
-		todo!()
 	}
 }
 
@@ -832,21 +831,11 @@ pub struct DefineIndexStatement {
 	pub uniq: bool,
 }
 
-impl fmt::Display for DefineIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE INDEX {} ON {} COLUMNS {}", self.name, self.what, self.cols)?;
-		if self.uniq == true {
-			write!(f, " UNIQUE")?
-		}
-		Ok(())
-	}
-}
-
-impl dbs::Process for DefineIndexStatement {
-	fn process(
+impl DefineIndexStatement {
+	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -854,6 +843,16 @@ impl dbs::Process for DefineIndexStatement {
 		exe.check(opt, Level::Db)?;
 		// Continue
 		todo!()
+	}
+}
+
+impl fmt::Display for DefineIndexStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE INDEX {} ON {} COLUMNS {}", self.name, self.what, self.cols)?;
+		if self.uniq == true {
+			write!(f, " UNIQUE")?
+		}
+		Ok(())
 	}
 }
 

@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -19,6 +18,27 @@ pub struct IfelseStatement {
 	pub close: Option<Value>,
 }
 
+impl IfelseStatement {
+	pub async fn compute(
+		&self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		for (ref cond, ref then) in &self.exprs {
+			let v = cond.compute(ctx, opt, exe, doc).await?;
+			if v.is_truthy() {
+				return then.compute(ctx, opt, exe, doc).await;
+			}
+		}
+		match self.close {
+			Some(ref v) => v.compute(ctx, opt, exe, doc).await,
+			None => Ok(Value::None),
+		}
+	}
+}
+
 impl fmt::Display for IfelseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
@@ -35,27 +55,6 @@ impl fmt::Display for IfelseStatement {
 		}
 		write!(f, " END")?;
 		Ok(())
-	}
-}
-
-impl dbs::Process for IfelseStatement {
-	fn process(
-		&self,
-		ctx: &Runtime,
-		opt: &Options,
-		exe: &mut Executor,
-		doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		for (ref cond, ref then) in &self.exprs {
-			let v = cond.process(ctx, opt, exe, doc)?;
-			if v.is_truthy() {
-				return then.process(ctx, opt, exe, doc);
-			}
-		}
-		match self.close {
-			Some(ref v) => v.process(ctx, opt, exe, doc),
-			None => Ok(Value::None),
-		}
 	}
 }
 

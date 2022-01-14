@@ -6,8 +6,14 @@ use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
 
 impl Value {
-	pub fn array(&mut self, ctx: &Runtime, opt: &Options, exe: &mut Executor, path: &Idiom) {
+	pub async fn array(
+		&mut self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &mut Executor,
+		path: &Idiom,
+	) {
 		let val = Value::from(Array::default());
-		self.set(ctx, opt, exe, path, Value::from(val))
+		self.set(ctx, opt, exe, path, Value::from(val)).await
 	}
 }

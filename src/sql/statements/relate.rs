@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
@@ -35,30 +34,11 @@ pub struct RelateStatement {
 	pub timeout: Option<Timeout>,
 }
 
-impl fmt::Display for RelateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RELATE {} -> {} -> {}", self.from, self.kind, self.with)?;
-		if self.uniq {
-			write!(f, " UNIQUE")?
-		}
-		if let Some(ref v) = self.data {
-			write!(f, " {}", v)?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {}", v)?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
-		}
-		Ok(())
-	}
-}
-
-impl dbs::Process for RelateStatement {
-	fn process(
+impl RelateStatement {
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -70,7 +50,7 @@ impl dbs::Process for RelateStatement {
 		let opt = &opt.futures(false);
 		// Loop over the select targets
 		for f in self.from.0.iter() {
-			match f.process(ctx, opt, exe, doc)? {
+			match f.compute(ctx, opt, exe, doc).await? {
 				Value::Table(v) => {
 					i.process_table(ctx, exe, v);
 				}
@@ -95,6 +75,25 @@ impl dbs::Process for RelateStatement {
 		}
 		// Output the results
 		i.output(ctx, exe)
+	}
+}
+
+impl fmt::Display for RelateStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "RELATE {} -> {} -> {}", self.from, self.kind, self.with)?;
+		if self.uniq {
+			write!(f, " UNIQUE")?
+		}
+		if let Some(ref v) = self.data {
+			write!(f, " {}", v)?
+		}
+		if let Some(ref v) = self.output {
+			write!(f, " {}", v)?
+		}
+		if let Some(ref v) = self.timeout {
+			write!(f, " {}", v)?
+		}
+		Ok(())
 	}
 }
 

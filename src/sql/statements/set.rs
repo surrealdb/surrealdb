@@ -1,4 +1,3 @@
-use crate::dbs;
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -20,21 +19,21 @@ pub struct SetStatement {
 	pub what: Value,
 }
 
-impl fmt::Display for SetStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LET ${} = {}", self.name, self.what)
-	}
-}
-
-impl dbs::Process for SetStatement {
-	fn process(
+impl SetStatement {
+	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options,
+		opt: &Options<'_>,
 		exe: &mut Executor,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		self.what.process(ctx, opt, exe, doc)
+		self.what.compute(ctx, opt, exe, doc).await
+	}
+}
+
+impl fmt::Display for SetStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "LET ${} = {}", self.name, self.what)
 	}
 }
 
