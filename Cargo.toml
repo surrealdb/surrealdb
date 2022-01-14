@@ -8,6 +8,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 [dependencies]
 anyhow = "1.0.44"
 argon2 = "0.3.1"
+async-recursion = "1.0.0"
 byteorder = "1.4.3"
 bytes = "1.1.0"
 clap = "2.33.3"
