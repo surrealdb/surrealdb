@@ -11,10 +11,6 @@ pub struct Query {
 }
 
 impl Query {
-	pub fn empty(&self) -> bool {
-		self.statements.len() == 0
-	}
-
 	pub fn statements(&self) -> &Vec<Statement> {
 		&self.statements.0
 	}

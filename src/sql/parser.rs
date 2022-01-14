@@ -5,23 +5,20 @@ use std::str;
 
 #[allow(dead_code)]
 pub fn parse(input: &str) -> Result<Query, Error> {
-	match query(input) {
-		Ok((_, query)) => {
-			if query.empty() {
-				Err(Error::EmptyError)
-			} else {
-				Ok(query)
-			}
-		}
-		Err(Err::Error(e)) => Err(Error::ParseError {
-			pos: input.len() - e.input.len(),
-			sql: String::from(e.input),
-		}),
-		Err(Err::Failure(e)) => Err(Error::ParseError {
-			pos: input.len() - e.input.len(),
-			sql: String::from(e.input),
-		}),
-		Err(Err::Incomplete(_)) => Err(Error::EmptyError),
+	match input.trim().len() {
+		0 => Err(Error::EmptyError),
+		_ => match query(input) {
+			Ok((_, query)) => Ok(query),
+			Err(Err::Error(e)) => Err(Error::ParseError {
+				pos: input.len() - e.input.len(),
+				sql: String::from(e.input),
+			}),
+			Err(Err::Failure(e)) => Err(Error::ParseError {
+				pos: input.len() - e.input.len(),
+				sql: String::from(e.input),
+			}),
+			Err(Err::Incomplete(_)) => Err(Error::EmptyError),
+		},
 	}
 }
 
