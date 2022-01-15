@@ -3,23 +3,53 @@ use crate::sql::query::{query, Query};
 use nom::Err;
 use std::str;
 
-#[allow(dead_code)]
 pub fn parse(input: &str) -> Result<Query, Error> {
 	match input.trim().len() {
 		0 => Err(Error::EmptyError),
 		_ => match query(input) {
 			Ok((_, query)) => Ok(query),
-			Err(Err::Error(e)) => Err(Error::ParseError {
-				pos: input.len() - e.input.len(),
-				sql: String::from(e.input),
-			}),
-			Err(Err::Failure(e)) => Err(Error::ParseError {
-				pos: input.len() - e.input.len(),
-				sql: String::from(e.input),
-			}),
+			Err(Err::Error(e)) => match locate(input, e.input) {
+				(s, l, c) => Err(Error::ParseError {
+					line: l,
+					char: c,
+					sql: s.to_string(),
+				}),
+			},
+			Err(Err::Failure(e)) => match locate(input, e.input) {
+				(s, l, c) => Err(Error::ParseError {
+					line: l,
+					char: c,
+					sql: s.to_string(),
+				}),
+			},
 			Err(Err::Incomplete(_)) => Err(Error::EmptyError),
 		},
 	}
+}
+
+fn truncate(s: &str, l: usize) -> &str {
+	match s.char_indices().nth(l) {
+		None => s,
+		Some((i, _)) => &s[..i],
+	}
+}
+
+fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
+	let index = input.len() - tried.len();
+	let tried = truncate(&tried, 100);
+	let lines = input.split('\n').collect::<Vec<&str>>();
+	let lines = lines.iter().map(|l| l.len()).enumerate();
+	let (mut total, mut chars) = (0, 0);
+	for (line, size) in lines {
+		total += size + 1;
+		if index < total {
+			let line_num = line + 1;
+			let char_num = index - chars;
+			return (tried, line_num, char_num);
+		}
+		chars += size + 1;
+	}
+	return (tried, 0, 0);
 }
 
 #[cfg(test)]

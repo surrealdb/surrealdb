@@ -39,9 +39,10 @@ pub enum Error {
 	#[error("The query was cancelled before completion")]
 	CancelledError,
 
-	#[error("Parse error at position {pos} when parsing '{sql}'")]
+	#[error("Parse error on line {line} at character {char} when parsing '{sql}'")]
 	ParseError {
-		pos: usize,
+		line: usize,
+		char: usize,
 		sql: String,
 	},
 
