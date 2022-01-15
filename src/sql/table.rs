@@ -27,22 +27,6 @@ pub struct Table {
 	pub name: String,
 }
 
-impl From<String> for Table {
-	fn from(s: String) -> Self {
-		Table {
-			name: s,
-		}
-	}
-}
-
-impl<'a> From<&'a str> for Table {
-	fn from(t: &str) -> Table {
-		Table {
-			name: String::from(t),
-		}
-	}
-}
-
 impl fmt::Display for Table {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", escape(&self.name, &val_char, "`"))
@@ -51,7 +35,12 @@ impl fmt::Display for Table {
 
 pub fn table(i: &str) -> IResult<&str, Table> {
 	let (i, v) = ident_raw(i)?;
-	Ok((i, Table::from(v)))
+	Ok((
+		i,
+		Table {
+			name: v,
+		},
+	))
 }
 
 #[cfg(test)]
@@ -66,7 +55,12 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
-		assert_eq!(out, Table::from("test"));
+		assert_eq!(
+			out,
+			Table {
+				name: String::from("test"),
+			}
+		);
 	}
 
 	#[test]
@@ -76,7 +70,12 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
-		assert_eq!(out, Table::from("test"));
+		assert_eq!(
+			out,
+			Table {
+				name: String::from("test"),
+			}
+		);
 	}
 
 	#[test]
@@ -86,6 +85,11 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
-		assert_eq!(out, Table::from("test"));
+		assert_eq!(
+			out,
+			Table {
+				name: String::from("test"),
+			}
+		);
 	}
 }

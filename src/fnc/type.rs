@@ -2,6 +2,7 @@ use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::geometry::Geometry;
 use crate::sql::number::Number;
+use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 
@@ -95,7 +96,9 @@ pub fn string(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn table(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(Value::Table(args.remove(0).as_strand().value.into()))
+	Ok(Value::Table(Table {
+		name: args.remove(0).as_strand().value,
+	}))
 }
 
 pub fn thing(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
