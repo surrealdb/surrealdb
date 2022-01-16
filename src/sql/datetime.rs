@@ -1,10 +1,10 @@
 use crate::sql::common::{take_digits, take_digits_range, take_u32};
+use crate::sql::error::IResult;
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::map;
 use nom::sequence::delimited;
-use nom::IResult;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;

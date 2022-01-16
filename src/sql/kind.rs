@@ -1,9 +1,9 @@
+use crate::sql::error::IResult;
 use crate::sql::table::{table, Table};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::map;
 use nom::multi::many1;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

@@ -1,9 +1,9 @@
 use crate::sql::common::commas;
 use crate::sql::common::escape;
 use crate::sql::common::val_char;
+use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
 use nom::multi::separated_list1;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;

@@ -1,5 +1,6 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
+use crate::sql::error::IResult;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{LineString, Point, Polygon};
@@ -11,7 +12,6 @@ use nom::multi::separated_list1;
 use nom::number::complete::double;
 use nom::sequence::delimited;
 use nom::sequence::preceded;
-use nom::IResult;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;

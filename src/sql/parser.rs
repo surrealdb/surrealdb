@@ -1,4 +1,6 @@
 use crate::err::Error;
+use crate::sql::error::Error::ParserError;
+use crate::sql::error::Error::ScriptError;
 use crate::sql::query::{query, Query};
 use nom::Err;
 use std::str;
@@ -8,21 +10,31 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 		0 => Err(Error::EmptyError),
 		_ => match query(input) {
 			Ok((_, query)) => Ok(query),
-			Err(Err::Error(e)) => match locate(input, e.input) {
-				(s, l, c) => Err(Error::ParseError {
-					line: l,
-					char: c,
-					sql: s.to_string(),
+			Err(Err::Error(e)) => match e {
+				ParserError(e) => match locate(input, e) {
+					(s, l, c) => Err(Error::ParseError {
+						line: l,
+						char: c,
+						sql: s.to_string(),
+					}),
+				},
+				ScriptError(e) => Err(Error::LanguageError {
+					message: e,
 				}),
 			},
-			Err(Err::Failure(e)) => match locate(input, e.input) {
-				(s, l, c) => Err(Error::ParseError {
-					line: l,
-					char: c,
-					sql: s.to_string(),
+			Err(Err::Failure(e)) => match e {
+				ParserError(e) => match locate(input, e) {
+					(s, l, c) => Err(Error::ParseError {
+						line: l,
+						char: c,
+						sql: s.to_string(),
+					}),
+				},
+				ScriptError(e) => Err(Error::LanguageError {
+					message: e,
 				}),
 			},
-			Err(Err::Incomplete(_)) => Err(Error::EmptyError),
+			_ => unreachable!(),
 		},
 	}
 }

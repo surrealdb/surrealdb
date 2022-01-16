@@ -1,11 +1,11 @@
 use crate::sql::common::escape;
 use crate::sql::common::val_char;
+use crate::sql::error::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::sequence::delimited;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;

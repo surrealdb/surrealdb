@@ -1,7 +1,7 @@
+use crate::sql::error::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

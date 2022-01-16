@@ -1,8 +1,8 @@
 use crate::sql::common::escape;
 use crate::sql::common::val_char;
+use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
 use nom::bytes::complete::tag;
-use nom::IResult;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;

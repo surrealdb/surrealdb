@@ -1,5 +1,6 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
+use crate::sql::error::IResult;
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::table::{tables, Tables};
 use crate::sql::value::{value, Value};
@@ -7,7 +8,6 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

@@ -7,13 +7,13 @@ use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::data::{data, Data};
+use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
 use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{whats, Value, Values};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

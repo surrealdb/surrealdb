@@ -1,7 +1,7 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::duration::{duration, Duration};
+use crate::sql::error::IResult;
 use nom::bytes::complete::tag_no_case;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

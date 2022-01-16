@@ -9,6 +9,7 @@ pub mod cond;
 pub mod data;
 pub mod datetime;
 pub mod duration;
+pub mod error;
 pub mod expression;
 pub mod fetch;
 pub mod field;

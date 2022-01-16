@@ -1,11 +1,11 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
+use crate::sql::error::IResult;
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

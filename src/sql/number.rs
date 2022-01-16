@@ -1,9 +1,9 @@
+use crate::sql::error::IResult;
 use dec::prelude::FromPrimitive;
 use dec::prelude::ToPrimitive;
 use dec::Decimal;
 use dec::MathematicalOps;
 use nom::number::complete::double;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;

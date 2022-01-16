@@ -3,11 +3,11 @@ use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
+use crate::sql::error::IResult;
 use crate::sql::value::{value, Value};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

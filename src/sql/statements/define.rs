@@ -8,6 +8,7 @@ use crate::sql::base::{base, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::take_u64;
 use crate::sql::duration::{duration, Duration};
+use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
 use crate::sql::idiom;
 use crate::sql::idiom::{Idiom, Idioms};
@@ -19,8 +20,8 @@ use crate::sql::view::{view, View};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
+use nom::multi::many0;
 use nom::sequence::tuple;
-use nom::{multi::many0, IResult};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

@@ -6,6 +6,7 @@ use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::data::{single, update, values, Data};
+use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
 use crate::sql::table::{table, Table};
 use crate::sql::timeout::{timeout, Timeout};
@@ -14,7 +15,6 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

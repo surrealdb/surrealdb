@@ -4,6 +4,7 @@ use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
+use crate::sql::error::IResult;
 use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Fields};
 use crate::sql::value::Value;
@@ -11,7 +12,6 @@ use crate::sql::value::{whats, Values};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

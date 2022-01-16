@@ -1,9 +1,9 @@
+use crate::sql::error::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::tag;
 use nom::character::complete::one_of;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;

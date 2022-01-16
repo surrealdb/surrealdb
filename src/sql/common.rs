@@ -1,13 +1,13 @@
 use crate::sql::comment::mightbespace;
+use crate::sql::error::Error::ParserError;
+use crate::sql::error::IResult;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while;
 use nom::bytes::complete::take_while_m_n;
 use nom::character::is_alphanumeric;
 use nom::combinator::map;
-use nom::error::Error;
-use nom::error::ErrorKind;
 use nom::multi::many1;
-use nom::IResult;
+use nom::Err::Error;
 use std::ops::RangeBounds;
 use std::str;
 
@@ -76,6 +76,6 @@ pub fn take_digits_range(i: &str, n: usize, range: impl RangeBounds<u32>) -> IRe
 	if range.contains(&v) {
 		Ok((i, v))
 	} else {
-		Err(nom::Err::Error(Error::new(i, ErrorKind::Eof)))
+		Err(Error(ParserError(i)))
 	}
 }

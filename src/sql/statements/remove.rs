@@ -5,13 +5,13 @@ use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::base::{base, Base};
 use crate::sql::comment::shouldbespace;
+use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
 use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
