@@ -2,6 +2,7 @@ use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::datetime::Datetime;
 use crate::sql::value::Value;
+use chrono::prelude::*;
 use chrono::Datelike;
 use chrono::DurationRound;
 use chrono::Timelike;
@@ -26,6 +27,39 @@ pub fn floor(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 					_ => Ok(Value::None),
 				},
 				_ => Ok(Value::None),
+			},
+			_ => Ok(Value::None),
+		},
+		_ => Ok(Value::None),
+	}
+}
+
+pub fn group(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+	match args.remove(0) {
+		Value::Datetime(v) => match args.remove(0) {
+			Value::Strand(g) => match g.value.as_str() {
+				"year" => Ok(Utc.ymd(v.value.year(), 1, 1).and_hms(0, 0, 0).into()),
+				"month" => Ok(Utc.ymd(v.value.year(), v.value.month(), 1).and_hms(0, 0, 0).into()),
+				"day" => Ok(Utc
+					.ymd(v.value.year(), v.value.month(), v.value.day())
+					.and_hms(0, 0, 0)
+					.into()),
+				"hour" => Ok(Utc
+					.ymd(v.value.year(), v.value.month(), v.value.day())
+					.and_hms(v.value.hour(), 0, 0)
+					.into()),
+				"minute" => Ok(Utc
+					.ymd(v.value.year(), v.value.month(), v.value.day())
+					.and_hms(v.value.hour(), v.value.minute(), 0)
+					.into()),
+				"second" => Ok(Utc
+					.ymd(v.value.year(), v.value.month(), v.value.day())
+					.and_hms(v.value.hour(), v.value.minute(), v.value.second())
+					.into()),
+				_ => Err(Error::ArgumentsError {
+					name: String::from("time::group"),
+					message: String::from("The second argument must be a string, and can be one of 'year', 'month', 'day', 'hour', 'minute', or 'second'."),
+				}),
 			},
 			_ => Ok(Value::None),
 		},

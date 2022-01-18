@@ -137,6 +137,7 @@ pub fn run(ctx: &Runtime, name: &String, args: Vec<Value>) -> Result<Value, Erro
 		//
 		"time::day" => args::check(ctx, name, args, Args::NoneOne, time::day),
 		"time::floor" => args::check(ctx, name, args, Args::Two, time::floor),
+		"time::group" => args::check(ctx, name, args, Args::Two, time::group),
 		"time::hour" => args::check(ctx, name, args, Args::NoneOne, time::hour),
 		"time::mins" => args::check(ctx, name, args, Args::NoneOne, time::mins),
 		"time::month" => args::check(ctx, name, args, Args::NoneOne, time::month),
