@@ -12,7 +12,6 @@ pub enum Args {
 	NoneTwo,
 	NoneOneTwo,
 	OneTwo,
-	OneTwoThree,
 }
 
 pub fn check(
@@ -77,13 +76,6 @@ pub fn check(
 			_ => Err(Error::ArgumentsError {
 				name: name.to_owned(),
 				message: String::from("The function expects 1 or 2 arguments."),
-			}),
-		},
-		Args::OneTwoThree => match args.len() {
-			1 | 2 | 3 => func(ctx, args),
-			_ => Err(Error::ArgumentsError {
-				name: name.to_owned(),
-				message: String::from("The function expects 1, 2, or 3 arguments."),
 			}),
 		},
 		Args::Any => func(ctx, args),

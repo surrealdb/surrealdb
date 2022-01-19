@@ -22,7 +22,7 @@ pub mod time;
 pub mod r#type;
 pub mod util;
 
-pub fn run(ctx: &Runtime, name: &String, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn run(ctx: &Runtime, name: &String, args: Vec<Value>) -> Result<Value, Error> {
 	match name.as_ref() {
 		//
 		"array::combine" => args::check(ctx, name, args, Args::Two, array::combine),
@@ -55,12 +55,12 @@ pub fn run(ctx: &Runtime, name: &String, args: Vec<Value>) -> Result<Value, Erro
 		"geo::hash::decode" => args::check(ctx, name, args, Args::One, geo::hash::decode),
 		"geo::hash::encode" => args::check(ctx, name, args, Args::OneTwo, geo::hash::encode),
 		//
-		"http::head" => args::check(ctx, name, args, Args::OneTwo, http::head),
-		"http::get" => args::check(ctx, name, args, Args::OneTwo, http::get),
-		"http::put" => args::check(ctx, name, args, Args::OneTwoThree, http::put),
-		"http::post" => args::check(ctx, name, args, Args::OneTwoThree, http::post),
-		"http::patch" => args::check(ctx, name, args, Args::OneTwoThree, http::patch),
-		"http::delete" => args::check(ctx, name, args, Args::OneTwo, http::delete),
+		"http::head" => http::head(ctx, args).await,
+		"http::get" => http::get(ctx, args).await,
+		"http::put" => http::put(ctx, args).await,
+		"http::post" => http::post(ctx, args).await,
+		"http::patch" => http::patch(ctx, args).await,
+		"http::delete" => http::delete(ctx, args).await,
 		//
 		"is::alphanum" => args::check(ctx, name, args, Args::One, is::alphanum),
 		"is::alpha" => args::check(ctx, name, args, Args::One, is::alpha),

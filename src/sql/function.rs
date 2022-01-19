@@ -60,7 +60,7 @@ impl Function {
 					let v = v.compute(ctx, opt, exe, doc).await?;
 					a.push(v);
 				}
-				fnc::run(ctx, s, a)
+				fnc::run(ctx, s, a).await
 			}
 		}
 	}
