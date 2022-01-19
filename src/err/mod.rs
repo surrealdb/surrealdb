@@ -33,6 +33,9 @@ pub enum Error {
 	#[error("Specify some SQL code to execute")]
 	EmptyError,
 
+	#[error("The request body contains invalid data")]
+	RequestError,
+
 	#[error("The query failed to complete in time")]
 	TimeoutError,
 

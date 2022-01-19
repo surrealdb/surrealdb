@@ -1,4 +1,5 @@
 use crate::dbs::Session;
+use crate::err::Error;
 use crate::sql::value::Value;
 use crate::web::conf;
 use crate::web::head;
@@ -143,7 +144,7 @@ async fn create_all(
 				Err(err) => Err(warp::reject::custom(err)),
 			}
 		}
-		Err(_) => todo!(),
+		Err(_) => Err(warp::reject::custom(Error::RequestError)),
 	}
 }
 
@@ -213,7 +214,7 @@ async fn create_one(
 				Err(err) => Err(warp::reject::custom(err)),
 			}
 		}
-		Err(_) => todo!(),
+		Err(_) => Err(warp::reject::custom(Error::RequestError)),
 	}
 }
 
@@ -241,7 +242,7 @@ async fn update_one(
 				Err(err) => Err(warp::reject::custom(err)),
 			}
 		}
-		Err(_) => todo!(),
+		Err(_) => Err(warp::reject::custom(Error::RequestError)),
 	}
 }
 
@@ -269,7 +270,7 @@ async fn modify_one(
 				Err(err) => Err(warp::reject::custom(err)),
 			}
 		}
-		Err(_) => todo!(),
+		Err(_) => Err(warp::reject::custom(Error::RequestError)),
 	}
 }
 
