@@ -19,8 +19,8 @@ pub enum Data {
 	SetExpression(Vec<(Idiom, Operator, Value)>),
 	DiffExpression(Array),
 	MergeExpression(Object),
-	ReplaceExpression(Value),
-	ContentExpression(Value),
+	ReplaceExpression(Object),
+	ContentExpression(Object),
 	SingleExpression(Value),
 	ValuesExpression(Vec<Vec<(Idiom, Value)>>),
 	UpdateExpression(Vec<(Idiom, Operator, Value)>),
@@ -113,14 +113,14 @@ fn merge(i: &str) -> IResult<&str, Data> {
 fn replace(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("REPLACE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = object(i)?;
 	Ok((i, Data::ReplaceExpression(v)))
 }
 
 fn content(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("CONTENT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
+	let (i, v) = object(i)?;
 	Ok((i, Data::ContentExpression(v)))
 }
 
@@ -215,6 +215,15 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("CONTENT { field: true }", format!("{}", out));
+	}
+
+	#[test]
+	fn replace_statement() {
+		let sql = "REPLACE { field: true }";
+		let res = data(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("REPLACE { field: true }", format!("{}", out));
 	}
 
 	#[test]
