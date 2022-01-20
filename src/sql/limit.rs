@@ -1,5 +1,5 @@
 use crate::sql::comment::shouldbespace;
-use crate::sql::common::take_u64;
+use crate::sql::common::take_usize;
 use crate::sql::error::IResult;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct Limit(pub u64);
+pub struct Limit(pub usize);
 
 impl fmt::Display for Limit {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -20,7 +20,7 @@ pub fn limit(i: &str) -> IResult<&str, Limit> {
 	let (i, _) = tag_no_case("LIMIT")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = take_u64(i)?;
+	let (i, v) = take_usize(i)?;
 	Ok((i, Limit(v)))
 }
 

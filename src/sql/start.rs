@@ -1,5 +1,5 @@
 use crate::sql::comment::shouldbespace;
-use crate::sql::common::take_u64;
+use crate::sql::common::take_usize;
 use crate::sql::error::IResult;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Start(pub u64);
+pub struct Start(pub usize);
 
 impl fmt::Display for Start {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -20,7 +20,7 @@ pub fn start(i: &str) -> IResult<&str, Start> {
 	let (i, _) = tag_no_case("START")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("AT"))))(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = take_u64(i)?;
+	let (i, v) = take_usize(i)?;
 	Ok((i, Start(v)))
 }
 

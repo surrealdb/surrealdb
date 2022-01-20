@@ -208,11 +208,11 @@ impl<'a> Iterator<'a> {
 
 		if let Some(l) = self.limit {
 			if let Some(s) = self.start {
-				if self.results.len() as u64 == l.0 + s.0 {
+				if self.results.len() == l.0 + s.0 {
 					self.ok = false
 				}
 			} else {
-				if self.results.len() as u64 == l.0 {
+				if self.results.len() == l.0 {
 					self.ok = false
 				}
 			}

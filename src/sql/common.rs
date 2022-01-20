@@ -42,6 +42,11 @@ pub fn to_u64(s: &str) -> u64 {
 }
 
 #[inline]
+pub fn to_usize(s: &str) -> usize {
+	str::FromStr::from_str(s).unwrap()
+}
+
+#[inline]
 pub fn val_char(chr: char) -> bool {
 	is_alphanumeric(chr as u8) || chr == '_' as char
 }
@@ -63,6 +68,11 @@ pub fn take_u32(i: &str) -> IResult<&str, u32> {
 
 pub fn take_u64(i: &str) -> IResult<&str, u64> {
 	let (i, v) = map(take_while(is_digit), to_u64)(i)?;
+	Ok((i, v))
+}
+
+pub fn take_usize(i: &str) -> IResult<&str, usize> {
+	let (i, v) = map(take_while(is_digit), to_usize)(i)?;
 	Ok((i, v))
 }
 

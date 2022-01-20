@@ -48,13 +48,13 @@ pub struct SelectStatement {
 }
 
 impl SelectStatement {
-	pub fn limit(&self) -> u64 {
+	pub fn limit(&self) -> usize {
 		match self.limit {
 			Some(Limit(v)) => v,
 			None => 0,
 		}
 	}
-	pub fn start(&self) -> u64 {
+	pub fn start(&self) -> usize {
 		match self.start {
 			Some(Start(v)) => v,
 			None => 0,
