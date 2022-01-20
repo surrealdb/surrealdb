@@ -37,12 +37,6 @@ use std::time::Duration;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Statements(pub Vec<Statement>);
 
-impl Statements {
-	pub fn len(&self) -> usize {
-		self.0.len()
-	}
-}
-
 impl fmt::Display for Statements {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", self.0.iter().map(|ref v| format!("{};", v)).collect::<Vec<_>>().join("\n"))
