@@ -7,8 +7,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub type Parent = Arc<Context>;
-
 pub struct Context {
 	// An optional parent context.
 	parent: Option<Arc<Context>>,
