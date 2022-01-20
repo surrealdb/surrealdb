@@ -10,6 +10,8 @@ use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use std::time::Instant;
 
+const NAME: &'static str = "surreal::exe";
+
 #[derive(Debug, Default)]
 pub struct Executor {
 	pub id: Option<String>,
@@ -53,6 +55,8 @@ impl Executor {
 		let mut opt = Options::new(&Auth::No);
 		// Process all statements in query
 		for stm in qry.statements().iter() {
+			// Log the statement
+			debug!(target: NAME, "{}", stm);
 			// Reset errors
 			if self.txn.is_none() {
 				self.err = None;
