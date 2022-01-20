@@ -42,7 +42,7 @@ impl Param {
 					// Process the paramater value
 					let res = v.compute(ctx, opt, exe, doc).await?;
 					// Return the desired field
-					res.get(ctx, opt, exe, &self.name.next()).await.ok()
+					res.get(ctx, opt, exe, &self.name.next()).await
 				}
 				// The base variable does not exist
 				None => Ok(Value::None),

@@ -32,6 +32,14 @@ pub struct Idiom {
 	pub parts: Vec<Part>,
 }
 
+impl From<String> for Idiom {
+	fn from(v: String) -> Self {
+		Idiom {
+			parts: vec![Part::from(v)],
+		}
+	}
+}
+
 impl From<Vec<Part>> for Idiom {
 	fn from(v: Vec<Part>) -> Self {
 		Idiom {
@@ -59,7 +67,7 @@ impl Idiom {
 	) -> Result<Value, Error> {
 		match doc {
 			// There is a current document
-			Some(v) => v.get(ctx, opt, exe, self).await.ok(),
+			Some(v) => v.get(ctx, opt, exe, self).await,
 			// There isn't any document
 			None => Ok(Value::None),
 		}

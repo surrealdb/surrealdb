@@ -1,6 +1,7 @@
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::err::Error;
 use crate::sql::array::Abolish;
 use crate::sql::idiom::Idiom;
 use crate::sql::part::Part;
@@ -16,66 +17,73 @@ impl Value {
 		opt: &Options<'_>,
 		exe: &mut Executor,
 		path: &Idiom,
-	) {
+	) -> Result<(), Error> {
 		match path.parts.first() {
 			// Get the current path part
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
 					Part::Field(p) => match path.parts.len() {
-						1 => v.remove(&p.name),
+						1 => {
+							v.remove(&p.name);
+							Ok(())
+						}
 						_ => match v.value.get_mut(&p.name) {
 							Some(v) if v.is_some() => v.del(ctx, opt, exe, &path.next()).await,
-							_ => (),
+							_ => Ok(()),
 						},
 					},
-					_ => (),
+					_ => Ok(()),
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => match path.parts.len() {
-						1 => v.value.clear(),
+						1 => {
+							v.value.clear();
+							Ok(())
+						}
 						_ => {
 							for v in &mut v.value {
-								v.del(ctx, opt, exe, &path.next()).await
+								v.del(ctx, opt, exe, &path.next()).await?;
 							}
+							Ok(())
 						}
 					},
 					Part::First => match path.parts.len() {
 						1 => {
 							if v.value.len().gt(&0) {
 								v.value.remove(0);
-								()
 							}
+							Ok(())
 						}
 						_ => match v.value.first_mut() {
 							Some(v) => v.del(ctx, opt, exe, &path.next()).await,
-							None => (),
+							None => Ok(()),
 						},
 					},
 					Part::Last => match path.parts.len() {
 						1 => {
 							if v.value.len().gt(&0) {
 								v.value.remove(v.value.len() - 1);
-								()
 							}
+							Ok(())
 						}
 						_ => match v.value.last_mut() {
 							Some(v) => v.del(ctx, opt, exe, &path.next()).await,
-							None => (),
+							None => Ok(()),
 						},
 					},
 					Part::Index(i) => match path.parts.len() {
 						1 => {
 							if v.value.len().gt(&i.to_usize()) {
 								v.value.remove(i.to_usize());
-								()
 							}
+							Ok(())
 						}
 						_ => match path.parts.len() {
 							_ => match v.value.get_mut(i.to_usize()) {
 								Some(v) => v.del(ctx, opt, exe, &path.next()).await,
-								None => (),
+								None => Ok(()),
 							},
 						},
 					},
@@ -83,31 +91,29 @@ impl Value {
 						1 => {
 							let mut m = HashMap::new();
 							for (i, v) in v.value.iter().enumerate() {
-								match w.compute(ctx, opt, exe, Some(&v)).await {
-									Ok(o) if o.is_truthy() => m.insert(i, ()),
-									_ => None,
+								if w.compute(ctx, opt, exe, Some(&v)).await?.is_truthy() {
+									m.insert(i, ());
 								};
 							}
-							v.value.abolish(|i| m.contains_key(&i))
+							v.value.abolish(|i| m.contains_key(&i));
+							Ok(())
 						}
 						_ => {
 							for v in &mut v.value {
-								match w.compute(ctx, opt, exe, Some(&v)).await {
-									Ok(o) if o.is_truthy() => {
-										v.del(ctx, opt, exe, &path.next()).await
-									}
-									_ => (),
-								};
+								if w.compute(ctx, opt, exe, Some(&v)).await?.is_truthy() {
+									v.del(ctx, opt, exe, &path.next()).await?;
+								}
 							}
+							Ok(())
 						}
 					},
-					_ => (),
+					_ => Ok(()),
 				},
 				// Ignore everything else
-				_ => (),
+				_ => Ok(()),
 			},
 			// We are done
-			None => (),
+			None => Ok(()),
 		}
 	}
 }
@@ -122,12 +128,10 @@ mod tests {
 	#[tokio::test]
 	async fn del_none() {
 		let (ctx, opt, mut exe) = mock();
-		let idi = Idiom {
-			parts: vec![],
-		};
+		let idi = Idiom::default();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
-		val.del(&ctx, &opt, &mut exe, &idi).await;
+		val.del(&ctx, &opt, &mut exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -137,7 +141,7 @@ mod tests {
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ }");
-		val.del(&ctx, &opt, &mut exe, &idi).await;
+		val.del(&ctx, &opt, &mut exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -147,7 +151,7 @@ mod tests {
 		let idi = Idiom::parse("test.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null } }");
-		val.del(&ctx, &opt, &mut exe, &idi).await;
+		val.del(&ctx, &opt, &mut exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -157,7 +161,7 @@ mod tests {
 		let idi = Idiom::parse("test.something.wrong");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
-		val.del(&ctx, &opt, &mut exe, &idi).await;
+		val.del(&ctx, &opt, &mut exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -167,7 +171,7 @@ mod tests {
 		let idi = Idiom::parse("test.other.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
-		val.del(&ctx, &opt, &mut exe, &idi).await;
+		val.del(&ctx, &opt, &mut exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -177,7 +181,7 @@ mod tests {
 		let idi = Idiom::parse("test.something[1]");
 		let mut val = Value::parse("{ test: { something: [123, 456, 789] } }");
 		let res = Value::parse("{ test: { something: [123, 789] } }");
-		val.del(&ctx, &opt, &mut exe, &idi).await;
+		val.del(&ctx, &opt, &mut exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -187,7 +191,7 @@ mod tests {
 		let idi = Idiom::parse("test.something[1].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 34 }, { }] } }");
-		val.del(&ctx, &opt, &mut exe, &idi).await;
+		val.del(&ctx, &opt, &mut exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -197,7 +201,7 @@ mod tests {
 		let idi = Idiom::parse("test.something[*].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ }, { }] } }");
-		val.del(&ctx, &opt, &mut exe, &idi).await;
+		val.del(&ctx, &opt, &mut exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -207,7 +211,7 @@ mod tests {
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 34 }, { }] } }");
-		val.del(&ctx, &opt, &mut exe, &idi).await;
+		val.del(&ctx, &opt, &mut exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -217,7 +221,7 @@ mod tests {
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 34 }] } }");
-		val.del(&ctx, &opt, &mut exe, &idi).await;
+		val.del(&ctx, &opt, &mut exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 }

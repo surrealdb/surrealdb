@@ -2,20 +2,18 @@ use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
-use crate::sql::array::Array;
-use crate::sql::idiom::Idiom;
+use crate::sql::object::Object;
 use crate::sql::value::Value;
 
 impl Value {
-	pub async fn array(
+	pub async fn clear(
 		&mut self,
-		ctx: &Runtime,
-		opt: &Options<'_>,
-		exe: &mut Executor,
-		path: &Idiom,
+		_ctx: &Runtime,
+		_opt: &Options<'_>,
+		_exe: &mut Executor,
 	) -> Result<(), Error> {
-		let val = Value::from(Array::default());
-		self.set(ctx, opt, exe, path, val).await
+		*self = Value::from(Object::default());
+		Ok(())
 	}
 }
 
@@ -27,22 +25,20 @@ mod tests {
 	use crate::sql::test::Parse;
 
 	#[tokio::test]
-	async fn array_none() {
+	async fn clear_none() {
 		let (ctx, opt, mut exe) = mock();
-		let idi = Idiom::default();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::parse("[]");
-		val.array(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = Value::parse("{}");
+		val.clear(&ctx, &opt, &mut exe).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
-	async fn array_path() {
+	async fn clear_path() {
 		let (ctx, opt, mut exe) = mock();
-		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::parse("{ test: [] }");
-		val.array(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = Value::parse("{}");
+		val.clear(&ctx, &opt, &mut exe).await.unwrap();
 		assert_eq!(res, val);
 	}
 }

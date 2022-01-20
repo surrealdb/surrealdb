@@ -66,13 +66,11 @@ impl Subquery {
 				// Process result
 				match v.limit() {
 					1 => match v.expr.single() {
-						Some(v) => {
-							res.first(&ctx, &opt, exe).await.get(&ctx, &opt, exe, &v).await.ok()
-						}
-						None => res.first(&ctx, &opt, exe).await.ok(),
+						Some(v) => res.first(&ctx, &opt, exe).await?.get(&ctx, &opt, exe, &v).await,
+						None => res.first(&ctx, &opt, exe).await,
 					},
 					_ => match v.expr.single() {
-						Some(v) => res.get(&ctx, &opt, exe, &v).await.ok(),
+						Some(v) => res.get(&ctx, &opt, exe, &v).await,
 						None => res.ok(),
 					},
 				}

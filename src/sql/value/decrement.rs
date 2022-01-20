@@ -1,6 +1,7 @@
 use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::err::Error;
 use crate::sql::idiom::Idiom;
 use crate::sql::number::Number;
 use crate::sql::value::Value;
@@ -13,33 +14,23 @@ impl Value {
 		exe: &mut Executor,
 		path: &Idiom,
 		val: Value,
-	) {
-		match self.get(ctx, opt, exe, path).await {
+	) -> Result<(), Error> {
+		match self.get(ctx, opt, exe, path).await? {
 			Value::Number(v) => match val {
-				Value::Number(x) => {
-					self.set(ctx, opt, exe, path, Value::from(v - x)).await;
-					()
-				}
-				_ => (),
+				Value::Number(x) => self.set(ctx, opt, exe, path, Value::from(v - x)).await,
+				_ => Ok(()),
 			},
 			Value::Array(v) => match val {
-				Value::Array(x) => {
-					self.set(ctx, opt, exe, path, Value::from(v - x)).await;
-					()
-				}
-				x => {
-					self.set(ctx, opt, exe, path, Value::from(v - x)).await;
-					()
-				}
+				Value::Array(x) => self.set(ctx, opt, exe, path, Value::from(v - x)).await,
+				x => self.set(ctx, opt, exe, path, Value::from(v - x)).await,
 			},
 			Value::None => match val {
 				Value::Number(x) => {
-					self.set(ctx, opt, exe, path, Value::from(Number::from(0) - x)).await;
-					()
+					self.set(ctx, opt, exe, path, Value::from(Number::from(0) - x)).await
 				}
-				_ => (),
+				_ => Ok(()),
 			},
-			_ => (),
+			_ => Ok(()),
 		}
 	}
 }
@@ -57,7 +48,7 @@ mod tests {
 		let idi = Idiom::parse("other");
 		let mut val = Value::parse("{ test: 100 }");
 		let res = Value::parse("{ test: 100, other: -10 }");
-		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(10)).await;
+		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(10)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -67,7 +58,7 @@ mod tests {
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: 100 }");
 		let res = Value::parse("{ test: 90 }");
-		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(10)).await;
+		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(10)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -77,7 +68,7 @@ mod tests {
 		let idi = Idiom::parse("test[1]");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [100, 190, 300] }");
-		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(10)).await;
+		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(10)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -87,7 +78,7 @@ mod tests {
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [100, 300] }");
-		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(200)).await;
+		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(200)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -97,7 +88,7 @@ mod tests {
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [200] }");
-		val.decrement(&ctx, &opt, &mut exe, &idi, Value::parse("[100, 300]")).await;
+		val.decrement(&ctx, &opt, &mut exe, &idi, Value::parse("[100, 300]")).await.unwrap();
 		assert_eq!(res, val);
 	}
 }
