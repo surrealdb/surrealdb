@@ -17,7 +17,7 @@ use std::fmt;
 pub enum Data {
 	EmptyExpression,
 	SetExpression(Vec<(Idiom, Operator, Value)>),
-	DiffExpression(Array),
+	PatchExpression(Array),
 	MergeExpression(Object),
 	ReplaceExpression(Object),
 	ContentExpression(Object),
@@ -44,7 +44,7 @@ impl fmt::Display for Data {
 					.collect::<Vec<_>>()
 					.join(", ")
 			),
-			Data::DiffExpression(v) => write!(f, "DIFF {}", v),
+			Data::PatchExpression(v) => write!(f, "PATCH {}", v),
 			Data::MergeExpression(v) => write!(f, "MERGE {}", v),
 			Data::ReplaceExpression(v) => write!(f, "REPLACE {}", v),
 			Data::ContentExpression(v) => write!(f, "CONTENT {}", v),
@@ -79,7 +79,7 @@ impl fmt::Display for Data {
 }
 
 pub fn data(i: &str) -> IResult<&str, Data> {
-	alt((set, diff, merge, replace, content))(i)
+	alt((set, patch, merge, replace, content))(i)
 }
 
 fn set(i: &str) -> IResult<&str, Data> {
@@ -96,11 +96,11 @@ fn set(i: &str) -> IResult<&str, Data> {
 	Ok((i, Data::SetExpression(v)))
 }
 
-fn diff(i: &str) -> IResult<&str, Data> {
-	let (i, _) = tag_no_case("DIFF")(i)?;
+fn patch(i: &str) -> IResult<&str, Data> {
+	let (i, _) = tag_no_case("PATCH")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = array(i)?;
-	Ok((i, Data::DiffExpression(v)))
+	Ok((i, Data::PatchExpression(v)))
 }
 
 fn merge(i: &str) -> IResult<&str, Data> {
@@ -191,12 +191,12 @@ mod tests {
 	}
 
 	#[test]
-	fn diff_statement() {
-		let sql = "DIFF [{ field: true }]";
-		let res = data(sql);
+	fn patch_statement() {
+		let sql = "PATCH [{ field: true }]";
+		let res = patch(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("DIFF [{ field: true }]", format!("{}", out));
+		assert_eq!("PATCH [{ field: true }]", format!("{}", out));
 	}
 
 	#[test]
