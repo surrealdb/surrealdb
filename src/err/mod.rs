@@ -49,6 +49,11 @@ pub enum Error {
 		sql: String,
 	},
 
+	#[error("The JSON Patch contains invalid operations. {message}")]
+	PatchError {
+		message: String,
+	},
+
 	#[error("Problem with embedded script function. {message}")]
 	LanguageError {
 		message: String,

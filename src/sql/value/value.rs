@@ -14,6 +14,7 @@ use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::model::{model, Model};
 use crate::sql::number::{number, Number};
 use crate::sql::object::{object, Object};
+use crate::sql::operation::Operation;
 use crate::sql::param::{param, Param};
 use crate::sql::part::Part;
 use crate::sql::regex::{regex, Regex};
@@ -313,6 +314,12 @@ impl From<Point<f64>> for Value {
 	}
 }
 
+impl From<Operation> for Value {
+	fn from(v: Operation) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
 impl<'a> From<Vec<&str>> for Value {
 	fn from(v: Vec<&str>) -> Self {
 		Value::Array(Array::from(v))
@@ -333,6 +340,12 @@ impl From<Vec<String>> for Value {
 
 impl From<Vec<Value>> for Value {
 	fn from(v: Vec<Value>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
+impl From<Vec<Operation>> for Value {
+	fn from(v: Vec<Operation>) -> Self {
 		Value::Array(Array::from(v))
 	}
 }
@@ -571,7 +584,13 @@ impl Value {
 	}
 
 	pub fn to_idiom(&self) -> Idiom {
-		self.to_string().split('.').map(|s| Part::from(s)).collect::<Vec<Part>>().into()
+		self.to_strand()
+			.value
+			.trim_start_matches('/')
+			.split(&['.', '/'][..])
+			.map(|s| Part::from(s))
+			.collect::<Vec<Part>>()
+			.into()
 	}
 
 	// -----------------------------------

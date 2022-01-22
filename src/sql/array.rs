@@ -6,6 +6,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::number::Number;
+use crate::sql::operation::Operation;
 use crate::sql::strand::Strand;
 use crate::sql::value::{value, Value};
 use nom::bytes::complete::tag;
@@ -61,6 +62,14 @@ impl<'a> From<Vec<&str>> for Array {
 	}
 }
 
+impl From<Vec<Operation>> for Array {
+	fn from(v: Vec<Operation>) -> Self {
+		Array {
+			value: v.into_iter().map(|v| Value::from(v)).collect(),
+		}
+	}
+}
+
 impl Array {
 	pub fn len(&self) -> usize {
 		self.value.len()
@@ -88,6 +97,18 @@ impl Array {
 			1 => [self.value.remove(0).as_float(), 0.0],
 			_ => [self.value.remove(0).as_float(), self.value.remove(0).as_float()],
 		}
+	}
+
+	pub fn to_operations(&self) -> Result<Vec<Operation>, Error> {
+		self.value
+			.iter()
+			.map(|v| match v {
+				Value::Object(v) => v.to_operation(),
+				_ => Err(Error::PatchError {
+					message: String::from("Operation must be an object"),
+				}),
+			})
+			.collect::<Result<Vec<_>, Error>>()
 	}
 }
 

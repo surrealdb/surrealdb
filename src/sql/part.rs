@@ -22,6 +22,18 @@ pub enum Part {
 	Graph(Graph),
 }
 
+impl From<isize> for Part {
+	fn from(v: isize) -> Self {
+		Part::Index(v.into())
+	}
+}
+
+impl From<usize> for Part {
+	fn from(v: usize) -> Self {
+		Part::Index(v.into())
+	}
+}
+
 impl From<Number> for Part {
 	fn from(v: Number) -> Self {
 		Part::Index(v)
@@ -54,7 +66,10 @@ impl From<String> for Part {
 
 impl From<&str> for Part {
 	fn from(v: &str) -> Self {
-		Part::Field(Ident::from(v.to_string()))
+		match v.parse::<isize>() {
+			Ok(v) => Part::from(v),
+			_ => Part::from(v.to_string()),
+		}
 	}
 }
 

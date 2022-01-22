@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{commas, escape, val_char};
 use crate::sql::error::IResult;
+use crate::sql::operation::{Op, Operation};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::is_not;
@@ -41,6 +42,24 @@ impl From<HashMap<String, Value>> for Object {
 	}
 }
 
+impl From<Operation> for Object {
+	fn from(v: Operation) -> Self {
+		Object {
+			value: map! {
+				String::from("op") => match v.op {
+					Op::None => Value::from("none"),
+					Op::Add => Value::from("add"),
+					Op::Remove => Value::from("remove"),
+					Op::Replace => Value::from("replace"),
+					Op::Change => Value::from("change"),
+				},
+				String::from("path") => Value::from(v.path),
+				String::from("value") => v.value,
+			},
+		}
+	}
+}
+
 impl Object {
 	pub fn remove(&mut self, key: &String) {
 		self.value.remove(key);
@@ -49,6 +68,26 @@ impl Object {
 	pub fn insert(&mut self, key: &String, val: Value) {
 		self.value.insert(key.to_owned(), val);
 		()
+	}
+	pub fn to_operation(&self) -> Result<Operation, Error> {
+		match self.value.get("op") {
+			Some(o) => match self.value.get("path") {
+				Some(p) => Ok(Operation {
+					op: o.into(),
+					path: p.to_idiom(),
+					value: match self.value.get("value") {
+						Some(v) => v.clone(),
+						None => Value::Null,
+					},
+				}),
+				_ => Err(Error::PatchError {
+					message: String::from("'path' key missing"),
+				}),
+			},
+			_ => Err(Error::PatchError {
+				message: String::from("'op' key missing"),
+			}),
+		}
 	}
 }
 

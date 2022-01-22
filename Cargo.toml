@@ -12,6 +12,8 @@ async-recursion = "1.0.0"
 byteorder = "1.4.3"
 bytes = "1.1.0"
 clap = "2.33.3"
+dmp = { git = "https://github.com/surrealdb/dmp", rev = "4d38162" }
+echodb = { git = "https://github.com/surrealdb/echodb", rev = "6b820e6" }
 futures = "0.3.17"
 fuzzy-matcher = "0.3.7"
 http = "0.2.5"
@@ -30,9 +32,6 @@ thiserror = "1.0.29"
 url = "2.2.2"
 utf-8 = "0.7.6"
 xid = "1.0.0"
-
-[dependencies.echodb]
-path = "../echodb"
 
 [dependencies.dec]
 version = "1.16.0"

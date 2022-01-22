@@ -1,3 +1,4 @@
+use crate::sql::array::{array, Array};
 use crate::sql::expression::{expression, Expression};
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::param::{param, Param};
@@ -10,6 +11,12 @@ pub trait Parse<T> {
 impl Parse<Value> for Value {
 	fn parse(val: &str) -> Value {
 		value(val).unwrap().1
+	}
+}
+
+impl Parse<Array> for Array {
+	fn parse(val: &str) -> Array {
+		array(val).unwrap().1
 	}
 }
 

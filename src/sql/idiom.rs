@@ -49,6 +49,11 @@ impl From<Vec<Part>> for Idiom {
 }
 
 impl Idiom {
+	pub fn add(&self, n: Part) -> Idiom {
+		let mut p = self.parts.to_vec();
+		p.push(n);
+		Idiom::from(p)
+	}
 	pub fn next(&self) -> Idiom {
 		match self.parts.len() {
 			0 => Idiom::from(vec![]),
