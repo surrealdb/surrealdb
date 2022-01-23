@@ -118,6 +118,7 @@ fn custom(i: &str) -> IResult<&str, (Tables, Option<Value>, Option<Idiom>)> {
 	let (i, w) = what(i)?;
 	let (i, c) = opt(cond)(i)?;
 	let (i, a) = opt(alias)(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag(")")(i)?;
 	Ok((i, (w, c, a)))
 }
@@ -195,6 +196,15 @@ mod tests {
 
 	#[test]
 	fn graph_conditions() {
+		let sql = "->(likes, follows WHERE influencer = true)";
+		let res = graph(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("->(likes, follows WHERE influencer = true)", format!("{}", out));
+	}
+
+	#[test]
+	fn graph_conditions_aliases() {
 		let sql = "->(likes, follows WHERE influencer = true AS connections)";
 		let res = graph(sql);
 		assert!(res.is_ok());

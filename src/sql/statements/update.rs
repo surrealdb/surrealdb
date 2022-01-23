@@ -125,7 +125,6 @@ mod tests {
 	fn update_statement() {
 		let sql = "UPDATE test";
 		let res = update(sql);
-		println!("{:?}", res);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("UPDATE test", format!("{}", out))

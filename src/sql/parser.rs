@@ -112,7 +112,6 @@ mod tests {
 				tags[$].value,
 				3s as duration,
 				1.345 AS number,
-				-999999999999999.9999999 AS double,
 				test AS `some thing`,
 				'2012-04-23T18:25:43.511Z' AS utctime,
 				'2012-04-23T18:25:43.511-08:00' AS pacifictime,
