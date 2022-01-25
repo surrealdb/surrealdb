@@ -19,7 +19,7 @@ impl OutputStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Ensure futures are processed

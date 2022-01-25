@@ -43,7 +43,7 @@ impl DefineStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
@@ -104,7 +104,7 @@ impl DefineNamespaceStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -148,7 +148,7 @@ impl DefineDatabaseStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -197,7 +197,7 @@ impl DefineLoginStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -295,7 +295,7 @@ impl DefineTokenStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -370,7 +370,7 @@ impl DefineScopeStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -493,7 +493,7 @@ impl DefineTableStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -624,7 +624,7 @@ impl DefineEventStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -698,7 +698,7 @@ impl DefineFieldStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -837,7 +837,7 @@ impl DefineIndexStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?

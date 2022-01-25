@@ -32,7 +32,7 @@ impl Expression {
 		&self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		let l = self.l.compute(ctx, opt, exe, doc).await?;

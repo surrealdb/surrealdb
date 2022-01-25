@@ -23,7 +23,7 @@ impl IfelseStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		for (ref cond, ref then) in &self.exprs {

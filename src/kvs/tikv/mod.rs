@@ -84,7 +84,10 @@ impl Transaction {
 		Ok(())
 	}
 	// Delete a key
-	pub async fn del(&mut self, key: Key) -> Result<(), Error> {
+	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
@@ -94,34 +97,44 @@ impl Transaction {
 			return Err(Error::TxReadonlyError);
 		}
 		// Delete the key
-		self.tx.delete(key).await?;
+		self.tx.delete(key.into()).await?;
 		// Return result
 		Ok(())
 	}
 	// Check if a key exists
-	pub async fn exi(&mut self, key: Key) -> Result<bool, Error> {
+	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	where
+		K: Into<Key>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
 		}
 		// Check the key
-		let res = self.tx.key_exists(key).await?;
+		let res = self.tx.key_exists(key.into()).await?;
 		// Return result
 		Ok(res)
 	}
 	// Fetch a key from the database
-	pub async fn get(&mut self, key: Key) -> Result<Option<Val>, Error> {
+	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	where
+		K: Into<Key>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
 		}
 		// Get the key
-		let res = self.tx.get(key).await?;
+		let res = self.tx.get(key.into()).await?;
 		// Return result
 		Ok(res)
 	}
 	// Insert or update a key in the database
-	pub async fn set(&mut self, key: Key, val: Val) -> Result<(), Error> {
+	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
@@ -131,12 +144,16 @@ impl Transaction {
 			return Err(Error::TxReadonlyError);
 		}
 		// Set the key
-		self.tx.put(key, val).await?;
+		self.tx.put(key.into(), val.into()).await?;
 		// Return result
 		Ok(())
 	}
 	// Insert a key if it doesn't exist in the database
-	pub async fn put(&mut self, key: Key, val: Val) -> Result<(), Error> {
+	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
@@ -146,16 +163,24 @@ impl Transaction {
 			return Err(Error::TxReadonlyError);
 		}
 		// Set the key
-		self.tx.insert(key, val).await?;
+		self.tx.insert(key.into(), val.into()).await?;
 		// Return result
 		Ok(())
 	}
 	// Retrieve a range of keys from the databases
-	pub async fn scan(&mut self, rng: Range<Key>, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
+	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
 		}
+		// Convert the range to bytes
+		let rng: Range<Key> = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
 		// Scan the keys
 		let res = self.tx.scan(rng, limit).await?;
 		let res = res.map(|kv| (Key::from(kv.0), kv.1)).collect();

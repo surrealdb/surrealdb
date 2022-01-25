@@ -48,6 +48,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5d78ce20460b82d3fa150275ed9d55e21064fc7951177baacf86a145c4a4b1f"
+
+[[package]]
 name = "argon2"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -443,8 +449,9 @@ dependencies = [
 [[package]]
 name = "echodb"
 version = "0.1.0"
-source = "git+https://github.com/surrealdb/echodb?rev=6b820e6#6b820e67f72997670f053cd0f1de88260c54de07"
+source = "git+https://github.com/surrealdb/echodb?rev=9a7cc5b#9a7cc5b58c9e41de65f4eaf5d383431d7490c34a"
 dependencies = [
+ "arc-swap",
  "futures 0.3.19",
  "im",
  "thiserror",

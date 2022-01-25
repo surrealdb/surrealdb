@@ -109,18 +109,14 @@ impl Statement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		match *self {
-			Statement::Use(ref v) => v.compute(ctx, opt, exe, doc).await,
+		match self {
 			Statement::Set(ref v) => v.compute(ctx, opt, exe, doc).await,
 			Statement::Info(ref v) => v.compute(ctx, opt, exe, doc).await,
 			Statement::Live(ref v) => v.compute(ctx, opt, exe, doc).await,
 			Statement::Kill(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Begin(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Cancel(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Commit(ref v) => v.compute(ctx, opt, exe, doc).await,
 			Statement::Output(ref v) => v.compute(ctx, opt, exe, doc).await,
 			Statement::Ifelse(ref v) => v.compute(ctx, opt, exe, doc).await,
 			Statement::Select(ref v) => v.compute(ctx, opt, exe, doc).await,
@@ -138,7 +134,7 @@ impl Statement {
 
 impl fmt::Display for Statement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match *self {
+		match self {
 			Statement::Use(ref v) => write!(f, "{}", v),
 			Statement::Set(ref v) => write!(f, "{}", v),
 			Statement::Info(ref v) => write!(f, "{}", v),

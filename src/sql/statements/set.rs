@@ -24,7 +24,7 @@ impl SetStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		self.what.compute(ctx, opt, exe, doc).await

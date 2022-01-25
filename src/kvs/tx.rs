@@ -30,7 +30,10 @@ impl<'a> Transaction<'a> {
 		}
 	}
 	// Delete a key
-	pub async fn del(&mut self, key: Key) -> Result<(), Error> {
+	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
 		match self {
 			Transaction::Mem(v) => v.del(key),
 			Transaction::File(v) => v.del(key),
@@ -38,7 +41,10 @@ impl<'a> Transaction<'a> {
 		}
 	}
 	// Check if a key exists
-	pub async fn exi(&mut self, key: Key) -> Result<bool, Error> {
+	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	where
+		K: Into<Key>,
+	{
 		match self {
 			Transaction::Mem(v) => v.exi(key),
 			Transaction::File(v) => v.exi(key),
@@ -46,7 +52,10 @@ impl<'a> Transaction<'a> {
 		}
 	}
 	// Fetch a key from the database
-	pub async fn get(&mut self, key: Key) -> Result<Option<Val>, Error> {
+	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	where
+		K: Into<Key>,
+	{
 		match self {
 			Transaction::Mem(v) => v.get(key),
 			Transaction::File(v) => v.get(key),
@@ -54,7 +63,11 @@ impl<'a> Transaction<'a> {
 		}
 	}
 	// Insert or update a key in the database
-	pub async fn set(&mut self, key: Key, val: Val) -> Result<(), Error> {
+	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Key>,
+	{
 		match self {
 			Transaction::Mem(v) => v.set(key, val),
 			Transaction::File(v) => v.set(key, val),
@@ -62,7 +75,11 @@ impl<'a> Transaction<'a> {
 		}
 	}
 	// Insert a key if it doesn't exist in the database
-	pub async fn put(&mut self, key: Key, val: Val) -> Result<(), Error> {
+	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Key>,
+	{
 		match self {
 			Transaction::Mem(v) => v.put(key, val),
 			Transaction::File(v) => v.put(key, val),
@@ -70,7 +87,10 @@ impl<'a> Transaction<'a> {
 		}
 	}
 	// Retrieve a range of keys from the databases
-	pub async fn scan(&mut self, rng: Range<Key>, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
+	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key>,
+	{
 		match self {
 			Transaction::Mem(v) => v.scan(rng, limit),
 			Transaction::File(v) => v.scan(rng, limit),

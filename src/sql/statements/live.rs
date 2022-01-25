@@ -30,7 +30,7 @@ impl LiveStatement {
 		&self,
 		_ctx: &Runtime,
 		_opt: &Options<'_>,
-		_exe: &mut Executor,
+		_exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		todo!()

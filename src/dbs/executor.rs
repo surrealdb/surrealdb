@@ -5,24 +5,27 @@ use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
+use crate::kvs::Transaction;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
+use futures::lock::Mutex;
+use std::sync::Arc;
 use std::time::Instant;
 
 const NAME: &'static str = "surreal::exe";
 
-#[derive(Debug, Default)]
-pub struct Executor {
+#[derive(Default)]
+pub struct Executor<'a> {
 	pub id: Option<String>,
 	pub ns: Option<String>,
 	pub db: Option<String>,
-	pub txn: Option<()>,
+	pub txn: Option<Arc<Mutex<Transaction<'a>>>>,
 	pub err: Option<Error>,
 }
 
-impl Executor {
-	pub fn new() -> Executor {
+impl<'a> Executor<'a> {
+	pub fn new() -> Executor<'a> {
 		Executor {
 			id: None,
 			ns: None,
@@ -31,7 +34,7 @@ impl Executor {
 		}
 	}
 
-	pub fn check(&mut self, opt: &Options, level: Level) -> Result<(), Error> {
+	pub fn check(&self, opt: &Options, level: Level) -> Result<(), Error> {
 		if opt.auth.check(level) == false {
 			return Err(Error::QueryPermissionsError);
 		}
@@ -86,10 +89,18 @@ impl Executor {
 				Statement::Cancel(stm) => {
 					let res = stm.compute(&ctx, &opt, self, None).await;
 					self.err = res.err();
+					self.txn = None;
 					continue;
 				}
 				// Commit a running transaction
 				Statement::Commit(stm) => {
+					let res = stm.compute(&ctx, &opt, self, None).await;
+					self.err = res.err();
+					self.txn = None;
+					continue;
+				}
+				// Commit a running transaction
+				Statement::Use(stm) => {
 					let res = stm.compute(&ctx, &opt, self, None).await;
 					self.err = res.err();
 					continue;

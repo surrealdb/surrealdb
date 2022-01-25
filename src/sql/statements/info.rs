@@ -25,7 +25,7 @@ impl InfoStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?

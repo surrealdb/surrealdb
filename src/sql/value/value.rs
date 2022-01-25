@@ -787,7 +787,7 @@ impl Value {
 		&self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		doc: Option<&'async_recursion Value>,
 	) -> Result<Value, Error> {
 		match self {

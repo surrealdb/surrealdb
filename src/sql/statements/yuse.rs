@@ -25,7 +25,7 @@ impl UseStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &mut Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		if let Some(ns) = &self.ns {

@@ -2,15 +2,18 @@ use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
+use crate::kvs::transaction;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
+use futures::lock::Mutex;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BeginStatement;
@@ -20,10 +23,17 @@ impl BeginStatement {
 		&self,
 		_ctx: &Runtime,
 		_opt: &Options<'_>,
-		_exe: &mut Executor,
+		exe: &mut Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		Ok(Value::None)
+		match &exe.txn {
+			Some(_) => Ok(Value::None),
+			None => {
+				let txn = transaction(true, false).await?;
+				exe.txn = Some(Arc::new(Mutex::new(txn)));
+				Ok(Value::None)
+			}
+		}
 	}
 }
 

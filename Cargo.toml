@@ -13,7 +13,7 @@ byteorder = "1.4.3"
 bytes = "1.1.0"
 clap = "3.0.10"
 dmp = { git = "https://github.com/surrealdb/dmp", rev = "4d38162" }
-echodb = { git = "https://github.com/surrealdb/echodb", rev = "6b820e6" }
+echodb = { git = "https://github.com/surrealdb/echodb", rev = "9a7cc5b" }
 futures = "0.3.19"
 fuzzy-matcher = "0.3.7"
 http = "0.2.6"

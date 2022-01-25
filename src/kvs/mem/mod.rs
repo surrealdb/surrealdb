@@ -72,7 +72,10 @@ impl<'a> Transaction<'a> {
 		Ok(())
 	}
 	// Delete a key
-	pub fn del(&mut self, key: Key) -> Result<(), Error> {
+	pub fn del<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
@@ -82,34 +85,44 @@ impl<'a> Transaction<'a> {
 			return Err(Error::TxReadonlyError);
 		}
 		// Remove the key
-		let res = self.tx.del(key)?;
+		let res = self.tx.del(key.into())?;
 		// Return result
 		Ok(res)
 	}
 	// Check if a key exists
-	pub fn exi(&mut self, key: Key) -> Result<bool, Error> {
+	pub fn exi<K>(&mut self, key: K) -> Result<bool, Error>
+	where
+		K: Into<Key>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
 		}
 		// Check the key
-		let res = self.tx.exi(key)?;
+		let res = self.tx.exi(key.into())?;
 		// Return result
 		Ok(res)
 	}
 	// Fetch a key from the database
-	pub fn get(&mut self, key: Key) -> Result<Option<Val>, Error> {
+	pub fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
+	where
+		K: Into<Key>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
 		}
 		// Get the key
-		let res = self.tx.get(key)?;
+		let res = self.tx.get(key.into())?;
 		// Return result
 		Ok(res)
 	}
 	// Insert or update a key in the database
-	pub fn set(&mut self, key: Key, val: Val) -> Result<(), Error> {
+	pub fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
@@ -119,12 +132,16 @@ impl<'a> Transaction<'a> {
 			return Err(Error::TxReadonlyError);
 		}
 		// Set the key
-		self.tx.set(key, val)?;
+		self.tx.set(key.into(), val.into())?;
 		// Return result
 		Ok(())
 	}
 	// Insert a key if it doesn't exist in the database
-	pub fn put(&mut self, key: Key, val: Val) -> Result<(), Error> {
+	pub fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
@@ -134,16 +151,24 @@ impl<'a> Transaction<'a> {
 			return Err(Error::TxReadonlyError);
 		}
 		// Set the key
-		self.tx.put(key, val)?;
+		self.tx.put(key.into(), val.into())?;
 		// Return result
 		Ok(())
 	}
 	// Retrieve a range of keys from the databases
-	pub fn scan(&mut self, rng: Range<Key>, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
+	pub fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key>,
+	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinishedError);
 		}
+		// Convert the range to bytes
+		let rng: Range<Key> = Range {
+			start: rng.start.into(),
+			end: rng.end.into(),
+		};
 		// Scan the keys
 		let res = self.tx.scan(rng, limit)?;
 		// Return result

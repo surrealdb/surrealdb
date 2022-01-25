@@ -11,7 +11,7 @@ impl Value {
 		&self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 	) -> Result<Self, Error> {
 		self.get(ctx, opt, exe, &Idiom::from(vec![Part::Last])).await
 	}

@@ -11,7 +11,7 @@ impl Value {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		val: &Array,
 	) -> Result<(), Error> {
 		for o in val.to_operations()?.into_iter() {

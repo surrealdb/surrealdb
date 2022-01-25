@@ -20,10 +20,20 @@ impl CommitStatement {
 		&self,
 		_ctx: &Runtime,
 		_opt: &Options<'_>,
-		_exe: &mut Executor,
+		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		Ok(Value::None)
+		match &exe.txn {
+			Some(txn) => {
+				let txn = txn.clone();
+				let mut txn = txn.lock().await;
+				match txn.commit().await {
+					Ok(_) => Ok(Value::None),
+					Err(e) => Err(e),
+				}
+			}
+			None => Ok(Value::None),
+		}
 	}
 }
 

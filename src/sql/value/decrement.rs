@@ -11,7 +11,7 @@ impl Value {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		path: &Idiom,
 		val: Value,
 	) -> Result<(), Error> {

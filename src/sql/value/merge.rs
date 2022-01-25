@@ -10,7 +10,7 @@ impl Value {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		val: &Object,
 	) -> Result<(), Error> {
 		match val.compute(ctx, opt, exe, Some(self)).await? {

@@ -15,7 +15,7 @@ impl Value {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options<'_>,
-		exe: &mut Executor,
+		exe: &Executor<'_>,
 		path: &Idiom,
 	) -> Result<(), Error> {
 		match path.parts.first() {

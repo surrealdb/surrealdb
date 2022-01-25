@@ -10,7 +10,7 @@ impl Value {
 		&mut self,
 		_ctx: &Runtime,
 		_opt: &Options<'_>,
-		_exe: &mut Executor,
+		_exe: &Executor<'_>,
 		val: &Object,
 	) -> Result<(), Error> {
 		// Clear all entries
