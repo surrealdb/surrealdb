@@ -399,7 +399,6 @@ impl Value {
 		match self {
 			Value::None => None,
 			Value::Void => None,
-			Value::Null => None,
 			_ => Some(self),
 		}
 	}

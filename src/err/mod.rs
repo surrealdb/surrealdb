@@ -70,6 +70,9 @@ pub enum Error {
 		timer: Duration,
 	},
 
+	#[error("Query not executed due to failed transaction")]
+	QueryExecutionError,
+
 	#[error("You don't have permission to perform this query type")]
 	QueryPermissionsError,
 

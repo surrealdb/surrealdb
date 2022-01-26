@@ -24,14 +24,24 @@ impl CommitStatement {
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match &exe.txn {
-			Some(txn) => {
-				let txn = txn.clone();
-				let mut txn = txn.lock().await;
-				match txn.commit().await {
-					Ok(_) => Ok(Value::None),
-					Err(e) => Err(e),
+			Some(txn) => match &exe.err {
+				Some(_) => {
+					let txn = txn.clone();
+					let mut txn = txn.lock().await;
+					match txn.cancel().await {
+						Ok(_) => Ok(Value::None),
+						Err(e) => Err(e),
+					}
 				}
-			}
+				None => {
+					let txn = txn.clone();
+					let mut txn = txn.lock().await;
+					match txn.commit().await {
+						Ok(_) => Ok(Value::None),
+						Err(e) => Err(e),
+					}
+				}
+			},
 			None => Ok(Value::None),
 		}
 	}
