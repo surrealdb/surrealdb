@@ -56,7 +56,7 @@ impl Transaction {
 	// Cancel a transaction
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.ok == true {
 			return Err(Error::TxFinishedError);
 		}
 		// Mark this transaction as done
@@ -69,11 +69,11 @@ impl Transaction {
 	// Commit a transaction
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.ok == true {
 			return Err(Error::TxFinishedError);
 		}
 		// Check to see if transaction is writable
-		if self.rw {
+		if self.rw == false {
 			return Err(Error::TxReadonlyError);
 		}
 		// Mark this transaction as done
@@ -89,11 +89,11 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.ok == true {
 			return Err(Error::TxFinishedError);
 		}
 		// Check to see if transaction is writable
-		if self.rw {
+		if self.rw == false {
 			return Err(Error::TxReadonlyError);
 		}
 		// Delete the key
@@ -107,7 +107,7 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.ok == true {
 			return Err(Error::TxFinishedError);
 		}
 		// Check the key
@@ -121,7 +121,7 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.ok == true {
 			return Err(Error::TxFinishedError);
 		}
 		// Get the key
@@ -136,11 +136,11 @@ impl Transaction {
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.ok == true {
 			return Err(Error::TxFinishedError);
 		}
 		// Check to see if transaction is writable
-		if self.rw {
+		if self.rw == false {
 			return Err(Error::TxReadonlyError);
 		}
 		// Set the key
@@ -155,11 +155,11 @@ impl Transaction {
 		V: Into<Val>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.ok == true {
 			return Err(Error::TxFinishedError);
 		}
 		// Check to see if transaction is writable
-		if self.rw {
+		if self.rw == false {
 			return Err(Error::TxReadonlyError);
 		}
 		// Set the key
@@ -173,7 +173,7 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		// Check to see if transaction is closed
-		if self.ok {
+		if self.ok == true {
 			return Err(Error::TxFinishedError);
 		}
 		// Convert the range to bytes
