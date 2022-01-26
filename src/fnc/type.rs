@@ -102,8 +102,16 @@ pub fn table(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn thing(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(Value::Thing(Thing {
-		tb: args.remove(0).as_strand().value,
-		id: args.remove(0).as_strand().value,
-	}))
+	match args.remove(0) {
+		tb => match args.remove(0) {
+			Value::Thing(id) => Ok(Value::Thing(Thing {
+				tb: tb.as_strand().value,
+				id: id.id,
+			})),
+			id => Ok(Value::Thing(Thing {
+				tb: tb.as_strand().value,
+				id: id.as_strand().value,
+			})),
+		},
+	}
 }
