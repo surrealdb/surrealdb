@@ -112,7 +112,7 @@ impl<'a> Executor<'a> {
 			sql: v.sql,
 			time: v.time,
 			status: Status::Err,
-			detail: Some(format!("Transaction cancelled")),
+			detail: Some(format!("{}", Error::QueryCancelledError)),
 			result: None,
 		}
 	}

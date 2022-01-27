@@ -70,6 +70,9 @@ pub enum Error {
 		timer: Duration,
 	},
 
+	#[error("Query not executed due to cancelled transaction")]
+	QueryCancelledError,
+
 	#[error("Query not executed due to failed transaction")]
 	QueryExecutionError,
 
