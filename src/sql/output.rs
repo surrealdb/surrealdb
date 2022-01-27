@@ -9,8 +9,8 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Output {
-	Null,
 	None,
+	Null,
 	Diff,
 	After,
 	Before,
@@ -19,7 +19,7 @@ pub enum Output {
 
 impl Default for Output {
 	fn default() -> Output {
-		Output::Null
+		Output::None
 	}
 }
 
@@ -27,8 +27,8 @@ impl fmt::Display for Output {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "RETURN ")?;
 		match self {
-			Output::Null => write!(f, "NULL"),
 			Output::None => write!(f, "NONE"),
+			Output::Null => write!(f, "NULL"),
 			Output::Diff => write!(f, "DIFF"),
 			Output::After => write!(f, "AFTER"),
 			Output::Before => write!(f, "BEFORE"),
@@ -41,8 +41,8 @@ pub fn output(i: &str) -> IResult<&str, Output> {
 	let (i, _) = tag_no_case("RETURN")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = alt((
-		map(tag_no_case("NULL"), |_| Output::Null),
 		map(tag_no_case("NONE"), |_| Output::None),
+		map(tag_no_case("NULL"), |_| Output::Null),
 		map(tag_no_case("DIFF"), |_| Output::Diff),
 		map(tag_no_case("AFTER"), |_| Output::After),
 		map(tag_no_case("BEFORE"), |_| Output::Before),
