@@ -14,6 +14,7 @@ use crate::sql::version::Version;
 pub struct Options<'a> {
 	pub auth: &'a Auth,
 	pub dive: usize,                  // How many subqueries have we gone into?
+	pub debug: bool,                  // Should we debug query response SQL?
 	pub force: bool,                  // Should we force tables/events to re-run?
 	pub fields: bool,                 // Should we process field queries?
 	pub events: bool,                 // Should we process event queries?
@@ -34,6 +35,7 @@ impl<'a> Options<'a> {
 		Options {
 			auth,
 			dive: 0,
+			debug: false,
 			force: false,
 			fields: true,
 			events: true,
@@ -54,6 +56,14 @@ impl<'a> Options<'a> {
 			Err(Error::RecursiveSubqueryError {
 				limit: self.dive,
 			})
+		}
+	}
+
+	// Create a new Options object for a subquery
+	pub fn debug(&self, v: bool) -> Options<'a> {
+		Options {
+			debug: v,
+			..*self
 		}
 	}
 

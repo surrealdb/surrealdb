@@ -109,6 +109,7 @@ impl<'a> Executor<'a> {
 
 	pub fn buf_cancel(&self, v: Response) -> Response {
 		Response {
+			sql: v.sql,
 			time: v.time,
 			status: Status::Err,
 			detail: Some(format!("Transaction cancelled")),
@@ -119,6 +120,7 @@ impl<'a> Executor<'a> {
 	pub fn buf_commit(&self, v: Response) -> Response {
 		match &self.err {
 			Some(_) => Response {
+				sql: v.sql,
 				time: v.time,
 				status: Status::Err,
 				detail: match v.status {
@@ -157,6 +159,7 @@ impl<'a> Executor<'a> {
 						"EVENT_QUERIES" => opt = opt.events(stm.what),
 						"TABLE_QUERIES" => opt = opt.tables(stm.what),
 						"IMPORT" => opt = opt.import(stm.what),
+						"DEBUG" => opt = opt.debug(stm.what),
 						_ => break,
 					}
 					continue;
@@ -249,6 +252,10 @@ impl<'a> Executor<'a> {
 			// Produce the response
 			let res = match res {
 				Ok(v) => Response {
+					sql: match opt.debug {
+						true => Some(format!("{}", stm)),
+						false => None,
+					},
 					time: format!("{:?}", dur),
 					status: Status::Ok,
 					detail: None,
@@ -257,6 +264,10 @@ impl<'a> Executor<'a> {
 				Err(e) => {
 					// Produce the response
 					let res = Response {
+						sql: match opt.debug {
+							true => Some(format!("{}", stm)),
+							false => None,
+						},
 						time: format!("{:?}", dur),
 						status: Status::Err,
 						detail: Some(format!("{}", e)),
