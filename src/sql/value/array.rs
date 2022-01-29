@@ -28,21 +28,21 @@ mod tests {
 
 	#[tokio::test]
 	async fn array_none() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::default();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("[]");
-		val.array(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		val.array(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn array_path() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: [] }");
-		val.array(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		val.array(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 }

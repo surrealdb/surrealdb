@@ -28,21 +28,21 @@ mod tests {
 
 	#[tokio::test]
 	async fn object_none() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::default();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{}");
-		val.object(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		val.object(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn object_path() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: {} }");
-		val.object(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		val.object(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 }

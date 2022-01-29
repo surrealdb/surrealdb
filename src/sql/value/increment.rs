@@ -45,51 +45,51 @@ mod tests {
 
 	#[tokio::test]
 	async fn inc_none() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("other");
 		let mut val = Value::parse("{ test: 100 }");
 		let res = Value::parse("{ test: 100, other: +10 }");
-		val.increment(&ctx, &opt, &mut exe, &idi, Value::from(10)).await.unwrap();
+		val.increment(&ctx, &opt, &exe, &idi, Value::from(10)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn inc_number() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: 100 }");
 		let res = Value::parse("{ test: 110 }");
-		val.increment(&ctx, &opt, &mut exe, &idi, Value::from(10)).await.unwrap();
+		val.increment(&ctx, &opt, &exe, &idi, Value::from(10)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn inc_array_number() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test[1]");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [100, 210, 300] }");
-		val.increment(&ctx, &opt, &mut exe, &idi, Value::from(10)).await.unwrap();
+		val.increment(&ctx, &opt, &exe, &idi, Value::from(10)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn inc_array_value() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [100, 200, 300] }");
-		val.increment(&ctx, &opt, &mut exe, &idi, Value::from(200)).await.unwrap();
+		val.increment(&ctx, &opt, &exe, &idi, Value::from(200)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn inc_array_array() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [100, 200, 300, 400, 500] }");
-		val.increment(&ctx, &opt, &mut exe, &idi, Value::parse("[100, 300, 400, 500]"))
+		val.increment(&ctx, &opt, &exe, &idi, Value::parse("[100, 300, 400, 500]"))
 			.await
 			.unwrap();
 		assert_eq!(res, val);

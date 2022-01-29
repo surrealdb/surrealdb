@@ -44,51 +44,51 @@ mod tests {
 
 	#[tokio::test]
 	async fn dec_none() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("other");
 		let mut val = Value::parse("{ test: 100 }");
 		let res = Value::parse("{ test: 100, other: -10 }");
-		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(10)).await.unwrap();
+		val.decrement(&ctx, &opt, &exe, &idi, Value::from(10)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn dec_number() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: 100 }");
 		let res = Value::parse("{ test: 90 }");
-		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(10)).await.unwrap();
+		val.decrement(&ctx, &opt, &exe, &idi, Value::from(10)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn dec_array_number() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test[1]");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [100, 190, 300] }");
-		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(10)).await.unwrap();
+		val.decrement(&ctx, &opt, &exe, &idi, Value::from(10)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn dec_array_value() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [100, 300] }");
-		val.decrement(&ctx, &opt, &mut exe, &idi, Value::from(200)).await.unwrap();
+		val.decrement(&ctx, &opt, &exe, &idi, Value::from(200)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn dec_array_array() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
 		let res = Value::parse("{ test: [200] }");
-		val.decrement(&ctx, &opt, &mut exe, &idi, Value::parse("[100, 300]")).await.unwrap();
+		val.decrement(&ctx, &opt, &exe, &idi, Value::parse("[100, 300]")).await.unwrap();
 		assert_eq!(res, val);
 	}
 }

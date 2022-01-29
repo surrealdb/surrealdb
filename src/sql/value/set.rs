@@ -85,101 +85,101 @@ mod tests {
 
 	#[tokio::test]
 	async fn set_none() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::default();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("999");
-		val.set(&ctx, &opt, &mut exe, &idi, Value::from(999)).await.unwrap();
+		val.set(&ctx, &opt, &exe, &idi, Value::from(999)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_reset() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: 999 }");
-		val.set(&ctx, &opt, &mut exe, &idi, Value::from(999)).await.unwrap();
+		val.set(&ctx, &opt, &exe, &idi, Value::from(999)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_basic() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 999 } }");
-		val.set(&ctx, &opt, &mut exe, &idi, Value::from(999)).await.unwrap();
+		val.set(&ctx, &opt, &exe, &idi, Value::from(999)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_wrong() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something.wrong");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 123 } }");
-		val.set(&ctx, &opt, &mut exe, &idi, Value::from(999)).await.unwrap();
+		val.set(&ctx, &opt, &exe, &idi, Value::from(999)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_other() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.other.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: { something: 999 }, something: 123 } }");
-		val.set(&ctx, &opt, &mut exe, &idi, Value::from(999)).await.unwrap();
+		val.set(&ctx, &opt, &exe, &idi, Value::from(999)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[1]");
 		let mut val = Value::parse("{ test: { something: [123, 456, 789] } }");
 		let res = Value::parse("{ test: { something: [123, 999, 789] } }");
-		val.set(&ctx, &opt, &mut exe, &idi, Value::from(999)).await.unwrap();
+		val.set(&ctx, &opt, &exe, &idi, Value::from(999)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_field() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[1].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 34 }, { age: 21 }] } }");
-		val.set(&ctx, &opt, &mut exe, &idi, Value::from(21)).await.unwrap();
+		val.set(&ctx, &opt, &exe, &idi, Value::from(21)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_fields() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[*].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }");
-		val.set(&ctx, &opt, &mut exe, &idi, Value::from(21)).await.unwrap();
+		val.set(&ctx, &opt, &exe, &idi, Value::from(21)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_where_field() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 34 }, { age: 21 }] } }");
-		val.set(&ctx, &opt, &mut exe, &idi, Value::from(21)).await.unwrap();
+		val.set(&ctx, &opt, &exe, &idi, Value::from(21)).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn set_array_where_fields() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 34 }, 21] } }");
-		val.set(&ctx, &opt, &mut exe, &idi, Value::from(21)).await.unwrap();
+		val.set(&ctx, &opt, &exe, &idi, Value::from(21)).await.unwrap();
 		assert_eq!(res, val);
 	}
 }

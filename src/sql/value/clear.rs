@@ -26,19 +26,19 @@ mod tests {
 
 	#[tokio::test]
 	async fn clear_none() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{}");
-		val.clear(&ctx, &opt, &mut exe).await.unwrap();
+		val.clear(&ctx, &opt, &exe).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn clear_path() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{}");
-		val.clear(&ctx, &opt, &mut exe).await.unwrap();
+		val.clear(&ctx, &opt, &exe).await.unwrap();
 		assert_eq!(res, val);
 	}
 }

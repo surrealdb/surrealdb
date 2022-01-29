@@ -28,11 +28,11 @@ mod tests {
 
 	#[tokio::test]
 	async fn replace() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ other: true }");
 		let obj = Object::from(map! {String::from("other") => Value::from(true) });
-		val.replace(&ctx, &opt, &mut exe, &obj).await.unwrap();
+		val.replace(&ctx, &opt, &exe, &obj).await.unwrap();
 		assert_eq!(res, val);
 	}
 }

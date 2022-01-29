@@ -97,28 +97,28 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_none() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::default();
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn get_basic() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something");
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(res, Value::from(123));
 	}
 
 	#[tokio::test]
 	async fn get_thing() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.other");
 		let val = Value::parse("{ test: { other: test:tobie, something: 123 } }");
-		let res = val.get(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -130,19 +130,19 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_array() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [123, 456, 789] } }");
-		let res = val.get(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(res, Value::from(456));
 	}
 
 	#[tokio::test]
 	async fn get_array_thing() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [test:tobie, test:jaime] } }");
-		let res = val.get(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -154,37 +154,37 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_array_field() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[1].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(res, Value::from(36));
 	}
 
 	#[tokio::test]
 	async fn get_array_fields() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[*].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
 	#[tokio::test]
 	async fn get_array_where_field() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![36]));
 	}
 
 	#[tokio::test]
 	async fn get_array_where_fields() {
-		let (ctx, opt, mut exe) = mock();
+		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &mut exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {
