@@ -154,7 +154,7 @@ impl<'a> Executor<'a> {
 			let res = match stm {
 				// Specify runtime options
 				Statement::Option(stm) => {
-					match &stm.name.name[..] {
+					match &stm.name.name.to_uppercase()[..] {
 						"FIELD_QUERIES" => opt = opt.fields(stm.what),
 						"EVENT_QUERIES" => opt = opt.events(stm.what),
 						"TABLE_QUERIES" => opt = opt.tables(stm.what),
