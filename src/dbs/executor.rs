@@ -14,8 +14,6 @@ use futures::lock::Mutex;
 use std::sync::Arc;
 use std::time::Instant;
 
-const NAME: &'static str = "surreal::exe";
-
 #[derive(Default)]
 pub struct Executor<'a> {
 	pub id: Option<String>,
