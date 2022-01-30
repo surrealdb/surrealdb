@@ -7,6 +7,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
+use futures::future::try_join_all;
 use std::collections::HashMap;
 
 impl Value {
@@ -43,9 +44,9 @@ impl Value {
 							Ok(())
 						}
 						_ => {
-							for v in &mut v.value {
-								v.del(ctx, opt, exe, &path.next()).await?;
-							}
+							let pth = path.next();
+							let fut = v.value.iter_mut().map(|v| v.del(&ctx, opt, exe, &pth));
+							try_join_all(fut).await?;
 							Ok(())
 						}
 					},
@@ -99,9 +100,10 @@ impl Value {
 							Ok(())
 						}
 						_ => {
+							let pth = path.next();
 							for v in &mut v.value {
 								if w.compute(ctx, opt, exe, Some(&v)).await?.is_truthy() {
-									v.del(ctx, opt, exe, &path.next()).await?;
+									v.del(ctx, opt, exe, &pth).await?;
 								}
 							}
 							Ok(())

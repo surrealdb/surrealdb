@@ -7,6 +7,7 @@ use crate::sql::object::Object;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
+use futures::future::try_join_all;
 
 impl Value {
 	#[async_recursion]
@@ -37,9 +38,10 @@ impl Value {
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => {
-						for v in &mut v.value {
-							v.set(ctx, opt, exe, &path.next(), val.clone()).await?;
-						}
+						let pth = path.next();
+						let fut =
+							v.value.iter_mut().map(|v| v.set(ctx, opt, exe, &pth, val.clone()));
+						try_join_all(fut).await?;
 						Ok(())
 					}
 					Part::First => match v.value.first_mut() {
@@ -55,9 +57,10 @@ impl Value {
 						None => Ok(()),
 					},
 					Part::Where(w) => {
+						let pth = path.next();
 						for v in &mut v.value {
 							if w.compute(ctx, opt, exe, Some(&v)).await?.is_truthy() {
-								v.set(ctx, opt, exe, &path.next(), val.clone()).await?;
+								v.set(ctx, opt, exe, &pth, val.clone()).await?;
 							}
 						}
 						Ok(())
