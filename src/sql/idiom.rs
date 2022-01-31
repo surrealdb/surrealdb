@@ -77,7 +77,7 @@ impl Idiom {
 	) -> Result<Value, Error> {
 		match doc {
 			// There is a current document
-			Some(v) => v.get(ctx, opt, exe, self).await,
+			Some(v) => v.get(ctx, opt, exe, self).await?.compute(ctx, opt, exe, doc).await,
 			// There isn't any document
 			None => Ok(Value::None),
 		}
