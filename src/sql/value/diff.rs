@@ -7,7 +7,7 @@ impl Value {
 	pub fn diff(&self, val: &Value, path: Idiom) -> Vec<Operation> {
 		let mut ops: Vec<Operation> = vec![];
 		match (self, val) {
-			(Value::Object(a), Value::Object(b)) => {
+			(Value::Object(a), Value::Object(b)) if a != b => {
 				// Loop over old keys
 				for (key, _) in a.value.iter() {
 					if b.value.contains_key(key) == false {
@@ -33,7 +33,7 @@ impl Value {
 					}
 				}
 			}
-			(Value::Array(a), Value::Array(b)) => {
+			(Value::Array(a), Value::Array(b)) if a != b => {
 				let mut n = 0;
 				while n < min(a.len(), b.len()) {
 					let path = path.add(n.into());
@@ -61,7 +61,7 @@ impl Value {
 					n += 1;
 				}
 			}
-			(Value::Strand(a), Value::Strand(b)) => ops.push(Operation {
+			(Value::Strand(a), Value::Strand(b)) if a != b => ops.push(Operation {
 				op: Op::Change,
 				path,
 				value: {
@@ -88,6 +88,14 @@ mod tests {
 	use super::*;
 	use crate::sql::array::Array;
 	use crate::sql::test::Parse;
+
+	#[test]
+	fn diff_none() {
+		let old = Value::parse("{ test: true, text: 'text', other: { something: true } }");
+		let now = Value::parse("{ test: true, text: 'text', other: { something: true } }");
+		let res = Array::parse("[]");
+		assert_eq!(res.to_operations().unwrap(), old.diff(&now, Idiom::default()));
+	}
 
 	#[test]
 	fn diff_add() {
