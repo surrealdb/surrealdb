@@ -12,6 +12,18 @@ pub struct Database {
 	db: String,
 }
 
+impl Into<Vec<u8>> for Database {
+	fn into(self) -> Vec<u8> {
+		self.encode().unwrap()
+	}
+}
+
+impl From<Vec<u8>> for Database {
+	fn from(val: Vec<u8>) -> Self {
+		Database::decode(&val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, db: &str) -> Database {
 	Database::new(ns.to_string(), db.to_string())
 }

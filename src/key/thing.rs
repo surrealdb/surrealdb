@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::key::bytes::{deserialize, serialize};
 use crate::key::BASE;
-use crate::sql::value::Value;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -15,6 +14,18 @@ pub struct Thing {
 	tb: String,
 	_d: String,
 	id: String,
+}
+
+impl Into<Vec<u8>> for Thing {
+	fn into(self) -> Vec<u8> {
+		self.encode().unwrap()
+	}
+}
+
+impl From<Vec<u8>> for Thing {
+	fn from(val: Vec<u8>) -> Self {
+		Thing::decode(&val).unwrap()
+	}
 }
 
 pub fn new(ns: &str, db: &str, tb: &str, id: &str) -> Thing {

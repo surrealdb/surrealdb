@@ -8,6 +8,18 @@ pub struct Kv {
 	kv: String,
 }
 
+impl Into<Vec<u8>> for Kv {
+	fn into(self) -> Vec<u8> {
+		self.encode().unwrap()
+	}
+}
+
+impl From<Vec<u8>> for Kv {
+	fn from(val: Vec<u8>) -> Self {
+		Kv::decode(&val).unwrap()
+	}
+}
+
 pub fn new() -> Kv {
 	Kv::new()
 }

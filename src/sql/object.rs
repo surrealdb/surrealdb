@@ -53,7 +53,7 @@ impl From<Operation> for Object {
 					Op::Replace => Value::from("replace"),
 					Op::Change => Value::from("change"),
 				},
-				String::from("path") => Value::from(v.path),
+				String::from("path") => v.path.to_path().into(),
 				String::from("value") => v.value,
 			},
 		}

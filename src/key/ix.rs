@@ -16,6 +16,18 @@ pub struct Ix {
 	ix: String,
 }
 
+impl Into<Vec<u8>> for Ix {
+	fn into(self) -> Vec<u8> {
+		self.encode().unwrap()
+	}
+}
+
+impl From<Vec<u8>> for Ix {
+	fn from(val: Vec<u8>) -> Self {
+		Ix::decode(&val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Ix {
 	Ix::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string())
 }

@@ -14,6 +14,18 @@ pub struct Du {
 	us: String,
 }
 
+impl Into<Vec<u8>> for Du {
+	fn into(self) -> Vec<u8> {
+		self.encode().unwrap()
+	}
+}
+
+impl From<Vec<u8>> for Du {
+	fn from(val: Vec<u8>) -> Self {
+		Du::decode(&val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, db: &str, us: &str) -> Du {
 	Du::new(ns.to_string(), db.to_string(), us.to_string())
 }

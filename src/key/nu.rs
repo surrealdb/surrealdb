@@ -12,6 +12,18 @@ pub struct Nu {
 	us: String,
 }
 
+impl Into<Vec<u8>> for Nu {
+	fn into(self) -> Vec<u8> {
+		self.encode().unwrap()
+	}
+}
+
+impl From<Vec<u8>> for Nu {
+	fn from(val: Vec<u8>) -> Self {
+		Nu::decode(&val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, us: &str) -> Nu {
 	Nu::new(ns.to_string(), us.to_string())
 }

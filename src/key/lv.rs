@@ -16,6 +16,18 @@ pub struct Lv {
 	lv: String,
 }
 
+impl Into<Vec<u8>> for Lv {
+	fn into(self) -> Vec<u8> {
+		self.encode().unwrap()
+	}
+}
+
+impl From<Vec<u8>> for Lv {
+	fn from(val: Vec<u8>) -> Self {
+		Lv::decode(&val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, db: &str, tb: &str, lv: &str) -> Lv {
 	Lv::new(ns.to_string(), db.to_string(), tb.to_string(), lv.to_string())
 }

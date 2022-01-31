@@ -10,6 +10,18 @@ pub struct Namespace {
 	ns: String,
 }
 
+impl Into<Vec<u8>> for Namespace {
+	fn into(self) -> Vec<u8> {
+		self.encode().unwrap()
+	}
+}
+
+impl From<Vec<u8>> for Namespace {
+	fn from(val: Vec<u8>) -> Self {
+		Namespace::decode(&val).unwrap()
+	}
+}
+
 pub fn new(ns: &str) -> Namespace {
 	Namespace::new(ns.to_string())
 }

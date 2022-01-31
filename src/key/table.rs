@@ -14,6 +14,18 @@ pub struct Table {
 	tb: String,
 }
 
+impl Into<Vec<u8>> for Table {
+	fn into(self) -> Vec<u8> {
+		self.encode().unwrap()
+	}
+}
+
+impl From<Vec<u8>> for Table {
+	fn from(val: Vec<u8>) -> Self {
+		Table::decode(&val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, db: &str, tb: &str) -> Table {
 	Table::new(ns.to_string(), db.to_string(), tb.to_string())
 }

@@ -54,11 +54,16 @@ impl Idiom {
 		p.push(n);
 		Idiom::from(p)
 	}
+
 	pub fn next(&self) -> Idiom {
 		match self.parts.len() {
 			0 => Idiom::from(vec![]),
 			_ => Idiom::from(self.parts[1..].to_vec()),
 		}
+	}
+
+	pub fn to_path(&self) -> String {
+		format!("/{}", self).replace(']', "").replace(&['.', '['][..], "/")
 	}
 }
 

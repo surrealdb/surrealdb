@@ -68,6 +68,18 @@ pub enum Key {
 	Edge,       // Edge resource data key
 }
 
+impl Into<Vec<u8>> for Key {
+	fn into(self) -> Vec<u8> {
+		self.encode().unwrap()
+	}
+}
+
+impl From<Vec<u8>> for Key {
+	fn from(val: Vec<u8>) -> Self {
+		Key::decode(&val).unwrap()
+	}
+}
+
 impl Key {
 	pub fn encode(&self) -> Result<Vec<u8>, Error> {
 		Ok(serialize(self)?)
