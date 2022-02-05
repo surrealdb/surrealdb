@@ -46,10 +46,6 @@ impl<'a> Executor<'a> {
 		Ok(())
 	}
 
-	pub fn export(&mut self, ctx: Runtime) -> Result<String, Error> {
-		todo!()
-	}
-
 	async fn begin(&mut self) -> bool {
 		match self.txn {
 			Some(_) => false,
@@ -105,7 +101,7 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	pub fn buf_cancel(&self, v: Response) -> Response {
+	fn buf_cancel(&self, v: Response) -> Response {
 		Response {
 			sql: v.sql,
 			time: v.time,
@@ -115,7 +111,7 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	pub fn buf_commit(&self, v: Response) -> Response {
+	fn buf_commit(&self, v: Response) -> Response {
 		match &self.err {
 			Some(_) => Response {
 				sql: v.sql,

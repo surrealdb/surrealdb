@@ -1,6 +1,7 @@
+use crate::dbs::export;
 use crate::dbs::Session;
 use crate::web::conf;
-use warp::http;
+use hyper::body::Body;
 use warp::Filter;
 
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
@@ -15,5 +16,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 }
 
 async fn handler(session: Session) -> Result<impl warp::Reply, warp::Rejection> {
-	Ok(warp::reply::with_status("Ok", http::StatusCode::OK))
+	let (chn, body) = Body::channel();
+	tokio::spawn(export(session, chn));
+	Ok(warp::reply::Response::new(body))
 }

@@ -6,6 +6,7 @@ use crate::dbs::variables::Variables;
 use crate::err::Error;
 use crate::sql;
 use crate::sql::query::Query;
+use hyper::body::Sender;
 
 pub async fn execute(txt: &str, session: Session, vars: Variables) -> Result<Responses, Error> {
 	// Create a new query executor
@@ -35,7 +36,7 @@ pub async fn process(ast: Query, session: Session, vars: Variables) -> Result<Re
 	exe.execute(ctx, ast).await
 }
 
-pub fn export(session: Session) -> Result<String, Error> {
+pub async fn export(session: Session, sender: Sender) -> Result<(), Error> {
 	// Create a new query executor
 	let mut exe = Executor::new();
 	// Create a new execution context
@@ -43,5 +44,5 @@ pub fn export(session: Session) -> Result<String, Error> {
 	// Process database export
 	exe.ns = session.ns;
 	exe.db = session.db;
-	exe.export(ctx)
+	exe.export(ctx, sender).await
 }

@@ -2084,6 +2084,7 @@ dependencies = [
  "fuzzy-matcher",
  "geo",
  "http",
+ "hyper",
  "log",
  "md-5",
  "nom 7.1.0",
