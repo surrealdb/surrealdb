@@ -5,6 +5,7 @@ mod head;
 mod import;
 mod key;
 mod log;
+mod output;
 mod root;
 mod signin;
 mod signup;

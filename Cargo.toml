@@ -80,3 +80,7 @@ version = "0.11.2"
 
 [dependencies.serde_json]
 version = "1.0.78"
+
+[dependencies.serde_pack]
+version = "1.0.0"
+package = "rmp-serde"

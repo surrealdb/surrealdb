@@ -1,6 +1,7 @@
 use crate::dbs::Session;
 use crate::web::conf;
 use crate::web::head;
+use crate::web::output;
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
 use warp::Filter;
@@ -42,8 +43,9 @@ async fn handler(
 	let sql = std::str::from_utf8(&sql).unwrap();
 	match crate::dbs::execute(sql, session, None).await {
 		Ok(res) => match output.as_ref() {
-			"application/json" => Ok(warp::reply::json(&res)),
-			"application/cbor" => Ok(warp::reply::json(&res)),
+			"application/json" => Ok(output::json(&res)),
+			"application/cbor" => Ok(output::cbor(&res)),
+			"application/msgpack" => Ok(output::pack(&res)),
 			_ => Err(warp::reject::not_found()),
 		},
 		Err(err) => Err(warp::reject::custom(err)),

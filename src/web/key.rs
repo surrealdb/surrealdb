@@ -3,6 +3,7 @@ use crate::err::Error;
 use crate::sql::value::Value;
 use crate::web::conf;
 use crate::web::head;
+use crate::web::output;
 use bytes::Bytes;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -113,9 +114,10 @@ async fn select_all(
 	let mut vars = HashMap::new();
 	vars.insert(String::from("table"), Value::from(table));
 	match crate::dbs::execute(sql.as_str(), session, Some(vars)).await {
-		Ok(res) => match output.as_ref() {
-			"application/json" => Ok(warp::reply::json(&res)),
-			"application/cbor" => Ok(warp::reply::json(&res)),
+		Ok(ref res) => match output.as_ref() {
+			"application/json" => Ok(output::json(res)),
+			"application/cbor" => Ok(output::cbor(res)),
+			"application/msgpack" => Ok(output::pack(&res)),
 			_ => Err(warp::reject::not_found()),
 		},
 		Err(err) => Err(warp::reject::custom(err)),
@@ -137,8 +139,9 @@ async fn create_all(
 			vars.insert(String::from("data"), Value::from(data));
 			match crate::dbs::execute(sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
-					"application/json" => Ok(warp::reply::json(&res)),
-					"application/cbor" => Ok(warp::reply::json(&res)),
+					"application/json" => Ok(output::json(&res)),
+					"application/cbor" => Ok(output::cbor(&res)),
+					"application/msgpack" => Ok(output::pack(&res)),
 					_ => Err(warp::reject::not_found()),
 				},
 				Err(err) => Err(warp::reject::custom(err)),
@@ -158,8 +161,9 @@ async fn delete_all(
 	vars.insert(String::from("table"), Value::from(table));
 	match crate::dbs::execute(sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
-			"application/json" => Ok(warp::reply::json(&res)),
-			"application/cbor" => Ok(warp::reply::json(&res)),
+			"application/json" => Ok(output::json(&res)),
+			"application/cbor" => Ok(output::cbor(&res)),
+			"application/msgpack" => Ok(output::pack(&res)),
 			_ => Err(warp::reject::not_found()),
 		},
 		Err(err) => Err(warp::reject::custom(err)),
@@ -182,8 +186,9 @@ async fn select_one(
 	vars.insert(String::from("id"), Value::from(id));
 	match crate::dbs::execute(sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
-			"application/json" => Ok(warp::reply::json(&res)),
-			"application/cbor" => Ok(warp::reply::json(&res)),
+			"application/json" => Ok(output::json(&res)),
+			"application/cbor" => Ok(output::cbor(&res)),
+			"application/msgpack" => Ok(output::pack(&res)),
 			_ => Err(warp::reject::not_found()),
 		},
 		Err(err) => Err(warp::reject::custom(err)),
@@ -207,8 +212,9 @@ async fn create_one(
 			vars.insert(String::from("data"), Value::from(data));
 			match crate::dbs::execute(sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
-					"application/json" => Ok(warp::reply::json(&res)),
-					"application/cbor" => Ok(warp::reply::json(&res)),
+					"application/json" => Ok(output::json(&res)),
+					"application/cbor" => Ok(output::cbor(&res)),
+					"application/msgpack" => Ok(output::pack(&res)),
 					_ => Err(warp::reject::not_found()),
 				},
 				Err(err) => Err(warp::reject::custom(err)),
@@ -235,8 +241,9 @@ async fn update_one(
 			vars.insert(String::from("data"), Value::from(data));
 			match crate::dbs::execute(sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
-					"application/json" => Ok(warp::reply::json(&res)),
-					"application/cbor" => Ok(warp::reply::json(&res)),
+					"application/json" => Ok(output::json(&res)),
+					"application/cbor" => Ok(output::cbor(&res)),
+					"application/msgpack" => Ok(output::pack(&res)),
 					_ => Err(warp::reject::not_found()),
 				},
 				Err(err) => Err(warp::reject::custom(err)),
@@ -263,8 +270,9 @@ async fn modify_one(
 			vars.insert(String::from("data"), Value::from(data));
 			match crate::dbs::execute(sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
-					"application/json" => Ok(warp::reply::json(&res)),
-					"application/cbor" => Ok(warp::reply::json(&res)),
+					"application/json" => Ok(output::json(&res)),
+					"application/cbor" => Ok(output::cbor(&res)),
+					"application/msgpack" => Ok(output::pack(&res)),
 					_ => Err(warp::reject::not_found()),
 				},
 				Err(err) => Err(warp::reject::custom(err)),
@@ -286,8 +294,9 @@ async fn delete_one(
 	vars.insert(String::from("id"), Value::from(id));
 	match crate::dbs::execute(sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
-			"application/json" => Ok(warp::reply::json(&res)),
-			"application/cbor" => Ok(warp::reply::json(&res)),
+			"application/json" => Ok(output::json(&res)),
+			"application/cbor" => Ok(output::cbor(&res)),
+			"application/msgpack" => Ok(output::pack(&res)),
 			_ => Err(warp::reject::not_found()),
 		},
 		Err(err) => Err(warp::reject::custom(err)),
