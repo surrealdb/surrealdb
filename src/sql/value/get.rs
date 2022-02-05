@@ -64,7 +64,7 @@ impl Value {
 				// Current path part is a thing
 				Value::Thing(v) => match path.parts.len() {
 					// No remote embedded fields, so just return this
-					1 => Ok(Value::Thing(v.clone())),
+					0 => Ok(Value::Thing(v.clone())),
 					// Remote embedded field, so fetch the thing
 					_ => {
 						let stm = SelectStatement {
@@ -72,10 +72,12 @@ impl Value {
 							what: Values(vec![Value::Thing(v.clone())]),
 							..SelectStatement::default()
 						};
-						match stm.compute(ctx, opt, exe, None).await {
-							Ok(v) => v.get(ctx, opt, exe, &path.next()).await,
-							Err(_) => Ok(Value::None),
-						}
+						stm.compute(ctx, opt, exe, None)
+							.await?
+							.first(ctx, opt, exe)
+							.await?
+							.get(ctx, opt, exe, &path)
+							.await
 					}
 				},
 				// Ignore everything else
