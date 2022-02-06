@@ -1,4 +1,5 @@
 use crate::dbs::Executor;
+use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::kvs::transaction;
@@ -12,7 +13,12 @@ macro_rules! output {
 }
 
 impl<'a> Executor<'a> {
-	pub async fn export(&mut self, ctx: Runtime, mut chn: Sender) -> Result<(), Error> {
+	pub async fn export(
+		&mut self,
+		ctx: Runtime,
+		opt: Options,
+		mut chn: Sender,
+	) -> Result<(), Error> {
 		// Start a new transaction
 		let txn = transaction(false, false).await?;
 		// Output OPTIONS

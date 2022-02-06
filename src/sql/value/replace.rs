@@ -9,7 +9,7 @@ impl Value {
 	pub async fn replace(
 		&mut self,
 		_ctx: &Runtime,
-		_opt: &Options<'_>,
+		_opt: &Options,
 		_exe: &Executor<'_>,
 		val: &Object,
 	) -> Result<(), Error> {

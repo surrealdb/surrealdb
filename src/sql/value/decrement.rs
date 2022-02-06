@@ -10,7 +10,7 @@ impl Value {
 	pub async fn decrement(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		path: &Idiom,
 		val: Value,

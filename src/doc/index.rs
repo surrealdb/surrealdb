@@ -9,7 +9,7 @@ impl Document {
 	pub async fn index(
 		&self,
 		_ctx: &Runtime,
-		_opt: &Options<'_>,
+		_opt: &Options,
 		_exe: &Executor<'_>,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {

@@ -1,7 +1,6 @@
 use crate::ctx::Context;
 use crate::dbs::response::{Response, Responses, Status};
 use crate::dbs::Auth;
-use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
@@ -16,38 +15,19 @@ use std::time::Instant;
 
 #[derive(Default)]
 pub struct Executor<'a> {
-	pub id: Option<String>,
-	pub ns: Option<String>,
-	pub db: Option<String>,
-	pub txn: Option<Arc<Mutex<Transaction<'a>>>>,
-	pub err: Option<Error>,
+	txn: Option<Arc<Mutex<Transaction<'a>>>>,
+	err: Option<Error>,
 }
 
 impl<'a> Executor<'a> {
 	pub fn new() -> Executor<'a> {
 		Executor {
-			id: None,
-			ns: None,
-			db: None,
 			..Executor::default()
 		}
 	}
 
-	pub fn check(&self, opt: &Options, level: Level) -> Result<(), Error> {
-		if opt.auth.check(level) == false {
-			return Err(Error::QueryPermissionsError);
-		}
-		if self.ns.is_none() {
-			return Err(Error::NsError);
-		}
-		if self.db.is_none() {
-			return Err(Error::DbError);
-		}
-		Ok(())
-	}
-
 	async fn begin(&mut self) -> bool {
-		match self.txn {
+		match &self.txn {
 			Some(_) => false,
 			None => match transaction(true, false).await {
 				Ok(v) => {
@@ -65,15 +45,25 @@ impl<'a> Executor<'a> {
 	async fn commit(&mut self, local: bool) {
 		if local {
 			match &self.txn {
-				Some(txn) => {
-					let txn = txn.clone();
-					let mut txn = txn.lock().await;
-					if let Err(e) = txn.commit().await {
-						self.err = Some(e);
+				Some(txn) => match &self.err {
+					Some(_) => {
+						let txn = txn.clone();
+						let mut txn = txn.lock().await;
+						if let Err(e) = txn.cancel().await {
+							self.err = Some(e);
+						}
+						self.txn = None;
 					}
-					self.txn = None;
-				}
-				None => unreachable!(),
+					None => {
+						let txn = txn.clone();
+						let mut txn = txn.lock().await;
+						if let Err(e) = txn.commit().await {
+							self.err = Some(e);
+						}
+						self.txn = None;
+					}
+				},
+				None => (),
 			}
 		}
 	}
@@ -91,13 +81,6 @@ impl<'a> Executor<'a> {
 				}
 				None => unreachable!(),
 			}
-		}
-	}
-
-	async fn finish(&mut self, res: &Result<Value, Error>, local: bool) {
-		match res {
-			Ok(_) => self.commit(local).await,
-			Err(_) => self.cancel(local).await,
 		}
 	}
 
@@ -127,13 +110,16 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	pub async fn execute(&mut self, mut ctx: Runtime, qry: Query) -> Result<Responses, Error> {
+	pub async fn execute(
+		&mut self,
+		mut ctx: Runtime,
+		mut opt: Options,
+		qry: Query,
+	) -> Result<Responses, Error> {
 		// Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
-		// Create a new options
-		let mut opt = Options::new(&Auth::No);
 		// Process all statements in query
 		for stm in qry.statements().iter() {
 			// Log the statement
@@ -159,39 +145,56 @@ impl<'a> Executor<'a> {
 					continue;
 				}
 				// Begin a new transaction
-				Statement::Begin(stm) => {
-					let res = stm.compute(&ctx, &opt, self, None).await;
-					if res.is_err() {
-						self.err = res.err()
-					};
+				Statement::Begin(_) => {
+					self.begin().await;
 					continue;
 				}
 				// Cancel a running transaction
-				Statement::Cancel(stm) => {
-					let res = stm.compute(&ctx, &opt, self, None).await;
-					if res.is_err() {
-						self.err = res.err()
-					};
+				Statement::Cancel(_) => {
+					self.cancel(true).await;
 					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
 					out.append(&mut buf);
 					self.txn = None;
 					continue;
 				}
 				// Commit a running transaction
-				Statement::Commit(stm) => {
-					let res = stm.compute(&ctx, &opt, self, None).await;
-					if res.is_err() {
-						self.err = res.err()
-					};
+				Statement::Commit(_) => {
+					self.commit(true).await;
 					buf = buf.into_iter().map(|v| self.buf_commit(v)).collect();
 					out.append(&mut buf);
 					self.txn = None;
 					continue;
 				}
-				// Commit a running transaction
+				// Switch to a different NS or DB
 				Statement::Use(stm) => {
-					let res = stm.compute(&ctx, &opt, self, None).await;
-					res
+					if let Some(ref ns) = stm.ns {
+						match &*opt.auth {
+							Auth::No => opt.ns = Some(Arc::new(ns.to_owned())),
+							Auth::Kv => opt.ns = Some(Arc::new(ns.to_owned())),
+							Auth::Ns(v) if v == ns => opt.ns = Some(Arc::new(ns.to_owned())),
+							_ => {
+								opt.ns = None;
+								return Err(Error::NsAuthenticationError {
+									ns: ns.to_owned(),
+								});
+							}
+						}
+					}
+					if let Some(ref db) = stm.db {
+						match &*opt.auth {
+							Auth::No => opt.db = Some(Arc::new(db.to_owned())),
+							Auth::Kv => opt.db = Some(Arc::new(db.to_owned())),
+							Auth::Ns(_) => opt.db = Some(Arc::new(db.to_owned())),
+							Auth::Db(_, v) if v == db => opt.db = Some(Arc::new(db.to_owned())),
+							_ => {
+								opt.db = None;
+								return Err(Error::DbAuthenticationError {
+									db: db.to_owned(),
+								});
+							}
+						}
+					}
+					Ok(Value::None)
 				}
 				// Process param definition statements
 				Statement::Set(stm) => {
@@ -235,7 +238,10 @@ impl<'a> Executor<'a> {
 							None => res,
 						};
 						// Finalise transaction
-						self.finish(&res, loc).await;
+						match &res {
+							Ok(_) => self.commit(loc).await,
+							Err(_) => self.cancel(loc).await,
+						};
 						// Return the result
 						res
 					}

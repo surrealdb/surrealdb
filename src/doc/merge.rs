@@ -12,7 +12,7 @@ impl Document {
 	pub async fn merge(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {

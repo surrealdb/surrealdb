@@ -9,7 +9,7 @@ impl Value {
 	pub async fn clear(
 		&mut self,
 		_ctx: &Runtime,
-		_opt: &Options<'_>,
+		_opt: &Options,
 		_exe: &Executor<'_>,
 	) -> Result<(), Error> {
 		*self = Value::from(Object::default());

@@ -10,7 +10,7 @@ impl Document {
 	pub async fn select(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {

@@ -63,10 +63,11 @@ impl<'a> Iterator<'a> {
 		}))
 	}
 
+	// Process the records and output
 	pub async fn output(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 	) -> Result<Value, Error> {
 		// Log the statement
@@ -96,35 +97,35 @@ impl<'a> Iterator<'a> {
 	}
 
 	#[inline]
-	fn output_split(&mut self, ctx: &Runtime, opt: &Options<'_>, exe: &Executor) {
+	fn output_split(&mut self, ctx: &Runtime, opt: &Options, exe: &Executor) {
 		if self.split.is_some() {
 			// Ignore
 		}
 	}
 
 	#[inline]
-	fn output_group(&mut self, ctx: &Runtime, opt: &Options<'_>, exe: &Executor) {
+	fn output_group(&mut self, ctx: &Runtime, opt: &Options, exe: &Executor) {
 		if self.group.is_some() {
 			// Ignore
 		}
 	}
 
 	#[inline]
-	fn output_order(&mut self, ctx: &Runtime, opt: &Options<'_>, exe: &Executor) {
+	fn output_order(&mut self, ctx: &Runtime, opt: &Options, exe: &Executor) {
 		if self.order.is_some() {
 			// Ignore
 		}
 	}
 
 	#[inline]
-	fn output_start(&mut self, ctx: &Runtime, opt: &Options<'_>, exe: &Executor) {
+	fn output_start(&mut self, ctx: &Runtime, opt: &Options, exe: &Executor) {
 		if let Some(v) = self.start {
 			self.results = mem::take(&mut self.results).into_iter().skip(v.0).collect();
 		}
 	}
 
 	#[inline]
-	fn output_limit(&mut self, ctx: &Runtime, opt: &Options<'_>, exe: &Executor) {
+	fn output_limit(&mut self, ctx: &Runtime, opt: &Options, exe: &Executor) {
 		if let Some(v) = self.limit {
 			self.results = mem::take(&mut self.results).into_iter().take(v.0).collect();
 		}
@@ -133,7 +134,7 @@ impl<'a> Iterator<'a> {
 	async fn iterate(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 	) -> Result<(), Error> {
 		match self.parallel {
@@ -167,7 +168,7 @@ impl<'a> Iterator<'a> {
 	pub async fn process(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		thg: Option<Thing>,
 		val: Value,

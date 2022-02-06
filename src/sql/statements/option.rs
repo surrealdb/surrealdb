@@ -1,13 +1,7 @@
-use crate::dbs::Executor;
-use crate::dbs::Level;
-use crate::dbs::Options;
-use crate::dbs::Runtime;
-use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
-use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
@@ -20,21 +14,6 @@ use std::fmt;
 pub struct OptionStatement {
 	pub name: Ident,
 	pub what: bool,
-}
-
-impl OptionStatement {
-	pub async fn compute(
-		&self,
-		_ctx: &Runtime,
-		opt: &Options<'_>,
-		exe: &Executor<'_>,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		// Allowed to run?
-		exe.check(opt, Level::Db)?;
-		// Return nothing
-		Ok(Value::None)
-	}
 }
 
 impl fmt::Display for OptionStatement {

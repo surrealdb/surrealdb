@@ -24,16 +24,16 @@ impl InfoStatement {
 	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		match self {
-			InfoStatement::Namespace => exe.check(opt, Level::Ns)?,
-			InfoStatement::Database => exe.check(opt, Level::Db)?,
-			InfoStatement::Scope(_) => exe.check(opt, Level::Db)?,
-			InfoStatement::Table(_) => exe.check(opt, Level::Db)?,
+			InfoStatement::Namespace => opt.check(Level::Ns)?,
+			InfoStatement::Database => opt.check(Level::Db)?,
+			InfoStatement::Scope(_) => opt.check(Level::Db)?,
+			InfoStatement::Table(_) => opt.check(Level::Db)?,
 		}
 		// Continue
 		todo!()

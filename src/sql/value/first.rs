@@ -10,7 +10,7 @@ impl Value {
 	pub async fn first(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 	) -> Result<Self, Error> {
 		self.get(ctx, opt, exe, &Idiom::from(vec![Part::First])).await

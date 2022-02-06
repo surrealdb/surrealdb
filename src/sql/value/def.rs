@@ -24,7 +24,7 @@ impl Value {
 	pub async fn def(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		val: Option<&Thing>,
 	) -> Result<(), Error> {

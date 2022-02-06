@@ -15,7 +15,7 @@ impl Value {
 	pub async fn iterate(
 		self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
@@ -35,7 +35,7 @@ impl Array {
 	pub async fn iterate(
 		self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
@@ -56,7 +56,7 @@ impl Model {
 	pub async fn iterate(
 		self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
@@ -90,7 +90,7 @@ impl Thing {
 	pub async fn iterate(
 		self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
@@ -102,7 +102,7 @@ impl Table {
 	pub async fn iterate(
 		self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {

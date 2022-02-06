@@ -32,7 +32,7 @@ impl RemoveStatement {
 	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -93,12 +93,12 @@ impl RemoveNamespaceStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Kv)?;
+		opt.check(Level::Kv)?;
 		// Continue
 		todo!()
 	}
@@ -137,12 +137,12 @@ impl RemoveDatabaseStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Ns)?;
+		opt.check(Level::Ns)?;
 		// Continue
 		todo!()
 	}
@@ -182,14 +182,14 @@ impl RemoveLoginStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		match self.base {
-			Base::Ns => exe.check(opt, Level::Kv)?,
-			Base::Db => exe.check(opt, Level::Ns)?,
+			Base::Ns => opt.check(Level::Kv)?,
+			Base::Db => opt.check(Level::Ns)?,
 			_ => unreachable!(),
 		}
 		// Continue
@@ -236,14 +236,14 @@ impl RemoveTokenStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		match self.base {
-			Base::Ns => exe.check(opt, Level::Kv)?,
-			Base::Db => exe.check(opt, Level::Ns)?,
+			Base::Ns => opt.check(Level::Kv)?,
+			Base::Db => opt.check(Level::Ns)?,
 			_ => unreachable!(),
 		}
 		// Continue
@@ -289,12 +289,12 @@ impl RemoveScopeStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Db)?;
+		opt.check(Level::Db)?;
 		// Continue
 		todo!()
 	}
@@ -333,12 +333,12 @@ impl RemoveTableStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Db)?;
+		opt.check(Level::Db)?;
 		// Continue
 		todo!()
 	}
@@ -378,12 +378,12 @@ impl RemoveEventStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Db)?;
+		opt.check(Level::Db)?;
 		// Continue
 		todo!()
 	}
@@ -429,12 +429,12 @@ impl RemoveFieldStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Db)?;
+		opt.check(Level::Db)?;
 		// Continue
 		todo!()
 	}
@@ -480,12 +480,12 @@ impl RemoveIndexStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Db)?;
+		opt.check(Level::Db)?;
 		// Continue
 		todo!()
 	}

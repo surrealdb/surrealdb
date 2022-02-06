@@ -793,7 +793,7 @@ impl Value {
 	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		doc: Option<&'async_recursion Value>,
 	) -> Result<Value, Error> {

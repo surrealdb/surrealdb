@@ -1,7 +1,8 @@
 use crate::cnf;
 use crate::dbs::Auth;
+use crate::dbs::Level;
 use crate::err::Error;
-use crate::sql::version::Version;
+use std::sync::Arc;
 
 // An Options is passed around when processing a set of query
 // statements. An Options contains specific information for how
@@ -11,29 +12,41 @@ use crate::sql::version::Version;
 // when importing data, where these queries might fail).
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Options<'a> {
-	pub auth: &'a Auth,
-	pub dive: usize,                  // How many subqueries have we gone into?
-	pub debug: bool,                  // Should we debug query response SQL?
-	pub force: bool,                  // Should we force tables/events to re-run?
-	pub fields: bool,                 // Should we process field queries?
-	pub events: bool,                 // Should we process event queries?
-	pub tables: bool,                 // Should we process table queries?
-	pub futures: bool,                // Should we process function futures?
-	pub version: Option<&'a Version>, // Current
+pub struct Options {
+	// Currently selected NS
+	pub ns: Option<Arc<String>>,
+	// Currently selected DB
+	pub db: Option<Arc<String>>,
+	// Connection authentication data
+	pub auth: Arc<Auth>,
+	// How many subqueries have we gone into?
+	pub dive: usize,
+	// Should we debug query response SQL?
+	pub debug: bool,
+	// Should we force tables/events to re-run?
+	pub force: bool,
+	// Should we process field queries?
+	pub fields: bool,
+	// Should we process event queries?
+	pub events: bool,
+	// Should we process table queries?
+	pub tables: bool,
+	// Should we process function futures?
+	pub futures: bool,
 }
 
-impl<'a> Default for Options<'a> {
+impl Default for Options {
 	fn default() -> Self {
-		Options::new(&Auth::No)
+		Options::new(Auth::No)
 	}
 }
 
-impl<'a> Options<'a> {
+impl Options {
 	// Create a new Options object
-	pub fn new(auth: &'a Auth) -> Options<'a> {
+	pub fn new(auth: Auth) -> Options {
 		Options {
-			auth,
+			ns: None,
+			db: None,
 			dive: 0,
 			debug: false,
 			force: false,
@@ -41,14 +54,27 @@ impl<'a> Options<'a> {
 			events: true,
 			tables: true,
 			futures: false,
-			version: None,
+			auth: Arc::new(auth),
 		}
 	}
 
+	// Get currently selected NS
+	pub fn ns(&self) -> &String {
+		self.ns.as_ref().unwrap()
+	}
+
+	// Get currently selected DB
+	pub fn db(&self) -> &String {
+		self.db.as_ref().unwrap()
+	}
+
 	// Create a new Options object for a subquery
-	pub fn dive(&self) -> Result<Options<'a>, Error> {
+	pub fn dive(&self) -> Result<Options, Error> {
 		if self.dive < cnf::MAX_RECURSIVE_QUERIES {
 			Ok(Options {
+				auth: self.auth.clone(),
+				ns: self.ns.clone(),
+				db: self.db.clone(),
 				dive: self.dive + 1,
 				..*self
 			})
@@ -60,48 +86,66 @@ impl<'a> Options<'a> {
 	}
 
 	// Create a new Options object for a subquery
-	pub fn debug(&self, v: bool) -> Options<'a> {
+	pub fn debug(&self, v: bool) -> Options {
 		Options {
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
 			debug: v,
 			..*self
 		}
 	}
 
 	// Create a new Options object for a subquery
-	pub fn force(&self, v: bool) -> Options<'a> {
+	pub fn force(&self, v: bool) -> Options {
 		Options {
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
 			force: v,
 			..*self
 		}
 	}
 
 	// Create a new Options object for a subquery
-	pub fn fields(&self, v: bool) -> Options<'a> {
+	pub fn fields(&self, v: bool) -> Options {
 		Options {
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
 			fields: v,
 			..*self
 		}
 	}
 
 	// Create a new Options object for a subquery
-	pub fn events(&self, v: bool) -> Options<'a> {
+	pub fn events(&self, v: bool) -> Options {
 		Options {
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
 			events: v,
 			..*self
 		}
 	}
 
 	// Create a new Options object for a subquery
-	pub fn tables(&self, v: bool) -> Options<'a> {
+	pub fn tables(&self, v: bool) -> Options {
 		Options {
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
 			tables: v,
 			..*self
 		}
 	}
 
 	// Create a new Options object for a subquery
-	pub fn import(&self, v: bool) -> Options<'a> {
+	pub fn import(&self, v: bool) -> Options {
 		Options {
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
 			fields: v,
 			events: v,
 			tables: v,
@@ -110,18 +154,27 @@ impl<'a> Options<'a> {
 	}
 
 	// Create a new Options object for a subquery
-	pub fn futures(&self, v: bool) -> Options<'a> {
+	pub fn futures(&self, v: bool) -> Options {
 		Options {
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
 			futures: v,
 			..*self
 		}
 	}
 
-	// Create a new Options object for a subquery
-	pub fn version(&self, v: Option<&'a Version>) -> Options<'a> {
-		Options {
-			version: v,
-			..*self
+	// Check whether the authentication permissions are ok
+	pub fn check(&self, level: Level) -> Result<(), Error> {
+		if self.auth.check(level) == false {
+			return Err(Error::QueryPermissionsError);
 		}
+		if self.ns.is_none() {
+			return Err(Error::NsError);
+		}
+		if self.db.is_none() {
+			return Err(Error::DbError);
+		}
+		Ok(())
 	}
 }

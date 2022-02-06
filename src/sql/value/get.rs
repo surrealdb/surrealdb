@@ -15,7 +15,7 @@ impl Value {
 	pub async fn get(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		path: &Idiom,
 	) -> Result<Self, Error> {

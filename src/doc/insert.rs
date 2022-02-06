@@ -10,7 +10,7 @@ impl Document {
 	pub async fn insert(
 		&mut self,
 		_ctx: &Runtime,
-		_opt: &Options<'_>,
+		_opt: &Options,
 		_exe: &Executor<'_>,
 		_stm: &Statement<'_>,
 	) -> Result<Value, Error> {

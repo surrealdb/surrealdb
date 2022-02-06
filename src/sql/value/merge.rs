@@ -9,7 +9,7 @@ impl Value {
 	pub async fn merge(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		val: &Object,
 	) -> Result<(), Error> {

@@ -108,7 +108,7 @@ impl Statement {
 	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {

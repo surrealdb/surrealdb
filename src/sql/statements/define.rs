@@ -42,7 +42,7 @@ impl DefineStatement {
 	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
@@ -103,12 +103,12 @@ impl DefineNamespaceStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Kv)?;
+		opt.check(Level::Kv)?;
 		// Continue
 		todo!()
 	}
@@ -147,12 +147,12 @@ impl DefineDatabaseStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Ns)?;
+		opt.check(Level::Ns)?;
 		// Continue
 		todo!()
 	}
@@ -196,14 +196,14 @@ impl DefineLoginStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		match self.base {
-			Base::Ns => exe.check(opt, Level::Kv)?,
-			Base::Db => exe.check(opt, Level::Ns)?,
+			Base::Ns => opt.check(Level::Kv)?,
+			Base::Db => opt.check(Level::Ns)?,
 			_ => unreachable!(),
 		}
 		// Continue
@@ -294,14 +294,14 @@ impl DefineTokenStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		match self.base {
-			Base::Ns => exe.check(opt, Level::Kv)?,
-			Base::Db => exe.check(opt, Level::Ns)?,
+			Base::Ns => opt.check(Level::Kv)?,
+			Base::Db => opt.check(Level::Ns)?,
 			_ => unreachable!(),
 		}
 		// Continue
@@ -369,12 +369,12 @@ impl DefineScopeStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Db)?;
+		opt.check(Level::Db)?;
 		// Continue
 		todo!()
 	}
@@ -492,12 +492,12 @@ impl DefineTableStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Db)?;
+		opt.check(Level::Db)?;
 		// Continue
 		todo!()
 	}
@@ -623,12 +623,12 @@ impl DefineEventStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Db)?;
+		opt.check(Level::Db)?;
 		// Continue
 		todo!()
 	}
@@ -697,12 +697,12 @@ impl DefineFieldStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Db)?;
+		opt.check(Level::Db)?;
 		// Continue
 		todo!()
 	}
@@ -836,12 +836,12 @@ impl DefineIndexStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::Db)?;
+		opt.check(Level::Db)?;
 		// Continue
 		todo!()
 	}

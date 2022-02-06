@@ -9,7 +9,7 @@ impl Document {
 	pub async fn erase(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {

@@ -14,7 +14,7 @@ impl Value {
 	pub async fn set(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		path: &Idiom,
 		val: Value,

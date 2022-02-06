@@ -32,12 +32,12 @@ impl CreateStatement {
 	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::No)?;
+		opt.check(Level::No)?;
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Pass in current statement

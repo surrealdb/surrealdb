@@ -67,12 +67,12 @@ impl SelectStatement {
 	pub async fn compute(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
-		exe.check(opt, Level::No)?;
+		opt.check(Level::No)?;
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Pass in current statement
@@ -85,8 +85,6 @@ impl SelectStatement {
 		i.start = self.start.as_ref();
 		// Ensure futures are processed
 		let opt = &opt.futures(true);
-		// Specify the document version
-		let opt = &opt.version(self.version.as_ref());
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, exe, doc).await?;

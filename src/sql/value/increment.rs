@@ -10,7 +10,7 @@ impl Value {
 	pub async fn increment(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		path: &Idiom,
 		val: Value,

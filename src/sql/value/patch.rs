@@ -10,7 +10,7 @@ impl Value {
 	pub async fn patch(
 		&mut self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		val: &Array,
 	) -> Result<(), Error> {

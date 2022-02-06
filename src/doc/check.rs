@@ -9,7 +9,7 @@ impl Document {
 	pub async fn check(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {

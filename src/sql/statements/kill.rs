@@ -19,7 +19,7 @@ impl KillStatement {
 	pub async fn compute(
 		&self,
 		_ctx: &Runtime,
-		_opt: &Options<'_>,
+		_opt: &Options,
 		_exe: &Executor<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {

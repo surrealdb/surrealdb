@@ -1,10 +1,5 @@
-use crate::dbs::Executor;
-use crate::dbs::Options;
-use crate::dbs::Runtime;
-use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
-use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -14,38 +9,6 @@ use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CommitStatement;
-
-impl CommitStatement {
-	pub async fn compute(
-		&self,
-		_ctx: &Runtime,
-		_opt: &Options<'_>,
-		exe: &Executor<'_>,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		match &exe.txn {
-			Some(txn) => match &exe.err {
-				Some(_) => {
-					let txn = txn.clone();
-					let mut txn = txn.lock().await;
-					match txn.cancel().await {
-						Ok(_) => Ok(Value::None),
-						Err(e) => Err(e),
-					}
-				}
-				None => {
-					let txn = txn.clone();
-					let mut txn = txn.lock().await;
-					match txn.commit().await {
-						Ok(_) => Ok(Value::None),
-						Err(e) => Err(e),
-					}
-				}
-			},
-			None => Ok(Value::None),
-		}
-	}
-}
 
 impl fmt::Display for CommitStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

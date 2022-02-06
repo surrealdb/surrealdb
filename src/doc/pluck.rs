@@ -13,7 +13,7 @@ impl Document {
 	pub async fn pluck(
 		&self,
 		ctx: &Runtime,
-		opt: &Options<'_>,
+		opt: &Options,
 		exe: &Executor<'_>,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
