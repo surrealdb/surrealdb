@@ -3,7 +3,7 @@ macro_rules! map {
         let mut m = ::std::collections::BTreeMap::new();
         $(m.insert($k, $v);)+
         m
-     }};
+    }};
 }
 
 macro_rules! hmap {
@@ -11,7 +11,7 @@ macro_rules! hmap {
         let mut m = ::std::collections::HashMap::new();
         $(m.insert($k, $v);)+
         m
-     }};
+    }};
 }
 
 macro_rules! bmap {
@@ -19,5 +19,5 @@ macro_rules! bmap {
         let mut m = ::std::collections::BTreeMap::new();
         $(m.insert($k, $v);)+
         m
-     }};
+    }};
 }
