@@ -13,6 +13,21 @@ use std::fmt;
 pub struct Fields(pub Vec<Field>);
 
 impl Fields {
+	pub fn all(&self) -> bool {
+		self.0.iter().any(|v| match v {
+			Field::All => true,
+			_ => false,
+		})
+	}
+	pub fn iter(&self) -> impl Iterator<Item = &Field> {
+		self.0.iter()
+	}
+	pub fn other(&self) -> impl Iterator<Item = &Field> {
+		self.0.iter().filter(|v| match v {
+			Field::All => false,
+			_ => true,
+		})
+	}
 	pub fn single(&self) -> Option<Idiom> {
 		match self.0.len() {
 			1 => match self.0.first() {

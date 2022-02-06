@@ -3,6 +3,7 @@ pub use self::value::*;
 pub mod array;
 pub mod clear;
 pub mod decrement;
+pub mod def;
 pub mod del;
 pub mod diff;
 pub mod fetch;

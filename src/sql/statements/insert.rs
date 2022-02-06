@@ -3,6 +3,7 @@ use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Statement;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::data::{single, update, values, Data};
@@ -43,9 +44,8 @@ impl InsertStatement {
 		exe.check(opt, Level::No)?;
 		// Create a new iterator
 		let mut i = Iterator::new();
-		// Pass in statement config
-		i.into = Some(&self.into);
-		i.data = Some(&self.data);
+		// Pass in current statement
+		i.stmt = Statement::from(self);
 		// Ensure futures are stored
 		let opt = &opt.futures(false);
 		// Parse the expression
@@ -53,23 +53,22 @@ impl InsertStatement {
 			Data::ValuesExpression(_) => {
 				todo!() // TODO: loop over each
 			}
-			Data::SingleExpression(v) => match v.compute(ctx, opt, exe, doc).await? {
-				Value::Array(v) => {
-					i.process_array(ctx, exe, v);
+			Data::SingleExpression(v) => {
+				let v = v.compute(ctx, opt, exe, doc).await?;
+				match v {
+					Value::Array(v) => v.value.into_iter().for_each(|v| i.prepare(v)),
+					Value::Object(_) => i.prepare(v),
+					v => {
+						return Err(Error::InsertStatementError {
+							value: v,
+						})
+					}
 				}
-				Value::Object(v) => {
-					i.process_object(ctx, exe, v);
-				}
-				v => {
-					return Err(Error::InsertStatementError {
-						value: v,
-					})
-				}
-			},
+			}
 			_ => unreachable!(),
 		}
 		// Output the results
-		i.output(ctx, exe)
+		i.output(ctx, opt, exe).await
 	}
 }
 

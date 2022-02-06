@@ -388,6 +388,14 @@ impl From<Option<String>> for Value {
 
 impl Value {
 	// -----------------------------------
+	// Initial record value
+	// -----------------------------------
+
+	pub fn base() -> Self {
+		Value::Object(Object::default())
+	}
+
+	// -----------------------------------
 	// Builtin types
 	// -----------------------------------
 

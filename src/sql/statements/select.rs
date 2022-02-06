@@ -3,6 +3,7 @@ use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Statement;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -74,9 +75,9 @@ impl SelectStatement {
 		exe.check(opt, Level::No)?;
 		// Create a new iterator
 		let mut i = Iterator::new();
+		// Pass in current statement
+		i.stmt = Statement::from(self);
 		// Pass in statement config
-		i.expr = Some(&self.expr);
-		i.cond = self.cond.as_ref();
 		i.split = self.split.as_ref();
 		i.group = self.group.as_ref();
 		i.order = self.order.as_ref();
@@ -88,29 +89,17 @@ impl SelectStatement {
 		let opt = &opt.version(self.version.as_ref());
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			match w.compute(ctx, opt, exe, doc).await? {
-				Value::Table(v) => {
-					i.process_table(ctx, exe, v);
-				}
-				Value::Thing(v) => {
-					i.process_thing(ctx, exe, v);
-				}
-				Value::Model(v) => {
-					i.process_model(ctx, exe, v);
-				}
-				Value::Array(v) => {
-					i.process_array(ctx, exe, v);
-				}
-				Value::Object(v) => {
-					i.process_object(ctx, exe, v);
-				}
-				v => {
-					i.process_value(ctx, exe, v);
-				}
+			let v = w.compute(ctx, opt, exe, doc).await?;
+			match v {
+				Value::Table(_) => i.prepare(v),
+				Value::Thing(_) => i.prepare(v),
+				Value::Model(_) => i.prepare(v),
+				Value::Array(_) => i.prepare(v),
+				v => i.prepare(v),
 			};
 		}
 		// Output the results
-		i.output(ctx, exe)
+		i.output(ctx, opt, exe).await
 	}
 }
 

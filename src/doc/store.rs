@@ -6,7 +6,7 @@ use crate::doc::Document;
 use crate::err::Error;
 
 impl Document {
-	pub async fn event(
+	pub async fn store(
 		&self,
 		_ctx: &Runtime,
 		_opt: &Options<'_>,

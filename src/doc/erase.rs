@@ -6,13 +6,13 @@ use crate::doc::Document;
 use crate::err::Error;
 
 impl Document {
-	pub async fn event(
-		&self,
-		_ctx: &Runtime,
-		_opt: &Options<'_>,
-		_exe: &Executor<'_>,
+	pub async fn erase(
+		&mut self,
+		ctx: &Runtime,
+		opt: &Options<'_>,
+		exe: &Executor<'_>,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		Ok(())
+		self.current.clear(ctx, opt, exe).await
 	}
 }

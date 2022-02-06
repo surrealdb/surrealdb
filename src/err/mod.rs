@@ -142,6 +142,9 @@ pub enum Error {
 		thing: Thing,
 	},
 
+	#[error("Conditional clause is not truthy")]
+	IgnoreError,
+
 	#[error("Key encoding error: {0}")]
 	EncodeError(#[from] EncodeError),
 

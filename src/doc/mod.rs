@@ -1,10 +1,13 @@
-pub use self::doc::*;
+pub use self::document::*;
 
+mod admit;
 mod allow;
 mod check;
+mod compute;
 mod create;
 mod delete;
-mod doc;
+mod document;
+mod erase;
 mod event;
 mod grant;
 mod index;
@@ -12,8 +15,9 @@ mod insert;
 mod lives;
 mod merge;
 mod perms;
+mod pluck;
 mod relate;
 mod select;
+mod store;
 mod table;
 mod update;
-mod r#yield;
