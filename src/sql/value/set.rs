@@ -66,6 +66,16 @@ impl Value {
 					}
 					_ => Ok(()),
 				},
+				// Current path part is empty
+				Value::Null => {
+					*self = Value::base();
+					self.set(ctx, opt, exe, path, val).await
+				}
+				// Current path part is empty
+				Value::None => {
+					*self = Value::base();
+					self.set(ctx, opt, exe, path, val).await
+				}
 				// Ignore everything else
 				_ => Ok(()),
 			},
@@ -96,6 +106,26 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn set_empty() {
+		let (ctx, opt, exe) = mock();
+		let idi = Idiom::parse("test");
+		let mut val = Value::None;
+		let res = Value::parse("{ test: 999 }");
+		val.set(&ctx, &opt, &exe, &idi, Value::from(999)).await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn set_blank() {
+		let (ctx, opt, exe) = mock();
+		let idi = Idiom::parse("test.something");
+		let mut val = Value::None;
+		let res = Value::parse("{ test: { something: 999 } }");
+		val.set(&ctx, &opt, &exe, &idi, Value::from(999)).await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
 	async fn set_reset() {
 		let (ctx, opt, exe) = mock();
 		let idi = Idiom::parse("test");
@@ -111,6 +141,16 @@ mod tests {
 		let idi = Idiom::parse("test.something");
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ test: { other: null, something: 999 } }");
+		val.set(&ctx, &opt, &exe, &idi, Value::from(999)).await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn set_allow() {
+		let (ctx, opt, exe) = mock();
+		let idi = Idiom::parse("test.something.allow");
+		let mut val = Value::parse("{ test: { other: null } }");
+		let res = Value::parse("{ test: { other: null, something: { allow: 999 } } }");
 		val.set(&ctx, &opt, &exe, &idi, Value::from(999)).await.unwrap();
 		assert_eq!(res, val);
 	}
