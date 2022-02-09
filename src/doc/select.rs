@@ -14,6 +14,8 @@ impl Document {
 		exe: &Executor<'_>,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
+		// Check if record exists
+		self.empty(ctx, opt, exe, stm).await?;
 		// Check where clause
 		self.check(ctx, opt, exe, stm).await?;
 		// Check if allowed

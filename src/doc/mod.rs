@@ -7,6 +7,7 @@ mod compute;
 mod create;
 mod delete;
 mod document;
+mod empty;
 mod erase;
 mod event;
 mod grant;
