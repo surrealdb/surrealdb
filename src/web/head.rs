@@ -1,13 +1,20 @@
-const NAME: &'static str = env!("CARGO_PKG_NAME");
-const VERS: &'static str = env!("CARGO_PKG_VERSION");
+use crate::cnf::PKG_NAME;
+use crate::cnf::PKG_VERS;
+use crate::cnf::SERVER_NAME;
+
+const ID: &'static str = "ID";
+const NS: &'static str = "NS";
+const DB: &'static str = "DB";
+const SERVER: &'static str = "Server";
+const VERSION: &'static str = "Version";
 
 pub fn version() -> warp::filters::reply::WithHeader {
-	let val = format!("{}-{}", NAME, VERS);
-	warp::reply::with::header("Version", val)
+	let val = format!("{}-{}", PKG_NAME, PKG_VERS);
+	warp::reply::with::header(VERSION, val)
 }
 
 pub fn server() -> warp::filters::reply::WithHeader {
-	warp::reply::with::header("Server", "SurrealDB")
+	warp::reply::with::header(SERVER, SERVER_NAME)
 }
 
 pub fn cors() -> warp::filters::cors::Builder {
@@ -27,8 +34,8 @@ pub fn cors() -> warp::filters::cors::Builder {
 			http::header::AUTHORIZATION,
 			http::header::CONTENT_TYPE,
 			http::header::ORIGIN,
-			"NS".parse().unwrap(),
-			"DB".parse().unwrap(),
-			"ID".parse().unwrap(),
+			NS.parse().unwrap(),
+			DB.parse().unwrap(),
+			ID.parse().unwrap(),
 		])
 }
