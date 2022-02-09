@@ -1,5 +1,5 @@
 use crate::kvs;
-use crate::web;
+use crate::net;
 use anyhow::Error;
 use clap;
 
@@ -20,7 +20,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Start up the kvs storage
 	kvs::init(matches)?;
 	// Start up the web server
-	web::init(matches)?;
+	net::init(matches)?;
 	// Don't error when done
 	Ok(())
 }

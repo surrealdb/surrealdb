@@ -1,7 +1,7 @@
 use crate::dbs::Session;
-use crate::web::conf;
-use crate::web::head;
-use crate::web::output;
+use crate::net::conf;
+use crate::net::head;
+use crate::net::output;
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
 use warp::Filter;

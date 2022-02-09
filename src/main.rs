@@ -13,8 +13,8 @@ mod err;
 mod fnc;
 mod key;
 mod kvs;
+mod net;
 mod sql;
-mod web;
 
 fn main() {
 	cli::init(); // Initiate the command line

@@ -1,9 +1,9 @@
 use crate::dbs::Session;
 use crate::err::Error;
+use crate::net::conf;
+use crate::net::head;
+use crate::net::output;
 use crate::sql::value::Value;
-use crate::web::conf;
-use crate::web::head;
-use crate::web::output;
 use bytes::Bytes;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -111,8 +111,11 @@ async fn select_all(
 		l = query.limit.unwrap_or(String::from("100")),
 		s = query.start.unwrap_or(String::from("0")),
 	);
-	let mut vars = HashMap::new();
-	vars.insert(String::from("table"), Value::from(table));
+	let vars = hmap! {
+		String::from("table") => Value::from(table),
+	};
+	// let mut vars = HashMap::new();
+	// vars.insert(String::from("table"), Value::from(table));
 	match crate::dbs::execute(sql.as_str(), session, Some(vars)).await {
 		Ok(ref res) => match output.as_ref() {
 			"application/json" => Ok(output::json(res)),
