@@ -2,7 +2,6 @@ use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
-use crate::sql::object::Object;
 use crate::sql::value::Value;
 
 impl Value {
@@ -12,7 +11,7 @@ impl Value {
 		_opt: &Options,
 		_exe: &Executor<'_>,
 	) -> Result<(), Error> {
-		*self = Value::from(Object::default());
+		*self = Value::base();
 		Ok(())
 	}
 }

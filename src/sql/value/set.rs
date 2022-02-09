@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
 use crate::sql::idiom::Idiom;
-use crate::sql::object::Object;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
@@ -27,7 +26,7 @@ impl Value {
 					Part::Field(p) => match v.value.get_mut(&p.name) {
 						Some(v) if v.is_some() => v.set(ctx, opt, exe, &path.next(), val).await,
 						_ => {
-							let mut obj = Value::from(Object::default());
+							let mut obj = Value::base();
 							obj.set(ctx, opt, exe, &path.next(), val).await?;
 							v.insert(&p.name, obj);
 							Ok(())
