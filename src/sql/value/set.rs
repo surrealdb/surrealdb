@@ -81,7 +81,7 @@ impl Value {
 			},
 			// No more parts so set the value
 			None => {
-				*self = val.clone();
+				*self = val;
 				Ok(())
 			}
 		}
