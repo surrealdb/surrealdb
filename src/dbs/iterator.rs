@@ -194,7 +194,6 @@ impl<'a> Iterator<'a> {
 		// Process the result
 		match res {
 			Err(Error::IgnoreError) => {
-				self.run.cancel();
 				return;
 			}
 			Err(e) => {
