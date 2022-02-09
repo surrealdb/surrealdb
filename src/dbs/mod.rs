@@ -20,7 +20,6 @@ pub use self::response::*;
 pub use self::runtime::*;
 pub use self::session::*;
 pub use self::statement::*;
-pub use self::variables::*;
 
 #[cfg(test)]
 pub(crate) mod test;
