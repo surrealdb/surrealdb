@@ -9,6 +9,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 anyhow = "1.0.53"
 argon2 = "0.3.2"
 async-recursion = "1.0.0"
+bincode = "1.3.3"
 byteorder = "1.4.3"
 bytes = "1.1.0"
 clap = "3.0.10"

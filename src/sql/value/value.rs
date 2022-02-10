@@ -388,13 +388,13 @@ impl From<Option<String>> for Value {
 
 impl Into<Vec<u8>> for Value {
 	fn into(self) -> Vec<u8> {
-		serde_cbor::to_vec(&self).unwrap()
+		bincode::serialize(&self).unwrap()
 	}
 }
 
 impl From<Vec<u8>> for Value {
 	fn from(v: Vec<u8>) -> Self {
-		serde_cbor::from_slice::<Value>(&v).unwrap()
+		bincode::deserialize::<Value>(&v).unwrap()
 	}
 }
 
@@ -613,7 +613,7 @@ impl Value {
 	}
 
 	pub fn to_vec(&self) -> Result<Vec<u8>, Error> {
-		serde_cbor::to_vec(&self).map_err(|e| e.into())
+		bincode::serialize(&self).map_err(|e| e.into())
 	}
 
 	// -----------------------------------

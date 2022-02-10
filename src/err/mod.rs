@@ -2,6 +2,7 @@ use crate::key::bytes::decode::Error as DecodeError;
 use crate::key::bytes::encode::Error as EncodeError;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use bincode::ErrorKind as BincodeError;
 use echodb::err::Error as EchoDBError;
 use http::Error as HttpError;
 use hyper::Error as HyperError;
@@ -168,6 +169,9 @@ pub enum Error {
 
 	#[error("CBOR Error: {0}")]
 	CborError(#[from] CborError),
+
+	#[error("Bincode Error: {0}")]
+	BincodeError(#[from] Box<BincodeError>),
 }
 
 impl warp::reject::Reject for Error {}
