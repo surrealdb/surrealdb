@@ -448,8 +448,9 @@ dependencies = [
 
 [[package]]
 name = "dmp"
-version = "0.1.0"
-source = "git+https://github.com/surrealdb/dmp?rev=4d38162#4d38162135c31284fef1307b80e8157176fbc803"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58c388e3a2998dce9c8aaa87ca67203d62954e9cf00879468c775aa4bba533ea"
 dependencies = [
  "regex",
  "urlencoding",
@@ -457,8 +458,9 @@ dependencies = [
 
 [[package]]
 name = "echodb"
-version = "0.1.0"
-source = "git+https://github.com/surrealdb/echodb?rev=9a7cc5b#9a7cc5b58c9e41de65f4eaf5d383431d7490c34a"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "559ea934ecdc437bf8f27535116185fc7409436fa88f4f1cae5a00c89ab8d6ec"
 dependencies = [
  "arc-swap",
  "futures 0.3.19",
