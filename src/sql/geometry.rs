@@ -342,7 +342,7 @@ impl Serialize for Geometry {
 					let mut map = s.serialize_map(Some(2))?;
 					map.serialize_key("type")?;
 					map.serialize_value("GeometryCollection")?;
-					map.serialize_key("coordinates")?;
+					map.serialize_key("geometries")?;
 					map.serialize_value(v)?;
 					map.end()
 				}
@@ -521,11 +521,11 @@ fn collection(i: &str) -> IResult<&str, Geometry> {
 		|i| {
 			let (i, _) = preceded(key_type, collection_type)(i)?;
 			let (i, _) = delimited(mightbespace, tag(","), mightbespace)(i)?;
-			let (i, v) = preceded(key_vals, collection_vals)(i)?;
+			let (i, v) = preceded(key_geom, collection_vals)(i)?;
 			Ok((i, v))
 		},
 		|i| {
-			let (i, v) = preceded(key_vals, collection_vals)(i)?;
+			let (i, v) = preceded(key_geom, collection_vals)(i)?;
 			let (i, _) = delimited(mightbespace, tag(","), mightbespace)(i)?;
 			let (i, _) = preceded(key_type, collection_type)(i)?;
 			Ok((i, v))
@@ -705,6 +705,18 @@ fn key_vals(i: &str) -> IResult<&str, &str> {
 		tag("coordinates"),
 		delimited(tag(SINGLE), tag("coordinates"), tag(SINGLE)),
 		delimited(tag(DOUBLE), tag("coordinates"), tag(DOUBLE)),
+	))(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = tag(":")(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, v))
+}
+
+fn key_geom(i: &str) -> IResult<&str, &str> {
+	let (i, v) = alt((
+		tag("geometries"),
+		delimited(tag(SINGLE), tag("geometries"), tag(SINGLE)),
+		delimited(tag(DOUBLE), tag("geometries"), tag(DOUBLE)),
 	))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag(":")(i)?;
