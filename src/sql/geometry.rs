@@ -253,8 +253,110 @@ impl Geometry {
 impl fmt::Display for Geometry {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Geometry::Point(v) => write!(f, "({}, {})", v.x(), v.y()),
-			_ => write!(f, "{}", serde_json::to_string(self).unwrap_or(String::from(""))),
+			Geometry::Point(v) => {
+				write!(f, "{{ type: 'Point', coordinates: [{}, {}] }}", v.x(), v.y())
+			}
+			Geometry::Line(v) => write!(
+				f,
+				"{{ type: 'LineString', coordinates: [{}] }}",
+				v.points_iter()
+					.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
+					.collect::<Vec<_>>()
+					.join(", ")
+			),
+			Geometry::Polygon(v) => write!(
+				f,
+				"{{ type: 'Polygon', coordinates: [[{}]{}] }}",
+				v.exterior()
+					.points_iter()
+					.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
+					.collect::<Vec<_>>()
+					.join(", "),
+				match v.interiors().len() {
+					0 => format!(""),
+					_ => format!(
+						", [{}]",
+						v.interiors()
+							.iter()
+							.map(|i| {
+								format!(
+									"[{}]",
+									i.points_iter()
+										.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
+										.collect::<Vec<_>>()
+										.join(", ")
+								)
+							})
+							.collect::<Vec<_>>()
+							.join(", "),
+					),
+				}
+			),
+			Geometry::MultiPoint(v) => {
+				write!(
+					f,
+					"{{ type: 'MultiPoint', coordinates: [{}] }}",
+					v.iter()
+						.map(|v| format!("[{}, {}]", v.x(), v.y()))
+						.collect::<Vec<_>>()
+						.join(", ")
+				)
+			}
+			Geometry::MultiLine(v) => write!(
+				f,
+				"{{ type: 'MultiLineString', coordinates: [{}] }}",
+				v.iter()
+					.map(|v| format!(
+						"[{}]",
+						v.points_iter()
+							.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
+							.collect::<Vec<_>>()
+							.join(", ")
+					))
+					.collect::<Vec<_>>()
+					.join(", ")
+			),
+			Geometry::MultiPolygon(v) => write!(
+				f,
+				"{{ type: 'MultiPolygon', coordinates: [{}] }}",
+				v.iter()
+					.map(|v| format!(
+						"[[{}]{}]",
+						v.exterior()
+							.points_iter()
+							.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
+							.collect::<Vec<_>>()
+							.join(", "),
+						match v.interiors().len() {
+							0 => format!(""),
+							_ => format!(
+								", [{}]",
+								v.interiors()
+									.iter()
+									.map(|i| {
+										format!(
+											"[{}]",
+											i.points_iter()
+												.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
+												.collect::<Vec<_>>()
+												.join(", ")
+										)
+									})
+									.collect::<Vec<_>>()
+									.join(", "),
+							),
+						}
+					))
+					.collect::<Vec<_>>()
+					.join(", "),
+			),
+			Geometry::Collection(v) => {
+				write!(
+					f,
+					"{{ type: 'GeometryCollection', geometries: [{}] }}",
+					v.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(", ")
+				)
+			}
 		}
 	}
 }
