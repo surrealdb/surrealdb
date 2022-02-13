@@ -6,7 +6,6 @@ use crate::net::output;
 use crate::sql::value::Value;
 use bytes::Bytes;
 use serde::Deserialize;
-use std::collections::HashMap;
 use std::str;
 use warp::path;
 use warp::Filter;
@@ -114,8 +113,6 @@ async fn select_all(
 	let vars = hmap! {
 		String::from("table") => Value::from(table),
 	};
-	// let mut vars = HashMap::new();
-	// vars.insert(String::from("table"), Value::from(table));
 	match crate::dbs::execute(sql.as_str(), session, Some(vars)).await {
 		Ok(ref res) => match output.as_ref() {
 			"application/json" => Ok(output::json(res)),
@@ -137,9 +134,10 @@ async fn create_all(
 	match crate::sql::value::json(data) {
 		Ok((_, data)) => {
 			let sql = "CREATE type::table($table) CONTENT $data";
-			let mut vars = HashMap::new();
-			vars.insert(String::from("table"), Value::from(table));
-			vars.insert(String::from("data"), Value::from(data));
+			let vars = hmap! {
+				String::from("table") => Value::from(table),
+				String::from("data") => Value::from(data),
+			};
 			match crate::dbs::execute(sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
@@ -160,8 +158,9 @@ async fn delete_all(
 	table: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let sql = "DELETE type::table($table)";
-	let mut vars = HashMap::new();
-	vars.insert(String::from("table"), Value::from(table));
+	let vars = hmap! {
+		String::from("table") => Value::from(table),
+	};
 	match crate::dbs::execute(sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
@@ -184,9 +183,10 @@ async fn select_one(
 	id: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let sql = "SELECT * FROM type::thing($table, $id)";
-	let mut vars = HashMap::new();
-	vars.insert(String::from("table"), Value::from(table));
-	vars.insert(String::from("id"), Value::from(id));
+	let vars = hmap! {
+		String::from("table") => Value::from(table),
+		String::from("id") => Value::from(id),
+	};
 	match crate::dbs::execute(sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
@@ -209,10 +209,11 @@ async fn create_one(
 	match crate::sql::value::json(data) {
 		Ok((_, data)) => {
 			let sql = "CREATE type::thing($table, $id) CONTENT $data";
-			let mut vars = HashMap::new();
-			vars.insert(String::from("table"), Value::from(table));
-			vars.insert(String::from("id"), Value::from(id));
-			vars.insert(String::from("data"), Value::from(data));
+			let vars = hmap! {
+				String::from("table") => Value::from(table),
+				String::from("id") => Value::from(id),
+				String::from("data") => Value::from(data),
+			};
 			match crate::dbs::execute(sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
@@ -238,10 +239,11 @@ async fn update_one(
 	match crate::sql::value::json(data) {
 		Ok((_, data)) => {
 			let sql = "UPDATE type::thing($table, $id) CONTENT $data";
-			let mut vars = HashMap::new();
-			vars.insert(String::from("table"), Value::from(table));
-			vars.insert(String::from("id"), Value::from(id));
-			vars.insert(String::from("data"), Value::from(data));
+			let vars = hmap! {
+				String::from("table") => Value::from(table),
+				String::from("id") => Value::from(id),
+				String::from("data") => Value::from(data),
+			};
 			match crate::dbs::execute(sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
@@ -267,10 +269,11 @@ async fn modify_one(
 	match crate::sql::value::json(data) {
 		Ok((_, data)) => {
 			let sql = "UPDATE type::thing($table, $id) MERGE $data";
-			let mut vars = HashMap::new();
-			vars.insert(String::from("table"), Value::from(table));
-			vars.insert(String::from("id"), Value::from(id));
-			vars.insert(String::from("data"), Value::from(data));
+			let vars = hmap! {
+				String::from("table") => Value::from(table),
+				String::from("id") => Value::from(id),
+				String::from("data") => Value::from(data),
+			};
 			match crate::dbs::execute(sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
@@ -292,9 +295,10 @@ async fn delete_one(
 	id: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let sql = "DELETE type::thing($table, $id)";
-	let mut vars = HashMap::new();
-	vars.insert(String::from("table"), Value::from(table));
-	vars.insert(String::from("id"), Value::from(id));
+	let vars = hmap! {
+		String::from("table") => Value::from(table),
+		String::from("id") => Value::from(id),
+	};
 	match crate::dbs::execute(sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
