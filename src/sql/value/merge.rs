@@ -2,7 +2,6 @@ use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
-use crate::sql::object::Object;
 use crate::sql::value::Value;
 
 impl Value {
@@ -11,7 +10,7 @@ impl Value {
 		ctx: &Runtime,
 		opt: &Options,
 		exe: &Executor<'_>,
-		val: &Object,
+		val: &Value,
 	) -> Result<(), Error> {
 		match val.compute(ctx, opt, exe, Some(self)).await? {
 			Value::Object(v) => {
@@ -20,7 +19,7 @@ impl Value {
 				}
 				Ok(())
 			}
-			_ => unreachable!(),
+			_ => Ok(()),
 		}
 	}
 }
