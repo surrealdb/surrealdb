@@ -254,7 +254,7 @@ impl fmt::Display for Geometry {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Geometry::Point(v) => {
-				write!(f, "{{ type: 'Point', coordinates: [{}, {}] }}", v.x(), v.y())
+				write!(f, "({}, {})", v.x(), v.y())
 			}
 			Geometry::Line(v) => write!(
 				f,
