@@ -1,10 +1,5 @@
-extern crate chrono;
-extern crate fern;
-extern crate log;
-extern crate std;
-
-use self::fern::colors::Color;
-use self::fern::colors::ColoredLevelConfig;
+use fern::colors::Color;
+use fern::colors::ColoredLevelConfig;
 
 pub fn init(verbosity: usize) {
 	let levels = ColoredLevelConfig::new()

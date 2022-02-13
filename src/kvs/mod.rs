@@ -24,9 +24,7 @@ pub enum Transaction<'a> {
 
 static DB: OnceCell<Datastore> = OnceCell::new();
 
-pub fn init(conf: &clap::ArgMatches) -> Result<(), Error> {
-	// Parse the database endpoint path
-	let path = conf.value_of("path").unwrap();
+pub fn init(path: &str) -> Result<(), Error> {
 	// Instantiate the database endpoint
 	match path {
 		"memory" => {

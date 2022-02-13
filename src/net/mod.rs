@@ -22,13 +22,11 @@ use warp::Filter;
 const ID: &'static str = "Request-Id";
 
 #[tokio::main]
-pub async fn init(conf: &clap::ArgMatches) -> Result<(), Error> {
+pub async fn init(bind: &str) -> Result<(), Error> {
 	//
-	let adr = conf.value_of("bind").unwrap();
-	//
-	let adr: SocketAddr = adr.parse().expect("Unable to parse socket address");
-	//
-	let web = root::config()
+	let adr: SocketAddr = bind.parse().expect("Unable to parse socket address");
+
+	let net = root::config()
 		// Version endpoint
 		.or(version::config())
 		// Status endpoint
@@ -52,22 +50,22 @@ pub async fn init(conf: &clap::ArgMatches) -> Result<(), Error> {
 		// End routes setup
 	;
 
-	let web = web.with(warp::compression::gzip());
+	let net = net.with(warp::compression::gzip());
 
-	let web = web.with(head::server());
+	let net = net.with(head::server());
 
-	let web = web.with(head::version());
+	let net = net.with(head::version());
 
-	let web = web.map(|reply| {
+	let net = net.map(|reply| {
 		let val = Uuid::new_v4().to_string();
 		warp::reply::with_header(reply, ID, val)
 	});
 
-	let web = web.with(log::write());
+	let net = net.with(log::write());
 
 	info!("Starting web server on {}", adr);
 
-	warp::serve(web).run(adr).await;
+	warp::serve(net).run(adr).await;
 
 	Ok(())
 }

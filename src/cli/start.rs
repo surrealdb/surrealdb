@@ -16,11 +16,16 @@ Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
 ";
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+	// output SurrealDB logo
 	println!("{}", LOGO);
+	// Parse the database endpoint path
+	let path = matches.value_of("path").unwrap();
+	// Parse the server binding address
+	let bind = matches.value_of("bind").unwrap();
 	// Start up the kvs storage
-	kvs::init(matches)?;
+	kvs::init(path)?;
 	// Start up the web server
-	net::init(matches)?;
+	net::init(bind)?;
 	// Don't error when done
 	Ok(())
 }
