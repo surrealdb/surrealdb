@@ -9,7 +9,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::output::Output;
 use crate::sql::value::Value;
 
-impl Document {
+impl<'a> Document<'a> {
 	pub async fn pluck(
 		&self,
 		ctx: &Runtime,

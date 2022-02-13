@@ -5,7 +5,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 
-impl Document {
+impl<'a> Document<'a> {
 	pub async fn admit(
 		&self,
 		_ctx: &Runtime,
@@ -17,19 +17,19 @@ impl Document {
 			Some(_) => Ok(()),
 			None => match stm {
 				Statement::Create(_) => Err(Error::CreateStatementError {
-					value: self.initial.clone(),
+					value: (*self.initial).clone(),
 				}),
 				Statement::Update(_) => Err(Error::UpdateStatementError {
-					value: self.initial.clone(),
+					value: (*self.initial).clone(),
 				}),
 				Statement::Relate(_) => Err(Error::RelateStatementError {
-					value: self.initial.clone(),
+					value: (*self.initial).clone(),
 				}),
 				Statement::Delete(_) => Err(Error::DeleteStatementError {
-					value: self.initial.clone(),
+					value: (*self.initial).clone(),
 				}),
 				Statement::Insert(_) => Err(Error::InsertStatementError {
-					value: self.initial.clone(),
+					value: (*self.initial).clone(),
 				}),
 				_ => unreachable!(),
 			},

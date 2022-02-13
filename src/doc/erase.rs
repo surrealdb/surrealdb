@@ -5,7 +5,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 
-impl Document {
+impl<'a> Document<'a> {
 	pub async fn erase(
 		&mut self,
 		ctx: &Runtime,
@@ -13,6 +13,6 @@ impl Document {
 		exe: &Executor<'_>,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		self.current.clear(ctx, opt, exe).await
+		self.current.to_mut().clear(ctx, opt, exe).await
 	}
 }

@@ -6,7 +6,7 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::value::Value;
 
-impl Document {
+impl<'a> Document<'a> {
 	pub async fn select(
 		&self,
 		ctx: &Runtime,

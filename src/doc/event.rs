@@ -5,7 +5,7 @@ use crate::dbs::Statement;
 use crate::doc::Document;
 use crate::err::Error;
 
-impl Document {
+impl<'a> Document<'a> {
 	pub async fn event(
 		&self,
 		_ctx: &Runtime,

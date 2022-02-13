@@ -1,19 +1,20 @@
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use std::borrow::Cow;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Document {
+pub struct Document<'a> {
 	pub(super) id: Option<Thing>,
-	pub(super) current: Value,
-	pub(super) initial: Value,
+	pub(super) current: Cow<'a, Value>,
+	pub(super) initial: Cow<'a, Value>,
 }
 
-impl Document {
-	pub fn new(id: Option<Thing>, val: Value) -> Document {
+impl<'a> Document<'a> {
+	pub fn new(id: Option<Thing>, val: &'a Value) -> Self {
 		Document {
 			id,
-			current: val.clone(),
-			initial: val,
+			current: Cow::Borrowed(val),
+			initial: Cow::Borrowed(val),
 		}
 	}
 }

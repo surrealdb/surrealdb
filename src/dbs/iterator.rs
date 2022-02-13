@@ -178,7 +178,7 @@ impl<'a> Iterator<'a> {
 			return;
 		}
 		// Setup a new document
-		let mut doc = Document::new(thg, val);
+		let mut doc = Document::new(thg, &val);
 
 		// Process the document
 		let res = match self.stmt {

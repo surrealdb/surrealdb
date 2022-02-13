@@ -8,7 +8,7 @@ use crate::sql::data::Data;
 use crate::sql::operator::Operator;
 use crate::sql::value::Value;
 
-impl Document {
+impl<'a> Document<'a> {
 	pub async fn merge(
 		&mut self,
 		ctx: &Runtime,
@@ -25,7 +25,7 @@ impl Document {
 			_ => unreachable!(),
 		};
 		// Set default field values
-		self.current.def(ctx, opt, exe, id).await?;
+		self.current.to_mut().def(ctx, opt, exe, id).await?;
 		// Check for a data clause
 		match data {
 			// The statement has a data clause
@@ -35,26 +35,36 @@ impl Document {
 						let v = x.2.compute(ctx, opt, exe, Some(&self.current)).await?;
 						match x.1 {
 							Operator::Equal => match v {
-								Value::Void => self.current.del(ctx, opt, exe, &x.0).await?,
-								_ => self.current.set(ctx, opt, exe, &x.0, v).await?,
+								Value::Void => {
+									self.current.to_mut().del(ctx, opt, exe, &x.0).await?
+								}
+								_ => self.current.to_mut().set(ctx, opt, exe, &x.0, v).await?,
 							},
-							Operator::Inc => self.current.increment(ctx, opt, exe, &x.0, v).await?,
-							Operator::Dec => self.current.decrement(ctx, opt, exe, &x.0, v).await?,
+							Operator::Inc => {
+								self.current.to_mut().increment(ctx, opt, exe, &x.0, v).await?
+							}
+							Operator::Dec => {
+								self.current.to_mut().decrement(ctx, opt, exe, &x.0, v).await?
+							}
 							_ => unreachable!(),
 						}
 					}
 				}
-				Data::PatchExpression(v) => self.current.patch(ctx, opt, exe, v).await?,
-				Data::MergeExpression(v) => self.current.merge(ctx, opt, exe, v).await?,
-				Data::ReplaceExpression(v) => self.current.replace(ctx, opt, exe, v).await?,
-				Data::ContentExpression(v) => self.current.replace(ctx, opt, exe, v).await?,
+				Data::PatchExpression(v) => self.current.to_mut().patch(ctx, opt, exe, v).await?,
+				Data::MergeExpression(v) => self.current.to_mut().merge(ctx, opt, exe, v).await?,
+				Data::ReplaceExpression(v) => {
+					self.current.to_mut().replace(ctx, opt, exe, v).await?
+				}
+				Data::ContentExpression(v) => {
+					self.current.to_mut().replace(ctx, opt, exe, v).await?
+				}
 				_ => unreachable!(),
 			},
 			// No data clause has been set
 			None => (),
 		};
 		// Set default field values
-		self.current.def(ctx, opt, exe, id).await?;
+		self.current.to_mut().def(ctx, opt, exe, id).await?;
 		// Set ASSERT and VALUE clauses
 		// todo!();
 		// Delete non-defined FIELDs
