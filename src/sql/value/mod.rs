@@ -16,4 +16,5 @@ pub mod object;
 pub mod patch;
 pub mod replace;
 pub mod set;
+pub mod single;
 pub mod value;
