@@ -17,6 +17,7 @@ impl<'a> Document<'a> {
 		let cond = match stm {
 			Statement::Select(stm) => stm.cond.as_ref(),
 			Statement::Update(stm) => stm.cond.as_ref(),
+			Statement::Delete(stm) => stm.cond.as_ref(),
 			_ => unreachable!(),
 		};
 		// Match clause
