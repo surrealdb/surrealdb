@@ -110,7 +110,7 @@ pub async fn run(ctx: &Runtime, name: &String, args: Vec<Value>) -> Result<Value
 		"rand::bool" => args::check(ctx, name, args, Args::None, rand::bool),
 		"rand::enum" => args::check(ctx, name, args, Args::Any, rand::r#enum),
 		"rand::float" => args::check(ctx, name, args, Args::NoneTwo, rand::float),
-		"rand::guid" => args::check(ctx, name, args, Args::None, rand::guid),
+		"rand::guid" => args::check(ctx, name, args, Args::NoneOne, rand::guid),
 		"rand::int" => args::check(ctx, name, args, Args::NoneTwo, rand::int),
 		"rand::string" => args::check(ctx, name, args, Args::NoneOneTwo, rand::string),
 		"rand::time" => args::check(ctx, name, args, Args::NoneTwo, rand::time),

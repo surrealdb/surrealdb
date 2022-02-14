@@ -1,3 +1,4 @@
+use crate::cnf::ID_CHARS;
 use crate::dbs::Executor;
 use crate::dbs::Iterator;
 use crate::dbs::Options;
@@ -9,6 +10,7 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
+use nanoid::nanoid;
 
 impl Value {
 	#[async_recursion]
@@ -65,7 +67,7 @@ impl Model {
 				for _ in 0..c {
 					Thing {
 						tb: self.table.to_string(),
-						id: xid::new().to_string(),
+						id: nanoid!(20, &ID_CHARS),
 					}
 					.iterate(ctx, opt, exe, ite)
 					.await?;

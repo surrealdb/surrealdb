@@ -1,3 +1,4 @@
+use crate::cnf::ID_CHARS;
 use crate::ctx::Canceller;
 use crate::ctx::Context;
 use crate::dbs::Executor;
@@ -15,10 +16,10 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use crate::sql::version::Version;
+use nanoid::nanoid;
 use std::mem;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
-use xid;
 
 pub type Channel = UnboundedSender<Value>;
 
@@ -59,7 +60,7 @@ impl<'a> Iterator<'a> {
 	pub fn produce(&mut self, val: Table) {
 		self.prepare(Value::Thing(Thing {
 			tb: val.name.to_string(),
-			id: xid::new().to_string(),
+			id: nanoid!(20, &ID_CHARS),
 		}))
 	}
 
