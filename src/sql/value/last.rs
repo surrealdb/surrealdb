@@ -11,7 +11,7 @@ impl Value {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 	) -> Result<Self, Error> {
 		self.get(ctx, opt, txn, &Idiom::from(vec![Part::Last])).await
 	}

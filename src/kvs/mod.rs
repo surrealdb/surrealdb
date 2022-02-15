@@ -17,10 +17,10 @@ pub enum Datastore {
 	TiKV(tikv::Datastore),
 }
 
-pub enum Transaction<'a> {
+pub enum Transaction {
 	Mock,
-	Mem(mem::Transaction<'a>),
-	File(file::Transaction<'a>),
+	Mem(mem::Transaction),
+	File(file::Transaction),
 	TiKV(tikv::Transaction),
 }
 
@@ -53,18 +53,18 @@ pub fn init(path: &str) -> Result<(), Error> {
 	}
 }
 
-pub async fn transaction<'a>(write: bool, lock: bool) -> Result<Transaction<'a>, Error> {
+pub async fn transaction<'a>(write: bool, lock: bool) -> Result<Transaction, Error> {
 	match DB.get().unwrap() {
 		Datastore::Mock => {
 			let tx = Transaction::Mock;
 			Ok(tx)
 		}
 		Datastore::Mem(v) => {
-			let tx = v.transaction(write, lock)?;
+			let tx = v.transaction(write, lock).await?;
 			Ok(Transaction::Mem(tx))
 		}
 		Datastore::File(v) => {
-			let tx = v.transaction(write, lock)?;
+			let tx = v.transaction(write, lock).await?;
 			Ok(Transaction::File(tx))
 		}
 		Datastore::TiKV(v) => {

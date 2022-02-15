@@ -30,7 +30,7 @@ impl LiveStatement {
 		&self,
 		_ctx: &Runtime,
 		_opt: &Options,
-		_txn: &Transaction<'_>,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		todo!()

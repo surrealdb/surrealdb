@@ -9,7 +9,7 @@ impl Value {
 		self,
 		_ctx: &Runtime,
 		_opt: &Options,
-		_txn: &Transaction<'_>,
+		_txn: &Transaction,
 		_path: &Idiom,
 	) -> Self {
 		self

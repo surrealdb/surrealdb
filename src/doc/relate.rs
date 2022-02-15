@@ -11,7 +11,7 @@ impl<'a> Document<'a> {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Check value type

@@ -69,7 +69,7 @@ impl<'a> Iterator<'a> {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 	) -> Result<Value, Error> {
 		// Log the statement
 		trace!("Iterating {}", self.stmt);
@@ -136,7 +136,7 @@ impl<'a> Iterator<'a> {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 	) -> Result<(), Error> {
 		match self.parallel {
 			// Run statements in parallel
@@ -170,7 +170,7 @@ impl<'a> Iterator<'a> {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		thg: Option<Thing>,
 		val: Value,
 	) {

@@ -7,13 +7,13 @@ pub struct Datastore {
 	db: echodb::Db<Key, Val>,
 }
 
-pub struct Transaction<'a> {
+pub struct Transaction {
 	// Is the transaction complete?
 	ok: bool,
 	// Is the transaction read+write?
 	rw: bool,
 	// The distributed datastore transaction
-	tx: echodb::Tx<'a, Key, Val>,
+	tx: echodb::Tx<Key, Val>,
 }
 
 impl Datastore {
@@ -24,8 +24,8 @@ impl Datastore {
 		})
 	}
 	// Start a new transaction
-	pub fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
-		match self.db.begin(write) {
+	pub async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+		match self.db.begin(write).await {
 			Ok(tx) => Ok(Transaction {
 				ok: false,
 				rw: write,
@@ -36,7 +36,7 @@ impl Datastore {
 	}
 }
 
-impl<'a> Transaction<'a> {
+impl Transaction {
 	// Check if closed
 	pub fn closed(&self) -> bool {
 		self.ok

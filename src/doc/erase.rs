@@ -10,7 +10,7 @@ impl<'a> Document<'a> {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		self.current.to_mut().clear(ctx, opt, txn).await

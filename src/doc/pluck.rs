@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Extract statement clause

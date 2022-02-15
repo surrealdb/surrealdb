@@ -4,7 +4,7 @@ use crate::kvs::Key;
 use crate::kvs::Val;
 use std::ops::Range;
 
-impl<'a> Transaction<'a> {
+impl Transaction {
 	// Check if closed
 	pub async fn closed(&self) -> bool {
 		match self {

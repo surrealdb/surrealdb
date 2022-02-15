@@ -25,7 +25,7 @@ impl Value {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		val: Option<&Thing>,
 	) -> Result<(), Error> {
 		match val {

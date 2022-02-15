@@ -10,7 +10,7 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Extract statement clause

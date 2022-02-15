@@ -35,7 +35,7 @@ impl Function {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {

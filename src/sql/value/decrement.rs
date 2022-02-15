@@ -11,7 +11,7 @@ impl Value {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		path: &Idiom,
 		val: Value,
 	) -> Result<(), Error> {

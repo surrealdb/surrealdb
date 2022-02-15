@@ -18,7 +18,7 @@ impl Value {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
 		match self {
@@ -38,7 +38,7 @@ impl Array {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
 		for v in self.value.into_iter() {
@@ -59,7 +59,7 @@ impl Model {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
@@ -93,7 +93,7 @@ impl Thing {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
 		Ok(())
@@ -105,7 +105,7 @@ impl Table {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
 		Ok(())

@@ -9,7 +9,7 @@ impl Value {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		val: &Value,
 	) -> Result<(), Error> {
 		match val.compute(ctx, opt, txn, Some(self)).await? {

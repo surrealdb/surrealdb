@@ -810,7 +810,7 @@ impl Value {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		doc: Option<&'async_recursion Value>,
 	) -> Result<Value, Error> {
 		match self {

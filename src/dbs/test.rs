@@ -5,7 +5,7 @@ use crate::dbs::Transaction;
 use futures::lock::Mutex;
 use std::sync::Arc;
 
-pub async fn mock<'a>() -> (Runtime, Options, Transaction<'a>) {
+pub async fn mock<'a>() -> (Runtime, Options, Transaction) {
 	let ctx = Context::default().freeze();
 	let opt = Options::default();
 	let txn = Arc::new(Mutex::new(crate::kvs::Transaction::Mock));

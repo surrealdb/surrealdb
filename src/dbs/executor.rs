@@ -14,19 +14,19 @@ use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Default)]
-pub struct Executor<'a> {
-	txn: Option<Arc<Mutex<Transaction<'a>>>>,
+pub struct Executor {
+	txn: Option<Arc<Mutex<Transaction>>>,
 	err: Option<Error>,
 }
 
-impl<'a> Executor<'a> {
-	pub fn new() -> Executor<'a> {
+impl Executor {
+	pub fn new() -> Executor {
 		Executor {
 			..Executor::default()
 		}
 	}
 
-	fn txn(&self) -> Arc<Mutex<Transaction<'a>>> {
+	fn txn(&self) -> Arc<Mutex<Transaction>> {
 		match &self.txn {
 			Some(txn) => txn.clone(),
 			None => unreachable!(),

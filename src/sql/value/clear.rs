@@ -9,7 +9,7 @@ impl Value {
 		&mut self,
 		_ctx: &Runtime,
 		_opt: &Options,
-		_txn: &Transaction<'_>,
+		_txn: &Transaction,
 	) -> Result<(), Error> {
 		*self = Value::base();
 		Ok(())

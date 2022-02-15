@@ -10,7 +10,7 @@ impl<'a> Document<'a> {
 		&self,
 		_ctx: &Runtime,
 		_opt: &Options,
-		_txn: &Transaction<'_>,
+		_txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		match self.id.is_some() && self.current.is_none() {

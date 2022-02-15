@@ -12,7 +12,7 @@ macro_rules! output {
 	};
 }
 
-impl<'a> Executor<'a> {
+impl Executor {
 	pub async fn export(
 		&mut self,
 		ctx: Runtime,

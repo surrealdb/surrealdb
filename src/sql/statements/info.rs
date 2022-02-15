@@ -25,7 +25,7 @@ impl InfoStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?

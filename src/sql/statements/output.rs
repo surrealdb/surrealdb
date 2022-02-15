@@ -19,7 +19,7 @@ impl OutputStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Ensure futures are processed

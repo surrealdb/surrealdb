@@ -11,7 +11,7 @@ impl<'a> Document<'a> {
 		&mut self,
 		_ctx: &Runtime,
 		_opt: &Options,
-		_txn: &Transaction<'_>,
+		_txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		todo!()

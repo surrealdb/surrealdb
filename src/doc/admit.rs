@@ -10,7 +10,7 @@ impl<'a> Document<'a> {
 		&self,
 		_ctx: &Runtime,
 		_opt: &Options,
-		_txn: &Transaction<'_>,
+		_txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		match self.id {

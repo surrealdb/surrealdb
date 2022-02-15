@@ -10,7 +10,7 @@ impl<'a> Document<'a> {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		Ok(())

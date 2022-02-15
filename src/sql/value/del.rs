@@ -16,7 +16,7 @@ impl Value {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction<'_>,
+		txn: &Transaction,
 		path: &Idiom,
 	) -> Result<(), Error> {
 		match path.parts.first() {
