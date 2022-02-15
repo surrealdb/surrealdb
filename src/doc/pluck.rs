@@ -1,7 +1,7 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Statement;
+use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::field::Field;
@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Extract statement clause
@@ -35,23 +35,23 @@ impl<'a> Document<'a> {
 				Output::None => Err(Error::IgnoreError),
 				Output::Null => Ok(Value::Null),
 				Output::Diff => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
-				Output::After => self.current.compute(ctx, opt, exe, Some(&self.current)).await,
-				Output::Before => self.initial.compute(ctx, opt, exe, Some(&self.initial)).await,
+				Output::After => self.current.compute(ctx, opt, txn, Some(&self.current)).await,
+				Output::Before => self.initial.compute(ctx, opt, txn, Some(&self.initial)).await,
 				Output::Fields(v) => {
 					let mut out = match v.all() {
-						true => self.current.compute(ctx, opt, exe, Some(&self.current)).await?,
+						true => self.current.compute(ctx, opt, txn, Some(&self.current)).await?,
 						false => Value::base(),
 					};
 					for v in v.iter() {
 						match v {
 							Field::All => (),
 							Field::Alone(v) => {
-								let x = v.compute(ctx, opt, exe, Some(&self.current)).await?;
-								out.set(ctx, opt, exe, &v.to_idiom(), x).await?;
+								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
+								out.set(ctx, opt, txn, &v.to_idiom(), x).await?;
 							}
 							Field::Alias(v, i) => {
-								let x = v.compute(ctx, opt, exe, Some(&self.current)).await?;
-								out.set(ctx, opt, exe, &i, x).await?;
+								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
+								out.set(ctx, opt, txn, &i, x).await?;
 							}
 						}
 					}
@@ -61,19 +61,19 @@ impl<'a> Document<'a> {
 			None => match stm {
 				Statement::Select(stm) => {
 					let mut out = match stm.expr.all() {
-						true => self.current.compute(ctx, opt, exe, Some(&self.current)).await?,
+						true => self.current.compute(ctx, opt, txn, Some(&self.current)).await?,
 						false => Value::base(),
 					};
 					for v in stm.expr.iter() {
 						match v {
 							Field::All => (),
 							Field::Alone(v) => {
-								let x = v.compute(ctx, opt, exe, Some(&self.current)).await?;
-								out.set(ctx, opt, exe, &v.to_idiom(), x).await?;
+								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
+								out.set(ctx, opt, txn, &v.to_idiom(), x).await?;
 							}
 							Field::Alias(v, i) => {
-								let x = v.compute(ctx, opt, exe, Some(&self.current)).await?;
-								out.set(ctx, opt, exe, &i, x).await?;
+								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
+								out.set(ctx, opt, txn, &i, x).await?;
 							}
 						}
 					}

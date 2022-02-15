@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -23,17 +23,17 @@ impl IfelseStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		for (ref cond, ref then) in &self.exprs {
-			let v = cond.compute(ctx, opt, exe, doc).await?;
+			let v = cond.compute(ctx, opt, txn, doc).await?;
 			if v.is_truthy() {
-				return then.compute(ctx, opt, exe, doc).await;
+				return then.compute(ctx, opt, txn, doc).await;
 			}
 		}
 		match self.close {
-			Some(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Some(ref v) => v.compute(ctx, opt, txn, doc).await,
 			None => Ok(Value::None),
 		}
 	}

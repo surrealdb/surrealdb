@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::idiom::Idiom;
 use crate::sql::part::Part;
@@ -25,16 +25,16 @@ impl Value {
 		&mut self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		val: Option<&Thing>,
 	) -> Result<(), Error> {
 		match val {
 			Some(id) => {
 				let id = id.clone();
 				let md = id.clone();
-				self.set(ctx, opt, exe, &RID, id.into()).await?;
-				self.set(ctx, opt, exe, &MTB, md.tb.into()).await?;
-				self.set(ctx, opt, exe, &MID, md.id.into()).await?;
+				self.set(ctx, opt, txn, &RID, id.into()).await?;
+				self.set(ctx, opt, txn, &MTB, md.tb.into()).await?;
+				self.set(ctx, opt, txn, &MID, md.id.into()).await?;
 				Ok(())
 			}
 			None => unreachable!(),

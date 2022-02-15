@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
 use crate::sql::common::colons;
@@ -109,24 +109,24 @@ impl Statement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			Statement::Set(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Info(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Live(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Kill(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Output(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Ifelse(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Select(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Create(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Update(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Relate(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Delete(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Insert(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Define(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Statement::Remove(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Statement::Set(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Info(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Live(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Kill(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Output(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Select(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Create(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Update(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Relate(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Delete(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Insert(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Define(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Remove(ref v) => v.compute(ctx, opt, txn, doc).await,
 			_ => unreachable!(),
 		}
 	}

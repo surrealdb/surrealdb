@@ -1,7 +1,7 @@
 use crate::ctx::Context;
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::statements::create::{create, CreateStatement};
@@ -43,12 +43,12 @@ impl Subquery {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			Subquery::Value(ref v) => v.compute(ctx, opt, exe, doc).await,
-			Subquery::Ifelse(ref v) => v.compute(ctx, opt, exe, doc).await,
+			Subquery::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Subquery::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Subquery::Select(ref v) => {
 				// Duplicate options
 				let opt = opt.dive()?;
@@ -62,15 +62,15 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				let res = v.compute(&ctx, &opt, exe, doc).await?;
+				let res = v.compute(&ctx, &opt, txn, doc).await?;
 				// Process result
 				match v.limit() {
 					1 => match v.expr.single() {
-						Some(v) => res.first(&ctx, &opt, exe).await?.get(&ctx, &opt, exe, &v).await,
-						None => res.first(&ctx, &opt, exe).await,
+						Some(v) => res.first(&ctx, &opt, txn).await?.get(&ctx, &opt, txn, &v).await,
+						None => res.first(&ctx, &opt, txn).await,
 					},
 					_ => match v.expr.single() {
-						Some(v) => res.get(&ctx, &opt, exe, &v).await,
+						Some(v) => res.get(&ctx, &opt, txn, &v).await,
 						None => res.ok(),
 					},
 				}
@@ -88,7 +88,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.compute(&ctx, &opt, exe, doc).await? {
+				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -109,7 +109,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.compute(&ctx, &opt, exe, doc).await? {
+				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -130,7 +130,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.compute(&ctx, &opt, exe, doc).await? {
+				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -151,7 +151,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.compute(&ctx, &opt, exe, doc).await? {
+				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -172,7 +172,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.compute(&ctx, &opt, exe, doc).await? {
+				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),

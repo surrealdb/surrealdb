@@ -1,7 +1,7 @@
-use crate::dbs::Executor;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -25,7 +25,7 @@ impl InfoStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?

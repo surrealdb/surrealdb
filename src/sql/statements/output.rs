@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -19,13 +19,13 @@ impl OutputStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Ensure futures are processed
 		let opt = &opt.futures(true);
 		// Process the output value
-		self.what.compute(ctx, opt, exe, doc).await
+		self.what.compute(ctx, opt, txn, doc).await
 	}
 }
 

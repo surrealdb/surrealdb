@@ -1,7 +1,7 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Statement;
+use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 
@@ -10,7 +10,7 @@ impl<'a> Document<'a> {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Extract statement clause
@@ -23,7 +23,7 @@ impl<'a> Document<'a> {
 		// Match clause
 		match cond {
 			Some(v) => {
-				match v.expr.compute(ctx, opt, exe, Some(&self.current)).await?.is_truthy() {
+				match v.expr.compute(ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 					false => Err(Error::IgnoreError),
 					true => Ok(()),
 				}

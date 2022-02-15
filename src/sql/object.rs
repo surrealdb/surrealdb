@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{commas, escape, val_char};
@@ -96,12 +96,12 @@ impl Object {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
 		for (k, v) in &self.value {
-			match v.compute(ctx, opt, exe, doc).await {
+			match v.compute(ctx, opt, txn, doc).await {
 				Ok(v) => x.insert(k.clone(), v),
 				Err(e) => return Err(e),
 			};

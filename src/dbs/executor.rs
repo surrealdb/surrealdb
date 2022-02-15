@@ -26,6 +26,13 @@ impl<'a> Executor<'a> {
 		}
 	}
 
+	fn txn(&self) -> Arc<Mutex<Transaction<'a>>> {
+		match &self.txn {
+			Some(txn) => txn.clone(),
+			None => unreachable!(),
+		}
+	}
+
 	async fn begin(&mut self) -> bool {
 		match &self.txn {
 			Some(_) => false,
@@ -198,7 +205,7 @@ impl<'a> Executor<'a> {
 				}
 				// Process param definition statements
 				Statement::Set(stm) => {
-					match stm.compute(&ctx, &opt, self, None).await {
+					match stm.compute(&ctx, &opt, &self.txn(), None).await {
 						Ok(val) => {
 							let mut new = Context::new(&ctx);
 							let key = stm.name.to_owned();
@@ -226,7 +233,7 @@ impl<'a> Executor<'a> {
 							ctx = new.freeze();
 						}
 						// Process the statement
-						let res = stm.compute(&ctx, &opt, self, None).await;
+						let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
 						// Catch statement timeout
 						let res = match stm.timeout() {
 							Some(timeout) => match ctx.is_timedout() {

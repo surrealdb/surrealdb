@@ -8,6 +8,7 @@ impl<'a> Transaction<'a> {
 	// Check if closed
 	pub async fn closed(&self) -> bool {
 		match self {
+			Transaction::Mock => unreachable!(),
 			Transaction::Mem(v) => v.closed(),
 			Transaction::File(v) => v.closed(),
 			Transaction::TiKV(v) => v.closed().await,
@@ -16,6 +17,7 @@ impl<'a> Transaction<'a> {
 	// Cancel a transaction
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		match self {
+			Transaction::Mock => unreachable!(),
 			Transaction::Mem(v) => v.cancel(),
 			Transaction::File(v) => v.cancel(),
 			Transaction::TiKV(v) => v.cancel().await,
@@ -24,6 +26,7 @@ impl<'a> Transaction<'a> {
 	// Commit a transaction
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		match self {
+			Transaction::Mock => unreachable!(),
 			Transaction::Mem(v) => v.commit(),
 			Transaction::File(v) => v.commit(),
 			Transaction::TiKV(v) => v.commit().await,
@@ -35,6 +38,7 @@ impl<'a> Transaction<'a> {
 		K: Into<Key>,
 	{
 		match self {
+			Transaction::Mock => unreachable!(),
 			Transaction::Mem(v) => v.del(key),
 			Transaction::File(v) => v.del(key),
 			Transaction::TiKV(v) => v.del(key).await,
@@ -46,6 +50,7 @@ impl<'a> Transaction<'a> {
 		K: Into<Key>,
 	{
 		match self {
+			Transaction::Mock => unreachable!(),
 			Transaction::Mem(v) => v.exi(key),
 			Transaction::File(v) => v.exi(key),
 			Transaction::TiKV(v) => v.exi(key).await,
@@ -57,6 +62,7 @@ impl<'a> Transaction<'a> {
 		K: Into<Key>,
 	{
 		match self {
+			Transaction::Mock => unreachable!(),
 			Transaction::Mem(v) => v.get(key),
 			Transaction::File(v) => v.get(key),
 			Transaction::TiKV(v) => v.get(key).await,
@@ -69,6 +75,7 @@ impl<'a> Transaction<'a> {
 		V: Into<Key>,
 	{
 		match self {
+			Transaction::Mock => unreachable!(),
 			Transaction::Mem(v) => v.set(key, val),
 			Transaction::File(v) => v.set(key, val),
 			Transaction::TiKV(v) => v.set(key, val).await,
@@ -81,6 +88,7 @@ impl<'a> Transaction<'a> {
 		V: Into<Key>,
 	{
 		match self {
+			Transaction::Mock => unreachable!(),
 			Transaction::Mem(v) => v.put(key, val),
 			Transaction::File(v) => v.put(key, val),
 			Transaction::TiKV(v) => v.put(key, val).await,
@@ -92,6 +100,7 @@ impl<'a> Transaction<'a> {
 		K: Into<Key>,
 	{
 		match self {
+			Transaction::Mock => unreachable!(),
 			Transaction::Mem(v) => v.scan(rng, limit),
 			Transaction::File(v) => v.scan(rng, limit),
 			Transaction::TiKV(v) => v.scan(rng, limit).await,

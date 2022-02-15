@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
@@ -24,10 +24,10 @@ impl SetStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		self.what.compute(ctx, opt, exe, doc).await
+		self.what.compute(ctx, opt, txn, doc).await
 	}
 }
 

@@ -1,9 +1,9 @@
-use crate::dbs::Executor;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Statement;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -68,7 +68,7 @@ impl SelectStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -87,7 +87,7 @@ impl SelectStatement {
 		let opt = &opt.futures(true);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, exe, doc).await?;
+			let v = w.compute(ctx, opt, txn, doc).await?;
 			match v {
 				Value::Table(_) => i.prepare(v),
 				Value::Thing(_) => i.prepare(v),
@@ -97,7 +97,7 @@ impl SelectStatement {
 			};
 		}
 		// Output the results
-		i.output(ctx, opt, exe).await
+		i.output(ctx, opt, txn).await
 	}
 }
 

@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
@@ -35,13 +35,13 @@ impl Function {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
 			Function::Future(ref e) => match opt.futures {
 				true => {
-					let a = e.compute(ctx, opt, exe, doc).await?;
+					let a = e.compute(ctx, opt, txn, doc).await?;
 					fnc::future::run(ctx, a)
 				}
 				false => Ok(self.to_owned().into()),
@@ -51,13 +51,13 @@ impl Function {
 				fnc::script::run(ctx, a)
 			}
 			Function::Cast(ref s, ref e) => {
-				let a = e.compute(ctx, opt, exe, doc).await?;
+				let a = e.compute(ctx, opt, txn, doc).await?;
 				fnc::cast::run(ctx, s, a)
 			}
 			Function::Normal(ref s, ref e) => {
 				let mut a: Vec<Value> = vec![];
 				for v in e {
-					let v = v.compute(ctx, opt, exe, doc).await?;
+					let v = v.compute(ctx, opt, txn, doc).await?;
 					a.push(v);
 				}
 				fnc::run(ctx, s, a).await

@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::error::IResult;
@@ -32,10 +32,10 @@ impl Expression {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		let l = self.l.compute(ctx, opt, exe, doc).await?;
+		let l = self.l.compute(ctx, opt, txn, doc).await?;
 		match self.o {
 			Operator::Or => match l.is_truthy() {
 				true => return Ok(l), // No need to continue
@@ -47,7 +47,7 @@ impl Expression {
 			},
 			_ => {} // Continue
 		}
-		let r = self.r.compute(ctx, opt, exe, doc).await?;
+		let r = self.r.compute(ctx, opt, txn, doc).await?;
 		match self.o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),

@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::value::Value;
 
@@ -9,7 +9,7 @@ impl Value {
 		&mut self,
 		_ctx: &Runtime,
 		_opt: &Options,
-		_exe: &Executor<'_>,
+		_txn: &Transaction<'_>,
 	) -> Result<(), Error> {
 		*self = Value::base();
 		Ok(())
@@ -25,19 +25,19 @@ mod tests {
 
 	#[tokio::test]
 	async fn clear_none() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{}");
-		val.clear(&ctx, &opt, &exe).await.unwrap();
+		val.clear(&ctx, &opt, &txn).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn clear_path() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{}");
-		val.clear(&ctx, &opt, &exe).await.unwrap();
+		val.clear(&ctx, &opt, &txn).await.unwrap();
 		assert_eq!(res, val);
 	}
 }

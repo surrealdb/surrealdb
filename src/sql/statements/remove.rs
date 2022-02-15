@@ -1,7 +1,7 @@
-use crate::dbs::Executor;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::base::{base, Base};
 use crate::sql::comment::shouldbespace;
@@ -33,19 +33,19 @@ impl RemoveStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			RemoveStatement::Namespace(ref v) => v.compute(ctx, opt, exe, doc).await,
-			RemoveStatement::Database(ref v) => v.compute(ctx, opt, exe, doc).await,
-			RemoveStatement::Login(ref v) => v.compute(ctx, opt, exe, doc).await,
-			RemoveStatement::Token(ref v) => v.compute(ctx, opt, exe, doc).await,
-			RemoveStatement::Scope(ref v) => v.compute(ctx, opt, exe, doc).await,
-			RemoveStatement::Table(ref v) => v.compute(ctx, opt, exe, doc).await,
-			RemoveStatement::Event(ref v) => v.compute(ctx, opt, exe, doc).await,
-			RemoveStatement::Field(ref v) => v.compute(ctx, opt, exe, doc).await,
-			RemoveStatement::Index(ref v) => v.compute(ctx, opt, exe, doc).await,
+			RemoveStatement::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
+			RemoveStatement::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
+			RemoveStatement::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			RemoveStatement::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
+			RemoveStatement::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
+			RemoveStatement::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
+			RemoveStatement::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
+			RemoveStatement::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
+			RemoveStatement::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -94,7 +94,7 @@ impl RemoveNamespaceStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -138,7 +138,7 @@ impl RemoveDatabaseStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -183,7 +183,7 @@ impl RemoveLoginStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -237,7 +237,7 @@ impl RemoveTokenStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -290,7 +290,7 @@ impl RemoveScopeStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -334,7 +334,7 @@ impl RemoveTableStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -379,7 +379,7 @@ impl RemoveEventStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -430,7 +430,7 @@ impl RemoveFieldStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -481,7 +481,7 @@ impl RemoveIndexStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?

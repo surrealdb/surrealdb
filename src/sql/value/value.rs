@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::common::commas;
@@ -810,7 +810,7 @@ impl Value {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&'async_recursion Value>,
 	) -> Result<Value, Error> {
 		match self {
@@ -819,13 +819,13 @@ impl Value {
 			Value::Null => Ok(Value::Null),
 			Value::True => Ok(Value::True),
 			Value::False => Ok(Value::False),
-			Value::Param(v) => v.compute(ctx, opt, exe, doc).await,
-			Value::Idiom(v) => v.compute(ctx, opt, exe, doc).await,
-			Value::Array(v) => v.compute(ctx, opt, exe, doc).await,
-			Value::Object(v) => v.compute(ctx, opt, exe, doc).await,
-			Value::Function(v) => v.compute(ctx, opt, exe, doc).await,
-			Value::Subquery(v) => v.compute(ctx, opt, exe, doc).await,
-			Value::Expression(v) => v.compute(ctx, opt, exe, doc).await,
+			Value::Param(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Object(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
 		}
 	}

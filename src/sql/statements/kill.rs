@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -20,7 +20,7 @@ impl KillStatement {
 		&self,
 		_ctx: &Runtime,
 		_opt: &Options,
-		_exe: &Executor<'_>,
+		_txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		todo!()

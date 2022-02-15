@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
@@ -72,12 +72,12 @@ impl Idiom {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match doc {
 			// There is a current document
-			Some(v) => v.get(ctx, opt, exe, self).await?.compute(ctx, opt, exe, doc).await,
+			Some(v) => v.get(ctx, opt, txn, self).await?.compute(ctx, opt, txn, doc).await,
 			// There isn't any document
 			None => Ok(Value::None),
 		}

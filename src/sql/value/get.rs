@@ -1,6 +1,6 @@
-use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::field::{Field, Fields};
 use crate::sql::idiom::Idiom;
@@ -16,7 +16,7 @@ impl Value {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		path: &Idiom,
 	) -> Result<Self, Error> {
 		match path.parts.first() {
@@ -25,7 +25,7 @@ impl Value {
 				// Current path part is an object
 				Value::Object(v) => match p {
 					Part::Field(p) => match v.value.get(&p.name) {
-						Some(v) => v.get(ctx, opt, exe, &path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, &path.next()).await,
 						None => Ok(Value::None),
 					},
 					_ => Ok(Value::None),
@@ -34,27 +34,27 @@ impl Value {
 				Value::Array(v) => match p {
 					Part::All => {
 						let pth = path.next();
-						let fut = v.value.iter().map(|v| v.get(&ctx, opt, exe, &pth));
+						let fut = v.value.iter().map(|v| v.get(&ctx, opt, txn, &pth));
 						try_join_all(fut).await.map(|v| v.into())
 					}
 					Part::First => match v.value.first() {
-						Some(v) => v.get(ctx, opt, exe, &path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, &path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Last => match v.value.last() {
-						Some(v) => v.get(ctx, opt, exe, &path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, &path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Index(i) => match v.value.get(i.to_usize()) {
-						Some(v) => v.get(ctx, opt, exe, &path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, &path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Where(w) => {
 						let pth = path.next();
 						let mut a = Vec::new();
 						for v in &v.value {
-							if w.compute(ctx, opt, exe, Some(&v)).await?.is_truthy() {
-								a.push(v.get(ctx, opt, exe, &pth).await?)
+							if w.compute(ctx, opt, txn, Some(&v)).await?.is_truthy() {
+								a.push(v.get(ctx, opt, txn, &pth).await?)
 							}
 						}
 						Ok(a.into())
@@ -72,11 +72,11 @@ impl Value {
 							what: Values(vec![Value::Thing(v.clone())]),
 							..SelectStatement::default()
 						};
-						stm.compute(ctx, opt, exe, None)
+						stm.compute(ctx, opt, txn, None)
 							.await?
-							.first(ctx, opt, exe)
+							.first(ctx, opt, txn)
 							.await?
-							.get(ctx, opt, exe, &path)
+							.get(ctx, opt, txn, &path)
 							.await
 					}
 				},
@@ -99,28 +99,28 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_none() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::default();
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn get_basic() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something");
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, Value::from(123));
 	}
 
 	#[tokio::test]
 	async fn get_thing() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.other");
 		let val = Value::parse("{ test: { other: test:tobie, something: 123 } }");
-		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -132,19 +132,19 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_array() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [123, 456, 789] } }");
-		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, Value::from(456));
 	}
 
 	#[tokio::test]
 	async fn get_array_thing() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [test:tobie, test:jaime] } }");
-		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -156,37 +156,37 @@ mod tests {
 
 	#[tokio::test]
 	async fn get_array_field() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, Value::from(36));
 	}
 
 	#[tokio::test]
 	async fn get_array_fields() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
 	#[tokio::test]
 	async fn get_array_where_field() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![36]));
 	}
 
 	#[tokio::test]
 	async fn get_array_where_fields() {
-		let (ctx, opt, exe) = mock();
+		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &exe, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {

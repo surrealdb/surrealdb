@@ -1,7 +1,7 @@
-use crate::dbs::Executor;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, Base};
@@ -43,19 +43,19 @@ impl DefineStatement {
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			DefineStatement::Namespace(ref v) => v.compute(ctx, opt, exe, doc).await,
-			DefineStatement::Database(ref v) => v.compute(ctx, opt, exe, doc).await,
-			DefineStatement::Login(ref v) => v.compute(ctx, opt, exe, doc).await,
-			DefineStatement::Token(ref v) => v.compute(ctx, opt, exe, doc).await,
-			DefineStatement::Scope(ref v) => v.compute(ctx, opt, exe, doc).await,
-			DefineStatement::Table(ref v) => v.compute(ctx, opt, exe, doc).await,
-			DefineStatement::Event(ref v) => v.compute(ctx, opt, exe, doc).await,
-			DefineStatement::Field(ref v) => v.compute(ctx, opt, exe, doc).await,
-			DefineStatement::Index(ref v) => v.compute(ctx, opt, exe, doc).await,
+			DefineStatement::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
+			DefineStatement::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
+			DefineStatement::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			DefineStatement::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
+			DefineStatement::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
+			DefineStatement::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
+			DefineStatement::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
+			DefineStatement::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
+			DefineStatement::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -104,7 +104,7 @@ impl DefineNamespaceStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -148,7 +148,7 @@ impl DefineDatabaseStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -197,7 +197,7 @@ impl DefineLoginStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -295,7 +295,7 @@ impl DefineTokenStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -370,7 +370,7 @@ impl DefineScopeStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -493,7 +493,7 @@ impl DefineTableStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -624,7 +624,7 @@ impl DefineEventStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -698,7 +698,7 @@ impl DefineFieldStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -837,7 +837,7 @@ impl DefineIndexStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		exe: &Executor<'_>,
+		txn: &Transaction<'_>,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
