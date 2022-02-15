@@ -1,9 +1,9 @@
-use crate::dbs::executor::Executor;
-use crate::dbs::options::Options;
-use crate::dbs::response::Responses;
-use crate::dbs::session::Session;
-use crate::dbs::variables::Attach;
-use crate::dbs::variables::Variables;
+use crate::dbs::Attach;
+use crate::dbs::Executor;
+use crate::dbs::Options;
+use crate::dbs::Responses;
+use crate::dbs::Session;
+use crate::dbs::Variables;
 use crate::err::Error;
 use crate::sql;
 use crate::sql::query::Query;
