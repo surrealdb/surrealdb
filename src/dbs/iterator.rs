@@ -18,10 +18,6 @@ use crate::sql::value::Value;
 use crate::sql::version::Version;
 use nanoid::nanoid;
 use std::mem;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::UnboundedSender;
-
-pub type Channel = UnboundedSender<Value>;
 
 #[derive(Default)]
 pub struct Iterator<'a> {
@@ -141,14 +137,18 @@ impl<'a> Iterator<'a> {
 		match self.parallel {
 			// Run statements in parallel
 			true => {
+				// Use multi producer channel
+				use tokio::sync::mpsc;
 				// Create an unbounded channel
-				let (_, mut rx) = mpsc::unbounded_channel();
+				let (chn, mut rx) = mpsc::unbounded_channel();
 				// Process all prepared values
-				for _ in mem::take(&mut self.readies) {
-					todo!();
+				for v in mem::take(&mut self.readies) {
+					tokio::spawn(v.channel(ctx.clone(), opt.clone(), chn.clone(), txn.clone()));
 				}
+				// Drop the main channel reference
+				drop(chn);
 				// Process all processed values
-				while let Some(v) = rx.recv().await {
+				while let Some((k, v)) = rx.recv().await {
 					self.process(&ctx, opt, txn, k, v).await;
 				}
 				// Everything processed ok

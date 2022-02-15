@@ -1,4 +1,5 @@
 mod auth;
+mod channel;
 mod dbs;
 mod executor;
 mod export;
@@ -13,6 +14,7 @@ mod transaction;
 mod variables;
 
 pub use self::auth::*;
+pub use self::channel::*;
 pub use self::dbs::*;
 pub use self::executor::*;
 pub use self::iterator::*;
