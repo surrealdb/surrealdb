@@ -4,7 +4,6 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::idiom::{idiom, Idiom};
-use crate::sql::object::{object, Object};
 use crate::sql::operator::{assigner, Operator};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
