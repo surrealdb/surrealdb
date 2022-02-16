@@ -1,6 +1,6 @@
 use crate::kvs;
+use crate::err::Error;
 use crate::net;
-use anyhow::Error;
 use clap;
 
 const LOGO: &'static str = "

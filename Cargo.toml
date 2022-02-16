@@ -6,7 +6,6 @@ version = "0.0.0"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [dependencies]
-anyhow = "1.0.53"
 argon2 = "0.3.2"
 async-recursion = "1.0.0"
 bincode = "1.3.3"

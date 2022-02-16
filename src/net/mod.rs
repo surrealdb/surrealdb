@@ -14,7 +14,7 @@ mod status;
 mod sync;
 mod version;
 
-use anyhow::Error;
+use crate::err::Error;
 use std::net::SocketAddr;
 use uuid::Uuid;
 use warp::Filter;

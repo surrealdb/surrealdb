@@ -1,4 +1,4 @@
-use anyhow::Error;
+use crate::err::Error;
 use clap;
 
 const NAME: &'static str = env!("CARGO_PKG_NAME");

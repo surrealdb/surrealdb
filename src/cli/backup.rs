@@ -1,4 +1,4 @@
-use anyhow::Error;
+use crate::err::Error;
 use reqwest::blocking::Body;
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;

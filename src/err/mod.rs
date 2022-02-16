@@ -4,8 +4,10 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use bincode::ErrorKind as BincodeError;
 use echodb::err::Error as EchoDBError;
+use std::io::Error as IoError;
 use http::Error as HttpError;
 use hyper::Error as HyperError;
+use reqwest::Error as ReqwestError;
 use serde_cbor::error::Error as CborError;
 use serde_json::error::Error as JsonError;
 use std::time::Duration;
@@ -172,6 +174,12 @@ pub enum Error {
 
 	#[error("Bincode Error: {0}")]
 	BincodeError(#[from] Box<BincodeError>),
+
+	#[error("Reqwest Error: {0}")]
+	ReqwestError(#[from] ReqwestError),
+
+	#[error("IO error: {0}")]
+	IoError(#[from] IoError),
 }
 
 impl warp::reject::Reject for Error {}
