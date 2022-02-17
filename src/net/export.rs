@@ -1,6 +1,7 @@
 use crate::dbs::export;
 use crate::dbs::Session;
 use crate::net::conf;
+use crate::net::DB;
 use hyper::body::Body;
 use warp::Filter;
 
@@ -16,7 +17,8 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 }
 
 async fn handler(session: Session) -> Result<impl warp::Reply, warp::Rejection> {
+	let db = DB.get().unwrap().clone();
 	let (chn, body) = Body::channel();
-	tokio::spawn(export(session, chn));
+	tokio::spawn(export(db, session, chn));
 	Ok(warp::reply::Response::new(body))
 }

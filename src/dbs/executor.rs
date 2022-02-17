@@ -3,9 +3,9 @@ use crate::dbs::response::{Response, Responses, Status};
 use crate::dbs::Auth;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::kvs::transaction;
-use crate::kvs::Transaction;
+use crate::kvs::Store;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
@@ -13,30 +13,32 @@ use futures::lock::Mutex;
 use std::sync::Arc;
 use std::time::Instant;
 
-#[derive(Default)]
 pub struct Executor {
-	txn: Option<Arc<Mutex<Transaction>>>,
-	err: Option<Error>,
+	pub(super) dbs: Store,
+	pub(super) err: Option<Error>,
+	pub(super) txn: Option<Transaction>,
 }
 
 impl Executor {
-	pub fn new() -> Executor {
+	pub fn new(dbs: Store) -> Executor {
 		Executor {
-			..Executor::default()
+			dbs,
+			txn: None,
+			err: None,
 		}
 	}
 
-	fn txn(&self) -> Arc<Mutex<Transaction>> {
-		match &self.txn {
+	fn txn(&self) -> Transaction {
+		match self.txn.as_ref() {
 			Some(txn) => txn.clone(),
 			None => unreachable!(),
 		}
 	}
 
 	async fn begin(&mut self) -> bool {
-		match &self.txn {
+		match self.txn.as_ref() {
 			Some(_) => false,
-			None => match transaction(true, false).await {
+			None => match self.dbs.transaction(true, false).await {
 				Ok(v) => {
 					self.txn = Some(Arc::new(Mutex::new(v)));
 					true
@@ -51,7 +53,7 @@ impl Executor {
 
 	async fn commit(&mut self, local: bool) {
 		if local {
-			match &self.txn {
+			match self.txn.as_ref() {
 				Some(txn) => match &self.err {
 					Some(_) => {
 						let txn = txn.clone();
@@ -77,7 +79,7 @@ impl Executor {
 
 	async fn cancel(&mut self, local: bool) {
 		if local {
-			match &self.txn {
+			match self.txn.as_ref() {
 				Some(txn) => {
 					let txn = txn.clone();
 					let mut txn = txn.lock().await;

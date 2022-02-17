@@ -18,11 +18,9 @@ pub struct Transaction {
 
 impl Datastore {
 	// Open a new database
-	pub fn new(path: &str) -> Result<Datastore, Error> {
-		let db = tikv::TransactionClient::new(vec![path]);
-		let db = futures::executor::block_on(db)?;
+	pub async fn new(path: &str) -> Result<Datastore, Error> {
 		Ok(Datastore {
-			db,
+			db: tikv::TransactionClient::new(vec![path]).await?,
 		})
 	}
 	// Start a new transaction

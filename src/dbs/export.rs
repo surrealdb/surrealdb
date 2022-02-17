@@ -2,7 +2,6 @@ use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
-use crate::kvs::transaction;
 use bytes::Bytes;
 use hyper::body::Sender;
 
@@ -20,7 +19,7 @@ impl Executor {
 		mut chn: Sender,
 	) -> Result<(), Error> {
 		// Start a new transaction
-		let txn = transaction(false, false).await?;
+		let txn = self.dbs.transaction(false, false).await?;
 		// Output OPTIONS
 		chn.send_data(output!("-- ------------------------------")).await?;
 		chn.send_data(output!("-- OPTION")).await?;

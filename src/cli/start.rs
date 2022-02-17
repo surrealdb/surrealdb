@@ -1,4 +1,3 @@
-use crate::kvs;
 use crate::err::Error;
 use crate::net;
 use clap;
@@ -22,10 +21,8 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let path = matches.value_of("path").unwrap();
 	// Parse the server binding address
 	let bind = matches.value_of("bind").unwrap();
-	// Start up the kvs storage
-	kvs::init(path)?;
 	// Start up the web server
-	net::init(bind)?;
+	net::init(bind, path)?;
 	// Don't error when done
 	Ok(())
 }

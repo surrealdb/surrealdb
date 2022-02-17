@@ -2,6 +2,7 @@ use crate::dbs::Session;
 use crate::net::conf;
 use crate::net::head;
 use crate::net::output;
+use crate::net::DB;
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
 use warp::Filter;
@@ -40,8 +41,9 @@ async fn handler(
 	output: String,
 	sql: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+	let db = DB.get().unwrap().clone();
 	let sql = std::str::from_utf8(&sql).unwrap();
-	match crate::dbs::execute(sql, session, None).await {
+	match crate::dbs::execute(db, sql, session, None).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),

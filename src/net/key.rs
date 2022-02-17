@@ -3,6 +3,7 @@ use crate::err::Error;
 use crate::net::conf;
 use crate::net::head;
 use crate::net::output;
+use crate::net::DB;
 use crate::sql::value::Value;
 use bytes::Bytes;
 use serde::Deserialize;
@@ -105,6 +106,7 @@ async fn select_all(
 	table: String,
 	query: Query,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+	let db = DB.get().unwrap().clone();
 	let sql = format!(
 		"SELECT * FROM type::table($table) LIMIT {l} START {s}",
 		l = query.limit.unwrap_or(String::from("100")),
@@ -113,7 +115,7 @@ async fn select_all(
 	let vars = hmap! {
 		String::from("table") => Value::from(table),
 	};
-	match crate::dbs::execute(sql.as_str(), session, Some(vars)).await {
+	match crate::dbs::execute(db, sql.as_str(), session, Some(vars)).await {
 		Ok(ref res) => match output.as_ref() {
 			"application/json" => Ok(output::json(res)),
 			"application/cbor" => Ok(output::cbor(res)),
@@ -130,6 +132,7 @@ async fn create_all(
 	table: String,
 	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+	let db = DB.get().unwrap().clone();
 	let data = str::from_utf8(&body).unwrap();
 	match crate::sql::value::json(data) {
 		Ok((_, data)) => {
@@ -138,7 +141,7 @@ async fn create_all(
 				String::from("table") => Value::from(table),
 				String::from("data") => Value::from(data),
 			};
-			match crate::dbs::execute(sql, session, Some(vars)).await {
+			match crate::dbs::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
@@ -157,11 +160,12 @@ async fn delete_all(
 	output: String,
 	table: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+	let db = DB.get().unwrap().clone();
 	let sql = "DELETE type::table($table)";
 	let vars = hmap! {
 		String::from("table") => Value::from(table),
 	};
-	match crate::dbs::execute(sql, session, Some(vars)).await {
+	match crate::dbs::execute(db, sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
@@ -182,12 +186,13 @@ async fn select_one(
 	table: String,
 	id: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+	let db = DB.get().unwrap().clone();
 	let sql = "SELECT * FROM type::thing($table, $id)";
 	let vars = hmap! {
 		String::from("table") => Value::from(table),
 		String::from("id") => Value::from(id),
 	};
-	match crate::dbs::execute(sql, session, Some(vars)).await {
+	match crate::dbs::execute(db, sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
@@ -205,6 +210,7 @@ async fn create_one(
 	id: String,
 	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+	let db = DB.get().unwrap().clone();
 	let data = str::from_utf8(&body).unwrap();
 	match crate::sql::value::json(data) {
 		Ok((_, data)) => {
@@ -214,7 +220,7 @@ async fn create_one(
 				String::from("id") => Value::from(id),
 				String::from("data") => Value::from(data),
 			};
-			match crate::dbs::execute(sql, session, Some(vars)).await {
+			match crate::dbs::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
@@ -235,6 +241,7 @@ async fn update_one(
 	id: String,
 	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+	let db = DB.get().unwrap().clone();
 	let data = str::from_utf8(&body).unwrap();
 	match crate::sql::value::json(data) {
 		Ok((_, data)) => {
@@ -244,7 +251,7 @@ async fn update_one(
 				String::from("id") => Value::from(id),
 				String::from("data") => Value::from(data),
 			};
-			match crate::dbs::execute(sql, session, Some(vars)).await {
+			match crate::dbs::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
@@ -265,6 +272,7 @@ async fn modify_one(
 	id: String,
 	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+	let db = DB.get().unwrap().clone();
 	let data = str::from_utf8(&body).unwrap();
 	match crate::sql::value::json(data) {
 		Ok((_, data)) => {
@@ -274,7 +282,7 @@ async fn modify_one(
 				String::from("id") => Value::from(id),
 				String::from("data") => Value::from(data),
 			};
-			match crate::dbs::execute(sql, session, Some(vars)).await {
+			match crate::dbs::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
@@ -294,12 +302,13 @@ async fn delete_one(
 	table: String,
 	id: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+	let db = DB.get().unwrap().clone();
 	let sql = "DELETE type::thing($table, $id)";
 	let vars = hmap! {
 		String::from("table") => Value::from(table),
 		String::from("id") => Value::from(id),
 	};
-	match crate::dbs::execute(sql, session, Some(vars)).await {
+	match crate::dbs::execute(db, sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
