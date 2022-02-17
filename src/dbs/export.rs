@@ -2,14 +2,7 @@ use crate::dbs::Executor;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::err::Error;
-use bytes::Bytes;
 use hyper::body::Sender;
-
-macro_rules! output {
-	($expression:expr) => {
-		Bytes::from(format!("{}\n", $expression))
-	};
-}
 
 impl Executor {
 	pub async fn export(
