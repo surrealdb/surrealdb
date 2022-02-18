@@ -28,6 +28,7 @@ pub async fn execute(
 	// Parse the SQL query text
 	let ast = sql::parse(txt)?;
 	// Process all statements
+	opt.auth = Arc::new(session.au);
 	opt.ns = session.ns.map(Arc::new);
 	opt.db = session.db.map(Arc::new);
 	exe.execute(ctx, opt, ast).await
@@ -48,6 +49,7 @@ pub async fn process(
 	// Attach the defined variables
 	let ctx = vars.attach(ctx);
 	// Process all statements
+	opt.auth = Arc::new(session.au);
 	opt.ns = session.ns.map(Arc::new);
 	opt.db = session.db.map(Arc::new);
 	exe.execute(ctx, opt, ast).await
@@ -61,6 +63,7 @@ pub async fn export(db: Store, session: Session, sender: Sender) -> Result<(), E
 	// Create a new execution context
 	let ctx = session.context();
 	// Process database export
+	opt.auth = Arc::new(session.au);
 	opt.ns = session.ns.map(Arc::new);
 	opt.db = session.db.map(Arc::new);
 	exe.export(ctx, opt, sender).await
