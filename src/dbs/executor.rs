@@ -10,19 +10,20 @@ use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use futures::lock::Mutex;
+use hyper::body::Sender;
 use std::sync::Arc;
 use std::time::Instant;
 
 pub struct Executor {
-	pub(super) dbs: Store,
-	pub(super) err: Option<Error>,
-	pub(super) txn: Option<Transaction>,
+	kvs: Store,
+	err: Option<Error>,
+	txn: Option<Transaction>,
 }
 
 impl Executor {
-	pub fn new(dbs: Store) -> Executor {
+	pub fn new(kvs: Store) -> Executor {
 		Executor {
-			dbs,
+			kvs,
 			txn: None,
 			err: None,
 		}
@@ -38,7 +39,7 @@ impl Executor {
 	async fn begin(&mut self) -> bool {
 		match self.txn.as_ref() {
 			Some(_) => false,
-			None => match self.dbs.transaction(true, false).await {
+			None => match self.kvs.transaction(true, false).await {
 				Ok(v) => {
 					self.txn = Some(Arc::new(Mutex::new(v)));
 					true
@@ -302,5 +303,67 @@ impl Executor {
 		}
 		// Return responses
 		Ok(Responses(out))
+	}
+
+	pub async fn export(
+		&mut self,
+		ctx: Runtime,
+		opt: Options,
+		mut chn: Sender,
+	) -> Result<(), Error> {
+		// Start a new transaction
+		let txn = self.kvs.transaction(false, false).await?;
+		// Output OPTIONS
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("-- OPTION")).await?;
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("")).await?;
+		chn.send_data(output!("OPTION IMPORT;")).await?;
+		chn.send_data(output!("")).await?;
+		// Output LOGINS
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("-- LOGINS")).await?;
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("")).await?;
+		// Output TOKENS
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("-- TOKENS")).await?;
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("")).await?;
+		// Output SCOPES
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("-- SCOPES")).await?;
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("")).await?;
+		// Output TABLES
+		for v in 0..1 {
+			chn.send_data(output!("-- ------------------------------")).await?;
+			chn.send_data(output!(format!("-- TABLE: {}", v))).await?;
+			chn.send_data(output!("-- ------------------------------")).await?;
+			chn.send_data(output!("")).await?;
+		}
+		// Start transaction
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("-- TRANSACTION")).await?;
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("")).await?;
+		chn.send_data(output!("BEGIN TRANSACTION;")).await?;
+		chn.send_data(output!("")).await?;
+		// Output TABLE data
+		for v in 0..1 {
+			chn.send_data(output!("-- ------------------------------")).await?;
+			chn.send_data(output!(format!("-- TABLE DATA: {}", v))).await?;
+			chn.send_data(output!("-- ------------------------------")).await?;
+			chn.send_data(output!("")).await?;
+		}
+		// Commit transaction
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("-- TRANSACTION")).await?;
+		chn.send_data(output!("-- ------------------------------")).await?;
+		chn.send_data(output!("")).await?;
+		chn.send_data(output!("COMMIT TRANSACTION;")).await?;
+		chn.send_data(output!("")).await?;
+		// Everything ok
+		Ok(())
 	}
 }

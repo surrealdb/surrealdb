@@ -12,7 +12,7 @@ use hyper::body::Sender;
 use std::sync::Arc;
 
 pub async fn execute(
-	db: Store,
+	kvs: Store,
 	txt: &str,
 	session: Session,
 	vars: Variables,
@@ -20,7 +20,7 @@ pub async fn execute(
 	// Create a new query options
 	let mut opt = Options::default();
 	// Create a new query executor
-	let mut exe = Executor::new(db);
+	let mut exe = Executor::new(kvs);
 	// Create a new execution context
 	let ctx = session.context();
 	// Attach the defined variables
@@ -35,7 +35,7 @@ pub async fn execute(
 }
 
 pub async fn process(
-	db: Store,
+	kvs: Store,
 	ast: Query,
 	session: Session,
 	vars: Variables,
@@ -43,7 +43,7 @@ pub async fn process(
 	// Create a new query options
 	let mut opt = Options::default();
 	// Create a new query executor
-	let mut exe = Executor::new(db);
+	let mut exe = Executor::new(kvs);
 	// Store session info on context
 	let ctx = session.context();
 	// Attach the defined variables
@@ -55,11 +55,11 @@ pub async fn process(
 	exe.execute(ctx, opt, ast).await
 }
 
-pub async fn export(db: Store, session: Session, sender: Sender) -> Result<(), Error> {
+pub async fn export(kvs: Store, session: Session, sender: Sender) -> Result<(), Error> {
 	// Create a new query options
 	let mut opt = Options::default();
 	// Create a new query executor
-	let mut exe = Executor::new(db);
+	let mut exe = Executor::new(kvs);
 	// Create a new execution context
 	let ctx = session.context();
 	// Process database export
