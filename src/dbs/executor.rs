@@ -12,7 +12,7 @@ use crate::sql::value::Value;
 use futures::lock::Mutex;
 use hyper::body::Sender;
 use std::sync::Arc;
-use std::time::Instant;
+use trice::Instant;
 
 pub struct Executor {
 	kvs: Store,
