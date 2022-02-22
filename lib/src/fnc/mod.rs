@@ -41,8 +41,6 @@ pub async fn run(ctx: &Runtime, name: &String, args: Vec<Value>) -> Result<Value
 		"crypto::sha512" => args::check(ctx, name, args, Args::One, crypto::sha512),
 		"crypto::argon2::compare" => args::check(ctx, name, args, Args::Two, crypto::argon2::cmp),
 		"crypto::argon2::generate" => args::check(ctx, name, args, Args::One, crypto::argon2::gen),
-		"crypto::bcrypt::compare" => args::check(ctx, name, args, Args::Two, crypto::bcrypt::cmp),
-		"crypto::bcrypt::generate" => args::check(ctx, name, args, Args::One, crypto::bcrypt::gen),
 		"crypto::pbkdf2::compare" => args::check(ctx, name, args, Args::Two, crypto::pbkdf2::cmp),
 		"crypto::pbkdf2::generate" => args::check(ctx, name, args, Args::One, crypto::pbkdf2::gen),
 		"crypto::scrypt::compare" => args::check(ctx, name, args, Args::Two, crypto::scrypt::cmp),

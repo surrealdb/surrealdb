@@ -185,8 +185,6 @@ fn function_crypto(i: &str) -> IResult<&str, &str> {
 		tag("crypto::sha512"),
 		tag("crypto::argon2::compare"),
 		tag("crypto::argon2::generate"),
-		tag("crypto::bcrypt::compare"),
-		tag("crypto::bcrypt::generate"),
 		tag("crypto::pbkdf2::compare"),
 		tag("crypto::pbkdf2::generate"),
 		tag("crypto::scrypt::compare"),

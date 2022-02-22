@@ -67,21 +67,6 @@ pub mod argon2 {
 	}
 }
 
-pub mod bcrypt {
-
-	use crate::dbs::Runtime;
-	use crate::err::Error;
-	use crate::sql::value::Value;
-
-	pub fn cmp(_: &Runtime, _args: Vec<Value>) -> Result<Value, Error> {
-		todo!()
-	}
-
-	pub fn gen(_: &Runtime, _args: Vec<Value>) -> Result<Value, Error> {
-		todo!()
-	}
-}
-
 pub mod pbkdf2 {
 
 	use crate::dbs::Runtime;
