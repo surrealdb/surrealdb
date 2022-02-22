@@ -1,10 +1,11 @@
-use crate::dbs::Session;
+use crate::err::Error;
 use crate::net::conf;
 use crate::net::head;
 use crate::net::output;
 use crate::net::DB;
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
+use surrealdb::Session;
 use warp::Filter;
 
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
@@ -43,13 +44,13 @@ async fn handler(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let db = DB.get().unwrap().clone();
 	let sql = std::str::from_utf8(&sql).unwrap();
-	match crate::dbs::execute(db, sql, session, None).await {
+	match surrealdb::execute(db, sql, session, None).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
 			_ => Err(warp::reject::not_found()),
 		},
-		Err(err) => Err(warp::reject::custom(err)),
+		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }

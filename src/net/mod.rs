@@ -15,14 +15,11 @@ mod sync;
 mod version;
 
 use crate::err::Error;
-use crate::kvs::Datastore;
 use once_cell::sync::OnceCell;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use uuid::Uuid;
+use surrealdb::Datastore;
 use warp::Filter;
-
-const ID: &'static str = "Request-Id";
 
 static DB: OnceCell<Arc<Datastore>> = OnceCell::new();
 
@@ -64,11 +61,6 @@ pub async fn init(bind: &str, path: &str) -> Result<(), Error> {
 	let net = net.with(head::version());
 	// Specify a generic server header
 	let net = net.with(head::server());
-	// Specify an ID for each request
-	let net = net.map(|reply| {
-		let val = Uuid::new_v4().to_string();
-		warp::reply::with_header(reply, ID, val)
-	});
 	// Log all requests to the console
 	let net = net.with(log::write());
 

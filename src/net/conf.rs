@@ -1,5 +1,5 @@
-use crate::dbs::Session;
 use std::net::SocketAddr;
+use surrealdb::Session;
 use warp::Filter;
 
 pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + Copy {

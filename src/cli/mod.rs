@@ -5,7 +5,7 @@ mod log;
 mod start;
 mod version;
 
-use clap::{App, AppSettings, Arg};
+use clap::{Arg, Command};
 
 fn auth_valid(v: &str) -> Result<(), String> {
 	if v.contains(":") {
@@ -113,9 +113,9 @@ fn key_valid(v: &str) -> Result<(), String> {
 }
 
 pub fn init() {
-	let setup = App::new("SurrealDB command-line interface and server")
-		.setting(AppSettings::DisableVersionFlag)
-		.setting(AppSettings::ArgRequiredElseHelp)
+	let setup = Command::new("SurrealDB command-line interface and server")
+		.disable_version_flag(true)
+		.arg_required_else_help(true)
 		.arg(
 			Arg::new("verbose")
 				.short('v')
@@ -126,7 +126,7 @@ pub fn init() {
 		);
 
 	let setup = setup.subcommand(
-		App::new("start")
+		Command::new("start")
 			.display_order(1)
 			.about("Start the database server")
 			.arg(
@@ -230,7 +230,7 @@ pub fn init() {
 	);
 
 	let setup = setup.subcommand(
-		App::new("backup")
+		Command::new("backup")
 			.display_order(2)
 			.about("Backup data to or from an existing database")
 			.arg(
@@ -266,7 +266,7 @@ pub fn init() {
 	);
 
 	let setup = setup.subcommand(
-		App::new("import")
+		Command::new("import")
 			.display_order(3)
 			.about("Import a SQL script into an existing database")
 			.arg(
@@ -318,7 +318,7 @@ pub fn init() {
 	);
 
 	let setup = setup.subcommand(
-		App::new("export")
+		Command::new("export")
 			.display_order(4)
 			.about("Export an existing database into a SQL script")
 			.arg(
@@ -370,7 +370,7 @@ pub fn init() {
 	);
 
 	let setup = setup.subcommand(
-		App::new("version")
+		Command::new("version")
 			.display_order(5)
 			.about("Output the command-line tool version information"),
 	);

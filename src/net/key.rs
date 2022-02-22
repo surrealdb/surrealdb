@@ -1,13 +1,13 @@
-use crate::dbs::Session;
 use crate::err::Error;
 use crate::net::conf;
 use crate::net::head;
 use crate::net::output;
 use crate::net::DB;
-use crate::sql::value::Value;
 use bytes::Bytes;
 use serde::Deserialize;
 use std::str;
+use surrealdb::sql::Value;
+use surrealdb::Session;
 use warp::path;
 use warp::Filter;
 
@@ -115,14 +115,14 @@ async fn select_all(
 	let vars = hmap! {
 		String::from("table") => Value::from(table),
 	};
-	match crate::dbs::execute(db, sql.as_str(), session, Some(vars)).await {
+	match surrealdb::execute(db, sql.as_str(), session, Some(vars)).await {
 		Ok(ref res) => match output.as_ref() {
 			"application/json" => Ok(output::json(res)),
 			"application/cbor" => Ok(output::cbor(res)),
 			"application/msgpack" => Ok(output::pack(&res)),
 			_ => Err(warp::reject::not_found()),
 		},
-		Err(err) => Err(warp::reject::custom(err)),
+		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }
 
@@ -134,21 +134,21 @@ async fn create_all(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let db = DB.get().unwrap().clone();
 	let data = str::from_utf8(&body).unwrap();
-	match crate::sql::value::json(data) {
-		Ok((_, data)) => {
+	match surrealdb::sql::json(data) {
+		Ok(data) => {
 			let sql = "CREATE type::table($table) CONTENT $data";
 			let vars = hmap! {
 				String::from("table") => Value::from(table),
 				String::from("data") => Value::from(data),
 			};
-			match crate::dbs::execute(db, sql, session, Some(vars)).await {
+			match surrealdb::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
 					_ => Err(warp::reject::not_found()),
 				},
-				Err(err) => Err(warp::reject::custom(err)),
+				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
 		Err(_) => Err(warp::reject::custom(Error::RequestError)),
@@ -165,14 +165,14 @@ async fn delete_all(
 	let vars = hmap! {
 		String::from("table") => Value::from(table),
 	};
-	match crate::dbs::execute(db, sql, session, Some(vars)).await {
+	match surrealdb::execute(db, sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
 			_ => Err(warp::reject::not_found()),
 		},
-		Err(err) => Err(warp::reject::custom(err)),
+		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }
 
@@ -192,14 +192,14 @@ async fn select_one(
 		String::from("table") => Value::from(table),
 		String::from("id") => Value::from(id),
 	};
-	match crate::dbs::execute(db, sql, session, Some(vars)).await {
+	match surrealdb::execute(db, sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
 			_ => Err(warp::reject::not_found()),
 		},
-		Err(err) => Err(warp::reject::custom(err)),
+		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }
 
@@ -212,22 +212,22 @@ async fn create_one(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let db = DB.get().unwrap().clone();
 	let data = str::from_utf8(&body).unwrap();
-	match crate::sql::value::json(data) {
-		Ok((_, data)) => {
+	match surrealdb::sql::json(data) {
+		Ok(data) => {
 			let sql = "CREATE type::thing($table, $id) CONTENT $data";
 			let vars = hmap! {
 				String::from("table") => Value::from(table),
 				String::from("id") => Value::from(id),
 				String::from("data") => Value::from(data),
 			};
-			match crate::dbs::execute(db, sql, session, Some(vars)).await {
+			match surrealdb::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
 					_ => Err(warp::reject::not_found()),
 				},
-				Err(err) => Err(warp::reject::custom(err)),
+				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
 		Err(_) => Err(warp::reject::custom(Error::RequestError)),
@@ -243,22 +243,22 @@ async fn update_one(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let db = DB.get().unwrap().clone();
 	let data = str::from_utf8(&body).unwrap();
-	match crate::sql::value::json(data) {
-		Ok((_, data)) => {
+	match surrealdb::sql::json(data) {
+		Ok(data) => {
 			let sql = "UPDATE type::thing($table, $id) CONTENT $data";
 			let vars = hmap! {
 				String::from("table") => Value::from(table),
 				String::from("id") => Value::from(id),
 				String::from("data") => Value::from(data),
 			};
-			match crate::dbs::execute(db, sql, session, Some(vars)).await {
+			match surrealdb::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
 					_ => Err(warp::reject::not_found()),
 				},
-				Err(err) => Err(warp::reject::custom(err)),
+				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
 		Err(_) => Err(warp::reject::custom(Error::RequestError)),
@@ -274,22 +274,22 @@ async fn modify_one(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let db = DB.get().unwrap().clone();
 	let data = str::from_utf8(&body).unwrap();
-	match crate::sql::value::json(data) {
-		Ok((_, data)) => {
+	match surrealdb::sql::json(data) {
+		Ok(data) => {
 			let sql = "UPDATE type::thing($table, $id) MERGE $data";
 			let vars = hmap! {
 				String::from("table") => Value::from(table),
 				String::from("id") => Value::from(id),
 				String::from("data") => Value::from(data),
 			};
-			match crate::dbs::execute(db, sql, session, Some(vars)).await {
+			match surrealdb::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
 					_ => Err(warp::reject::not_found()),
 				},
-				Err(err) => Err(warp::reject::custom(err)),
+				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
 		Err(_) => Err(warp::reject::custom(Error::RequestError)),
@@ -308,13 +308,13 @@ async fn delete_one(
 		String::from("table") => Value::from(table),
 		String::from("id") => Value::from(id),
 	};
-	match crate::dbs::execute(db, sql, session, Some(vars)).await {
+	match surrealdb::execute(db, sql, session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
 			_ => Err(warp::reject::not_found()),
 		},
-		Err(err) => Err(warp::reject::custom(err)),
+		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }
