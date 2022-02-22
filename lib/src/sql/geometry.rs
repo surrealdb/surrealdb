@@ -259,7 +259,7 @@ impl fmt::Display for Geometry {
 			Geometry::Line(v) => write!(
 				f,
 				"{{ type: 'LineString', coordinates: [{}] }}",
-				v.points_iter()
+				v.points()
 					.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
 					.collect::<Vec<_>>()
 					.join(", ")
@@ -268,7 +268,7 @@ impl fmt::Display for Geometry {
 				f,
 				"{{ type: 'Polygon', coordinates: [[{}]{}] }}",
 				v.exterior()
-					.points_iter()
+					.points()
 					.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
 					.collect::<Vec<_>>()
 					.join(", "),
@@ -281,7 +281,7 @@ impl fmt::Display for Geometry {
 							.map(|i| {
 								format!(
 									"[{}]",
-									i.points_iter()
+									i.points()
 										.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
 										.collect::<Vec<_>>()
 										.join(", ")
@@ -308,7 +308,7 @@ impl fmt::Display for Geometry {
 				v.iter()
 					.map(|v| format!(
 						"[{}]",
-						v.points_iter()
+						v.points()
 							.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
 							.collect::<Vec<_>>()
 							.join(", ")
@@ -323,7 +323,7 @@ impl fmt::Display for Geometry {
 					.map(|v| format!(
 						"[[{}]{}]",
 						v.exterior()
-							.points_iter()
+							.points()
 							.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
 							.collect::<Vec<_>>()
 							.join(", "),
@@ -336,7 +336,7 @@ impl fmt::Display for Geometry {
 									.map(|i| {
 										format!(
 											"[{}]",
-											i.points_iter()
+											i.points()
 												.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
 												.collect::<Vec<_>>()
 												.join(", ")
@@ -382,7 +382,7 @@ impl Serialize for Geometry {
 					map.serialize_value("LineString")?;
 					map.serialize_key("coordinates")?;
 					map.serialize_value(
-						v.points_iter()
+						v.points()
 							.map(|p| vec![p.x(), p.y()])
 							.collect::<Vec<Vec<f64>>>()
 							.as_slice(),
@@ -397,7 +397,7 @@ impl Serialize for Geometry {
 					map.serialize_value(
 						vec![v
 							.exterior()
-							.points_iter()
+							.points()
 							.map(|p| vec![p.x(), p.y()])
 							.collect::<Vec<Vec<f64>>>()]
 						.into_iter()
@@ -405,7 +405,7 @@ impl Serialize for Geometry {
 							v.interiors()
 								.into_iter()
 								.map(|i| {
-									i.points_iter()
+									i.points()
 										.map(|p| vec![p.x(), p.y()])
 										.collect::<Vec<Vec<f64>>>()
 								})
