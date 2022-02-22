@@ -4,8 +4,8 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::common::commas;
-use crate::sql::datetime::{datetime, datetime_raw, Datetime};
-use crate::sql::duration::{duration, duration_raw, Duration};
+use crate::sql::datetime::{datetime, Datetime};
+use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
 use crate::sql::function::{function, Function};
@@ -1001,6 +1001,8 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		map(tag_no_case("NULL"), |_| Value::Null),
 		map(tag_no_case("true"), |_| Value::True),
 		map(tag_no_case("false"), |_| Value::False),
+		map(datetime, |v| Value::Datetime(v)),
+		map(duration, |v| Value::Duration(v)),
 		map(geometry, |v| Value::Geometry(v)),
 		map(number, |v| Value::Number(v)),
 		map(object, |v| Value::Object(v)),
