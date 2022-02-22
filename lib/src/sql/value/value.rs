@@ -464,7 +464,7 @@ impl Value {
 	pub fn is_true(&self) -> bool {
 		match self {
 			Value::True => true,
-			Value::Strand(v) => v.value.to_ascii_lowercase() == "true", // TODO: remove this?
+			Value::Strand(v) => v.value.to_ascii_lowercase() == "true",
 			_ => false,
 		}
 	}
@@ -472,7 +472,7 @@ impl Value {
 	pub fn is_false(&self) -> bool {
 		match self {
 			Value::False => true,
-			Value::Strand(v) => v.value.to_ascii_lowercase() == "false", // TODO: remove this?
+			Value::Strand(v) => v.value.to_ascii_lowercase() == "false",
 			_ => false,
 		}
 	}
