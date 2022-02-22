@@ -11,6 +11,7 @@ use nom::multi::many0;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -30,6 +31,13 @@ pub fn locals(i: &str) -> IResult<&str, Idioms> {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Idiom {
 	pub parts: Vec<Part>,
+}
+
+impl Deref for Idiom {
+	type Target = [Part];
+	fn deref(&self) -> &Self::Target {
+		self.parts.as_slice()
+	}
 }
 
 impl From<String> for Idiom {
@@ -53,13 +61,6 @@ impl Idiom {
 		let mut p = self.parts.to_vec();
 		p.push(n);
 		Idiom::from(p)
-	}
-
-	pub fn next(&self) -> Idiom {
-		match self.parts.len() {
-			0 => Idiom::from(vec![]),
-			_ => Idiom::from(self.parts[1..].to_vec()),
-		}
 	}
 
 	pub fn to_path(&self) -> String {

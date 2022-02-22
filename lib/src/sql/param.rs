@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::idiom;
 use crate::sql::idiom::Idiom;
+use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 use nom::bytes::complete::tag;
@@ -39,10 +40,12 @@ impl Param {
 			Some(Part::Field(v)) => match ctx.value::<Value>(v.name.clone()) {
 				// The base variable exists
 				Some(v) => {
+					// Get the path parts
+					let pth: &[Part] = &self.name;
 					// Process the paramater value
 					let res = v.compute(ctx, opt, txn, doc).await?;
 					// Return the desired field
-					res.get(ctx, opt, txn, &self.name.next()).await
+					res.get(ctx, opt, txn, pth.next()).await
 				}
 				// The base variable does not exist
 				None => Ok(Value::None),

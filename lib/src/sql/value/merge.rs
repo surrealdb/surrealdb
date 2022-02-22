@@ -2,6 +2,7 @@ use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
@@ -15,7 +16,7 @@ impl Value {
 		match val.compute(ctx, opt, txn, Some(self)).await? {
 			Value::Object(v) => {
 				for (k, v) in v.value.into_iter() {
-					self.set(ctx, opt, txn, &k.into(), v).await?;
+					self.set(ctx, opt, txn, &[Part::from(k)], v).await?;
 				}
 				Ok(())
 			}

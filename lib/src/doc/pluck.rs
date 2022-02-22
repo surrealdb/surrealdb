@@ -47,11 +47,11 @@ impl<'a> Document<'a> {
 							Field::All => (),
 							Field::Alone(v) => {
 								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
-								out.set(ctx, opt, txn, &v.to_idiom(), x).await?;
+								out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 							}
 							Field::Alias(v, i) => {
 								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
-								out.set(ctx, opt, txn, &i, x).await?;
+								out.set(ctx, opt, txn, i, x).await?;
 							}
 						}
 					}
@@ -69,11 +69,11 @@ impl<'a> Document<'a> {
 							Field::All => (),
 							Field::Alone(v) => {
 								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
-								out.set(ctx, opt, txn, &v.to_idiom(), x).await?;
+								out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 							}
 							Field::Alias(v, i) => {
 								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
-								out.set(ctx, opt, txn, &i, x).await?;
+								out.set(ctx, opt, txn, i, x).await?;
 							}
 						}
 					}

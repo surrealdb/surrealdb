@@ -3,7 +3,7 @@ use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::Abolish;
-use crate::sql::idiom::Idiom;
+use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
@@ -18,20 +18,20 @@ impl Value {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		path: &Idiom,
+		path: &[Part],
 	) -> Result<(), Error> {
-		match path.parts.first() {
+		match path.first() {
 			// Get the current path part
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
-					Part::Field(f) => match path.parts.len() {
+					Part::Field(f) => match path.len() {
 						1 => {
 							v.remove(&f.name);
 							Ok(())
 						}
 						_ => match v.value.get_mut(&f.name) {
-							Some(v) if v.is_some() => v.del(ctx, opt, txn, &path.next()).await,
+							Some(v) if v.is_some() => v.del(ctx, opt, txn, path.next()).await,
 							_ => Ok(()),
 						},
 					},
@@ -39,19 +39,19 @@ impl Value {
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
-					Part::All => match path.parts.len() {
+					Part::All => match path.len() {
 						1 => {
 							v.value.clear();
 							Ok(())
 						}
 						_ => {
-							let pth = path.next();
-							let fut = v.value.iter_mut().map(|v| v.del(&ctx, opt, txn, &pth));
-							try_join_all(fut).await?;
+							let path = path.next();
+							let futs = v.value.iter_mut().map(|v| v.del(&ctx, opt, txn, path));
+							try_join_all(futs).await?;
 							Ok(())
 						}
 					},
-					Part::First => match path.parts.len() {
+					Part::First => match path.len() {
 						1 => {
 							if v.value.len().gt(&0) {
 								v.value.remove(0);
@@ -59,11 +59,11 @@ impl Value {
 							Ok(())
 						}
 						_ => match v.value.first_mut() {
-							Some(v) => v.del(ctx, opt, txn, &path.next()).await,
+							Some(v) => v.del(ctx, opt, txn, path.next()).await,
 							None => Ok(()),
 						},
 					},
-					Part::Last => match path.parts.len() {
+					Part::Last => match path.len() {
 						1 => {
 							if v.value.len().gt(&0) {
 								v.value.remove(v.value.len() - 1);
@@ -71,25 +71,25 @@ impl Value {
 							Ok(())
 						}
 						_ => match v.value.last_mut() {
-							Some(v) => v.del(ctx, opt, txn, &path.next()).await,
+							Some(v) => v.del(ctx, opt, txn, path.next()).await,
 							None => Ok(()),
 						},
 					},
-					Part::Index(i) => match path.parts.len() {
+					Part::Index(i) => match path.len() {
 						1 => {
 							if v.value.len().gt(&i.to_usize()) {
 								v.value.remove(i.to_usize());
 							}
 							Ok(())
 						}
-						_ => match path.parts.len() {
+						_ => match path.len() {
 							_ => match v.value.get_mut(i.to_usize()) {
-								Some(v) => v.del(ctx, opt, txn, &path.next()).await,
+								Some(v) => v.del(ctx, opt, txn, path.next()).await,
 								None => Ok(()),
 							},
 						},
 					},
-					Part::Where(w) => match path.parts.len() {
+					Part::Where(w) => match path.len() {
 						1 => {
 							let mut m = HashMap::new();
 							for (i, v) in v.value.iter().enumerate() {
@@ -101,27 +101,26 @@ impl Value {
 							Ok(())
 						}
 						_ => {
-							let pth = path.next();
+							let path = path.next();
 							for v in &mut v.value {
 								if w.compute(ctx, opt, txn, Some(&v)).await?.is_truthy() {
-									v.del(ctx, opt, txn, &pth).await?;
+									v.del(ctx, opt, txn, path).await?;
 								}
 							}
 							Ok(())
 						}
 					},
-					_ => match path.parts.len() {
+					_ => match path.len() {
 						1 => {
 							v.value.clear();
 							Ok(())
 						}
 						_ => {
-							let fut = v.value.iter_mut().map(|v| v.del(&ctx, opt, txn, &path));
-							try_join_all(fut).await?;
+							let futs = v.value.iter_mut().map(|v| v.del(&ctx, opt, txn, path));
+							try_join_all(futs).await?;
 							Ok(())
 						}
 					},
-					_ => Ok(()),
 				},
 				// Ignore everything else
 				_ => Ok(()),
@@ -137,6 +136,7 @@ mod tests {
 
 	use super::*;
 	use crate::dbs::test::mock;
+	use crate::sql::idiom::Idiom;
 	use crate::sql::test::Parse;
 
 	#[tokio::test]

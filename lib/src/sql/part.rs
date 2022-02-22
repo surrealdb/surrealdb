@@ -87,6 +87,23 @@ impl fmt::Display for Part {
 	}
 }
 
+// ------------------------------
+
+pub trait Next<'a> {
+	fn next(&'a self) -> &[Part];
+}
+
+impl<'a> Next<'a> for &'a [Part] {
+	fn next(&'a self) -> &'a [Part] {
+		match self.len() {
+			0 => &[],
+			_ => &self[1..],
+		}
+	}
+}
+
+// ------------------------------
+
 pub fn part(i: &str) -> IResult<&str, Part> {
 	alt((all, last, index, field, graph, filter))(i)
 }

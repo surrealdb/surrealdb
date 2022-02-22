@@ -3,7 +3,7 @@ use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::Array;
-use crate::sql::idiom::Idiom;
+use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
@@ -12,7 +12,7 @@ impl Value {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		path: &Idiom,
+		path: &[Part],
 	) -> Result<(), Error> {
 		let val = Value::from(Array::default());
 		self.set(ctx, opt, txn, path, val).await
@@ -24,6 +24,7 @@ mod tests {
 
 	use super::*;
 	use crate::dbs::test::mock;
+	use crate::sql::idiom::Idiom;
 	use crate::sql::test::Parse;
 
 	#[tokio::test]

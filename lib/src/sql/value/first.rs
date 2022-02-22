@@ -2,7 +2,6 @@ use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::sql::idiom::Idiom;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 
@@ -13,6 +12,6 @@ impl Value {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Self, Error> {
-		self.get(ctx, opt, txn, &Idiom::from(vec![Part::First])).await
+		self.get(ctx, opt, txn, &[Part::First]).await
 	}
 }

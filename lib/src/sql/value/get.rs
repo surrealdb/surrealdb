@@ -3,7 +3,7 @@ use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::field::{Field, Fields};
-use crate::sql::idiom::Idiom;
+use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::value::{Value, Values};
@@ -18,15 +18,15 @@ impl Value {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		path: &Idiom,
+		path: &[Part],
 	) -> Result<Self, Error> {
-		match path.parts.first() {
+		match path.first() {
 			// Get the current path part
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
 					Part::Field(f) => match v.value.get(&f.name) {
-						Some(v) => v.get(ctx, opt, txn, &path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, path.next()).await,
 						None => Ok(Value::None),
 					},
 					_ => Ok(Value::None),
@@ -34,39 +34,39 @@ impl Value {
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => {
-						let pth = path.next();
-						let fut = v.value.iter().map(|v| v.get(&ctx, opt, txn, &pth));
-						try_join_all(fut).await.map(|v| v.into())
+						let path = path.next();
+						let futs = v.value.iter().map(|v| v.get(&ctx, opt, txn, path));
+						try_join_all(futs).await.map(|v| v.into())
 					}
 					Part::First => match v.value.first() {
-						Some(v) => v.get(ctx, opt, txn, &path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Last => match v.value.last() {
-						Some(v) => v.get(ctx, opt, txn, &path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Index(i) => match v.value.get(i.to_usize()) {
-						Some(v) => v.get(ctx, opt, txn, &path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Where(w) => {
-						let pth = path.next();
+						let path = path.next();
 						let mut a = Vec::new();
 						for v in &v.value {
 							if w.compute(ctx, opt, txn, Some(&v)).await?.is_truthy() {
-								a.push(v.get(ctx, opt, txn, &pth).await?)
+								a.push(v.get(ctx, opt, txn, path).await?)
 							}
 						}
 						Ok(a.into())
 					}
 					_ => {
-						let fut = v.value.iter().map(|v| v.get(&ctx, opt, txn, &path));
-						try_join_all(fut).await.map(|v| v.into())
+						let futs = v.value.iter().map(|v| v.get(&ctx, opt, txn, path));
+						try_join_all(futs).await.map(|v| v.into())
 					}
 				},
 				// Current path part is a thing
-				Value::Thing(v) => match path.parts.len() {
+				Value::Thing(v) => match path.len() {
 					// No remote embedded fields, so just return this
 					0 => Ok(Value::Thing(v.clone())),
 					// Remote embedded field, so fetch the thing
@@ -80,7 +80,7 @@ impl Value {
 							.await?
 							.first(ctx, opt, txn)
 							.await?
-							.get(ctx, opt, txn, &path)
+							.get(ctx, opt, txn, path)
 							.await
 					}
 				},
@@ -98,6 +98,7 @@ mod tests {
 
 	use super::*;
 	use crate::dbs::test::mock;
+	use crate::sql::idiom::Idiom;
 	use crate::sql::test::Parse;
 	use crate::sql::thing::Thing;
 
