@@ -25,12 +25,12 @@ impl Value {
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
-					Part::Field(p) => match path.parts.len() {
+					Part::Field(f) => match path.parts.len() {
 						1 => {
-							v.remove(&p.name);
+							v.remove(&f.name);
 							Ok(())
 						}
-						_ => match v.value.get_mut(&p.name) {
+						_ => match v.value.get_mut(&f.name) {
 							Some(v) if v.is_some() => v.del(ctx, opt, txn, &path.next()).await,
 							_ => Ok(()),
 						},
@@ -107,6 +107,17 @@ impl Value {
 									v.del(ctx, opt, txn, &pth).await?;
 								}
 							}
+							Ok(())
+						}
+					},
+					_ => match path.parts.len() {
+						1 => {
+							v.value.clear();
+							Ok(())
+						}
+						_ => {
+							let fut = v.value.iter_mut().map(|v| v.del(&ctx, opt, txn, &path));
+							try_join_all(fut).await?;
 							Ok(())
 						}
 					},
@@ -200,6 +211,16 @@ mod tests {
 
 	#[tokio::test]
 	async fn del_array_fields() {
+		let (ctx, opt, txn) = mock().await;
+		let idi = Idiom::parse("test.something[*].age");
+		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = Value::parse("{ test: { something: [{ }, { }] } }");
+		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn del_array_fields_flat() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");

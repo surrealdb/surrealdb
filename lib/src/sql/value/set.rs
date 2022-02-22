@@ -24,12 +24,12 @@ impl Value {
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
-					Part::Field(p) => match v.value.get_mut(&p.name) {
+					Part::Field(f) => match v.value.get_mut(&f.name) {
 						Some(v) if v.is_some() => v.set(ctx, opt, txn, &path.next(), val).await,
 						_ => {
 							let mut obj = Value::base();
 							obj.set(ctx, opt, txn, &path.next(), val).await?;
-							v.insert(&p.name, obj);
+							v.insert(&f.name, obj);
 							Ok(())
 						}
 					},
@@ -65,7 +65,12 @@ impl Value {
 						}
 						Ok(())
 					}
-					_ => Ok(()),
+					_ => {
+						let fut =
+							v.value.iter_mut().map(|v| v.set(ctx, opt, txn, &path, val.clone()));
+						try_join_all(fut).await?;
+						Ok(())
+					}
 				},
 				// Current path part is empty
 				Value::Null => {
@@ -200,6 +205,16 @@ mod tests {
 	async fn set_array_fields() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
+		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }");
+		val.set(&ctx, &opt, &txn, &idi, Value::from(21)).await.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn set_array_fields_flat() {
+		let (ctx, opt, txn) = mock().await;
+		let idi = Idiom::parse("test.something.age");
 		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = Value::parse("{ test: { something: [{ age: 21 }, { age: 21 }] } }");
 		val.set(&ctx, &opt, &txn, &idi, Value::from(21)).await.unwrap();

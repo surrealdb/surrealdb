@@ -25,7 +25,7 @@ impl Value {
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
-					Part::Field(p) => match v.value.get(&p.name) {
+					Part::Field(f) => match v.value.get(&f.name) {
 						Some(v) => v.get(ctx, opt, txn, &path.next()).await,
 						None => Ok(Value::None),
 					},
@@ -60,7 +60,10 @@ impl Value {
 						}
 						Ok(a.into())
 					}
-					_ => Ok(Value::None),
+					_ => {
+						let fut = v.value.iter().map(|v| v.get(&ctx, opt, txn, &path));
+						try_join_all(fut).await.map(|v| v.into())
+					}
 				},
 				// Current path part is a thing
 				Value::Thing(v) => match path.parts.len() {
@@ -168,6 +171,15 @@ mod tests {
 	async fn get_array_fields() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
+		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		assert_eq!(res, Value::from(vec![34, 36]));
+	}
+
+	#[tokio::test]
+	async fn get_array_fields_flat() {
+		let (ctx, opt, txn) = mock().await;
+		let idi = Idiom::parse("test.something.age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
