@@ -8,9 +8,7 @@ use std::fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct UseStatement {
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub ns: Option<String>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub db: Option<String>,
 }
 

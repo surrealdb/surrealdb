@@ -14,7 +14,6 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct IfelseStatement {
 	pub exprs: Vec<(Value, Value)>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub close: Option<Value>,
 }
 

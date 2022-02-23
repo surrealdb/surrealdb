@@ -24,11 +24,8 @@ pub struct InsertStatement {
 	pub into: Table,
 	pub data: Data,
 	pub ignore: bool,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub update: Option<Data>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub output: Option<Output>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub timeout: Option<Timeout>,
 }
 

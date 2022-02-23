@@ -38,9 +38,7 @@ impl fmt::Display for Dir {
 pub struct Graph {
 	pub dir: Dir,
 	pub what: Tables,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cond: Option<Value>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub alias: Option<Idiom>,
 }
 

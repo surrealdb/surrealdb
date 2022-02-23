@@ -28,23 +28,14 @@ use std::fmt;
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub what: Values,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cond: Option<Cond>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub split: Option<Splits>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub group: Option<Groups>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub order: Option<Orders>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub limit: Option<Limit>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub start: Option<Start>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub fetch: Option<Fetchs>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub version: Option<Version>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub timeout: Option<Timeout>,
 }
 

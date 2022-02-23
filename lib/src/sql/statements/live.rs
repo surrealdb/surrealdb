@@ -19,9 +19,7 @@ use std::fmt;
 pub struct LiveStatement {
 	pub expr: Fields,
 	pub what: Values,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cond: Option<Cond>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub fetch: Option<Fetchs>,
 }
 

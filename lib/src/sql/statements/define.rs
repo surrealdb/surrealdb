@@ -186,9 +186,7 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 pub struct DefineLoginStatement {
 	pub name: String,
 	pub base: Base,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub pass: Option<String>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub hash: Option<String>,
 }
 
@@ -355,13 +353,9 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DefineScopeStatement {
 	pub name: String,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub session: Option<Duration>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub signup: Option<Value>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub signin: Option<Value>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub connect: Option<Value>,
 }
 
@@ -483,7 +477,6 @@ pub struct DefineTableStatement {
 	pub name: String,
 	pub drop: bool,
 	pub full: bool,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub view: Option<View>,
 	pub permissions: Permissions,
 }
@@ -682,13 +675,9 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: String,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub kind: Option<Kind>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub value: Option<Value>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub assert: Option<Value>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub priority: Option<u64>,
 	pub permissions: Permissions,
 }

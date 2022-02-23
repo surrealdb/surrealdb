@@ -11,9 +11,7 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Model {
 	pub table: String,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub count: Option<u64>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub range: Option<(u64, u64)>,
 }
 

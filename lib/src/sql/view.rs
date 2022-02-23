@@ -14,9 +14,7 @@ use std::fmt;
 pub struct View {
 	pub expr: Fields,
 	pub what: Tables,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub cond: Option<Cond>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub group: Option<Groups>,
 }
 

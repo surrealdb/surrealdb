@@ -20,11 +20,8 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CreateStatement {
 	pub what: Values,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub data: Option<Data>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub output: Option<Output>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub timeout: Option<Timeout>,
 }
 

@@ -27,11 +27,8 @@ pub struct RelateStatement {
 	pub from: Values,
 	pub with: Values,
 	pub uniq: bool,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub data: Option<Data>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub output: Option<Output>,
-	#[serde(skip_serializing_if = "Option::is_none")]
 	pub timeout: Option<Timeout>,
 }
 
