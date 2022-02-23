@@ -68,7 +68,7 @@ impl<'a> Iterator<'a> {
 		txn: &Transaction,
 	) -> Result<Value, Error> {
 		// Log the statement
-		trace!("Iterating {}", self.stmt);
+		trace!("Iterating: {}", self.stmt);
 		// Enable context override
 		let mut ctx = Context::new(&ctx);
 		self.run = ctx.add_cancel();

@@ -132,7 +132,7 @@ impl Executor {
 		// Process all statements in query
 		for stm in qry.statements().iter() {
 			// Log the statement
-			debug!("{}", stm);
+			debug!("Executing: {}", stm);
 			// Reset errors
 			if self.txn.is_none() {
 				self.err = None;
