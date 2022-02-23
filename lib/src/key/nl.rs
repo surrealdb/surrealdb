@@ -4,7 +4,7 @@ use crate::key::BASE;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct Nu {
+pub struct Nl {
 	kv: String,
 	_a: String,
 	ns: String,
@@ -12,25 +12,25 @@ pub struct Nu {
 	us: String,
 }
 
-impl Into<Vec<u8>> for Nu {
+impl Into<Vec<u8>> for Nl {
 	fn into(self) -> Vec<u8> {
 		self.encode().unwrap()
 	}
 }
 
-impl From<Vec<u8>> for Nu {
+impl From<Vec<u8>> for Nl {
 	fn from(val: Vec<u8>) -> Self {
-		Nu::decode(&val).unwrap()
+		Nl::decode(&val).unwrap()
 	}
 }
 
-pub fn new(ns: &str, us: &str) -> Nu {
-	Nu::new(ns.to_string(), us.to_string())
+pub fn new(ns: &str, us: &str) -> Nl {
+	Nl::new(ns.to_string(), us.to_string())
 }
 
-impl Nu {
-	pub fn new(ns: String, us: String) -> Nu {
-		Nu {
+impl Nl {
+	pub fn new(ns: String, us: String) -> Nl {
+		Nl {
 			kv: BASE.to_owned(),
 			_a: String::from("*"),
 			ns,
@@ -41,7 +41,7 @@ impl Nu {
 	pub fn encode(&self) -> Result<Vec<u8>, Error> {
 		Ok(serialize(self)?)
 	}
-	pub fn decode(v: &[u8]) -> Result<Nu, Error> {
+	pub fn decode(v: &[u8]) -> Result<Nl, Error> {
 		Ok(deserialize(v)?)
 	}
 }
@@ -52,12 +52,12 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Nu::new(
+		let val = Nl::new(
 			"test".to_string(),
 			"test".to_string(),
 		);
-		let enc = Nu::encode(&val).unwrap();
-		let dec = Nu::decode(&enc).unwrap();
+		let enc = Nl::encode(&val).unwrap();
+		let dec = Nl::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

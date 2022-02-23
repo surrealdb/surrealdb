@@ -4,7 +4,7 @@ use crate::key::BASE;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct Du {
+pub struct Dl {
 	kv: String,
 	_a: String,
 	ns: String,
@@ -14,25 +14,25 @@ pub struct Du {
 	us: String,
 }
 
-impl Into<Vec<u8>> for Du {
+impl Into<Vec<u8>> for Dl {
 	fn into(self) -> Vec<u8> {
 		self.encode().unwrap()
 	}
 }
 
-impl From<Vec<u8>> for Du {
+impl From<Vec<u8>> for Dl {
 	fn from(val: Vec<u8>) -> Self {
-		Du::decode(&val).unwrap()
+		Dl::decode(&val).unwrap()
 	}
 }
 
-pub fn new(ns: &str, db: &str, us: &str) -> Du {
-	Du::new(ns.to_string(), db.to_string(), us.to_string())
+pub fn new(ns: &str, db: &str, us: &str) -> Dl {
+	Dl::new(ns.to_string(), db.to_string(), us.to_string())
 }
 
-impl Du {
-	pub fn new(ns: String, db: String, us: String) -> Du {
-		Du {
+impl Dl {
+	pub fn new(ns: String, db: String, us: String) -> Dl {
+		Dl {
 			kv: BASE.to_owned(),
 			_a: String::from("*"),
 			ns,
@@ -45,7 +45,7 @@ impl Du {
 	pub fn encode(&self) -> Result<Vec<u8>, Error> {
 		Ok(serialize(self)?)
 	}
-	pub fn decode(v: &[u8]) -> Result<Du, Error> {
+	pub fn decode(v: &[u8]) -> Result<Dl, Error> {
 		Ok(deserialize(v)?)
 	}
 }
@@ -56,13 +56,13 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Du::new(
+		let val = Dl::new(
 			"test".to_string(),
 			"test".to_string(),
 			"test".to_string(),
 		);
-		let enc = Du::encode(&val).unwrap();
-		let dec = Du::decode(&enc).unwrap();
+		let enc = Dl::encode(&val).unwrap();
+		let dec = Dl::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

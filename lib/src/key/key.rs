@@ -46,10 +46,10 @@ pub const SUFFIX: &'static str = "\x7f";
 pub enum Key {
 	Ns(ns::Ns), // Namespace definition key
 	Nt(nt::Nt), // Namespace token definition key
-	Nu(nu::Nu), // Namespace user definition key
+	Nu(nl::Nl), // Namespace login definition key
 	Db(db::Db), // Database definition key
 	Dt(dt::Dt), // Database token definition key
-	Du(du::Du), // Database user definition key
+	Du(dl::Dl), // Database login definition key
 	Sc(sc::Sc), // Scope definition key
 	St(st::St), // Scope token definition key
 	Tb(tb::Tb), // Table definition key
