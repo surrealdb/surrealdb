@@ -2,7 +2,6 @@ use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
@@ -40,9 +39,7 @@ impl InsertStatement {
 		// Allowed to run?
 		opt.check(Level::No)?;
 		// Create a new iterator
-		let mut i = Iterator::new();
-		// Pass in current statement
-		i.stmt = Statement::from(self);
+		let mut i = Iterator::from(self);
 		// Ensure futures are stored
 		let opt = &opt.futures(false);
 		// Parse the expression

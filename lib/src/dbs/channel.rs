@@ -13,21 +13,19 @@ use async_recursion::async_recursion;
 use nanoid::nanoid;
 use tokio::sync::mpsc::UnboundedSender;
 
-pub type Channel = UnboundedSender<(Option<Thing>, Value)>;
-
 impl Value {
 	pub async fn channel(
 		self,
 		ctx: Runtime,
 		opt: Options,
-		chn: Channel,
 		txn: Transaction,
+		chn: UnboundedSender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		match self {
-			Value::Array(v) => v.process(&ctx, &opt, &chn, &txn).await?,
-			Value::Model(v) => v.process(&ctx, &opt, &chn, &txn).await?,
-			Value::Thing(v) => v.process(&ctx, &opt, &chn, &txn).await?,
-			Value::Table(v) => v.process(&ctx, &opt, &chn, &txn).await?,
+			Value::Array(v) => v.process(&ctx, &opt, &txn, &chn).await?,
+			Value::Model(v) => v.process(&ctx, &opt, &txn, &chn).await?,
+			Value::Thing(v) => v.process(&ctx, &opt, &txn, &chn).await?,
+			Value::Table(v) => v.process(&ctx, &opt, &txn, &chn).await?,
 			v => chn.send((None, v))?,
 		}
 		Ok(())
@@ -40,15 +38,15 @@ impl Array {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		chn: &Channel,
 		txn: &Transaction,
+		chn: &UnboundedSender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		for v in self.value.into_iter() {
 			match v {
-				Value::Array(v) => v.process(ctx, opt, chn, txn).await?,
-				Value::Model(v) => v.process(ctx, opt, chn, txn).await?,
-				Value::Thing(v) => v.process(ctx, opt, chn, txn).await?,
-				Value::Table(v) => v.process(ctx, opt, chn, txn).await?,
+				Value::Array(v) => v.process(ctx, opt, txn, chn).await?,
+				Value::Model(v) => v.process(ctx, opt, txn, chn).await?,
+				Value::Thing(v) => v.process(ctx, opt, txn, chn).await?,
+				Value::Table(v) => v.process(ctx, opt, txn, chn).await?,
 				v => chn.send((None, v))?,
 			}
 		}
@@ -61,8 +59,8 @@ impl Model {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		chn: &Channel,
 		txn: &Transaction,
+		chn: &UnboundedSender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			if let Some(c) = self.count {
@@ -71,7 +69,7 @@ impl Model {
 						tb: self.table.to_string(),
 						id: nanoid!(20, &ID_CHARS),
 					}
-					.process(ctx, opt, chn, txn)
+					.process(ctx, opt, txn, chn)
 					.await?;
 				}
 			}
@@ -81,7 +79,7 @@ impl Model {
 						tb: self.table.to_string(),
 						id: x.to_string(),
 					}
-					.process(ctx, opt, chn, txn)
+					.process(ctx, opt, txn, chn)
 					.await?;
 				}
 			}
@@ -95,8 +93,8 @@ impl Thing {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		chn: &Channel,
 		txn: &Transaction,
+		chn: &UnboundedSender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		Ok(())
 	}
@@ -107,8 +105,8 @@ impl Table {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		chn: &Channel,
 		txn: &Transaction,
+		chn: &UnboundedSender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		Ok(())
 	}

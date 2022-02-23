@@ -12,6 +12,12 @@ use crate::sql::limit::Limit;
 use crate::sql::order::Orders;
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
+use crate::sql::statements::create::CreateStatement;
+use crate::sql::statements::delete::DeleteStatement;
+use crate::sql::statements::insert::InsertStatement;
+use crate::sql::statements::relate::RelateStatement;
+use crate::sql::statements::select::SelectStatement;
+use crate::sql::statements::update::UpdateStatement;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -42,11 +48,66 @@ pub struct Iterator<'a> {
 	pub version: Option<&'a Version>,
 }
 
-impl<'a> Iterator<'a> {
-	pub fn new() -> Iterator<'a> {
-		Iterator::default()
+impl<'a> From<&'a SelectStatement> for Iterator<'a> {
+	fn from(v: &'a SelectStatement) -> Self {
+		Iterator {
+			stmt: Statement::from(v),
+			split: v.split.as_ref(),
+			group: v.group.as_ref(),
+			order: v.order.as_ref(),
+			limit: v.limit.as_ref(),
+			start: v.start.as_ref(),
+			..Iterator::default()
+		}
 	}
+}
 
+impl<'a> From<&'a CreateStatement> for Iterator<'a> {
+	fn from(v: &'a CreateStatement) -> Self {
+		Iterator {
+			stmt: Statement::from(v),
+			..Iterator::default()
+		}
+	}
+}
+
+impl<'a> From<&'a UpdateStatement> for Iterator<'a> {
+	fn from(v: &'a UpdateStatement) -> Self {
+		Iterator {
+			stmt: Statement::from(v),
+			..Iterator::default()
+		}
+	}
+}
+
+impl<'a> From<&'a RelateStatement> for Iterator<'a> {
+	fn from(v: &'a RelateStatement) -> Self {
+		Iterator {
+			stmt: Statement::from(v),
+			..Iterator::default()
+		}
+	}
+}
+
+impl<'a> From<&'a DeleteStatement> for Iterator<'a> {
+	fn from(v: &'a DeleteStatement) -> Self {
+		Iterator {
+			stmt: Statement::from(v),
+			..Iterator::default()
+		}
+	}
+}
+
+impl<'a> From<&'a InsertStatement> for Iterator<'a> {
+	fn from(v: &'a InsertStatement) -> Self {
+		Iterator {
+			stmt: Statement::from(v),
+			..Iterator::default()
+		}
+	}
+}
+
+impl<'a> Iterator<'a> {
 	// Prepares a value for processing
 	pub fn prepare(&mut self, val: Value) {
 		self.readies.push(val)
@@ -162,18 +223,20 @@ impl<'a> Iterator<'a> {
 			}
 			// Run statements in parallel
 			true => {
-				// Use multi producer channel
-				use tokio::sync::mpsc;
-				// Create an unbounded channel
-				let (chn, mut rx) = mpsc::unbounded_channel();
-				// Process all prepared values
-				for v in mem::take(&mut self.readies) {
-					tokio::spawn(v.channel(ctx.clone(), opt.clone(), chn.clone(), txn.clone()));
-				}
-				// Drop the main channel reference
-				drop(chn);
+				let mut rcv = {
+					// Use multi producer channel
+					use tokio::sync::mpsc;
+					// Create an unbounded channel
+					let (chn, rcv) = mpsc::unbounded_channel();
+					// Process all prepared values
+					for v in mem::take(&mut self.readies) {
+						tokio::spawn(v.channel(ctx.clone(), opt.clone(), txn.clone(), chn.clone()));
+					}
+					//
+					rcv
+				};
 				// Process all processed values
-				while let Some((k, v)) = rx.recv().await {
+				while let Some((k, v)) = rcv.recv().await {
 					self.process(&ctx, opt, txn, k, v).await;
 				}
 				// Everything processed ok
@@ -182,6 +245,7 @@ impl<'a> Iterator<'a> {
 		}
 	}
 
+	// Process a new record Thing and Value
 	pub async fn process(
 		&mut self,
 		ctx: &Runtime,
@@ -196,7 +260,6 @@ impl<'a> Iterator<'a> {
 		}
 		// Setup a new document
 		let mut doc = Document::new(thg, &val);
-
 		// Process the document
 		let res = match self.stmt {
 			Statement::Select(_) => doc.select(ctx, opt, txn, &self.stmt).await,
@@ -207,7 +270,12 @@ impl<'a> Iterator<'a> {
 			Statement::Insert(_) => doc.insert(ctx, opt, txn, &self.stmt).await,
 			_ => unreachable!(),
 		};
+		// Process the result
+		self.result(res);
+	}
 
+	// Accept a processed record result
+	fn result(&mut self, res: Result<Value, Error>) {
 		// Process the result
 		match res {
 			Err(Error::IgnoreError) => {
@@ -220,7 +288,6 @@ impl<'a> Iterator<'a> {
 			}
 			Ok(v) => self.results.push(v),
 		}
-
 		// Check if we can exit
 		if self.group.is_none() {
 			if self.order.is_none() {

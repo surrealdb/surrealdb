@@ -2,7 +2,6 @@ use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
-use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
@@ -65,15 +64,7 @@ impl SelectStatement {
 		// Allowed to run?
 		opt.check(Level::No)?;
 		// Create a new iterator
-		let mut i = Iterator::new();
-		// Pass in current statement
-		i.stmt = Statement::from(self);
-		// Pass in statement config
-		i.split = self.split.as_ref();
-		i.group = self.group.as_ref();
-		i.order = self.order.as_ref();
-		i.limit = self.limit.as_ref();
-		i.start = self.start.as_ref();
+		let mut i = Iterator::from(self);
 		// Ensure futures are processed
 		let opt = &opt.futures(true);
 		// Loop over the select targets
