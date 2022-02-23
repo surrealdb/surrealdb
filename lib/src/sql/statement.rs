@@ -75,27 +75,27 @@ pub enum Statement {
 impl Statement {
 	pub fn timeout(&self) -> Option<Duration> {
 		match self {
-			Statement::Select(ref v) => match &v.timeout {
+			Statement::Select(v) => match &v.timeout {
 				Some(v) => Some(v.expr.value),
 				None => None,
 			},
-			Statement::Create(ref v) => match &v.timeout {
+			Statement::Create(v) => match &v.timeout {
 				Some(v) => Some(v.expr.value),
 				None => None,
 			},
-			Statement::Update(ref v) => match &v.timeout {
+			Statement::Update(v) => match &v.timeout {
 				Some(v) => Some(v.expr.value),
 				None => None,
 			},
-			Statement::Relate(ref v) => match &v.timeout {
+			Statement::Relate(v) => match &v.timeout {
 				Some(v) => Some(v.expr.value),
 				None => None,
 			},
-			Statement::Delete(ref v) => match &v.timeout {
+			Statement::Delete(v) => match &v.timeout {
 				Some(v) => Some(v.expr.value),
 				None => None,
 			},
-			Statement::Insert(ref v) => match &v.timeout {
+			Statement::Insert(v) => match &v.timeout {
 				Some(v) => Some(v.expr.value),
 				None => None,
 			},
@@ -113,20 +113,20 @@ impl Statement {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			Statement::Set(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Info(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Live(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Kill(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Output(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Select(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Create(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Update(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Relate(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Delete(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Insert(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Define(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Remove(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Set(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Info(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Live(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Kill(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Output(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Ifelse(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Select(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Create(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Update(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Relate(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Delete(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Insert(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Define(v) => v.compute(ctx, opt, txn, doc).await,
+			Statement::Remove(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => unreachable!(),
 		}
 	}
@@ -135,25 +135,25 @@ impl Statement {
 impl fmt::Display for Statement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Statement::Use(ref v) => write!(f, "{}", v),
-			Statement::Set(ref v) => write!(f, "{}", v),
-			Statement::Info(ref v) => write!(f, "{}", v),
-			Statement::Live(ref v) => write!(f, "{}", v),
-			Statement::Kill(ref v) => write!(f, "{}", v),
-			Statement::Begin(ref v) => write!(f, "{}", v),
-			Statement::Cancel(ref v) => write!(f, "{}", v),
-			Statement::Commit(ref v) => write!(f, "{}", v),
-			Statement::Output(ref v) => write!(f, "{}", v),
-			Statement::Ifelse(ref v) => write!(f, "{}", v),
-			Statement::Select(ref v) => write!(f, "{}", v),
-			Statement::Create(ref v) => write!(f, "{}", v),
-			Statement::Update(ref v) => write!(f, "{}", v),
-			Statement::Relate(ref v) => write!(f, "{}", v),
-			Statement::Delete(ref v) => write!(f, "{}", v),
-			Statement::Insert(ref v) => write!(f, "{}", v),
-			Statement::Define(ref v) => write!(f, "{}", v),
-			Statement::Remove(ref v) => write!(f, "{}", v),
-			Statement::Option(ref v) => write!(f, "{}", v),
+			Statement::Use(v) => write!(f, "{}", v),
+			Statement::Set(v) => write!(f, "{}", v),
+			Statement::Info(v) => write!(f, "{}", v),
+			Statement::Live(v) => write!(f, "{}", v),
+			Statement::Kill(v) => write!(f, "{}", v),
+			Statement::Begin(v) => write!(f, "{}", v),
+			Statement::Cancel(v) => write!(f, "{}", v),
+			Statement::Commit(v) => write!(f, "{}", v),
+			Statement::Output(v) => write!(f, "{}", v),
+			Statement::Ifelse(v) => write!(f, "{}", v),
+			Statement::Select(v) => write!(f, "{}", v),
+			Statement::Create(v) => write!(f, "{}", v),
+			Statement::Update(v) => write!(f, "{}", v),
+			Statement::Relate(v) => write!(f, "{}", v),
+			Statement::Delete(v) => write!(f, "{}", v),
+			Statement::Insert(v) => write!(f, "{}", v),
+			Statement::Define(v) => write!(f, "{}", v),
+			Statement::Remove(v) => write!(f, "{}", v),
+			Statement::Option(v) => write!(f, "{}", v),
 		}
 	}
 }
