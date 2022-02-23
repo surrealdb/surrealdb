@@ -83,7 +83,7 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((casts, langs, future, normal))(i)
+	alt((casts, embed, future, normal))(i)
 }
 
 fn future(i: &str) -> IResult<&str, Function> {
@@ -99,7 +99,7 @@ fn future(i: &str) -> IResult<&str, Function> {
 	Ok((i, Function::Future(v)))
 }
 
-fn langs(i: &str) -> IResult<&str, Function> {
+fn embed(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("fn::script")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("->")(i)?;
@@ -417,23 +417,5 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("fn::future -> { 1.2345 + 5.4321 }", format!("{}", out));
 		assert_eq!(out, Function::Future(Value::from(Expression::parse("1.2345 + 5.4321"))));
-	}
-
-	#[test]
-	fn function_script_expression() {
-		let sql = "fn::script -> { 1.2345 + 5.4321 }";
-		let res = function(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(
-			"fn::script -> { return this.tags.filter(t => { return t.length > 3; }); }",
-			format!("{}", out)
-		);
-		assert_eq!(
-			out,
-			Function::Script(Script::from(
-				"return this.tags.filter(t => { return t.length > 3; });"
-			))
-		);
 	}
 }
