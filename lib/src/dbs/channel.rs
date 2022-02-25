@@ -21,12 +21,14 @@ impl Value {
 		txn: Transaction,
 		chn: UnboundedSender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
-		match self {
-			Value::Array(v) => v.process(&ctx, &opt, &txn, &chn).await?,
-			Value::Model(v) => v.process(&ctx, &opt, &txn, &chn).await?,
-			Value::Thing(v) => v.process(&ctx, &opt, &txn, &chn).await?,
-			Value::Table(v) => v.process(&ctx, &opt, &txn, &chn).await?,
-			v => chn.send((None, v))?,
+		if ctx.is_ok() {
+			match self {
+				Value::Array(v) => v.process(&ctx, &opt, &txn, &chn).await?,
+				Value::Model(v) => v.process(&ctx, &opt, &txn, &chn).await?,
+				Value::Thing(v) => v.process(&ctx, &opt, &txn, &chn).await?,
+				Value::Table(v) => v.process(&ctx, &opt, &txn, &chn).await?,
+				v => chn.send((None, v))?,
+			}
 		}
 		Ok(())
 	}
@@ -42,12 +44,14 @@ impl Array {
 		chn: &UnboundedSender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		for v in self.value.into_iter() {
-			match v {
-				Value::Array(v) => v.process(ctx, opt, txn, chn).await?,
-				Value::Model(v) => v.process(ctx, opt, txn, chn).await?,
-				Value::Thing(v) => v.process(ctx, opt, txn, chn).await?,
-				Value::Table(v) => v.process(ctx, opt, txn, chn).await?,
-				v => chn.send((None, v))?,
+			if ctx.is_ok() {
+				match v {
+					Value::Array(v) => v.process(ctx, opt, txn, chn).await?,
+					Value::Model(v) => v.process(ctx, opt, txn, chn).await?,
+					Value::Thing(v) => v.process(ctx, opt, txn, chn).await?,
+					Value::Table(v) => v.process(ctx, opt, txn, chn).await?,
+					v => chn.send((None, v))?,
+				}
 			}
 		}
 		Ok(())

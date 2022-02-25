@@ -23,12 +23,14 @@ impl Value {
 		txn: &Transaction,
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
-		match self {
-			Value::Array(v) => v.iterate(ctx, opt, txn, ite).await?,
-			Value::Model(v) => v.iterate(ctx, opt, txn, ite).await?,
-			Value::Thing(v) => v.iterate(ctx, opt, txn, ite).await?,
-			Value::Table(v) => v.iterate(ctx, opt, txn, ite).await?,
-			v => ite.process(ctx, opt, txn, None, v).await,
+		if ctx.is_ok() {
+			match self {
+				Value::Array(v) => v.iterate(ctx, opt, txn, ite).await?,
+				Value::Model(v) => v.iterate(ctx, opt, txn, ite).await?,
+				Value::Thing(v) => v.iterate(ctx, opt, txn, ite).await?,
+				Value::Table(v) => v.iterate(ctx, opt, txn, ite).await?,
+				v => ite.process(ctx, opt, txn, None, v).await,
+			}
 		}
 		Ok(())
 	}
@@ -45,12 +47,14 @@ impl Array {
 		ite: &mut Iterator<'_>,
 	) -> Result<(), Error> {
 		for v in self.value.into_iter() {
-			match v {
-				Value::Array(v) => v.iterate(ctx, opt, txn, ite).await?,
-				Value::Model(v) => v.iterate(ctx, opt, txn, ite).await?,
-				Value::Thing(v) => v.iterate(ctx, opt, txn, ite).await?,
-				Value::Table(v) => v.iterate(ctx, opt, txn, ite).await?,
-				v => ite.process(ctx, opt, txn, None, v).await,
+			if ctx.is_ok() {
+				match v {
+					Value::Array(v) => v.iterate(ctx, opt, txn, ite).await?,
+					Value::Model(v) => v.iterate(ctx, opt, txn, ite).await?,
+					Value::Thing(v) => v.iterate(ctx, opt, txn, ite).await?,
+					Value::Table(v) => v.iterate(ctx, opt, txn, ite).await?,
+					v => ite.process(ctx, opt, txn, None, v).await,
+				}
 			}
 		}
 		Ok(())
