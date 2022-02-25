@@ -11,7 +11,6 @@ pub mod ft;
 pub mod index;
 pub mod ix;
 pub mod key;
-pub mod kv;
 pub mod lv;
 pub mod namespace;
 pub mod nl;
