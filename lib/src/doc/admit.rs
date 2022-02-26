@@ -11,7 +11,7 @@ impl<'a> Document<'a> {
 		_ctx: &Runtime,
 		_opt: &Options,
 		_txn: &Transaction,
-		stm: &Statement<'_>,
+		stm: &Statement,
 	) -> Result<(), Error> {
 		match self.id {
 			Some(_) => Ok(()),

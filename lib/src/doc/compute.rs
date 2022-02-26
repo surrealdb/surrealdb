@@ -6,20 +6,22 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use tokio::sync::mpsc::Sender;
 
 impl<'a> Document<'a> {
 	pub async fn compute(
 		ctx: Runtime,
 		opt: Options,
 		txn: Transaction,
-		stm: Statement<'_>,
+		chn: Sender<Result<Value, Error>>,
+		stm: Statement,
 		thg: Option<Thing>,
 		val: Value,
-	) -> Result<Value, Error> {
+	) -> Result<(), Error> {
 		// Setup a new document
 		let mut doc = Document::new(thg, &val);
 		// Process the statement
-		match stm {
+		let res = match stm {
 			Statement::Select(_) => doc.select(&ctx, &opt, &txn, &stm).await,
 			Statement::Create(_) => doc.create(&ctx, &opt, &txn, &stm).await,
 			Statement::Update(_) => doc.update(&ctx, &opt, &txn, &stm).await,
@@ -27,6 +29,10 @@ impl<'a> Document<'a> {
 			Statement::Delete(_) => doc.delete(&ctx, &opt, &txn, &stm).await,
 			Statement::Insert(_) => doc.insert(&ctx, &opt, &txn, &stm).await,
 			_ => unreachable!(),
-		}
+		};
+		// Send back the result
+		let _ = chn.send(res).await;
+		// Everything went ok
+		Ok(())
 	}
 }

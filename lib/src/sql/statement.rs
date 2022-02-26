@@ -32,6 +32,7 @@ use nom::multi::separated_list1;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -51,25 +52,25 @@ pub fn statements(i: &str) -> IResult<&str, Statements> {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
-	Set(SetStatement),
-	Use(UseStatement),
-	Info(InfoStatement),
-	Live(LiveStatement),
-	Kill(KillStatement),
-	Begin(BeginStatement),
-	Cancel(CancelStatement),
-	Commit(CommitStatement),
-	Output(OutputStatement),
-	Ifelse(IfelseStatement),
-	Select(SelectStatement),
-	Create(CreateStatement),
-	Update(UpdateStatement),
-	Relate(RelateStatement),
-	Delete(DeleteStatement),
-	Insert(InsertStatement),
-	Define(DefineStatement),
-	Remove(RemoveStatement),
-	Option(OptionStatement),
+	Set(Arc<SetStatement>),
+	Use(Arc<UseStatement>),
+	Info(Arc<InfoStatement>),
+	Live(Arc<LiveStatement>),
+	Kill(Arc<KillStatement>),
+	Begin(Arc<BeginStatement>),
+	Cancel(Arc<CancelStatement>),
+	Commit(Arc<CommitStatement>),
+	Output(Arc<OutputStatement>),
+	Ifelse(Arc<IfelseStatement>),
+	Select(Arc<SelectStatement>),
+	Create(Arc<CreateStatement>),
+	Update(Arc<UpdateStatement>),
+	Relate(Arc<RelateStatement>),
+	Delete(Arc<DeleteStatement>),
+	Insert(Arc<InsertStatement>),
+	Define(Arc<DefineStatement>),
+	Remove(Arc<RemoveStatement>),
+	Option(Arc<OptionStatement>),
 }
 
 impl Statement {
@@ -162,25 +163,25 @@ pub fn statement(i: &str) -> IResult<&str, Statement> {
 	delimited(
 		mightbespace,
 		alt((
-			map(set, |v| Statement::Set(v)),
-			map(yuse, |v| Statement::Use(v)),
-			map(info, |v| Statement::Info(v)),
-			map(live, |v| Statement::Live(v)),
-			map(kill, |v| Statement::Kill(v)),
-			map(begin, |v| Statement::Begin(v)),
-			map(cancel, |v| Statement::Cancel(v)),
-			map(commit, |v| Statement::Commit(v)),
-			map(output, |v| Statement::Output(v)),
-			map(ifelse, |v| Statement::Ifelse(v)),
-			map(select, |v| Statement::Select(v)),
-			map(create, |v| Statement::Create(v)),
-			map(update, |v| Statement::Update(v)),
-			map(relate, |v| Statement::Relate(v)),
-			map(delete, |v| Statement::Delete(v)),
-			map(insert, |v| Statement::Insert(v)),
-			map(define, |v| Statement::Define(v)),
-			map(remove, |v| Statement::Remove(v)),
-			map(option, |v| Statement::Option(v)),
+			map(set, |v| Statement::Set(Arc::new(v))),
+			map(yuse, |v| Statement::Use(Arc::new(v))),
+			map(info, |v| Statement::Info(Arc::new(v))),
+			map(live, |v| Statement::Live(Arc::new(v))),
+			map(kill, |v| Statement::Kill(Arc::new(v))),
+			map(begin, |v| Statement::Begin(Arc::new(v))),
+			map(cancel, |v| Statement::Cancel(Arc::new(v))),
+			map(commit, |v| Statement::Commit(Arc::new(v))),
+			map(output, |v| Statement::Output(Arc::new(v))),
+			map(ifelse, |v| Statement::Ifelse(Arc::new(v))),
+			map(select, |v| Statement::Select(Arc::new(v))),
+			map(create, |v| Statement::Create(Arc::new(v))),
+			map(update, |v| Statement::Update(Arc::new(v))),
+			map(relate, |v| Statement::Relate(Arc::new(v))),
+			map(delete, |v| Statement::Delete(Arc::new(v))),
+			map(insert, |v| Statement::Insert(Arc::new(v))),
+			map(define, |v| Statement::Define(Arc::new(v))),
+			map(remove, |v| Statement::Remove(Arc::new(v))),
+			map(option, |v| Statement::Option(Arc::new(v))),
 		)),
 		mightbespace,
 	)(i)

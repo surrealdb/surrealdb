@@ -18,17 +18,18 @@ use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Subquery {
 	Value(Value),
-	Select(SelectStatement),
-	Create(CreateStatement),
-	Update(UpdateStatement),
-	Delete(DeleteStatement),
-	Relate(RelateStatement),
-	Insert(InsertStatement),
 	Ifelse(IfelseStatement),
+	Select(Arc<SelectStatement>),
+	Create(Arc<CreateStatement>),
+	Update(Arc<UpdateStatement>),
+	Delete(Arc<DeleteStatement>),
+	Relate(Arc<RelateStatement>),
+	Insert(Arc<InsertStatement>),
 }
 
 impl PartialOrd for Subquery {
@@ -62,7 +63,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				let res = v.compute(&ctx, &opt, txn, doc).await?;
+				let res = Arc::clone(v).compute(&ctx, &opt, txn, doc).await?;
 				// Process result
 				match v.limit() {
 					1 => match v.expr.single() {
@@ -88,7 +89,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match Arc::clone(v).compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -109,7 +110,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match Arc::clone(v).compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -130,7 +131,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match Arc::clone(v).compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -151,7 +152,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match Arc::clone(v).compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -172,7 +173,7 @@ impl Subquery {
 				// Prepare context
 				let ctx = ctx.freeze();
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match Arc::clone(v).compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.value.remove(0)),
 						_ => Ok(v.into()),
@@ -211,12 +212,12 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 fn subquery_others(i: &str) -> IResult<&str, Subquery> {
 	let (i, _) = tag("(")(i)?;
 	let (i, v) = alt((
-		map(select, |v| Subquery::Select(v)),
-		map(create, |v| Subquery::Create(v)),
-		map(update, |v| Subquery::Update(v)),
-		map(delete, |v| Subquery::Delete(v)),
-		map(relate, |v| Subquery::Relate(v)),
-		map(insert, |v| Subquery::Insert(v)),
+		map(select, |v| Subquery::Select(Arc::new(v))),
+		map(create, |v| Subquery::Create(Arc::new(v))),
+		map(update, |v| Subquery::Update(Arc::new(v))),
+		map(delete, |v| Subquery::Delete(Arc::new(v))),
+		map(relate, |v| Subquery::Relate(Arc::new(v))),
+		map(insert, |v| Subquery::Insert(Arc::new(v))),
 		map(value, |v| Subquery::Value(v)),
 	))(i)?;
 	let (i, _) = tag(")")(i)?;

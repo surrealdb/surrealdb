@@ -20,6 +20,7 @@ use nom::combinator::opt;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct RelateStatement {
@@ -35,7 +36,7 @@ pub struct RelateStatement {
 
 impl RelateStatement {
 	pub async fn compute(
-		&self,
+		self: &Arc<Self>,
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
@@ -43,8 +44,10 @@ impl RelateStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::No)?;
+		// Clone the statement
+		let s = Arc::clone(self);
 		// Create a new iterator
-		let mut i = Iterator::from(self);
+		let mut i = Iterator::from(s);
 		// Ensure futures are stored
 		let opt = &opt.futures(false);
 		// Loop over the select targets

@@ -11,7 +11,7 @@ impl<'a> Document<'a> {
 		_ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		_stm: &Statement<'_>,
+		_stm: &Statement,
 	) -> Result<(), Error> {
 		Ok(())
 	}

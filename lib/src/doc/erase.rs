@@ -11,7 +11,7 @@ impl<'a> Document<'a> {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		_stm: &Statement<'_>,
+		_stm: &Statement,
 	) -> Result<(), Error> {
 		self.current.to_mut().clear(ctx, opt, txn).await
 	}

@@ -12,7 +12,7 @@ impl<'a> Document<'a> {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		stm: &Statement<'_>,
+		stm: &Statement,
 	) -> Result<Value, Error> {
 		// Check if record exists
 		self.empty(ctx, opt, txn, stm).await?;

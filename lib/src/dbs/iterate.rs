@@ -21,7 +21,7 @@ impl Value {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		ite: &mut Iterator<'_>,
+		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match self {
@@ -44,7 +44,7 @@ impl Array {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		ite: &mut Iterator<'_>,
+		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		for v in self.value.into_iter() {
 			if ctx.is_ok() {
@@ -67,7 +67,7 @@ impl Model {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		ite: &mut Iterator<'_>,
+		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			if let Some(c) = self.count {
@@ -101,7 +101,7 @@ impl Thing {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		ite: &mut Iterator<'_>,
+		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		Ok(())
 	}
@@ -113,7 +113,7 @@ impl Table {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		ite: &mut Iterator<'_>,
+		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		Ok(())
 	}

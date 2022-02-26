@@ -12,7 +12,7 @@ impl<'a> Document<'a> {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		stm: &Statement<'_>,
+		stm: &Statement,
 	) -> Result<Value, Error> {
 		// Check value type
 		self.admit(ctx, opt, txn, stm).await?;

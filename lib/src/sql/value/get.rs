@@ -9,6 +9,7 @@ use crate::sql::statements::select::SelectStatement;
 use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
+use std::sync::Arc;
 
 impl Value {
 	#[cfg_attr(feature = "parallel", async_recursion)]
@@ -76,7 +77,8 @@ impl Value {
 							what: Values(vec![Value::Thing(v.clone())]),
 							..SelectStatement::default()
 						};
-						stm.compute(ctx, opt, txn, None)
+						Arc::new(stm)
+							.compute(ctx, opt, txn, None)
 							.await?
 							.first(ctx, opt, txn)
 							.await?

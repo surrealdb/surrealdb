@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		stm: &Statement<'_>,
+		stm: &Statement,
 	) -> Result<(), Error> {
 		// Get the ID reference
 		let id = self.id.as_ref();

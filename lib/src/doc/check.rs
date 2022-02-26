@@ -11,7 +11,7 @@ impl<'a> Document<'a> {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		stm: &Statement<'_>,
+		stm: &Statement,
 	) -> Result<(), Error> {
 		// Extract statement clause
 		let cond = match stm {

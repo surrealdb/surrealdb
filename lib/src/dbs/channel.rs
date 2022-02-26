@@ -11,7 +11,7 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
 use nanoid::nanoid;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 
 impl Value {
 	pub async fn channel(
@@ -19,7 +19,7 @@ impl Value {
 		ctx: Runtime,
 		opt: Options,
 		txn: Transaction,
-		chn: UnboundedSender<(Option<Thing>, Value)>,
+		chn: Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match self {
@@ -27,7 +27,7 @@ impl Value {
 				Value::Model(v) => v.process(&ctx, &opt, &txn, &chn).await?,
 				Value::Thing(v) => v.process(&ctx, &opt, &txn, &chn).await?,
 				Value::Table(v) => v.process(&ctx, &opt, &txn, &chn).await?,
-				v => chn.send((None, v))?,
+				v => chn.send((None, v)).await?,
 			}
 		}
 		Ok(())
@@ -41,7 +41,7 @@ impl Array {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		chn: &UnboundedSender<(Option<Thing>, Value)>,
+		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		for v in self.value.into_iter() {
 			if ctx.is_ok() {
@@ -50,7 +50,7 @@ impl Array {
 					Value::Model(v) => v.process(ctx, opt, txn, chn).await?,
 					Value::Thing(v) => v.process(ctx, opt, txn, chn).await?,
 					Value::Table(v) => v.process(ctx, opt, txn, chn).await?,
-					v => chn.send((None, v))?,
+					v => chn.send((None, v)).await?,
 				}
 			}
 		}
@@ -64,7 +64,7 @@ impl Model {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		chn: &UnboundedSender<(Option<Thing>, Value)>,
+		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			if let Some(c) = self.count {
@@ -98,7 +98,7 @@ impl Thing {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		chn: &UnboundedSender<(Option<Thing>, Value)>,
+		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		Ok(())
 	}
@@ -110,7 +110,7 @@ impl Table {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		chn: &UnboundedSender<(Option<Thing>, Value)>,
+		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		Ok(())
 	}
