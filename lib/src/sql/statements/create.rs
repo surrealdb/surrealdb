@@ -23,6 +23,7 @@ pub struct CreateStatement {
 	pub data: Option<Data>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
+	pub parallel: bool,
 }
 
 impl CreateStatement {
@@ -71,6 +72,9 @@ impl fmt::Display for CreateStatement {
 		if let Some(ref v) = self.timeout {
 			write!(f, " {}", v)?
 		}
+		if self.parallel {
+			write!(f, " PARALLEL")?
+		}
 		Ok(())
 	}
 }
@@ -82,6 +86,7 @@ pub fn create(i: &str) -> IResult<&str, CreateStatement> {
 	let (i, data) = opt(preceded(shouldbespace, data))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
+	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
 	Ok((
 		i,
 		CreateStatement {
@@ -89,6 +94,7 @@ pub fn create(i: &str) -> IResult<&str, CreateStatement> {
 			data,
 			output,
 			timeout,
+			parallel: parallel.is_some(),
 		},
 	))
 }

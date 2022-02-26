@@ -30,6 +30,7 @@ pub struct RelateStatement {
 	pub data: Option<Data>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
+	pub parallel: bool,
 }
 
 impl RelateStatement {
@@ -81,6 +82,9 @@ impl fmt::Display for RelateStatement {
 		if let Some(ref v) = self.timeout {
 			write!(f, " {}", v)?
 		}
+		if self.parallel {
+			write!(f, " PARALLEL")?
+		}
 		Ok(())
 	}
 }
@@ -93,6 +97,7 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	let (i, data) = opt(preceded(shouldbespace, data))(i)?;
 	let (i, output) = opt(preceded(shouldbespace, output))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
+	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
 	Ok((
 		i,
 		RelateStatement {
@@ -103,6 +108,7 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 			data,
 			output,
 			timeout,
+			parallel: parallel.is_some(),
 		},
 	))
 }

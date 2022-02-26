@@ -57,6 +57,7 @@ impl<'a> From<&'a SelectStatement> for Iterator<'a> {
 			order: v.order.as_ref(),
 			limit: v.limit.as_ref(),
 			start: v.start.as_ref(),
+			parallel: v.parallel,
 			..Iterator::default()
 		}
 	}
@@ -66,6 +67,7 @@ impl<'a> From<&'a CreateStatement> for Iterator<'a> {
 	fn from(v: &'a CreateStatement) -> Self {
 		Iterator {
 			stmt: Statement::from(v),
+			parallel: v.parallel,
 			..Iterator::default()
 		}
 	}
@@ -75,6 +77,7 @@ impl<'a> From<&'a UpdateStatement> for Iterator<'a> {
 	fn from(v: &'a UpdateStatement) -> Self {
 		Iterator {
 			stmt: Statement::from(v),
+			parallel: v.parallel,
 			..Iterator::default()
 		}
 	}
@@ -84,6 +87,7 @@ impl<'a> From<&'a RelateStatement> for Iterator<'a> {
 	fn from(v: &'a RelateStatement) -> Self {
 		Iterator {
 			stmt: Statement::from(v),
+			parallel: v.parallel,
 			..Iterator::default()
 		}
 	}
@@ -93,6 +97,7 @@ impl<'a> From<&'a DeleteStatement> for Iterator<'a> {
 	fn from(v: &'a DeleteStatement) -> Self {
 		Iterator {
 			stmt: Statement::from(v),
+			parallel: v.parallel,
 			..Iterator::default()
 		}
 	}
@@ -102,6 +107,7 @@ impl<'a> From<&'a InsertStatement> for Iterator<'a> {
 	fn from(v: &'a InsertStatement) -> Self {
 		Iterator {
 			stmt: Statement::from(v),
+			parallel: v.parallel,
 			..Iterator::default()
 		}
 	}
