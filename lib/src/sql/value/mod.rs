@@ -6,7 +6,6 @@ mod decrement;
 mod def;
 mod del;
 mod diff;
-mod fetch;
 mod first;
 mod get;
 mod increment;
