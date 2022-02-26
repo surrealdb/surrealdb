@@ -1,0 +1,13 @@
+[package]
+name = "surrealdb-derive"
+publish = true
+edition = "2021"
+version = "0.0.0"
+authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "1.0"
+quote = "1.0"
