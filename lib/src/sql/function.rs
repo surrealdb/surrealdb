@@ -55,10 +55,9 @@ impl Function {
 				fnc::cast::run(ctx, s, a)
 			}
 			Function::Normal(ref s, ref e) => {
-				let mut a: Vec<Value> = vec![];
+				let mut a: Vec<Value> = Vec::with_capacity(e.len());
 				for v in e {
-					let v = v.compute(ctx, opt, txn, doc).await?;
-					a.push(v);
+					a.push(v.compute(ctx, opt, txn, doc).await?);
 				}
 				fnc::run(ctx, s, a).await
 			}
