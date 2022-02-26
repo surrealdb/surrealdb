@@ -59,12 +59,12 @@ impl Options {
 	}
 
 	// Get currently selected NS
-	pub fn ns(&self) -> &String {
+	pub fn ns(&self) -> &str {
 		self.ns.as_ref().unwrap()
 	}
 
 	// Get currently selected DB
-	pub fn db(&self) -> &String {
+	pub fn db(&self) -> &str {
 		self.db.as_ref().unwrap()
 	}
 
