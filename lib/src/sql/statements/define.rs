@@ -17,6 +17,7 @@ use crate::sql::permission::{permissions, Permissions};
 use crate::sql::strand::strand_raw;
 use crate::sql::value::{value, values, Value, Values};
 use crate::sql::view::{view, View};
+use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
@@ -25,7 +26,7 @@ use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
@@ -94,7 +95,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DefineNamespaceStatement {
 	pub name: String,
 }
@@ -138,7 +139,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DefineDatabaseStatement {
 	pub name: String,
 }
@@ -182,7 +183,7 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DefineLoginStatement {
 	pub name: String,
 	pub base: Base,
@@ -280,7 +281,7 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DefineTokenStatement {
 	pub name: String,
 	pub base: Base,
@@ -350,7 +351,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DefineScopeStatement {
 	pub name: String,
 	pub session: Option<Duration>,
@@ -472,7 +473,7 @@ fn scope_connect(i: &str) -> IResult<&str, DefineScopeOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DefineTableStatement {
 	pub name: String,
 	pub drop: bool,
@@ -604,7 +605,7 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DefineEventStatement {
 	pub name: String,
 	pub what: String,
@@ -671,7 +672,7 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: String,
@@ -813,7 +814,7 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DefineIndexStatement {
 	pub name: String,
 	pub what: String,

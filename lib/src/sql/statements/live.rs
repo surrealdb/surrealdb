@@ -9,13 +9,14 @@ use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Fields};
 use crate::sql::value::Value;
 use crate::sql::value::{whats, Values};
+use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct LiveStatement {
 	pub expr: Fields,
 	pub what: Values,

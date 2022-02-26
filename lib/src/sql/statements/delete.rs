@@ -10,6 +10,7 @@ use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
 use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{whats, Value, Values};
+use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
@@ -17,7 +18,7 @@ use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DeleteStatement {
 	pub what: Values,
 	pub cond: Option<Cond>,

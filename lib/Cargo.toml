@@ -19,6 +19,7 @@ async-recursion = "1.0.0"
 byteorder = "1.4.3"
 chrono = { version = "0.4.19", features = ["serde"] }
 dec = { version = "1.21.0", package = "rust_decimal", features = ["maths", "serde-float"] }
+derive = { version = "0.1.0", package = "surrealdb-derive" }
 dmp = "0.1.1"
 echodb = { version = "0.2.0", optional = true }
 futures = "0.3.21"

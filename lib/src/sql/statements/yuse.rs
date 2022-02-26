@@ -1,12 +1,13 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
+use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct UseStatement {
 	pub ns: Option<String>,
 	pub db: Option<String>,

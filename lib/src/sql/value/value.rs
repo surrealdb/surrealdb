@@ -25,6 +25,7 @@ use crate::sql::thing::{thing, Thing};
 use async_recursion::async_recursion;
 use chrono::{DateTime, Utc};
 use dec::Decimal;
+use derive::Store;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
 use geo::Point;
@@ -74,7 +75,7 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 	Ok((i, Values(v)))
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Store)]
 pub enum Value {
 	None,
 	Void,
@@ -383,18 +384,6 @@ impl From<Option<String>> for Value {
 			Some(v) => Value::from(v),
 			None => Value::None,
 		}
-	}
-}
-
-impl Into<Vec<u8>> for Value {
-	fn into(self) -> Vec<u8> {
-		msgpack::to_vec(&self).unwrap()
-	}
-}
-
-impl From<Vec<u8>> for Value {
-	fn from(v: Vec<u8>) -> Self {
-		msgpack::from_slice::<Value>(&v).unwrap()
 	}
 }
 

@@ -17,13 +17,14 @@ use crate::sql::start::{start, Start};
 use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{selects, Value, Values};
 use crate::sql::version::{version, Version};
+use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub what: Values,
