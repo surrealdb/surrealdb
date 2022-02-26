@@ -4,6 +4,11 @@ publish = true
 edition = "2021"
 version = "0.0.0"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+description = "A high-performance library in that manipulates plain text"
+homepage = "https://github.com/surrealdb/dmp"
+repository = "https://github.com/surrealdb/dmp"
+keywords = ["surrealdb", "surreal", "database", "derive"]
+license = "MIT"
 
 [lib]
 proc-macro = true
