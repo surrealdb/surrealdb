@@ -12,28 +12,6 @@
 //! `bytekey` currently supports all Rust primitives, strings, options, structs, enums, vecs, and
 //! tuples. See **Serializer** for details on the serialization format.
 //!
-//! #### Usage
-//!
-//! ```
-//! #[macro_use]
-//! extern crate serde_derive;
-//! extern crate bytekey;
-//! use bytekey::{deserialize, serialize};
-//!
-//! #[derive(Debug, PartialEq, Serialize, Deserialize)]
-//! struct MyKey { a: u32, b: String }
-//!
-//! # fn main() {
-//! let a = MyKey { a: 1, b: "foo".to_string() };
-//! let b = MyKey { a: 2, b: "foo".to_string() };
-//! let c = MyKey { a: 2, b: "fooz".to_string() };
-//!
-//! assert!(serialize(&a).unwrap() < serialize(&b).unwrap());
-//! assert!(serialize(&b).unwrap() < serialize(&c).unwrap());
-//! assert_eq!(a, deserialize(&serialize(&a).unwrap()).unwrap());
-//! # }
-//! ```
-//!
 //! #### Type Evolution
 //!
 //! In general, the exact type of a serialized value must be known in order to correctly
@@ -60,5 +38,5 @@
 pub mod decode;
 pub mod encode;
 
-pub use self::decode::{deserialize, deserialize_from, Deserializer};
-pub use self::encode::{serialize, serialize_into, Serializer};
+pub use self::decode::{deserialize, Deserializer};
+pub use self::encode::{serialize, Serializer};

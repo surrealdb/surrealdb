@@ -111,15 +111,6 @@ impl serde::ser::Error for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Serialize data into a vector of `u8` bytes.
-///
-/// #### Usage
-///
-/// ```
-/// # use bytekey::serialize;
-/// assert_eq!(vec!(0x00, 0x00, 0x00, 0x2A), serialize(&42u32).unwrap());
-/// assert_eq!(vec!(0x66, 0x69, 0x7A, 0x7A, 0x62, 0x75, 0x7A, 0x7A, 0x00), serialize(&"fizzbuzz").unwrap());
-/// assert_eq!(vec!(0x2A, 0x66, 0x69, 0x7A, 0x7A, 0x00), serialize(&(42u8, "fizz")).unwrap());
-/// ```
 pub fn serialize<T>(v: &T) -> Result<Vec<u8>>
 where
 	T: Serialize,
@@ -133,17 +124,6 @@ where
 }
 
 /// Serialize data into the given vector of `u8` bytes.
-///
-/// #### Usage
-///
-/// ```
-/// # use bytekey::serialize_into;
-/// let mut bytes = vec![];
-/// bytekey::serialize_into(&mut bytes, &5u8).unwrap();
-/// assert_eq!(vec![5u8], bytes.clone());
-/// bytekey::serialize_into(&mut bytes, &10u8).unwrap();
-/// assert_eq!(vec![5u8, 10], bytes.clone());
-/// ```
 pub fn serialize_into<W, T>(writer: W, value: &T) -> Result<()>
 where
 	W: Write,
