@@ -1,5 +1,5 @@
 blank_lines_lower_bound = 1
-edition = "2018"
+edition = "2021"
 hard_tabs = true
 indent_style = "Block"
 match_arm_blocks = true
