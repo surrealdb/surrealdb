@@ -37,14 +37,16 @@ impl Expression {
 	) -> Result<Value, Error> {
 		let l = self.l.compute(ctx, opt, txn, doc).await?;
 		match self.o {
-			Operator::Or => match l.is_truthy() {
-				true => return Ok(l), // No need to continue
-				_ => {}               // Continue
-			},
-			Operator::And => match l.is_truthy() {
-				false => return Ok(l), // No need to continue
-				_ => {}                // Continue
-			},
+			Operator::Or => {
+				if let true = l.is_truthy() {
+					return Ok(l);
+				}
+			}
+			Operator::And => {
+				if let false = l.is_truthy() {
+					return Ok(l);
+				}
+			}
 			_ => {} // Continue
 		}
 		let r = self.r.compute(ctx, opt, txn, doc).await?;

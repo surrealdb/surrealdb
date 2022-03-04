@@ -32,15 +32,15 @@ fn process(
 	// Specify default conf
 	let mut conf = Session::default();
 	// Specify client ip
-	conf.ip = ip.map(|v| v.to_string()).map(|v| v.into());
+	conf.ip = ip.map(|v| v.to_string());
 	// Specify session origin
-	conf.or = or.map(|v| v.into());
+	conf.or = or;
 	// Specify session id
-	conf.id = id.map(|v| v.into());
+	conf.id = id;
 	// Specify namespace
-	conf.ns = ns.map(|v| v.into());
+	conf.ns = ns;
 	// Specify database
-	conf.db = db.map(|v| v.into());
+	conf.db = db;
 	// Parse authentication
 	match au {
 		Some(auth) if auth.starts_with("Basic") => basic(auth, conf),
@@ -49,10 +49,10 @@ fn process(
 	}
 }
 
-fn basic(auth: String, conf: Session) -> Session {
+fn basic(_auth: String, conf: Session) -> Session {
 	conf
 }
 
-fn token(auth: String, conf: Session) -> Session {
+fn token(_auth: String, conf: Session) -> Session {
 	conf
 }

@@ -38,12 +38,13 @@ pub fn r#enum(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 
 pub fn float(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
-		2 => match args.remove(0).as_float() {
-			min => match args.remove(0).as_float() {
+		2 => {
+			let min = args.remove(0).as_float();
+			match args.remove(0).as_float() {
 				max if max < min => Ok(rand::thread_rng().gen_range(max..=min).into()),
 				max => Ok(rand::thread_rng().gen_range(min..=max).into()),
-			},
-		},
+			}
+		}
 		0 => Ok(rand::random::<f64>().into()),
 		_ => unreachable!(),
 	}
@@ -51,9 +52,10 @@ pub fn float(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 
 pub fn guid(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
-		1 => match args.remove(0).as_int() as usize {
-			len => Ok(nanoid!(len, &ID_CHARS).into()),
-		},
+		1 => {
+			let len = args.remove(0).as_int() as usize;
+			Ok(nanoid!(len, &ID_CHARS).into())
+		}
 		0 => Ok(nanoid!(20, &ID_CHARS).into()),
 		_ => unreachable!(),
 	}
@@ -61,12 +63,13 @@ pub fn guid(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 
 pub fn int(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
-		2 => match args.remove(0).as_int() {
-			min => match args.remove(0).as_int() {
+		2 => {
+			let min = args.remove(0).as_int();
+			match args.remove(0).as_int() {
 				max if max < min => Ok(rand::thread_rng().gen_range(max..=min).into()),
 				max => Ok(rand::thread_rng().gen_range(min..=max).into()),
-			},
-		},
+			}
+		}
 		0 => Ok(rand::random::<i64>().into()),
 		_ => unreachable!(),
 	}
@@ -122,8 +125,9 @@ pub fn string(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 
 pub fn time(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
-		2 => match args.remove(0).as_int() {
-			min => match args.remove(0).as_int() {
+		2 => {
+			let min = args.remove(0).as_int();
+			match args.remove(0).as_int() {
 				max if max < min => {
 					let i = rand::thread_rng().gen_range(max..=min);
 					Ok(Datetime::from(i).into())
@@ -132,8 +136,8 @@ pub fn time(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 					let i = rand::thread_rng().gen_range(min..=max);
 					Ok(Datetime::from(i).into())
 				}
-			},
-		},
+			}
+		}
 		0 => {
 			let i = rand::random::<i64>();
 			Ok(Datetime::from(i).into())

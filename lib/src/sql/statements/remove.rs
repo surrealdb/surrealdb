@@ -69,15 +69,15 @@ impl fmt::Display for RemoveStatement {
 
 pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 	alt((
-		map(namespace, |v| RemoveStatement::Namespace(v)),
-		map(database, |v| RemoveStatement::Database(v)),
-		map(login, |v| RemoveStatement::Login(v)),
-		map(token, |v| RemoveStatement::Token(v)),
-		map(scope, |v| RemoveStatement::Scope(v)),
-		map(table, |v| RemoveStatement::Table(v)),
-		map(event, |v| RemoveStatement::Event(v)),
-		map(field, |v| RemoveStatement::Field(v)),
-		map(index, |v| RemoveStatement::Index(v)),
+		map(namespace, RemoveStatement::Namespace),
+		map(database, RemoveStatement::Database),
+		map(login, RemoveStatement::Login),
+		map(token, RemoveStatement::Token),
+		map(scope, RemoveStatement::Scope),
+		map(table, RemoveStatement::Table),
+		map(event, RemoveStatement::Event),
+		map(field, RemoveStatement::Field),
+		map(index, RemoveStatement::Index),
 	))(i)
 }
 
@@ -95,7 +95,7 @@ impl RemoveNamespaceStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -139,7 +139,7 @@ impl RemoveDatabaseStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -184,7 +184,7 @@ impl RemoveLoginStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -238,7 +238,7 @@ impl RemoveTokenStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -291,7 +291,7 @@ impl RemoveScopeStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -335,7 +335,7 @@ impl RemoveTableStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -380,7 +380,7 @@ impl RemoveEventStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -431,7 +431,7 @@ impl RemoveFieldStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -482,7 +482,7 @@ impl RemoveIndexStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?

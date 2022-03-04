@@ -36,7 +36,7 @@ impl Value {
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
-						let futs = v.value.iter().map(|v| v.get(&ctx, opt, txn, path));
+						let futs = v.value.iter().map(|v| v.get(ctx, opt, txn, path));
 						try_join_all(futs).await.map(|v| v.into())
 					}
 					Part::First => match v.value.first() {
@@ -55,14 +55,14 @@ impl Value {
 						let path = path.next();
 						let mut a = Vec::new();
 						for v in &v.value {
-							if w.compute(ctx, opt, txn, Some(&v)).await?.is_truthy() {
+							if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
 								a.push(v.get(ctx, opt, txn, path).await?)
 							}
 						}
 						Ok(a.into())
 					}
 					_ => {
-						let futs = v.value.iter().map(|v| v.get(&ctx, opt, txn, path));
+						let futs = v.value.iter().map(|v| v.get(ctx, opt, txn, path));
 						try_join_all(futs).await.map(|v| v.into())
 					}
 				},

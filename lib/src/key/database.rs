@@ -12,9 +12,9 @@ pub struct Database {
 	db: String,
 }
 
-impl Into<Vec<u8>> for Database {
-	fn into(self) -> Vec<u8> {
-		self.encode().unwrap()
+impl From<Database> for Vec<u8> {
+	fn from(val: Database) -> Vec<u8> {
+		val.encode().unwrap()
 	}
 }
 

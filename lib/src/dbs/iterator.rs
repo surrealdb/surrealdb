@@ -106,7 +106,7 @@ impl Iterator {
 	// Create a new record for processing
 	pub fn produce(&mut self, val: Table) {
 		self.prepare(Value::Thing(Thing {
-			tb: val.name.to_string(),
+			tb: val.name,
 			id: nanoid!(20, &ID_CHARS),
 		}))
 	}
@@ -121,7 +121,7 @@ impl Iterator {
 		// Log the statement
 		trace!("Iterating: {}", self.stm);
 		// Enable context override
-		let mut ctx = Context::new(&ctx);
+		let mut ctx = Context::new(ctx);
 		self.run = ctx.add_cancel();
 		let ctx = ctx.freeze();
 		// Process prepared values
@@ -145,35 +145,35 @@ impl Iterator {
 	}
 
 	#[inline]
-	fn output_split(&mut self, ctx: &Runtime, opt: &Options, txn: &Transaction) {
+	fn output_split(&mut self, _ctx: &Runtime, _opt: &Options, _txn: &Transaction) {
 		if self.stm.split().is_some() {
 			// Ignore
 		}
 	}
 
 	#[inline]
-	fn output_group(&mut self, ctx: &Runtime, opt: &Options, txn: &Transaction) {
+	fn output_group(&mut self, _ctx: &Runtime, _opt: &Options, _txn: &Transaction) {
 		if self.stm.group().is_some() {
 			// Ignore
 		}
 	}
 
 	#[inline]
-	fn output_order(&mut self, ctx: &Runtime, opt: &Options, txn: &Transaction) {
+	fn output_order(&mut self, _ctx: &Runtime, _opt: &Options, _txn: &Transaction) {
 		if self.stm.order().is_some() {
 			// Ignore
 		}
 	}
 
 	#[inline]
-	fn output_start(&mut self, ctx: &Runtime, opt: &Options, txn: &Transaction) {
+	fn output_start(&mut self, _ctx: &Runtime, _opt: &Options, _txn: &Transaction) {
 		if let Some(v) = self.stm.start() {
 			self.results = mem::take(&mut self.results).into_iter().skip(v.0).collect();
 		}
 	}
 
 	#[inline]
-	fn output_limit(&mut self, ctx: &Runtime, opt: &Options, txn: &Transaction) {
+	fn output_limit(&mut self, _ctx: &Runtime, _opt: &Options, _txn: &Transaction) {
 		if let Some(v) = self.stm.limit() {
 			self.results = mem::take(&mut self.results).into_iter().take(v.0).collect();
 		}
@@ -311,18 +311,14 @@ impl Iterator {
 			Ok(v) => self.results.push(v),
 		}
 		// Check if we can exit
-		if self.stm.group().is_none() {
-			if self.stm.order().is_none() {
-				if let Some(l) = self.stm.limit() {
-					if let Some(s) = self.stm.start() {
-						if self.results.len() == l.0 + s.0 {
-							self.run.cancel()
-						}
-					} else {
-						if self.results.len() == l.0 {
-							self.run.cancel()
-						}
+		if self.stm.group().is_none() && self.stm.order().is_none() {
+			if let Some(l) = self.stm.limit() {
+				if let Some(s) = self.stm.start() {
+					if self.results.len() == l.0 + s.0 {
+						self.run.cancel()
 					}
+				} else if self.results.len() == l.0 {
+					self.run.cancel()
 				}
 			}
 		}

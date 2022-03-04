@@ -1,6 +1,6 @@
 use crate::net::conf;
-use crate::net::DB;
-use hyper::body::Body;
+// use crate::net::DB;
+// use hyper::body::Body;
 // use surrealdb::dbs::export;
 use surrealdb::Session;
 use warp::Filter;
@@ -16,9 +16,10 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	opts.or(get)
 }
 
-async fn handler(session: Session) -> Result<impl warp::Reply, warp::Rejection> {
-	let db = DB.get().unwrap().clone();
-	let (chn, body) = Body::channel();
+async fn handler(_session: Session) -> Result<impl warp::Reply, warp::Rejection> {
+	// let db = DB.get().unwrap().clone();
+	// let (chn, body) = Body::channel();
 	// tokio::spawn(export(db, session, chn));
-	Ok(warp::reply::Response::new(body))
+	// Ok(warp::reply::Response::new(body))
+	Ok(warp::reply::reply())
 }

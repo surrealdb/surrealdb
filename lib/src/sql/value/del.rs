@@ -46,7 +46,7 @@ impl Value {
 						}
 						_ => {
 							let path = path.next();
-							let futs = v.value.iter_mut().map(|v| v.del(&ctx, opt, txn, path));
+							let futs = v.value.iter_mut().map(|v| v.del(ctx, opt, txn, path));
 							try_join_all(futs).await?;
 							Ok(())
 						}
@@ -82,18 +82,16 @@ impl Value {
 							}
 							Ok(())
 						}
-						_ => match path.len() {
-							_ => match v.value.get_mut(i.to_usize()) {
-								Some(v) => v.del(ctx, opt, txn, path.next()).await,
-								None => Ok(()),
-							},
+						_ => match v.value.get_mut(i.to_usize()) {
+							Some(v) => v.del(ctx, opt, txn, path.next()).await,
+							None => Ok(()),
 						},
 					},
 					Part::Where(w) => match path.len() {
 						1 => {
 							let mut m = HashMap::new();
 							for (i, v) in v.value.iter().enumerate() {
-								if w.compute(ctx, opt, txn, Some(&v)).await?.is_truthy() {
+								if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
 									m.insert(i, ());
 								};
 							}
@@ -103,7 +101,7 @@ impl Value {
 						_ => {
 							let path = path.next();
 							for v in &mut v.value {
-								if w.compute(ctx, opt, txn, Some(&v)).await?.is_truthy() {
+								if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
 									v.del(ctx, opt, txn, path).await?;
 								}
 							}
@@ -116,7 +114,7 @@ impl Value {
 							Ok(())
 						}
 						_ => {
-							let futs = v.value.iter_mut().map(|v| v.del(&ctx, opt, txn, path));
+							let futs = v.value.iter_mut().map(|v| v.del(ctx, opt, txn, path));
 							try_join_all(futs).await?;
 							Ok(())
 						}

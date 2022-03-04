@@ -18,9 +18,9 @@ pub struct Index {
 	fd: Value,
 }
 
-impl Into<Vec<u8>> for Index {
-	fn into(self) -> Vec<u8> {
-		self.encode().unwrap()
+impl From<Index> for Vec<u8> {
+	fn from(val: Index) -> Vec<u8> {
+		val.encode().unwrap()
 	}
 }
 

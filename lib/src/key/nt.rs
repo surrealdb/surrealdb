@@ -12,9 +12,9 @@ pub struct Nt {
 	tk: String,
 }
 
-impl Into<Vec<u8>> for Nt {
-	fn into(self) -> Vec<u8> {
-		self.encode().unwrap()
+impl From<Nt> for Vec<u8> {
+	fn from(val: Nt) -> Vec<u8> {
+		val.encode().unwrap()
 	}
 }
 

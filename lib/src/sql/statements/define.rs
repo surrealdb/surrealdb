@@ -79,15 +79,15 @@ impl fmt::Display for DefineStatement {
 
 pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 	alt((
-		map(namespace, |v| DefineStatement::Namespace(v)),
-		map(database, |v| DefineStatement::Database(v)),
-		map(login, |v| DefineStatement::Login(v)),
-		map(token, |v| DefineStatement::Token(v)),
-		map(scope, |v| DefineStatement::Scope(v)),
-		map(table, |v| DefineStatement::Table(v)),
-		map(event, |v| DefineStatement::Event(v)),
-		map(field, |v| DefineStatement::Field(v)),
-		map(index, |v| DefineStatement::Index(v)),
+		map(namespace, DefineStatement::Namespace),
+		map(database, DefineStatement::Database),
+		map(login, DefineStatement::Login),
+		map(token, DefineStatement::Token),
+		map(scope, DefineStatement::Scope),
+		map(table, DefineStatement::Table),
+		map(event, DefineStatement::Event),
+		map(field, DefineStatement::Field),
+		map(index, DefineStatement::Index),
 	))(i)
 }
 
@@ -105,7 +105,7 @@ impl DefineNamespaceStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -149,7 +149,7 @@ impl DefineDatabaseStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -196,7 +196,7 @@ impl DefineLoginStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -294,7 +294,7 @@ impl DefineTokenStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -365,7 +365,7 @@ impl DefineScopeStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -487,7 +487,7 @@ impl DefineTableStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -500,13 +500,13 @@ impl DefineTableStatement {
 impl fmt::Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE TABLE {}", self.name)?;
-		if self.drop == true {
+		if self.drop {
 			write!(f, " DROP")?
 		}
-		if self.full == true {
+		if self.full {
 			write!(f, " SCHEMAFULL")?
 		}
-		if self.full == false {
+		if !self.full {
 			write!(f, " SCHEMALESS")?
 		}
 		if let Some(ref v) = self.view {
@@ -534,7 +534,7 @@ fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 					DefineTableOption::Drop => Some(true),
 					_ => None,
 				})
-				.unwrap_or(Default::default()),
+				.unwrap_or_default(),
 			full: opts
 				.iter()
 				.find_map(|x| match x {
@@ -542,7 +542,7 @@ fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 					DefineTableOption::Schemaless => Some(false),
 					_ => None,
 				})
-				.unwrap_or(Default::default()),
+				.unwrap_or_default(),
 			view: opts.iter().find_map(|x| match x {
 				DefineTableOption::View(ref v) => Some(v.to_owned()),
 				_ => None,
@@ -553,7 +553,7 @@ fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 					DefineTableOption::Permissions(ref v) => Some(v.to_owned()),
 					_ => None,
 				})
-				.unwrap_or(Default::default()),
+				.unwrap_or_default(),
 		},
 	))
 }
@@ -618,7 +618,7 @@ impl DefineEventStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -688,7 +688,7 @@ impl DefineFieldStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -754,7 +754,7 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 					DefineFieldOption::Permissions(ref v) => Some(v.to_owned()),
 					_ => None,
 				})
-				.unwrap_or(Default::default()),
+				.unwrap_or_default(),
 		},
 	))
 }
@@ -827,7 +827,7 @@ impl DefineIndexStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
@@ -840,7 +840,7 @@ impl DefineIndexStatement {
 impl fmt::Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE INDEX {} ON {} COLUMNS {}", self.name, self.what, self.cols)?;
-		if self.uniq == true {
+		if self.uniq {
 			write!(f, " UNIQUE")?
 		}
 		Ok(())

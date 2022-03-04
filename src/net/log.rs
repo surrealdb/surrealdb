@@ -13,7 +13,7 @@ impl<T: fmt::Display> fmt::Display for OptFmt<T> {
 	}
 }
 
-const NAME: &'static str = "surreal::web";
+const NAME: &str = "surreal::web";
 
 pub fn write() -> warp::filters::log::Log<impl Fn(warp::filters::log::Info) + Copy> {
 	warp::log::custom(|info| {

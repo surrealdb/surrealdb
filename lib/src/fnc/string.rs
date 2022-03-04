@@ -95,5 +95,5 @@ pub fn uppercase(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn words(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(args.remove(0).as_strand().value.split(" ").collect::<Vec<&str>>().into())
+	Ok(args.remove(0).as_strand().value.split(' ').collect::<Vec<&str>>().into())
 }

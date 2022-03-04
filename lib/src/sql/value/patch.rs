@@ -22,20 +22,17 @@ impl Value {
 				},
 				Op::Remove => self.del(ctx, opt, txn, &o.path).await?,
 				Op::Replace => self.set(ctx, opt, txn, &o.path, o.value).await?,
-				Op::Change => match o.value {
-					Value::Strand(p) => match self.get(ctx, opt, txn, &o.path).await? {
-						Value::Strand(v) => {
+				Op::Change => {
+					if let Value::Strand(p) = o.value {
+						if let Value::Strand(v) = self.get(ctx, opt, txn, &o.path).await? {
 							let mut dmp = dmp::new();
 							let mut pch = dmp.patch_from_text(p.value);
 							let (txt, _) = dmp.patch_apply(&mut pch, &v.value);
 							let txt = txt.into_iter().collect::<String>();
 							self.set(ctx, opt, txn, &o.path, Value::from(txt)).await?;
-							()
 						}
-						_ => (),
-					},
-					_ => (),
-				},
+					}
+				}
 				_ => (),
 			}
 		}

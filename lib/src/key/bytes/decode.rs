@@ -4,7 +4,6 @@ use serde::de::{Deserialize, Visitor};
 use std;
 use std::fmt;
 use std::io::{self, Read};
-use std::mem::transmute;
 use std::str;
 use std::{i16, i32, i64, i8};
 use thiserror::Error;
@@ -110,10 +109,7 @@ where
 	where
 		V: Visitor<'de>,
 	{
-		let b = match self.reader.read_u8()? {
-			0 => false,
-			_ => true,
-		};
+		let b = !matches!(self.reader.read_u8()?, 0);
 		visitor.visit_bool(b)
 	}
 
@@ -187,7 +183,7 @@ where
 	{
 		let val = self.reader.read_i32::<BE>()?;
 		let t = ((val ^ i32::MIN) >> 31) | i32::MIN;
-		let f: f32 = unsafe { transmute(val ^ t) };
+		let f: f32 = f32::from_bits((val ^ t) as u32);
 		visitor.visit_f32(f)
 	}
 
@@ -197,7 +193,7 @@ where
 	{
 		let val = self.reader.read_i64::<BE>()?;
 		let t = ((val ^ i64::MIN) >> 63) | i64::MIN;
-		let f: f64 = unsafe { transmute(val ^ t) };
+		let f: f64 = f64::from_bits((val ^ t) as u64);
 		visitor.visit_f64(f)
 	}
 
@@ -211,7 +207,7 @@ where
 			Ok(_) => match str::from_utf8(&buffer) {
 				Ok(mut s) => {
 					const EOF: char = '\u{0}';
-					const EOF_STR: &'static str = "\u{0}";
+					const EOF_STR: &str = "\u{0}";
 					if s.len() >= EOF.len_utf8() {
 						let eof_start = s.len() - EOF.len_utf8();
 						if &s[eof_start..] == EOF_STR {
@@ -220,9 +216,9 @@ where
 					}
 					string.push_str(s)
 				}
-				Err(e) => panic!("1"),
+				Err(_) => panic!("1"),
 			},
-			Err(e) => panic!("2"),
+			Err(_) => panic!("2"),
 		}
 		visitor.visit_string(string)
 	}
@@ -237,7 +233,7 @@ where
 			Ok(_) => match str::from_utf8(&buffer) {
 				Ok(mut s) => {
 					const EOF: char = '\u{0}';
-					const EOF_STR: &'static str = "\u{0}";
+					const EOF_STR: &str = "\u{0}";
 					if s.len() >= EOF.len_utf8() {
 						let eof_start = s.len() - EOF.len_utf8();
 						if &s[eof_start..] == EOF_STR {
@@ -246,9 +242,9 @@ where
 					}
 					string.push_str(s)
 				}
-				Err(e) => panic!("1"),
+				Err(_) => panic!("1"),
 			},
-			Err(e) => panic!("2"),
+			Err(_) => panic!("2"),
 		}
 		visitor.visit_string(string)
 	}

@@ -57,7 +57,7 @@ impl From<Vec<Vec<Value>>> for Array {
 impl<'a> From<Vec<&str>> for Array {
 	fn from(v: Vec<&str>) -> Self {
 		Array {
-			value: v.into_iter().map(|v| Value::from(v)).collect(),
+			value: v.into_iter().map(Value::from).collect(),
 		}
 	}
 }
@@ -65,7 +65,7 @@ impl<'a> From<Vec<&str>> for Array {
 impl From<Vec<Operation>> for Array {
 	fn from(v: Vec<Operation>) -> Self {
 		Array {
-			value: v.into_iter().map(|v| Value::from(v)).collect(),
+			value: v.into_iter().map(Value::from).collect(),
 		}
 	}
 }
@@ -73,6 +73,10 @@ impl From<Vec<Operation>> for Array {
 impl Array {
 	pub fn len(&self) -> usize {
 		self.value.len()
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.value.is_empty()
 	}
 
 	pub fn as_ints(self) -> Vec<i64> {
@@ -163,7 +167,7 @@ impl Serialize for Array {
 impl ops::Add<Value> for Array {
 	type Output = Self;
 	fn add(mut self, other: Value) -> Self {
-		if self.value.iter().position(|x| *x == other).is_none() {
+		if !self.value.iter().any(|x| *x == other) {
 			self.value.push(other)
 		}
 		self
@@ -174,7 +178,7 @@ impl ops::Add for Array {
 	type Output = Self;
 	fn add(mut self, other: Self) -> Self {
 		for v in other.value {
-			if self.value.iter().position(|x| *x == v).is_none() {
+			if !self.value.iter().any(|x| *x == v) {
 				self.value.push(v)
 			}
 		}

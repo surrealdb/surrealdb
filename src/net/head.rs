@@ -2,11 +2,11 @@ use crate::cnf::PKG_NAME;
 use crate::cnf::PKG_VERS;
 use crate::cnf::SERVER_NAME;
 
-const ID: &'static str = "ID";
-const NS: &'static str = "NS";
-const DB: &'static str = "DB";
-const SERVER: &'static str = "Server";
-const VERSION: &'static str = "Version";
+const ID: &str = "ID";
+const NS: &str = "NS";
+const DB: &str = "DB";
+const SERVER: &str = "Server";
+const VERSION: &str = "Version";
 
 pub fn version() -> warp::filters::reply::WithHeader {
 	let val = format!("{}-{}", PKG_NAME, PKG_VERS);

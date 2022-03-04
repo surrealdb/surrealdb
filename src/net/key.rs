@@ -43,7 +43,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set create method
 	let create = base
 		.and(warp::post())
-		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
+		.and(warp::body::content_length_limit(1024 * 1024)) // 1MiB
 		.and(warp::body::bytes())
 		.and_then(create_all);
 	// Set delete method
@@ -68,19 +68,19 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set create method
 	let create = base
 		.and(warp::post())
-		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
+		.and(warp::body::content_length_limit(1024 * 1024)) // 1MiB
 		.and(warp::body::bytes())
 		.and_then(create_one);
 	// Set update method
 	let update = base
 		.and(warp::put())
-		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
+		.and(warp::body::content_length_limit(1024 * 1024)) // 1MiB
 		.and(warp::body::bytes())
 		.and_then(update_one);
 	// Set modify method
 	let modify = base
 		.and(warp::patch())
-		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
+		.and(warp::body::content_length_limit(1024 * 1024)) // 1MiB
 		.and(warp::body::bytes())
 		.and_then(modify_one);
 	// Set delete method
@@ -109,8 +109,8 @@ async fn select_all(
 	let db = DB.get().unwrap().clone();
 	let sql = format!(
 		"SELECT * FROM type::table($table) LIMIT {l} START {s}",
-		l = query.limit.unwrap_or(String::from("100")),
-		s = query.start.unwrap_or(String::from("0")),
+		l = query.limit.unwrap_or_else(|| String::from("100")),
+		s = query.start.unwrap_or_else(|| String::from("0")),
 	);
 	let vars = hmap! {
 		String::from("table") => Value::from(table),
@@ -139,7 +139,7 @@ async fn create_all(
 			let sql = "CREATE type::table($table) CONTENT $data";
 			let vars = hmap! {
 				String::from("table") => Value::from(table),
-				String::from("data") => Value::from(data),
+				String::from("data") => data,
 			};
 			match surrealdb::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
@@ -218,7 +218,7 @@ async fn create_one(
 			let vars = hmap! {
 				String::from("table") => Value::from(table),
 				String::from("id") => Value::from(id),
-				String::from("data") => Value::from(data),
+				String::from("data") => data,
 			};
 			match surrealdb::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
@@ -249,7 +249,7 @@ async fn update_one(
 			let vars = hmap! {
 				String::from("table") => Value::from(table),
 				String::from("id") => Value::from(id),
-				String::from("data") => Value::from(data),
+				String::from("data") => data,
 			};
 			match surrealdb::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
@@ -280,7 +280,7 @@ async fn modify_one(
 			let vars = hmap! {
 				String::from("table") => Value::from(table),
 				String::from("id") => Value::from(id),
-				String::from("data") => Value::from(data),
+				String::from("data") => data,
 			};
 			match surrealdb::execute(db, sql, session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {

@@ -46,7 +46,7 @@ pub fn output(i: &str) -> IResult<&str, Output> {
 		map(tag_no_case("DIFF"), |_| Output::Diff),
 		map(tag_no_case("AFTER"), |_| Output::After),
 		map(tag_no_case("BEFORE"), |_| Output::Before),
-		map(fields, |v| Output::Fields(v)),
+		map(fields, Output::Fields),
 	))(i)?;
 	Ok((i, v))
 }

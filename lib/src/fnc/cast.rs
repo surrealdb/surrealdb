@@ -3,8 +3,8 @@ use crate::err::Error;
 use crate::sql::number::Number;
 use crate::sql::value::Value;
 
-pub fn run(ctx: &Runtime, name: &String, val: Value) -> Result<Value, Error> {
-	match name.as_str() {
+pub fn run(ctx: &Runtime, name: &str, val: Value) -> Result<Value, Error> {
+	match name {
 		"bool" => bool(ctx, val),
 		"int" => int(ctx, val),
 		"float" => float(ctx, val),

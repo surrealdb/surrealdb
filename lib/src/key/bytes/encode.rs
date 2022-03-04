@@ -2,7 +2,6 @@ use byteorder::{WriteBytesExt, BE};
 use serde::{self, Serialize};
 use std::fmt;
 use std::io::{self, Write};
-use std::mem::transmute;
 use std::{self, i16, i32, i64, i8};
 use thiserror::Error;
 
@@ -405,14 +404,14 @@ where
 	}
 
 	fn serialize_f32(self, v: f32) -> Result<()> {
-		let val = unsafe { transmute::<f32, i32>(v) };
+		let val = v.to_bits() as i32;
 		let t = (val >> 31) | i32::MIN;
 		self.writer.write_i32::<BE>(val ^ t)?;
 		Ok(())
 	}
 
 	fn serialize_f64(self, v: f64) -> Result<()> {
-		let val = unsafe { transmute::<f64, i64>(v) };
+		let val = v.to_bits() as i64;
 		let t = (val >> 63) | i64::MIN;
 		self.writer.write_i64::<BE>(val ^ t)?;
 		Ok(())

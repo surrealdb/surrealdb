@@ -9,8 +9,8 @@ impl<'a> Document<'a> {
 	pub async fn store(
 		&self,
 		_ctx: &Runtime,
-		opt: &Options,
-		txn: &Transaction,
+		_opt: &Options,
+		_txn: &Transaction,
 		_stm: &Statement,
 	) -> Result<(), Error> {
 		Ok(())

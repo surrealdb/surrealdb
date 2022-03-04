@@ -98,7 +98,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 						_ => None,
 					})
 				})
-				.unwrap_or(Default::default()),
+				.unwrap_or_default(),
 			create: perms
 				.iter()
 				.find_map(|x| {
@@ -107,7 +107,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 						_ => None,
 					})
 				})
-				.unwrap_or(Default::default()),
+				.unwrap_or_default(),
 			update: perms
 				.iter()
 				.find_map(|x| {
@@ -116,7 +116,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 						_ => None,
 					})
 				})
-				.unwrap_or(Default::default()),
+				.unwrap_or_default(),
 			delete: perms
 				.iter()
 				.find_map(|x| {
@@ -125,7 +125,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 						_ => None,
 					})
 				})
-				.unwrap_or(Default::default()),
+				.unwrap_or_default(),
 		},
 	))
 }

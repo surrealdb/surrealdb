@@ -27,8 +27,7 @@ pub fn commas(i: &str) -> IResult<&str, ()> {
 
 #[inline]
 pub fn is_digit(chr: char) -> bool {
-	let chr = chr as u8;
-	chr >= 0x30 && chr <= 0x39
+	(0x30..=0x39).contains(&(chr as u8))
 }
 
 #[inline]
@@ -48,7 +47,7 @@ pub fn to_usize(s: &str) -> usize {
 
 #[inline]
 pub fn val_char(chr: char) -> bool {
-	is_alphanumeric(chr as u8) || chr == '_' as char
+	is_alphanumeric(chr as u8) || chr == '_'
 }
 
 #[inline]

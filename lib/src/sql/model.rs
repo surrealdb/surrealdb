@@ -17,19 +17,13 @@ pub struct Model {
 
 impl fmt::Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self.count {
-			Some(ref c) => {
-				let t = escape(&self.table, &val_char, "`");
-				write!(f, "|{}:{}|", t, c)?;
-			}
-			None => {}
+		if let Some(ref c) = self.count {
+			let t = escape(&self.table, &val_char, "`");
+			write!(f, "|{}:{}|", t, c)?;
 		}
-		match self.range {
-			Some((ref b, ref e)) => {
-				let t = escape(&self.table, &val_char, "`");
-				write!(f, "|{}:{}..{}|", t, b, e)?;
-			}
-			None => {}
+		if let Some((ref b, ref e)) = self.range {
+			let t = escape(&self.table, &val_char, "`");
+			write!(f, "|{}:{}..{}|", t, b, e)?;
 		}
 		Ok(())
 	}

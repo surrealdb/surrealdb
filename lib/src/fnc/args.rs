@@ -16,7 +16,7 @@ pub enum Args {
 
 pub fn check(
 	ctx: &Runtime,
-	name: &String,
+	name: &str,
 	args: Vec<Value>,
 	size: Args,
 	func: fn(&Runtime, Vec<Value>) -> Result<Value, Error>,

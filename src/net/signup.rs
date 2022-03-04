@@ -10,7 +10,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set post method
 	let post = base
 		.and(warp::post())
-		.and(warp::body::content_length_limit(1024 * 1024 * 1)) // 1MiB
+		.and(warp::body::content_length_limit(1024 * 1024)) // 1MiB
 		.and_then(handler);
 	// Specify route
 	opts.or(post).with(head::cors())

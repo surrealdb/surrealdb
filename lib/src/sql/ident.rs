@@ -44,7 +44,7 @@ pub fn ident(i: &str) -> IResult<&str, Ident> {
 
 pub fn ident_raw(i: &str) -> IResult<&str, String> {
 	let (i, v) = alt((ident_default, ident_backtick, ident_brackets))(i)?;
-	Ok((i, String::from(v)))
+	Ok((i, v))
 }
 
 fn ident_default(i: &str) -> IResult<&str, String> {

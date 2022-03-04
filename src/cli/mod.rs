@@ -8,7 +8,7 @@ mod version;
 use clap::{Arg, Command};
 
 fn auth_valid(v: &str) -> Result<(), String> {
-	if v.contains(":") {
+	if v.contains(':') {
 		return Ok(());
 	}
 	Err(String::from(
@@ -20,7 +20,7 @@ fn auth_valid(v: &str) -> Result<(), String> {
 }
 
 fn file_valid(v: &str) -> Result<(), String> {
-	if v.len() > 0 {
+	if !v.is_empty() {
 		return Ok(());
 	}
 	Err(String::from(
@@ -390,11 +390,7 @@ pub fn init() {
 		_ => Ok(()),
 	};
 
-	match output {
-		Err(e) => {
-			error!("{}", e);
-			return ();
-		}
-		Ok(_) => {}
-	};
+	if let Err(e) = output {
+		error!("{}", e);
+	}
 }

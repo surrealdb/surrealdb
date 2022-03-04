@@ -10,9 +10,9 @@ pub struct Namespace {
 	ns: String,
 }
 
-impl Into<Vec<u8>> for Namespace {
-	fn into(self) -> Vec<u8> {
-		self.encode().unwrap()
+impl From<Namespace> for Vec<u8> {
+	fn from(val: Namespace) -> Vec<u8> {
+		val.encode().unwrap()
 	}
 }
 

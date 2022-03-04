@@ -42,7 +42,7 @@ impl<'a> Document<'a> {
 						true => self.current.compute(ctx, opt, txn, Some(&self.current)).await?,
 						false => Value::base(),
 					};
-					for v in v.iter() {
+					for v in v.other() {
 						match v {
 							Field::All => (),
 							Field::Alone(v) => {
@@ -64,7 +64,7 @@ impl<'a> Document<'a> {
 						true => self.current.compute(ctx, opt, txn, Some(&self.current)).await?,
 						false => Value::base(),
 					};
-					for v in stm.expr.iter() {
+					for v in stm.expr.other() {
 						match v {
 							Field::All => (),
 							Field::Alone(v) => {

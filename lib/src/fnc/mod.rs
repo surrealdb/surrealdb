@@ -22,8 +22,8 @@ pub mod time;
 pub mod r#type;
 pub mod util;
 
-pub async fn run(ctx: &Runtime, name: &String, args: Vec<Value>) -> Result<Value, Error> {
-	match name.as_ref() {
+pub async fn run(ctx: &Runtime, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+	match name {
 		//
 		"array::combine" => args::check(ctx, name, args, Args::Two, array::combine),
 		"array::concat" => args::check(ctx, name, args, Args::Two, array::concat),

@@ -14,9 +14,9 @@ pub struct Tb {
 	tb: String,
 }
 
-impl Into<Vec<u8>> for Tb {
-	fn into(self) -> Vec<u8> {
-		self.encode().unwrap()
+impl From<Tb> for Vec<u8> {
+	fn from(val: Tb) -> Vec<u8> {
+		val.encode().unwrap()
 	}
 }
 

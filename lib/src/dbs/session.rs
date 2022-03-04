@@ -35,15 +35,15 @@ impl Session {
 	}
 }
 
-impl Into<Value> for &Session {
-	fn into(self) -> Value {
+impl From<&Session> for Value {
+	fn from(val: &Session) -> Value {
 		Value::from(map! {
-			"ip".to_string() => self.ip.to_owned().into(),
-			"or".to_string() => self.or.to_owned().into(),
-			"id".to_string() => self.id.to_owned().into(),
-			"ns".to_string() => self.ns.to_owned().into(),
-			"db".to_string() => self.db.to_owned().into(),
-			"sc".to_string() => self.sc.to_owned().into(),
+			"ip".to_string() => val.ip.to_owned().into(),
+			"or".to_string() => val.or.to_owned().into(),
+			"id".to_string() => val.id.to_owned().into(),
+			"ns".to_string() => val.ns.to_owned().into(),
+			"db".to_string() => val.db.to_owned().into(),
+			"sc".to_string() => val.sc.to_owned().into(),
 		})
 	}
 }

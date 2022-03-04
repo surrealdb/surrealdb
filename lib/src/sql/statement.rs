@@ -76,30 +76,12 @@ pub enum Statement {
 impl Statement {
 	pub fn timeout(&self) -> Option<Duration> {
 		match self {
-			Statement::Select(v) => match &v.timeout {
-				Some(v) => Some(v.expr.value),
-				None => None,
-			},
-			Statement::Create(v) => match &v.timeout {
-				Some(v) => Some(v.expr.value),
-				None => None,
-			},
-			Statement::Update(v) => match &v.timeout {
-				Some(v) => Some(v.expr.value),
-				None => None,
-			},
-			Statement::Relate(v) => match &v.timeout {
-				Some(v) => Some(v.expr.value),
-				None => None,
-			},
-			Statement::Delete(v) => match &v.timeout {
-				Some(v) => Some(v.expr.value),
-				None => None,
-			},
-			Statement::Insert(v) => match &v.timeout {
-				Some(v) => Some(v.expr.value),
-				None => None,
-			},
+			Statement::Select(v) => v.timeout.as_ref().map(|v| v.expr.value),
+			Statement::Create(v) => v.timeout.as_ref().map(|v| v.expr.value),
+			Statement::Update(v) => v.timeout.as_ref().map(|v| v.expr.value),
+			Statement::Relate(v) => v.timeout.as_ref().map(|v| v.expr.value),
+			Statement::Delete(v) => v.timeout.as_ref().map(|v| v.expr.value),
+			Statement::Insert(v) => v.timeout.as_ref().map(|v| v.expr.value),
 			_ => None,
 		}
 	}

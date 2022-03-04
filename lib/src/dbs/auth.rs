@@ -25,35 +25,11 @@ impl Default for Auth {
 impl Auth {
 	pub fn check(&self, level: Level) -> bool {
 		match self {
-			Auth::No => match level {
-				Level::No => true,
-				_ => false,
-			},
-			Auth::Kv => match level {
-				Level::No => true,
-				Level::Kv => true,
-				_ => false,
-			},
-			Auth::Ns(_) => match level {
-				Level::No => true,
-				Level::Kv => true,
-				Level::Ns => true,
-				_ => false,
-			},
-			Auth::Db(_, _) => match level {
-				Level::No => true,
-				Level::Kv => true,
-				Level::Ns => true,
-				Level::Db => true,
-				_ => false,
-			},
-			Auth::Sc(_, _, _) => match level {
-				Level::No => true,
-				Level::Kv => true,
-				Level::Ns => true,
-				Level::Db => true,
-				Level::Sc => true,
-			},
+			Auth::No => matches!(level, Level::No),
+			Auth::Kv => matches!(level, Level::No | Level::Kv),
+			Auth::Ns(_) => matches!(level, Level::No | Level::Kv | Level::Ns),
+			Auth::Db(_, _) => matches!(level, Level::No | Level::Kv | Level::Ns | Level::Db),
+			Auth::Sc(_, _, _) => true,
 		}
 	}
 }

@@ -82,42 +82,42 @@ impl fmt::Display for Statement {
 
 impl Statement {
 	// Returns any SPLIT clause if specified
-	pub fn split<'a>(self: &'a Statement) -> Option<&'a Splits> {
+	pub fn split(self: &Statement) -> Option<&Splits> {
 		match self {
 			Statement::Select(v) => v.split.as_ref(),
 			_ => None,
 		}
 	}
 	// Returns any GROUP clause if specified
-	pub fn group<'a>(self: &'a Statement) -> Option<&'a Groups> {
+	pub fn group(self: &Statement) -> Option<&Groups> {
 		match self {
 			Statement::Select(v) => v.group.as_ref(),
 			_ => None,
 		}
 	}
 	// Returns any ORDER clause if specified
-	pub fn order<'a>(self: &'a Statement) -> Option<&'a Orders> {
+	pub fn order(self: &Statement) -> Option<&Orders> {
 		match self {
 			Statement::Select(v) => v.order.as_ref(),
 			_ => None,
 		}
 	}
 	// Returns any START clause if specified
-	pub fn start<'a>(self: &'a Statement) -> Option<&'a Start> {
+	pub fn start(self: &Statement) -> Option<&Start> {
 		match self {
 			Statement::Select(v) => v.start.as_ref(),
 			_ => None,
 		}
 	}
 	// Returns any LIMIT clause if specified
-	pub fn limit<'a>(self: &'a Statement) -> Option<&'a Limit> {
+	pub fn limit(self: &Statement) -> Option<&Limit> {
 		match self {
 			Statement::Select(v) => v.limit.as_ref(),
 			_ => None,
 		}
 	}
 	// Returns any VERSION clause if specified
-	pub fn version<'a>(self: &'a Statement) -> Option<&'a Version> {
+	pub fn version(self: &Statement) -> Option<&Version> {
 		match self {
 			Statement::Select(v) => v.version.as_ref(),
 			_ => None,

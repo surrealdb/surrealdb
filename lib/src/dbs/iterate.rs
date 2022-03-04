@@ -4,7 +4,6 @@ use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::key::thing;
 use crate::sql::array::Array;
 use crate::sql::model::Model;
 use crate::sql::table::Table;
@@ -98,10 +97,10 @@ impl Model {
 impl Thing {
 	pub async fn iterate(
 		self,
-		ctx: &Runtime,
-		opt: &Options,
-		txn: &Transaction,
-		ite: &mut Iterator,
+		_ctx: &Runtime,
+		_opt: &Options,
+		_txn: &Transaction,
+		_ite: &mut Iterator,
 	) -> Result<(), Error> {
 		Ok(())
 	}
@@ -110,10 +109,10 @@ impl Thing {
 impl Table {
 	pub async fn iterate(
 		self,
-		ctx: &Runtime,
-		opt: &Options,
-		txn: &Transaction,
-		ite: &mut Iterator,
+		_ctx: &Runtime,
+		_opt: &Options,
+		_txn: &Transaction,
+		_ite: &mut Iterator,
 	) -> Result<(), Error> {
 		Ok(())
 	}

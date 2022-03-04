@@ -4,13 +4,13 @@ use crate::key::bytes::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 
 // Default base key
-pub const BASE: &'static str = "surreal";
+pub const BASE: &str = "surreal";
 // Ignore specifies an ignored field
-pub const IGNORE: &'static str = "\x00";
+pub const IGNORE: &str = "\x00";
 // Prefix is the lowest char found in a key
-pub const PREFIX: &'static str = "\x01";
+pub const PREFIX: &str = "\x01";
 // Suffix is the highest char found in a key
-pub const SUFFIX: &'static str = "\x7f";
+pub const SUFFIX: &str = "\x7f";
 
 /// KV              {$kv}
 /// NS              {$kv}!ns{$ns}
@@ -68,9 +68,9 @@ pub enum Key {
 	Edge,       // Edge resource data key
 }
 
-impl Into<Vec<u8>> for Key {
-	fn into(self) -> Vec<u8> {
-		self.encode().unwrap()
+impl From<Key> for Vec<u8> {
+	fn from(val: Key) -> Vec<u8> {
+		val.encode().unwrap()
 	}
 }
 

@@ -5,7 +5,7 @@ use crate::sql::value::Value;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct Index {
+pub struct Point {
 	kv: String,
 	_a: String,
 	ns: String,
@@ -19,25 +19,25 @@ pub struct Index {
 	id: String,
 }
 
-impl Into<Vec<u8>> for Index {
-	fn into(self) -> Vec<u8> {
-		self.encode().unwrap()
+impl From<Point> for Vec<u8> {
+	fn from(val: Point) -> Vec<u8> {
+		val.encode().unwrap()
 	}
 }
 
-impl From<Vec<u8>> for Index {
+impl From<Vec<u8>> for Point {
 	fn from(val: Vec<u8>) -> Self {
-		Index::decode(&val).unwrap()
+		Point::decode(&val).unwrap()
 	}
 }
 
-pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Value, id: &str) -> Index {
-	Index::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string(), fd, id.to_string())
+pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Value, id: &str) -> Point {
+	Point::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string(), fd, id.to_string())
 }
 
-impl Index {
-	pub fn new(ns: String, db: String, tb: String, ix: String, fd: Value, id: String) -> Index {
-		Index {
+impl Point {
+	pub fn new(ns: String, db: String, tb: String, ix: String, fd: Value, id: String) -> Point {
+		Point {
 			kv: BASE.to_owned(),
 			_a: String::from("*"),
 			ns,
@@ -54,7 +54,7 @@ impl Index {
 	pub fn encode(&self) -> Result<Vec<u8>, Error> {
 		Ok(serialize(self)?)
 	}
-	pub fn decode(v: &[u8]) -> Result<Index, Error> {
+	pub fn decode(v: &[u8]) -> Result<Point, Error> {
 		Ok(deserialize(v)?)
 	}
 }
@@ -65,7 +65,7 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Index::new(
+		let val = Point::new(
 			"test".to_string(),
 			"test".to_string(),
 			"test".to_string(),
@@ -73,8 +73,8 @@ mod tests {
 			"test".into(),
 			"test".into(),
 		);
-		let enc = Index::encode(&val).unwrap();
-		let dec = Index::decode(&enc).unwrap();
+		let enc = Point::encode(&val).unwrap();
+		let dec = Point::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

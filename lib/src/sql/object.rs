@@ -61,13 +61,11 @@ impl From<Operation> for Object {
 }
 
 impl Object {
-	pub fn remove(&mut self, key: &String) {
+	pub fn remove(&mut self, key: &str) {
 		self.value.remove(key);
-		()
 	}
-	pub fn insert(&mut self, key: &String, val: Value) {
+	pub fn insert(&mut self, key: &str, val: Value) {
 		self.value.insert(key.to_owned(), val);
-		()
 	}
 	pub fn to_operation(&self) -> Result<Operation, Error> {
 		match self.value.get("op") {
@@ -119,7 +117,7 @@ impl fmt::Display for Object {
 			"{{ {} }}",
 			self.value
 				.iter()
-				.map(|(ref k, ref v)| format!("{}: {}", escape(&k, &val_char, "\""), v))
+				.map(|(k, v)| format!("{}: {}", escape(k, &val_char, "\""), v))
 				.collect::<Vec<_>>()
 				.join(", ")
 		)

@@ -9,9 +9,9 @@ pub struct Document<'a> {
 	pub(super) initial: Cow<'a, Value>,
 }
 
-impl<'a> Into<Vec<u8>> for &Document<'a> {
-	fn into(self) -> Vec<u8> {
-		msgpack::to_vec(&self.current).unwrap()
+impl<'a> From<&Document<'a>> for Vec<u8> {
+	fn from(val: &Document<'a>) -> Vec<u8> {
+		msgpack::to_vec(&val.current).unwrap()
 	}
 }
 

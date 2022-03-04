@@ -99,21 +99,21 @@ impl From<usize> for Number {
 
 impl From<f32> for Number {
 	fn from(f: f32) -> Self {
-		Number::Decimal(Decimal::from_f32(f).unwrap_or(Decimal::new(0, 0)))
+		Number::Decimal(Decimal::from_f32(f).unwrap_or_default())
 	}
 }
 
 impl From<f64> for Number {
 	fn from(f: f64) -> Self {
-		Number::Decimal(Decimal::from_f64(f).unwrap_or(Decimal::new(0, 0)))
+		Number::Decimal(Decimal::from_f64(f).unwrap_or_default())
 	}
 }
 
 impl<'a> From<&'a str> for Number {
 	fn from(s: &str) -> Self {
 		match s.contains(&['e', 'E'][..]) {
-			true => Number::Decimal(Decimal::from_scientific(s).unwrap_or(Decimal::new(0, 0))),
-			false => Number::Decimal(Decimal::from_str(s).unwrap_or(Decimal::new(0, 0))),
+			true => Number::Decimal(Decimal::from_scientific(s).unwrap_or_default()),
+			false => Number::Decimal(Decimal::from_str(s).unwrap_or_default()),
 		}
 	}
 }
@@ -121,8 +121,8 @@ impl<'a> From<&'a str> for Number {
 impl From<String> for Number {
 	fn from(s: String) -> Self {
 		match s.contains(&['e', 'E'][..]) {
-			true => Number::Decimal(Decimal::from_scientific(&s).unwrap_or(Decimal::new(0, 0))),
-			false => Number::Decimal(Decimal::from_str(&s).unwrap_or(Decimal::new(0, 0))),
+			true => Number::Decimal(Decimal::from_scientific(&s).unwrap_or_default()),
+			false => Number::Decimal(Decimal::from_str(&s).unwrap_or_default()),
 		}
 	}
 }
@@ -173,7 +173,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v != &0,
 			Number::Float(v) => v != &0.0,
-			Number::Decimal(v) => v != &Decimal::new(0, 0),
+			Number::Decimal(v) => v != &Decimal::default(),
 		}
 	}
 
@@ -200,7 +200,7 @@ impl Number {
 	pub fn as_decimal(self) -> Decimal {
 		match self {
 			Number::Int(v) => Decimal::from(v),
-			Number::Float(v) => Decimal::from_f64(v).unwrap_or(Decimal::new(0, 0)),
+			Number::Float(v) => Decimal::from_f64(v).unwrap_or_default(),
 			Number::Decimal(v) => v,
 		}
 	}
@@ -236,7 +236,7 @@ impl Number {
 	pub fn to_decimal(&self) -> Decimal {
 		match self {
 			Number::Int(v) => Decimal::from(*v),
-			Number::Float(v) => Decimal::from_f64(*v).unwrap_or(Decimal::new(0, 0)),
+			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
 			Number::Decimal(v) => *v,
 		}
 	}
@@ -281,7 +281,7 @@ impl Number {
 		match self {
 			Number::Int(v) => (v as f64).sqrt().into(),
 			Number::Float(v) => v.sqrt().into(),
-			Number::Decimal(v) => v.sqrt().unwrap_or(Decimal::new(0, 0)).into(),
+			Number::Decimal(v) => v.sqrt().unwrap_or_default().into(),
 		}
 	}
 
@@ -302,7 +302,7 @@ impl Eq for Number {}
 
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
-		self.partial_cmp(&other).unwrap_or(Ordering::Equal)
+		self.partial_cmp(other).unwrap_or(Ordering::Equal)
 	}
 }
 
@@ -320,10 +320,10 @@ impl PartialEq for Number {
 			(Number::Decimal(v), Number::Int(w)) => v.eq(&Decimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				Decimal::from_f64(*v).unwrap_or(Decimal::default()).eq(w)
+				Decimal::from_f64(*v).unwrap_or_default().eq(w)
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
-				v.eq(&Decimal::from_f64(*w).unwrap_or(Decimal::default()))
+				v.eq(&Decimal::from_f64(*w).unwrap_or_default())
 			}
 		}
 	}
@@ -343,10 +343,10 @@ impl PartialOrd for Number {
 			(Number::Decimal(v), Number::Int(w)) => v.partial_cmp(&Decimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				Decimal::from_f64(*v).unwrap_or(Decimal::default()).partial_cmp(w)
+				Decimal::from_f64(*v).unwrap_or_default().partial_cmp(w)
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
-				v.partial_cmp(&Decimal::from_f64(*w).unwrap_or(Decimal::default()))
+				v.partial_cmp(&Decimal::from_f64(*w).unwrap_or_default())
 			}
 		}
 	}

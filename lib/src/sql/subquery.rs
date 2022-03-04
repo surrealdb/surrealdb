@@ -205,7 +205,7 @@ pub fn subquery(i: &str) -> IResult<&str, Subquery> {
 }
 
 fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
-	let (i, v) = map(ifelse, |v| Subquery::Ifelse(v))(i)?;
+	let (i, v) = map(ifelse, Subquery::Ifelse)(i)?;
 	Ok((i, v))
 }
 
@@ -218,7 +218,7 @@ fn subquery_others(i: &str) -> IResult<&str, Subquery> {
 		map(delete, |v| Subquery::Delete(Arc::new(v))),
 		map(relate, |v| Subquery::Relate(Arc::new(v))),
 		map(insert, |v| Subquery::Insert(Arc::new(v))),
-		map(value, |v| Subquery::Value(v)),
+		map(value, Subquery::Value),
 	))(i)?;
 	let (i, _) = tag(")")(i)?;
 	Ok((i, v))

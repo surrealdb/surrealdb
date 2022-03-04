@@ -1,8 +1,7 @@
 use crate::err::Error;
 use crate::net;
-use clap;
 
-const LOGO: &'static str = "
+const LOGO: &str = "
  .d8888b.                                             888 8888888b.  888888b.
 d88P  Y88b                                            888 888  'Y88b 888  '88b
 Y88b.                                                 888 888    888 888  .88P

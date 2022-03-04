@@ -10,7 +10,7 @@ impl Value {
 			(Value::Object(a), Value::Object(b)) if a != b => {
 				// Loop over old keys
 				for (key, _) in a.value.iter() {
-					if b.value.contains_key(key) == false {
+					if !b.value.contains_key(key) {
 						ops.push(Operation {
 							op: Op::Remove,
 							path: path.add(key.clone().into()),

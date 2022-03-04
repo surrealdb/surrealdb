@@ -22,9 +22,10 @@ pub fn abs(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 
 pub fn bottom(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
-		Value::Array(v) => match args.remove(0).as_int() {
-			c => Ok(v.as_numbers().bottom(c).into()),
-		},
+		Value::Array(v) => {
+			let c = args.remove(0).as_int();
+			Ok(v.as_numbers().bottom(c).into())
+		}
 		_ => Ok(Value::None),
 	}
 }
@@ -34,14 +35,13 @@ pub fn ceil(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn fixed(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
-	match args.remove(0) {
-		v => match args.remove(0).as_int() {
-			p if p > 0 => Ok(v.as_number().fixed(p as usize).into()),
-			_ => Err(Error::ArgumentsError {
-				name: String::from("math::fixed"),
-				message: String::from("The second argument must be an integer greater than 0."),
-			}),
-		},
+	let v = args.remove(0);
+	match args.remove(0).as_int() {
+		p if p > 0 => Ok(v.as_number().fixed(p as usize).into()),
+		_ => Err(Error::ArgumentsError {
+			name: String::from("math::fixed"),
+			message: String::from("The second argument must be an integer greater than 0."),
+		}),
 	}
 }
 
@@ -156,9 +156,10 @@ pub fn sum(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 
 pub fn top(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
-		Value::Array(v) => match args.remove(0).as_int() {
-			c => Ok(v.as_numbers().top(c).into()),
-		},
+		Value::Array(v) => {
+			let c = args.remove(0).as_int();
+			Ok(v.as_numbers().top(c).into())
+		}
 		_ => Ok(Value::None),
 	}
 }

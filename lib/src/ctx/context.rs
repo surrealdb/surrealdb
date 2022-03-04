@@ -127,18 +127,12 @@ impl Context {
 
 	// Check if the context is not ok to continue, because it timed out.
 	pub fn is_timedout(&self) -> bool {
-		match self.done() {
-			Some(Reason::Timedout) => true,
-			_ => false,
-		}
+		matches!(self.done(), Some(Reason::Timedout))
 	}
 
 	// Check if the context is not ok to continue, because it was cancelled.
 	pub fn is_cancelled(&self) -> bool {
-		match self.done() {
-			Some(Reason::Canceled) => true,
-			_ => false,
-		}
+		matches!(self.done(), Some(Reason::Canceled))
 	}
 
 	// Check if the status of the context. This will return a Result, with an Ok

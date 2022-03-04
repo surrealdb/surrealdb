@@ -63,17 +63,14 @@ pub fn number(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 
 pub fn point(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
-		2 => match args.remove(0) {
-			x => match args.remove(0) {
-				y => Ok((x.as_float(), y.as_float()).into()),
-			},
-		},
+		2 => {
+			let x = args.remove(0);
+			let y = args.remove(0);
+			Ok((x.as_float(), y.as_float()).into())
+		}
 		1 => match args.remove(0) {
 			Value::Array(v) if v.len() == 2 => Ok(v.as_point().into()),
-			Value::Geometry(v) => match v {
-				Geometry::Point(v) => Ok(v.into()),
-				_ => Ok(Value::None),
-			},
+			Value::Geometry(Geometry::Point(v)) => Ok(v.into()),
 			_ => Ok(Value::None),
 		},
 		_ => unreachable!(),
@@ -102,16 +99,15 @@ pub fn table(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn thing(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+	let tb = args.remove(0);
 	match args.remove(0) {
-		tb => match args.remove(0) {
-			Value::Thing(id) => Ok(Value::Thing(Thing {
-				tb: tb.as_strand().value,
-				id: id.id,
-			})),
-			id => Ok(Value::Thing(Thing {
-				tb: tb.as_strand().value,
-				id: id.as_strand().value,
-			})),
-		},
+		Value::Thing(id) => Ok(Value::Thing(Thing {
+			tb: tb.as_strand().value,
+			id: id.id,
+		})),
+		id => Ok(Value::Thing(Thing {
+			tb: tb.as_strand().value,
+			id: id.as_strand().value,
+		})),
 	}
 }

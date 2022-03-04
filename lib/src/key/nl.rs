@@ -12,9 +12,9 @@ pub struct Nl {
 	us: String,
 }
 
-impl Into<Vec<u8>> for Nl {
-	fn into(self) -> Vec<u8> {
-		self.encode().unwrap()
+impl From<Nl> for Vec<u8> {
+	fn from(val: Nl) -> Vec<u8> {
+		val.encode().unwrap()
 	}
 }
 

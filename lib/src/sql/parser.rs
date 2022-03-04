@@ -12,25 +12,27 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 		_ => match query(input) {
 			Ok((_, query)) => Ok(query),
 			Err(Err::Error(e)) => match e {
-				ParserError(e) => match locate(input, e) {
-					(s, l, c) => Err(Error::ParseError {
+				ParserError(e) => {
+					let (s, l, c) = locate(input, e);
+					Err(Error::ParseError {
 						line: l,
 						char: c,
 						sql: s.to_string(),
-					}),
-				},
+					})
+				}
 				ScriptError(e) => Err(Error::LanguageError {
 					message: e,
 				}),
 			},
 			Err(Err::Failure(e)) => match e {
-				ParserError(e) => match locate(input, e) {
-					(s, l, c) => Err(Error::ParseError {
+				ParserError(e) => {
+					let (s, l, c) = locate(input, e);
+					Err(Error::ParseError {
 						line: l,
 						char: c,
 						sql: s.to_string(),
-					}),
-				},
+					})
+				}
 				ScriptError(e) => Err(Error::LanguageError {
 					message: e,
 				}),
@@ -46,25 +48,27 @@ pub fn json(input: &str) -> Result<Value, Error> {
 		_ => match value(input) {
 			Ok((_, query)) => Ok(query),
 			Err(Err::Error(e)) => match e {
-				ParserError(e) => match locate(input, e) {
-					(s, l, c) => Err(Error::ParseError {
+				ParserError(e) => {
+					let (s, l, c) = locate(input, e);
+					Err(Error::ParseError {
 						line: l,
 						char: c,
 						sql: s.to_string(),
-					}),
-				},
+					})
+				}
 				ScriptError(e) => Err(Error::LanguageError {
 					message: e,
 				}),
 			},
 			Err(Err::Failure(e)) => match e {
-				ParserError(e) => match locate(input, e) {
-					(s, l, c) => Err(Error::ParseError {
+				ParserError(e) => {
+					let (s, l, c) = locate(input, e);
+					Err(Error::ParseError {
 						line: l,
 						char: c,
 						sql: s.to_string(),
-					}),
-				},
+					})
+				}
 				ScriptError(e) => Err(Error::LanguageError {
 					message: e,
 				}),
@@ -83,7 +87,7 @@ fn truncate(s: &str, l: usize) -> &str {
 
 fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
 	let index = input.len() - tried.len();
-	let tried = truncate(&tried, 100);
+	let tried = truncate(tried, 100);
 	let lines = input.split('\n').collect::<Vec<&str>>();
 	let lines = lines.iter().map(|l| l.len()).enumerate();
 	let (mut total, mut chars) = (0, 0);
@@ -96,7 +100,7 @@ fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
 		}
 		chars += size + 1;
 	}
-	return (tried, 0, 0);
+	(tried, 0, 0)
 }
 
 #[cfg(test)]

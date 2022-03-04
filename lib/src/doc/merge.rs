@@ -26,10 +26,9 @@ impl<'a> Document<'a> {
 		};
 		// Set default field values
 		self.current.to_mut().def(ctx, opt, txn, id).await?;
-		// Check for a data clause
-		match data {
-			// The statement has a data clause
-			Some(v) => match v {
+		// The statement has a data clause
+		if let Some(v) = data {
+			match v {
 				Data::SetExpression(x) => {
 					for x in x.iter() {
 						let v = x.2.compute(ctx, opt, txn, Some(&self.current)).await?;
@@ -59,9 +58,7 @@ impl<'a> Document<'a> {
 					self.current.to_mut().replace(ctx, opt, txn, v).await?
 				}
 				_ => unreachable!(),
-			},
-			// No data clause has been set
-			None => (),
+			};
 		};
 		// Set default field values
 		self.current.to_mut().def(ctx, opt, txn, id).await?;

@@ -417,37 +417,19 @@ impl Value {
 	// -----------------------------------
 
 	pub fn is_none(&self) -> bool {
-		match self {
-			Value::None => true,
-			Value::Void => true,
-			Value::Null => true,
-			_ => false,
-		}
+		matches!(self, Value::None | Value::Void | Value::Null)
 	}
 
 	pub fn is_void(&self) -> bool {
-		match self {
-			Value::None => true,
-			Value::Void => true,
-			_ => false,
-		}
+		matches!(self, Value::None | Value::Void)
 	}
 
 	pub fn is_null(&self) -> bool {
-		match self {
-			Value::None => true,
-			Value::Null => true,
-			_ => false,
-		}
+		matches!(self, Value::None | Value::Null)
 	}
 
 	pub fn is_some(&self) -> bool {
-		match self {
-			Value::None => false,
-			Value::Void => false,
-			Value::Null => false,
-			_ => true,
-		}
+		!self.is_none()
 	}
 
 	pub fn is_true(&self) -> bool {
@@ -472,9 +454,9 @@ impl Value {
 			Value::False => false,
 			Value::Thing(_) => true,
 			Value::Geometry(_) => true,
-			Value::Array(v) => v.value.len() > 0,
-			Value::Object(v) => v.value.len() > 0,
-			Value::Strand(v) => v.value.len() > 0 && v.value.to_ascii_lowercase() != "false",
+			Value::Array(v) => !v.value.is_empty(),
+			Value::Object(v) => !v.value.is_empty(),
+			Value::Strand(v) => !v.value.is_empty() && v.value.to_ascii_lowercase() != "false",
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.value.as_nanos() > 0,
 			Value::Datetime(v) => v.value.timestamp() > 0,
@@ -512,7 +494,7 @@ impl Value {
 		match self {
 			Value::True => Decimal::from(1),
 			Value::Number(v) => v.as_decimal(),
-			Value::Strand(v) => Decimal::from_str(v.as_str()).unwrap_or(Decimal::new(0, 0)),
+			Value::Strand(v) => Decimal::from_str(v.as_str()).unwrap_or_default(),
 			Value::Duration(v) => v.value.as_secs().into(),
 			Value::Datetime(v) => v.value.timestamp().into(),
 			_ => Decimal::default(),
@@ -596,7 +578,7 @@ impl Value {
 			.value
 			.trim_start_matches('/')
 			.split(&['.', '/'][..])
-			.map(|s| Part::from(s))
+			.map(Part::from)
 			.collect::<Vec<Part>>()
 			.into()
 	}
@@ -611,15 +593,15 @@ impl Value {
 
 	pub fn equal(&self, other: &Value) -> bool {
 		match self {
-			Value::None => other.is_none() == true,
-			Value::Null => other.is_null() == true,
-			Value::Void => other.is_void() == true,
-			Value::True => other.is_true() == true,
-			Value::False => other.is_false() == true,
+			Value::None => other.is_none(),
+			Value::Null => other.is_null(),
+			Value::Void => other.is_void(),
+			Value::True => other.is_true(),
+			Value::False => other.is_false(),
 			Value::Thing(v) => match other {
 				Value::Thing(w) => v == w,
 				Value::Regex(w) => match w.value {
-					Some(ref r) => r.is_match(v.to_string().as_str()) == true,
+					Some(ref r) => r.is_match(v.to_string().as_str()),
 					None => false,
 				},
 				_ => false,
@@ -647,7 +629,7 @@ impl Value {
 			Value::Strand(v) => match other {
 				Value::Strand(w) => v == w,
 				Value::Regex(w) => match w.value {
-					Some(ref r) => r.is_match(v.as_str()) == true,
+					Some(ref r) => r.is_match(v.as_str()),
 					None => false,
 				},
 				_ => v == &other.to_strand(),
@@ -656,7 +638,7 @@ impl Value {
 				Value::Number(w) => v == w,
 				Value::Strand(_) => v == &other.to_number(),
 				Value::Regex(w) => match w.value {
-					Some(ref r) => r.is_match(v.to_string().as_str()) == true,
+					Some(ref r) => r.is_match(v.to_string().as_str()),
 					None => false,
 				},
 				_ => false,
@@ -936,18 +918,18 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		map(tag_no_case("false"), |_| Value::False),
 		map(subquery, |v| Value::Subquery(Box::new(v))),
 		map(function, |v| Value::Function(Box::new(v))),
-		map(datetime, |v| Value::Datetime(v)),
-		map(duration, |v| Value::Duration(v)),
-		map(geometry, |v| Value::Geometry(v)),
-		map(number, |v| Value::Number(v)),
-		map(strand, |v| Value::Strand(v)),
-		map(object, |v| Value::Object(v)),
-		map(array, |v| Value::Array(v)),
-		map(param, |v| Value::Param(v)),
-		map(regex, |v| Value::Regex(v)),
-		map(thing, |v| Value::Thing(v)),
-		map(model, |v| Value::Model(v)),
-		map(idiom, |v| Value::Idiom(v)),
+		map(datetime, Value::Datetime),
+		map(duration, Value::Duration),
+		map(geometry, Value::Geometry),
+		map(number, Value::Number),
+		map(strand, Value::Strand),
+		map(object, Value::Object),
+		map(array, Value::Array),
+		map(param, Value::Param),
+		map(regex, Value::Regex),
+		map(thing, Value::Thing),
+		map(model, Value::Model),
+		map(idiom, Value::Idiom),
 	))(i)
 }
 
@@ -960,28 +942,28 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 		map(tag_no_case("false"), |_| Value::False),
 		map(subquery, |v| Value::Subquery(Box::new(v))),
 		map(function, |v| Value::Function(Box::new(v))),
-		map(datetime, |v| Value::Datetime(v)),
-		map(duration, |v| Value::Duration(v)),
-		map(geometry, |v| Value::Geometry(v)),
-		map(number, |v| Value::Number(v)),
-		map(strand, |v| Value::Strand(v)),
-		map(object, |v| Value::Object(v)),
-		map(array, |v| Value::Array(v)),
-		map(param, |v| Value::Param(v)),
-		map(regex, |v| Value::Regex(v)),
-		map(thing, |v| Value::Thing(v)),
-		map(model, |v| Value::Model(v)),
-		map(table, |v| Value::Table(v)),
+		map(datetime, Value::Datetime),
+		map(duration, Value::Duration),
+		map(geometry, Value::Geometry),
+		map(number, Value::Number),
+		map(strand, Value::Strand),
+		map(object, Value::Object),
+		map(array, Value::Array),
+		map(param, Value::Param),
+		map(regex, Value::Regex),
+		map(thing, Value::Thing),
+		map(model, Value::Model),
+		map(table, Value::Table),
 	))(i)
 }
 
 pub fn what(i: &str) -> IResult<&str, Value> {
 	alt((
 		map(function, |v| Value::Function(Box::new(v))),
-		map(param, |v| Value::Param(v)),
-		map(model, |v| Value::Model(v)),
-		map(thing, |v| Value::Thing(v)),
-		map(table, |v| Value::Table(v)),
+		map(param, Value::Param),
+		map(model, Value::Model),
+		map(thing, Value::Thing),
+		map(table, Value::Table),
 	))(i)
 }
 
@@ -990,13 +972,13 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		map(tag_no_case("NULL"), |_| Value::Null),
 		map(tag_no_case("true"), |_| Value::True),
 		map(tag_no_case("false"), |_| Value::False),
-		map(datetime, |v| Value::Datetime(v)),
-		map(duration, |v| Value::Duration(v)),
-		map(geometry, |v| Value::Geometry(v)),
-		map(number, |v| Value::Number(v)),
-		map(object, |v| Value::Object(v)),
-		map(array, |v| Value::Array(v)),
-		map(strand, |v| Value::Strand(v)),
+		map(datetime, Value::Datetime),
+		map(duration, Value::Duration),
+		map(geometry, Value::Geometry),
+		map(number, Value::Number),
+		map(object, Value::Object),
+		map(array, Value::Array),
+		map(strand, Value::Strand),
 	))(i)
 }
 

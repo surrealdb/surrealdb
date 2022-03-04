@@ -100,7 +100,7 @@ pub mod hash {
 				_ => Ok(Value::None),
 			},
 			1 => match args.remove(0) {
-				Value::Geometry(Geometry::Point(v)) => Ok(geo::encode(v, 12 as usize).into()),
+				Value::Geometry(Geometry::Point(v)) => Ok(geo::encode(v, 12).into()),
 				_ => Ok(Value::None),
 			},
 			_ => unreachable!(),

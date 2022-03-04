@@ -166,7 +166,7 @@ impl Options {
 
 	// Check whether the authentication permissions are ok
 	pub fn check(&self, level: Level) -> Result<(), Error> {
-		if self.auth.check(level) == false {
+		if !self.auth.check(level) {
 			return Err(Error::QueryPermissionsError);
 		}
 		if self.ns.is_none() {

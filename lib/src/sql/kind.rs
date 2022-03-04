@@ -55,8 +55,8 @@ pub fn kind(i: &str) -> IResult<&str, Kind> {
 		map(tag("number"), |_| Kind::Number),
 		map(tag("object"), |_| Kind::Object),
 		map(tag("string"), |_| Kind::String),
-		map(geometry, |v| Kind::Geometry(v)),
-		map(record, |v| Kind::Record(v)),
+		map(geometry, Kind::Geometry),
+		map(record, Kind::Record),
 	))(i)
 }
 

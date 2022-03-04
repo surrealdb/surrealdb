@@ -120,7 +120,7 @@ impl From<Geometry> for geo::Geometry<f64> {
 			Geometry::MultiPoint(v) => v.into(),
 			Geometry::MultiLine(v) => v.into(),
 			Geometry::MultiPolygon(v) => v.into(),
-			Geometry::Collection(v) => v.into_iter().collect::<geo::Geometry<f64>>().into(),
+			Geometry::Collection(v) => v.into_iter().collect::<geo::Geometry<f64>>(),
 		}
 	}
 }
@@ -273,7 +273,7 @@ impl fmt::Display for Geometry {
 					.collect::<Vec<_>>()
 					.join(", "),
 				match v.interiors().len() {
-					0 => format!(""),
+					0 => String::new(),
 					_ => format!(
 						", [{}]",
 						v.interiors()
@@ -328,7 +328,7 @@ impl fmt::Display for Geometry {
 							.collect::<Vec<_>>()
 							.join(", "),
 						match v.interiors().len() {
-							0 => format!(""),
+							0 => String::new(),
 							_ => format!(
 								", [{}]",
 								v.interiors()
@@ -403,7 +403,7 @@ impl Serialize for Geometry {
 						.into_iter()
 						.chain(
 							v.interiors()
-								.into_iter()
+								.iter()
 								.map(|i| {
 									i.points()
 										.map(|p| vec![p.x(), p.y()])

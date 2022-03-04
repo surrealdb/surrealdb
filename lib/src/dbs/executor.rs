@@ -53,8 +53,8 @@ impl Executor {
 
 	async fn commit(&mut self, local: bool) {
 		if local {
-			match self.txn.as_ref() {
-				Some(txn) => match &self.err {
+			if let Some(txn) = self.txn.as_ref() {
+				match &self.err {
 					Some(_) => {
 						let txn = txn.clone();
 						let mut txn = txn.lock().await;
@@ -71,8 +71,7 @@ impl Executor {
 						}
 						self.txn = None;
 					}
-				},
-				None => (),
+				}
 			}
 		}
 	}

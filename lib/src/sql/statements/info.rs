@@ -24,9 +24,9 @@ pub enum InfoStatement {
 impl InfoStatement {
 	pub async fn compute(
 		&self,
-		ctx: &Runtime,
+		_ctx: &Runtime,
 		opt: &Options,
-		txn: &Transaction,
+		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?

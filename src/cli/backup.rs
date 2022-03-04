@@ -5,7 +5,7 @@ use reqwest::header::CONTENT_TYPE;
 use std::fs::OpenOptions;
 use std::io::copy;
 
-const TYPE: &'static str = "application/octet-stream";
+const TYPE: &str = "application/octet-stream";
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Attempt to open the specified file,
