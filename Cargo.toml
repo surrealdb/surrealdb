@@ -2,7 +2,7 @@
 name = "surrealdb-derive"
 publish = true
 edition = "2021"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "A high-performance library in that manipulates plain text"
 homepage = "https://github.com/surrealdb/dmp"
