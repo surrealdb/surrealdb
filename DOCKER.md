@@ -24,7 +24,7 @@
     &nbsp;
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/language-Rust-dca282.svg?style=flat-square"></a>
 	&nbsp;
-	<a href="https://github.com/surrealdb/surrealdb/actions"><img src="https://img.shields.io/github/workflow/status/surrealdb/surrealdb/build?style=flat-square"></a>
+	<a href="https://github.com/surrealdb/surrealdb/actions"><img src="https://img.shields.io/github/workflow/status/surrealdb/surrealdb/ci?style=flat-square"></a>
     &nbsp;
     <a href="https://surrealdb.pingpong.host"><img src="https://img.shields.io/uptimerobot/ratio/7/m784409192-e472ca350bb615372ededed7?label=cloud%20uptime&style=flat-square"></a>
     &nbsp;
