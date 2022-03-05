@@ -11,15 +11,15 @@ pub fn store(input: TokenStream) -> TokenStream {
 	// Generate the output
 	let output = quote! {
 
-		impl Into<Vec<u8>> for #name {
-			fn into(self) -> Vec<u8> {
-				msgpack::to_vec(&self).unwrap()
+		impl From<#name> for Vec<u8> {
+			fn from(v: #name) -> Vec<u8> {
+				msgpack::to_vec(&v).unwrap()
 			}
 		}
 
-		impl Into<Vec<u8>> for &#name {
-			fn into(self) -> Vec<u8> {
-				msgpack::to_vec(&self).unwrap()
+		impl From<&#name> for Vec<u8> {
+			fn from(v: &#name) -> Vec<u8> {
+				msgpack::to_vec(&v).unwrap()
 			}
 		}
 
