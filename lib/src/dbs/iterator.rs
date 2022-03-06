@@ -300,7 +300,7 @@ impl Iterator {
 	fn result(&mut self, res: Result<Value, Error>) {
 		// Process the result
 		match res {
-			Err(Error::IgnoreError) => {
+			Err(Error::Ignore) => {
 				return;
 			}
 			Err(e) => {

@@ -56,7 +56,7 @@ pub fn group(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 					.ymd(v.value.year(), v.value.month(), v.value.day())
 					.and_hms(v.value.hour(), v.value.minute(), v.value.second())
 					.into()),
-				_ => Err(Error::ArgumentsError {
+				_ => Err(Error::InvalidArguments {
 					name: String::from("time::group"),
 					message: String::from("The second argument must be a string, and can be one of 'year', 'month', 'day', 'hour', 'minute', or 'second'."),
 				}),

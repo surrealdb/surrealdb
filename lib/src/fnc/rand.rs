@@ -91,12 +91,12 @@ pub fn string(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 					.map(char::from)
 					.collect::<String>()
 					.into()),
-				_ => Err(Error::ArgumentsError {
+				_ => Err(Error::InvalidArguments {
 					name: String::from("rand::string"),
 					message: String::from("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers."),
 				}),
 			},
-			_ => Err(Error::ArgumentsError {
+			_ => Err(Error::InvalidArguments {
 				name: String::from("rand::string"),
 				message: String::from("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers."),
 			}),
@@ -108,7 +108,7 @@ pub fn string(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 				.map(char::from)
 				.collect::<String>()
 				.into()),
-			_ => Err(Error::ArgumentsError {
+			_ => Err(Error::InvalidArguments {
 				name: String::from("rand::string"),
 				message: String::from("To generate a string of X characters in length, the argument must be a positive number."),
 			}),

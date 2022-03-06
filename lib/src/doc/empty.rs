@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		_stm: &Statement,
 	) -> Result<(), Error> {
 		match self.id.is_some() && self.current.is_none() {
-			true => Err(Error::IgnoreError),
+			true => Err(Error::Ignore),
 			false => Ok(()),
 		}
 	}

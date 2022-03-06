@@ -38,7 +38,7 @@ pub fn fixed(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	let v = args.remove(0);
 	match args.remove(0).as_int() {
 		p if p > 0 => Ok(v.as_number().fixed(p as usize).into()),
-		_ => Err(Error::ArgumentsError {
+		_ => Err(Error::InvalidArguments {
 			name: String::from("math::fixed"),
 			message: String::from("The second argument must be an integer greater than 0."),
 		}),

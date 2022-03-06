@@ -53,7 +53,7 @@ impl DeleteStatement {
 				Value::Model(_) => i.prepare(v),
 				Value::Array(_) => i.prepare(v),
 				v => {
-					return Err(Error::DeleteStatementError {
+					return Err(Error::DeleteStatement {
 						value: v,
 					})
 				}

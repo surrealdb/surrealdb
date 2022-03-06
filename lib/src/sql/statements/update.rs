@@ -54,7 +54,7 @@ impl UpdateStatement {
 				Value::Model(_) => i.prepare(v),
 				Value::Array(_) => i.prepare(v),
 				v => {
-					return Err(Error::UpdateStatementError {
+					return Err(Error::UpdateStatement {
 						value: v,
 					})
 				}

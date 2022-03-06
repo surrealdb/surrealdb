@@ -52,7 +52,7 @@ impl CreateStatement {
 				Value::Model(_) => i.prepare(v),
 				Value::Array(_) => i.prepare(v),
 				v => {
-					return Err(Error::CreateStatementError {
+					return Err(Error::CreateStatement {
 						value: v,
 					})
 				}

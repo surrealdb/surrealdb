@@ -79,7 +79,7 @@ impl Options {
 				..*self
 			})
 		} else {
-			Err(Error::RecursiveSubqueryError {
+			Err(Error::TooManySubqueries {
 				limit: self.dive,
 			})
 		}
@@ -167,13 +167,13 @@ impl Options {
 	// Check whether the authentication permissions are ok
 	pub fn check(&self, level: Level) -> Result<(), Error> {
 		if !self.auth.check(level) {
-			return Err(Error::QueryPermissionsError);
+			return Err(Error::QueryPermissions);
 		}
 		if self.ns.is_none() {
-			return Err(Error::NsError);
+			return Err(Error::NsEmpty);
 		}
 		if self.db.is_none() {
-			return Err(Error::DbError);
+			return Err(Error::DbEmpty);
 		}
 		Ok(())
 	}

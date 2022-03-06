@@ -24,7 +24,7 @@ impl<'a> Document<'a> {
 		match cond {
 			Some(v) => {
 				match v.expr.compute(ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
-					false => Err(Error::IgnoreError),
+					false => Err(Error::Ignore),
 					true => Ok(()),
 				}
 			}

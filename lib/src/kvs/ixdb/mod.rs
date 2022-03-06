@@ -33,7 +33,7 @@ impl Datastore {
 				rw: write,
 				tx,
 			}),
-			Err(_) => Err(Error::TxError),
+			Err(_) => Err(Error::Tx),
 		}
 	}
 }
@@ -47,7 +47,7 @@ impl Transaction {
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
-			return Err(Error::TxFinishedError);
+			return Err(Error::TxFinished);
 		}
 		// Mark this transaction as done
 		self.ok = true;
@@ -60,11 +60,11 @@ impl Transaction {
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
-			return Err(Error::TxFinishedError);
+			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
 		if !self.rw {
-			return Err(Error::TxReadonlyError);
+			return Err(Error::TxReadonly);
 		}
 		// Mark this transaction as done
 		self.ok = true;
@@ -80,11 +80,11 @@ impl Transaction {
 	{
 		// Check to see if transaction is closed
 		if self.ok {
-			return Err(Error::TxFinishedError);
+			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
 		if !self.rw {
-			return Err(Error::TxReadonlyError);
+			return Err(Error::TxReadonly);
 		}
 		// Remove the key
 		let res = self.tx.del(key.into()).await?;
@@ -98,7 +98,7 @@ impl Transaction {
 	{
 		// Check to see if transaction is closed
 		if self.ok {
-			return Err(Error::TxFinishedError);
+			return Err(Error::TxFinished);
 		}
 		// Check the key
 		let res = self.tx.exi(key.into()).await?;
@@ -112,7 +112,7 @@ impl Transaction {
 	{
 		// Check to see if transaction is closed
 		if self.ok {
-			return Err(Error::TxFinishedError);
+			return Err(Error::TxFinished);
 		}
 		// Get the key
 		let res = self.tx.get(key.into()).await?;
@@ -127,11 +127,11 @@ impl Transaction {
 	{
 		// Check to see if transaction is closed
 		if self.ok {
-			return Err(Error::TxFinishedError);
+			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
 		if !self.rw {
-			return Err(Error::TxReadonlyError);
+			return Err(Error::TxReadonly);
 		}
 		// Set the key
 		self.tx.set(key.into(), val.into()).await?;
@@ -146,11 +146,11 @@ impl Transaction {
 	{
 		// Check to see if transaction is closed
 		if self.ok {
-			return Err(Error::TxFinishedError);
+			return Err(Error::TxFinished);
 		}
 		// Check to see if transaction is writable
 		if !self.rw {
-			return Err(Error::TxReadonlyError);
+			return Err(Error::TxReadonly);
 		}
 		// Set the key
 		self.tx.put(key.into(), val.into()).await?;
@@ -164,7 +164,7 @@ impl Transaction {
 	{
 		// Check to see if transaction is closed
 		if self.ok {
-			return Err(Error::TxFinishedError);
+			return Err(Error::TxFinished);
 		}
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {

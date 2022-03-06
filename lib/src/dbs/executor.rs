@@ -97,7 +97,7 @@ impl Executor {
 			sql: v.sql,
 			time: v.time,
 			status: Status::Err,
-			detail: Some(format!("{}", Error::QueryCancelledError)),
+			detail: Some(format!("{}", Error::QueryCancelled)),
 			result: None,
 		}
 	}
@@ -109,7 +109,7 @@ impl Executor {
 				time: v.time,
 				status: Status::Err,
 				detail: match v.status {
-					Status::Ok => Some(format!("{}", Error::QueryExecutionError)),
+					Status::Ok => Some(format!("{}", Error::QueryNotExecuted)),
 					Status::Err => v.detail,
 				},
 				result: None,
@@ -182,7 +182,7 @@ impl Executor {
 							Auth::Ns(v) if v == ns => opt.ns = Some(Arc::new(ns.to_owned())),
 							_ => {
 								opt.ns = None;
-								return Err(Error::NsAuthenticationError {
+								return Err(Error::NsNotAllowed {
 									ns: ns.to_owned(),
 								});
 							}
@@ -196,7 +196,7 @@ impl Executor {
 							Auth::Db(_, v) if v == db => opt.db = Some(Arc::new(db.to_owned())),
 							_ => {
 								opt.db = None;
-								return Err(Error::DbAuthenticationError {
+								return Err(Error::DbNotAllowed {
 									db: db.to_owned(),
 								});
 							}
@@ -226,7 +226,7 @@ impl Executor {
 				// Process all other normal statements
 				_ => match self.err {
 					// This transaction has failed
-					Some(_) => Err(Error::QueryExecutionError),
+					Some(_) => Err(Error::QueryNotExecuted),
 					// Compute the statement normally
 					None => {
 						// Create a transaction
@@ -244,7 +244,7 @@ impl Executor {
 						// Catch statement timeout
 						let res = match stm.timeout() {
 							Some(timeout) => match ctx.is_timedout() {
-								true => Err(Error::QueryTimeoutError {
+								true => Err(Error::QueryTimeout {
 									timer: timeout,
 								}),
 								false => res,

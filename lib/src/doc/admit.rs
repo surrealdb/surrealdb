@@ -16,19 +16,19 @@ impl<'a> Document<'a> {
 		match self.id {
 			Some(_) => Ok(()),
 			None => match stm {
-				Statement::Create(_) => Err(Error::CreateStatementError {
+				Statement::Create(_) => Err(Error::CreateStatement {
 					value: (*self.initial).clone(),
 				}),
-				Statement::Update(_) => Err(Error::UpdateStatementError {
+				Statement::Update(_) => Err(Error::UpdateStatement {
 					value: (*self.initial).clone(),
 				}),
-				Statement::Relate(_) => Err(Error::RelateStatementError {
+				Statement::Relate(_) => Err(Error::RelateStatement {
 					value: (*self.initial).clone(),
 				}),
-				Statement::Delete(_) => Err(Error::DeleteStatementError {
+				Statement::Delete(_) => Err(Error::DeleteStatement {
 					value: (*self.initial).clone(),
 				}),
-				Statement::Insert(_) => Err(Error::InsertStatementError {
+				Statement::Insert(_) => Err(Error::InsertStatement {
 					value: (*self.initial).clone(),
 				}),
 				_ => unreachable!(),

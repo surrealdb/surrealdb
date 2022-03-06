@@ -92,7 +92,7 @@ pub mod hash {
 			2 => match args.remove(0) {
 				Value::Geometry(Geometry::Point(v)) => match args.remove(0).as_int() {
 					l if l > 0 && l <= 12 => Ok(geo::encode(v, l as usize).into()),
-					_ => Err(Error::ArgumentsError {
+					_ => Err(Error::InvalidArguments {
 						name: String::from("geo::encode"),
 						message: String::from("The second argument must be an integer greater than 0 and less than or equal to 12."),
 					}),

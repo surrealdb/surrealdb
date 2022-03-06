@@ -108,7 +108,7 @@ impl Array {
 			.iter()
 			.map(|v| match v {
 				Value::Object(v) => v.to_operation(),
-				_ => Err(Error::PatchError {
+				_ => Err(Error::InvalidPatch {
 					message: String::from("Operation must be an object"),
 				}),
 			})

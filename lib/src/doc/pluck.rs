@@ -32,7 +32,7 @@ impl<'a> Document<'a> {
 		// Match clause
 		match expr {
 			Some(v) => match v {
-				Output::None => Err(Error::IgnoreError),
+				Output::None => Err(Error::Ignore),
 				Output::Null => Ok(Value::Null),
 				Output::Diff => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
 				Output::After => self.current.compute(ctx, opt, txn, Some(&self.current)).await,

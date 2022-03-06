@@ -59,7 +59,7 @@ impl RelateStatement {
 				Value::Model(_) => i.prepare(v),
 				Value::Array(_) => i.prepare(v),
 				v => {
-					return Err(Error::RelateStatementError {
+					return Err(Error::RelateStatement {
 						value: v,
 					})
 				}

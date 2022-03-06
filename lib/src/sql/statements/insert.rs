@@ -58,7 +58,7 @@ impl InsertStatement {
 					Value::Array(v) => v.value.into_iter().for_each(|v| i.prepare(v)),
 					Value::Object(_) => i.prepare(v),
 					v => {
-						return Err(Error::InsertStatementError {
+						return Err(Error::InsertStatement {
 							value: v,
 						})
 					}

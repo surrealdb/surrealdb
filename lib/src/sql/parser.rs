@@ -8,32 +8,32 @@ use std::str;
 
 pub fn parse(input: &str) -> Result<Query, Error> {
 	match input.trim().len() {
-		0 => Err(Error::EmptyError),
+		0 => Err(Error::QueryEmpty),
 		_ => match query(input) {
 			Ok((_, query)) => Ok(query),
 			Err(Err::Error(e)) => match e {
 				ParserError(e) => {
 					let (s, l, c) = locate(input, e);
-					Err(Error::ParseError {
+					Err(Error::InvalidQuery {
 						line: l,
 						char: c,
 						sql: s.to_string(),
 					})
 				}
-				ScriptError(e) => Err(Error::LanguageError {
+				ScriptError(e) => Err(Error::InvalidScript {
 					message: e,
 				}),
 			},
 			Err(Err::Failure(e)) => match e {
 				ParserError(e) => {
 					let (s, l, c) = locate(input, e);
-					Err(Error::ParseError {
+					Err(Error::InvalidQuery {
 						line: l,
 						char: c,
 						sql: s.to_string(),
 					})
 				}
-				ScriptError(e) => Err(Error::LanguageError {
+				ScriptError(e) => Err(Error::InvalidScript {
 					message: e,
 				}),
 			},
@@ -44,32 +44,32 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 
 pub fn json(input: &str) -> Result<Value, Error> {
 	match input.trim().len() {
-		0 => Err(Error::EmptyError),
+		0 => Err(Error::QueryEmpty),
 		_ => match value(input) {
 			Ok((_, query)) => Ok(query),
 			Err(Err::Error(e)) => match e {
 				ParserError(e) => {
 					let (s, l, c) = locate(input, e);
-					Err(Error::ParseError {
+					Err(Error::InvalidQuery {
 						line: l,
 						char: c,
 						sql: s.to_string(),
 					})
 				}
-				ScriptError(e) => Err(Error::LanguageError {
+				ScriptError(e) => Err(Error::InvalidScript {
 					message: e,
 				}),
 			},
 			Err(Err::Failure(e)) => match e {
 				ParserError(e) => {
 					let (s, l, c) = locate(input, e);
-					Err(Error::ParseError {
+					Err(Error::InvalidQuery {
 						line: l,
 						char: c,
 						sql: s.to_string(),
 					})
 				}
-				ScriptError(e) => Err(Error::LanguageError {
+				ScriptError(e) => Err(Error::InvalidScript {
 					message: e,
 				}),
 			},

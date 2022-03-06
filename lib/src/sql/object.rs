@@ -78,11 +78,11 @@ impl Object {
 						None => Value::Null,
 					},
 				}),
-				_ => Err(Error::PatchError {
+				_ => Err(Error::InvalidPatch {
 					message: String::from("'path' key missing"),
 				}),
 			},
-			_ => Err(Error::PatchError {
+			_ => Err(Error::InvalidPatch {
 				message: String::from("'op' key missing"),
 			}),
 		}

@@ -20,107 +20,131 @@ use tokio::sync::mpsc::error::SendError as TokioError;
 
 #[derive(Error, Debug)]
 pub enum Error {
+	#[error("Conditional clause is not truthy")]
+	Ignore,
+
 	#[error("Couldn't setup connection to underlying datastore")]
-	DsError,
+	Ds,
 
 	#[error("Couldn't create a database transaction")]
-	TxError,
+	Tx,
 
 	#[error("Couldn't update a finished transaction")]
-	TxFinishedError,
+	TxFinished,
 
 	#[error("Couldn't write to a read only transaction")]
-	TxReadonlyError,
+	TxReadonly,
 
 	#[error("Specify a namespace to use")]
-	NsError,
+	NsEmpty,
 
 	#[error("Specify a database to use")]
-	DbError,
+	DbEmpty,
 
 	#[error("Specify some SQL code to execute")]
-	EmptyError,
-
-	#[error("The query failed to complete in time")]
-	TimeoutError,
-
-	#[error("The query was cancelled before completion")]
-	CancelledError,
+	QueryEmpty,
 
 	#[error("Parse error on line {line} at character {char} when parsing '{sql}'")]
-	ParseError {
+	InvalidQuery {
 		line: usize,
 		char: usize,
 		sql: String,
 	},
 
 	#[error("The JSON Patch contains invalid operations. {message}")]
-	PatchError {
+	InvalidPatch {
 		message: String,
 	},
 
 	#[error("Problem with embedded script function. {message}")]
-	LanguageError {
+	InvalidScript {
 		message: String,
 	},
 
 	#[error("Incorrect arguments for function {name}(). {message}")]
-	ArgumentsError {
+	InvalidArguments {
 		name: String,
 		message: String,
 	},
 
 	#[error("Query timeout of {timer:?} exceeded")]
-	QueryTimeoutError {
+	QueryTimeout {
 		timer: Duration,
 	},
 
 	#[error("Query not executed due to cancelled transaction")]
-	QueryCancelledError,
+	QueryCancelled,
 
 	#[error("Query not executed due to failed transaction")]
-	QueryExecutionError,
+	QueryNotExecuted,
 
 	#[error("You don't have permission to perform this query type")]
-	QueryPermissionsError,
+	QueryPermissions,
 
 	#[error("You don't have permission to change to the {ns} namespace")]
-	NsAuthenticationError {
+	NsNotAllowed {
 		ns: String,
 	},
 
 	#[error("You don't have permission to change to the {db} database")]
-	DbAuthenticationError {
+	DbNotAllowed {
 		db: String,
 	},
 
+	#[error("The namespace does not exist")]
+	NsNotFound,
+
+	#[error("The namespace token does not exist")]
+	NtNotFound,
+
+	#[error("The namespace login does not exist")]
+	NlNotFound,
+
+	#[error("The database does not exist")]
+	DbNotFound,
+
+	#[error("The database token does not exist")]
+	DtNotFound,
+
+	#[error("The database login does not exist")]
+	DlNotFound,
+
+	#[error("The scope does not exist")]
+	ScNotFound,
+
+	#[error("The scope token does not exist")]
+	StNotFound,
+
+	#[error("The table does not exist")]
+	TbNotFound,
+
 	#[error("Too many recursive subqueries have been set")]
-	RecursiveSubqueryError {
+	TooManySubqueries {
 		limit: usize,
 	},
 
 	#[error("Can not execute CREATE query using value '{value}'")]
-	CreateStatementError {
+	CreateStatement {
 		value: Value,
 	},
 
 	#[error("Can not execute UPDATE query using value '{value}'")]
-	UpdateStatementError {
+	UpdateStatement {
 		value: Value,
 	},
 
 	#[error("Can not execute RELATE query using value '{value}'")]
-	RelateStatementError {
+	RelateStatement {
 		value: Value,
 	},
 
 	#[error("Can not execute DELETE query using value '{value}'")]
-	DeleteStatementError {
+	DeleteStatement {
 		value: Value,
 	},
 
 	#[error("Can not execute INSERT query using value '{value}'")]
-	InsertStatementError {
+	InsertStatement {
 		value: Value,
 	},
 
@@ -131,46 +155,43 @@ pub enum Error {
 	},
 
 	#[error("Unable to write to the `{table}` table while setup as a view")]
-	TableViewError {
+	TableIsView {
 		table: String,
 	},
 
 	#[error("Database record `{thing}` already exists")]
-	RecordExistsError {
+	RecordExists {
 		thing: Thing,
 	},
 
 	#[error("Database index `{index}` already contains `{thing}`")]
-	RecordIndexError {
+	RecordIndex {
 		index: String,
 		thing: Thing,
 	},
 
-	#[error("Conditional clause is not truthy")]
-	IgnoreError,
-
 	#[error("Serde error: {0}")]
-	SerdeError(#[from] SerdeError),
+	Serde(#[from] SerdeError),
 
 	#[error("Key encoding error: {0}")]
-	EncodeError(#[from] EncodeError),
+	Encode(#[from] EncodeError),
 
 	#[error("Key decoding error: {0}")]
-	DecodeError(#[from] DecodeError),
+	Decode(#[from] DecodeError),
 
 	#[cfg(feature = "kv-echodb")]
 	#[error("Datastore error: {0}")]
-	EchoDBError(#[from] EchoDBError),
+	EchoDB(#[from] EchoDBError),
 
 	#[cfg(feature = "kv-indxdb")]
 	#[error("Datastore error: {0}")]
-	IndxDBError(#[from] IndxDBError),
+	IndxDB(#[from] IndxDBError),
 
 	#[cfg(feature = "kv-tikv")]
 	#[error("Datastore error: {0}")]
-	TiKVError(#[from] TiKVError),
+	TiKV(#[from] TiKVError),
 
 	#[cfg(feature = "parallel")]
 	#[error("Tokio Error: {0}")]
-	TokioError(#[from] TokioError<(Option<Thing>, Value)>),
+	Tokio(#[from] TokioError<(Option<Thing>, Value)>),
 }
