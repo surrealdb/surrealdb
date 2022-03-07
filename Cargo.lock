@@ -460,12 +460,12 @@ dependencies = [
 
 [[package]]
 name = "echodb"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3b15c1b33dc9bbe3d1dc8beadc8b477d524ad2534c6cebbddb1b1b0ba882825"
+checksum = "e7717db5a8a5af149e6652cce851908dbfe05bdd4183c6d2f382e312ef3dc523"
 dependencies = [
  "arc-swap",
- "im",
+ "imbl",
  "thiserror",
  "tokio",
 ]
@@ -1012,13 +1012,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "im"
-version = "15.0.0"
+name = "imbl"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "111c1983f3c5bb72732df25cddacee9b546d08325fb584b5ebd38148be7b0246"
+checksum = "543682c9082b25e63d03b5acbd65ad111fd49dd93e70843e5175db4ff81d606b"
 dependencies = [
  "bitmaps",
- "rand_core 0.5.1",
+ "rand_core 0.6.3",
  "rand_xoshiro",
  "sized-chunks",
  "typenum",
@@ -1795,11 +1795,11 @@ dependencies = [
 
 [[package]]
 name = "rand_xoshiro"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9fcdd2e881d02f1d9390ae47ad8e5696a9e4be7b547a1da2afbc61973217004"
+checksum = "6f97cdb2a36ed4183de61b2f824cc45c9f1037f28afe0a322e9fff4c108b5aaa"
 dependencies = [
- "rand_core 0.5.1",
+ "rand_core 0.6.3",
 ]
 
 [[package]]
@@ -2250,9 +2250,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-derive"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71202396222f43d24f42963f6f8e8b6626c90c56ac53a912257ea88707876978"
+checksum = "6045ae5b030a2485f0862dd735eff304b72a7cef3d4d541b3a46a45565737548"
 dependencies = [
  "quote",
  "syn",

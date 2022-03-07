@@ -13,6 +13,15 @@ pub struct Thing {
 	pub id: String,
 }
 
+impl From<(String, String)> for Thing {
+	fn from(v: (String, String)) -> Self {
+		Thing {
+			tb: v.0,
+			id: v.1,
+		}
+	}
+}
+
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let t = escape(&self.tb, &val_char, "`");
