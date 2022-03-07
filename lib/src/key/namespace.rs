@@ -1,13 +1,12 @@
 use crate::err::Error;
 use crate::key::bytes::{deserialize, serialize};
-use crate::key::BASE;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Namespace {
-	kv: String,
-	_a: String,
-	ns: String,
+	__: char,
+	_a: char,
+	pub ns: String,
 }
 
 impl From<Namespace> for Vec<u8> {
@@ -29,8 +28,8 @@ pub fn new(ns: &str) -> Namespace {
 impl Namespace {
 	pub fn new(ns: String) -> Namespace {
 		Namespace {
-			kv: BASE.to_owned(),
-			_a: String::from("*"),
+			__: '/',
+			_a: '*',
 			ns,
 		}
 	}

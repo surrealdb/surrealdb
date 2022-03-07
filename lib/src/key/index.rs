@@ -1,21 +1,20 @@
 use crate::err::Error;
 use crate::key::bytes::{deserialize, serialize};
-use crate::key::BASE;
 use crate::sql::value::Value;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Index {
-	kv: String,
-	_a: String,
-	ns: String,
-	_b: String,
-	db: String,
-	_c: String,
-	tb: String,
-	_d: String,
-	ix: String,
-	fd: Value,
+	__: char,
+	_a: char,
+	pub ns: String,
+	_b: char,
+	pub db: String,
+	_c: char,
+	pub tb: String,
+	_d: char,
+	pub ix: String,
+	pub fd: Value,
 }
 
 impl From<Index> for Vec<u8> {
@@ -37,14 +36,14 @@ pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Value) -> Index {
 impl Index {
 	pub fn new(ns: String, db: String, tb: String, ix: String, fd: Value) -> Index {
 		Index {
-			kv: BASE.to_owned(),
-			_a: String::from("*"),
+			__: '/',
+			_a: '*',
 			ns,
-			_b: String::from("*"),
+			_b: '*',
 			db,
-			_c: String::from("*"),
+			_c: '*',
 			tb,
-			_d: String::from("¤"),
+			_d: '¤',
 			ix,
 			fd,
 		}

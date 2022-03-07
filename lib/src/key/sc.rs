@@ -1,17 +1,18 @@
 use crate::err::Error;
 use crate::key::bytes::{deserialize, serialize};
-use crate::key::BASE;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Sc {
-	kv: String,
-	_a: String,
-	ns: String,
-	_b: String,
-	db: String,
-	_c: String,
-	sc: String,
+	__: char,
+	_a: char,
+	pub ns: String,
+	_b: char,
+	pub db: String,
+	_c: char,
+	_d: char,
+	_e: char,
+	pub sc: String,
 }
 
 impl From<Sc> for Vec<u8> {
@@ -33,12 +34,14 @@ pub fn new(ns: &str, db: &str, sc: &str) -> Sc {
 impl Sc {
 	pub fn new(ns: String, db: String, sc: String) -> Sc {
 		Sc {
-			kv: BASE.to_owned(),
-			_a: String::from("*"),
+			__: '/',
+			_a: '*',
 			ns,
-			_b: String::from("*"),
+			_b: '*',
 			db,
-			_c: String::from("!sc"),
+			_c: '!',
+			_d: 's',
+			_e: 'c',
 			sc,
 		}
 	}

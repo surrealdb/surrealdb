@@ -1,17 +1,18 @@
 use crate::err::Error;
 use crate::key::bytes::{deserialize, serialize};
-use crate::key::BASE;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Dl {
-	kv: String,
-	_a: String,
-	ns: String,
-	_b: String,
-	db: String,
-	_c: String,
-	us: String,
+	__: char,
+	_a: char,
+	pub ns: String,
+	_b: char,
+	pub db: String,
+	_c: char,
+	_d: char,
+	_e: char,
+	pub dl: String,
 }
 
 impl From<Dl> for Vec<u8> {
@@ -26,20 +27,22 @@ impl From<Vec<u8>> for Dl {
 	}
 }
 
-pub fn new(ns: &str, db: &str, us: &str) -> Dl {
-	Dl::new(ns.to_string(), db.to_string(), us.to_string())
+pub fn new(ns: &str, db: &str, dl: &str) -> Dl {
+	Dl::new(ns.to_string(), db.to_string(), dl.to_string())
 }
 
 impl Dl {
-	pub fn new(ns: String, db: String, us: String) -> Dl {
+	pub fn new(ns: String, db: String, dl: String) -> Dl {
 		Dl {
-			kv: BASE.to_owned(),
-			_a: String::from("*"),
+			__: '/',
+			_a: '*',
 			ns,
-			_b: String::from("*"),
+			_b: '*',
 			db,
-			_c: String::from("!us"),
-			us,
+			_c: '!',
+			_d: 'd',
+			_e: 'l',
+			dl,
 		}
 	}
 	pub fn encode(&self) -> Result<Vec<u8>, Error> {

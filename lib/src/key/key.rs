@@ -3,8 +3,6 @@ use crate::err::Error;
 use crate::key::bytes::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 
-// Default base key
-pub const BASE: &str = "surreal";
 // Ignore specifies an ignored field
 pub const IGNORE: &str = "\x00";
 // Prefix is the lowest char found in a key

@@ -1,19 +1,18 @@
 use crate::err::Error;
 use crate::key::bytes::{deserialize, serialize};
-use crate::key::BASE;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Thing {
-	kv: String,
-	_a: String,
-	ns: String,
-	_b: String,
-	db: String,
-	_c: String,
-	tb: String,
-	_d: String,
-	id: String,
+	__: char,
+	_a: char,
+	pub ns: String,
+	_b: char,
+	pub db: String,
+	_c: char,
+	pub tb: String,
+	_d: char,
+	pub id: String,
 }
 
 impl From<Thing> for Vec<u8> {
@@ -28,6 +27,12 @@ impl From<Vec<u8>> for Thing {
 	}
 }
 
+impl From<&Vec<u8>> for Thing {
+	fn from(val: &Vec<u8>) -> Self {
+		Thing::decode(&val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, db: &str, tb: &str, id: &str) -> Thing {
 	Thing::new(ns.to_string(), db.to_string(), tb.to_string(), id.to_string())
 }
@@ -35,14 +40,14 @@ pub fn new(ns: &str, db: &str, tb: &str, id: &str) -> Thing {
 impl Thing {
 	pub fn new(ns: String, db: String, tb: String, id: String) -> Thing {
 		Thing {
-			kv: BASE.to_owned(),
-			_a: String::from("*"),
+			__: '/',
+			_a: '*',
 			ns,
-			_b: String::from("*"),
+			_b: '*',
 			db,
-			_c: String::from("*"),
+			_c: '*',
 			tb,
-			_d: String::from("*"),
+			_d: '*',
 			id,
 		}
 	}

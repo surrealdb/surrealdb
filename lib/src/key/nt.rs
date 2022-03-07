@@ -1,15 +1,16 @@
 use crate::err::Error;
 use crate::key::bytes::{deserialize, serialize};
-use crate::key::BASE;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Nt {
-	kv: String,
-	_a: String,
-	ns: String,
-	_b: String,
-	tk: String,
+	__: char,
+	_a: char,
+	pub ns: String,
+	_b: char,
+	_c: char,
+	_d: char,
+	pub tk: String,
 }
 
 impl From<Nt> for Vec<u8> {
@@ -31,10 +32,12 @@ pub fn new(ns: &str, tk: &str) -> Nt {
 impl Nt {
 	pub fn new(ns: String, tk: String) -> Nt {
 		Nt {
-			kv: BASE.to_owned(),
-			_a: String::from("*"),
+			__: '/',
+			_a: '*',
 			ns,
-			_b: String::from("!tk"),
+			_b: '!',
+			_c: 'n',
+			_d: 't',
 			tk,
 		}
 	}
