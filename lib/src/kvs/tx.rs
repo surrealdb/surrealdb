@@ -4,6 +4,17 @@ use crate::kvs::Key;
 use crate::kvs::Val;
 use std::ops::Range;
 
+trait Add<T> {
+	fn add(self, v: T) -> Self;
+}
+
+impl Add<u8> for Vec<u8> {
+	fn add(mut self, v: u8) -> Self {
+		self.push(v);
+		self
+	}
+}
+
 impl Transaction {
 	// Check if closed
 	pub async fn closed(&self) -> bool {
@@ -150,5 +161,179 @@ impl Transaction {
 			#[cfg(feature = "kv-tikv")]
 			Transaction::TiKV(v) => v.scan(rng, limit).await,
 		}
+	}
+	// Retrieve a range of keys from the databases
+	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key>,
+	{
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		let mut out: Vec<(Key, Val)> = vec![];
+		// Start processing
+		while num > 0 {
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+				Some(ref mut beg) => {
+					beg.push(0);
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+			};
+			// Get total results
+			let n = res.len() - 1;
+			// Loop over results
+			for (i, (k, v)) in res.into_iter().enumerate() {
+				// Ready the next
+				if i == n {
+					nxt = Some(k.clone());
+				}
+				// Delete
+				out.push((k, v));
+				// Count
+				num -= 1;
+			}
+		}
+		Ok(out)
+	}
+	// Delete a range of keys from the databases
+	pub async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		let beg: Key = rng.start.into();
+		let end: Key = rng.end.into();
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		// Start processing
+		while num > 0 {
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+				Some(ref mut beg) => {
+					beg.push(0);
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+			};
+			// Get total results
+			let n = res.len() - 1;
+			// Loop over results
+			for (i, (k, _)) in res.into_iter().enumerate() {
+				// Ready the next
+				if i == n {
+					nxt = Some(k.clone());
+				}
+				// Delete
+				self.del(k).await?;
+				// Count
+				num -= 1;
+			}
+		}
+		Ok(())
+	}
+	// Retrieve a prefix of keys from the databases
+	pub async fn getp<K>(&mut self, key: K, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	where
+		K: Into<Key>,
+	{
+		let beg: Key = key.into();
+		let end: Key = beg.clone().add(255);
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		let mut out: Vec<(Key, Val)> = vec![];
+		// Start processing
+		while num > 0 {
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+				Some(ref mut beg) => {
+					beg.push(0);
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+			};
+			// Get total results
+			let n = res.len() - 1;
+			// Loop over results
+			for (i, (k, v)) in res.into_iter().enumerate() {
+				// Ready the next
+				if i == n {
+					nxt = Some(k.clone());
+				}
+				// Delete
+				out.push((k, v));
+				// Count
+				num -= 1;
+			}
+		}
+		Ok(out)
+	}
+	// Delete a prefix of keys from the databases
+	pub async fn delp<K>(&mut self, key: K, limit: u32) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		let beg: Key = key.into();
+		let end: Key = beg.clone().add(255);
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		// Start processing
+		while num > 0 {
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+				Some(ref mut beg) => {
+					beg.push(0);
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+			};
+			// Get total results
+			let n = res.len() - 1;
+			// Loop over results
+			for (i, (k, _)) in res.into_iter().enumerate() {
+				// Ready the next
+				if i == n {
+					nxt = Some(k.clone());
+				}
+				// Delete
+				self.del(k).await?;
+				// Count
+				num -= 1;
+			}
+		}
+		Ok(())
 	}
 }

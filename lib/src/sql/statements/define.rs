@@ -14,17 +14,24 @@ use crate::sql::idiom;
 use crate::sql::idiom::{Idiom, Idioms};
 use crate::sql::kind::{kind, Kind};
 use crate::sql::permission::{permissions, Permissions};
+use crate::sql::statements::UpdateStatement;
 use crate::sql::strand::strand_raw;
 use crate::sql::value::{value, values, Value, Values};
 use crate::sql::view::{view, View};
+use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::Argon2;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::multi::many0;
 use nom::sequence::tuple;
+use rand::distributions::Alphanumeric;
+use rand::rngs::OsRng;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub enum DefineStatement {
@@ -105,13 +112,16 @@ impl DefineNamespaceStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Kv)?;
-		// Continue
-		todo!()
+		// Process the statement
+		let key = crate::key::ns::new(&self.name);
+		txn.clone().lock().await.set(key, self).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -149,13 +159,20 @@ impl DefineDatabaseStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Ns)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Process the statement
+		let key = crate::key::db::new(opt.ns(), &self.name);
+		let mut run = run.lock().await;
+		run.add_ns(opt.ns()).await?;
+		run.set(key, self).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -187,8 +204,8 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 pub struct DefineLoginStatement {
 	pub name: String,
 	pub base: Base,
-	pub pass: Option<String>,
-	pub hash: Option<String>,
+	pub hash: String,
+	pub code: String,
 }
 
 impl DefineLoginStatement {
@@ -196,30 +213,45 @@ impl DefineLoginStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		// Allowed to run?
 		match self.base {
-			Base::Ns => opt.check(Level::Kv)?,
-			Base::Db => opt.check(Level::Ns)?,
+			Base::Ns => {
+				// Allowed to run?
+				opt.check(Level::Kv)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Process the statement
+				let key = crate::key::nl::new(opt.ns(), &self.name);
+				let mut run = run.lock().await;
+				run.add_ns(opt.ns()).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Db => {
+				// Allowed to run?
+				opt.check(Level::Ns)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Process the statement
+				let key = crate::key::dl::new(opt.ns(), opt.db(), &self.name);
+				let mut run = run.lock().await;
+				run.add_ns(opt.ns()).await?;
+				run.add_db(opt.ns(), opt.db()).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
 			_ => unreachable!(),
 		}
-		// Continue
-		todo!()
 	}
 }
 
 impl fmt::Display for DefineLoginStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE LOGIN {} ON {}", self.name, self.base)?;
-		if let Some(ref v) = self.pass {
-			write!(f, " PASSWORD {}", v)?
-		}
-		if let Some(ref v) = self.hash {
-			write!(f, " PASSHASH {}", v)?
-		}
-		Ok(())
+		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, self.hash)
 	}
 }
 
@@ -239,13 +271,17 @@ fn login(i: &str) -> IResult<&str, DefineLoginStatement> {
 		DefineLoginStatement {
 			name,
 			base,
-			pass: match opts {
-				DefineLoginOption::Password(ref v) => Some(v.to_owned()),
-				_ => None,
-			},
+			code: rand::thread_rng()
+				.sample_iter(&Alphanumeric)
+				.take(128)
+				.map(char::from)
+				.collect::<String>(),
 			hash: match opts {
-				DefineLoginOption::Passhash(ref v) => Some(v.to_owned()),
-				_ => None,
+				DefineLoginOption::Passhash(v) => v,
+				DefineLoginOption::Password(v) => Argon2::default()
+					.hash_password(v.as_ref(), SaltString::generate(&mut OsRng).as_ref())
+					.unwrap()
+					.to_string(),
 			},
 		},
 	))
@@ -294,17 +330,39 @@ impl DefineTokenStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		// Allowed to run?
 		match self.base {
-			Base::Ns => opt.check(Level::Kv)?,
-			Base::Db => opt.check(Level::Ns)?,
+			Base::Ns => {
+				// Allowed to run?
+				opt.check(Level::Kv)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Process the statement
+				let key = crate::key::nt::new(opt.ns(), &self.name);
+				let mut run = run.lock().await;
+				run.add_ns(opt.ns()).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Db => {
+				// Allowed to run?
+				opt.check(Level::Ns)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Process the statement
+				let key = crate::key::dt::new(opt.ns(), opt.db(), &self.name);
+				let mut run = run.lock().await;
+				run.add_ns(opt.ns()).await?;
+				run.add_db(opt.ns(), opt.db()).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
 			_ => unreachable!(),
 		}
-		// Continue
-		todo!()
 	}
 }
 
@@ -354,6 +412,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct DefineScopeStatement {
 	pub name: String,
+	pub code: String,
 	pub session: Option<Duration>,
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
@@ -365,13 +424,21 @@ impl DefineScopeStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Process the statement
+		let key = crate::key::sc::new(opt.ns(), opt.db(), &self.name);
+		let mut run = run.lock().await;
+		run.add_ns(opt.ns()).await?;
+		run.add_db(opt.ns(), opt.db()).await?;
+		run.set(key, self).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -405,6 +472,11 @@ fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 		i,
 		DefineScopeStatement {
 			name,
+			code: rand::thread_rng()
+				.sample_iter(&Alphanumeric)
+				.take(128)
+				.map(char::from)
+				.collect::<String>(),
 			session: opts.iter().find_map(|x| match x {
 				DefineScopeOption::Session(ref v) => Some(v.to_owned()),
 				_ => None,
@@ -485,15 +557,41 @@ pub struct DefineTableStatement {
 impl DefineTableStatement {
 	pub async fn compute(
 		&self,
-		_ctx: &Runtime,
+		ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&Value>,
+		txn: &Transaction,
+		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Process the statement
+		let key = crate::key::tb::new(opt.ns(), opt.db(), &self.name);
+		let mut run = run.lock().await;
+		run.add_ns(opt.ns()).await?;
+		run.add_db(opt.ns(), opt.db()).await?;
+		run.set(key, self).await?;
+		// Check if table is a view
+		if let Some(view) = &self.view {
+			// Remove the table data
+			let key = crate::key::table::new(opt.ns(), opt.db(), &self.name);
+			run.delp(key, u32::MAX).await?;
+			// Process each foreign table
+			for v in view.what.0.iter() {
+				// Save the view config
+				let key = crate::key::ft::new(opt.ns(), opt.db(), &v.name, &self.name);
+				run.set(key, self).await?;
+				// Process the view data
+				let stm = UpdateStatement {
+					what: Values(vec![Value::Table(v.clone())]),
+					..UpdateStatement::default()
+				};
+				Arc::new(stm).compute(ctx, opt, txn, doc).await?;
+			}
+		}
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -618,13 +716,22 @@ impl DefineEventStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Process the statement
+		let key = crate::key::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let mut run = run.lock().await;
+		run.add_ns(opt.ns()).await?;
+		run.add_db(opt.ns(), opt.db()).await?;
+		run.add_tb(opt.ns(), opt.db(), &self.what).await?;
+		run.set(key, self).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -688,13 +795,22 @@ impl DefineFieldStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Process the statement
+		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name.to_string());
+		let mut run = run.lock().await;
+		run.add_ns(opt.ns()).await?;
+		run.add_db(opt.ns(), opt.db()).await?;
+		run.add_tb(opt.ns(), opt.db(), &self.what).await?;
+		run.set(key, self).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -825,15 +941,33 @@ pub struct DefineIndexStatement {
 impl DefineIndexStatement {
 	pub async fn compute(
 		&self,
-		_ctx: &Runtime,
+		ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
-		_doc: Option<&Value>,
+		txn: &Transaction,
+		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Process the statement
+		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let mut run = run.lock().await;
+		run.add_ns(opt.ns()).await?;
+		run.add_db(opt.ns(), opt.db()).await?;
+		run.add_tb(opt.ns(), opt.db(), &self.what).await?;
+		run.set(key, self).await?;
+		// Remove the index data
+		let key = crate::key::index::new(opt.ns(), opt.db(), &self.what, &self.name, Value::None);
+		run.delp(key, u32::MAX).await?;
+		// Update the index data
+		let stm = UpdateStatement {
+			what: Values(vec![Value::Table(self.what.clone().into())]),
+			..UpdateStatement::default()
+		};
+		Arc::new(stm).compute(ctx, opt, txn, doc).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 

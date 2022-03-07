@@ -27,6 +27,14 @@ pub struct Table {
 	pub name: String,
 }
 
+impl From<String> for Table {
+	fn from(v: String) -> Self {
+		Table {
+			name: v,
+		}
+	}
+}
+
 impl fmt::Display for Table {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", escape(&self.name, &val_char, "`"))

@@ -1,3 +1,4 @@
+mod ex;
 mod file;
 mod ixdb;
 mod kv;
