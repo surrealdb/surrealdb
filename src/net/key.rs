@@ -112,7 +112,7 @@ async fn select_all(
 		l = query.limit.unwrap_or_else(|| String::from("100")),
 		s = query.start.unwrap_or_else(|| String::from("0")),
 	);
-	let vars = hmap! {
+	let vars = map! {
 		String::from("table") => Value::from(table),
 	};
 	match surrealdb::execute(db, sql.as_str(), session, Some(vars)).await {
@@ -137,7 +137,7 @@ async fn create_all(
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
 			let sql = "CREATE type::table($table) CONTENT $data";
-			let vars = hmap! {
+			let vars = map! {
 				String::from("table") => Value::from(table),
 				String::from("data") => data,
 			};
@@ -162,7 +162,7 @@ async fn delete_all(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let db = DB.get().unwrap().clone();
 	let sql = "DELETE type::table($table)";
-	let vars = hmap! {
+	let vars = map! {
 		String::from("table") => Value::from(table),
 	};
 	match surrealdb::execute(db, sql, session, Some(vars)).await {
@@ -188,7 +188,7 @@ async fn select_one(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let db = DB.get().unwrap().clone();
 	let sql = "SELECT * FROM type::thing($table, $id)";
-	let vars = hmap! {
+	let vars = map! {
 		String::from("table") => Value::from(table),
 		String::from("id") => Value::from(id),
 	};
@@ -215,7 +215,7 @@ async fn create_one(
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
 			let sql = "CREATE type::thing($table, $id) CONTENT $data";
-			let vars = hmap! {
+			let vars = map! {
 				String::from("table") => Value::from(table),
 				String::from("id") => Value::from(id),
 				String::from("data") => data,
@@ -246,7 +246,7 @@ async fn update_one(
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
 			let sql = "UPDATE type::thing($table, $id) CONTENT $data";
-			let vars = hmap! {
+			let vars = map! {
 				String::from("table") => Value::from(table),
 				String::from("id") => Value::from(id),
 				String::from("data") => data,
@@ -277,7 +277,7 @@ async fn modify_one(
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
 			let sql = "UPDATE type::thing($table, $id) MERGE $data";
-			let vars = hmap! {
+			let vars = map! {
 				String::from("table") => Value::from(table),
 				String::from("id") => Value::from(id),
 				String::from("data") => data,
@@ -304,7 +304,7 @@ async fn delete_one(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	let db = DB.get().unwrap().clone();
 	let sql = "DELETE type::thing($table, $id)";
-	let vars = hmap! {
+	let vars = map! {
 		String::from("table") => Value::from(table),
 		String::from("id") => Value::from(id),
 	};
