@@ -29,6 +29,12 @@ pub fn store(input: TokenStream) -> TokenStream {
 			}
 		}
 
+		impl From<&Vec<u8>> for #name {
+			fn from(v: &Vec<u8>) -> Self {
+				msgpack::from_slice::<Self>(&v).unwrap()
+			}
+		}
+
 	};
 
 	output.into()
