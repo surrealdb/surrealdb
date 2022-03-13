@@ -201,6 +201,12 @@ impl From<Expression> for Value {
 	}
 }
 
+impl From<Box<Expression>> for Value {
+	fn from(v: Box<Expression>) -> Self {
+		Value::Expression(v)
+	}
+}
+
 impl From<i8> for Value {
 	fn from(v: i8) -> Self {
 		Value::Number(Number::from(v))

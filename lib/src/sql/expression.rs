@@ -28,6 +28,35 @@ impl Default for Expression {
 }
 
 impl Expression {
+	// Create a new expression
+	pub fn new(l: Value, o: Operator, r: Value) -> Expression {
+		Expression {
+			l,
+			o,
+			r,
+		}
+	}
+	// Augment an existing expression
+	pub fn augment(mut self, l: Value, o: Operator) -> Expression {
+		if o.precedence() >= self.o.precedence() {
+			match self.l {
+				Value::Expression(x) => {
+					self.l = x.augment(l, o).into();
+					self
+				}
+				_ => {
+					self.l = Expression::new(l, o, self.l).into();
+					self
+				}
+			}
+		} else {
+			let r = Value::from(self);
+			Expression::new(l, o, r)
+		}
+	}
+}
+
+impl Expression {
 	pub async fn compute(
 		&self,
 		ctx: &Runtime,
@@ -96,14 +125,11 @@ pub fn expression(i: &str) -> IResult<&str, Expression> {
 	let (i, l) = single(i)?;
 	let (i, o) = operator(i)?;
 	let (i, r) = value(i)?;
-	Ok((
-		i,
-		Expression {
-			l,
-			o,
-			r,
-		},
-	))
+	let v = match r {
+		Value::Expression(r) => r.augment(l, o),
+		_ => Expression::new(l, o, r),
+	};
+	Ok((i, v))
 }
 
 #[cfg(test)]

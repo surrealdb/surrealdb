@@ -56,6 +56,21 @@ impl Default for Operator {
 	}
 }
 
+impl Operator {
+	#[inline]
+	pub fn precedence(&self) -> u8 {
+		match self {
+			Operator::Or => 1,
+			Operator::And => 2,
+			Operator::Sub => 4,
+			Operator::Add => 5,
+			Operator::Mul => 6,
+			Operator::Div => 7,
+			_ => 3,
+		}
+	}
+}
+
 impl fmt::Display for Operator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
