@@ -1,6 +1,5 @@
 pub use self::key::*;
 
-pub mod bytes;
 pub mod database;
 pub mod db;
 pub mod dl;

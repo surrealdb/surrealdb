@@ -1,7 +1,7 @@
 use super::*;
 use crate::err::Error;
-use crate::key::bytes::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
+use storekey::{deserialize, serialize};
 
 // Ignore specifies an ignored field
 pub const IGNORE: &str = "\x00";

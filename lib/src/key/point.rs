@@ -1,7 +1,7 @@
 use crate::err::Error;
-use crate::key::bytes::{deserialize, serialize};
 use crate::sql::value::Value;
 use serde::{Deserialize, Serialize};
+use storekey::{deserialize, serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Point {

@@ -1,9 +1,9 @@
-use crate::key::bytes::decode::Error as DecodeError;
-use crate::key::bytes::encode::Error as EncodeError;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use msgpack::encode::Error as SerdeError;
 use std::time::Duration;
+use storekey::decode::Error as DecodeError;
+use storekey::encode::Error as EncodeError;
 use thiserror::Error;
 
 #[cfg(feature = "kv-tikv")]
