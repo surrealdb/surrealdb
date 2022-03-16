@@ -8,7 +8,6 @@ use nom::character::is_alphanumeric;
 use nom::multi::many1;
 use nom::Err::Error;
 use std::ops::RangeBounds;
-use std::str;
 
 pub fn colons(i: &str) -> IResult<&str, ()> {
 	let (i, _) = mightbespace(i)?;
@@ -46,7 +45,7 @@ pub fn escape(s: &str, f: &dyn Fn(char) -> bool, c: &str) -> String {
 
 pub fn take_u32(i: &str) -> IResult<&str, u32> {
 	let (i, v) = take_while(is_digit)(i)?;
-	match str::FromStr::from_str(v) {
+	match v.parse::<u32>() {
 		Ok(v) => Ok((i, v)),
 		_ => Err(Error(ParserError(i))),
 	}
@@ -54,7 +53,7 @@ pub fn take_u32(i: &str) -> IResult<&str, u32> {
 
 pub fn take_u64(i: &str) -> IResult<&str, u64> {
 	let (i, v) = take_while(is_digit)(i)?;
-	match str::FromStr::from_str(v) {
+	match v.parse::<u64>() {
 		Ok(v) => Ok((i, v)),
 		_ => Err(Error(ParserError(i))),
 	}
@@ -62,7 +61,7 @@ pub fn take_u64(i: &str) -> IResult<&str, u64> {
 
 pub fn take_usize(i: &str) -> IResult<&str, usize> {
 	let (i, v) = take_while(is_digit)(i)?;
-	match str::FromStr::from_str(v) {
+	match v.parse::<usize>() {
 		Ok(v) => Ok((i, v)),
 		_ => Err(Error(ParserError(i))),
 	}
@@ -70,7 +69,7 @@ pub fn take_usize(i: &str) -> IResult<&str, usize> {
 
 pub fn take_digits(i: &str, n: usize) -> IResult<&str, u32> {
 	let (i, v) = take_while_m_n(n, n, is_digit)(i)?;
-	match str::FromStr::from_str(v) {
+	match v.parse::<u32>() {
 		Ok(v) => Ok((i, v)),
 		_ => Err(Error(ParserError(i))),
 	}
@@ -78,7 +77,7 @@ pub fn take_digits(i: &str, n: usize) -> IResult<&str, u32> {
 
 pub fn take_digits_range(i: &str, n: usize, range: impl RangeBounds<u32>) -> IResult<&str, u32> {
 	let (i, v) = take_while_m_n(n, n, is_digit)(i)?;
-	match str::FromStr::from_str(v) {
+	match v.parse::<u32>() {
 		Ok(v) if range.contains(&v) => Ok((i, v)),
 		_ => Err(Error(ParserError(i))),
 	}
