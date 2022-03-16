@@ -14,8 +14,8 @@ use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::{whats, Value, Values};
 use derive::Store;
 use nom::branch::alt;
-use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
+use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
@@ -119,11 +119,13 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 fn relate_o(i: &str) -> IResult<&str, (Table, Values, Values)> {
 	let (i, from) = whats(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("->")(i)?;
+	let (i, _) = char('-')(i)?;
+	let (i, _) = char('>')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, kind) = table(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("->")(i)?;
+	let (i, _) = char('-')(i)?;
+	let (i, _) = char('>')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, with) = whats(i)?;
 	Ok((i, (kind, from, with)))
@@ -132,11 +134,13 @@ fn relate_o(i: &str) -> IResult<&str, (Table, Values, Values)> {
 fn relate_i(i: &str) -> IResult<&str, (Table, Values, Values)> {
 	let (i, with) = whats(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("<-")(i)?;
+	let (i, _) = char('<')(i)?;
+	let (i, _) = char('-')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, kind) = table(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("<-")(i)?;
+	let (i, _) = char('<')(i)?;
+	let (i, _) = char('-')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, from) = whats(i)?;
 	Ok((i, (kind, from, with)))

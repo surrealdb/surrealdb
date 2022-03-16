@@ -9,7 +9,7 @@ use crate::sql::number::Number;
 use crate::sql::operation::Operation;
 use crate::sql::strand::Strand;
 use crate::sql::value::{value, Value};
-use nom::bytes::complete::tag;
+use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::ser::SerializeStruct;
@@ -357,13 +357,13 @@ impl<T: PartialEq> Difference<T> for Vec<T> {
 // ------------------------------
 
 pub fn array(i: &str) -> IResult<&str, Array> {
-	let (i, _) = tag("[")(i)?;
+	let (i, _) = char('[')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = separated_list0(commas, item)(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(tag(","))(i)?;
+	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("]")(i)?;
+	let (i, _) = char(']')(i)?;
 	Ok((
 		i,
 		Array {

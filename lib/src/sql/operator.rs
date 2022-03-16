@@ -4,6 +4,7 @@ use crate::sql::error::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
+use nom::character::complete::char;
 use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -112,7 +113,7 @@ impl fmt::Display for Operator {
 
 pub fn assigner(i: &str) -> IResult<&str, Operator> {
 	alt((
-		map(tag("="), |_| Operator::Equal),
+		map(char('='), |_| Operator::Equal),
 		map(tag("+="), |_| Operator::Inc),
 		map(tag("-="), |_| Operator::Dec),
 	))(i)
@@ -130,40 +131,40 @@ pub fn symbols(i: &str) -> IResult<&str, Operator> {
 			map(tag("!="), |_| Operator::NotEqual),
 			map(tag("*="), |_| Operator::AllEqual),
 			map(tag("?="), |_| Operator::AnyEqual),
-			map(tag("="), |_| Operator::Equal),
+			map(char('='), |_| Operator::Equal),
 		)),
 		alt((
 			map(tag("!~"), |_| Operator::NotLike),
 			map(tag("*~"), |_| Operator::AllLike),
 			map(tag("?~"), |_| Operator::AnyLike),
-			map(tag("~"), |_| Operator::Like),
+			map(char('~'), |_| Operator::Like),
 		)),
 		alt((
 			map(tag("<="), |_| Operator::LessThanOrEqual),
-			map(tag("<"), |_| Operator::LessThan),
+			map(char('<'), |_| Operator::LessThan),
 			map(tag(">="), |_| Operator::MoreThanOrEqual),
-			map(tag(">"), |_| Operator::MoreThan),
+			map(char('>'), |_| Operator::MoreThan),
 		)),
 		alt((
-			map(tag("+"), |_| Operator::Add),
-			map(tag("-"), |_| Operator::Sub),
-			map(tag("*"), |_| Operator::Mul),
-			map(tag("×"), |_| Operator::Mul),
-			map(tag("∙"), |_| Operator::Mul),
-			map(tag("/"), |_| Operator::Div),
-			map(tag("÷"), |_| Operator::Div),
+			map(char('+'), |_| Operator::Add),
+			map(char('-'), |_| Operator::Sub),
+			map(char('*'), |_| Operator::Mul),
+			map(char('×'), |_| Operator::Mul),
+			map(char('∙'), |_| Operator::Mul),
+			map(char('/'), |_| Operator::Div),
+			map(char('÷'), |_| Operator::Div),
 		)),
 		alt((
-			map(tag("∋"), |_| Operator::Contain),
-			map(tag("∌"), |_| Operator::NotContain),
-			map(tag("∈"), |_| Operator::Inside),
-			map(tag("∉"), |_| Operator::NotInside),
-			map(tag("⊇"), |_| Operator::ContainAll),
-			map(tag("⊃"), |_| Operator::ContainAny),
-			map(tag("⊅"), |_| Operator::ContainNone),
-			map(tag("⊆"), |_| Operator::AllInside),
-			map(tag("⊂"), |_| Operator::AnyInside),
-			map(tag("⊄"), |_| Operator::NoneInside),
+			map(char('∋'), |_| Operator::Contain),
+			map(char('∌'), |_| Operator::NotContain),
+			map(char('∈'), |_| Operator::Inside),
+			map(char('∉'), |_| Operator::NotInside),
+			map(char('⊇'), |_| Operator::ContainAll),
+			map(char('⊃'), |_| Operator::ContainAny),
+			map(char('⊅'), |_| Operator::ContainNone),
+			map(char('⊆'), |_| Operator::AllInside),
+			map(char('⊂'), |_| Operator::AnyInside),
+			map(char('⊄'), |_| Operator::NoneInside),
 		)),
 	))(i)?;
 	let (i, _) = mightbespace(i)?;

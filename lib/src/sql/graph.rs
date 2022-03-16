@@ -5,8 +5,8 @@ use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::table::{tables, Tables};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
-use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
+use nom::character::complete::char;
 use nom::combinator::opt;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -64,7 +64,8 @@ pub fn graph(i: &str) -> IResult<&str, Graph> {
 }
 
 fn graph_in(i: &str) -> IResult<&str, Graph> {
-	let (i, _) = tag("<-")(i)?;
+	let (i, _) = char('<')(i)?;
+	let (i, _) = char('-')(i)?;
 	let (i, (what, cond, alias)) = alt((simple, custom))(i)?;
 	Ok((
 		i,
@@ -78,7 +79,8 @@ fn graph_in(i: &str) -> IResult<&str, Graph> {
 }
 
 fn graph_out(i: &str) -> IResult<&str, Graph> {
-	let (i, _) = tag("->")(i)?;
+	let (i, _) = char('-')(i)?;
+	let (i, _) = char('>')(i)?;
 	let (i, (what, cond, alias)) = alt((simple, custom))(i)?;
 	Ok((
 		i,
@@ -92,7 +94,9 @@ fn graph_out(i: &str) -> IResult<&str, Graph> {
 }
 
 fn graph_both(i: &str) -> IResult<&str, Graph> {
-	let (i, _) = tag("<->")(i)?;
+	let (i, _) = char('<')(i)?;
+	let (i, _) = char('-')(i)?;
+	let (i, _) = char('>')(i)?;
 	let (i, (what, cond, alias)) = alt((simple, custom))(i)?;
 	Ok((
 		i,
@@ -111,13 +115,13 @@ fn simple(i: &str) -> IResult<&str, (Tables, Option<Value>, Option<Idiom>)> {
 }
 
 fn custom(i: &str) -> IResult<&str, (Tables, Option<Value>, Option<Idiom>)> {
-	let (i, _) = tag("(")(i)?;
+	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, w) = what(i)?;
 	let (i, c) = opt(cond)(i)?;
 	let (i, a) = opt(alias)(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag(")")(i)?;
+	let (i, _) = char(')')(i)?;
 	Ok((i, (w, c, a)))
 }
 

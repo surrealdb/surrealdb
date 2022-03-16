@@ -1,7 +1,7 @@
 use crate::sql::error::IResult;
 use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
-use nom::bytes::complete::tag;
+use nom::character::complete::char;
 use nom::character::complete::one_of;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -49,9 +49,9 @@ impl fmt::Display for Regex {
 }
 
 pub fn regex(i: &str) -> IResult<&str, Regex> {
-	let (i, _) = tag("/")(i)?;
+	let (i, _) = char('/')(i)?;
 	let (i, v) = escaped(is_not("\\/"), '\\', one_of("/"))(i)?;
-	let (i, _) = tag("/")(i)?;
+	let (i, _) = char('/')(i)?;
 	Ok((i, Regex::from(v)))
 }
 

@@ -3,8 +3,8 @@ use crate::sql::common::val_char;
 use crate::sql::error::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::is_not;
-use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
+use nom::character::complete::char;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -53,12 +53,12 @@ fn ident_default(i: &str) -> IResult<&str, String> {
 }
 
 fn ident_backtick(i: &str) -> IResult<&str, String> {
-	let (i, v) = delimited(tag("`"), is_not("`"), tag("`"))(i)?;
+	let (i, v) = delimited(char('`'), is_not("`"), char('`'))(i)?;
 	Ok((i, String::from(v)))
 }
 
 fn ident_brackets(i: &str) -> IResult<&str, String> {
-	let (i, v) = delimited(tag("⟨"), is_not("⟩"), tag("⟩"))(i)?;
+	let (i, v) = delimited(char('⟨'), is_not("⟩"), char('⟩'))(i)?;
 	Ok((i, String::from(v)))
 }
 

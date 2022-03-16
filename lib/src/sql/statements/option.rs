@@ -4,8 +4,8 @@ use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use derive::Store;
 use nom::branch::alt;
-use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
+use nom::character::complete::char;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
@@ -32,8 +32,8 @@ pub fn option(i: &str) -> IResult<&str, OptionStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, n) = ident(i)?;
 	let (i, v) = opt(alt((
-		map(tuple((mightbespace, tag("="), mightbespace, tag_no_case("TRUE"))), |_| true),
-		map(tuple((mightbespace, tag("="), mightbespace, tag_no_case("FALSE"))), |_| false),
+		map(tuple((mightbespace, char('='), mightbespace, tag_no_case("TRUE"))), |_| true),
+		map(tuple((mightbespace, char('='), mightbespace, tag_no_case("FALSE"))), |_| false),
 	)))(i)?;
 	Ok((
 		i,

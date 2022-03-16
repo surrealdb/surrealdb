@@ -7,6 +7,7 @@ use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
+use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
@@ -114,38 +115,38 @@ pub fn first(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn all(i: &str) -> IResult<&str, Part> {
-	let (i, _) = tag("[")(i)?;
-	let (i, _) = tag("*")(i)?;
-	let (i, _) = tag("]")(i)?;
+	let (i, _) = char('[')(i)?;
+	let (i, _) = char('*')(i)?;
+	let (i, _) = char(']')(i)?;
 	Ok((i, Part::All))
 }
 
 pub fn last(i: &str) -> IResult<&str, Part> {
-	let (i, _) = tag("[")(i)?;
-	let (i, _) = tag("$")(i)?;
-	let (i, _) = tag("]")(i)?;
+	let (i, _) = char('[')(i)?;
+	let (i, _) = char('$')(i)?;
+	let (i, _) = char(']')(i)?;
 	Ok((i, Part::Last))
 }
 
 pub fn index(i: &str) -> IResult<&str, Part> {
-	let (i, _) = tag("[")(i)?;
+	let (i, _) = char('[')(i)?;
 	let (i, v) = number(i)?;
-	let (i, _) = tag("]")(i)?;
+	let (i, _) = char(']')(i)?;
 	Ok((i, Part::Index(v)))
 }
 
 pub fn field(i: &str) -> IResult<&str, Part> {
-	let (i, _) = tag(".")(i)?;
+	let (i, _) = char('.')(i)?;
 	let (i, v) = ident(i)?;
 	Ok((i, Part::Field(v)))
 }
 
 pub fn filter(i: &str) -> IResult<&str, Part> {
-	let (i, _) = tag("[")(i)?;
+	let (i, _) = char('[')(i)?;
 	let (i, _) = alt((tag_no_case("WHERE"), tag("?")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = value(i)?;
-	let (i, _) = tag("]")(i)?;
+	let (i, _) = char(']')(i)?;
 	Ok((i, Part::Where(v)))
 }
 

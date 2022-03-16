@@ -10,6 +10,7 @@ use crate::sql::script::{script, Script};
 use crate::sql::value::{single, value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
+use nom::character::complete::char;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -88,33 +89,35 @@ pub fn function(i: &str) -> IResult<&str, Function> {
 fn future(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("fn::future")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("->")(i)?;
+	let (i, _) = char('-')(i)?;
+	let (i, _) = char('>')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("{")(i)?;
+	let (i, _) = char('{')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = value(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("}")(i)?;
+	let (i, _) = char('}')(i)?;
 	Ok((i, Function::Future(v)))
 }
 
 fn embed(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("fn::script")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("->")(i)?;
+	let (i, _) = char('-')(i)?;
+	let (i, _) = char('>')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("{")(i)?;
+	let (i, _) = char('{')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = script(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("}")(i)?;
+	let (i, _) = char('}')(i)?;
 	Ok((i, Function::Script(v)))
 }
 
 fn casts(i: &str) -> IResult<&str, Function> {
-	let (i, _) = tag("<")(i)?;
+	let (i, _) = char('<')(i)?;
 	let (i, s) = function_casts(i)?;
-	let (i, _) = tag(">")(i)?;
+	let (i, _) = char('>')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = single(i)?;
 	Ok((i, Function::Cast(s.to_string(), v)))
@@ -122,11 +125,11 @@ fn casts(i: &str) -> IResult<&str, Function> {
 
 fn normal(i: &str) -> IResult<&str, Function> {
 	let (i, s) = function_names(i)?;
-	let (i, _) = tag("(")(i)?;
+	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = separated_list0(commas, value)(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag(")")(i)?;
+	let (i, _) = char(')')(i)?;
 	Ok((i, Function::Normal(s.to_string(), v)))
 }
 

@@ -4,7 +4,7 @@ use crate::sql::common::val_char;
 use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
 use nom::branch::alt;
-use nom::bytes::complete::tag;
+use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -34,11 +34,11 @@ pub fn model(i: &str) -> IResult<&str, Model> {
 }
 
 fn model_count(i: &str) -> IResult<&str, Model> {
-	let (i, _) = tag("|")(i)?;
+	let (i, _) = char('|')(i)?;
 	let (i, t) = ident_raw(i)?;
-	let (i, _) = tag(":")(i)?;
+	let (i, _) = char(':')(i)?;
 	let (i, c) = take_u64(i)?;
-	let (i, _) = tag("|")(i)?;
+	let (i, _) = char('|')(i)?;
 	Ok((
 		i,
 		Model {
@@ -50,13 +50,14 @@ fn model_count(i: &str) -> IResult<&str, Model> {
 }
 
 fn model_range(i: &str) -> IResult<&str, Model> {
-	let (i, _) = tag("|")(i)?;
+	let (i, _) = char('|')(i)?;
 	let (i, t) = ident_raw(i)?;
-	let (i, _) = tag(":")(i)?;
+	let (i, _) = char(':')(i)?;
 	let (i, b) = take_u64(i)?;
-	let (i, _) = tag("..")(i)?;
+	let (i, _) = char('.')(i)?;
+	let (i, _) = char('.')(i)?;
 	let (i, e) = take_u64(i)?;
-	let (i, _) = tag("|")(i)?;
+	let (i, _) = char('|')(i)?;
 	Ok((
 		i,
 		Model {

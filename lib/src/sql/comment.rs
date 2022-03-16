@@ -1,7 +1,7 @@
 use crate::sql::error::IResult;
 use nom::branch::alt;
-use nom::bytes::complete::tag;
 use nom::bytes::complete::take_until;
+use nom::character::complete::char;
 use nom::character::complete::multispace0;
 use nom::character::complete::multispace1;
 use nom::character::complete::not_line_ending;
@@ -36,30 +36,34 @@ fn space(i: &str) -> IResult<&str, ()> {
 
 fn block(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
-	let (i, _) = tag("/*")(i)?;
+	let (i, _) = char('/')(i)?;
+	let (i, _) = char('*')(i)?;
 	let (i, _) = take_until("*/")(i)?;
-	let (i, _) = tag("*/")(i)?;
+	let (i, _) = char('*')(i)?;
+	let (i, _) = char('/')(i)?;
 	let (i, _) = multispace0(i)?;
 	Ok((i, ()))
 }
 
 fn slash(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
-	let (i, _) = tag("//")(i)?;
+	let (i, _) = char('/')(i)?;
+	let (i, _) = char('/')(i)?;
 	let (i, _) = not_line_ending(i)?;
 	Ok((i, ()))
 }
 
 fn dash(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
-	let (i, _) = tag("--")(i)?;
+	let (i, _) = char('-')(i)?;
+	let (i, _) = char('-')(i)?;
 	let (i, _) = not_line_ending(i)?;
 	Ok((i, ()))
 }
 
 fn hash(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
-	let (i, _) = tag("#")(i)?;
+	let (i, _) = char('#')(i)?;
 	let (i, _) = not_line_ending(i)?;
 	Ok((i, ()))
 }

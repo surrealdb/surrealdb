@@ -1,9 +1,9 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::error::Error::ParserError;
 use crate::sql::error::IResult;
-use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while;
 use nom::bytes::complete::take_while_m_n;
+use nom::character::complete::char;
 use nom::character::is_alphanumeric;
 use nom::multi::many1;
 use nom::Err::Error;
@@ -11,14 +11,14 @@ use std::ops::RangeBounds;
 
 pub fn colons(i: &str) -> IResult<&str, ()> {
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = many1(tag(";"))(i)?;
+	let (i, _) = many1(char(';'))(i)?;
 	let (i, _) = mightbespace(i)?;
 	Ok((i, ()))
 }
 
 pub fn commas(i: &str) -> IResult<&str, ()> {
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag(",")(i)?;
+	let (i, _) = char(',')(i)?;
 	let (i, _) = mightbespace(i)?;
 	Ok((i, ()))
 }

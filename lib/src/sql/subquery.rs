@@ -13,7 +13,7 @@ use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
-use nom::bytes::complete::tag;
+use nom::character::complete::char;
 use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -210,7 +210,7 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 }
 
 fn subquery_others(i: &str) -> IResult<&str, Subquery> {
-	let (i, _) = tag("(")(i)?;
+	let (i, _) = char('(')(i)?;
 	let (i, v) = alt((
 		map(select, |v| Subquery::Select(Arc::new(v))),
 		map(create, |v| Subquery::Create(Arc::new(v))),
@@ -220,7 +220,7 @@ fn subquery_others(i: &str) -> IResult<&str, Subquery> {
 		map(insert, |v| Subquery::Insert(Arc::new(v))),
 		map(value, Subquery::Value),
 	))(i)?;
-	let (i, _) = tag(")")(i)?;
+	let (i, _) = char(')')(i)?;
 	Ok((i, v))
 }
 

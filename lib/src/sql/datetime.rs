@@ -2,7 +2,7 @@ use crate::sql::common::{take_digits, take_digits_range, take_u32};
 use crate::sql::error::IResult;
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 use nom::branch::alt;
-use nom::bytes::complete::tag;
+use nom::character::complete::char;
 use nom::combinator::map;
 use nom::sequence::delimited;
 use serde::ser::SerializeStruct;
@@ -71,8 +71,8 @@ impl Serialize for Datetime {
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
 	alt((
-		delimited(tag("\""), datetime_raw, tag("\"")),
-		delimited(tag("\'"), datetime_raw, tag("\'")),
+		delimited(char('\"'), datetime_raw, char('\"')),
+		delimited(char('\''), datetime_raw, char('\'')),
 	))(i)
 }
 
@@ -82,9 +82,9 @@ pub fn datetime_raw(i: &str) -> IResult<&str, Datetime> {
 
 fn date(i: &str) -> IResult<&str, Datetime> {
 	let (i, year) = year(i)?;
-	let (i, _) = tag("-")(i)?;
+	let (i, _) = char('-')(i)?;
 	let (i, mon) = month(i)?;
-	let (i, _) = tag("-")(i)?;
+	let (i, _) = char('-')(i)?;
 	let (i, day) = day(i)?;
 
 	let d = Utc.ymd(year, mon, day).and_hms(0, 0, 0);
@@ -98,15 +98,15 @@ fn date(i: &str) -> IResult<&str, Datetime> {
 
 fn time(i: &str) -> IResult<&str, Datetime> {
 	let (i, year) = year(i)?;
-	let (i, _) = tag("-")(i)?;
+	let (i, _) = char('-')(i)?;
 	let (i, mon) = month(i)?;
-	let (i, _) = tag("-")(i)?;
+	let (i, _) = char('-')(i)?;
 	let (i, day) = day(i)?;
-	let (i, _) = tag("T")(i)?;
+	let (i, _) = char('T')(i)?;
 	let (i, hour) = hour(i)?;
-	let (i, _) = tag(":")(i)?;
+	let (i, _) = char(':')(i)?;
 	let (i, min) = minute(i)?;
-	let (i, _) = tag(":")(i)?;
+	let (i, _) = char(':')(i)?;
 	let (i, sec) = second(i)?;
 	let (i, zone) = zone(i)?;
 
@@ -131,15 +131,15 @@ fn time(i: &str) -> IResult<&str, Datetime> {
 
 fn nano(i: &str) -> IResult<&str, Datetime> {
 	let (i, year) = year(i)?;
-	let (i, _) = tag("-")(i)?;
+	let (i, _) = char('-')(i)?;
 	let (i, mon) = month(i)?;
-	let (i, _) = tag("-")(i)?;
+	let (i, _) = char('-')(i)?;
 	let (i, day) = day(i)?;
-	let (i, _) = tag("T")(i)?;
+	let (i, _) = char('T')(i)?;
 	let (i, hour) = hour(i)?;
-	let (i, _) = tag(":")(i)?;
+	let (i, _) = char(':')(i)?;
 	let (i, min) = minute(i)?;
-	let (i, _) = tag(":")(i)?;
+	let (i, _) = char(':')(i)?;
 	let (i, sec) = second(i)?;
 	let (i, nano) = nanosecond(i)?;
 	let (i, zone) = zone(i)?;
@@ -191,7 +191,7 @@ fn second(i: &str) -> IResult<&str, u32> {
 }
 
 fn nanosecond(i: &str) -> IResult<&str, u32> {
-	let (i, _) = tag(".")(i)?;
+	let (i, _) = char('.')(i)?;
 	let (i, v) = take_u32(i)?;
 	Ok((i, v))
 }
@@ -201,14 +201,14 @@ fn zone(i: &str) -> IResult<&str, Option<FixedOffset>> {
 }
 
 fn zone_utc(i: &str) -> IResult<&str, Option<FixedOffset>> {
-	let (i, _) = tag("Z")(i)?;
+	let (i, _) = char('Z')(i)?;
 	Ok((i, None))
 }
 
 fn zone_all(i: &str) -> IResult<&str, Option<FixedOffset>> {
 	let (i, s) = sign(i)?;
 	let (i, h) = hour(i)?;
-	let (i, _) = tag(":")(i)?;
+	let (i, _) = char(':')(i)?;
 	let (i, m) = minute(i)?;
 	if h == 0 && m == 0 {
 		Ok((i, None))
@@ -222,8 +222,8 @@ fn zone_all(i: &str) -> IResult<&str, Option<FixedOffset>> {
 }
 
 fn sign(i: &str) -> IResult<&str, i32> {
-	map(alt((tag("-"), tag("+"))), |s: &str| match s {
-		"-" => -1,
+	map(alt((char('-'), char('+'))), |s: char| match s {
+		'-' => -1,
 		_ => 1,
 	})(i)
 }

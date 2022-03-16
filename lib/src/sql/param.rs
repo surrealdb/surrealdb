@@ -8,7 +8,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
-use nom::bytes::complete::tag;
+use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
@@ -62,7 +62,7 @@ impl fmt::Display for Param {
 }
 
 pub fn param(i: &str) -> IResult<&str, Param> {
-	let (i, _) = tag("$")(i)?;
+	let (i, _) = char('$')(i)?;
 	let (i, v) = idiom::param(i)?;
 	Ok((i, Param::from(v)))
 }

@@ -8,8 +8,8 @@ use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
 use crate::sql::value::{value, Value};
 use derive::Store;
-use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
+use nom::character::complete::char;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -41,9 +41,9 @@ impl fmt::Display for SetStatement {
 pub fn set(i: &str) -> IResult<&str, SetStatement> {
 	let (i, _) = tag_no_case("LET")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, n) = preceded(tag("$"), ident_raw)(i)?;
+	let (i, n) = preceded(char('$'), ident_raw)(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("=")(i)?;
+	let (i, _) = char('=')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, w) = value(i)?;
 	Ok((

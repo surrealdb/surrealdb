@@ -2,6 +2,7 @@ use crate::sql::error::IResult;
 use crate::sql::table::{table, Table};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
+use nom::character::complete::char;
 use nom::combinator::map;
 use nom::multi::many1;
 use serde::{Deserialize, Serialize};
@@ -62,7 +63,7 @@ pub fn kind(i: &str) -> IResult<&str, Kind> {
 
 fn geometry(i: &str) -> IResult<&str, String> {
 	let (i, _) = tag("geometry")(i)?;
-	let (i, _) = tag("(")(i)?;
+	let (i, _) = char('(')(i)?;
 	let (i, v) = alt((
 		tag("feature"),
 		tag("point"),
@@ -73,14 +74,14 @@ fn geometry(i: &str) -> IResult<&str, String> {
 		tag("multipolygon"),
 		tag("collection"),
 	))(i)?;
-	let (i, _) = tag(")")(i)?;
+	let (i, _) = char(')')(i)?;
 	Ok((i, String::from(v)))
 }
 
 fn record(i: &str) -> IResult<&str, Vec<Table>> {
 	let (i, _) = tag("record")(i)?;
-	let (i, _) = tag("(")(i)?;
+	let (i, _) = char('(')(i)?;
 	let (i, v) = many1(table)(i)?;
-	let (i, _) = tag(")")(i)?;
+	let (i, _) = char(')')(i)?;
 	Ok((i, v))
 }
