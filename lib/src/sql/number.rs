@@ -29,91 +29,79 @@ pub enum Number {
 
 impl Default for Number {
 	fn default() -> Self {
-		Number::Decimal(Decimal::from(0))
+		Number::Int(0)
 	}
 }
 
 impl From<i8> for Number {
 	fn from(i: i8) -> Self {
-		Number::Decimal(Decimal::from(i))
+		Number::Int(i as i64)
 	}
 }
 
 impl From<i16> for Number {
 	fn from(i: i16) -> Self {
-		Number::Decimal(Decimal::from(i))
+		Number::Int(i as i64)
 	}
 }
 
 impl From<i32> for Number {
 	fn from(i: i32) -> Self {
-		Number::Decimal(Decimal::from(i))
+		Number::Int(i as i64)
 	}
 }
 
 impl From<i64> for Number {
 	fn from(i: i64) -> Self {
-		Number::Decimal(Decimal::from(i))
-	}
-}
-
-impl From<i128> for Number {
-	fn from(i: i128) -> Self {
-		Number::Decimal(Decimal::from(i))
+		Number::Int(i as i64)
 	}
 }
 
 impl From<isize> for Number {
 	fn from(i: isize) -> Self {
-		Number::Decimal(Decimal::from(i))
+		Number::Int(i as i64)
 	}
 }
 
 impl From<u8> for Number {
 	fn from(i: u8) -> Self {
-		Number::Decimal(Decimal::from(i))
+		Number::Int(i as i64)
 	}
 }
 
 impl From<u16> for Number {
 	fn from(i: u16) -> Self {
-		Number::Decimal(Decimal::from(i))
+		Number::Int(i as i64)
 	}
 }
 
 impl From<u32> for Number {
 	fn from(i: u32) -> Self {
-		Number::Decimal(Decimal::from(i))
+		Number::Int(i as i64)
 	}
 }
 
 impl From<u64> for Number {
 	fn from(i: u64) -> Self {
-		Number::Decimal(Decimal::from(i))
-	}
-}
-
-impl From<u128> for Number {
-	fn from(i: u128) -> Self {
-		Number::Decimal(Decimal::from(i))
+		Number::Int(i as i64)
 	}
 }
 
 impl From<usize> for Number {
 	fn from(i: usize) -> Self {
-		Number::Decimal(Decimal::from(i))
+		Number::Int(i as i64)
 	}
 }
 
 impl From<f32> for Number {
 	fn from(f: f32) -> Self {
-		Number::Decimal(Decimal::from_f32(f).unwrap_or_default())
+		Number::Float(f as f64)
 	}
 }
 
 impl From<f64> for Number {
 	fn from(f: f64) -> Self {
-		Number::Decimal(Decimal::from_f64(f).unwrap_or_default())
+		Number::Float(f as f64)
 	}
 }
 
