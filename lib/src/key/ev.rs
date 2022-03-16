@@ -4,16 +4,16 @@ use storekey::{deserialize, serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Ev {
-	__: char,
-	_a: char,
+	__: u8,
+	_a: u8,
 	pub ns: String,
-	_b: char,
+	_b: u8,
 	pub db: String,
-	_c: char,
+	_c: u8,
 	pub tb: String,
-	_d: char,
-	_e: char,
-	_f: char,
+	_d: u8,
+	_e: u8,
+	_f: u8,
 	pub ev: String,
 }
 
@@ -36,16 +36,16 @@ pub fn new(ns: &str, db: &str, tb: &str, ev: &str) -> Ev {
 impl Ev {
 	pub fn new(ns: String, db: String, tb: String, ev: String) -> Ev {
 		Ev {
-			__: '/',
-			_a: '*',
+			__: 0x2f, // /
+			_a: 0x2a, // *
 			ns,
-			_b: '*',
+			_b: 0x2a, // *
 			db,
-			_c: '*',
+			_c: 0x2a, // *
 			tb,
-			_d: '!',
-			_e: 'e',
-			_f: 'v',
+			_d: 0x21, // !
+			_e: 0x65, // e
+			_f: 0x76, // v
 			ev,
 		}
 	}

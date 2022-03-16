@@ -4,8 +4,8 @@ use storekey::{deserialize, serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Namespace {
-	__: char,
-	_a: char,
+	__: u8,
+	_a: u8,
 	pub ns: String,
 }
 
@@ -28,8 +28,8 @@ pub fn new(ns: &str) -> Namespace {
 impl Namespace {
 	pub fn new(ns: String) -> Namespace {
 		Namespace {
-			__: '/',
-			_a: '*',
+			__: 0x2f, // /
+			_a: 0x2a, // *
 			ns,
 		}
 	}

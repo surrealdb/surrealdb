@@ -4,12 +4,12 @@ use storekey::{deserialize, serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Db {
-	__: char,
-	_a: char,
+	__: u8,
+	_a: u8,
 	pub ns: String,
-	_b: char,
-	_c: char,
-	_d: char,
+	_b: u8,
+	_c: u8,
+	_d: u8,
 	pub db: String,
 }
 
@@ -32,12 +32,12 @@ pub fn new(ns: &str, db: &str) -> Db {
 impl Db {
 	pub fn new(ns: String, db: String) -> Db {
 		Db {
-			__: '/',
-			_a: '*',
+			__: 0x2f, // /
+			_a: 0x2a, // *
 			ns,
-			_b: '!',
-			_c: 'd',
-			_d: 'b',
+			_b: 0x21, // !
+			_c: 0x64, // d
+			_d: 0x02, // b
 			db,
 		}
 	}

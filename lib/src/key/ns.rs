@@ -4,10 +4,10 @@ use storekey::{deserialize, serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Ns {
-	__: char,
-	_a: char,
-	_b: char,
-	_c: char,
+	__: u8,
+	_a: u8,
+	_b: u8,
+	_c: u8,
 	pub ns: String,
 }
 
@@ -30,10 +30,10 @@ pub fn new(ns: &str) -> Ns {
 impl Ns {
 	pub fn new(ns: String) -> Ns {
 		Ns {
-			__: '/',
-			_a: '!',
-			_b: 'n',
-			_c: 's',
+			__: 0x2f, // /
+			_a: 0x21, // !
+			_b: 0x6e, // n
+			_c: 0x73, // s
 			ns,
 		}
 	}

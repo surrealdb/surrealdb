@@ -5,14 +5,14 @@ use storekey::{deserialize, serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Point {
-	__: char,
-	_a: char,
+	__: u8,
+	_a: u8,
 	pub ns: String,
-	_b: char,
+	_b: u8,
 	pub db: String,
-	_c: char,
+	_c: u8,
 	pub tb: String,
-	_d: char,
+	_d: u8,
 	pub ix: String,
 	pub fd: Value,
 	pub id: String,
@@ -37,14 +37,14 @@ pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Value, id: &str) -> Point
 impl Point {
 	pub fn new(ns: String, db: String, tb: String, ix: String, fd: Value, id: String) -> Point {
 		Point {
-			__: '/',
-			_a: '*',
+			__: 0x2f, // /
+			_a: 0x2a, // *
 			ns,
-			_b: '*',
+			_b: 0x2a, // *
 			db,
-			_c: '*',
+			_c: 0x2a, // *
 			tb,
-			_d: '¤',
+			_d: 0xa4, // ¤
 			ix,
 			fd,
 			id,

@@ -4,14 +4,14 @@ use storekey::{deserialize, serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Sc {
-	__: char,
-	_a: char,
+	__: u8,
+	_a: u8,
 	pub ns: String,
-	_b: char,
+	_b: u8,
 	pub db: String,
-	_c: char,
-	_d: char,
-	_e: char,
+	_c: u8,
+	_d: u8,
+	_e: u8,
 	pub sc: String,
 }
 
@@ -34,14 +34,14 @@ pub fn new(ns: &str, db: &str, sc: &str) -> Sc {
 impl Sc {
 	pub fn new(ns: String, db: String, sc: String) -> Sc {
 		Sc {
-			__: '/',
-			_a: '*',
+			__: 0x2f, // /
+			_a: 0x2a, // *
 			ns,
-			_b: '*',
+			_b: 0x2a, // *
 			db,
-			_c: '!',
-			_d: 's',
-			_e: 'c',
+			_c: 0x21, // !
+			_d: 0x73, // s
+			_e: 0x63, // c
 			sc,
 		}
 	}

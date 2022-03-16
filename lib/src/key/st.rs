@@ -4,18 +4,18 @@ use storekey::{deserialize, serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct St {
-	__: char,
-	_a: char,
+	__: u8,
+	_a: u8,
 	pub ns: String,
-	_b: char,
+	_b: u8,
 	pub db: String,
-	_c: char,
-	_d: char,
-	_e: char,
+	_c: u8,
+	_d: u8,
+	_e: u8,
 	pub sc: String,
-	_f: char,
-	_g: char,
-	_h: char,
+	_f: u8,
+	_g: u8,
+	_h: u8,
 	pub tk: String,
 }
 
@@ -38,18 +38,18 @@ pub fn new(ns: &str, db: &str, sc: &str, tk: &str) -> St {
 impl St {
 	pub fn new(ns: String, db: String, sc: String, tk: String) -> St {
 		St {
-			__: '/',
-			_a: '*',
+			__: 0x2f, // /
+			_a: 0x2a, // *
 			ns,
-			_b: '*',
+			_b: 0x2a, // *
 			db,
-			_c: '!',
-			_d: 's',
-			_e: 't',
+			_c: 0x21, // !
+			_d: 0x73, // s
+			_e: 0x74, // t
 			sc,
-			_f: '!',
-			_g: 't',
-			_h: 'k',
+			_f: 0x21, // !
+			_g: 0x74, // t
+			_h: 0x6b, // k
 			tk,
 		}
 	}

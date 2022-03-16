@@ -4,12 +4,12 @@ use storekey::{deserialize, serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Table {
-	__: char,
-	_a: char,
+	__: u8,
+	_a: u8,
 	pub ns: String,
-	_b: char,
+	_b: u8,
 	pub db: String,
-	_c: char,
+	_c: u8,
 	pub tb: String,
 }
 
@@ -32,12 +32,12 @@ pub fn new(ns: &str, db: &str, tb: &str) -> Table {
 impl Table {
 	pub fn new(ns: String, db: String, tb: String) -> Table {
 		Table {
-			__: '/',
-			_a: '*',
+			__: 0x2f, // /
+			_a: 0x2a, // *
 			ns,
-			_b: '*',
+			_b: 0x2a, // *
 			db,
-			_c: '*',
+			_c: 0x2a, // *
 			tb,
 		}
 	}
