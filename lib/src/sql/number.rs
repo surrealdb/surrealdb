@@ -1,8 +1,16 @@
+use crate::sql::comment::comment;
 use crate::sql::error::IResult;
+use crate::sql::operator::{assigner, operator};
 use dec::prelude::FromPrimitive;
 use dec::prelude::ToPrimitive;
 use dec::Decimal;
 use dec::MathematicalOps;
+use nom::branch::alt;
+use nom::bytes::complete::tag;
+use nom::character::complete::multispace1;
+use nom::combinator::eof;
+use nom::combinator::map;
+use nom::combinator::peek;
 use nom::number::complete::recognize_float;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -504,6 +512,17 @@ impl<'a> Product<&'a Self> for Number {
 
 pub fn number(i: &str) -> IResult<&str, Number> {
 	let (i, v) = recognize_float(i)?;
+	let (i, _) = peek(alt((
+		map(multispace1, |_| ()),
+		map(operator, |_| ()),
+		map(assigner, |_| ()),
+		map(comment, |_| ()),
+		map(tag("]"), |_| ()),
+		map(tag("}"), |_| ()),
+		map(tag(";"), |_| ()),
+		map(tag(","), |_| ()),
+		map(eof, |_| ()),
+	)))(i)?;
 	Ok((i, Number::from(v)))
 }
 
