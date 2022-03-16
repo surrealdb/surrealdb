@@ -5,7 +5,6 @@ use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while;
 use nom::bytes::complete::take_while_m_n;
 use nom::character::is_alphanumeric;
-use nom::combinator::map;
 use nom::multi::many1;
 use nom::Err::Error;
 use std::ops::RangeBounds;
@@ -31,21 +30,6 @@ pub fn is_digit(chr: char) -> bool {
 }
 
 #[inline]
-pub fn to_u32(s: &str) -> u32 {
-	str::FromStr::from_str(s).unwrap()
-}
-
-#[inline]
-pub fn to_u64(s: &str) -> u64 {
-	str::FromStr::from_str(s).unwrap()
-}
-
-#[inline]
-pub fn to_usize(s: &str) -> usize {
-	str::FromStr::from_str(s).unwrap()
-}
-
-#[inline]
 pub fn val_char(chr: char) -> bool {
 	is_alphanumeric(chr as u8) || chr == '_'
 }
@@ -61,30 +45,41 @@ pub fn escape(s: &str, f: &dyn Fn(char) -> bool, c: &str) -> String {
 }
 
 pub fn take_u32(i: &str) -> IResult<&str, u32> {
-	let (i, v) = map(take_while(is_digit), to_u32)(i)?;
-	Ok((i, v))
+	let (i, v) = take_while(is_digit)(i)?;
+	match str::FromStr::from_str(v) {
+		Ok(v) => Ok((i, v)),
+		_ => Err(Error(ParserError(i))),
+	}
 }
 
 pub fn take_u64(i: &str) -> IResult<&str, u64> {
-	let (i, v) = map(take_while(is_digit), to_u64)(i)?;
-	Ok((i, v))
+	let (i, v) = take_while(is_digit)(i)?;
+	match str::FromStr::from_str(v) {
+		Ok(v) => Ok((i, v)),
+		_ => Err(Error(ParserError(i))),
+	}
 }
 
 pub fn take_usize(i: &str) -> IResult<&str, usize> {
-	let (i, v) = map(take_while(is_digit), to_usize)(i)?;
-	Ok((i, v))
+	let (i, v) = take_while(is_digit)(i)?;
+	match str::FromStr::from_str(v) {
+		Ok(v) => Ok((i, v)),
+		_ => Err(Error(ParserError(i))),
+	}
 }
 
 pub fn take_digits(i: &str, n: usize) -> IResult<&str, u32> {
-	let (i, v) = map(take_while_m_n(n, n, is_digit), to_u32)(i)?;
-	Ok((i, v))
+	let (i, v) = take_while_m_n(n, n, is_digit)(i)?;
+	match str::FromStr::from_str(v) {
+		Ok(v) => Ok((i, v)),
+		_ => Err(Error(ParserError(i))),
+	}
 }
 
 pub fn take_digits_range(i: &str, n: usize, range: impl RangeBounds<u32>) -> IResult<&str, u32> {
-	let (i, v) = map(take_while_m_n(n, n, is_digit), to_u32)(i)?;
-	if range.contains(&v) {
-		Ok((i, v))
-	} else {
-		Err(Error(ParserError(i)))
+	let (i, v) = take_while_m_n(n, n, is_digit)(i)?;
+	match str::FromStr::from_str(v) {
+		Ok(v) if range.contains(&v) => Ok((i, v)),
+		_ => Err(Error(ParserError(i))),
 	}
 }

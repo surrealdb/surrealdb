@@ -1,14 +1,13 @@
+use crate::sql::common::take_u64;
 use crate::sql::datetime::Datetime;
 use crate::sql::error::IResult;
 use chrono::DurationRound;
 use nom::branch::alt;
-use nom::bytes::complete::is_a;
 use nom::bytes::complete::tag;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops;
-use std::str::FromStr;
 use std::time;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
@@ -131,8 +130,7 @@ pub fn duration_raw(i: &str) -> IResult<&str, Duration> {
 }
 
 fn part(i: &str) -> IResult<&str, u64> {
-	let (i, v) = is_a("1234567890")(i)?;
-	let v = u64::from_str(v).unwrap();
+	let (i, v) = take_u64(i)?;
 	Ok((i, v))
 }
 
