@@ -183,7 +183,7 @@ impl Transaction {
 					self.scan(min..max, num).await?
 				}
 				Some(ref mut beg) => {
-					beg.push(0);
+					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
 					let num = std::cmp::min(1000, num);
@@ -226,7 +226,7 @@ impl Transaction {
 					self.scan(min..max, num).await?
 				}
 				Some(ref mut beg) => {
-					beg.push(0);
+					beg.push(0x00);
 					let min = beg.clone();
 					let max = end.clone();
 					let num = std::cmp::min(1000, num);
@@ -255,7 +255,7 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		let beg: Key = key.into();
-		let end: Key = beg.clone().add(255);
+		let end: Key = beg.clone().add(0xff);
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
 		let mut out: Vec<(Key, Val)> = vec![];
@@ -299,7 +299,7 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		let beg: Key = key.into();
-		let end: Key = beg.clone().add(255);
+		let end: Key = beg.clone().add(0xff);
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
 		// Start processing

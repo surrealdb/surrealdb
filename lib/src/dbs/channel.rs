@@ -135,7 +135,7 @@ impl Table {
 							txn.clone().lock().await.scan(min..max, 1000).await?
 						}
 						Some(ref mut beg) => {
-							beg.push(0);
+							beg.push(0x00);
 							let min = beg.clone();
 							let max = end.encode()?;
 							txn.clone().lock().await.scan(min..max, 1000).await?
