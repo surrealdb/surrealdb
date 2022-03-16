@@ -517,6 +517,7 @@ pub fn number(i: &str) -> IResult<&str, Number> {
 		map(operator, |_| ()),
 		map(assigner, |_| ()),
 		map(comment, |_| ()),
+		map(tag(")"), |_| ()),
 		map(tag("]"), |_| ()),
 		map(tag("}"), |_| ()),
 		map(tag(";"), |_| ()),
