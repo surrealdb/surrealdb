@@ -12,7 +12,7 @@ pub struct Thing {
 	_c: u8,
 	pub tb: String,
 	_d: u8,
-	pub id: Part<Id>,
+	pub id: String,
 }
 
 impl From<Thing> for Vec<u8> {
