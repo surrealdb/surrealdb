@@ -23,8 +23,8 @@ use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
 use async_recursion::async_recursion;
+use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
-use dec::Decimal;
 use derive::Store;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -279,12 +279,6 @@ impl From<f64> for Value {
 	}
 }
 
-impl From<Decimal> for Value {
-	fn from(v: Decimal) -> Self {
-		Value::Number(Number::from(v))
-	}
-}
-
 impl From<String> for Value {
 	fn from(v: String) -> Self {
 		Value::Strand(Strand::from(v))
@@ -496,14 +490,14 @@ impl Value {
 		}
 	}
 
-	pub fn as_decimal(self) -> Decimal {
+	pub fn as_decimal(self) -> BigDecimal {
 		match self {
-			Value::True => Decimal::from(1),
+			Value::True => BigDecimal::from(1),
 			Value::Number(v) => v.as_decimal(),
-			Value::Strand(v) => Decimal::from_str(v.as_str()).unwrap_or_default(),
+			Value::Strand(v) => BigDecimal::from_str(v.as_str()).unwrap_or_default(),
 			Value::Duration(v) => v.value.as_secs().into(),
 			Value::Datetime(v) => v.value.timestamp().into(),
-			_ => Decimal::default(),
+			_ => BigDecimal::default(),
 		}
 	}
 

@@ -1,20 +1,17 @@
 use crate::sql::comment::comment;
-use crate::sql::error::Error::ParserError;
 use crate::sql::error::IResult;
 use crate::sql::operator::{assigner, operator};
-use dec::prelude::FromPrimitive;
-use dec::prelude::ToPrimitive;
-use dec::Decimal;
-use dec::MathematicalOps;
+use bigdecimal::BigDecimal;
+use bigdecimal::FromPrimitive;
+use bigdecimal::ToPrimitive;
 use nom::branch::alt;
 use nom::character::complete::char;
-use nom::character::complete::digit1;
+use nom::character::complete::i64;
 use nom::character::complete::multispace1;
 use nom::combinator::eof;
 use nom::combinator::map;
 use nom::combinator::peek;
 use nom::number::complete::recognize_float;
-use nom::Err::Error;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
@@ -27,7 +24,7 @@ use std::str::FromStr;
 pub enum Number {
 	Int(i64),
 	Float(f64),
-	Decimal(Decimal),
+	Decimal(BigDecimal),
 }
 
 impl Default for Number {
@@ -110,24 +107,18 @@ impl From<f64> for Number {
 
 impl<'a> From<&'a str> for Number {
 	fn from(s: &str) -> Self {
-		match s.contains(&['e', 'E'][..]) {
-			true => Number::Decimal(Decimal::from_scientific(s).unwrap_or_default()),
-			false => Number::Decimal(Decimal::from_str(s).unwrap_or_default()),
-		}
+		Number::Decimal(BigDecimal::from_str(s).unwrap_or_default())
 	}
 }
 
 impl From<String> for Number {
 	fn from(s: String) -> Self {
-		match s.contains(&['e', 'E'][..]) {
-			true => Number::Decimal(Decimal::from_scientific(&s).unwrap_or_default()),
-			false => Number::Decimal(Decimal::from_str(&s).unwrap_or_default()),
-		}
+		Number::Decimal(BigDecimal::from_str(&s).unwrap_or_default())
 	}
 }
 
-impl From<Decimal> for Number {
-	fn from(v: Decimal) -> Self {
+impl From<BigDecimal> for Number {
+	fn from(v: BigDecimal) -> Self {
 		Number::Decimal(v)
 	}
 }
@@ -172,7 +163,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v != &0,
 			Number::Float(v) => v != &0.0,
-			Number::Decimal(v) => v != &Decimal::default(),
+			Number::Decimal(v) => v != &BigDecimal::default(),
 		}
 	}
 
@@ -184,7 +175,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v,
 			Number::Float(v) => v as i64,
-			Number::Decimal(v) => v.to_i64().unwrap_or(0),
+			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
 		}
 	}
 
@@ -192,27 +183,27 @@ impl Number {
 		match self {
 			Number::Int(v) => v as f64,
 			Number::Float(v) => v,
-			Number::Decimal(v) => v.to_f64().unwrap_or(0.0),
+			Number::Decimal(v) => v.to_f64().unwrap_or_default(),
 		}
 	}
 
-	pub fn as_decimal(self) -> Decimal {
+	pub fn as_decimal(self) -> BigDecimal {
 		match self {
-			Number::Int(v) => Decimal::from(v),
-			Number::Float(v) => Decimal::from_f64(v).unwrap_or_default(),
+			Number::Int(v) => BigDecimal::from_i64(v).unwrap_or_default(),
+			Number::Float(v) => BigDecimal::from_f64(v).unwrap_or_default(),
 			Number::Decimal(v) => v,
 		}
 	}
 
 	// -----------------------------------
-	//
+	// Complex conversion of number
 	// -----------------------------------
 
 	pub fn to_usize(&self) -> usize {
 		match self {
 			Number::Int(v) => *v as usize,
 			Number::Float(v) => *v as usize,
-			Number::Decimal(v) => v.to_usize().unwrap_or(0),
+			Number::Decimal(v) => v.to_usize().unwrap_or_default(),
 		}
 	}
 
@@ -220,7 +211,7 @@ impl Number {
 		match self {
 			Number::Int(v) => *v,
 			Number::Float(v) => *v as i64,
-			Number::Decimal(v) => v.to_i64().unwrap_or(0),
+			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
 		}
 	}
 
@@ -228,15 +219,15 @@ impl Number {
 		match self {
 			Number::Int(v) => *v as f64,
 			Number::Float(v) => *v,
-			Number::Decimal(v) => v.to_f64().unwrap_or(0.0),
+			Number::Decimal(v) => v.to_f64().unwrap_or_default(),
 		}
 	}
 
-	pub fn to_decimal(&self) -> Decimal {
+	pub fn to_decimal(&self) -> BigDecimal {
 		match self {
-			Number::Int(v) => Decimal::from(*v),
-			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
-			Number::Decimal(v) => *v,
+			Number::Int(v) => BigDecimal::from_i64(*v).unwrap_or_default(),
+			Number::Float(v) => BigDecimal::from_f64(*v).unwrap_or_default(),
+			Number::Decimal(v) => v.clone(),
 		}
 	}
 
@@ -256,7 +247,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.ceil().into(),
-			Number::Decimal(v) => v.ceil().into(),
+			Number::Decimal(v) => (v + BigDecimal::from_f32(0.5).unwrap()).round(0).into(),
 		}
 	}
 
@@ -264,7 +255,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.floor().into(),
-			Number::Decimal(v) => v.floor().into(),
+			Number::Decimal(v) => (v - BigDecimal::from_f32(0.5).unwrap()).round(0).into(),
 		}
 	}
 
@@ -272,7 +263,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.round().into(),
-			Number::Decimal(v) => v.round().into(),
+			Number::Decimal(v) => v.round(0).into(),
 		}
 	}
 
@@ -292,7 +283,7 @@ impl Number {
 		match self {
 			Number::Int(v) => format!("{:.1$}", v, precision).into(),
 			Number::Float(v) => format!("{:.1$}", v, precision).into(),
-			Number::Decimal(v) => v.round_dp(precision as u32).into(),
+			Number::Decimal(v) => v.round(precision as i64).into(),
 		}
 	}
 }
@@ -315,14 +306,14 @@ impl PartialEq for Number {
 			(Number::Int(v), Number::Float(w)) => (*v as f64).eq(w),
 			(Number::Float(v), Number::Int(w)) => v.eq(&(*w as f64)),
 			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).eq(w),
-			(Number::Decimal(v), Number::Int(w)) => v.eq(&Decimal::from(*w)),
+			(Number::Int(v), Number::Decimal(w)) => BigDecimal::from(*v).eq(w),
+			(Number::Decimal(v), Number::Int(w)) => v.eq(&BigDecimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				Decimal::from_f64(*v).unwrap_or_default().eq(w)
+				BigDecimal::from_f64(*v).unwrap_or_default().eq(w)
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
-				v.eq(&Decimal::from_f64(*w).unwrap_or_default())
+				v.eq(&BigDecimal::from_f64(*w).unwrap_or_default())
 			}
 		}
 	}
@@ -338,14 +329,14 @@ impl PartialOrd for Number {
 			(Number::Int(v), Number::Float(w)) => (*v as f64).partial_cmp(w),
 			(Number::Float(v), Number::Int(w)) => v.partial_cmp(&(*w as f64)),
 			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).partial_cmp(w),
-			(Number::Decimal(v), Number::Int(w)) => v.partial_cmp(&Decimal::from(*w)),
+			(Number::Int(v), Number::Decimal(w)) => BigDecimal::from(*v).partial_cmp(w),
+			(Number::Decimal(v), Number::Int(w)) => v.partial_cmp(&BigDecimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				Decimal::from_f64(*v).unwrap_or_default().partial_cmp(w)
+				BigDecimal::from_f64(*v).unwrap_or_default().partial_cmp(w)
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
-				v.partial_cmp(&Decimal::from_f64(*w).unwrap_or_default())
+				v.partial_cmp(&BigDecimal::from_f64(*w).unwrap_or_default())
 			}
 		}
 	}
@@ -439,7 +430,6 @@ impl ops::Div for Number {
 	type Output = Self;
 	fn div(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v / w),
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v / w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 / w),
@@ -453,7 +443,6 @@ impl<'a, 'b> ops::Div<&'b Number> for &'a Number {
 	type Output = Number;
 	fn div(self, other: &'b Number) -> Number {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v / w),
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v / w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 / w),
@@ -506,7 +495,7 @@ pub fn number(i: &str) -> IResult<&str, Number> {
 }
 
 fn integer(i: &str) -> IResult<&str, Number> {
-	let (i, v) = digit1(i)?;
+	let (i, v) = i64(i)?;
 	let (i, _) = peek(alt((
 		map(multispace1, |_| ()),
 		map(operator, |_| ()),
@@ -519,10 +508,7 @@ fn integer(i: &str) -> IResult<&str, Number> {
 		map(char(','), |_| ()),
 		map(eof, |_| ()),
 	)))(i)?;
-	match v.parse::<i64>() {
-		Ok(v) => Ok((i, Number::from(v))),
-		_ => Err(Error(ParserError(i))),
-	}
+	Ok((i, Number::from(v)))
 }
 
 fn decimal(i: &str) -> IResult<&str, Number> {

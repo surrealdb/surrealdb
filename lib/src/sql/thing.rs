@@ -49,8 +49,8 @@ impl Serialize for Thing {
 
 pub fn thing(i: &str) -> IResult<&str, Thing> {
 	let (i, t) = ident_raw(i)?;
-	let (i, v) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
+	let (i, v) = ident_raw(i)?;
 	Ok((
 		i,
 		Thing {
