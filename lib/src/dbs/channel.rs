@@ -79,7 +79,7 @@ impl Model {
 				}
 			}
 			if let Some(r) = self.range {
-				for x in r.0..r.1 {
+				for x in r.0..=r.1 {
 					Thing {
 						tb: self.table.to_string(),
 						id: x.to_string(),
