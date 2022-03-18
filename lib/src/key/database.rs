@@ -27,6 +27,18 @@ pub fn new(ns: &str, db: &str) -> Database {
 	Database::new(ns.to_string(), db.to_string())
 }
 
+pub fn prefix(ns: &str) -> Vec<u8> {
+	let mut k = super::namespace::new(ns).encode().unwrap();
+	k.extend_from_slice(&[0x2a, 0x00]);
+	k
+}
+
+pub fn suffix(ns: &str) -> Vec<u8> {
+	let mut k = super::namespace::new(ns).encode().unwrap();
+	k.extend_from_slice(&[0x2a, 0xff]);
+	k
+}
+
 impl Database {
 	pub fn new(ns: String, db: String) -> Database {
 		Database {

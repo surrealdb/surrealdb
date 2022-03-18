@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::key;
 use crate::key::thing;
 use crate::sql::array::Array;
 use crate::sql::model::Model;
@@ -123,21 +122,21 @@ impl Table {
 		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
-			let beg = thing::new(opt.ns(), opt.db(), &self.name, key::PREFIX);
-			let end = thing::new(opt.ns(), opt.db(), &self.name, key::SUFFIX);
+			let beg = thing::prefix(opt.ns(), opt.db(), &self.name);
+			let end = thing::suffix(opt.ns(), opt.db(), &self.name);
 			let mut nxt: Option<Vec<u8>> = None;
 			loop {
 				if ctx.is_ok() {
 					let res = match nxt {
 						None => {
-							let min = beg.encode()?;
-							let max = end.encode()?;
+							let min = beg.clone();
+							let max = end.clone();
 							txn.clone().lock().await.scan(min..max, 1000).await?
 						}
 						Some(ref mut beg) => {
 							beg.push(0x00);
 							let min = beg.clone();
-							let max = end.encode()?;
+							let max = end.clone();
 							txn.clone().lock().await.scan(min..max, 1000).await?
 						}
 					};

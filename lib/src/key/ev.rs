@@ -33,6 +33,18 @@ pub fn new(ns: &str, db: &str, tb: &str, ev: &str) -> Ev {
 	Ev::new(ns.to_string(), db.to_string(), tb.to_string(), ev.to_string())
 }
 
+pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
+	let mut k = super::table::new(ns, db, tb).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x65, 0x76, 0x00]);
+	k
+}
+
+pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
+	let mut k = super::table::new(ns, db, tb).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x65, 0x76, 0xff]);
+	k
+}
+
 impl Ev {
 	pub fn new(ns: String, db: String, tb: String, ev: String) -> Ev {
 		Ev {

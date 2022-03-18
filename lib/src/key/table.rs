@@ -29,6 +29,18 @@ pub fn new(ns: &str, db: &str, tb: &str) -> Table {
 	Table::new(ns.to_string(), db.to_string(), tb.to_string())
 }
 
+pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
+	let mut k = super::database::new(ns, db).encode().unwrap();
+	k.extend_from_slice(&[0x2a, 0x00]);
+	k
+}
+
+pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
+	let mut k = super::database::new(ns, db).encode().unwrap();
+	k.extend_from_slice(&[0x2a, 0xff]);
+	k
+}
+
 impl Table {
 	pub fn new(ns: String, db: String, tb: String) -> Table {
 		Table {

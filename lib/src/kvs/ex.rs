@@ -30,50 +30,50 @@ where
 impl Transaction {
 	// Get all namespaces
 	pub async fn all_ns(&mut self) -> Result<Vec<DefineNamespaceStatement>, Error> {
-		let beg = crate::key::ns::new(crate::key::PREFIX);
-		let end = crate::key::ns::new(crate::key::SUFFIX);
+		let beg = crate::key::ns::prefix();
+		let end = crate::key::ns::suffix();
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
 	// Get all namespace logins
 	pub async fn all_nl(&mut self, ns: &str) -> Result<Vec<DefineLoginStatement>, Error> {
-		let beg = crate::key::nl::new(ns, crate::key::PREFIX);
-		let end = crate::key::nl::new(ns, crate::key::SUFFIX);
+		let beg = crate::key::nl::prefix(ns);
+		let end = crate::key::nl::suffix(ns);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
 	// Get all namespace tokens
 	pub async fn all_nt(&mut self, ns: &str) -> Result<Vec<DefineTokenStatement>, Error> {
-		let beg = crate::key::nt::new(ns, crate::key::PREFIX);
-		let end = crate::key::nt::new(ns, crate::key::SUFFIX);
+		let beg = crate::key::nt::prefix(ns);
+		let end = crate::key::nt::suffix(ns);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
 	// Get all databases
 	pub async fn all_db(&mut self, ns: &str) -> Result<Vec<DefineDatabaseStatement>, Error> {
-		let beg = crate::key::db::new(ns, crate::key::PREFIX);
-		let end = crate::key::db::new(ns, crate::key::SUFFIX);
+		let beg = crate::key::db::prefix(ns);
+		let end = crate::key::db::suffix(ns);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
 	// Get all database logins
 	pub async fn all_dl(&mut self, ns: &str, db: &str) -> Result<Vec<DefineLoginStatement>, Error> {
-		let beg = crate::key::dl::new(ns, db, crate::key::PREFIX);
-		let end = crate::key::dl::new(ns, db, crate::key::SUFFIX);
+		let beg = crate::key::dl::prefix(ns, db);
+		let end = crate::key::dl::suffix(ns, db);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
 	// Get all database tokens
 	pub async fn all_dt(&mut self, ns: &str, db: &str) -> Result<Vec<DefineTokenStatement>, Error> {
-		let beg = crate::key::dt::new(ns, db, crate::key::PREFIX);
-		let end = crate::key::dt::new(ns, db, crate::key::SUFFIX);
+		let beg = crate::key::dt::prefix(ns, db);
+		let end = crate::key::dt::suffix(ns, db);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
 	// Get all scopes
 	pub async fn all_sc(&mut self, ns: &str, db: &str) -> Result<Vec<DefineScopeStatement>, Error> {
-		let beg = crate::key::sc::new(ns, db, crate::key::PREFIX);
-		let end = crate::key::sc::new(ns, db, crate::key::SUFFIX);
+		let beg = crate::key::sc::prefix(ns, db);
+		let end = crate::key::sc::suffix(ns, db);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
@@ -84,15 +84,15 @@ impl Transaction {
 		db: &str,
 		sc: &str,
 	) -> Result<Vec<DefineTokenStatement>, Error> {
-		let beg = crate::key::st::new(ns, db, sc, crate::key::PREFIX);
-		let end = crate::key::st::new(ns, db, sc, crate::key::SUFFIX);
+		let beg = crate::key::st::prefix(ns, db, sc);
+		let end = crate::key::st::suffix(ns, db, sc);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
 	// Get all tables
 	pub async fn all_tb(&mut self, ns: &str, db: &str) -> Result<Vec<DefineTableStatement>, Error> {
-		let beg = crate::key::tb::new(ns, db, crate::key::PREFIX);
-		let end = crate::key::tb::new(ns, db, crate::key::SUFFIX);
+		let beg = crate::key::tb::prefix(ns, db);
+		let end = crate::key::tb::suffix(ns, db);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
@@ -103,8 +103,8 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Vec<DefineEventStatement>, Error> {
-		let beg = crate::key::ev::new(ns, db, tb, crate::key::PREFIX);
-		let end = crate::key::ev::new(ns, db, tb, crate::key::SUFFIX);
+		let beg = crate::key::ev::prefix(ns, db, tb);
+		let end = crate::key::ev::suffix(ns, db, tb);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
@@ -115,8 +115,8 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Vec<DefineFieldStatement>, Error> {
-		let beg = crate::key::fd::new(ns, db, tb, crate::key::PREFIX);
-		let end = crate::key::fd::new(ns, db, tb, crate::key::SUFFIX);
+		let beg = crate::key::fd::prefix(ns, db, tb);
+		let end = crate::key::fd::suffix(ns, db, tb);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
@@ -127,8 +127,8 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Vec<DefineIndexStatement>, Error> {
-		let beg = crate::key::ix::new(ns, db, tb, crate::key::PREFIX);
-		let end = crate::key::ix::new(ns, db, tb, crate::key::SUFFIX);
+		let beg = crate::key::ix::prefix(ns, db, tb);
+		let end = crate::key::ix::suffix(ns, db, tb);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
@@ -139,8 +139,8 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Vec<DefineTableStatement>, Error> {
-		let beg = crate::key::ft::new(ns, db, tb, crate::key::PREFIX);
-		let end = crate::key::ft::new(ns, db, tb, crate::key::SUFFIX);
+		let beg = crate::key::ft::prefix(ns, db, tb);
+		let end = crate::key::ft::suffix(ns, db, tb);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}
@@ -151,8 +151,8 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Vec<LiveStatement>, Error> {
-		let beg = crate::key::lv::new(ns, db, tb, crate::key::PREFIX);
-		let end = crate::key::lv::new(ns, db, tb, crate::key::SUFFIX);
+		let beg = crate::key::lv::prefix(ns, db, tb);
+		let end = crate::key::lv::suffix(ns, db, tb);
 		let val = self.getr(beg..end, u32::MAX).await?;
 		Ok(val.convert())
 	}

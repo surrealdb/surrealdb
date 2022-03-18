@@ -33,6 +33,18 @@ pub fn new(ns: &str, db: &str, tb: &str, ft: &str) -> Ft {
 	Ft::new(ns.to_string(), db.to_string(), tb.to_string(), ft.to_string())
 }
 
+pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
+	let mut k = super::table::new(ns, db, tb).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x66, 0x74, 0x00]);
+	k
+}
+
+pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
+	let mut k = super::table::new(ns, db, tb).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x66, 0x74, 0xff]);
+	k
+}
+
 impl Ft {
 	pub fn new(ns: String, db: String, tb: String, ft: String) -> Ft {
 		Ft {

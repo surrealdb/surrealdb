@@ -25,6 +25,18 @@ pub fn new(ns: &str) -> Namespace {
 	Namespace::new(ns.to_string())
 }
 
+pub fn prefix() -> Vec<u8> {
+	let mut k = super::kv::new().encode().unwrap();
+	k.extend_from_slice(&[0x2a, 0x00]);
+	k
+}
+
+pub fn suffix() -> Vec<u8> {
+	let mut k = super::kv::new().encode().unwrap();
+	k.extend_from_slice(&[0x2a, 0xff]);
+	k
+}
+
 impl Namespace {
 	pub fn new(ns: String) -> Namespace {
 		Namespace {

@@ -31,6 +31,18 @@ pub fn new(ns: &str, db: &str, tb: &str) -> Dt {
 	Dt::new(ns.to_string(), db.to_string(), tb.to_string())
 }
 
+pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
+	let mut k = super::database::new(ns, db).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x64, 0x74, 0x00]);
+	k
+}
+
+pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
+	let mut k = super::database::new(ns, db).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x64, 0x74, 0xff]);
+	k
+}
+
 impl Dt {
 	pub fn new(ns: String, db: String, tk: String) -> Dt {
 		Dt {

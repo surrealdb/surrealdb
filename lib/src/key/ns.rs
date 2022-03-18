@@ -27,6 +27,18 @@ pub fn new(ns: &str) -> Ns {
 	Ns::new(ns.to_string())
 }
 
+pub fn prefix() -> Vec<u8> {
+	let mut k = super::kv::new().encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x6e, 0x73, 0x00]);
+	k
+}
+
+pub fn suffix() -> Vec<u8> {
+	let mut k = super::kv::new().encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x6e, 0x73, 0xff]);
+	k
+}
+
 impl Ns {
 	pub fn new(ns: String) -> Ns {
 		Ns {

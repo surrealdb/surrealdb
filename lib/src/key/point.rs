@@ -34,6 +34,18 @@ pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Value, id: &str) -> Point
 	Point::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string(), fd, id.to_string())
 }
 
+pub fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
+	let mut k = super::guide::new(ns, db, tb, ix).encode().unwrap();
+	k.extend_from_slice(&[0x00]);
+	k
+}
+
+pub fn suffix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
+	let mut k = super::guide::new(ns, db, tb, ix).encode().unwrap();
+	k.extend_from_slice(&[0xff]);
+	k
+}
+
 impl Point {
 	pub fn new(ns: String, db: String, tb: String, ix: String, fd: Value, id: String) -> Point {
 		Point {

@@ -29,6 +29,18 @@ pub fn new(ns: &str, tk: &str) -> Nt {
 	Nt::new(ns.to_string(), tk.to_string())
 }
 
+pub fn prefix(ns: &str) -> Vec<u8> {
+	let mut k = super::namespace::new(ns).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x6e, 0x74, 0x00]);
+	k
+}
+
+pub fn suffix(ns: &str) -> Vec<u8> {
+	let mut k = super::namespace::new(ns).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x6e, 0x74, 0xff]);
+	k
+}
+
 impl Nt {
 	pub fn new(ns: String, tk: String) -> Nt {
 		Nt {

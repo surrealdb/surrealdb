@@ -35,6 +35,18 @@ pub fn new(ns: &str, db: &str, sc: &str, tk: &str) -> St {
 	St::new(ns.to_string(), db.to_string(), sc.to_string(), tk.to_string())
 }
 
+pub fn prefix(ns: &str, db: &str, sc: &str) -> Vec<u8> {
+	let mut k = super::sc::new(ns, db, sc).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x74, 0x6b, 0x00]);
+	k
+}
+
+pub fn suffix(ns: &str, db: &str, sc: &str) -> Vec<u8> {
+	let mut k = super::sc::new(ns, db, sc).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x74, 0x6b, 0xff]);
+	k
+}
+
 impl St {
 	pub fn new(ns: String, db: String, sc: String, tk: String) -> St {
 		St {
