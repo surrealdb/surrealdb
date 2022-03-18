@@ -1,3 +1,4 @@
+use crate::sql::cond::Cond;
 use crate::sql::group::Groups;
 use crate::sql::limit::Limit;
 use crate::sql::order::Orders;
@@ -81,6 +82,15 @@ impl fmt::Display for Statement {
 }
 
 impl Statement {
+	// Returns any SPLIT clause if specified
+	pub fn conds(self: &Statement) -> Option<&Cond> {
+		match self {
+			Statement::Select(v) => v.cond.as_ref(),
+			Statement::Update(v) => v.cond.as_ref(),
+			Statement::Delete(v) => v.cond.as_ref(),
+			_ => None,
+		}
+	}
 	// Returns any SPLIT clause if specified
 	pub fn split(self: &Statement) -> Option<&Splits> {
 		match self {
