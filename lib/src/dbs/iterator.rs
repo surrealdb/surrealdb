@@ -213,6 +213,8 @@ impl Iterator {
 			// Run statements in parallel
 			true => {
 				let mut rcv = {
+					// Get current statement
+					let stm = &self.stm;
 					// Create an unbounded channel
 					let (chn, rx) = tokio::sync::mpsc::channel(MAX_CONCURRENT_TASKS);
 					// Process all prepared values
@@ -221,6 +223,7 @@ impl Iterator {
 							tokio::spawn(v.channel(
 								ctx.clone(),
 								opt.clone(),
+								stm.clone(),
 								txn.clone(),
 								chn.clone(),
 							));
