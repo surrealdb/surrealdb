@@ -107,7 +107,7 @@ pub fn thing(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 		})),
 		id => Ok(Value::Thing(Thing {
 			tb: tb.as_strand().value,
-			id: id.as_strand().value,
+			id: id.as_strand().into(),
 		})),
 	}
 }

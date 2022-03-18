@@ -100,6 +100,7 @@ mod tests {
 
 	use super::*;
 	use crate::dbs::test::mock;
+	use crate::sql::id::Id;
 	use crate::sql::idiom::Idiom;
 	use crate::sql::test::Parse;
 	use crate::sql::thing::Thing;
@@ -132,7 +133,7 @@ mod tests {
 			res,
 			Value::from(Thing {
 				tb: String::from("test"),
-				id: String::from("tobie")
+				id: Id::from("tobie")
 			})
 		);
 	}
@@ -156,7 +157,7 @@ mod tests {
 			res,
 			Value::from(Thing {
 				tb: String::from("test"),
-				id: String::from("jaime")
+				id: Id::from("jaime")
 			})
 		);
 	}

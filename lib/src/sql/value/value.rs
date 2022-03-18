@@ -10,6 +10,7 @@ use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
 use crate::sql::function::{function, Function};
 use crate::sql::geometry::{geometry, Geometry};
+use crate::sql::id::Id;
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::model::{model, Model};
 use crate::sql::number::{number, Number};
@@ -383,6 +384,15 @@ impl From<Option<String>> for Value {
 		match v {
 			Some(v) => Value::from(v),
 			None => Value::None,
+		}
+	}
+}
+
+impl From<Id> for Value {
+	fn from(v: Id) -> Self {
+		match v {
+			Id::String(v) => Strand::from(v).into(),
+			Id::Number(v) => Number::from(v).into(),
 		}
 	}
 }

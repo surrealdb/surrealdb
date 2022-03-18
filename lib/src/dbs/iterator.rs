@@ -1,4 +1,3 @@
-use crate::cnf::ID_CHARS;
 use crate::cnf::MAX_CONCURRENT_TASKS;
 use crate::ctx::Canceller;
 use crate::ctx::Context;
@@ -8,6 +7,7 @@ use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::sql::id::Id;
 use crate::sql::statements::create::CreateStatement;
 use crate::sql::statements::delete::DeleteStatement;
 use crate::sql::statements::insert::InsertStatement;
@@ -17,7 +17,6 @@ use crate::sql::statements::update::UpdateStatement;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use nanoid::nanoid;
 use std::mem;
 use std::sync::Arc;
 
@@ -107,7 +106,7 @@ impl Iterator {
 	pub fn produce(&mut self, val: Table) {
 		self.prepare(Value::Thing(Thing {
 			tb: val.name,
-			id: nanoid!(20, &ID_CHARS),
+			id: Id::rand(),
 		}))
 	}
 

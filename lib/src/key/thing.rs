@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::sql::id::Id;
 use serde::{Deserialize, Serialize};
 use storekey::{deserialize, serialize};
 
@@ -12,7 +13,7 @@ pub struct Thing {
 	_c: u8,
 	pub tb: String,
 	_d: u8,
-	pub id: String,
+	pub id: Id,
 }
 
 impl From<Thing> for Vec<u8> {
@@ -33,8 +34,8 @@ impl From<&Vec<u8>> for Thing {
 	}
 }
 
-pub fn new(ns: &str, db: &str, tb: &str, id: &str) -> Thing {
-	Thing::new(ns.to_string(), db.to_string(), tb.to_string(), id.to_string())
+pub fn new(ns: &str, db: &str, tb: &str, id: &Id) -> Thing {
+	Thing::new(ns.to_string(), db.to_string(), tb.to_string(), id.to_owned())
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
@@ -50,7 +51,7 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 }
 
 impl Thing {
-	pub fn new(ns: String, db: String, tb: String, id: String) -> Thing {
+	pub fn new(ns: String, db: String, tb: String, id: Id) -> Thing {
 		Thing {
 			__: 0x2f, // /
 			_a: 0x2a, // *

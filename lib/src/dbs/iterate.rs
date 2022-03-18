@@ -1,4 +1,3 @@
-use crate::cnf::ID_CHARS;
 use crate::dbs::Iterator;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
@@ -6,12 +5,12 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::key::thing;
 use crate::sql::array::Array;
+use crate::sql::id::Id;
 use crate::sql::model::Model;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
-use nanoid::nanoid;
 
 impl Value {
 	#[cfg_attr(feature = "parallel", async_recursion)]
@@ -74,7 +73,7 @@ impl Model {
 				for _ in 0..c {
 					Thing {
 						tb: self.table.to_string(),
-						id: nanoid!(20, &ID_CHARS),
+						id: Id::rand(),
 					}
 					.iterate(ctx, opt, txn, ite)
 					.await?;
@@ -84,7 +83,7 @@ impl Model {
 				for x in r.0..=r.1 {
 					Thing {
 						tb: self.table.to_string(),
-						id: x.to_string(),
+						id: Id::from(x),
 					}
 					.iterate(ctx, opt, txn, ite)
 					.await?;

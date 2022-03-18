@@ -1,20 +1,22 @@
 use crate::sql::common::escape;
 use crate::sql::common::val_char;
 use crate::sql::error::IResult;
+use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
+use crate::sql::number::Number;
 use nom::character::complete::char;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize)]
 pub struct Thing {
 	pub tb: String,
-	pub id: String,
+	pub id: Id,
 }
 
-impl From<(String, String)> for Thing {
-	fn from(v: (String, String)) -> Self {
+impl From<(String, Id)> for Thing {
+	fn from(v: (String, Id)) -> Self {
 		Thing {
 			tb: v.0,
 			id: v.1,
@@ -22,11 +24,28 @@ impl From<(String, String)> for Thing {
 	}
 }
 
+impl From<(String, String)> for Thing {
+	fn from(v: (String, String)) -> Self {
+		Thing {
+			tb: v.0,
+			id: Id::from(v.1),
+		}
+	}
+}
+
+impl From<(String, Number)> for Thing {
+	fn from(v: (String, Number)) -> Self {
+		Thing {
+			tb: v.0,
+			id: Id::from(v.1),
+		}
+	}
+}
+
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		let t = escape(&self.tb, &val_char, "`");
-		let i = escape(&self.id, &val_char, "`");
-		write!(f, "{}:{}", t, i)
+		write!(f, "{}:{}", t, self.id)
 	}
 }
 
@@ -50,7 +69,7 @@ impl Serialize for Thing {
 pub fn thing(i: &str) -> IResult<&str, Thing> {
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
-	let (i, v) = ident_raw(i)?;
+	let (i, v) = id(i)?;
 	Ok((
 		i,
 		Thing {
@@ -76,7 +95,7 @@ mod tests {
 			out,
 			Thing {
 				tb: String::from("test"),
-				id: String::from("id"),
+				id: Id::from("id"),
 			}
 		);
 	}
@@ -92,7 +111,7 @@ mod tests {
 			out,
 			Thing {
 				tb: String::from("test"),
-				id: String::from("id"),
+				id: Id::from("id"),
 			}
 		);
 	}
@@ -108,7 +127,7 @@ mod tests {
 			out,
 			Thing {
 				tb: String::from("test"),
-				id: String::from("id"),
+				id: Id::from("id"),
 			}
 		);
 	}
