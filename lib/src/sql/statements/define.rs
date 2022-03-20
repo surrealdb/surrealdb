@@ -166,9 +166,10 @@ impl DefineDatabaseStatement {
 		opt.check(Level::Ns)?;
 		// Clone transaction
 		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::db::new(opt.ns(), &self.name);
-		let mut run = run.lock().await;
 		run.add_ns(opt.ns()).await?;
 		run.set(key, self).await?;
 		// Ok all good
@@ -222,9 +223,10 @@ impl DefineLoginStatement {
 				opt.check(Level::Kv)?;
 				// Clone transaction
 				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
 				// Process the statement
 				let key = crate::key::nl::new(opt.ns(), &self.name);
-				let mut run = run.lock().await;
 				run.add_ns(opt.ns()).await?;
 				run.set(key, self).await?;
 				// Ok all good
@@ -235,9 +237,10 @@ impl DefineLoginStatement {
 				opt.check(Level::Ns)?;
 				// Clone transaction
 				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
 				// Process the statement
 				let key = crate::key::dl::new(opt.ns(), opt.db(), &self.name);
-				let mut run = run.lock().await;
 				run.add_ns(opt.ns()).await?;
 				run.add_db(opt.ns(), opt.db()).await?;
 				run.set(key, self).await?;
@@ -339,9 +342,10 @@ impl DefineTokenStatement {
 				opt.check(Level::Kv)?;
 				// Clone transaction
 				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
 				// Process the statement
 				let key = crate::key::nt::new(opt.ns(), &self.name);
-				let mut run = run.lock().await;
 				run.add_ns(opt.ns()).await?;
 				run.set(key, self).await?;
 				// Ok all good
@@ -352,9 +356,10 @@ impl DefineTokenStatement {
 				opt.check(Level::Ns)?;
 				// Clone transaction
 				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
 				// Process the statement
 				let key = crate::key::dt::new(opt.ns(), opt.db(), &self.name);
-				let mut run = run.lock().await;
 				run.add_ns(opt.ns()).await?;
 				run.add_db(opt.ns(), opt.db()).await?;
 				run.set(key, self).await?;
@@ -431,9 +436,10 @@ impl DefineScopeStatement {
 		opt.check(Level::Db)?;
 		// Clone transaction
 		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::sc::new(opt.ns(), opt.db(), &self.name);
-		let mut run = run.lock().await;
 		run.add_ns(opt.ns()).await?;
 		run.add_db(opt.ns(), opt.db()).await?;
 		run.set(key, self).await?;
@@ -566,9 +572,10 @@ impl DefineTableStatement {
 		opt.check(Level::Db)?;
 		// Clone transaction
 		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::tb::new(opt.ns(), opt.db(), &self.name);
-		let mut run = run.lock().await;
 		run.add_ns(opt.ns()).await?;
 		run.add_db(opt.ns(), opt.db()).await?;
 		run.set(key, self).await?;
@@ -582,6 +589,11 @@ impl DefineTableStatement {
 				// Save the view config
 				let key = crate::key::ft::new(opt.ns(), opt.db(), &v.name, &self.name);
 				run.set(key, self).await?;
+			}
+			// Release the transaction
+			drop(run);
+			// Process each foreign table
+			for v in view.what.0.iter() {
 				// Process the view data
 				let stm = UpdateStatement {
 					what: Values(vec![Value::Table(v.clone())]),
@@ -723,9 +735,10 @@ impl DefineEventStatement {
 		opt.check(Level::Db)?;
 		// Clone transaction
 		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
-		let mut run = run.lock().await;
 		run.add_ns(opt.ns()).await?;
 		run.add_db(opt.ns(), opt.db()).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what).await?;
@@ -802,9 +815,10 @@ impl DefineFieldStatement {
 		opt.check(Level::Db)?;
 		// Clone transaction
 		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name.to_string());
-		let mut run = run.lock().await;
 		run.add_ns(opt.ns()).await?;
 		run.add_db(opt.ns(), opt.db()).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what).await?;
@@ -950,9 +964,10 @@ impl DefineIndexStatement {
 		opt.check(Level::Db)?;
 		// Clone transaction
 		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
-		let mut run = run.lock().await;
 		run.add_ns(opt.ns()).await?;
 		run.add_db(opt.ns(), opt.db()).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what).await?;
@@ -960,6 +975,8 @@ impl DefineIndexStatement {
 		// Remove the index data
 		let key = crate::key::index::new(opt.ns(), opt.db(), &self.what, &self.name, Value::None);
 		run.delp(key, u32::MAX).await?;
+		// Release the transaction
+		drop(run);
 		// Update the index data
 		let stm = UpdateStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),
