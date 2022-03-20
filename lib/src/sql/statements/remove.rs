@@ -95,13 +95,23 @@ impl RemoveNamespaceStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Kv)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::ns::new(&self.name);
+		run.del(key).await?;
+		// Delete the resource data
+		let key = crate::key::namespace::new(&self.name);
+		run.delp(key, u32::MAX).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -139,13 +149,23 @@ impl RemoveDatabaseStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Ns)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::db::new(opt.ns(), &self.name);
+		run.del(key).await?;
+		// Delete the resource data
+		let key = crate::key::database::new(opt.ns(), &self.name);
+		run.delp(key, u32::MAX).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -184,17 +204,38 @@ impl RemoveLoginStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		// Allowed to run?
 		match self.base {
-			Base::Ns => opt.check(Level::Kv)?,
-			Base::Db => opt.check(Level::Ns)?,
+			Base::Ns => {
+				// Allowed to run?
+				opt.check(Level::Kv)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Delete the definition
+				let key = crate::key::nl::new(opt.ns(), &self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Db => {
+				// Allowed to run?
+				opt.check(Level::Ns)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Delete the definition
+				let key = crate::key::dl::new(opt.ns(), opt.db(), &self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
 			_ => unreachable!(),
 		}
-		// Continue
-		todo!()
 	}
 }
 
@@ -238,17 +279,38 @@ impl RemoveTokenStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		// Allowed to run?
 		match self.base {
-			Base::Ns => opt.check(Level::Kv)?,
-			Base::Db => opt.check(Level::Ns)?,
+			Base::Ns => {
+				// Allowed to run?
+				opt.check(Level::Kv)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Delete the definition
+				let key = crate::key::nt::new(opt.ns(), &self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
+			Base::Db => {
+				// Allowed to run?
+				opt.check(Level::Ns)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Delete the definition
+				let key = crate::key::dt::new(opt.ns(), opt.db(), &self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
 			_ => unreachable!(),
 		}
-		// Continue
-		todo!()
 	}
 }
 
@@ -291,13 +353,20 @@ impl RemoveScopeStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::sc::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -335,13 +404,23 @@ impl RemoveTableStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::tb::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// Remove the resource data
+		let key = crate::key::table::new(opt.ns(), opt.db(), &self.name);
+		run.delp(key, u32::MAX).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -380,13 +459,20 @@ impl RemoveEventStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
+		run.del(key).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -431,13 +517,20 @@ impl RemoveFieldStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name);
+		run.del(key).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
@@ -482,13 +575,23 @@ impl RemoveIndexStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::Db)?;
-		// Continue
-		todo!()
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
+		run.del(key).await?;
+		// Remove the resource data
+		let key = crate::key::guide::new(opt.ns(), opt.db(), &self.what, &self.name);
+		run.delp(key, u32::MAX).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 
