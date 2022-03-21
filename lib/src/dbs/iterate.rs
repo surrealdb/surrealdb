@@ -144,12 +144,16 @@ impl Table {
 					};
 					if !res.is_empty() {
 						// Get total results
-						let n = res.len() - 1;
+						let n = res.len();
+						// Exit when settled
+						if n == 0 {
+							break;
+						}
 						// Loop over results
 						for (i, (k, v)) in res.into_iter().enumerate() {
 							if ctx.is_ok() {
 								// Ready the next
-								if i == n {
+								if n == i + 1 {
 									nxt = Some(k.clone());
 								}
 								// Parse the key-value
