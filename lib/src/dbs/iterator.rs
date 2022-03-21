@@ -130,52 +130,89 @@ impl Iterator {
 			return Err(e);
 		}
 		// Process any SPLIT clause
-		self.output_split(&ctx, opt, txn);
+		self.output_split(&ctx, opt, txn).await?;
 		// Process any GROUP clause
-		self.output_group(&ctx, opt, txn);
+		self.output_group(&ctx, opt, txn).await?;
 		// Process any ORDER clause
-		self.output_order(&ctx, opt, txn);
+		self.output_order(&ctx, opt, txn).await?;
 		// Process any START clause
-		self.output_start(&ctx, opt, txn);
+		if let Some(v) = self.stm.start() {
+			self.results = mem::take(&mut self.results).into_iter().skip(v.0).collect();
+		}
 		// Process any LIMIT clause
-		self.output_limit(&ctx, opt, txn);
+		if let Some(v) = self.stm.limit() {
+			self.results = mem::take(&mut self.results).into_iter().take(v.0).collect();
+		}
 		// Output the results
 		Ok(mem::take(&mut self.results).into())
 	}
 
 	#[inline]
-	fn output_split(&mut self, _ctx: &Runtime, _opt: &Options, _txn: &Transaction) {
-		if self.stm.split().is_some() {
-			// Ignore
+	async fn output_split(
+		&mut self,
+		ctx: &Runtime,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<(), Error> {
+		if let Some(splits) = self.stm.split() {
+			for split in &splits.0 {
+				// Get the query result
+				let res = mem::take(&mut self.results);
+				// Loop over each value
+				for obj in &res {
+					// Get the value at the path
+					let val = obj.get(ctx, opt, txn, &split.split).await?;
+					// Set the value at the path
+					match val {
+						Value::Array(v) => {
+							for val in v.value {
+								// Make a copy of object
+								let mut obj = obj.clone();
+								// Set the value at the path
+								obj.set(ctx, opt, txn, &split.split, val).await?;
+								// Add the object to the results
+								self.results.push(obj);
+							}
+						}
+						_ => {
+							// Make a copy of object
+							let mut obj = obj.clone();
+							// Set the value at the path
+							obj.set(ctx, opt, txn, &split.split, val).await?;
+							// Add the object to the results
+							self.results.push(obj);
+						}
+					}
+				}
+			}
 		}
+		Ok(())
 	}
 
 	#[inline]
-	fn output_group(&mut self, _ctx: &Runtime, _opt: &Options, _txn: &Transaction) {
+	async fn output_group(
+		&mut self,
+		_ctx: &Runtime,
+		_opt: &Options,
+		_txn: &Transaction,
+	) -> Result<(), Error> {
 		if self.stm.group().is_some() {
 			// Ignore
 		}
+		Ok(())
 	}
 
 	#[inline]
-	fn output_order(&mut self, _ctx: &Runtime, _opt: &Options, _txn: &Transaction) {
+	async fn output_order(
+		&mut self,
+		_ctx: &Runtime,
+		_opt: &Options,
+		_txn: &Transaction,
+	) -> Result<(), Error> {
 		if self.stm.order().is_some() {
 			// Ignore
 		}
-	}
-
-	#[inline]
-	fn output_start(&mut self, _ctx: &Runtime, _opt: &Options, _txn: &Transaction) {
-		if let Some(v) = self.stm.start() {
-			self.results = mem::take(&mut self.results).into_iter().skip(v.0).collect();
-		}
-	}
-
-	#[inline]
-	fn output_limit(&mut self, _ctx: &Runtime, _opt: &Options, _txn: &Transaction) {
-		if let Some(v) = self.stm.limit() {
-			self.results = mem::take(&mut self.results).into_iter().take(v.0).collect();
-		}
+		Ok(())
 	}
 
 	#[cfg(not(feature = "parallel"))]
