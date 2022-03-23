@@ -8,6 +8,7 @@ use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::id::Id;
+use crate::sql::part::Part;
 use crate::sql::statements::create::CreateStatement;
 use crate::sql::statements::delete::DeleteStatement;
 use crate::sql::statements::insert::InsertStatement;
@@ -137,13 +138,11 @@ impl Iterator {
 		// Process any ORDER clause
 		self.output_order(&ctx, opt, txn).await?;
 		// Process any START clause
-		if let Some(v) = self.stm.start() {
-			self.results = mem::take(&mut self.results).into_iter().skip(v.0).collect();
-		}
+		self.output_start(&ctx, opt, txn).await?;
 		// Process any LIMIT clause
-		if let Some(v) = self.stm.limit() {
-			self.results = mem::take(&mut self.results).into_iter().take(v.0).collect();
-		}
+		self.output_limit(&ctx, opt, txn).await?;
+		// Process any FETCH clause
+		self.output_fetch(&ctx, opt, txn).await?;
 		// Output the results
 		Ok(mem::take(&mut self.results).into())
 	}
@@ -226,6 +225,70 @@ impl Iterator {
 				}
 				Ordering::Equal
 			})
+		}
+		Ok(())
+	}
+
+	#[inline]
+	async fn output_start(
+		&mut self,
+		_ctx: &Runtime,
+		_opt: &Options,
+		_txn: &Transaction,
+	) -> Result<(), Error> {
+		if let Some(v) = self.stm.start() {
+			self.results = mem::take(&mut self.results).into_iter().skip(v.0).collect();
+		}
+		Ok(())
+	}
+
+	#[inline]
+	async fn output_limit(
+		&mut self,
+		_ctx: &Runtime,
+		_opt: &Options,
+		_txn: &Transaction,
+	) -> Result<(), Error> {
+		if let Some(v) = self.stm.limit() {
+			self.results = mem::take(&mut self.results).into_iter().take(v.0).collect();
+		}
+		Ok(())
+	}
+
+	#[inline]
+	async fn output_fetch(
+		&mut self,
+		ctx: &Runtime,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<(), Error> {
+		if let Some(fetchs) = self.stm.fetch() {
+			for fetch in &fetchs.0 {
+				// Loop over each value
+				for obj in &mut self.results {
+					// Get the value at the path
+					let val = obj.get(ctx, opt, txn, &fetch.fetch).await?;
+					// Set the value at the path
+					match val {
+						Value::Array(v) => {
+							// Fetch all remote records
+							let val = Value::Array(v).get(ctx, opt, txn, &[Part::All]).await?;
+							// Set the value at the path
+							obj.set(ctx, opt, txn, &fetch.fetch, val).await?;
+						}
+						Value::Thing(v) => {
+							// Fetch all remote records
+							let val = Value::Thing(v).get(ctx, opt, txn, &[Part::All]).await?;
+							// Set the value at the path
+							obj.set(ctx, opt, txn, &fetch.fetch, val).await?;
+						}
+						_ => {
+							// Set the value at the path
+							obj.set(ctx, opt, txn, &fetch.fetch, val).await?;
+						}
+					}
+				}
+			}
 		}
 		Ok(())
 	}

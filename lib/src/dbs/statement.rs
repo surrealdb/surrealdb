@@ -1,4 +1,5 @@
 use crate::sql::cond::Cond;
+use crate::sql::fetch::Fetchs;
 use crate::sql::group::Groups;
 use crate::sql::limit::Limit;
 use crate::sql::order::Orders;
@@ -109,6 +110,13 @@ impl Statement {
 	pub fn order(self: &Statement) -> Option<&Orders> {
 		match self {
 			Statement::Select(v) => v.order.as_ref(),
+			_ => None,
+		}
+	}
+	// Returns any FETCH clause if specified
+	pub fn fetch(self: &Statement) -> Option<&Fetchs> {
+		match self {
+			Statement::Select(v) => v.fetch.as_ref(),
 			_ => None,
 		}
 	}
