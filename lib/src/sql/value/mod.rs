@@ -2,6 +2,7 @@ pub use self::value::*;
 
 mod array;
 mod clear;
+mod compare;
 mod decrement;
 mod def;
 mod del;

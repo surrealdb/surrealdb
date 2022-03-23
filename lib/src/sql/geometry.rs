@@ -36,7 +36,7 @@ pub enum Geometry {
 impl PartialOrd for Geometry {
 	#[inline]
 	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
-		unreachable!()
+		None
 	}
 }
 

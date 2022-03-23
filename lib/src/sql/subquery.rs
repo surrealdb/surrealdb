@@ -35,7 +35,7 @@ pub enum Subquery {
 impl PartialOrd for Subquery {
 	#[inline]
 	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
-		unreachable!()
+		None
 	}
 }
 

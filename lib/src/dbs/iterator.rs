@@ -17,6 +17,7 @@ use crate::sql::statements::update::UpdateStatement;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use std::cmp::Ordering;
 use std::mem;
 use std::sync::Arc;
 
@@ -209,8 +210,22 @@ impl Iterator {
 		_opt: &Options,
 		_txn: &Transaction,
 	) -> Result<(), Error> {
-		if self.stm.order().is_some() {
-			// Ignore
+		if let Some(orders) = self.stm.order() {
+			self.results.sort_by(|a, b| {
+				for order in &orders.0 {
+					let o = match order.direction {
+						true => a.compare(b, &order.order),
+						false => b.compare(a, &order.order),
+					};
+					match o {
+						Some(Ordering::Greater) => return Ordering::Greater,
+						Some(Ordering::Equal) => continue,
+						Some(Ordering::Less) => return Ordering::Less,
+						None => continue,
+					}
+				}
+				Ordering::Equal
+			})
 		}
 		Ok(())
 	}

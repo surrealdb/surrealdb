@@ -27,7 +27,7 @@ pub enum Function {
 impl PartialOrd for Function {
 	#[inline]
 	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
-		unreachable!()
+		None
 	}
 }
 

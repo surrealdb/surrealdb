@@ -1,0 +1,186 @@
+use crate::sql::part::Next;
+use crate::sql::part::Part;
+use crate::sql::value::Value;
+use std::cmp::Ordering;
+
+impl Value {
+	pub fn compare(&self, other: &Self, path: &[Part]) -> Option<Ordering> {
+		match path.first() {
+			// Get the current path part
+			Some(p) => match (self, other) {
+				// Current path part is an object
+				(Value::Object(a), Value::Object(b)) => match p {
+					Part::Field(f) => match (a.value.get(&f.name), b.value.get(&f.name)) {
+						(Some(a), Some(b)) => a.compare(b, path.next()),
+						(Some(_), None) => Some(Ordering::Greater),
+						(None, Some(_)) => Some(Ordering::Less),
+						(_, _) => Some(Ordering::Equal),
+					},
+					_ => None,
+				},
+				// Current path part is an array
+				(Value::Array(a), Value::Array(b)) => match p {
+					Part::All => {
+						for (a, b) in a.value.iter().zip(b.value.iter()) {
+							match a.compare(b, path.next()) {
+								Some(Ordering::Equal) => continue,
+								None => continue,
+								o => return o,
+							}
+						}
+						match (a.len(), b.len()) {
+							(a, b) if a > b => Some(Ordering::Greater),
+							(a, b) if a < b => Some(Ordering::Less),
+							_ => Some(Ordering::Equal),
+						}
+					}
+					Part::First => match (a.value.first(), b.value.first()) {
+						(Some(a), Some(b)) => a.compare(b, path.next()),
+						(Some(_), None) => Some(Ordering::Greater),
+						(None, Some(_)) => Some(Ordering::Less),
+						(_, _) => Some(Ordering::Equal),
+					},
+					Part::Last => match (a.value.first(), b.value.first()) {
+						(Some(a), Some(b)) => a.compare(b, path.next()),
+						(Some(_), None) => Some(Ordering::Greater),
+						(None, Some(_)) => Some(Ordering::Less),
+						(_, _) => Some(Ordering::Equal),
+					},
+					Part::Index(i) => {
+						match (a.value.get(i.to_usize()), b.value.get(i.to_usize())) {
+							(Some(a), Some(b)) => a.compare(b, path.next()),
+							(Some(_), None) => Some(Ordering::Greater),
+							(None, Some(_)) => Some(Ordering::Less),
+							(_, _) => Some(Ordering::Equal),
+						}
+					}
+					_ => {
+						for (a, b) in a.value.iter().zip(b.value.iter()) {
+							match a.compare(b, path) {
+								Some(Ordering::Equal) => continue,
+								None => continue,
+								o => return o,
+							}
+						}
+						match (a.len(), b.len()) {
+							(a, b) if a > b => Some(Ordering::Greater),
+							(a, b) if a < b => Some(Ordering::Less),
+							_ => Some(Ordering::Equal),
+						}
+					}
+				},
+				// Ignore everything else
+				(a, b) => a.compare(b, path.next()),
+			},
+			// No more parts so get the value
+			None => self.partial_cmp(other),
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+	use crate::sql::idiom::Idiom;
+	use crate::sql::test::Parse;
+
+	#[test]
+	fn compare_none() {
+		let idi = Idiom::default();
+		let one = Value::parse("{ test: { other: null, something: 456 } }");
+		let two = Value::parse("{ test: { other: null, something: 123 } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Greater));
+	}
+
+	#[test]
+	fn compare_basic() {
+		let idi = Idiom::parse("test.something");
+		let one = Value::parse("{ test: { other: null, something: 456 } }");
+		let two = Value::parse("{ test: { other: null, something: 123 } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Greater));
+	}
+
+	#[test]
+	fn compare_basic_missing_left() {
+		let idi = Idiom::parse("test.something");
+		let one = Value::parse("{ test: { other: null } }");
+		let two = Value::parse("{ test: { other: null, something: 123 } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Less));
+	}
+
+	#[test]
+	fn compare_basic_missing_right() {
+		let idi = Idiom::parse("test.something");
+		let one = Value::parse("{ test: { other: null, something: 456 } }");
+		let two = Value::parse("{ test: { other: null } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Greater));
+	}
+
+	#[test]
+	fn compare_array() {
+		let idi = Idiom::parse("test.something.*");
+		let one = Value::parse("{ test: { other: null, something: [4, 5, 6] } }");
+		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Greater));
+	}
+
+	#[test]
+	fn compare_array_longer_left() {
+		let idi = Idiom::parse("test.something.*");
+		let one = Value::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
+		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Greater));
+	}
+
+	#[test]
+	fn compare_array_longer_right() {
+		let idi = Idiom::parse("test.something.*");
+		let one = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let two = Value::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Less));
+	}
+
+	#[test]
+	fn compare_array_missing_left() {
+		let idi = Idiom::parse("test.something.*");
+		let one = Value::parse("{ test: { other: null, something: null } }");
+		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Less));
+	}
+
+	#[test]
+	fn compare_array_missing_right() {
+		let idi = Idiom::parse("test.something.*");
+		let one = Value::parse("{ test: { other: null, something: [4, 5, 6] } }");
+		let two = Value::parse("{ test: { other: null, something: null } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Greater));
+	}
+
+	#[test]
+	fn compare_array_missing_value_left() {
+		let idi = Idiom::parse("test.something.*");
+		let one = Value::parse("{ test: { other: null, something: [1, null, 3] } }");
+		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Less));
+	}
+
+	#[test]
+	fn compare_array_missing_value_right() {
+		let idi = Idiom::parse("test.something.*");
+		let one = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
+		let two = Value::parse("{ test: { other: null, something: [1, null, 3] } }");
+		let res = one.compare(&two, &idi);
+		assert_eq!(res, Some(Ordering::Greater));
+	}
+}
