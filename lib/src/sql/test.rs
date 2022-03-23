@@ -3,6 +3,7 @@ use crate::sql::expression::{expression, Expression};
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::param::{param, Param};
 use crate::sql::script::{script, Script};
+use crate::sql::thing::{thing, Thing};
 use crate::sql::value::{value, Value};
 
 pub trait Parse<T> {
@@ -36,6 +37,12 @@ impl Parse<Idiom> for Idiom {
 impl Parse<Script> for Script {
 	fn parse(val: &str) -> Script {
 		script(val).unwrap().1
+	}
+}
+
+impl Parse<Thing> for Thing {
+	fn parse(val: &str) -> Thing {
+		thing(val).unwrap().1
 	}
 }
 

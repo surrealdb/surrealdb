@@ -35,6 +35,7 @@ pub mod dt;
 pub mod ev;
 pub mod fd;
 pub mod ft;
+pub mod graph;
 pub mod guide;
 pub mod index;
 pub mod ix;
