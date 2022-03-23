@@ -1,7 +1,7 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
-use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::idiom::{basic, Idiom};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
@@ -75,7 +75,7 @@ fn order_rand(i: &str) -> IResult<&str, Vec<Order>> {
 }
 
 fn order_raw(i: &str) -> IResult<&str, Order> {
-	let (i, v) = idiom(i)?;
+	let (i, v) = basic(i)?;
 	let (i, c) = opt(tuple((shouldbespace, tag_no_case("COLLATE"))))(i)?;
 	let (i, n) = opt(tuple((shouldbespace, tag_no_case("NUMERIC"))))(i)?;
 	let (i, d) = opt(alt((

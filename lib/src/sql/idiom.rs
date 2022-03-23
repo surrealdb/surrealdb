@@ -4,7 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
-use crate::sql::part::{all, field, first, graph, index, part, Part};
+use crate::sql::part::{all, field, first, graph, index, last, part, Part};
 use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::multi::many0;
@@ -103,10 +103,18 @@ impl fmt::Display for Idiom {
 	}
 }
 
-// Used in a DEFINE FIELD and DEFINE INDEX clause
+// Used in a DEFINE FIELD and DEFINE INDEX clauses
 pub fn local(i: &str) -> IResult<&str, Idiom> {
 	let (i, p) = first(i)?;
 	let (i, mut v) = many0(alt((all, index, field)))(i)?;
+	v.insert(0, p);
+	Ok((i, Idiom::from(v)))
+}
+
+// Used in a SPLIT, ORDER, and GROUP clauses
+pub fn basic(i: &str) -> IResult<&str, Idiom> {
+	let (i, p) = first(i)?;
+	let (i, mut v) = many0(alt((all, last, index, field)))(i)?;
 	v.insert(0, p);
 	Ok((i, Idiom::from(v)))
 }

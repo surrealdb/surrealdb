@@ -1,7 +1,7 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
-use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::idiom::{basic, Idiom};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list1;
@@ -42,7 +42,7 @@ pub fn group(i: &str) -> IResult<&str, Groups> {
 }
 
 fn group_raw(i: &str) -> IResult<&str, Group> {
-	let (i, v) = idiom(i)?;
+	let (i, v) = basic(i)?;
 	Ok((
 		i,
 		Group {

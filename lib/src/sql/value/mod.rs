@@ -13,6 +13,7 @@ mod last;
 mod merge;
 mod object;
 mod patch;
+mod pick;
 mod replace;
 mod set;
 mod single;

@@ -161,7 +161,7 @@ impl Iterator {
 				// Loop over each value
 				for obj in &res {
 					// Get the value at the path
-					let val = obj.get(ctx, opt, txn, &split.split).await?;
+					let val = obj.pick(&split.split);
 					// Set the value at the path
 					match val {
 						Value::Array(v) => {

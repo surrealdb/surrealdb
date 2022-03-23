@@ -1,7 +1,7 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
-use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::idiom::{basic, Idiom};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list1;
@@ -42,7 +42,7 @@ pub fn split(i: &str) -> IResult<&str, Splits> {
 }
 
 fn split_raw(i: &str) -> IResult<&str, Split> {
-	let (i, v) = idiom(i)?;
+	let (i, v) = basic(i)?;
 	Ok((
 		i,
 		Split {

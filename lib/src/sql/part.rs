@@ -115,9 +115,19 @@ pub fn first(i: &str) -> IResult<&str, Part> {
 }
 
 pub fn all(i: &str) -> IResult<&str, Part> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = char('*')(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = alt((
+		|i| {
+			let (i, _) = char('.')(i)?;
+			let (i, _) = char('*')(i)?;
+			Ok((i, ()))
+		},
+		|i| {
+			let (i, _) = char('[')(i)?;
+			let (i, _) = char('*')(i)?;
+			let (i, _) = char(']')(i)?;
+			Ok((i, ()))
+		},
+	))(i)?;
 	Ok((i, Part::All))
 }
 
