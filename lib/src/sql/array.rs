@@ -244,38 +244,6 @@ impl<T> Abolish<T> for Vec<T> {
 
 // ------------------------------
 
-pub trait Uniq<T> {
-	fn uniq(self) -> Vec<T>;
-}
-
-impl<T: PartialEq> Uniq<T> for Vec<T> {
-	fn uniq(mut self) -> Vec<T> {
-		for x in (0..self.len()).rev() {
-			for y in (x + 1..self.len()).rev() {
-				if self[x] == self[y] {
-					self.remove(y);
-				}
-			}
-		}
-		self
-	}
-}
-
-// ------------------------------
-
-pub trait Union<T> {
-	fn union(self, other: Vec<T>) -> Vec<T>;
-}
-
-impl<T: PartialEq> Union<T> for Vec<T> {
-	fn union(mut self, mut other: Vec<T>) -> Vec<T> {
-		self.append(&mut other);
-		self.uniq()
-	}
-}
-
-// ------------------------------
-
 pub trait Combine<T> {
 	fn combine(self, other: Vec<T>) -> Vec<Vec<T>>;
 }
@@ -285,9 +253,7 @@ impl<T: PartialEq + Clone> Combine<T> for Vec<T> {
 		let mut out = Vec::new();
 		for a in self.iter() {
 			for b in other.iter() {
-				if a != b {
-					out.push(vec![a.clone(), b.clone()]);
-				}
+				out.push(vec![a.clone(), b.clone()]);
 			}
 		}
 		out
@@ -297,17 +263,34 @@ impl<T: PartialEq + Clone> Combine<T> for Vec<T> {
 // ------------------------------
 
 pub trait Concat<T> {
-	fn concat(self, other: Vec<T>) -> Vec<Vec<T>>;
+	fn concat(self, other: Vec<T>) -> Vec<T>;
 }
 
-impl<T: PartialEq + Clone> Concat<T> for Vec<T> {
-	fn concat(self, other: Vec<T>) -> Vec<Vec<T>> {
+impl<T: PartialEq> Concat<T> for Vec<T> {
+	fn concat(mut self, mut other: Vec<T>) -> Vec<T> {
+		self.append(&mut other);
+		self
+	}
+}
+
+// ------------------------------
+
+pub trait Difference<T> {
+	fn difference(self, other: Vec<T>) -> Vec<T>;
+}
+
+impl<T: PartialEq> Difference<T> for Vec<T> {
+	fn difference(self, other: Vec<T>) -> Vec<T> {
 		let mut out = Vec::new();
-		for a in self.iter() {
-			for b in other.iter() {
-				out.push(vec![a.clone(), b.clone()]);
+		let mut other: Vec<_> = other.into_iter().collect();
+		for a in self.into_iter() {
+			if let Some(pos) = other.iter().position(|b| a == *b) {
+				other.remove(pos);
+			} else {
+				out.push(a);
 			}
 		}
+		out.append(&mut other);
 		out
 	}
 }
@@ -334,23 +317,33 @@ impl<T: PartialEq> Intersect<T> for Vec<T> {
 
 // ------------------------------
 
-pub trait Difference<T> {
-	fn difference(self, other: Vec<T>) -> Vec<T>;
+pub trait Union<T> {
+	fn union(self, other: Vec<T>) -> Vec<T>;
 }
 
-impl<T: PartialEq> Difference<T> for Vec<T> {
-	fn difference(self, other: Vec<T>) -> Vec<T> {
-		let mut out = Vec::new();
-		let mut other: Vec<_> = other.into_iter().collect();
-		for a in self.into_iter() {
-			if let Some(pos) = other.iter().position(|b| a == *b) {
-				other.remove(pos);
-			} else {
-				out.push(a);
+impl<T: PartialEq> Union<T> for Vec<T> {
+	fn union(mut self, mut other: Vec<T>) -> Vec<T> {
+		self.append(&mut other);
+		self.uniq()
+	}
+}
+
+// ------------------------------
+
+pub trait Uniq<T> {
+	fn uniq(self) -> Vec<T>;
+}
+
+impl<T: PartialEq> Uniq<T> for Vec<T> {
+	fn uniq(mut self) -> Vec<T> {
+		for x in (0..self.len()).rev() {
+			for y in (x + 1..self.len()).rev() {
+				if self[x] == self[y] {
+					self.remove(y);
+				}
 			}
 		}
-		out.append(&mut other);
-		out
+		self
 	}
 }
 
