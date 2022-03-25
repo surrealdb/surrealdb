@@ -30,7 +30,7 @@ impl Value {
 						Some(v) => v.get(ctx, opt, txn, path.next()).await,
 						None => Ok(Value::None),
 					},
-					Part::All => Ok(self.clone()),
+					Part::All => self.get(ctx, opt, txn, path.next()).await,
 					_ => Ok(Value::None),
 				},
 				// Current path part is an array

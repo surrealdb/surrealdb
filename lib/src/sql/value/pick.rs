@@ -13,7 +13,7 @@ impl Value {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					Part::All => self.clone(),
+					Part::All => self.pick(path.next()),
 					_ => Value::None,
 				},
 				// Current path part is an array
