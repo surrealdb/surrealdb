@@ -1,3 +1,5 @@
+#![allow(clippy::derive_ord_xor_partial_ord)]
+
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Transaction;
@@ -48,6 +50,15 @@ static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().igno
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Values(pub Vec<Value>);
+
+impl Values {
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+}
 
 impl Deref for Values {
 	type Target = Vec<Value>;
@@ -407,8 +418,8 @@ impl From<Option<String>> for Value {
 impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {
+			Id::Number(v) => v.into(),
 			Id::String(v) => Strand::from(v).into(),
-			Id::Number(v) => Number::from(v).into(),
 		}
 	}
 }

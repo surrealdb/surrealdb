@@ -29,6 +29,12 @@ impl From<Vec<u8>> for Ix {
 	}
 }
 
+impl From<&Vec<u8>> for Ix {
+	fn from(val: &Vec<u8>) -> Self {
+		Ix::decode(val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Ix {
 	Ix::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string())
 }

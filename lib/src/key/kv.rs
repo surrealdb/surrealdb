@@ -19,8 +19,20 @@ impl From<Vec<u8>> for Kv {
 	}
 }
 
+impl From<&Vec<u8>> for Kv {
+	fn from(val: &Vec<u8>) -> Self {
+		Kv::decode(val).unwrap()
+	}
+}
+
 pub fn new() -> Kv {
 	Kv::new()
+}
+
+impl Default for Kv {
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
 impl Kv {

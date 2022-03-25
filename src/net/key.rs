@@ -151,7 +151,7 @@ async fn create_all(
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
-		Err(_) => Err(warp::reject::custom(Error::RequestError)),
+		Err(_) => Err(warp::reject::custom(Error::Request)),
 	}
 }
 
@@ -230,7 +230,7 @@ async fn create_one(
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
-		Err(_) => Err(warp::reject::custom(Error::RequestError)),
+		Err(_) => Err(warp::reject::custom(Error::Request)),
 	}
 }
 
@@ -261,7 +261,7 @@ async fn update_one(
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
-		Err(_) => Err(warp::reject::custom(Error::RequestError)),
+		Err(_) => Err(warp::reject::custom(Error::Request)),
 	}
 }
 
@@ -292,7 +292,7 @@ async fn modify_one(
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
-		Err(_) => Err(warp::reject::custom(Error::RequestError)),
+		Err(_) => Err(warp::reject::custom(Error::Request)),
 	}
 }
 

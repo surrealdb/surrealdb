@@ -32,6 +32,12 @@ impl From<Vec<u8>> for Graph {
 	}
 }
 
+impl From<&Vec<u8>> for Graph {
+	fn from(val: &Vec<u8>) -> Self {
+		Graph::decode(val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, fk: &Thing) -> Graph {
 	Graph::new(
 		ns.to_string(),

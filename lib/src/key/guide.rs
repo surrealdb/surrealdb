@@ -27,6 +27,12 @@ impl From<Vec<u8>> for Guide {
 	}
 }
 
+impl From<&Vec<u8>> for Guide {
+	fn from(val: &Vec<u8>) -> Self {
+		Guide::decode(val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Guide {
 	Guide::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string())
 }

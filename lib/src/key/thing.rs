@@ -30,7 +30,7 @@ impl From<Vec<u8>> for Thing {
 
 impl From<&Vec<u8>> for Thing {
 	fn from(val: &Vec<u8>) -> Self {
-		Thing::decode(&val).unwrap()
+		Thing::decode(val).unwrap()
 	}
 }
 

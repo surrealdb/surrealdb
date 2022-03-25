@@ -57,7 +57,7 @@ impl fmt::Display for Id {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Id::Number(v) => write!(f, "{}", v),
-			Id::String(v) => write!(f, "{}", escape(&v, &val_char, "`")),
+			Id::String(v) => write!(f, "{}", escape(v, &val_char, "`")),
 		}
 	}
 }

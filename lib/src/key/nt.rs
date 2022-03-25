@@ -25,6 +25,12 @@ impl From<Vec<u8>> for Nt {
 	}
 }
 
+impl From<&Vec<u8>> for Nt {
+	fn from(val: &Vec<u8>) -> Self {
+		Nt::decode(val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, tk: &str) -> Nt {
 	Nt::new(ns.to_string(), tk.to_string())
 }

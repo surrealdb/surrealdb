@@ -21,6 +21,12 @@ impl From<Vec<u8>> for Namespace {
 	}
 }
 
+impl From<&Vec<u8>> for Namespace {
+	fn from(val: &Vec<u8>) -> Self {
+		Namespace::decode(val).unwrap()
+	}
+}
+
 pub fn new(ns: &str) -> Namespace {
 	Namespace::new(ns.to_string())
 }

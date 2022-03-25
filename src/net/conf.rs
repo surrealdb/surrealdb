@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use surrealdb::Auth;
 use surrealdb::Session;
 use warp::Filter;
 
@@ -29,18 +30,17 @@ fn process(
 	ns: Option<String>,
 	db: Option<String>,
 ) -> Session {
-	// Specify default conf
-	let mut conf = Session::default();
-	// Specify client ip
-	conf.ip = ip.map(|v| v.to_string());
-	// Specify session origin
-	conf.or = or;
-	// Specify session id
-	conf.id = id;
-	// Specify namespace
-	conf.ns = ns;
-	// Specify database
-	conf.db = db;
+	// Create session
+	let conf = Session {
+		au: Auth::No,
+		ip: ip.map(|v| v.to_string()),
+		or,
+		id,
+		ns,
+		db,
+		sc: None,
+		sd: None,
+	};
 	// Parse authentication
 	match au {
 		Some(auth) if auth.starts_with("Basic") => basic(auth, conf),

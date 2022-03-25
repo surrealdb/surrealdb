@@ -23,6 +23,12 @@ impl From<Vec<u8>> for Ns {
 	}
 }
 
+impl From<&Vec<u8>> for Ns {
+	fn from(val: &Vec<u8>) -> Self {
+		Ns::decode(val).unwrap()
+	}
+}
+
 pub fn new(ns: &str) -> Ns {
 	Ns::new(ns.to_string())
 }

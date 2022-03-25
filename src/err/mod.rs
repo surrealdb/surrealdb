@@ -5,37 +5,37 @@ use serde_cbor::error::Error as CborError;
 use serde_json::error::Error as JsonError;
 use serde_pack::encode::Error as PackError;
 use std::io::Error as IoError;
-use surrealdb::Error as DBError;
+use surrealdb::Error as DbError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
 	#[error("The request body contains invalid data")]
-	RequestError,
+	Request,
 
 	#[error("{0}")]
-	DBError(#[from] DBError),
+	Db(#[from] DbError),
 
 	#[error("IO error: {0}")]
-	IoError(#[from] IoError),
+	Io(#[from] IoError),
 
 	#[error("HTTP Error: {0}")]
-	HyperError(#[from] HyperError),
+	Hyper(#[from] HyperError),
 
 	#[error("HTTP Error: {0}")]
-	HttpError(#[from] HttpError),
+	Http(#[from] HttpError),
 
 	#[error("JSON Error: {0}")]
-	JsonError(#[from] JsonError),
+	Json(#[from] JsonError),
 
 	#[error("CBOR Error: {0}")]
-	CborError(#[from] CborError),
+	Cbor(#[from] CborError),
 
 	#[error("PACK Error: {0}")]
-	PackError(#[from] PackError),
+	Pack(#[from] PackError),
 
 	#[error("Reqwest Error: {0}")]
-	ReqwestError(#[from] ReqwestError),
+	Reqwest(#[from] ReqwestError),
 }
 
 impl warp::reject::Reject for Error {}

@@ -30,6 +30,12 @@ impl From<Vec<u8>> for Point {
 	}
 }
 
+impl From<&Vec<u8>> for Point {
+	fn from(val: &Vec<u8>) -> Self {
+		Point::decode(val).unwrap()
+	}
+}
+
 pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Value, id: &str) -> Point {
 	Point::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string(), fd, id.to_string())
 }

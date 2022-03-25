@@ -22,7 +22,7 @@
 ///
 /// Thing           /*{ns}*{db}*{tb}*{id}
 ///
-/// Graph			/*{ns}*{db}*{tb}~{id}{gt}{fk}
+/// Graph           /*{ns}*{db}*{tb}~{id}{gt}{fk}
 ///
 /// Guide           /*{ns}*{db}*{tb}¤{ix}
 /// Index           /*{ns}*{db}*{tb}¤{ix}{fd}
