@@ -18,5 +18,4 @@ mod patch;
 mod pick;
 mod replace;
 mod set;
-mod single;
 mod value;
