@@ -8,9 +8,31 @@ use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Splits(pub Vec<Split>);
+
+impl Splits {
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+}
+
+impl Deref for Splits {
+	type Target = Vec<Split>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl IntoIterator for Splits {
+	type Item = Split;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
 
 impl fmt::Display for Splits {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

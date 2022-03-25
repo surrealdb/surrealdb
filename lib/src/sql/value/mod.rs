@@ -1,5 +1,6 @@
 pub use self::value::*;
 
+mod all;
 mod array;
 mod clear;
 mod compare;

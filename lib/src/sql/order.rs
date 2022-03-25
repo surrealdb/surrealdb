@@ -9,9 +9,31 @@ use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Orders(pub Vec<Order>);
+
+impl Orders {
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+}
+
+impl Deref for Orders {
+	type Target = Vec<Order>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl IntoIterator for Orders {
+	type Item = Order;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
 
 impl fmt::Display for Orders {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

@@ -36,10 +36,12 @@ use nom::combinator::map;
 use nom::multi::separated_list1;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::ops;
+use std::ops::Deref;
 use std::str::FromStr;
 
 static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
@@ -47,9 +49,10 @@ static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().igno
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Values(pub Vec<Value>);
 
-impl fmt::Display for Values {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))
+impl Deref for Values {
+	type Target = Vec<Value>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
 	}
 }
 
@@ -58,6 +61,12 @@ impl IntoIterator for Values {
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
+	}
+}
+
+impl fmt::Display for Values {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "{}", self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))
 	}
 }
 
@@ -103,6 +112,12 @@ pub enum Value {
 }
 
 impl Eq for Value {}
+
+impl Ord for Value {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.partial_cmp(other).unwrap_or(Ordering::Equal)
+	}
+}
 
 impl Default for Value {
 	fn default() -> Value {

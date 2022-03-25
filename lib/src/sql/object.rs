@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
 pub struct Object {
 	pub value: BTreeMap<String, Value>,
 }

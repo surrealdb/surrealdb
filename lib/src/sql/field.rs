@@ -8,6 +8,7 @@ use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Fields(pub Vec<Field>);
@@ -29,6 +30,21 @@ impl Fields {
 			},
 			_ => None,
 		}
+	}
+}
+
+impl Deref for Fields {
+	type Target = Vec<Field>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl IntoIterator for Fields {
+	type Item = Field;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
 	}
 }
 

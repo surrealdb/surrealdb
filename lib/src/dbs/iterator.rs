@@ -7,6 +7,8 @@ use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::sql::array::Array;
+use crate::sql::field::Field;
 use crate::sql::id::Id;
 use crate::sql::part::Part;
 use crate::sql::statements::create::CreateStatement;
@@ -19,6 +21,7 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::mem;
 use std::sync::Arc;
 
@@ -155,7 +158,8 @@ impl Iterator {
 		txn: &Transaction,
 	) -> Result<(), Error> {
 		if let Some(splits) = self.stm.split() {
-			for split in &splits.0 {
+			// Loop over each split clause
+			for split in splits.iter() {
 				// Get the query result
 				let res = mem::take(&mut self.results);
 				// Loop over each value
@@ -192,12 +196,86 @@ impl Iterator {
 	#[inline]
 	async fn output_group(
 		&mut self,
-		_ctx: &Runtime,
-		_opt: &Options,
-		_txn: &Transaction,
+		ctx: &Runtime,
+		opt: &Options,
+		txn: &Transaction,
 	) -> Result<(), Error> {
-		if self.stm.group().is_some() {
-			// Ignore
+		if let Some(fields) = self.stm.expr() {
+			if let Some(groups) = self.stm.group() {
+				// Create the new grouped collection
+				let mut grp: BTreeMap<Array, Array> = BTreeMap::new();
+				// Get the query result
+				let res = mem::take(&mut self.results);
+				// Loop over each value
+				for obj in res {
+					// Create a new column set
+					let mut arr = Array::with_capacity(groups.len());
+					// Loop over each group clause
+					for group in groups.iter() {
+						// Get the value at the path
+						let val = obj.pick(&group.group);
+						// Set the value at the path
+						arr.value.push(val);
+					}
+					// Add to grouped collection
+					match grp.get_mut(&arr) {
+						Some(v) => v.value.push(obj),
+						None => {
+							grp.insert(arr, Array::from(obj));
+						}
+					}
+				}
+				// Loop over each grouped collection
+				for (_, vals) in grp {
+					// Create a new value
+					let mut obj = Value::base();
+					// Save the collected values
+					let vals = Value::from(vals);
+					// Loop over each group clause
+					for field in fields.other() {
+						// Process it if it is a normal field
+						if let Field::Alone(v) = field {
+							match v {
+								Value::Function(f) if f.is_aggregate() => {
+									let x = vals
+										.all(ctx, opt, txn)
+										.await?
+										.get(ctx, opt, txn, v.to_idiom().as_ref())
+										.await?;
+									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
+									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+								}
+								_ => {
+									let x = vals.first(ctx, opt, txn).await?;
+									let x = v.compute(ctx, opt, txn, Some(&x)).await?;
+									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+								}
+							}
+						}
+						// Process it if it is a aliased field
+						if let Field::Alias(v, i) = field {
+							match v {
+								Value::Function(f) if f.is_aggregate() => {
+									let x = vals
+										.all(ctx, opt, txn)
+										.await?
+										.get(ctx, opt, txn, i)
+										.await?;
+									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
+									obj.set(ctx, opt, txn, i, x).await?;
+								}
+								_ => {
+									let x = vals.first(ctx, opt, txn).await?;
+									let x = v.compute(ctx, opt, txn, Some(&x)).await?;
+									obj.set(ctx, opt, txn, i, x).await?;
+								}
+							}
+						}
+					}
+					// Add the object to the results
+					self.results.push(obj);
+				}
+			}
 		}
 		Ok(())
 	}
@@ -210,8 +288,11 @@ impl Iterator {
 		_txn: &Transaction,
 	) -> Result<(), Error> {
 		if let Some(orders) = self.stm.order() {
+			// Sort the full result set
 			self.results.sort_by(|a, b| {
-				for order in &orders.0 {
+				// Loop over each order clause
+				for order in orders.iter() {
+					// Reverse the ordering if DESC
 					let o = match order.direction {
 						true => a.compare(b, &order.order),
 						false => b.compare(a, &order.order),

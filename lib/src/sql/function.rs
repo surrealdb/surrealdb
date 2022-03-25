@@ -32,6 +32,76 @@ impl PartialOrd for Function {
 }
 
 impl Function {
+	// Get function arguments if applicable
+	pub fn args(&self) -> &[Value] {
+		match self {
+			Function::Normal(_, a) => a,
+			_ => &[],
+		}
+	}
+	// Convert this function to an aggregate
+	pub fn aggregate(&self, val: Value) -> Function {
+		match self {
+			Function::Normal(n, a) => {
+				let mut a = a.to_owned();
+				match a.len() {
+					0 => a.insert(0, val),
+					_ => {
+						a.remove(0);
+						a.insert(0, val);
+					}
+				}
+				Function::Normal(n.to_owned(), a)
+			}
+			_ => unreachable!(),
+		}
+	}
+	// Check if this function is a rolling function
+	pub fn is_rolling(&self) -> bool {
+		match self {
+			Function::Normal(f, _) if f == "array::concat" => true,
+			Function::Normal(f, _) if f == "array::distinct" => true,
+			Function::Normal(f, _) if f == "array::union" => true,
+			Function::Normal(f, _) if f == "count" => true,
+			Function::Normal(f, _) if f == "math::max" => true,
+			Function::Normal(f, _) if f == "math::mean" => true,
+			Function::Normal(f, _) if f == "math::min" => true,
+			Function::Normal(f, _) if f == "math::stddev" => true,
+			Function::Normal(f, _) if f == "math::sum" => true,
+			Function::Normal(f, _) if f == "math::variance" => true,
+			_ => false,
+		}
+	}
+	// Check if this function is a grouping function
+	pub fn is_aggregate(&self) -> bool {
+		match self {
+			Function::Normal(f, _) if f == "array::concat" => true,
+			Function::Normal(f, _) if f == "array::distinct" => true,
+			Function::Normal(f, _) if f == "array::union" => true,
+			Function::Normal(f, _) if f == "count" => true,
+			Function::Normal(f, _) if f == "math::bottom" => true,
+			Function::Normal(f, _) if f == "math::interquartile" => true,
+			Function::Normal(f, _) if f == "math::max" => true,
+			Function::Normal(f, _) if f == "math::mean" => true,
+			Function::Normal(f, _) if f == "math::median" => true,
+			Function::Normal(f, _) if f == "math::midhinge" => true,
+			Function::Normal(f, _) if f == "math::min" => true,
+			Function::Normal(f, _) if f == "math::mode" => true,
+			Function::Normal(f, _) if f == "math::nearestrank" => true,
+			Function::Normal(f, _) if f == "math::percentile" => true,
+			Function::Normal(f, _) if f == "math::sample" => true,
+			Function::Normal(f, _) if f == "math::spread" => true,
+			Function::Normal(f, _) if f == "math::stddev" => true,
+			Function::Normal(f, _) if f == "math::sum" => true,
+			Function::Normal(f, _) if f == "math::top" => true,
+			Function::Normal(f, _) if f == "math::trimean" => true,
+			Function::Normal(f, _) if f == "math::variance" => true,
+			_ => false,
+		}
+	}
+}
+
+impl Function {
 	pub async fn compute(
 		&self,
 		ctx: &Runtime,

@@ -67,14 +67,40 @@ impl<'a> Document<'a> {
 					for v in stm.expr.other() {
 						match v {
 							Field::All => (),
-							Field::Alone(v) => {
-								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
-								out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
-							}
-							Field::Alias(v, i) => {
-								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
-								out.set(ctx, opt, txn, i, x).await?;
-							}
+							Field::Alone(v) => match v {
+								Value::Function(f) if stm.group.is_some() && f.is_aggregate() => {
+									let x = match f.args().len() {
+										0 => f.compute(ctx, opt, txn, Some(&self.current)).await?,
+										_ => {
+											f.args()[0]
+												.compute(ctx, opt, txn, Some(&self.current))
+												.await?
+										}
+									};
+									out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+								}
+								_ => {
+									let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
+									out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+								}
+							},
+							Field::Alias(v, i) => match v {
+								Value::Function(f) if stm.group.is_some() && f.is_aggregate() => {
+									let x = match f.args().len() {
+										0 => f.compute(ctx, opt, txn, Some(&self.current)).await?,
+										_ => {
+											f.args()[0]
+												.compute(ctx, opt, txn, Some(&self.current))
+												.await?
+										}
+									};
+									out.set(ctx, opt, txn, i, x).await?;
+								}
+								_ => {
+									let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
+									out.set(ctx, opt, txn, i, x).await?;
+								}
+							},
 						}
 					}
 					Ok(out)

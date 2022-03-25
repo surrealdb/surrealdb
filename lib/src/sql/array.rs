@@ -17,9 +17,17 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
 pub struct Array {
 	pub value: Vec<Value>,
+}
+
+impl From<Value> for Array {
+	fn from(v: Value) -> Self {
+		Array {
+			value: vec![v],
+		}
+	}
 }
 
 impl From<Vec<Value>> for Array {
@@ -71,6 +79,18 @@ impl From<Vec<Operation>> for Array {
 }
 
 impl Array {
+	pub fn new() -> Self {
+		Array {
+			value: Vec::default(),
+		}
+	}
+
+	pub fn with_capacity(len: usize) -> Self {
+		Array {
+			value: Vec::with_capacity(len),
+		}
+	}
+
 	pub fn len(&self) -> usize {
 		self.value.len()
 	}

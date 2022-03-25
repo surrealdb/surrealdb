@@ -8,9 +8,31 @@ use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Groups(pub Vec<Group>);
+
+impl Groups {
+	pub fn len(&self) -> usize {
+		self.0.len()
+	}
+}
+
+impl Deref for Groups {
+	type Target = Vec<Group>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl IntoIterator for Groups {
+	type Item = Group;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
 
 impl fmt::Display for Groups {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
