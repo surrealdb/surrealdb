@@ -81,8 +81,7 @@ impl Value {
 						Arc::new(stm)
 							.compute(ctx, opt, txn, None)
 							.await?
-							.first(ctx, opt, txn)
-							.await?
+							.first()
 							.get(ctx, opt, txn, path)
 							.await
 					}

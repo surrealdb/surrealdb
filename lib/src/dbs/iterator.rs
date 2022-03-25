@@ -238,15 +238,14 @@ impl Iterator {
 							match v {
 								Value::Function(f) if f.is_aggregate() => {
 									let x = vals
-										.all(ctx, opt, txn)
-										.await?
+										.all()
 										.get(ctx, opt, txn, v.to_idiom().as_ref())
 										.await?;
 									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
 									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 								}
 								_ => {
-									let x = vals.first(ctx, opt, txn).await?;
+									let x = vals.first();
 									let x = v.compute(ctx, opt, txn, Some(&x)).await?;
 									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 								}
@@ -256,16 +255,12 @@ impl Iterator {
 						if let Field::Alias(v, i) = field {
 							match v {
 								Value::Function(f) if f.is_aggregate() => {
-									let x = vals
-										.all(ctx, opt, txn)
-										.await?
-										.get(ctx, opt, txn, i)
-										.await?;
+									let x = vals.all().get(ctx, opt, txn, i).await?;
 									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
 									obj.set(ctx, opt, txn, i, x).await?;
 								}
 								_ => {
-									let x = vals.first(ctx, opt, txn).await?;
+									let x = vals.first();
 									let x = v.compute(ctx, opt, txn, Some(&x)).await?;
 									obj.set(ctx, opt, txn, i, x).await?;
 								}
