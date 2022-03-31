@@ -13,9 +13,9 @@ impl<'a> Document<'a> {
 		_txn: &Transaction,
 		stm: &Statement,
 	) -> Result<(), Error> {
-		match self.id {
-			Some(_) => Ok(()),
-			None => match stm {
+		// Check that we are altering a record
+		if self.id.is_none() {
+			return match stm {
 				Statement::Create(_) => Err(Error::CreateStatement {
 					value: (*self.initial).clone(),
 				}),
@@ -32,7 +32,9 @@ impl<'a> Document<'a> {
 					value: (*self.initial).clone(),
 				}),
 				_ => unreachable!(),
-			},
+			};
 		}
+		// Carry on
+		Ok(())
 	}
 }

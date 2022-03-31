@@ -13,9 +13,13 @@ impl<'a> Document<'a> {
 		_txn: &Transaction,
 		_stm: &Statement,
 	) -> Result<(), Error> {
-		match self.id.is_some() && self.current.is_none() {
-			true => Err(Error::Ignore),
-			false => Ok(()),
+		// Check if this record exists
+		if self.id.is_some() {
+			if self.current.is_none() {
+				return Err(Error::Ignore);
+			}
 		}
+		// Carry on
+		Ok(())
 	}
 }
