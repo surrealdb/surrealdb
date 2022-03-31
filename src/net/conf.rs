@@ -32,7 +32,7 @@ fn process(
 ) -> Session {
 	// Create session
 	let conf = Session {
-		au: Auth::No,
+		au: Auth::default(),
 		ip: ip.map(|v| v.to_string()),
 		or,
 		id,

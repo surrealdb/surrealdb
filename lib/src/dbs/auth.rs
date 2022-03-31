@@ -26,10 +26,10 @@ impl Auth {
 	pub fn check(&self, level: Level) -> bool {
 		match self {
 			Auth::No => matches!(level, Level::No),
-			Auth::Kv => matches!(level, Level::No | Level::Kv),
-			Auth::Ns(_) => matches!(level, Level::No | Level::Kv | Level::Ns),
-			Auth::Db(_, _) => matches!(level, Level::No | Level::Kv | Level::Ns | Level::Db),
-			Auth::Sc(_, _, _) => true,
+			Auth::Sc(_, _, _) => matches!(level, Level::No | Level::Sc),
+			Auth::Db(_, _) => matches!(level, Level::No | Level::Sc | Level::Db),
+			Auth::Ns(_) => matches!(level, Level::No | Level::Sc | Level::Db | Level::Ns),
+			Auth::Kv => true,
 		}
 	}
 }
