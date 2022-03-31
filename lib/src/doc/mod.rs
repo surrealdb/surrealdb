@@ -10,6 +10,7 @@ mod document;
 mod empty;
 mod erase;
 mod event;
+mod exist;
 mod grant;
 mod index;
 mod insert;
