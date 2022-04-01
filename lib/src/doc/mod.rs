@@ -1,9 +1,11 @@
 pub use self::document::*;
 
+#[cfg(feature = "parallel")]
+mod compute;
+
 mod admit;
 mod allow;
 mod check;
-mod compute;
 mod create;
 mod delete;
 mod document;
