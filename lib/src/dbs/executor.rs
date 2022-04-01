@@ -147,10 +147,11 @@ impl Executor {
 					opt.check(Level::Db)?;
 					// Process the option
 					match &stm.name.name.to_uppercase()[..] {
-						"FIELD_QUERIES" => opt = opt.fields(stm.what),
-						"EVENT_QUERIES" => opt = opt.events(stm.what),
-						"TABLE_QUERIES" => opt = opt.tables(stm.what),
+						"FIELDS" => opt = opt.fields(stm.what),
+						"EVENTS" => opt = opt.events(stm.what),
+						"TABLES" => opt = opt.tables(stm.what),
 						"IMPORT" => opt = opt.import(stm.what),
+						"FORCE" => opt = opt.force(stm.what),
 						"DEBUG" => opt = opt.debug(stm.what),
 						_ => break,
 					}
