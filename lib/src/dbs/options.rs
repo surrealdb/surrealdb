@@ -160,9 +160,9 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
-			fields: v,
-			events: v,
-			tables: v,
+			fields: !v,
+			events: !v,
+			tables: !v,
 			..*self
 		}
 	}
