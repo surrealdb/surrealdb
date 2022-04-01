@@ -1,6 +1,7 @@
 use crate::ctx::Context;
 use crate::dbs::response::{Response, Responses, Status};
 use crate::dbs::Auth;
+use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Transaction;
@@ -142,6 +143,9 @@ impl Executor {
 			let res = match stm {
 				// Specify runtime options
 				Statement::Option(stm) => {
+					// Allowed to run?
+					opt.check(Level::Db)?;
+					// Process the option
 					match &stm.name.name.to_uppercase()[..] {
 						"FIELD_QUERIES" => opt = opt.fields(stm.what),
 						"EVENT_QUERIES" => opt = opt.events(stm.what),
@@ -150,6 +154,7 @@ impl Executor {
 						"DEBUG" => opt = opt.debug(stm.what),
 						_ => break,
 					}
+					// Continue
 					continue;
 				}
 				// Begin a new transaction
