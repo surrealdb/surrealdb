@@ -100,7 +100,7 @@ impl Thing {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		stm: &Statement,
+		_stm: &Statement,
 		txn: &Transaction,
 		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
@@ -122,7 +122,7 @@ impl Table {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		stm: &Statement,
+		_stm: &Statement,
 		txn: &Transaction,
 		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
