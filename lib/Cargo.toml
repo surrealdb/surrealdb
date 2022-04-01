@@ -14,7 +14,7 @@ kv-indxdb = ["indxdb"]
 kv-yokudb = []
 
 [dependencies]
-argon2 = "0.3.4"
+argon2 = "0.4.0"
 async-recursion = "1.0.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
 byteorder = "1.4.3"
@@ -25,18 +25,18 @@ echodb = { version = "0.2.1", optional = true }
 futures = "0.3.21"
 fuzzy-matcher = "0.3.7"
 geo = { version = "0.19.0", features = ["use-serde"] }
-indxdb = { version = "0.1.2", optional = true }
-log = "0.4.14"
+indxdb = { version = "0.1.3", optional = true }
+log = "0.4.16"
 md-5 = "0.10.1"
 nanoid = "0.4.0"
 nom = "7.1.1"
 once_cell = "1.10.0"
-pbkdf2 = "0.10.1"
+pbkdf2 = "0.11.0"
 trice = "0.1.0"
 rand = "0.8.5"
 regex = "1.5.5"
 msgpack = { version = "1.0.0", package = "rmp-serde" }
-scrypt = "0.9.0"
+scrypt = "0.10.0"
 serde = { version = "1.0.136", features = ["derive", "rc"] }
 storekey = "0.1.0"
 sha-1 = "0.10.0"
