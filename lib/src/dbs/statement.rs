@@ -87,6 +87,7 @@ impl fmt::Display for Statement {
 
 impl Statement {
 	// Returns any query fields if specified
+	#[inline]
 	pub fn expr(self: &Statement) -> Option<&Fields> {
 		match self {
 			Statement::Select(v) => Some(&v.expr),
@@ -94,6 +95,7 @@ impl Statement {
 		}
 	}
 	// Returns any SET clause if specified
+	#[inline]
 	pub fn data(self: &Statement) -> Option<&Data> {
 		match self {
 			Statement::Create(v) => v.data.as_ref(),
@@ -102,6 +104,7 @@ impl Statement {
 		}
 	}
 	// Returns any WHERE clause if specified
+	#[inline]
 	pub fn conds(self: &Statement) -> Option<&Cond> {
 		match self {
 			Statement::Select(v) => v.cond.as_ref(),
@@ -111,6 +114,7 @@ impl Statement {
 		}
 	}
 	// Returns any SPLIT clause if specified
+	#[inline]
 	pub fn split(self: &Statement) -> Option<&Splits> {
 		match self {
 			Statement::Select(v) => v.split.as_ref(),
@@ -118,6 +122,7 @@ impl Statement {
 		}
 	}
 	// Returns any GROUP clause if specified
+	#[inline]
 	pub fn group(self: &Statement) -> Option<&Groups> {
 		match self {
 			Statement::Select(v) => v.group.as_ref(),
@@ -125,6 +130,7 @@ impl Statement {
 		}
 	}
 	// Returns any ORDER clause if specified
+	#[inline]
 	pub fn order(self: &Statement) -> Option<&Orders> {
 		match self {
 			Statement::Select(v) => v.order.as_ref(),
@@ -132,6 +138,7 @@ impl Statement {
 		}
 	}
 	// Returns any FETCH clause if specified
+	#[inline]
 	pub fn fetch(self: &Statement) -> Option<&Fetchs> {
 		match self {
 			Statement::Select(v) => v.fetch.as_ref(),
@@ -139,6 +146,7 @@ impl Statement {
 		}
 	}
 	// Returns any START clause if specified
+	#[inline]
 	pub fn start(self: &Statement) -> Option<&Start> {
 		match self {
 			Statement::Select(v) => v.start.as_ref(),
@@ -146,6 +154,7 @@ impl Statement {
 		}
 	}
 	// Returns any LIMIT clause if specified
+	#[inline]
 	pub fn limit(self: &Statement) -> Option<&Limit> {
 		match self {
 			Statement::Select(v) => v.limit.as_ref(),
@@ -153,6 +162,7 @@ impl Statement {
 		}
 	}
 	// Returns any RETURN clause if specified
+	#[inline]
 	pub fn output(self: &Statement) -> Option<&Output> {
 		match self {
 			Statement::Create(v) => v.output.as_ref(),
@@ -164,6 +174,7 @@ impl Statement {
 		}
 	}
 	// Returns any VERSION clause if specified
+	#[inline]
 	pub fn version(self: &Statement) -> Option<&Version> {
 		match self {
 			Statement::Select(v) => v.version.as_ref(),
