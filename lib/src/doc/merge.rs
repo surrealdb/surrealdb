@@ -18,16 +18,10 @@ impl<'a> Document<'a> {
 	) -> Result<(), Error> {
 		// Get the ID reference
 		let id = self.id.as_ref();
-		// Extract statement clause
-		let data = match stm {
-			Statement::Create(stm) => stm.data.as_ref(),
-			Statement::Update(stm) => stm.data.as_ref(),
-			_ => unreachable!(),
-		};
 		// Set default field values
 		self.current.to_mut().def(ctx, opt, txn, id).await?;
 		// The statement has a data clause
-		if let Some(v) = data {
+		if let Some(v) = stm.data() {
 			match v {
 				Data::SetExpression(x) => {
 					for x in x.iter() {
@@ -62,10 +56,6 @@ impl<'a> Document<'a> {
 		};
 		// Set default field values
 		self.current.to_mut().def(ctx, opt, txn, id).await?;
-		// Set ASSERT and VALUE clauses
-		// todo!();
-		// Delete non-defined FIELDs
-		// todo!();
 		// Carry on
 		Ok(())
 	}

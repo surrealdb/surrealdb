@@ -13,22 +13,13 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement,
 	) -> Result<(), Error> {
-		// Extract statement clause
-		let cond = match stm {
-			Statement::Select(stm) => stm.cond.as_ref(),
-			Statement::Update(stm) => stm.cond.as_ref(),
-			Statement::Delete(stm) => stm.cond.as_ref(),
-			_ => unreachable!(),
-		};
-		// Match clause
-		match cond {
-			Some(v) => {
-				match v.expr.compute(ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
-					false => Err(Error::Ignore),
-					true => Ok(()),
-				}
+		// Check where condition
+		if let Some(cond) = stm.conds() {
+			if cond.expr.compute(ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
+				return Err(Error::Ignore);
 			}
-			None => Ok(()),
 		}
+		// Carry on
+		Ok(())
 	}
 }

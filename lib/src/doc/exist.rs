@@ -15,7 +15,9 @@ impl<'a> Document<'a> {
 	) -> Result<(), Error> {
 		// Check if this record exists
 		if let Some(id) = &self.id {
+			// If there is a current value
 			if self.current.is_some() {
+				// The record already exists
 				return Err(Error::RecordExists {
 					thing: id.clone(),
 				});

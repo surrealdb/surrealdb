@@ -1,9 +1,11 @@
 use crate::sql::cond::Cond;
+use crate::sql::data::Data;
 use crate::sql::fetch::Fetchs;
 use crate::sql::field::Fields;
 use crate::sql::group::Groups;
 use crate::sql::limit::Limit;
 use crate::sql::order::Orders;
+use crate::sql::output::Output;
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
 use crate::sql::statements::create::CreateStatement;
@@ -91,7 +93,15 @@ impl Statement {
 			_ => None,
 		}
 	}
-	// Returns any SPLIT clause if specified
+	// Returns any SET clause if specified
+	pub fn data(self: &Statement) -> Option<&Data> {
+		match self {
+			Statement::Create(v) => v.data.as_ref(),
+			Statement::Update(v) => v.data.as_ref(),
+			_ => None,
+		}
+	}
+	// Returns any WHERE clause if specified
 	pub fn conds(self: &Statement) -> Option<&Cond> {
 		match self {
 			Statement::Select(v) => v.cond.as_ref(),
@@ -139,6 +149,17 @@ impl Statement {
 	pub fn limit(self: &Statement) -> Option<&Limit> {
 		match self {
 			Statement::Select(v) => v.limit.as_ref(),
+			_ => None,
+		}
+	}
+	// Returns any RETURN clause if specified
+	pub fn output(self: &Statement) -> Option<&Output> {
+		match self {
+			Statement::Create(v) => v.output.as_ref(),
+			Statement::Update(v) => v.output.as_ref(),
+			Statement::Relate(v) => v.output.as_ref(),
+			Statement::Delete(v) => v.output.as_ref(),
+			Statement::Insert(v) => v.output.as_ref(),
 			_ => None,
 		}
 	}

@@ -22,7 +22,7 @@ impl<'a> Document<'a> {
 		self.allow(ctx, opt, txn, stm).await?;
 		// Erase document
 		self.erase(ctx, opt, txn, stm).await?;
-		// Store index data
+		// Purge index data
 		self.index(ctx, opt, txn, stm).await?;
 		// Store record data
 		self.store(ctx, opt, txn, stm).await?;

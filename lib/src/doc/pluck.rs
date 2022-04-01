@@ -17,20 +17,10 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement,
 	) -> Result<Value, Error> {
-		// Extract statement clause
-		let expr = match stm {
-			Statement::Select(_) => None,
-			Statement::Create(stm) => stm.output.as_ref().or(Some(&Output::After)),
-			Statement::Update(stm) => stm.output.as_ref().or(Some(&Output::After)),
-			Statement::Relate(stm) => stm.output.as_ref().or(Some(&Output::After)),
-			Statement::Delete(stm) => stm.output.as_ref().or(Some(&Output::None)),
-			Statement::Insert(stm) => stm.output.as_ref().or(Some(&Output::After)),
-			_ => unreachable!(),
-		};
 		// Ensure futures are run
 		let opt = &opt.futures(true);
 		// Match clause
-		match expr {
+		match stm.output() {
 			Some(v) => match v {
 				Output::None => Err(Error::Ignore),
 				Output::Null => Ok(Value::Null),
@@ -59,16 +49,16 @@ impl<'a> Document<'a> {
 				}
 			},
 			None => match stm {
-				Statement::Select(stm) => {
-					let mut out = match stm.expr.all() {
+				Statement::Select(s) => {
+					let mut out = match s.expr.all() {
 						true => self.current.compute(ctx, opt, txn, Some(&self.current)).await?,
 						false => Value::base(),
 					};
-					for v in stm.expr.other() {
+					for v in s.expr.other() {
 						match v {
 							Field::All => (),
 							Field::Alone(v) => match v {
-								Value::Function(f) if stm.group.is_some() && f.is_aggregate() => {
+								Value::Function(f) if s.group.is_some() && f.is_aggregate() => {
 									let x = match f.args().len() {
 										0 => f.compute(ctx, opt, txn, Some(&self.current)).await?,
 										_ => {
@@ -85,7 +75,7 @@ impl<'a> Document<'a> {
 								}
 							},
 							Field::Alias(v, i) => match v {
-								Value::Function(f) if stm.group.is_some() && f.is_aggregate() => {
+								Value::Function(f) if s.group.is_some() && f.is_aggregate() => {
 									let x = match f.args().len() {
 										0 => f.compute(ctx, opt, txn, Some(&self.current)).await?,
 										_ => {
@@ -105,7 +95,19 @@ impl<'a> Document<'a> {
 					}
 					Ok(out)
 				}
-				_ => unreachable!(),
+				Statement::Create(_) => {
+					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+				}
+				Statement::Update(_) => {
+					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+				}
+				Statement::Relate(_) => {
+					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+				}
+				Statement::Insert(_) => {
+					self.current.compute(ctx, opt, txn, Some(&self.current)).await
+				}
+				_ => Err(Error::Ignore),
 			},
 		}
 	}
