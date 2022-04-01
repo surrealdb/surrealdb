@@ -16,10 +16,10 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement,
 	) -> Result<(), Error> {
-		// Get the ID reference
-		let id = self.id.as_ref();
+		// Get the record id
+		let rid = self.id.as_ref().unwrap();
 		// Set default field values
-		self.current.to_mut().def(ctx, opt, txn, id).await?;
+		self.current.to_mut().def(ctx, opt, txn, rid).await?;
 		// The statement has a data clause
 		if let Some(v) = stm.data() {
 			match v {
@@ -55,7 +55,7 @@ impl<'a> Document<'a> {
 			};
 		};
 		// Set default field values
-		self.current.to_mut().def(ctx, opt, txn, id).await?;
+		self.current.to_mut().def(ctx, opt, txn, rid).await?;
 		// Carry on
 		Ok(())
 	}
