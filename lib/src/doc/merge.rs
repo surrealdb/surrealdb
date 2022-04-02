@@ -43,13 +43,17 @@ impl<'a> Document<'a> {
 						}
 					}
 				}
-				Data::PatchExpression(v) => self.current.to_mut().patch(ctx, opt, txn, v).await?,
-				Data::MergeExpression(v) => self.current.to_mut().merge(ctx, opt, txn, v).await?,
-				Data::ReplaceExpression(v) => {
-					self.current.to_mut().replace(ctx, opt, txn, v).await?
+				Data::PatchExpression(data) => {
+					self.current.to_mut().patch(ctx, opt, txn, data).await?
 				}
-				Data::ContentExpression(v) => {
-					self.current.to_mut().replace(ctx, opt, txn, v).await?
+				Data::MergeExpression(data) => {
+					self.current.to_mut().merge(ctx, opt, txn, data).await?
+				}
+				Data::ReplaceExpression(data) => {
+					self.current.to_mut().replace(ctx, opt, txn, data).await?
+				}
+				Data::ContentExpression(data) => {
+					self.current.to_mut().replace(ctx, opt, txn, data).await?
 				}
 				_ => unreachable!(),
 			};
