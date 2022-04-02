@@ -6,7 +6,7 @@ use crate::doc::Document;
 use crate::err::Error;
 
 impl<'a> Document<'a> {
-	pub async fn store(
+	pub async fn purge(
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -27,9 +27,13 @@ impl<'a> Document<'a> {
 		let mut run = run.lock().await;
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
-		// Store the record data
+		// Purge the record data
 		let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
-		run.set(key, self).await?;
+		run.del(key).await?;
+		// Remove the graph data
+		let beg = crate::key::graph::prefix(opt.ns(), opt.db(), &rid.tb, &rid.id);
+		let end = crate::key::graph::suffix(opt.ns(), opt.db(), &rid.tb, &rid.id);
+		run.delr(beg..end, u32::MAX).await?;
 		// Carry on
 		Ok(())
 	}

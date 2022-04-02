@@ -20,6 +20,7 @@ mod lives;
 mod merge;
 mod perms;
 mod pluck;
+mod purge;
 mod relate;
 mod select;
 mod store;

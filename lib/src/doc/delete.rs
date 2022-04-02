@@ -24,8 +24,8 @@ impl<'a> Document<'a> {
 		self.erase(ctx, opt, txn, stm).await?;
 		// Purge index data
 		self.index(ctx, opt, txn, stm).await?;
-		// Store record data
-		self.store(ctx, opt, txn, stm).await?;
+		// Purge record data
+		self.purge(ctx, opt, txn, stm).await?;
 		// Run table queries
 		self.table(ctx, opt, txn, stm).await?;
 		// Run lives queries
