@@ -622,7 +622,9 @@ impl fmt::Display for DefineTableStatement {
 		if let Some(ref v) = self.view {
 			write!(f, " {}", v)?
 		}
-		write!(f, " {}", self.permissions)?;
+		if !self.permissions.is_full() {
+			write!(f, " {}", self.permissions)?;
+		}
 		Ok(())
 	}
 }
@@ -840,7 +842,9 @@ impl fmt::Display for DefineFieldStatement {
 		if let Some(ref v) = self.assert {
 			write!(f, " ASSERT {}", v)?
 		}
-		write!(f, " {}", self.permissions)?;
+		if !self.permissions.is_full() {
+			write!(f, " {}", self.permissions)?;
+		}
 		Ok(())
 	}
 }

@@ -143,7 +143,7 @@ pub enum Permission {
 
 impl Default for Permission {
 	fn default() -> Self {
-		Permission::None
+		Permission::Full
 	}
 }
 
