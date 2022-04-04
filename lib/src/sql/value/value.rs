@@ -307,6 +307,12 @@ impl From<f64> for Value {
 	}
 }
 
+impl From<BigDecimal> for Value {
+	fn from(v: BigDecimal) -> Self {
+		Value::Number(Number::from(v))
+	}
+}
+
 impl From<String> for Value {
 	fn from(v: String) -> Self {
 		Value::Strand(Strand::from(v))
@@ -622,6 +628,42 @@ impl Value {
 
 	pub fn to_vec(&self) -> Result<Vec<u8>, Error> {
 		msgpack::to_vec(&self).map_err(|e| e.into())
+	}
+
+	// -----------------------------------
+	// Simple conversion of value
+	// -----------------------------------
+
+	pub fn make_bool(self) -> Value {
+		self.is_truthy().into()
+	}
+
+	pub fn make_int(self) -> Value {
+		self.as_int().into()
+	}
+
+	pub fn make_float(self) -> Value {
+		self.as_float().into()
+	}
+
+	pub fn make_decimal(self) -> Value {
+		self.as_decimal().into()
+	}
+
+	pub fn make_number(self) -> Value {
+		self.as_number().into()
+	}
+
+	pub fn make_strand(self) -> Value {
+		self.as_strand().into()
+	}
+
+	pub fn make_datetime(self) -> Value {
+		self.as_datetime().into()
+	}
+
+	pub fn make_duration(self) -> Value {
+		self.as_duration().into()
 	}
 
 	// -----------------------------------
