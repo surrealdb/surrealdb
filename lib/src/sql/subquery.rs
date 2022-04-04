@@ -58,7 +58,7 @@ impl Subquery {
 				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value(String::from("parent"), doc);
+					ctx.add_value("parent".into(), doc);
 				}
 				// Prepare context
 				let ctx = ctx.freeze();
@@ -84,7 +84,7 @@ impl Subquery {
 				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value(String::from("parent"), doc);
+					ctx.add_value("parent".into(), doc);
 				}
 				// Prepare context
 				let ctx = ctx.freeze();
@@ -105,7 +105,7 @@ impl Subquery {
 				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value(String::from("parent"), doc);
+					ctx.add_value("parent".into(), doc);
 				}
 				// Prepare context
 				let ctx = ctx.freeze();
@@ -126,7 +126,7 @@ impl Subquery {
 				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value(String::from("parent"), doc);
+					ctx.add_value("parent".into(), doc);
 				}
 				// Prepare context
 				let ctx = ctx.freeze();
@@ -147,7 +147,7 @@ impl Subquery {
 				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value(String::from("parent"), doc);
+					ctx.add_value("parent".into(), doc);
 				}
 				// Prepare context
 				let ctx = ctx.freeze();
@@ -168,7 +168,7 @@ impl Subquery {
 				// Add parent document
 				if doc.is_some() {
 					let doc = doc.unwrap().clone();
-					ctx.add_value(String::from("parent"), doc);
+					ctx.add_value("parent".into(), doc);
 				}
 				// Prepare context
 				let ctx = ctx.freeze();
