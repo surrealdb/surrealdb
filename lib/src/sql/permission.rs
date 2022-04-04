@@ -94,7 +94,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 				.iter()
 				.find_map(|x| {
 					x.iter().find_map(|y| match y {
-						(Permission::Select, ref v) => Some(v.to_owned()),
+						('s', ref v) => Some(v.to_owned()),
 						_ => None,
 					})
 				})
@@ -103,7 +103,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 				.iter()
 				.find_map(|x| {
 					x.iter().find_map(|y| match y {
-						(Permission::Create, ref v) => Some(v.to_owned()),
+						('c', ref v) => Some(v.to_owned()),
 						_ => None,
 					})
 				})
@@ -112,7 +112,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 				.iter()
 				.find_map(|x| {
 					x.iter().find_map(|y| match y {
-						(Permission::Update, ref v) => Some(v.to_owned()),
+						('u', ref v) => Some(v.to_owned()),
 						_ => None,
 					})
 				})
@@ -121,7 +121,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 				.iter()
 				.find_map(|x| {
 					x.iter().find_map(|y| match y {
-						(Permission::Delete, ref v) => Some(v.to_owned()),
+						('d', ref v) => Some(v.to_owned()),
 						_ => None,
 					})
 				})
@@ -134,10 +134,6 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 pub enum Permission {
 	None,
 	Full,
-	Select,
-	Create,
-	Update,
-	Delete,
 	Specific(Value),
 }
 
@@ -153,21 +149,20 @@ impl fmt::Display for Permission {
 			Permission::None => write!(f, "NONE"),
 			Permission::Full => write!(f, "FULL"),
 			Permission::Specific(ref v) => write!(f, "WHERE {}", v),
-			_ => write!(f, ""),
 		}
 	}
 }
 
-fn permission(i: &str) -> IResult<&str, Vec<(Permission, Permission)>> {
+fn permission(i: &str) -> IResult<&str, Vec<(char, Permission)>> {
 	let (i, _) = tag_no_case("FOR")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, kind) = separated_list0(
 		commas,
 		alt((
-			map(tag_no_case("SELECT"), |_| Permission::Select),
-			map(tag_no_case("CREATE"), |_| Permission::Create),
-			map(tag_no_case("UPDATE"), |_| Permission::Update),
-			map(tag_no_case("DELETE"), |_| Permission::Delete),
+			map(tag_no_case("SELECT"), |_| 's'),
+			map(tag_no_case("CREATE"), |_| 'c'),
+			map(tag_no_case("UPDATE"), |_| 'u'),
+			map(tag_no_case("DELETE"), |_| 'd'),
 		)),
 	)(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -178,7 +173,7 @@ fn permission(i: &str) -> IResult<&str, Vec<(Permission, Permission)>> {
 			Permission::Specific(v)
 		}),
 	))(i)?;
-	Ok((i, kind.iter().map(|k| (k.to_owned(), expr.clone())).collect()))
+	Ok((i, kind.into_iter().map(|k| (k, expr.clone())).collect()))
 }
 
 #[cfg(test)]
