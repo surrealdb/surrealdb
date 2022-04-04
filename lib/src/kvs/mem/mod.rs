@@ -73,24 +73,6 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
-	// Delete a key
-	pub fn del<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.ok {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.rw {
-			return Err(Error::TxReadonly);
-		}
-		// Remove the key
-		let res = self.tx.del(key.into())?;
-		// Return result
-		Ok(res)
-	}
 	// Check if a key exists
 	pub fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
@@ -156,6 +138,62 @@ impl Transaction {
 		self.tx.put(key.into(), val.into())?;
 		// Return result
 		Ok(())
+	}
+	// Insert a key if it doesn't exist in the database
+	pub fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.rw {
+			return Err(Error::TxReadonly);
+		}
+		// Set the key
+		self.tx.putc(key.into(), val.into(), chk.map(|v| v.into()))?;
+		// Return result
+		Ok(())
+	}
+	// Delete a key
+	pub fn del<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.rw {
+			return Err(Error::TxReadonly);
+		}
+		// Remove the key
+		let res = self.tx.del(key.into())?;
+		// Return result
+		Ok(res)
+	}
+	// Delete a key
+	pub fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.rw {
+			return Err(Error::TxReadonly);
+		}
+		// Remove the key
+		let res = self.tx.delc(key.into(), chk.map(|v| v.into()))?;
+		// Return result
+		Ok(res)
 	}
 	// Retrieve a range of keys from the databases
 	pub fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>

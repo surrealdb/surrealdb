@@ -50,7 +50,7 @@ impl Datastore {
 
 impl Transaction {
 	// Check if closed
-	pub async fn closed(&self) -> bool {
+	pub fn closed(&self) -> bool {
 		self.ok
 	}
 	// Cancel a transaction
@@ -81,24 +81,6 @@ impl Transaction {
 		// Cancel this transaction
 		self.tx.commit().await?;
 		// Continue
-		Ok(())
-	}
-	// Delete a key
-	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: Into<Key>,
-	{
-		// Check to see if transaction is closed
-		if self.ok {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.rw {
-			return Err(Error::TxReadonly);
-		}
-		// Delete the key
-		self.tx.delete(key.into()).await?;
-		// Return result
 		Ok(())
 	}
 	// Check if a key exists
@@ -164,6 +146,80 @@ impl Transaction {
 		}
 		// Set the key
 		self.tx.insert(key.into(), val.into()).await?;
+		// Return result
+		Ok(())
+	}
+	// Insert a key if it doesn't exist in the database
+	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.rw {
+			return Err(Error::TxReadonly);
+		}
+		// Get the key
+		let key = key.into();
+		// Get the val
+		let val = val.into();
+		// Get the check
+		let chk = chk.map(|v| v.into());
+		// Delete the key
+		match (self.tx.get(key.clone()).await?, chk) {
+			(Some(v), Some(w)) if v == w => self.tx.put(key, val).await?,
+			(None, None) => self.tx.put(key, val).await?,
+			_ => return Err(Error::TxConditionNotMet),
+		};
+		// Return result
+		Ok(())
+	}
+	// Delete a key
+	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.rw {
+			return Err(Error::TxReadonly);
+		}
+		// Delete the key
+		self.tx.delete(key.into()).await?;
+		// Return result
+		Ok(())
+	}
+	// Delete a key
+	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.rw {
+			return Err(Error::TxReadonly);
+		}
+		// Get the key
+		let key = key.into();
+		// Get the check
+		let chk = chk.map(|v| v.into());
+		// Delete the key
+		match (self.tx.get(key.clone()).await?, chk) {
+			(Some(v), Some(w)) if v == w => self.tx.delete(key).await?,
+			(None, None) => self.tx.delete(key).await?,
+			_ => return Err(Error::TxConditionNotMet),
+		};
 		// Return result
 		Ok(())
 	}

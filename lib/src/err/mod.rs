@@ -35,6 +35,9 @@ pub enum Error {
 	#[error("Couldn't write to a read only transaction")]
 	TxReadonly,
 
+	#[error("Value being checked was not correct")]
+	TxConditionNotMet,
+
 	#[error("Specify a namespace to use")]
 	NsEmpty,
 

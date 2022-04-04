@@ -466,9 +466,9 @@ dependencies = [
 
 [[package]]
 name = "echodb"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7717db5a8a5af149e6652cce851908dbfe05bdd4183c6d2f382e312ef3dc523"
+checksum = "9b4d29774dada6bb3dc284fbe41c79efd5425b90933defcb42b109005fe56d41"
 dependencies = [
  "arc-swap",
  "imbl",
@@ -1043,9 +1043,9 @@ dependencies = [
 
 [[package]]
 name = "indxdb"
-version = "0.1.3"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c89b87ab58cbdad0201008ce91890b38e09e18bcc546ee9cb3bf78c1c8dcd3bf"
+checksum = "21ea82794a5c0be29734baebe23cf505148313bc35b247b735be9b540b330595"
 dependencies = [
  "js-sys",
  "rexie",

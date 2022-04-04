@@ -22,12 +22,12 @@ impl Transaction {
 			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
 			Transaction::Mem(v) => v.closed(),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.closed(),
 			#[cfg(feature = "kv-yokudb")]
 			Transaction::File(v) => v.closed(),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.closed(),
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.closed().await,
+			Transaction::TiKV(v) => v.closed(),
 		}
 	}
 	// Cancel a transaction
@@ -36,10 +36,10 @@ impl Transaction {
 			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
 			Transaction::Mem(v) => v.cancel(),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.cancel().await,
 			#[cfg(feature = "kv-yokudb")]
 			Transaction::File(v) => v.cancel(),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.cancel().await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction::TiKV(v) => v.cancel().await,
 		}
@@ -50,10 +50,10 @@ impl Transaction {
 			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
 			Transaction::Mem(v) => v.commit(),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.commit().await,
 			#[cfg(feature = "kv-yokudb")]
 			Transaction::File(v) => v.commit(),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.commit().await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction::TiKV(v) => v.commit().await,
 		}
@@ -67,10 +67,10 @@ impl Transaction {
 			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
 			Transaction::Mem(v) => v.del(key),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.del(key).await,
 			#[cfg(feature = "kv-yokudb")]
 			Transaction::File(v) => v.del(key),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.del(key).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction::TiKV(v) => v.del(key).await,
 		}
@@ -84,10 +84,10 @@ impl Transaction {
 			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
 			Transaction::Mem(v) => v.exi(key),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.exi(key).await,
 			#[cfg(feature = "kv-yokudb")]
 			Transaction::File(v) => v.exi(key),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.exi(key).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction::TiKV(v) => v.exi(key).await,
 		}
@@ -101,10 +101,10 @@ impl Transaction {
 			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
 			Transaction::Mem(v) => v.get(key),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.get(key).await,
 			#[cfg(feature = "kv-yokudb")]
 			Transaction::File(v) => v.get(key),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.get(key).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction::TiKV(v) => v.get(key).await,
 		}
@@ -119,10 +119,10 @@ impl Transaction {
 			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
 			Transaction::Mem(v) => v.set(key, val),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.set(key, val).await,
 			#[cfg(feature = "kv-yokudb")]
 			Transaction::File(v) => v.set(key, val),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.set(key, val).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction::TiKV(v) => v.set(key, val).await,
 		}
@@ -137,10 +137,10 @@ impl Transaction {
 			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
 			Transaction::Mem(v) => v.put(key, val),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.put(key, val).await,
 			#[cfg(feature = "kv-yokudb")]
 			Transaction::File(v) => v.put(key, val),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.put(key, val).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction::TiKV(v) => v.put(key, val).await,
 		}
@@ -154,12 +154,48 @@ impl Transaction {
 			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
 			Transaction::Mem(v) => v.scan(rng, limit),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-yokudb")]
 			Transaction::File(v) => v.scan(rng, limit),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-tikv")]
 			Transaction::TiKV(v) => v.scan(rng, limit).await,
+		}
+	}
+	// Delete a range of keys from the databases
+	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
+		match self {
+			Transaction::Mock => unreachable!(),
+			#[cfg(feature = "kv-echodb")]
+			Transaction::Mem(v) => v.putc(key, val, chk),
+			#[cfg(feature = "kv-yokudb")]
+			Transaction::File(v) => v.putc(key, val, chk),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.putc(key, val, chk).await,
+			#[cfg(feature = "kv-tikv")]
+			Transaction::TiKV(v) => v.putc(key, val, chk).await,
+		}
+	}
+	// Delete a range of keys from the databases
+	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
+	where
+		K: Into<Key>,
+		V: Into<Val>,
+	{
+		match self {
+			Transaction::Mock => unreachable!(),
+			#[cfg(feature = "kv-echodb")]
+			Transaction::Mem(v) => v.delc(key, chk),
+			#[cfg(feature = "kv-yokudb")]
+			Transaction::File(v) => v.delc(key, chk),
+			#[cfg(feature = "kv-indxdb")]
+			Transaction::IxDB(v) => v.delc(key, chk).await,
+			#[cfg(feature = "kv-tikv")]
+			Transaction::TiKV(v) => v.delc(key, chk).await,
 		}
 	}
 	// Retrieve a range of keys from the databases
