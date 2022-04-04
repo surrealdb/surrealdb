@@ -245,35 +245,41 @@ impl Transaction {
 	// Get all namespaces
 	pub async fn add_ns(&mut self, ns: &str) -> Result<(), Error> {
 		let key = crate::key::ns::new(ns);
-		self.put(
-			key,
-			DefineNamespaceStatement {
-				name: ns.to_owned(),
-			},
-		)
-		.await
+		let _ = self
+			.put(
+				key,
+				DefineNamespaceStatement {
+					name: ns.to_owned(),
+				},
+			)
+			.await;
+		Ok(())
 	}
 	// Get all namespace logins
 	pub async fn add_db(&mut self, ns: &str, db: &str) -> Result<(), Error> {
 		let key = crate::key::db::new(ns, db);
-		self.put(
-			key,
-			DefineDatabaseStatement {
-				name: db.to_owned(),
-			},
-		)
-		.await
+		let _ = self
+			.put(
+				key,
+				DefineDatabaseStatement {
+					name: db.to_owned(),
+				},
+			)
+			.await;
+		Ok(())
 	}
 	// Get all namespace tokens
 	pub async fn add_tb(&mut self, ns: &str, db: &str, tb: &str) -> Result<(), Error> {
 		let key = crate::key::tb::new(ns, db, tb);
-		self.put(
-			key,
-			DefineTableStatement {
-				name: tb.to_owned(),
-				..DefineTableStatement::default()
-			},
-		)
-		.await
+		let _ = self
+			.put(
+				key,
+				DefineTableStatement {
+					name: tb.to_owned(),
+					..DefineTableStatement::default()
+				},
+			)
+			.await;
+		Ok(())
 	}
 }
