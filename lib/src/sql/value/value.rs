@@ -507,6 +507,40 @@ impl Value {
 		}
 	}
 
+	pub fn is_type_record(&self, types: &[Table]) -> bool {
+		match self {
+			Value::Thing(v) => types.iter().any(|t| t.name == v.tb),
+			_ => false,
+		}
+	}
+
+	pub fn is_type_geometry(&self, types: &[String]) -> bool {
+		match self {
+			Value::Geometry(Geometry::Point(_)) => {
+				types.iter().any(|t| &t[..] == "feature" || &t[..] == "point")
+			}
+			Value::Geometry(Geometry::Line(_)) => {
+				types.iter().any(|t| &t[..] == "feature" || &t[..] == "line")
+			}
+			Value::Geometry(Geometry::Polygon(_)) => {
+				types.iter().any(|t| &t[..] == "feature" || &t[..] == "polygon")
+			}
+			Value::Geometry(Geometry::MultiPoint(_)) => {
+				types.iter().any(|t| &t[..] == "feature" || &t[..] == "multipoint")
+			}
+			Value::Geometry(Geometry::MultiLine(_)) => {
+				types.iter().any(|t| &t[..] == "feature" || &t[..] == "multiline")
+			}
+			Value::Geometry(Geometry::MultiPolygon(_)) => {
+				types.iter().any(|t| &t[..] == "feature" || &t[..] == "multipolygon")
+			}
+			Value::Geometry(Geometry::Collection(_)) => {
+				types.iter().any(|t| &t[..] == "feature" || &t[..] == "collection")
+			}
+			_ => false,
+		}
+	}
+
 	// -----------------------------------
 	// Simple conversion of value
 	// -----------------------------------

@@ -1,3 +1,4 @@
+use crate::sql::idiom::Idiom;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use msgpack::encode::Error as SerdeError;
@@ -171,6 +172,13 @@ pub enum Error {
 	RecordIndex {
 		index: String,
 		thing: Thing,
+	},
+
+	#[error("Found '{value}' for field '{field}' but field must conform to: {check}")]
+	FieldValue {
+		value: Value,
+		field: Idiom,
+		check: Value,
 	},
 
 	#[error("Serde error: {0}")]

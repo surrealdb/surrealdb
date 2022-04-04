@@ -23,6 +23,15 @@ impl Default for Auth {
 }
 
 impl Auth {
+	pub fn perms(&self) -> bool {
+		match self {
+			Auth::No => true,
+			Auth::Sc(_, _, _) => true,
+			Auth::Db(_, _) => false,
+			Auth::Ns(_) => false,
+			Auth::Kv => false,
+		}
+	}
 	pub fn check(&self, level: Level) -> bool {
 		match self {
 			Auth::No => matches!(level, Level::No),
