@@ -37,18 +37,33 @@ impl Param {
 		// Find a base variable by name
 		match self.name.parts.first() {
 			// The first part will be a field
-			Some(Part::Field(v)) => match ctx.value::<Value>(&v.name) {
-				// The base variable exists
-				Some(v) => {
-					// Get the path parts
-					let pth: &[Part] = &self.name;
-					// Process the paramater value
-					let res = v.compute(ctx, opt, txn, doc).await?;
-					// Return the desired field
-					res.get(ctx, opt, txn, pth.next()).await
-				}
-				// The base variable does not exist
-				None => Ok(Value::None),
+			Some(Part::Field(v)) => match &v.name[..] {
+				"this" => match doc {
+					// The base document exists
+					Some(v) => {
+						// Get the path parts
+						let pth: &[Part] = &self.name;
+						// Process the paramater value
+						let res = v.compute(ctx, opt, txn, doc).await?;
+						// Return the desired field
+						res.get(ctx, opt, txn, pth.next()).await
+					}
+					// The base document does not exist
+					None => Ok(Value::None),
+				},
+				_ => match ctx.value::<Value>(&v.name) {
+					// The base variable exists
+					Some(v) => {
+						// Get the path parts
+						let pth: &[Part] = &self.name;
+						// Process the paramater value
+						let res = v.compute(ctx, opt, txn, doc).await?;
+						// Return the desired field
+						res.get(ctx, opt, txn, pth.next()).await
+					}
+					// The base variable does not exist
+					None => Ok(Value::None),
+				},
 			},
 			_ => unreachable!(),
 		}
