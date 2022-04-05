@@ -146,12 +146,12 @@ impl Context {
 
 	// Get a value from the context. If no value is stored under the
 	// provided key, then this will return None.
-	pub fn value<V>(&self, key: String) -> Option<&V>
+	pub fn value<V>(&self, key: &str) -> Option<&V>
 	where
 		V: Any + Send + Sync + Sized,
 	{
 		if let Some(ref values) = self.values {
-			if let Some(value) = values.get(&key) {
+			if let Some(value) = values.get(key) {
 				let value: &dyn Any = &**value;
 				return value.downcast_ref::<V>();
 			}

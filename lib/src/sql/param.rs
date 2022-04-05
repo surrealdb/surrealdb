@@ -37,7 +37,7 @@ impl Param {
 		// Find a base variable by name
 		match self.name.parts.first() {
 			// The first part will be a field
-			Some(Part::Field(v)) => match ctx.value::<Value>(v.name.clone()) {
+			Some(Part::Field(v)) => match ctx.value::<Value>(&v.name) {
 				// The base variable exists
 				Some(v) => {
 					// Get the path parts
