@@ -38,7 +38,7 @@ impl<'a> Document<'a> {
 	// Get the table for this document
 	pub async fn tb(
 		&self,
-		ctx: &Runtime,
+		_ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<DefineTableStatement, Error> {

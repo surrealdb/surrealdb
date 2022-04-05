@@ -86,6 +86,11 @@ impl fmt::Display for Statement {
 }
 
 impl Statement {
+	// Check the type of statement
+	#[inline]
+	pub fn is_select(&self) -> bool {
+		matches!(self, Statement::Select(_))
+	}
 	// Returns any query fields if specified
 	#[inline]
 	pub fn expr(&self) -> Option<&Fields> {

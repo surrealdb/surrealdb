@@ -153,7 +153,7 @@ pub enum Error {
 	},
 
 	#[error("You don't have permission to run the `{query}` query on the `{table}` table")]
-	TablePermissionsError {
+	TablePermissions {
 		query: String,
 		table: String,
 	},
