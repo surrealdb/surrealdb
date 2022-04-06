@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
+use crate::sql::object::Object;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -15,10 +16,11 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub enum InfoStatement {
-	Namespace,
-	Database,
-	Scope(String),
-	Table(String),
+	Kv,
+	Ns,
+	Db,
+	Sc(String),
+	Tb(String),
 }
 
 impl InfoStatement {
@@ -26,28 +28,161 @@ impl InfoStatement {
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
-		_txn: &Transaction,
+		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		match self {
-			InfoStatement::Namespace => opt.check(Level::Ns)?,
-			InfoStatement::Database => opt.check(Level::Db)?,
-			InfoStatement::Scope(_) => opt.check(Level::Db)?,
-			InfoStatement::Table(_) => opt.check(Level::Db)?,
+			InfoStatement::Kv => {
+				// Allowed to run?
+				opt.check(Level::Kv)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Create the result set
+				let mut res = Object::default();
+				// Process the statement
+				let mut tmp = Object::default();
+				for v in run.all_ns().await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("ns", tmp.into());
+				// Ok all good
+				Value::from(res).ok()
+			}
+			InfoStatement::Ns => {
+				// Allowed to run?
+				opt.check(Level::Ns)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Create the result set
+				let mut res = Object::default();
+				// Process the databases
+				let mut tmp = Object::default();
+				for v in run.all_db(opt.ns()).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("db", tmp.into());
+				// Process the tokens
+				let mut tmp = Object::default();
+				for v in run.all_nt(opt.ns()).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("nt", tmp.into());
+				// Process the logins
+				let mut tmp = Object::default();
+				for v in run.all_nl(opt.ns()).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("nl", tmp.into());
+				// Ok all good
+				Value::from(res).ok()
+			}
+			InfoStatement::Db => {
+				// Allowed to run?
+				opt.check(Level::Db)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Create the result set
+				let mut res = Object::default();
+				// Process the tables
+				let mut tmp = Object::default();
+				for v in run.all_tb(opt.ns(), opt.db()).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("tb", tmp.into());
+				// Process the scopes
+				let mut tmp = Object::default();
+				for v in run.all_sc(opt.ns(), opt.db()).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("sc", tmp.into());
+				// Process the tokens
+				let mut tmp = Object::default();
+				for v in run.all_nt(opt.ns()).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("nt", tmp.into());
+				// Process the logins
+				let mut tmp = Object::default();
+				for v in run.all_nl(opt.ns()).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("nl", tmp.into());
+				// Ok all good
+				Value::from(res).ok()
+			}
+			InfoStatement::Sc(sc) => {
+				// Allowed to run?
+				opt.check(Level::Db)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Create the result set
+				let mut res = Object::default();
+				// Process the tokens
+				let mut tmp = Object::default();
+				for v in run.all_st(opt.ns(), opt.db(), sc).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("st", tmp.into());
+				// Ok all good
+				Value::from(res).ok()
+			}
+			InfoStatement::Tb(tb) => {
+				// Allowed to run?
+				opt.check(Level::Db)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Create the result set
+				let mut res = Object::default();
+				// Process the events
+				let mut tmp = Object::default();
+				for v in run.all_ev(opt.ns(), opt.db(), tb).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("ev", tmp.into());
+				// Process the fields
+				let mut tmp = Object::default();
+				for v in run.all_fd(opt.ns(), opt.db(), tb).await? {
+					tmp.insert(&v.name.to_string(), v.to_string().into());
+				}
+				res.insert("fd", tmp.into());
+				// Process the indexs
+				let mut tmp = Object::default();
+				for v in run.all_ix(opt.ns(), opt.db(), tb).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("ix", tmp.into());
+				// Process the tables
+				let mut tmp = Object::default();
+				for v in run.all_ft(opt.ns(), opt.db(), tb).await? {
+					tmp.insert(&v.name, v.to_string().into());
+				}
+				res.insert("ft", tmp.into());
+				// Ok all good
+				Value::from(res).ok()
+			}
 		}
-		// Continue
-		todo!()
 	}
 }
 
 impl fmt::Display for InfoStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			InfoStatement::Namespace => write!(f, "INFO FOR NAMESPACE"),
-			InfoStatement::Database => write!(f, "INFO FOR DATABASE"),
-			InfoStatement::Scope(ref s) => write!(f, "INFO FOR SCOPE {}", s),
-			InfoStatement::Table(ref t) => write!(f, "INFO FOR TABLE {}", t),
+			InfoStatement::Kv => write!(f, "INFO FOR KV"),
+			InfoStatement::Ns => write!(f, "INFO FOR NAMESPACE"),
+			InfoStatement::Db => write!(f, "INFO FOR DATABASE"),
+			InfoStatement::Sc(ref s) => write!(f, "INFO FOR SCOPE {}", s),
+			InfoStatement::Tb(ref t) => write!(f, "INFO FOR TABLE {}", t),
 		}
 	}
 }
@@ -57,31 +192,36 @@ pub fn info(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FOR")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	alt((namespace, database, scope, table))(i)
+	alt((kv, ns, db, sc, tb))(i)
 }
 
-fn namespace(i: &str) -> IResult<&str, InfoStatement> {
+fn kv(i: &str) -> IResult<&str, InfoStatement> {
+	let (i, _) = tag_no_case("KV")(i)?;
+	Ok((i, InfoStatement::Kv))
+}
+
+fn ns(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("NAMESPACE"), tag_no_case("NS")))(i)?;
-	Ok((i, InfoStatement::Namespace))
+	Ok((i, InfoStatement::Ns))
 }
 
-fn database(i: &str) -> IResult<&str, InfoStatement> {
+fn db(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("DATABASE"), tag_no_case("DB")))(i)?;
-	Ok((i, InfoStatement::Database))
+	Ok((i, InfoStatement::Db))
 }
 
-fn scope(i: &str) -> IResult<&str, InfoStatement> {
+fn sc(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("SCOPE"), tag_no_case("SC")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, scope) = ident_raw(i)?;
-	Ok((i, InfoStatement::Scope(scope)))
+	Ok((i, InfoStatement::Sc(scope)))
 }
 
-fn table(i: &str) -> IResult<&str, InfoStatement> {
+fn tb(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = alt((tag_no_case("TABLE"), tag_no_case("TB")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, table) = ident_raw(i)?;
-	Ok((i, InfoStatement::Table(table)))
+	Ok((i, InfoStatement::Tb(table)))
 }
 
 #[cfg(test)]
@@ -95,7 +235,7 @@ mod tests {
 		let res = info(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, InfoStatement::Namespace);
+		assert_eq!(out, InfoStatement::Ns);
 		assert_eq!("INFO FOR NAMESPACE", format!("{}", out));
 	}
 
@@ -105,7 +245,7 @@ mod tests {
 		let res = info(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, InfoStatement::Database);
+		assert_eq!(out, InfoStatement::Db);
 		assert_eq!("INFO FOR DATABASE", format!("{}", out));
 	}
 
@@ -115,7 +255,7 @@ mod tests {
 		let res = info(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, InfoStatement::Scope(String::from("test")));
+		assert_eq!(out, InfoStatement::Sc(String::from("test")));
 		assert_eq!("INFO FOR SCOPE test", format!("{}", out));
 	}
 
@@ -125,7 +265,7 @@ mod tests {
 		let res = info(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, InfoStatement::Table(String::from("test")));
+		assert_eq!(out, InfoStatement::Tb(String::from("test")));
 		assert_eq!("INFO FOR TABLE test", format!("{}", out));
 	}
 }
