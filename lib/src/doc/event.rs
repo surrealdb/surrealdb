@@ -24,12 +24,8 @@ impl<'a> Document<'a> {
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
-		// Get the record id
-		let rid = self.id.as_ref().unwrap();
-		// Get all event statements
-		let evs = txn.clone().lock().await.all_ev(opt.ns(), opt.db(), &rid.tb).await?;
 		// Loop through all event statements
-		for ev in evs.iter() {
+		for ev in self.ev(opt, txn).await?.iter() {
 			// Get the event action
 			let met = if self.initial.is_none() {
 				Value::from("CREATE")

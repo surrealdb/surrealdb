@@ -1,7 +1,9 @@
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::sql::statements::define::DefineEventStatement;
+use crate::sql::statements::define::DefineFieldStatement;
+use crate::sql::statements::define::DefineIndexStatement;
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -38,7 +40,6 @@ impl<'a> Document<'a> {
 	// Get the table for this document
 	pub async fn tb(
 		&self,
-		_ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<DefineTableStatement, Error> {
@@ -46,5 +47,38 @@ impl<'a> Document<'a> {
 		let id = self.id.as_ref().unwrap();
 		// Get the table definition
 		txn.clone().lock().await.get_tb(opt.ns(), opt.db(), &id.tb).await
+	}
+	// Get the events for this document
+	pub async fn ev(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Vec<DefineEventStatement>, Error> {
+		// Get the record id
+		let id = self.id.as_ref().unwrap();
+		// Get the table definition
+		txn.clone().lock().await.all_ev(opt.ns(), opt.db(), &id.tb).await
+	}
+	// Get the fields for this document
+	pub async fn fd(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Vec<DefineFieldStatement>, Error> {
+		// Get the record id
+		let id = self.id.as_ref().unwrap();
+		// Get the table definition
+		txn.clone().lock().await.all_fd(opt.ns(), opt.db(), &id.tb).await
+	}
+	// Get the indexes for this document
+	pub async fn ix(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Vec<DefineIndexStatement>, Error> {
+		// Get the record id
+		let id = self.id.as_ref().unwrap();
+		// Get the table definition
+		txn.clone().lock().await.all_ix(opt.ns(), opt.db(), &id.tb).await
 	}
 }

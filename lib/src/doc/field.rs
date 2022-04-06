@@ -17,12 +17,8 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		_stm: &Statement,
 	) -> Result<(), Error> {
-		// Get the record id
-		let rid = self.id.as_ref().unwrap();
-		// Get all field statements
-		let fds = txn.clone().lock().await.all_fd(opt.ns(), opt.db(), &rid.tb).await?;
 		// Loop through all field statements
-		for fd in fds.iter() {
+		for fd in self.fd(opt, txn).await?.iter() {
 			// Get the initial value
 			let old = self.initial.get(ctx, opt, txn, &fd.name).await?;
 			// Get the current value

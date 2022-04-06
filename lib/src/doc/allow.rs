@@ -17,7 +17,7 @@ impl<'a> Document<'a> {
 		// Check permission clause
 		if opt.perms && opt.auth.perms() && self.id.is_some() {
 			// Get the table
-			let tb = self.tb(ctx, opt, txn).await?;
+			let tb = self.tb(opt, txn).await?;
 			// Get the permission clause
 			let perms = if self.initial.is_none() {
 				&tb.permissions.create

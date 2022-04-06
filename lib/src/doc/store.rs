@@ -8,7 +8,7 @@ use crate::err::Error;
 impl<'a> Document<'a> {
 	pub async fn store(
 		&self,
-		ctx: &Runtime,
+		_ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
 		_stm: &Statement,
@@ -18,7 +18,7 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Check if the table is a view
-		if self.tb(ctx, opt, txn).await?.drop {
+		if self.tb(opt, txn).await?.drop {
 			return Ok(());
 		}
 		// Clone transaction
