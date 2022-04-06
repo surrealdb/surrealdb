@@ -87,6 +87,7 @@ impl<'a> Document<'a> {
 			}
 			// Check for a PERMISSIONS clause
 			if opt.perms && opt.auth.perms() {
+				// Get the permission clause
 				let perms = if self.initial.is_none() {
 					&fd.permissions.create
 				} else if self.current.is_none() {
@@ -94,6 +95,7 @@ impl<'a> Document<'a> {
 				} else {
 					&fd.permissions.update
 				};
+				// Match the permission clause
 				match perms {
 					Permission::Full => (),
 					Permission::None => val = old,

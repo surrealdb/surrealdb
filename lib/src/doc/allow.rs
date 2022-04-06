@@ -18,7 +18,7 @@ impl<'a> Document<'a> {
 		if opt.perms && opt.auth.perms() && self.id.is_some() {
 			// Get the table
 			let tb = self.tb(ctx, opt, txn).await?;
-			// Get the permission
+			// Get the permission clause
 			let perms = if self.initial.is_none() {
 				&tb.permissions.create
 			} else if self.current.is_none() {
@@ -28,7 +28,7 @@ impl<'a> Document<'a> {
 			} else {
 				&tb.permissions.update
 			};
-			// Match the permission
+			// Match the permission clause
 			match perms {
 				Permission::None => return Err(Error::Ignore),
 				Permission::Full => return Ok(()),

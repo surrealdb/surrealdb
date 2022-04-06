@@ -19,8 +19,8 @@ impl<'a> Document<'a> {
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.futures(true);
-		// Match clause
 		match stm.output() {
+		// Process output clause
 			Some(v) => match v {
 				Output::None => Err(Error::Ignore),
 				Output::Null => Ok(Value::Null),

@@ -16,6 +16,8 @@ impl<'a> Document<'a> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
 			if cond.expr.compute(ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
+			// Check if the expression is truthy
+				// Ignore this document
 				return Err(Error::Ignore);
 			}
 		}
