@@ -115,21 +115,21 @@ impl<'a> Document<'a> {
 		// Loop through all field statements
 		for fd in self.fd(opt, txn).await?.iter() {
 			// Loop over each field in document
-			for k in out.each(&fd.name).into_iter() {
+			for k in out.each(&fd.name).iter() {
 				// Process field permissions
 				match &fd.permissions.select {
 					Permission::Full => (),
-					Permission::None => out.del(ctx, opt, txn, &k).await?,
+					Permission::None => out.del(ctx, opt, txn, k).await?,
 					Permission::Specific(e) => {
 						// Get the current value
-						let val = self.current.pick(&k);
+						let val = self.current.pick(k);
 						// Configure the context
 						let mut ctx = Context::new(ctx);
 						ctx.add_value("value".into(), val);
 						let ctx = ctx.freeze();
 						// Process the PERMISSION clause
 						if !e.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
-							out.del(&ctx, opt, txn, &k).await?
+							out.del(&ctx, opt, txn, k).await?
 						}
 					}
 				}

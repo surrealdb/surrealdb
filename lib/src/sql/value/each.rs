@@ -26,7 +26,7 @@ impl Value {
 						.value
 						.iter()
 						.enumerate()
-						.flat_map(|(i, v)| v._each(path.next(), prev.add(Part::from(i))))
+						.flat_map(|(i, v)| v._each(path.next(), prev.clone().add(Part::from(i))))
 						.collect::<Vec<_>>(),
 					Part::First => match v.value.first() {
 						Some(v) => v._each(path.next(), prev.add(p.clone())),
@@ -44,7 +44,7 @@ impl Value {
 						.value
 						.iter()
 						.enumerate()
-						.flat_map(|(i, v)| v._each(path.next(), prev.add(Part::from(i))))
+						.flat_map(|(i, v)| v._each(path.next(), prev.clone().add(Part::from(i))))
 						.collect::<Vec<_>>(),
 				},
 				// Ignore everything else

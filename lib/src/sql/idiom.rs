@@ -57,10 +57,9 @@ impl From<Vec<Part>> for Idiom {
 }
 
 impl Idiom {
-	pub fn add(&self, n: Part) -> Idiom {
-		let mut p = self.parts.to_vec();
-		p.push(n);
-		Idiom::from(p)
+	pub fn add(mut self, n: Part) -> Idiom {
+		self.parts.push(n);
+		self
 	}
 
 	pub fn to_path(&self) -> String {

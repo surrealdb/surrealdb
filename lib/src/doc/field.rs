@@ -20,11 +20,11 @@ impl<'a> Document<'a> {
 		// Loop through all field statements
 		for fd in self.fd(opt, txn).await?.iter() {
 			// Loop over each field in document
-			for k in self.current.each(&fd.name).into_iter() {
+			for k in self.current.each(&fd.name).iter() {
 				// Get the initial value
-				let old = self.initial.pick(&k);
+				let old = self.initial.pick(k);
 				// Get the current value
-				let mut val = self.current.pick(&k);
+				let mut val = self.current.pick(k);
 				// Check for a VALUE clause
 				if let Some(expr) = &fd.value {
 					// Configure the context
@@ -113,9 +113,9 @@ impl<'a> Document<'a> {
 				}
 				// Set the value of the field
 				match val {
-					Value::None => self.current.to_mut().del(ctx, opt, txn, &k).await?,
-					Value::Void => self.current.to_mut().del(ctx, opt, txn, &k).await?,
-					_ => self.current.to_mut().set(ctx, opt, txn, &k, val).await?,
+					Value::None => self.current.to_mut().del(ctx, opt, txn, k).await?,
+					Value::Void => self.current.to_mut().del(ctx, opt, txn, k).await?,
+					_ => self.current.to_mut().set(ctx, opt, txn, k, val).await?,
 				};
 			}
 		}
