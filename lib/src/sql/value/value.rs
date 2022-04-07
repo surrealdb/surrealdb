@@ -14,6 +14,7 @@ use crate::sql::function::{function, Function};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::Id;
 use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
 use crate::sql::number::{number, Number};
 use crate::sql::object::{object, Object};
@@ -669,35 +670,89 @@ impl Value {
 	// -----------------------------------
 
 	pub fn make_bool(self) -> Value {
-		self.is_truthy().into()
+		match self {
+			Value::True | Value::False => self,
+			_ => self.is_truthy().into(),
+		}
 	}
 
 	pub fn make_int(self) -> Value {
-		self.as_int().into()
+		match self {
+			Value::Number(Number::Int(_)) => self,
+			_ => self.as_int().into(),
+		}
 	}
 
 	pub fn make_float(self) -> Value {
-		self.as_float().into()
+		match self {
+			Value::Number(Number::Float(_)) => self,
+			_ => self.as_float().into(),
+		}
 	}
 
 	pub fn make_decimal(self) -> Value {
-		self.as_decimal().into()
+		match self {
+			Value::Number(Number::Decimal(_)) => self,
+			_ => self.as_decimal().into(),
+		}
 	}
 
 	pub fn make_number(self) -> Value {
-		self.as_number().into()
+		match self {
+			Value::Number(_) => self,
+			_ => self.as_number().into(),
+		}
 	}
 
 	pub fn make_strand(self) -> Value {
-		self.as_strand().into()
+		match self {
+			Value::Strand(_) => self,
+			_ => self.as_strand().into(),
+		}
 	}
 
 	pub fn make_datetime(self) -> Value {
-		self.as_datetime().into()
+		match self {
+			Value::Datetime(_) => self,
+			_ => self.as_datetime().into(),
+		}
 	}
 
 	pub fn make_duration(self) -> Value {
-		self.as_duration().into()
+		match self {
+			Value::Duration(_) => self,
+			_ => self.as_duration().into(),
+		}
+	}
+
+	pub fn convert_to(self, kind: &Kind) -> Value {
+		match kind {
+			Kind::Any => self,
+			Kind::Bool => self.make_bool(),
+			Kind::Int => self.make_int(),
+			Kind::Float => self.make_float(),
+			Kind::Decimal => self.make_decimal(),
+			Kind::Number => self.make_number(),
+			Kind::String => self.make_strand(),
+			Kind::Datetime => self.make_datetime(),
+			Kind::Duration => self.make_duration(),
+			Kind::Array => match self {
+				Value::Array(_) => self,
+				_ => Value::None,
+			},
+			Kind::Object => match self {
+				Value::Object(_) => self,
+				_ => Value::None,
+			},
+			Kind::Record(t) => match self.is_type_record(t) {
+				true => self,
+				_ => Value::None,
+			},
+			Kind::Geometry(t) => match self.is_type_geometry(t) {
+				true => self,
+				_ => Value::None,
+			},
+		}
 	}
 
 	// -----------------------------------

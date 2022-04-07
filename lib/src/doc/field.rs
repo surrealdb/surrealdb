@@ -5,7 +5,6 @@ use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::kind::Kind;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 
@@ -38,33 +37,7 @@ impl<'a> Document<'a> {
 				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
-					val = match kind {
-						Kind::Any => val,
-						Kind::Bool => val.make_bool(),
-						Kind::Int => val.make_int(),
-						Kind::Float => val.make_float(),
-						Kind::Decimal => val.make_decimal(),
-						Kind::Number => val.make_number(),
-						Kind::String => val.make_strand(),
-						Kind::Datetime => val.make_datetime(),
-						Kind::Duration => val.make_duration(),
-						Kind::Array => match val {
-							Value::Array(_) => val,
-							_ => Value::None,
-						},
-						Kind::Object => match val {
-							Value::Object(_) => val,
-							_ => Value::None,
-						},
-						Kind::Record(t) => match val.is_type_record(t) {
-							true => val,
-							_ => Value::None,
-						},
-						Kind::Geometry(t) => match val.is_type_geometry(t) {
-							true => val,
-							_ => Value::None,
-						},
-					}
+					val = val.convert_to(kind);
 				}
 				// Check for a ASSERT clause
 				if let Some(expr) = &fd.assert {
