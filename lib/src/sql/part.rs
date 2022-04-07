@@ -23,6 +23,12 @@ pub enum Part {
 	Graph(Graph),
 }
 
+impl From<i32> for Part {
+	fn from(v: i32) -> Self {
+		Part::Index(v.into())
+	}
+}
+
 impl From<isize> for Part {
 	fn from(v: isize) -> Self {
 		Part::Index(v.into())

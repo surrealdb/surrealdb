@@ -8,6 +8,7 @@ mod decrement;
 mod def;
 mod del;
 mod diff;
+mod each;
 mod first;
 mod get;
 mod increment;
