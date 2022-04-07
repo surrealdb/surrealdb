@@ -71,11 +71,17 @@ impl From<String> for Part {
 	}
 }
 
+impl From<&String> for Part {
+	fn from(v: &String) -> Self {
+		Part::Field(Ident::from(v))
+	}
+}
+
 impl From<&str> for Part {
 	fn from(v: &str) -> Self {
 		match v.parse::<isize>() {
 			Ok(v) => Part::from(v),
-			_ => Part::from(v.to_string()),
+			_ => Part::from(v.to_owned()),
 		}
 	}
 }

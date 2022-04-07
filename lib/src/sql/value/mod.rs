@@ -9,6 +9,7 @@ mod def;
 mod del;
 mod diff;
 mod each;
+mod every;
 mod first;
 mod get;
 mod increment;
