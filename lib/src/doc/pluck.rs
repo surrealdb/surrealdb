@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Statement;
@@ -7,6 +8,7 @@ use crate::err::Error;
 use crate::sql::field::Field;
 use crate::sql::idiom::Idiom;
 use crate::sql::output::Output;
+use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 
 impl<'a> Document<'a> {
@@ -19,8 +21,8 @@ impl<'a> Document<'a> {
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.futures(true);
-		match stm.output() {
-		// Process output clause
+		// Process the desired output
+		let mut out = match stm.output() {
 			Some(v) => match v {
 				Output::None => Err(Error::Ignore),
 				Output::Null => Ok(Value::Null),
@@ -109,6 +111,31 @@ impl<'a> Document<'a> {
 				}
 				_ => Err(Error::Ignore),
 			},
+		}?;
+		// Loop through all field statements
+		for fd in self.fd(opt, txn).await?.iter() {
+			// Loop over each field in document
+			for k in out.each(&fd.name).into_iter() {
+				// Process field permissions
+				match &fd.permissions.select {
+					Permission::Full => (),
+					Permission::None => out.del(ctx, opt, txn, &k).await?,
+					Permission::Specific(e) => {
+						// Get the current value
+						let val = self.current.pick(&k);
+						// Configure the context
+						let mut ctx = Context::new(ctx);
+						ctx.add_value("value".into(), val);
+						let ctx = ctx.freeze();
+						// Process the PERMISSION clause
+						if !e.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
+							out.del(&ctx, opt, txn, &k).await?
+						}
+					}
+				}
+			}
 		}
+		// Output result
+		Ok(out)
 	}
 }
