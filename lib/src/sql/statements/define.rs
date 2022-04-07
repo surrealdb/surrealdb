@@ -6,7 +6,6 @@ use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, Base};
 use crate::sql::comment::shouldbespace;
-use crate::sql::common::take_u64;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
@@ -801,7 +800,6 @@ pub struct DefineFieldStatement {
 	pub kind: Option<Kind>,
 	pub value: Option<Value>,
 	pub assert: Option<Value>,
-	pub priority: Option<u64>,
 	pub permissions: Permissions,
 }
 
@@ -878,10 +876,6 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 				DefineFieldOption::Assert(ref v) => Some(v.to_owned()),
 				_ => None,
 			}),
-			priority: opts.iter().find_map(|x| match x {
-				DefineFieldOption::Priority(ref v) => Some(v.to_owned()),
-				_ => None,
-			}),
 			permissions: opts
 				.iter()
 				.find_map(|x| match x {
@@ -898,12 +892,11 @@ pub enum DefineFieldOption {
 	Kind(Kind),
 	Value(Value),
 	Assert(Value),
-	Priority(u64),
 	Permissions(Permissions),
 }
 
 fn field_opts(i: &str) -> IResult<&str, DefineFieldOption> {
-	alt((field_kind, field_value, field_assert, field_priority, field_permissions))(i)
+	alt((field_kind, field_value, field_assert, field_permissions))(i)
 }
 
 fn field_kind(i: &str) -> IResult<&str, DefineFieldOption> {
@@ -928,14 +921,6 @@ fn field_assert(i: &str) -> IResult<&str, DefineFieldOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = value(i)?;
 	Ok((i, DefineFieldOption::Assert(v)))
-}
-
-fn field_priority(i: &str) -> IResult<&str, DefineFieldOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("PRIORITY")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = take_u64(i)?;
-	Ok((i, DefineFieldOption::Priority(v)))
 }
 
 fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
