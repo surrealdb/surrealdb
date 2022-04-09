@@ -10,7 +10,7 @@ members = ["lib"]
 
 [profile.release]
 lto = true
-# strip = true
+strip = true
 opt-level = 3
 panic = 'abort'
 codegen-units = 1
