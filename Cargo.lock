@@ -2182,9 +2182,9 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "storekey"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eb2d79b9cdf125f28f0d57d28b17cb7871f43fff9e34db594ecf0fc8dcc5e65"
+checksum = "5c486bc18d702687cb3265288657cfe89df0f2f1a88900f104a2cc86889bddd7"
 dependencies = [
  "byteorder",
  "serde",

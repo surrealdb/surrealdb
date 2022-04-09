@@ -1,5 +1,6 @@
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::sql::array::Array;
+use crate::sql::id::Id;
 use serde::{Deserialize, Serialize};
 use storekey::{deserialize, serialize};
 
@@ -14,8 +15,8 @@ pub struct Point {
 	pub tb: String,
 	_d: u8,
 	pub ix: String,
-	pub fd: Value,
-	pub id: String,
+	pub fd: Array,
+	pub id: Id,
 }
 
 impl From<Point> for Vec<u8> {
@@ -36,8 +37,8 @@ impl From<&Vec<u8>> for Point {
 	}
 }
 
-pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Value, id: &str) -> Point {
-	Point::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string(), fd, id.to_string())
+pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Array, id: &Id) -> Point {
+	Point::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string(), fd, id.to_owned())
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
@@ -53,7 +54,7 @@ pub fn suffix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
 }
 
 impl Point {
-	pub fn new(ns: String, db: String, tb: String, ix: String, fd: Value, id: String) -> Point {
+	pub fn new(ns: String, db: String, tb: String, ix: String, fd: Array, id: Id) -> Point {
 		Point {
 			__: 0x2f, // /
 			_a: 0x2a, // *
@@ -87,7 +88,7 @@ mod tests {
 			"test".to_string(),
 			"test".to_string(),
 			"test".to_string(),
-			"test".into(),
+			vec!["test"].into(),
 			"test".into(),
 		);
 		let enc = Point::encode(&val).unwrap();

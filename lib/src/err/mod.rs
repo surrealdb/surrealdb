@@ -169,7 +169,7 @@ pub enum Error {
 	},
 
 	#[error("Database index `{index}` already contains `{thing}`")]
-	RecordIndex {
+	IndexExists {
 		index: String,
 		thing: Thing,
 	},

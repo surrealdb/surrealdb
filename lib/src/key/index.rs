@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::value::Value;
+use crate::sql::array::Array;
 use serde::{Deserialize, Serialize};
 use storekey::{deserialize, serialize};
 
@@ -14,7 +14,7 @@ pub struct Index {
 	pub tb: String,
 	_d: u8,
 	pub ix: String,
-	pub fd: Value,
+	pub fd: Array,
 }
 
 impl From<Index> for Vec<u8> {
@@ -35,7 +35,7 @@ impl From<&Vec<u8>> for Index {
 	}
 }
 
-pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Value) -> Index {
+pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Array) -> Index {
 	Index::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string(), fd)
 }
 
@@ -52,7 +52,7 @@ pub fn suffix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {
 }
 
 impl Index {
-	pub fn new(ns: String, db: String, tb: String, ix: String, fd: Value) -> Index {
+	pub fn new(ns: String, db: String, tb: String, ix: String, fd: Array) -> Index {
 		Index {
 			__: 0x2f, // /
 			_a: 0x2a, // *
@@ -85,7 +85,7 @@ mod tests {
 			"test".to_string(),
 			"test".to_string(),
 			"test".to_string(),
-			"test".into(),
+			vec!["test"].into(),
 		);
 		let enc = Index::encode(&val).unwrap();
 		let dec = Index::decode(&enc).unwrap();

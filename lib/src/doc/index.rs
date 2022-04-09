@@ -4,15 +4,89 @@ use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::sql::array::Array;
 
 impl<'a> Document<'a> {
 	pub async fn index(
 		&self,
-		_ctx: &Runtime,
-		_opt: &Options,
-		_txn: &Transaction,
+		ctx: &Runtime,
+		opt: &Options,
+		txn: &Transaction,
 		_stm: &Statement,
 	) -> Result<(), Error> {
+		// Check if forced
+		if !opt.force && !self.changed() {
+			return Ok(());
+		}
+		// Check if the table is a view
+		if self.tb(opt, txn).await?.drop {
+			return Ok(());
+		}
+		// Get the record id
+		let rid = self.id.as_ref().unwrap();
+		// Loop through all index statements
+		for ix in self.ix(opt, txn).await?.iter() {
+			// Calculate old values
+			let mut o = Array::with_capacity(ix.cols.len());
+			for i in ix.cols.iter() {
+				let v = i.compute(ctx, opt, txn, Some(&self.current)).await?;
+				o.value.push(v);
+			}
+			// Calculate new values
+			let mut n = Array::with_capacity(ix.cols.len());
+			for i in ix.cols.iter() {
+				let v = i.compute(ctx, opt, txn, Some(&self.current)).await?;
+				n.value.push(v);
+			}
+			// Clone transaction
+			let run = txn.clone();
+			// Claim transaction
+			let mut run = run.lock().await;
+			// Update the index entries
+			if opt.force || o != n {
+				match ix.uniq {
+					true => {
+						// Delete the old index data
+						if self.initial.is_some() {
+							#[rustfmt::skip]
+							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, o);
+							run.delc(key, Some(rid)).await?;
+						}
+						// Create the new index data
+						if self.current.is_some() {
+							#[rustfmt::skip]
+							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, n);
+							if run.putc(key, rid, None).await.is_err() {
+								return Err(Error::IndexExists {
+									index: ix.name.to_owned(),
+									thing: rid.to_owned(),
+								});
+							}
+						}
+					}
+					false => {
+						// Delete the old index data
+						if self.initial.is_some() {
+							#[rustfmt::skip]
+							let key = crate::key::point::new(opt.ns(), opt.db(), &ix.what, &ix.name, o, &rid.id);
+							run.delc(key, Some(rid)).await?;
+						}
+						// Create the new index data
+						if self.current.is_some() {
+							#[rustfmt::skip]
+							let key = crate::key::point::new(opt.ns(), opt.db(), &ix.what, &ix.name, n, &rid.id);
+							if run.putc(key, rid, None).await.is_err() {
+								return Err(Error::IndexExists {
+									index: ix.name.to_owned(),
+									thing: rid.to_owned(),
+								});
+							}
+						}
+					}
+				};
+			}
+		}
+		// Carry on
 		Ok(())
 	}
 }

@@ -4,12 +4,13 @@ use crate::sql::error::IResult;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
 use crate::sql::number::Number;
+use derive::Store;
 use nom::character::complete::char;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store)]
 pub struct Thing {
 	pub tb: String,
 	pub id: Id,
