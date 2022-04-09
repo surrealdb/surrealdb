@@ -191,7 +191,7 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let res = self.tx.del(key.into(), chk.map(|v| v.into())).await?;
+		let res = self.tx.delc(key.into(), chk.map(|v| v.into())).await?;
 		// Return result
 		Ok(res)
 	}
