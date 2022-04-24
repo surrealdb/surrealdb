@@ -139,8 +139,8 @@ pub fn time(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 			}
 		}
 		0 => {
-			let i = rand::random::<i64>();
-			Ok(Datetime::from(i).into())
+			let i = rand::random::<i32>();
+			Ok(Datetime::from(i as i64).into())
 		}
 		_ => unreachable!(),
 	}
