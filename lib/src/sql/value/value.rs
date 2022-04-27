@@ -913,6 +913,37 @@ impl Value {
 			_ => false,
 		}
 	}
+
+	// -----------------------------------
+	// Sorting operations
+	// -----------------------------------
+
+	pub fn lexical_cmp(&self, other: &Value) -> Option<Ordering> {
+		match (self, other) {
+			(Value::Strand(a), Value::Strand(b)) => {
+				Some(lexical_sort::lexical_cmp(&a.value, &b.value))
+			}
+			_ => self.partial_cmp(other),
+		}
+	}
+
+	pub fn natural_cmp(&self, other: &Value) -> Option<Ordering> {
+		match (self, other) {
+			(Value::Strand(a), Value::Strand(b)) => {
+				Some(lexical_sort::natural_cmp(&a.value, &b.value))
+			}
+			_ => self.partial_cmp(other),
+		}
+	}
+
+	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
+		match (self, other) {
+			(Value::Strand(a), Value::Strand(b)) => {
+				Some(lexical_sort::natural_lexical_cmp(&a.value, &b.value))
+			}
+			_ => self.partial_cmp(other),
+		}
+	}
 }
 
 impl fmt::Display for Value {

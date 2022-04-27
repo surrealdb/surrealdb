@@ -296,8 +296,8 @@ impl Iterator {
 							a.partial_cmp(&b)
 						}
 						false => match order.direction {
-							true => a.compare(b, &order.order),
-							false => b.compare(a, &order.order),
+							true => a.compare(b, &order.order, order.collate, order.numeric),
+							false => b.compare(a, &order.order, order.collate, order.numeric),
 						},
 					};
 					//

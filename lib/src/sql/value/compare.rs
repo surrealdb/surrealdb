@@ -4,14 +4,20 @@ use crate::sql::value::Value;
 use std::cmp::Ordering;
 
 impl Value {
-	pub fn compare(&self, other: &Self, path: &[Part]) -> Option<Ordering> {
+	pub fn compare(
+		&self,
+		other: &Self,
+		path: &[Part],
+		collate: bool,
+		numeric: bool,
+	) -> Option<Ordering> {
 		match path.first() {
 			// Get the current path part
 			Some(p) => match (self, other) {
 				// Current path part is an object
 				(Value::Object(a), Value::Object(b)) => match p {
 					Part::Field(f) => match (a.value.get(&f.name), b.value.get(&f.name)) {
-						(Some(a), Some(b)) => a.compare(b, path.next()),
+						(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
 						(Some(_), None) => Some(Ordering::Greater),
 						(None, Some(_)) => Some(Ordering::Less),
 						(_, _) => Some(Ordering::Equal),
@@ -22,7 +28,7 @@ impl Value {
 				(Value::Array(a), Value::Array(b)) => match p {
 					Part::All => {
 						for (a, b) in a.value.iter().zip(b.value.iter()) {
-							match a.compare(b, path.next()) {
+							match a.compare(b, path.next(), collate, numeric) {
 								Some(Ordering::Equal) => continue,
 								None => continue,
 								o => return o,
@@ -35,20 +41,20 @@ impl Value {
 						}
 					}
 					Part::First => match (a.value.first(), b.value.first()) {
-						(Some(a), Some(b)) => a.compare(b, path.next()),
+						(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
 						(Some(_), None) => Some(Ordering::Greater),
 						(None, Some(_)) => Some(Ordering::Less),
 						(_, _) => Some(Ordering::Equal),
 					},
 					Part::Last => match (a.value.first(), b.value.first()) {
-						(Some(a), Some(b)) => a.compare(b, path.next()),
+						(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
 						(Some(_), None) => Some(Ordering::Greater),
 						(None, Some(_)) => Some(Ordering::Less),
 						(_, _) => Some(Ordering::Equal),
 					},
 					Part::Index(i) => {
 						match (a.value.get(i.to_usize()), b.value.get(i.to_usize())) {
-							(Some(a), Some(b)) => a.compare(b, path.next()),
+							(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
 							(Some(_), None) => Some(Ordering::Greater),
 							(None, Some(_)) => Some(Ordering::Less),
 							(_, _) => Some(Ordering::Equal),
@@ -56,7 +62,7 @@ impl Value {
 					}
 					_ => {
 						for (a, b) in a.value.iter().zip(b.value.iter()) {
-							match a.compare(b, path) {
+							match a.compare(b, path, collate, numeric) {
 								Some(Ordering::Equal) => continue,
 								None => continue,
 								o => return o,
@@ -70,10 +76,15 @@ impl Value {
 					}
 				},
 				// Ignore everything else
-				(a, b) => a.compare(b, path.next()),
+				(a, b) => a.compare(b, path.next(), collate, numeric),
 			},
 			// No more parts so get the value
-			None => self.partial_cmp(other),
+			None => match (collate, numeric) {
+				(true, true) => self.natural_lexical_cmp(other),
+				(true, false) => self.lexical_cmp(other),
+				(false, true) => self.natural_cmp(other),
+				_ => self.partial_cmp(other),
+			},
 		}
 	}
 }
@@ -90,7 +101,7 @@ mod tests {
 		let idi = Idiom::default();
 		let one = Value::parse("{ test: { other: null, something: 456 } }");
 		let two = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
@@ -99,7 +110,7 @@ mod tests {
 		let idi = Idiom::parse("test.something");
 		let one = Value::parse("{ test: { other: null, something: 456 } }");
 		let two = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
@@ -108,7 +119,7 @@ mod tests {
 		let idi = Idiom::parse("test.something");
 		let one = Value::parse("{ test: { other: null } }");
 		let two = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
 
@@ -117,7 +128,7 @@ mod tests {
 		let idi = Idiom::parse("test.something");
 		let one = Value::parse("{ test: { other: null, something: 456 } }");
 		let two = Value::parse("{ test: { other: null } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
@@ -126,7 +137,7 @@ mod tests {
 		let idi = Idiom::parse("test.something.*");
 		let one = Value::parse("{ test: { other: null, something: [4, 5, 6] } }");
 		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
@@ -135,7 +146,7 @@ mod tests {
 		let idi = Idiom::parse("test.something.*");
 		let one = Value::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
 		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
@@ -144,7 +155,7 @@ mod tests {
 		let idi = Idiom::parse("test.something.*");
 		let one = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
 		let two = Value::parse("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
 
@@ -153,7 +164,7 @@ mod tests {
 		let idi = Idiom::parse("test.something.*");
 		let one = Value::parse("{ test: { other: null, something: null } }");
 		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
 
@@ -162,7 +173,7 @@ mod tests {
 		let idi = Idiom::parse("test.something.*");
 		let one = Value::parse("{ test: { other: null, something: [4, 5, 6] } }");
 		let two = Value::parse("{ test: { other: null, something: null } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 
@@ -171,7 +182,7 @@ mod tests {
 		let idi = Idiom::parse("test.something.*");
 		let one = Value::parse("{ test: { other: null, something: [1, null, 3] } }");
 		let two = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
 
@@ -180,7 +191,7 @@ mod tests {
 		let idi = Idiom::parse("test.something.*");
 		let one = Value::parse("{ test: { other: null, something: [1, 2, 3] } }");
 		let two = Value::parse("{ test: { other: null, something: [1, null, 3] } }");
-		let res = one.compare(&two, &idi);
+		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
 }
