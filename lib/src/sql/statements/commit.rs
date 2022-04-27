@@ -28,7 +28,6 @@ fn commit_basic(i: &str) -> IResult<&str, CommitStatement> {
 
 fn commit_query(i: &str) -> IResult<&str, CommitStatement> {
 	let (i, _) = tag_no_case("COMMIT")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TRANSACTION"))))(i)?;
 	Ok((i, CommitStatement))
 }

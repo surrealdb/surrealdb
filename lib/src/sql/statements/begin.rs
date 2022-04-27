@@ -28,7 +28,6 @@ fn begin_basic(i: &str) -> IResult<&str, BeginStatement> {
 
 fn begin_query(i: &str) -> IResult<&str, BeginStatement> {
 	let (i, _) = tag_no_case("BEGIN")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TRANSACTION"))))(i)?;
 	Ok((i, BeginStatement))
 }

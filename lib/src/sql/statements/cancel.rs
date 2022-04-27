@@ -28,7 +28,6 @@ fn cancel_basic(i: &str) -> IResult<&str, CancelStatement> {
 
 fn cancel_query(i: &str) -> IResult<&str, CancelStatement> {
 	let (i, _) = tag_no_case("CANCEL")(i)?;
-	let (i, _) = shouldbespace(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TRANSACTION"))))(i)?;
 	Ok((i, CancelStatement))
 }
