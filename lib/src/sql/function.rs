@@ -387,8 +387,6 @@ fn function_string(i: &str) -> IResult<&str, &str> {
 
 fn function_time(i: &str) -> IResult<&str, &str> {
 	alt((
-		tag("time::add"),
-		tag("time::age"),
 		tag("time::day"),
 		tag("time::floor"),
 		tag("time::group"),
