@@ -237,8 +237,6 @@ impl Executor {
 					None => {
 						// Create a transaction
 						let loc = self.begin().await;
-						// Enable context override
-						let mut ctx = Context::new(&ctx).freeze();
 						// Specify statement timeout
 						if let Some(timeout) = stm.timeout() {
 							let mut new = Context::new(&ctx);
