@@ -109,6 +109,7 @@ impl Expression {
 			Operator::AllInside => fnc::operate::inside_all(&l, &r),
 			Operator::AnyInside => fnc::operate::inside_any(&l, &r),
 			Operator::NoneInside => fnc::operate::inside_none(&l, &r),
+			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
 			_ => unreachable!(),
 		}

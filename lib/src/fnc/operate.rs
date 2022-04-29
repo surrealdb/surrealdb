@@ -193,6 +193,13 @@ pub fn inside_none(a: &Value, b: &Value) -> Result<Value, Error> {
 	}
 }
 
+pub fn outside(a: &Value, b: &Value) -> Result<Value, Error> {
+	match a.intersects(b) {
+		true => Ok(Value::False),
+		false => Ok(Value::True),
+	}
+}
+
 pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	match a.intersects(b) {
 		true => Ok(Value::True),

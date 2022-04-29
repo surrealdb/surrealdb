@@ -48,6 +48,7 @@ pub enum Operator {
 	AllInside,   // ⊆
 	AnyInside,   // ⊂
 	NoneInside,  // ⊄
+	Outside,     // ∈
 	Intersects,  // ∩
 }
 
@@ -106,6 +107,7 @@ impl fmt::Display for Operator {
 			Operator::AllInside => write!(f, "ALL INSIDE"),
 			Operator::AnyInside => write!(f, "ANY INSIDE"),
 			Operator::NoneInside => write!(f, "NONE INSIDE"),
+			Operator::Outside => write!(f, "OUTSIDE"),
 			Operator::Intersects => write!(f, "INTERSECTS"),
 		}
 	}
@@ -195,7 +197,7 @@ pub fn phrases(i: &str) -> IResult<&str, Operator> {
 			map(tag_no_case("NONE INSIDE"), |_| Operator::NoneInside),
 			map(tag_no_case("NOT INSIDE"), |_| Operator::NotInside),
 			map(tag_no_case("INSIDE"), |_| Operator::Inside),
-			map(tag_no_case("OUTSIDE"), |_| Operator::NotInside),
+			map(tag_no_case("OUTSIDE"), |_| Operator::Outside),
 			map(tag_no_case("INTERSECTS"), |_| Operator::Intersects),
 		)),
 	))(i)?;
