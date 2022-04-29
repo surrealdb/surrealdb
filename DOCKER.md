@@ -76,23 +76,27 @@ Getting started with SurrealDB is as easy as starting up the SurrealDB database 
 
 ##### Client side apps
 
-- [Getting started with Javascript](https://surrealdb.com/docs/integration/javascript)
-- [Getting started with Ember.js](https://surrealdb.com/docs/integration/emberjs)
-- [Getting started with React.js](https://surrealdb.com/docs/integration/reactjs)
-- [Getting started with Angular.js](https://surrealdb.com/docs/integration/angularjs) (coming soon)
-- [Getting started with Vue.js](https://surrealdb.com/docs/integration/vue.js) (coming soon)
-- [Getting started with Apollo GraphQL](https://surrealdb.com/docs/integration/apollo) (coming soon)
+- [Getting started with Javascript](https://surrealdb.com/docs/integration/libraries/javascript)
+- [Getting started with WebAssembly](https://surrealdb.com/docs/integration/libraries/webassembly)
+- [Getting started with Ember.js](https://surrealdb.com/docs/integration/libraries/emberjs)
+- [Getting started with React.js](https://surrealdb.com/docs/integration/libraries/reactjs)
+- [Getting started with Angular.js](https://surrealdb.com/docs/integration/libraries/angularjs)
+- [Getting started with Vue.js](https://surrealdb.com/docs/integration/libraries/vue.js)
+- [Getting started with Apollo GraphQL](https://surrealdb.com/docs/integration/libraries/apollo)
 
 ##### Server side code
 
-- [Getting started with Deno](https://surrealdb.com/docs/integration/deno)
-- [Getting started with Golang](https://surrealdb.com/docs/integration/golang)
-- [Getting started with Python](https://surrealdb.com/docs/integration/python)
-- [Getting started with Node.js](https://surrealdb.com/docs/integration/nodejs)
-- [Getting started with Swift](https://surrealdb.com/docs/integration/swift) (coming soon)
-- [Getting started with Rust](https://surrealdb.com/docs/integration/rust) (coming soon)
-- [Getting started with Ruby](https://surrealdb.com/docs/integration/ruby) (coming soon)
-- [Getting started with PHP](https://surrealdb.com/docs/integration/php) (coming soon)
+- [Getting started with Node.js](https://surrealdb.com/docs/integration/libraries/nodejs)
+- [Getting started with Golang](https://surrealdb.com/docs/integration/libraries/golang)
+- [Getting started with Rust](https://surrealdb.com/docs/integration/libraries/rust)
+- [Getting started with Deno](https://surrealdb.com/docs/integration/libraries/deno)
+- [Getting started with Python](https://surrealdb.com/docs/integration/libraries/python)
+- [Getting started with C](https://surrealdb.com/docs/integration/libraries/c)
+- [Getting started with Java](https://surrealdb.com/docs/integration/libraries/java)
+- [Getting started with Ruby](https://surrealdb.com/docs/integration/libraries/ruby)
+- [Getting started with PHP](https://surrealdb.com/docs/integration/libraries/php)
+- [Getting started with Swift](https://surrealdb.com/docs/integration/libraries/swift)
+- [Getting started with R](https://surrealdb.com/docs/integration/libraries/r)
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/documentation.svg?raw=true">&nbsp;&nbsp;Documentation</h2>
 
