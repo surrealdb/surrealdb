@@ -20,7 +20,6 @@ use crate::sql::statements::update::UpdateStatement;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
