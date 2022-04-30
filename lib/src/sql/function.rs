@@ -366,7 +366,6 @@ fn function_rand(i: &str) -> IResult<&str, &str> {
 fn function_string(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("string::concat"),
-		tag("string::contains"),
 		tag("string::endsWith"),
 		tag("string::join"),
 		tag("string::length"),

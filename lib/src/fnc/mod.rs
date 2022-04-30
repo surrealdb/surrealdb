@@ -116,7 +116,6 @@ pub async fn run(ctx: &Runtime, name: &str, args: Vec<Value>) -> Result<Value, E
 		"rand" => args::check(ctx, name, args, Args::None, rand::rand),
 		//
 		"string::concat" => args::check(ctx, name, args, Args::Any, string::concat),
-		"string::contains" => args::check(ctx, name, args, Args::Two, string::contains),
 		"string::endsWith" => args::check(ctx, name, args, Args::Two, string::ends_with),
 		"string::join" => args::check(ctx, name, args, Args::Any, string::join),
 		"string::length" => args::check(ctx, name, args, Args::One, string::length),
