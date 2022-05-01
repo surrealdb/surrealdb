@@ -15,8 +15,8 @@ use std::sync::Arc;
 use trice::Instant;
 
 pub struct Executor {
+	err: bool,
 	kvs: Store,
-	err: Option<Error>,
 	txn: Option<Transaction>,
 }
 
@@ -25,7 +25,7 @@ impl Executor {
 		Executor {
 			kvs,
 			txn: None,
-			err: None,
+			err: false,
 		}
 	}
 
@@ -44,8 +44,8 @@ impl Executor {
 					self.txn = Some(Arc::new(Mutex::new(v)));
 					true
 				}
-				Err(e) => {
-					self.err = Some(e);
+				Err(_) => {
+					self.err = true;
 					false
 				}
 			},
@@ -56,19 +56,19 @@ impl Executor {
 		if local {
 			if let Some(txn) = self.txn.as_ref() {
 				match &self.err {
-					Some(_) => {
+					true => {
 						let txn = txn.clone();
 						let mut txn = txn.lock().await;
-						if let Err(e) = txn.cancel().await {
-							self.err = Some(e);
+						if txn.cancel().await.is_err() {
+							self.err = true;
 						}
 						self.txn = None;
 					}
-					None => {
+					false => {
 						let txn = txn.clone();
 						let mut txn = txn.lock().await;
-						if let Err(e) = txn.commit().await {
-							self.err = Some(e);
+						if txn.commit().await.is_err() {
+							self.err = true;
 						}
 						self.txn = None;
 					}
@@ -83,8 +83,8 @@ impl Executor {
 				Some(txn) => {
 					let txn = txn.clone();
 					let mut txn = txn.lock().await;
-					if let Err(e) = txn.cancel().await {
-						self.err = Some(e);
+					if txn.cancel().await.is_err() {
+						self.err = true;
 					}
 					self.txn = None;
 				}
@@ -105,7 +105,7 @@ impl Executor {
 
 	fn buf_commit(&self, v: Response) -> Response {
 		match &self.err {
-			Some(_) => Response {
+			true => Response {
 				sql: v.sql,
 				time: v.time,
 				status: Status::Err,
@@ -135,7 +135,7 @@ impl Executor {
 			debug!("Executing: {}", stm);
 			// Reset errors
 			if self.txn.is_none() {
-				self.err = None;
+				self.err = false;
 			}
 			// Get the statement start time
 			let now = Instant::now();
@@ -232,9 +232,9 @@ impl Executor {
 				// Process all other normal statements
 				_ => match self.err {
 					// This transaction has failed
-					Some(_) => Err(Error::QueryNotExecuted),
+					true => Err(Error::QueryNotExecuted),
 					// Compute the statement normally
-					None => {
+					false => {
 						// Create a transaction
 						let loc = self.begin().await;
 						// Specify statement timeout
@@ -291,8 +291,8 @@ impl Executor {
 						detail: Some(format!("{}", e)),
 						result: None,
 					};
-					// Keep the error
-					self.err = Some(e);
+					// Mark the error
+					self.err = true;
 					// Return
 					res
 				}
