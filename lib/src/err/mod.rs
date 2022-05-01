@@ -2,6 +2,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use msgpack::encode::Error as SerdeError;
+use serde::Serialize;
 use std::time::Duration;
 use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
@@ -205,4 +206,13 @@ pub enum Error {
 	#[cfg(feature = "parallel")]
 	#[error("Tokio Error: {0}")]
 	Tokio(#[from] TokioError<(Option<Thing>, Value)>),
+}
+
+impl Serialize for Error {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		serializer.serialize_str(self.to_string().as_str())
+	}
 }

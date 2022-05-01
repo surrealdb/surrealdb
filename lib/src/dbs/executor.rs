@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::response::{Response, Responses, Status};
+use crate::dbs::response::{Response, Responses};
 use crate::dbs::Auth;
 use crate::dbs::Level;
 use crate::dbs::Options;
@@ -97,9 +97,7 @@ impl Executor {
 		Response {
 			sql: v.sql,
 			time: v.time,
-			status: Status::Err,
-			detail: Some(format!("{}", Error::QueryCancelled)),
-			result: None,
+			result: Err(Error::QueryCancelled),
 		}
 	}
 
@@ -108,12 +106,10 @@ impl Executor {
 			true => Response {
 				sql: v.sql,
 				time: v.time,
-				status: Status::Err,
-				detail: match v.status {
-					Status::Ok => Some(format!("{}", Error::QueryNotExecuted)),
-					Status::Err => v.detail,
+				result: match v.result {
+					Ok(_) => Err(Error::QueryNotExecuted),
+					Err(e) => Err(e),
 				},
-				result: None,
 			},
 			_ => v,
 		}
@@ -274,10 +270,8 @@ impl Executor {
 						true => Some(format!("{}", stm)),
 						false => None,
 					},
-					time: format!("{:?}", dur),
-					status: Status::Ok,
-					detail: None,
-					result: v.output(),
+					time: dur,
+					result: Ok(v),
 				},
 				Err(e) => {
 					// Produce the response
@@ -286,10 +280,8 @@ impl Executor {
 							true => Some(format!("{}", stm)),
 							false => None,
 						},
-						time: format!("{:?}", dur),
-						status: Status::Err,
-						detail: Some(format!("{}", e)),
-						result: None,
+						time: dur,
+						result: Err(e),
 					};
 					// Mark the error
 					self.err = true;
@@ -310,6 +302,6 @@ impl Executor {
 			}
 		}
 		// Return responses
-		Ok(Responses(out))
+		Ok(out)
 	}
 }
