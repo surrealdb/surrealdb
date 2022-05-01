@@ -15,7 +15,7 @@ use async_recursion::async_recursion;
 impl Value {
 	#[cfg_attr(feature = "parallel", async_recursion)]
 	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
-	pub async fn iterate(
+	pub(crate) async fn iterate(
 		self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -38,7 +38,7 @@ impl Value {
 impl Array {
 	#[cfg_attr(feature = "parallel", async_recursion)]
 	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
-	pub async fn iterate(
+	pub(crate) async fn iterate(
 		self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -61,7 +61,7 @@ impl Array {
 }
 
 impl Model {
-	pub async fn iterate(
+	pub(crate) async fn iterate(
 		self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -95,7 +95,7 @@ impl Model {
 }
 
 impl Thing {
-	pub async fn iterate(
+	pub(crate) async fn iterate(
 		self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -116,7 +116,7 @@ impl Thing {
 }
 
 impl Table {
-	pub async fn iterate(
+	pub(crate) async fn iterate(
 		self,
 		ctx: &Runtime,
 		opt: &Options,

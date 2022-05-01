@@ -24,7 +24,7 @@ pub enum InfoStatement {
 }
 
 impl InfoStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,

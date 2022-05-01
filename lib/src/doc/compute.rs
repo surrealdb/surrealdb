@@ -9,7 +9,7 @@ use crate::sql::value::Value;
 use tokio::sync::mpsc::Sender;
 
 impl<'a> Document<'a> {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		ctx: Runtime,
 		opt: Options,
 		txn: Transaction,

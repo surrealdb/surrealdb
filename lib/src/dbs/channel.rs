@@ -14,7 +14,7 @@ use async_recursion::async_recursion;
 use tokio::sync::mpsc::Sender;
 
 impl Value {
-	pub async fn channel(
+	pub(crate) async fn channel(
 		self,
 		ctx: Runtime,
 		opt: Options,
@@ -37,7 +37,7 @@ impl Value {
 
 impl Array {
 	#[async_recursion]
-	pub async fn process(
+	pub(crate) async fn process(
 		self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -61,7 +61,7 @@ impl Array {
 }
 
 impl Model {
-	pub async fn process(
+	pub(crate) async fn process(
 		self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -96,7 +96,7 @@ impl Model {
 }
 
 impl Thing {
-	pub async fn process(
+	pub(crate) async fn process(
 		self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -118,7 +118,7 @@ impl Thing {
 }
 
 impl Table {
-	pub async fn process(
+	pub(crate) async fn process(
 		self,
 		ctx: &Runtime,
 		opt: &Options,

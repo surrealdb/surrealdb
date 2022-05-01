@@ -29,7 +29,7 @@ pub struct DeleteStatement {
 }
 
 impl DeleteStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		self: &Arc<Self>,
 		ctx: &Runtime,
 		opt: &Options,

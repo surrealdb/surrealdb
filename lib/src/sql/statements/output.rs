@@ -16,7 +16,7 @@ pub struct OutputStatement {
 }
 
 impl OutputStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		ctx: &Runtime,
 		opt: &Options,

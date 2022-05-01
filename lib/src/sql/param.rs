@@ -27,7 +27,7 @@ impl From<Idiom> for Param {
 }
 
 impl Param {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		ctx: &Runtime,
 		opt: &Options,

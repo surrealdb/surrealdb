@@ -30,7 +30,7 @@ pub enum RemoveStatement {
 }
 
 impl RemoveStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -91,7 +91,7 @@ pub struct RemoveNamespaceStatement {
 }
 
 impl RemoveNamespaceStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -145,7 +145,7 @@ pub struct RemoveDatabaseStatement {
 }
 
 impl RemoveDatabaseStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -200,7 +200,7 @@ pub struct RemoveLoginStatement {
 }
 
 impl RemoveLoginStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -275,7 +275,7 @@ pub struct RemoveTokenStatement {
 }
 
 impl RemoveTokenStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -349,7 +349,7 @@ pub struct RemoveScopeStatement {
 }
 
 impl RemoveScopeStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -400,7 +400,7 @@ pub struct RemoveTableStatement {
 }
 
 impl RemoveTableStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -455,7 +455,7 @@ pub struct RemoveEventStatement {
 }
 
 impl RemoveEventStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -513,7 +513,7 @@ pub struct RemoveFieldStatement {
 }
 
 impl RemoveFieldStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -571,7 +571,7 @@ pub struct RemoveIndexStatement {
 }
 
 impl RemoveIndexStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,

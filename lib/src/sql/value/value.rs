@@ -977,7 +977,7 @@ impl fmt::Display for Value {
 impl Value {
 	#[cfg_attr(feature = "parallel", async_recursion)]
 	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		ctx: &Runtime,
 		opt: &Options,

@@ -35,7 +35,7 @@ pub struct RelateStatement {
 }
 
 impl RelateStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		self: &Arc<Self>,
 		ctx: &Runtime,
 		opt: &Options,

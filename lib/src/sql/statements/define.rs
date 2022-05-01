@@ -46,7 +46,7 @@ pub enum DefineStatement {
 }
 
 impl DefineStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -107,7 +107,7 @@ pub struct DefineNamespaceStatement {
 }
 
 impl DefineNamespaceStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -154,7 +154,7 @@ pub struct DefineDatabaseStatement {
 }
 
 impl DefineDatabaseStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -209,7 +209,7 @@ pub struct DefineLoginStatement {
 }
 
 impl DefineLoginStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -328,7 +328,7 @@ pub struct DefineTokenStatement {
 }
 
 impl DefineTokenStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -424,7 +424,7 @@ pub struct DefineScopeStatement {
 }
 
 impl DefineScopeStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -560,7 +560,7 @@ pub struct DefineTableStatement {
 }
 
 impl DefineTableStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		ctx: &Runtime,
 		opt: &Options,
@@ -725,7 +725,7 @@ pub struct DefineEventStatement {
 }
 
 impl DefineEventStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -804,7 +804,7 @@ pub struct DefineFieldStatement {
 }
 
 impl DefineFieldStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		opt: &Options,
@@ -942,7 +942,7 @@ pub struct DefineIndexStatement {
 }
 
 impl DefineIndexStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		ctx: &Runtime,
 		opt: &Options,

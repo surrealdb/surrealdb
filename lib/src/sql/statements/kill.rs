@@ -17,7 +17,7 @@ pub struct KillStatement {
 }
 
 impl KillStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		_opt: &Options,

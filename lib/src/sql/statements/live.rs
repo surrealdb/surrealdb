@@ -25,7 +25,7 @@ pub struct LiveStatement {
 }
 
 impl LiveStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		_ctx: &Runtime,
 		_opt: &Options,

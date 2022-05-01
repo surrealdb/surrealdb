@@ -88,7 +88,7 @@ impl Statement {
 }
 
 impl Statement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		ctx: &Runtime,
 		opt: &Options,

@@ -32,7 +32,7 @@ pub struct InsertStatement {
 }
 
 impl InsertStatement {
-	pub async fn compute(
+	pub(crate) async fn compute(
 		self: &Arc<Self>,
 		ctx: &Runtime,
 		opt: &Options,
