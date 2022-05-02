@@ -72,14 +72,6 @@ pub fn starts_with(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	Ok(val.starts_with(&chr).into())
 }
 
-pub fn substr(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
-	let val = args.remove(0).as_strand();
-	let beg = args.remove(0).as_int() as usize;
-	let lim = args.remove(0).as_int() as usize;
-	let val = val.value.chars().skip(beg).take(lim).collect::<String>();
-	Ok(val.into())
-}
-
 pub fn trim(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	Ok(args.remove(0).as_strand().value.trim().into())
 }

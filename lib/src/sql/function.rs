@@ -377,7 +377,6 @@ fn function_string(i: &str) -> IResult<&str, &str> {
 		tag("string::slug"),
 		tag("string::split"),
 		tag("string::startsWith"),
-		tag("string::substr"),
 		tag("string::trim"),
 		tag("string::uppercase"),
 		tag("string::words"),

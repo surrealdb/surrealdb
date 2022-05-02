@@ -127,7 +127,6 @@ pub async fn run(ctx: &Runtime, name: &str, args: Vec<Value>) -> Result<Value, E
 		"string::slug" => args::check(ctx, name, args, Args::OneTwo, string::slug),
 		"string::split" => args::check(ctx, name, args, Args::Two, string::split),
 		"string::startsWith" => args::check(ctx, name, args, Args::Two, string::starts_with),
-		"string::substr" => args::check(ctx, name, args, Args::Three, string::substr),
 		"string::trim" => args::check(ctx, name, args, Args::One, string::trim),
 		"string::uppercase" => args::check(ctx, name, args, Args::One, string::uppercase),
 		"string::words" => args::check(ctx, name, args, Args::One, string::words),
