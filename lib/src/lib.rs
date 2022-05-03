@@ -23,7 +23,6 @@ pub use dbs::execute;
 pub use dbs::process;
 pub use dbs::Auth;
 pub use dbs::Response;
-pub use dbs::Responses;
 pub use dbs::Session;
 
 pub use kvs::Datastore;

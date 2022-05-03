@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::response::{Response, Responses};
+use crate::dbs::response::Response;
 use crate::dbs::Auth;
 use crate::dbs::Level;
 use crate::dbs::Options;
@@ -120,7 +120,7 @@ impl Executor {
 		mut ctx: Runtime,
 		mut opt: Options,
 		qry: Query,
-	) -> Result<Responses, Error> {
+	) -> Result<Vec<Response>, Error> {
 		// Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses

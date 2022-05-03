@@ -4,8 +4,6 @@ use serde::ser::SerializeStruct;
 use serde::Serialize;
 use std::time::Duration;
 
-pub type Responses = Vec<Response>;
-
 #[derive(Debug)]
 pub struct Response {
 	pub sql: Option<String>,

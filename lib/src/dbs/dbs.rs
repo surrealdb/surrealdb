@@ -1,7 +1,7 @@
 use crate::dbs::Attach;
 use crate::dbs::Executor;
 use crate::dbs::Options;
-use crate::dbs::Responses;
+use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
@@ -15,7 +15,7 @@ pub async fn execute(
 	txt: &str,
 	session: Session,
 	vars: Variables,
-) -> Result<Responses, Error> {
+) -> Result<Vec<Response>, Error> {
 	// Create a new query options
 	let mut opt = Options::default();
 	// Create a new query executor
@@ -38,7 +38,7 @@ pub async fn process(
 	ast: Query,
 	session: Session,
 	vars: Variables,
-) -> Result<Responses, Error> {
+) -> Result<Vec<Response>, Error> {
 	// Create a new query options
 	let mut opt = Options::default();
 	// Create a new query executor
