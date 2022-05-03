@@ -11,6 +11,12 @@ docs:
 test:
 	cargo test --workspace
 
+.PHONY: check
+check:
+	cargo check --workspace
+	cargo fmt --all -- --check
+	cargo clippy -- -W warnings
+
 .PHONY: clean
 clean:
 	cargo clean --workspace
