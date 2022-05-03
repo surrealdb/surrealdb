@@ -6,7 +6,7 @@ use crate::dbs::Options;
 use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::kvs::Store;
+use crate::kvs::Datastore;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
@@ -14,14 +14,14 @@ use futures::lock::Mutex;
 use std::sync::Arc;
 use trice::Instant;
 
-pub struct Executor {
+pub struct Executor<'a> {
 	err: bool,
-	kvs: Store,
+	kvs: &'a Datastore,
 	txn: Option<Transaction>,
 }
 
-impl Executor {
-	pub fn new(kvs: Store) -> Executor {
+impl<'a> Executor<'a> {
+	pub fn new(kvs: &'a Datastore) -> Executor<'a> {
 		Executor {
 			kvs,
 			txn: None,

@@ -42,9 +42,9 @@ async fn handler(
 	output: String,
 	sql: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let db = DB.get().unwrap().clone();
+	let db = DB.get().unwrap();
 	let sql = std::str::from_utf8(&sql).unwrap();
-	match surrealdb::execute(db, sql, session, None).await {
+	match db.execute(sql, &session, None).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),

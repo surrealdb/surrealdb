@@ -19,8 +19,6 @@ pub mod sql;
 
 pub use err::Error;
 
-pub use dbs::execute;
-pub use dbs::process;
 pub use dbs::Auth;
 pub use dbs::Response;
 pub use dbs::Session;

@@ -1,11 +1,11 @@
 use crate::ctx::Context;
 use crate::dbs::Auth;
-use crate::dbs::Runtime;
 use crate::sql::value::Value;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Session {
-	pub au: Auth,           // Authentication info
+	pub au: Arc<Auth>,      // Authentication info
 	pub ip: Option<String>, // Session ip address
 	pub or: Option<String>, // Session origin
 	pub id: Option<String>, // Session id
@@ -16,8 +16,16 @@ pub struct Session {
 }
 
 impl Session {
-	pub fn context(&self) -> Runtime {
-		let mut ctx = Context::background();
+	// Retrieves the selected namespace
+	pub fn ns(&self) -> Option<Arc<String>> {
+		self.ns.to_owned().map(Arc::new)
+	}
+	// Retrieves the selected database
+	pub fn db(&self) -> Option<Arc<String>> {
+		self.db.to_owned().map(Arc::new)
+	}
+	// Convert a session into a runtime
+	pub fn context(&self, mut ctx: Context) -> Context {
 		// Add session value
 		let key = String::from("session");
 		let val: Value = self.into();
@@ -31,7 +39,7 @@ impl Session {
 		let val: Value = self.sd.to_owned().into();
 		ctx.add_value(key, val);
 		// Output context
-		ctx.freeze()
+		ctx
 	}
 }
 

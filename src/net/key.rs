@@ -106,7 +106,7 @@ async fn select_all(
 	table: String,
 	query: Query,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let db = DB.get().unwrap().clone();
+	let db = DB.get().unwrap();
 	let sql = format!(
 		"SELECT * FROM type::table($table) LIMIT {l} START {s}",
 		l = query.limit.unwrap_or_else(|| String::from("100")),
@@ -115,7 +115,7 @@ async fn select_all(
 	let vars = map! {
 		String::from("table") => Value::from(table),
 	};
-	match surrealdb::execute(db, sql.as_str(), session, Some(vars)).await {
+	match db.execute(sql.as_str(), &session, Some(vars)).await {
 		Ok(ref res) => match output.as_ref() {
 			"application/json" => Ok(output::json(res)),
 			"application/cbor" => Ok(output::cbor(res)),
@@ -132,7 +132,7 @@ async fn create_all(
 	table: String,
 	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let db = DB.get().unwrap().clone();
+	let db = DB.get().unwrap();
 	let data = str::from_utf8(&body).unwrap();
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -141,7 +141,7 @@ async fn create_all(
 				String::from("table") => Value::from(table),
 				String::from("data") => data,
 			};
-			match surrealdb::execute(db, sql, session, Some(vars)).await {
+			match db.execute(sql, &session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
@@ -160,12 +160,12 @@ async fn delete_all(
 	output: String,
 	table: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let db = DB.get().unwrap().clone();
+	let db = DB.get().unwrap();
 	let sql = "DELETE type::table($table)";
 	let vars = map! {
 		String::from("table") => Value::from(table),
 	};
-	match surrealdb::execute(db, sql, session, Some(vars)).await {
+	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
@@ -186,13 +186,13 @@ async fn select_one(
 	table: String,
 	id: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let db = DB.get().unwrap().clone();
+	let db = DB.get().unwrap();
 	let sql = "SELECT * FROM type::thing($table, $id)";
 	let vars = map! {
 		String::from("table") => Value::from(table),
 		String::from("id") => Value::from(id),
 	};
-	match surrealdb::execute(db, sql, session, Some(vars)).await {
+	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
@@ -210,7 +210,7 @@ async fn create_one(
 	id: String,
 	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let db = DB.get().unwrap().clone();
+	let db = DB.get().unwrap();
 	let data = str::from_utf8(&body).unwrap();
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -220,7 +220,7 @@ async fn create_one(
 				String::from("id") => Value::from(id),
 				String::from("data") => data,
 			};
-			match surrealdb::execute(db, sql, session, Some(vars)).await {
+			match db.execute(sql, &session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
@@ -241,7 +241,7 @@ async fn update_one(
 	id: String,
 	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let db = DB.get().unwrap().clone();
+	let db = DB.get().unwrap();
 	let data = str::from_utf8(&body).unwrap();
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -251,7 +251,7 @@ async fn update_one(
 				String::from("id") => Value::from(id),
 				String::from("data") => data,
 			};
-			match surrealdb::execute(db, sql, session, Some(vars)).await {
+			match db.execute(sql, &session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
@@ -272,7 +272,7 @@ async fn modify_one(
 	id: String,
 	body: Bytes,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let db = DB.get().unwrap().clone();
+	let db = DB.get().unwrap();
 	let data = str::from_utf8(&body).unwrap();
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -282,7 +282,7 @@ async fn modify_one(
 				String::from("id") => Value::from(id),
 				String::from("data") => data,
 			};
-			match surrealdb::execute(db, sql, session, Some(vars)).await {
+			match db.execute(sql, &session, Some(vars)).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
@@ -302,13 +302,13 @@ async fn delete_one(
 	table: String,
 	id: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-	let db = DB.get().unwrap().clone();
+	let db = DB.get().unwrap();
 	let sql = "DELETE type::thing($table, $id)";
 	let vars = map! {
 		String::from("table") => Value::from(table),
 		String::from("id") => Value::from(id),
 	};
-	match surrealdb::execute(db, sql, session, Some(vars)).await {
+	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),

@@ -1,5 +1,4 @@
 mod auth;
-mod dbs;
 mod executor;
 mod iterate;
 mod iterator;
@@ -12,7 +11,6 @@ mod transaction;
 mod variables;
 
 pub use self::auth::*;
-pub use self::dbs::*;
 pub use self::executor::*;
 pub use self::iterator::*;
 pub use self::options::*;

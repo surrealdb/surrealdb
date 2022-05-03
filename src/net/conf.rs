@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use surrealdb::Auth;
 use surrealdb::Session;
 use warp::Filter;
@@ -32,7 +33,7 @@ fn process(
 ) -> Session {
 	// Create session
 	let conf = Session {
-		au: Auth::default(),
+		au: Arc::new(Auth::default()),
 		ip: ip.map(|v| v.to_string()),
 		or,
 		id,

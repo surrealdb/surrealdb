@@ -1,204 +1,311 @@
-use super::Transaction;
+use super::kv::Add;
+use super::kv::Convert;
+use super::Key;
+use super::Val;
 use crate::err::Error;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::sql;
+use sql::statements::DefineDatabaseStatement;
+use sql::statements::DefineEventStatement;
+use sql::statements::DefineFieldStatement;
+use sql::statements::DefineIndexStatement;
+use sql::statements::DefineLoginStatement;
+use sql::statements::DefineNamespaceStatement;
+use sql::statements::DefineScopeStatement;
+use sql::statements::DefineTableStatement;
+use sql::statements::DefineTokenStatement;
+use sql::statements::LiveStatement;
 use std::ops::Range;
 
-trait Add<T> {
-	fn add(self, v: T) -> Self;
+/// A set of undoable updates and requests against a dataset.
+pub struct Transaction {
+	pub(super) inner: Inner,
 }
 
-impl Add<u8> for Vec<u8> {
-	fn add(mut self, v: u8) -> Self {
-		self.push(v);
-		self
-	}
+pub(super) enum Inner {
+	#[cfg(feature = "kv-echodb")]
+	Mem(super::mem::Transaction),
+	#[cfg(feature = "kv-indxdb")]
+	IxDB(super::ixdb::Transaction),
+	#[cfg(feature = "kv-yokudb")]
+	File(super::file::Transaction),
+	#[cfg(feature = "kv-tikv")]
+	TiKV(super::tikv::Transaction),
 }
 
 impl Transaction {
-	// Check if closed
+	/// Check if transactions is finished.
+	///
+	/// If the transaction has been cancelled or committed,
+	/// then this function will return [`true`], and any further
+	/// calls to functions on this transaction will result
+	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.closed(),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.closed(),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.closed(),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.closed(),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.closed(),
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.closed(),
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.closed(),
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.closed(),
 		}
 	}
-	// Cancel a transaction
+	/// Cancel a transaction.
+	///
+	/// This reverses all changes made within the transaction.
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.cancel(),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.cancel(),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.cancel(),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.cancel(),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.cancel().await,
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.cancel().await,
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.cancel().await,
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.cancel().await,
 		}
 	}
-	// Commit a transaction
+	/// Commit a transaction.
+	///
+	/// This attempts to commit all changes made within the transaction.
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.commit(),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.commit(),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.commit(),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.commit(),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.commit().await,
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.commit().await,
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.commit().await,
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.commit().await,
 		}
 	}
-	// Delete a key
+	/// Delete a key from the datastore.
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key>,
 	{
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.del(key),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.del(key),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.del(key),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.del(key),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.del(key).await,
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.del(key).await,
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.del(key).await,
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.del(key).await,
 		}
 	}
-	// Check if a key exists
+	/// Check if a key exists in the datastore.
 	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key>,
 	{
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.exi(key),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.exi(key),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.exi(key),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.exi(key),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.exi(key).await,
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.exi(key).await,
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.exi(key).await,
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.exi(key).await,
 		}
 	}
-	// Fetch a key from the database
+	/// Fetch a key from the datastore.
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key>,
 	{
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.get(key),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.get(key),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.get(key),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.get(key),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.get(key).await,
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.get(key).await,
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.get(key).await,
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.get(key).await,
 		}
 	}
-	// Insert or update a key in the database
+	/// Insert or update a key in the datastore.
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Key>,
 	{
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.set(key, val),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.set(key, val),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.set(key, val),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.set(key, val),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.set(key, val).await,
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.set(key, val).await,
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.set(key, val).await,
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.set(key, val).await,
 		}
 	}
-	// Insert a key if it doesn't exist in the database
+	/// Insert a key if it doesn't exist in the datastore.
 	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Key>,
 	{
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.put(key, val),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.put(key, val),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.put(key, val),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.put(key, val),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.put(key, val).await,
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.put(key, val).await,
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.put(key, val).await,
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.put(key, val).await,
 		}
 	}
-	// Retrieve a range of keys from the databases
+	/// Retrieve a specific range of keys from the datastore.
+	///
+	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key>,
 	{
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.scan(rng, limit),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.scan(rng, limit),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.scan(rng, limit),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.scan(rng, limit),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.scan(rng, limit).await,
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.scan(rng, limit).await,
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.scan(rng, limit).await,
 		}
 	}
-	// Delete a range of keys from the databases
+	/// Update a key in the datastore if the current value matches a condition.
 	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
 	{
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.putc(key, val, chk),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.putc(key, val, chk),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.putc(key, val, chk),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.putc(key, val, chk),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.putc(key, val, chk).await,
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.putc(key, val, chk).await,
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.putc(key, val, chk).await,
 		}
 	}
-	// Delete a range of keys from the databases
+	/// Delete a key from the datastore if the current value matches a condition.
 	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
 		V: Into<Val>,
 	{
 		match self {
-			Transaction::Mock => unreachable!(),
 			#[cfg(feature = "kv-echodb")]
-			Transaction::Mem(v) => v.delc(key, chk),
+			Transaction {
+				inner: Inner::Mem(v),
+			} => v.delc(key, chk),
 			#[cfg(feature = "kv-yokudb")]
-			Transaction::File(v) => v.delc(key, chk),
+			Transaction {
+				inner: Inner::File(v),
+			} => v.delc(key, chk),
 			#[cfg(feature = "kv-indxdb")]
-			Transaction::IxDB(v) => v.delc(key, chk).await,
+			Transaction {
+				inner: Inner::IxDB(v),
+			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-tikv")]
-			Transaction::TiKV(v) => v.delc(key, chk).await,
+			Transaction {
+				inner: Inner::TiKV(v),
+			} => v.delc(key, chk).await,
 		}
 	}
-	// Retrieve a range of keys from the databases
+	/// Retrieve a specific range of keys from the datastore.
+	///
+	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key>,
@@ -246,7 +353,9 @@ impl Transaction {
 		}
 		Ok(out)
 	}
-	// Delete a range of keys from the databases
+	/// Delete a range of keys from the datastore.
+	///
+	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn delr<K>(&mut self, rng: Range<K>, limit: u32) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -293,7 +402,9 @@ impl Transaction {
 		}
 		Ok(())
 	}
-	// Retrieve a prefix of keys from the databases
+	/// Retrieve a specific prefix of keys from the datastore.
+	///
+	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn getp<K>(&mut self, key: K, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key>,
@@ -341,7 +452,9 @@ impl Transaction {
 		}
 		Ok(out)
 	}
-	// Delete a prefix of keys from the databases
+	/// Delete a prefix of keys from the datastore.
+	///
+	/// This function fetches key-value pairs from the underlying datastore in batches of 1000.
 	pub async fn delp<K>(&mut self, key: K, limit: u32) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -386,6 +499,254 @@ impl Transaction {
 				num -= 1;
 			}
 		}
+		Ok(())
+	}
+	/// Retrieve all namespace definitions in a datastore.
+	pub async fn all_ns(&mut self) -> Result<Vec<DefineNamespaceStatement>, Error> {
+		let beg = crate::key::ns::prefix();
+		let end = crate::key::ns::suffix();
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all namespace login definitions for a specific namespace.
+	pub async fn all_nl(&mut self, ns: &str) -> Result<Vec<DefineLoginStatement>, Error> {
+		let beg = crate::key::nl::prefix(ns);
+		let end = crate::key::nl::suffix(ns);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all namespace token definitions for a specific namespace.
+	pub async fn all_nt(&mut self, ns: &str) -> Result<Vec<DefineTokenStatement>, Error> {
+		let beg = crate::key::nt::prefix(ns);
+		let end = crate::key::nt::suffix(ns);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all database definitions for a specific namespace.
+	pub async fn all_db(&mut self, ns: &str) -> Result<Vec<DefineDatabaseStatement>, Error> {
+		let beg = crate::key::db::prefix(ns);
+		let end = crate::key::db::suffix(ns);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all database login definitions for a specific database.
+	pub async fn all_dl(&mut self, ns: &str, db: &str) -> Result<Vec<DefineLoginStatement>, Error> {
+		let beg = crate::key::dl::prefix(ns, db);
+		let end = crate::key::dl::suffix(ns, db);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all database token definitions for a specific database.
+	pub async fn all_dt(&mut self, ns: &str, db: &str) -> Result<Vec<DefineTokenStatement>, Error> {
+		let beg = crate::key::dt::prefix(ns, db);
+		let end = crate::key::dt::suffix(ns, db);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all scope definitions for a specific database.
+	pub async fn all_sc(&mut self, ns: &str, db: &str) -> Result<Vec<DefineScopeStatement>, Error> {
+		let beg = crate::key::sc::prefix(ns, db);
+		let end = crate::key::sc::suffix(ns, db);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all scope token definitions for a scope.
+	pub async fn all_st(
+		&mut self,
+		ns: &str,
+		db: &str,
+		sc: &str,
+	) -> Result<Vec<DefineTokenStatement>, Error> {
+		let beg = crate::key::st::prefix(ns, db, sc);
+		let end = crate::key::st::suffix(ns, db, sc);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all table definitions for a specific database.
+	pub async fn all_tb(&mut self, ns: &str, db: &str) -> Result<Vec<DefineTableStatement>, Error> {
+		let beg = crate::key::tb::prefix(ns, db);
+		let end = crate::key::tb::suffix(ns, db);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all event definitions for a specific table.
+	pub async fn all_ev(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<Vec<DefineEventStatement>, Error> {
+		let beg = crate::key::ev::prefix(ns, db, tb);
+		let end = crate::key::ev::suffix(ns, db, tb);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all field definitions for a specific table.
+	pub async fn all_fd(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<Vec<DefineFieldStatement>, Error> {
+		let beg = crate::key::fd::prefix(ns, db, tb);
+		let end = crate::key::fd::suffix(ns, db, tb);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all index definitions for a specific table.
+	pub async fn all_ix(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<Vec<DefineIndexStatement>, Error> {
+		let beg = crate::key::ix::prefix(ns, db, tb);
+		let end = crate::key::ix::suffix(ns, db, tb);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all view definitions for a specific table.
+	pub async fn all_ft(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<Vec<DefineTableStatement>, Error> {
+		let beg = crate::key::ft::prefix(ns, db, tb);
+		let end = crate::key::ft::suffix(ns, db, tb);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve all live definitions for a specific table.
+	pub async fn all_lv(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<Vec<LiveStatement>, Error> {
+		let beg = crate::key::lv::prefix(ns, db, tb);
+		let end = crate::key::lv::suffix(ns, db, tb);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		Ok(val.convert())
+	}
+	/// Retrieve a specific namespace definition.
+	pub async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
+		let key = crate::key::ns::new(ns);
+		let val = self.get(key).await?.ok_or(Error::NsNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific namespace login definition.
+	pub async fn get_nl(&mut self, ns: &str, nl: &str) -> Result<DefineLoginStatement, Error> {
+		let key = crate::key::nl::new(ns, nl);
+		let val = self.get(key).await?.ok_or(Error::NlNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific namespace token definition.
+	pub async fn get_nt(&mut self, ns: &str, nt: &str) -> Result<DefineTokenStatement, Error> {
+		let key = crate::key::nt::new(ns, nt);
+		let val = self.get(key).await?.ok_or(Error::NtNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific database definition.
+	pub async fn get_db(&mut self, ns: &str, db: &str) -> Result<DefineDatabaseStatement, Error> {
+		let key = crate::key::db::new(ns, db);
+		let val = self.get(key).await?.ok_or(Error::DbNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific database login definition.
+	pub async fn get_dl(
+		&mut self,
+		ns: &str,
+		db: &str,
+		dl: &str,
+	) -> Result<DefineLoginStatement, Error> {
+		let key = crate::key::dl::new(ns, db, dl);
+		let val = self.get(key).await?.ok_or(Error::DlNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific database token definition.
+	pub async fn get_dt(
+		&mut self,
+		ns: &str,
+		db: &str,
+		dt: &str,
+	) -> Result<DefineTokenStatement, Error> {
+		let key = crate::key::dt::new(ns, db, dt);
+		let val = self.get(key).await?.ok_or(Error::DtNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific scope definition.
+	pub async fn get_sc(
+		&mut self,
+		ns: &str,
+		db: &str,
+		sc: &str,
+	) -> Result<DefineScopeStatement, Error> {
+		let key = crate::key::sc::new(ns, db, sc);
+		let val = self.get(key).await?.ok_or(Error::ScNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific scope token definition.
+	pub async fn get_st(
+		&mut self,
+		ns: &str,
+		db: &str,
+		sc: &str,
+		st: &str,
+	) -> Result<DefineTokenStatement, Error> {
+		let key = crate::key::st::new(ns, db, sc, st);
+		let val = self.get(key).await?.ok_or(Error::StNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific table definition.
+	pub async fn get_tb(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<DefineTableStatement, Error> {
+		let key = crate::key::tb::new(ns, db, tb);
+		let val = self.get(key).await?.ok_or(Error::TbNotFound)?;
+		Ok(val.into())
+	}
+	/// Add a namespace with a default configuration.
+	pub async fn add_ns(&mut self, ns: &str) -> Result<(), Error> {
+		let key = crate::key::ns::new(ns);
+		let _ = self
+			.put(
+				key,
+				DefineNamespaceStatement {
+					name: ns.to_owned(),
+				},
+			)
+			.await;
+		Ok(())
+	}
+	/// Add a database with a default configuration.
+	pub async fn add_db(&mut self, ns: &str, db: &str) -> Result<(), Error> {
+		let key = crate::key::db::new(ns, db);
+		let _ = self
+			.put(
+				key,
+				DefineDatabaseStatement {
+					name: db.to_owned(),
+				},
+			)
+			.await;
+		Ok(())
+	}
+	/// Add a table with a default configuration.
+	pub async fn add_tb(&mut self, ns: &str, db: &str, tb: &str) -> Result<(), Error> {
+		let key = crate::key::tb::new(ns, db, tb);
+		let _ = self
+			.put(
+				key,
+				DefineTableStatement {
+					name: tb.to_owned(),
+					..DefineTableStatement::default()
+				},
+			)
+			.await;
 		Ok(())
 	}
 }
