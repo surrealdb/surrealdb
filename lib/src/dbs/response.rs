@@ -4,6 +4,7 @@ use serde::ser::SerializeStruct;
 use serde::Serialize;
 use std::time::Duration;
 
+/// The return value when running a query set on the database.
 #[derive(Debug)]
 pub struct Response {
 	pub sql: Option<String>,
@@ -12,11 +13,11 @@ pub struct Response {
 }
 
 impl Response {
-	// Return the transaction speed
+	/// Return the transaction duration as a string
 	pub fn speed(&self) -> String {
 		format!("{:?}", self.time)
 	}
-	// Retrieve the response as a result
+	/// Retrieve the response as a result by reference
 	pub fn output(&self) -> Result<&Value, &Error> {
 		match &self.result {
 			Ok(v) => Ok(v),

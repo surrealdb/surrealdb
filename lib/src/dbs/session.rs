@@ -3,29 +3,38 @@ use crate::dbs::Auth;
 use crate::sql::value::Value;
 use std::sync::Arc;
 
+/// Specifies the current session information when processing a query.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Session {
-	pub au: Arc<Auth>,      // Authentication info
-	pub ip: Option<String>, // Session ip address
-	pub or: Option<String>, // Session origin
-	pub id: Option<String>, // Session id
-	pub ns: Option<String>, // Namespace
-	pub db: Option<String>, // Database
-	pub sc: Option<String>, // Scope
-	pub sd: Option<Value>,  // Scope auth data
+	/// The current [`Auth`] information
+	pub au: Arc<Auth>,
+	/// The current connection IP address
+	pub ip: Option<String>,
+	/// The current connection origin
+	pub or: Option<String>,
+	/// The current connection ID
+	pub id: Option<String>,
+	/// THe currently selected namespace
+	pub ns: Option<String>,
+	/// THe currently selected database
+	pub db: Option<String>,
+	/// The currently selected authentication scope
+	pub sc: Option<String>,
+	/// The current scope authentication data
+	pub sd: Option<Value>,
 }
 
 impl Session {
 	// Retrieves the selected namespace
-	pub fn ns(&self) -> Option<Arc<String>> {
+	pub(crate) fn ns(&self) -> Option<Arc<String>> {
 		self.ns.to_owned().map(Arc::new)
 	}
 	// Retrieves the selected database
-	pub fn db(&self) -> Option<Arc<String>> {
+	pub(crate) fn db(&self) -> Option<Arc<String>> {
 		self.db.to_owned().map(Arc::new)
 	}
 	// Convert a session into a runtime
-	pub fn context(&self, mut ctx: Context) -> Context {
+	pub(crate) fn context(&self, mut ctx: Context) -> Context {
 		// Add session value
 		let key = String::from("session");
 		let val: Value = self.into();

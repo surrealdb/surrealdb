@@ -98,7 +98,7 @@ impl Datastore {
 			_ => unreachable!(),
 		}
 	}
-	/// Create a new transaction
+	/// Create a new transaction on this datastore
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		match &self.inner {
 			#[cfg(feature = "kv-echodb")]
@@ -131,7 +131,7 @@ impl Datastore {
 			}
 		}
 	}
-	/// Execute a query
+	/// Parse and execute an SQL query
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -158,7 +158,7 @@ impl Datastore {
 		opt.db = sess.db();
 		exe.execute(ctx, opt, ast).await
 	}
-	/// Execute a query
+	/// Execute a pre-parsed SQL query
 	pub async fn process(
 		&self,
 		ast: Query,
