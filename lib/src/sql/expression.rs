@@ -12,9 +12,9 @@ use std::str;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Expression {
-	l: Value,
-	o: Operator,
-	r: Value,
+	pub l: Value,
+	pub o: Operator,
+	pub r: Value,
 }
 
 impl Default for Expression {

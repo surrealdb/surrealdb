@@ -7,7 +7,7 @@ use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Query {
-	statements: Statements,
+	pub statements: Statements,
 }
 
 impl Query {
