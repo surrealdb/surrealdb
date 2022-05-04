@@ -6,9 +6,25 @@ use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Fetchs(pub Vec<Fetch>);
+
+impl Deref for Fetchs {
+	type Target = Vec<Fetch>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl IntoIterator for Fetchs {
+	type Item = Fetch;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
 
 impl fmt::Display for Fetchs {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -21,13 +37,18 @@ impl fmt::Display for Fetchs {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Fetch {
-	pub fetch: Idiom,
+pub struct Fetch(pub Idiom);
+
+impl Deref for Fetch {
+	type Target = Idiom;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
 }
 
 impl fmt::Display for Fetch {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.fetch)
+		write!(f, "{}", self.0)
 	}
 }
 
@@ -40,12 +61,7 @@ pub fn fetch(i: &str) -> IResult<&str, Fetchs> {
 
 fn fetch_raw(i: &str) -> IResult<&str, Fetch> {
 	let (i, v) = idiom(i)?;
-	Ok((
-		i,
-		Fetch {
-			fetch: v,
-		},
-	))
+	Ok((i, Fetch(v)))
 }
 
 #[cfg(test)]
@@ -60,12 +76,7 @@ mod tests {
 		let res = fetch(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(
-			out,
-			Fetchs(vec![Fetch {
-				fetch: Idiom::parse("field")
-			}])
-		);
+		assert_eq!(out, Fetchs(vec![Fetch(Idiom::parse("field"))]));
 		assert_eq!("FETCH field", format!("{}", out));
 	}
 
@@ -77,14 +88,7 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
-			Fetchs(vec![
-				Fetch {
-					fetch: Idiom::parse("field")
-				},
-				Fetch {
-					fetch: Idiom::parse("other.field")
-				},
-			])
+			Fetchs(vec![Fetch(Idiom::parse("field")), Fetch(Idiom::parse("other.field")),])
 		);
 		assert_eq!("FETCH field, other.field", format!("{}", out));
 	}

@@ -351,24 +351,24 @@ impl Iterator {
 				// Loop over each value
 				for obj in &mut self.results {
 					// Get the value at the path
-					let val = obj.get(ctx, opt, txn, &fetch.fetch).await?;
+					let val = obj.get(ctx, opt, txn, fetch).await?;
 					// Set the value at the path
 					match val {
 						Value::Array(v) => {
 							// Fetch all remote records
 							let val = Value::Array(v).get(ctx, opt, txn, &[Part::All]).await?;
 							// Set the value at the path
-							obj.set(ctx, opt, txn, &fetch.fetch, val).await?;
+							obj.set(ctx, opt, txn, fetch, val).await?;
 						}
 						Value::Thing(v) => {
 							// Fetch all remote records
 							let val = Value::Thing(v).get(ctx, opt, txn, &[Part::All]).await?;
 							// Set the value at the path
-							obj.set(ctx, opt, txn, &fetch.fetch, val).await?;
+							obj.set(ctx, opt, txn, fetch, val).await?;
 						}
 						_ => {
 							// Set the value at the path
-							obj.set(ctx, opt, txn, &fetch.fetch, val).await?;
+							obj.set(ctx, opt, txn, fetch, val).await?;
 						}
 					}
 				}
