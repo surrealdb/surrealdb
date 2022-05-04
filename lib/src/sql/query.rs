@@ -3,33 +3,28 @@ use crate::sql::statement::{statements, Statement, Statements};
 use nom::combinator::all_consuming;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Query {
-	pub statements: Statements,
-}
+pub struct Query(pub Statements);
 
-impl Query {
-	pub fn statements(&self) -> &Vec<Statement> {
-		&self.statements.0
+impl Deref for Query {
+	type Target = Vec<Statement>;
+	fn deref(&self) -> &Self::Target {
+		&self.0 .0
 	}
 }
 
 impl fmt::Display for Query {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.statements)
+		write!(f, "{}", self.0)
 	}
 }
 
 pub fn query(i: &str) -> IResult<&str, Query> {
 	let (i, v) = all_consuming(statements)(i)?;
-	Ok((
-		i,
-		Query {
-			statements: v,
-		},
-	))
+	Ok((i, Query(v)))
 }
 
 #[cfg(test)]

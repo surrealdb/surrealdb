@@ -32,11 +32,19 @@ use nom::multi::separated_list1;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Statements(pub Vec<Statement>);
+
+impl Deref for Statements {
+	type Target = Vec<Statement>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
 
 impl fmt::Display for Statements {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

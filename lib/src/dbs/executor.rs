@@ -126,7 +126,7 @@ impl<'a> Executor<'a> {
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
 		// Process all statements in query
-		for stm in qry.statements().iter() {
+		for stm in qry.iter() {
 			// Log the statement
 			debug!("Executing: {}", stm);
 			// Reset errors
