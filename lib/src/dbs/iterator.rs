@@ -165,7 +165,7 @@ impl Iterator {
 				// Loop over each value
 				for obj in &res {
 					// Get the value at the path
-					let val = obj.pick(&split.split);
+					let val = obj.pick(split);
 					// Set the value at the path
 					match val {
 						Value::Array(v) => {
@@ -173,7 +173,7 @@ impl Iterator {
 								// Make a copy of object
 								let mut obj = obj.clone();
 								// Set the value at the path
-								obj.set(ctx, opt, txn, &split.split, val).await?;
+								obj.set(ctx, opt, txn, split, val).await?;
 								// Add the object to the results
 								self.results.push(obj);
 							}
@@ -182,7 +182,7 @@ impl Iterator {
 							// Make a copy of object
 							let mut obj = obj.clone();
 							// Set the value at the path
-							obj.set(ctx, opt, txn, &split.split, val).await?;
+							obj.set(ctx, opt, txn, split, val).await?;
 							// Add the object to the results
 							self.results.push(obj);
 						}
