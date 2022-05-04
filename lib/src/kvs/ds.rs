@@ -33,8 +33,10 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// # use surrealdb::Datastore;
-	/// # fn main() -> Result<()> {
-	/// let ds = Datastore::new("memory")?;
+	/// # use surrealdb::Error;
+	/// # #[tokio::main]
+	/// # async fn main() -> Result<(), Error> {
+	/// let ds = Datastore::new("memory").await?;
 	/// # Ok(())
 	/// # }
 	/// ```
@@ -43,8 +45,10 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// # use surrealdb::Datastore;
-	/// # fn main() -> Result<()> {
-	/// let ds = Datastore::new("file://temp.db")?;
+	/// # use surrealdb::Error;
+	/// # #[tokio::main]
+	/// # async fn main() -> Result<(), Error> {
+	/// let ds = Datastore::new("file://temp.db").await?;
 	/// # Ok(())
 	/// # }
 	/// ```
@@ -53,8 +57,10 @@ impl Datastore {
 	///
 	/// ```rust,no_run
 	/// # use surrealdb::Datastore;
-	/// # fn main() -> Result<()> {
-	/// let ds = Datastore::new("tikv://127.0.0.1:2379")?;
+	/// # use surrealdb::Error;
+	/// # #[tokio::main]
+	/// # async fn main() -> Result<(), Error> {
+	/// let ds = Datastore::new("tikv://127.0.0.1:2379").await?;
 	/// # Ok(())
 	/// # }
 	/// ```
