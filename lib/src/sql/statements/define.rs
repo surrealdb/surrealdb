@@ -586,7 +586,7 @@ impl DefineTableStatement {
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Save the view config
-				let key = crate::key::ft::new(opt.ns(), opt.db(), &v.name, &self.name);
+				let key = crate::key::ft::new(opt.ns(), opt.db(), v, &self.name);
 				run.set(key, self).await?;
 			}
 			// Release the transaction

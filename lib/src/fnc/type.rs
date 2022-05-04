@@ -93,9 +93,7 @@ pub fn string(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn table(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(Value::Table(Table {
-		name: args.remove(0).as_strand().value,
-	}))
+	Ok(Value::Table(Table(args.remove(0).as_string())))
 }
 
 pub fn thing(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {

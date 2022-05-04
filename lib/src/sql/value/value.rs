@@ -510,7 +510,7 @@ impl Value {
 
 	pub fn is_type_record(&self, types: &[Table]) -> bool {
 		match self {
-			Value::Thing(v) => types.iter().any(|t| t.name == v.tb),
+			Value::Thing(v) => types.iter().any(|tb| tb.0 == v.tb),
 			_ => false,
 		}
 	}
@@ -587,6 +587,13 @@ impl Value {
 			Value::Duration(v) => v.value.as_secs().into(),
 			Value::Datetime(v) => v.value.timestamp().into(),
 			_ => Number::default(),
+		}
+	}
+
+	pub fn as_string(self) -> String {
+		match self {
+			Value::Strand(v) => v.value,
+			_ => self.to_string(),
 		}
 	}
 

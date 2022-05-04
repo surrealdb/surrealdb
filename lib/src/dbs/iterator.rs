@@ -110,7 +110,7 @@ impl Iterator {
 	// Create a new record for processing
 	pub fn produce(&mut self, val: Table) {
 		self.prepare(Value::Thing(Thing {
-			tb: val.name,
+			tb: val.0,
 			id: Id::rand(),
 		}))
 	}
