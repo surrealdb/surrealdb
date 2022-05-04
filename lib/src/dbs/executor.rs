@@ -233,23 +233,26 @@ impl<'a> Executor<'a> {
 					false => {
 						// Create a transaction
 						let loc = self.begin().await;
-						// Specify statement timeout
-						if let Some(timeout) = stm.timeout() {
-							let mut new = Context::new(&ctx);
-							new.add_timeout(timeout);
-							ctx = new.freeze();
-						}
 						// Process the statement
-						let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
-						// Catch statement timeout
 						let res = match stm.timeout() {
-							Some(timeout) => match ctx.is_timedout() {
-								true => Err(Error::QueryTimeout {
-									timer: timeout,
-								}),
-								false => res,
-							},
-							None => res,
+							// There is a timeout clause
+							Some(timeout) => {
+								// Set statement timeout
+								let mut ctx = Context::new(&ctx);
+								ctx.add_timeout(timeout);
+								let ctx = ctx.freeze();
+								// Process the statement
+								let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
+								// Catch statement timeout
+								match ctx.is_timedout() {
+									true => Err(Error::QueryTimeout {
+										timer: timeout,
+									}),
+									false => res,
+								}
+							}
+							// There is no timeout clause
+							None => stm.compute(&ctx, &opt, &self.txn(), None).await,
 						};
 						// Finalise transaction
 						match &res {
