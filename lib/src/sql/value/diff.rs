@@ -13,7 +13,7 @@ impl Value {
 					if !b.value.contains_key(key) {
 						ops.push(Operation {
 							op: Op::Remove,
-							path: path.clone().add(key.clone().into()),
+							path: path.clone().push(key.clone().into()),
 							value: Value::Null,
 						})
 					}
@@ -23,11 +23,11 @@ impl Value {
 					match a.value.get(key) {
 						None => ops.push(Operation {
 							op: Op::Add,
-							path: path.clone().add(key.clone().into()),
+							path: path.clone().push(key.clone().into()),
 							value: val.clone(),
 						}),
 						Some(old) => {
-							let path = path.clone().add(key.clone().into());
+							let path = path.clone().push(key.clone().into());
 							ops.append(&mut old.diff(val, path))
 						}
 					}
@@ -36,7 +36,7 @@ impl Value {
 			(Value::Array(a), Value::Array(b)) if a != b => {
 				let mut n = 0;
 				while n < min(a.len(), b.len()) {
-					let path = path.clone().add(n.into());
+					let path = path.clone().push(n.into());
 					ops.append(&mut a.value[n].diff(&b.value[n], path));
 					n += 1;
 				}
@@ -44,7 +44,7 @@ impl Value {
 					if n >= a.len() {
 						ops.push(Operation {
 							op: Op::Add,
-							path: path.clone().add(n.into()),
+							path: path.clone().push(n.into()),
 							value: b.value[n].clone(),
 						})
 					}
@@ -54,7 +54,7 @@ impl Value {
 					if n >= b.len() {
 						ops.push(Operation {
 							op: Op::Remove,
-							path: path.clone().add(n.into()),
+							path: path.clone().push(n.into()),
 							value: Value::Null,
 						})
 					}

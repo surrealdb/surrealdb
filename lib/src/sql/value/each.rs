@@ -14,10 +14,10 @@ impl Value {
 				// Current path part is an object
 				Value::Object(v) => match p {
 					Part::Field(f) => match v.value.get(&f.name) {
-						Some(v) => v._each(path.next(), prev.add(p.clone())),
+						Some(v) => v._each(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
-					Part::All => self._each(path.next(), prev.add(p.clone())),
+					Part::All => self._each(path.next(), prev.push(p.clone())),
 					_ => vec![],
 				},
 				// Current path part is an array
@@ -26,25 +26,25 @@ impl Value {
 						.value
 						.iter()
 						.enumerate()
-						.flat_map(|(i, v)| v._each(path.next(), prev.clone().add(Part::from(i))))
+						.flat_map(|(i, v)| v._each(path.next(), prev.clone().push(Part::from(i))))
 						.collect::<Vec<_>>(),
 					Part::First => match v.value.first() {
-						Some(v) => v._each(path.next(), prev.add(p.clone())),
+						Some(v) => v._each(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
 					Part::Last => match v.value.last() {
-						Some(v) => v._each(path.next(), prev.add(p.clone())),
+						Some(v) => v._each(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
 					Part::Index(i) => match v.value.get(i.to_usize()) {
-						Some(v) => v._each(path.next(), prev.add(p.clone())),
+						Some(v) => v._each(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
 					_ => v
 						.value
 						.iter()
 						.enumerate()
-						.flat_map(|(i, v)| v._each(path.next(), prev.clone().add(Part::from(i))))
+						.flat_map(|(i, v)| v._each(path.next(), prev.clone().push(Part::from(i))))
 						.collect::<Vec<_>>(),
 				},
 				// Ignore everything else

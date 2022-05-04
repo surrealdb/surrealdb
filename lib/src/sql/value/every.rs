@@ -12,14 +12,14 @@ impl Value {
 			Value::Object(v) => v
 				.value
 				.iter()
-				.flat_map(|(k, v)| v._every(prev.clone().add(Part::from(k))))
+				.flat_map(|(k, v)| v._every(prev.clone().push(Part::from(k))))
 				.collect::<Vec<_>>(),
 			// Current path part is an array
 			Value::Array(v) => v
 				.value
 				.iter()
 				.enumerate()
-				.flat_map(|(i, v)| v._every(prev.clone().add(Part::from(i))))
+				.flat_map(|(i, v)| v._every(prev.clone().push(Part::from(i))))
 				.collect::<Vec<_>>(),
 			// Process everything else
 			_ => vec![prev],

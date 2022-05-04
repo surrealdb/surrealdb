@@ -73,7 +73,7 @@ impl From<Vec<Part>> for Idiom {
 }
 
 impl Idiom {
-	pub fn add(mut self, n: Part) -> Idiom {
+	pub fn push(mut self, n: Part) -> Idiom {
 		self.parts.push(n);
 		self
 	}
