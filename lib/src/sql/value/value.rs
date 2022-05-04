@@ -498,7 +498,7 @@ impl Value {
 			Value::False => false,
 			Value::Thing(_) => true,
 			Value::Geometry(_) => true,
-			Value::Array(v) => !v.value.is_empty(),
+			Value::Array(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
 			Value::Strand(v) => !v.value.is_empty() && v.value.to_ascii_lowercase() != "false",
 			Value::Number(v) => v.is_truthy(),
@@ -831,14 +831,14 @@ impl Value {
 
 	pub fn all_equal(&self, other: &Value) -> bool {
 		match self {
-			Value::Array(v) => v.value.iter().all(|v| v.equal(other)),
+			Value::Array(v) => v.iter().all(|v| v.equal(other)),
 			_ => self.equal(other),
 		}
 	}
 
 	pub fn any_equal(&self, other: &Value) -> bool {
 		match self {
-			Value::Array(v) => v.value.iter().any(|v| v.equal(other)),
+			Value::Array(v) => v.iter().any(|v| v.equal(other)),
 			_ => self.equal(other),
 		}
 	}
@@ -855,21 +855,21 @@ impl Value {
 
 	pub fn all_fuzzy(&self, other: &Value) -> bool {
 		match self {
-			Value::Array(v) => v.value.iter().all(|v| v.fuzzy(other)),
+			Value::Array(v) => v.iter().all(|v| v.fuzzy(other)),
 			_ => self.fuzzy(other),
 		}
 	}
 
 	pub fn any_fuzzy(&self, other: &Value) -> bool {
 		match self {
-			Value::Array(v) => v.value.iter().any(|v| v.fuzzy(other)),
+			Value::Array(v) => v.iter().any(|v| v.fuzzy(other)),
 			_ => self.fuzzy(other),
 		}
 	}
 
 	pub fn contains(&self, other: &Value) -> bool {
 		match self {
-			Value::Array(v) => v.value.iter().any(|v| v.equal(other)),
+			Value::Array(v) => v.iter().any(|v| v.equal(other)),
 			Value::Strand(v) => match other {
 				Value::Strand(w) => v.value.contains(w.as_str()),
 				_ => v.value.contains(&other.to_strand().as_str()),
@@ -884,8 +884,8 @@ impl Value {
 
 	pub fn contains_all(&self, other: &Value) -> bool {
 		match other {
-			Value::Array(v) => v.value.iter().all(|v| match self {
-				Value::Array(w) => w.value.iter().any(|w| v.equal(w)),
+			Value::Array(v) => v.iter().all(|v| match self {
+				Value::Array(w) => w.iter().any(|w| v.equal(w)),
 				Value::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
@@ -895,8 +895,8 @@ impl Value {
 
 	pub fn contains_any(&self, other: &Value) -> bool {
 		match other {
-			Value::Array(v) => v.value.iter().any(|v| match self {
-				Value::Array(w) => w.value.iter().any(|w| v.equal(w)),
+			Value::Array(v) => v.iter().any(|v| match self {
+				Value::Array(w) => w.iter().any(|w| v.equal(w)),
 				Value::Geometry(_) => self.contains(v),
 				_ => false,
 			}),

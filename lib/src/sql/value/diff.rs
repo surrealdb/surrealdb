@@ -37,7 +37,7 @@ impl Value {
 				let mut n = 0;
 				while n < min(a.len(), b.len()) {
 					let path = path.clone().push(n.into());
-					ops.append(&mut a.value[n].diff(&b.value[n], path));
+					ops.append(&mut a[n].diff(&b[n], path));
 					n += 1;
 				}
 				while n < b.len() {
@@ -45,7 +45,7 @@ impl Value {
 						ops.push(Operation {
 							op: Op::Add,
 							path: path.clone().push(n.into()),
-							value: b.value[n].clone(),
+							value: b[n].clone(),
 						})
 					}
 					n += 1;

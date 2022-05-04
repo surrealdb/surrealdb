@@ -45,7 +45,7 @@ impl Array {
 		txn: &Transaction,
 		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
-		for v in self.value.into_iter() {
+		for v in self {
 			if ctx.is_ok() {
 				match v {
 					Value::Array(v) => v.process(ctx, opt, stm, txn, chn).await?,

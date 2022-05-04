@@ -15,7 +15,6 @@ impl Value {
 				.collect::<Vec<_>>(),
 			// Current path part is an array
 			Value::Array(v) => v
-				.value
 				.iter()
 				.enumerate()
 				.flat_map(|(i, v)| v._every(prev.clone().push(Part::from(i))))

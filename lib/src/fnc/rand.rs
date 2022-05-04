@@ -20,11 +20,11 @@ pub fn r#enum(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Value::None),
 		1 => match args.remove(0) {
-			Value::Array(mut v) => match v.value.len() {
+			Value::Array(mut v) => match v.len() {
 				0 => Ok(Value::None),
 				n => {
 					let i = rand::thread_rng().gen_range(0..n);
-					Ok(v.value.remove(i))
+					Ok(v.remove(i))
 				}
 			},
 			v => Ok(v),

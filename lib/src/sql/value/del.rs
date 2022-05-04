@@ -41,48 +41,50 @@ impl Value {
 				Value::Array(v) => match p {
 					Part::All => match path.len() {
 						1 => {
-							v.value.clear();
+							v.clear();
 							Ok(())
 						}
 						_ => {
 							let path = path.next();
-							let futs = v.value.iter_mut().map(|v| v.del(ctx, opt, txn, path));
+							let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
 							try_join_all(futs).await?;
 							Ok(())
 						}
 					},
 					Part::First => match path.len() {
 						1 => {
-							if v.value.len().gt(&0) {
-								v.value.remove(0);
+							if v.len().gt(&0) {
+								let i = 0;
+								v.remove(i);
 							}
 							Ok(())
 						}
-						_ => match v.value.first_mut() {
+						_ => match v.first_mut() {
 							Some(v) => v.del(ctx, opt, txn, path.next()).await,
 							None => Ok(()),
 						},
 					},
 					Part::Last => match path.len() {
 						1 => {
-							if v.value.len().gt(&0) {
-								v.value.remove(v.value.len() - 1);
+							if v.len().gt(&0) {
+								let i = v.len() - 1;
+								v.remove(i);
 							}
 							Ok(())
 						}
-						_ => match v.value.last_mut() {
+						_ => match v.last_mut() {
 							Some(v) => v.del(ctx, opt, txn, path.next()).await,
 							None => Ok(()),
 						},
 					},
 					Part::Index(i) => match path.len() {
 						1 => {
-							if v.value.len().gt(&i.to_usize()) {
-								v.value.remove(i.to_usize());
+							if v.len().gt(&i.to_usize()) {
+								v.remove(i.to_usize());
 							}
 							Ok(())
 						}
-						_ => match v.value.get_mut(i.to_usize()) {
+						_ => match v.get_mut(i.to_usize()) {
 							Some(v) => v.del(ctx, opt, txn, path.next()).await,
 							None => Ok(()),
 						},
@@ -90,17 +92,17 @@ impl Value {
 					Part::Where(w) => match path.len() {
 						1 => {
 							let mut m = HashMap::new();
-							for (i, v) in v.value.iter().enumerate() {
+							for (i, v) in v.iter().enumerate() {
 								if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
 									m.insert(i, ());
 								};
 							}
-							v.value.abolish(|i| m.contains_key(&i));
+							v.abolish(|i| m.contains_key(&i));
 							Ok(())
 						}
 						_ => {
 							let path = path.next();
-							for v in &mut v.value {
+							for v in v.iter_mut() {
 								if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
 									v.del(ctx, opt, txn, path).await?;
 								}
@@ -110,11 +112,11 @@ impl Value {
 					},
 					_ => match path.len() {
 						1 => {
-							v.value.clear();
+							v.clear();
 							Ok(())
 						}
 						_ => {
-							let futs = v.value.iter_mut().map(|v| v.del(ctx, opt, txn, path));
+							let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
 							try_join_all(futs).await?;
 							Ok(())
 						}

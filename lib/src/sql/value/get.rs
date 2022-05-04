@@ -37,25 +37,25 @@ impl Value {
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
-						let futs = v.value.iter().map(|v| v.get(ctx, opt, txn, path));
+						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
 						try_join_all(futs).await.map(|v| v.into())
 					}
-					Part::First => match v.value.first() {
+					Part::First => match v.first() {
 						Some(v) => v.get(ctx, opt, txn, path.next()).await,
 						None => Ok(Value::None),
 					},
-					Part::Last => match v.value.last() {
+					Part::Last => match v.last() {
 						Some(v) => v.get(ctx, opt, txn, path.next()).await,
 						None => Ok(Value::None),
 					},
-					Part::Index(i) => match v.value.get(i.to_usize()) {
+					Part::Index(i) => match v.get(i.to_usize()) {
 						Some(v) => v.get(ctx, opt, txn, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Where(w) => {
 						let path = path.next();
 						let mut a = Vec::new();
-						for v in &v.value {
+						for v in v.iter() {
 							if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
 								a.push(v.get(ctx, opt, txn, path).await?)
 							}
@@ -63,7 +63,7 @@ impl Value {
 						Ok(a.into())
 					}
 					_ => {
-						let futs = v.value.iter().map(|v| v.get(ctx, opt, txn, path));
+						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
 						try_join_all(futs).await.map(|v| v.into())
 					}
 				},

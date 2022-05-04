@@ -18,22 +18,20 @@ impl Value {
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
-					Part::All => {
-						v.value.iter().map(|v| v.pick(path.next())).collect::<Vec<_>>().into()
-					}
-					Part::First => match v.value.first() {
+					Part::All => v.iter().map(|v| v.pick(path.next())).collect::<Vec<_>>().into(),
+					Part::First => match v.first() {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					Part::Last => match v.value.last() {
+					Part::Last => match v.last() {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					Part::Index(i) => match v.value.get(i.to_usize()) {
+					Part::Index(i) => match v.get(i.to_usize()) {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					_ => v.value.iter().map(|v| v.pick(path)).collect::<Vec<_>>().into(),
+					_ => v.iter().map(|v| v.pick(path)).collect::<Vec<_>>().into(),
 				},
 				// Ignore everything else
 				_ => Value::None,

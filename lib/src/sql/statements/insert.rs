@@ -55,7 +55,7 @@ impl InsertStatement {
 			Data::SingleExpression(v) => {
 				let v = v.compute(ctx, opt, txn, doc).await?;
 				match v {
-					Value::Array(v) => v.value.into_iter().for_each(|v| i.prepare(v)),
+					Value::Array(v) => v.into_iter().for_each(|v| i.prepare(v)),
 					Value::Object(_) => i.prepare(v),
 					v => {
 						return Err(Error::InsertStatement {

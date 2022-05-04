@@ -169,7 +169,7 @@ impl Iterator {
 					// Set the value at the path
 					match val {
 						Value::Array(v) => {
-							for val in v.value {
+							for val in v {
 								// Make a copy of object
 								let mut obj = obj.clone();
 								// Set the value at the path
@@ -215,11 +215,11 @@ impl Iterator {
 						// Get the value at the path
 						let val = obj.pick(&group.group);
 						// Set the value at the path
-						arr.value.push(val);
+						arr.push(val);
 					}
 					// Add to grouped collection
 					match grp.get_mut(&arr) {
-						Some(v) => v.value.push(obj),
+						Some(v) => v.push(obj),
 						None => {
 							grp.insert(arr, Array::from(obj));
 						}

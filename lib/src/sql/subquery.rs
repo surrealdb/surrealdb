@@ -91,7 +91,7 @@ impl Subquery {
 				// Process subquery
 				match Arc::clone(v).compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.value.remove(0)),
+						1 => Ok(v.remove(0)),
 						_ => Ok(v.into()),
 					},
 					v => Ok(v),
@@ -112,7 +112,7 @@ impl Subquery {
 				// Process subquery
 				match Arc::clone(v).compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.value.remove(0)),
+						1 => Ok(v.remove(0)),
 						_ => Ok(v.into()),
 					},
 					v => Ok(v),
@@ -133,7 +133,7 @@ impl Subquery {
 				// Process subquery
 				match Arc::clone(v).compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.value.remove(0)),
+						1 => Ok(v.remove(0)),
 						_ => Ok(v.into()),
 					},
 					v => Ok(v),
@@ -154,7 +154,7 @@ impl Subquery {
 				// Process subquery
 				match Arc::clone(v).compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.value.remove(0)),
+						1 => Ok(v.remove(0)),
 						_ => Ok(v.into()),
 					},
 					v => Ok(v),
@@ -175,7 +175,7 @@ impl Subquery {
 				// Process subquery
 				match Arc::clone(v).compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.value.remove(0)),
+						1 => Ok(v.remove(0)),
 						_ => Ok(v.into()),
 					},
 					v => Ok(v),

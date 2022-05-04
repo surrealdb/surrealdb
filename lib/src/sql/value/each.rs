@@ -23,25 +23,23 @@ impl Value {
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => v
-						.value
 						.iter()
 						.enumerate()
 						.flat_map(|(i, v)| v._each(path.next(), prev.clone().push(Part::from(i))))
 						.collect::<Vec<_>>(),
-					Part::First => match v.value.first() {
+					Part::First => match v.first() {
 						Some(v) => v._each(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
-					Part::Last => match v.value.last() {
+					Part::Last => match v.last() {
 						Some(v) => v._each(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
-					Part::Index(i) => match v.value.get(i.to_usize()) {
+					Part::Index(i) => match v.get(i.to_usize()) {
 						Some(v) => v._each(path.next(), prev.push(p.clone())),
 						None => vec![],
 					},
 					_ => v
-						.value
 						.iter()
 						.enumerate()
 						.flat_map(|(i, v)| v._each(path.next(), prev.clone().push(Part::from(i))))

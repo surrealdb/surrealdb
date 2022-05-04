@@ -30,13 +30,13 @@ impl<'a> Document<'a> {
 			let mut o = Array::with_capacity(ix.cols.len());
 			for i in ix.cols.iter() {
 				let v = i.compute(ctx, opt, txn, Some(&self.current)).await?;
-				o.value.push(v);
+				o.push(v);
 			}
 			// Calculate new values
 			let mut n = Array::with_capacity(ix.cols.len());
 			for i in ix.cols.iter() {
 				let v = i.compute(ctx, opt, txn, Some(&self.current)).await?;
-				n.value.push(v);
+				n.push(v);
 			}
 			// Clone transaction
 			let run = txn.clone();

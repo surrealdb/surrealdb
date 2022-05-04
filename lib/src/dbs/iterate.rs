@@ -45,7 +45,7 @@ impl Array {
 		txn: &Transaction,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
-		for v in self.value.into_iter() {
+		for v in self.into_iter() {
 			if ctx.is_ok() {
 				match v {
 					Value::Array(v) => v.iterate(ctx, opt, txn, ite).await?,
