@@ -227,11 +227,11 @@ pub enum Error {
 	#[error("Serde error: {0}")]
 	Serde(#[from] SerdeError),
 
-	/// Represents an underlying error from the EchoDB instance
+	/// Represents an error when encoding a key-value entry
 	#[error("Key encoding error: {0}")]
 	Encode(#[from] EncodeError),
 
-	/// Represents an underlying error from the EchoDB instance
+	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
 	Decode(#[from] DecodeError),
 
