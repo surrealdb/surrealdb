@@ -11,18 +11,22 @@ use crate::sql::value::Value;
 use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct Param {
-	pub name: Idiom,
-}
+pub struct Param(pub Idiom);
 
 impl From<Idiom> for Param {
 	fn from(p: Idiom) -> Param {
-		Param {
-			name: p,
-		}
+		Param(p)
+	}
+}
+
+impl Deref for Param {
+	type Target = Idiom;
+	fn deref(&self) -> &Self::Target {
+		&self.0
 	}
 }
 
@@ -35,14 +39,14 @@ impl Param {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Find a base variable by name
-		match self.name.parts.first() {
+		match self.parts.first() {
 			// The first part will be a field
 			Some(Part::Field(v)) => match &v.name[..] {
 				"this" => match doc {
 					// The base document exists
 					Some(v) => {
 						// Get the path parts
-						let pth: &[Part] = &self.name;
+						let pth: &[Part] = self;
 						// Process the paramater value
 						let res = v.compute(ctx, opt, txn, doc).await?;
 						// Return the desired field
@@ -55,7 +59,7 @@ impl Param {
 					// The base variable exists
 					Some(v) => {
 						// Get the path parts
-						let pth: &[Part] = &self.name;
+						let pth: &[Part] = self;
 						// Process the paramater value
 						let res = v.compute(ctx, opt, txn, doc).await?;
 						// Return the desired field
@@ -72,7 +76,7 @@ impl Param {
 
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", &self.name)
+		write!(f, "${}", &self.0)
 	}
 }
 
