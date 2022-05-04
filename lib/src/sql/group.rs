@@ -48,13 +48,18 @@ impl fmt::Display for Groups {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct Group {
-	pub group: Idiom,
+pub struct Group(pub Idiom);
+
+impl Deref for Group {
+	type Target = Idiom;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
 }
 
 impl fmt::Display for Group {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.group)
+		write!(f, "{}", self.0)
 	}
 }
 
@@ -68,12 +73,7 @@ pub fn group(i: &str) -> IResult<&str, Groups> {
 
 fn group_raw(i: &str) -> IResult<&str, Group> {
 	let (i, v) = basic(i)?;
-	Ok((
-		i,
-		Group {
-			group: v,
-		},
-	))
+	Ok((i, Group(v)))
 }
 
 #[cfg(test)]
@@ -88,12 +88,7 @@ mod tests {
 		let res = group(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(
-			out,
-			Groups(vec![Group {
-				group: Idiom::parse("field")
-			}])
-		);
+		assert_eq!(out, Groups(vec![Group(Idiom::parse("field"))]));
 		assert_eq!("GROUP BY field", format!("{}", out));
 	}
 
@@ -103,12 +98,7 @@ mod tests {
 		let res = group(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(
-			out,
-			Groups(vec![Group {
-				group: Idiom::parse("field")
-			}])
-		);
+		assert_eq!(out, Groups(vec![Group(Idiom::parse("field"))]));
 		assert_eq!("GROUP BY field", format!("{}", out));
 	}
 
@@ -120,14 +110,7 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(
 			out,
-			Groups(vec![
-				Group {
-					group: Idiom::parse("field")
-				},
-				Group {
-					group: Idiom::parse("other.field")
-				},
-			])
+			Groups(vec![Group(Idiom::parse("field")), Group(Idiom::parse("other.field"))])
 		);
 		assert_eq!("GROUP BY field, other.field", format!("{}", out));
 	}

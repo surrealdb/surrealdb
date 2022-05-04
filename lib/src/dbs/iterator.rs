@@ -213,7 +213,7 @@ impl Iterator {
 					// Loop over each group clause
 					for group in groups.iter() {
 						// Get the value at the path
-						let val = obj.pick(&group.group);
+						let val = obj.pick(group);
 						// Set the value at the path
 						arr.push(val);
 					}
