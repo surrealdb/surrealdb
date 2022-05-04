@@ -9,8 +9,8 @@ impl Value {
 		match (self, val) {
 			(Value::Object(a), Value::Object(b)) if a != b => {
 				// Loop over old keys
-				for (key, _) in a.value.iter() {
-					if !b.value.contains_key(key) {
+				for (key, _) in a.iter() {
+					if !b.contains_key(key) {
 						ops.push(Operation {
 							op: Op::Remove,
 							path: path.clone().push(key.clone().into()),
@@ -19,8 +19,8 @@ impl Value {
 					}
 				}
 				// Loop over new keys
-				for (key, val) in b.value.iter() {
-					match a.value.get(key) {
+				for (key, val) in b.iter() {
+					match a.get(key) {
 						None => ops.push(Operation {
 							op: Op::Add,
 							path: path.clone().push(key.clone().into()),

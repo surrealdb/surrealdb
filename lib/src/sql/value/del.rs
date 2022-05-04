@@ -30,7 +30,7 @@ impl Value {
 							v.remove(&f.name);
 							Ok(())
 						}
-						_ => match v.value.get_mut(&f.name) {
+						_ => match v.get_mut(&f.name) {
 							Some(v) if v.is_some() => v.del(ctx, opt, txn, path.next()).await,
 							_ => Ok(()),
 						},

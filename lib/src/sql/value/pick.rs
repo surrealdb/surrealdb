@@ -9,7 +9,7 @@ impl Value {
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
-					Part::Field(f) => match v.value.get(&f.name) {
+					Part::Field(f) => match v.get(&f.name) {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},

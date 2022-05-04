@@ -15,7 +15,7 @@ impl Value {
 	) -> Result<(), Error> {
 		match val.compute(ctx, opt, txn, Some(self)).await? {
 			Value::Object(v) => {
-				for (k, v) in v.value.into_iter() {
+				for (k, v) in v {
 					self.set(ctx, opt, txn, &[Part::from(k)], v).await?;
 				}
 				Ok(())

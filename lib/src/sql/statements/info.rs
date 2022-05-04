@@ -45,9 +45,9 @@ impl InfoStatement {
 				// Process the statement
 				let mut tmp = Object::default();
 				for v in run.all_ns().await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("ns", tmp.into());
+				res.insert("ns".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -63,21 +63,21 @@ impl InfoStatement {
 				// Process the databases
 				let mut tmp = Object::default();
 				for v in run.all_db(opt.ns()).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("db", tmp.into());
+				res.insert("db".to_owned(), tmp.into());
 				// Process the tokens
 				let mut tmp = Object::default();
 				for v in run.all_nt(opt.ns()).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("nt", tmp.into());
+				res.insert("nt".to_owned(), tmp.into());
 				// Process the logins
 				let mut tmp = Object::default();
 				for v in run.all_nl(opt.ns()).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("nl", tmp.into());
+				res.insert("nl".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -93,27 +93,27 @@ impl InfoStatement {
 				// Process the tables
 				let mut tmp = Object::default();
 				for v in run.all_tb(opt.ns(), opt.db()).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("tb", tmp.into());
+				res.insert("tb".to_owned(), tmp.into());
 				// Process the scopes
 				let mut tmp = Object::default();
 				for v in run.all_sc(opt.ns(), opt.db()).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("sc", tmp.into());
+				res.insert("sc".to_owned(), tmp.into());
 				// Process the tokens
 				let mut tmp = Object::default();
 				for v in run.all_nt(opt.ns()).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("nt", tmp.into());
+				res.insert("nt".to_owned(), tmp.into());
 				// Process the logins
 				let mut tmp = Object::default();
 				for v in run.all_nl(opt.ns()).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("nl", tmp.into());
+				res.insert("nl".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -129,9 +129,9 @@ impl InfoStatement {
 				// Process the tokens
 				let mut tmp = Object::default();
 				for v in run.all_st(opt.ns(), opt.db(), sc).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("st", tmp.into());
+				res.insert("st".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -147,27 +147,27 @@ impl InfoStatement {
 				// Process the events
 				let mut tmp = Object::default();
 				for v in run.all_ev(opt.ns(), opt.db(), tb).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("ev", tmp.into());
+				res.insert("ev".to_owned(), tmp.into());
 				// Process the fields
 				let mut tmp = Object::default();
 				for v in run.all_fd(opt.ns(), opt.db(), tb).await? {
-					tmp.insert(&v.name.to_string(), v.to_string().into());
+					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
-				res.insert("fd", tmp.into());
+				res.insert("fd".to_owned(), tmp.into());
 				// Process the indexs
 				let mut tmp = Object::default();
 				for v in run.all_ix(opt.ns(), opt.db(), tb).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("ix", tmp.into());
+				res.insert("ix".to_owned(), tmp.into());
 				// Process the tables
 				let mut tmp = Object::default();
 				for v in run.all_ft(opt.ns(), opt.db(), tb).await? {
-					tmp.insert(&v.name, v.to_string().into());
+					tmp.insert(v.name.to_owned(), v.to_string().into());
 				}
-				res.insert("ft", tmp.into());
+				res.insert("ft".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}

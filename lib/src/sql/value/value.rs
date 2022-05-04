@@ -499,7 +499,7 @@ impl Value {
 			Value::Thing(_) => true,
 			Value::Geometry(_) => true,
 			Value::Array(v) => !v.value.is_empty(),
-			Value::Object(v) => !v.value.is_empty(),
+			Value::Object(v) => !v.is_empty(),
 			Value::Strand(v) => !v.value.is_empty() && v.value.to_ascii_lowercase() != "false",
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.value.as_nanos() > 0,

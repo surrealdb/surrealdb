@@ -10,7 +10,6 @@ impl Value {
 		match self {
 			// Current path part is an object
 			Value::Object(v) => v
-				.value
 				.iter()
 				.flat_map(|(k, v)| v._every(prev.clone().push(Part::from(k))))
 				.collect::<Vec<_>>(),

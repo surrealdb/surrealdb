@@ -16,7 +16,7 @@ impl Value {
 			Some(p) => match (self, other) {
 				// Current path part is an object
 				(Value::Object(a), Value::Object(b)) => match p {
-					Part::Field(f) => match (a.value.get(&f.name), b.value.get(&f.name)) {
+					Part::Field(f) => match (a.get(&f.name), b.get(&f.name)) {
 						(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
 						(Some(_), None) => Some(Ordering::Greater),
 						(None, Some(_)) => Some(Ordering::Less),

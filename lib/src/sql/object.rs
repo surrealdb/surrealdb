@@ -15,65 +15,73 @@ use nom::combinator::opt;
 use nom::multi::separated_list0;
 use nom::sequence::delimited;
 use serde::ser::SerializeMap;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
-pub struct Object {
-	pub value: BTreeMap<String, Value>,
-}
+pub struct Object(pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<String, Value>> for Object {
 	fn from(v: BTreeMap<String, Value>) -> Self {
-		Object {
-			value: v,
-		}
+		Object(v)
 	}
 }
 
 impl From<HashMap<String, Value>> for Object {
 	fn from(v: HashMap<String, Value>) -> Self {
-		Object {
-			value: v.into_iter().collect(),
-		}
+		Object(v.into_iter().collect())
 	}
 }
 
 impl From<Operation> for Object {
 	fn from(v: Operation) -> Self {
-		Object {
-			value: map! {
-				String::from("op") => match v.op {
-					Op::None => Value::from("none"),
-					Op::Add => Value::from("add"),
-					Op::Remove => Value::from("remove"),
-					Op::Replace => Value::from("replace"),
-					Op::Change => Value::from("change"),
-				},
-				String::from("path") => v.path.to_path().into(),
-				String::from("value") => v.value,
+		Object(map! {
+			String::from("op") => match v.op {
+				Op::None => Value::from("none"),
+				Op::Add => Value::from("add"),
+				Op::Remove => Value::from("remove"),
+				Op::Replace => Value::from("replace"),
+				Op::Change => Value::from("change"),
 			},
-		}
+			String::from("path") => v.path.to_path().into(),
+			String::from("value") => v.value,
+		})
+	}
+}
+
+impl Deref for Object {
+	type Target = BTreeMap<String, Value>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl DerefMut for Object {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
+	}
+}
+
+impl IntoIterator for Object {
+	type Item = (String, Value);
+	type IntoIter = std::collections::btree_map::IntoIter<String, Value>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
 	}
 }
 
 impl Object {
-	pub fn remove(&mut self, key: &str) {
-		self.value.remove(key);
-	}
-	pub fn insert(&mut self, key: &str, val: Value) {
-		self.value.insert(key.to_owned(), val);
-	}
 	pub fn to_operation(&self) -> Result<Operation, Error> {
-		match self.value.get("op") {
-			Some(o) => match self.value.get("path") {
+		match self.get("op") {
+			Some(o) => match self.get("path") {
 				Some(p) => Ok(Operation {
 					op: o.into(),
 					path: p.to_idiom(),
-					value: match self.value.get("value") {
+					value: match self.get("value") {
 						Some(v) => v.clone(),
 						None => Value::Null,
 					},
@@ -98,15 +106,13 @@ impl Object {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
-		for (k, v) in &self.value {
+		for (k, v) in self.iter() {
 			match v.compute(ctx, opt, txn, doc).await {
 				Ok(v) => x.insert(k.clone(), v),
 				Err(e) => return Err(e),
 			};
 		}
-		Ok(Value::Object(Object {
-			value: x,
-		}))
+		Ok(Value::Object(Object(x)))
 	}
 }
 
@@ -115,8 +121,7 @@ impl fmt::Display for Object {
 		write!(
 			f,
 			"{{ {} }}",
-			self.value
-				.iter()
+			self.iter()
 				.map(|(k, v)| format!("{}: {}", escape(k, &val_char, "\""), v))
 				.collect::<Vec<_>>()
 				.join(", ")
@@ -130,16 +135,14 @@ impl Serialize for Object {
 		S: serde::Serializer,
 	{
 		if serializer.is_human_readable() {
-			let mut map = serializer.serialize_map(Some(self.value.len()))?;
-			for (ref k, ref v) in &self.value {
+			let mut map = serializer.serialize_map(Some(self.len()))?;
+			for (ref k, ref v) in &self.0 {
 				map.serialize_key(k)?;
 				map.serialize_value(v)?;
 			}
 			map.end()
 		} else {
-			let mut val = serializer.serialize_struct("Object", 1)?;
-			val.serialize_field("value", &self.value)?;
-			val.end()
+			serializer.serialize_newtype_struct("Object", &self.0)
 		}
 	}
 }
@@ -152,12 +155,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('}')(i)?;
-	Ok((
-		i,
-		Object {
-			value: v.into_iter().collect(),
-		},
-	))
+	Ok((i, Object(v.into_iter().collect())))
 }
 
 fn item(i: &str) -> IResult<&str, (String, Value)> {
@@ -197,7 +195,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ one: 1, tre: 3, two: 2 }", format!("{}", out));
-		assert_eq!(out.value.len(), 3);
+		assert_eq!(out.0.len(), 3);
 	}
 
 	#[test]
@@ -207,7 +205,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ one: 1, tre: 3, two: 2 }", format!("{}", out));
-		assert_eq!(out.value.len(), 3);
+		assert_eq!(out.0.len(), 3);
 	}
 
 	#[test]
@@ -217,6 +215,6 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("{ one: 1, tre: 3 + 1, two: 2 }", format!("{}", out));
-		assert_eq!(out.value.len(), 3);
+		assert_eq!(out.0.len(), 3);
 	}
 }
