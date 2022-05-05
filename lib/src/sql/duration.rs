@@ -74,7 +74,7 @@ impl ops::Add<Datetime> for Duration {
 	type Output = Datetime;
 	fn add(self, other: Datetime) -> Datetime {
 		match chrono::Duration::from_std(self.value) {
-			Ok(d) => Datetime::from(other.value + d),
+			Ok(d) => Datetime::from(other.0 + d),
 			Err(_) => Datetime::default(),
 		}
 	}
@@ -84,7 +84,7 @@ impl ops::Sub<Datetime> for Duration {
 	type Output = Datetime;
 	fn sub(self, other: Datetime) -> Datetime {
 		match chrono::Duration::from_std(self.value) {
-			Ok(d) => Datetime::from(other.value - d),
+			Ok(d) => Datetime::from(other.0 - d),
 			Err(_) => Datetime::default(),
 		}
 	}
@@ -94,7 +94,7 @@ impl ops::Div<Datetime> for Duration {
 	type Output = Datetime;
 	fn div(self, other: Datetime) -> Datetime {
 		match chrono::Duration::from_std(self.value) {
-			Ok(d) => match other.value.duration_trunc(d) {
+			Ok(d) => match other.duration_trunc(d) {
 				Ok(v) => Datetime::from(v),
 				Err(_) => Datetime::default(),
 			},

@@ -5,37 +5,29 @@ use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
 use nom::sequence::delimited;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 use std::str;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize)]
-pub struct Datetime {
-	pub value: DateTime<Utc>,
-}
+pub struct Datetime(pub DateTime<Utc>);
 
 impl Default for Datetime {
 	fn default() -> Self {
-		Datetime {
-			value: Utc::now(),
-		}
+		Datetime(Utc::now())
 	}
 }
 
 impl From<i64> for Datetime {
 	fn from(v: i64) -> Self {
-		Datetime {
-			value: Utc.timestamp(v, 0),
-		}
+		Datetime(Utc.timestamp(v, 0))
 	}
 }
 
 impl From<DateTime<Utc>> for Datetime {
 	fn from(v: DateTime<Utc>) -> Self {
-		Datetime {
-			value: v,
-		}
+		Datetime(v)
 	}
 }
 
@@ -48,9 +40,16 @@ impl<'a> From<&'a str> for Datetime {
 	}
 }
 
+impl Deref for Datetime {
+	type Target = DateTime<Utc>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
 impl fmt::Display for Datetime {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "\"{:?}\"", self.value)
+		write!(f, "\"{:?}\"", self.0)
 	}
 }
 
@@ -60,11 +59,9 @@ impl Serialize for Datetime {
 		S: serde::Serializer,
 	{
 		if serializer.is_human_readable() {
-			serializer.serialize_some(&self.value)
+			serializer.serialize_some(&self.0)
 		} else {
-			let mut val = serializer.serialize_struct("Datetime", 1)?;
-			val.serialize_field("value", &self.value)?;
-			val.end()
+			serializer.serialize_newtype_struct("Datetime", &self.0)
 		}
 	}
 }
@@ -88,12 +85,7 @@ fn date(i: &str) -> IResult<&str, Datetime> {
 	let (i, day) = day(i)?;
 
 	let d = Utc.ymd(year, mon, day).and_hms(0, 0, 0);
-	Ok((
-		i,
-		Datetime {
-			value: d,
-		},
-	))
+	Ok((i, Datetime(d)))
 }
 
 fn time(i: &str) -> IResult<&str, Datetime> {
@@ -114,15 +106,11 @@ fn time(i: &str) -> IResult<&str, Datetime> {
 		Some(z) => {
 			let d = z.ymd(year, mon, day).and_hms(hour, min, sec);
 			let d = d.with_timezone(&Utc);
-			Datetime {
-				value: d,
-			}
+			Datetime(d)
 		}
 		None => {
 			let d = Utc.ymd(year, mon, day).and_hms(hour, min, sec);
-			Datetime {
-				value: d,
-			}
+			Datetime(d)
 		}
 	};
 
@@ -148,15 +136,11 @@ fn nano(i: &str) -> IResult<&str, Datetime> {
 		Some(z) => {
 			let d = z.ymd(year, mon, day).and_hms_nano(hour, min, sec, nano);
 			let d = d.with_timezone(&Utc);
-			Datetime {
-				value: d,
-			}
+			Datetime(d)
 		}
 		None => {
 			let d = Utc.ymd(year, mon, day).and_hms_nano(hour, min, sec, nano);
-			Datetime {
-				value: d,
-			}
+			Datetime(d)
 		}
 	};
 
