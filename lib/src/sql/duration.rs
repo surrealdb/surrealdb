@@ -4,8 +4,10 @@ use crate::sql::error::IResult;
 use chrono::DurationRound;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
+use nom::multi::many1;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::iter::Sum;
 use std::ops;
 use std::ops::Deref;
 use std::time;
@@ -87,7 +89,7 @@ impl fmt::Display for Duration {
 		}
 		// Ensure no empty output
 		if o.is_empty() {
-			o.push(format!("0ns"));
+			o.push("0ns".to_string());
 		}
 		// Concatenate together
 		write!(f, "{}", o.concat())
@@ -114,9 +116,23 @@ impl ops::Add for Duration {
 	}
 }
 
+impl<'a, 'b> ops::Add<&'b Duration> for &'a Duration {
+	type Output = Duration;
+	fn add(self, other: &'b Duration) -> Duration {
+		Duration::from(self.0 + other.0)
+	}
+}
+
 impl ops::Sub for Duration {
 	type Output = Self;
 	fn sub(self, other: Self) -> Self {
+		Duration::from(self.0 - other.0)
+	}
+}
+
+impl<'a, 'b> ops::Sub<&'b Duration> for &'a Duration {
+	type Output = Duration;
+	fn sub(self, other: &'b Duration) -> Duration {
 		Duration::from(self.0 - other.0)
 	}
 }
@@ -154,8 +170,27 @@ impl ops::Div<Datetime> for Duration {
 	}
 }
 
+impl Sum<Self> for Duration {
+	fn sum<I>(iter: I) -> Duration
+	where
+		I: Iterator<Item = Self>,
+	{
+		iter.fold(Duration::default(), |a, b| a + b)
+	}
+}
+
+impl<'a> Sum<&'a Self> for Duration {
+	fn sum<I>(iter: I) -> Duration
+	where
+		I: Iterator<Item = &'a Self>,
+	{
+		iter.fold(Duration::default(), |a, b| &a + b)
+	}
+}
+
 pub fn duration(i: &str) -> IResult<&str, Duration> {
-	duration_raw(i)
+	let (i, v) = many1(duration_raw)(i)?;
+	Ok((i, v.iter().sum::<Duration>()))
 }
 
 pub fn duration_raw(i: &str) -> IResult<&str, Duration> {
@@ -260,5 +295,15 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("1d12h", format!("{}", out));
 		assert_eq!(out.0, Duration::new(129_600, 0));
+	}
+
+	#[test]
+	fn duration_multi() {
+		let sql = "1d12h30m";
+		let res = duration(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("1d12h30m", format!("{}", out));
+		assert_eq!(out.0, Duration::new(131_400, 0));
 	}
 }
