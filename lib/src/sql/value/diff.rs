@@ -66,7 +66,7 @@ impl Value {
 				path,
 				value: {
 					let mut dmp = dmp::new();
-					let mut pch = dmp.patch_make1(&a.value, &b.value);
+					let mut pch = dmp.patch_make1(a, b);
 					let txt = dmp.patch_to_text(&mut pch);
 					txt.into()
 				},

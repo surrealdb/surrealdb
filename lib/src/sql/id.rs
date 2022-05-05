@@ -4,7 +4,6 @@ use crate::sql::common::val_char;
 use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
 use crate::sql::number::{number, Number};
-use crate::sql::strand::Strand;
 use nanoid::nanoid;
 use nom::branch::alt;
 use nom::combinator::map;
@@ -26,12 +25,6 @@ impl From<Number> for Id {
 impl From<String> for Id {
 	fn from(v: String) -> Self {
 		Id::String(v)
-	}
-}
-
-impl From<Strand> for Id {
-	fn from(v: Strand) -> Self {
-		Id::String(v.value)
 	}
 }
 

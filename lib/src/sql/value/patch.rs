@@ -26,8 +26,8 @@ impl Value {
 					if let Value::Strand(p) = o.value {
 						if let Value::Strand(v) = self.get(ctx, opt, txn, &o.path).await? {
 							let mut dmp = dmp::new();
-							let mut pch = dmp.patch_from_text(p.value);
-							let (txt, _) = dmp.patch_apply(&mut pch, &v.value);
+							let mut pch = dmp.patch_from_text(p.as_string());
+							let (txt, _) = dmp.patch_apply(&mut pch, v.as_str());
 							let txt = txt.into_iter().collect::<String>();
 							self.set(ctx, opt, txn, &o.path, Value::from(txt)).await?;
 						}

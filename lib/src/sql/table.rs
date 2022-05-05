@@ -3,7 +3,6 @@ use crate::sql::common::escape;
 use crate::sql::common::val_char;
 use crate::sql::error::IResult;
 use crate::sql::ident::ident_raw;
-use crate::sql::strand::Strand;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -30,12 +29,6 @@ pub struct Table(pub String);
 impl From<String> for Table {
 	fn from(v: String) -> Self {
 		Table(v)
-	}
-}
-
-impl From<Strand> for Table {
-	fn from(v: Strand) -> Self {
-		Table(v.value)
 	}
 }
 

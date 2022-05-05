@@ -11,7 +11,7 @@ pub mod email {
 
 	pub fn domain(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 		// Convert to a String
-		let val = args.remove(0).as_strand().value;
+		let val = args.remove(0).as_string();
 		// Check if value is empty
 		if val.is_empty() {
 			return Ok(Value::None);
@@ -36,7 +36,7 @@ pub mod email {
 
 	pub fn user(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 		// Convert to a String
-		let val = args.remove(0).as_strand().value;
+		let val = args.remove(0).as_string();
 		// Check if value is empty
 		if val.is_empty() {
 			return Ok(Value::None);
@@ -69,7 +69,7 @@ pub mod url {
 
 	pub fn domain(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 		// Convert to a String
-		let val = args.remove(0).as_strand().value;
+		let val = args.remove(0).as_string();
 		// Parse the URL
 		match Url::parse(&val) {
 			Ok(v) => match v.domain() {
@@ -82,7 +82,7 @@ pub mod url {
 
 	pub fn fragment(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 		// Convert to a String
-		let val = args.remove(0).as_strand().value;
+		let val = args.remove(0).as_string();
 		// Parse the URL
 		match Url::parse(&val) {
 			Ok(v) => match v.fragment() {
@@ -95,7 +95,7 @@ pub mod url {
 
 	pub fn host(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 		// Convert to a String
-		let val = args.remove(0).as_strand().value;
+		let val = args.remove(0).as_string();
 		// Parse the URL
 		match Url::parse(&val) {
 			Ok(v) => match v.host_str() {
@@ -108,7 +108,7 @@ pub mod url {
 
 	pub fn path(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 		// Convert to a String
-		let val = args.remove(0).as_strand().value;
+		let val = args.remove(0).as_string();
 		// Parse the URL
 		match Url::parse(&val) {
 			Ok(v) => Ok(v.path().into()),
@@ -118,7 +118,7 @@ pub mod url {
 
 	pub fn port(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 		// Convert to a String
-		let val = args.remove(0).as_strand().value;
+		let val = args.remove(0).as_string();
 		// Parse the URL
 		match Url::parse(&val) {
 			Ok(v) => match v.port() {
@@ -131,7 +131,7 @@ pub mod url {
 
 	pub fn query(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 		// Convert to a String
-		let val = args.remove(0).as_strand().value;
+		let val = args.remove(0).as_string();
 		// Parse the URL
 		match Url::parse(&val) {
 			Ok(v) => match v.query() {

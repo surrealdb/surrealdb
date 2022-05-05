@@ -37,7 +37,7 @@ pub fn floor(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 pub fn group(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
 		Value::Datetime(v) => match args.remove(0) {
-			Value::Strand(g) => match g.value.as_str() {
+			Value::Strand(g) => match g.as_str() {
 				"year" => Ok(Utc.ymd(v.value.year(), 1, 1).and_hms(0, 0, 0).into()),
 				"month" => Ok(Utc.ymd(v.value.year(), v.value.month(), 1).and_hms(0, 0, 0).into()),
 				"day" => Ok(Utc

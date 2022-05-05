@@ -26,7 +26,7 @@ impl Default for Op {
 
 impl From<&Value> for Op {
 	fn from(v: &Value) -> Self {
-		match &v.to_strand().value[..] {
+		match v.to_strand().as_str() {
 			"add" => Op::Add,
 			"remove" => Op::Remove,
 			"replace" => Op::Replace,

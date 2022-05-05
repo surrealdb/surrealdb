@@ -4,10 +4,10 @@ use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
 use nom::bytes::complete::tag;
 use nom::character::complete::one_of;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops;
+use std::ops::Deref;
 use std::str;
 
 const SINGLE: &str = r#"'"#;
@@ -17,35 +17,39 @@ const DOUBLE: &str = r#"""#;
 const DOUBLE_ESC: &str = r#"\""#;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
-pub struct Strand {
-	pub value: String,
-}
+pub struct Strand(pub String);
 
 impl From<String> for Strand {
 	fn from(s: String) -> Self {
-		Strand {
-			value: s,
-		}
+		Strand(s)
 	}
 }
 
 impl<'a> From<&'a str> for Strand {
 	fn from(s: &str) -> Self {
-		Strand {
-			value: String::from(s),
-		}
+		Strand(String::from(s))
+	}
+}
+
+impl Deref for Strand {
+	type Target = String;
+	fn deref(&self) -> &Self::Target {
+		&self.0
 	}
 }
 
 impl Strand {
 	pub fn as_str(&self) -> &str {
-		self.value.as_str()
+		self.0.as_str()
+	}
+	pub fn as_string(self) -> String {
+		self.0
 	}
 }
 
 impl fmt::Display for Strand {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "\"{}\"", self.value)
+		write!(f, "\"{}\"", self.0)
 	}
 }
 
@@ -55,11 +59,9 @@ impl Serialize for Strand {
 		S: serde::Serializer,
 	{
 		if serializer.is_human_readable() {
-			serializer.serialize_some(&self.value)
+			serializer.serialize_some(&self.0)
 		} else {
-			let mut val = serializer.serialize_struct("Strand", 1)?;
-			val.serialize_field("value", &self.value)?;
-			val.end()
+			serializer.serialize_newtype_struct("Strand", &self.0)
 		}
 	}
 }
@@ -67,13 +69,13 @@ impl Serialize for Strand {
 impl ops::Add for Strand {
 	type Output = Self;
 	fn add(self, other: Self) -> Self {
-		Strand::from(self.value + &other.value)
+		Strand::from(self.0 + &other.0)
 	}
 }
 
 pub fn strand(i: &str) -> IResult<&str, Strand> {
 	let (i, v) = strand_raw(i)?;
-	Ok((i, Strand::from(v)))
+	Ok((i, Strand(v)))
 }
 
 pub fn strand_raw(i: &str) -> IResult<&str, String> {
