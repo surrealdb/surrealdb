@@ -45,7 +45,7 @@ sha2 = "0.10.2"
 slug = "0.1.4"
 thiserror = "1.0.30"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
-tokio = { version = "1.17.0", features = ["rt-multi-thread"], optional = true }
+tokio = { version = "1.17.0", features = ["sync"], optional = true }
 url = "2.2.2"
 utf-8 = "0.7.6"
 uuid = { version = "0.8.2", features = ["serde", "v4"] }
