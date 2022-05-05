@@ -142,7 +142,7 @@ impl<'a> Executor<'a> {
 					// Allowed to run?
 					opt.check(Level::Db)?;
 					// Process the option
-					match &stm.name.name.to_uppercase()[..] {
+					match &stm.name.to_uppercase()[..] {
 						"FIELDS" => opt = opt.fields(stm.what),
 						"EVENTS" => opt = opt.events(stm.what),
 						"TABLES" => opt = opt.tables(stm.what),

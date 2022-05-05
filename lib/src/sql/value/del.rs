@@ -27,10 +27,10 @@ impl Value {
 				Value::Object(v) => match p {
 					Part::Field(f) => match path.len() {
 						1 => {
-							v.remove(&f.name);
+							v.remove(f as &str);
 							Ok(())
 						}
-						_ => match v.get_mut(&f.name) {
+						_ => match v.get_mut(f as &str) {
 							Some(v) if v.is_some() => v.del(ctx, opt, txn, path.next()).await,
 							_ => Ok(()),
 						},

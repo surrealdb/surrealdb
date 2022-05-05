@@ -26,7 +26,7 @@ impl Value {
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
-					Part::Field(f) => match v.get(&f.name) {
+					Part::Field(f) => match v.get(f as &str) {
 						Some(v) => v.get(ctx, opt, txn, path.next()).await,
 						None => Ok(Value::None),
 					},

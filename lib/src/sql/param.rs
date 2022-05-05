@@ -41,7 +41,7 @@ impl Param {
 		// Find a base variable by name
 		match self.parts.first() {
 			// The first part will be a field
-			Some(Part::Field(v)) => match &v.name[..] {
+			Some(Part::Field(v)) => match v.as_str() {
 				"this" => match doc {
 					// The base document exists
 					Some(v) => {
@@ -55,7 +55,7 @@ impl Param {
 					// The base document does not exist
 					None => Ok(Value::None),
 				},
-				_ => match ctx.value::<Value>(&v.name) {
+				_ => match ctx.value::<Value>(v) {
 					// The base variable exists
 					Some(v) => {
 						// Get the path parts

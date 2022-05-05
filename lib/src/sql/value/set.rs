@@ -24,12 +24,12 @@ impl Value {
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
-					Part::Field(f) => match v.get_mut(&f.name) {
+					Part::Field(f) => match v.get_mut(f as &str) {
 						Some(v) if v.is_some() => v.set(ctx, opt, txn, path.next(), val).await,
 						_ => {
 							let mut obj = Value::base();
 							obj.set(ctx, opt, txn, path.next(), val).await?;
-							v.insert(f.name.to_owned(), obj);
+							v.insert(f.to_string(), obj);
 							Ok(())
 						}
 					},

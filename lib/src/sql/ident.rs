@@ -8,40 +8,40 @@ use nom::character::complete::char;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct Ident {
-	pub name: String,
-}
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Ident(pub String);
 
 impl From<String> for Ident {
 	fn from(s: String) -> Self {
-		Ident {
-			name: s,
-		}
+		Ident(s)
 	}
 }
 
 impl<'a> From<&'a str> for Ident {
 	fn from(i: &str) -> Ident {
-		Ident {
-			name: String::from(i),
-		}
+		Ident(String::from(i))
 	}
 }
 
 impl<'a> From<&'a String> for Ident {
 	fn from(i: &String) -> Ident {
-		Ident {
-			name: String::from(i),
-		}
+		Ident(String::from(i))
+	}
+}
+
+impl Deref for Ident {
+	type Target = String;
+	fn deref(&self) -> &Self::Target {
+		&self.0
 	}
 }
 
 impl fmt::Display for Ident {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", escape(&self.name, &val_char, "`"))
+		write!(f, "{}", escape(&self.0, &val_char, "`"))
 	}
 }
 
