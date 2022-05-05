@@ -13,15 +13,6 @@ use std::ops::Deref;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Groups(pub Vec<Group>);
 
-impl Groups {
-	pub fn len(&self) -> usize {
-		self.0.len()
-	}
-	pub fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-}
-
 impl Deref for Groups {
 	type Target = Vec<Group>;
 	fn deref(&self) -> &Self::Target {

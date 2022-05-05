@@ -52,15 +52,6 @@ static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().igno
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Values(pub Vec<Value>);
 
-impl Values {
-	pub fn len(&self) -> usize {
-		self.0.len()
-	}
-	pub fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-}
-
 impl Deref for Values {
 	type Target = Vec<Value>;
 	fn deref(&self) -> &Self::Target {

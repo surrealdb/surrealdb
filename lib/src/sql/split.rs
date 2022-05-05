@@ -13,15 +13,6 @@ use std::ops::Deref;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Splits(pub Vec<Split>);
 
-impl Splits {
-	pub fn len(&self) -> usize {
-		self.0.len()
-	}
-	pub fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-}
-
 impl Deref for Splits {
 	type Target = Vec<Split>;
 	fn deref(&self) -> &Self::Target {

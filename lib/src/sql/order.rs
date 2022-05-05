@@ -14,15 +14,6 @@ use std::ops::Deref;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Orders(pub Vec<Order>);
 
-impl Orders {
-	pub fn len(&self) -> usize {
-		self.0.len()
-	}
-	pub fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-}
-
 impl Deref for Orders {
 	type Target = Vec<Order>;
 	fn deref(&self) -> &Self::Target {

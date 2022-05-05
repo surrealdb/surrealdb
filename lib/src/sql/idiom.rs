@@ -17,15 +17,6 @@ use std::str;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Idioms(pub Vec<Idiom>);
 
-impl Idioms {
-	pub fn len(&self) -> usize {
-		self.0.len()
-	}
-	pub fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-}
-
 impl Deref for Idioms {
 	type Target = Vec<Idiom>;
 	fn deref(&self) -> &Self::Target {
