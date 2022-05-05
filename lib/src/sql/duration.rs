@@ -4,24 +4,24 @@ use crate::sql::error::IResult;
 use chrono::DurationRound;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops;
+use std::ops::Deref;
 use std::time;
 
+static SECONDS_PER_YEAR: u64 = 31_536_000;
+static SECONDS_PER_WEEK: u64 = 604_800;
+static SECONDS_PER_DAY: u64 = 86400;
+static SECONDS_PER_HOUR: u64 = 3600;
+static SECONDS_PER_MINUTE: u64 = 60;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
-pub struct Duration {
-	pub input: String,
-	pub value: time::Duration,
-}
+pub struct Duration(pub time::Duration);
 
 impl From<time::Duration> for Duration {
-	fn from(t: time::Duration) -> Self {
-		Duration {
-			input: format!("{:?}", t),
-			value: t,
-		}
+	fn from(v: time::Duration) -> Self {
+		Duration(v)
 	}
 }
 
@@ -34,9 +34,63 @@ impl<'a> From<&'a str> for Duration {
 	}
 }
 
+impl Deref for Duration {
+	type Target = time::Duration;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
 impl fmt::Display for Duration {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.input)
+		// Split up the duration
+		let secs = self.0.as_secs();
+		let nano = self.0.subsec_nanos();
+		// Calculate the total years
+		let year = secs / SECONDS_PER_YEAR;
+		let secs = secs % SECONDS_PER_YEAR;
+		// Calculate the total weeks
+		let week = secs / SECONDS_PER_WEEK;
+		let secs = secs % SECONDS_PER_WEEK;
+		// Calculate the total days
+		let days = secs / SECONDS_PER_DAY;
+		let secs = secs % SECONDS_PER_DAY;
+		// Calculate the total hours
+		let hour = secs / SECONDS_PER_HOUR;
+		let secs = secs % SECONDS_PER_HOUR;
+		// Calculate the total mins
+		let mins = secs / SECONDS_PER_MINUTE;
+		let secs = secs % SECONDS_PER_MINUTE;
+		// Prepare the outpit
+		let mut o = Vec::with_capacity(7);
+		// Write the different parts
+		if year > 0 {
+			o.push(format!("{year}y"));
+		}
+		if week > 0 {
+			o.push(format!("{week}w"));
+		}
+		if days > 0 {
+			o.push(format!("{days}d"));
+		}
+		if hour > 0 {
+			o.push(format!("{hour}h"));
+		}
+		if mins > 0 {
+			o.push(format!("{mins}m"));
+		}
+		if secs > 0 {
+			o.push(format!("{secs}s"));
+		}
+		if nano > 0 {
+			o.push(format!("{nano}ns"));
+		}
+		// Ensure no empty output
+		if o.is_empty() {
+			o.push(format!("0ns"));
+		}
+		// Concatenate together
+		write!(f, "{}", o.concat())
 	}
 }
 
@@ -46,12 +100,9 @@ impl Serialize for Duration {
 		S: serde::Serializer,
 	{
 		if serializer.is_human_readable() {
-			serializer.serialize_some(&self.input)
+			serializer.serialize_some(&self.0)
 		} else {
-			let mut val = serializer.serialize_struct("Duration", 2)?;
-			val.serialize_field("input", &self.input)?;
-			val.serialize_field("value", &self.value)?;
-			val.end()
+			serializer.serialize_newtype_struct("Duration", &self.0)
 		}
 	}
 }
@@ -59,21 +110,21 @@ impl Serialize for Duration {
 impl ops::Add for Duration {
 	type Output = Self;
 	fn add(self, other: Self) -> Self {
-		Duration::from(self.value + other.value)
+		Duration::from(self.0 + other.0)
 	}
 }
 
 impl ops::Sub for Duration {
 	type Output = Self;
 	fn sub(self, other: Self) -> Self {
-		Duration::from(self.value - other.value)
+		Duration::from(self.0 - other.0)
 	}
 }
 
 impl ops::Add<Datetime> for Duration {
 	type Output = Datetime;
 	fn add(self, other: Datetime) -> Datetime {
-		match chrono::Duration::from_std(self.value) {
+		match chrono::Duration::from_std(self.0) {
 			Ok(d) => Datetime::from(other.0 + d),
 			Err(_) => Datetime::default(),
 		}
@@ -83,7 +134,7 @@ impl ops::Add<Datetime> for Duration {
 impl ops::Sub<Datetime> for Duration {
 	type Output = Datetime;
 	fn sub(self, other: Datetime) -> Datetime {
-		match chrono::Duration::from_std(self.value) {
+		match chrono::Duration::from_std(self.0) {
 			Ok(d) => Datetime::from(other.0 - d),
 			Err(_) => Datetime::default(),
 		}
@@ -93,7 +144,7 @@ impl ops::Sub<Datetime> for Duration {
 impl ops::Div<Datetime> for Duration {
 	type Output = Datetime;
 	fn div(self, other: Datetime) -> Datetime {
-		match chrono::Duration::from_std(self.value) {
+		match chrono::Duration::from_std(self.0) {
 			Ok(d) => match other.duration_trunc(d) {
 				Ok(v) => Datetime::from(v),
 				Err(_) => Datetime::default(),
@@ -112,20 +163,17 @@ pub fn duration_raw(i: &str) -> IResult<&str, Duration> {
 	let (i, u) = unit(i)?;
 	Ok((
 		i,
-		Duration {
-			input: format!("{}{}", v, u),
-			value: match u {
-				"ns" => time::Duration::new(0, v as u32),
-				"µs" => time::Duration::new(0, v as u32 * 1000),
-				"ms" => time::Duration::new(0, v as u32 * 1000 * 1000),
-				"s" => time::Duration::new(v, 0),
-				"m" => time::Duration::new(v * 60, 0),
-				"h" => time::Duration::new(v * 60 * 60, 0),
-				"d" => time::Duration::new(v * 60 * 60 * 24, 0),
-				"w" => time::Duration::new(v * 60 * 60 * 24 * 7, 0),
-				_ => time::Duration::new(0, 0),
-			},
-		},
+		Duration(match u {
+			"ns" => time::Duration::new(0, v as u32),
+			"µs" => time::Duration::new(0, v as u32 * 1000),
+			"ms" => time::Duration::new(0, v as u32 * 1000 * 1000),
+			"s" => time::Duration::new(v, 0),
+			"m" => time::Duration::new(v * 60, 0),
+			"h" => time::Duration::new(v * 60 * 60, 0),
+			"d" => time::Duration::new(v * 60 * 60 * 24, 0),
+			"w" => time::Duration::new(v * 60 * 60 * 24 * 7, 0),
+			_ => time::Duration::new(0, 0),
+		}),
 	))
 }
 
@@ -142,6 +190,7 @@ fn unit(i: &str) -> IResult<&str, &str> {
 mod tests {
 
 	use super::*;
+	use std::time::Duration;
 
 	#[test]
 	fn duration_nil() {
@@ -150,7 +199,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("0ns", format!("{}", out));
-		assert_eq!(out.value, Duration::from("0ns").value);
+		assert_eq!(out.0, Duration::new(0, 0));
 	}
 
 	#[test]
@@ -160,7 +209,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("1s", format!("{}", out));
-		assert_eq!(out.value, Duration::from("1s").value);
+		assert_eq!(out.0, Duration::new(1, 0));
 	}
 
 	#[test]
@@ -169,8 +218,8 @@ mod tests {
 		let res = duration(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("1000ms", format!("{}", out));
-		assert_eq!(out.value, Duration::from("1s").value);
+		assert_eq!("1s", format!("{}", out));
+		assert_eq!(out.0, Duration::new(1, 0));
 	}
 
 	#[test]
@@ -179,8 +228,8 @@ mod tests {
 		let res = duration(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("86400s", format!("{}", out));
-		assert_eq!(out.value, Duration::from("1d").value);
+		assert_eq!("1d", format!("{}", out));
+		assert_eq!(out.0, Duration::new(86_400, 0));
 	}
 
 	#[test]
@@ -190,7 +239,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("5d", format!("{}", out));
-		assert_eq!(out.value, Duration::from("5d").value);
+		assert_eq!(out.0, Duration::new(432_000, 0));
 	}
 
 	#[test]
@@ -200,6 +249,16 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("4w", format!("{}", out));
-		assert_eq!(out.value, Duration::from("4w").value);
+		assert_eq!(out.0, Duration::new(2_419_200, 0));
+	}
+
+	#[test]
+	fn duration_split() {
+		let sql = "129600s";
+		let res = duration(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("1d12h", format!("{}", out));
+		assert_eq!(out.0, Duration::new(129_600, 0));
 	}
 }

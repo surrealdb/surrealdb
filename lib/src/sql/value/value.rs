@@ -502,7 +502,7 @@ impl Value {
 			Value::Object(v) => !v.is_empty(),
 			Value::Strand(v) => !v.is_empty() && v.to_ascii_lowercase() != "false",
 			Value::Number(v) => v.is_truthy(),
-			Value::Duration(v) => v.value.as_nanos() > 0,
+			Value::Duration(v) => v.as_nanos() > 0,
 			Value::Datetime(v) => v.timestamp() > 0,
 			_ => false,
 		}
@@ -551,7 +551,7 @@ impl Value {
 			Value::True => 1,
 			Value::Strand(v) => v.parse::<i64>().unwrap_or(0),
 			Value::Number(v) => v.as_int(),
-			Value::Duration(v) => v.value.as_secs() as i64,
+			Value::Duration(v) => v.as_secs() as i64,
 			Value::Datetime(v) => v.timestamp(),
 			_ => 0,
 		}
@@ -562,7 +562,7 @@ impl Value {
 			Value::True => 1.0,
 			Value::Strand(v) => v.parse::<f64>().unwrap_or(0.0),
 			Value::Number(v) => v.as_float(),
-			Value::Duration(v) => v.value.as_secs() as f64,
+			Value::Duration(v) => v.as_secs() as f64,
 			Value::Datetime(v) => v.timestamp() as f64,
 			_ => 0.0,
 		}
@@ -573,7 +573,7 @@ impl Value {
 			Value::True => BigDecimal::from(1),
 			Value::Number(v) => v.as_decimal(),
 			Value::Strand(v) => BigDecimal::from_str(v.as_str()).unwrap_or_default(),
-			Value::Duration(v) => v.value.as_secs().into(),
+			Value::Duration(v) => v.as_secs().into(),
 			Value::Datetime(v) => v.timestamp().into(),
 			_ => BigDecimal::default(),
 		}
@@ -584,7 +584,7 @@ impl Value {
 			Value::True => Number::from(1),
 			Value::Number(v) => v,
 			Value::Strand(v) => Number::from(v.as_str()),
-			Value::Duration(v) => v.value.as_secs().into(),
+			Value::Duration(v) => v.as_secs().into(),
 			Value::Datetime(v) => v.timestamp().into(),
 			_ => Number::default(),
 		}
@@ -629,7 +629,7 @@ impl Value {
 			Value::True => Number::from(1),
 			Value::Number(v) => v.clone(),
 			Value::Strand(v) => Number::from(v.as_str()),
-			Value::Duration(v) => v.value.as_secs().into(),
+			Value::Duration(v) => v.as_secs().into(),
 			Value::Datetime(v) => v.timestamp().into(),
 			_ => Number::default(),
 		}

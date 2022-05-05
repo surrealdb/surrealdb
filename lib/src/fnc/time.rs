@@ -21,7 +21,7 @@ pub fn day(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 pub fn floor(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
 		Value::Datetime(v) => match args.remove(0) {
-			Value::Duration(w) => match chrono::Duration::from_std(w.value) {
+			Value::Duration(w) => match chrono::Duration::from_std(*w) {
 				Ok(d) => match v.duration_trunc(d) {
 					Ok(v) => Ok(v.into()),
 					_ => Ok(Value::None),
@@ -114,7 +114,7 @@ pub fn now(_: &Runtime, _: Vec<Value>) -> Result<Value, Error> {
 pub fn round(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
 		Value::Datetime(v) => match args.remove(0) {
-			Value::Duration(w) => match chrono::Duration::from_std(w.value) {
+			Value::Duration(w) => match chrono::Duration::from_std(*w) {
 				Ok(d) => match v.duration_round(d) {
 					Ok(v) => Ok(v.into()),
 					_ => Ok(Value::None),
