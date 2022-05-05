@@ -24,10 +24,10 @@ dmp = "0.1.1"
 echodb = { version = "0.3.0", optional = true }
 futures = "0.3.21"
 fuzzy-matcher = "0.3.7"
-geo = { version = "0.19.0", features = ["use-serde"] }
+geo = { version = "0.20.1", features = ["use-serde"] }
 indxdb = { version = "0.2.0", optional = true }
 lexical-sort = "0.3.1"
-log = "0.4.16"
+log = "0.4.17"
 md-5 = "0.10.1"
 nanoid = "0.4.0"
 nom = "7.1.1"
@@ -36,19 +36,19 @@ pbkdf2 = "0.11.0"
 trice = "0.1.0"
 rand = "0.8.5"
 regex = "1.5.5"
-msgpack = { version = "1.0.0", package = "rmp-serde" }
+msgpack = { version = "1.1.0", package = "rmp-serde" }
 scrypt = "0.10.0"
-serde = { version = "1.0.136", features = ["derive", "rc"] }
+serde = { version = "1.0.137", features = ["derive", "rc"] }
 storekey = "0.2.0"
 sha-1 = "0.10.0"
 sha2 = "0.10.2"
 slug = "0.1.4"
-thiserror = "1.0.30"
+thiserror = "1.0.31"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
-tokio = { version = "1.17.0", features = ["sync"], optional = true }
+tokio = { version = "1.18.1", features = ["sync"], optional = true }
 url = "2.2.2"
 utf-8 = "0.7.6"
-uuid = { version = "0.8.2", features = ["serde", "v4"] }
+uuid = { version = "1.0.0", features = ["serde", "v4"] }
 
 [dev-dependencies]
-tokio = { version = "1.17.0", features = ["macros"] }
+tokio = { version = "1.18.1", features = ["macros"] }
