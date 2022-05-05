@@ -48,6 +48,13 @@ pub struct Order {
 	pub direction: bool,
 }
 
+impl Deref for Order {
+	type Target = Idiom;
+	fn deref(&self) -> &Self::Target {
+		&self.order
+	}
+}
+
 impl fmt::Display for Order {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", self.order)?;
