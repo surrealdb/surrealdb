@@ -36,39 +36,34 @@ pub fn locals(i: &str) -> IResult<&str, Idioms> {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct Idiom {
-	pub parts: Vec<Part>,
-}
+pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {
 	type Target = [Part];
 	fn deref(&self) -> &Self::Target {
-		self.parts.as_slice()
+		self.0.as_slice()
 	}
 }
 
 impl From<String> for Idiom {
 	fn from(v: String) -> Self {
-		Idiom {
-			parts: vec![Part::from(v)],
-		}
+		Idiom(vec![Part::from(v)])
 	}
 }
 
 impl From<Vec<Part>> for Idiom {
 	fn from(v: Vec<Part>) -> Self {
-		Idiom {
-			parts: v,
-		}
+		Idiom(v)
 	}
 }
 
 impl Idiom {
+	///
 	pub fn push(mut self, n: Part) -> Idiom {
-		self.parts.push(n);
+		self.0.push(n);
 		self
 	}
-
+	///
 	pub fn to_path(&self) -> String {
 		format!("/{}", self).replace(']', "").replace(&['.', '['][..], "/")
 	}
@@ -96,7 +91,7 @@ impl fmt::Display for Idiom {
 		write!(
 			f,
 			"{}",
-			self.parts
+			self.0
 				.iter()
 				.enumerate()
 				.map(|(i, p)| match (i, p) {
@@ -154,12 +149,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
-		assert_eq!(
-			out,
-			Idiom {
-				parts: vec![Part::from("test")],
-			}
-		);
+		assert_eq!(out, Idiom(vec![Part::from("test")]));
 	}
 
 	#[test]
@@ -169,12 +159,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
-		assert_eq!(
-			out,
-			Idiom {
-				parts: vec![Part::from("test")],
-			}
-		);
+		assert_eq!(out, Idiom(vec![Part::from("test")]));
 	}
 
 	#[test]
@@ -184,12 +169,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test", format!("{}", out));
-		assert_eq!(
-			out,
-			Idiom {
-				parts: vec![Part::from("test")],
-			}
-		);
+		assert_eq!(out, Idiom(vec![Part::from("test")]));
 	}
 
 	#[test]
@@ -199,12 +179,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp", format!("{}", out));
-		assert_eq!(
-			out,
-			Idiom {
-				parts: vec![Part::from("test"), Part::from("temp"),],
-			}
-		);
+		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp"),]));
 	}
 
 	#[test]
@@ -214,12 +189,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.`some key`", format!("{}", out));
-		assert_eq!(
-			out,
-			Idiom {
-				parts: vec![Part::from("test"), Part::from("some key"),],
-			}
-		);
+		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("some key"),]));
 	}
 
 	#[test]
@@ -229,12 +199,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp[*]", format!("{}", out));
-		assert_eq!(
-			out,
-			Idiom {
-				parts: vec![Part::from("test"), Part::from("temp"), Part::All,],
-			}
-		);
+		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp"), Part::All,]));
 	}
 
 	#[test]
@@ -244,12 +209,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("test.temp[$]", format!("{}", out));
-		assert_eq!(
-			out,
-			Idiom {
-				parts: vec![Part::from("test"), Part::from("temp"), Part::Last,],
-			}
-		);
+		assert_eq!(out, Idiom(vec![Part::from("test"), Part::from("temp"), Part::Last,]));
 	}
 
 	#[test]
@@ -261,9 +221,7 @@ mod tests {
 		assert_eq!("test.temp[*].text", format!("{}", out));
 		assert_eq!(
 			out,
-			Idiom {
-				parts: vec![Part::from("test"), Part::from("temp"), Part::All, Part::from("text")],
-			}
+			Idiom(vec![Part::from("test"), Part::from("temp"), Part::All, Part::from("text")])
 		);
 	}
 
@@ -276,14 +234,12 @@ mod tests {
 		assert_eq!("test.temp[WHERE test = true].text", format!("{}", out));
 		assert_eq!(
 			out,
-			Idiom {
-				parts: vec![
-					Part::from("test"),
-					Part::from("temp"),
-					Part::from(Value::from(Expression::parse("test = true"))),
-					Part::from("text")
-				],
-			}
+			Idiom(vec![
+				Part::from("test"),
+				Part::from("temp"),
+				Part::from(Value::from(Expression::parse("test = true"))),
+				Part::from("text")
+			])
 		);
 	}
 
@@ -296,14 +252,12 @@ mod tests {
 		assert_eq!("test.temp[WHERE test = true].text", format!("{}", out));
 		assert_eq!(
 			out,
-			Idiom {
-				parts: vec![
-					Part::from("test"),
-					Part::from("temp"),
-					Part::from(Value::from(Expression::parse("test = true"))),
-					Part::from("text")
-				],
-			}
+			Idiom(vec![
+				Part::from("test"),
+				Part::from("temp"),
+				Part::from(Value::from(Expression::parse("test = true"))),
+				Part::from("text")
+			])
 		);
 	}
 }

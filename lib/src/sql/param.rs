@@ -39,7 +39,7 @@ impl Param {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		// Find a base variable by name
-		match self.parts.first() {
+		match self.first() {
 			// The first part will be a field
 			Some(Part::Field(v)) => match v.as_str() {
 				"this" => match doc {
