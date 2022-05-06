@@ -28,13 +28,13 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
-	/// There was an error when connecting to the underlying datastore
-	#[error("Couldn't setup connection to underlying datastore")]
-	Ds,
+	/// There was a problem with the underlying datastore
+	#[error("There was a problem with the underlying datastore: {0}")]
+	Ds(String),
 
-	/// There was an error when starting a new transaction
-	#[error("Couldn't create a database transaction")]
-	Tx,
+	/// There was a problem with a datastore transaction
+	#[error("There was a problem with a datastore transaction: {0}")]
+	Tx(String),
 
 	/// The transaction was already cancelled or committed
 	#[error("Couldn't update a finished transaction")]
@@ -235,25 +235,31 @@ pub enum Error {
 	#[error("Key decoding error: {0}")]
 	Decode(#[from] DecodeError),
 
-	/// Represents an underlying error from the EchoDB instance
-	#[cfg(feature = "kv-echodb")]
-	#[error("Datastore error: {0}")]
-	EchoDB(#[from] EchoDBError),
-
-	/// Represents an underlying error from the IndxDB instance
-	#[cfg(feature = "kv-indxdb")]
-	#[error("Datastore error: {0}")]
-	IndxDB(#[from] IndxDBError),
-
-	/// Represents an underlying error from the TiKV instance
-	#[cfg(feature = "kv-tikv")]
-	#[error("Datastore error: {0}")]
-	TiKV(#[from] TiKVError),
-
 	/// Represents an underlying error with Tokio message channels
 	#[cfg(feature = "parallel")]
 	#[error("Tokio Error: {0}")]
 	Tokio(#[from] TokioError<(Option<Thing>, Value)>),
+}
+
+#[cfg(feature = "kv-echodb")]
+impl From<EchoDBError> for Error {
+	fn from(e: EchoDBError) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-indxdb")]
+impl From<IndxDBError> for Error {
+	fn from(e: IndxDBError) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-tikv")]
+impl From<TiKVError> for Error {
+	fn from(e: TiKVError) -> Error {
+		Error::Tx(e.to_string())
+	}
 }
 
 impl Serialize for Error {

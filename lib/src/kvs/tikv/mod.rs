@@ -21,9 +21,12 @@ pub struct Transaction {
 impl Datastore {
 	// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		Ok(Datastore {
-			db: tikv::TransactionClient::new(vec![path]).await?,
-		})
+		match tikv::TransactionClient::new(vec![path]).await {
+			Ok(db) => Ok(Datastore {
+				db,
+			}),
+			Err(e) => Err(Error::Ds(e.to_string())),
+		}
 	}
 	// Start a new transaction
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
@@ -34,7 +37,7 @@ impl Datastore {
 					rw: write,
 					tx,
 				}),
-				Err(_) => Err(Error::Tx),
+				Err(e) => Err(Error::Tx(e.to_string())),
 			},
 			false => match self.db.begin_pessimistic().await {
 				Ok(tx) => Ok(Transaction {
@@ -42,7 +45,7 @@ impl Datastore {
 					rw: write,
 					tx,
 				}),
-				Err(_) => Err(Error::Tx),
+				Err(e) => Err(Error::Tx(e.to_string())),
 			},
 		}
 	}

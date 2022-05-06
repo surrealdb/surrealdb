@@ -33,7 +33,7 @@ impl Datastore {
 				rw: write,
 				tx,
 			}),
-			Err(_) => Err(Error::Tx),
+			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}
 }
