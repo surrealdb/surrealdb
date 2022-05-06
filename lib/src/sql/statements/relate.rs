@@ -60,7 +60,7 @@ impl RelateStatement {
 				Value::Array(_) => i.prepare(v),
 				v => {
 					return Err(Error::RelateStatement {
-						value: v,
+						value: v.to_string(),
 					})
 				}
 			};

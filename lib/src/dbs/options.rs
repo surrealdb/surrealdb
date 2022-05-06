@@ -82,9 +82,7 @@ impl Options {
 				..*self
 			})
 		} else {
-			Err(Error::TooManySubqueries {
-				limit: self.dive,
-			})
+			Err(Error::TooManySubqueries)
 		}
 	}
 

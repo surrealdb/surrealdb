@@ -17,19 +17,19 @@ impl<'a> Document<'a> {
 		if self.id.is_none() {
 			return match stm {
 				Statement::Create(_) => Err(Error::CreateStatement {
-					value: (*self.initial).clone(),
+					value: self.initial.to_string(),
 				}),
 				Statement::Update(_) => Err(Error::UpdateStatement {
-					value: (*self.initial).clone(),
+					value: self.initial.to_string(),
 				}),
 				Statement::Relate(_) => Err(Error::RelateStatement {
-					value: (*self.initial).clone(),
+					value: self.initial.to_string(),
 				}),
 				Statement::Delete(_) => Err(Error::DeleteStatement {
-					value: (*self.initial).clone(),
+					value: self.initial.to_string(),
 				}),
 				Statement::Insert(_) => Err(Error::InsertStatement {
-					value: (*self.initial).clone(),
+					value: self.initial.to_string(),
 				}),
 				_ => unreachable!(),
 			};

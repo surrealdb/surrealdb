@@ -19,7 +19,7 @@ impl<'a> Document<'a> {
 			if self.current.is_some() {
 				// The record already exists
 				return Err(Error::RecordExists {
-					thing: id.clone(),
+					thing: id.to_string(),
 				});
 			}
 		}

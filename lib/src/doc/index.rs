@@ -58,8 +58,8 @@ impl<'a> Document<'a> {
 							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, n);
 							if run.putc(key, rid, None).await.is_err() {
 								return Err(Error::IndexExists {
-									index: ix.name.to_owned(),
-									thing: rid.to_owned(),
+									index: ix.name.to_string(),
+									thing: rid.to_string(),
 								});
 							}
 						}
@@ -77,8 +77,8 @@ impl<'a> Document<'a> {
 							let key = crate::key::point::new(opt.ns(), opt.db(), &ix.what, &ix.name, n, &rid.id);
 							if run.putc(key, rid, None).await.is_err() {
 								return Err(Error::IndexExists {
-									index: ix.name.to_owned(),
-									thing: rid.to_owned(),
+									index: ix.name.to_string(),
+									thing: rid.to_string(),
 								});
 							}
 						}

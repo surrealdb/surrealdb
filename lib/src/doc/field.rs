@@ -50,9 +50,9 @@ impl<'a> Document<'a> {
 					// Process the ASSERT clause
 					if !expr.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 						return Err(Error::FieldValue {
-							value: val.clone(),
+							value: val.to_string(),
 							field: fd.name.clone(),
-							check: expr.clone(),
+							check: expr.to_string(),
 						});
 					}
 				}

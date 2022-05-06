@@ -54,7 +54,7 @@ impl DeleteStatement {
 				Value::Array(_) => i.prepare(v),
 				v => {
 					return Err(Error::DeleteStatement {
-						value: v,
+						value: v.to_string(),
 					})
 				}
 			};

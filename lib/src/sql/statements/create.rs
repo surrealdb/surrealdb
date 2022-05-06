@@ -53,7 +53,7 @@ impl CreateStatement {
 				Value::Array(_) => i.prepare(v),
 				v => {
 					return Err(Error::CreateStatement {
-						value: v,
+						value: v.to_string(),
 					})
 				}
 			};

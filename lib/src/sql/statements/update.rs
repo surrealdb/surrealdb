@@ -55,7 +55,7 @@ impl UpdateStatement {
 				Value::Array(_) => i.prepare(v),
 				v => {
 					return Err(Error::UpdateStatement {
-						value: v,
+						value: v.to_string(),
 					})
 				}
 			};

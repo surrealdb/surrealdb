@@ -245,9 +245,7 @@ impl<'a> Executor<'a> {
 								let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
 								// Catch statement timeout
 								match ctx.is_timedout() {
-									true => Err(Error::QueryTimeout {
-										timer: timeout,
-									}),
+									true => Err(Error::QueryTimedout),
 									false => res,
 								}
 							}

@@ -59,7 +59,7 @@ impl InsertStatement {
 					Value::Object(_) => i.prepare(v),
 					v => {
 						return Err(Error::InsertStatement {
-							value: v,
+							value: v.to_string(),
 						})
 					}
 				}
