@@ -69,24 +69,26 @@ impl Model {
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
-			if let Some(c) = self.count {
-				for _ in 0..c {
-					Thing {
-						tb: self.table.to_string(),
-						id: Id::rand(),
+			match self {
+				Model::Count(tb, c) => {
+					for _ in 0..c {
+						Thing {
+							tb: tb.to_string(),
+							id: Id::rand(),
+						}
+						.iterate(ctx, opt, txn, ite)
+						.await?;
 					}
-					.iterate(ctx, opt, txn, ite)
-					.await?;
 				}
-			}
-			if let Some(r) = self.range {
-				for x in r.0..=r.1 {
-					Thing {
-						tb: self.table.to_string(),
-						id: Id::from(x),
+				Model::Range(tb, b, e) => {
+					for x in b..=e {
+						Thing {
+							tb: tb.to_string(),
+							id: Id::from(x),
+						}
+						.iterate(ctx, opt, txn, ite)
+						.await?;
 					}
-					.iterate(ctx, opt, txn, ite)
-					.await?;
 				}
 			}
 		}

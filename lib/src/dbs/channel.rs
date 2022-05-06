@@ -70,24 +70,26 @@ impl Model {
 		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
-			if let Some(c) = self.count {
-				for _ in 0..c {
-					Thing {
-						tb: self.table.to_string(),
-						id: Id::rand(),
+			match self {
+				Model::Count(tb, c) => {
+					for _ in 0..c {
+						Thing {
+							tb: tb.to_string(),
+							id: Id::rand(),
+						}
+						.process(ctx, opt, stm, txn, chn)
+						.await?;
 					}
-					.process(ctx, opt, stm, txn, chn)
-					.await?;
 				}
-			}
-			if let Some(r) = self.range {
-				for x in r.0..=r.1 {
-					Thing {
-						tb: self.table.to_string(),
-						id: Id::from(x),
+				Model::Range(tb, b, e) => {
+					for x in b..=e {
+						Thing {
+							tb: tb.to_string(),
+							id: Id::from(x),
+						}
+						.process(ctx, opt, stm, txn, chn)
+						.await?;
 					}
-					.process(ctx, opt, stm, txn, chn)
-					.await?;
 				}
 			}
 		}
