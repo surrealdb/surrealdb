@@ -15,6 +15,7 @@ pub struct Datastore {
 	pub(super) inner: Inner,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
 	#[cfg(feature = "kv-echodb")]
 	Mem(super::mem::Datastore),
