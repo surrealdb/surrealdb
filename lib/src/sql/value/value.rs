@@ -766,7 +766,7 @@ impl Value {
 			Value::False => other.is_false(),
 			Value::Thing(v) => match other {
 				Value::Thing(w) => v == w,
-				Value::Regex(w) => match w.value {
+				Value::Regex(w) => match w.regex() {
 					Some(ref r) => r.is_match(v.to_string().as_str()),
 					None => false,
 				},
@@ -774,11 +774,11 @@ impl Value {
 			},
 			Value::Regex(v) => match other {
 				Value::Regex(w) => v == w,
-				Value::Number(w) => match v.value {
+				Value::Number(w) => match v.regex() {
 					Some(ref r) => r.is_match(w.to_string().as_str()),
 					None => false,
 				},
-				Value::Strand(w) => match v.value {
+				Value::Strand(w) => match v.regex() {
 					Some(ref r) => r.is_match(w.as_str()),
 					None => false,
 				},
@@ -794,7 +794,7 @@ impl Value {
 			},
 			Value::Strand(v) => match other {
 				Value::Strand(w) => v == w,
-				Value::Regex(w) => match w.value {
+				Value::Regex(w) => match w.regex() {
 					Some(ref r) => r.is_match(v.as_str()),
 					None => false,
 				},
@@ -803,7 +803,7 @@ impl Value {
 			Value::Number(v) => match other {
 				Value::Number(w) => v == w,
 				Value::Strand(_) => v == &other.to_number(),
-				Value::Regex(w) => match w.value {
+				Value::Regex(w) => match w.regex() {
 					Some(ref r) => r.is_match(v.to_string().as_str()),
 					None => false,
 				},

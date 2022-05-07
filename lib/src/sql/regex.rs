@@ -4,47 +4,38 @@ use nom::bytes::complete::is_not;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
 use std::fmt;
+use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct Regex {
-	pub input: String,
-	#[serde(skip)]
-	pub value: Option<regex::Regex>,
-}
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Regex(String);
 
 impl<'a> From<&'a str> for Regex {
 	fn from(r: &str) -> Regex {
-		let r = r.replace("\\/", "/");
-		let r = r.as_str();
-		Regex {
-			input: String::from(r),
-			value: match regex::Regex::new(r) {
-				Ok(v) => Some(v),
-				Err(_) => None,
-			},
-		}
+		Regex(r.replace("\\/", "/").to_string())
 	}
 }
 
-impl PartialEq for Regex {
-	fn eq(&self, other: &Self) -> bool {
-		self.input == other.input
-	}
-}
-
-impl PartialOrd for Regex {
-	#[inline]
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.input.cmp(&other.input))
+impl Deref for Regex {
+	type Target = String;
+	fn deref(&self) -> &Self::Target {
+		&self.0
 	}
 }
 
 impl fmt::Display for Regex {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "/{}/", &self.input)
+		write!(f, "/{}/", &self.0)
+	}
+}
+
+impl Regex {
+	pub fn regex(&self) -> Option<regex::Regex> {
+		match regex::Regex::new(&self.0) {
+			Ok(v) => Some(v),
+			Err(_) => None,
+		}
 	}
 }
 
