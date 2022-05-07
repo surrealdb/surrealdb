@@ -17,7 +17,6 @@ kv-yokudb = []
 argon2 = "0.4.0"
 async-recursion = "1.0.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
-byteorder = "1.4.3"
 chrono = { version = "0.4.19", features = ["serde"] }
 derive = { version = "0.1.2", package = "surrealdb-derive" }
 dmp = "0.1.1"
