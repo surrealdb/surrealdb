@@ -2255,6 +2255,7 @@ dependencies = [
  "hyper",
  "log",
  "once_cell",
+ "rand 0.8.5",
  "reqwest",
  "rmp-serde",
  "serde",

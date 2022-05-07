@@ -6,7 +6,13 @@ mod start;
 mod version;
 
 use clap::{Arg, Command};
+use once_cell::sync::Lazy;
+use rand::distributions::Alphanumeric;
+use rand::Rng;
 
+static PASS: Lazy<String> = Lazy::new(|| {
+	rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
+});
 
 fn file_valid(v: &str) -> Result<(), String> {
 	if !v.is_empty() {
@@ -139,7 +145,7 @@ pub fn init() {
 					.short('p')
 					.long("pass")
 					.forbid_empty_values(true)
-					.default_value("root")
+					.default_value(PASS.as_str())
 					.help("The master password for the database"),
 			)
 			.arg(

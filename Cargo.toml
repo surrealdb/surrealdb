@@ -25,6 +25,7 @@ http = "0.2.7"
 hyper = "0.14.18"
 log = "0.4.17"
 once_cell = "1.10.0"
+rand = "0.8.5"
 reqwest = { version = "0.11.10", features = ["blocking"] }
 serde = { version = "1.0.137", features = ["derive"] }
 serde_cbor = "0.11.2"
