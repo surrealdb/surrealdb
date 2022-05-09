@@ -19,7 +19,7 @@ check:
 
 .PHONY: clean
 clean:
-	cargo clean --workspace
+	cargo clean
 
 .PHONY: serve
 serve:
