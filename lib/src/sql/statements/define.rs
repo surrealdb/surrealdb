@@ -979,7 +979,7 @@ impl DefineIndexStatement {
 
 impl fmt::Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE INDEX {} ON {} COLUMNS {}", self.name, self.what, self.cols)?;
+		write!(f, "DEFINE INDEX {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
 		if self.uniq {
 			write!(f, " UNIQUE")?
 		}
@@ -999,7 +999,7 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, what) = ident_raw(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("COLUMNS")(i)?;
+	let (i, _) = alt((tag_no_case("COLUMNS"), tag_no_case("FIELDS")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, cols) = idiom::locals(i)?;
 	let (i, uniq) = opt(|i| {
