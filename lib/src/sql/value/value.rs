@@ -1348,7 +1348,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
 		assert_eq!(80, std::mem::size_of::<crate::sql::thing::Thing>());
 		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
-		assert_eq!(40, std::mem::size_of::<crate::sql::regex::Regex>());
+		assert_eq!(24, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::function::Function>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::subquery::Subquery>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::expression::Expression>>());
