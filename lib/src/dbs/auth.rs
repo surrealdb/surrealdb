@@ -1,3 +1,4 @@
+/// The authentication level for a datastore execution context.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub enum Level {
 	No,
@@ -7,7 +8,7 @@ pub enum Level {
 	Sc,
 }
 
-/// Specifies the authentication level for the datastore execution context.
+/// Specifies the current authentication for the datastore execution context.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub enum Auth {
 	/// Specifies that the user is not authenticated
@@ -29,6 +30,26 @@ impl Default for Auth {
 }
 
 impl Auth {
+	/// Checks whether the current authentication has root level permissions
+	pub fn is_kv(&self) -> bool {
+		self.check(Level::Kv)
+	}
+	/// Checks whether the current authentication has namespace level permissions
+	pub fn is_ns(&self) -> bool {
+		self.check(Level::Ns)
+	}
+	/// Checks whether the current authentication has database level permissions
+	pub fn is_db(&self) -> bool {
+		self.check(Level::Db)
+	}
+	/// Checks whether the current authentication has scope level permissions
+	pub fn is_sc(&self) -> bool {
+		self.check(Level::Sc)
+	}
+	/// Checks whether the current authentication is unauthenticated
+	pub fn is_no(&self) -> bool {
+		self.check(Level::Sc)
+	}
 	/// Checks whether permissions clauses need to be processed
 	pub(crate) fn perms(&self) -> bool {
 		match self {
