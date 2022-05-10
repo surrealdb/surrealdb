@@ -7,6 +7,7 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Algorithm {
+	EdDSA,
 	Es256,
 	Es384,
 	Es512,
@@ -30,6 +31,7 @@ impl Default for Algorithm {
 impl fmt::Display for Algorithm {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
+			Algorithm::EdDSA => write!(f, "EDDSA"),
 			Algorithm::Es256 => write!(f, "ES256"),
 			Algorithm::Es384 => write!(f, "ES384"),
 			Algorithm::Es512 => write!(f, "ES512"),
@@ -48,6 +50,7 @@ impl fmt::Display for Algorithm {
 
 pub fn algorithm(i: &str) -> IResult<&str, Algorithm> {
 	alt((
+		map(tag("EDDSA"), |_| Algorithm::EdDSA),
 		map(tag("ES256"), |_| Algorithm::Es256),
 		map(tag("ES384"), |_| Algorithm::Es384),
 		map(tag("ES512"), |_| Algorithm::Es512),

@@ -1,10 +1,11 @@
-use http::Error as HttpError;
-use hyper::Error as HyperError;
+use base64::DecodeError as Base64Error;
+use jsonwebtoken::errors::Error as JWTError;
 use reqwest::Error as ReqwestError;
 use serde_cbor::error::Error as CborError;
 use serde_json::error::Error as JsonError;
 use serde_pack::encode::Error as PackError;
 use std::io::Error as IoError;
+use std::string::FromUtf8Error as Utf8Error;
 use surrealdb::Error as DbError;
 use thiserror::Error;
 
@@ -13,29 +14,44 @@ pub enum Error {
 	#[error("The request body contains invalid data")]
 	Request,
 
-	#[error("{0}")]
+	#[error("There was a problem with authentication")]
+	InvalidAuth,
+
+	#[error("There was a problem with the database: {0}")]
 	Db(#[from] DbError),
 
-	#[error("IO error: {0}")]
+	#[error("Couldn't open the specified file: {0}")]
 	Io(#[from] IoError),
 
-	#[error("HTTP Error: {0}")]
-	Hyper(#[from] HyperError),
-
-	#[error("HTTP Error: {0}")]
-	Http(#[from] HttpError),
-
-	#[error("JSON Error: {0}")]
+	#[error("There was an error serializing to JSON: {0}")]
 	Json(#[from] JsonError),
 
-	#[error("CBOR Error: {0}")]
+	#[error("There was an error serializing to CBOR: {0}")]
 	Cbor(#[from] CborError),
 
-	#[error("PACK Error: {0}")]
+	#[error("There was an error serializing to MessagePack: {0}")]
 	Pack(#[from] PackError),
 
-	#[error("Reqwest Error: {0}")]
-	Reqwest(#[from] ReqwestError),
+	#[error("There was an error with the remote request: {0}")]
+	Remote(#[from] ReqwestError),
 }
 
 impl warp::reject::Reject for Error {}
+
+impl From<Base64Error> for Error {
+	fn from(_: Base64Error) -> Error {
+		Error::InvalidAuth
+	}
+}
+
+impl From<Utf8Error> for Error {
+	fn from(_: Utf8Error) -> Error {
+		Error::InvalidAuth
+	}
+}
+
+impl From<JWTError> for Error {
+	fn from(_: JWTError) -> Error {
+		Error::InvalidAuth
+	}
+}

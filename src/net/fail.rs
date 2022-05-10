@@ -14,7 +14,28 @@ struct Message {
 }
 
 pub async fn recover(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rejection> {
-	if err.is_not_found() {
+	if let Some(err) = err.find::<Error>() {
+		match err {
+			Error::InvalidAuth => Ok(warp::reply::with_status(
+				warp::reply::json(&Message {
+					code: 403,
+					details: Some("Authentication failed".to_string()),
+					description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
+					information: Some(err.to_string()),
+				}),
+				StatusCode::FORBIDDEN,
+			)),
+			_ => Ok(warp::reply::with_status(
+				warp::reply::json(&Message {
+					code: 400,
+					details: Some("Request problems detected".to_string()),
+					description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
+					information: Some(err.to_string()),
+				}),
+				StatusCode::BAD_REQUEST,
+			))
+		}
+	} else if err.is_not_found() {
 		Ok(warp::reply::with_status(
 			warp::reply::json(&Message {
 				code: 404,
@@ -23,16 +44,6 @@ pub async fn recover(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rej
 				information: None,
 			}),
 			StatusCode::NOT_FOUND,
-		))
-	} else if let Some(err) = err.find::<Error>() {
-		Ok(warp::reply::with_status(
-			warp::reply::json(&Message {
-				code: 400,
-				details: Some("Request problems detected".to_string()),
-				description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
-				information: Some(err.to_string()),
-			}),
-			StatusCode::BAD_REQUEST,
 		))
 	} else if err.find::<warp::reject::MethodNotAllowed>().is_some() {
 		Ok(warp::reply::with_status(
@@ -43,6 +54,16 @@ pub async fn recover(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rej
 				information: None,
 			}),
 			StatusCode::METHOD_NOT_ALLOWED,
+		))
+	} else if err.find::<warp::reject::MissingHeader>().is_some() {
+		Ok(warp::reply::with_status(
+			warp::reply::json(&Message {
+				code: 412,
+				details: Some("Request problems detected".to_string()),
+				description: Some("The request appears to be missing a required header. Refer to the documentation for request requirements.".to_string()),
+				information: None,
+			}),
+			StatusCode::PRECONDITION_FAILED,
 		))
 	} else if err.find::<warp::reject::PayloadTooLarge>().is_some() {
 		Ok(warp::reply::with_status(
@@ -63,16 +84,6 @@ pub async fn recover(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rej
 				information: None,
 			}),
 			StatusCode::UNSUPPORTED_MEDIA_TYPE,
-		))
-	} else if err.find::<warp::reject::MissingHeader>().is_some() {
-		Ok(warp::reply::with_status(
-			warp::reply::json(&Message {
-				code: 412,
-				details: Some("Request problems detected".to_string()),
-				description: Some("The request appears to be missing a required header. Refer to the documentation for request requirements.".to_string()),
-				information: None,
-			}),
-			StatusCode::PRECONDITION_FAILED,
 		))
 	} else if err.find::<warp::reject::InvalidQuery>().is_some() {
 		Ok(warp::reply::with_status(

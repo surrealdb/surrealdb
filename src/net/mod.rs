@@ -1,4 +1,3 @@
-mod conf;
 mod config;
 mod export;
 mod fail;
@@ -8,6 +7,7 @@ mod index;
 mod key;
 mod log;
 mod output;
+mod session;
 mod signin;
 mod signup;
 mod sql;

@@ -1,7 +1,7 @@
 use crate::err::Error;
-use crate::net::conf;
 use crate::net::head;
 use crate::net::output;
+use crate::net::session;
 use crate::net::DB;
 use bytes::Bytes;
 use serde::Deserialize;
@@ -35,7 +35,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set select method
 	let select = warp::any()
 		.and(warp::get())
-		.and(conf::build())
+		.and(session::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(path!("key" / String).and(warp::path::end()))
 		.and(warp::query())
@@ -43,7 +43,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set create method
 	let create = warp::any()
 		.and(warp::post())
-		.and(conf::build())
+		.and(session::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(path!("key" / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
@@ -52,7 +52,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set delete method
 	let delete = warp::any()
 		.and(warp::delete())
-		.and(conf::build())
+		.and(session::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(path!("key" / String).and(warp::path::end()))
 		.and_then(delete_all);
@@ -66,14 +66,14 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set select method
 	let select = warp::any()
 		.and(warp::get())
-		.and(conf::build())
+		.and(session::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and_then(select_one);
 	// Set create method
 	let create = warp::any()
 		.and(warp::post())
-		.and(conf::build())
+		.and(session::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
@@ -82,7 +82,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set update method
 	let update = warp::any()
 		.and(warp::put())
-		.and(conf::build())
+		.and(session::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
@@ -91,7 +91,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set modify method
 	let modify = warp::any()
 		.and(warp::patch())
-		.and(conf::build())
+		.and(session::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
@@ -100,7 +100,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set delete method
 	let delete = warp::any()
 		.and(warp::delete())
-		.and(conf::build())
+		.and(session::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and_then(delete_one);

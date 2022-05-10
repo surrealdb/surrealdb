@@ -1,7 +1,7 @@
 use crate::err::Error;
-use crate::net::conf;
 use crate::net::head;
 use crate::net::output;
+use crate::net::session;
 use crate::net::DB;
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
@@ -18,7 +18,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set post method
 	let post = base
 		.and(warp::post())
-		.and(conf::build())
+		.and(session::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
