@@ -18,7 +18,7 @@ codegen-units = 1
 [dependencies]
 bytes = "1.1.0"
 chrono = { version = "0.4.19", features = ["serde"] }
-clap = "3.1.15"
+clap = "3.1.17"
 fern = { version = "0.6.1", features = ["colored"] }
 futures = "0.3.21"
 http = "0.2.7"

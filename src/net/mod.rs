@@ -1,12 +1,13 @@
 mod conf;
+mod config;
 mod export;
 mod fail;
 mod head;
 mod import;
+mod index;
 mod key;
 mod log;
 mod output;
-mod root;
 mod signin;
 mod signup;
 mod sql;
@@ -15,24 +16,27 @@ mod sync;
 mod version;
 
 use crate::err::Error;
+use config::Config;
 use once_cell::sync::OnceCell;
-use std::net::SocketAddr;
-use std::sync::Arc;
 use surrealdb::Datastore;
 use warp::Filter;
 
-static DB: OnceCell<Arc<Datastore>> = OnceCell::new();
+static DB: OnceCell<Datastore> = OnceCell::new();
+
+static CF: OnceCell<Config> = OnceCell::new();
 
 #[tokio::main]
-pub async fn init(bind: &str, path: &str) -> Result<(), Error> {
-	// Parse the desired binding socket address
-	let adr: SocketAddr = bind.parse().expect("Unable to parse socket address");
-	// Parse and setup desired datastore
-	let dbs = Datastore::new(path).await.expect("Unable to parse datastore path");
+pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+	// Parse the server config options
+	let cfg = config::parse(matches);
+	// Parse and setup the desired kv datastore
+	let dbs = Datastore::new(&cfg.path).await?;
 	// Store database instance
-	let _ = DB.set(Arc::new(dbs));
+	let _ = DB.set(dbs);
+	// Store config options
+	let _ = CF.set(cfg);
 	// Setup web routes
-	let net = root::config()
+	let net = index::config()
 		// Version endpoint
 		.or(version::config())
 		// Status endpoint
@@ -64,9 +68,12 @@ pub async fn init(bind: &str, path: &str) -> Result<(), Error> {
 	// Log all requests to the console
 	let net = net.with(log::write());
 
-	info!("Starting web server on {}", adr);
+	// Get local copy of options
+	let opt = CF.get().unwrap();
 
-	warp::serve(net).run(adr).await;
+	info!("Starting web server on {}", &opt.bind);
+
+	warp::serve(net).run(opt.bind).await;
 
 	Ok(())
 }
