@@ -13,7 +13,7 @@ pub struct Regex(String);
 
 impl<'a> From<&'a str> for Regex {
 	fn from(r: &str) -> Regex {
-		Regex(r.replace("\\/", "/").to_string())
+		Regex(r.replace("\\/", "/"))
 	}
 }
 
