@@ -1,22 +1,48 @@
+use crate::err::Error;
+use crate::net::output;
+use crate::net::session;
+use crate::net::DB;
+use bytes::Bytes;
+use surrealdb::Session;
 use warp::http;
 use warp::Filter;
 
 const MAX: u64 = 1024 * 1024 * 1024 * 4; // 4 GiB
 
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
-	// Set base path
-	let base = warp::path("import").and(warp::path::end());
-	// Set opts method
-	let opts = base.and(warp::options()).map(warp::reply);
-	// Set post method
-	let post = base
+	warp::path("import")
+		.and(warp::path::end())
 		.and(warp::post())
+		.and(session::build())
+		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
 		.and(warp::body::content_length_limit(MAX))
-		.and_then(handler);
-	// Specify route
-	opts.or(post)
+		.and(warp::body::bytes())
+		.and_then(handler)
 }
 
-async fn handler() -> Result<impl warp::Reply, warp::Rejection> {
-	Ok(warp::reply::with_status("Ok", http::StatusCode::OK))
+async fn handler(
+	session: Session,
+	output: String,
+	sql: Bytes,
+) -> Result<impl warp::Reply, warp::Rejection> {
+	// Check the permissions
+	match session.au.is_db() {
+		true => {
+			// Get the datastore reference
+			let db = DB.get().unwrap();
+			// Convert the body to a byte slice
+			let sql = std::str::from_utf8(&sql).unwrap();
+			// Execute the sql query in the database
+			match db.execute(sql, &session, None).await {
+				Ok(res) => match output.as_ref() {
+					"application/json" => Ok(output::json(&res)),
+					"application/cbor" => Ok(output::cbor(&res)),
+					"application/msgpack" => Ok(output::pack(&res)),
+					_ => Err(warp::reject::not_found()),
+				},
+				Err(err) => Err(warp::reject::custom(Error::from(err))),
+			}
+		}
+		_ => Err(warp::reject::custom(Error::InvalidAuth)),
+	}
 }

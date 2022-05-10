@@ -256,6 +256,13 @@ impl From<TiKVError> for Error {
 }
 
 #[cfg(feature = "parallel")]
+impl From<TokioError<bytes::Bytes>> for Error {
+	fn from(e: TokioError<bytes::Bytes>) -> Error {
+		Error::Channel(e.to_string())
+	}
+}
+
+#[cfg(feature = "parallel")]
 impl From<TokioError<(Option<Thing>, Value)>> for Error {
 	fn from(e: TokioError<(Option<Thing>, Value)>) -> Error {
 		Error::Channel(e.to_string())

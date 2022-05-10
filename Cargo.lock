@@ -2374,6 +2374,7 @@ dependencies = [
  "argon2",
  "async-recursion",
  "bigdecimal",
+ "bytes",
  "chrono",
  "dmp",
  "echodb",
