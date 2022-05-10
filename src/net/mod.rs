@@ -73,7 +73,11 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 
 	info!("Starting web server on {}", &opt.bind);
 
-	warp::serve(net).run(opt.bind).await;
+	if let (Some(crt), Some(key)) = (&opt.crt, &opt.key) {
+		warp::serve(net).tls().cert_path(crt).key_path(key).run(opt.bind).await
+	} else {
+		warp::serve(net).run(opt.bind).await
+	};
 
 	Ok(())
 }
