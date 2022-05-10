@@ -11,8 +11,10 @@ use surrealdb::Session;
 use warp::path;
 use warp::Filter;
 
+const MAX: u64 = 1024 * 16; // 16 KiB
+
 #[derive(Default, Deserialize, Debug, Clone)]
-pub struct Query {
+struct Query {
 	pub limit: Option<String>,
 	pub start: Option<String>,
 }
@@ -30,24 +32,30 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Routes for a table
 	// ------------------------------
 
-	// All methods
-	let base = warp::any();
-	// Get session config
-	let base = base.and(conf::build());
-	// Get content type header
-	let base = base.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()));
-	// Set base path for all
-	let base = base.and(path!("key" / String).and(warp::path::end()));
 	// Set select method
-	let select = base.and(warp::get()).and(warp::query()).and_then(select_all);
+	let select = warp::any()
+		.and(warp::get())
+		.and(conf::build())
+		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(path!("key" / String).and(warp::path::end()))
+		.and(warp::query())
+		.and_then(select_all);
 	// Set create method
-	let create = base
+	let create = warp::any()
 		.and(warp::post())
-		.and(warp::body::content_length_limit(1024 * 1024)) // 1MiB
+		.and(conf::build())
+		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(path!("key" / String).and(warp::path::end()))
+		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and_then(create_all);
 	// Set delete method
-	let delete = base.and(warp::delete()).and_then(delete_all);
+	let delete = warp::any()
+		.and(warp::delete())
+		.and(conf::build())
+		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(path!("key" / String).and(warp::path::end()))
+		.and_then(delete_all);
 	// Specify route
 	let all = select.or(create).or(delete);
 
@@ -55,36 +63,47 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Routes for a thing
 	// ------------------------------
 
-	// All methods
-	let base = warp::any();
-	// Get session config
-	let base = base.and(conf::build());
-	// Get content type header
-	let base = base.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()));
-	// Set base path for one
-	let base = base.and(path!("key" / String / String).and(warp::path::end()));
 	// Set select method
-	let select = base.and(warp::get()).and_then(select_one);
+	let select = warp::any()
+		.and(warp::get())
+		.and(conf::build())
+		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(path!("key" / String / String).and(warp::path::end()))
+		.and_then(select_one);
 	// Set create method
-	let create = base
+	let create = warp::any()
 		.and(warp::post())
-		.and(warp::body::content_length_limit(1024 * 1024)) // 1MiB
+		.and(conf::build())
+		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and_then(create_one);
 	// Set update method
-	let update = base
+	let update = warp::any()
 		.and(warp::put())
-		.and(warp::body::content_length_limit(1024 * 1024)) // 1MiB
+		.and(conf::build())
+		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and_then(update_one);
 	// Set modify method
-	let modify = base
+	let modify = warp::any()
 		.and(warp::patch())
-		.and(warp::body::content_length_limit(1024 * 1024)) // 1MiB
+		.and(conf::build())
+		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and_then(modify_one);
 	// Set delete method
-	let delete = base.and(warp::delete()).and_then(delete_one);
+	let delete = warp::any()
+		.and(warp::delete())
+		.and(conf::build())
+		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(path!("key" / String / String).and(warp::path::end()))
+		.and_then(delete_one);
 	// Specify route
 	let one = select.or(create).or(update).or(modify).or(delete);
 

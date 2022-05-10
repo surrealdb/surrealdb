@@ -8,6 +8,8 @@ use futures::{FutureExt, StreamExt};
 use surrealdb::Session;
 use warp::Filter;
 
+const MAX: u64 = 1024 * 1024; // 1 MiB
+
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	// Set base path
 	let base = warp::path("sql").and(warp::path::end());
@@ -18,7 +20,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(warp::post())
 		.and(conf::build())
 		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
-		.and(warp::body::content_length_limit(1024 * 1024)) // 1MiB
+		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and_then(handler);
 	// Set sock method

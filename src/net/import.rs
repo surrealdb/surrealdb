@@ -1,6 +1,8 @@
 use warp::http;
 use warp::Filter;
 
+const MAX: u64 = 1024 * 1024 * 1024 * 4; // 4 GiB
+
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	// Set base path
 	let base = warp::path("import").and(warp::path::end());
@@ -9,7 +11,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set post method
 	let post = base
 		.and(warp::post())
-		.and(warp::body::content_length_limit(1024 * 1024 * 1024)) // 1GiB
+		.and(warp::body::content_length_limit(MAX))
 		.and_then(handler);
 	// Specify route
 	opts.or(post)
