@@ -38,6 +38,12 @@ pub enum Error {
 
 impl warp::reject::Reject for Error {}
 
+impl From<Error> for String {
+	fn from(e: Error) -> String {
+		e.to_string()
+	}
+}
+
 impl From<Base64Error> for Error {
 	fn from(_: Base64Error) -> Error {
 		Error::InvalidAuth

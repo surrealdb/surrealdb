@@ -234,6 +234,12 @@ pub enum Error {
 	Decode(#[from] DecodeError),
 }
 
+impl From<Error> for String {
+	fn from(e: Error) -> String {
+		e.to_string()
+	}
+}
+
 #[cfg(feature = "kv-echodb")]
 impl From<EchoDBError> for Error {
 	fn from(e: EchoDBError) -> Error {
