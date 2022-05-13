@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		_stm: &Statement,
+		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check events
 		if !opt.events {

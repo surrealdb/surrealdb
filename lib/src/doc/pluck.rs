@@ -17,7 +17,7 @@ impl<'a> Document<'a> {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		stm: &Statement,
+		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.futures(true);

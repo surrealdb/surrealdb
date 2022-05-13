@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		_stm: &Statement,
+		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Loop through all field statements
 		for fd in self.fd(opt, txn).await?.iter() {

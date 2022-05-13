@@ -11,7 +11,7 @@ impl<'a> Document<'a> {
 		_ctx: &Runtime,
 		_opt: &Options,
 		_txn: &Transaction,
-		stm: &Statement,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check that we are altering a record
 		if self.id.is_none() {

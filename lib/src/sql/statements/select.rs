@@ -2,6 +2,7 @@ use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
@@ -23,7 +24,6 @@ use nom::combinator::opt;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct SelectStatement {
@@ -58,7 +58,7 @@ impl SelectStatement {
 
 impl SelectStatement {
 	pub(crate) async fn compute(
-		self: &Arc<Self>,
+		&self,
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
@@ -66,10 +66,8 @@ impl SelectStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.check(Level::No)?;
-		// Clone the statement
-		let s = Arc::clone(self);
 		// Create a new iterator
-		let mut i = Iterator::from(s);
+		let mut i = Iterator::new();
 		// Ensure futures are processed
 		let opt = &opt.futures(true);
 		// Loop over the select targets
@@ -83,8 +81,10 @@ impl SelectStatement {
 				v => i.prepare(v),
 			};
 		}
+		// Assign the statement
+		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn).await
+		i.output(ctx, opt, txn, &stm).await
 	}
 }
 

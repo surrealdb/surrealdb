@@ -7,15 +7,6 @@ use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
 use thiserror::Error;
 
-#[cfg(feature = "kv-tikv")]
-use tikv::Error as TiKVError;
-
-#[cfg(feature = "kv-echodb")]
-use echodb::err::Error as EchoDBError;
-
-#[cfg(feature = "kv-indxdb")]
-use indxdb::err::Error as IndxDBError;
-
 #[cfg(feature = "parallel")]
 use tokio::sync::mpsc::error::SendError as TokioError;
 
@@ -241,22 +232,22 @@ impl From<Error> for String {
 }
 
 #[cfg(feature = "kv-echodb")]
-impl From<EchoDBError> for Error {
-	fn from(e: EchoDBError) -> Error {
+impl From<echodb::err::Error> for Error {
+	fn from(e: echodb::err::Error) -> Error {
 		Error::Tx(e.to_string())
 	}
 }
 
 #[cfg(feature = "kv-indxdb")]
-impl From<IndxDBError> for Error {
-	fn from(e: IndxDBError) -> Error {
+impl From<indxdb::err::Error> for Error {
+	fn from(e: indxdb::err::Error) -> Error {
 		Error::Tx(e.to_string())
 	}
 }
 
 #[cfg(feature = "kv-tikv")]
-impl From<TiKVError> for Error {
-	fn from(e: TiKVError) -> Error {
+impl From<tikv::Error> for Error {
+	fn from(e: tikv::Error) -> Error {
 		Error::Tx(e.to_string())
 	}
 }
@@ -268,9 +259,14 @@ impl From<TokioError<bytes::Bytes>> for Error {
 	}
 }
 
-#[cfg(feature = "parallel")]
-impl From<TokioError<(Option<Thing>, Value)>> for Error {
-	fn from(e: TokioError<(Option<Thing>, Value)>) -> Error {
+impl From<channel::RecvError> for Error {
+	fn from(e: channel::RecvError) -> Error {
+		Error::Channel(e.to_string())
+	}
+}
+
+impl From<channel::SendError<(Option<Thing>, Value)>> for Error {
+	fn from(e: channel::SendError<(Option<Thing>, Value)>) -> Error {
 		Error::Channel(e.to_string())
 	}
 }

@@ -12,7 +12,7 @@ impl<'a> Document<'a> {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
-		stm: &Statement,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check permission clause
 		if opt.perms && opt.auth.perms() && self.id.is_some() {

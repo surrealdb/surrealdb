@@ -11,28 +11,19 @@ use crate::sql::array::Array;
 use crate::sql::field::Field;
 use crate::sql::id::Id;
 use crate::sql::part::Part;
-use crate::sql::statements::create::CreateStatement;
-use crate::sql::statements::delete::DeleteStatement;
-use crate::sql::statements::insert::InsertStatement;
-use crate::sql::statements::relate::RelateStatement;
-use crate::sql::statements::select::SelectStatement;
-use crate::sql::statements::update::UpdateStatement;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use executor::Executor;
+use futures::join;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
-use std::sync::Arc;
 
 #[derive(Default)]
 pub struct Iterator {
 	// Iterator status
 	run: Canceller,
-	// Iterator statement
-	stm: Statement,
-	// Iterator run option
-	parallel: bool,
 	// Iterator runtime error
 	error: Option<Error>,
 	// Iterator input values
@@ -41,67 +32,12 @@ pub struct Iterator {
 	results: Vec<Value>,
 }
 
-impl From<Arc<SelectStatement>> for Iterator {
-	fn from(v: Arc<SelectStatement>) -> Self {
-		Iterator {
-			parallel: v.parallel,
-			stm: Statement::from(v),
-			..Iterator::default()
-		}
-	}
-}
-
-impl From<Arc<CreateStatement>> for Iterator {
-	fn from(v: Arc<CreateStatement>) -> Self {
-		Iterator {
-			parallel: v.parallel,
-			stm: Statement::from(v),
-			..Iterator::default()
-		}
-	}
-}
-
-impl From<Arc<UpdateStatement>> for Iterator {
-	fn from(v: Arc<UpdateStatement>) -> Self {
-		Iterator {
-			parallel: v.parallel,
-			stm: Statement::from(v),
-			..Iterator::default()
-		}
-	}
-}
-
-impl From<Arc<RelateStatement>> for Iterator {
-	fn from(v: Arc<RelateStatement>) -> Self {
-		Iterator {
-			parallel: v.parallel,
-			stm: Statement::from(v),
-			..Iterator::default()
-		}
-	}
-}
-
-impl From<Arc<DeleteStatement>> for Iterator {
-	fn from(v: Arc<DeleteStatement>) -> Self {
-		Iterator {
-			parallel: v.parallel,
-			stm: Statement::from(v),
-			..Iterator::default()
-		}
-	}
-}
-
-impl From<Arc<InsertStatement>> for Iterator {
-	fn from(v: Arc<InsertStatement>) -> Self {
-		Iterator {
-			parallel: v.parallel,
-			stm: Statement::from(v),
-			..Iterator::default()
-		}
-	}
-}
-
 impl Iterator {
+	// Creates a new iterator
+	pub fn new() -> Self {
+		Self::default()
+	}
+
 	// Prepares a value for processing
 	pub fn prepare(&mut self, val: Value) {
 		self.readies.push(val)
@@ -121,31 +57,32 @@ impl Iterator {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Log the statement
-		trace!("Iterating: {}", self.stm);
+		trace!("Iterating: {}", stm);
 		// Enable context override
 		let mut ctx = Context::new(ctx);
 		self.run = ctx.add_cancel();
 		let ctx = ctx.freeze();
 		// Process prepared values
-		self.iterate(&ctx, opt, txn).await?;
+		self.iterate(&ctx, opt, txn, stm).await?;
 		// Return any document errors
 		if let Some(e) = self.error.take() {
 			return Err(e);
 		}
 		// Process any SPLIT clause
-		self.output_split(&ctx, opt, txn).await?;
+		self.output_split(&ctx, opt, txn, stm).await?;
 		// Process any GROUP clause
-		self.output_group(&ctx, opt, txn).await?;
+		self.output_group(&ctx, opt, txn, stm).await?;
 		// Process any ORDER clause
-		self.output_order(&ctx, opt, txn).await?;
+		self.output_order(&ctx, opt, txn, stm).await?;
 		// Process any START clause
-		self.output_start(&ctx, opt, txn).await?;
+		self.output_start(&ctx, opt, txn, stm).await?;
 		// Process any LIMIT clause
-		self.output_limit(&ctx, opt, txn).await?;
+		self.output_limit(&ctx, opt, txn, stm).await?;
 		// Process any FETCH clause
-		self.output_fetch(&ctx, opt, txn).await?;
+		self.output_fetch(&ctx, opt, txn, stm).await?;
 		// Output the results
 		Ok(mem::take(&mut self.results).into())
 	}
@@ -156,8 +93,9 @@ impl Iterator {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		if let Some(splits) = self.stm.split() {
+		if let Some(splits) = stm.split() {
 			// Loop over each split clause
 			for split in splits.iter() {
 				// Get the query result
@@ -199,9 +137,10 @@ impl Iterator {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		if let Some(fields) = self.stm.expr() {
-			if let Some(groups) = self.stm.group() {
+		if let Some(fields) = stm.expr() {
+			if let Some(groups) = stm.group() {
 				// Create the new grouped collection
 				let mut grp: BTreeMap<Array, Array> = BTreeMap::new();
 				// Get the query result
@@ -281,8 +220,9 @@ impl Iterator {
 		_ctx: &Runtime,
 		_opt: &Options,
 		_txn: &Transaction,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		if let Some(orders) = self.stm.order() {
+		if let Some(orders) = stm.order() {
 			// Sort the full result set
 			self.results.sort_by(|a, b| {
 				// Loop over each order clause
@@ -319,8 +259,9 @@ impl Iterator {
 		_ctx: &Runtime,
 		_opt: &Options,
 		_txn: &Transaction,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		if let Some(v) = self.stm.start() {
+		if let Some(v) = stm.start() {
 			self.results = mem::take(&mut self.results).into_iter().skip(v.0).collect();
 		}
 		Ok(())
@@ -332,8 +273,9 @@ impl Iterator {
 		_ctx: &Runtime,
 		_opt: &Options,
 		_txn: &Transaction,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		if let Some(v) = self.stm.limit() {
+		if let Some(v) = stm.limit() {
 			self.results = mem::take(&mut self.results).into_iter().take(v.0).collect();
 		}
 		Ok(())
@@ -345,8 +287,9 @@ impl Iterator {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		if let Some(fetchs) = self.stm.fetch() {
+		if let Some(fetchs) = stm.fetch() {
 			for fetch in &fetchs.0 {
 				// Loop over each value
 				for obj in &mut self.results {
@@ -383,10 +326,11 @@ impl Iterator {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Process all prepared values
 		for v in mem::take(&mut self.readies) {
-			v.iterate(ctx, opt, txn, self).await?;
+			v.iterate(ctx, opt, txn, stm, self).await?;
 		}
 		// Everything processed ok
 		Ok(())
@@ -398,70 +342,67 @@ impl Iterator {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		match self.parallel {
+		match stm.parallel() {
 			// Run statements sequentially
 			false => {
 				// Process all prepared values
 				for v in mem::take(&mut self.readies) {
-					v.iterate(ctx, opt, txn, self).await?;
+					v.iterate(ctx, opt, txn, stm, self).await?;
 				}
 				// Everything processed ok
 				Ok(())
 			}
 			// Run statements in parallel
 			true => {
-				let mut rcv = {
-					// Get current statement
-					let stm = &self.stm;
-					// Create an unbounded channel
-					let (chn, rx) = tokio::sync::mpsc::channel(MAX_CONCURRENT_TASKS);
+				// Create a new executor
+				let exe = Executor::new();
+				// Take all of the iterator values
+				let vals = mem::take(&mut self.readies);
+				// Create a channel to shutdown
+				let (end, exit) = channel::bounded::<()>(1);
+				// Create an unbounded channel
+				let (chn, docs) = channel::bounded(MAX_CONCURRENT_TASKS);
+				// Create an async closure for prepared values
+				let adocs = async {
 					// Process all prepared values
-					for v in mem::take(&mut self.readies) {
-						if ctx.is_ok() {
-							tokio::spawn(v.channel(
-								ctx.clone(),
-								opt.clone(),
-								stm.clone(),
-								txn.clone(),
-								chn.clone(),
-							));
-						}
+					for v in vals {
+						exe.spawn(v.channel(ctx, opt, txn, stm, chn.clone()))
+							// Ensure we detach the spawned task
+							.detach();
 					}
-					// Return the receiver
-					rx
+					// Drop the uncloned channel instance
+					drop(chn);
 				};
-				let mut rcv = {
-					// Clone the send values
-					let ctx = ctx.clone();
-					let opt = opt.clone();
-					let txn = txn.clone();
-					let stm = self.stm.clone();
-					// Create an unbounded channel
-					let (chn, rx) = tokio::sync::mpsc::channel(MAX_CONCURRENT_TASKS);
+				// Create an unbounded channel
+				let (chn, vals) = channel::bounded(MAX_CONCURRENT_TASKS);
+				// Create an async closure for received values
+				let avals = async {
 					// Process all received values
-					tokio::spawn(async move {
-						while let Some((k, v)) = rcv.recv().await {
-							if ctx.is_ok() {
-								tokio::spawn(Document::compute(
-									ctx.clone(),
-									opt.clone(),
-									txn.clone(),
-									chn.clone(),
-									stm.clone(),
-									k,
-									v,
-								));
-							}
-						}
-					});
-					// Return the receiver
-					rx
+					while let Ok((k, v)) = docs.recv().await {
+						exe.spawn(Document::compute(ctx, opt, txn, stm, chn.clone(), k, v))
+							// Ensure we detach the spawned task
+							.detach();
+					}
+					// Drop the uncloned channel instance
+					drop(chn);
 				};
-				// Process all processed values
-				while let Some(r) = rcv.recv().await {
-					self.result(r);
-				}
+				// Create an async closure to process results
+				let aproc = async {
+					// Process all processed values
+					while let Ok(r) = vals.recv().await {
+						self.result(r, stm);
+					}
+					// Shutdown the executor
+					let _ = end.send(()).await;
+				};
+				// Run all executor tasks
+				let fut = exe.run(exit.recv());
+				// Wait for all closures
+				let res = join!(adocs, avals, aproc, fut);
+				// Consume executor error
+				let _ = res.3;
 				// Everything processed ok
 				Ok(())
 			}
@@ -474,6 +415,7 @@ impl Iterator {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 		thg: Option<Thing>,
 		val: Value,
 	) {
@@ -484,21 +426,20 @@ impl Iterator {
 		// Setup a new document
 		let mut doc = Document::new(thg, &val);
 		// Process the document
-		let res = match self.stm {
-			Statement::Select(_) => doc.select(ctx, opt, txn, &self.stm).await,
-			Statement::Create(_) => doc.create(ctx, opt, txn, &self.stm).await,
-			Statement::Update(_) => doc.update(ctx, opt, txn, &self.stm).await,
-			Statement::Relate(_) => doc.relate(ctx, opt, txn, &self.stm).await,
-			Statement::Delete(_) => doc.delete(ctx, opt, txn, &self.stm).await,
-			Statement::Insert(_) => doc.insert(ctx, opt, txn, &self.stm).await,
-			_ => unreachable!(),
+		let res = match stm {
+			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,
+			Statement::Create(_) => doc.create(ctx, opt, txn, stm).await,
+			Statement::Update(_) => doc.update(ctx, opt, txn, stm).await,
+			Statement::Relate(_) => doc.relate(ctx, opt, txn, stm).await,
+			Statement::Delete(_) => doc.delete(ctx, opt, txn, stm).await,
+			Statement::Insert(_) => doc.insert(ctx, opt, txn, stm).await,
 		};
 		// Process the result
-		self.result(res);
+		self.result(res, stm);
 	}
 
 	// Accept a processed record result
-	fn result(&mut self, res: Result<Value, Error>) {
+	fn result(&mut self, res: Result<Value, Error>, stm: &Statement<'_>) {
 		// Process the result
 		match res {
 			Err(Error::Ignore) => {
@@ -512,9 +453,9 @@ impl Iterator {
 			Ok(v) => self.results.push(v),
 		}
 		// Check if we can exit
-		if self.stm.group().is_none() && self.stm.order().is_none() {
-			if let Some(l) = self.stm.limit() {
-				if let Some(s) = self.stm.start() {
+		if stm.group().is_none() && stm.order().is_none() {
+			if let Some(l) = stm.limit() {
+				if let Some(s) = stm.start() {
 					if self.results.len() == l.0 + s.0 {
 						self.run.cancel()
 					}

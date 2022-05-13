@@ -11,7 +11,7 @@ impl<'a> Document<'a> {
 		_ctx: &Runtime,
 		_opt: &Options,
 		_txn: &Transaction,
-		_stm: &Statement,
+		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check if this record exists
 		if self.id.is_some() {

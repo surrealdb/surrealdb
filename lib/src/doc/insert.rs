@@ -12,7 +12,7 @@ impl<'a> Document<'a> {
 		_ctx: &Runtime,
 		_opt: &Options,
 		_txn: &Transaction,
-		_stm: &Statement,
+		_stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		todo!()
 	}

@@ -11,23 +11,23 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
-use tokio::sync::mpsc::Sender;
+use channel::Sender;
 
 impl Value {
 	pub(crate) async fn channel(
 		self,
-		ctx: Runtime,
-		opt: Options,
-		stm: Statement,
-		txn: Transaction,
+		ctx: &Runtime,
+		opt: &Options,
+		txn: &Transaction,
+		stm: &Statement<'_>,
 		chn: Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match self {
-				Value::Array(v) => v.process(&ctx, &opt, &stm, &txn, &chn).await?,
-				Value::Model(v) => v.process(&ctx, &opt, &stm, &txn, &chn).await?,
-				Value::Thing(v) => v.process(&ctx, &opt, &stm, &txn, &chn).await?,
-				Value::Table(v) => v.process(&ctx, &opt, &stm, &txn, &chn).await?,
+				Value::Array(v) => v.process(ctx, opt, txn, stm, &chn).await?,
+				Value::Model(v) => v.process(ctx, opt, txn, stm, &chn).await?,
+				Value::Thing(v) => v.process(ctx, opt, txn, stm, &chn).await?,
+				Value::Table(v) => v.process(ctx, opt, txn, stm, &chn).await?,
 				v => chn.send((None, v)).await?,
 			}
 		}
@@ -41,17 +41,17 @@ impl Array {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		stm: &Statement,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		for v in self {
 			if ctx.is_ok() {
 				match v {
-					Value::Array(v) => v.process(ctx, opt, stm, txn, chn).await?,
-					Value::Model(v) => v.process(ctx, opt, stm, txn, chn).await?,
-					Value::Thing(v) => v.process(ctx, opt, stm, txn, chn).await?,
-					Value::Table(v) => v.process(ctx, opt, stm, txn, chn).await?,
+					Value::Array(v) => v.process(ctx, opt, txn, stm, chn).await?,
+					Value::Model(v) => v.process(ctx, opt, txn, stm, chn).await?,
+					Value::Thing(v) => v.process(ctx, opt, txn, stm, chn).await?,
+					Value::Table(v) => v.process(ctx, opt, txn, stm, chn).await?,
 					v => chn.send((None, v)).await?,
 				}
 			}
@@ -65,8 +65,8 @@ impl Model {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		stm: &Statement,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
@@ -77,7 +77,7 @@ impl Model {
 							tb: tb.to_string(),
 							id: Id::rand(),
 						}
-						.process(ctx, opt, stm, txn, chn)
+						.process(ctx, opt, txn, stm, chn)
 						.await?;
 					}
 				}
@@ -87,7 +87,7 @@ impl Model {
 							tb: tb.to_string(),
 							id: Id::from(x),
 						}
-						.process(ctx, opt, stm, txn, chn)
+						.process(ctx, opt, txn, stm, chn)
 						.await?;
 					}
 				}
@@ -102,8 +102,8 @@ impl Thing {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		_stm: &Statement,
 		txn: &Transaction,
+		_stm: &Statement<'_>,
 		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
@@ -124,8 +124,8 @@ impl Table {
 		self,
 		ctx: &Runtime,
 		opt: &Options,
-		_stm: &Statement,
 		txn: &Transaction,
+		_stm: &Statement<'_>,
 		chn: &Sender<(Option<Thing>, Value)>,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {

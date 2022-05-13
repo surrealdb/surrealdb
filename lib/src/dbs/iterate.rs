@@ -1,6 +1,7 @@
 use crate::dbs::Iterator;
 use crate::dbs::Options;
 use crate::dbs::Runtime;
+use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::key::thing;
@@ -20,15 +21,16 @@ impl Value {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match self {
-				Value::Array(v) => v.iterate(ctx, opt, txn, ite).await?,
-				Value::Model(v) => v.iterate(ctx, opt, txn, ite).await?,
-				Value::Thing(v) => v.iterate(ctx, opt, txn, ite).await?,
-				Value::Table(v) => v.iterate(ctx, opt, txn, ite).await?,
-				v => ite.process(ctx, opt, txn, None, v).await,
+				Value::Array(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
+				Value::Model(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
+				Value::Thing(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
+				Value::Table(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
+				v => ite.process(ctx, opt, txn, stm, None, v).await,
 			}
 		}
 		Ok(())
@@ -43,16 +45,17 @@ impl Array {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		for v in self.into_iter() {
 			if ctx.is_ok() {
 				match v {
-					Value::Array(v) => v.iterate(ctx, opt, txn, ite).await?,
-					Value::Model(v) => v.iterate(ctx, opt, txn, ite).await?,
-					Value::Thing(v) => v.iterate(ctx, opt, txn, ite).await?,
-					Value::Table(v) => v.iterate(ctx, opt, txn, ite).await?,
-					v => ite.process(ctx, opt, txn, None, v).await,
+					Value::Array(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
+					Value::Model(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
+					Value::Thing(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
+					Value::Table(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
+					v => ite.process(ctx, opt, txn, stm, None, v).await,
 				}
 			}
 		}
@@ -66,6 +69,7 @@ impl Model {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
@@ -76,7 +80,7 @@ impl Model {
 							tb: tb.to_string(),
 							id: Id::rand(),
 						}
-						.iterate(ctx, opt, txn, ite)
+						.iterate(ctx, opt, txn, stm, ite)
 						.await?;
 					}
 				}
@@ -86,7 +90,7 @@ impl Model {
 							tb: tb.to_string(),
 							id: Id::from(x),
 						}
-						.iterate(ctx, opt, txn, ite)
+						.iterate(ctx, opt, txn, stm, ite)
 						.await?;
 					}
 				}
@@ -102,6 +106,7 @@ impl Thing {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
@@ -111,7 +116,7 @@ impl Thing {
 				Some(v) => Value::from(v),
 				None => Value::None,
 			};
-			ite.process(ctx, opt, txn, Some(self), val).await;
+			ite.process(ctx, opt, txn, stm, Some(self), val).await;
 		}
 		Ok(())
 	}
@@ -123,6 +128,7 @@ impl Table {
 		ctx: &Runtime,
 		opt: &Options,
 		txn: &Transaction,
+		stm: &Statement<'_>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
@@ -163,7 +169,7 @@ impl Table {
 								let v: crate::sql::value::Value = (&v).into();
 								let t = Thing::from((k.tb, k.id));
 								// Process the record
-								ite.process(ctx, opt, txn, Some(t), v).await;
+								ite.process(ctx, opt, txn, stm, Some(t), v).await;
 							}
 						}
 						continue;

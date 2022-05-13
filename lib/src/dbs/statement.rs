@@ -16,62 +16,54 @@ use crate::sql::statements::select::SelectStatement;
 use crate::sql::statements::update::UpdateStatement;
 use crate::sql::version::Version;
 use std::fmt;
-use std::sync::Arc;
 
 #[derive(Clone, Debug)]
-pub enum Statement {
-	None,
-	Select(Arc<SelectStatement>),
-	Create(Arc<CreateStatement>),
-	Update(Arc<UpdateStatement>),
-	Relate(Arc<RelateStatement>),
-	Delete(Arc<DeleteStatement>),
-	Insert(Arc<InsertStatement>),
+pub enum Statement<'a> {
+	Select(&'a SelectStatement),
+	Create(&'a CreateStatement),
+	Update(&'a UpdateStatement),
+	Relate(&'a RelateStatement),
+	Delete(&'a DeleteStatement),
+	Insert(&'a InsertStatement),
 }
 
-impl Default for Statement {
-	fn default() -> Self {
-		Statement::None
-	}
-}
-
-impl From<Arc<SelectStatement>> for Statement {
-	fn from(v: Arc<SelectStatement>) -> Self {
+impl<'a> From<&'a SelectStatement> for Statement<'a> {
+	fn from(v: &'a SelectStatement) -> Self {
 		Statement::Select(v)
 	}
 }
 
-impl From<Arc<CreateStatement>> for Statement {
-	fn from(v: Arc<CreateStatement>) -> Self {
+impl<'a> From<&'a CreateStatement> for Statement<'a> {
+	fn from(v: &'a CreateStatement) -> Self {
 		Statement::Create(v)
 	}
 }
 
-impl From<Arc<UpdateStatement>> for Statement {
-	fn from(v: Arc<UpdateStatement>) -> Self {
+impl<'a> From<&'a UpdateStatement> for Statement<'a> {
+	fn from(v: &'a UpdateStatement) -> Self {
 		Statement::Update(v)
 	}
 }
 
-impl From<Arc<RelateStatement>> for Statement {
-	fn from(v: Arc<RelateStatement>) -> Self {
+impl<'a> From<&'a RelateStatement> for Statement<'a> {
+	fn from(v: &'a RelateStatement) -> Self {
 		Statement::Relate(v)
 	}
 }
 
-impl From<Arc<DeleteStatement>> for Statement {
-	fn from(v: Arc<DeleteStatement>) -> Self {
+impl<'a> From<&'a DeleteStatement> for Statement<'a> {
+	fn from(v: &'a DeleteStatement) -> Self {
 		Statement::Delete(v)
 	}
 }
 
-impl From<Arc<InsertStatement>> for Statement {
-	fn from(v: Arc<InsertStatement>) -> Self {
+impl<'a> From<&'a InsertStatement> for Statement<'a> {
+	fn from(v: &'a InsertStatement) -> Self {
 		Statement::Insert(v)
 	}
 }
 
-impl fmt::Display for Statement {
+impl<'a> fmt::Display for Statement<'a> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Statement::Select(v) => write!(f, "{}", v),
@@ -80,12 +72,11 @@ impl fmt::Display for Statement {
 			Statement::Relate(v) => write!(f, "{}", v),
 			Statement::Delete(v) => write!(f, "{}", v),
 			Statement::Insert(v) => write!(f, "{}", v),
-			_ => unreachable!(),
 		}
 	}
 }
 
-impl Statement {
+impl<'a> Statement<'a> {
 	// Check the type of statement
 	#[inline]
 	pub fn is_select(&self) -> bool {
@@ -184,6 +175,18 @@ impl Statement {
 		match self {
 			Statement::Select(v) => v.version.as_ref(),
 			_ => None,
+		}
+	}
+	// Returns any RETURN clause if specified
+	#[inline]
+	pub fn parallel(&self) -> bool {
+		match self {
+			Statement::Select(v) => v.parallel,
+			Statement::Create(v) => v.parallel,
+			Statement::Update(v) => v.parallel,
+			Statement::Relate(v) => v.parallel,
+			Statement::Delete(v) => v.parallel,
+			Statement::Insert(v) => v.parallel,
 		}
 	}
 }
