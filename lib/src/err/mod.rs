@@ -7,9 +7,6 @@ use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
 use thiserror::Error;
 
-#[cfg(feature = "parallel")]
-use tokio::sync::mpsc::error::SendError as TokioError;
-
 /// An error originating from the SurrealDB client library.
 #[derive(Error, Debug)]
 pub enum Error {
@@ -252,15 +249,14 @@ impl From<tikv::Error> for Error {
 	}
 }
 
-#[cfg(feature = "parallel")]
-impl From<TokioError<bytes::Bytes>> for Error {
-	fn from(e: TokioError<bytes::Bytes>) -> Error {
+impl From<channel::RecvError> for Error {
+	fn from(e: channel::RecvError) -> Error {
 		Error::Channel(e.to_string())
 	}
 }
 
-impl From<channel::RecvError> for Error {
-	fn from(e: channel::RecvError) -> Error {
+impl From<channel::SendError<bytes::Bytes>> for Error {
+	fn from(e: channel::SendError<bytes::Bytes>) -> Error {
 		Error::Channel(e.to_string())
 	}
 }

@@ -25,19 +25,23 @@ async fn handler(session: Session) -> Result<impl warp::Reply, warp::Rejection> 
 			let dbv = session.db.clone().unwrap();
 			// Create a chunked response
 			let (mut chn, bdy) = Body::channel();
-			// Initiate a new async channel
-			let (snd, mut rcv) = tokio::sync::mpsc::channel(100);
 			// Spawn a new database export
-			tokio::spawn(db.export(nsv, dbv, snd));
-			// Process all processed values
-			tokio::spawn(async move {
-				while let Some(v) = rcv.recv().await {
-					let _ = chn.send_data(v).await;
+			match db.export(nsv, dbv).await {
+				Ok(rcv) => {
+					// Process all processed values
+					tokio::spawn(async move {
+						while let Ok(v) = rcv.recv().await {
+							let _ = chn.send_data(v).await;
+						}
+					});
+					// Return the chunked body
+					Ok(warp::reply::Response::new(bdy))
 				}
-			});
-			// Return the chunked body
-			Ok(warp::reply::Response::new(bdy))
+				// There was en error with the export
+				_ => Err(warp::reject::custom(Error::InvalidAuth)),
+			}
 		}
+		// There was an error with permissions
 		_ => Err(warp::reject::custom(Error::InvalidAuth)),
 	}
 }

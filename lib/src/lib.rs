@@ -19,12 +19,15 @@ mod ctx;
 mod dbs;
 mod doc;
 mod err;
+mod exe;
 mod fnc;
 mod key;
 mod kvs;
 
+// SQL
 pub mod sql;
 
+// Exports
 pub use dbs::Auth;
 pub use dbs::Response;
 pub use dbs::Session;
@@ -33,3 +36,6 @@ pub use kvs::Datastore;
 pub use kvs::Key;
 pub use kvs::Transaction;
 pub use kvs::Val;
+
+// Re-exports
+pub use channel::Receiver;

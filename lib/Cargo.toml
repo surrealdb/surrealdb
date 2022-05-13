@@ -7,7 +7,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
 default = ["parallel", "kv-tikv", "kv-echodb", "kv-yokudb"]
-parallel = ["tokio"]
+parallel = []
 kv-tikv = ["tikv"]
 kv-echodb = ["echodb"]
 kv-indxdb = ["indxdb"]
@@ -47,7 +47,6 @@ sha2 = "0.10.2"
 slug = "0.1.4"
 thiserror = "1.0.31"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
-tokio = { version = "1.18.1", features = ["sync"], optional = true }
 url = "2.2.2"
 utf-8 = "0.7.6"
 uuid = { version = "1.0.0", features = ["serde", "v4"] }
