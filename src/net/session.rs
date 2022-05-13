@@ -147,18 +147,16 @@ async fn process(
 }
 
 async fn basic(auth: String, mut session: Session) -> Result<Session, Error> {
-	// Get the config options
-	let opts = CF.get().unwrap();
 	// Retrieve just the auth data
 	if let Some((_, auth)) = auth.split_once(' ') {
 		// Get a database reference
-		let db = DB.get().unwrap();
+		let kvs = DB.get().unwrap();
+		// Get the config options
+		let opts = CF.get().unwrap();
 		// Decode the encoded auth data
 		let auth = base64::decode(auth)?;
 		// Convert the auth data to String
 		let auth = String::from_utf8(auth)?;
-		// Create a new readonly transaction
-		let mut tx = db.transaction(false, false).await?;
 		// Split the auth data into user and pass
 		if let Some((user, pass)) = auth.split_once(':') {
 			// Check that the details are not empty
@@ -172,6 +170,8 @@ async fn basic(auth: String, mut session: Session) -> Result<Session, Error> {
 			}
 			// Check if this is NS authentication
 			if let Some(ns) = &session.ns {
+				// Create a new readonly transaction
+				let mut tx = kvs.transaction(false, false).await?;
 				// Check if the supplied NS Login exists
 				if let Ok(nl) = tx.get_nl(ns, user).await {
 					// Compute the hash and verify the password
@@ -204,9 +204,7 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 	// Retrieve just the auth data
 	if let Some((_, auth)) = auth.split_once(' ') {
 		// Get a database reference
-		let db = DB.get().unwrap();
-		// Create a new readonly transaction
-		let mut tx = db.transaction(false, false).await?;
+		let kvs = DB.get().unwrap();
 		// Decode the token without verifying
 		let token = decode::<Claims>(auth, &KEY, &DUD)?;
 		// Check the token authentication claims
@@ -221,6 +219,8 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 				id: Some(id),
 				..
 			} => {
+				// Create a new readonly transaction
+				let mut tx = kvs.transaction(false, false).await?;
 				// Get the scope token
 				let de = tx.get_st(&ns, &db, &sc, &tk).await?;
 				let cf = config(de.kind, de.code)?;
@@ -243,6 +243,8 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 				id: Some(id),
 				..
 			} => {
+				// Create a new readonly transaction
+				let mut tx = kvs.transaction(false, false).await?;
 				// Get the scope
 				let de = tx.get_sc(&ns, &db, &sc).await?;
 				let cf = config(Algorithm::Hs512, de.code)?;
@@ -263,6 +265,8 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 				tk: Some(tk),
 				..
 			} => {
+				// Create a new readonly transaction
+				let mut tx = kvs.transaction(false, false).await?;
 				// Get the database token
 				let de = tx.get_dt(&ns, &db, &tk).await?;
 				let cf = config(de.kind, de.code)?;
@@ -281,6 +285,8 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 				id: Some(id),
 				..
 			} => {
+				// Create a new readonly transaction
+				let mut tx = kvs.transaction(false, false).await?;
 				// Get the database login
 				let de = tx.get_dl(&ns, &db, &id).await?;
 				let cf = config(Algorithm::Hs512, de.code)?;
@@ -298,6 +304,8 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 				tk: Some(tk),
 				..
 			} => {
+				// Create a new readonly transaction
+				let mut tx = kvs.transaction(false, false).await?;
 				// Get the namespace token
 				let de = tx.get_nt(&ns, &tk).await?;
 				let cf = config(de.kind, de.code)?;
@@ -314,6 +322,8 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 				id: Some(id),
 				..
 			} => {
+				// Create a new readonly transaction
+				let mut tx = kvs.transaction(false, false).await?;
 				// Get the namespace login
 				let de = tx.get_nl(&ns, &id).await?;
 				let cf = config(Algorithm::Hs512, de.code)?;
