@@ -35,10 +35,10 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	async fn begin(&mut self) -> bool {
+	async fn begin(&mut self, write: bool) -> bool {
 		match self.txn.as_ref() {
 			Some(_) => false,
-			None => match self.kvs.transaction(true, false).await {
+			None => match self.kvs.transaction(write, false).await {
 				Ok(v) => {
 					self.txn = Some(Arc::new(Mutex::new(v)));
 					true
@@ -155,7 +155,7 @@ impl<'a> Executor<'a> {
 				}
 				// Begin a new transaction
 				Statement::Begin(_) => {
-					self.begin().await;
+					self.begin(true).await;
 					continue;
 				}
 				// Cancel a running transaction
@@ -208,7 +208,7 @@ impl<'a> Executor<'a> {
 				// Process param definition statements
 				Statement::Set(stm) => {
 					// Create a transaction
-					let loc = self.begin().await;
+					let loc = self.begin(stm.writeable()).await;
 					// Process the statement
 					match stm.compute(&ctx, &opt, &self.txn(), None).await {
 						Ok(val) => {
@@ -228,7 +228,7 @@ impl<'a> Executor<'a> {
 					// Compute the statement normally
 					false => {
 						// Create a transaction
-						let loc = self.begin().await;
+						let loc = self.begin(stm.writeable()).await;
 						// Process the statement
 						let res = match stm.timeout() {
 							// There is a timeout clause

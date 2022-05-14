@@ -21,6 +21,10 @@ pub struct SetStatement {
 }
 
 impl SetStatement {
+	pub(crate) fn writeable(&self) -> bool {
+		self.what.writeable()
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

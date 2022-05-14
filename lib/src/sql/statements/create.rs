@@ -28,6 +28,10 @@ pub struct CreateStatement {
 }
 
 impl CreateStatement {
+	pub(crate) fn writeable(&self) -> bool {
+		true
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

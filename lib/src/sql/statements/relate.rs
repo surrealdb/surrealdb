@@ -35,6 +35,10 @@ pub struct RelateStatement {
 }
 
 impl RelateStatement {
+	pub(crate) fn writeable(&self) -> bool {
+		true
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

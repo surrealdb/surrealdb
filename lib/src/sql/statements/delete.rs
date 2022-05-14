@@ -29,6 +29,10 @@ pub struct DeleteStatement {
 }
 
 impl DeleteStatement {
+	pub(crate) fn writeable(&self) -> bool {
+		true
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

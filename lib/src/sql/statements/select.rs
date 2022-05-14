@@ -9,7 +9,7 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
 use crate::sql::fetch::{fetch, Fetchs};
-use crate::sql::field::{fields, Fields};
+use crate::sql::field::{fields, Field, Fields};
 use crate::sql::group::{group, Groups};
 use crate::sql::limit::{limit, Limit};
 use crate::sql::order::{order, Orders};
@@ -42,21 +42,36 @@ pub struct SelectStatement {
 }
 
 impl SelectStatement {
+	/// Return the statement limit number or 0 if not set
 	pub fn limit(&self) -> usize {
 		match self.limit {
 			Some(Limit(v)) => v,
 			None => 0,
 		}
 	}
+
+	/// Return the statement start number or 0 if not set
 	pub fn start(&self) -> usize {
 		match self.start {
 			Some(Start(v)) => v,
 			None => 0,
 		}
 	}
-}
 
-impl SelectStatement {
+	pub(crate) fn writeable(&self) -> bool {
+		if self.expr.iter().any(|v| match v {
+			Field::All => false,
+			Field::Alone(v) => v.writeable(),
+			Field::Alias(v, _) => v.writeable(),
+		}) {
+			return true;
+		}
+		if self.what.iter().any(|v| v.writeable()) {
+			return true;
+		}
+		self.cond.as_ref().map_or(false, |v| v.writeable())
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

@@ -19,6 +19,15 @@ pub struct IfelseStatement {
 }
 
 impl IfelseStatement {
+	pub(crate) fn writeable(&self) -> bool {
+		for (cond, then) in self.exprs.iter() {
+			if cond.writeable() || then.writeable() {
+				return true;
+			}
+		}
+		self.close.as_ref().map_or(false, |v| v.writeable())
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

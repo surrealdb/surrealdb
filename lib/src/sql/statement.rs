@@ -59,8 +59,8 @@ pub fn statements(i: &str) -> IResult<&str, Statements> {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
-	Set(SetStatement),
 	Use(UseStatement),
+	Set(SetStatement),
 	Info(InfoStatement),
 	Live(LiveStatement),
 	Kill(KillStatement),
@@ -92,9 +92,29 @@ impl Statement {
 			_ => None,
 		}
 	}
-}
 
-impl Statement {
+	pub(crate) fn writeable(&self) -> bool {
+		match self {
+			Statement::Use(_) => false,
+			Statement::Set(v) => v.writeable(),
+			Statement::Info(_) => false,
+			Statement::Live(_) => true,
+			Statement::Kill(_) => true,
+			Statement::Output(v) => v.writeable(),
+			Statement::Ifelse(v) => v.writeable(),
+			Statement::Select(v) => v.writeable(),
+			Statement::Create(v) => v.writeable(),
+			Statement::Update(v) => v.writeable(),
+			Statement::Relate(v) => v.writeable(),
+			Statement::Delete(v) => v.writeable(),
+			Statement::Insert(v) => v.writeable(),
+			Statement::Define(_) => true,
+			Statement::Remove(_) => true,
+			Statement::Option(_) => false,
+			_ => unreachable!(),
+		}
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

@@ -38,6 +38,19 @@ impl PartialOrd for Subquery {
 }
 
 impl Subquery {
+	pub(crate) fn writeable(&self) -> bool {
+		match self {
+			Subquery::Value(v) => v.writeable(),
+			Subquery::Ifelse(v) => v.writeable(),
+			Subquery::Select(v) => v.writeable(),
+			Subquery::Create(v) => v.writeable(),
+			Subquery::Update(v) => v.writeable(),
+			Subquery::Delete(v) => v.writeable(),
+			Subquery::Relate(v) => v.writeable(),
+			Subquery::Insert(v) => v.writeable(),
+		}
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

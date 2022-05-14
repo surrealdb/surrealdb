@@ -967,6 +967,17 @@ impl fmt::Display for Value {
 }
 
 impl Value {
+	pub(crate) fn writeable(&self) -> bool {
+		match self {
+			Value::Array(v) => v.iter().any(|v| v.writeable()),
+			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
+			Value::Function(v) => v.args().iter().any(|v| v.writeable()),
+			Value::Subquery(v) => v.writeable(),
+			Value::Expression(v) => v.l.writeable() || v.r.writeable(),
+			_ => false,
+		}
+	}
+
 	#[cfg_attr(feature = "parallel", async_recursion)]
 	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
 	pub(crate) async fn compute(

@@ -32,6 +32,10 @@ pub struct InsertStatement {
 }
 
 impl InsertStatement {
+	pub(crate) fn writeable(&self) -> bool {
+		true
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
