@@ -163,8 +163,6 @@ impl Datastore {
 		let ctx = vars.attach(ctx);
 		// Parse the SQL query text
 		let ast = sql::parse(txt)?;
-		// Freeze the context
-		let ctx = ctx.freeze();
 		// Process all statements
 		opt.auth = sess.au.clone();
 		opt.ns = sess.ns();
@@ -189,8 +187,6 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx);
-		// Freeze the context
-		let ctx = ctx.freeze();
 		// Process all statements
 		opt.auth = sess.au.clone();
 		opt.ns = sess.ns();

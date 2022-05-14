@@ -1,4 +1,4 @@
-use crate::dbs::Runtime;
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::geometry::Geometry;
 use crate::sql::number::Number;
@@ -6,14 +6,14 @@ use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 
-pub fn bool(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn bool(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0).is_truthy() {
 		true => Ok(Value::True),
 		false => Ok(Value::False),
 	}
 }
 
-pub fn datetime(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn datetime(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	let val = args.remove(0);
 	match val {
 		Value::Datetime(_) => Ok(val),
@@ -21,7 +21,7 @@ pub fn datetime(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn decimal(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn decimal(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	let val = args.remove(0);
 	match val {
 		Value::Number(Number::Decimal(_)) => Ok(val),
@@ -29,7 +29,7 @@ pub fn decimal(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn duration(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn duration(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	let val = args.remove(0);
 	match val {
 		Value::Duration(_) => Ok(val),
@@ -37,7 +37,7 @@ pub fn duration(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn float(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn float(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	let val = args.remove(0);
 	match val {
 		Value::Number(Number::Float(_)) => Ok(val),
@@ -45,7 +45,7 @@ pub fn float(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn int(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn int(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	let val = args.remove(0);
 	match val {
 		Value::Number(Number::Int(_)) => Ok(val),
@@ -53,7 +53,7 @@ pub fn int(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn number(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn number(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	let val = args.remove(0);
 	match val {
 		Value::Number(_) => Ok(val),
@@ -61,7 +61,7 @@ pub fn number(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn point(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn point(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		2 => {
 			let x = args.remove(0);
@@ -77,14 +77,14 @@ pub fn point(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn regex(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn regex(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
 		Value::Strand(v) => Ok(Value::Regex(v.as_str().into())),
 		_ => Ok(Value::None),
 	}
 }
 
-pub fn string(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn string(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	let val = args.remove(0);
 	match val {
 		Value::Strand(_) => Ok(val),
@@ -92,11 +92,11 @@ pub fn string(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn table(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn table(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	Ok(Value::Table(Table(args.remove(0).as_string())))
 }
 
-pub fn thing(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn thing(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	let tb = args.remove(0);
 	match args.remove(0) {
 		Value::Thing(id) => Ok(Value::Thing(Thing {

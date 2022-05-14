@@ -1,8 +1,8 @@
-use crate::dbs::Runtime;
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::value::Value;
 
-pub async fn head(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn head(_ctx: &Context<'_>, args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		1 | 2 => todo!(),
 		_ => Err(Error::InvalidArguments {
@@ -12,7 +12,7 @@ pub async fn head(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub async fn get(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn get(_ctx: &Context<'_>, args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		1 | 2 => todo!(),
 		_ => Err(Error::InvalidArguments {
@@ -22,7 +22,7 @@ pub async fn get(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub async fn put(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn put(_ctx: &Context<'_>, args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		1 | 2 | 3 => todo!(),
 		_ => Err(Error::InvalidArguments {
@@ -32,7 +32,7 @@ pub async fn put(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub async fn post(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn post(_ctx: &Context<'_>, args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		1 | 2 | 3 => todo!(),
 		_ => Err(Error::InvalidArguments {
@@ -42,7 +42,7 @@ pub async fn post(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub async fn patch(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn patch(_ctx: &Context<'_>, args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		1 | 2 | 3 => todo!(),
 		_ => Err(Error::InvalidArguments {
@@ -52,7 +52,7 @@ pub async fn patch(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub async fn delete(_ctx: &Runtime, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn delete(_ctx: &Context<'_>, args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		1 | 2 => todo!(),
 		_ => Err(Error::InvalidArguments {

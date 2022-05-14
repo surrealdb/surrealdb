@@ -1,6 +1,6 @@
+use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
@@ -26,7 +26,7 @@ pub enum InfoStatement {
 impl InfoStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,

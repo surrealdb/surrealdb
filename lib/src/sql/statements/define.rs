@@ -1,6 +1,6 @@
+use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
@@ -48,7 +48,7 @@ pub enum DefineStatement {
 impl DefineStatement {
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&Value>,
@@ -109,7 +109,7 @@ pub struct DefineNamespaceStatement {
 impl DefineNamespaceStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -156,7 +156,7 @@ pub struct DefineDatabaseStatement {
 impl DefineDatabaseStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -211,7 +211,7 @@ pub struct DefineLoginStatement {
 impl DefineLoginStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -330,7 +330,7 @@ pub struct DefineTokenStatement {
 impl DefineTokenStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -426,7 +426,7 @@ pub struct DefineScopeStatement {
 impl DefineScopeStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -562,7 +562,7 @@ pub struct DefineTableStatement {
 impl DefineTableStatement {
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&Value>,
@@ -727,7 +727,7 @@ pub struct DefineEventStatement {
 impl DefineEventStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -806,7 +806,7 @@ pub struct DefineFieldStatement {
 impl DefineFieldStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -944,7 +944,7 @@ pub struct DefineIndexStatement {
 impl DefineIndexStatement {
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&Value>,

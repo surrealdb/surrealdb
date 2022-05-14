@@ -1,5 +1,5 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
@@ -19,7 +19,7 @@ pub struct KillStatement {
 impl KillStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		_opt: &Options,
 		_txn: &Transaction,
 		_doc: Option<&Value>,

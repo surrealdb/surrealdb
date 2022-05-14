@@ -1,5 +1,5 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
@@ -16,7 +16,7 @@ use channel::Sender;
 impl Value {
 	pub(crate) async fn channel(
 		self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -39,7 +39,7 @@ impl Array {
 	#[async_recursion]
 	pub(crate) async fn process(
 		self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -63,7 +63,7 @@ impl Array {
 impl Model {
 	pub(crate) async fn process(
 		self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -100,7 +100,7 @@ impl Model {
 impl Thing {
 	pub(crate) async fn process(
 		self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_stm: &Statement<'_>,
@@ -122,7 +122,7 @@ impl Thing {
 impl Table {
 	pub(crate) async fn process(
 		self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_stm: &Statement<'_>,

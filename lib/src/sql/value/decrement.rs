@@ -1,5 +1,5 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::number::Number;
@@ -9,7 +9,7 @@ use crate::sql::value::Value;
 impl Value {
 	pub async fn decrement(
 		&mut self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		path: &[Part],

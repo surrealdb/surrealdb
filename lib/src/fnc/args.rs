@@ -1,4 +1,4 @@
-use crate::dbs::Runtime;
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::value::Value;
 
@@ -15,11 +15,11 @@ pub enum Args {
 }
 
 pub fn check(
-	ctx: &Runtime,
+	ctx: &Context,
 	name: &str,
 	args: Vec<Value>,
 	size: Args,
-	func: fn(&Runtime, Vec<Value>) -> Result<Value, Error>,
+	func: fn(&Context, Vec<Value>) -> Result<Value, Error>,
 ) -> Result<Value, Error> {
 	match size {
 		Args::None => match args.len() {

@@ -1,6 +1,6 @@
+use crate::ctx::Context;
 use crate::dbs::Iterator;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
@@ -18,7 +18,7 @@ impl Value {
 	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
 	pub(crate) async fn iterate(
 		self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -42,7 +42,7 @@ impl Array {
 	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
 	pub(crate) async fn iterate(
 		self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -66,7 +66,7 @@ impl Array {
 impl Model {
 	pub(crate) async fn iterate(
 		self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -103,7 +103,7 @@ impl Model {
 impl Thing {
 	pub(crate) async fn iterate(
 		self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -125,7 +125,7 @@ impl Thing {
 impl Table {
 	pub(crate) async fn iterate(
 		self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,

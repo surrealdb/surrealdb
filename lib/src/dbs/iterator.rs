@@ -2,7 +2,6 @@ use crate::cnf::MAX_CONCURRENT_TASKS;
 use crate::ctx::Canceller;
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
@@ -54,7 +53,7 @@ impl Iterator {
 	// Process the records and output
 	pub async fn output(
 		&mut self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -64,7 +63,6 @@ impl Iterator {
 		// Enable context override
 		let mut ctx = Context::new(ctx);
 		self.run = ctx.add_cancel();
-		let ctx = ctx.freeze();
 		// Process prepared values
 		self.iterate(&ctx, opt, txn, stm).await?;
 		// Return any document errors
@@ -90,7 +88,7 @@ impl Iterator {
 	#[inline]
 	async fn output_split(
 		&mut self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -134,7 +132,7 @@ impl Iterator {
 	#[inline]
 	async fn output_group(
 		&mut self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -217,7 +215,7 @@ impl Iterator {
 	#[inline]
 	async fn output_order(
 		&mut self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		_opt: &Options,
 		_txn: &Transaction,
 		stm: &Statement<'_>,
@@ -256,7 +254,7 @@ impl Iterator {
 	#[inline]
 	async fn output_start(
 		&mut self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		_opt: &Options,
 		_txn: &Transaction,
 		stm: &Statement<'_>,
@@ -270,7 +268,7 @@ impl Iterator {
 	#[inline]
 	async fn output_limit(
 		&mut self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		_opt: &Options,
 		_txn: &Transaction,
 		stm: &Statement<'_>,
@@ -284,7 +282,7 @@ impl Iterator {
 	#[inline]
 	async fn output_fetch(
 		&mut self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -323,7 +321,7 @@ impl Iterator {
 	#[cfg(not(feature = "parallel"))]
 	async fn iterate(
 		&mut self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -339,7 +337,7 @@ impl Iterator {
 	#[cfg(feature = "parallel")]
 	async fn iterate(
 		&mut self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -412,7 +410,7 @@ impl Iterator {
 	// Process a new record Thing and Value
 	pub async fn process(
 		&mut self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,

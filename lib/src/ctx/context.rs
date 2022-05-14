@@ -1,32 +1,45 @@
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-use std::any::Any;
+use crate::sql::value::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub struct Context {
+impl<'a> From<Value> for Cow<'a, Value> {
+	fn from(v: Value) -> Cow<'a, Value> {
+		Cow::Owned(v)
+	}
+}
+
+impl<'a> From<&'a Value> for Cow<'a, Value> {
+	fn from(v: &'a Value) -> Cow<'a, Value> {
+		Cow::Borrowed(v)
+	}
+}
+
+pub struct Context<'a> {
 	// An optional parent context.
-	parent: Option<Arc<Context>>,
+	parent: Option<&'a Context<'a>>,
 	// An optional deadline.
 	deadline: Option<Instant>,
 	// Wether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
-	values: Option<HashMap<String, Box<dyn Any + Send + Sync>>>,
+	values: Option<HashMap<String, Cow<'a, Value>>>,
 }
 
-impl Default for Context {
+impl<'a> Default for Context<'a> {
 	fn default() -> Self {
 		Context::background()
 	}
 }
 
-impl Context {
+impl<'a> Context<'a> {
 	// Create an empty background context.
-	pub fn background() -> Context {
+	pub fn background() -> Self {
 		Context {
 			values: None,
 			parent: None,
@@ -36,22 +49,13 @@ impl Context {
 	}
 
 	// Create a new child from a frozen context.
-	pub fn new(parent: &Arc<Context>) -> Context {
+	pub fn new(parent: &'a Context) -> Self {
 		Context {
 			values: None,
-			parent: Some(Arc::clone(parent)),
+			parent: Some(parent),
 			deadline: parent.deadline,
 			cancelled: Arc::new(AtomicBool::new(false)),
 		}
-	}
-
-	// Freeze the context so it can be used to create child contexts. The
-	// parent context can no longer be modified once it has been frozen.
-	pub fn freeze(mut self) -> Arc<Context> {
-		if let Some(ref mut values) = self.values {
-			values.shrink_to_fit();
-		}
-		Arc::new(self)
 	}
 
 	// Add cancelation to the context. The value that is returned will cancel
@@ -80,10 +84,10 @@ impl Context {
 	// with the same key.
 	pub fn add_value<V>(&mut self, key: String, value: V)
 	where
-		V: Any + Send + Sync + Sized,
+		V: Into<Cow<'a, Value>>,
 	{
 		if let Some(ref mut values) = self.values {
-			values.insert(key, Box::new(value));
+			values.insert(key, value.into());
 		} else {
 			self.values = Some(HashMap::new());
 			self.add_value(key, value);
@@ -104,7 +108,7 @@ impl Context {
 			// TODO: see if we can relax the ordering.
 			_ if self.cancelled.load(Ordering::SeqCst) => Some(Reason::Canceled),
 			_ => match self.parent {
-				Some(ref parent_ctx) => parent_ctx.done(),
+				Some(ctx) => ctx.done(),
 				_ => None,
 			},
 		}
@@ -146,24 +150,27 @@ impl Context {
 
 	// Get a value from the context. If no value is stored under the
 	// provided key, then this will return None.
-	pub fn value<V>(&self, key: &str) -> Option<&V>
-	where
-		V: Any + Send + Sync + Sized,
-	{
-		if let Some(ref values) = self.values {
-			if let Some(value) = values.get(key) {
-				let value: &dyn Any = &**value;
-				return value.downcast_ref::<V>();
-			}
-		}
-		match self.parent {
-			Some(ref parent) => parent.value(key),
-			_ => None,
+	pub fn value(&self, key: &str) -> Option<&Value> {
+		match &self.values {
+			Some(v) => match v.get(key) {
+				Some(v) => match v {
+					Cow::Borrowed(v) => Some(*v),
+					Cow::Owned(v) => Some(v),
+				},
+				None => match self.parent {
+					Some(p) => p.value(key),
+					_ => None,
+				},
+			},
+			None => match self.parent {
+				Some(p) => p.value(key),
+				_ => None,
+			},
 		}
 	}
 }
 
-impl fmt::Debug for Context {
+impl<'a> fmt::Debug for Context<'a> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct("Context")
 			.field("parent", &self.parent)

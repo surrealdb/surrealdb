@@ -1,7 +1,7 @@
+use crate::ctx::Context;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
@@ -37,7 +37,7 @@ pub struct RelateStatement {
 impl RelateStatement {
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&Value>,

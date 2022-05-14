@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
@@ -14,7 +13,7 @@ use crate::sql::value::Value;
 impl<'a> Document<'a> {
 	pub async fn pluck(
 		&self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
@@ -127,8 +126,7 @@ impl<'a> Document<'a> {
 							let val = self.current.pick(k);
 							// Configure the context
 							let mut ctx = Context::new(ctx);
-							ctx.add_value("value".into(), val);
-							let ctx = ctx.freeze();
+							ctx.add_value("value".into(), &val);
 							// Process the PERMISSION clause
 							if !e.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 								out.del(&ctx, opt, txn, k).await?

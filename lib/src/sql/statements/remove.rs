@@ -1,6 +1,6 @@
+use crate::ctx::Context;
 use crate::dbs::Level;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::base::{base, Base};
@@ -32,7 +32,7 @@ pub enum RemoveStatement {
 impl RemoveStatement {
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&Value>,
@@ -93,7 +93,7 @@ pub struct RemoveNamespaceStatement {
 impl RemoveNamespaceStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -147,7 +147,7 @@ pub struct RemoveDatabaseStatement {
 impl RemoveDatabaseStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -202,7 +202,7 @@ pub struct RemoveLoginStatement {
 impl RemoveLoginStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -277,7 +277,7 @@ pub struct RemoveTokenStatement {
 impl RemoveTokenStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -351,7 +351,7 @@ pub struct RemoveScopeStatement {
 impl RemoveScopeStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -402,7 +402,7 @@ pub struct RemoveTableStatement {
 impl RemoveTableStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -457,7 +457,7 @@ pub struct RemoveEventStatement {
 impl RemoveEventStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -515,7 +515,7 @@ pub struct RemoveFieldStatement {
 impl RemoveFieldStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,
@@ -573,7 +573,7 @@ pub struct RemoveIndexStatement {
 impl RemoveIndexStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_doc: Option<&Value>,

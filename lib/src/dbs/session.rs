@@ -34,7 +34,7 @@ impl Session {
 		self.db.to_owned().map(Arc::new)
 	}
 	// Convert a session into a runtime
-	pub(crate) fn context(&self, mut ctx: Context) -> Context {
+	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
 		// Add session value
 		let key = String::from("session");
 		let val: Value = self.into();

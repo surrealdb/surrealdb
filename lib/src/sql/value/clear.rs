@@ -1,5 +1,5 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::value::Value;
@@ -7,7 +7,7 @@ use crate::sql::value::Value;
 impl Value {
 	pub async fn clear(
 		&mut self,
-		_ctx: &Runtime,
+		_ctx: &Context<'_>,
 		_opt: &Options,
 		_txn: &Transaction,
 	) -> Result<(), Error> {

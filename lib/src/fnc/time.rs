@@ -1,4 +1,4 @@
-use crate::dbs::Runtime;
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::datetime::Datetime;
 use crate::sql::value::Value;
@@ -8,7 +8,7 @@ use chrono::DurationRound;
 use chrono::Timelike;
 use chrono::Utc;
 
-pub fn day(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn day(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().day().into()),
 		_ => match args.remove(0) {
@@ -18,7 +18,7 @@ pub fn day(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn floor(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn floor(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
 		Value::Datetime(v) => match args.remove(0) {
 			Value::Duration(w) => match chrono::Duration::from_std(*w) {
@@ -34,7 +34,7 @@ pub fn floor(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn group(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn group(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
 		Value::Datetime(v) => match args.remove(0) {
 			Value::Strand(g) => match g.as_str() {
@@ -67,7 +67,7 @@ pub fn group(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn hour(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn hour(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().hour().into()),
 		_ => match args.remove(0) {
@@ -77,7 +77,7 @@ pub fn hour(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn mins(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn mins(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().minute().into()),
 		_ => match args.remove(0) {
@@ -87,7 +87,7 @@ pub fn mins(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn month(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn month(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().day().into()),
 		_ => match args.remove(0) {
@@ -97,7 +97,7 @@ pub fn month(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn nano(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn nano(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().timestamp_nanos().into()),
 		_ => match args.remove(0) {
@@ -107,11 +107,11 @@ pub fn nano(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn now(_: &Runtime, _: Vec<Value>) -> Result<Value, Error> {
+pub fn now(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
 	Ok(Datetime::default().into())
 }
 
-pub fn round(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn round(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
 		Value::Datetime(v) => match args.remove(0) {
 			Value::Duration(w) => match chrono::Duration::from_std(*w) {
@@ -127,7 +127,7 @@ pub fn round(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn secs(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn secs(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().second().into()),
 		_ => match args.remove(0) {
@@ -137,7 +137,7 @@ pub fn secs(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn unix(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn unix(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().timestamp().into()),
 		_ => match args.remove(0) {
@@ -147,7 +147,7 @@ pub fn unix(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn wday(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn wday(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().weekday().number_from_monday().into()),
 		_ => match args.remove(0) {
@@ -157,7 +157,7 @@ pub fn wday(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn week(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn week(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().iso_week().week().into()),
 		_ => match args.remove(0) {
@@ -167,7 +167,7 @@ pub fn week(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn yday(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn yday(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().ordinal().into()),
 		_ => match args.remove(0) {
@@ -177,7 +177,7 @@ pub fn yday(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn year(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn year(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Utc::now().year().into()),
 		_ => match args.remove(0) {

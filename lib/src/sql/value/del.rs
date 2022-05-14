@@ -1,5 +1,5 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::Abolish;
@@ -15,7 +15,7 @@ impl Value {
 	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
 	pub async fn del(
 		&mut self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		path: &[Part],

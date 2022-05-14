@@ -1,5 +1,5 @@
+use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::part::Part;
@@ -12,7 +12,7 @@ static RID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 impl Value {
 	pub async fn def(
 		&mut self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		val: &Thing,

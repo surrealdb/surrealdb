@@ -1,5 +1,5 @@
 use crate::cnf::ID_CHARS;
-use crate::dbs::Runtime;
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::datetime::Datetime;
 use crate::sql::value::Value;
@@ -8,15 +8,15 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use uuid::Uuid;
 
-pub fn rand(_: &Runtime, _: Vec<Value>) -> Result<Value, Error> {
+pub fn rand(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
 	Ok(rand::random::<f64>().into())
 }
 
-pub fn bool(_: &Runtime, _: Vec<Value>) -> Result<Value, Error> {
+pub fn bool(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
 	Ok(rand::random::<bool>().into())
 }
 
-pub fn r#enum(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn r#enum(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		0 => Ok(Value::None),
 		1 => match args.remove(0) {
@@ -36,7 +36,7 @@ pub fn r#enum(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn float(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn float(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		2 => {
 			let min = args.remove(0).as_float();
@@ -50,7 +50,7 @@ pub fn float(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn guid(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn guid(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		1 => {
 			let len = args.remove(0).as_int() as usize;
@@ -61,7 +61,7 @@ pub fn guid(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn int(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn int(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		2 => {
 			let min = args.remove(0).as_int();
@@ -75,7 +75,7 @@ pub fn int(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn string(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn string(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		2 => match args.remove(0).as_int() {
 			min if min >= 0 => match args.remove(0).as_int() {
@@ -123,7 +123,7 @@ pub fn string(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn time(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn time(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		2 => {
 			let min = args.remove(0).as_int();
@@ -146,6 +146,6 @@ pub fn time(_: &Runtime, mut args: Vec<Value>) -> Result<Value, Error> {
 	}
 }
 
-pub fn uuid(_: &Runtime, _: Vec<Value>) -> Result<Value, Error> {
+pub fn uuid(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
 	Ok(Uuid::new_v4().to_string().into())
 }

@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::error::IResult;
@@ -41,7 +40,7 @@ impl PartialOrd for Subquery {
 impl Subquery {
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&Value>,
@@ -55,12 +54,9 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if doc.is_some() {
-					let doc = doc.unwrap().clone();
+				if let Some(doc) = doc {
 					ctx.add_value("parent".into(), doc);
 				}
-				// Prepare context
-				let ctx = ctx.freeze();
 				// Process subquery
 				let res = v.compute(&ctx, &opt, txn, doc).await?;
 				// Process result
@@ -81,12 +77,9 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if doc.is_some() {
-					let doc = doc.unwrap().clone();
+				if let Some(doc) = doc {
 					ctx.add_value("parent".into(), doc);
 				}
-				// Prepare context
-				let ctx = ctx.freeze();
 				// Process subquery
 				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
@@ -102,12 +95,9 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if doc.is_some() {
-					let doc = doc.unwrap().clone();
+				if let Some(doc) = doc {
 					ctx.add_value("parent".into(), doc);
 				}
-				// Prepare context
-				let ctx = ctx.freeze();
 				// Process subquery
 				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
@@ -123,12 +113,9 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if doc.is_some() {
-					let doc = doc.unwrap().clone();
+				if let Some(doc) = doc {
 					ctx.add_value("parent".into(), doc);
 				}
-				// Prepare context
-				let ctx = ctx.freeze();
 				// Process subquery
 				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
@@ -144,12 +131,9 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if doc.is_some() {
-					let doc = doc.unwrap().clone();
+				if let Some(doc) = doc {
 					ctx.add_value("parent".into(), doc);
 				}
-				// Prepare context
-				let ctx = ctx.freeze();
 				// Process subquery
 				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
@@ -165,12 +149,9 @@ impl Subquery {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
-				if doc.is_some() {
-					let doc = doc.unwrap().clone();
+				if let Some(doc) = doc {
 					ctx.add_value("parent".into(), doc);
 				}
-				// Prepare context
-				let ctx = ctx.freeze();
 				// Process subquery
 				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {

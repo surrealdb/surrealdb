@@ -1,4 +1,4 @@
-use crate::dbs::Runtime;
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::fnc::args::Args;
 use crate::sql::value::Value;
@@ -22,7 +22,7 @@ pub mod time;
 pub mod r#type;
 pub mod util;
 
-pub async fn run(ctx: &Runtime, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
 	match name {
 		//
 		"array::combine" => args::check(ctx, name, args, Args::Two, array::combine),

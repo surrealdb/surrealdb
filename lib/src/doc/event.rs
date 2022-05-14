@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Runtime;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
@@ -11,7 +10,7 @@ use std::ops::Deref;
 impl<'a> Document<'a> {
 	pub async fn event(
 		&self,
-		ctx: &Runtime,
+		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_stm: &Statement<'_>,
@@ -37,10 +36,9 @@ impl<'a> Document<'a> {
 			// Configure the context
 			let mut ctx = Context::new(ctx);
 			ctx.add_value("event".into(), met);
-			ctx.add_value("value".into(), self.current.deref().clone());
-			ctx.add_value("after".into(), self.current.deref().clone());
-			ctx.add_value("before".into(), self.initial.deref().clone());
-			let ctx = ctx.freeze();
+			ctx.add_value("value".into(), self.current.deref());
+			ctx.add_value("after".into(), self.current.deref());
+			ctx.add_value("before".into(), self.initial.deref());
 			// Ensure event queries run
 			let opt = &opt.perms(false);
 			// Process conditional clause
