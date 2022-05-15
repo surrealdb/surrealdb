@@ -1,6 +1,6 @@
-macro_rules! output {
+macro_rules! bytes {
 	($expression:expr) => {
-		bytes::Bytes::from(format!("{}\n", $expression))
+		format!("{}\n", $expression).into_bytes()
 	};
 }
 

@@ -1,4 +1,3 @@
-use crate::cnf::MAX_CONCURRENT_TASKS;
 use crate::ctx::Canceller;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -13,8 +12,6 @@ use crate::sql::part::Part;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use executor::Executor;
-use futures::join;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
@@ -355,13 +352,13 @@ impl Iterator {
 			// Run statements in parallel
 			true => {
 				// Create a new executor
-				let exe = Executor::new();
+				let exe = executor::Executor::new();
 				// Take all of the iterator values
 				let vals = mem::take(&mut self.readies);
 				// Create a channel to shutdown
 				let (end, exit) = channel::bounded::<()>(1);
 				// Create an unbounded channel
-				let (chn, docs) = channel::bounded(MAX_CONCURRENT_TASKS);
+				let (chn, docs) = channel::bounded(crate::cnf::MAX_CONCURRENT_TASKS);
 				// Create an async closure for prepared values
 				let adocs = async {
 					// Process all prepared values
@@ -374,7 +371,7 @@ impl Iterator {
 					drop(chn);
 				};
 				// Create an unbounded channel
-				let (chn, vals) = channel::bounded(MAX_CONCURRENT_TASKS);
+				let (chn, vals) = channel::bounded(crate::cnf::MAX_CONCURRENT_TASKS);
 				// Create an async closure for received values
 				let avals = async {
 					// Process all received values
@@ -398,7 +395,7 @@ impl Iterator {
 				// Run all executor tasks
 				let fut = exe.run(exit.recv());
 				// Wait for all closures
-				let res = join!(adocs, avals, aproc, fut);
+				let res = futures::join!(adocs, avals, aproc, fut);
 				// Consume executor error
 				let _ = res.3;
 				// Everything processed ok

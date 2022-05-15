@@ -3,7 +3,10 @@ use super::kv::Convert;
 use super::Key;
 use super::Val;
 use crate::err::Error;
+use crate::key::thing;
 use crate::sql;
+use crate::sql::thing::Thing;
+use channel::Sender;
 use sql::statements::DefineDatabaseStatement;
 use sql::statements::DefineEventStatement;
 use sql::statements::DefineFieldStatement;
@@ -748,6 +751,167 @@ impl Transaction {
 				},
 			)
 			.await;
+		Ok(())
+	}
+	/// Writes the full database contents as binary SQL.
+	pub async fn export(&mut self, ns: &str, db: &str, chn: Sender<Vec<u8>>) -> Result<(), Error> {
+		// Output OPTIONS
+		{
+			chn.send(bytes!("-- ------------------------------")).await?;
+			chn.send(bytes!("-- OPTION")).await?;
+			chn.send(bytes!("-- ------------------------------")).await?;
+			chn.send(bytes!("")).await?;
+			chn.send(bytes!("OPTION IMPORT;")).await?;
+			chn.send(bytes!("")).await?;
+		}
+		// Output LOGINS
+		{
+			let dls = self.all_dl(ns, db).await?;
+			if !dls.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- LOGINS")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for dl in dls {
+					chn.send(bytes!(format!("{};", dl))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
+		// Output TOKENS
+		{
+			let dts = self.all_dt(ns, db).await?;
+			if !dts.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- TOKENS")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for dt in dts {
+					chn.send(bytes!(format!("{};", dt))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
+		// Output SCOPES
+		{
+			let scs = self.all_sc(ns, db).await?;
+			if !scs.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- SCOPES")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for sc in scs {
+					chn.send(bytes!(format!("{};", sc))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
+		// Output TABLES
+		{
+			let tbs = self.all_tb(ns, db).await?;
+			if !tbs.is_empty() {
+				for tb in &tbs {
+					// Output TABLE
+					chn.send(bytes!("-- ------------------------------")).await?;
+					chn.send(bytes!(format!("-- TABLE: {}", tb.name))).await?;
+					chn.send(bytes!("-- ------------------------------")).await?;
+					chn.send(bytes!("")).await?;
+					chn.send(bytes!(format!("{};", tb))).await?;
+					chn.send(bytes!("")).await?;
+					// Output FIELDS
+					{
+						let fds = self.all_fd(ns, db, &tb.name).await?;
+						if !fds.is_empty() {
+							for fd in &fds {
+								chn.send(bytes!(format!("{};", fd))).await?;
+							}
+							chn.send(bytes!("")).await?;
+						}
+					}
+					// Output INDEXS
+					let ixs = self.all_fd(ns, db, &tb.name).await?;
+					if !ixs.is_empty() {
+						for ix in &ixs {
+							chn.send(bytes!(format!("{};", ix))).await?;
+						}
+						chn.send(bytes!("")).await?;
+					}
+					// Output EVENTS
+					let evs = self.all_ev(ns, db, &tb.name).await?;
+					if !evs.is_empty() {
+						for ev in &evs {
+							chn.send(bytes!(format!("{};", ev))).await?;
+						}
+						chn.send(bytes!("")).await?;
+					}
+				}
+				// Start transaction
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- TRANSACTION")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				chn.send(bytes!("BEGIN TRANSACTION;")).await?;
+				chn.send(bytes!("")).await?;
+				// Output TABLE data
+				for tb in &tbs {
+					chn.send(bytes!("-- ------------------------------")).await?;
+					chn.send(bytes!(format!("-- TABLE DATA: {}", tb.name))).await?;
+					chn.send(bytes!("-- ------------------------------")).await?;
+					chn.send(bytes!("")).await?;
+					// Fetch records
+					let beg = thing::prefix(ns, db, &tb.name);
+					let end = thing::suffix(ns, db, &tb.name);
+					let mut nxt: Option<Vec<u8>> = None;
+					loop {
+						let res = match nxt {
+							None => {
+								let min = beg.clone();
+								let max = end.clone();
+								self.scan(min..max, 1000).await?
+							}
+							Some(ref mut beg) => {
+								beg.push(0x00);
+								let min = beg.clone();
+								let max = end.clone();
+								self.scan(min..max, 1000).await?
+							}
+						};
+						if !res.is_empty() {
+							// Get total results
+							let n = res.len();
+							// Exit when settled
+							if n == 0 {
+								break;
+							}
+							// Loop over results
+							for (i, (k, v)) in res.into_iter().enumerate() {
+								// Ready the next
+								if n == i + 1 {
+									nxt = Some(k.clone());
+								}
+								// Parse the key-value
+								let k: crate::key::thing::Thing = (&k).into();
+								let v: crate::sql::value::Value = (&v).into();
+								let t = Thing::from((k.tb, k.id));
+								// Write record
+								chn.send(bytes!(format!("UPDATE {} CONTENT {};", t, v))).await?;
+							}
+							continue;
+						}
+						break;
+					}
+					chn.send(bytes!("")).await?;
+				}
+				// Commit transaction
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- TRANSACTION")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				chn.send(bytes!("COMMIT TRANSACTION;")).await?;
+				chn.send(bytes!("")).await?;
+			}
+		}
+		// Everything exported
 		Ok(())
 	}
 }

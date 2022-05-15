@@ -206,7 +206,7 @@ pub enum Error {
 	},
 
 	/// There was an error processing a value in parallel
-	#[error("There was an error processing a value in parallel ")]
+	#[error("There was an error processing a value in parallel")]
 	Channel(String),
 
 	/// Represents an underlying error with Serde encoding / decoding
@@ -255,8 +255,8 @@ impl From<channel::RecvError> for Error {
 	}
 }
 
-impl From<channel::SendError<bytes::Bytes>> for Error {
-	fn from(e: channel::SendError<bytes::Bytes>) -> Error {
+impl From<channel::SendError<Vec<u8>>> for Error {
+	fn from(e: channel::SendError<Vec<u8>>) -> Error {
 		Error::Channel(e.to_string())
 	}
 }

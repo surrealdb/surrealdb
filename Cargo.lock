@@ -2449,7 +2449,6 @@ dependencies = [
  "async-executor",
  "async-recursion",
  "bigdecimal",
- "bytes",
  "chrono",
  "dmp",
  "echodb",

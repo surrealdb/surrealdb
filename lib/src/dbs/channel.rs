@@ -14,6 +14,8 @@ use async_recursion::async_recursion;
 use channel::Sender;
 
 impl Value {
+	#[cfg_attr(feature = "parallel", async_recursion)]
+	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
 	pub(crate) async fn channel(
 		self,
 		ctx: &Context<'_>,
@@ -36,7 +38,8 @@ impl Value {
 }
 
 impl Array {
-	#[async_recursion]
+	#[cfg_attr(feature = "parallel", async_recursion)]
+	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
 	pub(crate) async fn process(
 		self,
 		ctx: &Context<'_>,

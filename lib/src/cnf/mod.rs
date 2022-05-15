@@ -1,5 +1,5 @@
-// Specifies how many concurrent jobs can be buffered in the worker channel.
 #[cfg(feature = "parallel")]
+// Specifies how many concurrent jobs can be buffered in the worker channel.
 pub const MAX_CONCURRENT_TASKS: usize = 64;
 
 // Specifies how many subqueries will be processed recursively before the query fails.

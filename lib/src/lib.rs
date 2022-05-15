@@ -19,7 +19,6 @@ mod ctx;
 mod dbs;
 mod doc;
 mod err;
-mod exe;
 mod fnc;
 mod key;
 mod kvs;
@@ -38,4 +37,8 @@ pub use kvs::Transaction;
 pub use kvs::Val;
 
 // Re-exports
-pub use channel::Receiver;
+pub mod channel {
+	pub use channel::bounded as new;
+	pub use channel::Receiver;
+	pub use channel::Sender;
+}

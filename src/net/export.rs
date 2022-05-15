@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::net::session;
 use crate::net::DB;
+use bytes::Bytes;
 use hyper::body::Body;
 use surrealdb::Session;
 use warp::Filter;
@@ -25,21 +26,18 @@ async fn handler(session: Session) -> Result<impl warp::Reply, warp::Rejection> 
 			let dbv = session.db.clone().unwrap();
 			// Create a chunked response
 			let (mut chn, bdy) = Body::channel();
+			// Create a new bounded channel
+			let (snd, rcv) = surrealdb::channel::new(1);
 			// Spawn a new database export
-			match db.export(nsv, dbv).await {
-				Ok(rcv) => {
-					// Process all processed values
-					tokio::spawn(async move {
-						while let Ok(v) = rcv.recv().await {
-							let _ = chn.send_data(v).await;
-						}
-					});
-					// Return the chunked body
-					Ok(warp::reply::Response::new(bdy))
+			tokio::spawn(db.export(nsv, dbv, snd));
+			// Process all processed values
+			tokio::spawn(async move {
+				while let Ok(v) = rcv.recv().await {
+					let _ = chn.send_data(Bytes::from(v)).await;
 				}
-				// There was en error with the export
-				_ => Err(warp::reject::custom(Error::InvalidAuth)),
-			}
+			});
+			// Return the chunked body
+			Ok(warp::reply::Response::new(bdy))
 		}
 		// There was an error with permissions
 		_ => Err(warp::reject::custom(Error::InvalidAuth)),
