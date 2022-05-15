@@ -1,15 +1,25 @@
-use crate::sql::common::escape;
 use crate::sql::common::val_char;
 use crate::sql::error::IResult;
+use crate::sql::escape::escape_ident;
 use nom::branch::alt;
+use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
+use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
+use nom::character::complete::one_of;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
 use std::str;
+
+const BRACKET_L: char = '⟨';
+const BRACKET_R: char = '⟩';
+const BRACKET_END: &str = r#"⟩"#;
+
+const BACKTICK: &str = r#"`"#;
+const BACKTICK_ESC: &str = r#"\`"#;
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Ident(pub String);
@@ -41,7 +51,7 @@ impl Deref for Ident {
 
 impl fmt::Display for Ident {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", escape(&self.0, &val_char, "`"))
+		write!(f, "{}", escape_ident(&self.0))
 	}
 }
 
@@ -61,12 +71,14 @@ fn ident_default(i: &str) -> IResult<&str, String> {
 }
 
 fn ident_backtick(i: &str) -> IResult<&str, String> {
-	let (i, v) = delimited(char('`'), is_not("`"), char('`'))(i)?;
-	Ok((i, String::from(v)))
+	let (i, _) = char('`')(i)?;
+	let (i, v) = alt((escaped(is_not(BACKTICK_ESC), '\\', one_of(BACKTICK)), tag("")))(i)?;
+	let (i, _) = char('`')(i)?;
+	Ok((i, String::from(v).replace(BACKTICK_ESC, BACKTICK)))
 }
 
 fn ident_brackets(i: &str) -> IResult<&str, String> {
-	let (i, v) = delimited(char('⟨'), is_not("⟩"), char('⟩'))(i)?;
+	let (i, v) = delimited(char(BRACKET_L), is_not(BRACKET_END), char(BRACKET_R))(i)?;
 	Ok((i, String::from(v)))
 }
 

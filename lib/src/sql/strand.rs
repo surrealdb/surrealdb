@@ -1,4 +1,5 @@
 use crate::sql::error::IResult;
+use crate::sql::escape::escape_strand;
 use nom::branch::alt;
 use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
@@ -49,7 +50,7 @@ impl Strand {
 
 impl fmt::Display for Strand {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "\"{}\"", self.0)
+		write!(f, "{}", escape_strand(&self.0))
 	}
 }
 

@@ -1,6 +1,5 @@
-use crate::sql::common::escape;
-use crate::sql::common::val_char;
 use crate::sql::error::IResult;
+use crate::sql::escape::escape_ident;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
 use crate::sql::number::Number;
@@ -45,8 +44,7 @@ impl From<(String, Number)> for Thing {
 
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let t = escape(&self.tb, &val_char, "`");
-		write!(f, "{}:{}", t, self.id)
+		write!(f, "{}:{}", escape_ident(&self.tb), self.id)
 	}
 }
 

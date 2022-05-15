@@ -1,7 +1,6 @@
-use crate::sql::common::escape;
 use crate::sql::common::take_u64;
-use crate::sql::common::val_char;
 use crate::sql::error::IResult;
+use crate::sql::escape::escape_ident;
 use crate::sql::ident::ident_raw;
 use nom::branch::alt;
 use nom::character::complete::char;
@@ -18,12 +17,10 @@ impl fmt::Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Model::Count(tb, c) => {
-				let t = escape(tb, &val_char, "`");
-				write!(f, "|{}:{}|", t, c)
+				write!(f, "|{}:{}|", escape_ident(tb), c)
 			}
 			Model::Range(tb, b, e) => {
-				let t = escape(tb, &val_char, "`");
-				write!(f, "|{}:{}..{}|", t, b, e)
+				write!(f, "|{}:{}..{}|", escape_ident(tb), b, e)
 			}
 		}
 	}

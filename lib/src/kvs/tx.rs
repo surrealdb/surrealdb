@@ -717,7 +717,7 @@ impl Transaction {
 			.put(
 				key,
 				DefineNamespaceStatement {
-					name: ns.to_owned(),
+					name: ns.into(),
 				},
 			)
 			.await;
@@ -730,7 +730,7 @@ impl Transaction {
 			.put(
 				key,
 				DefineDatabaseStatement {
-					name: db.to_owned(),
+					name: db.into(),
 				},
 			)
 			.await;
@@ -743,7 +743,7 @@ impl Transaction {
 			.put(
 				key,
 				DefineTableStatement {
-					name: tb.to_owned(),
+					name: tb.into(),
 					..DefineTableStatement::default()
 				},
 			)

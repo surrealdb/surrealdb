@@ -1,8 +1,7 @@
 use crate::sql::common::commas;
-use crate::sql::common::escape;
-use crate::sql::common::val_char;
 use crate::sql::error::IResult;
-use crate::sql::ident::ident_raw;
+use crate::sql::escape::escape_ident;
+use crate::sql::ident::{ident_raw, Ident};
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -32,6 +31,12 @@ impl From<String> for Table {
 	}
 }
 
+impl From<Ident> for Table {
+	fn from(v: Ident) -> Self {
+		Table(v.0)
+	}
+}
+
 impl Deref for Table {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {
@@ -41,7 +46,7 @@ impl Deref for Table {
 
 impl fmt::Display for Table {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", escape(&self.0, &val_char, "`"))
+		write!(f, "{}", escape_ident(&self.0))
 	}
 }
 

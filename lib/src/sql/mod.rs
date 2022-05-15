@@ -8,6 +8,7 @@ pub(crate) mod data;
 pub(crate) mod datetime;
 pub(crate) mod duration;
 pub(crate) mod error;
+pub(crate) mod escape;
 pub(crate) mod expression;
 pub(crate) mod fetch;
 pub(crate) mod field;

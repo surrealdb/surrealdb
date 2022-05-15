@@ -3,8 +3,9 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
-use crate::sql::common::{commas, escape, val_char};
+use crate::sql::common::{commas, val_char};
 use crate::sql::error::IResult;
+use crate::sql::escape::escape_key;
 use crate::sql::operation::{Op, Operation};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
@@ -122,7 +123,7 @@ impl fmt::Display for Object {
 			f,
 			"{{ {} }}",
 			self.iter()
-				.map(|(k, v)| format!("{}: {}", escape(k, &val_char, "\""), v))
+				.map(|(k, v)| format!("{}: {}", escape_key(k), v))
 				.collect::<Vec<_>>()
 				.join(", ")
 		)
