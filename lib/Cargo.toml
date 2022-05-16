@@ -7,7 +7,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
 default = ["parallel", "kv-tikv", "kv-echodb", "kv-yokudb"]
-parallel = []
+parallel = ["executor"]
 kv-tikv = ["tikv"]
 kv-echodb = ["echodb"]
 kv-indxdb = ["indxdb"]
@@ -22,7 +22,7 @@ chrono = { version = "0.4.19", features = ["serde"] }
 derive = { version = "0.1.2", package = "surrealdb-derive" }
 dmp = "0.1.1"
 echodb = { version = "0.3.0", optional = true }
-executor = { version = "1.4.1", package = "async-executor" }
+executor = { version = "1.4.1", package = "async-executor", optional = true }
 futures = "0.3.21"
 fuzzy-matcher = "0.3.7"
 geo = { version = "0.20.1", features = ["use-serde"] }
