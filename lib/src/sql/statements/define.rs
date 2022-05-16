@@ -31,7 +31,6 @@ use rand::rngs::OsRng;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub enum DefineStatement {
@@ -608,7 +607,7 @@ impl DefineTableStatement {
 					what: Values(vec![Value::Table(v.clone())]),
 					..UpdateStatement::default()
 				};
-				Arc::new(stm).compute(ctx, opt, txn, doc).await?;
+				stm.compute(ctx, opt, txn, doc).await?;
 			}
 		}
 		// Ok all good
@@ -981,7 +980,7 @@ impl DefineIndexStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),
 			..UpdateStatement::default()
 		};
-		Arc::new(stm).compute(ctx, opt, txn, doc).await?;
+		stm.compute(ctx, opt, txn, doc).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
