@@ -51,4 +51,4 @@ utf-8 = "0.7.6"
 uuid = { version = "1.0.0", features = ["serde", "v4"] }
 
 [dev-dependencies]
-tokio = { version = "1.18.1", features = ["macros"] }
+tokio = { version = "1.18.2", features = ["macros"] }

@@ -20,7 +20,7 @@ argon2 = "0.4.0"
 base64 = "0.13.0"
 bytes = "1.1.0"
 chrono = { version = "0.4.19", features = ["serde"] }
-clap = "3.1.17"
+clap = "3.1.18"
 fern = { version = "0.6.1", features = ["colored"] }
 futures = "0.3.21"
 http = "0.2.7"
@@ -36,5 +36,5 @@ serde_json = "1.0.81"
 serde_pack = { version = "1.1.0", package = "rmp-serde" }
 surrealdb = { path = "lib" }
 thiserror = "1.0.31"
-tokio = { version = "1.18.1", features = ["macros"] }
+tokio = { version = "1.18.2", features = ["macros"] }
 warp = { version = "0.3.2", features = ["compression", "tls", "websocket"] }
