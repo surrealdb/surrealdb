@@ -42,7 +42,7 @@ impl Param {
 		match self.first() {
 			// The first part will be a field
 			Some(Part::Field(v)) => match v.as_str() {
-				"this" => match doc {
+				"this" | "self" => match doc {
 					// The base document exists
 					Some(v) => {
 						// Get the path parts
