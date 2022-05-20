@@ -27,6 +27,15 @@ impl From<time::Duration> for Duration {
 	}
 }
 
+impl From<String> for Duration {
+	fn from(s: String) -> Self {
+		match duration(s.as_ref()) {
+			Ok((_, v)) => v,
+			Err(_) => Duration::default(),
+		}
+	}
+}
+
 impl<'a> From<&'a str> for Duration {
 	fn from(s: &str) -> Self {
 		match duration(s) {

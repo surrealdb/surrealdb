@@ -1,3 +1,4 @@
+use crate::err::Error;
 use std::fmt;
 use std::io;
 
@@ -12,6 +13,15 @@ impl fmt::Display for Reason {
 		match *self {
 			Reason::Timedout => write!(f, "Context timedout"),
 			Reason::Canceled => write!(f, "Context canceled"),
+		}
+	}
+}
+
+impl From<Reason> for Error {
+	fn from(reason: Reason) -> Self {
+		match reason {
+			Reason::Timedout => Error::QueryTimedout,
+			Reason::Canceled => Error::QueryCancelled,
 		}
 	}
 }

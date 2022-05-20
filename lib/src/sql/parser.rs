@@ -1,6 +1,5 @@
 use crate::err::Error;
 use crate::sql::error::Error::ParserError;
-use crate::sql::error::Error::ScriptError;
 use crate::sql::query::{query, Query};
 use crate::sql::value::{json as value, Value};
 use nom::Err;
@@ -20,9 +19,6 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 						sql: s.to_string(),
 					})
 				}
-				ScriptError(e) => Err(Error::InvalidScript {
-					message: e,
-				}),
 			},
 			Err(Err::Failure(e)) => match e {
 				ParserError(e) => {
@@ -33,9 +29,6 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 						sql: s.to_string(),
 					})
 				}
-				ScriptError(e) => Err(Error::InvalidScript {
-					message: e,
-				}),
 			},
 			_ => unreachable!(),
 		},
@@ -56,9 +49,6 @@ pub fn json(input: &str) -> Result<Value, Error> {
 						sql: s.to_string(),
 					})
 				}
-				ScriptError(e) => Err(Error::InvalidScript {
-					message: e,
-				}),
 			},
 			Err(Err::Failure(e)) => match e {
 				ParserError(e) => {
@@ -69,9 +59,6 @@ pub fn json(input: &str) -> Result<Value, Error> {
 						sql: s.to_string(),
 					})
 				}
-				ScriptError(e) => Err(Error::InvalidScript {
-					message: e,
-				}),
 			},
 			_ => unreachable!(),
 		},

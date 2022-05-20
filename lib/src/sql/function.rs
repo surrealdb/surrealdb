@@ -11,6 +11,7 @@ use crate::sql::value::{single, value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
+use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -110,27 +111,32 @@ impl Function {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			Function::Future(ref e) => match opt.futures {
+			Function::Cast(s, e) => {
+				let a = e.compute(ctx, opt, txn, doc).await?;
+				fnc::cast::run(ctx, s, a)
+			}
+			Function::Normal(s, e) => {
+				let mut a: Vec<Value> = Vec::with_capacity(e.len());
+				for v in e {
+					a.push(v.compute(ctx, opt, txn, doc).await?);
+				}
+				fnc::run(ctx, s, a).await
+			}
+			Function::Future(e) => match opt.futures {
 				true => {
 					let a = e.compute(ctx, opt, txn, doc).await?;
 					fnc::future::run(ctx, a)
 				}
 				false => Ok(self.to_owned().into()),
 			},
-			Function::Script(ref s) => {
-				let a = s.to_owned();
-				fnc::script::run(ctx, a)
-			}
-			Function::Cast(ref s, ref e) => {
-				let a = e.compute(ctx, opt, txn, doc).await?;
-				fnc::cast::run(ctx, s, a)
-			}
-			Function::Normal(ref s, ref e) => {
-				let mut a: Vec<Value> = Vec::with_capacity(e.len());
-				for v in e {
-					a.push(v.compute(ctx, opt, txn, doc).await?);
-				}
-				fnc::run(ctx, s, a).await
+			#[allow(unused_variables)]
+			Function::Script(s) => {
+				#[cfg(feature = "scripting")]
+				return fnc::script::run(ctx, doc, s);
+				#[cfg(not(feature = "scripting"))]
+				return Err(Error::InvalidScript {
+					message: String::from("Embedded functions are not enabled."),
+				});
 			}
 		}
 	}
@@ -140,7 +146,7 @@ impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Function::Future(ref e) => write!(f, "fn::future -> {{ {} }}", e),
-			Function::Script(ref s) => write!(f, "fn::script -> {{ {} }}", s),
+			Function::Script(ref s) => write!(f, "fn::script -> {{{}}}", s),
 			Function::Cast(ref s, ref e) => write!(f, "<{}> {}", s, e),
 			Function::Normal(ref s, ref e) => write!(
 				f,
@@ -153,7 +159,21 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((casts, embed, future, normal))(i)
+	alt((scripts, future, casts, normal))(i)
+}
+
+fn scripts(i: &str) -> IResult<&str, Function> {
+	let (i, _) = tag("fn::script")(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('-')(i)?;
+	let (i, _) = char('>')(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(tag("function()"))(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('{')(i)?;
+	let (i, v) = script(i)?;
+	let (i, _) = char('}')(i)?;
+	Ok((i, Function::Script(v)))
 }
 
 fn future(i: &str) -> IResult<&str, Function> {
@@ -168,20 +188,6 @@ fn future(i: &str) -> IResult<&str, Function> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('}')(i)?;
 	Ok((i, Function::Future(v)))
-}
-
-fn embed(i: &str) -> IResult<&str, Function> {
-	let (i, _) = tag("fn::script")(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('-')(i)?;
-	let (i, _) = char('>')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = script(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
-	Ok((i, Function::Script(v)))
 }
 
 fn casts(i: &str) -> IResult<&str, Function> {
@@ -485,5 +491,23 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("fn::future -> { 1.2345 + 5.4321 }", format!("{}", out));
 		assert_eq!(out, Function::Future(Value::from(Expression::parse("1.2345 + 5.4321"))));
+	}
+
+	#[test]
+	fn function_script_expression() {
+		let sql = "fn::script -> { return this.tags.filter(t => { return t.length > 3; }); }";
+		let res = function(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(
+			"fn::script -> { return this.tags.filter(t => { return t.length > 3; }); }",
+			format!("{}", out)
+		);
+		assert_eq!(
+			out,
+			Function::Script(Script::parse(
+				" return this.tags.filter(t => { return t.length > 3; }); "
+			))
+		);
 	}
 }
