@@ -185,7 +185,7 @@ impl Transaction {
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
-		V: Into<Key>,
+		V: Into<Val>,
 	{
 		match self {
 			#[cfg(feature = "kv-echodb")]
@@ -210,7 +210,7 @@ impl Transaction {
 	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
-		V: Into<Key>,
+		V: Into<Val>,
 	{
 		match self {
 			#[cfg(feature = "kv-echodb")]
