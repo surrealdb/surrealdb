@@ -1,6 +1,7 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::serde::is_internal_serialization;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{LineString, Point, Polygon};
@@ -367,7 +368,21 @@ impl Serialize for Geometry {
 	where
 		S: serde::Serializer,
 	{
-		if s.is_human_readable() {
+		if is_internal_serialization() {
+			match self {
+				Geometry::Point(v) => s.serialize_newtype_variant("Geometry", 0, "Point", v),
+				Geometry::Line(v) => s.serialize_newtype_variant("Geometry", 1, "Line", v),
+				Geometry::Polygon(v) => s.serialize_newtype_variant("Geometry", 2, "Polygon", v),
+				Geometry::MultiPoint(v) => s.serialize_newtype_variant("Geometry", 3, "Points", v),
+				Geometry::MultiLine(v) => s.serialize_newtype_variant("Geometry", 4, "Lines", v),
+				Geometry::MultiPolygon(v) => {
+					s.serialize_newtype_variant("Geometry", 5, "Polygons", v)
+				}
+				Geometry::Collection(v) => {
+					s.serialize_newtype_variant("Geometry", 6, "Collection", v)
+				}
+			}
+		} else {
 			match self {
 				Geometry::Point(v) => {
 					let mut map = s.serialize_map(Some(2))?;
@@ -448,20 +463,6 @@ impl Serialize for Geometry {
 					map.serialize_key("geometries")?;
 					map.serialize_value(v)?;
 					map.end()
-				}
-			}
-		} else {
-			match self {
-				Geometry::Point(v) => s.serialize_newtype_variant("Geometry", 0, "Point", v),
-				Geometry::Line(v) => s.serialize_newtype_variant("Geometry", 1, "Line", v),
-				Geometry::Polygon(v) => s.serialize_newtype_variant("Geometry", 2, "Polygon", v),
-				Geometry::MultiPoint(v) => s.serialize_newtype_variant("Geometry", 3, "Points", v),
-				Geometry::MultiLine(v) => s.serialize_newtype_variant("Geometry", 4, "Lines", v),
-				Geometry::MultiPolygon(v) => {
-					s.serialize_newtype_variant("Geometry", 5, "Polygons", v)
-				}
-				Geometry::Collection(v) => {
-					s.serialize_newtype_variant("Geometry", 6, "Collection", v)
 				}
 			}
 		}

@@ -3,6 +3,7 @@ use crate::sql::escape::escape_ident;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
 use crate::sql::number::Number;
+use crate::sql::serde::is_internal_serialization;
 use derive::Store;
 use nom::character::complete::char;
 use serde::ser::SerializeStruct;
@@ -53,14 +54,14 @@ impl Serialize for Thing {
 	where
 		S: serde::Serializer,
 	{
-		if serializer.is_human_readable() {
-			let output = format!("{}:{}", self.tb, self.id);
-			serializer.serialize_some(&output)
-		} else {
+		if is_internal_serialization() {
 			let mut val = serializer.serialize_struct("Thing", 2)?;
 			val.serialize_field("tb", &self.tb)?;
 			val.serialize_field("id", &self.id)?;
 			val.end()
+		} else {
+			let output = format!("{}:{}", self.tb, self.id);
+			serializer.serialize_some(&output)
 		}
 	}
 }

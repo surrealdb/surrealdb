@@ -1,6 +1,7 @@
 use crate::sql::common::take_u64;
 use crate::sql::datetime::Datetime;
 use crate::sql::error::IResult;
+use crate::sql::serde::is_internal_serialization;
 use chrono::DurationRound;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -110,10 +111,10 @@ impl Serialize for Duration {
 	where
 		S: serde::Serializer,
 	{
-		if serializer.is_human_readable() {
-			serializer.serialize_some(&self.0)
-		} else {
+		if is_internal_serialization() {
 			serializer.serialize_newtype_struct("Duration", &self.0)
+		} else {
+			serializer.serialize_some(&self.0)
 		}
 	}
 }

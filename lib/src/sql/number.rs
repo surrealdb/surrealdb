@@ -1,6 +1,7 @@
 use crate::sql::comment::comment;
 use crate::sql::error::IResult;
 use crate::sql::operator::{assigner, operator};
+use crate::sql::serde::is_internal_serialization;
 use bigdecimal::BigDecimal;
 use bigdecimal::FromPrimitive;
 use bigdecimal::ToPrimitive;
@@ -138,17 +139,17 @@ impl Serialize for Number {
 	where
 		S: serde::Serializer,
 	{
-		if s.is_human_readable() {
-			match self {
-				Number::Int(v) => s.serialize_i64(*v),
-				Number::Float(v) => s.serialize_f64(*v),
-				Number::Decimal(v) => s.serialize_some(v),
-			}
-		} else {
+		if is_internal_serialization() {
 			match self {
 				Number::Int(v) => s.serialize_newtype_variant("Number", 0, "Int", v),
 				Number::Float(v) => s.serialize_newtype_variant("Number", 1, "Float", v),
 				Number::Decimal(v) => s.serialize_newtype_variant("Number", 2, "Decimal", v),
+			}
+		} else {
+			match self {
+				Number::Int(v) => s.serialize_i64(*v),
+				Number::Float(v) => s.serialize_f64(*v),
+				Number::Decimal(v) => s.serialize_some(v),
 			}
 		}
 	}

@@ -1,5 +1,6 @@
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_strand;
+use crate::sql::serde::is_internal_serialization;
 use nom::branch::alt;
 use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
@@ -59,10 +60,10 @@ impl Serialize for Strand {
 	where
 		S: serde::Serializer,
 	{
-		if serializer.is_human_readable() {
-			serializer.serialize_some(&self.0)
-		} else {
+		if is_internal_serialization() {
 			serializer.serialize_newtype_struct("Strand", &self.0)
+		} else {
+			serializer.serialize_some(&self.0)
 		}
 	}
 }

@@ -159,8 +159,8 @@ mod tests {
 		assert!(res.is_ok());
 		let tmp = res.unwrap();
 
-		let enc = msgpack::to_vec(&tmp).unwrap();
-		let dec = msgpack::from_slice::<Query>(&enc).unwrap();
+		let enc: Vec<u8> = Vec::from(&tmp);
+		let dec: Query = Query::from(enc);
 		assert_eq!(tmp, dec);
 	}
 }

@@ -7,6 +7,7 @@ use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::number::Number;
 use crate::sql::operation::Operation;
+use crate::sql::serde::is_internal_serialization;
 use crate::sql::strand::Strand;
 use crate::sql::value::{value, Value};
 use nom::character::complete::char;
@@ -159,10 +160,10 @@ impl Serialize for Array {
 	where
 		S: serde::Serializer,
 	{
-		if serializer.is_human_readable() {
-			serializer.serialize_some(&self.0)
-		} else {
+		if is_internal_serialization() {
 			serializer.serialize_newtype_struct("Array", &self.0)
+		} else {
+			serializer.serialize_some(&self.0)
 		}
 	}
 }

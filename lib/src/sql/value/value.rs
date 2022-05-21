@@ -22,6 +22,7 @@ use crate::sql::operation::Operation;
 use crate::sql::param::{param, Param};
 use crate::sql::part::Part;
 use crate::sql::regex::{regex, Regex};
+use crate::sql::serde::is_internal_serialization;
 use crate::sql::strand::{strand, Strand};
 use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
@@ -659,10 +660,6 @@ impl Value {
 			.into()
 	}
 
-	pub fn to_vec(&self) -> Result<Vec<u8>, Error> {
-		msgpack::to_vec(&self).map_err(|e| e.into())
-	}
-
 	// -----------------------------------
 	// Simple conversion of value
 	// -----------------------------------
@@ -1010,24 +1007,7 @@ impl Serialize for Value {
 	where
 		S: serde::Serializer,
 	{
-		if s.is_human_readable() {
-			match self {
-				Value::None => s.serialize_none(),
-				Value::Void => s.serialize_none(),
-				Value::Null => s.serialize_none(),
-				Value::True => s.serialize_bool(true),
-				Value::False => s.serialize_bool(false),
-				Value::Thing(v) => s.serialize_some(v),
-				Value::Array(v) => s.serialize_some(v),
-				Value::Object(v) => s.serialize_some(v),
-				Value::Number(v) => s.serialize_some(v),
-				Value::Strand(v) => s.serialize_some(v),
-				Value::Geometry(v) => s.serialize_some(v),
-				Value::Duration(v) => s.serialize_some(v),
-				Value::Datetime(v) => s.serialize_some(v),
-				_ => s.serialize_none(),
-			}
-		} else {
+		if is_internal_serialization() {
 			match self {
 				Value::None => s.serialize_unit_variant("Value", 0, "None"),
 				Value::Void => s.serialize_unit_variant("Value", 1, "Void"),
@@ -1050,6 +1030,23 @@ impl Serialize for Value {
 				Value::Function(v) => s.serialize_newtype_variant("Value", 18, "Function", v),
 				Value::Subquery(v) => s.serialize_newtype_variant("Value", 19, "Subquery", v),
 				Value::Expression(v) => s.serialize_newtype_variant("Value", 20, "Expression", v),
+			}
+		} else {
+			match self {
+				Value::None => s.serialize_none(),
+				Value::Void => s.serialize_none(),
+				Value::Null => s.serialize_none(),
+				Value::True => s.serialize_bool(true),
+				Value::False => s.serialize_bool(false),
+				Value::Thing(v) => s.serialize_some(v),
+				Value::Array(v) => s.serialize_some(v),
+				Value::Object(v) => s.serialize_some(v),
+				Value::Number(v) => s.serialize_some(v),
+				Value::Strand(v) => s.serialize_some(v),
+				Value::Geometry(v) => s.serialize_some(v),
+				Value::Duration(v) => s.serialize_some(v),
+				Value::Datetime(v) => s.serialize_some(v),
+				_ => s.serialize_none(),
 			}
 		}
 	}

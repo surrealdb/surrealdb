@@ -1,12 +1,13 @@
 use crate::sql::error::IResult;
 use crate::sql::statement::{statements, Statement, Statements};
+use derive::Store;
 use nom::combinator::all_consuming;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct Query(pub Statements);
 
 impl Deref for Query {

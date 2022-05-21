@@ -18,7 +18,7 @@ pub struct Document<'a> {
 
 impl<'a> From<&Document<'a>> for Vec<u8> {
 	fn from(val: &Document<'a>) -> Vec<u8> {
-		msgpack::to_vec(&val.current).unwrap()
+		val.current.as_ref().into()
 	}
 }
 
