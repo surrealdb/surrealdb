@@ -29,7 +29,7 @@ impl<'a> Document<'a> {
 			// Calculate old values
 			let mut o = Array::with_capacity(ix.cols.len());
 			for i in ix.cols.iter() {
-				let v = i.compute(ctx, opt, txn, Some(&self.current)).await?;
+				let v = i.compute(ctx, opt, txn, Some(&self.initial)).await?;
 				o.push(v);
 			}
 			// Calculate new values
