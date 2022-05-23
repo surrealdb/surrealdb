@@ -8,6 +8,7 @@ use crate::key::thing;
 use crate::sql::array::Array;
 use crate::sql::id::Id;
 use crate::sql::model::Model;
+use crate::sql::object::Object;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -26,6 +27,7 @@ impl Value {
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match self {
+				Value::Object(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
 				Value::Array(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
 				Value::Model(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
 				Value::Thing(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
@@ -51,12 +53,33 @@ impl Array {
 		for v in self.into_iter() {
 			if ctx.is_ok() {
 				match v {
+					Value::Object(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
 					Value::Array(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
 					Value::Model(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
 					Value::Thing(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
 					Value::Table(v) => v.iterate(ctx, opt, txn, stm, ite).await?,
 					v => ite.process(ctx, opt, txn, stm, None, v).await,
 				}
+			}
+		}
+		Ok(())
+	}
+}
+
+impl Object {
+	#[cfg_attr(feature = "parallel", async_recursion)]
+	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
+	pub(crate) async fn iterate(
+		self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		stm: &Statement<'_>,
+		ite: &mut Iterator,
+	) -> Result<(), Error> {
+		if ctx.is_ok() {
+			if let Some(Value::Thing(id)) = self.get("id") {
+				id.clone().iterate(ctx, opt, txn, stm, ite).await?;
 			}
 		}
 		Ok(())

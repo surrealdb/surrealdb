@@ -1158,6 +1158,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 
 pub fn what(i: &str) -> IResult<&str, Value> {
 	alt((
+		map(subquery, |v| Value::Subquery(Box::new(v))),
 		map(function, |v| Value::Function(Box::new(v))),
 		map(param, Value::Param),
 		map(model, Value::Model),

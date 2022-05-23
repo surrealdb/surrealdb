@@ -7,6 +7,7 @@ use crate::key::thing;
 use crate::sql::array::Array;
 use crate::sql::id::Id;
 use crate::sql::model::Model;
+use crate::sql::object::Object;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -26,6 +27,7 @@ impl Value {
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match self {
+				Value::Object(v) => v.process(ctx, opt, txn, stm, &chn).await?,
 				Value::Array(v) => v.process(ctx, opt, txn, stm, &chn).await?,
 				Value::Model(v) => v.process(ctx, opt, txn, stm, &chn).await?,
 				Value::Thing(v) => v.process(ctx, opt, txn, stm, &chn).await?,
@@ -51,12 +53,33 @@ impl Array {
 		for v in self {
 			if ctx.is_ok() {
 				match v {
+					Value::Object(v) => v.process(ctx, opt, txn, stm, chn).await?,
 					Value::Array(v) => v.process(ctx, opt, txn, stm, chn).await?,
 					Value::Model(v) => v.process(ctx, opt, txn, stm, chn).await?,
 					Value::Thing(v) => v.process(ctx, opt, txn, stm, chn).await?,
 					Value::Table(v) => v.process(ctx, opt, txn, stm, chn).await?,
 					v => chn.send((None, v)).await?,
 				}
+			}
+		}
+		Ok(())
+	}
+}
+
+impl Object {
+	#[cfg_attr(feature = "parallel", async_recursion)]
+	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
+	pub(crate) async fn process(
+		self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		stm: &Statement<'_>,
+		chn: &Sender<(Option<Thing>, Value)>,
+	) -> Result<(), Error> {
+		if ctx.is_ok() {
+			if let Some(Value::Thing(id)) = self.get("id") {
+				id.clone().process(ctx, opt, txn, stm, chn).await?;
 			}
 		}
 		Ok(())
