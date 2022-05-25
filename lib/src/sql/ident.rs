@@ -30,13 +30,13 @@ impl From<String> for Ident {
 	}
 }
 
-impl<'a> From<&'a str> for Ident {
+impl From<&str> for Ident {
 	fn from(i: &str) -> Ident {
 		Ident(String::from(i))
 	}
 }
 
-impl<'a> From<&'a String> for Ident {
+impl From<&String> for Ident {
 	fn from(i: &String) -> Ident {
 		Ident(String::from(i))
 	}

@@ -32,7 +32,7 @@ impl From<DateTime<Utc>> for Datetime {
 	}
 }
 
-impl<'a> From<&'a str> for Datetime {
+impl From<&str> for Datetime {
 	fn from(s: &str) -> Self {
 		match datetime_raw(s) {
 			Ok((_, v)) => v,

@@ -37,7 +37,7 @@ impl From<String> for Duration {
 	}
 }
 
-impl<'a> From<&'a str> for Duration {
+impl From<&str> for Duration {
 	fn from(s: &str) -> Self {
 		match duration(s) {
 			Ok((_, v)) => v,

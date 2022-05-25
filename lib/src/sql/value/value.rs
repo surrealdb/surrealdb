@@ -312,7 +312,7 @@ impl From<String> for Value {
 	}
 }
 
-impl<'a> From<&'a str> for Value {
+impl From<&str> for Value {
 	fn from(v: &str) -> Self {
 		Value::Strand(Strand::from(v))
 	}

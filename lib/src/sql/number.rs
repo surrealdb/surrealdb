@@ -106,7 +106,7 @@ impl From<f64> for Number {
 	}
 }
 
-impl<'a> From<&'a str> for Number {
+impl From<&str> for Number {
 	fn from(s: &str) -> Self {
 		Number::Decimal(BigDecimal::from_str(s).unwrap_or_default())
 	}

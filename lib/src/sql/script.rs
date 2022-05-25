@@ -32,7 +32,7 @@ impl From<String> for Script {
 	}
 }
 
-impl<'a> From<&'a str> for Script {
+impl From<&str> for Script {
 	fn from(s: &str) -> Self {
 		Script(String::from(s))
 	}

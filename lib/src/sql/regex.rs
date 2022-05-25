@@ -11,7 +11,7 @@ use std::str;
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Regex(String);
 
-impl<'a> From<&'a str> for Regex {
+impl From<&str> for Regex {
 	fn from(r: &str) -> Regex {
 		Regex(r.replace("\\/", "/"))
 	}
