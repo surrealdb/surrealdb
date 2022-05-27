@@ -67,13 +67,7 @@ impl From<Graph> for Part {
 
 impl From<String> for Part {
 	fn from(v: String) -> Self {
-		Part::Field(Ident::from(v))
-	}
-}
-
-impl From<&String> for Part {
-	fn from(v: &String) -> Self {
-		Part::Field(Ident::from(v))
+		Part::Field(Ident(v))
 	}
 }
 

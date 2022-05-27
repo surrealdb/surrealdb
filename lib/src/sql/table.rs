@@ -31,6 +31,12 @@ impl From<String> for Table {
 	}
 }
 
+impl From<&str> for Table {
+	fn from(v: &str) -> Self {
+		Table(String::from(v))
+	}
+}
+
 impl From<Ident> for Table {
 	fn from(v: Ident) -> Self {
 		Table(v.0)

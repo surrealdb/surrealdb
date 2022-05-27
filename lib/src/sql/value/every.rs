@@ -11,13 +11,19 @@ impl Value {
 			// Current path part is an object
 			Value::Object(v) => v
 				.iter()
-				.flat_map(|(k, v)| v._every(prev.clone().push(Part::from(k))))
+				.flat_map(|(k, v)| {
+					let p = Part::from(k.to_owned());
+					v._every(prev.clone().push(p))
+				})
 				.collect::<Vec<_>>(),
 			// Current path part is an array
 			Value::Array(v) => v
 				.iter()
 				.enumerate()
-				.flat_map(|(i, v)| v._every(prev.clone().push(Part::from(i))))
+				.flat_map(|(i, v)| {
+					let p = Part::from(i.to_owned());
+					v._every(prev.clone().push(p))
+				})
 				.collect::<Vec<_>>(),
 			// Process everything else
 			_ => vec![prev],

@@ -45,12 +45,6 @@ impl Deref for Idiom {
 	}
 }
 
-impl From<String> for Idiom {
-	fn from(v: String) -> Self {
-		Idiom(vec![Part::from(v)])
-	}
-}
-
 impl From<Vec<Part>> for Idiom {
 	fn from(v: Vec<Part>) -> Self {
 		Idiom(v)

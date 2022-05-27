@@ -36,12 +36,6 @@ impl From<&str> for Ident {
 	}
 }
 
-impl From<&String> for Ident {
-	fn from(i: &String) -> Ident {
-		Ident(String::from(i))
-	}
-}
-
 impl Deref for Ident {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {

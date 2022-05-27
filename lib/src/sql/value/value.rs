@@ -360,12 +360,6 @@ impl From<Vec<i32>> for Value {
 	}
 }
 
-impl From<Vec<String>> for Value {
-	fn from(v: Vec<String>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
 impl From<Vec<Value>> for Value {
 	fn from(v: Vec<Value>) -> Self {
 		Value::Array(Array::from(v))
@@ -374,12 +368,6 @@ impl From<Vec<Value>> for Value {
 
 impl From<Vec<Operation>> for Value {
 	fn from(v: Vec<Operation>) -> Self {
-		Value::Array(Array::from(v))
-	}
-}
-
-impl From<Vec<Vec<Value>>> for Value {
-	fn from(v: Vec<Vec<Value>>) -> Self {
 		Value::Array(Array::from(v))
 	}
 }

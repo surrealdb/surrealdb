@@ -36,19 +36,7 @@ impl From<Vec<Value>> for Array {
 
 impl From<Vec<i32>> for Array {
 	fn from(v: Vec<i32>) -> Self {
-		Array(v.into_iter().map(|x| x.into()).collect())
-	}
-}
-
-impl From<Vec<String>> for Array {
-	fn from(v: Vec<String>) -> Self {
-		Array(v.into_iter().map(|x| x.into()).collect())
-	}
-}
-
-impl From<Vec<Vec<Value>>> for Array {
-	fn from(v: Vec<Vec<Value>>) -> Self {
-		Array(v.into_iter().map(|x| x.into()).collect())
+		Array(v.into_iter().map(Value::from).collect())
 	}
 }
 
