@@ -64,7 +64,10 @@ impl Tb {
 		}
 	}
 	pub fn encode(&self) -> Result<Vec<u8>, Error> {
-		Ok(serialize(self)?)
+		crate::sql::serde::beg_internal_serialization();
+		let v = serialize(self);
+		crate::sql::serde::end_internal_serialization();
+		Ok(v?)
 	}
 	pub fn decode(v: &[u8]) -> Result<Tb, Error> {
 		Ok(deserialize(v)?)
