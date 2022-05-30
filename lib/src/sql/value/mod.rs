@@ -22,5 +22,6 @@ mod object;
 mod patch;
 mod pick;
 mod replace;
+mod retable;
 mod set;
 mod single;

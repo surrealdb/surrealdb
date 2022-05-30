@@ -7,7 +7,7 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use once_cell::sync::Lazy;
 
-static RID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
+static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 
 impl Value {
 	pub async fn def(
@@ -17,6 +17,6 @@ impl Value {
 		txn: &Transaction,
 		val: &Thing,
 	) -> Result<(), Error> {
-		self.set(ctx, opt, txn, RID.as_ref(), val.clone().into()).await
+		self.set(ctx, opt, txn, ID.as_ref(), val.clone().into()).await
 	}
 }

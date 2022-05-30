@@ -1,6 +1,4 @@
 use crate::sql::idiom::Idiom;
-use crate::sql::thing::Thing;
-use crate::sql::value::Value;
 use msgpack::encode::Error as SerdeError;
 use serde::Serialize;
 use storekey::decode::Error as DecodeError;
@@ -205,6 +203,12 @@ pub enum Error {
 		check: String,
 	},
 
+	/// Found a record id for the record but this is not a valid id
+	#[error("Found '{value}' for the record ID but this is not a valid id")]
+	IdInvalid {
+		value: String,
+	},
+
 	/// There was an error processing a value in parallel
 	#[error("There was an error processing a value in parallel")]
 	Channel(String),
@@ -255,14 +259,8 @@ impl From<channel::RecvError> for Error {
 	}
 }
 
-impl From<channel::SendError<Vec<u8>>> for Error {
-	fn from(e: channel::SendError<Vec<u8>>) -> Error {
-		Error::Channel(e.to_string())
-	}
-}
-
-impl From<channel::SendError<(Option<Thing>, Value)>> for Error {
-	fn from(e: channel::SendError<(Option<Thing>, Value)>) -> Error {
+impl<T> From<channel::SendError<T>> for Error {
+	fn from(e: channel::SendError<T>) -> Error {
 		Error::Channel(e.to_string())
 	}
 }

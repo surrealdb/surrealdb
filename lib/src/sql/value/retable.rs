@@ -1,0 +1,40 @@
+use crate::err::Error;
+use crate::sql::id::Id;
+use crate::sql::part::Part;
+use crate::sql::table::Table;
+use crate::sql::thing::Thing;
+use crate::sql::value::Value;
+use once_cell::sync::Lazy;
+
+static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
+
+impl Value {
+	pub fn retable(&self, val: &Table) -> Result<Thing, Error> {
+		// Fetch the id from the document
+		let id = match self.pick(&*ID) {
+			Value::Strand(id) => Thing {
+				tb: val.to_string(),
+				id: Id::String(id.0),
+			},
+			Value::Number(id) => Thing {
+				tb: val.to_string(),
+				id: Id::Number(id),
+			},
+			Value::Thing(id) => Thing {
+				tb: val.to_string(),
+				id: id.id,
+			},
+			Value::None => Thing {
+				tb: val.to_string(),
+				id: Id::rand(),
+			},
+			id => {
+				return Err(Error::IdInvalid {
+					value: id.to_string(),
+				})
+			}
+		};
+		// Return the record id
+		Ok(id)
+	}
+}
