@@ -1,7 +1,9 @@
 use crate::ctx::Context;
+use crate::dbs::Operable;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
+use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::thing::Thing;
@@ -16,10 +18,16 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 		chn: Sender<Result<Value, Error>>,
 		thg: Option<Thing>,
-		val: Value,
+		val: Operable,
 	) -> Result<(), Error> {
+		// Setup a new workable
+		let ins = match val {
+			Operable::Value(v) => (v, Workable::Normal),
+			Operable::Mergeable(v, o) => (v, Workable::Insert(o)),
+			Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
+		};
 		// Setup a new document
-		let mut doc = Document::new(thg, &val);
+		let mut doc = Document::new(thg, &ins.0, ins.1);
 		// Process the statement
 		let res = match stm {
 			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,

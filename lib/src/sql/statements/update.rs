@@ -1,4 +1,5 @@
 use crate::ctx::Context;
+use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
@@ -51,10 +52,47 @@ impl UpdateStatement {
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;
 			match v {
-				Value::Table(_) => i.prepare(v),
-				Value::Thing(_) => i.prepare(v),
-				Value::Model(_) => i.prepare(v),
-				Value::Array(_) => i.prepare(v),
+				Value::Table(v) => i.ingest(Iterable::Table(v)),
+				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
+				Value::Model(v) => {
+					for v in v {
+						i.ingest(Iterable::Thing(v));
+					}
+				}
+				Value::Array(v) => {
+					for v in v {
+						match v {
+							Value::Table(v) => i.ingest(Iterable::Table(v)),
+							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
+							Value::Model(v) => {
+								for v in v {
+									i.ingest(Iterable::Thing(v));
+								}
+							}
+							Value::Object(v) => match v.rid() {
+								Some(v) => i.ingest(Iterable::Thing(v)),
+								None => {
+									return Err(Error::UpdateStatement {
+										value: v.to_string(),
+									})
+								}
+							},
+							v => {
+								return Err(Error::UpdateStatement {
+									value: v.to_string(),
+								})
+							}
+						};
+					}
+				}
+				Value::Object(v) => match v.rid() {
+					Some(v) => i.ingest(Iterable::Thing(v)),
+					None => {
+						return Err(Error::UpdateStatement {
+							value: v.to_string(),
+						})
+					}
+				},
 				v => {
 					return Err(Error::UpdateStatement {
 						value: v.to_string(),

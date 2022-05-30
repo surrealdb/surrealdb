@@ -96,6 +96,8 @@ impl<'a> Statement<'a> {
 		match self {
 			Statement::Create(v) => v.data.as_ref(),
 			Statement::Update(v) => v.data.as_ref(),
+			Statement::Relate(v) => v.data.as_ref(),
+			Statement::Insert(v) => v.update.as_ref(),
 			_ => None,
 		}
 	}
@@ -157,6 +159,14 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
+	// Returns any VERSION clause if specified
+	#[inline]
+	pub fn version(&self) -> Option<&Version> {
+		match self {
+			Statement::Select(v) => v.version.as_ref(),
+			_ => None,
+		}
+	}
 	// Returns any RETURN clause if specified
 	#[inline]
 	pub fn output(&self) -> Option<&Output> {
@@ -166,14 +176,6 @@ impl<'a> Statement<'a> {
 			Statement::Relate(v) => v.output.as_ref(),
 			Statement::Delete(v) => v.output.as_ref(),
 			Statement::Insert(v) => v.output.as_ref(),
-			_ => None,
-		}
-	}
-	// Returns any VERSION clause if specified
-	#[inline]
-	pub fn version(&self) -> Option<&Version> {
-		match self {
-			Statement::Select(v) => v.version.as_ref(),
 			_ => None,
 		}
 	}

@@ -3,12 +3,13 @@ pub use self::document::*;
 #[cfg(feature = "parallel")]
 mod compute;
 
-mod admit;
 mod allow;
+mod alter;
 mod check;
 mod create;
 mod delete;
 mod document;
+mod edges;
 mod empty;
 mod erase;
 mod event;

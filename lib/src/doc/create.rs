@@ -14,12 +14,10 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
-		// Check value type
-		self.admit(ctx, opt, txn, stm).await?;
 		// Check if exists
 		self.exist(ctx, opt, txn, stm).await?;
-		// Merge record data
-		self.merge(ctx, opt, txn, stm).await?;
+		// Alter record data
+		self.alter(ctx, opt, txn, stm).await?;
 		// Merge fields data
 		self.field(ctx, opt, txn, stm).await?;
 		// Check if allowed

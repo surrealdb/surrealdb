@@ -1,4 +1,5 @@
 use crate::ctx::Context;
+use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
@@ -52,20 +53,102 @@ impl RelateStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored
 		let opt = &opt.futures(false);
-		// Loop over the select targets
-		for w in self.from.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc).await?;
-			match v {
-				Value::Table(_) => i.prepare(v),
-				Value::Thing(_) => i.prepare(v),
-				Value::Model(_) => i.prepare(v),
-				Value::Array(_) => i.prepare(v),
-				v => {
-					return Err(Error::RelateStatement {
-						value: v.to_string(),
-					})
-				}
-			};
+		// Loop over the from targets
+		let from = {
+			let mut out = Vec::new();
+			for w in self.from.0.iter() {
+				let v = w.compute(ctx, opt, txn, doc).await?;
+				match v {
+					Value::Thing(v) => out.push(v),
+					Value::Array(v) => {
+						for v in v {
+							match v {
+								Value::Thing(v) => out.push(v),
+								Value::Object(v) => match v.rid() {
+									Some(v) => out.push(v),
+									_ => {
+										return Err(Error::RelateStatement {
+											value: v.to_string(),
+										})
+									}
+								},
+								v => {
+									return Err(Error::RelateStatement {
+										value: v.to_string(),
+									})
+								}
+							}
+						}
+					}
+					Value::Object(v) => match v.rid() {
+						Some(v) => out.push(v),
+						None => {
+							return Err(Error::RelateStatement {
+								value: v.to_string(),
+							})
+						}
+					},
+					v => {
+						return Err(Error::RelateStatement {
+							value: v.to_string(),
+						})
+					}
+				};
+			}
+			out
+		};
+		// Loop over the with targets
+		let with = {
+			let mut out = Vec::new();
+			for w in self.with.0.iter() {
+				let v = w.compute(ctx, opt, txn, doc).await?;
+				match v {
+					Value::Thing(v) => out.push(v),
+					Value::Array(v) => {
+						for v in v {
+							match v {
+								Value::Thing(v) => out.push(v),
+								Value::Object(v) => match v.rid() {
+									Some(v) => out.push(v),
+									None => {
+										return Err(Error::RelateStatement {
+											value: v.to_string(),
+										})
+									}
+								},
+								v => {
+									return Err(Error::RelateStatement {
+										value: v.to_string(),
+									})
+								}
+							}
+						}
+					}
+					Value::Object(v) => match v.rid() {
+						Some(v) => out.push(v),
+						None => {
+							return Err(Error::RelateStatement {
+								value: v.to_string(),
+							})
+						}
+					},
+					v => {
+						return Err(Error::RelateStatement {
+							value: v.to_string(),
+						})
+					}
+				};
+			}
+			out
+		};
+		//
+		for f in from.iter() {
+			for w in with.iter() {
+				let f = f.clone();
+				let w = w.clone();
+				let t = self.kind.generate();
+				i.ingest(Iterable::Relatable(f, t, w));
+			}
 		}
 		// Assign the statement
 		let stm = Statement::from(self);

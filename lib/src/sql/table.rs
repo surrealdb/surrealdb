@@ -1,7 +1,9 @@
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_ident;
+use crate::sql::id::Id;
 use crate::sql::ident::{ident_raw, Ident};
+use crate::sql::thing::Thing;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -47,6 +49,15 @@ impl Deref for Table {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {
 		&self.0
+	}
+}
+
+impl Table {
+	pub fn generate(&self) -> Thing {
+		Thing {
+			tb: self.0.to_owned(),
+			id: Id::rand(),
+		}
 	}
 }
 

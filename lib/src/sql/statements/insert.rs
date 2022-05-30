@@ -1,4 +1,5 @@
 use crate::ctx::Context;
+use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Level;
 use crate::dbs::Options;
@@ -51,14 +52,40 @@ impl InsertStatement {
 		let opt = &opt.futures(false);
 		// Parse the expression
 		match &self.data {
-			Data::ValuesExpression(_) => {
-				todo!() // TODO: loop over each
+			// Check if this is a traditional statement
+			Data::ValuesExpression(v) => {
+				for v in v {
+					// Create a new empty base object
+					let mut o = Value::base();
+					// Set each field from the expression
+					for (k, v) in v.iter() {
+						let v = v.compute(ctx, opt, txn, None).await?;
+						o.set(ctx, opt, txn, k, v).await?;
+					}
+					// Specify the new table record id
+					let id = o.retable(&self.into)?;
+					// Pass the mergeable to the iterator
+					i.ingest(Iterable::Mergeable(id, o));
+				}
 			}
+			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
 				let v = v.compute(ctx, opt, txn, doc).await?;
 				match v {
-					Value::Array(v) => v.into_iter().for_each(|v| i.prepare(v)),
-					Value::Object(_) => i.prepare(v),
+					Value::Array(v) => {
+						for v in v {
+							// Specify the new table record id
+							let id = v.retable(&self.into)?;
+							// Pass the mergeable to the iterator
+							i.ingest(Iterable::Mergeable(id, v));
+						}
+					}
+					Value::Object(_) => {
+						// Specify the new table record id
+						let id = v.retable(&self.into)?;
+						// Pass the mergeable to the iterator
+						i.ingest(Iterable::Mergeable(id, v));
+					}
 					v => {
 						return Err(Error::InsertStatement {
 							value: v.to_string(),

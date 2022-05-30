@@ -7,7 +7,6 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::array::Array;
 use crate::sql::field::Field;
-use crate::sql::id::Id;
 use crate::sql::part::Part;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
@@ -16,16 +15,36 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
 
+pub enum Iterable {
+	Value(Value),
+	Table(Table),
+	Thing(Thing),
+	Mergeable(Thing, Value),
+	Relatable(Thing, Thing, Thing),
+}
+
+pub enum Operable {
+	Value(Value),
+	Mergeable(Value, Value),
+	Relatable(Thing, Value, Thing),
+}
+
+pub enum Workable {
+	Normal,
+	Insert(Value),
+	Relate(Thing, Thing),
+}
+
 #[derive(Default)]
 pub struct Iterator {
 	// Iterator status
 	run: Canceller,
 	// Iterator runtime error
 	error: Option<Error>,
-	// Iterator input values
-	readies: Vec<Value>,
 	// Iterator output results
 	results: Vec<Value>,
+	// Iterator input values
+	entries: Vec<Iterable>,
 }
 
 impl Iterator {
@@ -35,16 +54,8 @@ impl Iterator {
 	}
 
 	// Prepares a value for processing
-	pub fn prepare(&mut self, val: Value) {
-		self.readies.push(val)
-	}
-
-	// Create a new record for processing
-	pub fn produce(&mut self, val: Table) {
-		self.prepare(Value::Thing(Thing {
-			tb: val.0,
-			id: Id::rand(),
-		}))
+	pub fn ingest(&mut self, val: Iterable) {
+		self.entries.push(val)
 	}
 
 	// Process the records and output
@@ -324,7 +335,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Process all prepared values
-		for v in mem::take(&mut self.readies) {
+		for v in mem::take(&mut self.entries) {
 			v.iterate(ctx, opt, txn, stm, self).await?;
 		}
 		// Everything processed ok
@@ -343,7 +354,7 @@ impl Iterator {
 			// Run statements sequentially
 			false => {
 				// Process all prepared values
-				for v in mem::take(&mut self.readies) {
+				for v in mem::take(&mut self.entries) {
 					v.iterate(ctx, opt, txn, stm, self).await?;
 				}
 				// Everything processed ok
@@ -354,7 +365,7 @@ impl Iterator {
 				// Create a new executor
 				let exe = executor::Executor::new();
 				// Take all of the iterator values
-				let vals = mem::take(&mut self.readies);
+				let vals = mem::take(&mut self.entries);
 				// Create a channel to shutdown
 				let (end, exit) = channel::bounded::<()>(1);
 				// Create an unbounded channel
@@ -412,14 +423,20 @@ impl Iterator {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		thg: Option<Thing>,
-		val: Value,
+		val: Operable,
 	) {
 		// Check current context
 		if ctx.is_done() {
 			return;
 		}
+		// Setup a new workable
+		let val = match val {
+			Operable::Value(v) => (v, Workable::Normal),
+			Operable::Mergeable(v, o) => (v, Workable::Insert(o)),
+			Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
+		};
 		// Setup a new document
-		let mut doc = Document::new(thg, &val);
+		let mut doc = Document::new(thg, &val.0, val.1);
 		// Process the document
 		let res = match stm {
 			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,

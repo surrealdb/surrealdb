@@ -14,8 +14,6 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
-		// Check value type
-		self.admit(ctx, opt, txn, stm).await?;
 		// Check where clause
 		self.check(ctx, opt, txn, stm).await?;
 		// Erase document
