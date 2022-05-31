@@ -91,7 +91,7 @@ impl Object {
 			Some(o) => match self.get("path") {
 				Some(p) => Ok(Operation {
 					op: o.into(),
-					path: p.to_idiom(),
+					path: p.jsonpath(),
 					value: match self.get("value") {
 						Some(v) => v.clone(),
 						None => Value::Null,

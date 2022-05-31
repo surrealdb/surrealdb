@@ -29,7 +29,7 @@ impl Value {
 						_ => {
 							let mut obj = Value::base();
 							obj.set(ctx, opt, txn, path.next(), val).await?;
-							v.insert(f.to_string(), obj);
+							v.insert(f.to_raw(), obj);
 							Ok(())
 						}
 					},

@@ -43,6 +43,12 @@ impl Deref for Ident {
 	}
 }
 
+impl Ident {
+	pub fn to_raw(&self) -> String {
+		self.0.to_string()
+	}
+}
+
 impl fmt::Display for Ident {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", escape_ident(&self.0))

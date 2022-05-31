@@ -45,6 +45,12 @@ impl Deref for Idiom {
 	}
 }
 
+impl From<String> for Idiom {
+	fn from(v: String) -> Self {
+		Idiom(vec![Part::from(v)])
+	}
+}
+
 impl From<Vec<Part>> for Idiom {
 	fn from(v: Vec<Part>) -> Self {
 		Idiom(v)
@@ -60,6 +66,15 @@ impl Idiom {
 	///
 	pub fn to_path(&self) -> String {
 		format!("/{}", self).replace(']', "").replace(&['.', '['][..], "/")
+	}
+	///
+	pub fn simplify(&self) -> Idiom {
+		self.0
+			.iter()
+			.cloned()
+			.filter(|p| matches!(p, Part::Field(_) | Part::Graph(_)))
+			.collect::<Vec<_>>()
+			.into()
 	}
 }
 

@@ -639,13 +639,18 @@ impl Value {
 	}
 
 	pub fn to_idiom(&self) -> Idiom {
-		self.to_strand()
-			.as_str()
-			.trim_start_matches('/')
-			.split(&['.', '/'][..])
-			.map(Part::from)
-			.collect::<Vec<Part>>()
-			.into()
+		match self {
+			Value::Idiom(v) => v.simplify(),
+			Value::Strand(v) => v.0.to_string().into(),
+			Value::Datetime(v) => v.0.to_string().into(),
+			Value::Function(v) => match v.as_ref() {
+				Function::Future(_) => "fn::future".to_string().into(),
+				Function::Script(_) => "fn::script".to_string().into(),
+				Function::Normal(f, _) => f.to_string().into(),
+				_ => v.to_string().into(),
+			},
+			_ => self.to_string().into(),
+		}
 	}
 
 	// -----------------------------------
@@ -736,6 +741,20 @@ impl Value {
 				_ => Value::None,
 			},
 		}
+	}
+
+	// -----------------------------------
+	// JSON Path conversion
+	// -----------------------------------
+
+	pub fn jsonpath(&self) -> Idiom {
+		self.to_strand()
+			.as_str()
+			.trim_start_matches('/')
+			.split(&['.', '/'][..])
+			.map(Part::from)
+			.collect::<Vec<Part>>()
+			.into()
 	}
 
 	// -----------------------------------
