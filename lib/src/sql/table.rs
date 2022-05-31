@@ -13,6 +13,13 @@ use std::str;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Tables(pub Vec<Table>);
 
+impl Deref for Tables {
+	type Target = Vec<Table>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
 impl fmt::Display for Tables {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))

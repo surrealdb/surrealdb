@@ -7,6 +7,7 @@ use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
+use nom::combinator::map;
 use nom::combinator::opt;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -44,10 +45,18 @@ pub struct Graph {
 
 impl fmt::Display for Graph {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		if self.what.0.len() == 1 && self.cond.is_none() && self.alias.is_none() {
-			write!(f, "{}{}", self.dir, self.what)
+		if self.what.0.len() <= 1 && self.cond.is_none() && self.alias.is_none() {
+			write!(f, "{}", self.dir,)?;
+			match self.what.len() {
+				0 => write!(f, "?"),
+				_ => write!(f, "{}", self.what),
+			}
 		} else {
-			write!(f, "{}({}", self.dir, self.what)?;
+			write!(f, "{}(", self.dir,)?;
+			match self.what.len() {
+				0 => write!(f, "?"),
+				_ => write!(f, "{}", self.what),
+			}?;
 			if let Some(ref v) = self.cond {
 				write!(f, " WHERE {}", v)?
 			}
@@ -126,8 +135,12 @@ fn custom(i: &str) -> IResult<&str, (Tables, Option<Value>, Option<Idiom>)> {
 }
 
 fn what(i: &str) -> IResult<&str, Tables> {
-	let (i, v) = tables(i)?;
+	let (i, v) = alt((any, tables))(i)?;
 	Ok((i, v))
+}
+
+fn any(i: &str) -> IResult<&str, Tables> {
+	map(char('?'), |_| Tables::default())(i)
 }
 
 fn cond(i: &str) -> IResult<&str, Value> {
