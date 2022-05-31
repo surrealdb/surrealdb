@@ -35,10 +35,6 @@ impl Session {
 	}
 	// Convert a session into a runtime
 	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
-		// Add session value
-		let key = String::from("session");
-		let val: Value = self.into();
-		ctx.add_value(key, val);
 		// Add scope value
 		let key = String::from("scope");
 		let val: Value = self.sc.to_owned().into();
@@ -47,20 +43,18 @@ impl Session {
 		let key = String::from("auth");
 		let val: Value = self.sd.to_owned().into();
 		ctx.add_value(key, val);
+		// Add session value
+		let key = String::from("session");
+		let val: Value = Value::from(map! {
+			"ip".to_string() => self.ip.to_owned().into(),
+			"or".to_string() => self.or.to_owned().into(),
+			"id".to_string() => self.id.to_owned().into(),
+			"ns".to_string() => self.ns.to_owned().into(),
+			"db".to_string() => self.db.to_owned().into(),
+			"sc".to_string() => self.sc.to_owned().into(),
+		});
+		ctx.add_value(key, val);
 		// Output context
 		ctx
-	}
-}
-
-impl From<&Session> for Value {
-	fn from(val: &Session) -> Value {
-		Value::from(map! {
-			"ip".to_string() => val.ip.to_owned().into(),
-			"or".to_string() => val.or.to_owned().into(),
-			"id".to_string() => val.id.to_owned().into(),
-			"ns".to_string() => val.ns.to_owned().into(),
-			"db".to_string() => val.db.to_owned().into(),
-			"sc".to_string() => val.sc.to_owned().into(),
-		})
 	}
 }
