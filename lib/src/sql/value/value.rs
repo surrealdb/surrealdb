@@ -647,7 +647,7 @@ impl Value {
 				Function::Future(_) => "fn::future".to_string().into(),
 				Function::Script(_) => "fn::script".to_string().into(),
 				Function::Normal(f, _) => f.to_string().into(),
-				_ => v.to_string().into(),
+				Function::Cast(_, v) => v.to_idiom(),
 			},
 			_ => self.to_string().into(),
 		}
