@@ -22,10 +22,10 @@ impl<'a> Document<'a> {
 		self.field(ctx, opt, txn, stm).await?;
 		// Check if allowed
 		self.allow(ctx, opt, txn, stm).await?;
-		// Store index data
-		self.index(ctx, opt, txn, stm).await?;
 		// Store record edges
 		self.edges(ctx, opt, txn, stm).await?;
+		// Store index data
+		self.index(ctx, opt, txn, stm).await?;
 		// Store record data
 		self.store(ctx, opt, txn, stm).await?;
 		// Run table queries
