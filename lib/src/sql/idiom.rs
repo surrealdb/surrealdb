@@ -58,23 +58,31 @@ impl From<Vec<Part>> for Idiom {
 }
 
 impl Idiom {
-	///
-	pub fn push(mut self, n: Part) -> Idiom {
+	// Appends a part to the end of this Idiom
+	pub(crate) fn push(mut self, n: Part) -> Idiom {
 		self.0.push(n);
 		self
 	}
-	///
-	pub fn to_path(&self) -> String {
+	// Convert this Idiom to a JSON Path string
+	pub(crate) fn to_path(&self) -> String {
 		format!("/{}", self).replace(']', "").replace(&['.', '['][..], "/")
 	}
-	///
-	pub fn simplify(&self) -> Idiom {
+	// Simplifies this Idiom for use in object keys
+	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
 			.iter()
 			.cloned()
 			.filter(|p| matches!(p, Part::Field(_) | Part::Graph(_)))
 			.collect::<Vec<_>>()
 			.into()
+	}
+	// Check if this is an expression with multiple yields
+	pub(crate) fn is_multi_yield(&self) -> bool {
+		self.iter().any(Self::split_multi_yield)
+	}
+	// Check if the path part is a yield in a multi-yield expression
+	pub(crate) fn split_multi_yield(v: &Part) -> bool {
+		matches!(v, Part::Graph(g) if g.alias.is_some())
 	}
 }
 

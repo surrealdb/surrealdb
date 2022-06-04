@@ -7,6 +7,7 @@ use crate::err::Error;
 use crate::sql::field::Field;
 use crate::sql::idiom::Idiom;
 use crate::sql::output::Output;
+use crate::sql::part::Part;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 
@@ -36,14 +37,79 @@ impl<'a> Document<'a> {
 					for v in v.other() {
 						match v {
 							Field::All => (),
-							Field::Alone(v) => {
-								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
-								out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
-							}
-							Field::Alias(v, i) => {
-								let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
-								out.set(ctx, opt, txn, i, x).await?;
-							}
+							Field::Alone(v) => match v {
+								// This expression is a multi-output graph traversal
+								Value::Idiom(v) if v.is_multi_yield() => {
+									// Store the different output yields here
+									let mut res: Vec<(&[Part], Value)> = Vec::new();
+									// Split the expression by each output alias
+									for v in v.split_inclusive(Idiom::split_multi_yield) {
+										// Use the last fetched value for each fetch
+										let x = match res.last() {
+											Some((_, r)) => r,
+											None => self.current.as_ref(),
+										};
+										// Continue fetching the next idiom part
+										let x = x
+											.get(ctx, opt, txn, v)
+											.await?
+											.compute(ctx, opt, txn, Some(&self.current))
+											.await?;
+										// Add the result to the temporary store
+										res.push((v, x));
+									}
+									// Assign each fetched yield to the output
+									for (p, x) in res {
+										match p.last().unwrap().alias() {
+											// This is an alias expression part
+											Some(i) => out.set(ctx, opt, txn, i, x).await?,
+											// This is the end of the expression
+											None => out.set(ctx, opt, txn, v, x).await?,
+										}
+									}
+								}
+								// This expression is a normal field expression
+								_ => {
+									let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
+									out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?
+								}
+							},
+							Field::Alias(v, i) => match v {
+								// This expression is a multi-output graph traversal
+								Value::Idiom(v) if v.is_multi_yield() => {
+									// Store the different output yields here
+									let mut res: Vec<(&[Part], Value)> = Vec::new();
+									// Split the expression by each output alias
+									for v in v.split_inclusive(Idiom::split_multi_yield) {
+										// Use the last fetched value for each fetch
+										let x = match res.last() {
+											Some((_, r)) => r,
+											None => self.current.as_ref(),
+										};
+										// Continue fetching the next idiom part
+										let x = x
+											.get(ctx, opt, txn, v)
+											.await?
+											.compute(ctx, opt, txn, Some(&self.current))
+											.await?;
+										// Add the result to the temporary store
+										res.push((v, x));
+									}
+									// Assign each fetched yield to the output
+									for (p, x) in res {
+										match p.last().unwrap().alias() {
+											// This is an alias expression part
+											Some(i) => out.set(ctx, opt, txn, i, x).await?,
+											// This is the end of the expression
+											None => out.set(ctx, opt, txn, i, x).await?,
+										}
+									}
+								}
+								_ => {
+									let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
+									out.set(ctx, opt, txn, i, x).await?
+								}
+							},
 						}
 					}
 					Ok(out)
@@ -59,9 +125,12 @@ impl<'a> Document<'a> {
 						match v {
 							Field::All => (),
 							Field::Alone(v) => match v {
+								// This expression is a grouped aggregate function
 								Value::Function(f) if s.group.is_some() && f.is_aggregate() => {
 									let x = match f.args().len() {
+										// If no function arguments, then compute the result
 										0 => f.compute(ctx, opt, txn, Some(&self.current)).await?,
+										// If arguments, then pass the first value through
 										_ => {
 											f.args()[0]
 												.compute(ctx, opt, txn, Some(&self.current))
@@ -70,15 +139,49 @@ impl<'a> Document<'a> {
 									};
 									out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 								}
+								// This expression is a multi-output graph traversal
+								Value::Idiom(v) if v.is_multi_yield() => {
+									// Store the different output yields here
+									let mut res: Vec<(&[Part], Value)> = Vec::new();
+									// Split the expression by each output alias
+									for v in v.split_inclusive(Idiom::split_multi_yield) {
+										// Use the last fetched value for each fetch
+										let x = match res.last() {
+											Some((_, r)) => r,
+											None => self.current.as_ref(),
+										};
+										// Continue fetching the next idiom part
+										let x = x
+											.get(ctx, opt, txn, v)
+											.await?
+											.compute(ctx, opt, txn, Some(&self.current))
+											.await?;
+										// Add the result to the temporary store
+										res.push((v, x));
+									}
+									// Assign each fetched yield to the output
+									for (p, x) in res {
+										match p.last().unwrap().alias() {
+											// This is an alias expression part
+											Some(i) => out.set(ctx, opt, txn, i, x).await?,
+											// This is the end of the expression
+											None => out.set(ctx, opt, txn, v, x).await?,
+										}
+									}
+								}
+								// This expression is a normal field expression
 								_ => {
 									let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
 									out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 								}
 							},
 							Field::Alias(v, i) => match v {
+								// This expression is a grouped aggregate function
 								Value::Function(f) if s.group.is_some() && f.is_aggregate() => {
 									let x = match f.args().len() {
+										// If no function arguments, then compute the result
 										0 => f.compute(ctx, opt, txn, Some(&self.current)).await?,
+										// If arguments, then pass the first value through
 										_ => {
 											f.args()[0]
 												.compute(ctx, opt, txn, Some(&self.current))
@@ -87,6 +190,37 @@ impl<'a> Document<'a> {
 									};
 									out.set(ctx, opt, txn, i, x).await?;
 								}
+								// This expression is a multi-output graph traversal
+								Value::Idiom(v) if v.is_multi_yield() => {
+									// Store the different output yields here
+									let mut res: Vec<(&[Part], Value)> = Vec::new();
+									// Split the expression by each output alias
+									for v in v.split_inclusive(Idiom::split_multi_yield) {
+										// Use the last fetched value for each fetch
+										let x = match res.last() {
+											Some((_, r)) => r,
+											None => self.current.as_ref(),
+										};
+										// Continue fetching the next idiom part
+										let x = x
+											.get(ctx, opt, txn, v)
+											.await?
+											.compute(ctx, opt, txn, Some(&self.current))
+											.await?;
+										// Add the result to the temporary store
+										res.push((v, x));
+									}
+									// Assign each fetched yield to the output
+									for (p, x) in res {
+										match p.last().unwrap().alias() {
+											// This is an alias expression part
+											Some(i) => out.set(ctx, opt, txn, i, x).await?,
+											// This is the end of the expression
+											None => out.set(ctx, opt, txn, i, x).await?,
+										}
+									}
+								}
+								// This expression is a normal field expression
 								_ => {
 									let x = v.compute(ctx, opt, txn, Some(&self.current)).await?;
 									out.set(ctx, opt, txn, i, x).await?;

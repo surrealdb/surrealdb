@@ -2,6 +2,7 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::graph::{graph as graph_raw, Graph};
 use crate::sql::ident::{ident, Ident};
+use crate::sql::idiom::Idiom;
 use crate::sql::number::{number, Number};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
@@ -76,6 +77,16 @@ impl From<&str> for Part {
 		match v.parse::<isize>() {
 			Ok(v) => Part::from(v),
 			_ => Part::from(v.to_owned()),
+		}
+	}
+}
+
+impl Part {
+	// Returns a yield if an alias is specified
+	pub(crate) fn alias(&self) -> Option<&Idiom> {
+		match self {
+			Part::Graph(v) => v.alias.as_ref(),
+			_ => None,
 		}
 	}
 }
