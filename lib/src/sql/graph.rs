@@ -2,7 +2,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::idiom::{idiom, Idiom};
-use crate::sql::table::{tables, Tables};
+use crate::sql::table::{table, tables, Tables};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -119,14 +119,14 @@ fn graph_both(i: &str) -> IResult<&str, Graph> {
 }
 
 fn simple(i: &str) -> IResult<&str, (Tables, Option<Value>, Option<Idiom>)> {
-	let (i, w) = what(i)?;
+	let (i, w) = alt((any, single))(i)?;
 	Ok((i, (w, None, None)))
 }
 
 fn custom(i: &str) -> IResult<&str, (Tables, Option<Value>, Option<Idiom>)> {
 	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, w) = what(i)?;
+	let (i, w) = alt((any, multi))(i)?;
 	let (i, c) = opt(cond)(i)?;
 	let (i, a) = opt(alias)(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -134,9 +134,14 @@ fn custom(i: &str) -> IResult<&str, (Tables, Option<Value>, Option<Idiom>)> {
 	Ok((i, (w, c, a)))
 }
 
-fn what(i: &str) -> IResult<&str, Tables> {
-	let (i, v) = alt((any, tables))(i)?;
-	Ok((i, v))
+fn single(i: &str) -> IResult<&str, Tables> {
+	let (i, v) = table(i)?;
+	Ok((i, Tables::from(v)))
+}
+
+fn multi(i: &str) -> IResult<&str, Tables> {
+	let (i, v) = tables(i)?;
+	Ok((i, Tables::from(v)))
 }
 
 fn any(i: &str) -> IResult<&str, Tables> {

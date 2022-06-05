@@ -13,6 +13,12 @@ use std::str;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Tables(pub Vec<Table>);
 
+impl From<Table> for Tables {
+	fn from(v: Table) -> Self {
+		Tables(vec![v])
+	}
+}
+
 impl Deref for Tables {
 	type Target = Vec<Table>;
 	fn deref(&self) -> &Self::Target {
