@@ -640,6 +640,7 @@ impl Value {
 
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
+			Value::Param(v) => v.simplify(),
 			Value::Idiom(v) => v.simplify(),
 			Value::Strand(v) => v.0.to_string().into(),
 			Value::Datetime(v) => v.0.to_string().into(),
