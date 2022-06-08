@@ -5,7 +5,7 @@ use crate::dbs::Transaction;
 use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::graph::Dir;
+use crate::sql::dir::Dir;
 
 impl<'a> Document<'a> {
 	pub async fn edges(

@@ -1,5 +1,6 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
+use crate::sql::dir::{dir, Dir};
 use crate::sql::error::IResult;
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::table::{table, tables, Tables};
@@ -12,29 +13,6 @@ use nom::combinator::opt;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub enum Dir {
-	In,
-	Out,
-	Both,
-}
-
-impl Default for Dir {
-	fn default() -> Dir {
-		Dir::Both
-	}
-}
-
-impl fmt::Display for Dir {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Dir::In => write!(f, "<-"),
-			Dir::Out => write!(f, "->"),
-			Dir::Both => write!(f, "<->"),
-		}
-	}
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Graph {
 	pub dir: Dir,
@@ -46,13 +24,13 @@ pub struct Graph {
 impl fmt::Display for Graph {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.what.0.len() <= 1 && self.cond.is_none() && self.alias.is_none() {
-			write!(f, "{}", self.dir,)?;
+			write!(f, "{}", self.dir)?;
 			match self.what.len() {
 				0 => write!(f, "?"),
 				_ => write!(f, "{}", self.what),
 			}
 		} else {
-			write!(f, "{}(", self.dir,)?;
+			write!(f, "{}(", self.dir)?;
 			match self.what.len() {
 				0 => write!(f, "?"),
 				_ => write!(f, "{}", self.what),

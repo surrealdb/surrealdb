@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::graph::Dir;
+use crate::sql::dir::Dir;
 use crate::sql::id::Id;
 use crate::sql::thing::Thing;
 use serde::{Deserialize, Serialize};
