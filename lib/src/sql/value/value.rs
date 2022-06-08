@@ -1352,7 +1352,8 @@ mod tests {
 
 	#[test]
 	fn check_size() {
-		assert_eq!(88, std::mem::size_of::<Value>());
+		assert_eq!(64, std::mem::size_of::<Value>());
+		assert_eq!(88, std::mem::size_of::<Result<Value, Error>>());
 		assert_eq!(48, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
@@ -1363,13 +1364,12 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::param::Param>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
-		assert_eq!(80, std::mem::size_of::<crate::sql::thing::Thing>());
+		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
 		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::function::Function>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::subquery::Subquery>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::expression::Expression>>());
-		assert_eq!(96, std::mem::size_of::<Result<Value, Error>>());
 	}
 
 	#[test]

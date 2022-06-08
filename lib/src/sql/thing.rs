@@ -2,7 +2,6 @@ use crate::sql::error::IResult;
 use crate::sql::escape::escape_ident;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
-use crate::sql::number::Number;
 use crate::sql::serde::is_internal_serialization;
 use derive::Store;
 use nom::character::complete::char;
@@ -27,15 +26,6 @@ impl From<(String, Id)> for Thing {
 
 impl From<(String, String)> for Thing {
 	fn from(v: (String, String)) -> Self {
-		Thing {
-			tb: v.0,
-			id: Id::from(v.1),
-		}
-	}
-}
-
-impl From<(String, Number)> for Thing {
-	fn from(v: (String, Number)) -> Self {
 		Thing {
 			tb: v.0,
 			id: Id::from(v.1),

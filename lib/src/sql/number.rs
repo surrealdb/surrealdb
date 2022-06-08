@@ -160,6 +160,18 @@ impl Number {
 	// Simple number detection
 	// -----------------------------------
 
+	pub fn is_int(&self) -> bool {
+		matches!(self, Number::Int(_))
+	}
+
+	pub fn is_float(&self) -> bool {
+		matches!(self, Number::Float(_))
+	}
+
+	pub fn is_decimal(&self) -> bool {
+		matches!(self, Number::Decimal(_))
+	}
+
 	pub fn is_truthy(&self) -> bool {
 		match self {
 			Number::Int(v) => v != &0,
@@ -492,10 +504,10 @@ impl<'a> Product<&'a Self> for Number {
 }
 
 pub fn number(i: &str) -> IResult<&str, Number> {
-	alt((integer, decimal))(i)
+	alt((map(integer, Number::from), map(decimal, Number::from)))(i)
 }
 
-fn integer(i: &str) -> IResult<&str, Number> {
+pub fn integer(i: &str) -> IResult<&str, i64> {
 	let (i, v) = i64(i)?;
 	let (i, _) = peek(alt((
 		map(multispace1, |_| ()),
@@ -509,10 +521,10 @@ fn integer(i: &str) -> IResult<&str, Number> {
 		map(char(','), |_| ()),
 		map(eof, |_| ()),
 	)))(i)?;
-	Ok((i, Number::from(v)))
+	Ok((i, v))
 }
 
-fn decimal(i: &str) -> IResult<&str, Number> {
+pub fn decimal(i: &str) -> IResult<&str, &str> {
 	let (i, v) = recognize_float(i)?;
 	let (i, _) = peek(alt((
 		map(multispace1, |_| ()),
@@ -526,7 +538,7 @@ fn decimal(i: &str) -> IResult<&str, Number> {
 		map(char(','), |_| ()),
 		map(eof, |_| ()),
 	)))(i)?;
-	Ok((i, Number::from(v)))
+	Ok((i, v))
 }
 
 #[cfg(test)]

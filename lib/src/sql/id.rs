@@ -2,7 +2,7 @@ use crate::cnf::ID_CHARS;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_ident;
 use crate::sql::ident::ident_raw;
-use crate::sql::number::{number, Number};
+use crate::sql::number::integer;
 use nanoid::nanoid;
 use nom::branch::alt;
 use nom::combinator::map;
@@ -11,13 +11,25 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Id {
-	Number(Number),
+	Number(i64),
 	String(String),
 }
 
-impl From<Number> for Id {
-	fn from(v: Number) -> Self {
+impl From<i64> for Id {
+	fn from(v: i64) -> Self {
 		Id::Number(v)
+	}
+}
+
+impl From<i32> for Id {
+	fn from(v: i32) -> Self {
+		Id::Number(v as i64)
+	}
+}
+
+impl From<u64> for Id {
+	fn from(v: u64) -> Self {
+		Id::Number(v as i64)
 	}
 }
 
@@ -30,12 +42,6 @@ impl From<String> for Id {
 impl From<&str> for Id {
 	fn from(v: &str) -> Self {
 		Id::String(v.to_owned())
-	}
-}
-
-impl From<u64> for Id {
-	fn from(v: u64) -> Self {
-		Id::Number(Number::from(v))
 	}
 }
 
@@ -55,7 +61,7 @@ impl fmt::Display for Id {
 }
 
 pub fn id(i: &str) -> IResult<&str, Id> {
-	alt((map(number, Id::Number), map(ident_raw, Id::String)))(i)
+	alt((map(integer, Id::Number), map(ident_raw, Id::String)))(i)
 }
 
 #[cfg(test)]
