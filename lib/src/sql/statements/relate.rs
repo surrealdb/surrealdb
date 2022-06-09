@@ -6,18 +6,23 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::sql::array::array;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::data::{data, Data};
 use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
+use crate::sql::param::param;
+use crate::sql::subquery::subquery;
 use crate::sql::table::{table, Table};
+use crate::sql::thing::thing;
 use crate::sql::timeout::{timeout, Timeout};
-use crate::sql::value::{whats, Value, Values};
+use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
+use nom::combinator::map;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
@@ -26,8 +31,8 @@ use std::fmt;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct RelateStatement {
 	pub kind: Table,
-	pub from: Values,
-	pub with: Values,
+	pub from: Value,
+	pub with: Value,
 	pub uniq: bool,
 	pub data: Option<Data>,
 	pub output: Option<Output>,
@@ -56,89 +61,84 @@ impl RelateStatement {
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();
-			for w in self.from.0.iter() {
-				let v = w.compute(ctx, opt, txn, doc).await?;
-				match v {
-					Value::Thing(v) => out.push(v),
-					Value::Array(v) => {
-						for v in v {
-							match v {
-								Value::Thing(v) => out.push(v),
-								Value::Object(v) => match v.rid() {
-									Some(v) => out.push(v),
-									_ => {
-										return Err(Error::RelateStatement {
-											value: v.to_string(),
-										})
-									}
-								},
-								v => {
+			match self.from.compute(ctx, opt, txn, doc).await? {
+				Value::Thing(v) => out.push(v),
+				Value::Array(v) => {
+					for v in v {
+						match v {
+							Value::Thing(v) => out.push(v),
+							Value::Object(v) => match v.rid() {
+								Some(v) => out.push(v),
+								_ => {
 									return Err(Error::RelateStatement {
 										value: v.to_string(),
 									})
 								}
+							},
+							v => {
+								return Err(Error::RelateStatement {
+									value: v.to_string(),
+								})
 							}
 						}
 					}
-					Value::Object(v) => match v.rid() {
-						Some(v) => out.push(v),
-						None => {
-							return Err(Error::RelateStatement {
-								value: v.to_string(),
-							})
-						}
-					},
-					v => {
+				}
+				Value::Object(v) => match v.rid() {
+					Some(v) => out.push(v),
+					None => {
 						return Err(Error::RelateStatement {
 							value: v.to_string(),
 						})
 					}
-				};
-			}
+				},
+				v => {
+					return Err(Error::RelateStatement {
+						value: v.to_string(),
+					})
+				}
+			};
+			// }
 			out
 		};
 		// Loop over the with targets
 		let with = {
 			let mut out = Vec::new();
-			for w in self.with.0.iter() {
-				let v = w.compute(ctx, opt, txn, doc).await?;
-				match v {
-					Value::Thing(v) => out.push(v),
-					Value::Array(v) => {
-						for v in v {
-							match v {
-								Value::Thing(v) => out.push(v),
-								Value::Object(v) => match v.rid() {
-									Some(v) => out.push(v),
-									None => {
-										return Err(Error::RelateStatement {
-											value: v.to_string(),
-										})
-									}
-								},
-								v => {
+			match self.with.compute(ctx, opt, txn, doc).await? {
+				Value::Thing(v) => out.push(v),
+				Value::Array(v) => {
+					for v in v {
+						match v {
+							Value::Thing(v) => out.push(v),
+							Value::Object(v) => match v.rid() {
+								Some(v) => out.push(v),
+								None => {
 									return Err(Error::RelateStatement {
 										value: v.to_string(),
 									})
 								}
+							},
+							v => {
+								return Err(Error::RelateStatement {
+									value: v.to_string(),
+								})
 							}
 						}
 					}
-					Value::Object(v) => match v.rid() {
-						Some(v) => out.push(v),
-						None => {
-							return Err(Error::RelateStatement {
-								value: v.to_string(),
-							})
-						}
-					},
-					v => {
+				}
+				Value::Object(v) => match v.rid() {
+					Some(v) => out.push(v),
+					None => {
 						return Err(Error::RelateStatement {
 							value: v.to_string(),
 						})
 					}
-				};
-			}
+				},
+				v => {
+					return Err(Error::RelateStatement {
+						value: v.to_string(),
+					})
+				}
+			};
 			out
 		};
 		//
@@ -203,8 +203,13 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	))
 }
 
-fn relate_o(i: &str) -> IResult<&str, (Table, Values, Values)> {
-	let (i, from) = whats(i)?;
+fn relate_o(i: &str) -> IResult<&str, (Table, Value, Value)> {
+	let (i, from) = alt((
+		map(subquery, Value::from),
+		map(array, Value::from),
+		map(param, Value::from),
+		map(thing, Value::from),
+	))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, _) = char('>')(i)?;
@@ -214,12 +219,22 @@ fn relate_o(i: &str) -> IResult<&str, (Table, Values, Values)> {
 	let (i, _) = char('-')(i)?;
 	let (i, _) = char('>')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, with) = whats(i)?;
+	let (i, with) = alt((
+		map(subquery, Value::from),
+		map(array, Value::from),
+		map(param, Value::from),
+		map(thing, Value::from),
+	))(i)?;
 	Ok((i, (kind, from, with)))
 }
 
-fn relate_i(i: &str) -> IResult<&str, (Table, Values, Values)> {
-	let (i, with) = whats(i)?;
+fn relate_i(i: &str) -> IResult<&str, (Table, Value, Value)> {
+	let (i, with) = alt((
+		map(subquery, Value::from),
+		map(array, Value::from),
+		map(param, Value::from),
+		map(thing, Value::from),
+	))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('<')(i)?;
 	let (i, _) = char('-')(i)?;
@@ -229,7 +244,12 @@ fn relate_i(i: &str) -> IResult<&str, (Table, Values, Values)> {
 	let (i, _) = char('<')(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, from) = whats(i)?;
+	let (i, from) = alt((
+		map(subquery, Value::from),
+		map(array, Value::from),
+		map(param, Value::from),
+		map(thing, Value::from),
+	))(i)?;
 	Ok((i, (kind, from, with)))
 }
 
@@ -240,28 +260,19 @@ mod tests {
 
 	#[test]
 	fn relate_statement_in() {
-		let sql = "RELATE person->like->animal";
+		let sql = "RELATE person:tobie->like->animal:koala";
 		let res = relate(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("RELATE person -> like -> animal", format!("{}", out))
+		assert_eq!("RELATE person:tobie -> like -> animal:koala", format!("{}", out))
 	}
 
 	#[test]
 	fn relate_statement_out() {
-		let sql = "RELATE animal<-like<-person";
+		let sql = "RELATE animal:koala<-like<-person:tobie";
 		let res = relate(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("RELATE person -> like -> animal", format!("{}", out))
-	}
-
-	#[test]
-	fn relate_statement_thing() {
-		let sql = "RELATE person:tobie->like->person:jaime";
-		let res = relate(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("RELATE person:tobie -> like -> person:jaime", format!("{}", out))
+		assert_eq!("RELATE person:tobie -> like -> animal:koala", format!("{}", out))
 	}
 }
