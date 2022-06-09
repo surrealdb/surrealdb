@@ -53,6 +53,7 @@ impl DeleteStatement {
 			match v {
 				Value::Table(v) => i.ingest(Iterable::Table(v)),
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
+				Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
 				Value::Model(v) => {
 					for v in v {
 						i.ingest(Iterable::Thing(v));
@@ -63,6 +64,7 @@ impl DeleteStatement {
 						match v {
 							Value::Table(v) => i.ingest(Iterable::Table(v)),
 							Value::Thing(v) => i.ingest(Iterable::Thing(v)),
+							Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
 							Value::Model(v) => {
 								for v in v {
 									i.ingest(Iterable::Thing(v));

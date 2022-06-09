@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::part::Next;
 use crate::sql::part::Part;
@@ -9,6 +10,9 @@ use crate::sql::statements::select::SelectStatement;
 use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
+use once_cell::sync::Lazy;
+
+static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 
 impl Value {
 	#[cfg_attr(feature = "parallel", async_recursion)]
@@ -25,6 +29,10 @@ impl Value {
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
+					Part::Graph(_) => match v.rid() {
+						Some(v) => Value::Thing(v).get(ctx, opt, txn, path).await,
+						None => Ok(Value::None),
+					},
 					Part::Field(f) => match v.get(f as &str) {
 						Some(v) => v.get(ctx, opt, txn, path.next()).await,
 						None => Ok(Value::None),
@@ -67,23 +75,62 @@ impl Value {
 					}
 				},
 				// Current path part is a thing
-				Value::Thing(v) => match path.len() {
-					// No remote embedded fields, so just return this
-					0 => Ok(Value::Thing(v.clone())),
-					// Remote embedded field, so fetch the thing
-					_ => {
-						let stm = SelectStatement {
-							expr: Fields(vec![Field::All]),
-							what: Values(vec![Value::Thing(v.clone())]),
-							..SelectStatement::default()
-						};
-						stm.compute(ctx, opt, txn, None)
-							.await?
-							.first()
-							.get(ctx, opt, txn, path)
-							.await
+				Value::Thing(v) => {
+					// Clone the thing
+					let val = v.clone();
+					// Check how many path parts are remaining
+					match path.len() {
+						// No remote embedded fields, so just return this
+						0 => Ok(Value::Thing(val)),
+						// Remote embedded field, so fetch the thing
+						_ => match p {
+							// This is a graph traversal expression
+							Part::Graph(g) => {
+								let stm = SelectStatement {
+									expr: Fields(vec![Field::All]),
+									what: Values(vec![Value::from(Edges {
+										from: val,
+										dir: g.dir.clone(),
+										what: g.what.clone(),
+									})]),
+									cond: g.cond.clone(),
+									..SelectStatement::default()
+								};
+								match path.len() {
+									1 => stm
+										.compute(ctx, opt, txn, None)
+										.await?
+										.all()
+										.get(ctx, opt, txn, ID.as_ref())
+										.await?
+										.flatten()
+										.ok(),
+									_ => stm
+										.compute(ctx, opt, txn, None)
+										.await?
+										.all()
+										.get(ctx, opt, txn, path.next())
+										.await?
+										.flatten()
+										.ok(),
+								}
+							}
+							// This is a remote field expression
+							_ => {
+								let stm = SelectStatement {
+									expr: Fields(vec![Field::All]),
+									what: Values(vec![Value::from(val)]),
+									..SelectStatement::default()
+								};
+								stm.compute(ctx, opt, txn, None)
+									.await?
+									.first()
+									.get(ctx, opt, txn, path)
+									.await
+							}
+						},
 					}
-				},
+				}
 				// Ignore everything else
 				_ => Ok(Value::None),
 			},

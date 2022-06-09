@@ -1,17 +1,12 @@
-use crate::sql::comment::comment;
+use crate::sql::ending::number as ending;
 use crate::sql::error::IResult;
-use crate::sql::operator::{assigner, operator};
 use crate::sql::serde::is_internal_serialization;
 use bigdecimal::BigDecimal;
 use bigdecimal::FromPrimitive;
 use bigdecimal::ToPrimitive;
 use nom::branch::alt;
-use nom::character::complete::char;
 use nom::character::complete::i64;
-use nom::character::complete::multispace1;
-use nom::combinator::eof;
 use nom::combinator::map;
-use nom::combinator::peek;
 use nom::number::complete::recognize_float;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -509,35 +504,13 @@ pub fn number(i: &str) -> IResult<&str, Number> {
 
 pub fn integer(i: &str) -> IResult<&str, i64> {
 	let (i, v) = i64(i)?;
-	let (i, _) = peek(alt((
-		map(multispace1, |_| ()),
-		map(operator, |_| ()),
-		map(assigner, |_| ()),
-		map(comment, |_| ()),
-		map(char(')'), |_| ()),
-		map(char(']'), |_| ()),
-		map(char('}'), |_| ()),
-		map(char(';'), |_| ()),
-		map(char(','), |_| ()),
-		map(eof, |_| ()),
-	)))(i)?;
+	let (i, _) = ending(i)?;
 	Ok((i, v))
 }
 
 pub fn decimal(i: &str) -> IResult<&str, &str> {
 	let (i, v) = recognize_float(i)?;
-	let (i, _) = peek(alt((
-		map(multispace1, |_| ()),
-		map(operator, |_| ()),
-		map(assigner, |_| ()),
-		map(comment, |_| ()),
-		map(char(')'), |_| ()),
-		map(char(']'), |_| ()),
-		map(char('}'), |_| ()),
-		map(char(';'), |_| ()),
-		map(char(','), |_| ()),
-		map(eof, |_| ()),
-	)))(i)?;
+	let (i, _) = ending(i)?;
 	Ok((i, v))
 }
 

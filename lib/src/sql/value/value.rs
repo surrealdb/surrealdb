@@ -8,6 +8,7 @@ use crate::sql::array::{array, Array};
 use crate::sql::common::commas;
 use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::duration::{duration, Duration};
+use crate::sql::edges::{edges, Edges};
 use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
 use crate::sql::function::{function, Function};
@@ -110,6 +111,7 @@ pub enum Value {
 	Thing(Thing),
 	Model(Model),
 	Regex(Regex),
+	Edges(Box<Edges>),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
@@ -147,6 +149,12 @@ impl From<Param> for Value {
 impl From<Idiom> for Value {
 	fn from(v: Idiom) -> Self {
 		Value::Idiom(v)
+	}
+}
+
+impl From<Model> for Value {
+	fn from(v: Model) -> Self {
+		Value::Model(v)
 	}
 }
 
@@ -210,21 +218,27 @@ impl From<Duration> for Value {
 	}
 }
 
+impl From<Edges> for Value {
+	fn from(v: Edges) -> Self {
+		Value::Edges(Box::new(v))
+	}
+}
+
 impl From<Function> for Value {
 	fn from(v: Function) -> Self {
 		Value::Function(Box::new(v))
 	}
 }
 
-impl From<Expression> for Value {
-	fn from(v: Expression) -> Self {
-		Value::Expression(Box::new(v))
+impl From<Subquery> for Value {
+	fn from(v: Subquery) -> Self {
+		Value::Subquery(Box::new(v))
 	}
 }
 
-impl From<Box<Expression>> for Value {
-	fn from(v: Box<Expression>) -> Self {
-		Value::Expression(v)
+impl From<Expression> for Value {
+	fn from(v: Expression) -> Self {
+		Value::Expression(Box::new(v))
 	}
 }
 
@@ -964,6 +978,7 @@ impl fmt::Display for Value {
 			Value::Thing(v) => write!(f, "{}", v),
 			Value::Model(v) => write!(f, "{}", v),
 			Value::Regex(v) => write!(f, "{}", v),
+			Value::Edges(v) => write!(f, "{}", v),
 			Value::Function(v) => write!(f, "{}", v),
 			Value::Subquery(v) => write!(f, "{}", v),
 			Value::Expression(v) => write!(f, "{}", v),
@@ -1035,9 +1050,10 @@ impl Serialize for Value {
 				Value::Thing(v) => s.serialize_newtype_variant("Value", 15, "Thing", v),
 				Value::Model(v) => s.serialize_newtype_variant("Value", 16, "Model", v),
 				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 18, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 19, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 20, "Expression", v),
+				Value::Edges(v) => s.serialize_newtype_variant("Value", 18, "Edges", v),
+				Value::Function(v) => s.serialize_newtype_variant("Value", 19, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant("Value", 20, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant("Value", 21, "Expression", v),
 			}
 		} else {
 			match self {
@@ -1113,7 +1129,7 @@ pub fn value(i: &str) -> IResult<&str, Value> {
 }
 
 pub fn double(i: &str) -> IResult<&str, Value> {
-	map(expression, |v| Value::Expression(Box::new(v)))(i)
+	map(expression, Value::from)(i)
 }
 
 pub fn single(i: &str) -> IResult<&str, Value> {
@@ -1123,20 +1139,20 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		map(tag_no_case("NULL"), |_| Value::Null),
 		map(tag_no_case("true"), |_| Value::True),
 		map(tag_no_case("false"), |_| Value::False),
-		map(subquery, |v| Value::Subquery(Box::new(v))),
-		map(function, |v| Value::Function(Box::new(v))),
-		map(datetime, Value::Datetime),
-		map(duration, Value::Duration),
-		map(geometry, Value::Geometry),
-		map(number, Value::Number),
-		map(strand, Value::Strand),
-		map(object, Value::Object),
-		map(array, Value::Array),
-		map(param, Value::Param),
-		map(regex, Value::Regex),
-		map(thing, Value::Thing),
-		map(model, Value::Model),
-		map(idiom, Value::Idiom),
+		map(subquery, Value::from),
+		map(function, Value::from),
+		map(datetime, Value::from),
+		map(duration, Value::from),
+		map(geometry, Value::from),
+		map(number, Value::from),
+		map(strand, Value::from),
+		map(object, Value::from),
+		map(array, Value::from),
+		map(param, Value::from),
+		map(regex, Value::from),
+		map(model, Value::from),
+		map(idiom, Value::from),
+		map(thing, Value::from),
 	))(i)
 }
 
@@ -1147,31 +1163,33 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 		map(tag_no_case("NULL"), |_| Value::Null),
 		map(tag_no_case("true"), |_| Value::True),
 		map(tag_no_case("false"), |_| Value::False),
-		map(subquery, |v| Value::Subquery(Box::new(v))),
-		map(function, |v| Value::Function(Box::new(v))),
-		map(datetime, Value::Datetime),
-		map(duration, Value::Duration),
-		map(geometry, Value::Geometry),
-		map(number, Value::Number),
-		map(strand, Value::Strand),
-		map(object, Value::Object),
-		map(array, Value::Array),
-		map(param, Value::Param),
-		map(regex, Value::Regex),
-		map(thing, Value::Thing),
-		map(model, Value::Model),
-		map(table, Value::Table),
+		map(subquery, Value::from),
+		map(function, Value::from),
+		map(datetime, Value::from),
+		map(duration, Value::from),
+		map(geometry, Value::from),
+		map(number, Value::from),
+		map(strand, Value::from),
+		map(object, Value::from),
+		map(array, Value::from),
+		map(param, Value::from),
+		map(regex, Value::from),
+		map(model, Value::from),
+		map(edges, Value::from),
+		map(thing, Value::from),
+		map(table, Value::from),
 	))(i)
 }
 
 pub fn what(i: &str) -> IResult<&str, Value> {
 	alt((
-		map(subquery, |v| Value::Subquery(Box::new(v))),
-		map(function, |v| Value::Function(Box::new(v))),
-		map(param, Value::Param),
-		map(model, Value::Model),
-		map(thing, Value::Thing),
-		map(table, Value::Table),
+		map(subquery, Value::from),
+		map(function, Value::from),
+		map(param, Value::from),
+		map(model, Value::from),
+		map(edges, Value::from),
+		map(thing, Value::from),
+		map(table, Value::from),
 	))(i)
 }
 
@@ -1180,13 +1198,13 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		map(tag_no_case("NULL"), |_| Value::Null),
 		map(tag_no_case("true"), |_| Value::True),
 		map(tag_no_case("false"), |_| Value::False),
-		map(datetime, Value::Datetime),
-		map(duration, Value::Duration),
-		map(geometry, Value::Geometry),
-		map(number, Value::Number),
-		map(object, Value::Object),
-		map(array, Value::Array),
-		map(strand, Value::Strand),
+		map(datetime, Value::from),
+		map(duration, Value::from),
+		map(geometry, Value::from),
+		map(number, Value::from),
+		map(object, Value::from),
+		map(array, Value::from),
+		map(strand, Value::from),
 	))(i)
 }
 
@@ -1367,6 +1385,7 @@ mod tests {
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
 		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::regex::Regex>());
+		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::function::Function>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::subquery::Subquery>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::expression::Expression>>());

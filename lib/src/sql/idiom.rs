@@ -4,11 +4,12 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
-use crate::sql::part::{all, field, first, graph, index, last, part, Part};
+use crate::sql::part::Next;
+use crate::sql::part::{all, field, first, graph, index, last, part, thing, Part};
 use crate::sql::value::Value;
 use nom::branch::alt;
-use nom::multi::many0;
 use nom::multi::separated_list1;
+use nom::multi::{many0, many1};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
@@ -72,7 +73,7 @@ impl Idiom {
 		self.0
 			.iter()
 			.cloned()
-			.filter(|p| matches!(p, Part::Field(_) | Part::Graph(_)))
+			.filter(|p| matches!(p, Part::Field(_) | Part::Thing(_) | Part::Graph(_)))
 			.collect::<Vec<_>>()
 			.into()
 	}
@@ -94,11 +95,24 @@ impl Idiom {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		match doc {
-			// There is a current document
-			Some(v) => v.get(ctx, opt, txn, self).await?.compute(ctx, opt, txn, doc).await,
-			// There isn't any document
-			None => Ok(Value::None),
+		match self.first() {
+			// The first part is a thing record
+			Some(Part::Thing(v)) => {
+				// Use the thing as the document
+				let v: Value = v.clone().into();
+				// Fetch the Idiom from the document
+				v.get(ctx, opt, txn, self.as_ref().next())
+					.await?
+					.compute(ctx, opt, txn, Some(&v))
+					.await
+			}
+			// Otherwise use the current document
+			_ => match doc {
+				// There is a current document
+				Some(v) => v.get(ctx, opt, txn, self).await?.compute(ctx, opt, txn, doc).await,
+				// There isn't any document
+				None => Ok(Value::None),
+			},
 		}
 	}
 }
@@ -146,18 +160,32 @@ pub fn param(i: &str) -> IResult<&str, Idiom> {
 }
 
 pub fn idiom(i: &str) -> IResult<&str, Idiom> {
-	let (i, p) = alt((first, graph))(i)?;
-	let (i, mut v) = many0(part)(i)?;
-	v.insert(0, p);
-	Ok((i, Idiom::from(v)))
+	alt((
+		|i| {
+			let (i, p) = alt((thing, graph))(i)?;
+			let (i, mut v) = many1(part)(i)?;
+			v.insert(0, p);
+			Ok((i, Idiom::from(v)))
+		},
+		|i| {
+			let (i, p) = alt((first, graph))(i)?;
+			let (i, mut v) = many0(part)(i)?;
+			v.insert(0, p);
+			Ok((i, Idiom::from(v)))
+		},
+	))(i)
 }
 
 #[cfg(test)]
 mod tests {
 
 	use super::*;
+	use crate::sql::dir::Dir;
 	use crate::sql::expression::Expression;
+	use crate::sql::graph::Graph;
+	use crate::sql::table::Table;
 	use crate::sql::test::Parse;
+	use crate::sql::thing::Thing;
 
 	#[test]
 	fn idiom_normal() {
@@ -274,6 +302,34 @@ mod tests {
 				Part::from("temp"),
 				Part::from(Value::from(Expression::parse("test = true"))),
 				Part::from("text")
+			])
+		);
+	}
+
+	#[test]
+	fn idiom_start_thing_remote_traversal() {
+		let sql = "person:test.friend->like->person";
+		let res = idiom(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("person:test.friend->like->person", format!("{}", out));
+		assert_eq!(
+			out,
+			Idiom(vec![
+				Part::from(Thing::from(("person", "test"))),
+				Part::from("friend"),
+				Part::from(Graph {
+					dir: Dir::Out,
+					what: Table::from("like").into(),
+					cond: None,
+					alias: None,
+				}),
+				Part::from(Graph {
+					dir: Dir::Out,
+					what: Table::from("person").into(),
+					cond: None,
+					alias: None,
+				}),
 			])
 		);
 	}

@@ -1,9 +1,11 @@
 use crate::sql::comment::shouldbespace;
+use crate::sql::ending::ident as ending;
 use crate::sql::error::IResult;
 use crate::sql::graph::{graph as graph_raw, Graph};
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom::Idiom;
 use crate::sql::number::{number, Number};
+use crate::sql::thing::{thing as thing_raw, Thing};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -21,6 +23,7 @@ pub enum Part {
 	Field(Ident),
 	Index(Number),
 	Where(Value),
+	Thing(Thing),
 	Graph(Graph),
 }
 
@@ -57,6 +60,12 @@ impl From<Ident> for Part {
 impl From<Value> for Part {
 	fn from(v: Value) -> Self {
 		Part::Where(v)
+	}
+}
+
+impl From<Thing> for Part {
+	fn from(v: Thing) -> Self {
+		Part::Thing(v)
 	}
 }
 
@@ -100,6 +109,7 @@ impl fmt::Display for Part {
 			Part::Field(v) => write!(f, ".{}", v),
 			Part::Index(v) => write!(f, "[{}]", v),
 			Part::Where(v) => write!(f, "[WHERE {}]", v),
+			Part::Thing(v) => write!(f, "{}", v),
 			Part::Graph(v) => write!(f, "{}", v),
 		}
 	}
@@ -128,6 +138,7 @@ pub fn part(i: &str) -> IResult<&str, Part> {
 
 pub fn first(i: &str) -> IResult<&str, Part> {
 	let (i, v) = ident(i)?;
+	let (i, _) = ending(i)?;
 	Ok((i, Part::Field(v)))
 }
 
@@ -165,6 +176,7 @@ pub fn index(i: &str) -> IResult<&str, Part> {
 pub fn field(i: &str) -> IResult<&str, Part> {
 	let (i, _) = char('.')(i)?;
 	let (i, v) = ident(i)?;
+	let (i, _) = ending(i)?;
 	Ok((i, Part::Field(v)))
 }
 
@@ -175,6 +187,11 @@ pub fn filter(i: &str) -> IResult<&str, Part> {
 	let (i, v) = value(i)?;
 	let (i, _) = char(']')(i)?;
 	Ok((i, Part::Where(v)))
+}
+
+pub fn thing(i: &str) -> IResult<&str, Part> {
+	let (i, v) = thing_raw(i)?;
+	Ok((i, Part::Thing(v)))
 }
 
 pub fn graph(i: &str) -> IResult<&str, Part> {

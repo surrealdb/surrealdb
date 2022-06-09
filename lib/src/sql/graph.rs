@@ -21,6 +21,12 @@ pub struct Graph {
 	pub alias: Option<Idiom>,
 }
 
+impl Graph {
+	pub fn to_raw(&self) -> String {
+		self.to_string()
+	}
+}
+
 impl fmt::Display for Graph {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.what.0.len() <= 1 && self.cond.is_none() && self.alias.is_none() {

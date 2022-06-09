@@ -6,6 +6,7 @@ use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::array::Array;
+use crate::sql::edges::Edges;
 use crate::sql::field::Field;
 use crate::sql::part::Part;
 use crate::sql::table::Table;
@@ -19,6 +20,7 @@ pub enum Iterable {
 	Value(Value),
 	Table(Table),
 	Thing(Thing),
+	Edges(Edges),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),
 }

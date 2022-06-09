@@ -14,6 +14,7 @@ mod diff;
 mod each;
 mod every;
 mod first;
+mod flatten;
 mod get;
 mod increment;
 mod last;

@@ -33,6 +33,21 @@ impl From<(String, String)> for Thing {
 	}
 }
 
+impl From<(&str, &str)> for Thing {
+	fn from(v: (&str, &str)) -> Self {
+		Thing {
+			tb: v.0.to_owned(),
+			id: Id::from(v.1),
+		}
+	}
+}
+
+impl Thing {
+	pub fn to_raw(&self) -> String {
+		self.to_string()
+	}
+}
+
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}:{}", escape_ident(&self.tb), self.id)
