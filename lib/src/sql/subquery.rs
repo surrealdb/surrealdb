@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
@@ -204,6 +205,7 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 
 fn subquery_others(i: &str) -> IResult<&str, Subquery> {
 	let (i, _) = char('(')(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		map(select, Subquery::Select),
 		map(create, Subquery::Create),
@@ -213,6 +215,7 @@ fn subquery_others(i: &str) -> IResult<&str, Subquery> {
 		map(insert, Subquery::Insert),
 		map(value, Subquery::Value),
 	))(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(')')(i)?;
 	Ok((i, v))
 }
