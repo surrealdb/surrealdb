@@ -1,8 +1,7 @@
-use crate::err::Error;
+use derive::Key;
 use serde::{Deserialize, Serialize};
-use storekey::{deserialize, serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 pub struct Database {
 	__: u8,
 	_a: u8,
@@ -11,38 +10,8 @@ pub struct Database {
 	pub db: String,
 }
 
-impl From<Database> for Vec<u8> {
-	fn from(val: Database) -> Vec<u8> {
-		val.encode().unwrap()
-	}
-}
-
-impl From<Vec<u8>> for Database {
-	fn from(val: Vec<u8>) -> Self {
-		Database::decode(&val).unwrap()
-	}
-}
-
-impl From<&Vec<u8>> for Database {
-	fn from(val: &Vec<u8>) -> Self {
-		Database::decode(val).unwrap()
-	}
-}
-
 pub fn new(ns: &str, db: &str) -> Database {
 	Database::new(ns.to_string(), db.to_string())
-}
-
-pub fn prefix(ns: &str) -> Vec<u8> {
-	let mut k = super::namespace::new(ns).encode().unwrap();
-	k.extend_from_slice(&[0x2a, 0x00]);
-	k
-}
-
-pub fn suffix(ns: &str) -> Vec<u8> {
-	let mut k = super::namespace::new(ns).encode().unwrap();
-	k.extend_from_slice(&[0x2a, 0xff]);
-	k
 }
 
 impl Database {
@@ -54,15 +23,6 @@ impl Database {
 			_b: 0x2a, // *
 			db,
 		}
-	}
-	pub fn encode(&self) -> Result<Vec<u8>, Error> {
-		crate::sql::serde::beg_internal_serialization();
-		let v = serialize(self);
-		crate::sql::serde::end_internal_serialization();
-		Ok(v?)
-	}
-	pub fn decode(v: &[u8]) -> Result<Database, Error> {
-		Ok(deserialize(v)?)
 	}
 }
 

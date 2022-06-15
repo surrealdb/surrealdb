@@ -588,8 +588,9 @@ impl RemoveIndexStatement {
 		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
 		// Remove the resource data
-		let key = crate::key::guide::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.delp(key, u32::MAX).await?;
+		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);
+		let end = crate::key::index::suffix(opt.ns(), opt.db(), &self.what, &self.name);
+		run.delr(beg..end, u32::MAX).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

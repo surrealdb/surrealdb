@@ -22,11 +22,9 @@
 ///
 /// Thing           /*{ns}*{db}*{tb}*{id}
 ///
-/// Graph           /*{ns}*{db}*{tb}~{id}{gt}{fk}
+/// Graph           /*{ns}*{db}*{tb}~{id}{eg}{fk}
 ///
-/// Guide           /*{ns}*{db}*{tb}¤{ix}
-/// Index           /*{ns}*{db}*{tb}¤{ix}{fd}
-/// Point           /*{ns}*{db}*{tb}¤{ix}{fd}{id}
+/// Index           /*{ns}*{db}*{tb}¤{ix}{fd}{id}
 ///
 pub mod database;
 pub mod db;
@@ -36,7 +34,6 @@ pub mod ev;
 pub mod fd;
 pub mod ft;
 pub mod graph;
-pub mod guide;
 pub mod index;
 pub mod ix;
 pub mod kv;
@@ -45,7 +42,6 @@ pub mod namespace;
 pub mod nl;
 pub mod ns;
 pub mod nt;
-pub mod point;
 pub mod sc;
 pub mod st;
 pub mod table;

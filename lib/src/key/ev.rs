@@ -1,8 +1,7 @@
-use crate::err::Error;
+use derive::Key;
 use serde::{Deserialize, Serialize};
-use storekey::{deserialize, serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 pub struct Ev {
 	__: u8,
 	_a: u8,
@@ -15,24 +14,6 @@ pub struct Ev {
 	_e: u8,
 	_f: u8,
 	pub ev: String,
-}
-
-impl From<Ev> for Vec<u8> {
-	fn from(val: Ev) -> Vec<u8> {
-		val.encode().unwrap()
-	}
-}
-
-impl From<Vec<u8>> for Ev {
-	fn from(val: Vec<u8>) -> Self {
-		Ev::decode(&val).unwrap()
-	}
-}
-
-impl From<&Vec<u8>> for Ev {
-	fn from(val: &Vec<u8>) -> Self {
-		Ev::decode(val).unwrap()
-	}
 }
 
 pub fn new(ns: &str, db: &str, tb: &str, ev: &str) -> Ev {
@@ -66,15 +47,6 @@ impl Ev {
 			_f: 0x76, // v
 			ev,
 		}
-	}
-	pub fn encode(&self) -> Result<Vec<u8>, Error> {
-		crate::sql::serde::beg_internal_serialization();
-		let v = serialize(self);
-		crate::sql::serde::end_internal_serialization();
-		Ok(v?)
-	}
-	pub fn decode(v: &[u8]) -> Result<Ev, Error> {
-		Ok(deserialize(v)?)
 	}
 }
 

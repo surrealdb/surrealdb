@@ -1,9 +1,8 @@
-use crate::err::Error;
 use crate::sql::id::Id;
+use derive::Key;
 use serde::{Deserialize, Serialize};
-use storekey::{deserialize, serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 pub struct Thing {
 	__: u8,
 	_a: u8,
@@ -14,24 +13,6 @@ pub struct Thing {
 	pub tb: String,
 	_d: u8,
 	pub id: Id,
-}
-
-impl From<Thing> for Vec<u8> {
-	fn from(val: Thing) -> Vec<u8> {
-		val.encode().unwrap()
-	}
-}
-
-impl From<Vec<u8>> for Thing {
-	fn from(val: Vec<u8>) -> Self {
-		Thing::decode(&val).unwrap()
-	}
-}
-
-impl From<&Vec<u8>> for Thing {
-	fn from(val: &Vec<u8>) -> Self {
-		Thing::decode(val).unwrap()
-	}
 }
 
 pub fn new(ns: &str, db: &str, tb: &str, id: &Id) -> Thing {
@@ -63,15 +44,6 @@ impl Thing {
 			_d: 0x2a, // *
 			id,
 		}
-	}
-	pub fn encode(&self) -> Result<Vec<u8>, Error> {
-		crate::sql::serde::beg_internal_serialization();
-		let v = serialize(self);
-		crate::sql::serde::end_internal_serialization();
-		Ok(v?)
-	}
-	pub fn decode(v: &[u8]) -> Result<Thing, Error> {
-		Ok(deserialize(v)?)
 	}
 }
 

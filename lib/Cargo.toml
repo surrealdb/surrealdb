@@ -21,7 +21,7 @@ bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
 boa = { version = "0.14.0", package = "boa_engine", optional = true }
 channel = { version = "1.6.1", package = "async-channel" }
 chrono = { version = "0.4.19", features = ["serde"] }
-derive = { version = "0.2.0", package = "surrealdb-derive" }
+derive = { version = "0.3.0", package = "surrealdb-derive" }
 dmp = "0.1.1"
 echodb = { version = "0.3.0", optional = true }
 executor = { version = "1.4.1", package = "async-executor", optional = true }

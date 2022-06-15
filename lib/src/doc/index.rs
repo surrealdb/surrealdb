@@ -49,13 +49,13 @@ impl<'a> Document<'a> {
 						// Delete the old index data
 						if self.initial.is_some() {
 							#[rustfmt::skip]
-							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, o);
+							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, o, None);
 							run.delc(key, Some(rid)).await?;
 						}
 						// Create the new index data
 						if self.current.is_some() {
 							#[rustfmt::skip]
-							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, n);
+							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, n, None);
 							if run.putc(key, rid, None).await.is_err() {
 								return Err(Error::IndexExists {
 									index: ix.name.to_string(),
@@ -68,13 +68,13 @@ impl<'a> Document<'a> {
 						// Delete the old index data
 						if self.initial.is_some() {
 							#[rustfmt::skip]
-							let key = crate::key::point::new(opt.ns(), opt.db(), &ix.what, &ix.name, o, &rid.id);
+							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, o, Some(&rid.id));
 							run.delc(key, Some(rid)).await?;
 						}
 						// Create the new index data
 						if self.current.is_some() {
 							#[rustfmt::skip]
-							let key = crate::key::point::new(opt.ns(), opt.db(), &ix.what, &ix.name, n, &rid.id);
+							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, n, Some(&rid.id));
 							if run.putc(key, rid, None).await.is_err() {
 								return Err(Error::IndexExists {
 									index: ix.name.to_string(),

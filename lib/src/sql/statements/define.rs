@@ -971,8 +971,9 @@ impl DefineIndexStatement {
 		run.add_tb(opt.ns(), opt.db(), &self.what).await?;
 		run.set(key, self).await?;
 		// Remove the index data
-		let key = crate::key::guide::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.delp(key, u32::MAX).await?;
+		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);
+		let end = crate::key::index::suffix(opt.ns(), opt.db(), &self.what, &self.name);
+		run.delr(beg..end, u32::MAX).await?;
 		// Release the transaction
 		drop(run);
 		// Update the index data
