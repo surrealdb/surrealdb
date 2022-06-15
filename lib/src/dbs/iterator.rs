@@ -307,7 +307,7 @@ impl Iterator {
 					match val {
 						Value::Array(v) => {
 							// Fetch all remote records
-							let val = Value::Array(v).get(ctx, opt, txn, &[Part::All]).await?;
+							let val = Value::Array(v).get(ctx, opt, txn, &[Part::Any]).await?;
 							// Set the value at the path
 							obj.set(ctx, opt, txn, fetch, val).await?;
 						}
