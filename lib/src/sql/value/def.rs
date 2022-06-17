@@ -2,12 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::sql::part::Part;
+use crate::sql::paths::ID;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use once_cell::sync::Lazy;
-
-static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 
 impl Value {
 	pub async fn def(

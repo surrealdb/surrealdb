@@ -34,6 +34,7 @@ pub(crate) mod output;
 pub(crate) mod param;
 pub(crate) mod parser;
 pub(crate) mod part;
+pub(crate) mod paths;
 pub(crate) mod permission;
 pub(crate) mod query;
 pub(crate) mod regex;

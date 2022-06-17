@@ -12,6 +12,7 @@ use crate::sql::part::Part;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use async_recursion::async_recursion;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
@@ -329,6 +330,7 @@ impl Iterator {
 	}
 
 	#[cfg(not(feature = "parallel"))]
+	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
 	async fn iterate(
 		&mut self,
 		ctx: &Context<'_>,
@@ -345,6 +347,7 @@ impl Iterator {
 	}
 
 	#[cfg(feature = "parallel")]
+	#[cfg_attr(feature = "parallel", async_recursion)]
 	async fn iterate(
 		&mut self,
 		ctx: &Context<'_>,

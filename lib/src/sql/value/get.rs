@@ -6,13 +6,11 @@ use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::part::Next;
 use crate::sql::part::Part;
+use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
-use once_cell::sync::Lazy;
-
-static ID: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("id")]);
 
 impl Value {
 	#[cfg_attr(feature = "parallel", async_recursion)]
