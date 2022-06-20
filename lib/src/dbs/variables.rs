@@ -1,8 +1,8 @@
 use crate::ctx::Context;
 use crate::sql::value::Value;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-pub type Variables = Option<HashMap<String, Value>>;
+pub type Variables = Option<BTreeMap<String, Value>>;
 
 pub(crate) trait Attach {
 	fn attach(self, ctx: Context) -> Context;
