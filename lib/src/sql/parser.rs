@@ -1,7 +1,8 @@
 use crate::err::Error;
 use crate::sql::error::Error::ParserError;
 use crate::sql::query::{query, Query};
-use crate::sql::value::{json as value, Value};
+use crate::sql::thing::Thing;
+use crate::sql::value::Value;
 use nom::Err;
 use std::str;
 
@@ -35,10 +36,40 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 	}
 }
 
+pub fn thing(input: &str) -> Result<Thing, Error> {
+	match input.trim().len() {
+		0 => Err(Error::QueryEmpty),
+		_ => match super::thing::thing(input) {
+			Ok((_, query)) => Ok(query),
+			Err(Err::Error(e)) => match e {
+				ParserError(e) => {
+					let (s, l, c) = locate(input, e);
+					Err(Error::InvalidQuery {
+						line: l,
+						char: c,
+						sql: s.to_string(),
+					})
+				}
+			},
+			Err(Err::Failure(e)) => match e {
+				ParserError(e) => {
+					let (s, l, c) = locate(input, e);
+					Err(Error::InvalidQuery {
+						line: l,
+						char: c,
+						sql: s.to_string(),
+					})
+				}
+			},
+			_ => unreachable!(),
+		},
+	}
+}
+
 pub fn json(input: &str) -> Result<Value, Error> {
 	match input.trim().len() {
 		0 => Err(Error::QueryEmpty),
-		_ => match value(input) {
+		_ => match super::value::json(input) {
 			Ok((_, query)) => Ok(query),
 			Err(Err::Error(e)) => match e {
 				ParserError(e) => {
