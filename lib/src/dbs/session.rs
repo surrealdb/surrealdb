@@ -25,15 +25,58 @@ pub struct Session {
 }
 
 impl Session {
-	// Retrieves the selected namespace
+	/// Create a session with root authentication
+	pub fn for_kv() -> Session {
+		Session {
+			au: Arc::new(Auth::Kv),
+			..Session::default()
+		}
+	}
+	/// Create a session with namespace authentication
+	pub fn for_ns<S>(ns: S) -> Session
+	where
+		S: Into<String> + Clone,
+	{
+		Session {
+			ns: Some(ns.clone().into()),
+			au: Arc::new(Auth::Ns(ns.into())),
+			..Session::default()
+		}
+	}
+	/// Create a session with database authentication
+	pub fn for_db<S>(ns: S, db: S) -> Session
+	where
+		S: Into<String> + Clone,
+	{
+		Session {
+			ns: Some(ns.clone().into()),
+			db: Some(db.clone().into()),
+			au: Arc::new(Auth::Db(ns.into(), db.into())),
+			..Session::default()
+		}
+	}
+	/// Create a session with scope authentication
+	pub fn for_sc<S>(ns: S, db: S, sc: S) -> Session
+	where
+		S: Into<String> + Clone,
+	{
+		Session {
+			ns: Some(ns.clone().into()),
+			db: Some(db.clone().into()),
+			sc: Some(sc.clone().into()),
+			au: Arc::new(Auth::Sc(ns.into(), db.into(), sc.into())),
+			..Session::default()
+		}
+	}
+	/// Retrieves the selected namespace
 	pub(crate) fn ns(&self) -> Option<Arc<String>> {
 		self.ns.to_owned().map(Arc::new)
 	}
-	// Retrieves the selected database
+	/// Retrieves the selected database
 	pub(crate) fn db(&self) -> Option<Arc<String>> {
 		self.db.to_owned().map(Arc::new)
 	}
-	// Convert a session into a runtime
+	/// Convert a session into a runtime
 	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
 		// Add scope value
 		let key = String::from("scope");

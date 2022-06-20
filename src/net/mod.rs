@@ -4,6 +4,7 @@ mod fail;
 mod head;
 mod import;
 mod index;
+mod jwt;
 mod key;
 mod log;
 mod output;

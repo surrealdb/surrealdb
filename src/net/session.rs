@@ -1,15 +1,14 @@
 use crate::err::Error;
+use crate::net::jwt::Claims;
 use crate::net::CF;
 use crate::net::DB;
 use argon2::password_hash::{PasswordHash, PasswordVerifier};
 use argon2::Argon2;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use surrealdb::sql::Algorithm;
-use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
 use surrealdb::Auth;
 use surrealdb::Session;
@@ -73,20 +72,6 @@ fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Er
 			Validation::new(jsonwebtoken::Algorithm::RS512),
 		)),
 	}
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Claims {
-	iss: String,
-	iat: usize,
-	nbf: usize,
-	exp: usize,
-	ns: Option<String>,
-	db: Option<String>,
-	sc: Option<String>,
-	tk: Option<String>,
-	tb: Option<String>,
-	id: Option<String>,
 }
 
 static KEY: Lazy<DecodingKey> = Lazy::new(|| DecodingKey::from_secret(&[]));
@@ -215,12 +200,13 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 				db: Some(db),
 				sc: Some(sc),
 				tk: Some(tk),
-				tb: Some(tb),
 				id: Some(id),
 				..
 			} => {
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
+				// Parse the record id
+				let id = surrealdb::sql::thing(&id)?;
 				// Get the scope token
 				let de = tx.get_st(&ns, &db, &sc, &tk).await?;
 				let cf = config(de.kind, de.code)?;
@@ -230,7 +216,7 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
 				session.sc = Some(sc.to_owned());
-				session.sd = Some(Value::from(Thing::from((tb, id))));
+				session.sd = Some(Value::from(id));
 				session.au = Arc::new(Auth::Sc(ns, db, sc));
 				return Ok(session);
 			}
@@ -239,12 +225,13 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 				ns: Some(ns),
 				db: Some(db),
 				sc: Some(sc),
-				tb: Some(tb),
 				id: Some(id),
 				..
 			} => {
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
+				// Parse the record id
+				let id = surrealdb::sql::thing(&id)?;
 				// Get the scope
 				let de = tx.get_sc(&ns, &db, &sc).await?;
 				let cf = config(Algorithm::Hs512, de.code)?;
@@ -254,7 +241,7 @@ async fn token(auth: String, mut session: Session) -> Result<Session, Error> {
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
 				session.sc = Some(sc.to_owned());
-				session.sd = Some(Value::from(Thing::from((tb, id))));
+				session.sd = Some(Value::from(id));
 				session.au = Arc::new(Auth::Sc(ns, db, sc));
 				return Ok(session);
 			}
