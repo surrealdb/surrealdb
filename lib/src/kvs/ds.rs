@@ -8,8 +8,11 @@ use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
 use crate::sql;
-use crate::sql::query::Query;
+use crate::sql::Query;
+use crate::sql::Value;
 use channel::Sender;
+use futures::lock::Mutex;
+use std::sync::Arc;
 
 /// The underlying datastore instance which stores the dataset.
 pub struct Datastore {
@@ -189,6 +192,40 @@ impl Datastore {
 		opt.ns = sess.ns();
 		opt.db = sess.db();
 		exe.execute(ctx, opt, ast).await
+	}
+
+	/// Execute a pre-parsed SQL query
+	pub async fn compute(
+		&self,
+		val: Value,
+		sess: &Session,
+		vars: Variables,
+	) -> Result<Value, Error> {
+		// Start a new transaction
+		let txn = self.transaction(val.writeable(), false).await?;
+		//
+		let txn = Arc::new(Mutex::new(txn));
+		// Create a new query options
+		let mut opt = Options::default();
+		// Create a default context
+		let ctx = Context::default();
+		// Start an execution context
+		let ctx = sess.context(ctx);
+		// Store the query variables
+		let ctx = vars.attach(ctx);
+		// Setup the query options
+		opt.auth = sess.au.clone();
+		opt.ns = sess.ns();
+		opt.db = sess.db();
+		// Compute the value
+		let res = val.compute(&ctx, &opt, &txn, None).await?;
+		// Store any data
+		match val.writeable() {
+			true => txn.lock().await.commit().await?,
+			false => txn.lock().await.cancel().await?,
+		};
+		// Return result
+		Ok(res)
 	}
 
 	/// Performs a full database export as SQL
