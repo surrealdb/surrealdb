@@ -429,7 +429,6 @@ pub struct DefineScopeStatement {
 	pub session: Option<Duration>,
 	pub signup: Option<Value>,
 	pub signin: Option<Value>,
-	pub connect: Option<Value>,
 }
 
 impl DefineScopeStatement {
@@ -468,9 +467,6 @@ impl fmt::Display for DefineScopeStatement {
 		if let Some(ref v) = self.signin {
 			write!(f, " {}", v)?
 		}
-		if let Some(ref v) = self.connect {
-			write!(f, " {}", v)?
-		}
 		Ok(())
 	}
 }
@@ -503,10 +499,6 @@ fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 				DefineScopeOption::Signin(ref v) => Some(v.to_owned()),
 				_ => None,
 			}),
-			connect: opts.iter().find_map(|x| match x {
-				DefineScopeOption::Connect(ref v) => Some(v.to_owned()),
-				_ => None,
-			}),
 		},
 	))
 }
@@ -516,11 +508,10 @@ pub enum DefineScopeOption {
 	Session(Duration),
 	Signup(Value),
 	Signin(Value),
-	Connect(Value),
 }
 
 fn scope_opts(i: &str) -> IResult<&str, DefineScopeOption> {
-	alt((scope_session, scope_signup, scope_signin, scope_connect))(i)
+	alt((scope_session, scope_signup, scope_signin))(i)
 }
 
 fn scope_session(i: &str) -> IResult<&str, DefineScopeOption> {
@@ -545,14 +536,6 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = value(i)?;
 	Ok((i, DefineScopeOption::Signin(v)))
-}
-
-fn scope_connect(i: &str) -> IResult<&str, DefineScopeOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("CONNECT")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, v) = value(i)?;
-	Ok((i, DefineScopeOption::Connect(v)))
 }
 
 // --------------------------------------------------
