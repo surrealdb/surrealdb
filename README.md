@@ -36,7 +36,7 @@
     &nbsp;
 	<a href="https://github.com/surrealdb/surrealdb/actions"><img src="https://img.shields.io/github/workflow/status/surrealdb/surrealdb/Continuous%20integration?style=flat-square"></a>
     &nbsp;
-    <a href="https://surrealdb.pingpong.host"><img src="https://img.shields.io/uptimerobot/ratio/7/m784409192-e472ca350bb615372ededed7?label=cloud%20uptime&style=flat-square"></a>
+    <a href="https://status.surrealdb.com"><img src="https://img.shields.io/uptimerobot/ratio/7/m784409192-e472ca350bb615372ededed7?label=cloud%20uptime&style=flat-square"></a>
     &nbsp;
     <a href="https://hub.docker.com/repository/docker/surrealdb/surrealdb"><img src="https://img.shields.io/docker/pulls/surrealdb/surrealdb?style=flat-square"></a>
     &nbsp;
