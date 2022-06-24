@@ -5,10 +5,24 @@ mod log;
 mod start;
 mod version;
 
+use crate::cnf::LOGO;
 use clap::{Arg, Command};
 use once_cell::sync::Lazy;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
+
+const INFO: &str = "
+To get started using SurrealDB, and for guides on connecting to and building applications
+on top of SurrealDB, check out the SurrealDB documentation (https://surrealdb.com/docs).
+
+If you have questions or ideas, join the SurrealDB community (https://surrealdb.com/community).
+
+If you find a bug, submit an issue on Github (https://github.com/surrealdb/surrealdb/issues).
+
+We would love it if you could star the repository (https://github.com/surrealdb/surrealdb).
+
+----------
+";
 
 static PASS: Lazy<String> = Lazy::new(|| {
 	rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
@@ -109,6 +123,8 @@ fn key_valid(v: &str) -> Result<(), String> {
 
 pub fn init() {
 	let setup = Command::new("SurrealDB command-line interface and server")
+		.about(INFO)
+		.before_help(LOGO)
 		.disable_version_flag(true)
 		.arg_required_else_help(true)
 		.arg(
