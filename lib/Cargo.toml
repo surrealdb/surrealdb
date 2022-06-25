@@ -43,7 +43,7 @@ regex = "1.5.6"
 msgpack = { version = "1.1.0", package = "rmp-serde" }
 scrypt = "0.10.0"
 serde = { version = "1.0.137", features = ["derive"] }
-storekey = "0.2.0"
+storekey = "0.3.0"
 sha-1 = "0.10.0"
 sha2 = "0.10.2"
 slug = "0.1.4"

@@ -2,11 +2,11 @@ use crate::cnf::ID_CHARS;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::datetime::Datetime;
+use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use nanoid::nanoid;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use uuid::Uuid;
 
 pub fn rand(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
 	Ok(rand::random::<f64>().into())
@@ -147,5 +147,5 @@ pub fn time(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn uuid(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
-	Ok(Uuid::new_v4().to_string().into())
+	Ok(Uuid::new().into())
 }

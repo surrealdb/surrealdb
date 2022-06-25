@@ -24,6 +24,11 @@ pub fn commas(i: &str) -> IResult<&str, ()> {
 }
 
 #[inline]
+pub fn is_hex(chr: char) -> bool {
+	chr.is_ascii_hexdigit()
+}
+
+#[inline]
 pub fn is_digit(chr: char) -> bool {
 	(0x30..=0x39).contains(&(chr as u8))
 }

@@ -28,6 +28,7 @@ use crate::sql::strand::{strand, Strand};
 use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
+use crate::sql::uuid::{uuid as unique, Uuid};
 use async_recursion::async_recursion;
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
@@ -101,6 +102,7 @@ pub enum Value {
 	Strand(Strand),
 	Duration(Duration),
 	Datetime(Datetime),
+	Uuid(Uuid),
 	Array(Array),
 	Object(Object),
 	Geometry(Geometry),
@@ -137,6 +139,12 @@ impl From<bool> for Value {
 			true => Value::True,
 			false => Value::False,
 		}
+	}
+}
+
+impl From<Uuid> for Value {
+	fn from(v: Uuid) -> Self {
+		Value::Uuid(v)
 	}
 }
 
@@ -823,6 +831,10 @@ impl Value {
 				},
 				_ => false,
 			},
+			Value::Uuid(v) => match other {
+				Value::Uuid(w) => v == w,
+				_ => false,
+			},
 			Value::Array(v) => match other {
 				Value::Array(w) => v == w,
 				_ => false,
@@ -989,6 +1001,7 @@ impl fmt::Display for Value {
 			Value::Strand(v) => write!(f, "{}", v),
 			Value::Duration(v) => write!(f, "{}", v),
 			Value::Datetime(v) => write!(f, "{}", v),
+			Value::Uuid(v) => write!(f, "{}", v),
 			Value::Array(v) => write!(f, "{}", v),
 			Value::Object(v) => write!(f, "{}", v),
 			Value::Geometry(v) => write!(f, "{}", v),
@@ -1061,19 +1074,20 @@ impl Serialize for Value {
 				Value::Strand(v) => s.serialize_newtype_variant("Value", 6, "Strand", v),
 				Value::Duration(v) => s.serialize_newtype_variant("Value", 7, "Duration", v),
 				Value::Datetime(v) => s.serialize_newtype_variant("Value", 8, "Datetime", v),
-				Value::Array(v) => s.serialize_newtype_variant("Value", 9, "Array", v),
-				Value::Object(v) => s.serialize_newtype_variant("Value", 10, "Object", v),
-				Value::Geometry(v) => s.serialize_newtype_variant("Value", 11, "Geometry", v),
-				Value::Param(v) => s.serialize_newtype_variant("Value", 12, "Param", v),
-				Value::Idiom(v) => s.serialize_newtype_variant("Value", 13, "Idiom", v),
-				Value::Table(v) => s.serialize_newtype_variant("Value", 14, "Table", v),
-				Value::Thing(v) => s.serialize_newtype_variant("Value", 15, "Thing", v),
-				Value::Model(v) => s.serialize_newtype_variant("Value", 16, "Model", v),
-				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
-				Value::Edges(v) => s.serialize_newtype_variant("Value", 18, "Edges", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 19, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 20, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 21, "Expression", v),
+				Value::Uuid(v) => s.serialize_newtype_variant("Value", 9, "Uuid", v),
+				Value::Array(v) => s.serialize_newtype_variant("Value", 10, "Array", v),
+				Value::Object(v) => s.serialize_newtype_variant("Value", 11, "Object", v),
+				Value::Geometry(v) => s.serialize_newtype_variant("Value", 12, "Geometry", v),
+				Value::Param(v) => s.serialize_newtype_variant("Value", 13, "Param", v),
+				Value::Idiom(v) => s.serialize_newtype_variant("Value", 14, "Idiom", v),
+				Value::Table(v) => s.serialize_newtype_variant("Value", 15, "Table", v),
+				Value::Thing(v) => s.serialize_newtype_variant("Value", 16, "Thing", v),
+				Value::Model(v) => s.serialize_newtype_variant("Value", 17, "Model", v),
+				Value::Regex(v) => s.serialize_newtype_variant("Value", 18, "Regex", v),
+				Value::Edges(v) => s.serialize_newtype_variant("Value", 19, "Edges", v),
+				Value::Function(v) => s.serialize_newtype_variant("Value", 20, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant("Value", 21, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant("Value", 22, "Expression", v),
 			}
 		} else {
 			match self {
@@ -1083,6 +1097,7 @@ impl Serialize for Value {
 				Value::True => s.serialize_bool(true),
 				Value::False => s.serialize_bool(false),
 				Value::Thing(v) => s.serialize_some(v),
+				Value::Uuid(v) => s.serialize_some(v),
 				Value::Array(v) => s.serialize_some(v),
 				Value::Object(v) => s.serialize_some(v),
 				Value::Number(v) => s.serialize_some(v),
@@ -1164,6 +1179,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		map(datetime, Value::from),
 		map(duration, Value::from),
 		map(geometry, Value::from),
+		map(unique, Value::from),
 		map(number, Value::from),
 		map(strand, Value::from),
 		map(object, Value::from),
@@ -1188,6 +1204,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 		map(datetime, Value::from),
 		map(duration, Value::from),
 		map(geometry, Value::from),
+		map(unique, Value::from),
 		map(number, Value::from),
 		map(strand, Value::from),
 		map(object, Value::from),
@@ -1221,6 +1238,7 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		map(datetime, Value::from),
 		map(duration, Value::from),
 		map(geometry, Value::from),
+		map(unique, Value::from),
 		map(number, Value::from),
 		map(object, Value::from),
 		map(array, Value::from),
