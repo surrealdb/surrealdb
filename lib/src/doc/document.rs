@@ -39,6 +39,10 @@ impl<'a> Document<'a> {
 	pub fn changed(&self) -> bool {
 		self.initial != self.current
 	}
+	// Check if document has changed
+	pub fn is_new(&self) -> bool {
+		self.initial.is_none()
+	}
 	// Get the table for this document
 	pub async fn tb(
 		&self,

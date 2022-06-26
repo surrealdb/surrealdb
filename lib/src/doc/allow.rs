@@ -19,12 +19,12 @@ impl<'a> Document<'a> {
 			// Get the table
 			let tb = self.tb(opt, txn).await?;
 			// Get the permission clause
-			let perms = if self.initial.is_none() {
-				&tb.permissions.create
-			} else if self.current.is_none() {
+			let perms = if stm.is_delete() {
 				&tb.permissions.delete
 			} else if stm.is_select() {
 				&tb.permissions.select
+			} else if self.is_new() {
+				&tb.permissions.create
 			} else {
 				&tb.permissions.update
 			};

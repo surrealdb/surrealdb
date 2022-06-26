@@ -82,6 +82,11 @@ impl<'a> Statement<'a> {
 	pub fn is_select(&self) -> bool {
 		matches!(self, Statement::Select(_))
 	}
+	// Check the type of statement
+	#[inline]
+	pub fn is_delete(&self) -> bool {
+		matches!(self, Statement::Delete(_))
+	}
 	// Returns any query fields if specified
 	#[inline]
 	pub fn expr(&self) -> Option<&Fields> {

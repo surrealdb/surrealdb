@@ -13,7 +13,7 @@ impl<'a> Document<'a> {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_stm: &Statement<'_>,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Loop through all field statements
 		for fd in self.fd(opt, txn).await?.iter() {
@@ -56,10 +56,10 @@ impl<'a> Document<'a> {
 				// Check for a PERMISSIONS clause
 				if opt.perms && opt.auth.perms() {
 					// Get the permission clause
-					let perms = if self.initial.is_none() {
-						&fd.permissions.create
-					} else if self.current.is_none() {
+					let perms = if stm.is_delete() {
 						&fd.permissions.delete
+					} else if self.is_new() {
+						&fd.permissions.create
 					} else {
 						&fd.permissions.update
 					};

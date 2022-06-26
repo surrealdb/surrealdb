@@ -13,7 +13,7 @@ impl<'a> Document<'a> {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		_stm: &Statement<'_>,
+		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check events
 		if !opt.events {
@@ -26,10 +26,10 @@ impl<'a> Document<'a> {
 		// Loop through all event statements
 		for ev in self.ev(opt, txn).await?.iter() {
 			// Get the event action
-			let met = if self.initial.is_none() {
-				Value::from("CREATE")
-			} else if self.current.is_none() {
+			let met = if stm.is_delete() {
 				Value::from("DELETE")
+			} else if self.is_new() {
+				Value::from("CREATE")
 			} else {
 				Value::from("UPDATE")
 			};
