@@ -163,7 +163,7 @@ impl From<&Value> for JsValue {
 				false => JsValue::Rational(v.to_f64().unwrap_or_default()),
 			},
 			Value::Datetime(v) => JsValue::from(JsObject::from_proto_and_data(
-				Boa::default().intrinsics().constructors().object().prototype(),
+				Boa::default().intrinsics().constructors().date().prototype(),
 				ObjectData::date(v.into()),
 			)),
 			Value::Duration(v) => JsValue::from(JsObject::from_proto_and_data(
