@@ -11,6 +11,9 @@ use std::fmt;
 use std::ops::Deref;
 use std::str;
 
+const SINGLE: char = '\'';
+const DOUBLE: char = '"';
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize)]
 pub struct Datetime(pub DateTime<Utc>);
 
@@ -69,12 +72,12 @@ impl Serialize for Datetime {
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
 	alt((
-		delimited(char('\"'), datetime_raw, char('\"')),
-		delimited(char('\''), datetime_raw, char('\'')),
+		delimited(char(DOUBLE), datetime_raw, char(DOUBLE)),
+		delimited(char(SINGLE), datetime_raw, char(SINGLE)),
 	))(i)
 }
 
-pub fn datetime_raw(i: &str) -> IResult<&str, Datetime> {
+fn datetime_raw(i: &str) -> IResult<&str, Datetime> {
 	alt((nano, time, date))(i)
 }
 

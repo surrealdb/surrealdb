@@ -203,7 +203,7 @@ pub fn duration(i: &str) -> IResult<&str, Duration> {
 	Ok((i, v.iter().sum::<Duration>()))
 }
 
-pub fn duration_raw(i: &str) -> IResult<&str, Duration> {
+fn duration_raw(i: &str) -> IResult<&str, Duration> {
 	let (i, v) = part(i)?;
 	let (i, u) = unit(i)?;
 	Ok((

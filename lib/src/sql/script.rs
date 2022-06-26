@@ -56,7 +56,7 @@ pub fn script(i: &str) -> IResult<&str, Script> {
 	Ok((i, Script(String::from(v))))
 }
 
-pub fn script_raw(i: &str) -> IResult<&str, &str> {
+fn script_raw(i: &str) -> IResult<&str, &str> {
 	recognize(many1(alt((char_any, char_object, string_single, string_double, string_backtick))))(i)
 }
 
