@@ -6,12 +6,11 @@ use crate::fnc;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
-use crate::sql::script::{script, Script};
+use crate::sql::script::{script as func, Script};
 use crate::sql::value::{single, value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
-use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -20,9 +19,9 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Function {
 	Future(Value),
-	Script(Script),
 	Cast(String, Value),
 	Normal(String, Vec<Value>),
+	Script(Script, Vec<Value>),
 }
 
 impl PartialOrd for Function {
@@ -111,32 +110,36 @@ impl Function {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			Function::Cast(s, e) => {
-				let a = e.compute(ctx, opt, txn, doc).await?;
-				fnc::cast::run(ctx, s, a)
+			Function::Future(v) => match opt.futures {
+				true => {
+					let v = v.compute(ctx, opt, txn, doc).await?;
+					fnc::future::run(ctx, v)
+				}
+				false => Ok(self.to_owned().into()),
+			},
+			Function::Cast(s, x) => {
+				let v = x.compute(ctx, opt, txn, doc).await?;
+				fnc::cast::run(ctx, s, v)
 			}
-			Function::Normal(s, e) => {
-				let mut a: Vec<Value> = Vec::with_capacity(e.len());
-				for v in e {
+			Function::Normal(s, x) => {
+				let mut a: Vec<Value> = Vec::with_capacity(x.len());
+				for v in x {
 					a.push(v.compute(ctx, opt, txn, doc).await?);
 				}
 				fnc::run(ctx, s, a).await
 			}
-			Function::Future(e) => match opt.futures {
-				true => {
-					let a = e.compute(ctx, opt, txn, doc).await?;
-					fnc::future::run(ctx, a)
+			Function::Script(s, x) => {
+				if cfg!(feature = "scripting") {
+					let mut a: Vec<Value> = Vec::with_capacity(x.len());
+					for v in x {
+						a.push(v.compute(ctx, opt, txn, doc).await?);
+					}
+					fnc::script::run(ctx, s, a, doc)
+				} else {
+					Err(Error::InvalidScript {
+						message: String::from("Embedded functions are not enabled."),
+					})
 				}
-				false => Ok(self.to_owned().into()),
-			},
-			#[allow(unused_variables)]
-			Function::Script(s) => {
-				#[cfg(feature = "scripting")]
-				return fnc::script::run(ctx, doc, s);
-				#[cfg(not(feature = "scripting"))]
-				return Err(Error::InvalidScript {
-					message: String::from("Embedded functions are not enabled."),
-				});
 			}
 		}
 	}
@@ -146,8 +149,13 @@ impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Function::Future(ref e) => write!(f, "fn::future -> {{ {} }}", e),
-			Function::Script(ref s) => write!(f, "fn::script -> {{{}}}", s),
 			Function::Cast(ref s, ref e) => write!(f, "<{}> {}", s, e),
+			Function::Script(ref s, ref e) => write!(
+				f,
+				"fn::script -> ({}) => {{{}}}",
+				e.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "),
+				s,
+			),
 			Function::Normal(ref s, ref e) => write!(
 				f,
 				"{}({})",
@@ -159,21 +167,7 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((scripts, future, casts, normal))(i)
-}
-
-fn scripts(i: &str) -> IResult<&str, Function> {
-	let (i, _) = tag("fn::script")(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('-')(i)?;
-	let (i, _) = char('>')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = opt(tag("function()"))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('{')(i)?;
-	let (i, v) = script(i)?;
-	let (i, _) = char('}')(i)?;
-	Ok((i, Function::Script(v)))
+	alt((future, normal, script, cast))(i)
 }
 
 fn future(i: &str) -> IResult<&str, Function> {
@@ -190,23 +184,41 @@ fn future(i: &str) -> IResult<&str, Function> {
 	Ok((i, Function::Future(v)))
 }
 
-fn casts(i: &str) -> IResult<&str, Function> {
+fn normal(i: &str) -> IResult<&str, Function> {
+	let (i, s) = function_names(i)?;
+	let (i, _) = char('(')(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, a) = separated_list0(commas, value)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char(')')(i)?;
+	Ok((i, Function::Normal(s.to_string(), a)))
+}
+
+fn script(i: &str) -> IResult<&str, Function> {
+	let (i, _) = tag("fn::script")(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('-')(i)?;
+	let (i, _) = char('>')(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = tag("(")(i)?;
+	let (i, a) = separated_list0(commas, value)(i)?;
+	let (i, _) = tag(")")(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = tag("=>")(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('{')(i)?;
+	let (i, v) = func(i)?;
+	let (i, _) = char('}')(i)?;
+	Ok((i, Function::Script(v, a)))
+}
+
+fn cast(i: &str) -> IResult<&str, Function> {
 	let (i, _) = char('<')(i)?;
 	let (i, s) = function_casts(i)?;
 	let (i, _) = char('>')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = single(i)?;
 	Ok((i, Function::Cast(s.to_string(), v)))
-}
-
-fn normal(i: &str) -> IResult<&str, Function> {
-	let (i, s) = function_names(i)?;
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list0(commas, value)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
-	Ok((i, Function::Normal(s.to_string(), v)))
 }
 
 fn function_casts(i: &str) -> IResult<&str, &str> {
@@ -495,19 +507,20 @@ mod tests {
 
 	#[test]
 	fn function_script_expression() {
-		let sql = "fn::script -> { return this.tags.filter(t => { return t.length > 3; }); }";
+		let sql = "fn::script -> () => { return this.tags.filter(t => { return t.length > 3; }); }";
 		let res = function(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
-			"fn::script -> { return this.tags.filter(t => { return t.length > 3; }); }",
+			"fn::script -> () => { return this.tags.filter(t => { return t.length > 3; }); }",
 			format!("{}", out)
 		);
 		assert_eq!(
 			out,
-			Function::Script(Script::parse(
-				" return this.tags.filter(t => { return t.length > 3; }); "
-			))
+			Function::Script(
+				Script::parse(" return this.tags.filter(t => { return t.length > 3; }); "),
+				vec![]
+			)
 		);
 	}
 }

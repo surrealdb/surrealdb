@@ -668,7 +668,7 @@ impl Value {
 			Value::Datetime(v) => v.0.to_string().into(),
 			Value::Function(v) => match v.as_ref() {
 				Function::Future(_) => "fn::future".to_string().into(),
-				Function::Script(_) => "fn::script".to_string().into(),
+				Function::Script(_, _) => "fn::script".to_string().into(),
 				Function::Normal(f, _) => f.to_string().into(),
 				Function::Cast(_, v) => v.to_idiom(),
 			},

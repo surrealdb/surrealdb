@@ -105,16 +105,20 @@ impl Class for JsRecord {
 	}
 }
 
-pub fn run(ctx: &Context, doc: Option<&Value>, src: &str) -> Result<Value, Error> {
+pub fn run(ctx: &Context, src: &str, arg: Vec<Value>, doc: Option<&Value>) -> Result<Value, Error> {
 	let _ = ctx.check()?;
 	// Create an execution context
 	let mut ctx = Boa::default();
-	// Retrieve the current document
-	let obj = doc.map_or(JsValue::Undefined, JsValue::from);
+	// Convert the arguments to JavaScript
+	let args = JsValue::from(Value::from(arg));
+	// Convert the current document to JavaScript
+	let this = doc.map_or(JsValue::Undefined, JsValue::from);
 	// Create the main function structure
-	let src = format!("(function() {{ {} }}).call(document)", src);
+	let src = format!("(function() {{ {} }}).apply(self, args)", src);
 	// Register the current document as a global object
-	ctx.register_global_property("document", obj, Attribute::default());
+	ctx.register_global_property("self", this, Attribute::default());
+	// Register the current document as a global object
+	ctx.register_global_property("args", args, Attribute::default());
 	// Register the JsDuration type as a global class
 	ctx.register_global_class::<JsDuration>().unwrap();
 	// Register the JsRecord type as a global class
@@ -127,6 +131,12 @@ pub fn run(ctx: &Context, doc: Option<&Value>, src: &str) -> Result<Value, Error
 		Err(e) => Err(Error::InvalidScript {
 			message: e.display().to_string(),
 		}),
+	}
+}
+
+impl From<Value> for JsValue {
+	fn from(v: Value) -> Self {
+		JsValue::from(&v)
 	}
 }
 
