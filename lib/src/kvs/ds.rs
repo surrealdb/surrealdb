@@ -163,10 +163,14 @@ impl Datastore {
 		let ctx = vars.attach(ctx);
 		// Parse the SQL query text
 		let ast = sql::parse(txt)?;
-		// Process all statements
+		// Setup the auth options
 		opt.auth = sess.au.clone();
+		// Setup the live options
+		opt.live = sess.rt;
+		// Set current NS and DB
 		opt.ns = sess.ns();
 		opt.db = sess.db();
+		// Process all statements
 		exe.execute(ctx, opt, ast).await
 	}
 
@@ -187,10 +191,14 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx);
-		// Process all statements
+		// Setup the auth options
 		opt.auth = sess.au.clone();
+		// Setup the live options
+		opt.live = sess.rt;
+		// Set current NS and DB
 		opt.ns = sess.ns();
 		opt.db = sess.db();
+		// Process all statements
 		exe.execute(ctx, opt, ast).await
 	}
 
@@ -213,8 +221,9 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx);
-		// Setup the query options
+		// Setup the auth options
 		opt.auth = sess.au.clone();
+		// Set current NS and DB
 		opt.ns = sess.ns();
 		opt.db = sess.db();
 		// Compute the value

@@ -21,6 +21,8 @@ pub struct Options {
 	pub auth: Arc<Auth>,
 	// How many subqueries have we gone into?
 	pub dive: usize,
+	// Whether live queries are allowed?
+	pub live: bool,
 	// Should we debug query response SQL?
 	pub debug: bool,
 	// Should we force tables/events to re-run?
@@ -50,6 +52,7 @@ impl Options {
 			ns: None,
 			db: None,
 			dive: 0,
+			live: false,
 			perms: true,
 			debug: false,
 			force: false,
@@ -174,6 +177,13 @@ impl Options {
 			futures: v,
 			..*self
 		}
+	}
+
+	pub fn realtime(&self) -> Result<(), Error> {
+		if !self.live {
+			return Err(Error::RealtimeDisabled);
+		}
+		Ok(())
 	}
 
 	// Check whether the authentication permissions are ok

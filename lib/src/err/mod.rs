@@ -136,6 +136,10 @@ pub enum Error {
 	#[error("The table does not exist")]
 	TbNotFound,
 
+	/// Unable to perform the realtime query
+	#[error("Unable to perform the realtime query")]
+	RealtimeDisabled,
+
 	/// Too many recursive subqueries have been processed
 	#[error("Too many recursive subqueries have been processed")]
 	TooManySubqueries,
@@ -167,6 +171,18 @@ pub enum Error {
 	/// Can not execute INSERT query using the specified value
 	#[error("Can not execute INSERT query using value '{value}'")]
 	InsertStatement {
+		value: String,
+	},
+
+	/// Can not execute LIVE query using the specified value
+	#[error("Can not execute LIVE query using value '{value}'")]
+	LiveStatement {
+		value: String,
+	},
+
+	/// Can not execute KILL query using the specified id
+	#[error("Can not execute KILL query using id '{value}'")]
+	KillStatement {
 		value: String,
 	},
 

@@ -1,3 +1,4 @@
+use crate::sql::uuid::Uuid;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -13,11 +14,11 @@ pub struct Lv {
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub lv: String,
+	pub lv: Uuid,
 }
 
-pub fn new(ns: &str, db: &str, tb: &str, lv: &str) -> Lv {
-	Lv::new(ns.to_string(), db.to_string(), tb.to_string(), lv.to_string())
+pub fn new(ns: &str, db: &str, tb: &str, lv: &Uuid) -> Lv {
+	Lv::new(ns.to_string(), db.to_string(), tb.to_string(), lv.to_owned())
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
@@ -33,7 +34,7 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 }
 
 impl Lv {
-	pub fn new(ns: String, db: String, tb: String, lv: String) -> Lv {
+	pub fn new(ns: String, db: String, tb: String, lv: Uuid) -> Lv {
 		Lv {
 			__: 0x2f, // /
 			_a: 0x2a, // *
@@ -60,7 +61,7 @@ mod tests {
 			"test".to_string(),
 			"test".to_string(),
 			"test".to_string(),
-			"test".to_string(),
+			"00000000-0000-0000-0000-000000000000".into(),
 		);
 		let enc = Lv::encode(&val).unwrap();
 		let dec = Lv::decode(&enc).unwrap();

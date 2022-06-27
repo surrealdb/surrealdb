@@ -8,15 +8,17 @@ use std::sync::Arc;
 pub struct Session {
 	/// The current [`Auth`] information
 	pub au: Arc<Auth>,
+	/// Whether realtime queries are supported
+	pub rt: bool,
 	/// The current connection IP address
 	pub ip: Option<String>,
 	/// The current connection origin
 	pub or: Option<String>,
 	/// The current connection ID
 	pub id: Option<String>,
-	/// THe currently selected namespace
+	/// The currently selected namespace
 	pub ns: Option<String>,
-	/// THe currently selected database
+	/// The currently selected database
 	pub db: Option<String>,
 	/// The currently selected authentication scope
 	pub sc: Option<String>,

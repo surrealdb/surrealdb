@@ -12,6 +12,7 @@
 /// SC              /*{ns}*{db}!sc{sc}
 /// ST              /*{ns}*{db}!st{sc}!tk{tk}
 /// TB              /*{ns}*{db}!tb{tb}
+/// LQ              /*{ns}*{db}!lq{lq}
 ///
 /// Table           /*{ns}*{db}*{tb}
 /// FT              /*{ns}*{db}*{tb}!ft{ft}
@@ -37,6 +38,7 @@ pub mod graph;
 pub mod index;
 pub mod ix;
 pub mod kv;
+pub mod lq;
 pub mod lv;
 pub mod namespace;
 pub mod nl;
