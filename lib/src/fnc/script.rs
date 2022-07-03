@@ -106,6 +106,7 @@ impl Class for JsRecord {
 }
 
 pub fn run(ctx: &Context, src: &str, arg: Vec<Value>, doc: Option<&Value>) -> Result<Value, Error> {
+	// Check the context
 	let _ = ctx.check()?;
 	// Create an execution context
 	let mut ctx = Boa::default();
@@ -126,17 +127,11 @@ pub fn run(ctx: &Context, src: &str, arg: Vec<Value>, doc: Option<&Value>) -> Re
 	// Attempt to execute the script
 	match ctx.eval(src.as_bytes()) {
 		// The script executed successfully
-		Ok(ref v) => Ok(v.into()),
+		Ok(v) => Ok(v.into()),
 		// There was an error running the script
 		Err(e) => Err(Error::InvalidScript {
 			message: e.display().to_string(),
 		}),
-	}
-}
-
-impl From<Value> for JsValue {
-	fn from(v: Value) -> Self {
-		JsValue::from(&v)
 	}
 }
 
@@ -154,6 +149,12 @@ impl From<&Datetime> for Date {
 			Some((v.nanosecond() / 1_000_000) as f64),
 		);
 		obj
+	}
+}
+
+impl From<Value> for JsValue {
+	fn from(v: Value) -> Self {
+		JsValue::from(&v)
 	}
 }
 
@@ -209,6 +210,12 @@ impl From<&Value> for JsValue {
 			}
 			_ => JsValue::Null,
 		}
+	}
+}
+
+impl From<JsValue> for Value {
+	fn from(v: JsValue) -> Self {
+		Value::from(&v)
 	}
 }
 
