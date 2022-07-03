@@ -105,7 +105,12 @@ impl Class for JsRecord {
 	}
 }
 
-pub fn run(ctx: &Context, src: &str, arg: Vec<Value>, doc: Option<&Value>) -> Result<Value, Error> {
+pub async fn run(
+	ctx: &Context<'_>,
+	src: &str,
+	arg: Vec<Value>,
+	doc: Option<&Value>,
+) -> Result<Value, Error> {
 	// Check the context
 	let _ = ctx.check()?;
 	// Create an execution context
