@@ -128,14 +128,18 @@ impl Function {
 				}
 				fnc::run(ctx, s, a).await
 			}
+			#[allow(unused_variables)]
 			Function::Script(s, x) => {
-				if cfg!(feature = "scripting") {
+				#[cfg(feature = "scripting")]
+				{
 					let mut a: Vec<Value> = Vec::with_capacity(x.len());
 					for v in x {
 						a.push(v.compute(ctx, opt, txn, doc).await?);
 					}
 					fnc::script::run(ctx, s, a, doc)
-				} else {
+				}
+				#[cfg(not(feature = "scripting"))]
+				{
 					Err(Error::InvalidScript {
 						message: String::from("Embedded functions are not enabled."),
 					})
