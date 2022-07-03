@@ -1179,6 +1179,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		map(datetime, Value::from),
 		map(duration, Value::from),
 		map(geometry, Value::from),
+		map(thing, Value::from),
 		map(unique, Value::from),
 		map(number, Value::from),
 		map(strand, Value::from),
@@ -1188,7 +1189,6 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		map(regex, Value::from),
 		map(model, Value::from),
 		map(idiom, Value::from),
-		map(thing, Value::from),
 	))(i)
 }
 
@@ -1204,6 +1204,8 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 		map(datetime, Value::from),
 		map(duration, Value::from),
 		map(geometry, Value::from),
+		map(edges, Value::from),
+		map(thing, Value::from),
 		map(unique, Value::from),
 		map(number, Value::from),
 		map(strand, Value::from),
@@ -1212,8 +1214,6 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 		map(param, Value::from),
 		map(regex, Value::from),
 		map(model, Value::from),
-		map(edges, Value::from),
-		map(thing, Value::from),
 		map(table, Value::from),
 	))(i)
 }
@@ -1238,6 +1238,7 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 		map(datetime, Value::from),
 		map(duration, Value::from),
 		map(geometry, Value::from),
+		map(thing, Value::from),
 		map(unique, Value::from),
 		map(number, Value::from),
 		map(object, Value::from),
