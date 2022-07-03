@@ -97,15 +97,24 @@ pub fn table(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn thing(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	let tb = args.remove(0);
-	match args.remove(0) {
-		Value::Thing(id) => Ok(Value::Thing(Thing {
-			tb: tb.as_string(),
-			id: id.id,
-		})),
-		id => Ok(Value::Thing(Thing {
-			tb: tb.as_string(),
-			id: id.as_string().into(),
-		})),
+	match args.len() {
+		2 => {
+			let tb = args.remove(0);
+			match args.remove(0) {
+				Value::Thing(id) => Ok(Value::Thing(Thing {
+					tb: tb.as_string(),
+					id: id.id,
+				})),
+				id => Ok(Value::Thing(Thing {
+					tb: tb.as_string(),
+					id: id.as_string().into(),
+				})),
+			}
+		}
+		1 => match args.remove(0) {
+			Value::Thing(v) => Ok(v.into()),
+			_ => Ok(Value::None),
+		},
+		_ => unreachable!(),
 	}
 }

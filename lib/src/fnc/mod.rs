@@ -158,7 +158,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"type::regex" => args::check(ctx, name, args, Args::One, r#type::regex),
 		"type::string" => args::check(ctx, name, args, Args::One, r#type::string),
 		"type::table" => args::check(ctx, name, args, Args::One, r#type::table),
-		"type::thing" => args::check(ctx, name, args, Args::Two, r#type::thing),
+		"type::thing" => args::check(ctx, name, args, Args::OneTwo, r#type::thing),
 		//
 		_ => unreachable!(),
 	}
