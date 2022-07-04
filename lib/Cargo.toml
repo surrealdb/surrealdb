@@ -15,7 +15,7 @@ kv-yokudb = []
 scripting = ["boa", "gc"]
 
 [dependencies]
-argon2 = "0.4.0"
+argon2 = "0.4.1"
 async-recursion = "1.0.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
 boa = { version = "0.15.0", package = "boa_engine", optional = true }
@@ -28,7 +28,7 @@ executor = { version = "1.4.1", package = "async-executor", optional = true }
 futures = "0.3.21"
 fuzzy-matcher = "0.3.7"
 gc = { version = "0.4.1", optional = true }
-geo = { version = "0.21.0", features = ["use-serde"] }
+geo = { version = "0.22.0", features = ["use-serde"] }
 indxdb = { version = "0.2.0", optional = true }
 lexical-sort = "0.3.1"
 log = "0.4.17"
@@ -41,7 +41,7 @@ pbkdf2 = "0.11.0"
 rand = "0.8.5"
 regex = "1.5.6"
 scrypt = "0.10.0"
-serde = { version = "1.0.137", features = ["derive"] }
+serde = { version = "1.0.138", features = ["derive"] }
 sha-1 = "0.10.0"
 sha2 = "0.10.2"
 slug = "0.1.4"
