@@ -21,6 +21,7 @@ mod dbs;
 mod err;
 mod iam;
 mod net;
+mod rpc;
 
 fn main() {
 	cli::init(); // Initiate the command line

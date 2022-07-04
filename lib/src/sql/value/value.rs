@@ -2,6 +2,7 @@
 
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::dbs::Response;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
@@ -46,6 +47,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
+use std::iter::FromIterator;
 use std::ops;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -430,6 +432,16 @@ impl From<Id> for Value {
 			Id::Number(v) => v.into(),
 			Id::String(v) => Strand::from(v).into(),
 		}
+	}
+}
+
+impl FromIterator<Response> for Vec<Value> {
+	fn from_iter<I: IntoIterator<Item = Response>>(iter: I) -> Self {
+		let mut c: Vec<Value> = vec![];
+		for i in iter {
+			c.push(i.into())
+		}
+		c
 	}
 }
 

@@ -47,6 +47,9 @@ impl Strand {
 	pub fn as_string(self) -> String {
 		self.0
 	}
+	pub fn to_raw(self) -> String {
+		self.0
+	}
 }
 
 impl fmt::Display for Strand {
