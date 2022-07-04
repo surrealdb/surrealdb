@@ -38,6 +38,7 @@ async fn handler(
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
+					"application/octet-stream" => Ok(output::none()),
 					_ => Err(warp::reject::not_found()),
 				},
 				Err(err) => Err(warp::reject::custom(Error::from(err))),

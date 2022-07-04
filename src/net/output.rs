@@ -4,9 +4,14 @@ use serde::Serialize;
 
 pub enum Output {
 	None,
+	Fail,
 	Json(Vec<u8>), // JSON
 	Cbor(Vec<u8>), // CBOR
 	Pack(Vec<u8>), // MessagePack
+}
+
+pub fn none() -> Output {
+	Output::None
 }
 
 pub fn json<T>(val: &T) -> Output
@@ -15,7 +20,7 @@ where
 {
 	match serde_json::to_vec(val) {
 		Ok(v) => Output::Json(v),
-		Err(_) => Output::None,
+		Err(_) => Output::Fail,
 	}
 }
 
@@ -25,7 +30,7 @@ where
 {
 	match serde_cbor::to_vec(val) {
 		Ok(v) => Output::Cbor(v),
-		Err(_) => Output::None,
+		Err(_) => Output::Fail,
 	}
 }
 
@@ -35,7 +40,7 @@ where
 {
 	match serde_pack::to_vec(val) {
 		Ok(v) => Output::Pack(v),
-		Err(_) => Output::None,
+		Err(_) => Output::Fail,
 	}
 }
 
@@ -60,7 +65,8 @@ impl warp::Reply for Output {
 				res.headers_mut().insert(CONTENT_TYPE, con);
 				res
 			}
-			Output::None => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+			Output::None => StatusCode::OK.into_response(),
+			Output::Fail => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
 		}
 	}
 }
