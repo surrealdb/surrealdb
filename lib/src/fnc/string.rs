@@ -1,7 +1,7 @@
 use crate::ctx::Context;
 use crate::err::Error;
+use crate::fnc::util::string;
 use crate::sql::value::Value;
-use slug::slugify;
 
 pub fn concat(_: &Context, args: Vec<Value>) -> Result<Value, Error> {
 	Ok(args.into_iter().map(|x| x.as_string()).collect::<Vec<_>>().concat().into())
@@ -56,7 +56,7 @@ pub fn slice(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn slug(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(slugify(&args.remove(0).as_string()).into())
+	Ok(string::slug(&args.remove(0).as_string()).into())
 }
 
 pub fn split(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {

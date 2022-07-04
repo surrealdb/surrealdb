@@ -614,9 +614,9 @@ dependencies = [
 
 [[package]]
 name = "deunicode"
-version = "0.4.3"
+version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "850878694b7933ca4c9569d30a34b55031b9b139ee1fc7b94a527c4ef960d690"
+checksum = "f2c9736e15e7df1638a7f6eee92a6511615c738246a052af5ba86f039b65aede"
 
 [[package]]
 name = "digest"
@@ -2576,15 +2576,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb703cfe953bccee95685111adeedb76fabe4e97549a58d16f03ea7b9367bb32"
 
 [[package]]
-name = "slug"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3bc762e6a4b6c6fcaade73e77f9ebc6991b676f88bb2358bddb56560f073373"
-dependencies = [
- "deunicode",
-]
-
-[[package]]
 name = "smallvec"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2694,6 +2685,7 @@ dependencies = [
  "bigdecimal",
  "boa_engine",
  "chrono",
+ "deunicode",
  "dmp",
  "echodb",
  "futures 0.3.21",
@@ -2715,7 +2707,6 @@ dependencies = [
  "serde",
  "sha-1 0.10.0",
  "sha2",
- "slug",
  "storekey",
  "surrealdb-derive",
  "thiserror",
