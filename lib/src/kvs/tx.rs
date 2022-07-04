@@ -714,44 +714,37 @@ impl Transaction {
 		Ok(val.into())
 	}
 	/// Add a namespace with a default configuration.
-	pub async fn add_ns(&mut self, ns: &str) -> Result<(), Error> {
+	pub async fn add_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
 		let key = crate::key::ns::new(ns);
-		let _ = self
-			.put(
-				key,
-				DefineNamespaceStatement {
-					name: ns.to_owned().into(),
-				},
-			)
-			.await;
-		Ok(())
+		let val = DefineNamespaceStatement {
+			name: ns.to_owned().into(),
+		};
+		let _ = self.put(key, &val).await?;
+		Ok(val)
 	}
 	/// Add a database with a default configuration.
-	pub async fn add_db(&mut self, ns: &str, db: &str) -> Result<(), Error> {
+	pub async fn add_db(&mut self, ns: &str, db: &str) -> Result<DefineDatabaseStatement, Error> {
 		let key = crate::key::db::new(ns, db);
-		let _ = self
-			.put(
-				key,
-				DefineDatabaseStatement {
-					name: db.to_owned().into(),
-				},
-			)
-			.await;
-		Ok(())
+		let val = DefineDatabaseStatement {
+			name: db.to_owned().into(),
+		};
+		let _ = self.put(key, &val).await?;
+		Ok(val)
 	}
 	/// Add a table with a default configuration.
-	pub async fn add_tb(&mut self, ns: &str, db: &str, tb: &str) -> Result<(), Error> {
+	pub async fn add_tb(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+	) -> Result<DefineTableStatement, Error> {
 		let key = crate::key::tb::new(ns, db, tb);
-		let _ = self
-			.put(
-				key,
-				DefineTableStatement {
-					name: tb.to_owned().into(),
-					..DefineTableStatement::default()
-				},
-			)
-			.await;
-		Ok(())
+		let val = DefineTableStatement {
+			name: tb.to_owned().into(),
+			..DefineTableStatement::default()
+		};
+		let _ = self.put(key, &val).await?;
+		Ok(val)
 	}
 	/// Writes the full database contents as binary SQL.
 	pub async fn export(&mut self, ns: &str, db: &str, chn: Sender<Vec<u8>>) -> Result<(), Error> {
