@@ -1,4 +1,7 @@
+use once_cell::sync::OnceCell;
 use std::net::SocketAddr;
+
+pub static CF: OnceCell<Config> = OnceCell::new();
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -10,7 +13,7 @@ pub struct Config {
 	pub key: Option<String>,
 }
 
-pub fn parse(matches: &clap::ArgMatches) -> Config {
+pub fn init(matches: &clap::ArgMatches) {
 	// Parse the server binding address
 	let bind = matches
 		.value_of("bind")
@@ -26,13 +29,13 @@ pub fn parse(matches: &clap::ArgMatches) -> Config {
 	// Parse any TLS server security options
 	let crt = matches.value_of("web-crt").map(|v| v.to_owned());
 	let key = matches.value_of("web-key").map(|v| v.to_owned());
-	// Return a new config object
-	Config {
+	// Store the new config object
+	let _ = CF.set(Config {
 		bind,
 		path,
 		user,
 		pass,
 		crt,
 		key,
-	}
+	});
 }

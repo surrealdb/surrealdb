@@ -1,9 +1,12 @@
 mod backup;
+mod config;
 mod export;
 mod import;
 mod log;
 mod start;
 mod version;
+
+pub use config::CF;
 
 use crate::cnf::LOGO;
 use clap::{Arg, Command};

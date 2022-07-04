@@ -1,12 +1,19 @@
+use super::config;
 use crate::cnf::LOGO;
+use crate::dbs;
 use crate::err::Error;
 use crate::net;
 
-pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+#[tokio::main]
+pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// output SurrealDB logo
 	println!("{}", LOGO);
-	// Start up the web server
-	net::init(matches)?;
-	// Don't error when done
+	// Setup the cli options
+	config::init(matches);
+	// Start the kvs server
+	dbs::init().await?;
+	// Start the web server
+	net::init().await?;
+	// All ok
 	Ok(())
 }

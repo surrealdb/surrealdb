@@ -1,6 +1,6 @@
+use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::session;
-use crate::net::DB;
 use bytes::Bytes;
 use hyper::body::Body;
 use surrealdb::Session;

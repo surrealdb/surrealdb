@@ -1,8 +1,8 @@
+use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::head;
 use crate::net::output;
 use crate::net::session;
-use crate::net::DB;
 use bytes::Bytes;
 use serde::Deserialize;
 use std::str;
