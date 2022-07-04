@@ -5,3 +5,10 @@ macro_rules! map {
         m
     }};
 }
+
+macro_rules! mrg {
+    ($($m:expr, $x:expr)+) => {{
+        $($m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)+
+        $($m)+
+    }};
+}
