@@ -510,6 +510,26 @@ impl Value {
 		}
 	}
 
+	pub fn is_uuid(&self) -> bool {
+		matches!(self, Value::Uuid(_))
+	}
+
+	pub fn is_thing(&self) -> bool {
+		matches!(self, Value::Thing(_))
+	}
+
+	pub fn is_strand(&self) -> bool {
+		matches!(self, Value::Strand(_))
+	}
+
+	pub fn is_array(&self) -> bool {
+		matches!(self, Value::Array(_))
+	}
+
+	pub fn is_object(&self) -> bool {
+		matches!(self, Value::Object(_))
+	}
+
 	pub fn is_type_record(&self, types: &[Table]) -> bool {
 		match self {
 			Value::Thing(v) => types.iter().any(|tb| tb.0 == v.tb),
@@ -733,6 +753,23 @@ impl Value {
 		match self {
 			Value::Duration(_) => self,
 			_ => self.as_duration().into(),
+		}
+	}
+
+	pub fn make_table(self) -> Value {
+		match self {
+			Value::Table(_) => self,
+			Value::Strand(v) => Value::Table(Table(v.0)),
+			_ => Value::Table(Table(self.as_strand().0)),
+		}
+	}
+
+	pub fn make_table_or_thing(self) -> Value {
+		match self {
+			Value::Table(_) => self,
+			Value::Thing(_) => self,
+			Value::Strand(v) => Value::Table(Table(v.0)),
+			_ => Value::Table(Table(self.as_strand().0)),
 		}
 	}
 
