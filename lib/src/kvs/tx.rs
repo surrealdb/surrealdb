@@ -719,7 +719,7 @@ impl Transaction {
 		let val = DefineNamespaceStatement {
 			name: ns.to_owned().into(),
 		};
-		let _ = self.put(key, &val).await?;
+		let _ = self.put(key, &val).await;
 		Ok(val)
 	}
 	/// Add a database with a default configuration.
@@ -728,7 +728,7 @@ impl Transaction {
 		let val = DefineDatabaseStatement {
 			name: db.to_owned().into(),
 		};
-		let _ = self.put(key, &val).await?;
+		let _ = self.put(key, &val).await;
 		Ok(val)
 	}
 	/// Add a table with a default configuration.
@@ -743,7 +743,7 @@ impl Transaction {
 			name: tb.to_owned().into(),
 			..DefineTableStatement::default()
 		};
-		let _ = self.put(key, &val).await?;
+		let _ = self.put(key, &val).await;
 		Ok(val)
 	}
 	/// Writes the full database contents as binary SQL.
