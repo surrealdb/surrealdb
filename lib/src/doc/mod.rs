@@ -6,6 +6,7 @@ mod compute;
 mod allow;
 mod alter;
 mod check;
+mod clean;
 mod create;
 mod delete;
 mod document;
