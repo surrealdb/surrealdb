@@ -114,7 +114,7 @@ impl Serialize for Duration {
 		if is_internal_serialization() {
 			serializer.serialize_newtype_struct("Duration", &self.0)
 		} else {
-			serializer.serialize_some(&self.0)
+			serializer.serialize_some(&self.to_string())
 		}
 	}
 }
