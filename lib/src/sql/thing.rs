@@ -1,5 +1,5 @@
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_ident;
+use crate::sql::escape::escape_id;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
 use crate::sql::serde::is_internal_serialization;
@@ -54,7 +54,7 @@ impl Thing {
 
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", escape_ident(&self.tb), self.id)
+		write!(f, "{}:{}", escape_id(&self.tb), self.id)
 	}
 }
 

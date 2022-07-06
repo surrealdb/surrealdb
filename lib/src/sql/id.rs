@@ -1,6 +1,6 @@
 use crate::cnf::ID_CHARS;
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_ident;
+use crate::sql::escape::escape_id;
 use crate::sql::ident::ident_raw;
 use crate::sql::number::integer;
 use nanoid::nanoid;
@@ -55,7 +55,7 @@ impl fmt::Display for Id {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Id::Number(v) => write!(f, "{}", v),
-			Id::String(v) => write!(f, "{}", escape_ident(v)),
+			Id::String(v) => write!(f, "{}", escape_id(v)),
 		}
 	}
 }
