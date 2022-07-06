@@ -49,6 +49,12 @@ impl Id {
 	pub fn rand() -> Id {
 		Id::String(nanoid!(20, &ID_CHARS))
 	}
+	pub fn to_raw(&self) -> String {
+		match self {
+			Id::Number(v) => v.to_string(),
+			Id::String(v) => v.to_string(),
+		}
+	}
 }
 
 impl fmt::Display for Id {

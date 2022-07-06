@@ -53,6 +53,12 @@ impl Deref for Duration {
 	}
 }
 
+impl Duration {
+	pub fn to_raw(&self) -> String {
+		self.to_string()
+	}
+}
+
 impl fmt::Display for Duration {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		// Split up the duration
