@@ -2732,7 +2732,6 @@ dependencies = [
  "tokio",
  "trice",
  "url",
- "utf-8",
  "uuid",
 ]
 
