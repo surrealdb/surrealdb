@@ -69,7 +69,7 @@ impl Serialize for Thing {
 			val.serialize_field("id", &self.id)?;
 			val.end()
 		} else {
-			let output = format!("{}:{}", self.tb, self.id);
+			let output = self.to_string();
 			serializer.serialize_some(&output)
 		}
 	}
