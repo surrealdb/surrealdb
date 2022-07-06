@@ -329,7 +329,8 @@ impl Iterator {
 		Ok(())
 	}
 
-	#[cfg(not(feature = "parallel"))]
+	#[cfg(any(target_arch = "wasm32", not(feature = "parallel")))]
+	#[cfg_attr(feature = "parallel", async_recursion)]
 	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
 	async fn iterate(
 		&mut self,
@@ -346,8 +347,9 @@ impl Iterator {
 		Ok(())
 	}
 
-	#[cfg(feature = "parallel")]
+	#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 	#[cfg_attr(feature = "parallel", async_recursion)]
+	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
 	async fn iterate(
 		&mut self,
 		ctx: &Context<'_>,
