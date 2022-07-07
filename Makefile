@@ -11,6 +11,10 @@ docs:
 test:
 	cargo test --workspace
 
+.PHONY: setup
+setup:
+	cargo upgrade --workspace
+
 .PHONY: check
 check:
 	cargo check --workspace
