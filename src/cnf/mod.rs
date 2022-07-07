@@ -19,3 +19,6 @@ pub const SERVER_NAME: &str = "SurrealDB";
 
 // The public endpoint for the database administration interface
 pub const APP_ENDPOINT: &str = "https://app.surrealdb.com";
+
+// Specifies how many concurrent jobs can be buffered in the worker channel.
+pub const MAX_CONCURRENT_CALLS: usize = 24;

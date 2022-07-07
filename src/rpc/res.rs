@@ -1,6 +1,8 @@
 use serde::Serialize;
 use std::borrow::Cow;
+use surrealdb::channel::Sender;
 use surrealdb::sql::Value;
+use warp::ws::Message;
 
 #[derive(Serialize)]
 enum Content {
@@ -18,6 +20,12 @@ pub struct Response {
 }
 
 impl Response {
+	// Send the response to the channel
+	pub async fn send(self, chn: Sender<Message>) {
+		let res = serde_json::to_string(&self).unwrap();
+		let res = Message::text(res);
+		let _ = chn.send(res).await;
+	}
 	// Create a JSON RPC result response
 	pub fn success(id: Option<String>, val: Value) -> Response {
 		Response {
