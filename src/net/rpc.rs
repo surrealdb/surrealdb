@@ -490,7 +490,7 @@ impl Rpc {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Specify the SQL query string
-		let sql = "UPDATE $what DIFF $data RETURN DIFF";
+		let sql = "UPDATE $what PATCH $data RETURN DIFF";
 		// Specify the query paramaters
 		let var = Some(map! {
 			String::from("what") => what.make_table_or_thing(),
