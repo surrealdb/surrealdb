@@ -64,15 +64,19 @@ impl<'a> Document<'a> {
 					}
 				}
 				Data::PatchExpression(data) => {
+					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
 					self.current.to_mut().patch(ctx, opt, txn, data).await?
 				}
 				Data::MergeExpression(data) => {
+					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
 					self.current.to_mut().merge(ctx, opt, txn, data).await?
 				}
 				Data::ReplaceExpression(data) => {
+					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
 					self.current.to_mut().replace(ctx, opt, txn, data).await?
 				}
 				Data::ContentExpression(data) => {
+					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
 					self.current.to_mut().replace(ctx, opt, txn, data).await?
 				}
 				_ => unreachable!(),

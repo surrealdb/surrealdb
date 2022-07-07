@@ -1,4 +1,3 @@
-use crate::sql::array::{array, Array};
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
@@ -16,7 +15,7 @@ use std::fmt;
 pub enum Data {
 	EmptyExpression,
 	SetExpression(Vec<(Idiom, Operator, Value)>),
-	PatchExpression(Array),
+	PatchExpression(Value),
 	MergeExpression(Value),
 	ReplaceExpression(Value),
 	ContentExpression(Value),
@@ -98,7 +97,7 @@ fn set(i: &str) -> IResult<&str, Data> {
 fn patch(i: &str) -> IResult<&str, Data> {
 	let (i, _) = tag_no_case("PATCH")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, v) = array(i)?;
+	let (i, v) = value(i)?;
 	Ok((i, Data::PatchExpression(v)))
 }
 

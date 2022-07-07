@@ -7,13 +7,13 @@ use crate::sql::value::Value;
 impl Value {
 	pub async fn replace(
 		&mut self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		val: &Value,
+		_ctx: &Context<'_>,
+		_opt: &Options,
+		_txn: &Transaction,
+		val: Value,
 	) -> Result<(), Error> {
 		// Clear all entries
-		match val.compute(ctx, opt, txn, Some(self)).await? {
+		match val {
 			Value::Object(v) => {
 				*self = Value::from(v);
 				Ok(())
@@ -36,7 +36,7 @@ mod tests {
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::parse("{ other: true }");
 		let obj = Value::parse("{ other: true }");
-		val.replace(&ctx, &opt, &txn, &obj).await.unwrap();
+		val.replace(&ctx, &opt, &txn, obj).await.unwrap();
 		assert_eq!(res, val);
 	}
 }

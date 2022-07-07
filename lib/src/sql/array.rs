@@ -105,17 +105,6 @@ impl Array {
 			_ => [self.0.remove(0).as_float(), self.0.remove(0).as_float()],
 		}
 	}
-
-	pub fn to_operations(&self) -> Result<Vec<Operation>, Error> {
-		self.iter()
-			.map(|v| match v {
-				Value::Object(v) => v.to_operation(),
-				_ => Err(Error::InvalidPatch {
-					message: String::from("Operation must be an object"),
-				}),
-			})
-			.collect::<Result<Vec<_>, Error>>()
-	}
 }
 
 impl Array {

@@ -708,6 +708,23 @@ impl Value {
 		}
 	}
 
+	pub fn to_operations(&self) -> Result<Vec<Operation>, Error> {
+		match self {
+			Value::Array(v) => v
+				.iter()
+				.map(|v| match v {
+					Value::Object(v) => v.to_operation(),
+					_ => Err(Error::InvalidPatch {
+						message: String::from("Operation must be an object"),
+					}),
+				})
+				.collect::<Result<Vec<_>, Error>>(),
+			_ => Err(Error::InvalidPatch {
+				message: String::from("Operations must be an array"),
+			}),
+		}
+	}
+
 	// -----------------------------------
 	// Simple conversion of value
 	// -----------------------------------

@@ -11,9 +11,9 @@ impl Value {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		val: &Value,
+		val: Value,
 	) -> Result<(), Error> {
-		match val.compute(ctx, opt, txn, Some(self)).await? {
+		match val {
 			Value::Object(v) => {
 				for (k, v) in v {
 					self.set(ctx, opt, txn, &[Part::from(k)], v).await?;
