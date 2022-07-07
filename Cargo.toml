@@ -27,7 +27,7 @@ http = "0.2.8"
 hyper = "0.14.19"
 jsonwebtoken = "8.1.1"
 log = "0.4.17"
-once_cell = "1.12.0"
+once_cell = "1.13.0"
 rand = "0.8.5"
 reqwest = { version = "0.11.11", features = ["blocking"] }
 serde = { version = "1.0.138", features = ["derive"] }
