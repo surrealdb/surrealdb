@@ -148,7 +148,7 @@ impl Rpc {
 				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"query" => match params.take_two() {
-				(Value::Strand(s), Value::None) => rpc.read().await.query(s).await,
+				(Value::Strand(s), o) if o.is_none() => rpc.read().await.query(s).await,
 				(Value::Strand(s), Value::Object(o)) => rpc.read().await.query_with(s, o).await,
 				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
