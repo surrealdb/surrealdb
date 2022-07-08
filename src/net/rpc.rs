@@ -139,6 +139,10 @@ impl Rpc {
 				v if v.is_strand() => rpc.read().await.live(v).await,
 				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
+			"let" => match params.take_two() {
+				(Value::Strand(s), v) => rpc.write().await.set(s, v).await,
+				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+			},
 			"set" => match params.take_two() {
 				(Value::Strand(s), v) => rpc.write().await.set(s, v).await,
 				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
