@@ -583,6 +583,8 @@ impl DefineTableStatement {
 			}
 			// Release the transaction
 			drop(run);
+			// Force tables to reprocess
+			let opt = &opt.force(true);
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Process the view data
