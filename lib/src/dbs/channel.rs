@@ -78,7 +78,9 @@ impl Iterable {
 					// Loop until no more keys
 					loop {
 						// Check if the context is finished
-						ctx.check()?;
+						if ctx.is_done() {
+							break;
+						}
 						// Get the next 1000 key-value entries
 						let res = match nxt {
 							None => {
@@ -104,7 +106,9 @@ impl Iterable {
 							// Loop over results
 							for (i, (k, v)) in res.into_iter().enumerate() {
 								// Check the context
-								ctx.check()?;
+								if ctx.is_done() {
+									break;
+								}
 								// Ready the next
 								if n == i + 1 {
 									nxt = Some(k.clone());
@@ -199,7 +203,9 @@ impl Iterable {
 						// Loop until no more keys
 						loop {
 							// Check if the context is finished
-							ctx.check()?;
+							if ctx.is_done() {
+								break;
+							}
 							// Get the next 1000 key-value entries
 							let res = match nxt {
 								None => {
@@ -225,7 +231,9 @@ impl Iterable {
 								// Loop over results
 								for (i, (k, _)) in res.into_iter().enumerate() {
 									// Check the context
-									ctx.check()?;
+									if ctx.is_done() {
+										break;
+									}
 									// Ready the next
 									if n == i + 1 {
 										nxt = Some(k.clone());

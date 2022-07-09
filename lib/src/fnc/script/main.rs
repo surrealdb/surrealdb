@@ -12,7 +12,9 @@ pub async fn run(
 	doc: Option<&Value>,
 ) -> Result<Value, Error> {
 	// Check the context
-	let _ = ctx.check()?;
+	if ctx.is_done() {
+		return Ok(Value::None);
+	}
 	// Create a new agent
 	let exe = Executor::default();
 	// Create an JavaScript context
