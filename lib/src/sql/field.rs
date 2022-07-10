@@ -1,7 +1,12 @@
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::dbs::Transaction;
+use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::part::Part;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -51,6 +56,105 @@ impl IntoIterator for Fields {
 impl fmt::Display for Fields {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))
+	}
+}
+
+impl Fields {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Ensure futures are run
+		let opt = &opt.futures(true);
+		//
+		let doc = doc.unwrap_or(&Value::None);
+		// Process the desired output
+		let mut out = match self.all() {
+			true => doc.compute(ctx, opt, txn, Some(doc)).await?,
+			false => Value::base(),
+		};
+		for v in self.other() {
+			match v {
+				Field::All => (),
+				Field::Alone(v) => match v {
+					// This expression is a multi-output graph traversal
+					Value::Idiom(v) if v.is_multi_yield() => {
+						// Store the different output yields here
+						let mut res: Vec<(&[Part], Value)> = Vec::new();
+						// Split the expression by each output alias
+						for v in v.split_inclusive(Idiom::split_multi_yield) {
+							// Use the last fetched value for each fetch
+							let x = match res.last() {
+								Some((_, r)) => r,
+								None => doc,
+							};
+							// Continue fetching the next idiom part
+							let x = x
+								.get(ctx, opt, txn, v)
+								.await?
+								.compute(ctx, opt, txn, Some(doc))
+								.await?;
+							// Add the result to the temporary store
+							res.push((v, x));
+						}
+						// Assign each fetched yield to the output
+						for (p, x) in res {
+							match p.last().unwrap().alias() {
+								// This is an alias expression part
+								Some(i) => out.set(ctx, opt, txn, i, x).await?,
+								// This is the end of the expression
+								None => out.set(ctx, opt, txn, v, x).await?,
+							}
+						}
+					}
+					// This expression is a normal field expression
+					_ => {
+						let x = v.compute(ctx, opt, txn, Some(doc)).await?;
+						out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+					}
+				},
+				Field::Alias(v, i) => match v {
+					// This expression is a multi-output graph traversal
+					Value::Idiom(v) if v.is_multi_yield() => {
+						// Store the different output yields here
+						let mut res: Vec<(&[Part], Value)> = Vec::new();
+						// Split the expression by each output alias
+						for v in v.split_inclusive(Idiom::split_multi_yield) {
+							// Use the last fetched value for each fetch
+							let x = match res.last() {
+								Some((_, r)) => r,
+								None => doc,
+							};
+							// Continue fetching the next idiom part
+							let x = x
+								.get(ctx, opt, txn, v)
+								.await?
+								.compute(ctx, opt, txn, Some(doc))
+								.await?;
+							// Add the result to the temporary store
+							res.push((v, x));
+						}
+						// Assign each fetched yield to the output
+						for (p, x) in res {
+							match p.last().unwrap().alias() {
+								// This is an alias expression part
+								Some(i) => out.set(ctx, opt, txn, i, x).await?,
+								// This is the end of the expression
+								None => out.set(ctx, opt, txn, i, x).await?,
+							}
+						}
+					}
+					_ => {
+						let x = v.compute(ctx, opt, txn, Some(doc)).await?;
+						out.set(ctx, opt, txn, i, x).await?;
+					}
+				},
+			}
+		}
+		Ok(out)
 	}
 }
 
