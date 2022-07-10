@@ -40,7 +40,7 @@ impl From<Vec<i32>> for Array {
 	}
 }
 
-impl<'a> From<Vec<&str>> for Array {
+impl From<Vec<&str>> for Array {
 	fn from(v: Vec<&str>) -> Self {
 		Array(v.into_iter().map(Value::from).collect())
 	}

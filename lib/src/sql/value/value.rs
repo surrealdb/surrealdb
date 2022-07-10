@@ -372,7 +372,7 @@ impl From<Operation> for Value {
 	}
 }
 
-impl<'a> From<Vec<&str>> for Value {
+impl From<Vec<&str>> for Value {
 	fn from(v: Vec<&str>) -> Self {
 		Value::Array(Array::from(v))
 	}

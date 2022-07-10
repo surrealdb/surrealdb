@@ -172,9 +172,9 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let res = self.tx.del(key.into())?;
+		self.tx.del(key.into())?;
 		// Return result
-		Ok(res)
+		Ok(())
 	}
 	// Delete a key
 	pub fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
@@ -191,9 +191,9 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let res = self.tx.delc(key.into(), chk.map(|v| v.into()))?;
+		self.tx.delc(key.into(), chk.map(|v| v.into()))?;
 		// Return result
-		Ok(res)
+		Ok(())
 	}
 	// Retrieve a range of keys from the databases
 	pub fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
