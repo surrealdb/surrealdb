@@ -4,41 +4,40 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*.*.*"
   pull_request:
     branches:
       - main
 
 jobs:
-  check:
-    name: Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-      - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --workspace
 
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
+
       - name: Checkout sources
         uses: actions/checkout@v2
+
+      - name: Cache cargo assets
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-test-cargo-${{ hashFiles('**/Cargo.lock') }}
+
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: stable
           override: true
+
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
@@ -49,8 +48,21 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
+
       - name: Checkout sources
         uses: actions/checkout@v2
+
+      - name: Cache cargo assets
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-lint-cargo-${{ hashFiles('**/Cargo.lock') }}
+
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -58,11 +70,19 @@ jobs:
           toolchain: stable
           override: true
           components: rustfmt, clippy
+
+      - name: Run cargo check
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --workspace
+
       - name: Run cargo fmt
         uses: actions-rs/cargo@v1
         with:
           command: fmt
           args: --all -- --check
+
       - name: Run cargo clippy
         uses: actions-rs/cargo@v1
         with:
