@@ -1,7 +1,7 @@
-FROM alpine:latest
+FROM gcr.io/distroless/cc:latest
 
-RUN apk add --update --no-cache ca-certificates
+ARG TARGETARCH
 
-ADD surreal /usr/bin/
+ADD $TARGETARCH/surreal /
 
-ENTRYPOINT ["surreal"]
+ENTRYPOINT ["/surreal"]
