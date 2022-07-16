@@ -66,6 +66,7 @@ impl Fields {
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&Value>,
+		group: bool,
 	) -> Result<Value, Error> {
 		// Ensure futures are run
 		let opt = &opt.futures(true);
@@ -80,6 +81,16 @@ impl Fields {
 			match v {
 				Field::All => (),
 				Field::Alone(v) => match v {
+					// This expression is a grouped aggregate function
+					Value::Function(f) if group && f.is_aggregate() => {
+						let x = match f.args().len() {
+							// If no function arguments, then compute the result
+							0 => f.compute(ctx, opt, txn, Some(doc)).await?,
+							// If arguments, then pass the first value through
+							_ => f.args()[0].compute(ctx, opt, txn, Some(doc)).await?,
+						};
+						out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+					}
 					// This expression is a multi-output graph traversal
 					Value::Idiom(v) if v.is_multi_yield() => {
 						// Store the different output yields here
@@ -117,6 +128,16 @@ impl Fields {
 					}
 				},
 				Field::Alias(v, i) => match v {
+					// This expression is a grouped aggregate function
+					Value::Function(f) if group && f.is_aggregate() => {
+						let x = match f.args().len() {
+							// If no function arguments, then compute the result
+							0 => f.compute(ctx, opt, txn, Some(doc)).await?,
+							// If arguments, then pass the first value through
+							_ => f.args()[0].compute(ctx, opt, txn, Some(doc)).await?,
+						};
+						out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+					}
 					// This expression is a multi-output graph traversal
 					Value::Idiom(v) if v.is_multi_yield() => {
 						// Store the different output yields here

@@ -27,10 +27,12 @@ impl<'a> Document<'a> {
 				Output::Diff => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
 				Output::After => self.current.compute(ctx, opt, txn, Some(&self.current)).await,
 				Output::Before => self.initial.compute(ctx, opt, txn, Some(&self.initial)).await,
-				Output::Fields(v) => v.compute(ctx, opt, txn, Some(&self.current)).await,
+				Output::Fields(v) => v.compute(ctx, opt, txn, Some(&self.current), false).await,
 			},
 			None => match stm {
-				Statement::Select(s) => s.expr.compute(ctx, opt, txn, Some(&self.current)).await,
+				Statement::Select(s) => {
+					s.expr.compute(ctx, opt, txn, Some(&self.current), s.group.is_some()).await
+				}
 				Statement::Create(_) => {
 					self.current.compute(ctx, opt, txn, Some(&self.current)).await
 				}
