@@ -56,9 +56,13 @@ impl<'a> Document<'a> {
 		let tb = txn.clone().lock().await.get_tb(opt.ns(), opt.db(), &id.tb).await;
 		// Return the table or attempt to define it
 		match tb {
+			// The table exists
 			Ok(tb) => Ok(tb),
+			// The table doesn't exist
 			Err(e) => match opt.auth.check(Level::Db) {
+				// We can create the table automatically
 				true => txn.clone().lock().await.add_tb(opt.ns(), opt.db(), &id.tb).await,
+				// We can't create the table so error
 				false => Err(e),
 			},
 		}
@@ -71,7 +75,7 @@ impl<'a> Document<'a> {
 	) -> Result<Vec<DefineEventStatement>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
-		// Get the table definition
+		// Get the event definitions
 		txn.clone().lock().await.all_ev(opt.ns(), opt.db(), &id.tb).await
 	}
 	// Get the fields for this document
@@ -82,7 +86,7 @@ impl<'a> Document<'a> {
 	) -> Result<Vec<DefineFieldStatement>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
-		// Get the table definition
+		// Get the field definitions
 		txn.clone().lock().await.all_fd(opt.ns(), opt.db(), &id.tb).await
 	}
 	// Get the indexes for this document
@@ -93,7 +97,7 @@ impl<'a> Document<'a> {
 	) -> Result<Vec<DefineIndexStatement>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
-		// Get the table definition
+		// Get the index definitions
 		txn.clone().lock().await.all_ix(opt.ns(), opt.db(), &id.tb).await
 	}
 }
