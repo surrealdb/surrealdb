@@ -157,7 +157,7 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.tx.putc(key.into(), val.into(), chk.map(|v| v.into())).await?;
+		self.tx.putc(key.into(), val.into(), chk.map(Into::into)).await?;
 		// Return result
 		Ok(())
 	}
@@ -194,7 +194,7 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let res = self.tx.delc(key.into(), chk.map(|v| v.into())).await?;
+		let res = self.tx.delc(key.into(), chk.map(Into::into)).await?;
 		// Return result
 		Ok(res)
 	}

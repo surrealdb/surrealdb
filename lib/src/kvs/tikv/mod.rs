@@ -171,7 +171,7 @@ impl Transaction {
 		// Get the val
 		let val = val.into();
 		// Get the check
-		let chk = chk.map(|v| v.into());
+		let chk = chk.map(Into::into);
 		// Delete the key
 		match (self.tx.get(key.clone()).await?, chk) {
 			(Some(v), Some(w)) if v == w => self.tx.put(key, val).await?,
@@ -216,7 +216,7 @@ impl Transaction {
 		// Get the key
 		let key = key.into();
 		// Get the check
-		let chk = chk.map(|v| v.into());
+		let chk = chk.map(Into::into);
 		// Delete the key
 		match (self.tx.get(key.clone()).await?, chk) {
 			(Some(v), Some(w)) if v == w => self.tx.delete(key).await?,

@@ -44,11 +44,11 @@ impl Value {
 					Part::All => {
 						let path = path.next();
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						try_join_all(futs).await.map(|v| v.into())
+						try_join_all(futs).await.map(Into::into)
 					}
 					Part::Any => {
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						try_join_all(futs).await.map(|v| v.into())
+						try_join_all(futs).await.map(Into::into)
 					}
 					Part::First => match v.first() {
 						Some(v) => v.get(ctx, opt, txn, path.next()).await,
@@ -74,7 +74,7 @@ impl Value {
 					}
 					_ => {
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						try_join_all(futs).await.map(|v| v.into())
+						try_join_all(futs).await.map(Into::into)
 					}
 				},
 				// Current path part is a thing
