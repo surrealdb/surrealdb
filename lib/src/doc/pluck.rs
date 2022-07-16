@@ -6,6 +6,7 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::idiom::Idiom;
 use crate::sql::output::Output;
+use crate::sql::paths::META;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 
@@ -73,6 +74,8 @@ impl<'a> Document<'a> {
 				}
 			}
 		}
+		// Remove metadata fields on output
+		out.del(ctx, opt, txn, &*META).await?;
 		// Output result
 		Ok(out)
 	}
