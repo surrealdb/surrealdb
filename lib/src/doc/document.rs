@@ -67,6 +67,17 @@ impl<'a> Document<'a> {
 			},
 		}
 	}
+	// Get the foreign tables for this document
+	pub async fn ft(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Vec<DefineTableStatement>, Error> {
+		// Get the record id
+		let id = self.id.as_ref().unwrap();
+		// Get the table definitions
+		txn.clone().lock().await.all_ft(opt.ns(), opt.db(), &id.tb).await
+	}
 	// Get the events for this document
 	pub async fn ev(
 		&self,

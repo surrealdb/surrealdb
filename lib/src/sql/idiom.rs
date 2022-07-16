@@ -8,6 +8,8 @@ use crate::sql::part::Next;
 use crate::sql::part::{all, field, first, graph, index, last, part, thing, Part};
 use crate::sql::paths::{ID, IN, OUT};
 use crate::sql::value::Value;
+use md5::Digest;
+use md5::Md5;
 use nom::branch::alt;
 use nom::multi::separated_list1;
 use nom::multi::{many0, many1};
@@ -64,6 +66,12 @@ impl Idiom {
 	pub(crate) fn push(mut self, n: Part) -> Idiom {
 		self.0.push(n);
 		self
+	}
+	// Convert this Idiom to a unique hash
+	pub(crate) fn to_hash(&self) -> String {
+		let mut hasher = Md5::new();
+		hasher.update(self.to_string().as_str());
+		format!("{:x}", hasher.finalize())
 	}
 	// Convert this Idiom to a JSON Path string
 	pub(crate) fn to_path(&self) -> String {

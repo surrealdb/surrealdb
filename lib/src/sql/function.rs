@@ -32,6 +32,13 @@ impl PartialOrd for Function {
 }
 
 impl Function {
+	// Get function name if applicable
+	pub fn name(&self) -> &str {
+		match self {
+			Function::Normal(n, _) => n.as_str(),
+			_ => unreachable!(),
+		}
+	}
 	// Get function arguments if applicable
 	pub fn args(&self) -> &[Value] {
 		match self {
@@ -59,16 +66,11 @@ impl Function {
 	// Check if this function is a rolling function
 	pub fn is_rolling(&self) -> bool {
 		match self {
-			Function::Normal(f, _) if f == "array::concat" => true,
-			Function::Normal(f, _) if f == "array::distinct" => true,
-			Function::Normal(f, _) if f == "array::union" => true,
 			Function::Normal(f, _) if f == "count" => true,
 			Function::Normal(f, _) if f == "math::max" => true,
 			Function::Normal(f, _) if f == "math::mean" => true,
 			Function::Normal(f, _) if f == "math::min" => true,
-			Function::Normal(f, _) if f == "math::stddev" => true,
 			Function::Normal(f, _) if f == "math::sum" => true,
-			Function::Normal(f, _) if f == "math::variance" => true,
 			_ => false,
 		}
 	}
