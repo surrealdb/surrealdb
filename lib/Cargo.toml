@@ -6,13 +6,14 @@ version = "0.1.0"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
-default = ["parallel", "kv-tikv", "kv-echodb", "kv-yokudb", "scripting"]
+default = ["parallel", "kv-tikv", "kv-echodb", "kv-yokudb", "scripting", "http"]
 parallel = ["executor"]
 kv-tikv = ["tikv"]
 kv-echodb = ["echodb"]
 kv-indxdb = ["indxdb"]
 kv-yokudb = []
 scripting = ["js", "executor"]
+http = ["surf"]
 
 [dependencies]
 argon2 = "0.4.1"
@@ -45,6 +46,7 @@ serde = { version = "1.0.138", features = ["derive"] }
 sha-1 = "0.10.0"
 sha2 = "0.10.2"
 storekey = "0.3.0"
+surf = { version = "2.3.2", optional = true }
 thiserror = "1.0.31"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
 trice = "0.1.0"

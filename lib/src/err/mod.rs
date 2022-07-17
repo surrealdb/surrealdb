@@ -225,6 +225,10 @@ pub enum Error {
 		value: String,
 	},
 
+	/// There was an error processing a remote HTTP request
+	#[error("There was an error processing a remote HTTP request")]
+	Http(String),
+
 	/// There was an error processing a value in parallel
 	#[error("There was an error processing a value in parallel")]
 	Channel(String),
@@ -278,6 +282,12 @@ impl From<channel::RecvError> for Error {
 impl<T> From<channel::SendError<T>> for Error {
 	fn from(e: channel::SendError<T>) -> Error {
 		Error::Channel(e.to_string())
+	}
+}
+
+impl From<surf::Error> for Error {
+	fn from(e: surf::Error) -> Error {
+		Error::Http(e.to_string())
 	}
 }
 
