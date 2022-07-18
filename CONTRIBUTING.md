@@ -43,10 +43,10 @@ To listen to code changes as you develop, use the following command:
 cargo watch -x 'run -- -vvv start memory'
 ```
 
-SurrealDB runs by default on port 3000. To change the default port, use the following command:
+SurrealDB runs by default on port 8000. To change the default port, use the following command:
 
 ```bash
-cargo run -- -vvv start memory --bind 0.0.0.0:8000
+cargo run -- -vvv start memory --bind 0.0.0.0:9000
 ```
 
 To run all tests manually, use the SurrealDB command-line from your terminal:

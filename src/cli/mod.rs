@@ -181,7 +181,7 @@ pub fn init() {
 					.short('b')
 					.long("bind")
 					.forbid_empty_values(true)
-					.default_value("0.0.0.0:3000")
+					.default_value("0.0.0.0:8000")
 					.help("The hostname or ip address to listen for connections on"),
 			)
 			.arg(
