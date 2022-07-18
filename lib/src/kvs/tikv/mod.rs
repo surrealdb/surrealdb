@@ -4,6 +4,8 @@ use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use std::ops::Range;
+use tikv::CheckLevel;
+use tikv::TransactionOptions;
 
 pub struct Datastore {
 	db: tikv::TransactionClient,
@@ -31,22 +33,32 @@ impl Datastore {
 	// Start a new transaction
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		match lock {
-			true => match self.db.begin_optimistic().await {
-				Ok(tx) => Ok(Transaction {
-					ok: false,
-					rw: write,
-					tx,
-				}),
-				Err(e) => Err(Error::Tx(e.to_string())),
-			},
-			false => match self.db.begin_pessimistic().await {
-				Ok(tx) => Ok(Transaction {
-					ok: false,
-					rw: write,
-					tx,
-				}),
-				Err(e) => Err(Error::Tx(e.to_string())),
-			},
+			true => {
+				// Set the behaviour when dropping an unfinished transaction
+				let opt = TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn);
+				// Create a new optimistic transaction
+				match self.db.begin_with_options(opt).await {
+					Ok(tx) => Ok(Transaction {
+						ok: false,
+						rw: write,
+						tx,
+					}),
+					Err(e) => Err(Error::Tx(e.to_string())),
+				}
+			}
+			false => {
+				// Set the behaviour when dropping an unfinished transaction
+				let opt = TransactionOptions::new_pessimistic().drop_check(CheckLevel::Warn);
+				// Create a new pessimistic transaction
+				match self.db.begin_with_options(opt).await {
+					Ok(tx) => Ok(Transaction {
+						ok: false,
+						rw: write,
+						tx,
+					}),
+					Err(e) => Err(Error::Tx(e.to_string())),
+				}
+			}
 		}
 	}
 }
