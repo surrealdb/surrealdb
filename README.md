@@ -30,7 +30,7 @@
 <br>
 
 <p align="center">
-    <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/version-1.0.0--dev-ff00a0.svg?style=flat-square"></a>
+    <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/github/v/release/surrealdb/surrealdb?color=%23ff00a0&include_prereleases&label=version&sort=semver&style=flat-square"></a>
     &nbsp;
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/language-Rust-dca282.svg?style=flat-square"></a>
     &nbsp;
