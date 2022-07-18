@@ -27,7 +27,7 @@ clean:
 
 .PHONY: serve
 serve:
-	cargo run -- -vvv start memory --user root --pass root
+	cargo run -- -vvv start --user root --pass root memory
 
 .PHONY: quick
 quick:
