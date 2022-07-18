@@ -42,7 +42,7 @@ pbkdf2 = "0.11.0"
 rand = "0.8.5"
 regex = "1.6.0"
 scrypt = "0.10.0"
-serde = { version = "1.0.138", features = ["derive"] }
+serde = { version = "1.0.139", features = ["derive"] }
 sha-1 = "0.10.0"
 sha2 = "0.10.2"
 storekey = "0.3.0"
@@ -54,4 +54,4 @@ url = "2.2.2"
 uuid = { version = "1.1.2", features = ["serde", "v4"] }
 
 [dev-dependencies]
-tokio = { version = "1.19.2", features = ["macros"] }
+tokio = { version = "1.20.0", features = ["macros"] }
