@@ -19,6 +19,8 @@ use crate::cli::CF;
 use crate::err::Error;
 use warp::Filter;
 
+const LOG: &str = "surrealdb::net";
+
 pub async fn init() -> Result<(), Error> {
 	// Setup web routes
 	let net = index::config()
@@ -58,7 +60,9 @@ pub async fn init() -> Result<(), Error> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 
-	info!("Starting web server on {}", &opt.bind);
+	info!(target: LOG, "Starting web server on {}", &opt.bind);
+
+	info!(target: LOG, "Started web server on {}", &opt.bind);
 
 	if let (Some(crt), Some(key)) = (&opt.crt, &opt.key) {
 		warp::serve(net).tls().cert_path(crt).key_path(key).run(opt.bind).await

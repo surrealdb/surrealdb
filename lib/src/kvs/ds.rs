@@ -7,6 +7,7 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
+use crate::kvs::LOG;
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
@@ -73,37 +74,45 @@ impl Datastore {
 		match path {
 			#[cfg(feature = "kv-echodb")]
 			"memory" => {
-				info!("Starting kvs store in {}", path);
-				super::mem::Datastore::new().await.map(|v| Datastore {
+				info!(target: LOG, "Starting kvs store in {}", path);
+				let v = super::mem::Datastore::new().await.map(|v| Datastore {
 					inner: Inner::Mem(v),
-				})
+				});
+				info!(target: LOG, "Started kvs store in {}", path);
+				v
 			}
 			// Parse and initiate an IxDB database
 			#[cfg(feature = "kv-indxdb")]
 			s if s.starts_with("ixdb:") => {
-				info!("Starting kvs store at {}", path);
+				info!(target: LOG, "Starting kvs store at {}", path);
 				let s = s.trim_start_matches("ixdb://");
-				super::ixdb::Datastore::new(s).await.map(|v| Datastore {
+				let v = super::ixdb::Datastore::new(s).await.map(|v| Datastore {
 					inner: Inner::IxDB(v),
-				})
+				});
+				info!(target: LOG, "Started kvs store at {}", path);
+				v
 			}
 			// Parse and initiate an File database
 			#[cfg(feature = "kv-yokudb")]
 			s if s.starts_with("file:") => {
-				info!("Starting kvs store at {}", path);
+				info!(target: LOG, "Starting kvs store at {}", path);
 				let s = s.trim_start_matches("file://");
-				super::file::Datastore::new(s).await.map(|v| Datastore {
+				let v = super::file::Datastore::new(s).await.map(|v| Datastore {
 					inner: Inner::File(v),
-				})
+				});
+				info!(target: LOG, "Started kvs store at {}", path);
+				v
 			}
 			// Parse and initiate an TiKV database
 			#[cfg(feature = "kv-tikv")]
 			s if s.starts_with("tikv:") => {
-				info!("Starting kvs store at {}", path);
+				info!(target: LOG, "Connecting to kvs store at {}", path);
 				let s = s.trim_start_matches("tikv://");
-				super::tikv::Datastore::new(s).await.map(|v| Datastore {
+				let v = super::tikv::Datastore::new(s).await.map(|v| Datastore {
 					inner: Inner::TiKV(v),
-				})
+				});
+				info!(target: LOG, "Connected to kvs store at {}", path);
+				v
 			}
 			// The datastore path is not valid
 			_ => unreachable!(),

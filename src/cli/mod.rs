@@ -14,6 +14,8 @@ use once_cell::sync::Lazy;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 
+pub const LOG: &str = "surrealdb::cli";
+
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
 on top of SurrealDB, check out the SurrealDB documentation (https://surrealdb.com/docs).
@@ -396,6 +398,6 @@ pub fn init() {
 	};
 
 	if let Err(e) = output {
-		error!("{}", e);
+		error!(target: LOG, "{}", e);
 	}
 }

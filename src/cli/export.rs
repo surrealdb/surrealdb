@@ -1,3 +1,4 @@
+use crate::cli::LOG;
 use crate::err::Error;
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
@@ -54,7 +55,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// and return an Ok to signify that
 	// this command has been successful.
 
-	info!("The SQL file was exported successfully");
+	info!(target: LOG, "The SQL file was exported successfully");
 
 	Ok(())
 }
