@@ -234,7 +234,7 @@ pub fn init() {
 					.takes_value(true)
 					.default_value("info")
 					.forbid_empty_values(true)
-					.help("Database path used for storing data")
+					.help("The logging level for the database server")
 					.value_parser(["warn", "info", "debug", "trace", "full"]),
 			),
 	);
