@@ -6,36 +6,21 @@ use std::fs::OpenOptions;
 use std::io::copy;
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
-	// Ensure that the command has a file
-	// argument. If no file argument has
-	// been provided, then return an error.
-
+	// Set the default logging level
+	crate::cli::log::init(3);
+	// Try to parse the file argument
 	let file = matches.value_of("file").unwrap();
-
-	// Attempt to open the specified file,
-	// and if there is a problem opening
-	// the file, then return an error.
-
+	// Try to open the specified file
 	let mut file = OpenOptions::new().write(true).create(true).truncate(true).open(file)?;
-
 	// Parse all other cli arguments
-
 	let user = matches.value_of("user").unwrap();
-
 	let pass = matches.value_of("pass").unwrap();
-
 	let conn = matches.value_of("conn").unwrap();
-
 	let ns = matches.value_of("ns").unwrap();
-
 	let db = matches.value_of("db").unwrap();
-
+	// Set the correct export URL
 	let conn = format!("{}/export", conn);
-
-	// Create and send the HTTP request
-	// specifying the basic auth header
-	// and the specified content-type.
-
+	// Export the data from the database
 	let mut res = Client::new()
 		.get(&conn)
 		.header(CONTENT_TYPE, "application/octet-stream")
@@ -44,18 +29,10 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 		.header("DB", db)
 		.send()?
 		.error_for_status()?;
-
-	// Copy the contents of the http get
-	// response to the specified ouput
-	// file and pass along any errors.
-
+	// Copy the export to the file
 	copy(&mut res, &mut file)?;
-
-	// Output an informational message
-	// and return an Ok to signify that
-	// this command has been successful.
-
+	// Output a success message
 	info!(target: LOG, "The SQL file was exported successfully");
-
+	// Everything OK
 	Ok(())
 }

@@ -8,22 +8,11 @@ use std::io::copy;
 const TYPE: &str = "application/octet-stream";
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
-	// Attempt to open the specified file,
-	// and if there is a problem opening
-	// the file, then return an error.
-
+	// Try to parse the specified source file
 	let from = matches.value_of("from").unwrap();
-
-	// Attempt to open the specified file,
-	// and if there is a problem opening
-	// the file, then return an error.
-
+	// Try to parse the specified output file
 	let into = matches.value_of("into").unwrap();
-
-	// Process the response, checking
-	// for any errors, and outputting
-	// the responses back to the user.
-
+	// Process the source->destination response
 	if from.ends_with(".db") && into.ends_with(".db") {
 		backup_file_to_file(matches, from, into)
 	} else if from.ends_with(".db") {
@@ -36,45 +25,48 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 }
 
 fn backup_file_to_file(_: &clap::ArgMatches, from: &str, into: &str) -> Result<(), Error> {
+	// Try to open the source file
 	let mut from = OpenOptions::new().read(true).open(from)?;
-
+	// Try to open the output file
 	let mut into = OpenOptions::new().write(true).create(true).truncate(true).open(into)?;
-
+	// Copy the data to the destination
 	copy(&mut from, &mut into)?;
-
+	// Everything OK
 	Ok(())
 }
 
 fn backup_http_to_file(matches: &clap::ArgMatches, from: &str, into: &str) -> Result<(), Error> {
+	// Parse the specified username
 	let user = matches.value_of("user").unwrap();
-
+	// Parse the specified password
 	let pass = matches.value_of("pass").unwrap();
-
+	// Set the correct source URL
 	let from = format!("{}/sync", from);
-
+	// Try to open the source http
 	let mut from = Client::new()
 		.get(&from)
 		.basic_auth(user, Some(pass))
 		.header(CONTENT_TYPE, TYPE)
 		.send()?
 		.error_for_status()?;
-
+	// Try to open the output file
 	let mut into = OpenOptions::new().write(true).create(true).truncate(true).open(into)?;
-
+	// Copy the data to the destination
 	copy(&mut from, &mut into)?;
-
+	// Everything OK
 	Ok(())
 }
 
 fn backup_file_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Result<(), Error> {
+	// Parse the specified username
 	let user = matches.value_of("user").unwrap();
-
+	// Parse the specified password
 	let pass = matches.value_of("pass").unwrap();
-
-	let into = format!("{}/sync", into);
-
+	// Try to open the source file
 	let from = OpenOptions::new().read(true).open(from)?;
-
+	// Set the correct output URL
+	let into = format!("{}/sync", into);
+	// Copy the data to the destination
 	Client::new()
 		.post(&into)
 		.basic_auth(user, Some(pass))
@@ -82,26 +74,27 @@ fn backup_file_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 		.body(from)
 		.send()?
 		.error_for_status()?;
-
+	// Everything OK
 	Ok(())
 }
 
 fn backup_http_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Result<(), Error> {
+	// Parse the specified username
 	let user = matches.value_of("user").unwrap();
-
+	// Parse the specified password
 	let pass = matches.value_of("pass").unwrap();
-
+	// Set the correct source URL
 	let from = format!("{}/sync", from);
-
+	// Set the correct output URL
 	let into = format!("{}/sync", into);
-
+	// Try to open the source file
 	let from = Client::new()
 		.get(&from)
 		.basic_auth(user, Some(pass))
 		.header(CONTENT_TYPE, TYPE)
 		.send()?
 		.error_for_status()?;
-
+	// Copy the data to the destination
 	Client::new()
 		.post(&into)
 		.basic_auth(user, Some(pass))
@@ -109,6 +102,6 @@ fn backup_http_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 		.body(Body::new(from))
 		.send()?
 		.error_for_status()?;
-
+	// Everything OK
 	Ok(())
 }

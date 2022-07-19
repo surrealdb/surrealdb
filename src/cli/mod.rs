@@ -385,10 +385,6 @@ pub fn init() {
 
 	let matches = setup.get_matches();
 
-	let verbose = matches.occurrences_of("verbose") as usize;
-
-	log::init(verbose);
-
 	let output = match matches.subcommand() {
 		Some(("start", m)) => start::init(m),
 		Some(("backup", m)) => backup::init(m),
