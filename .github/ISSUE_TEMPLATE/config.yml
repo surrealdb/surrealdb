@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/surrealdb/surrealdb/discussions
     about: Ask questions and discuss ideas here.
   - name: Security issues
-    url: https://surrealdb.com/security
+    url: https://surrealdb.com/legal/security
     about: Report security vulnerabilities here.
