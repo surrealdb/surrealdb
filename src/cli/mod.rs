@@ -131,15 +131,7 @@ pub fn init() {
 		.about(INFO)
 		.before_help(LOGO)
 		.disable_version_flag(true)
-		.arg_required_else_help(true)
-		.arg(
-			Arg::new("verbose")
-				.short('v')
-				.long("verbose")
-				.takes_value(false)
-				.multiple_occurrences(true)
-				.help("Specify the log output verbosity"),
-		);
+		.arg_required_else_help(true);
 
 	let setup = setup.subcommand(
 		Command::new("start")
@@ -234,6 +226,16 @@ pub fn init() {
 					.takes_value(true)
 					.forbid_empty_values(true)
 					.help("Path to the private key file for encrypted client connections"),
+			)
+			.arg(
+				Arg::new("log")
+					.short('l')
+					.long("log")
+					.takes_value(true)
+					.default_value("info")
+					.forbid_empty_values(true)
+					.help("Database path used for storing data")
+					.value_parser(["warn", "info", "debug", "trace", "full"]),
 			),
 	);
 
