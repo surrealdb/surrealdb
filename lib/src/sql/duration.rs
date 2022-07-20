@@ -223,6 +223,7 @@ fn duration_raw(i: &str) -> IResult<&str, Duration> {
 			"h" => time::Duration::new(v * 60 * 60, 0),
 			"d" => time::Duration::new(v * 60 * 60 * 24, 0),
 			"w" => time::Duration::new(v * 60 * 60 * 24 * 7, 0),
+			"y" => time::Duration::new(v * 60 * 60 * 24 * 365, 0),
 			_ => time::Duration::new(0, 0),
 		}),
 	))
@@ -234,7 +235,17 @@ fn part(i: &str) -> IResult<&str, u64> {
 }
 
 fn unit(i: &str) -> IResult<&str, &str> {
-	alt((tag("ns"), tag("µs"), tag("ms"), tag("s"), tag("m"), tag("h"), tag("d"), tag("w")))(i)
+	alt((
+		tag("ns"),
+		tag("µs"),
+		tag("ms"),
+		tag("s"),
+		tag("m"),
+		tag("h"),
+		tag("d"),
+		tag("w"),
+		tag("y"),
+	))(i)
 }
 
 #[cfg(test)]
