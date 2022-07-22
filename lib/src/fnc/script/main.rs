@@ -53,14 +53,10 @@ pub async fn run(
 			// The promise fulfilled successfully
 			Ok(v) => Ok(v),
 			// There was an error awaiting the promise
-			Err(e) => Err(Error::InvalidScript {
-				message: e.to_string(),
-			}),
+			Err(e) => Err(Error::from(e)),
 		},
 		// There was an error running the script
-		Err(e) => Err(Error::InvalidScript {
-			message: e.to_string(),
-		}),
+		Err(e) => Err(Error::from(e)),
 	};
 	// Return the result
 	res

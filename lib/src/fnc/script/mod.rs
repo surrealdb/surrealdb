@@ -3,6 +3,7 @@
 pub use main::run;
 
 mod classes;
+mod error;
 mod executor;
 mod from;
 mod into;
