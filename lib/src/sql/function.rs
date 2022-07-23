@@ -154,7 +154,7 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Function::Future(ref e) => write!(f, "fn::future -> {{ {} }}", e),
+			Function::Future(ref e) => write!(f, "<future> {{ {} }}", e),
 			Function::Cast(ref s, ref e) => write!(f, "<{}> {}", s, e),
 			Function::Script(ref s, ref e) => write!(
 				f,
@@ -173,21 +173,7 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((future, normal, script, cast))(i)
-}
-
-fn future(i: &str) -> IResult<&str, Function> {
-	let (i, _) = tag("fn::future")(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('-')(i)?;
-	let (i, _) = char('>')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = value(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
-	Ok((i, Function::Future(v)))
+	alt((normal, script, future, cast))(i)
 }
 
 fn normal(i: &str) -> IResult<&str, Function> {
@@ -216,6 +202,19 @@ fn script(i: &str) -> IResult<&str, Function> {
 	let (i, v) = func(i)?;
 	let (i, _) = char('}')(i)?;
 	Ok((i, Function::Script(v, a)))
+}
+
+fn future(i: &str) -> IResult<&str, Function> {
+	let (i, _) = char('<')(i)?;
+	let (i, _) = tag("future")(i)?;
+	let (i, _) = char('>')(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('{')(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, v) = value(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('}')(i)?;
+	Ok((i, Function::Future(v)))
 }
 
 fn cast(i: &str) -> IResult<&str, Function> {
@@ -503,11 +502,11 @@ mod tests {
 
 	#[test]
 	fn function_future_expression() {
-		let sql = "fn::future -> { 1.2345 + 5.4321 }";
+		let sql = "<future> { 1.2345 + 5.4321 }";
 		let res = function(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("fn::future -> { 1.2345 + 5.4321 }", format!("{}", out));
+		assert_eq!("<future> { 1.2345 + 5.4321 }", format!("{}", out));
 		assert_eq!(out, Function::Future(Value::from(Expression::parse("1.2345 + 5.4321"))));
 	}
 
