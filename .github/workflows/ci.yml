@@ -296,6 +296,11 @@ jobs:
           name: surreal-${{ github.ref_name }}.linux-arm64
           path: arm64
 
+      - name: Set file permissions
+        shell: bash
+        run: |
+          chmod +x amd64/surreal arm64/surreal
+
       - name: Configure DockerHub
         uses: docker/login-action@v2
         with:
