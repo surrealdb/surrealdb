@@ -1,5 +1,7 @@
 use super::classes;
 use super::executor::Executor;
+use super::modules::loader;
+use super::modules::resolver;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::value::Value;
@@ -24,6 +26,8 @@ pub async fn run(
 	let run = js::Runtime::new().unwrap();
 	// Create an execution context
 	let ctx = js::Context::full(&run).unwrap();
+	// Set the module resolver and loader
+	run.set_loader(resolver(), loader());
 	// Enable async code in the runtime
 	run.spawn_executor(&exe).detach();
 	// Create the main function structure
