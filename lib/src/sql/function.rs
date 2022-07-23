@@ -158,7 +158,7 @@ impl fmt::Display for Function {
 			Function::Cast(ref s, ref e) => write!(f, "<{}> {}", s, e),
 			Function::Script(ref s, ref e) => write!(
 				f,
-				"fn::script -> ({}) => {{{}}}",
+				"function({}) {{{}}}",
 				e.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "),
 				s,
 			),
@@ -187,16 +187,11 @@ fn normal(i: &str) -> IResult<&str, Function> {
 }
 
 fn script(i: &str) -> IResult<&str, Function> {
-	let (i, _) = tag("fn::script")(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('-')(i)?;
-	let (i, _) = char('>')(i)?;
+	let (i, _) = alt((tag("fn::script"), tag("fn"), tag("function")))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("(")(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
 	let (i, _) = tag(")")(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("=>")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('{')(i)?;
 	let (i, v) = func(i)?;
@@ -512,12 +507,12 @@ mod tests {
 
 	#[test]
 	fn function_script_expression() {
-		let sql = "fn::script -> () => { return this.tags.filter(t => { return t.length > 3; }); }";
+		let sql = "function() { return this.tags.filter(t => { return t.length > 3; }); }";
 		let res = function(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
-			"fn::script -> () => { return this.tags.filter(t => { return t.length > 3; }); }",
+			"function() { return this.tags.filter(t => { return t.length > 3; }); }",
 			format!("{}", out)
 		);
 		assert_eq!(
