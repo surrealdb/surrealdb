@@ -3,13 +3,16 @@ use super::executor::Executor;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::value::Value;
+use js::Function;
 use js::Promise;
+use js::Rest;
+use js::This;
 
 pub async fn run(
 	ctx: &Context<'_>,
+	doc: Option<&Value>,
 	src: &str,
 	arg: Vec<Value>,
-	doc: Option<&Value>,
 ) -> Result<Value, Error> {
 	// Check the context
 	if ctx.is_done() {
@@ -23,12 +26,8 @@ pub async fn run(
 	let ctx = js::Context::full(&run).unwrap();
 	// Enable async code in the runtime
 	run.spawn_executor(&exe).detach();
-	// Convert the arguments to JavaScript
-	let args = Value::from(arg);
-	// Convert the current document to JavaScript
-	let this = doc.map_or(&Value::None, |v| v);
 	// Create the main function structure
-	let src = format!("(async function() {{ {} }}).apply(self, args)", src);
+	let src = format!("export async function main() {{ {} }}", src);
 	// Attempt to execute the script
 	let res: Result<Promise<Value>, js::Error> = ctx.with(|ctx| {
 		// Get the context global object
@@ -39,12 +38,12 @@ pub async fn run(
 		global.init_def::<classes::Record>().unwrap();
 		// Register the Uuid type as a global class
 		global.init_def::<classes::Uuid>().unwrap();
-		// Register the document as a global object
-		global.prop("self", this).unwrap();
-		// Register the args as a global object
-		global.prop("args", args).unwrap();
-		// Attempt to execute the script
-		ctx.eval(src)
+		// Attempt to compile the script
+		let res = ctx.compile("script", src)?;
+		// Attempt to fetch the main export
+		let fnc = res.get::<_, Function>("main")?;
+		// Execute the main function
+		fnc.call((This(doc), Rest(arg)))
 	});
 	// Return the script result
 	let res = match res {

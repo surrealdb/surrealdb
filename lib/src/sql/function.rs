@@ -138,7 +138,7 @@ impl Function {
 					for v in x {
 						a.push(v.compute(ctx, opt, txn, doc).await?);
 					}
-					fnc::script::run(ctx, s, a, doc).await
+					fnc::script::run(ctx, doc, s, a).await
 				}
 				#[cfg(not(feature = "scripting"))]
 				{
