@@ -1,5 +1,4 @@
 use crate::err::Error;
-use crate::net::head;
 use bytes::Bytes;
 use std::str;
 use surrealdb::sql::Value;
@@ -20,7 +19,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(warp::body::bytes())
 		.and_then(handler);
 	// Specify route
-	opts.or(post).with(head::cors())
+	opts.or(post)
 }
 
 async fn handler(body: Bytes) -> Result<impl warp::Reply, warp::Rejection> {

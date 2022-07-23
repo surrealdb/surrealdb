@@ -1,6 +1,5 @@
 use crate::dbs::DB;
 use crate::err::Error;
-use crate::net::head;
 use crate::net::output;
 use crate::net::session;
 use bytes::Bytes;
@@ -30,7 +29,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(session::build())
 		.map(|ws: Ws, session: Session| ws.on_upgrade(move |ws| socket(ws, session)));
 	// Specify route
-	opts.or(post).or(sock).with(head::cors())
+	opts.or(post).or(sock)
 }
 
 async fn handler(

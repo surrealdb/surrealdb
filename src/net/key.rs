@@ -1,6 +1,5 @@
 use crate::dbs::DB;
 use crate::err::Error;
-use crate::net::head;
 use crate::net::output;
 use crate::net::session;
 use bytes::Bytes;
@@ -112,7 +111,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// ------------------------------
 
 	// Specify route
-	opts.or(all).or(one).with(head::cors())
+	opts.or(all).or(one)
 }
 
 // ------------------------------

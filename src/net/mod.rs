@@ -54,6 +54,8 @@ pub async fn init() -> Result<(), Error> {
 	let net = net.with(head::version());
 	// Specify a generic server header
 	let net = net.with(head::server());
+	// Set cors headers on all requests
+	let net = net.with(head::cors());
 	// Log all requests to the console
 	let net = net.with(log::write());
 
