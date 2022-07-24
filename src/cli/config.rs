@@ -8,7 +8,7 @@ pub struct Config {
 	pub bind: SocketAddr,
 	pub path: String,
 	pub user: String,
-	pub pass: String,
+	pub pass: Option<String>,
 	pub crt: Option<String>,
 	pub key: Option<String>,
 }
@@ -25,7 +25,7 @@ pub fn init(matches: &clap::ArgMatches) {
 	// Parse the root username for authentication
 	let user = matches.value_of("user").unwrap().to_owned();
 	// Parse the root password for authentication
-	let pass = matches.value_of("pass").unwrap().to_owned();
+	let pass = matches.value_of("pass").map(|v| v.to_owned());
 	// Parse any TLS server security options
 	let crt = matches.value_of("web-crt").map(|v| v.to_owned());
 	let key = matches.value_of("web-key").map(|v| v.to_owned());

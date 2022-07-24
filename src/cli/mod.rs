@@ -10,9 +10,6 @@ pub use config::CF;
 
 use crate::cnf::LOGO;
 use clap::{Arg, Command};
-use once_cell::sync::Lazy;
-use rand::distributions::Alphanumeric;
-use rand::Rng;
 
 pub const LOG: &str = "surrealdb::cli";
 
@@ -28,10 +25,6 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 
 ----------
 ";
-
-static PASS: Lazy<String> = Lazy::new(|| {
-	rand::thread_rng().sample_iter(&Alphanumeric).take(16).map(char::from).collect::<String>()
-});
 
 fn file_valid(v: &str) -> Result<(), String> {
 	if !v.is_empty() {
@@ -157,9 +150,8 @@ pub fn init() {
 				Arg::new("pass")
 					.short('p')
 					.long("pass")
-					.hide_default_value(true)
+					.takes_value(true)
 					.forbid_empty_values(true)
-					.default_value(PASS.as_str())
 					.help("The master password for the database"),
 			)
 			.arg(

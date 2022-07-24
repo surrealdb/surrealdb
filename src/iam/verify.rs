@@ -97,9 +97,11 @@ pub async fn basic(session: &mut Session, auth: String) -> Result<(), Error> {
 				return Err(Error::InvalidAuth);
 			}
 			// Check if this is root authentication
-			if user == opts.user && pass == opts.pass {
-				session.au = Arc::new(Auth::Kv);
-				return Ok(());
+			if let Some(root) = &opts.pass {
+				if user == opts.user && pass == root {
+					session.au = Arc::new(Auth::Kv);
+					return Ok(());
+				}
 			}
 			// Check if this is NS authentication
 			if let Some(ns) = &session.ns {
