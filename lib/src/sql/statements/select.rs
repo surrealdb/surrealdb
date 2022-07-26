@@ -80,6 +80,8 @@ impl SelectStatement {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::No)?;
 		// Create a new iterator

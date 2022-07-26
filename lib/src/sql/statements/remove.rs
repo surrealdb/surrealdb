@@ -98,6 +98,8 @@ impl RemoveNamespaceStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// No need for NS/DB
+		opt.needs(Level::Kv)?;
 		// Allowed to run?
 		opt.check(Level::Kv)?;
 		// Clone transaction
@@ -152,6 +154,8 @@ impl RemoveDatabaseStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected NS?
+		opt.needs(Level::Ns)?;
 		// Allowed to run?
 		opt.check(Level::Ns)?;
 		// Clone transaction
@@ -209,6 +213,8 @@ impl RemoveLoginStatement {
 	) -> Result<Value, Error> {
 		match self.base {
 			Base::Ns => {
+				// Selected NS?
+				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
@@ -222,6 +228,8 @@ impl RemoveLoginStatement {
 				Ok(Value::None)
 			}
 			Base::Db => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
@@ -284,6 +292,8 @@ impl RemoveTokenStatement {
 	) -> Result<Value, Error> {
 		match self.base {
 			Base::Ns => {
+				// Selected NS?
+				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
@@ -297,6 +307,8 @@ impl RemoveTokenStatement {
 				Ok(Value::None)
 			}
 			Base::Db => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
@@ -356,6 +368,8 @@ impl RemoveScopeStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
@@ -407,6 +421,8 @@ impl RemoveTableStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
@@ -462,6 +478,8 @@ impl RemoveEventStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
@@ -520,6 +538,8 @@ impl RemoveFieldStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
@@ -578,6 +598,8 @@ impl RemoveIndexStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction

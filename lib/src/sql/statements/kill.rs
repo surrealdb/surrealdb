@@ -27,6 +27,8 @@ impl KillStatement {
 	) -> Result<Value, Error> {
 		// Allowed to run?
 		opt.realtime()?;
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::No)?;
 		// Clone transaction

@@ -114,6 +114,8 @@ impl DefineNamespaceStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// No need for NS/DB
+		opt.needs(Level::Kv)?;
 		// Allowed to run?
 		opt.check(Level::Kv)?;
 		// Process the statement
@@ -161,6 +163,8 @@ impl DefineDatabaseStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected NS?
+		opt.needs(Level::Ns)?;
 		// Allowed to run?
 		opt.check(Level::Ns)?;
 		// Clone transaction
@@ -218,6 +222,8 @@ impl DefineLoginStatement {
 	) -> Result<Value, Error> {
 		match self.base {
 			Base::Ns => {
+				// Selected DB?
+				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
@@ -232,6 +238,8 @@ impl DefineLoginStatement {
 				Ok(Value::None)
 			}
 			Base::Db => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
@@ -343,6 +351,8 @@ impl DefineTokenStatement {
 	) -> Result<Value, Error> {
 		match self.base {
 			Base::Ns => {
+				// Selected DB?
+				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
@@ -357,6 +367,8 @@ impl DefineTokenStatement {
 				Ok(Value::None)
 			}
 			Base::Db => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
@@ -439,6 +451,8 @@ impl DefineScopeStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
@@ -559,6 +573,8 @@ impl DefineTableStatement {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
@@ -726,6 +742,8 @@ impl DefineEventStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
@@ -805,6 +823,8 @@ impl DefineFieldStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction
@@ -943,6 +963,8 @@ impl DefineIndexStatement {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
 		// Clone transaction

@@ -191,10 +191,15 @@ impl Options {
 		if !self.auth.check(level) {
 			return Err(Error::QueryPermissions);
 		}
-		if self.ns.is_none() {
+		Ok(())
+	}
+
+	// Check whether the authentication permissions are ok
+	pub fn needs(&self, level: Level) -> Result<(), Error> {
+		if self.ns.is_none() && matches!(level, Level::Ns | Level::Db) {
 			return Err(Error::NsEmpty);
 		}
-		if self.db.is_none() {
+		if self.db.is_none() && matches!(level, Level::Db) {
 			return Err(Error::DbEmpty);
 		}
 		Ok(())

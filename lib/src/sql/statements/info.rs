@@ -34,6 +34,8 @@ impl InfoStatement {
 		// Allowed to run?
 		match self {
 			InfoStatement::Kv => {
+				// No need for NS/DB
+				opt.needs(Level::Kv)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
 				// Clone transaction
@@ -52,6 +54,8 @@ impl InfoStatement {
 				Value::from(res).ok()
 			}
 			InfoStatement::Ns => {
+				// Selected NS?
+				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
 				// Clone transaction
@@ -82,6 +86,8 @@ impl InfoStatement {
 				Value::from(res).ok()
 			}
 			InfoStatement::Db => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
@@ -118,6 +124,8 @@ impl InfoStatement {
 				Value::from(res).ok()
 			}
 			InfoStatement::Sc(sc) => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction
@@ -136,6 +144,8 @@ impl InfoStatement {
 				Value::from(res).ok()
 			}
 			InfoStatement::Tb(tb) => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
 				// Clone transaction

@@ -139,6 +139,8 @@ impl<'a> Executor<'a> {
 			let res = match stm {
 				// Specify runtime options
 				Statement::Option(stm) => {
+					// Selected DB?
+					opt.needs(Level::Db)?;
 					// Allowed to run?
 					opt.check(Level::Db)?;
 					// Process the option
