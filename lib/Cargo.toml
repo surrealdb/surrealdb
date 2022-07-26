@@ -14,13 +14,13 @@ license = "Apache-2.0"
 
 [features]
 default = ["parallel", "kv-tikv", "kv-echodb", "kv-yokudb", "scripting", "http"]
-parallel = ["executor"]
-kv-tikv = ["tikv"]
-kv-echodb = ["echodb"]
-kv-indxdb = ["indxdb"]
+parallel = ["dep:executor"]
+kv-tikv = ["dep:tikv"]
+kv-echodb = ["dep:echodb"]
+kv-indxdb = ["dep:indxdb"]
 kv-yokudb = []
-scripting = ["js", "executor"]
-http = ["surf"]
+scripting = ["dep:js", "dep:executor"]
+http = ["dep:surf"]
 
 [dependencies]
 argon2 = "0.4.1"
@@ -53,7 +53,6 @@ serde = { version = "1.0.139", features = ["derive"] }
 sha-1 = "0.10.0"
 sha2 = "0.10.2"
 storekey = "0.3.0"
-surf = { version = "2.3.2", optional = true }
 thiserror = "1.0.31"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
 trice = "0.1.0"
@@ -62,3 +61,9 @@ uuid = { version = "1.1.2", features = ["serde", "v4"] }
 
 [dev-dependencies]
 tokio = { version = "1.20.0", features = ["macros"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+surf = { version = "2.3.2", optional = true, default-features = false, features = ["encoding", "wasm-client"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+surf = { version = "2.3.2", optional = true, default-features = false, features = ["encoding", "curl-client"] }
