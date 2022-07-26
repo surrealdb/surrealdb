@@ -19,7 +19,7 @@ pub struct Permissions {
 }
 
 impl Permissions {
-	fn none() -> Self {
+	pub fn none() -> Self {
 		Permissions {
 			select: Permission::None,
 			create: Permission::None,
@@ -28,7 +28,7 @@ impl Permissions {
 		}
 	}
 
-	fn full() -> Self {
+	pub fn full() -> Self {
 		Permissions {
 			select: Permission::Full,
 			create: Permission::Full,

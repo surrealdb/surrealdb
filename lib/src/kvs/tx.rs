@@ -7,6 +7,7 @@ use crate::key::thing;
 use crate::sql;
 use crate::sql::thing::Thing;
 use channel::Sender;
+use sql::permission::Permissions;
 use sql::statements::DefineDatabaseStatement;
 use sql::statements::DefineEventStatement;
 use sql::statements::DefineFieldStatement;
@@ -741,6 +742,7 @@ impl Transaction {
 		let key = crate::key::tb::new(ns, db, tb);
 		let val = DefineTableStatement {
 			name: tb.to_owned().into(),
+			permissions: Permissions::none(),
 			..DefineTableStatement::default()
 		};
 		let _ = self.put(key, &val).await;
