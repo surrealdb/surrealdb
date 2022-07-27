@@ -26,3 +26,4 @@ mod replace;
 mod retable;
 mod set;
 mod single;
+mod walk;

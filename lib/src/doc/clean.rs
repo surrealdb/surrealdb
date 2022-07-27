@@ -26,15 +26,15 @@ impl<'a> Document<'a> {
 				for k in self.current.each(&fd.name).into_iter() {
 					keys.push(k);
 				}
-				// Loop over every field in the document
-				for k in self.current.every().iter() {
-					if !keys.contains(k) {
-						match k {
-							k if k.is_id() => continue,
-							k if k.is_in() => continue,
-							k if k.is_out() => continue,
-							k => self.current.to_mut().del(ctx, opt, txn, k).await?,
-						}
+			}
+			// Loop over every field in the document
+			for fd in self.current.every().iter() {
+				if !keys.contains(fd) {
+					match fd {
+						fd if fd.is_id() => continue,
+						fd if fd.is_in() => continue,
+						fd if fd.is_out() => continue,
+						fd => self.current.to_mut().del(ctx, opt, txn, fd).await?,
 					}
 				}
 			}
