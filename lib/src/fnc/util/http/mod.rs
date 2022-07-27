@@ -4,13 +4,13 @@ use crate::sql::object::Object;
 use crate::sql::strand::Strand;
 use crate::sql::value::Value;
 
-pub async fn head(uri: Strand, opts: Object) -> Result<Value, Error> {
+pub async fn head(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Start a new HEAD request
 	let mut req = surf::head(uri.as_str());
 	// Add the User-Agent header
 	req = req.header("User-Agent", "SurrealDB");
 	// Add specified header values
-	for (k, v) in opts.iter() {
+	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
 	}
 	// Send the request and wait
@@ -22,13 +22,13 @@ pub async fn head(uri: Strand, opts: Object) -> Result<Value, Error> {
 	}
 }
 
-pub async fn get(uri: Strand, opts: Object) -> Result<Value, Error> {
+pub async fn get(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Start a new GET request
 	let mut req = surf::get(uri.as_str());
 	// Add the User-Agent header
 	req = req.header("User-Agent", "SurrealDB");
 	// Add specified header values
-	for (k, v) in opts.iter() {
+	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
 	}
 	// Send the request and wait
@@ -50,13 +50,13 @@ pub async fn get(uri: Strand, opts: Object) -> Result<Value, Error> {
 	}
 }
 
-pub async fn put(uri: Strand, body: Value, opts: Object) -> Result<Value, Error> {
+pub async fn put(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Start a new GET request
 	let mut req = surf::put(uri.as_str());
 	// Add the User-Agent header
 	req = req.header("User-Agent", "SurrealDB");
 	// Add specified header values
-	for (k, v) in opts.iter() {
+	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
 	}
 	// Submit the request body
@@ -80,13 +80,13 @@ pub async fn put(uri: Strand, body: Value, opts: Object) -> Result<Value, Error>
 	}
 }
 
-pub async fn post(uri: Strand, body: Value, opts: Object) -> Result<Value, Error> {
+pub async fn post(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Start a new GET request
 	let mut req = surf::post(uri.as_str());
 	// Add the User-Agent header
 	req = req.header("User-Agent", "SurrealDB");
 	// Add specified header values
-	for (k, v) in opts.iter() {
+	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
 	}
 	// Submit the request body
@@ -110,13 +110,13 @@ pub async fn post(uri: Strand, body: Value, opts: Object) -> Result<Value, Error
 	}
 }
 
-pub async fn patch(uri: Strand, body: Value, opts: Object) -> Result<Value, Error> {
+pub async fn patch(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Start a new GET request
 	let mut req = surf::patch(uri.as_str());
 	// Add the User-Agent header
 	req = req.header("User-Agent", "SurrealDB");
 	// Add specified header values
-	for (k, v) in opts.iter() {
+	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
 	}
 	// Submit the request body
@@ -140,13 +140,13 @@ pub async fn patch(uri: Strand, body: Value, opts: Object) -> Result<Value, Erro
 	}
 }
 
-pub async fn delete(uri: Strand, opts: Object) -> Result<Value, Error> {
+pub async fn delete(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Start a new GET request
 	let mut req = surf::delete(uri.as_str());
 	// Add the User-Agent header
 	req = req.header("User-Agent", "SurrealDB");
 	// Add specified header values
-	for (k, v) in opts.iter() {
+	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
 	}
 	// Send the request and wait

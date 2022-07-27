@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::sql::object::Object;
 use crate::sql::value::Value;
 
 #[cfg(not(feature = "http"))]
@@ -50,7 +49,7 @@ pub async fn head(_: &Context<'_>, mut args: Vec<Value>) -> Result<Value, Error>
 			}),
 		},
 		1 => match args.remove(0) {
-			Value::Strand(uri) => crate::fnc::util::http::head(uri, Object::default()).await,
+			Value::Strand(uri) => crate::fnc::util::http::head(uri, None).await,
 			_ => Err(Error::InvalidArguments {
 				name: String::from("http::head"),
 				message: String::from("The first argument should be a string."),
@@ -80,7 +79,7 @@ pub async fn get(_: &Context<'_>, mut args: Vec<Value>) -> Result<Value, Error> 
 			}),
 		},
 		1 => match args.remove(0) {
-			Value::Strand(uri) => crate::fnc::util::http::get(uri, Object::default()).await,
+			Value::Strand(uri) => crate::fnc::util::http::get(uri, None).await,
 			_ => Err(Error::InvalidArguments {
 				name: String::from("http::get"),
 				message: String::from("The first argument should be a string."),
@@ -110,14 +109,14 @@ pub async fn put(_: &Context<'_>, mut args: Vec<Value>) -> Result<Value, Error> 
 			}),
 		},
 		2 => match (args.remove(0), args.remove(0)) {
-			(Value::Strand(uri), val) => crate::fnc::util::http::put(uri, val, Object::default()).await,
+			(Value::Strand(uri), val) => crate::fnc::util::http::put(uri, val, None).await,
 			_ => Err(Error::InvalidArguments {
 				name: String::from("http::put"),
 				message: String::from("The first argument should be a string."),
 			}),
 		},
 		1 => match args.remove(0) {
-			Value::Strand(uri) => crate::fnc::util::http::put(uri, Value::Null, Object::default()).await,
+			Value::Strand(uri) => crate::fnc::util::http::put(uri, Value::Null, None).await,
 			_ => Err(Error::InvalidArguments {
 				name: String::from("http::put"),
 				message: String::from("The first argument should be a string."),
@@ -147,14 +146,14 @@ pub async fn post(_: &Context<'_>, mut args: Vec<Value>) -> Result<Value, Error>
 			}),
 		},
 		2 => match (args.remove(0), args.remove(0)) {
-			(Value::Strand(uri), val) => crate::fnc::util::http::post(uri, val, Object::default()).await,
+			(Value::Strand(uri), val) => crate::fnc::util::http::post(uri, val, None).await,
 			_ => Err(Error::InvalidArguments {
 				name: String::from("http::post"),
 				message: String::from("The first argument should be a string."),
 			}),
 		},
 		1 => match args.remove(0) {
-			Value::Strand(uri) => crate::fnc::util::http::post(uri, Value::Null, Object::default()).await,
+			Value::Strand(uri) => crate::fnc::util::http::post(uri, Value::Null, None).await,
 			_ => Err(Error::InvalidArguments {
 				name: String::from("http::post"),
 				message: String::from("The first argument should be a string."),
@@ -184,14 +183,14 @@ pub async fn patch(_: &Context<'_>, mut args: Vec<Value>) -> Result<Value, Error
 			}),
 		},
 		2 => match (args.remove(0), args.remove(0)) {
-			(Value::Strand(uri), val) => crate::fnc::util::http::patch(uri, val, Object::default()).await,
+			(Value::Strand(uri), val) => crate::fnc::util::http::patch(uri, val, None).await,
 			_ => Err(Error::InvalidArguments {
 				name: String::from("http::patch"),
 				message: String::from("The first argument should be a string."),
 			}),
 		},
 		1 => match args.remove(0) {
-			Value::Strand(uri) => crate::fnc::util::http::patch(uri, Value::Null, Object::default()).await,
+			Value::Strand(uri) => crate::fnc::util::http::patch(uri, Value::Null, None).await,
 			_ => Err(Error::InvalidArguments {
 				name: String::from("http::patch"),
 				message: String::from("The first argument should be a string."),
@@ -221,7 +220,7 @@ pub async fn delete(_: &Context<'_>, mut args: Vec<Value>) -> Result<Value, Erro
 			}),
 		},
 		1 => match args.remove(0) {
-			Value::Strand(uri) => crate::fnc::util::http::delete(uri, Object::default()).await,
+			Value::Strand(uri) => crate::fnc::util::http::delete(uri, None).await,
 			_ => Err(Error::InvalidArguments {
 				name: String::from("http::delete"),
 				message: String::from("The first argument should be a string."),

@@ -1,3 +1,9 @@
+macro_rules! get_cfg {
+	($i:ident : $($s:expr),+) => (
+		let $i = || { $( if cfg!($i=$s) { return $s; } );+ "unknown"};
+	)
+}
+
 #[js::bind(module, public)]
 #[quickjs(bare)]
 #[allow(non_upper_case_globals)]
@@ -16,10 +22,10 @@ pub mod package {
 	pub fn release() -> String {
 		get_cfg!(target_os: "windows", "macos", "ios", "linux", "android", "freebsd", "openbsd", "netbsd");
 		get_cfg!(target_arch: "x86", "x86_64", "mips", "powerpc", "powerpc64", "arm", "aarch64");
-		format!("{} for {} on {}", crate::cnf::VERSION, target_os(), target_arch())
+		format!("{} for {} on {}", env!("CARGO_PKG_VERSION"), target_os(), target_arch())
 	}
 	// Get the current version
 	pub fn version() -> &'static str {
-		crate::cnf::VERSION
+		env!("CARGO_PKG_VERSION")
 	}
 }

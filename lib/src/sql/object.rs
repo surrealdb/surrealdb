@@ -40,6 +40,12 @@ impl From<HashMap<String, Value>> for Object {
 	}
 }
 
+impl From<Option<Object>> for Object {
+	fn from(v: Option<Object>) -> Self {
+		v.unwrap_or_default()
+	}
+}
+
 impl From<Operation> for Object {
 	fn from(v: Operation) -> Self {
 		Object(map! {
