@@ -1,3 +1,4 @@
+use crate::cli::CF;
 use crate::cnf::SERVER_NAME;
 use crate::dbs::DB;
 use crate::err::Error;
@@ -76,6 +77,8 @@ pub async fn signin(vars: Object) -> Result<String, Error> {
 pub async fn sc(ns: String, db: String, sc: String, vars: Object) -> Result<String, Error> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
+	// Get local copy of options
+	let opt = CF.get().unwrap();
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(false, false).await?;
 	// Check if the supplied NS Login exists
@@ -89,7 +92,7 @@ pub async fn sc(ns: String, db: String, sc: String, vars: Object) -> Result<Stri
 					// Setup the query session
 					let sess = Session::for_db(&ns, &db);
 					// Compute the value with the params
-					match kvs.compute(val, &sess, vars).await {
+					match kvs.compute(val, &sess, vars, opt.strict).await {
 						// The signin value succeeded
 						Ok(val) => match val.rid() {
 							// There is a record returned

@@ -1,3 +1,4 @@
+use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::output;
@@ -30,10 +31,12 @@ async fn handler(
 		true => {
 			// Get the datastore reference
 			let db = DB.get().unwrap();
+			// Get local copy of options
+			let opt = CF.get().unwrap();
 			// Convert the body to a byte slice
 			let sql = std::str::from_utf8(&sql).unwrap();
 			// Execute the sql query in the database
-			match db.execute(sql, &session, None).await {
+			match db.execute(sql, &session, None, opt.strict).await {
 				Ok(res) => match output.as_ref() {
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),

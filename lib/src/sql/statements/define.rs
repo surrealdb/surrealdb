@@ -173,7 +173,7 @@ impl DefineDatabaseStatement {
 		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::db::new(opt.ns(), &self.name);
-		run.add_ns(opt.ns()).await?;
+		run.add_ns(opt.ns(), opt.strict).await?;
 		run.set(key, self).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -232,7 +232,7 @@ impl DefineLoginStatement {
 				let mut run = run.lock().await;
 				// Process the statement
 				let key = crate::key::nl::new(opt.ns(), &self.name);
-				run.add_ns(opt.ns()).await?;
+				run.add_ns(opt.ns(), opt.strict).await?;
 				run.set(key, self).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -248,8 +248,8 @@ impl DefineLoginStatement {
 				let mut run = run.lock().await;
 				// Process the statement
 				let key = crate::key::dl::new(opt.ns(), opt.db(), &self.name);
-				run.add_ns(opt.ns()).await?;
-				run.add_db(opt.ns(), opt.db()).await?;
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 				run.set(key, self).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -361,7 +361,7 @@ impl DefineTokenStatement {
 				let mut run = run.lock().await;
 				// Process the statement
 				let key = crate::key::nt::new(opt.ns(), &self.name);
-				run.add_ns(opt.ns()).await?;
+				run.add_ns(opt.ns(), opt.strict).await?;
 				run.set(key, self).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -377,8 +377,8 @@ impl DefineTokenStatement {
 				let mut run = run.lock().await;
 				// Process the statement
 				let key = crate::key::dt::new(opt.ns(), opt.db(), &self.name);
-				run.add_ns(opt.ns()).await?;
-				run.add_db(opt.ns(), opt.db()).await?;
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 				run.set(key, self).await?;
 				// Ok all good
 				Ok(Value::None)
@@ -461,8 +461,8 @@ impl DefineScopeStatement {
 		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::sc::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns()).await?;
-		run.add_db(opt.ns(), opt.db()).await?;
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.set(key, self).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -583,8 +583,8 @@ impl DefineTableStatement {
 		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::tb::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns()).await?;
-		run.add_db(opt.ns(), opt.db()).await?;
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.set(key, self).await?;
 		// Check if table is a view
 		if let Some(view) = &self.view {
@@ -752,9 +752,9 @@ impl DefineEventStatement {
 		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.add_ns(opt.ns()).await?;
-		run.add_db(opt.ns(), opt.db()).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what).await?;
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -833,9 +833,9 @@ impl DefineFieldStatement {
 		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name.to_string());
-		run.add_ns(opt.ns()).await?;
-		run.add_db(opt.ns(), opt.db()).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what).await?;
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -973,9 +973,9 @@ impl DefineIndexStatement {
 		let mut run = run.lock().await;
 		// Process the statement
 		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
-		run.add_ns(opt.ns()).await?;
-		run.add_db(opt.ns(), opt.db()).await?;
-		run.add_tb(opt.ns(), opt.db(), &self.what).await?;
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
 		// Remove the index data
 		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);

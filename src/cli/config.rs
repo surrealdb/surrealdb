@@ -5,6 +5,7 @@ pub static CF: OnceCell<Config> = OnceCell::new();
 
 #[derive(Clone, Debug)]
 pub struct Config {
+	pub strict: bool,
 	pub bind: SocketAddr,
 	pub path: String,
 	pub user: String,
@@ -29,8 +30,11 @@ pub fn init(matches: &clap::ArgMatches) {
 	// Parse any TLS server security options
 	let crt = matches.value_of("web-crt").map(|v| v.to_owned());
 	let key = matches.value_of("web-key").map(|v| v.to_owned());
+	// Check if database strict mode is enabled
+	let strict = matches.is_present("strict");
 	// Store the new config object
 	let _ = CF.set(Config {
+		strict,
 		bind,
 		path,
 		user,

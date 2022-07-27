@@ -220,6 +220,14 @@ pub fn init() {
 					.help("Path to the private key file for encrypted client connections"),
 			)
 			.arg(
+				Arg::new("strict")
+					.short('s')
+					.long("strict")
+					.required(false)
+					.takes_value(false)
+					.help("Whether strict mode is enabled on this database instance"),
+			)
+			.arg(
 				Arg::new("log")
 					.short('l')
 					.long("log")

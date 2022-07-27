@@ -1,3 +1,4 @@
+use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::output;
@@ -39,10 +40,12 @@ async fn handler(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get a database reference
 	let db = DB.get().unwrap();
+	// Get local copy of options
+	let opt = CF.get().unwrap();
 	// Convert the received sql query
 	let sql = std::str::from_utf8(&sql).unwrap();
 	// Execute the received sql query
-	match db.execute(sql, &session, None).await {
+	match db.execute(sql, &session, None, opt.strict).await {
 		// Convert the response to JSON
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),
@@ -65,8 +68,10 @@ async fn socket(ws: WebSocket, session: Session) {
 			if let Ok(sql) = msg.to_str() {
 				// Get a database reference
 				let db = DB.get().unwrap();
+				// Get local copy of options
+				let opt = CF.get().unwrap();
 				// Execute the received sql query
-				let _ = match db.execute(sql, &session, None).await {
+				let _ = match db.execute(sql, &session, None, opt.strict).await {
 					// Convert the response to JSON
 					Ok(v) => match serde_json::to_string(&v) {
 						// Send the JSON response to the client

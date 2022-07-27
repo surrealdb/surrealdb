@@ -50,21 +50,31 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<DefineTableStatement, Error> {
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
+		let rid = self.id.as_ref().unwrap();
 		// Get the table definition
-		let tb = txn.clone().lock().await.get_tb(opt.ns(), opt.db(), &id.tb).await;
+		let tb = run.get_tb(opt.ns(), opt.db(), &rid.tb).await;
 		// Return the table or attempt to define it
 		match tb {
+			// The table doesn't exist
+			Err(Error::TbNotFound) => match opt.auth.check(Level::Db) {
+				// We can create the table automatically
+				true => {
+					run.add_ns(opt.ns(), opt.strict).await?;
+					run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+					run.add_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
+				}
+				// We can't create the table so error
+				false => Err(Error::TbNotFound),
+			},
+			// There was an error
+			Err(err) => Err(err),
 			// The table exists
 			Ok(tb) => Ok(tb),
-			// The table doesn't exist
-			Err(e) => match opt.auth.check(Level::Db) {
-				// We can create the table automatically
-				true => txn.clone().lock().await.add_tb(opt.ns(), opt.db(), &id.tb).await,
-				// We can't create the table so error
-				false => Err(e),
-			},
 		}
 	}
 	// Get the foreign tables for this document

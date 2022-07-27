@@ -35,6 +35,8 @@ pub struct Options {
 	pub events: bool,
 	// Should we process table queries?
 	pub tables: bool,
+	// Should we error if tables don't exist?
+	pub strict: bool,
 	// Should we process function futures?
 	pub futures: bool,
 }
@@ -59,6 +61,7 @@ impl Options {
 			fields: true,
 			events: true,
 			tables: true,
+			strict: false,
 			futures: false,
 			auth: Arc::new(auth),
 		}
@@ -169,6 +172,17 @@ impl Options {
 	}
 
 	// Create a new Options object for a subquery
+	pub fn strict(&self, v: bool) -> Options {
+		Options {
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
+			strict: v,
+			..*self
+		}
+	}
+
+	// Create a new Options object for a subquery
 	pub fn futures(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -179,6 +193,7 @@ impl Options {
 		}
 	}
 
+	// Check whether realtime queries are supported
 	pub fn realtime(&self) -> Result<(), Error> {
 		if !self.live {
 			return Err(Error::RealtimeDisabled);
@@ -194,7 +209,7 @@ impl Options {
 		Ok(())
 	}
 
-	// Check whether the authentication permissions are ok
+	// Check whether the necessary NS / DB options have been set
 	pub fn needs(&self, level: Level) -> Result<(), Error> {
 		if self.ns.is_none() && matches!(level, Level::Ns | Level::Db) {
 			return Err(Error::NsEmpty);

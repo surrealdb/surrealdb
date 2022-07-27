@@ -1,3 +1,4 @@
+use crate::cli::CF;
 use crate::cnf::MAX_CONCURRENT_CALLS;
 use crate::dbs::DB;
 use crate::err::Error;
@@ -232,10 +233,12 @@ impl Rpc {
 	async fn info(&self) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $auth";
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, None).await?;
+		let mut res = kvs.execute(sql, &self.session, None, opt.strict).await?;
 		// Extract the first value from the result
 		let res = res.remove(0).result?.first();
 		// Return the result to the client
@@ -268,6 +271,8 @@ impl Rpc {
 	async fn kill(&self, id: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "KILL $id";
 		// Specify the query paramaters
@@ -276,7 +281,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		// Return the result to the client
@@ -286,6 +291,8 @@ impl Rpc {
 	async fn live(&self, tb: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "LIVE SELECT * FROM $tb";
 		// Specify the query paramaters
@@ -294,7 +301,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		// Return the result to the client
@@ -308,10 +315,12 @@ impl Rpc {
 	async fn query(&self, sql: Strand) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the query paramaters
 		let var = Some(self.vars.clone());
 		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var).await?;
+		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.into_iter().collect::<Vec<Value>>().into();
 		// Return the result to the client
@@ -321,10 +330,12 @@ impl Rpc {
 	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the query paramaters
 		let var = Some(mrg! { vars.0, &self.vars });
 		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var).await?;
+		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.into_iter().collect::<Vec<Value>>().into();
 		// Return the result to the client
@@ -338,6 +349,8 @@ impl Rpc {
 	async fn select(&self, what: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $what";
 		// Specify the query paramaters
@@ -346,7 +359,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		// Return the result to the client
@@ -360,6 +373,8 @@ impl Rpc {
 	async fn create(&self, what: Value, data: impl Into<Option<Value>>) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "CREATE $what CONTENT $data RETURN AFTER";
 		// Specify the query paramaters
@@ -369,7 +384,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		// Return the result to the client
@@ -383,6 +398,8 @@ impl Rpc {
 	async fn update(&self, what: Value, data: impl Into<Option<Value>>) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what CONTENT $data RETURN AFTER";
 		// Specify the query paramaters
@@ -392,7 +409,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		// Return the result to the client
@@ -406,6 +423,8 @@ impl Rpc {
 	async fn change(&self, what: Value, data: impl Into<Option<Value>>) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what MERGE $data RETURN AFTER";
 		// Specify the query paramaters
@@ -415,7 +434,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		// Return the result to the client
@@ -429,6 +448,8 @@ impl Rpc {
 	async fn modify(&self, what: Value, data: impl Into<Option<Value>>) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what PATCH $data RETURN DIFF";
 		// Specify the query paramaters
@@ -438,7 +459,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		// Return the result to the client
@@ -452,6 +473,8 @@ impl Rpc {
 	async fn delete(&self, what: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "DELETE $what";
 		// Specify the query paramaters
@@ -460,7 +483,7 @@ impl Rpc {
 			=> &self.vars
 		});
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var).await?;
+		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		// Return the result to the client

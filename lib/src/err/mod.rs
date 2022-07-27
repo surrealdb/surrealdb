@@ -33,6 +33,10 @@ pub enum Error {
 	#[error("Value being checked was not correct")]
 	TxConditionNotMet,
 
+	/// The key being inserted in the transaction already exists
+	#[error("The key being inserted already exists")]
+	TxKeyAlreadyExists,
+
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
 	NsEmpty,
@@ -259,21 +263,30 @@ impl From<Error> for String {
 #[cfg(feature = "kv-echodb")]
 impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
-		Error::Tx(e.to_string())
+		match e {
+			echodb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
+			_ => Error::Tx(e.to_string()),
+		}
 	}
 }
 
 #[cfg(feature = "kv-indxdb")]
 impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
-		Error::Tx(e.to_string())
+		match e {
+			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
+			_ => Error::Tx(e.to_string()),
+		}
 	}
 }
 
 #[cfg(feature = "kv-tikv")]
 impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
-		Error::Tx(e.to_string())
+		match e {
+			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
+			_ => Error::Tx(e.to_string()),
+		}
 	}
 }
 

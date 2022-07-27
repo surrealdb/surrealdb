@@ -159,6 +159,7 @@ impl Datastore {
 		txt: &str,
 		sess: &Session,
 		vars: Variables,
+		strict: bool,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
 		let mut opt = Options::default();
@@ -179,6 +180,8 @@ impl Datastore {
 		// Set current NS and DB
 		opt.ns = sess.ns();
 		opt.db = sess.db();
+		// Set strict config
+		opt.strict = strict;
 		// Process all statements
 		exe.execute(ctx, opt, ast).await
 	}
@@ -189,6 +192,7 @@ impl Datastore {
 		ast: Query,
 		sess: &Session,
 		vars: Variables,
+		strict: bool,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
 		let mut opt = Options::default();
@@ -207,6 +211,8 @@ impl Datastore {
 		// Set current NS and DB
 		opt.ns = sess.ns();
 		opt.db = sess.db();
+		// Set strict config
+		opt.strict = strict;
 		// Process all statements
 		exe.execute(ctx, opt, ast).await
 	}
@@ -217,6 +223,7 @@ impl Datastore {
 		val: Value,
 		sess: &Session,
 		vars: Variables,
+		strict: bool,
 	) -> Result<Value, Error> {
 		// Start a new transaction
 		let txn = self.transaction(val.writeable(), false).await?;
@@ -235,6 +242,8 @@ impl Datastore {
 		// Set current NS and DB
 		opt.ns = sess.ns();
 		opt.db = sess.db();
+		// Set strict config
+		opt.strict = strict;
 		// Compute the value
 		let res = val.compute(&ctx, &opt, &txn, None).await?;
 		// Store any data

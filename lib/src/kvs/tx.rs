@@ -714,39 +714,76 @@ impl Transaction {
 		let val = self.get(key).await?.ok_or(Error::TbNotFound)?;
 		Ok(val.into())
 	}
-	/// Add a namespace with a default configuration.
-	pub async fn add_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
-		let key = crate::key::ns::new(ns);
-		let val = DefineNamespaceStatement {
-			name: ns.to_owned().into(),
-		};
-		let _ = self.put(key, &val).await;
-		Ok(val)
+	/// Add a namespace with a default configuration, only if we are in dynamic mode.
+	pub async fn add_ns(
+		&mut self,
+		ns: &str,
+		strict: bool,
+	) -> Result<DefineNamespaceStatement, Error> {
+		match self.get_ns(ns).await {
+			Err(Error::NsNotFound) => match strict {
+				false => {
+					let key = crate::key::ns::new(ns);
+					let val = DefineNamespaceStatement {
+						name: ns.to_owned().into(),
+					};
+					self.put(key, &val).await?;
+					Ok(val)
+				}
+				true => Err(Error::NsNotFound),
+			},
+			Err(e) => Err(e),
+			Ok(v) => Ok(v),
+		}
 	}
-	/// Add a database with a default configuration.
-	pub async fn add_db(&mut self, ns: &str, db: &str) -> Result<DefineDatabaseStatement, Error> {
-		let key = crate::key::db::new(ns, db);
-		let val = DefineDatabaseStatement {
-			name: db.to_owned().into(),
-		};
-		let _ = self.put(key, &val).await;
-		Ok(val)
+	/// Add a database with a default configuration, only if we are in dynamic mode.
+	pub async fn add_db(
+		&mut self,
+		ns: &str,
+		db: &str,
+		strict: bool,
+	) -> Result<DefineDatabaseStatement, Error> {
+		match self.get_db(ns, db).await {
+			Err(Error::DbNotFound) => match strict {
+				false => {
+					let key = crate::key::db::new(ns, db);
+					let val = DefineDatabaseStatement {
+						name: db.to_owned().into(),
+					};
+					self.put(key, &val).await?;
+					Ok(val)
+				}
+				true => Err(Error::DbNotFound),
+			},
+			Err(e) => Err(e),
+			Ok(v) => Ok(v),
+		}
 	}
-	/// Add a table with a default configuration.
+	/// Add a table with a default configuration, only if we are in dynamic mode.
 	pub async fn add_tb(
 		&mut self,
 		ns: &str,
 		db: &str,
 		tb: &str,
+		strict: bool,
 	) -> Result<DefineTableStatement, Error> {
-		let key = crate::key::tb::new(ns, db, tb);
-		let val = DefineTableStatement {
-			name: tb.to_owned().into(),
-			permissions: Permissions::none(),
-			..DefineTableStatement::default()
-		};
-		let _ = self.put(key, &val).await;
-		Ok(val)
+		match self.get_tb(ns, db, tb).await {
+			Err(Error::TbNotFound) => match strict {
+				false => {
+					let key = crate::key::tb::new(ns, db, tb);
+					let val = DefineTableStatement {
+						name: tb.to_owned().into(),
+						permissions: Permissions::none(),
+						..DefineTableStatement::default()
+					};
+					self.put(key, &val).await?;
+					Ok(val)
+				}
+				true => Err(Error::TbNotFound),
+			},
+			Err(e) => Err(e),
+			Ok(v) => Ok(v),
+		}
 	}
 	/// Writes the full database contents as binary SQL.
 	pub async fn export(&mut self, ns: &str, db: &str, chn: Sender<Vec<u8>>) -> Result<(), Error> {
