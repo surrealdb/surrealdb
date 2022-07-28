@@ -28,7 +28,7 @@ impl<'a> Document<'a> {
 						let v = x.2.compute(ctx, opt, txn, Some(&self.current)).await?;
 						match x.1 {
 							Operator::Equal => match v {
-								Value::Void => {
+								Value::None => {
 									self.current.to_mut().del(ctx, opt, txn, &x.0).await?
 								}
 								_ => self.current.to_mut().set(ctx, opt, txn, &x.0, v).await?,
@@ -48,7 +48,7 @@ impl<'a> Document<'a> {
 						let v = x.2.compute(ctx, opt, txn, Some(&self.current)).await?;
 						match x.1 {
 							Operator::Equal => match v {
-								Value::Void => {
+								Value::None => {
 									self.current.to_mut().del(ctx, opt, txn, &x.0).await?
 								}
 								_ => self.current.to_mut().set(ctx, opt, txn, &x.0, v).await?,

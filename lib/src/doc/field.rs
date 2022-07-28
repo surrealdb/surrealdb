@@ -81,7 +81,6 @@ impl<'a> Document<'a> {
 				// Set the value of the field
 				match val {
 					Value::None => self.current.to_mut().del(ctx, opt, txn, &k).await?,
-					Value::Void => self.current.to_mut().del(ctx, opt, txn, &k).await?,
 					_ => self.current.to_mut().set(ctx, opt, txn, &k, val).await?,
 				};
 			}

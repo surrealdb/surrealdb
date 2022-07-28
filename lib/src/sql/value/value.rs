@@ -96,7 +96,6 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 #[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Store)]
 pub enum Value {
 	None,
-	Void,
 	Null,
 	False,
 	True,
@@ -465,7 +464,6 @@ impl Value {
 	pub fn output(self) -> Option<Value> {
 		match self {
 			Value::None => None,
-			Value::Void => None,
 			_ => Some(self),
 		}
 	}
@@ -475,11 +473,7 @@ impl Value {
 	// -----------------------------------
 
 	pub fn is_none(&self) -> bool {
-		matches!(self, Value::None | Value::Void | Value::Null)
-	}
-
-	pub fn is_void(&self) -> bool {
-		matches!(self, Value::None | Value::Void)
+		matches!(self, Value::None | Value::Null)
 	}
 
 	pub fn is_null(&self) -> bool {
@@ -874,7 +868,6 @@ impl Value {
 		match self {
 			Value::None => other.is_none(),
 			Value::Null => other.is_null(),
-			Value::Void => other.is_void(),
 			Value::True => other.is_true(),
 			Value::False => other.is_false(),
 			Value::Thing(v) => match other {
@@ -1059,7 +1052,6 @@ impl fmt::Display for Value {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Value::None => write!(f, "NONE"),
-			Value::Void => write!(f, "VOID"),
 			Value::Null => write!(f, "NULL"),
 			Value::True => write!(f, "true"),
 			Value::False => write!(f, "false"),
@@ -1108,7 +1100,6 @@ impl Value {
 	) -> Result<Value, Error> {
 		match self {
 			Value::None => Ok(Value::None),
-			Value::Void => Ok(Value::Void),
 			Value::Null => Ok(Value::Null),
 			Value::True => Ok(Value::True),
 			Value::False => Ok(Value::False),
@@ -1132,33 +1123,31 @@ impl Serialize for Value {
 		if is_internal_serialization() {
 			match self {
 				Value::None => s.serialize_unit_variant("Value", 0, "None"),
-				Value::Void => s.serialize_unit_variant("Value", 1, "Void"),
-				Value::Null => s.serialize_unit_variant("Value", 2, "Null"),
-				Value::False => s.serialize_unit_variant("Value", 3, "False"),
-				Value::True => s.serialize_unit_variant("Value", 4, "True"),
-				Value::Number(v) => s.serialize_newtype_variant("Value", 5, "Number", v),
-				Value::Strand(v) => s.serialize_newtype_variant("Value", 6, "Strand", v),
-				Value::Duration(v) => s.serialize_newtype_variant("Value", 7, "Duration", v),
-				Value::Datetime(v) => s.serialize_newtype_variant("Value", 8, "Datetime", v),
-				Value::Uuid(v) => s.serialize_newtype_variant("Value", 9, "Uuid", v),
-				Value::Array(v) => s.serialize_newtype_variant("Value", 10, "Array", v),
-				Value::Object(v) => s.serialize_newtype_variant("Value", 11, "Object", v),
-				Value::Geometry(v) => s.serialize_newtype_variant("Value", 12, "Geometry", v),
-				Value::Param(v) => s.serialize_newtype_variant("Value", 13, "Param", v),
-				Value::Idiom(v) => s.serialize_newtype_variant("Value", 14, "Idiom", v),
-				Value::Table(v) => s.serialize_newtype_variant("Value", 15, "Table", v),
-				Value::Thing(v) => s.serialize_newtype_variant("Value", 16, "Thing", v),
-				Value::Model(v) => s.serialize_newtype_variant("Value", 17, "Model", v),
-				Value::Regex(v) => s.serialize_newtype_variant("Value", 18, "Regex", v),
-				Value::Edges(v) => s.serialize_newtype_variant("Value", 19, "Edges", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 20, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 21, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 22, "Expression", v),
+				Value::Null => s.serialize_unit_variant("Value", 1, "Null"),
+				Value::False => s.serialize_unit_variant("Value", 2, "False"),
+				Value::True => s.serialize_unit_variant("Value", 3, "True"),
+				Value::Number(v) => s.serialize_newtype_variant("Value", 4, "Number", v),
+				Value::Strand(v) => s.serialize_newtype_variant("Value", 5, "Strand", v),
+				Value::Duration(v) => s.serialize_newtype_variant("Value", 6, "Duration", v),
+				Value::Datetime(v) => s.serialize_newtype_variant("Value", 7, "Datetime", v),
+				Value::Uuid(v) => s.serialize_newtype_variant("Value", 8, "Uuid", v),
+				Value::Array(v) => s.serialize_newtype_variant("Value", 9, "Array", v),
+				Value::Object(v) => s.serialize_newtype_variant("Value", 10, "Object", v),
+				Value::Geometry(v) => s.serialize_newtype_variant("Value", 11, "Geometry", v),
+				Value::Param(v) => s.serialize_newtype_variant("Value", 12, "Param", v),
+				Value::Idiom(v) => s.serialize_newtype_variant("Value", 13, "Idiom", v),
+				Value::Table(v) => s.serialize_newtype_variant("Value", 14, "Table", v),
+				Value::Thing(v) => s.serialize_newtype_variant("Value", 15, "Thing", v),
+				Value::Model(v) => s.serialize_newtype_variant("Value", 16, "Model", v),
+				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
+				Value::Edges(v) => s.serialize_newtype_variant("Value", 18, "Edges", v),
+				Value::Function(v) => s.serialize_newtype_variant("Value", 19, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant("Value", 20, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant("Value", 21, "Expression", v),
 			}
 		} else {
 			match self {
 				Value::None => s.serialize_none(),
-				Value::Void => s.serialize_none(),
 				Value::Null => s.serialize_none(),
 				Value::True => s.serialize_bool(true),
 				Value::False => s.serialize_bool(false),
@@ -1237,7 +1226,6 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 	alt((
 		alt((
 			map(tag_no_case("NONE"), |_| Value::None),
-			map(tag_no_case("VOID"), |_| Value::Void),
 			map(tag_no_case("NULL"), |_| Value::Null),
 			map(tag_no_case("true"), |_| Value::True),
 			map(tag_no_case("false"), |_| Value::False),
@@ -1266,7 +1254,6 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 	alt((
 		alt((
 			map(tag_no_case("NONE"), |_| Value::None),
-			map(tag_no_case("VOID"), |_| Value::Void),
 			map(tag_no_case("NULL"), |_| Value::Null),
 			map(tag_no_case("true"), |_| Value::True),
 			map(tag_no_case("false"), |_| Value::False),
@@ -1331,23 +1318,13 @@ mod tests {
 	#[test]
 	fn check_none() {
 		assert_eq!(true, Value::None.is_none());
-		assert_eq!(true, Value::Void.is_none());
 		assert_eq!(true, Value::Null.is_none());
 		assert_eq!(false, Value::from(1).is_none());
 	}
 
 	#[test]
-	fn check_void() {
-		assert_eq!(true, Value::None.is_void());
-		assert_eq!(true, Value::Void.is_void());
-		assert_eq!(false, Value::Null.is_void());
-		assert_eq!(false, Value::from(1).is_void());
-	}
-
-	#[test]
 	fn check_null() {
 		assert_eq!(true, Value::None.is_null());
-		assert_eq!(false, Value::Void.is_null());
 		assert_eq!(true, Value::Null.is_null());
 		assert_eq!(false, Value::from(1).is_null());
 	}
@@ -1378,7 +1355,6 @@ mod tests {
 	fn convert_bool() {
 		assert_eq!(false, Value::None.is_truthy());
 		assert_eq!(false, Value::Null.is_truthy());
-		assert_eq!(false, Value::Void.is_truthy());
 		assert_eq!(true, Value::True.is_truthy());
 		assert_eq!(false, Value::False.is_truthy());
 		assert_eq!(false, Value::from(0).is_truthy());
@@ -1396,7 +1372,6 @@ mod tests {
 	fn convert_int() {
 		assert_eq!(0, Value::None.as_int());
 		assert_eq!(0, Value::Null.as_int());
-		assert_eq!(0, Value::Void.as_int());
 		assert_eq!(1, Value::True.as_int());
 		assert_eq!(0, Value::False.as_int());
 		assert_eq!(0, Value::from(0).as_int());
@@ -1414,7 +1389,6 @@ mod tests {
 	fn convert_float() {
 		assert_eq!(0.0, Value::None.as_float());
 		assert_eq!(0.0, Value::Null.as_float());
-		assert_eq!(0.0, Value::Void.as_float());
 		assert_eq!(1.0, Value::True.as_float());
 		assert_eq!(0.0, Value::False.as_float());
 		assert_eq!(0.0, Value::from(0).as_float());
@@ -1432,7 +1406,6 @@ mod tests {
 	fn convert_number() {
 		assert_eq!(Number::from(0), Value::None.as_number());
 		assert_eq!(Number::from(0), Value::Null.as_number());
-		assert_eq!(Number::from(0), Value::Void.as_number());
 		assert_eq!(Number::from(1), Value::True.as_number());
 		assert_eq!(Number::from(0), Value::False.as_number());
 		assert_eq!(Number::from(0), Value::from(0).as_number());
@@ -1450,7 +1423,6 @@ mod tests {
 	fn convert_strand() {
 		assert_eq!(Strand::from("NONE"), Value::None.as_strand());
 		assert_eq!(Strand::from("NULL"), Value::Null.as_strand());
-		assert_eq!(Strand::from("VOID"), Value::Void.as_strand());
 		assert_eq!(Strand::from("true"), Value::True.as_strand());
 		assert_eq!(Strand::from("false"), Value::False.as_strand());
 		assert_eq!(Strand::from("0"), Value::from(0).as_strand());
@@ -1468,7 +1440,6 @@ mod tests {
 	fn convert_string() {
 		assert_eq!(String::from("NONE"), Value::None.as_string());
 		assert_eq!(String::from("NULL"), Value::Null.as_string());
-		assert_eq!(String::from("VOID"), Value::Void.as_string());
 		assert_eq!(String::from("true"), Value::True.as_string());
 		assert_eq!(String::from("false"), Value::False.as_string());
 		assert_eq!(String::from("0"), Value::from(0).as_string());

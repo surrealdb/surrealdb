@@ -21,7 +21,6 @@ impl<'js> IntoJs<'js> for &Value {
 	fn into_js(self, ctx: Ctx<'js>) -> Result<js::Value<'js>, Error> {
 		match self {
 			Value::Null => Null.into_js(ctx),
-			Value::Void => Undefined.into_js(ctx),
 			Value::None => Undefined.into_js(ctx),
 			Value::True => Ok(js::Value::new_bool(ctx, true)),
 			Value::False => Ok(js::Value::new_bool(ctx, false)),
