@@ -70,6 +70,16 @@ impl Session {
 			..Session::default()
 		}
 	}
+	/// Set the selected namespace for the session
+	pub fn with_ns(mut self, ns: &str) -> Session {
+		self.ns = Some(ns.to_owned());
+		self
+	}
+	/// Set the selected database for the session
+	pub fn with_db(mut self, db: &str) -> Session {
+		self.db = Some(db.to_owned());
+		self
+	}
 	/// Retrieves the selected namespace
 	pub(crate) fn ns(&self) -> Option<Arc<String>> {
 		self.ns.to_owned().map(Arc::new)
