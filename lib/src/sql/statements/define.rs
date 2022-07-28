@@ -1019,11 +1019,7 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let (i, _) = alt((tag_no_case("COLUMNS"), tag_no_case("FIELDS")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, cols) = idiom::locals(i)?;
-	let (i, uniq) = opt(|i| {
-		shouldbespace(i)?;
-		tag_no_case("UNIQUE")(i)?;
-		Ok((i, true))
-	})(i)?;
+	let (i, uniq) = opt(tuple((shouldbespace, tag_no_case("UNIQUE"))))(i)?;
 	Ok((
 		i,
 		DefineIndexStatement {
