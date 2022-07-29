@@ -21,9 +21,15 @@ async fn handler(session: Session) -> Result<impl warp::Reply, warp::Rejection> 
 			// Get the datastore reference
 			let db = DB.get().unwrap();
 			// Extract the NS header value
-			let nsv = session.ns.clone().unwrap();
+			let nsv = match session.ns {
+				Some(ns) => ns,
+				None => return Err(warp::reject::custom(Error::NoNsHeader)),
+			};
 			// Extract the DB header value
-			let dbv = session.db.clone().unwrap();
+			let dbv = match session.db {
+				Some(db) => db,
+				None => return Err(warp::reject::custom(Error::NoDbHeader)),
+			};
 			// Create a chunked response
 			let (mut chn, bdy) = Body::channel();
 			// Create a new bounded channel

@@ -14,6 +14,12 @@ pub enum Error {
 	#[error("The request body contains invalid data")]
 	Request,
 
+	#[error("There was no NS header present in the request")]
+	NoNsHeader,
+
+	#[error("There was no DB header present in the request")]
+	NoDbHeader,
+
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
 
