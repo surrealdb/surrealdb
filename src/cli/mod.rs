@@ -308,7 +308,7 @@ pub fn init() {
 					.long("conn")
 					.forbid_empty_values(true)
 					.validator(conn_valid)
-					.default_value("https://surreal.io")
+					.default_value("https://cloud.surrealdb.com")
 					.help("Remote database server url to connect to"),
 			)
 			.arg(
@@ -362,7 +362,7 @@ pub fn init() {
 					.long("conn")
 					.forbid_empty_values(true)
 					.validator(conn_valid)
-					.default_value("https://surreal.io")
+					.default_value("https://cloud.surrealdb.com")
 					.help("Remote database server url to connect to"),
 			)
 			.arg(
