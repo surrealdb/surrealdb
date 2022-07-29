@@ -3,7 +3,6 @@ use crate::err::Error;
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
 use std::fs::OpenOptions;
-use std::io::copy;
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Set the default logging level
@@ -21,16 +20,15 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Set the correct export URL
 	let conn = format!("{}/export", conn);
 	// Export the data from the database
-	let mut res = Client::new()
+	Client::new()
 		.get(&conn)
 		.header(CONTENT_TYPE, "application/octet-stream")
 		.basic_auth(user, Some(pass))
 		.header("NS", ns)
 		.header("DB", db)
 		.send()?
-		.error_for_status()?;
-	// Copy the export to the file
-	copy(&mut res, &mut file)?;
+		.error_for_status()?
+		.copy_to(&mut file)?;
 	// Output a success message
 	info!(target: LOG, "The SQL file was exported successfully");
 	// Everything OK

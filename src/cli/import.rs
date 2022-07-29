@@ -3,7 +3,7 @@ use crate::err::Error;
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
 use std::fs::OpenOptions;
-use std::io::prelude::*;
+use std::io::prelude::Read;
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Set the default logging level
