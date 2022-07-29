@@ -48,8 +48,6 @@ pub async fn init() -> Result<(), Error> {
 		.recover(fail::recover)
 		// End routes setup
 	;
-	// Enable response compression
-	let net = net.with(warp::compression::gzip());
 	// Specify a generic version header
 	let net = net.with(head::version());
 	// Specify a generic server header
