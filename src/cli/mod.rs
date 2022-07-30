@@ -278,7 +278,7 @@ pub fn init() {
 	let setup = setup.subcommand(
 		Command::new("import")
 			.display_order(3)
-			.about("Import a SQL script into an existing database")
+			.about("Import a SurrealQL script into an existing database")
 			.arg(
 				Arg::new("file")
 					.index(1)
@@ -332,7 +332,7 @@ pub fn init() {
 	let setup = setup.subcommand(
 		Command::new("export")
 			.display_order(4)
-			.about("Export an existing database into a SQL script")
+			.about("Export an existing database as a SurrealQL script")
 			.arg(
 				Arg::new("file")
 					.index(1)
