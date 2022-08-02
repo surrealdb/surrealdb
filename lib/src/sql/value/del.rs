@@ -110,17 +110,11 @@ impl Value {
 							Ok(())
 						}
 					},
-					_ => match path.len() {
-						1 => {
-							v.clear();
-							Ok(())
-						}
-						_ => {
-							let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-							try_join_all(futs).await?;
-							Ok(())
-						}
-					},
+					_ => {
+						let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
+						try_join_all(futs).await?;
+						Ok(())
+					}
 				},
 				// Ignore everything else
 				_ => Ok(()),
@@ -203,8 +197,10 @@ mod tests {
 	async fn del_array_field() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1].age");
-		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = Value::parse("{ test: { something: [{ age: 34 }, { }] } }");
+		let mut val = Value::parse(
+			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
+		);
+		let res = Value::parse("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }");
 		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
@@ -213,8 +209,10 @@ mod tests {
 	async fn del_array_fields() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
-		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = Value::parse("{ test: { something: [{ }, { }] } }");
+		let mut val = Value::parse(
+			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
+		);
+		let res = Value::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
 		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
@@ -222,9 +220,11 @@ mod tests {
 	#[tokio::test]
 	async fn del_array_fields_flat() {
 		let (ctx, opt, txn) = mock().await;
-		let idi = Idiom::parse("test.something[*].age");
-		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = Value::parse("{ test: { something: [{ }, { }] } }");
+		let idi = Idiom::parse("test.something.age");
+		let mut val = Value::parse(
+			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
+		);
+		let res = Value::parse("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
 		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
@@ -233,8 +233,10 @@ mod tests {
 	async fn del_array_where_field() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
-		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = Value::parse("{ test: { something: [{ age: 34 }, { }] } }");
+		let mut val = Value::parse(
+			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
+		);
+		let res = Value::parse("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }");
 		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
@@ -243,8 +245,10 @@ mod tests {
 	async fn del_array_where_fields() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
-		let mut val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = Value::parse("{ test: { something: [{ age: 34 }] } }");
+		let mut val = Value::parse(
+			"{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }",
+		);
+		let res = Value::parse("{ test: { something: [{ name: 'A', age: 34 }] } }");
 		val.del(&ctx, &opt, &txn, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
