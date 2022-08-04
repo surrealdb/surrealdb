@@ -1,3 +1,4 @@
+use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
 use crate::sql::table::{table, Table};
 use nom::branch::alt;
@@ -79,6 +80,7 @@ pub fn kind(i: &str) -> IResult<&str, Kind> {
 
 fn record(i: &str) -> IResult<&str, Vec<Table>> {
 	let (i, _) = tag("record")(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
 	let (i, v) = many1(table)(i)?;
 	let (i, _) = char(')')(i)?;
@@ -87,6 +89,7 @@ fn record(i: &str) -> IResult<&str, Vec<Table>> {
 
 fn geometry(i: &str) -> IResult<&str, Vec<String>> {
 	let (i, _) = tag("geometry")(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
 	let (i, v) = many1(map(
 		alt((
