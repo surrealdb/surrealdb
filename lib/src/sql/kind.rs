@@ -1,11 +1,12 @@
 use crate::sql::comment::mightbespace;
+use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::table::{table, Table};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::combinator::map;
-use nom::multi::many1;
+use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -82,7 +83,7 @@ fn record(i: &str) -> IResult<&str, Vec<Table>> {
 	let (i, _) = tag("record")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
-	let (i, v) = many1(table)(i)?;
+	let (i, v) = separated_list1(commas, table)(i)?;
 	let (i, _) = char(')')(i)?;
 	Ok((i, v))
 }
@@ -91,19 +92,22 @@ fn geometry(i: &str) -> IResult<&str, Vec<String>> {
 	let (i, _) = tag("geometry")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
-	let (i, v) = many1(map(
-		alt((
-			tag("feature"),
-			tag("point"),
-			tag("line"),
-			tag("polygon"),
-			tag("multipoint"),
-			tag("multiline"),
-			tag("multipolygon"),
-			tag("collection"),
-		)),
-		String::from,
-	))(i)?;
+	let (i, v) = separated_list1(
+		commas,
+		map(
+			alt((
+				tag("feature"),
+				tag("point"),
+				tag("line"),
+				tag("polygon"),
+				tag("multipoint"),
+				tag("multiline"),
+				tag("multipolygon"),
+				tag("collection"),
+			)),
+			String::from,
+		),
+	)(i)?;
 	let (i, _) = char(')')(i)?;
 	Ok((i, v))
 }
