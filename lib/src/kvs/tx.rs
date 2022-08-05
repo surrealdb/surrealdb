@@ -861,7 +861,7 @@ impl Transaction {
 						}
 					}
 					// Output INDEXS
-					let ixs = self.all_fd(ns, db, &tb.name).await?;
+					let ixs = self.all_ix(ns, db, &tb.name).await?;
 					if !ixs.is_empty() {
 						for ix in &ixs {
 							chn.send(bytes!(format!("{};", ix))).await?;
