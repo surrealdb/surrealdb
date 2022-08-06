@@ -3,6 +3,7 @@ mod config;
 mod export;
 mod import;
 mod log;
+mod sql;
 mod start;
 mod version;
 
@@ -391,9 +392,65 @@ pub fn init() {
 			.about("Output the command-line tool version information"),
 	);
 
+	let setup = setup.subcommand(
+		Command::new("sql")
+			.display_order(6)
+			.about("Start an SQL REPL in your terminal with pipe support")
+			.arg(
+				Arg::new("ns")
+					.long("ns")
+					.required(true)
+					.takes_value(true)
+					.forbid_empty_values(true)
+					.help("The namespace to export the data from"),
+			)
+			.arg(
+				Arg::new("db")
+					.long("db")
+					.required(true)
+					.takes_value(true)
+					.forbid_empty_values(true)
+					.help("The database to export the data from"),
+			)
+			.arg(
+				Arg::new("conn")
+					.short('c')
+					.long("conn")
+					.alias("host")
+					.forbid_empty_values(true)
+					.validator(conn_valid)
+					.default_value("https://cloud.surrealdb.com")
+					.help("Remote database server url to connect to"),
+			)
+			.arg(
+				Arg::new("user")
+					.short('u')
+					.long("user")
+					.forbid_empty_values(true)
+					.default_value("root")
+					.help("Database authentication username to use when connecting"),
+			)
+			.arg(
+				Arg::new("pass")
+					.short('p')
+					.long("pass")
+					.forbid_empty_values(true)
+					.default_value("root")
+					.help("Database authentication password to use when connecting"),
+			)
+			.arg(
+				Arg::new("pretty")
+					.long("pretty")
+					.required(false)
+					.takes_value(false)
+					.help("Whether database responses should be pretty printed"),
+			),
+	);
+
 	let matches = setup.get_matches();
 
 	let output = match matches.subcommand() {
+		Some(("sql", m)) => sql::init(m),
 		Some(("start", m)) => start::init(m),
 		Some(("backup", m)) => backup::init(m),
 		Some(("import", m)) => import::init(m),
