@@ -13,11 +13,15 @@ async fn strict_mode_no_namespace() -> Result<(), Error> {
 		DEFINE TABLE test;
 		DEFINE FIELD extra ON test VALUE true;
 		CREATE test:tester;
+		SELECT * FROM test;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, true).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(tmp.err(), Some(Error::NsNotFound)));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(tmp.err(), Some(Error::NsNotFound)));
@@ -42,14 +46,18 @@ async fn strict_mode_no_database() -> Result<(), Error> {
 		DEFINE TABLE test;
 		DEFINE FIELD extra ON test VALUE true;
 		CREATE test:tester;
+		SELECT * FROM test;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, true).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(tmp.err(), Some(Error::DbNotFound)));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(tmp.err(), Some(Error::DbNotFound)));
@@ -71,17 +79,21 @@ async fn strict_mode_no_table() -> Result<(), Error> {
 		-- DEFINE TABLE test;
 		DEFINE FIELD extra ON test VALUE true;
 		CREATE test:tester;
+		SELECT * FROM test;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, true).await?;
-	assert_eq!(res.len(), 4);
+	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(tmp.err(), Some(Error::TbNotFound)));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(tmp.err(), Some(Error::TbNotFound)));
@@ -100,11 +112,12 @@ async fn strict_mode_all_ok() -> Result<(), Error> {
 		DEFINE TABLE test;
 		DEFINE FIELD extra ON test VALUE true;
 		CREATE test:tester;
+		SELECT * FROM test;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, true).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
@@ -122,6 +135,10 @@ async fn strict_mode_all_ok() -> Result<(), Error> {
 	let val = Value::parse("[{ id: test:tester, extra: true }]");
 	assert_eq!(tmp, val);
 	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	assert_eq!(tmp, val);
+	//
 	Ok(())
 }
 
@@ -130,6 +147,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let sql = "
 		DEFINE FIELD extra ON test VALUE true;
 		CREATE test:tester;
+		SELECT * FROM test;
 		INFO FOR KV;
 		INFO FOR NS;
 		INFO FOR DB;
@@ -138,10 +156,14 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: test:tester, extra: true }]");
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[{ id: test:tester, extra: true }]");

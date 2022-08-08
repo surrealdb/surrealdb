@@ -1134,6 +1134,26 @@ impl Transaction {
 			Ok(v) => Ok(v),
 		}
 	}
+	/// Retrieve and cache a specific table definition.
+	pub async fn check_ns_db_tb(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		strict: bool,
+	) -> Result<(), Error> {
+		match strict {
+			// Strict mode is disabled
+			false => Ok(()),
+			// Strict mode is enabled
+			true => {
+				self.get_and_cache_ns(ns).await?;
+				self.get_and_cache_db(ns, db).await?;
+				self.get_and_cache_tb(ns, db, tb).await?;
+				Ok(())
+			}
+		}
+	}
 	/// Writes the full database contents as binary SQL.
 	pub async fn export(&mut self, ns: &str, db: &str, chn: Sender<Vec<u8>>) -> Result<(), Error> {
 		// Output OPTIONS

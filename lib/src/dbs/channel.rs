@@ -30,6 +30,8 @@ impl Iterable {
 					chn.send((None, val)).await?;
 				}
 				Iterable::Thing(v) => {
+					// Check that the table exists
+					txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 					// Fetch the data from the store
 					let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
 					let val = txn.clone().lock().await.get(key).await?;
@@ -42,6 +44,8 @@ impl Iterable {
 					chn.send((Some(v), val)).await?;
 				}
 				Iterable::Mergeable(v, o) => {
+					// Check that the table exists
+					txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 					// Fetch the data from the store
 					let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
 					let val = txn.clone().lock().await.get(key).await?;
@@ -56,6 +60,8 @@ impl Iterable {
 					chn.send((Some(v), val)).await?;
 				}
 				Iterable::Relatable(f, v, w) => {
+					// Check that the table exists
+					txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
 					// Fetch the data from the store
 					let key = thing::new(opt.ns(), opt.db(), &v.tb, &v.id);
 					let val = txn.clone().lock().await.get(key).await?;
@@ -70,6 +76,8 @@ impl Iterable {
 					chn.send((Some(v), val)).await?;
 				}
 				Iterable::Table(v) => {
+					// Check that the table exists
+					txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
 					// Prepare the start and end keys
 					let beg = thing::prefix(opt.ns(), opt.db(), &v);
 					let end = thing::suffix(opt.ns(), opt.db(), &v);
