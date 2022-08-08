@@ -1,3 +1,4 @@
+mod cache;
 mod ds;
 mod file;
 mod ixdb;

@@ -127,6 +127,7 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
 					inner: super::tx::Inner::Mem(tx),
+					cache: super::cache::Cache::default(),
 				})
 			}
 			#[cfg(feature = "kv-indxdb")]
@@ -134,6 +135,7 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
 					inner: super::tx::Inner::IxDB(tx),
+					cache: super::cache::Cache::default(),
 				})
 			}
 			#[cfg(feature = "kv-yokudb")]
@@ -141,6 +143,7 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
 					inner: super::tx::Inner::File(tx),
+					cache: super::cache::Cache::default(),
 				})
 			}
 			#[cfg(feature = "kv-tikv")]
@@ -148,6 +151,7 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
 					inner: super::tx::Inner::TiKV(tx),
+					cache: super::cache::Cache::default(),
 				})
 			}
 		}

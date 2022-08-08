@@ -10,6 +10,7 @@ use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::borrow::Cow;
+use std::sync::Arc;
 
 pub struct Document<'a> {
 	pub(super) id: Option<Thing>,
@@ -49,7 +50,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-	) -> Result<DefineTableStatement, Error> {
+	) -> Result<Arc<DefineTableStatement>, Error> {
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -57,16 +58,16 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the table definition
-		let tb = run.get_tb(opt.ns(), opt.db(), &rid.tb).await;
+		let tb = run.get_and_cache_tb(opt.ns(), opt.db(), &rid.tb).await;
 		// Return the table or attempt to define it
 		match tb {
 			// The table doesn't exist
 			Err(Error::TbNotFound) => match opt.auth.check(Level::Db) {
 				// We can create the table automatically
 				true => {
-					run.add_ns(opt.ns(), opt.strict).await?;
-					run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-					run.add_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
+					run.add_and_cache_ns(opt.ns(), opt.strict).await?;
+					run.add_and_cache_db(opt.ns(), opt.db(), opt.strict).await?;
+					run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
 				}
 				// We can't create the table so error
 				false => Err(Error::TbNotFound),
@@ -82,7 +83,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-	) -> Result<Vec<DefineTableStatement>, Error> {
+	) -> Result<Arc<Vec<DefineTableStatement>>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definitions
@@ -93,7 +94,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-	) -> Result<Vec<DefineEventStatement>, Error> {
+	) -> Result<Arc<Vec<DefineEventStatement>>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the event definitions
@@ -104,7 +105,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-	) -> Result<Vec<DefineFieldStatement>, Error> {
+	) -> Result<Arc<Vec<DefineFieldStatement>>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the field definitions
@@ -115,7 +116,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-	) -> Result<Vec<DefineIndexStatement>, Error> {
+	) -> Result<Arc<Vec<DefineIndexStatement>>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the index definitions
