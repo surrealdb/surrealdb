@@ -3,12 +3,18 @@ use crate::sql::json;
 use crate::sql::object::Object;
 use crate::sql::strand::Strand;
 use crate::sql::value::Value;
+use surf::Client;
+use surf::Config;
 
 pub async fn head(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+	// Set a default client with no timeout
+	let cli: Client = Config::new().set_timeout(None).try_into().unwrap();
 	// Start a new HEAD request
-	let mut req = surf::head(uri.as_str());
+	let mut req = cli.head(uri.as_str());
 	// Add the User-Agent header
-	req = req.header("User-Agent", "SurrealDB");
+	if cfg!(not(target_arch = "wasm32")) {
+		req = req.header("User-Agent", "SurrealDB");
+	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
@@ -23,10 +29,14 @@ pub async fn head(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> 
 }
 
 pub async fn get(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+	// Set a default client with no timeout
+	let cli: Client = Config::new().set_timeout(None).try_into().unwrap();
 	// Start a new GET request
-	let mut req = surf::get(uri.as_str());
+	let mut req = cli.get(uri.as_str());
 	// Add the User-Agent header
-	req = req.header("User-Agent", "SurrealDB");
+	if cfg!(not(target_arch = "wasm32")) {
+		req = req.header("User-Agent", "SurrealDB");
+	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
@@ -51,10 +61,14 @@ pub async fn get(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
 }
 
 pub async fn put(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<Value, Error> {
+	// Set a default client with no timeout
+	let cli: Client = Config::new().set_timeout(None).try_into().unwrap();
 	// Start a new GET request
-	let mut req = surf::put(uri.as_str());
+	let mut req = cli.put(uri.as_str());
 	// Add the User-Agent header
-	req = req.header("User-Agent", "SurrealDB");
+	if cfg!(not(target_arch = "wasm32")) {
+		req = req.header("User-Agent", "SurrealDB");
+	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
@@ -81,10 +95,14 @@ pub async fn put(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<Va
 }
 
 pub async fn post(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<Value, Error> {
+	// Set a default client with no timeout
+	let cli: Client = Config::new().set_timeout(None).try_into().unwrap();
 	// Start a new GET request
-	let mut req = surf::post(uri.as_str());
+	let mut req = cli.post(uri.as_str());
 	// Add the User-Agent header
-	req = req.header("User-Agent", "SurrealDB");
+	if cfg!(not(target_arch = "wasm32")) {
+		req = req.header("User-Agent", "SurrealDB");
+	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
@@ -111,10 +129,14 @@ pub async fn post(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<V
 }
 
 pub async fn patch(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<Value, Error> {
+	// Set a default client with no timeout
+	let cli: Client = Config::new().set_timeout(None).try_into().unwrap();
 	// Start a new GET request
-	let mut req = surf::patch(uri.as_str());
+	let mut req = cli.patch(uri.as_str());
 	// Add the User-Agent header
-	req = req.header("User-Agent", "SurrealDB");
+	if cfg!(not(target_arch = "wasm32")) {
+		req = req.header("User-Agent", "SurrealDB");
+	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
@@ -141,10 +163,14 @@ pub async fn patch(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<
 }
 
 pub async fn delete(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
+	// Set a default client with no timeout
+	let cli: Client = Config::new().set_timeout(None).try_into().unwrap();
 	// Start a new GET request
-	let mut req = surf::delete(uri.as_str());
+	let mut req = cli.delete(uri.as_str());
 	// Add the User-Agent header
-	req = req.header("User-Agent", "SurrealDB");
+	if cfg!(not(target_arch = "wasm32")) {
+		req = req.header("User-Agent", "SurrealDB");
+	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
 		req = req.header(k.as_str(), v.to_strand().as_str());
