@@ -116,7 +116,7 @@ impl Fields {
 						for (p, x) in res {
 							match p.last().unwrap().alias() {
 								// This is an alias expression part
-								Some(i) => out.set(ctx, opt, txn, i, x).await?,
+								Some(a) => out.set(ctx, opt, txn, a, x).await?,
 								// This is the end of the expression
 								None => out.set(ctx, opt, txn, v, x).await?,
 							}
@@ -164,7 +164,11 @@ impl Fields {
 						for (p, x) in res {
 							match p.last().unwrap().alias() {
 								// This is an alias expression part
-								Some(i) => out.set(ctx, opt, txn, i, x).await?,
+								Some(a) => {
+									let v = x.clone();
+									out.set(ctx, opt, txn, a, x).await?;
+									out.set(ctx, opt, txn, i, v).await?;
+								}
 								// This is the end of the expression
 								None => out.set(ctx, opt, txn, i, x).await?,
 							}
