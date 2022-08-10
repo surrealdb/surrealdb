@@ -107,7 +107,8 @@ impl Fields {
 								.get(ctx, opt, txn, v)
 								.await?
 								.compute(ctx, opt, txn, Some(doc))
-								.await?;
+								.await?
+								.flatten();
 							// Add the result to the temporary store
 							res.push((v, x));
 						}
@@ -154,7 +155,8 @@ impl Fields {
 								.get(ctx, opt, txn, v)
 								.await?
 								.compute(ctx, opt, txn, Some(doc))
-								.await?;
+								.await?
+								.flatten();
 							// Add the result to the temporary store
 							res.push((v, x));
 						}
