@@ -6,6 +6,7 @@ default:
 .PHONY: setup
 setup:
 	cargo upgrade --workspace --pinned --to-lockfile
+	cargo update
 
 .PHONY: docs
 docs:
