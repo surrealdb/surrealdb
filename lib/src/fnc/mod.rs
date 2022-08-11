@@ -31,7 +31,10 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"array::distinct" => args::check(ctx, name, args, Args::One, array::distinct),
 		"array::intersect" => args::check(ctx, name, args, Args::Two, array::intersect),
 		"array::len" => args::check(ctx, name, args, Args::One, array::len),
+		"array::sort" => args::check(ctx, name, args, Args::OneTwo, array::sort),
 		"array::union" => args::check(ctx, name, args, Args::Two, array::union),
+		"array::sort::asc" => args::check(ctx, name, args, Args::One, array::sort::asc),
+		"array::sort::desc" => args::check(ctx, name, args, Args::One, array::sort::desc),
 		//
 		"count" => args::check(ctx, name, args, Args::NoneOne, count::count),
 		//

@@ -259,6 +259,9 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 		tag("array::distinct"),
 		tag("array::intersect"),
 		tag("array::len"),
+		tag("array::sort::asc"),
+		tag("array::sort::desc"),
+		tag("array::sort"),
 		tag("array::union"),
 	))(i)
 }
@@ -269,16 +272,16 @@ fn function_count(i: &str) -> IResult<&str, &str> {
 
 fn function_crypto(i: &str) -> IResult<&str, &str> {
 	alt((
-		tag("crypto::md5"),
-		tag("crypto::sha1"),
-		tag("crypto::sha256"),
-		tag("crypto::sha512"),
 		tag("crypto::argon2::compare"),
 		tag("crypto::argon2::generate"),
+		tag("crypto::md5"),
 		tag("crypto::pbkdf2::compare"),
 		tag("crypto::pbkdf2::generate"),
 		tag("crypto::scrypt::compare"),
 		tag("crypto::scrypt::generate"),
+		tag("crypto::sha1"),
+		tag("crypto::sha256"),
+		tag("crypto::sha512"),
 	))(i)
 }
 
