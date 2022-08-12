@@ -36,3 +36,7 @@ quick:
 .PHONY: build
 build:
 	cargo build --release
+
+.PHONY: debian
+debian:
+	cargo deb -v

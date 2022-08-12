@@ -39,3 +39,18 @@ surrealdb = { path = "lib" }
 thiserror = "1.0.31"
 tokio = { version = "1.20.0", features = ["macros"] }
 warp = { version = "0.3.2", features = ["compression", "tls", "websocket"] }
+
+[package.metadata.deb]
+maintainer-scripts = "debian/"
+maintainer = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
+copyright = "2022, SurrealDB Ltd."
+systemd-units = { enable = true }
+depends = "$auto"
+section = "utility"
+priority = "optional"
+assets = [
+  ["target/release/surreal", "usr/share/surreal/surreal", "755"],
+  ["debian/README", "usr/share/surreal/README", "644"],
+]
+extended-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web."
+license-file = ["LICENSE", "4"]
