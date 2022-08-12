@@ -139,7 +139,7 @@ jobs:
           vcpkg install openssl:x64-windows-static
 
       - name: Install dependencies
-        if: contains(matrix.arch, 'ubuntu') && endsWith(matrix.arch, '-gnu')
+        if: contains(matrix.arch, 'linux') && endsWith(matrix.arch, '-gnu')
         run: |
           sudo apt-get -y update
           sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
@@ -169,7 +169,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
 
       - name: Package binaries
-        if: !contains(matrix.arch, 'windows')
+        if: ${{ !contains(matrix.arch, 'windows') }}
         shell: bash
         run: |
           cd target/${{ matrix.arch }}/release
@@ -181,7 +181,7 @@ jobs:
           cd -
 
       - name: Package binaries
-        if: contains(matrix.arch, 'windows')
+        if: ${{ contains(matrix.arch, 'windows') }}
         shell: bash
         run: |
           cd target/${{ matrix.arch }}/release
