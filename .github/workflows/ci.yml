@@ -142,6 +142,9 @@ jobs:
           override: true
           target: ${{ matrix.arch }}
 
+      - name: Output package versions
+        run: go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
+
       - name: Run cargo build
         uses: actions-rs/cargo@v1
         with:
