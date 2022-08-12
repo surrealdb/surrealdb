@@ -1,0 +1,22 @@
+[Unit]
+Description=SurrealDB Service
+
+[Service]
+Type=simple
+ExecStart=/usr/share/surreal/surreal start --log trace --user root --pass root
+WorkingDirectory=/usr/share/surreal
+Restart=always
+
+KillMode=process
+
+LimitNOFILE=infinity
+
+LimitCORE=infinity
+
+# Environment variables:
+# override defaults
+# Environment=LOG_DEFAULT_LEVEL=DEBUG
+# Environment=LOGFILE_DEFAULT_LEVEL=DEBUG
+
+[Install]
+WantedBy=multi-user.target
