@@ -14,7 +14,10 @@ pub async fn init() -> Result<(), Error> {
 	let opt = CF.get().unwrap();
 	// Log authentication options
 	match opt.pass {
-		Some(_) => info!(target: LOG, "Root authentication is enabled"),
+		Some(_) => {
+			info!(target: LOG, "Root authentication is enabled");
+			info!(target: LOG, "Root username is '{}'", opt.user);
+		}
 		None => info!(target: LOG, "Root authentication is disabled"),
 	};
 	// All ok
