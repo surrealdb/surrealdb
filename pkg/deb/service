@@ -1,0 +1,24 @@
+[Unit]
+Description=SurrealDB Service
+
+[Service]
+Type=simple
+ExecStart=/usr/share/surreal/surreal start
+WorkingDirectory=/usr/share/surreal
+Restart=always
+
+KillMode=process
+
+LimitNOFILE=infinity
+
+LimitCORE=infinity
+
+; Environment variables:
+; Environment=USER=root
+; Environment=PASS=root
+; Environment=BIND=0.0.0.0:8000
+; Environment=LOG=debug
+; Environment=STRICT=false
+
+[Install]
+WantedBy=multi-user.target
