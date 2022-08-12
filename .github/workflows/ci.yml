@@ -114,19 +114,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
 
-      - name: Install dependencies
-        if: ${{ contains(matrix.os, 'ubuntu') }}
-        run: |
-          sudo apt-get -y update
-          # sudo apt-get -y install llvm
-          # sudo apt-get -y install cmake
-          # sudo apt-get -y install clang-11
-          # sudo apt-get -y install binutils
-          # sudo apt-get -y install mingw-w64
-          sudo apt-get -y install g++-aarch64-linux-gnu
-          sudo apt-get -y install gcc-aarch64-linux-gnu
-          sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
-
       - name: Checkout sources
         uses: actions/checkout@v2
 
@@ -140,6 +127,13 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ matrix.arch }}-build-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install dependencies
+        if: contains(matrix.arch, 'ubuntu') && endsWith(matrix.arch, '-gnu')
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
+          sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
@@ -162,7 +156,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
 
       - name: Package binaries
-        if: ${{ !contains(matrix.arch, 'windows') }}
+        if: !contains(matrix.arch, 'windows')
         shell: bash
         run: |
           cd target/${{ matrix.arch }}/release
@@ -174,7 +168,7 @@ jobs:
           cd -
 
       - name: Package binaries
-        if: ${{ contains(matrix.arch, 'windows') }}
+        if: contains(matrix.arch, 'windows')
         shell: bash
         run: |
           cd target/${{ matrix.arch }}/release
