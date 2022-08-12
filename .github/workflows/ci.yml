@@ -109,7 +109,7 @@ jobs:
             os: ubuntu-latest
             file: surreal-${{ github.ref_name }}.linux-arm64
           # - arch: x86_64-pc-windows-gnu
-          #   os: ubuntu-latest
+          #   os: windows-latest
           #   file: surreal-${{ github.ref_name }}.windows-amd64
     runs-on: ${{ matrix.os }}
     steps:
@@ -127,6 +127,16 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ matrix.arch }}-build-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Prepare environment
+        if: contains(matrix.arch, 'windows') && endsWith(matrix.arch, '-gnu')
+        run: echo "C:\msys64\usr\bin;$Env:Path" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8
+
+      - name: Install dependencies
+        if: contains(matrix.arch, 'windows') && endsWith(matrix.arch, '-msvc')
+        run: |
+          vcpkg integrate install
+          vcpkg install openssl:x64-windows-static
 
       - name: Install dependencies
         if: contains(matrix.arch, 'ubuntu') && endsWith(matrix.arch, '-gnu')
