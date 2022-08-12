@@ -53,7 +53,7 @@ pub async fn run(
 		fnc.call((This(doc), Rest(arg)))
 	});
 	// Return the script result
-	let res = match res {
+	match res {
 		// The script executed successfully
 		Ok(v) => match exe.run(v).await {
 			// The promise fulfilled successfully
@@ -63,7 +63,5 @@ pub async fn run(
 		},
 		// There was an error running the script
 		Err(e) => Err(Error::from(e)),
-	};
-	// Return the result
-	res
+	}
 }
