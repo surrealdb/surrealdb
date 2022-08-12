@@ -49,8 +49,8 @@ depends = "$auto"
 section = "utility"
 priority = "optional"
 assets = [
-  ["target/release/surreal", "usr/share/surreal/surreal", "755"],
-  ["pkg/deb/README", "usr/share/surreal/README", "644"],
+    ["target/release/surreal", "usr/share/surreal/surreal", "755"],
+    ["pkg/deb/README", "usr/share/surreal/README", "644"],
 ]
 extended-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web."
 license-file = ["LICENSE", "4"]
