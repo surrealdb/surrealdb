@@ -142,6 +142,7 @@ pub fn init() {
 			.arg(
 				Arg::new("user")
 					.short('u')
+					.env("USER")
 					.long("user")
 					.forbid_empty_values(true)
 					.default_value("root")
@@ -150,6 +151,7 @@ pub fn init() {
 			.arg(
 				Arg::new("pass")
 					.short('p')
+					.env("PASS")
 					.long("pass")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -157,6 +159,7 @@ pub fn init() {
 			)
 			.arg(
 				Arg::new("addr")
+					.env("ADDR")
 					.long("addr")
 					.number_of_values(1)
 					.forbid_empty_values(true)
@@ -167,6 +170,7 @@ pub fn init() {
 			.arg(
 				Arg::new("bind")
 					.short('b')
+					.env("BIND")
 					.long("bind")
 					.forbid_empty_values(true)
 					.default_value("0.0.0.0:8000")
@@ -175,6 +179,7 @@ pub fn init() {
 			.arg(
 				Arg::new("key")
 					.short('k')
+					.env("KEY")
 					.long("key")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -183,6 +188,7 @@ pub fn init() {
 			)
 			.arg(
 				Arg::new("kvs-ca")
+					.env("KVS_CA")
 					.long("kvs-ca")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -190,6 +196,7 @@ pub fn init() {
 			)
 			.arg(
 				Arg::new("kvs-crt")
+					.env("KVS_CRT")
 					.long("kvs-crt")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -199,6 +206,7 @@ pub fn init() {
 			)
 			.arg(
 				Arg::new("kvs-key")
+					.env("KVS_KEY")
 					.long("kvs-key")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -208,6 +216,7 @@ pub fn init() {
 			)
 			.arg(
 				Arg::new("web-crt")
+					.env("WEB_CRT")
 					.long("web-crt")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -215,6 +224,7 @@ pub fn init() {
 			)
 			.arg(
 				Arg::new("web-key")
+					.env("WEB_KEY")
 					.long("web-key")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -223,6 +233,7 @@ pub fn init() {
 			.arg(
 				Arg::new("strict")
 					.short('s')
+					.env("STRICT")
 					.long("strict")
 					.required(false)
 					.takes_value(false)
@@ -231,6 +242,7 @@ pub fn init() {
 			.arg(
 				Arg::new("log")
 					.short('l')
+					.env("LOG")
 					.long("log")
 					.takes_value(true)
 					.default_value("info")
