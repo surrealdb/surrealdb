@@ -3453,7 +3453,7 @@ dependencies = [
 
 [[package]]
 name = "surreal"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "argon2",
  "base64",
