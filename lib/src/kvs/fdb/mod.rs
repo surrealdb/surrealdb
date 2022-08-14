@@ -11,6 +11,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use once_cell::sync::Lazy;
 
+// In case you're curious why FDB store doesn't work as you've expected,
+// run a few queries via surrealdb-sql or via the REST API, and
+// run the following command to what have been saved to FDB:
+//   fdbcli --exec 'getrangekeys \x00 \xff'
 pub struct Datastore {
 	db: foundationdb::Database,
 	_fdbnet: Arc<foundationdb::api::NetworkAutoStop>
@@ -203,6 +207,15 @@ impl Transaction {
 		Ok(())
 	}
 	// Insert a key if it doesn't exist in the database
+	//
+	// This function is used when the client sent a CREATE query,
+	// where the key is derived from namespace, database, table name,
+	// and either an auto-generated record ID or a the record ID specified by the client
+	// after the colon in the CREATE query's first argument.
+	//
+	// Suppose you've sent a query like `CREATE author:john SET ...` with
+	// the namespace `test` and the database `test`-
+	// You'll see SurrealDB sets a value to the key `/*test\x00*test\x00*author\x00*\x00\x00\x00\x01john\x00`.
 	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
