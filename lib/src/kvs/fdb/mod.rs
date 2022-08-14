@@ -7,7 +7,14 @@ use crate::kvs::Key;
 use crate::kvs::Val;
 use std::ops::Range;
 use std::sync::Arc;
-// Mutex is needed dude to https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html
+// We use it to work-around the fact that foundationdb-rs' Transaction
+// have incompatible lifetimes for the cancel and the commit methods.
+// More concretely, fdb-rs's cancel/commit takes the receiver as just `self`,
+// which result in it moves and drops the receiver on the function call,
+// which results in a compile error on cancel/commit that takes the self as `&mut self` which doesn't drop
+// self or the fdb-rs Transaction it contains.
+//
+// We use tokio's Mutex instead of the std's due to https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html.
 use tokio::sync::Mutex;
 use once_cell::sync::Lazy;
 
