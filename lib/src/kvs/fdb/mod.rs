@@ -217,7 +217,7 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		let key: Vec<u8> = key.into();
-		if !self.exi(key.clone().as_slice()).await? {
+		if self.exi(key.clone().as_slice()).await? {
 			return Err(Error::TxKeyAlreadyExists);
 		}
 		// Set the key
