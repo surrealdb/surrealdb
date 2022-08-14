@@ -7,11 +7,13 @@ use crate::kvs::Key;
 use crate::kvs::Val;
 use std::ops::Range;
 use std::sync::Arc;
-// https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html
+// Mutex is needed dude to https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html
 use tokio::sync::Mutex;
+use once_cell::sync::Lazy;
 
 pub struct Datastore {
 	db: foundationdb::Database,
+	_fdbnet: Arc<foundationdb::api::NetworkAutoStop>
 }
 
 pub struct Transaction {
@@ -32,9 +34,15 @@ impl Datastore {
 	// at a system-dependent location defined by FDB.
 	// See https://apple.github.io/foundationdb/administration.html#default-cluster-file for more information on that.
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
+		static FDBNET: Lazy<Arc<foundationdb::api::NetworkAutoStop>> = Lazy::new(|| {
+			Arc::new(unsafe { foundationdb::boot() })
+		});
+		let _fdbnet = (*FDBNET).clone();
+
 		match foundationdb::Database::from_path(path) {
 			Ok(db) => Ok(Datastore {
 				db,
+				_fdbnet,
 			}),
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}

@@ -7,6 +7,8 @@
 //! can be used in distributed mode by connecting to a distributed [TiKV](https://tikv.org)
 //! key-value store.
 
+#![forbid(unsafe_code)]
+
 #[macro_use]
 extern crate log;
 

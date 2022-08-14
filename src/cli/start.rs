@@ -8,10 +8,6 @@ use crate::net;
 
 #[tokio::main]
 pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
-	#[cfg(feature = "kv-fdb")]
-	// Start the fdb client
-	let fdbnet = unsafe { foundationdb::boot() };
-
 	// Set the default log level
 	match matches.get_one::<String>("log").map(String::as_str) {
 		Some("warn") => log::init(0),
