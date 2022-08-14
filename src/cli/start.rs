@@ -27,7 +27,6 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	dbs::init().await?;
 	// Start the web server
 	net::init().await?;
-
 	// All ok
 	Ok(())
 }
