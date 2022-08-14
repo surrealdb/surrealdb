@@ -77,6 +77,17 @@ impl Transaction {
 	pub fn closed(&self) -> bool {
 		self.ok
 	}
+	// We use lock=true to enable the tikv's own pessimistic tx (https://docs.pingcap.com/tidb/v4.0/pessimistic-transaction)
+	// for tikv kvs.
+	// FDB's standard transaction(snapshot=false) behaves like a tikv perssimistic tx
+	// by automatically retrying on conflict at the fdb client layer.
+	// So in fdb kvs we assume that lock=true is basically a request to
+	// use the standard fdb tx to make transactions Serializable.
+	// In case the tx is rw, we assume the user never wants to lose serializability
+	// so we go with the standard fdb serializable tx in that case too.
+	fn snapshot(&self) -> bool {
+		!self.rw && !self.lock
+	}
 	// Cancel a transaction
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
@@ -160,7 +171,7 @@ impl Transaction {
 		// make the transaction serializable, we use the inverse of it to enable the snapshot isolation
 		// on the get request.
 		// See https://apple.github.io/foundationdb/api-c.html#snapshot-reads for more information on how the snapshot get is supposed to work in FDB.
-		tx.get(key, !self.lock).await
+		tx.get(key, self.snapshot()).await
 			.map(|v| v.is_some())
 			.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)))
 	}
@@ -183,7 +194,7 @@ impl Transaction {
 		// make the transaction serializable, we use the inverse of it to enable the snapshot isolation
 		// on the get request.
 		// See https://apple.github.io/foundationdb/api-c.html#snapshot-reads for more information on how the snapshot get is supposed to work in FDB.
-		let res = tx.get(key, !self.lock).await
+		let res = tx.get(key, self.snapshot()).await
 			.map(|v| v.as_ref().map(|v| Val::from(v.to_vec())))
 			.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)));
 		res
@@ -280,7 +291,7 @@ impl Transaction {
 		// make the transaction serializable, we use the inverse of it to enable the snapshot isolation
 		// on the get request.
 		// See https://apple.github.io/foundationdb/api-c.html#snapshot-reads for more information on how the snapshot get is supposed to work in FDB.
-		let res = tx.get(key, !self.lock).await;
+		let res = tx.get(key, false).await;
 		let res = res.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)));
 		match (res, chk) {
 			(Ok(Some(v)), Some(w)) if Val::from(v.as_ref()) == w => tx.set(key, val),
@@ -371,7 +382,7 @@ impl Transaction {
 		// make the transaction serializable, we use the inverse of it to enable the snapshot isolation
 		// on the get request.
 		// See https://apple.github.io/foundationdb/api-c.html#snapshot-reads for more information on how the snapshot get is supposed to work in FDB.
-		let mut stream = tx.get_ranges_keyvalues(opt, !self.lock);
+		let mut stream = tx.get_ranges_keyvalues(opt, self.snapshot());
 		let mut res: Vec<(Key, Val)> = vec!();
 		loop {
 			let x = stream.try_next().await;
