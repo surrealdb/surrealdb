@@ -14,9 +14,10 @@ categories = ["database-implementations", "data-structures", "embedded"]
 license = "Apache-2.0"
 
 [features]
-default = ["parallel", "kv-tikv", "kv-echodb", "kv-yokudb", "scripting", "http"]
+default = ["parallel", "kv-tikv", "kv-fdb", "kv-echodb", "kv-yokudb", "scripting", "http"]
 parallel = ["dep:executor"]
 kv-tikv = ["dep:tikv"]
+kv-fdb = ["dep:foundationdb"]
 kv-echodb = ["dep:echodb"]
 kv-indxdb = ["dep:indxdb"]
 kv-yokudb = []
@@ -35,6 +36,7 @@ dmp = "0.1.1"
 echodb = { version = "0.3.0", optional = true }
 executor = { version = "1.4.1", package = "async-executor", optional = true }
 futures = "0.3.21"
+foundationdb = { version = "0.7.0", default-features = false, features = ["fdb-6_3", "embedded-fdb-include"], optional = true }
 fuzzy-matcher = "0.3.7"
 geo = { version = "0.22.1", features = ["use-serde"] }
 indxdb = { version = "0.2.0", optional = true }
@@ -56,6 +58,7 @@ sha2 = "0.10.2"
 storekey = "0.3.0"
 thiserror = "1.0.32"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
+tokio = { version = "1.20.0", features = ["sync"] }
 trice = "0.1.0"
 url = "2.2.2"
 uuid = { version = "1.1.2", features = ["serde", "v4"] }

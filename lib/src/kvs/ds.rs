@@ -30,6 +30,8 @@ pub(super) enum Inner {
 	File(super::file::Datastore),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Datastore),
+	#[cfg(feature = "kv-fdb")]
+	FDB(super::fdb::Datastore),
 }
 
 impl Datastore {
@@ -114,6 +116,17 @@ impl Datastore {
 				info!(target: LOG, "Connected to kvs store at {}", path);
 				v
 			}
+			// Parse and initiate an TiKV database
+			#[cfg(feature = "kv-fdb")]
+			s if s.starts_with("fdb:") => {
+				info!(target: LOG, "Connecting to kvs store at {}", path);
+				let s = s.trim_start_matches("fdb://");
+				let v = super::fdb::Datastore::new(s).await.map(|v| Datastore {
+					inner: Inner::FDB(v),
+				});
+				info!(target: LOG, "Connected to kvs store at {}", path);
+				v
+			}
 			// The datastore path is not valid
 			_ => unreachable!(),
 		}
@@ -151,6 +164,14 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
 					inner: super::tx::Inner::TiKV(tx),
+					cache: super::cache::Cache::default(),
+				})
+			}
+			#[cfg(feature = "kv-fdb")]
+			Inner::FDB(v) => {
+				let tx = v.transaction(write, lock).await?;
+				Ok(Transaction {
+					inner: super::tx::Inner::FDB(tx),
 					cache: super::cache::Cache::default(),
 				})
 			}

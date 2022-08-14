@@ -5,6 +5,7 @@ mod ixdb;
 mod kv;
 mod mem;
 mod tikv;
+mod fdb;
 mod tx;
 
 pub use self::ds::*;

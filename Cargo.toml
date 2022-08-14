@@ -23,6 +23,7 @@ chrono = { version = "0.4.21", features = ["serde"] }
 clap = { version = "3.2.17", features = ["env"] }
 fern = { version = "0.6.1", features = ["colored"] }
 futures = "0.3.21"
+foundationdb = { version = "0.7.0", default-features = false, features = ["fdb-6_3", "embedded-fdb-include"] }
 http = "0.2.8"
 hyper = "0.14.20"
 jsonwebtoken = "8.1.1"
