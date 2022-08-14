@@ -32,10 +32,6 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Start the web server
 	net::init().await?;
 
-	// Gracefully stop the fdb client
-	#[cfg(feature = "kv-fdb")]
-	drop(fdbnet);
-
 	// All ok
 	Ok(())
 }
