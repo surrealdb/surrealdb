@@ -14,8 +14,8 @@ use std::sync::Arc;
 // which results in a compile error on cancel/commit that takes the self as `&mut self` which doesn't drop
 // self or the fdb-rs Transaction it contains.
 //
-// We use tokio's Mutex instead of the std's due to https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html.
-use tokio::sync::Mutex;
+// We use mutex from the futures crate instead of the std's due to https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html.
+use futures::lock::Mutex;
 use once_cell::sync::Lazy;
 
 // In case you're curious why FDB store doesn't work as you've expected,
@@ -24,7 +24,7 @@ use once_cell::sync::Lazy;
 //   fdbcli --exec 'getrangekeys \x00 \xff'
 pub struct Datastore {
 	db: foundationdb::Database,
-	_fdbnet: Arc<foundationdb::api::NetworkAutoStop>
+	_fdbnet: Arc<foundationdb::api::NetworkAutoStop>,
 }
 
 pub struct Transaction {
@@ -45,9 +45,8 @@ impl Datastore {
 	// at a system-dependent location defined by FDB.
 	// See https://apple.github.io/foundationdb/administration.html#default-cluster-file for more information on that.
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		static FDBNET: Lazy<Arc<foundationdb::api::NetworkAutoStop>> = Lazy::new(|| {
-			Arc::new(unsafe { foundationdb::boot() })
-		});
+		static FDBNET: Lazy<Arc<foundationdb::api::NetworkAutoStop>> =
+			Lazy::new(|| Arc::new(unsafe { foundationdb::boot() }));
 		let _fdbnet = (*FDBNET).clone();
 
 		match foundationdb::Database::from_path(path) {
@@ -64,7 +63,7 @@ impl Datastore {
 			Ok(tx) => Ok(Transaction {
 				ok: false,
 				rw: write,
-				lock: lock,
+				lock,
 				tx: Arc::new(Mutex::new(Some(tx))),
 			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
@@ -105,12 +104,10 @@ impl Transaction {
 		// replace it with the new `reset`ed tx.
 		let tx = match self.tx.lock().await.take() {
 			Some(tx) => {
-				let tc =  tx.cancel();
+				let tc = tx.cancel();
 				tc.reset()
 			}
-			_ => {
-				return Err(Error::Ds("Unexpected error".to_string()))
-			}
+			_ => return Err(Error::Ds("Unexpected error".to_string())),
 		};
 		self.tx = Arc::new(Mutex::new(Some(tx)));
 		// Continue
@@ -136,18 +133,14 @@ impl Transaction {
 		// so that we can atomically `take` the tx out of the container and
 		// replace it with the new `reset`ed tx.
 		let r = match self.tx.lock().await.take() {
-			Some(tx) => {
-				tx.commit().await
-			}
-			_ => {
-				return Err(Error::Ds("Unexpected error".to_string()))
-			}
+			Some(tx) => tx.commit().await,
+			_ => return Err(Error::Ds("Unexpected error".to_string())),
 		};
 		match r {
-			Ok(_r) => {},
+			Ok(_r) => {}
 			Err(e) => {
 				return Err(Error::Tx(format!("Transaction commit error: {}", e).to_string()));
-			},
+			}
 		}
 		// Continue
 		Ok(())
@@ -162,8 +155,8 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let key:Vec<u8>=key.into();
-		let key:&[u8]=&key[..];
+		let key: Vec<u8> = key.into();
+		let key: &[u8] = &key[..];
 		let tx = self.tx.lock().await;
 		let tx = tx.as_ref().unwrap();
 		// Assuming the `lock` argument passed to the datastore creation function
@@ -171,7 +164,8 @@ impl Transaction {
 		// make the transaction serializable, we use the inverse of it to enable the snapshot isolation
 		// on the get request.
 		// See https://apple.github.io/foundationdb/api-c.html#snapshot-reads for more information on how the snapshot get is supposed to work in FDB.
-		tx.get(key, self.snapshot()).await
+		tx.get(key, self.snapshot())
+			.await
 			.map(|v| v.is_some())
 			.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)))
 	}
@@ -194,7 +188,9 @@ impl Transaction {
 		// make the transaction serializable, we use the inverse of it to enable the snapshot isolation
 		// on the get request.
 		// See https://apple.github.io/foundationdb/api-c.html#snapshot-reads for more information on how the snapshot get is supposed to work in FDB.
-		let res = tx.get(key, self.snapshot()).await
+		let res = tx
+			.get(key, self.snapshot())
+			.await
 			.map(|v| v.as_ref().map(|v| Val::from(v.to_vec())))
 			.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)));
 		res
@@ -216,7 +212,7 @@ impl Transaction {
 		// Set the key
 		let key: Vec<u8> = key.into();
 		let key = &key[..];
-		let val:Vec<u8>=val.into();
+		let val: Vec<u8> = val.into();
 		let val = &val[..];
 		let tx = self.tx.lock().await;
 		let tx = tx.as_ref().unwrap();
@@ -254,7 +250,7 @@ impl Transaction {
 		// Set the key
 		let key: &[u8] = &key[..];
 		let val: Vec<u8> = val.into();
-		let val : &[u8] = &val[..];
+		let val: &[u8] = &val[..];
 		let tx = self.tx.lock().await;
 		let tx = tx.as_ref().unwrap();
 		tx.set(key, val);
@@ -276,11 +272,11 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Get the key
-		let key:Vec<u8>=key.into();
+		let key: Vec<u8> = key.into();
 		let key: &[u8] = key.as_slice();
 		// Get the val
-		let val:Vec<u8> = val.into();
-		let val:&[u8] = val.as_slice();
+		let val: Vec<u8> = val.into();
+		let val: &[u8] = val.as_slice();
 		// Get the check
 		let chk = chk.map(Into::into);
 		// Delete the key
@@ -316,8 +312,8 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Delete the key
-		let key:Vec<u8>=key.into();
-		let key:&[u8]=key.as_slice();
+		let key: Vec<u8> = key.into();
+		let key: &[u8] = key.as_slice();
 		let tx = self.tx.lock().await;
 		let tx = tx.as_ref().unwrap();
 		tx.clear(key);
@@ -369,7 +365,7 @@ impl Transaction {
 			end: rng.end.into(),
 		};
 		// Scan the keys
-		let begin:Vec<u8> = rng.start.into();
+		let begin: Vec<u8> = rng.start.into();
 		let end: Vec<u8> = rng.end.into();
 		let opt = foundationdb::RangeOption {
 			limit: Some(limit.try_into().unwrap()),
@@ -383,7 +379,7 @@ impl Transaction {
 		// on the get request.
 		// See https://apple.github.io/foundationdb/api-c.html#snapshot-reads for more information on how the snapshot get is supposed to work in FDB.
 		let mut stream = tx.get_ranges_keyvalues(opt, self.snapshot());
-		let mut res: Vec<(Key, Val)> = vec!();
+		let mut res: Vec<(Key, Val)> = vec![];
 		loop {
 			let x = stream.try_next().await;
 			match x {
@@ -391,14 +387,10 @@ impl Transaction {
 					let x = (Key::from(v.key()), Val::from(v.value()));
 					res.push(x)
 				}
-				Ok(None) => {
-					break
-				}
-				Err(e) => {
-					return Err(Error::Tx(format!("GetRanges failed: {}", e).to_string()))
-				}
+				Ok(None) => break,
+				Err(e) => return Err(Error::Tx(format!("GetRanges failed: {}", e).to_string())),
 			}
 		}
-		return Ok(res)
+		return Ok(res);
 	}
 }

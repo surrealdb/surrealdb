@@ -14,7 +14,7 @@ categories = ["database-implementations", "data-structures", "embedded"]
 license = "Apache-2.0"
 
 [features]
-default = ["parallel", "kv-tikv", "kv-fdb", "kv-echodb", "kv-yokudb", "scripting", "http"]
+default = ["parallel", "kv-tikv", "kv-echodb", "kv-yokudb", "scripting", "http"]
 parallel = ["dep:executor"]
 kv-tikv = ["dep:tikv"]
 kv-fdb = ["dep:foundationdb"]
@@ -58,7 +58,6 @@ sha2 = "0.10.2"
 storekey = "0.3.0"
 thiserror = "1.0.32"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
-tokio = { version = "1.20.0", features = ["sync"] }
 trice = "0.1.0"
 url = "2.2.2"
 uuid = { version = "1.1.2", features = ["serde", "v4"] }
