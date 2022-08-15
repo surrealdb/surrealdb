@@ -39,6 +39,8 @@ pub(super) enum Inner {
 	File(super::file::Transaction),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Transaction),
+	#[cfg(feature = "kv-fdb")]
+	FDB(super::fdb::Transaction),
 }
 
 impl Transaction {
@@ -70,6 +72,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.closed(),
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
+				..
+			} => v.closed(),
 		}
 	}
 	/// Cancel a transaction.
@@ -97,6 +104,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.cancel().await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
+				..
+			} => v.cancel().await,
 		}
 	}
 	/// Commit a transaction.
@@ -122,6 +134,11 @@ impl Transaction {
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
+				..
+			} => v.commit().await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
 				..
 			} => v.commit().await,
 		}
@@ -152,6 +169,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.del(key).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
+				..
+			} => v.del(key).await,
 		}
 	}
 	/// Check if a key exists in the datastore.
@@ -180,6 +202,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.exi(key).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
+				..
+			} => v.exi(key).await,
 		}
 	}
 	/// Fetch a key from the datastore.
@@ -206,6 +233,11 @@ impl Transaction {
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
+				..
+			} => v.get(key).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
 				..
 			} => v.get(key).await,
 		}
@@ -237,6 +269,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.set(key, val).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
+				..
+			} => v.set(key, val).await,
 		}
 	}
 	/// Insert a key if it doesn't exist in the datastore.
@@ -264,6 +301,11 @@ impl Transaction {
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
+				..
+			} => v.put(key, val).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
 				..
 			} => v.put(key, val).await,
 		}
@@ -296,6 +338,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
+				..
+			} => v.scan(rng, limit).await,
 		}
 	}
 	/// Update a key in the datastore if the current value matches a condition.
@@ -325,6 +372,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.putc(key, val, chk).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
+				..
+			} => v.putc(key, val, chk).await,
 		}
 	}
 	/// Delete a key from the datastore if the current value matches a condition.
@@ -352,6 +404,11 @@ impl Transaction {
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
+				..
+			} => v.delc(key, chk).await,
+			#[cfg(feature = "kv-fdb")]
+			Transaction {
+				inner: Inner::FDB(v),
 				..
 			} => v.delc(key, chk).await,
 		}

@@ -48,6 +48,9 @@ fn path_valid(v: &str) -> Result<(), String> {
 	if v.starts_with("tikv://") {
 		return Ok(());
 	}
+	if v.starts_with("fdb://") {
+		return Ok(());
+	}
 	Err(String::from(
 		"\
 		Provide a valid database path paramater\

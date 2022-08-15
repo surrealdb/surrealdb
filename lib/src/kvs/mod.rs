@@ -1,5 +1,6 @@
 mod cache;
 mod ds;
+mod fdb;
 mod file;
 mod ixdb;
 mod kv;
