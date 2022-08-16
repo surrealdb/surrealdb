@@ -62,12 +62,20 @@ pub async fn init() -> Result<(), Error> {
 
 	info!(target: LOG, "Starting web server on {}", &opt.bind);
 
-	info!(target: LOG, "Started web server on {}", &opt.bind);
-
-	if let (Some(crt), Some(key)) = (&opt.crt, &opt.key) {
-		warp::serve(net).tls().cert_path(crt).key_path(key).run(opt.bind).await
+	if let (Some(c), Some(k)) = (&opt.crt, &opt.key) {
+		// Bind the server to the desired port
+		let (adr, srv) = warp::serve(net).tls().cert_path(c).key_path(k).bind_ephemeral(opt.bind);
+		// Log the server startup status
+		info!(target: LOG, "Started web server on {}", &adr);
+		// Run the server forever
+		srv.await
 	} else {
-		warp::serve(net).run(opt.bind).await
+		// Bind the server to the desired port
+		let (adr, srv) = warp::serve(net).bind_ephemeral(opt.bind);
+		// Log the server startup status
+		info!(target: LOG, "Started web server on {}", &adr);
+		// Run the server forever
+		srv.await
 	};
 
 	Ok(())
