@@ -22,7 +22,22 @@ pub mod time;
 pub mod r#type;
 pub mod util;
 
+// Attempts to run any function
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+	match name {
+		v if v.starts_with("http") => {
+			// HTTP functions are asynchronous
+			asynchronous(ctx, name, args).await
+		}
+		_ => {
+			// Other functions are synchronous
+			synchronous(ctx, name, args)
+		}
+	}
+}
+
+// Attempts to run a synchronous function
+pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
 	match name {
 		//
 		"array::combine" => args::check(ctx, name, args, Args::Two, array::combine),
@@ -55,13 +70,6 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"geo::distance" => args::check(ctx, name, args, Args::Two, geo::distance),
 		"geo::hash::decode" => args::check(ctx, name, args, Args::One, geo::hash::decode),
 		"geo::hash::encode" => args::check(ctx, name, args, Args::OneTwo, geo::hash::encode),
-		//
-		"http::head" => http::head(ctx, args).await,
-		"http::get" => http::get(ctx, args).await,
-		"http::put" => http::put(ctx, args).await,
-		"http::post" => http::post(ctx, args).await,
-		"http::patch" => http::patch(ctx, args).await,
-		"http::delete" => http::delete(ctx, args).await,
 		//
 		"is::alphanum" => args::check(ctx, name, args, Args::One, is::alphanum),
 		"is::alpha" => args::check(ctx, name, args, Args::One, is::alpha),
@@ -162,6 +170,21 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"type::string" => args::check(ctx, name, args, Args::One, r#type::string),
 		"type::table" => args::check(ctx, name, args, Args::One, r#type::table),
 		"type::thing" => args::check(ctx, name, args, Args::OneTwo, r#type::thing),
+		//
+		_ => unreachable!(),
+	}
+}
+
+// Attempts to run an asynchronous function
+pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+	match name {
+		//
+		"http::head" => http::head(ctx, args).await,
+		"http::get" => http::get(ctx, args).await,
+		"http::put" => http::put(ctx, args).await,
+		"http::post" => http::post(ctx, args).await,
+		"http::patch" => http::patch(ctx, args).await,
+		"http::delete" => http::delete(ctx, args).await,
 		//
 		_ => unreachable!(),
 	}
