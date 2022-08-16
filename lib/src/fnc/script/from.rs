@@ -76,6 +76,10 @@ impl<'js> FromJs<'js> for Value {
 					}
 					return Ok(x.into());
 				}
+				// Check to see if this object is a function
+				if v.as_function().is_some() {
+					return Ok(Value::None);
+				}
 				// This object is a normal object
 				let mut x = Object::default();
 				for i in v.props() {
