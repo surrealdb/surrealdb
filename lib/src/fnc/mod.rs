@@ -17,6 +17,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod script;
+pub mod session;
 pub mod string;
 pub mod time;
 pub mod r#type;
@@ -125,6 +126,13 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"rand::time" => args::check(ctx, name, args, Args::NoneTwo, rand::time),
 		"rand::uuid" => args::check(ctx, name, args, Args::None, rand::uuid),
 		"rand" => args::check(ctx, name, args, Args::None, rand::rand),
+		//
+		"session::db" => args::check(ctx, name, args, Args::None, session::db),
+		"session::id" => args::check(ctx, name, args, Args::None, session::id),
+		"session::ip" => args::check(ctx, name, args, Args::None, session::ip),
+		"session::ns" => args::check(ctx, name, args, Args::None, session::ns),
+		"session::origin" => args::check(ctx, name, args, Args::None, session::origin),
+		"session::sc" => args::check(ctx, name, args, Args::None, session::sc),
 		//
 		"string::concat" => args::check(ctx, name, args, Args::Any, string::concat),
 		"string::endsWith" => args::check(ctx, name, args, Args::Two, string::ends_with),

@@ -245,6 +245,7 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 		function_math,
 		function_parse,
 		function_rand,
+		function_session,
 		function_string,
 		function_time,
 		function_type,
@@ -381,6 +382,17 @@ fn function_rand(i: &str) -> IResult<&str, &str> {
 		tag("rand::time"),
 		tag("rand::uuid"),
 		tag("rand"),
+	))(i)
+}
+
+fn function_session(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("session::db"),
+		tag("session::id"),
+		tag("session::ip"),
+		tag("session::ns"),
+		tag("session::origin"),
+		tag("session::sc"),
 	))(i)
 }
 
