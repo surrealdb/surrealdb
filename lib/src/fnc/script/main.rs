@@ -39,6 +39,8 @@ pub async fn run(
 		let global = ctx.globals();
 		// Register the surrealdb module as a global object
 		global.init_def::<globals::surrealdb::Package>().unwrap();
+		// Register the fetch function as a global object
+		global.init_def::<globals::fetch::Fetch>()?;
 		// Register the Duration type as a global class
 		global.init_def::<classes::Duration>().unwrap();
 		// Register the Record type as a global class
