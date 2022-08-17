@@ -37,8 +37,6 @@ pub async fn run(
 	let res: Result<Promise<Value>, js::Error> = ctx.with(|ctx| {
 		// Get the context global object
 		let global = ctx.globals();
-		// Register the surrealdb module as a global object
-		global.init_def::<globals::surrealdb::Package>().unwrap();
 		// Register the fetch function as a global object
 		global.init_def::<globals::fetch::Fetch>()?;
 		// Register the Duration type as a global class
