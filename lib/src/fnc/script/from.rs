@@ -38,23 +38,23 @@ impl<'js> FromJs<'js> for Value {
 				// Extract the value as an object
 				let v = val.into_object().unwrap();
 				// Check to see if this object is a duration
-				if (&v).instance_of::<classes::duration::Duration>() {
-					let v = v.into_instance::<classes::duration::Duration>().unwrap();
-					let v: &classes::duration::Duration = v.as_ref();
+				if (&v).instance_of::<classes::duration::duration::Duration>() {
+					let v = v.into_instance::<classes::duration::duration::Duration>().unwrap();
+					let v: &classes::duration::duration::Duration = v.as_ref();
 					let v = v.value.clone();
 					return Ok(Duration::from(v).into());
 				}
 				// Check to see if this object is a record
-				if (&v).instance_of::<classes::record::Record>() {
-					let v = v.into_instance::<classes::record::Record>().unwrap();
-					let v: &classes::record::Record = v.as_ref();
+				if (&v).instance_of::<classes::record::record::Record>() {
+					let v = v.into_instance::<classes::record::record::Record>().unwrap();
+					let v: &classes::record::record::Record = v.as_ref();
 					let v = (v.tb.clone(), v.id.clone());
 					return Ok(Thing::from(v).into());
 				}
 				// Check to see if this object is a uuid
-				if (&v).instance_of::<classes::uuid::Uuid>() {
-					let v = v.into_instance::<classes::uuid::Uuid>().unwrap();
-					let v: &classes::uuid::Uuid = v.as_ref();
+				if (&v).instance_of::<classes::uuid::uuid::Uuid>() {
+					let v = v.into_instance::<classes::uuid::uuid::Uuid>().unwrap();
+					let v: &classes::uuid::uuid::Uuid = v.as_ref();
 					let v = v.value.clone();
 					return Ok(Uuid::from(v).into());
 				}

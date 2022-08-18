@@ -40,11 +40,11 @@ pub async fn run(
 		// Register the fetch function as a global object
 		global.init_def::<globals::fetch::Fetch>()?;
 		// Register the Duration type as a global class
-		global.init_def::<classes::Duration>()?;
+		global.init_def::<classes::duration::Duration>()?;
 		// Register the Record type as a global class
-		global.init_def::<classes::Record>()?;
+		global.init_def::<classes::record::Record>()?;
 		// Register the Uuid type as a global class
-		global.init_def::<classes::Uuid>()?;
+		global.init_def::<classes::uuid::Uuid>()?;
 		// Attempt to compile the script
 		let res = ctx.compile("script", src)?;
 		// Attempt to fetch the main export
