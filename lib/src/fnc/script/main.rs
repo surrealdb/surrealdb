@@ -32,7 +32,7 @@ pub async fn run(
 	// Enable async code in the runtime
 	run.spawn_executor(&exe).detach();
 	// Create the main function structure
-	let src = format!("export async function main() {{ {} }}", src);
+	let src = format!("export default async function() {{ {} }}", src);
 	// Attempt to execute the script
 	let res: Result<Promise<Value>, js::Error> = ctx.with(|ctx| {
 		// Get the context global object
@@ -48,7 +48,7 @@ pub async fn run(
 		// Attempt to compile the script
 		let res = ctx.compile("script", src)?;
 		// Attempt to fetch the main export
-		let fnc = res.get::<_, Function>("main")?;
+		let fnc = res.get::<_, Function>("default")?;
 		// Execute the main function
 		fnc.call((This(doc), Rest(arg)))
 	});
