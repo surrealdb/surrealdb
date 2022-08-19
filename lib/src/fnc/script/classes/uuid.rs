@@ -1,5 +1,6 @@
 #[js::bind(object, public)]
 #[quickjs(bare)]
+#[allow(non_snake_case)]
 #[allow(clippy::module_inception)]
 pub mod uuid {
 
@@ -17,13 +18,13 @@ pub mod uuid {
 				value,
 			}
 		}
-		#[quickjs(rename = "toString")]
-		pub fn output(&self) -> String {
-			self.value.to_owned()
-		}
 		#[quickjs(get)]
 		pub fn value(&self) -> &str {
 			&self.value
+		}
+		// Convert the object to a string
+		pub fn toString(&self) -> String {
+			self.value.to_owned()
 		}
 	}
 }

@@ -1,5 +1,6 @@
 #[js::bind(object, public)]
 #[quickjs(bare)]
+#[allow(non_snake_case)]
 #[allow(clippy::module_inception)]
 pub mod record {
 
@@ -20,10 +21,6 @@ pub mod record {
 				id,
 			}
 		}
-		#[quickjs(rename = "toString")]
-		pub fn output(&self) -> String {
-			format!("{}:{}", self.tb, self.id)
-		}
 		#[quickjs(get)]
 		pub fn tb(&self) -> &str {
 			&self.tb
@@ -31,6 +28,10 @@ pub mod record {
 		#[quickjs(get)]
 		pub fn id(&self) -> &str {
 			&self.id
+		}
+		// Convert the object to a string
+		pub fn toString(&self) -> String {
+			format!("{}:{}", self.tb, self.id)
 		}
 	}
 }
