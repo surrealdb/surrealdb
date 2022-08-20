@@ -29,45 +29,45 @@
 	<a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/license-Apache_License_2.0-00bfff.svg?style=flat-square"></a>
 </p>
 
+<p align="center">
+	<a href="https://surrealdb.com/blog"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/blog.svg?raw=true" alt="Blog"></a>
+	&nbsp;
+	<a href="https://github.com/surrealdb/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/github.svg?raw=true" alt="Github	"></a>
+	&nbsp;
+    <a href="https://www.linkedin.com/company/surrealdb/"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/linkedin.svg?raw=true" alt="LinkedIn"></a>
+    &nbsp;
+    <a href="https://twitter.com/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/twitter.svg?raw=true" alt="Twitter"></a>
+    &nbsp;
+    <a href="https://www.youtube.com/channel/UCjf2teVEuYVvvVC-gFZNq6w"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/youtube.svg?raw=true" alt="Youtube"></a>
+    &nbsp;
+    <a href="https://dev.to/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/dev.svg?raw=true" alt="Dev"></a>
+    &nbsp;
+    <a href="https://surrealdb.com/discord"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/discord.svg?raw=true" alt="Discord"></a>
+    &nbsp;
+    <a href="https://stackoverflow.com/questions/tagged/surrealdb"><img height="25" src="https://github.com/surrealdb/surrealdb/blob/main/img/social/stack-overflow.svg?raw=true" alt="StackOverflow"></a>
+</p>
+
 <br>
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/whatissurreal.svg?raw=true">&nbsp;&nbsp;What is SurrealDB?</h2>
 
 SurrealDB is an end-to-end cloud native database for web, mobile, serverless, jamstack, backend, and traditional applications. SurrealDB reduces the development time of modern applications by simplifying your database and API stack, removing the need for most server-side components, allowing you to build secure, performant apps quicker and cheaper. SurrealDB acts as both a database and a modern, realtime, collaborative API backend layer. SurrealDB can run as a single server or in a highly-available, highly-scalable distributed mode - with support for SQL querying from client devices, GraphQL, ACID transactions, WebSocket connections, structured and unstructured data, graph querying, full-text indexing, geospatial querying, and row-by-row permissions-based access.
 
-For more details see [why](https://surrealdb.com/why), [features](https://surrealdb.com/features), or [documentation](https://surrealdb.com/docs).
+View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), the product [roadmap](https://surrealdb.com/roadmap), and [documentation](https://surrealdb.com/docs).
 
-<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/cloud.svg?raw=true">&nbsp;&nbsp;SurrealDB Cloud</h2>
+<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/features.svg?raw=true">&nbsp;&nbsp;Features</h2>
 
-SurrealDB can run as a single-instance, or as a highly-available, highly-scalable cluster. If you don't want to manage your own database, we can run SurrealDB for you, in the Cloud, with just a couple of clicks. To get started with SurrealDB Cloud see our [website](https://surrealdb.com).
-
-<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/gettingstarted.svg?raw=true">&nbsp;&nbsp;Getting started</h2>
-
-Getting started with SurrealDB is as easy as starting up the SurrealDB database server, choosing your platform, and integrating its SDK into your code. You can easily get started with your platform of choice by reading one of our tutorials.
-
-##### Client side apps
-
-- [Getting started with Javascript](https://surrealdb.com/docs/integration/libraries/javascript)
-- [Getting started with WebAssembly](https://surrealdb.com/docs/integration/libraries/webassembly)
-- [Getting started with Ember.js](https://surrealdb.com/docs/integration/libraries/emberjs)
-- [Getting started with React.js](https://surrealdb.com/docs/integration/libraries/reactjs)
-- [Getting started with Angular.js](https://surrealdb.com/docs/integration/libraries/angularjs)
-- [Getting started with Vue.js](https://surrealdb.com/docs/integration/libraries/vue.js)
-- [Getting started with Apollo GraphQL](https://surrealdb.com/docs/integration/libraries/apollo)
-
-##### Server side code
-
-- [Getting started with Node.js](https://surrealdb.com/docs/integration/libraries/nodejs)
-- [Getting started with Golang](https://surrealdb.com/docs/integration/libraries/golang)
-- [Getting started with Rust](https://surrealdb.com/docs/integration/libraries/rust)
-- [Getting started with Deno](https://surrealdb.com/docs/integration/libraries/deno)
-- [Getting started with Python](https://surrealdb.com/docs/integration/libraries/python)
-- [Getting started with C](https://surrealdb.com/docs/integration/libraries/c)
-- [Getting started with Java](https://surrealdb.com/docs/integration/libraries/java)
-- [Getting started with Ruby](https://surrealdb.com/docs/integration/libraries/ruby)
-- [Getting started with PHP](https://surrealdb.com/docs/integration/libraries/php)
-- [Getting started with Swift](https://surrealdb.com/docs/integration/libraries/swift)
-- [Getting started with R](https://surrealdb.com/docs/integration/libraries/r)
+- [x] Database server, or embedded library
+- [x] Multi-row, multi-table ACID transactions
+- [x] Single-node, or highly-scalable distributed mode
+- [x] Record links and directed typed graph connections
+- [x] Store structured and unstructured data
+- [x] Incrementally computed views for pre-computed advanced analytics
+- [x] Realtime-api layer, and security permissions built in
+- [x] Store and model data in any way with tables, documents, and graph
+- [x] Simple schema definition for frontend and backend development
+- [x] Connect and query directly from web-browsers and client devices
+- [x] Use embedded JavaScript functions for custom advanced functionality
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/documentation.svg?raw=true">&nbsp;&nbsp;Documentation</h2>
 
@@ -119,6 +119,169 @@ Docker can be used to manage and run SurrealDB database instances without the ne
 
 ```bash
 docker run --rm -p 8000:8000 surrealdb/surrealdb:latest -vvv start
+```
+
+<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/gettingstarted.svg?raw=true">&nbsp;&nbsp;Getting started</h2>
+
+Getting started with SurrealDB is as easy as starting up the SurrealDB database server, choosing your platform, and integrating its SDK into your code. You can easily get started with your platform of choice by reading one of our tutorials.
+
+##### Client side apps
+
+- [x] [Getting started with Javascript](https://surrealdb.com/docs/integration/libraries/javascript)
+- [x] [Getting started with WebAssembly](https://surrealdb.com/docs/integration/libraries/webassembly)
+- [x] [Getting started with Ember.js](https://surrealdb.com/docs/integration/libraries/emberjs)
+- [ ] [Getting started with React.js](https://surrealdb.com/docs/integration/libraries/reactjs)
+- [ ] [Getting started with Angular.js](https://surrealdb.com/docs/integration/libraries/angularjs)
+- [ ] [Getting started with Vue.js](https://surrealdb.com/docs/integration/libraries/vuejs)
+- [ ] [Getting started with Apollo GraphQL](https://surrealdb.com/docs/integration/libraries/apollo)
+
+##### Server side code
+
+- [x] [Getting started with Javascript](https://surrealdb.com/docs/integration/libraries/javascript)
+- [x] [Getting started with Node.js](https://surrealdb.com/docs/integration/libraries/nodejs)
+- [x] [Getting started with Golang](https://surrealdb.com/docs/integration/libraries/golang)
+- [x] [Getting started with Rust](https://surrealdb.com/docs/integration/libraries/rust)
+- [x] [Getting started with Deno](https://surrealdb.com/docs/integration/libraries/deno)
+- [ ] [Getting started with Python](https://surrealdb.com/docs/integration/libraries/python) (coming soon)
+- [ ] [Getting started with C](https://surrealdb.com/docs/integration/libraries/c) (coming soon)
+- [ ] [Getting started with Java](https://surrealdb.com/docs/integration/libraries/java) (coming soon)
+- [ ] [Getting started with Ruby](https://surrealdb.com/docs/integration/libraries/ruby) (coming soon)
+- [ ] [Getting started with PHP](https://surrealdb.com/docs/integration/libraries/php) (coming soon)
+- [ ] [Getting started with Swift](https://surrealdb.com/docs/integration/libraries/swift) (coming soon)
+- [ ] [Getting started with R](https://surrealdb.com/docs/integration/libraries/r) (coming soon)
+
+<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/features.svg?raw=true">&nbsp;&nbsp;Quick look</h2>
+
+With strongly-typed data types, data can be fully modelled right in the database.
+
+```sql
+UPDATE person SET
+	waist = <int> "34.59",
+	height = <float> 201,
+	score = <decimal> 0.3 + 0.3 + 0.3 + 0.1
+;
+```
+
+Store dynamically computed fields which are calculated when retrieved.
+
+```sql
+CREATE person SET
+	birthday = "2007-06-22",
+	can_drive = <future> { time::now() > birthday + 18y }
+;
+```
+
+Easily work with unstructured or structured data, in schema-less or schema-full mode.
+
+```sql
+-- Create a schemafull table
+DEFINE TABLE user SCHEMAFULL;
+
+-- Specify fields on the user table
+DEFINE FIELD name ON TABLE user TYPE object;
+DEFINE FIELD name.first ON TABLE user TYPE string;
+DEFINE FIELD name.last ON TABLE user TYPE string;
+DEFINE FIELD email ON TABLE user TYPE string ASSERT is::email($value);
+
+-- Add a unique index on the email field preventing duplicate values
+DEFINE INDEX email ON TABLE user COLUMNS email UNIQUE;
+
+-- Create a new event whenever a user changes their email address
+DEFINE EVENT email ON TABLE user WHEN $before.email != $after.email THEN (
+	CREATE event SET user = $this, time = time::now(), value = $after.email, action = 'email_changed'
+);
+```
+
+Connect records together with fully directed graph edge connections.
+
+```sql
+-- Add a graph edge between user:tobie and article:surreal
+RELATE user:tobie->write->article:surreal
+	SET time.written = time::now()
+;
+
+-- Add a graph edge between specific users and developers
+LET $from = (SELECT users FROM company:surrealdb);
+LET $devs = (SELECT * FROM user WHERE tags CONTAINS 'developer');
+RELATE $from->like->$devs UNIQUE
+	SET time.connected = time::now()
+;
+```
+
+
+Query data flexibly with advanced expressions and graph queries.
+
+```sql
+-- Select a nested array, and filter based on an attribute
+SELECT emails[WHERE active = true] FROM person;
+
+-- Select all 1st, 2nd, and 3rd level people who this specific person record knows, or likes, as separate outputs
+SELECT ->knows->(? AS f1)->knows->(? AS f2)->(knows, likes AS e3 WHERE influencer = true)->(? AS f3) FROM person:tobie;
+
+-- Select all person records (and their recipients), who have sent more than 5 emails
+SELECT *, ->sent->email->to->person FROM person WHERE count(->sent->email) > 5;
+
+-- Select other products purchased by people who purchased this laptop
+SELECT <-purchased<-person->purchased->product FROM product:laptop;
+
+-- Select products purchased by people in the last 3 weeks who have purchased the same products that we purchased
+SELECT ->purchased->product<-purchased<-person->(purchased WHERE created_at > time::now() - 3w)->product FROM person:tobie;
+```
+
+Store GeoJSON geographical data types, including points, lines and polygons.
+
+```sql
+UPDATE city:london SET
+	centre = (-0.118092, 51.509865),
+	boundary = {
+		type: "Polygon",
+		coordinates: [[
+			[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+			[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+			[-0.38314819, 51.37692386]
+		]]
+	}
+;
+```
+
+Write custom embedded logic using JavaScript functions.
+
+```sql
+CREATE film SET
+	ratings = [
+		{ rating: 6, user: user:bt8e39uh1ouhfm8ko8s0 },
+		{ rating: 8, user: user:bsilfhu88j04rgs0ga70 },
+	],
+	featured = function() {
+		return this.ratings.filter(r => {
+			return r.rating >= 7;
+		}).map(r => {
+			return { ...r, rating: r.rating * 10 };
+		});
+	}
+;
+```
+
+Specify granular access permissions for client and application access.
+
+```sql
+-- Specify access permissions for the 'post' table
+DEFINE TABLE post SCHEMALESS
+	PERMISSIONS
+		FOR select
+			-- Published posts can be selected
+			WHERE published = true
+			-- A user can select all their own posts
+			OR user = $auth.id
+		FOR create, update
+			-- A user can create or update their own posts
+			WHERE user = $auth.id
+		FOR delete
+			-- A user can delete their own posts
+			WHERE user = $auth.id
+			-- Or an admin can delete any posts
+			OR $auth.admin = true
+;
 ```
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/community.svg?raw=true">&nbsp;&nbsp;Community</h2>
