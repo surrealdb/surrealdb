@@ -128,7 +128,7 @@ impl Datastore {
 				v
 			}
 			// The datastore path is not valid
-			_ => unreachable!(),
+			_ => Err(Error::Ds("Unable to load the specified datastore".into())),
 		}
 	}
 
