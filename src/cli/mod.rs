@@ -53,7 +53,7 @@ fn path_valid(v: &str) -> Result<(), String> {
 	}
 	Err(String::from(
 		"\
-		Provide a valid database path paramater\
+		Provide a valid database path parameter\
 	",
 	))
 }

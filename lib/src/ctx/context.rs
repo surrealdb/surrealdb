@@ -25,7 +25,7 @@ pub struct Context<'a> {
 	parent: Option<&'a Context<'a>>,
 	// An optional deadline.
 	deadline: Option<Instant>,
-	// Wether or not this context is cancelled.
+	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
 	values: Option<HashMap<String, Cow<'a, Value>>>,
@@ -58,7 +58,7 @@ impl<'a> Context<'a> {
 		}
 	}
 
-	// Add cancelation to the context. The value that is returned will cancel
+	// Add cancellation to the context. The value that is returned will cancel
 	// the context and it's children once called.
 	pub fn add_cancel(&mut self) -> Canceller {
 		let cancelled = self.cancelled.clone();

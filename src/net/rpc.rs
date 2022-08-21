@@ -275,7 +275,7 @@ impl Rpc {
 		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "KILL $id";
-		// Specify the query paramaters
+		// Specify the query parameters
 		let var = Some(map! {
 			String::from("id") => id,
 			=> &self.vars
@@ -295,7 +295,7 @@ impl Rpc {
 		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "LIVE SELECT * FROM $tb";
-		// Specify the query paramaters
+		// Specify the query parameters
 		let var = Some(map! {
 			String::from("tb") => tb.make_table(),
 			=> &self.vars
@@ -317,7 +317,7 @@ impl Rpc {
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
 		let opt = CF.get().unwrap();
-		// Specify the query paramaters
+		// Specify the query parameters
 		let var = Some(self.vars.clone());
 		// Execute the query on the database
 		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
@@ -332,7 +332,7 @@ impl Rpc {
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
 		let opt = CF.get().unwrap();
-		// Specify the query paramaters
+		// Specify the query parameters
 		let var = Some(mrg! { vars.0, &self.vars });
 		// Execute the query on the database
 		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
@@ -353,7 +353,7 @@ impl Rpc {
 		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "SELECT * FROM $what";
-		// Specify the query paramaters
+		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.make_table_or_thing(),
 			=> &self.vars
@@ -377,7 +377,7 @@ impl Rpc {
 		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "CREATE $what CONTENT $data RETURN AFTER";
-		// Specify the query paramaters
+		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.make_table_or_thing(),
 			String::from("data") => data.into().into(),
@@ -402,7 +402,7 @@ impl Rpc {
 		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what CONTENT $data RETURN AFTER";
-		// Specify the query paramaters
+		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.make_table_or_thing(),
 			String::from("data") => data.into().into(),
@@ -427,7 +427,7 @@ impl Rpc {
 		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what MERGE $data RETURN AFTER";
-		// Specify the query paramaters
+		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.make_table_or_thing(),
 			String::from("data") => data.into().into(),
@@ -452,7 +452,7 @@ impl Rpc {
 		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "UPDATE $what PATCH $data RETURN DIFF";
-		// Specify the query paramaters
+		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.make_table_or_thing(),
 			String::from("data") => data.into().into(),
@@ -477,7 +477,7 @@ impl Rpc {
 		let opt = CF.get().unwrap();
 		// Specify the SQL query string
 		let sql = "DELETE $what";
-		// Specify the query paramaters
+		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.make_table_or_thing(),
 			=> &self.vars

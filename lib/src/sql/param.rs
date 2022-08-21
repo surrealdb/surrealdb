@@ -47,7 +47,7 @@ impl Param {
 					Some(v) => {
 						// Get the path parts
 						let pth: &[Part] = self;
-						// Process the paramater value
+						// Process the parameter value
 						let res = v.compute(ctx, opt, txn, doc).await?;
 						// Return the desired field
 						res.get(ctx, opt, txn, pth.next()).await
@@ -60,7 +60,7 @@ impl Param {
 					Some(v) => {
 						// Get the path parts
 						let pth: &[Part] = self;
-						// Process the paramater value
+						// Process the parameter value
 						let res = v.compute(ctx, opt, txn, doc).await?;
 						// Return the desired field
 						res.get(ctx, opt, txn, pth.next()).await
