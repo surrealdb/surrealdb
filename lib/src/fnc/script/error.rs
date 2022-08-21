@@ -10,7 +10,7 @@ impl From<js::Error> for Error {
 				line,
 			} => Error::InvalidScript {
 				message: format!(
-					"An exception occured{}: {}{}",
+					"An exception occurred{}: {}{}",
 					match file.is_empty() {
 						false => format!(" at {}:{}", file, line),
 						true => String::default(),
@@ -26,7 +26,7 @@ impl From<js::Error> for Error {
 				),
 			},
 			js::Error::Unknown => Error::InvalidScript {
-				message: "An unknown error occured".to_string(),
+				message: "An unknown error occurred".to_string(),
 			},
 			_ => Error::InvalidScript {
 				message: e.to_string(),

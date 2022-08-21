@@ -166,7 +166,7 @@ impl InfoStatement {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("fd".to_owned(), tmp.into());
-				// Process the indexs
+				// Process the indexes
 				let mut tmp = Object::default();
 				for v in run.all_ix(opt.ns(), opt.db(), tb).await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());

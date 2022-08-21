@@ -286,7 +286,7 @@ impl Datastore {
 		let mut txn = self.transaction(false, false).await?;
 		// Process the export
 		txn.export(&ns, &db, chn).await?;
-		// Everythign ok
+		// Everything ok
 		Ok(())
 	}
 }

@@ -11,11 +11,11 @@ use surrealdb::sql::Object;
 use surrealdb::Session;
 
 pub async fn signin(vars: Object) -> Result<String, Error> {
-	// Parse the speficied variables
+	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
 	let sc = vars.get("SC").or_else(|| vars.get("sc"));
-	// Check if the paramaters exist
+	// Check if the parameters exist
 	match (ns, db, sc) {
 		(Some(ns), Some(db), Some(sc)) => {
 			// Process the provided values
