@@ -76,11 +76,15 @@ impl Subquery {
 				// Process result
 				match v.limit() {
 					1 => match v.expr.single() {
-						Some(v) => res.first().get(&ctx, &opt, txn, &v).await,
+						Some(v) => {
+							let x = res.first();
+							let x = x.get(&ctx, &opt, txn, &v).await;
+							x.map(|x| x.into_owned())
+						}
 						None => res.first().ok(),
 					},
 					_ => match v.expr.single() {
-						Some(v) => res.get(&ctx, &opt, txn, &v).await,
+						Some(v) => res.get(&ctx, &opt, txn, &v).await.map(|x| x.into_owned()),
 						None => res.ok(),
 					},
 				}

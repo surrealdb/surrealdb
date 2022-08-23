@@ -50,7 +50,8 @@ impl Param {
 						// Process the parameter value
 						let res = v.compute(ctx, opt, txn, doc).await?;
 						// Return the desired field
-						res.get(ctx, opt, txn, pth.next()).await
+						let x = res.get(ctx, opt, txn, pth.next()).await;
+						x.map(|x| x.into_owned())
 					}
 					// The base document does not exist
 					None => Ok(Value::None),
@@ -63,7 +64,8 @@ impl Param {
 						// Process the parameter value
 						let res = v.compute(ctx, opt, txn, doc).await?;
 						// Return the desired field
-						res.get(ctx, opt, txn, pth.next()).await
+						let x = res.get(ctx, opt, txn, pth.next()).await;
+						x.map(|x| x.into_owned())
 					}
 					// The base variable does not exist
 					None => Ok(Value::None),

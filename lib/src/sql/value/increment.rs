@@ -15,7 +15,7 @@ impl Value {
 		path: &[Part],
 		val: Value,
 	) -> Result<(), Error> {
-		match self.get(ctx, opt, txn, path).await? {
+		match self.get(ctx, opt, txn, path).await?.into_owned() {
 			Value::Number(v) => match val {
 				Value::Number(x) => self.set(ctx, opt, txn, path, Value::from(v + x)).await,
 				_ => Ok(()),

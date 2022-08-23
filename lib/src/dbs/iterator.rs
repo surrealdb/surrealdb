@@ -186,10 +186,11 @@ impl Iterator {
 						if let Field::Alone(v) = field {
 							match v {
 								Value::Function(f) if f.is_aggregate() => {
-									let x = vals
-										.all()
+									let x = vals.all();
+									let x = x
 										.get(ctx, opt, txn, v.to_idiom().as_ref())
-										.await?;
+										.await?
+										.into_owned();
 									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
 									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 								}
@@ -207,7 +208,8 @@ impl Iterator {
 									let x = vals
 										.all()
 										.get(ctx, opt, txn, v.to_idiom().as_ref())
-										.await?;
+										.await?
+										.into_owned();
 									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
 									obj.set(ctx, opt, txn, i, x).await?;
 								}
@@ -307,18 +309,20 @@ impl Iterator {
 				// Loop over each value
 				for obj in &mut self.results {
 					// Get the value at the path
-					let val = obj.get(ctx, opt, txn, fetch).await?;
+					let val = obj.get(ctx, opt, txn, fetch).await?.into_owned();
 					// Set the value at the path
 					match val {
 						Value::Array(v) => {
 							// Fetch all remote records
-							let val = Value::Array(v).get(ctx, opt, txn, &[Part::Any]).await?;
+							let val = Value::Array(v);
+							let val = val.get(ctx, opt, txn, &[Part::Any]).await?.into_owned();
 							// Set the value at the path
 							obj.set(ctx, opt, txn, fetch, val).await?;
 						}
 						Value::Thing(v) => {
 							// Fetch all remote records
-							let val = Value::Thing(v).get(ctx, opt, txn, &[Part::All]).await?;
+							let val = Value::Thing(v);
+							let val = val.get(ctx, opt, txn, &[Part::All]).await?.into_owned();
 							// Set the value at the path
 							obj.set(ctx, opt, txn, fetch, val).await?;
 						}

@@ -15,7 +15,7 @@ impl Value {
 	) -> Result<(), Error> {
 		for o in val.to_operations()?.into_iter() {
 			match o.op {
-				Op::Add => match self.get(ctx, opt, txn, &o.path).await? {
+				Op::Add => match self.get(ctx, opt, txn, &o.path).await?.into_owned() {
 					Value::Array(_) => self.increment(ctx, opt, txn, &o.path, o.value).await?,
 					_ => self.set(ctx, opt, txn, &o.path, o.value).await?,
 				},
@@ -23,7 +23,9 @@ impl Value {
 				Op::Replace => self.set(ctx, opt, txn, &o.path, o.value).await?,
 				Op::Change => {
 					if let Value::Strand(p) = o.value {
-						if let Value::Strand(v) = self.get(ctx, opt, txn, &o.path).await? {
+						if let Value::Strand(v) =
+							self.get(ctx, opt, txn, &o.path).await?.into_owned()
+						{
 							let mut dmp = dmp::new();
 							let mut pch = dmp.patch_from_text(p.as_string());
 							let (txt, _) = dmp.patch_apply(&mut pch, v.as_str());
