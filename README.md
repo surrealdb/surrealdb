@@ -200,7 +200,7 @@ docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start
 Update the image to the latest version:
 
 ```bash
-docker pull surrealdb/surrealdb
+docker pull surrealdb/surrealdb:latest
 ```
 
 <h2><img height="20" src="/img/gettingstarted.svg">&nbsp;&nbsp;Getting started</h2>
