@@ -197,6 +197,12 @@ Docker can be used to manage and run SurrealDB database instances without the ne
 docker run --pull --rm -p 8000:8000 surrealdb/surrealdb:latest start
 ```
 
+If you expect errors like `No such image: surrealdb/surrealdb:latest` please try to `pull` the latest image first.
+
+```bash
+docker pull surrealdb/surrealdb
+```
+
 <h2><img height="20" src="/img/gettingstarted.svg">&nbsp;&nbsp;Getting started</h2>
 
 Getting started with SurrealDB is as easy as starting up the SurrealDB database server, choosing your platform, and integrating its SDK into your code. You can easily get started with your platform of choice by reading one of our tutorials.
