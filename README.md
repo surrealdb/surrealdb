@@ -197,7 +197,7 @@ Docker can be used to manage and run SurrealDB database instances without the ne
 docker run --pull --rm -p 8000:8000 surrealdb/surrealdb:latest start
 ```
 
-If you expect errors like `No such image: surrealdb/surrealdb:latest` please try to `pull` the latest image first.
+If you experience errors like `No such image: surrealdb/surrealdb:latest` please try to just `pull` the latest image first.
 
 ```bash
 docker pull surrealdb/surrealdb
