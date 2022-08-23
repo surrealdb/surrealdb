@@ -5,10 +5,12 @@ use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
+use std::sync::Arc;
 use surrealdb::sql::Object;
+use surrealdb::Auth;
 use surrealdb::Session;
 
-pub async fn signup(vars: Object) -> Result<String, Error> {
+pub async fn signup(session: &mut Session, vars: Object) -> Result<String, Error> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -21,7 +23,7 @@ pub async fn signup(vars: Object) -> Result<String, Error> {
 			let db = db.to_strand().as_string();
 			let sc = sc.to_strand().as_string();
 			// Attempt to signin to specified scope
-			let res = super::signup::sc(ns, db, sc, vars).await?;
+			let res = super::signup::sc(session, ns, db, sc, vars).await?;
 			// Return the result to the client
 			Ok(res)
 		}
@@ -29,7 +31,13 @@ pub async fn signup(vars: Object) -> Result<String, Error> {
 	}
 }
 
-pub async fn sc(ns: String, db: String, sc: String, vars: Object) -> Result<String, Error> {
+pub async fn sc(
+	session: &mut Session,
+	ns: String,
+	db: String,
+	sc: String,
+	vars: Object,
+) -> Result<String, Error> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Get local copy of options
@@ -64,12 +72,14 @@ pub async fn sc(ns: String, db: String, sc: String, vars: Object) -> Result<Stri
 										_ => Utc::now() + Duration::hours(1),
 									}
 									.timestamp(),
-									ns: Some(ns),
-									db: Some(db),
-									sc: Some(sc),
+									ns: Some(ns.to_owned()),
+									db: Some(db.to_owned()),
+									sc: Some(sc.to_owned()),
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
+								// Set the authentication on the sesssion
+								session.au = Arc::new(Auth::Sc(ns, db, sc));
 								// Create the authentication token
 								match encode(&*HEADER, &val, &key) {
 									// The auth token was created successfully

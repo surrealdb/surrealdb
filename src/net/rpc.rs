@@ -116,11 +116,11 @@ impl Rpc {
 				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"signup" => match params.take_one() {
-				Value::Object(v) => rpc.read().await.signup(v).await,
+				Value::Object(v) => rpc.write().await.signup(v).await,
 				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"signin" => match params.take_one() {
-				Value::Object(v) => rpc.read().await.signin(v).await,
+				Value::Object(v) => rpc.write().await.signin(v).await,
 				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"invalidate" => match params.len() {
@@ -208,12 +208,18 @@ impl Rpc {
 		Ok(Value::None)
 	}
 
-	async fn signup(&self, vars: Object) -> Result<Value, Error> {
-		crate::iam::signup::signup(vars).await.map(Into::into).map_err(Into::into)
+	async fn signup(&mut self, vars: Object) -> Result<Value, Error> {
+		crate::iam::signup::signup(&mut self.session, vars)
+			.await
+			.map(Into::into)
+			.map_err(Into::into)
 	}
 
-	async fn signin(&self, vars: Object) -> Result<Value, Error> {
-		crate::iam::signin::signin(vars).await.map(Into::into).map_err(Into::into)
+	async fn signin(&mut self, vars: Object) -> Result<Value, Error> {
+		crate::iam::signin::signin(&mut self.session, vars)
+			.await
+			.map(Into::into)
+			.map_err(Into::into)
 	}
 
 	async fn invalidate(&mut self) -> Result<Value, Error> {
