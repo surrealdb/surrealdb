@@ -2,11 +2,17 @@
 
 This file contains a set of instructions for building SurrealDB on a number of different platforms. Currently, SurrealDB is built for release automatically in a [Github Actions](https://github.com/surrealdb/surrealdb/actions) continuous-integration environment, on macOS, Ubuntu, and Windows.
 
-## Building on macOS
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+
+## Building on macOS (arm64)
 
 <details><summary>Click to show details</summary>
 	
-### ✅ Compile for macOS
+### ✅ Compile for `apple-darwin` (macOS)
 ```bash
 # Setup
 brew install cmake
@@ -18,31 +24,59 @@ cargo build --release --locked --target x86_64-apple-darwin
 cargo build --release --locked --target aarch64-apple-darwin
 ```
 
-### ❌ Cross-compile for Linux
-<sub>This does not yet build successfully</sub>
+### ✅ Compile for `aarch64-unknown-linux-gnu` (Linux)
 ```bash
+# Run Docker
+docker run -it --platform linux/arm64 -v $PWD:/code ubuntu
 # Setup
-brew install cmake
-brew tap messense/macos-cross-toolchains
-brew install x86_64-unknown-linux-gnu
-brew install aarch64-unknown-linux-gnu
-rustup target add x86_64-unknown-linux-gnu
+apt-get -y update
+apt-get -y install \
+	curl \
+	llvm \
+	cmake \
+	binutils \
+	clang-11 \
+	qemu-user \
+	musl-tools \
+	libssl-dev \
+	pkg-config \
+	build-essential
+# Install rustlang and cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+# Add extra targets for rust
 rustup target add aarch64-unknown-linux-gnu
-# Compile for x86_64-unknown-linux-gnu
-export CC_x86_64_unknown_linux_gnu=x86_64-unknown-linux-gnu-gcc
-export CXX_x86_64_unknown_linux_gnu=x86_64-unknown-linux-gnu-g++
-export AR_x86_64_unknown_linux_gnu=x86_64-unknown-linux-gnu-ar
-export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-unknown-linux-gnu-gcc
-cargo build --release --locked --target x86_64-unknown-linux-gnu
 # Compile for aarch64-unknown-linux-gnu
-export CC_aarch64_unknown_linux_gnu=aarch64-unknown-linux-gnu-gcc
-export CXX_aarch64_unknown_linux_gnu=aarch64-unknown-linux-gnu-g++
-export AR_aarch64_unknown_linux_gnu=aarch64-unknown-linux-gnu-ar
-export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-unknown-linux-gnu-gcc
 cargo build --release --locked --target aarch64-unknown-linux-gnu
 ```
 
-### ❌ Cross-compile for Windows
+### ✅ Compile for `x86_64-unknown-linux-gnu` (Linux)
+```bash
+# Run Docker
+docker run -it --platform linux/amd64 -v $PWD:/code ubuntu
+# Setup
+apt-get -y update
+apt-get -y install \
+	curl \
+	llvm \
+	cmake \
+	binutils \
+	clang-11 \
+	qemu-user \
+	musl-tools \
+	libssl-dev \
+	pkg-config \
+	build-essential
+# Install rustlang and cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+# Add extra targets for rust
+rustup target add x86_64-unknown-linux-gnu
+# Compile for x86_64-unknown-linux-gnu
+cargo build --release --locked --target x86_64-unknown-linux-gnu
+```
+
+### ❌ Cross-compile for `x86_64-pc-windows-gnu` (Windows)
 <sub>This does not yet build successfully</sub>
 ```bash
 # Setup
@@ -54,17 +88,7 @@ export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
 cargo build --release --locked --target x86_64-pc-windows-gnu
 ```
 
-### ❌ Cross-compile for Raspberry Pi
-<sub>This does not yet build successfully</sub>
-```bash
-# Setup
-brew install cmake arm-linux-gnueabihf-binutils
-rustup target add armv7-unknown-linux-musleabihf
-# Compile for armv7-unknown-linux-musleabihf
-cargo build --target armv7-unknown-linux-musleabihf
-```
-
-### ❌ Cross-compile for Linux (Musl)
+### ❌ Cross-compile for `x86_64-unknown-linux-musl` (Linux Musl)
 <sub>This does not yet build successfully</sub>
 ```bash
 docker pull clux/muslrust:stable
@@ -73,26 +97,67 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 	
 </details>
 
-## Building on Ubuntu 20.04
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+
+## Building on Ubuntu 20.04 (arm64)
 
 <details><summary>Click to show details</summary>
 
-### ✅ Compile for Linux
+### ✅ Compile for `aarch64-unknown-linux-gnu` (Linux)
 ```bash
 # Setup
-sudo apt-get -y update
-sudo apt-get -y install llvm cmake clang-11 binutils
-sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
-sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
-rustup target add x86_64-unknown-linux-gnu
+apt-get -y update
+apt-get -y install \
+	curl \
+	llvm \
+	cmake \
+	binutils \
+	clang-11 \
+	qemu-user \
+	musl-tools \
+	libssl-dev \
+	pkg-config \
+	build-essential
+# Install rustlang and cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+# Add extra targets for rust
 rustup target add aarch64-unknown-linux-gnu
-# Compile for x86_64-unknown-linux-gnu
-cargo build --release --locked --target x86_64-unknown-linux-gnu
-# Compile for x86_64-unknown-linux-gnu
+# Compile for aarch64-unknown-linux-gnu
 cargo build --release --locked --target aarch64-unknown-linux-gnu
 ```
 
-### ❌ Cross-compile for Windows
+### ✅ Compile for `x86_64-unknown-linux-gnu` (Linux)
+```bash
+# Setup
+apt-get -y update
+apt-get -y install \
+	curl \
+	llvm \
+	cmake \
+	binutils \
+	clang-11 \
+	qemu-user \
+	musl-tools \
+	libssl-dev \
+	pkg-config \
+	build-essential \
+	libc6-dev-amd64-cross \
+	crossbuild-essential-amd64
+# Install rustlang and cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+# Add extra targets for rust
+rustup target add x86_64-unknown-linux-gnu
+# Compile for x86_64-unknown-linux-gnu
+cargo build --release --locked --target x86_64-unknown-linux-gnu
+```
+
+### ❌ Cross-compile for `x86_64-pc-windows-gnu` (Windows)
 <sub>This does not yet build successfully</sub>
 ```bash
 # Setup
@@ -105,19 +170,143 @@ export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
 cargo build --release --locked --target x86_64-pc-windows-gnu
 ```
 
-### ❌ Cross-compile for Raspberry Pi
+### ❌ Cross-compile for `armv7-unknown-linux-musleabihf` (Raspberry Pi)
+<sub>This does not yet build successfully</sub>
+```bash
+# Setup
+apt-get -y update
+apt-get -y install \
+	curl \
+	llvm \
+	cmake \
+	binutils \
+	clang-11 \
+	qemu-user \
+	musl-tools \
+	libssl-dev \
+	pkg-config \
+	build-essential \
+	g++-arm-linux-gnueabihf \
+	gcc-arm-linux-gnueabihf
+# Install rustlang and cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+# Add extra targets for rust
+rustup target add armv7-unknown-linux-musleabihf
+# Compile for x86_64-unknown-linux-gnu
+cargo build --release --locked --target armv7-unknown-linux-musleabihf
+```
+
+### ❌ Cross-compile for `x86_64-unknown-linux-musl` (Linux Musl)
+<sub>This does not yet build successfully</sub>
+```bash
+docker pull clux/muslrust:stable
+docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --release --target x86_64-unknown-linux-musl
+```
+
+</details>
+
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+<!-- -------------------------------------------------- -->
+
+## Building on Ubuntu 20.04 (amd64)
+
+<details><summary>Click to show details</summary>
+
+### ✅ Compile for `x86_64-unknown-linux-gnu` (Linux)
+```bash
+# Setup
+apt-get -y update
+apt-get -y install \
+	curl \
+	llvm \
+	cmake \
+	binutils \
+	clang-11 \
+	qemu-user \
+	musl-tools \
+	libssl-dev \
+	pkg-config \
+	build-essential
+# Install rustlang and cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+# Add extra targets for rust
+rustup target add x86_64-unknown-linux-gnu
+# Compile for x86_64-unknown-linux-gnu
+cargo build --release --locked --target x86_64-unknown-linux-gnu
+```
+
+### ✅ Compile for `aarch64-unknown-linux-gnu` (Linux)
+```bash
+# Setup
+apt-get -y update
+apt-get -y install \
+	curl \
+	llvm \
+	cmake \
+	binutils \
+	clang-11 \
+	qemu-user \
+	musl-tools \
+	libssl-dev \
+	pkg-config \
+	build-essential \
+	libc6-dev-arm64-cross \
+	crossbuild-essential-arm64
+# Install rustlang and cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+# Add extra targets for rust
+rustup target add aarch64-unknown-linux-gnu
+# Compile for x86_64-unknown-linux-gnu
+cargo build --release --locked --target aarch64-unknown-linux-gnu
+```
+
+### ❌ Cross-compile for `x86_64-pc-windows-gnu` (Windows)
 <sub>This does not yet build successfully</sub>
 ```bash
 # Setup
 sudo apt-get -y update
-sudo apt-get -y install llvm cmake clang-11 binutils
-sudo apt-get -y install -y g++-arm-linux-gnueabihf gcc-arm-linux-gnueabihf
-rustup target add armv7-unknown-linux-gnueabihf
-# Compile for armv7-unknown-linux-musleabihf
+sudo apt-get -y install llvm cmake clang-11 binutils mingw-w64
+rustup target add x86_64-pc-windows-gnu
+# Compile for x86_64-pc-windows-gnu
+export CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc
+export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
+cargo build --release --locked --target x86_64-pc-windows-gnu
+```
+
+### ❌ Cross-compile for `armv7-unknown-linux-musleabihf` (Raspberry Pi)
+<sub>This does not yet build successfully</sub>
+```bash
+# Setup
+apt-get -y update
+apt-get -y install \
+	curl \
+	llvm \
+	cmake \
+	binutils \
+	clang-11 \
+	qemu-user \
+	musl-tools \
+	libssl-dev \
+	pkg-config \
+	build-essential \
+	g++-arm-linux-gnueabihf \
+	gcc-arm-linux-gnueabihf
+# Install rustlang and cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+# Add extra targets for rust
+rustup target add armv7-unknown-linux-musleabihf
+# Compile for x86_64-unknown-linux-gnu
 cargo build --release --locked --target armv7-unknown-linux-musleabihf
 ```
 
-### ❌ Cross-compile for Linux (Musl)
+### ❌ Cross-compile for `x86_64-unknown-linux-musl` (Linux Musl)
 <sub>This does not yet build successfully</sub>
 ```bash
 docker pull clux/muslrust:stable
