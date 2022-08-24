@@ -23,7 +23,7 @@ pub struct Transaction {
 impl Datastore {
 	// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		match tikv::TransactionClient::new(vec![path]).await {
+		match tikv::TransactionClient::new(vec![path], None).await {
 			Ok(db) => Ok(Datastore {
 				db,
 			}),

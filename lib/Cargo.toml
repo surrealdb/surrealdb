@@ -57,7 +57,7 @@ sha-1 = "0.10.0"
 sha2 = "0.10.2"
 storekey = "0.3.0"
 thiserror = "1.0.32"
-tikv = { version = "0.1.0", package = "tikv-client", optional = true }
+tikv = { version = "0.1.0", package = "tikv-client", git = "https://github.com/tikv/client-rust", optional = true, rev = "68b7f1e1ab0e059cbee1a3200d559ef4b03d4c8b" }
 trice = "0.1.0"
 url = "2.2.2"
 uuid = { version = "1.1.2", features = ["serde", "v4"] }
