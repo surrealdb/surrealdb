@@ -29,14 +29,16 @@ pub struct Options {
 	pub force: bool,
 	// Should we run permissions checks?
 	pub perms: bool,
+	// Should we error if tables don't exist?
+	pub strict: bool,
 	// Should we process field queries?
 	pub fields: bool,
 	// Should we process event queries?
 	pub events: bool,
 	// Should we process table queries?
 	pub tables: bool,
-	// Should we error if tables don't exist?
-	pub strict: bool,
+	// Should we process index queries?
+	pub indexes: bool,
 	// Should we process function futures?
 	pub futures: bool,
 }
@@ -58,10 +60,11 @@ impl Options {
 			perms: true,
 			debug: false,
 			force: false,
+			strict: false,
 			fields: true,
 			events: true,
 			tables: true,
-			strict: false,
+			indexes: true,
 			futures: false,
 			auth: Arc::new(auth),
 		}
@@ -154,6 +157,17 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			tables: v,
+			..*self
+		}
+	}
+
+	// Create a new Options object for a subquery
+	pub fn indexes(&self, v: bool) -> Options {
+		Options {
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
+			indexes: v,
 			..*self
 		}
 	}

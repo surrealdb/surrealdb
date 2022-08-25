@@ -14,6 +14,10 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		// Check events
+		if !opt.indexes {
+			return Ok(());
+		}
 		// Check if forced
 		if !opt.force && !self.changed() {
 			return Ok(());
@@ -50,7 +54,7 @@ impl<'a> Document<'a> {
 						if self.initial.is_some() {
 							#[rustfmt::skip]
 							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, o, None);
-							run.delc(key, Some(rid)).await?;
+							let _ = run.delc(key, Some(rid)).await; // Ignore this error
 						}
 						// Create the new index data
 						if self.current.is_some() {
@@ -69,7 +73,7 @@ impl<'a> Document<'a> {
 						if self.initial.is_some() {
 							#[rustfmt::skip]
 							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, o, Some(&rid.id));
-							run.delc(key, Some(rid)).await?;
+							let _ = run.delc(key, Some(rid)).await; // Ignore this error
 						}
 						// Create the new index data
 						if self.current.is_some() {
