@@ -13,15 +13,8 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let user = matches.value_of("user").unwrap();
 	let pass = matches.value_of("pass").unwrap();
 	let conn = matches.value_of("conn").unwrap();
-
-	let ns = match matches.value_of("ns") {
-		Some(val) => val,
-		None => "",
-	};
-	let db = match matches.value_of("db") {
-		Some(val) => val,
-		None => "",
-	};
+	let ns = matches.value_of("ns");
+	let db = matches.value_of("db");
 
 	// If we should pretty-print responses
 	let pretty = matches.is_present("pretty");
@@ -45,11 +38,19 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				let res = Client::new()
 					.post(&conn)
 					.header(CONTENT_TYPE, "application/json")
-					.basic_auth(user, Some(pass))
-					.header("NS", ns)
-					.header("DB", db)
-					.body(line)
-					.send();
+					.basic_auth(user, Some(pass));
+				// Add NS header if specified
+				let res = match ns {
+					Some(ns) => res.header("NS", ns),
+					None => res,
+				};
+				// Add DB header if specified
+				let res = match db {
+					Some(db) => res.header("DB", db),
+					None => res,
+				};
+				// Complete request
+				let res = res.body(line).send();
 				// Get the request response
 				match process(pretty, res) {
 					Ok(v) => println!("{}", v),
