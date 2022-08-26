@@ -115,6 +115,9 @@ fn thing_double(i: &str) -> IResult<&str, Thing> {
 mod tests {
 
 	use super::*;
+	use crate::sql::array::Array;
+	use crate::sql::object::Object;
+	use crate::sql::value::Value;
 
 	#[test]
 	fn thing_normal() {
@@ -160,6 +163,41 @@ mod tests {
 			Thing {
 				tb: String::from("test"),
 				id: Id::from("id"),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_object() {
+		let sql = "test:{ location: 'GBR', year: 2022 }";
+		let res = thing(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(r#"test:{ location: "GBR", year: 2022 }"#, format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::Object(Object::from(map! {
+					"location".to_string() => Value::from("GBR"),
+					"year".to_string() => Value::from(2022),
+				})),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_array() {
+		let sql = "test:['GBR', 2022]";
+		let res = thing(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(r#"test:["GBR", 2022]"#, format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::Array(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
 			}
 		);
 	}
