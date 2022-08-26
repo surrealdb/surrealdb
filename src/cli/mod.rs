@@ -414,7 +414,7 @@ pub fn init() {
 			.arg(
 				Arg::new("ns")
 					.long("ns")
-					.required(true)
+					.required(false)
 					.takes_value(true)
 					.forbid_empty_values(true)
 					.help("The namespace to export the data from"),
@@ -422,7 +422,7 @@ pub fn init() {
 			.arg(
 				Arg::new("db")
 					.long("db")
-					.required(true)
+					.required(false)
 					.takes_value(true)
 					.forbid_empty_values(true)
 					.help("The database to export the data from"),
