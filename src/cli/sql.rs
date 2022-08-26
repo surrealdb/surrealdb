@@ -13,8 +13,16 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let user = matches.value_of("user").unwrap();
 	let pass = matches.value_of("pass").unwrap();
 	let conn = matches.value_of("conn").unwrap();
-	let ns = matches.value_of("ns").unwrap();
-	let db = matches.value_of("db").unwrap();
+
+	let ns = match matches.value_of("ns") {
+		Some(val) => val,
+		None => "",
+	};
+	let db = match matches.value_of("db") {
+		Some(val) => val,
+		None => "",
+	};
+
 	// If we should pretty-print responses
 	let pretty = matches.is_present("pretty");
 	// Set the correct import URL
