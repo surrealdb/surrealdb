@@ -1,8 +1,10 @@
 use crate::cnf::ID_CHARS;
+use crate::sql::array::{array, Array};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_id;
 use crate::sql::ident::ident_raw;
 use crate::sql::number::integer;
+use crate::sql::object::{object, Object};
 use nanoid::nanoid;
 use nom::branch::alt;
 use nom::combinator::map;
@@ -13,6 +15,8 @@ use std::fmt;
 pub enum Id {
 	Number(i64),
 	String(String),
+	Object(Object),
+	Array(Array),
 }
 
 impl From<i64> for Id {
@@ -53,6 +57,8 @@ impl Id {
 		match self {
 			Id::Number(v) => v.to_string(),
 			Id::String(v) => v.to_string(),
+			Id::Object(v) => v.to_string(),
+			Id::Array(v) => v.to_string(),
 		}
 	}
 }
@@ -62,12 +68,19 @@ impl fmt::Display for Id {
 		match self {
 			Id::Number(v) => write!(f, "{}", v),
 			Id::String(v) => write!(f, "{}", escape_id(v)),
+			Id::Object(v) => write!(f, "{}", v),
+			Id::Array(v) => write!(f, "{}", v),
 		}
 	}
 }
 
 pub fn id(i: &str) -> IResult<&str, Id> {
-	alt((map(integer, Id::Number), map(ident_raw, Id::String)))(i)
+	alt((
+		map(integer, Id::Number),
+		map(ident_raw, Id::String),
+		map(object, Id::Object),
+		map(array, Id::Array),
+	))(i)
 }
 
 #[cfg(test)]
