@@ -14,13 +14,13 @@ categories = ["database-implementations", "data-structures", "embedded"]
 license = "Apache-2.0"
 
 [features]
-default = ["parallel", "kv-tikv", "kv-echodb", "kv-yokudb", "scripting", "http"]
+default = ["parallel", "kv-echodb", "kv-rocksdb", "scripting", "http"]
 parallel = ["dep:executor"]
 kv-tikv = ["dep:tikv"]
 kv-fdb = ["dep:foundationdb"]
 kv-echodb = ["dep:echodb"]
 kv-indxdb = ["dep:indxdb"]
-kv-yokudb = []
+kv-rocksdb = []
 scripting = ["dep:js", "dep:executor"]
 http = ["dep:surf"]
 

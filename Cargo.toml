@@ -5,6 +5,11 @@ edition = "2021"
 version = "1.0.0-beta.6"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
+[features]
+default = []
+storage-tikv = ["surrealdb/kv-tikv"]
+storage-fdb = ["surrealdb/kv-fdb"]
+
 [workspace]
 members = ["lib"]
 
