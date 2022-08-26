@@ -1,7 +1,9 @@
 use crate::err::Error;
+use crate::net::session;
 use bytes::Bytes;
 use std::str;
 use surrealdb::sql::Value;
+use surrealdb::Session;
 use warp::http::Response;
 use warp::Filter;
 
@@ -15,6 +17,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set post method
 	let post = base
 		.and(warp::post())
+		.and(session::build())
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and_then(handler);
@@ -22,13 +25,13 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	opts.or(post)
 }
 
-async fn handler(body: Bytes) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handler(mut session: Session, body: Bytes) -> Result<impl warp::Reply, warp::Rejection> {
 	// Convert the HTTP body into text
 	let data = str::from_utf8(&body).unwrap();
 	// Parse the provided data as JSON
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
-		Ok(Value::Object(vars)) => match crate::iam::signup::signup(vars).await {
+		Ok(Value::Object(vars)) => match crate::iam::signup::signup(&mut session, vars).await {
 			// Authentication was successful
 			Ok(v) => Ok(Response::builder().body(v)),
 			// There was an error with authentication

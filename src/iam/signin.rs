@@ -7,10 +7,12 @@ use argon2::password_hash::{PasswordHash, PasswordVerifier};
 use argon2::Argon2;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
+use std::sync::Arc;
 use surrealdb::sql::Object;
+use surrealdb::Auth;
 use surrealdb::Session;
 
-pub async fn signin(vars: Object) -> Result<String, Error> {
+pub async fn signin(session: &mut Session, vars: Object) -> Result<String, Error> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -23,7 +25,7 @@ pub async fn signin(vars: Object) -> Result<String, Error> {
 			let db = db.to_strand().as_string();
 			let sc = sc.to_strand().as_string();
 			// Attempt to signin to specified scope
-			let res = super::signin::sc(ns, db, sc, vars).await?;
+			let res = super::signin::sc(session, ns, db, sc, vars).await?;
 			// Return the result to the client
 			Ok(res)
 		}
@@ -41,7 +43,7 @@ pub async fn signin(vars: Object) -> Result<String, Error> {
 					let user = user.to_strand().as_string();
 					let pass = pass.to_strand().as_string();
 					// Attempt to signin to database
-					let res = super::signin::db(ns, db, user, pass).await?;
+					let res = super::signin::db(session, ns, db, user, pass).await?;
 					// Return the result to the client
 					Ok(res)
 				}
@@ -62,7 +64,27 @@ pub async fn signin(vars: Object) -> Result<String, Error> {
 					let user = user.to_strand().as_string();
 					let pass = pass.to_strand().as_string();
 					// Attempt to signin to namespace
-					let res = super::signin::ns(ns, user, pass).await?;
+					let res = super::signin::ns(session, ns, user, pass).await?;
+					// Return the result to the client
+					Ok(res)
+				}
+				// There is no username or password
+				_ => Err(Error::InvalidAuth),
+			}
+		}
+		(None, None, None) => {
+			// Get the provided user and pass
+			let user = vars.get("user");
+			let pass = vars.get("pass");
+			// Validate the user and pass
+			match (user, pass) {
+				// There is a username and password
+				(Some(user), Some(pass)) => {
+					// Process the provided values
+					let user = user.to_strand().as_string();
+					let pass = pass.to_strand().as_string();
+					// Attempt to signin to namespace
+					let res = super::signin::su(session, user, pass).await?;
 					// Return the result to the client
 					Ok(res)
 				}
@@ -74,7 +96,13 @@ pub async fn signin(vars: Object) -> Result<String, Error> {
 	}
 }
 
-pub async fn sc(ns: String, db: String, sc: String, vars: Object) -> Result<String, Error> {
+pub async fn sc(
+	session: &mut Session,
+	ns: String,
+	db: String,
+	sc: String,
+	vars: Object,
+) -> Result<String, Error> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Get local copy of options
@@ -109,12 +137,14 @@ pub async fn sc(ns: String, db: String, sc: String, vars: Object) -> Result<Stri
 										_ => Utc::now() + Duration::hours(1),
 									}
 									.timestamp(),
-									ns: Some(ns),
-									db: Some(db),
-									sc: Some(sc),
+									ns: Some(ns.to_owned()),
+									db: Some(db.to_owned()),
+									sc: Some(sc.to_owned()),
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
+								// Set the authentication on the sesssion
+								session.au = Arc::new(Auth::Sc(ns, db, sc));
 								// Create the authentication token
 								match encode(&*HEADER, &val, &key) {
 									// The auth token was created successfully
@@ -139,7 +169,13 @@ pub async fn sc(ns: String, db: String, sc: String, vars: Object) -> Result<Stri
 	}
 }
 
-pub async fn db(ns: String, db: String, user: String, pass: String) -> Result<String, Error> {
+pub async fn db(
+	session: &mut Session,
+	ns: String,
+	db: String,
+	user: String,
+	pass: String,
+) -> Result<String, Error> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Create a new readonly transaction
@@ -160,11 +196,13 @@ pub async fn db(ns: String, db: String, user: String, pass: String) -> Result<St
 						iat: Utc::now().timestamp(),
 						nbf: Utc::now().timestamp(),
 						exp: (Utc::now() + Duration::hours(1)).timestamp(),
-						ns: Some(ns),
-						db: Some(db),
+						ns: Some(ns.to_owned()),
+						db: Some(db.to_owned()),
 						id: Some(user),
 						..Claims::default()
 					};
+					// Set the authentication on the sesssion
+					session.au = Arc::new(Auth::Db(ns, db));
 					// Create the authentication token
 					match encode(&*HEADER, &val, &key) {
 						// The auth token was created successfully
@@ -182,7 +220,12 @@ pub async fn db(ns: String, db: String, user: String, pass: String) -> Result<St
 	}
 }
 
-pub async fn ns(ns: String, user: String, pass: String) -> Result<String, Error> {
+pub async fn ns(
+	session: &mut Session,
+	ns: String,
+	user: String,
+	pass: String,
+) -> Result<String, Error> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Create a new readonly transaction
@@ -203,10 +246,12 @@ pub async fn ns(ns: String, user: String, pass: String) -> Result<String, Error>
 						iat: Utc::now().timestamp(),
 						nbf: Utc::now().timestamp(),
 						exp: (Utc::now() + Duration::hours(1)).timestamp(),
-						ns: Some(ns),
+						ns: Some(ns.to_owned()),
 						id: Some(user),
 						..Claims::default()
 					};
+					// Set the authentication on the sesssion
+					session.au = Arc::new(Auth::Ns(ns));
 					// Create the authentication token
 					match encode(&*HEADER, &val, &key) {
 						// The auth token was created successfully
@@ -222,4 +267,18 @@ pub async fn ns(ns: String, user: String, pass: String) -> Result<String, Error>
 		// The specified user login does not exist
 		_ => Err(Error::InvalidAuth),
 	}
+}
+
+pub async fn su(session: &mut Session, user: String, pass: String) -> Result<String, Error> {
+	// Get the config options
+	let opts = CF.get().unwrap();
+	// Attempt to verify the root user
+	if let Some(root) = &opts.pass {
+		if user == opts.user && &pass == root {
+			session.au = Arc::new(Auth::Kv);
+			return Ok(String::from(""));
+		}
+	}
+	// The specified user login does not exist
+	Err(Error::InvalidAuth)
 }

@@ -15,6 +15,10 @@ impl<'a> Document<'a> {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		// Check fields
+		if !opt.fields {
+			return Ok(());
+		}
 		// Loop through all field statements
 		for fd in self.fd(opt, txn).await?.iter() {
 			// Loop over each field in document

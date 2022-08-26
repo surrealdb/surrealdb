@@ -473,6 +473,56 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_index_single_simple() -> Result<(), Error> {
+	let sql = "
+		CREATE user:1 SET age = 23;
+		CREATE user:2 SET age = 10;
+		DEFINE INDEX test ON user FIELDS age;
+		DEFINE INDEX test ON user COLUMNS age;
+		INFO FOR TABLE user;
+		UPDATE user:1 SET age = 24;
+		UPDATE user:2 SET age = 11;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 7);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			ev: {},
+			fd: {},
+			ft: {},
+			ix: { test: 'DEFINE INDEX test ON user FIELDS age' },
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: user:1, age: 24 }]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: user:2, age: 11 }]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_index_single() -> Result<(), Error> {
 	let sql = "
 		DEFINE INDEX test ON user FIELDS email;
@@ -662,6 +712,110 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 		tmp.err(),
 		Some(e) if e.to_string() == "Database index `test` already contains `user:4`"
 	));
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
+	let sql = "
+		CREATE user:1 SET email = 'info@surrealdb.com';
+		CREATE user:2 SET email = 'test@surrealdb.com';
+		CREATE user:3 SET email = 'test@surrealdb.com';
+		DEFINE INDEX test ON user FIELDS email UNIQUE;
+		DEFINE INDEX test ON user COLUMNS email UNIQUE;
+		INFO FOR TABLE user;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Database index `test` already contains `user:3`"
+	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Database index `test` already contains `user:3`"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			ev: {},
+			fd: {},
+			ft: {},
+			ix: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> {
+	let sql = "
+		CREATE user:1 SET account = 'apple', email = 'test@surrealdb.com';
+		CREATE user:2 SET account = 'tesla', email = 'test@surrealdb.com';
+		CREATE user:3 SET account = 'apple', email = 'test@surrealdb.com';
+		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
+		DEFINE INDEX test ON user FIELDS account, email UNIQUE;
+		DEFINE INDEX test ON user COLUMNS account, email UNIQUE;
+		INFO FOR TABLE user;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 7);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Database index `test` already contains `user:3`"
+	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Database index `test` already contains `user:3`"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			ev: {},
+			fd: {},
+			ft: {},
+			ix: {},
+		}",
+	);
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }

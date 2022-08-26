@@ -599,8 +599,14 @@ impl DefineTableStatement {
 			}
 			// Release the transaction
 			drop(run);
-			// Force tables to reprocess
+			// Force queries to run
 			let opt = &opt.force(true);
+			// Don't process field queries
+			let opt = &opt.fields(false);
+			// Don't process event queries
+			let opt = &opt.events(false);
+			// Don't process index queries
+			let opt = &opt.indexes(false);
 			// Process each foreign table
 			for v in view.what.0.iter() {
 				// Process the view data
@@ -983,6 +989,14 @@ impl DefineIndexStatement {
 		run.delr(beg..end, u32::MAX).await?;
 		// Release the transaction
 		drop(run);
+		// Force queries to run
+		let opt = &opt.force(true);
+		// Don't process field queries
+		let opt = &opt.fields(false);
+		// Don't process event queries
+		let opt = &opt.events(false);
+		// Don't process table queries
+		let opt = &opt.tables(false);
 		// Update the index data
 		let stm = UpdateStatement {
 			what: Values(vec![Value::Table(self.what.clone().into())]),
