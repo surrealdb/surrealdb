@@ -93,7 +93,10 @@ pub fn string(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn table(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(Value::Table(Table(args.remove(0).as_string())))
+	Ok(Value::Table(Table(match args.remove(0) {
+		Value::Thing(t) => t.tb.clone(),
+		v => v.as_string()
+	})))
 }
 
 pub fn thing(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
