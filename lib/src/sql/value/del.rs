@@ -8,7 +8,7 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
-use std::collections::{HashSet};
+use std::collections::HashSet;
 
 impl Value {
 	#[cfg_attr(feature = "parallel", async_recursion)]

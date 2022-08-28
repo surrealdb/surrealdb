@@ -21,14 +21,10 @@ pub fn r#enum(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	Ok(match args.len() {
 		0 => Value::None,
 		1 => match args.remove(0) {
-			Value::Array(v) => {
-				v.into_iter().choose(&mut rand::thread_rng()).unwrap_or(Value::None)
-			},
+			Value::Array(v) => v.into_iter().choose(&mut rand::thread_rng()).unwrap_or(Value::None),
 			v => v,
 		},
-		_ => {
-			args.into_iter().choose(&mut rand::thread_rng()).unwrap()
-		}
+		_ => args.into_iter().choose(&mut rand::thread_rng()).unwrap(),
 	})
 }
 
