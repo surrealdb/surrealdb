@@ -133,6 +133,21 @@ impl Datastore {
 	}
 
 	/// Create a new transaction on this datastore
+	///
+	/// *You must ensure that a [`Transaction`] does not ever outlive a [`Datastore`] instance.*
+	///
+	/// ```rust,no_run
+	/// use surrealdb::Datastore;
+	/// use surrealdb::Error;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(), Error> {
+	///     let ds = Datastore::new("file://database.db").await?;
+	///     let mut tx = ds.transaction(true, false).await?;
+	///     tx.cancel().await?;
+	///     Ok(())
+	/// }
+	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		match &self.inner {
 			#[cfg(feature = "kv-echodb")]
@@ -179,6 +194,21 @@ impl Datastore {
 	}
 
 	/// Parse and execute an SQL query
+	///
+	/// ```rust,no_run
+	/// use surrealdb::Datastore;
+	/// use surrealdb::Error;
+	/// use surrealdb::Session;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(), Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::for_kv();
+	///     let ast = "USE NS test DB test; SELECT * FROM person;";
+	///     let res = ds.execute(ast, &ses, None, false).await?;
+	///     Ok(())
+	/// }
+	/// ```
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -212,6 +242,22 @@ impl Datastore {
 	}
 
 	/// Execute a pre-parsed SQL query
+	///
+	/// ```rust,no_run
+	/// use surrealdb::Datastore;
+	/// use surrealdb::Error;
+	/// use surrealdb::Session;
+	/// use surrealdb::sql::parse;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(), Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::for_kv();
+	///     let ast = parse("USE NS test DB test; SELECT * FROM person;")?;
+	///     let res = ds.process(ast, &ses, None, false).await?;
+	///     Ok(())
+	/// }
+	/// ```
 	pub async fn process(
 		&self,
 		ast: Query,
@@ -242,7 +288,24 @@ impl Datastore {
 		exe.execute(ctx, opt, ast).await
 	}
 
-	/// Execute a pre-parsed SQL query
+	/// Ensure a SQL [`Value`] is fully computed
+	///
+	/// ```rust,no_run
+	/// use surrealdb::Datastore;
+	/// use surrealdb::Error;
+	/// use surrealdb::Session;
+	/// use surrealdb::sql::Function;
+	/// use surrealdb::sql::Value;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(), Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::for_kv();
+	///     let val = Value::Function(Box::new(Function::Future(Value::True)));
+	///     let res = ds.compute(val, &ses, None, false).await?;
+	///     Ok(())
+	/// }
+	/// ```
 	pub async fn compute(
 		&self,
 		val: Value,

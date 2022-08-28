@@ -1,10 +1,11 @@
-//! This library provides an easy-to-use client for [SurrealDB](https://surrealdb.com),
-//! the ultimate cloud database for tomorrow's applications. SurrealDB is a scalable,
-//! distributed, collaborative, document-graph database for the realtime web.
+//! This library provides the low-level database library implementation, and query language
+//! definition, for [SurrealDB](https://surrealdb.com), the ultimate cloud database for
+//! tomorrow's applications. SurrealDB is a scalable, distributed, collaborative, document-graph
+//! database for the realtime web.
 //!
-//! This library can be used to start an embedded in-memory datastore, an embedded
-//! datastore persisted to disk, or for connecting to a distributed [TiKV](https://tikv.org)
-//! key-value store.
+//! This library can be used to start an embedded in-memory datastore, an embedded datastore
+//! persisted to disk, a browser-based embedded datastore backed by IndexedDB, or for connecting
+//! to a distributed [TiKV](https://tikv.org) key-value store.
 
 #[macro_use]
 extern crate log;
