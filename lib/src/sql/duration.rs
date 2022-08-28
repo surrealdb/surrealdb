@@ -30,10 +30,7 @@ impl From<time::Duration> for Duration {
 
 impl From<String> for Duration {
 	fn from(s: String) -> Self {
-		match duration(s.as_ref()) {
-			Ok((_, v)) => v,
-			Err(_) => Duration::default(),
-		}
+		s.as_str().into()
 	}
 }
 
@@ -64,6 +61,12 @@ impl fmt::Display for Duration {
 		// Split up the duration
 		let secs = self.0.as_secs();
 		let nano = self.0.subsec_nanos();
+
+		// Ensure no empty output
+		if secs == 0 && nano == 0 {
+			return write!(f, "0ns");
+		}
+
 		// Calculate the total years
 		let year = secs / SECONDS_PER_YEAR;
 		let secs = secs % SECONDS_PER_YEAR;
@@ -79,36 +82,29 @@ impl fmt::Display for Duration {
 		// Calculate the total mins
 		let mins = secs / SECONDS_PER_MINUTE;
 		let secs = secs % SECONDS_PER_MINUTE;
-		// Prepare the outpit
-		let mut o = Vec::with_capacity(7);
 		// Write the different parts
 		if year > 0 {
-			o.push(format!("{year}y"));
+			write!(f, "{year}y")?;
 		}
 		if week > 0 {
-			o.push(format!("{week}w"));
+			write!(f, "{week}w")?;
 		}
 		if days > 0 {
-			o.push(format!("{days}d"));
+			write!(f, "{days}d")?;
 		}
 		if hour > 0 {
-			o.push(format!("{hour}h"));
+			write!(f, "{hour}h")?;
 		}
 		if mins > 0 {
-			o.push(format!("{mins}m"));
+			write!(f, "{mins}m")?;
 		}
 		if secs > 0 {
-			o.push(format!("{secs}s"));
+			write!(f, "{secs}s")?;
 		}
 		if nano > 0 {
-			o.push(format!("{nano}ns"));
+			write!(f, "{nano}ns")?;
 		}
-		// Ensure no empty output
-		if o.is_empty() {
-			o.push("0ns".to_string());
-		}
-		// Concatenate together
-		write!(f, "{}", o.concat())
+		Ok(())
 	}
 }
 

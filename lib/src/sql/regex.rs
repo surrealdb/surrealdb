@@ -32,10 +32,7 @@ impl fmt::Display for Regex {
 
 impl Regex {
 	pub fn regex(&self) -> Option<regex::Regex> {
-		match regex::Regex::new(&self.0) {
-			Ok(v) => Some(v),
-			Err(_) => None,
-		}
+		regex::Regex::new(&self.0).ok()
 	}
 }
 

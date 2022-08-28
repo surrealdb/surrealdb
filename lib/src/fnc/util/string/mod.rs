@@ -9,9 +9,9 @@ pub fn slug<S: AsRef<str>>(s: S) -> String {
 	// Get a reference
 	let s = s.as_ref();
 	// Convert unicode to ascii
-	let s = deunicode(s);
+	let mut s = deunicode(s);
 	// Convert string to lowercase
-	let s = s.to_ascii_lowercase();
+	s.make_ascii_lowercase();
 	// Replace any non-simple characters
 	let s = SIMPLES.replace_all(s.as_ref(), "-");
 	// Replace any duplicated hyphens
