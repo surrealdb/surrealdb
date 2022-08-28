@@ -10,6 +10,7 @@ use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
 use crate::sql::part::Part;
+use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -22,6 +23,7 @@ pub enum Iterable {
 	Value(Value),
 	Table(Table),
 	Thing(Thing),
+	Range(Range),
 	Edges(Edges),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),

@@ -135,6 +135,66 @@ impl Iterable {
 						break;
 					}
 				}
+				Iterable::Range(v) => {
+					// Check that the table exists
+					txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
+					// Prepare the start and end keys
+					let beg = thing::new(opt.ns(), opt.db(), &v.tb, &v.beg).encode().unwrap();
+					let end = thing::new(opt.ns(), opt.db(), &v.tb, &v.end).encode().unwrap();
+					// Prepare the next holder key
+					let mut nxt: Option<Vec<u8>> = None;
+					// Loop until no more keys
+					loop {
+						// Check if the context is finished
+						if ctx.is_done() {
+							break;
+						}
+						// Get the next 1000 key-value entries
+						let res = match nxt {
+							None => {
+								let min = beg.clone();
+								let max = end.clone();
+								txn.clone().lock().await.scan(min..max, 1000).await?
+							}
+							Some(ref mut beg) => {
+								beg.push(0x00);
+								let min = beg.clone();
+								let max = end.clone();
+								txn.clone().lock().await.scan(min..max, 1000).await?
+							}
+						};
+						// If there are key-value entries then fetch them
+						if !res.is_empty() {
+							// Get total results
+							let n = res.len();
+							// Exit when settled
+							if n == 0 {
+								break;
+							}
+							// Loop over results
+							for (i, (k, v)) in res.into_iter().enumerate() {
+								// Check the context
+								if ctx.is_done() {
+									break;
+								}
+								// Ready the next
+								if n == i + 1 {
+									nxt = Some(k.clone());
+								}
+								// Parse the data from the store
+								let key: crate::key::thing::Thing = (&k).into();
+								let val: crate::sql::value::Value = (&v).into();
+								let rid = Thing::from((key.tb, key.id));
+								// Create a new operable value
+								let val = Operable::Value(val);
+								// Process the record
+								ite.process(ctx, opt, txn, stm, Some(rid), val).await;
+							}
+							continue;
+						}
+						break;
+					}
+				}
 				Iterable::Edges(e) => {
 					// Pull out options
 					let ns = opt.ns();

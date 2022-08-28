@@ -56,6 +56,7 @@ impl UpdateStatement {
 			match v {
 				Value::Table(v) => i.ingest(Iterable::Table(v)),
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
+				Value::Range(v) => i.ingest(Iterable::Range(*v)),
 				Value::Edges(v) => i.ingest(Iterable::Edges(*v)),
 				Value::Model(v) => {
 					for v in v {

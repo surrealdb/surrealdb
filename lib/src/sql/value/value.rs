@@ -23,6 +23,7 @@ use crate::sql::object::{object, Object};
 use crate::sql::operation::Operation;
 use crate::sql::param::{param, Param};
 use crate::sql::part::Part;
+use crate::sql::range::{range, Range};
 use crate::sql::regex::{regex, Regex};
 use crate::sql::serde::is_internal_serialization;
 use crate::sql::strand::{strand, Strand};
@@ -114,6 +115,7 @@ pub enum Value {
 	Thing(Thing),
 	Model(Model),
 	Regex(Regex),
+	Range(Box<Range>),
 	Edges(Box<Edges>),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
@@ -224,6 +226,12 @@ impl From<Datetime> for Value {
 impl From<Duration> for Value {
 	fn from(v: Duration) -> Self {
 		Value::Duration(v)
+	}
+}
+
+impl From<Range> for Value {
+	fn from(v: Range) -> Self {
+		Value::Range(Box::new(v))
 	}
 }
 
@@ -1071,6 +1079,7 @@ impl fmt::Display for Value {
 			Value::Thing(v) => write!(f, "{}", v),
 			Value::Model(v) => write!(f, "{}", v),
 			Value::Regex(v) => write!(f, "{}", v),
+			Value::Range(v) => write!(f, "{}", v),
 			Value::Edges(v) => write!(f, "{}", v),
 			Value::Function(v) => write!(f, "{}", v),
 			Value::Subquery(v) => write!(f, "{}", v),
@@ -1142,10 +1151,11 @@ impl Serialize for Value {
 				Value::Thing(v) => s.serialize_newtype_variant("Value", 15, "Thing", v),
 				Value::Model(v) => s.serialize_newtype_variant("Value", 16, "Model", v),
 				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
-				Value::Edges(v) => s.serialize_newtype_variant("Value", 18, "Edges", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 19, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 20, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 21, "Expression", v),
+				Value::Range(v) => s.serialize_newtype_variant("Value", 18, "Range", v),
+				Value::Edges(v) => s.serialize_newtype_variant("Value", 19, "Edges", v),
+				Value::Function(v) => s.serialize_newtype_variant("Value", 20, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant("Value", 21, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant("Value", 22, "Expression", v),
 			}
 		} else {
 			match self {
@@ -1275,6 +1285,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(regex, Value::from),
 			map(model, Value::from),
 			map(edges, Value::from),
+			map(range, Value::from),
 			map(thing, Value::from),
 			map(table, Value::from),
 			map(strand, Value::from),
@@ -1289,6 +1300,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 		map(param, Value::from),
 		map(model, Value::from),
 		map(edges, Value::from),
+		map(range, Value::from),
 		map(thing, Value::from),
 		map(table, Value::from),
 	))(i)
@@ -1472,6 +1484,7 @@ mod tests {
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
 		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::regex::Regex>());
+		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::function::Function>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::subquery::Subquery>>());
