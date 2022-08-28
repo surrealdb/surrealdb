@@ -31,12 +31,12 @@ pub struct Transaction {
 
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
-	#[cfg(feature = "kv-echodb")]
+	#[cfg(feature = "kv-mem")]
 	Mem(super::mem::Transaction),
+	#[cfg(feature = "kv-rocksdb")]
+	RocksDB(super::rocksdb::Transaction),
 	#[cfg(feature = "kv-indxdb")]
-	IxDB(super::ixdb::Transaction),
-	#[cfg(feature = "kv-yokudb")]
-	File(super::file::Transaction),
+	IndxDB(super::indxdb::Transaction),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Transaction),
 	#[cfg(feature = "kv-fdb")]
@@ -52,19 +52,19 @@ impl Transaction {
 	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.closed(),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
 			} => v.closed(),
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.closed(),
 			#[cfg(feature = "kv-tikv")]
@@ -84,19 +84,19 @@ impl Transaction {
 	/// This reverses all changes made within the transaction.
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.cancel(),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
-			} => v.cancel(),
+			} => v.cancel().await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.cancel().await,
 			#[cfg(feature = "kv-tikv")]
@@ -116,19 +116,19 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.commit(),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
-			} => v.commit(),
+			} => v.commit().await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.commit().await,
 			#[cfg(feature = "kv-tikv")]
@@ -149,19 +149,19 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.del(key),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
-			} => v.del(key),
+			} => v.del(key).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.del(key).await,
 			#[cfg(feature = "kv-tikv")]
@@ -182,19 +182,19 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.exi(key),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
-			} => v.exi(key),
+			} => v.exi(key).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.exi(key).await,
 			#[cfg(feature = "kv-tikv")]
@@ -215,19 +215,19 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.get(key),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
-			} => v.get(key),
+			} => v.get(key).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.get(key).await,
 			#[cfg(feature = "kv-tikv")]
@@ -249,19 +249,19 @@ impl Transaction {
 		V: Into<Val>,
 	{
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.set(key, val),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
-			} => v.set(key, val),
+			} => v.set(key, val).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.set(key, val).await,
 			#[cfg(feature = "kv-tikv")]
@@ -283,19 +283,19 @@ impl Transaction {
 		V: Into<Val>,
 	{
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.put(key, val),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
-			} => v.put(key, val),
+			} => v.put(key, val).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.put(key, val).await,
 			#[cfg(feature = "kv-tikv")]
@@ -318,19 +318,19 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.scan(rng, limit),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
-			} => v.scan(rng, limit),
+			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-tikv")]
@@ -352,19 +352,19 @@ impl Transaction {
 		V: Into<Val>,
 	{
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.putc(key, val, chk),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
-			} => v.putc(key, val, chk),
+			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-tikv")]
@@ -386,19 +386,19 @@ impl Transaction {
 		V: Into<Val>,
 	{
 		match self {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Transaction {
 				inner: Inner::Mem(v),
 				..
 			} => v.delc(key, chk),
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
-				inner: Inner::File(v),
+				inner: Inner::RocksDB(v),
 				..
-			} => v.delc(key, chk),
+			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
-				inner: Inner::IxDB(v),
+				inner: Inner::IndxDB(v),
 				..
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-tikv")]

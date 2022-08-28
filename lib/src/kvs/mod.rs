@@ -1,10 +1,10 @@
 mod cache;
 mod ds;
 mod fdb;
-mod file;
-mod ixdb;
+mod indxdb;
 mod kv;
 mod mem;
+mod rocksdb;
 mod tikv;
 mod tx;
 

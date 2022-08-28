@@ -22,12 +22,12 @@ pub struct Datastore {
 
 #[allow(clippy::large_enum_variant)]
 pub(super) enum Inner {
-	#[cfg(feature = "kv-echodb")]
+	#[cfg(feature = "kv-mem")]
 	Mem(super::mem::Datastore),
+	#[cfg(feature = "kv-rocksdb")]
+	RocksDB(super::rocksdb::Datastore),
 	#[cfg(feature = "kv-indxdb")]
-	IxDB(super::ixdb::Datastore),
-	#[cfg(feature = "kv-yokudb")]
-	File(super::file::Datastore),
+	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
@@ -74,7 +74,7 @@ impl Datastore {
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
 		match path {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			"memory" => {
 				info!(target: LOG, "Starting kvs store in {}", path);
 				let v = super::mem::Datastore::new().await.map(|v| Datastore {
@@ -83,44 +83,60 @@ impl Datastore {
 				info!(target: LOG, "Started kvs store in {}", path);
 				v
 			}
-			// Parse and initiate an IxDB database
-			#[cfg(feature = "kv-indxdb")]
-			s if s.starts_with("ixdb:") => {
-				info!(target: LOG, "Starting kvs store at {}", path);
-				let s = s.trim_start_matches("ixdb://");
-				let v = super::ixdb::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::IxDB(v),
-				});
-				info!(target: LOG, "Started kvs store at {}", path);
-				v
-			}
 			// Parse and initiate an File database
-			#[cfg(feature = "kv-yokudb")]
+			#[cfg(feature = "kv-rocksdb")]
 			s if s.starts_with("file:") => {
 				info!(target: LOG, "Starting kvs store at {}", path);
 				let s = s.trim_start_matches("file://");
-				let v = super::file::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::File(v),
+				let s = s.trim_start_matches("file:");
+				let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
+					inner: Inner::RocksDB(v),
 				});
 				info!(target: LOG, "Started kvs store at {}", path);
 				v
 			}
-			// Parse and initiate an TiKV database
+			// Parse and initiate an RocksDB database
+			#[cfg(feature = "kv-rocksdb")]
+			s if s.starts_with("rocksdb:") => {
+				info!(target: LOG, "Starting kvs store at {}", path);
+				let s = s.trim_start_matches("rocksdb://");
+				let s = s.trim_start_matches("rocksdb:");
+				let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
+					inner: Inner::RocksDB(v),
+				});
+				info!(target: LOG, "Started kvs store at {}", path);
+				v
+			}
+			// Parse and initiate an IndxDB database
+			#[cfg(feature = "kv-indxdb")]
+			s if s.starts_with("indxdb:") => {
+				info!(target: LOG, "Starting kvs store at {}", path);
+				let s = s.trim_start_matches("indxdb://");
+				let s = s.trim_start_matches("indxdb:");
+				let v = super::indxdb::Datastore::new(s).await.map(|v| Datastore {
+					inner: Inner::IndxDB(v),
+				});
+				info!(target: LOG, "Started kvs store at {}", path);
+				v
+			}
+			// Parse and initiate a TiKV database
 			#[cfg(feature = "kv-tikv")]
 			s if s.starts_with("tikv:") => {
 				info!(target: LOG, "Connecting to kvs store at {}", path);
 				let s = s.trim_start_matches("tikv://");
+				let s = s.trim_start_matches("tikv:");
 				let v = super::tikv::Datastore::new(s).await.map(|v| Datastore {
 					inner: Inner::TiKV(v),
 				});
 				info!(target: LOG, "Connected to kvs store at {}", path);
 				v
 			}
-			// Parse and initiate an TiKV database
+			// Parse and initiate a FoundationDB database
 			#[cfg(feature = "kv-fdb")]
 			s if s.starts_with("fdb:") => {
 				info!(target: LOG, "Connecting to kvs store at {}", path);
 				let s = s.trim_start_matches("fdb://");
+				let s = s.trim_start_matches("fdb:");
 				let v = super::fdb::Datastore::new(s).await.map(|v| Datastore {
 					inner: Inner::FDB(v),
 				});
@@ -150,7 +166,7 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		match &self.inner {
-			#[cfg(feature = "kv-echodb")]
+			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
@@ -158,19 +174,19 @@ impl Datastore {
 					cache: super::cache::Cache::default(),
 				})
 			}
-			#[cfg(feature = "kv-indxdb")]
-			Inner::IxDB(v) => {
+			#[cfg(feature = "kv-rocksdb")]
+			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
-					inner: super::tx::Inner::IxDB(tx),
+					inner: super::tx::Inner::RocksDB(tx),
 					cache: super::cache::Cache::default(),
 				})
 			}
-			#[cfg(feature = "kv-yokudb")]
-			Inner::File(v) => {
+			#[cfg(feature = "kv-indxdb")]
+			Inner::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
-					inner: super::tx::Inner::File(tx),
+					inner: super::tx::Inner::IndxDB(tx),
 					cache: super::cache::Cache::default(),
 				})
 			}
