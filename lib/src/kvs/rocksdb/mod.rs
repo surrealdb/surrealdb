@@ -9,10 +9,11 @@ use rocksdb::IteratorMode;
 use rocksdb::OptimisticTransactionDB;
 use rocksdb::ReadOptions;
 use std::ops::Range;
+use std::pin::Pin;
 use std::sync::Arc;
 
 pub struct Datastore {
-	db: rocksdb::OptimisticTransactionDB,
+	db: Pin<Arc<rocksdb::OptimisticTransactionDB>>,
 }
 
 pub struct Transaction {
@@ -22,13 +23,16 @@ pub struct Transaction {
 	rw: bool,
 	// The distributed datastore transaction
 	tx: Arc<Mutex<Option<rocksdb::Transaction<'static, OptimisticTransactionDB>>>>,
+	// the above, supposedly 'static, transaction actually points here, so keep the memory alive
+	// note that this is dropped last, as it is declared last
+	_db: Pin<Arc<rocksdb::OptimisticTransactionDB>>,
 }
 
 impl Datastore {
 	// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
 		Ok(Datastore {
-			db: OptimisticTransactionDB::open_default(path)?,
+			db: Arc::pin(OptimisticTransactionDB::open_default(path)?),
 		})
 	}
 	// Start a new transaction
@@ -52,6 +56,7 @@ impl Datastore {
 			ok: false,
 			rw: write,
 			tx: Arc::new(Mutex::new(Some(tx))),
+			_db: self.db.clone()
 		})
 	}
 }
@@ -284,5 +289,20 @@ impl Transaction {
 		}
 		// Return result
 		Ok(res)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	// https://github.com/surrealdb/surrealdb/issues/76
+	#[tokio::test]
+	async fn soundness() {
+		let mut transaction = get_transaction().await;
+		transaction.put("uh", "oh").await.unwrap();
+
+		async fn get_transaction() -> crate::Transaction {
+			let datastore = crate::Datastore::new("rocksdb:/tmp/rocks.db").await.unwrap();
+			datastore.transaction(true, false).await.unwrap()
+		}
 	}
 }
