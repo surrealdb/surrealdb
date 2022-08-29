@@ -220,7 +220,10 @@ impl<'a> Executor<'a> {
 						_ => break,
 					}
 					// Cancel transaction
-					self.cancel(loc).await;
+					match stm.writeable() {
+						true => self.commit(loc).await,
+						false => self.cancel(loc).await,
+					};
 					// Return nothing
 					Ok(Value::None)
 				}
