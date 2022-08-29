@@ -112,10 +112,10 @@ jobs:
             os: ubuntu-latest
             file: surreal-${{ github.ref_name }}.linux-arm64
             opts: --features storage-tikv
-          # - arch: x86_64-pc-windows-gnu
-          #   os: windows-latest
-          #   file: surreal-${{ github.ref_name }}.windows-amd64
-          #   opts:
+          - arch: x86_64-pc-windows-gnu
+            os: windows-latest
+            file: surreal-${{ github.ref_name }}.windows-amd64
+            opts:
     runs-on: ${{ matrix.os }}
     steps:
 
