@@ -255,7 +255,10 @@ impl<'a> Executor<'a> {
 						};
 						// Finalise transaction
 						match &res {
-							Ok(_) => self.commit(loc).await,
+							Ok(_) => match stm.writeable() {
+								true => self.commit(loc).await,
+								false => self.cancel(loc).await,
+							},
 							Err(_) => self.cancel(loc).await,
 						};
 						// Return the result
