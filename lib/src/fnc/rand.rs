@@ -6,6 +6,7 @@ use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use nanoid::nanoid;
 use rand::distributions::Alphanumeric;
+use rand::prelude::IteratorRandom;
 use rand::Rng;
 
 pub fn rand(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
@@ -17,23 +18,14 @@ pub fn bool(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn r#enum(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	match args.len() {
-		0 => Ok(Value::None),
+	Ok(match args.len() {
+		0 => Value::None,
 		1 => match args.remove(0) {
-			Value::Array(mut v) => match v.len() {
-				0 => Ok(Value::None),
-				n => {
-					let i = rand::thread_rng().gen_range(0..n);
-					Ok(v.remove(i))
-				}
-			},
-			v => Ok(v),
+			Value::Array(v) => v.into_iter().choose(&mut rand::thread_rng()).unwrap_or(Value::None),
+			v => v,
 		},
-		n => {
-			let i = rand::thread_rng().gen_range(0..n);
-			Ok(args.remove(i))
-		}
-	}
+		_ => args.into_iter().choose(&mut rand::thread_rng()).unwrap(),
+	})
 }
 
 pub fn float(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
