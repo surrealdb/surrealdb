@@ -7,6 +7,8 @@ use crate::dbs::Transaction;
 use crate::dbs::LOG;
 use crate::err::Error;
 use crate::kvs::Datastore;
+use crate::sql::paths::DB;
+use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
@@ -112,6 +114,20 @@ impl<'a> Executor<'a> {
 		}
 	}
 
+	async fn set_ns(&self, ctx: &mut Context<'_>, opt: &mut Options, ns: &str) {
+		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+		session.put(NS.as_ref(), ns.to_owned().into());
+		ctx.add_value(String::from("session"), session);
+		opt.ns = Some(Arc::new(ns.to_owned()));
+	}
+
+	async fn set_db(&self, ctx: &mut Context<'_>, opt: &mut Options, db: &str) {
+		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+		session.put(DB.as_ref(), db.to_owned().into());
+		ctx.add_value(String::from("session"), session);
+		opt.db = Some(Arc::new(db.to_owned()));
+	}
+
 	pub async fn execute(
 		&mut self,
 		mut ctx: Context<'_>,
@@ -178,9 +194,9 @@ impl<'a> Executor<'a> {
 				Statement::Use(stm) => {
 					if let Some(ref ns) = stm.ns {
 						match &*opt.auth {
-							Auth::No => opt.ns = Some(Arc::new(ns.to_owned())),
-							Auth::Kv => opt.ns = Some(Arc::new(ns.to_owned())),
-							Auth::Ns(v) if v == ns => opt.ns = Some(Arc::new(ns.to_owned())),
+							Auth::No => self.set_ns(&mut ctx, &mut opt, ns).await,
+							Auth::Kv => self.set_ns(&mut ctx, &mut opt, ns).await,
+							Auth::Ns(v) if v == ns => self.set_ns(&mut ctx, &mut opt, ns).await,
 							_ => {
 								opt.ns = None;
 								return Err(Error::NsNotAllowed {
@@ -191,10 +207,10 @@ impl<'a> Executor<'a> {
 					}
 					if let Some(ref db) = stm.db {
 						match &*opt.auth {
-							Auth::No => opt.db = Some(Arc::new(db.to_owned())),
-							Auth::Kv => opt.db = Some(Arc::new(db.to_owned())),
-							Auth::Ns(_) => opt.db = Some(Arc::new(db.to_owned())),
-							Auth::Db(_, v) if v == db => opt.db = Some(Arc::new(db.to_owned())),
+							Auth::No => self.set_db(&mut ctx, &mut opt, db).await,
+							Auth::Kv => self.set_db(&mut ctx, &mut opt, db).await,
+							Auth::Ns(_) => self.set_db(&mut ctx, &mut opt, db).await,
+							Auth::Db(_, v) if v == db => self.set_db(&mut ctx, &mut opt, db).await,
 							_ => {
 								opt.db = None;
 								return Err(Error::DbNotAllowed {
