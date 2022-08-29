@@ -79,16 +79,13 @@ impl<'a> Executor<'a> {
 
 	async fn cancel(&mut self, local: bool) {
 		if local {
-			match self.txn.as_ref() {
-				Some(txn) => {
-					let txn = txn.clone();
-					let mut txn = txn.lock().await;
-					if txn.cancel().await.is_err() {
-						self.err = true;
-					}
-					self.txn = None;
+			if let Some(txn) = self.txn.as_ref() {
+				let txn = txn.clone();
+				let mut txn = txn.lock().await;
+				if txn.cancel().await.is_err() {
+					self.err = true;
 				}
-				None => unreachable!(),
+				self.txn = None;
 			}
 		}
 	}
@@ -212,20 +209,28 @@ impl<'a> Executor<'a> {
 				Statement::Set(stm) => {
 					// Create a transaction
 					let loc = self.begin(stm.writeable()).await;
-					// Process the statement
-					match stm.compute(&ctx, &opt, &self.txn(), None).await {
-						Ok(val) => {
-							ctx.add_value(stm.name.to_owned(), val);
+					// Check the transaction
+					match self.err {
+						// We failed to create a transaction
+						true => Err(Error::TxFailure),
+						// The transaction began successfully
+						false => {
+							// Process the statement
+							match stm.compute(&ctx, &opt, &self.txn(), None).await {
+								Ok(val) => {
+									ctx.add_value(stm.name.to_owned(), val);
+								}
+								_ => break,
+							}
+							// Cancel transaction
+							match stm.writeable() {
+								true => self.commit(loc).await,
+								false => self.cancel(loc).await,
+							};
+							// Return nothing
+							Ok(Value::None)
 						}
-						_ => break,
 					}
-					// Cancel transaction
-					match stm.writeable() {
-						true => self.commit(loc).await,
-						false => self.cancel(loc).await,
-					};
-					// Return nothing
-					Ok(Value::None)
 				}
 				// Process all other normal statements
 				_ => match self.err {
@@ -235,34 +240,42 @@ impl<'a> Executor<'a> {
 					false => {
 						// Create a transaction
 						let loc = self.begin(stm.writeable()).await;
-						// Process the statement
-						let res = match stm.timeout() {
-							// There is a timeout clause
-							Some(timeout) => {
-								// Set statement timeout
-								let mut ctx = Context::new(&ctx);
-								ctx.add_timeout(timeout);
+						// Check the transaction
+						match self.err {
+							// We failed to create a transaction
+							true => Err(Error::TxFailure),
+							// The transaction began successfully
+							false => {
 								// Process the statement
-								let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
-								// Catch statement timeout
-								match ctx.is_timedout() {
-									true => Err(Error::QueryTimedout),
-									false => res,
-								}
+								let res = match stm.timeout() {
+									// There is a timeout clause
+									Some(timeout) => {
+										// Set statement timeout
+										let mut ctx = Context::new(&ctx);
+										ctx.add_timeout(timeout);
+										// Process the statement
+										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
+										// Catch statement timeout
+										match ctx.is_timedout() {
+											true => Err(Error::QueryTimedout),
+											false => res,
+										}
+									}
+									// There is no timeout clause
+									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
+								};
+								// Finalise transaction
+								match &res {
+									Ok(_) => match stm.writeable() {
+										true => self.commit(loc).await,
+										false => self.cancel(loc).await,
+									},
+									Err(_) => self.cancel(loc).await,
+								};
+								// Return the result
+								res
 							}
-							// There is no timeout clause
-							None => stm.compute(&ctx, &opt, &self.txn(), None).await,
-						};
-						// Finalise transaction
-						match &res {
-							Ok(_) => match stm.writeable() {
-								true => self.commit(loc).await,
-								false => self.cancel(loc).await,
-							},
-							Err(_) => self.cancel(loc).await,
-						};
-						// Return the result
-						res
+						}
 					}
 				},
 			};

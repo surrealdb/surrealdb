@@ -21,6 +21,10 @@ pub enum Error {
 	#[error("There was a problem with a datastore transaction: {0}")]
 	Tx(String),
 
+	/// There was an error when starting a new datastore transaction
+	#[error("There was an error when starting a new datastore transaction")]
+	TxFailure,
+
 	/// The transaction was already cancelled or committed
 	#[error("Couldn't update a finished transaction")]
 	TxFinished,
