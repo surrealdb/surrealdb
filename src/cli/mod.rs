@@ -42,13 +42,13 @@ fn path_valid(v: &str) -> Result<(), String> {
 	if v == "memory" {
 		return Ok(());
 	}
-	if v.starts_with("file://") {
+	if v.starts_with("file:") {
 		return Ok(());
 	}
-	if v.starts_with("tikv://") {
+	if v.starts_with("tikv:") {
 		return Ok(());
 	}
-	if v.starts_with("fdb://") {
+	if v.starts_with("fdb:") {
 		return Ok(());
 	}
 	Err(String::from(
