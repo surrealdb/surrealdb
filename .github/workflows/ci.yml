@@ -150,6 +150,13 @@ jobs:
           sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
           sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
 
+      - name: Install FoundationDB
+        if: contains(matrix.arch, 'linux') && startsWith(matrix.arch, 'x86_64')
+        run: |
+          curl -sLO https://github.com/apple/foundationdb/releases/download/6.3.23/foundationdb-clients_6.3.23-1_amd64.deb
+          sudo dpkg -i --force-architecture foundationdb-clients_6.3.23-1_amd64.deb
+          rm -rf foundationdb-clients_6.3.23-1_amd64.deb
+
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
