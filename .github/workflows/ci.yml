@@ -107,7 +107,7 @@ jobs:
           - arch: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             file: surreal-${{ github.ref_name }}.linux-amd64
-            opts: --features storage-tikv,storage-fdb
+            opts: --features storage-tikv
           - arch: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             file: surreal-${{ github.ref_name }}.linux-arm64
