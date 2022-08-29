@@ -172,6 +172,8 @@ jobs:
         with:
           command: build
           args: ${{ matrix.opts }} --release --locked --target ${{ matrix.arch }}
+        env:
+          BINDGEN_EXTRA_CLANG_ARGS_aarch64-unknown-linux-gnu: "-I/usr/aarch64-linux-gnu/include/"
 
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v1
