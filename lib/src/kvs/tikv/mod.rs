@@ -33,7 +33,7 @@ impl Datastore {
 	// Start a new transaction
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		match lock {
-			true => {
+			false => {
 				// Set the behaviour when dropping an unfinished transaction
 				let opt = TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn);
 				// Create a new optimistic transaction
@@ -46,7 +46,7 @@ impl Datastore {
 					Err(e) => Err(Error::Tx(e.to_string())),
 				}
 			}
-			false => {
+			true => {
 				// Set the behaviour when dropping an unfinished transaction
 				let opt = TransactionOptions::new_pessimistic().drop_check(CheckLevel::Warn);
 				// Create a new pessimistic transaction
