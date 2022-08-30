@@ -56,7 +56,7 @@ impl Datastore {
 			ok: false,
 			rw: write,
 			tx: Arc::new(Mutex::new(Some(tx))),
-			_db: self.db.clone()
+			_db: self.db.clone(),
 		})
 	}
 }
