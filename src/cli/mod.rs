@@ -122,6 +122,7 @@ pub fn init() {
 			.arg(
 				Arg::new("path")
 					.index(1)
+					.env("DB_PATH")
 					.required(false)
 					.validator(path_valid)
 					.default_value("memory")
