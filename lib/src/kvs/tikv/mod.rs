@@ -35,7 +35,11 @@ impl Datastore {
 		match lock {
 			false => {
 				// Set the behaviour when dropping an unfinished transaction
-				let opt = TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn);
+				let mut opt = TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn);
+				// Set this transaction as read only if possible
+				if !write {
+					opt = opt.read_only();
+				}
 				// Create a new optimistic transaction
 				match self.db.begin_with_options(opt).await {
 					Ok(tx) => Ok(Transaction {
@@ -48,7 +52,11 @@ impl Datastore {
 			}
 			true => {
 				// Set the behaviour when dropping an unfinished transaction
-				let opt = TransactionOptions::new_pessimistic().drop_check(CheckLevel::Warn);
+				let mut opt = TransactionOptions::new_pessimistic().drop_check(CheckLevel::Warn);
+				// Set this transaction as read only if possible
+				if !write {
+					opt = opt.read_only();
+				}
 				// Create a new pessimistic transaction
 				match self.db.begin_with_options(opt).await {
 					Ok(tx) => Ok(Transaction {
