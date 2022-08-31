@@ -47,8 +47,15 @@ pub struct Index {
 	pub id: Option<Id>,
 }
 
-pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: Array, id: Option<&Id>) -> Index {
-	Index::new(ns.to_string(), db.to_string(), tb.to_string(), ix.to_string(), fd, id.cloned())
+pub fn new(ns: &str, db: &str, tb: &str, ix: &str, fd: &Array, id: Option<&Id>) -> Index {
+	Index::new(
+		ns.to_string(),
+		db.to_string(),
+		tb.to_string(),
+		ix.to_string(),
+		fd.to_owned(),
+		id.cloned(),
+	)
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Vec<u8> {

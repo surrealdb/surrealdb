@@ -217,10 +217,10 @@ pub enum Error {
 	},
 
 	/// A database index entry for the specified record already exists
-	#[error("Database index `{index}` already contains `{thing}`")]
+	#[error("Database index `{index}` already contains {value}")]
 	IndexExists {
 		index: String,
-		thing: String,
+		value: String,
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
