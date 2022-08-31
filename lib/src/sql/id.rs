@@ -15,8 +15,8 @@ use std::fmt;
 pub enum Id {
 	Number(i64),
 	String(String),
-	Object(Object),
 	Array(Array),
+	Object(Object),
 }
 
 impl From<i64> for Id {
