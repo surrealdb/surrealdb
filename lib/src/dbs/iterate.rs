@@ -107,10 +107,6 @@ impl Iterable {
 						if !res.is_empty() {
 							// Get total results
 							let n = res.len();
-							// Exit when settled
-							if n == 0 {
-								break;
-							}
 							// Loop over results
 							for (i, (k, v)) in res.into_iter().enumerate() {
 								// Check the context
@@ -167,10 +163,6 @@ impl Iterable {
 						if !res.is_empty() {
 							// Get total results
 							let n = res.len();
-							// Exit when settled
-							if n == 0 {
-								break;
-							}
 							// Loop over results
 							for (i, (k, v)) in res.into_iter().enumerate() {
 								// Check the context
