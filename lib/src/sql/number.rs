@@ -1,4 +1,5 @@
-use crate::sql::ending::number as ending;
+use crate::sql::ending::integer as integer_ending;
+use crate::sql::ending::number as number_ending;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
 use bigdecimal::BigDecimal;
@@ -504,13 +505,13 @@ pub fn number(i: &str) -> IResult<&str, Number> {
 
 pub fn integer(i: &str) -> IResult<&str, i64> {
 	let (i, v) = i64(i)?;
-	let (i, _) = ending(i)?;
+	let (i, _) = integer_ending(i)?;
 	Ok((i, v))
 }
 
 pub fn decimal(i: &str) -> IResult<&str, &str> {
 	let (i, v) = recognize_float(i)?;
-	let (i, _) = ending(i)?;
+	let (i, _) = number_ending(i)?;
 	Ok((i, v))
 }
 

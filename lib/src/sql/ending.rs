@@ -23,6 +23,13 @@ pub fn number(i: &str) -> IResult<&str, ()> {
 	)))(i)
 }
 
+pub fn integer(i: &str) -> IResult<&str, ()> {
+	peek(alt((
+		map(number, |_| ()),
+		map(char('.'), |_| ()),
+	)))(i)
+}
+
 pub fn ident(i: &str) -> IResult<&str, ()> {
 	peek(alt((
 		map(multispace1, |_| ()),
