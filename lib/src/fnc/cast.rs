@@ -18,10 +18,7 @@ pub fn run(_: &Context, name: &str, val: Value) -> Result<Value, Error> {
 }
 
 pub fn bool(val: Value) -> Result<Value, Error> {
-	match val.is_truthy() {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(val.is_truthy().into())
 }
 
 pub fn int(val: Value) -> Result<Value, Error> {

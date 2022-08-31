@@ -22,7 +22,7 @@ pub fn alpha(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn ascii(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(args.remove(0).as_string().chars().all(|x| char::is_ascii(&x)).into())
+	Ok(args.remove(0).as_string().is_ascii().into())
 }
 
 pub fn domain(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
@@ -30,30 +30,13 @@ pub fn domain(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn email(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	// Convert to a String
-	let val = args.remove(0).as_string();
-	// Convert to a &str
-	let val = val.as_str();
-	// Check if value is empty
-	if val.is_empty() {
-		return Ok(Value::False);
-	}
-	// Ensure the value contains @
-	if !val.contains('@') {
-		return Ok(Value::False);
-	}
-	// Reverse split the value by @
-	let parts: Vec<&str> = val.rsplitn(2, '@').collect();
-	// Check the first part matches
-	if !USER_RE.is_match(parts[1]) {
-		return Ok(Value::False);
-	}
-	// Check the second part matches
-	if !HOST_RE.is_match(parts[0]) {
-		return Ok(Value::False);
-	}
-	// The email is valid
-	Ok(Value::True)
+	Ok(args
+		.remove(0)
+		.as_string()
+		.rsplit_once('@')
+		.map(|(user, host)| USER_RE.is_match(user) && HOST_RE.is_match(host))
+		.unwrap_or(false)
+		.into())
 }
 
 pub fn hexadecimal(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {

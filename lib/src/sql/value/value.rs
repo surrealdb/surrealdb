@@ -137,6 +137,7 @@ impl Default for Value {
 }
 
 impl From<bool> for Value {
+	#[inline]
 	fn from(v: bool) -> Self {
 		match v {
 			true => Value::True,
@@ -497,7 +498,7 @@ impl Value {
 	pub fn is_true(&self) -> bool {
 		match self {
 			Value::True => true,
-			Value::Strand(v) => v.to_ascii_lowercase() == "true",
+			Value::Strand(v) => v.eq_ignore_ascii_case("true"),
 			_ => false,
 		}
 	}
@@ -505,7 +506,7 @@ impl Value {
 	pub fn is_false(&self) -> bool {
 		match self {
 			Value::False => true,
-			Value::Strand(v) => v.to_ascii_lowercase() == "false",
+			Value::Strand(v) => v.eq_ignore_ascii_case("false"),
 			_ => false,
 		}
 	}
@@ -518,7 +519,7 @@ impl Value {
 			Value::Geometry(_) => true,
 			Value::Array(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
-			Value::Strand(v) => !v.is_empty() && v.to_ascii_lowercase() != "false",
+			Value::Strand(v) => !v.is_empty() && !v.eq_ignore_ascii_case("false"),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
 			Value::Datetime(v) => v.timestamp() > 0,
@@ -556,25 +557,25 @@ impl Value {
 	pub fn is_type_geometry(&self, types: &[String]) -> bool {
 		match self {
 			Value::Geometry(Geometry::Point(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "point")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "point"))
 			}
 			Value::Geometry(Geometry::Line(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "line")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "line"))
 			}
 			Value::Geometry(Geometry::Polygon(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "polygon")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "polygon"))
 			}
 			Value::Geometry(Geometry::MultiPoint(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "multipoint")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "multipoint"))
 			}
 			Value::Geometry(Geometry::MultiLine(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "multiline")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "multiline"))
 			}
 			Value::Geometry(Geometry::MultiPolygon(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "multipolygon")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "multipolygon"))
 			}
 			Value::Geometry(Geometry::Collection(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "collection")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "collection"))
 			}
 			_ => false,
 		}
