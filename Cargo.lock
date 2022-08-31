@@ -3,6 +3,15 @@
 version = 3
 
 [[package]]
+name = "addr"
+version = "0.15.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a93b8a41dbe230ad5087cc721f8d41611de654542180586b315d9f4cf6b72bef"
+dependencies = [
+ "psl-types",
+]
+
+[[package]]
 name = "adler"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2728,6 +2737,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "psl-types"
+version = "2.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac"
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3641,6 +3656,7 @@ dependencies = [
 name = "surrealdb"
 version = "1.0.0-beta.7"
 dependencies = [
+ "addr",
  "argon2",
  "async-channel",
  "async-executor",
@@ -3668,6 +3684,7 @@ dependencies = [
  "rocksdb",
  "rquickjs",
  "scrypt",
+ "semver 1.0.13",
  "serde",
  "sha-1 0.10.0",
  "sha2 0.10.2",

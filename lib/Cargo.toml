@@ -25,6 +25,7 @@ scripting = ["dep:js", "dep:executor"]
 http = ["dep:surf"]
 
 [dependencies]
+addr = { version = "0.15.6", default-features = false, features = ["std"] }
 argon2 = "0.4.1"
 async-recursion = "1.0.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
@@ -53,6 +54,7 @@ rand = "0.8.5"
 regex = "1.6.0"
 rocksdb = { version = "0.19.0", optional = true }
 scrypt = "0.10.0"
+semver = { version = "1.0.13", default-features = false }
 serde = { version = "1.0.144", features = ["derive"] }
 sha-1 = "0.10.0"
 sha2 = "0.10.2"

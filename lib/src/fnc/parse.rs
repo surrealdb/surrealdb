@@ -3,60 +3,47 @@ pub mod email {
 	use crate::ctx::Context;
 	use crate::err::Error;
 	use crate::sql::value::Value;
-	use once_cell::sync::Lazy;
-	use regex::Regex;
-
-	#[rustfmt::skip] static USER_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(?i)[a-z0-9.!#$%&'*+/=?^_`{|}~-]+\z").unwrap());
-	#[rustfmt::skip] static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$",).unwrap());
+	use addr::email::Host;
 
 	pub fn domain(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 		// Convert to a String
 		let val = args.remove(0).as_string();
-		// Check if value is empty
-		if val.is_empty() {
-			return Ok(Value::None);
+		// Parse the email address
+		match addr::parse_email_address(&val) {
+			// Return the host part
+			Ok(v) => match v.host() {
+				Host::Domain(name) => Ok(name.as_str().into()),
+				Host::IpAddr(ip_addr) => Ok(ip_addr.to_string().into()),
+			},
+			Err(_) => Ok(Value::None),
 		}
-		// Ensure the value contains @
-		if !val.contains('@') {
-			return Ok(Value::None);
-		}
-		// Reverse split the value by @
-		let parts: Vec<&str> = val.rsplitn(2, '@').collect();
-		// Check the first part matches
-		if !USER_RE.is_match(parts[1]) {
-			return Ok(Value::None);
-		}
-		// Check the second part matches
-		if !HOST_RE.is_match(parts[0]) {
-			return Ok(Value::None);
-		}
-		// Return the domain
-		Ok(parts[0].into())
 	}
 
 	pub fn user(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		// Convert to a String
 		let val = args.remove(0).as_string();
-		// Check if value is empty
-		if val.is_empty() {
-			return Ok(Value::None);
+		// Parse the email address
+		match addr::parse_email_address(&val) {
+			// Return the user part
+			Ok(v) => Ok(v.user().into()),
+			Err(_) => Ok(Value::None),
 		}
-		// Ensure the value contains @
-		if !val.contains('@') {
-			return Ok(Value::None);
+	}
+
+	#[cfg(test)]
+	mod tests {
+		#[test]
+		fn domain() {
+			let input = vec!["john.doe@example.com".into()];
+			let value = super::domain(&Default::default(), input).unwrap();
+			assert_eq!(value, "example.com".into());
 		}
-		// Reverse split the value by @
-		let parts: Vec<&str> = val.rsplitn(2, '@').collect();
-		// Check the first part matches
-		if !USER_RE.is_match(parts[1]) {
-			return Ok(Value::None);
+
+		#[test]
+		fn user() {
+			let input = vec!["john.doe@example.com".into()];
+			let value = super::user(&Default::default(), input).unwrap();
+			assert_eq!(value, "john.doe".into());
 		}
-		// Check the second part matches
-		if !HOST_RE.is_match(parts[0]) {
-			return Ok(Value::None);
-		}
-		// Return the domain
-		Ok(parts[1].into())
 	}
 }
 
