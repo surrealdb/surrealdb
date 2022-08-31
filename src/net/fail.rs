@@ -25,6 +25,15 @@ pub async fn recover(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rej
 				}),
 				StatusCode::FORBIDDEN,
 			)),
+			Error::InvalidStorage => Ok(warp::reply::with_status(
+				warp::reply::json(&Message {
+					code: 500,
+					details: Some("Health check failed".to_string()),
+					description: Some("The database health check for this instance failed. There was an issue with the underlying storage engine.".to_string()),
+					information: Some(err.to_string()),
+				}),
+				StatusCode::FORBIDDEN,
+			)),
 			_ => Ok(warp::reply::with_status(
 				warp::reply::json(&Message {
 					code: 400,
