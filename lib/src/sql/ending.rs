@@ -7,6 +7,7 @@ use nom::character::complete::multispace1;
 use nom::combinator::eof;
 use nom::combinator::map;
 use nom::combinator::peek;
+use nom::bytes::complete::tag;
 
 pub fn number(i: &str) -> IResult<&str, ()> {
 	peek(alt((
@@ -19,14 +20,8 @@ pub fn number(i: &str) -> IResult<&str, ()> {
 		map(char('}'), |_| ()),
 		map(char(';'), |_| ()),
 		map(char(','), |_| ()),
+		map(tag(".."), |_| ()),
 		map(eof, |_| ()),
-	)))(i)
-}
-
-pub fn integer(i: &str) -> IResult<&str, ()> {
-	peek(alt((
-		map(number, |_| ()),
-		map(char('.'), |_| ()),
 	)))(i)
 }
 
