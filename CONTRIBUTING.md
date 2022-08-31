@@ -28,25 +28,25 @@ To set up a working **development environment**, ensure that you have `rustup` i
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone git@github.com:[YOUR_FORK_HERE]/surrealdb.git
 cd surrealdb
-cargo run -- -vvv
+cargo run -- help
 ```
 
 To run the SurrealDB database server, use the following command:
 
 ```bash
-cargo run -- -vvv start memory
+cargo run -- start --log trace --user root --pass root memory
 ```
 
 To listen to code changes as you develop, use the following command:
 
 ```bash
-cargo watch -x 'run -- -vvv start memory'
+cargo watch -x 'run -- start --log trace --user root --pass root memory'
 ```
 
 SurrealDB runs by default on port 8000. To change the default port, use the following command:
 
 ```bash
-cargo run -- -vvv start memory --bind 0.0.0.0:9000
+cargo run -- start --log trace --user root --pass root --bind 0.0.0.0:9000 memory
 ```
 
 To run all tests manually, use the SurrealDB command-line from your terminal:
