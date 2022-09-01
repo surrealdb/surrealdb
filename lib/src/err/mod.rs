@@ -224,7 +224,7 @@ pub enum Error {
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
-	#[error("Found '{value}' for field '{field}' but field must conform to: {check}")]
+	#[error("Found {value} for field `{field}` but field must conform to: {check}")]
 	FieldValue {
 		value: String,
 		field: Idiom,

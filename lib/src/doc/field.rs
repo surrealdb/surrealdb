@@ -37,7 +37,11 @@ impl<'a> Document<'a> {
 				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
-					val = val.convert_to(kind);
+					val = match val {
+						Value::None => val,
+						Value::Null => val,
+						_ => val.convert_to(kind),
+					}
 				}
 				// Check for a ASSERT clause
 				if let Some(expr) = &fd.assert {
