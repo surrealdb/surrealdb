@@ -6,17 +6,17 @@ use std::ops::Mul;
 use std::ops::Sub;
 
 pub fn or(a: Value, b: Value) -> Result<Value, Error> {
-	match a.is_truthy() {
-		true => Ok(a),
-		false => Ok(b),
-	}
+	Ok(match a.is_truthy() {
+		true => a,
+		false => b,
+	})
 }
 
 pub fn and(a: Value, b: Value) -> Result<Value, Error> {
-	match a.is_truthy() {
-		true => Ok(b),
-		false => Ok(a),
-	}
+	Ok(match a.is_truthy() {
+		true => b,
+		false => a,
+	})
 }
 
 pub fn add(a: Value, b: Value) -> Result<Value, Error> {
@@ -40,171 +40,99 @@ pub fn exact(a: &Value, b: &Value) -> Result<Value, Error> {
 }
 
 pub fn equal(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.equal(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.equal(b).into())
 }
 
 pub fn not_equal(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.equal(b) {
-		true => Ok(Value::False),
-		false => Ok(Value::True),
-	}
+	Ok((!a.equal(b)).into())
 }
 
 pub fn all_equal(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.all_equal(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.all_equal(b).into())
 }
 
 pub fn any_equal(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.any_equal(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.any_equal(b).into())
 }
 
 pub fn like(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.fuzzy(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.fuzzy(b).into())
 }
 
 pub fn not_like(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.fuzzy(b) {
-		true => Ok(Value::False),
-		false => Ok(Value::True),
-	}
+	Ok((!a.fuzzy(b)).into())
 }
 
 pub fn all_like(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.all_fuzzy(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.all_fuzzy(b).into())
 }
 
 pub fn any_like(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.any_fuzzy(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.any_fuzzy(b).into())
 }
 
 pub fn less_than(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.lt(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.lt(b).into())
 }
 
 pub fn less_than_or_equal(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.le(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.le(b).into())
 }
 
 pub fn more_than(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.gt(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.gt(b).into())
 }
 
 pub fn more_than_or_equal(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.ge(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.ge(b).into())
 }
 
 pub fn contain(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.contains(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.contains(b).into())
 }
 
 pub fn not_contain(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.contains(b) {
-		true => Ok(Value::False),
-		false => Ok(Value::True),
-	}
+	Ok((!a.contains(b)).into())
 }
 
 pub fn contain_all(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.contains_all(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.contains_all(b).into())
 }
 
 pub fn contain_any(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.contains_any(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.contains_any(b).into())
 }
 
 pub fn contain_none(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.contains_any(b) {
-		true => Ok(Value::False),
-		false => Ok(Value::True),
-	}
+	Ok((!a.contains_any(b)).into())
 }
 
 pub fn inside(a: &Value, b: &Value) -> Result<Value, Error> {
-	match b.contains(a) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(b.contains(a).into())
 }
 
 pub fn not_inside(a: &Value, b: &Value) -> Result<Value, Error> {
-	match b.contains(a) {
-		true => Ok(Value::False),
-		false => Ok(Value::True),
-	}
+	Ok((!b.contains(a)).into())
 }
 
 pub fn inside_all(a: &Value, b: &Value) -> Result<Value, Error> {
-	match b.contains_all(a) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(b.contains_all(a).into())
 }
 
 pub fn inside_any(a: &Value, b: &Value) -> Result<Value, Error> {
-	match b.contains_any(a) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(b.contains_any(a).into())
 }
 
 pub fn inside_none(a: &Value, b: &Value) -> Result<Value, Error> {
-	match b.contains_any(a) {
-		true => Ok(Value::False),
-		false => Ok(Value::True),
-	}
+	Ok((!b.contains_any(a)).into())
 }
 
 pub fn outside(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.intersects(b) {
-		true => Ok(Value::False),
-		false => Ok(Value::True),
-	}
+	Ok((!a.intersects(b)).into())
 }
 
 pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
-	match a.intersects(b) {
-		true => Ok(Value::True),
-		false => Ok(Value::False),
-	}
+	Ok(a.intersects(b).into())
 }
 
 #[cfg(test)]
