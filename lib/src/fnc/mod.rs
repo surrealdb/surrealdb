@@ -108,7 +108,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"math::trimean" => args::check(ctx, name, args, Args::One, math::trimean),
 		"math::variance" => args::check(ctx, name, args, Args::One, math::variance),
 		//
-		"parse::email::domain" => args::check(ctx, name, args, Args::One, parse::email::domain),
+		"parse::email::host" => args::check(ctx, name, args, Args::One, parse::email::host),
 		"parse::email::user" => args::check(ctx, name, args, Args::One, parse::email::user),
 		"parse::url::domain" => args::check(ctx, name, args, Args::One, parse::url::domain),
 		"parse::url::fragment" => args::check(ctx, name, args, Args::One, parse::url::fragment),

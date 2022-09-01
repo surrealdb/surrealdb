@@ -360,7 +360,7 @@ fn function_math(i: &str) -> IResult<&str, &str> {
 
 fn function_parse(i: &str) -> IResult<&str, &str> {
 	alt((
-		tag("parse::email::domain"),
+		tag("parse::email::host"),
 		tag("parse::email::user"),
 		tag("parse::url::domain"),
 		tag("parse::url::fragment"),

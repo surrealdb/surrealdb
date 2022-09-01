@@ -5,7 +5,7 @@ pub mod email {
 	use crate::sql::value::Value;
 	use addr::email::Host;
 
-	pub fn domain(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
+	pub fn host(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 		// Convert to a String
 		let val = args.remove(0).as_string();
 		// Parse the email address
@@ -32,9 +32,9 @@ pub mod email {
 	#[cfg(test)]
 	mod tests {
 		#[test]
-		fn domain() {
+		fn host() {
 			let input = vec!["john.doe@example.com".into()];
-			let value = super::domain(&Default::default(), input).unwrap();
+			let value = super::host(&Default::default(), input).unwrap();
 			assert_eq!(value, "example.com".into());
 		}
 
