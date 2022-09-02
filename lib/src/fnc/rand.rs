@@ -81,7 +81,7 @@ pub fn string(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	const LIMIT: i64 = 2i64.pow(16);
 	match args.len() {
 		2 => match args.remove(0).as_int() {
-			min if min >= 0 && min <= LIMIT => match args.remove(0).as_int() {
+			min if (0..=LIMIT).contains(&min) => match args.remove(0).as_int() {
 				max if min <= max && max <= LIMIT => Ok(rand::thread_rng()
 					.sample_iter(&Alphanumeric)
 					.take(rand::thread_rng().gen_range(min as usize..=max as usize))
@@ -105,7 +105,7 @@ pub fn string(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 			}),
 		},
 		1 => match args.remove(0).as_int() {
-			x if x >= 0 && x <= LIMIT => Ok(rand::thread_rng()
+			x if (0..=LIMIT).contains(&x) => Ok(rand::thread_rng()
 				.sample_iter(&Alphanumeric)
 				.take(x as usize)
 				.map(char::from)
