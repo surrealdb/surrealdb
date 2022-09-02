@@ -77,7 +77,7 @@ pub enum Error {
 		message: String,
 	},
 
-	/// The wrong number of arguments was given for the specified function
+	/// The wrong quantity or magnitude of arguments was given for the specified function
 	#[error("Incorrect arguments for function {name}(). {message}")]
 	InvalidArguments {
 		name: String,

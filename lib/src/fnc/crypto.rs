@@ -50,12 +50,14 @@ pub mod argon2 {
 	};
 	use rand::rngs::OsRng;
 
-	pub fn cmp(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		let algo = Argon2::default();
-		let hash = args.remove(0).as_string();
-		let pass = args.remove(0).as_string();
-		let test = PasswordHash::new(&hash).unwrap();
-		Ok(algo.verify_password(pass.as_ref(), &test).is_ok().into())
+	pub fn cmp(_: &Context, args: Vec<Value>) -> Result<Value, Error> {
+		let args: [Value; 2] = args.try_into().unwrap();
+		let [hash, pass] = args.map(Value::as_string);
+		Ok(PasswordHash::new(&hash)
+			.ok()
+			.and_then(|test| Argon2::default().verify_password(pass.as_ref(), &test).ok())
+			.is_some()
+			.into())
 	}
 
 	pub fn gen(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
@@ -78,11 +80,14 @@ pub mod pbkdf2 {
 	};
 	use rand::rngs::OsRng;
 
-	pub fn cmp(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		let hash = args.remove(0).as_string();
-		let pass = args.remove(0).as_string();
-		let test = PasswordHash::new(&hash).unwrap();
-		Ok(Pbkdf2.verify_password(pass.as_ref(), &test).is_ok().into())
+	pub fn cmp(_: &Context, args: Vec<Value>) -> Result<Value, Error> {
+		let args: [Value; 2] = args.try_into().unwrap();
+		let [hash, pass] = args.map(Value::as_string);
+		Ok(PasswordHash::new(&hash)
+			.ok()
+			.and_then(|test| Pbkdf2.verify_password(pass.as_ref(), &test).ok())
+			.is_some()
+			.into())
 	}
 
 	pub fn gen(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
@@ -104,11 +109,14 @@ pub mod scrypt {
 		Scrypt,
 	};
 
-	pub fn cmp(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		let hash = args.remove(0).as_string();
-		let pass = args.remove(0).as_string();
-		let test = PasswordHash::new(&hash).unwrap();
-		Ok(Scrypt.verify_password(pass.as_ref(), &test).is_ok().into())
+	pub fn cmp(_: &Context, args: Vec<Value>) -> Result<Value, Error> {
+		let args: [Value; 2] = args.try_into().unwrap();
+		let [hash, pass] = args.map(Value::as_string);
+		Ok(PasswordHash::new(&hash)
+			.ok()
+			.and_then(|test| Scrypt.verify_password(pass.as_ref(), &test).ok())
+			.is_some()
+			.into())
 	}
 
 	pub fn gen(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
