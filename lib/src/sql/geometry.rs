@@ -373,10 +373,14 @@ impl Serialize for Geometry {
 				Geometry::Point(v) => s.serialize_newtype_variant("Geometry", 0, "Point", v),
 				Geometry::Line(v) => s.serialize_newtype_variant("Geometry", 1, "Line", v),
 				Geometry::Polygon(v) => s.serialize_newtype_variant("Geometry", 2, "Polygon", v),
-				Geometry::MultiPoint(v) => s.serialize_newtype_variant("Geometry", 3, "Points", v),
-				Geometry::MultiLine(v) => s.serialize_newtype_variant("Geometry", 4, "Lines", v),
+				Geometry::MultiPoint(v) => {
+					s.serialize_newtype_variant("Geometry", 3, "MultiPoint", v)
+				}
+				Geometry::MultiLine(v) => {
+					s.serialize_newtype_variant("Geometry", 4, "MultiLine", v)
+				}
 				Geometry::MultiPolygon(v) => {
-					s.serialize_newtype_variant("Geometry", 5, "Polygons", v)
+					s.serialize_newtype_variant("Geometry", 5, "MultiPolygon", v)
 				}
 				Geometry::Collection(v) => {
 					s.serialize_newtype_variant("Geometry", 6, "Collection", v)
@@ -437,7 +441,12 @@ impl Serialize for Geometry {
 					map.serialize_key("type")?;
 					map.serialize_value("MultiPoint")?;
 					map.serialize_key("coordinates")?;
-					map.serialize_value(v.0.as_slice())?;
+					map.serialize_value(
+						v.0.iter()
+							.map(|v| vec![v.x(), v.y()])
+							.collect::<Vec<Vec<f64>>>()
+							.as_slice(),
+					)?;
 					map.end()
 				}
 				Geometry::MultiLine(v) => {
@@ -445,7 +454,14 @@ impl Serialize for Geometry {
 					map.serialize_key("type")?;
 					map.serialize_value("MultiLineString")?;
 					map.serialize_key("coordinates")?;
-					map.serialize_value(v.0.as_slice())?;
+					map.serialize_value(
+						v.0.iter()
+							.map(|v| {
+								v.points().map(|v| vec![v.x(), v.y()]).collect::<Vec<Vec<f64>>>()
+							})
+							.collect::<Vec<Vec<Vec<f64>>>>()
+							.as_slice(),
+					)?;
 					map.end()
 				}
 				Geometry::MultiPolygon(v) => {
@@ -453,7 +469,30 @@ impl Serialize for Geometry {
 					map.serialize_key("type")?;
 					map.serialize_value("MultiPolygon")?;
 					map.serialize_key("coordinates")?;
-					map.serialize_value(v.0.as_slice())?;
+					map.serialize_value(
+						v.0.iter()
+							.map(|v| {
+								vec![v
+									.exterior()
+									.points()
+									.map(|p| vec![p.x(), p.y()])
+									.collect::<Vec<Vec<f64>>>()]
+								.into_iter()
+								.chain(
+									v.interiors()
+										.iter()
+										.map(|i| {
+											i.points()
+												.map(|p| vec![p.x(), p.y()])
+												.collect::<Vec<Vec<f64>>>()
+										})
+										.collect::<Vec<Vec<Vec<f64>>>>(),
+								)
+								.collect::<Vec<Vec<Vec<f64>>>>()
+							})
+							.collect::<Vec<Vec<Vec<Vec<f64>>>>>()
+							.as_slice(),
+					)?;
 					map.end()
 				}
 				Geometry::Collection(v) => {
