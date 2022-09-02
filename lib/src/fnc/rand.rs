@@ -45,8 +45,17 @@ pub fn float(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 pub fn guid(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
 		1 => {
+			// Only need 53 to uniquely identify all atoms in observable universe.
+			const LIMIT: usize = 64;
 			let len = args.remove(0).as_int() as usize;
-			Ok(nanoid!(len, &ID_CHARS).into())
+			if len > LIMIT {
+				Err(Error::InvalidArguments {
+					name: String::from("rand::guid"),
+					message: format!("The maximum length of a GUID is {}.", LIMIT),
+				})
+			} else {
+				Ok(nanoid!(len, &ID_CHARS).into())
+			}
 		}
 		0 => Ok(nanoid!(20, &ID_CHARS).into()),
 		_ => unreachable!(),
@@ -68,33 +77,35 @@ pub fn int(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn string(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
+	// Limit how much time and bandwidth is spent.
+	const LIMIT: i64 = 2i64.pow(16);
 	match args.len() {
 		2 => match args.remove(0).as_int() {
-			min if min >= 0 => match args.remove(0).as_int() {
-				max if max >= 0 && max < min => Ok(rand::thread_rng()
-					.sample_iter(&Alphanumeric)
-					.take(rand::thread_rng().gen_range(max as usize..=min as usize))
-					.map(char::from)
-					.collect::<String>()
-					.into()),
-				max if max >= 0 => Ok(rand::thread_rng()
+			min if (0..=LIMIT).contains(&min) => match args.remove(0).as_int() {
+				max if min <= max && max <= LIMIT => Ok(rand::thread_rng()
 					.sample_iter(&Alphanumeric)
 					.take(rand::thread_rng().gen_range(min as usize..=max as usize))
 					.map(char::from)
 					.collect::<String>()
 					.into()),
+				max if max >= 0 && max <= min => Ok(rand::thread_rng()
+					.sample_iter(&Alphanumeric)
+					.take(rand::thread_rng().gen_range(max as usize..=min as usize))
+					.map(char::from)
+					.collect::<String>()
+					.into()),
 				_ => Err(Error::InvalidArguments {
 					name: String::from("rand::string"),
-					message: String::from("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers."),
+					message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {}.", LIMIT),
 				}),
 			},
 			_ => Err(Error::InvalidArguments {
 				name: String::from("rand::string"),
-				message: String::from("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers."),
+				message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {}.", LIMIT),
 			}),
 		},
 		1 => match args.remove(0).as_int() {
-			x if x >= 0 => Ok(rand::thread_rng()
+			x if (0..=LIMIT).contains(&x) => Ok(rand::thread_rng()
 				.sample_iter(&Alphanumeric)
 				.take(x as usize)
 				.map(char::from)
@@ -102,7 +113,7 @@ pub fn string(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 				.into()),
 			_ => Err(Error::InvalidArguments {
 				name: String::from("rand::string"),
-				message: String::from("To generate a string of X characters in length, the argument must be a positive number."),
+				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {}.", LIMIT),
 			}),
 		},
 		0 => Ok(rand::thread_rng()

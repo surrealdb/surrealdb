@@ -36,7 +36,15 @@ pub fn repeat(_: &Context, args: Vec<Value>) -> Result<Value, Error> {
 	let [val_arg, num_arg]: [Value; 2] = args.try_into().unwrap();
 	let val = val_arg.as_string();
 	let num = num_arg.as_int() as usize;
-	Ok(val.repeat(num).into())
+	const LIMIT: usize = 2usize.pow(20);
+	if val.len().saturating_mul(num) > LIMIT {
+		Err(Error::InvalidArguments {
+			name: String::from("string::repeat"),
+			message: format!("Output must not exceed {} bytes.", LIMIT),
+		})
+	} else {
+		Ok(val.repeat(num).into())
+	}
 }
 
 pub fn replace(_: &Context, args: Vec<Value>) -> Result<Value, Error> {
