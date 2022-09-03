@@ -35,6 +35,7 @@ Temporary Items
 /target/
 /lib/target/
 .idea/
+/result
 
 # -----------------------------------
 # Specific
