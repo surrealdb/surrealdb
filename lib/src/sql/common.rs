@@ -1,6 +1,8 @@
 use crate::sql::comment::mightbespace;
+use crate::sql::comment::shouldbespace;
 use crate::sql::error::Error::ParserError;
 use crate::sql::error::IResult;
+use nom::branch::alt;
 use nom::bytes::complete::take_while;
 use nom::bytes::complete::take_while_m_n;
 use nom::character::complete::char;
@@ -21,6 +23,10 @@ pub fn commas(i: &str) -> IResult<&str, ()> {
 	let (i, _) = char(',')(i)?;
 	let (i, _) = mightbespace(i)?;
 	Ok((i, ()))
+}
+
+pub fn commasorspace(i: &str) -> IResult<&str, ()> {
+	alt((commas, shouldbespace))(i)
 }
 
 #[inline]

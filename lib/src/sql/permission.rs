@@ -1,5 +1,6 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
+use crate::sql::common::commasorspace;
 use crate::sql::error::IResult;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
@@ -86,7 +87,7 @@ fn full(i: &str) -> IResult<&str, Permissions> {
 }
 
 fn specific(i: &str) -> IResult<&str, Permissions> {
-	let (i, perms) = separated_list0(commas, permission)(i)?;
+	let (i, perms) = separated_list0(commasorspace, permission)(i)?;
 	Ok((
 		i,
 		Permissions {
