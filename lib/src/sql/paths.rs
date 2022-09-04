@@ -11,6 +11,8 @@ pub static DB: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("db")]);
 
 pub static SC: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("sc")]);
 
+pub static SD: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("sd")]);
+
 pub static OR: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("or")]);
 
 pub static IN: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("in")]);

@@ -133,6 +133,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"session::ns" => args::check(ctx, name, args, Args::None, session::ns),
 		"session::origin" => args::check(ctx, name, args, Args::None, session::origin),
 		"session::sc" => args::check(ctx, name, args, Args::None, session::sc),
+		"session::sd" => args::check(ctx, name, args, Args::None, session::sd),
 		//
 		"string::concat" => args::check(ctx, name, args, Args::Any, string::concat),
 		"string::endsWith" => args::check(ctx, name, args, Args::Two, string::ends_with),

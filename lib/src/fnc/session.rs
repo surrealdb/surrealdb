@@ -6,6 +6,7 @@ use crate::sql::paths::IP;
 use crate::sql::paths::NS;
 use crate::sql::paths::OR;
 use crate::sql::paths::SC;
+use crate::sql::paths::SD;
 use crate::sql::value::Value;
 
 pub fn db(ctx: &Context, _: Vec<Value>) -> Result<Value, Error> {
@@ -30,4 +31,8 @@ pub fn origin(ctx: &Context, _: Vec<Value>) -> Result<Value, Error> {
 
 pub fn sc(ctx: &Context, _: Vec<Value>) -> Result<Value, Error> {
 	ctx.value("session").unwrap_or(&Value::None).pick(SC.as_ref()).ok()
+}
+
+pub fn sd(ctx: &Context, _: Vec<Value>) -> Result<Value, Error> {
+	ctx.value("session").unwrap_or(&Value::None).pick(SD.as_ref()).ok()
 }
