@@ -34,10 +34,20 @@ pub fn range(i: &str) -> IResult<&str, Range> {
 		},
 	))
 }
+
 #[cfg(test)]
 mod tests {
 
 	use super::*;
+
+	#[test]
+	fn range_int() {
+		let sql = "person:1..100";
+		let res = range(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(r#"person:1..100"#, format!("{}", out));
+	}
 
 	#[test]
 	fn range_array() {
