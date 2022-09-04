@@ -7,6 +7,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
 use surrealdb::sql::Object;
+use surrealdb::sql::Value;
 use surrealdb::Auth;
 use surrealdb::Session;
 
@@ -79,6 +80,10 @@ pub async fn sc(
 									..Claims::default()
 								};
 								// Set the authentication on the sesssion
+								session.ns = Some(ns.to_owned());
+								session.db = Some(db.to_owned());
+								session.sc = Some(sc.to_owned());
+								session.sd = Some(Value::from(rid));
 								session.au = Arc::new(Auth::Sc(ns, db, sc));
 								// Create the authentication token
 								match encode(&*HEADER, &val, &key) {
