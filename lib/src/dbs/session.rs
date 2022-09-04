@@ -107,6 +107,7 @@ impl Session {
 			"ns".to_string() => self.ns.to_owned().into(),
 			"db".to_string() => self.db.to_owned().into(),
 			"sc".to_string() => self.sc.to_owned().into(),
+			"sd".to_string() => self.sd.to_owned().into(),
 		});
 		ctx.add_value(key, val);
 		// Output context
