@@ -1,8 +1,13 @@
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::dbs::Transaction;
+use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_id;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
 use crate::sql::serde::is_internal_serialization;
+use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::character::complete::char;
@@ -55,6 +60,32 @@ impl Thing {
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}:{}", escape_id(&self.tb), self.id)
+	}
+}
+
+impl Thing {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		Ok(Value::Thing(Thing {
+			tb: self.tb.clone(),
+			id: match &self.id {
+				Id::Number(v) => Id::Number(*v),
+				Id::String(v) => Id::String(v.clone()),
+				Id::Object(v) => match v.compute(ctx, opt, txn, doc).await? {
+					Value::Object(v) => Id::Object(v),
+					_ => unreachable!(),
+				},
+				Id::Array(v) => match v.compute(ctx, opt, txn, doc).await? {
+					Value::Array(v) => Id::Array(v),
+					_ => unreachable!(),
+				},
+			},
+		}))
 	}
 }
 
