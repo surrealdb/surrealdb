@@ -1,5 +1,6 @@
 use crate::ctx::Context;
 use crate::err::Error;
+use crate::exe::spawn_blocking_non_static;
 use crate::fnc::args::Args;
 use crate::sql::value::Value;
 
@@ -29,6 +30,12 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		v if v.starts_with("http") => {
 			// HTTP functions are asynchronous
 			asynchronous(ctx, name, args).await
+		}
+		#[cfg(feature = "parallel")]
+		v if v.starts_with("crypto") && (v.ends_with("generate") || v.ends_with("compare")) => {
+			// Other functions are synchronous but computationally intensive, so they are dispatched
+			// to a different thread if possible
+			spawn_blocking_non_static(|| synchronous(ctx, name, args)).await
 		}
 		_ => {
 			// Other functions are synchronous
