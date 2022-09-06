@@ -1,3 +1,5 @@
+use once_cell::sync::Lazy;
+
 pub const LOGO: &str = "
  .d8888b.                                             888 8888888b.  888888b.
 d88P  Y88b                                            888 888  'Y88b 888  '88b
@@ -12,7 +14,13 @@ Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
 
 // The name and version of this build
 pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");
-pub const PKG_VERS: &str = env!("CARGO_PKG_VERSION");
+pub static PKG_VERS: Lazy<String> = Lazy::new(|| match option_env!("SURREAL_BUILD_METADATA") {
+	Some(metadata) if !metadata.trim().is_empty() => {
+		let version = env!("CARGO_PKG_VERSION");
+		format!("{version}+{metadata}")
+	}
+	_ => env!("CARGO_PKG_VERSION").to_owned(),
+});
 
 // The publicly visible name of the server
 pub const SERVER_NAME: &str = "SurrealDB";
