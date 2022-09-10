@@ -36,19 +36,19 @@ async fn field_definition_value_assert_failure() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == "Found NONE for field `age` but field must conform to: $value > 0"
+		Some(e) if e.to_string() == "Found NONE for field `age`, with record `person:test`, but field must conform to: $value > 0"
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == "Found NONE for field `age` but field must conform to: $value > 0"
+		Some(e) if e.to_string() == "Found NONE for field `age`, with record `person:test`, but field must conform to: $value > 0"
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == "Found NULL for field `age` but field must conform to: $value > 0"
+		Some(e) if e.to_string() == "Found NULL for field `age`, with record `person:test`, but field must conform to: $value > 0"
 	));
 	//
 	Ok(())
