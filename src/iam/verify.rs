@@ -2,6 +2,7 @@ use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::iam::token::Claims;
+use crate::iam::LOG;
 use argon2::password_hash::{PasswordHash, PasswordVerifier};
 use argon2::Argon2;
 use jsonwebtoken::{decode, DecodingKey, Validation};
@@ -11,7 +12,6 @@ use surrealdb::sql::Algorithm;
 use surrealdb::sql::Value;
 use surrealdb::Auth;
 use surrealdb::Session;
-use crate::iam::LOG;
 
 fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
 	match algo {
@@ -168,7 +168,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				..
 			} => {
 				// Log the decoded authentication claims
-				trace!(target: LOG, "Attempting authentication for scope `{}` with token `{}`", sc, tk);
+				trace!(target: LOG, "Authenticating to scope `{}` with token `{}`", sc, tk);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Parse the record id
@@ -179,7 +179,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				// Verify the token
 				decode::<Claims>(auth, &cf.0, &cf.1)?;
 				// Log the success
-				debug!(target: LOG, "Authenticated to scope `{}` with token `{}` as `{}`", sc, tk, id);
+				debug!(target: LOG, "Authenticated to scope `{}` with token `{}`", sc, tk);
 				// Set the session
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
@@ -197,7 +197,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				..
 			} => {
 				// Log the decoded authentication claims
-				trace!(target: LOG, "Attempting authentication for scope `{}`", sc);
+				trace!(target: LOG, "Authenticating to scope `{}`", sc);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Parse the record id
@@ -208,7 +208,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				// Verify the token
 				decode::<Claims>(auth, &cf.0, &cf.1)?;
 				// Log the success
-				debug!(target: LOG, "Authenticated to scope `{}` as `{}`", sc, id);
+				debug!(target: LOG, "Authenticated to scope `{}`", sc);
 				// Set the session
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
@@ -225,7 +225,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				..
 			} => {
 				// Log the decoded authentication claims
-				trace!(target: LOG, "Attempting authentication for database `{}` with token `{}`", db, tk);
+				trace!(target: LOG, "Authenticating to database `{}` with token `{}`", db, tk);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Get the database token
@@ -249,7 +249,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				..
 			} => {
 				// Log the decoded authentication claims
-				trace!(target: LOG, "Attempting authentication for database `{}` with login `{}`", db, id);
+				trace!(target: LOG, "Authenticating to database `{}` with login `{}`", db, id);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Get the database login
@@ -272,7 +272,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				..
 			} => {
 				// Log the decoded authentication claims
-				trace!(target: LOG, "Attempting authentication for namespace `{}` with token `{}`", ns, tk);
+				trace!(target: LOG, "Authenticating to namespace `{}` with token `{}`", ns, tk);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Get the namespace token
@@ -294,7 +294,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				..
 			} => {
 				// Log the decoded authentication claims
-				trace!(target: LOG, "Attempting authentication for namespace `{}` with login `{}`", ns, id);
+				trace!(target: LOG, "Authenticating to namespace `{}` with login `{}`", ns, id);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Get the namespace login
