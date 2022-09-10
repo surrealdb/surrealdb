@@ -217,15 +217,17 @@ pub enum Error {
 	},
 
 	/// A database index entry for the specified record already exists
-	#[error("Database index `{index}` already contains {value}")]
+	#[error("Database index `{index}` already contains {value}, on record `{thing}`")]
 	IndexExists {
+		thing: String,
 		index: String,
 		value: String,
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
-	#[error("Found {value} for field `{field}` but field must conform to: {check}")]
+	#[error("Found {value} for field `{field}`, on record `{thing}`, but field must conform to: {check}")]
 	FieldValue {
+		thing: String,
 		value: String,
 		field: Idiom,
 		check: String,

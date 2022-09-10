@@ -19,6 +19,8 @@ impl<'a> Document<'a> {
 		if !opt.fields {
 			return Ok(());
 		}
+		// Get the record id
+		let rid = self.id.as_ref().unwrap();
 		// Loop through all field statements
 		for fd in self.fd(opt, txn).await?.iter() {
 			// Loop over each field in document
@@ -53,6 +55,7 @@ impl<'a> Document<'a> {
 					// Process the ASSERT clause
 					if !expr.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 						return Err(Error::FieldValue {
+							thing: rid.to_string(),
 							value: val.to_string(),
 							field: fd.name.clone(),
 							check: expr.to_string(),

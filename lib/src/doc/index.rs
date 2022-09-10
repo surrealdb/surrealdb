@@ -62,6 +62,7 @@ impl<'a> Document<'a> {
 							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &n, None);
 							if run.putc(key, rid, None).await.is_err() {
 								return Err(Error::IndexExists {
+									thing: rid.to_string(),
 									index: ix.name.to_string(),
 									value: match n.len() {
 										1 => n.first().unwrap().to_string(),
@@ -84,6 +85,7 @@ impl<'a> Document<'a> {
 							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &n, Some(&rid.id));
 							if run.putc(key, rid, None).await.is_err() {
 								return Err(Error::IndexExists {
+									thing: rid.to_string(),
 									index: ix.name.to_string(),
 									value: match n.len() {
 										1 => n.first().unwrap().to_string(),
