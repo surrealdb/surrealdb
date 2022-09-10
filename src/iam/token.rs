@@ -10,14 +10,29 @@ pub struct Claims {
 	pub nbf: i64,
 	pub exp: i64,
 	pub iss: String,
+	#[serde(alias = "ns")]
+	#[serde(alias = "NS")]
+	#[serde(rename = "NS")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub ns: Option<String>,
+	#[serde(alias = "db")]
+	#[serde(alias = "DB")]
+	#[serde(rename = "DB")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub db: Option<String>,
+	#[serde(alias = "sc")]
+	#[serde(alias = "SC")]
+	#[serde(rename = "SC")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub sc: Option<String>,
+	#[serde(alias = "tk")]
+	#[serde(alias = "TK")]
+	#[serde(rename = "TK")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub tk: Option<String>,
+	#[serde(alias = "id")]
+	#[serde(alias = "ID")]
+	#[serde(rename = "ID")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub id: Option<String>,
 }
