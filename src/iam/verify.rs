@@ -11,6 +11,7 @@ use surrealdb::sql::Algorithm;
 use surrealdb::sql::Value;
 use surrealdb::Auth;
 use surrealdb::Session;
+use crate::iam::LOG;
 
 fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
 	match algo {
@@ -80,6 +81,8 @@ static DUD: Lazy<Validation> = Lazy::new(|| {
 });
 
 pub async fn basic(session: &mut Session, auth: String) -> Result<(), Error> {
+	// Log the authentication type
+	trace!(target: LOG, "Attempting basic authentication");
 	// Retrieve just the auth data
 	if let Some((_, auth)) = auth.split_once(' ') {
 		// Get a database reference
@@ -99,6 +102,9 @@ pub async fn basic(session: &mut Session, auth: String) -> Result<(), Error> {
 			// Check if this is root authentication
 			if let Some(root) = &opts.pass {
 				if user == opts.user && pass == root {
+					// Log the authentication type
+					debug!(target: LOG, "Authenticated as super user");
+					// Store the authentication data
 					session.au = Arc::new(Auth::Kv);
 					return Ok(());
 				}
@@ -112,6 +118,9 @@ pub async fn basic(session: &mut Session, auth: String) -> Result<(), Error> {
 					// Compute the hash and verify the password
 					let hash = PasswordHash::new(&nl.hash).unwrap();
 					if Argon2::default().verify_password(pass.as_ref(), &hash).is_ok() {
+						// Log the successful namespace authentication
+						debug!(target: LOG, "Authenticated as namespace user: {}", user);
+						// Store the authentication data
 						session.au = Arc::new(Auth::Ns(ns.to_owned()));
 						return Ok(());
 					}
@@ -123,6 +132,9 @@ pub async fn basic(session: &mut Session, auth: String) -> Result<(), Error> {
 						// Compute the hash and verify the password
 						let hash = PasswordHash::new(&dl.hash).unwrap();
 						if Argon2::default().verify_password(pass.as_ref(), &hash).is_ok() {
+							// Log the successful namespace authentication
+							debug!(target: LOG, "Authenticated as database user: {}", user);
+							// Store the authentication data
 							session.au = Arc::new(Auth::Db(ns.to_owned(), db.to_owned()));
 							return Ok(());
 						}
@@ -136,6 +148,8 @@ pub async fn basic(session: &mut Session, auth: String) -> Result<(), Error> {
 }
 
 pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
+	// Log the authentication type
+	trace!(target: LOG, "Attempting token authentication");
 	// Retrieve just the auth data
 	if let Some((_, auth)) = auth.split_once(' ') {
 		// Get a database reference
@@ -153,6 +167,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				id: Some(id),
 				..
 			} => {
+				// Log the decoded authentication claims
+				trace!(target: LOG, "Attempting authentication for scope `{}` with token `{}`", sc, tk);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Parse the record id
@@ -162,6 +178,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				let cf = config(de.kind, de.code)?;
 				// Verify the token
 				decode::<Claims>(auth, &cf.0, &cf.1)?;
+				// Log the success
+				debug!(target: LOG, "Authenticated to scope `{}` with token `{}` as `{}`", sc, tk, id);
 				// Set the session
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
@@ -178,6 +196,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				id: Some(id),
 				..
 			} => {
+				// Log the decoded authentication claims
+				trace!(target: LOG, "Attempting authentication for scope `{}`", sc);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Parse the record id
@@ -187,6 +207,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				let cf = config(Algorithm::Hs512, de.code)?;
 				// Verify the token
 				decode::<Claims>(auth, &cf.0, &cf.1)?;
+				// Log the success
+				debug!(target: LOG, "Authenticated to scope `{}` as `{}`", sc, id);
 				// Set the session
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
@@ -202,6 +224,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				tk: Some(tk),
 				..
 			} => {
+				// Log the decoded authentication claims
+				trace!(target: LOG, "Attempting authentication for database `{}` with token `{}`", db, tk);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Get the database token
@@ -209,6 +233,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				let cf = config(de.kind, de.code)?;
 				// Verify the token
 				decode::<Claims>(auth, &cf.0, &cf.1)?;
+				// Log the success
+				debug!(target: LOG, "Authenticated to database `{}` with token `{}`", db, tk);
 				// Set the session
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
@@ -222,6 +248,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				id: Some(id),
 				..
 			} => {
+				// Log the decoded authentication claims
+				trace!(target: LOG, "Attempting authentication for database `{}` with login `{}`", db, id);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Get the database login
@@ -229,6 +257,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				let cf = config(Algorithm::Hs512, de.code)?;
 				// Verify the token
 				decode::<Claims>(auth, &cf.0, &cf.1)?;
+				// Log the success
+				debug!(target: LOG, "Authenticated to database `{}` with login `{}`", db, id);
 				// Set the session
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
@@ -241,6 +271,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				tk: Some(tk),
 				..
 			} => {
+				// Log the decoded authentication claims
+				trace!(target: LOG, "Attempting authentication for namespace `{}` with token `{}`", ns, tk);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Get the namespace token
@@ -248,6 +280,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				let cf = config(de.kind, de.code)?;
 				// Verify the token
 				decode::<Claims>(auth, &cf.0, &cf.1)?;
+				// Log the success
+				trace!(target: LOG, "Authenticated to namespace `{}` with token `{}`", ns, tk);
 				// Set the session
 				session.ns = Some(ns.to_owned());
 				session.au = Arc::new(Auth::Ns(ns));
@@ -259,6 +293,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				id: Some(id),
 				..
 			} => {
+				// Log the decoded authentication claims
+				trace!(target: LOG, "Attempting authentication for namespace `{}` with login `{}`", ns, id);
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Get the namespace login
@@ -266,6 +302,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				let cf = config(Algorithm::Hs512, de.code)?;
 				// Verify the token
 				decode::<Claims>(auth, &cf.0, &cf.1)?;
+				// Log the success
+				trace!(target: LOG, "Authenticated to namespace `{}` with login `{}`", ns, id);
 				// Set the session
 				session.ns = Some(ns.to_owned());
 				session.au = Arc::new(Auth::Ns(ns));
