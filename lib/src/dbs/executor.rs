@@ -197,6 +197,7 @@ impl<'a> Executor<'a> {
 							Auth::No => self.set_ns(&mut ctx, &mut opt, ns).await,
 							Auth::Kv => self.set_ns(&mut ctx, &mut opt, ns).await,
 							Auth::Ns(v) if v == ns => self.set_ns(&mut ctx, &mut opt, ns).await,
+							Auth::Db(v, _) if v == ns => self.set_ns(&mut ctx, &mut opt, ns).await,
 							_ => {
 								opt.ns = None;
 								return Err(Error::NsNotAllowed {
