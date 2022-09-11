@@ -91,7 +91,7 @@ impl<A: FromArg> FromArgs for (Option<A>,) {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let err = || Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Expected 0 or 1 arguments."),
+			message: String::from("Expected 0 or 1 arguments."),
 		};
 
 		let mut args = args.into_iter();
@@ -111,7 +111,7 @@ impl<A: FromArg, B: FromArg> FromArgs for (A, Option<B>) {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let err = || Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Expected 1 or 2 arguments."),
+			message: String::from("Expected 1 or 2 arguments."),
 		};
 
 		let mut args = args.into_iter();
@@ -132,7 +132,7 @@ impl<A: FromArg, B: FromArg> FromArgs for (Option<A>, Option<B>) {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let err = || Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Expected 0, 1, or 2 arguments."),
+			message: String::from("Expected 0, 1, or 2 arguments."),
 		};
 
 		let mut args = args.into_iter();
@@ -156,7 +156,7 @@ impl<A: FromArg, B: FromArg> FromArgs for (Option<(A, B)>,) {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let err = || Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Expected 0 or 2 arguments."),
+			message: String::from("Expected 0 or 2 arguments."),
 		};
 
 		let mut args = args.into_iter();
@@ -180,7 +180,7 @@ impl<A: FromArg, B: FromArg, C: FromArg> FromArgs for (A, Option<B>, Option<C>) 
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let err = || Error::InvalidArguments {
 			name: name.to_owned(),
-			message: format!("Expected 1, 2, or 3 arguments."),
+			message: String::from("Expected 1, 2, or 3 arguments."),
 		};
 
 		let mut args = args.into_iter();
