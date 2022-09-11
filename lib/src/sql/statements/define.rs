@@ -695,7 +695,14 @@ pub enum DefineTableOption {
 }
 
 fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
-	alt((table_drop, table_view, table_schemaless, table_schemafull, table_permissions))(i)
+	alt((
+		table_drop,
+		table_view,
+		table_schemaless,
+		table_schemafull,
+		table_schemaful,
+		table_permissions,
+	))(i)
 }
 
 fn table_drop(i: &str) -> IResult<&str, DefineTableOption> {
@@ -719,6 +726,12 @@ fn table_schemaless(i: &str) -> IResult<&str, DefineTableOption> {
 fn table_schemafull(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("SCHEMAFULL")(i)?;
+	Ok((i, DefineTableOption::Schemafull))
+}
+
+fn table_schemaful(i: &str) -> IResult<&str, DefineTableOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("SCHEMAFUL")(i)?;
 	Ok((i, DefineTableOption::Schemafull))
 }
 
