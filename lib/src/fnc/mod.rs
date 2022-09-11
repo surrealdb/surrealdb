@@ -52,7 +52,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
 		"array::sort::desc" => array::sort::desc,
-		"count::count" => count::count,
+		"count" => count::count,
 		"crypto::md5" => crypto::md5,
 		"crypto::sha1" => crypto::sha1,
 		"crypto::sha256" => crypto::sha256,
