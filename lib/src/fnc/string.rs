@@ -6,8 +6,7 @@ pub fn concat(args: Vec<Value>) -> Result<Value, Error> {
 	Ok(args.into_iter().map(|x| x.as_string()).collect::<Vec<_>>().concat().into())
 }
 
-#[allow(non_snake_case)]
-pub fn endsWith((val, chr): (String, String)) -> Result<Value, Error> {
+pub fn ends_with((val, chr): (String, String)) -> Result<Value, Error> {
 	Ok(val.ends_with(&chr).into())
 }
 
@@ -64,8 +63,7 @@ pub fn split((val, chr): (String, String)) -> Result<Value, Error> {
 	Ok(val.split(&chr).collect::<Vec<&str>>().into())
 }
 
-#[allow(non_snake_case)]
-pub fn startsWith((val, chr): (String, String)) -> Result<Value, Error> {
+pub fn starts_with((val, chr): (String, String)) -> Result<Value, Error> {
 	Ok(val.starts_with(&chr).into())
 }
 
