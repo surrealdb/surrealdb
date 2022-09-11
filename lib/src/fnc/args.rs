@@ -175,3 +175,28 @@ impl<A: FromArg, B: FromArg> FromArgs for (Option<(A, B)>,) {
 		Ok((a.zip(b),))
 	}
 }
+
+impl<A: FromArg, B: FromArg, C: FromArg> FromArgs for (A, Option<B>, Option<C>) {
+	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
+		let err = || Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!("Expected 1, 2, or 3 arguments."),
+		};
+
+		let mut args = args.into_iter();
+		let a = A::from_arg(args.next().ok_or_else(err)?)?;
+		let b = match args.next() {
+			Some(b) => Some(B::from_arg(b)?),
+			None => None,
+		};
+		let c = match args.next() {
+			Some(c) => Some(C::from_arg(c)?),
+			None => None,
+		};
+		if args.next().is_some() {
+			// Too many.
+			return Err(err());
+		}
+		Ok((a, b, c))
+	}
+}

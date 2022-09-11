@@ -25,26 +25,13 @@ pub mod util;
 
 // Attempts to run any function
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
-	match name {
-		v if v.starts_with("http") => {
-			// HTTP functions are asynchronous
-			asynchronous(ctx, name, args).await
-		}
-		_ => {
-			// Other functions are synchronous
-			synchronous(ctx, name, args)
-		}
-	}
-}
-
-// Attempts to run a synchronous function
-pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
 	macro_rules! dispatch {
-		($name: ident, $ctx: expr, $args: ident, $($function: path),+, $((ctx) $ctx_function: path),+) => {
+		($name: ident, $ctx: expr, $args: ident, $($function: path),+, $((ctx) $ctx_function: path),+, $(async $async_function: path),+) => {
 			{
 				match $name {
 					$(stringify!($function) => $function(shim($name, $args)?),)+
 					$(stringify!($ctx_function) => $ctx_function($ctx, shim($name, $args)?),)+
+					$(stringify!($async_function) => $async_function(shim($name, $args)?).await,)+
 					_ => unreachable!()
 				}
 			}
@@ -181,21 +168,12 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		(ctx) session::ns,
 		(ctx) session::origin,
 		(ctx) session::sc,
-		(ctx) session::sd
+		(ctx) session::sd,
+		async http::head,
+		async http::get,
+		async http::put,
+		async http::post,
+		async http::patch,
+		async http::delete
 	)
-}
-
-// Attempts to run an asynchronous function
-pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
-	match name {
-		//
-		"http::head" => http::head(ctx, args).await,
-		"http::get" => http::get(ctx, args).await,
-		"http::put" => http::put(ctx, args).await,
-		"http::post" => http::post(ctx, args).await,
-		"http::patch" => http::patch(ctx, args).await,
-		"http::delete" => http::delete(ctx, args).await,
-		//
-		_ => unreachable!(),
-	}
 }
