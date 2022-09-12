@@ -87,7 +87,7 @@ pub mod hash {
 
 	pub fn encode((point, len): (Value, Option<usize>)) -> Result<Value, Error> {
 		let len = match len {
-			Some(len) if len > 0 && len < 12 => len,
+			Some(len) if (0..=12).contains(&len) => len,
 			None => 12,
 			_ => return Err(Error::InvalidArguments {
 				name: String::from("geo::encode"),
