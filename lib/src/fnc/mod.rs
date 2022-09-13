@@ -26,7 +26,7 @@ pub mod util;
 // Attempts to run any function
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
 	macro_rules! dispatch {
-		($name: ident, $args: ident, $($function_name: literal => $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*),+) => {
+		($name: ident, $args: ident, $($function_name: literal => $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
 			{
 				match $name {
 					$($function_name => $($function_path)::+($($ctx_arg,)* shim($name, $args)?)$(.$await)*,)+
@@ -66,6 +66,12 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"geo::distance" => geo::distance,
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
+		"http::head" => http::head.await,
+		"http::get" => http::get.await,
+		"http::put" => http::put.await,
+		"http::post" =>  http::post.await,
+		"http::patch" => http::patch.await,
+		"http::delete" => http::delete.await,
 		"is::alphanum" => is::alphanum,
 		"is::alpha" => is::alpha,
 		"is::ascii" => is::ascii,
@@ -117,6 +123,13 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"rand::time" => rand::time,
 		"rand::uuid" => rand::uuid,
 		"rand" => rand::rand,
+		"session::db" => session::db(ctx),
+		"session::id" => session::id(ctx),
+		"session::ip" => session::ip(ctx),
+		"session::ns" => session::ns(ctx),
+		"session::origin" => session::origin(ctx),
+		"session::sc" => session::sc(ctx),
+		"session::sd" => session::sd(ctx),
 		"string::concat" => string::concat,
 		"string::endsWith" => string::ends_with,
 		"string::join" => string::join,
@@ -159,18 +172,5 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
-		"session::db" => session::db(ctx),
-		"session::id" => session::id(ctx),
-		"session::ip" => session::ip(ctx),
-		"session::ns" => session::ns(ctx),
-		"session::origin" => session::origin(ctx),
-		"session::sc" => session::sc(ctx),
-		"session::sd" => session::sd(ctx),
-		"http::head" => http::head.await,
-		"http::get" => http::get.await,
-		"http::put" => http::put.await,
-		"http::post" =>  http::post.await,
-		"http::patch" => http::patch.await,
-		"http::delete" => http::delete.await
 	)
 }
