@@ -26,12 +26,10 @@ pub mod util;
 // Attempts to run any function
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
 	macro_rules! dispatch {
-		($name: ident, $ctx: expr, $args: ident, $($function_name: literal => $function: path),+, $((ctx) $ctx_function_name: literal => $ctx_function: path),+, $($async_function_name: literal => async $async_function: path),+) => {
+		($name: ident, $args: ident, $($function_name: literal => $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*),+) => {
 			{
 				match $name {
-					$($function_name => $function(shim($name, $args)?),)+
-					$($ctx_function_name => $ctx_function($ctx, shim($name, $args)?),)+
-					$($async_function_name => $async_function(shim($name, $args)?).await,)+
+					$($function_name => $($function_path)::+($($ctx_arg,)* shim($name, $args)?)$(.$await)*,)+
 					_ => unreachable!()
 				}
 			}
@@ -40,7 +38,6 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 
 	dispatch!(
 		name,
-		ctx,
 		args,
 		"array::combine" => array::combine,
 		"array::concat" => array::concat,
@@ -162,18 +159,18 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
-		(ctx) "session::db" => session::db,
-		(ctx) "session::id" => session::id,
-		(ctx) "session::ip" => session::ip,
-		(ctx) "session::ns" => session::ns,
-		(ctx) "session::origin" => session::origin,
-		(ctx) "session::sc" => session::sc,
-		(ctx) "session::sd" => session::sd,
-		"http::head" => async http::head,
-		"http::get" => async http::get,
-		"http::put" => async http::put,
-		"http::post" => async http::post,
-		"http::patch" => async http::patch,
-		"http::delete" => async http::delete
+		"session::db" => session::db(ctx),
+		"session::id" => session::id(ctx),
+		"session::ip" => session::ip(ctx),
+		"session::ns" => session::ns(ctx),
+		"session::origin" => session::origin(ctx),
+		"session::sc" => session::sc(ctx),
+		"session::sd" => session::sd(ctx),
+		"http::head" => http::head.await,
+		"http::get" => http::get.await,
+		"http::put" => http::put.await,
+		"http::post" =>  http::post.await,
+		"http::patch" => http::patch.await,
+		"http::delete" => http::delete.await
 	)
 }
