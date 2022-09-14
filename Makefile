@@ -30,6 +30,10 @@ clean:
 serve:
 	cargo run -- start --log trace --user root --pass root memory
 
+.PHONY: sql
+sql:
+	cargo run -- sql --conn http://0.0.0.0:8000 --user root --pass root --ns test --db test
+
 .PHONY: quick
 quick:
 	cargo build
