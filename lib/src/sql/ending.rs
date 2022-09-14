@@ -18,6 +18,7 @@ pub fn number(i: &str) -> IResult<&str, ()> {
 		map(char(')'), |_| ()),
 		map(char(']'), |_| ()),
 		map(char('}'), |_| ()),
+		map(char('"'), |_| ()),
 		map(char(';'), |_| ()),
 		map(char(','), |_| ()),
 		map(tag(".."), |_| ()),

@@ -167,6 +167,22 @@ mod tests {
 	}
 
 	#[test]
+	fn thing_integer() {
+		let sql = "test:001";
+		let res = thing(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("test:1", format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(1),
+			}
+		);
+	}
+
+	#[test]
 	fn thing_quoted_backtick() {
 		let sql = "`test`:`id`";
 		let res = thing(sql);
