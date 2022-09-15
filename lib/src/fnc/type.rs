@@ -85,17 +85,16 @@ pub fn table((arg,): (Value,)) -> Result<Value, Error> {
 
 pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 	Ok(if let Some(arg2) = arg2 {
-		let tb = arg1;
-		match arg2 {
-			Value::Thing(id) => Value::Thing(Thing {
-				tb: tb.as_string(),
-				id: id.id,
-			}),
-			id => Value::Thing(Thing {
-				tb: tb.as_string(),
-				id: id.as_string().into(),
-			}),
-		}
+		Value::Thing(Thing{
+			tb: arg1.as_string(),
+			id: match arg2 {
+				Value::Thing(v) => v.id,
+				Value::Array(v) => v.into(),
+				Value::Object(v) => v.into(),
+				Value::Number(Number::Int(v)) => v.into(),
+				v => v.as_string().into(),
+			}
+		})
 	} else {
 		match arg1 {
 			Value::Thing(v) => v.into(),

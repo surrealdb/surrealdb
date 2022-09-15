@@ -32,6 +32,10 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 		match readline {
 			// The user typed a query
 			Ok(line) => {
+				// Ignore all empty lines
+				if line.is_empty() {
+					continue;
+				}
 				// Add the entry to the history
 				rl.add_history_entry(line.as_str());
 				// Make a new remote request

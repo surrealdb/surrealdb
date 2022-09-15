@@ -61,7 +61,7 @@ impl Rpc {
 		// Send messages to the client
 		tokio::task::spawn(async move {
 			while let Some(res) = rcv.next().await {
-				wtx.send(res).await.unwrap();
+				let _ = wtx.send(res).await;
 			}
 		});
 		// Get messages from the client
