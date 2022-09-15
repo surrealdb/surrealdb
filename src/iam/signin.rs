@@ -144,7 +144,7 @@ pub async fn sc(
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
-								// Set the authentication on the sesssion
+								// Set the authentication on the session
 								session.ns = Some(ns.to_owned());
 								session.db = Some(db.to_owned());
 								session.sc = Some(sc.to_owned());
@@ -206,7 +206,7 @@ pub async fn db(
 						id: Some(user),
 						..Claims::default()
 					};
-					// Set the authentication on the sesssion
+					// Set the authentication on the session
 					session.au = Arc::new(Auth::Db(ns, db));
 					// Create the authentication token
 					match encode(&*HEADER, &val, &key) {
@@ -255,7 +255,7 @@ pub async fn ns(
 						id: Some(user),
 						..Claims::default()
 					};
-					// Set the authentication on the sesssion
+					// Set the authentication on the session
 					session.au = Arc::new(Auth::Ns(ns));
 					// Create the authentication token
 					match encode(&*HEADER, &val, &key) {

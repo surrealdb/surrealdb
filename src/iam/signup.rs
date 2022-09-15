@@ -79,7 +79,7 @@ pub async fn sc(
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
-								// Set the authentication on the sesssion
+								// Set the authentication on the session
 								session.ns = Some(ns.to_owned());
 								session.db = Some(db.to_owned());
 								session.sc = Some(sc.to_owned());

@@ -13,7 +13,7 @@ async fn handler() -> Result<impl warp::Reply, warp::Rejection> {
 	match db.transaction(false, false).await {
 		// The transaction failed to start
 		Err(_) => Err(warp::reject::custom(Error::InvalidStorage)),
-		// The transaction was successfull
+		// The transaction was successful
 		Ok(mut tx) => {
 			// Cancel the transaction
 			let _ = tx.cancel().await;
