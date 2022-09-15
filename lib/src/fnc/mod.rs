@@ -25,15 +25,34 @@ pub mod util;
 
 // Attempts to run any function
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
+	// Wrappers return a function as opposed to a value so that the dispatch! method can always
+	// perform a function call.
+	#[cfg(feature = "parallel")]
+	fn cpu_intensive<R: Send + 'static>(
+		function: impl FnOnce() -> R + Send + 'static,
+	) -> impl FnOnce() -> executor::Task<R> {
+		|| crate::exe::spawn(async move { function() })
+	}
+
+	#[cfg(not(feature = "parallel"))]
+	fn cpu_intensive<R: Send + 'static>(
+		function: impl FnOnce() -> R + Send + 'static,
+	) -> impl FnOnce() -> std::future::Ready<R> {
+		|| std::future::Ready(function())
+	}
+
 	macro_rules! dispatch {
-		($name: ident, $args: ident, $($function_name: literal => $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
+		($name: ident, $args: ident, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
 			{
 				match $name {
-					$($function_name => $($function_path)::+($($ctx_arg,)* shim($name, $args)?)$(.$await)*,)+
+					$($function_name => {
+						let args = shim($name, $args)?;
+						$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
+					},)+
 					_ => unreachable!()
 				}
 			}
-		}
+		};
 	}
 
 	dispatch!(
@@ -54,12 +73,12 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"crypto::sha1" => crypto::sha1,
 		"crypto::sha256" => crypto::sha256,
 		"crypto::sha512" => crypto::sha512,
-		"crypto::argon2::compare" => crypto::argon2::cmp,
-		"crypto::argon2::generate" => crypto::argon2::gen,
-		"crypto::pbkdf2::compare" => crypto::pbkdf2::cmp,
-		"crypto::pbkdf2::generate" => crypto::pbkdf2::gen,
-		"crypto::scrypt::compare" => crypto::scrypt::cmp,
-		"crypto::scrypt::generate" => crypto::scrypt::gen,
+		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
+		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
+		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
+		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
+		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
+		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
 		"geo::centroid" => geo::centroid,
