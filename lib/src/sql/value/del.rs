@@ -8,7 +8,7 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 impl Value {
 	#[cfg_attr(feature = "parallel", async_recursion)]
@@ -91,13 +91,15 @@ impl Value {
 					},
 					Part::Where(w) => match path.len() {
 						1 => {
-							let mut m = HashMap::new();
+							// TODO: If further optimization is desired, push indices to a vec,
+							// iterate in reverse, and call swap_remove
+							let mut m = HashSet::new();
 							for (i, v) in v.iter().enumerate() {
 								if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
-									m.insert(i, ());
+									m.insert(i);
 								};
 							}
-							v.abolish(|i| m.contains_key(&i));
+							v.abolish(|i| m.contains(&i));
 							Ok(())
 						}
 						_ => {

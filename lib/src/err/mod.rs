@@ -21,6 +21,10 @@ pub enum Error {
 	#[error("There was a problem with a datastore transaction: {0}")]
 	Tx(String),
 
+	/// There was an error when starting a new datastore transaction
+	#[error("There was an error when starting a new datastore transaction")]
+	TxFailure,
+
 	/// The transaction was already cancelled or committed
 	#[error("Couldn't update a finished transaction")]
 	TxFinished,
@@ -73,7 +77,7 @@ pub enum Error {
 		message: String,
 	},
 
-	/// The wrong number of arguments was given for the specified function
+	/// The wrong quantity or magnitude of arguments was given for the specified function
 	#[error("Incorrect arguments for function {name}(). {message}")]
 	InvalidArguments {
 		name: String,
@@ -213,15 +217,17 @@ pub enum Error {
 	},
 
 	/// A database index entry for the specified record already exists
-	#[error("Database index `{index}` already contains `{thing}`")]
+	#[error("Database index `{index}` already contains {value}, with record `{thing}`")]
 	IndexExists {
-		index: String,
 		thing: String,
+		index: String,
+		value: String,
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
-	#[error("Found '{value}' for field '{field}' but field must conform to: {check}")]
+	#[error("Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}")]
 	FieldValue {
+		thing: String,
 		value: String,
 		field: Idiom,
 		check: String,
@@ -260,7 +266,7 @@ impl From<Error> for String {
 	}
 }
 
-#[cfg(feature = "kv-echodb")]
+#[cfg(feature = "kv-mem")]
 impl From<echodb::err::Error> for Error {
 	fn from(e: echodb::err::Error) -> Error {
 		match e {
@@ -287,6 +293,13 @@ impl From<tikv::Error> for Error {
 			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
 			_ => Error::Tx(e.to_string()),
 		}
+	}
+}
+
+#[cfg(feature = "kv-rocksdb")]
+impl From<rocksdb::Error> for Error {
+	fn from(e: rocksdb::Error) -> Error {
+		Error::Tx(e.to_string())
 	}
 }
 

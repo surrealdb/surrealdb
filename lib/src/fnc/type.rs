@@ -93,24 +93,24 @@ pub fn string(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn table(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(Value::Table(Table(args.remove(0).as_string())))
+	Ok(Value::Table(Table(match args.remove(0) {
+		Value::Thing(t) => t.tb,
+		v => v.as_string(),
+	})))
 }
 
 pub fn thing(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
-		2 => {
-			let tb = args.remove(0);
-			match args.remove(0) {
-				Value::Thing(id) => Ok(Value::Thing(Thing {
-					tb: tb.as_string(),
-					id: id.id,
-				})),
-				id => Ok(Value::Thing(Thing {
-					tb: tb.as_string(),
-					id: id.as_string().into(),
-				})),
-			}
-		}
+		2 => Ok(Value::Thing(Thing {
+			tb: args.remove(0).as_string(),
+			id: match args.remove(0) {
+				Value::Thing(v) => v.id,
+				Value::Array(v) => v.into(),
+				Value::Object(v) => v.into(),
+				Value::Number(Number::Int(v)) => v.into(),
+				v => v.as_string().into(),
+			},
+		})),
 		1 => match args.remove(0) {
 			Value::Thing(v) => Ok(v.into()),
 			_ => Ok(Value::None),

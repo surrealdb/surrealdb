@@ -7,6 +7,8 @@ use crate::dbs::Transaction;
 use crate::dbs::LOG;
 use crate::err::Error;
 use crate::kvs::Datastore;
+use crate::sql::paths::DB;
+use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
@@ -79,16 +81,13 @@ impl<'a> Executor<'a> {
 
 	async fn cancel(&mut self, local: bool) {
 		if local {
-			match self.txn.as_ref() {
-				Some(txn) => {
-					let txn = txn.clone();
-					let mut txn = txn.lock().await;
-					if txn.cancel().await.is_err() {
-						self.err = true;
-					}
-					self.txn = None;
+			if let Some(txn) = self.txn.as_ref() {
+				let txn = txn.clone();
+				let mut txn = txn.lock().await;
+				if txn.cancel().await.is_err() {
+					self.err = true;
 				}
-				None => unreachable!(),
+				self.txn = None;
 			}
 		}
 	}
@@ -113,6 +112,20 @@ impl<'a> Executor<'a> {
 			},
 			_ => v,
 		}
+	}
+
+	async fn set_ns(&self, ctx: &mut Context<'_>, opt: &mut Options, ns: &str) {
+		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+		session.put(NS.as_ref(), ns.to_owned().into());
+		ctx.add_value(String::from("session"), session);
+		opt.ns = Some(Arc::new(ns.to_owned()));
+	}
+
+	async fn set_db(&self, ctx: &mut Context<'_>, opt: &mut Options, db: &str) {
+		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+		session.put(DB.as_ref(), db.to_owned().into());
+		ctx.add_value(String::from("session"), session);
+		opt.db = Some(Arc::new(db.to_owned()));
 	}
 
 	pub async fn execute(
@@ -181,9 +194,10 @@ impl<'a> Executor<'a> {
 				Statement::Use(stm) => {
 					if let Some(ref ns) = stm.ns {
 						match &*opt.auth {
-							Auth::No => opt.ns = Some(Arc::new(ns.to_owned())),
-							Auth::Kv => opt.ns = Some(Arc::new(ns.to_owned())),
-							Auth::Ns(v) if v == ns => opt.ns = Some(Arc::new(ns.to_owned())),
+							Auth::No => self.set_ns(&mut ctx, &mut opt, ns).await,
+							Auth::Kv => self.set_ns(&mut ctx, &mut opt, ns).await,
+							Auth::Ns(v) if v == ns => self.set_ns(&mut ctx, &mut opt, ns).await,
+							Auth::Db(v, _) if v == ns => self.set_ns(&mut ctx, &mut opt, ns).await,
 							_ => {
 								opt.ns = None;
 								return Err(Error::NsNotAllowed {
@@ -194,10 +208,10 @@ impl<'a> Executor<'a> {
 					}
 					if let Some(ref db) = stm.db {
 						match &*opt.auth {
-							Auth::No => opt.db = Some(Arc::new(db.to_owned())),
-							Auth::Kv => opt.db = Some(Arc::new(db.to_owned())),
-							Auth::Ns(_) => opt.db = Some(Arc::new(db.to_owned())),
-							Auth::Db(_, v) if v == db => opt.db = Some(Arc::new(db.to_owned())),
+							Auth::No => self.set_db(&mut ctx, &mut opt, db).await,
+							Auth::Kv => self.set_db(&mut ctx, &mut opt, db).await,
+							Auth::Ns(_) => self.set_db(&mut ctx, &mut opt, db).await,
+							Auth::Db(_, v) if v == db => self.set_db(&mut ctx, &mut opt, db).await,
 							_ => {
 								opt.db = None;
 								return Err(Error::DbNotAllowed {
@@ -212,17 +226,28 @@ impl<'a> Executor<'a> {
 				Statement::Set(stm) => {
 					// Create a transaction
 					let loc = self.begin(stm.writeable()).await;
-					// Process the statement
-					match stm.compute(&ctx, &opt, &self.txn(), None).await {
-						Ok(val) => {
-							ctx.add_value(stm.name.to_owned(), val);
+					// Check the transaction
+					match self.err {
+						// We failed to create a transaction
+						true => Err(Error::TxFailure),
+						// The transaction began successfully
+						false => {
+							// Process the statement
+							match stm.compute(&ctx, &opt, &self.txn(), None).await {
+								Ok(val) => {
+									ctx.add_value(stm.name.to_owned(), val);
+								}
+								_ => break,
+							}
+							// Cancel transaction
+							match stm.writeable() {
+								true => self.commit(loc).await,
+								false => self.cancel(loc).await,
+							};
+							// Return nothing
+							Ok(Value::None)
 						}
-						_ => break,
 					}
-					// Cancel transaction
-					self.cancel(loc).await;
-					// Return nothing
-					Ok(Value::None)
 				}
 				// Process all other normal statements
 				_ => match self.err {
@@ -232,31 +257,42 @@ impl<'a> Executor<'a> {
 					false => {
 						// Create a transaction
 						let loc = self.begin(stm.writeable()).await;
-						// Process the statement
-						let res = match stm.timeout() {
-							// There is a timeout clause
-							Some(timeout) => {
-								// Set statement timeout
-								let mut ctx = Context::new(&ctx);
-								ctx.add_timeout(timeout);
+						// Check the transaction
+						match self.err {
+							// We failed to create a transaction
+							true => Err(Error::TxFailure),
+							// The transaction began successfully
+							false => {
 								// Process the statement
-								let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
-								// Catch statement timeout
-								match ctx.is_timedout() {
-									true => Err(Error::QueryTimedout),
-									false => res,
-								}
+								let res = match stm.timeout() {
+									// There is a timeout clause
+									Some(timeout) => {
+										// Set statement timeout
+										let mut ctx = Context::new(&ctx);
+										ctx.add_timeout(timeout);
+										// Process the statement
+										let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
+										// Catch statement timeout
+										match ctx.is_timedout() {
+											true => Err(Error::QueryTimedout),
+											false => res,
+										}
+									}
+									// There is no timeout clause
+									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
+								};
+								// Finalise transaction
+								match &res {
+									Ok(_) => match stm.writeable() {
+										true => self.commit(loc).await,
+										false => self.cancel(loc).await,
+									},
+									Err(_) => self.cancel(loc).await,
+								};
+								// Return the result
+								res
 							}
-							// There is no timeout clause
-							None => stm.compute(&ctx, &opt, &self.txn(), None).await,
-						};
-						// Finalise transaction
-						match &res {
-							Ok(_) => self.commit(loc).await,
-							Err(_) => self.cancel(loc).await,
-						};
-						// Return the result
-						res
+						}
 					}
 				},
 			};

@@ -99,18 +99,23 @@ jobs:
           - arch: x86_64-apple-darwin
             os: macos-latest
             file: surreal-${{ github.ref_name }}.darwin-amd64
+            opts: --features storage-tikv
           - arch: aarch64-apple-darwin
             os: macos-latest
             file: surreal-${{ github.ref_name }}.darwin-arm64
+            opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             file: surreal-${{ github.ref_name }}.linux-amd64
+            opts: --features storage-tikv
           - arch: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             file: surreal-${{ github.ref_name }}.linux-arm64
-          # - arch: x86_64-pc-windows-gnu
-          #   os: windows-latest
-          #   file: surreal-${{ github.ref_name }}.windows-amd64
+            opts: --features storage-tikv
+          - arch: x86_64-pc-windows-msvc
+            os: windows-latest
+            file: surreal-${{ github.ref_name }}.windows-amd64
+            opts:
     runs-on: ${{ matrix.os }}
     steps:
 
@@ -145,6 +150,13 @@ jobs:
           sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
           sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
 
+      - name: Install FoundationDB
+        if: contains(matrix.arch, 'linux') && startsWith(matrix.arch, 'x86_64')
+        run: |
+          curl -sLO https://github.com/apple/foundationdb/releases/download/6.3.23/foundationdb-clients_6.3.23-1_amd64.deb
+          sudo dpkg -i --force-architecture foundationdb-clients_6.3.23-1_amd64.deb
+          rm -rf foundationdb-clients_6.3.23-1_amd64.deb
+
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -159,7 +171,9 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --locked --target ${{ matrix.arch }}
+          args: ${{ matrix.opts }} --release --locked --target ${{ matrix.arch }}
+        env:
+          BINDGEN_EXTRA_CLANG_ARGS_aarch64-unknown-linux-gnu: "-I/usr/aarch64-linux-gnu/include/"
 
       - name: Configure AWS
         uses: aws-actions/configure-aws-credentials@v1

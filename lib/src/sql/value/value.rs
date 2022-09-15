@@ -23,6 +23,7 @@ use crate::sql::object::{object, Object};
 use crate::sql::operation::Operation;
 use crate::sql::param::{param, Param};
 use crate::sql::part::Part;
+use crate::sql::range::{range, Range};
 use crate::sql::regex::{regex, Regex};
 use crate::sql::serde::is_internal_serialization;
 use crate::sql::strand::{strand, Strand};
@@ -114,6 +115,7 @@ pub enum Value {
 	Thing(Thing),
 	Model(Model),
 	Regex(Regex),
+	Range(Box<Range>),
 	Edges(Box<Edges>),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
@@ -135,6 +137,7 @@ impl Default for Value {
 }
 
 impl From<bool> for Value {
+	#[inline]
 	fn from(v: bool) -> Self {
 		match v {
 			true => Value::True,
@@ -224,6 +227,12 @@ impl From<Datetime> for Value {
 impl From<Duration> for Value {
 	fn from(v: Duration) -> Self {
 		Value::Duration(v)
+	}
+}
+
+impl From<Range> for Value {
+	fn from(v: Range) -> Self {
+		Value::Range(Box::new(v))
 	}
 }
 
@@ -430,6 +439,8 @@ impl From<Id> for Value {
 		match v {
 			Id::Number(v) => v.into(),
 			Id::String(v) => Strand::from(v).into(),
+			Id::Object(v) => v.into(),
+			Id::Array(v) => v.into(),
 		}
 	}
 }
@@ -487,7 +498,7 @@ impl Value {
 	pub fn is_true(&self) -> bool {
 		match self {
 			Value::True => true,
-			Value::Strand(v) => v.to_ascii_lowercase() == "true",
+			Value::Strand(v) => v.eq_ignore_ascii_case("true"),
 			_ => false,
 		}
 	}
@@ -495,7 +506,7 @@ impl Value {
 	pub fn is_false(&self) -> bool {
 		match self {
 			Value::False => true,
-			Value::Strand(v) => v.to_ascii_lowercase() == "false",
+			Value::Strand(v) => v.eq_ignore_ascii_case("false"),
 			_ => false,
 		}
 	}
@@ -508,7 +519,7 @@ impl Value {
 			Value::Geometry(_) => true,
 			Value::Array(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
-			Value::Strand(v) => !v.is_empty() && v.to_ascii_lowercase() != "false",
+			Value::Strand(v) => !v.is_empty() && !v.eq_ignore_ascii_case("false"),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
 			Value::Datetime(v) => v.timestamp() > 0,
@@ -546,25 +557,25 @@ impl Value {
 	pub fn is_type_geometry(&self, types: &[String]) -> bool {
 		match self {
 			Value::Geometry(Geometry::Point(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "point")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "point"))
 			}
 			Value::Geometry(Geometry::Line(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "line")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "line"))
 			}
 			Value::Geometry(Geometry::Polygon(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "polygon")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "polygon"))
 			}
 			Value::Geometry(Geometry::MultiPoint(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "multipoint")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "multipoint"))
 			}
 			Value::Geometry(Geometry::MultiLine(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "multiline")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "multiline"))
 			}
 			Value::Geometry(Geometry::MultiPolygon(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "multipolygon")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "multipolygon"))
 			}
 			Value::Geometry(Geometry::Collection(_)) => {
-				types.iter().any(|t| &t[..] == "feature" || &t[..] == "collection")
+				types.iter().any(|t| matches!(t.as_str(), "feature" | "collection"))
 			}
 			_ => false,
 		}
@@ -1069,6 +1080,7 @@ impl fmt::Display for Value {
 			Value::Thing(v) => write!(f, "{}", v),
 			Value::Model(v) => write!(f, "{}", v),
 			Value::Regex(v) => write!(f, "{}", v),
+			Value::Range(v) => write!(f, "{}", v),
 			Value::Edges(v) => write!(f, "{}", v),
 			Value::Function(v) => write!(f, "{}", v),
 			Value::Subquery(v) => write!(f, "{}", v),
@@ -1103,6 +1115,7 @@ impl Value {
 			Value::Null => Ok(Value::Null),
 			Value::True => Ok(Value::True),
 			Value::False => Ok(Value::False),
+			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Param(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,
@@ -1140,10 +1153,11 @@ impl Serialize for Value {
 				Value::Thing(v) => s.serialize_newtype_variant("Value", 15, "Thing", v),
 				Value::Model(v) => s.serialize_newtype_variant("Value", 16, "Model", v),
 				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
-				Value::Edges(v) => s.serialize_newtype_variant("Value", 18, "Edges", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 19, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 20, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 21, "Expression", v),
+				Value::Range(v) => s.serialize_newtype_variant("Value", 18, "Range", v),
+				Value::Edges(v) => s.serialize_newtype_variant("Value", 19, "Edges", v),
+				Value::Function(v) => s.serialize_newtype_variant("Value", 20, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant("Value", 21, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant("Value", 22, "Expression", v),
 			}
 		} else {
 			match self {
@@ -1273,6 +1287,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(regex, Value::from),
 			map(model, Value::from),
 			map(edges, Value::from),
+			map(range, Value::from),
 			map(thing, Value::from),
 			map(table, Value::from),
 			map(strand, Value::from),
@@ -1287,6 +1302,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 		map(param, Value::from),
 		map(model, Value::from),
 		map(edges, Value::from),
+		map(range, Value::from),
 		map(thing, Value::from),
 		map(table, Value::from),
 	))(i)
@@ -1456,7 +1472,7 @@ mod tests {
 	#[test]
 	fn check_size() {
 		assert_eq!(64, std::mem::size_of::<Value>());
-		assert_eq!(88, std::mem::size_of::<Result<Value, Error>>());
+		assert_eq!(112, std::mem::size_of::<Result<Value, Error>>());
 		assert_eq!(48, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
@@ -1470,6 +1486,7 @@ mod tests {
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
 		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::regex::Regex>());
+		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::function::Function>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::subquery::Subquery>>());

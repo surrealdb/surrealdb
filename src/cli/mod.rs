@@ -28,84 +28,69 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 ";
 
 fn file_valid(v: &str) -> Result<(), String> {
-	if !v.is_empty() {
-		return Ok(());
+	match v {
+		v if !v.is_empty() => Ok(()),
+		_ => Err(String::from(
+			"\
+			Provide a valid path to a SQL file\
+		",
+		)),
 	}
-	Err(String::from(
-		"\
-		Provide a valid path to a SQL file\
-	",
-	))
 }
 
 fn path_valid(v: &str) -> Result<(), String> {
-	if v == "memory" {
-		return Ok(());
+	match v {
+		"memory" => Ok(()),
+		v if v.starts_with("file:") => Ok(()),
+		v if v.starts_with("rocksdb:") => Ok(()),
+		v if v.starts_with("tikv:") => Ok(()),
+		v if v.starts_with("fdb:") => Ok(()),
+		_ => Err(String::from(
+			"\
+			Provide a valid database path parameter\
+		",
+		)),
 	}
-	if v.starts_with("file://") {
-		return Ok(());
-	}
-	if v.starts_with("tikv://") {
-		return Ok(());
-	}
-	if v.starts_with("fdb://") {
-		return Ok(());
-	}
-	Err(String::from(
-		"\
-		Provide a valid database path parameter\
-	",
-	))
 }
 
 fn conn_valid(v: &str) -> Result<(), String> {
-	if v.starts_with("https://") {
-		return Ok(());
+	match v {
+		v if v.starts_with("http://") => Ok(()),
+		v if v.starts_with("https://") => Ok(()),
+		_ => Err(String::from(
+			"\
+			Provide a valid database connection string\
+		",
+		)),
 	}
-	if v.starts_with("http://") {
-		return Ok(());
-	}
-	Err(String::from(
-		"\
-		Provide a valid database connection string\
-	",
-	))
 }
 
 fn from_valid(v: &str) -> Result<(), String> {
-	if v.starts_with("https://") {
-		return Ok(());
+	match v {
+		v if v.ends_with(".db") => Ok(()),
+		v if v.starts_with("http://") => Ok(()),
+		v if v.starts_with("https://") => Ok(()),
+		_ => Err(String::from(
+			"\
+			Provide a valid database connection string, \
+			or specify the path to a database file\
+		",
+		)),
 	}
-	if v.starts_with("http://") {
-		return Ok(());
-	}
-	if v.ends_with(".db") {
-		return Ok(());
-	}
-	Err(String::from(
-		"\
-		Provide a valid database connection string, \
-		or specify the path to a database file\
-	",
-	))
 }
 
 fn into_valid(v: &str) -> Result<(), String> {
-	if v.starts_with("https://") {
-		return Ok(());
+	match v {
+		v if v.ends_with(".db") => Ok(()),
+		v if v.starts_with("http://") => Ok(()),
+		v if v.starts_with("https://") => Ok(()),
+		_ => Err(String::from(
+			"\
+			Provide a valid database connection string, \
+			or specify the path to a database file\
+		",
+		)),
 	}
-	if v.starts_with("http://") {
-		return Ok(());
-	}
-	if v.ends_with(".db") {
-		return Ok(());
-	}
-	Err(String::from(
-		"\
-		Provide a valid database connection string, \
-		or specify the path to a database file\
-	",
-	))
 }
 
 fn key_valid(v: &str) -> Result<(), String> {
@@ -137,6 +122,7 @@ pub fn init() {
 			.arg(
 				Arg::new("path")
 					.index(1)
+					.env("DB_PATH")
 					.required(false)
 					.validator(path_valid)
 					.default_value("memory")

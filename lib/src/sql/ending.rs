@@ -2,6 +2,7 @@ use crate::sql::comment::comment;
 use crate::sql::error::IResult;
 use crate::sql::operator::{assigner, operator};
 use nom::branch::alt;
+use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::character::complete::multispace1;
 use nom::combinator::eof;
@@ -17,8 +18,10 @@ pub fn number(i: &str) -> IResult<&str, ()> {
 		map(char(')'), |_| ()),
 		map(char(']'), |_| ()),
 		map(char('}'), |_| ()),
+		map(char('"'), |_| ()),
 		map(char(';'), |_| ()),
 		map(char(','), |_| ()),
+		map(tag(".."), |_| ()),
 		map(eof, |_| ()),
 	)))(i)
 }

@@ -1,6 +1,7 @@
 mod export;
 mod fail;
 mod head;
+mod health;
 mod import;
 mod index;
 mod key;
@@ -28,6 +29,8 @@ pub async fn init() -> Result<(), Error> {
 		.or(version::config())
 		// Status endpoint
 		.or(status::config())
+		// Health endpoint
+		.or(health::config())
 		// Signup endpoint
 		.or(signup::config())
 		// Signin endpoint

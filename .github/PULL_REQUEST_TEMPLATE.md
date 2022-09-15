@@ -18,4 +18,4 @@ If this pull request is related to any other pull request or issue, or resolves 
 
 ## Have you read the [Contributing Guidelines](https://github.com/surrealdb/surrealdb/blob/master/CONTRIBUTING.md)?
 
-[ ] I have read the [Contributing Guidelines](https://github.com/surrealdb/surrealdb/blob/master/CONTRIBUTING.md)
+- [ ] I have read the [Contributing Guidelines](https://github.com/surrealdb/surrealdb/blob/master/CONTRIBUTING.md)

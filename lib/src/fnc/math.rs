@@ -150,7 +150,7 @@ pub fn stddev(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 pub fn sum(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
 		Value::Array(v) => Ok(v.as_numbers().into_iter().sum::<Number>().into()),
-		_ => Ok(Value::None),
+		v => Ok(v.as_number().into()),
 	}
 }
 

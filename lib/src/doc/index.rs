@@ -53,17 +53,21 @@ impl<'a> Document<'a> {
 						// Delete the old index data
 						if self.initial.is_some() {
 							#[rustfmt::skip]
-							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, o, None);
+							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &o, None);
 							let _ = run.delc(key, Some(rid)).await; // Ignore this error
 						}
 						// Create the new index data
 						if self.current.is_some() {
 							#[rustfmt::skip]
-							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, n, None);
+							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &n, None);
 							if run.putc(key, rid, None).await.is_err() {
 								return Err(Error::IndexExists {
-									index: ix.name.to_string(),
 									thing: rid.to_string(),
+									index: ix.name.to_string(),
+									value: match n.len() {
+										1 => n.first().unwrap().to_string(),
+										_ => n.to_string(),
+									},
 								});
 							}
 						}
@@ -72,17 +76,21 @@ impl<'a> Document<'a> {
 						// Delete the old index data
 						if self.initial.is_some() {
 							#[rustfmt::skip]
-							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, o, Some(&rid.id));
+							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &o, Some(&rid.id));
 							let _ = run.delc(key, Some(rid)).await; // Ignore this error
 						}
 						// Create the new index data
 						if self.current.is_some() {
 							#[rustfmt::skip]
-							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, n, Some(&rid.id));
+							let key = crate::key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &n, Some(&rid.id));
 							if run.putc(key, rid, None).await.is_err() {
 								return Err(Error::IndexExists {
-									index: ix.name.to_string(),
 									thing: rid.to_string(),
+									index: ix.name.to_string(),
+									value: match n.len() {
+										1 => n.first().unwrap().to_string(),
+										_ => n.to_string(),
+									},
 								});
 							}
 						}

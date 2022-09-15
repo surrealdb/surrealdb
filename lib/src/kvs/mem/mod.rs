@@ -1,4 +1,4 @@
-#![cfg(feature = "kv-echodb")]
+#![cfg(feature = "kv-mem")]
 
 use crate::err::Error;
 use crate::kvs::Key;

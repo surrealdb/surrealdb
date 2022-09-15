@@ -1,8 +1,13 @@
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::dbs::Transaction;
+use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_id;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
 use crate::sql::serde::is_internal_serialization;
+use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::character::complete::char;
@@ -55,6 +60,32 @@ impl Thing {
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}:{}", escape_id(&self.tb), self.id)
+	}
+}
+
+impl Thing {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		Ok(Value::Thing(Thing {
+			tb: self.tb.clone(),
+			id: match &self.id {
+				Id::Number(v) => Id::Number(*v),
+				Id::String(v) => Id::String(v.clone()),
+				Id::Object(v) => match v.compute(ctx, opt, txn, doc).await? {
+					Value::Object(v) => Id::Object(v),
+					_ => unreachable!(),
+				},
+				Id::Array(v) => match v.compute(ctx, opt, txn, doc).await? {
+					Value::Array(v) => Id::Array(v),
+					_ => unreachable!(),
+				},
+			},
+		}))
 	}
 }
 
@@ -115,6 +146,9 @@ fn thing_double(i: &str) -> IResult<&str, Thing> {
 mod tests {
 
 	use super::*;
+	use crate::sql::array::Array;
+	use crate::sql::object::Object;
+	use crate::sql::value::Value;
 
 	#[test]
 	fn thing_normal() {
@@ -128,6 +162,22 @@ mod tests {
 			Thing {
 				tb: String::from("test"),
 				id: Id::from("id"),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_integer() {
+		let sql = "test:001";
+		let res = thing(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("test:1", format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::from(1),
 			}
 		);
 	}
@@ -160,6 +210,41 @@ mod tests {
 			Thing {
 				tb: String::from("test"),
 				id: Id::from("id"),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_object() {
+		let sql = "test:{ location: 'GBR', year: 2022 }";
+		let res = thing(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(r#"test:{ location: "GBR", year: 2022 }"#, format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::Object(Object::from(map! {
+					"location".to_string() => Value::from("GBR"),
+					"year".to_string() => Value::from(2022),
+				})),
+			}
+		);
+	}
+
+	#[test]
+	fn thing_array() {
+		let sql = "test:['GBR', 2022]";
+		let res = thing(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(r#"test:["GBR", 2022]"#, format!("{}", out));
+		assert_eq!(
+			out,
+			Thing {
+				tb: String::from("test"),
+				id: Id::Array(Array::from(vec![Value::from("GBR"), Value::from(2022)])),
 			}
 		);
 	}

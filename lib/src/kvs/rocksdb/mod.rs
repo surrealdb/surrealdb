@@ -1,14 +1,19 @@
-#![cfg(feature = "kv-tikv")]
+#![cfg(feature = "kv-rocksdb")]
 
 use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use futures::lock::Mutex;
+use rocksdb::Direction;
+use rocksdb::IteratorMode;
+use rocksdb::OptimisticTransactionDB;
+use rocksdb::ReadOptions;
 use std::ops::Range;
-use tikv::CheckLevel;
-use tikv::TransactionOptions;
+use std::pin::Pin;
+use std::sync::Arc;
 
 pub struct Datastore {
-	db: tikv::TransactionClient,
+	db: Pin<Arc<rocksdb::OptimisticTransactionDB>>,
 }
 
 pub struct Transaction {
@@ -17,57 +22,42 @@ pub struct Transaction {
 	// Is the transaction read+write?
 	rw: bool,
 	// The distributed datastore transaction
-	tx: tikv::Transaction,
+	tx: Arc<Mutex<Option<rocksdb::Transaction<'static, OptimisticTransactionDB>>>>,
+	// the above, supposedly 'static, transaction actually points here, so keep the memory alive
+	// note that this is dropped last, as it is declared last
+	_db: Pin<Arc<rocksdb::OptimisticTransactionDB>>,
 }
 
 impl Datastore {
 	// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		match tikv::TransactionClient::new(vec![path]).await {
-			Ok(db) => Ok(Datastore {
-				db,
-			}),
-			Err(e) => Err(Error::Ds(e.to_string())),
-		}
+		Ok(Datastore {
+			db: Arc::pin(OptimisticTransactionDB::open_default(path)?),
+		})
 	}
 	// Start a new transaction
-	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
-		match lock {
-			false => {
-				// Set the behaviour when dropping an unfinished transaction
-				let mut opt = TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn);
-				// Set this transaction as read only if possible
-				if !write {
-					opt = opt.read_only();
-				}
-				// Create a new optimistic transaction
-				match self.db.begin_with_options(opt).await {
-					Ok(tx) => Ok(Transaction {
-						ok: false,
-						rw: write,
-						tx,
-					}),
-					Err(e) => Err(Error::Tx(e.to_string())),
-				}
-			}
-			true => {
-				// Set the behaviour when dropping an unfinished transaction
-				let mut opt = TransactionOptions::new_pessimistic().drop_check(CheckLevel::Warn);
-				// Set this transaction as read only if possible
-				if !write {
-					opt = opt.read_only();
-				}
-				// Create a new pessimistic transaction
-				match self.db.begin_with_options(opt).await {
-					Ok(tx) => Ok(Transaction {
-						ok: false,
-						rw: write,
-						tx,
-					}),
-					Err(e) => Err(Error::Tx(e.to_string())),
-				}
-			}
-		}
+	pub async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+		// Create a new transaction
+		let tx = self.db.transaction();
+		// The database reference must always outlive
+		// the transaction. If it doesn't then this
+		// is undefined behaviour. This unsafe block
+		// ensures that the transaction reference is
+		// static, but will cause a crash if the
+		// datastore is dropped prematurely.
+		let tx = unsafe {
+			std::mem::transmute::<
+				rocksdb::Transaction<'_, OptimisticTransactionDB>,
+				rocksdb::Transaction<'static, OptimisticTransactionDB>,
+			>(tx)
+		};
+		// Return the transaction
+		Ok(Transaction {
+			ok: false,
+			rw: write,
+			tx: Arc::new(Mutex::new(Some(tx))),
+			_db: self.db.clone(),
+		})
 	}
 }
 
@@ -85,7 +75,10 @@ impl Transaction {
 		// Mark this transaction as done
 		self.ok = true;
 		// Cancel this transaction
-		self.tx.rollback().await?;
+		match self.tx.lock().await.take() {
+			Some(tx) => tx.rollback()?,
+			None => unreachable!(),
+		};
 		// Continue
 		Ok(())
 	}
@@ -102,7 +95,10 @@ impl Transaction {
 		// Mark this transaction as done
 		self.ok = true;
 		// Cancel this transaction
-		self.tx.commit().await?;
+		match self.tx.lock().await.take() {
+			Some(tx) => tx.commit()?,
+			None => unreachable!(),
+		};
 		// Continue
 		Ok(())
 	}
@@ -116,7 +112,7 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.tx.key_exists(key.into()).await?;
+		let res = self.tx.lock().await.as_ref().unwrap().get(key.into())?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -130,7 +126,7 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let res = self.tx.get(key.into()).await?;
+		let res = self.tx.lock().await.as_ref().unwrap().get(key.into())?;
 		// Return result
 		Ok(res)
 	}
@@ -149,7 +145,7 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.tx.put(key.into(), val.into()).await?;
+		self.tx.lock().await.as_ref().unwrap().put(key.into(), val.into())?;
 		// Return result
 		Ok(())
 	}
@@ -167,8 +163,17 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
-		// Set the key
-		self.tx.insert(key.into(), val.into()).await?;
+		// Get the transaction
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
+		// Get the arguments
+		let key = key.into();
+		let val = val.into();
+		// Set the key if empty
+		match tx.get(&key)? {
+			None => tx.put(key, val)?,
+			_ => return Err(Error::TxKeyAlreadyExists),
+		};
 		// Return result
 		Ok(())
 	}
@@ -186,16 +191,17 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
-		// Get the key
+		// Get the transaction
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
+		// Get the arguments
 		let key = key.into();
-		// Get the val
 		let val = val.into();
-		// Get the check
 		let chk = chk.map(Into::into);
-		// Delete the key
-		match (self.tx.get(key.clone()).await?, chk) {
-			(Some(v), Some(w)) if v == w => self.tx.put(key, val).await?,
-			(None, None) => self.tx.put(key, val).await?,
+		// Set the key if valid
+		match (tx.get(&key)?, chk) {
+			(Some(v), Some(w)) if v == w => tx.put(key, val)?,
+			(None, None) => tx.put(key, val)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -214,8 +220,8 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
-		// Delete the key
-		self.tx.delete(key.into()).await?;
+		// Remove the key
+		self.tx.lock().await.as_ref().unwrap().delete(key.into())?;
 		// Return result
 		Ok(())
 	}
@@ -233,14 +239,16 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
-		// Get the key
+		// Get the transaction
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
+		// Get the arguments
 		let key = key.into();
-		// Get the check
 		let chk = chk.map(Into::into);
-		// Delete the key
-		match (self.tx.get(key.clone()).await?, chk) {
-			(Some(v), Some(w)) if v == w => self.tx.delete(key).await?,
-			(None, None) => self.tx.delete(key).await?,
+		// Delete the key if valid
+		match (tx.get(&key)?, chk) {
+			(Some(v), Some(w)) if v == w => tx.delete(key)?,
+			(None, None) => tx.delete(key)?,
 			_ => return Err(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -255,15 +263,46 @@ impl Transaction {
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
+		// Get the transaction
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
 		// Convert the range to bytes
 		let rng: Range<Key> = Range {
 			start: rng.start.into(),
 			end: rng.end.into(),
 		};
-		// Scan the keys
-		let res = self.tx.scan(rng, limit).await?;
-		let res = res.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		// Create result set
+		let mut res = vec![];
+		// Iterate forwards
+		let dir = Direction::Forward;
+		// Set the start key
+		let cnf = IteratorMode::From(&rng.start, dir);
+		// Set the maximum key
+		let mut opt = ReadOptions::default();
+		opt.set_iterate_range(..rng.end);
+		// Create the iterator
+		let ite = tx.iterator_opt(cnf, opt);
+		// Scan the keys in the iterator
+		for item in ite.take(limit as usize) {
+			let (k, v) = item?;
+			res.push((k.into_vec(), v.into_vec()));
+		}
 		// Return result
 		Ok(res)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	// https://github.com/surrealdb/surrealdb/issues/76
+	#[tokio::test]
+	async fn soundness() {
+		let mut transaction = get_transaction().await;
+		transaction.put("uh", "oh").await.unwrap();
+
+		async fn get_transaction() -> crate::Transaction {
+			let datastore = crate::Datastore::new("rocksdb:/tmp/rocks.db").await.unwrap();
+			datastore.transaction(true, false).await.unwrap()
+		}
 	}
 }
