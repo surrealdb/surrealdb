@@ -38,7 +38,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
 	) -> impl FnOnce() -> std::future::Ready<R> {
-		|| std::future::Ready(function())
+		|| std::future::ready(function())
 	}
 
 	macro_rules! dispatch {
