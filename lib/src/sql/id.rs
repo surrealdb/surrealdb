@@ -37,6 +37,18 @@ impl From<u64> for Id {
 	}
 }
 
+impl From<Array> for Id {
+	fn from(v: Array) -> Self {
+		Id::Array(v)
+	}
+}
+
+impl From<Object> for Id {
+	fn from(v: Object) -> Self {
+		Id::Object(v)
+	}
+}
+
 impl From<String> for Id {
 	fn from(v: String) -> Self {
 		Id::String(v)
@@ -87,6 +99,15 @@ pub fn id(i: &str) -> IResult<&str, Id> {
 mod tests {
 
 	use super::*;
+
+	#[test]
+	fn id_int() {
+		let sql = "001";
+		let res = id(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(Id::from(1), out);
+	}
 
 	#[test]
 	fn id_number() {
