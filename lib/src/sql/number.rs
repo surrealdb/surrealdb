@@ -144,7 +144,10 @@ impl Serialize for Number {
 			match self {
 				Number::Int(v) => s.serialize_i64(*v),
 				Number::Float(v) => s.serialize_f64(*v),
-				Number::Decimal(v) => s.serialize_some(v),
+				Number::Decimal(v) => match serde_json::Number::from_str(&v.to_string()) {
+					Ok(num) => s.serialize_some(&num),
+					Err(_) => s.serialize_some(v),
+				},
 			}
 		}
 	}
