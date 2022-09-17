@@ -20,7 +20,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let post = base
 		.and(warp::post())
 		.and(session::build())
-		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and_then(handler);

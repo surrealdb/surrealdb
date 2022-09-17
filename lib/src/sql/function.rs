@@ -394,6 +394,7 @@ fn function_session(i: &str) -> IResult<&str, &str> {
 		tag("session::origin"),
 		tag("session::sc"),
 		tag("session::sd"),
+		tag("session::token"),
 	))(i)
 }
 

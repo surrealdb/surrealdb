@@ -70,7 +70,7 @@ impl<'a> Document<'a> {
 					run.add_and_cache_tb(opt.ns(), opt.db(), &rid.tb, opt.strict).await
 				}
 				// We can't create the table so error
-				false => Err(Error::TbNotFound),
+				false => Err(Error::QueryPermissions),
 			},
 			// There was an error
 			Err(err) => Err(err),

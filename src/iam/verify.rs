@@ -156,6 +156,8 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 		let kvs = DB.get().unwrap();
 		// Decode the token without verifying
 		let token = decode::<Claims>(auth, &KEY, &DUD)?;
+		// Parse the token and catch any errors
+		let value = super::parse::parse(auth)?;
 		// Check the token authentication claims
 		match token.claims {
 			// Check if this is scope token authentication
@@ -181,6 +183,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				// Log the success
 				debug!(target: LOG, "Authenticated to scope `{}` with token `{}`", sc, tk);
 				// Set the session
+				session.tk = Some(value);
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
 				session.sc = Some(sc.to_owned());
@@ -210,6 +213,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				// Log the success
 				debug!(target: LOG, "Authenticated to scope `{}`", sc);
 				// Set the session
+				session.tk = Some(value);
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
 				session.sc = Some(sc.to_owned());
@@ -236,6 +240,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				// Log the success
 				debug!(target: LOG, "Authenticated to database `{}` with token `{}`", db, tk);
 				// Set the session
+				session.tk = Some(value);
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
 				session.au = Arc::new(Auth::Db(ns, db));
@@ -260,6 +265,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				// Log the success
 				debug!(target: LOG, "Authenticated to database `{}` with login `{}`", db, id);
 				// Set the session
+				session.tk = Some(value);
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
 				session.au = Arc::new(Auth::Db(ns, db));
@@ -283,6 +289,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				// Log the success
 				trace!(target: LOG, "Authenticated to namespace `{}` with token `{}`", ns, tk);
 				// Set the session
+				session.tk = Some(value);
 				session.ns = Some(ns.to_owned());
 				session.au = Arc::new(Auth::Ns(ns));
 				return Ok(());
@@ -305,6 +312,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				// Log the success
 				trace!(target: LOG, "Authenticated to namespace `{}` with login `{}`", ns, id);
 				// Set the session
+				session.tk = Some(value);
 				session.ns = Some(ns.to_owned());
 				session.au = Arc::new(Auth::Ns(ns));
 				return Ok(());

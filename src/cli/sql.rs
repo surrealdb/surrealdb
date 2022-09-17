@@ -1,7 +1,7 @@
 use crate::err::Error;
 use reqwest::blocking::Client;
 use reqwest::blocking::Response;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::ACCEPT;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use serde_json::Value;
@@ -41,7 +41,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				// Make a new remote request
 				let res = Client::new()
 					.post(&conn)
-					.header(CONTENT_TYPE, "application/json")
+					.header(ACCEPT, "application/json")
 					.basic_auth(user, Some(pass));
 				// Add NS header if specified
 				let res = match ns {

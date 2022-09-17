@@ -68,7 +68,9 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
 		"array::sort::desc" => array::sort::desc,
+		//
 		"count" => count::count,
+		//
 		"crypto::md5" => crypto::md5,
 		"crypto::sha1" => crypto::sha1,
 		"crypto::sha256" => crypto::sha256,
@@ -85,12 +87,14 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"geo::distance" => geo::distance,
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
+		//
 		"http::head" => http::head.await,
 		"http::get" => http::get.await,
 		"http::put" => http::put.await,
 		"http::post" =>  http::post.await,
 		"http::patch" => http::patch.await,
 		"http::delete" => http::delete.await,
+		//
 		"is::alphanum" => is::alphanum,
 		"is::alpha" => is::alpha,
 		"is::ascii" => is::ascii,
@@ -102,6 +106,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"is::numeric" => is::numeric,
 		"is::semver" => is::semver,
 		"is::uuid" => is::uuid,
+		//
 		"math::abs" => math::abs,
 		"math::bottom" => math::bottom,
 		"math::ceil" => math::ceil,
@@ -125,6 +130,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"math::top" => math::top,
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
+		//
 		"parse::email::host" => parse::email::host,
 		"parse::email::user" => parse::email::user,
 		"parse::url::domain" => parse::url::domain,
@@ -133,6 +139,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"parse::url::path" => parse::url::path,
 		"parse::url::port" => parse::url::port,
 		"parse::url::query" => parse::url::query,
+		//
 		"rand::bool" => rand::bool,
 		"rand::enum" => rand::r#enum,
 		"rand::float" => rand::float,
@@ -142,6 +149,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"rand::time" => rand::time,
 		"rand::uuid" => rand::uuid,
 		"rand" => rand::rand,
+		//
 		"session::db" => session::db(ctx),
 		"session::id" => session::id(ctx),
 		"session::ip" => session::ip(ctx),
@@ -149,6 +157,8 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"session::origin" => session::origin(ctx),
 		"session::sc" => session::sc(ctx),
 		"session::sd" => session::sd(ctx),
+		"session::token" => session::token(ctx),
+		//
 		"string::concat" => string::concat,
 		"string::endsWith" => string::ends_with,
 		"string::join" => string::join,
@@ -164,6 +174,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"string::trim" => string::trim,
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
+		//
 		"time::day" => time::day,
 		"time::floor" => time::floor,
 		"time::group" => time::group,
@@ -179,6 +190,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"time::week" => time::week,
 		"time::yday" => time::yday,
 		"time::year" => time::year,
+		//
 		"type::bool" => r#type::bool,
 		"type::datetime" => r#type::datetime,
 		"type::decimal" => r#type::decimal,
