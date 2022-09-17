@@ -2,7 +2,7 @@
 name = "surrealdb-derive"
 publish = true
 edition = "2021"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "Private implementation of procedural macros for surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb-derive"
