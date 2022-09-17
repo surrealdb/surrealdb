@@ -92,13 +92,17 @@ impl Session {
 	}
 	/// Convert a session into a runtime
 	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {
-		// Add scope value
-		let key = String::from("scope");
-		let val: Value = self.sc.to_owned().into();
-		ctx.add_value(key, val);
 		// Add auth data
 		let key = String::from("auth");
 		let val: Value = self.sd.to_owned().into();
+		ctx.add_value(key, val);
+		// Add scope data
+		let key = String::from("scope");
+		let val: Value = self.sc.to_owned().into();
+		ctx.add_value(key, val);
+		// Add token data
+		let key = String::from("token");
+		let val: Value = self.tk.to_owned().into();
 		ctx.add_value(key, val);
 		// Add session value
 		let key = String::from("session");
