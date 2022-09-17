@@ -52,34 +52,36 @@ pub fn key(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input as DeriveInput);
 	// Fetch the struct name
 	let name = &input.ident;
+	let generics = input.generics;
+	let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 	// Generate the output
 	let output = quote! {
 
-		impl From<#name> for Vec<u8> {
-			fn from(v: #name) -> Vec<u8> {
+		impl #impl_generics From<#name #ty_generics #where_clause> for Vec<u8> {
+			fn from(v: #name #ty_generics #where_clause) -> Vec<u8> {
 				v.encode().unwrap_or_default()
 			}
 		}
 
-		impl From<&#name> for Vec<u8> {
-			fn from(v: &#name) -> Vec<u8> {
+		impl #impl_generics From<&#name #ty_generics #where_clause> for Vec<u8> {
+			fn from(v: &#name #ty_generics #where_clause) -> Vec<u8> {
 				v.encode().unwrap_or_default()
 			}
 		}
 
-		impl From<Vec<u8>> for #name {
+		impl #impl_generics From<Vec<u8>> for #name #ty_generics #where_clause {
 			fn from(v: Vec<u8>) -> Self {
 				Self::decode(&v).unwrap()
 			}
 		}
 
-		impl From<&Vec<u8>> for #name {
+		impl #impl_generics From<&Vec<u8>> for #name #ty_generics #where_clause {
 			fn from(v: &Vec<u8>) -> Self {
 				Self::decode(v).unwrap()
 			}
 		}
 
-		impl #name {
+		impl #impl_generics #name #ty_generics #where_clause{
 
 			pub fn encode(&self) -> Result<Vec<u8>, crate::err::Error> {
 				crate::sql::serde::beg_internal_serialization();
@@ -88,7 +90,7 @@ pub fn key(input: TokenStream) -> TokenStream {
 				Ok(v?)
 			}
 
-			pub fn decode(v: &[u8]) -> Result<#name, crate::err::Error> {
+			pub fn decode(v: &[u8]) -> Result<#name #ty_generics #where_clause, crate::err::Error> {
 				let v = storekey::deserialize(v);
 				Ok(v?)
 			}
