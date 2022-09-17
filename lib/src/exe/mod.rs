@@ -9,7 +9,7 @@ pub fn spawn<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static
 			catch_unwind(|| {
 				futures::executor::block_on(GLOBAL.run(futures::future::pending::<()>()))
 			})
-				.ok();
+			.ok();
 		});
 		Executor::new()
 	});
