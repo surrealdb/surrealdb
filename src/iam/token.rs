@@ -1,6 +1,8 @@
 use jsonwebtoken::{Algorithm, Header};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use surrealdb::sql::Object;
+use surrealdb::sql::Value;
 
 pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
 
@@ -35,4 +37,38 @@ pub struct Claims {
 	#[serde(rename = "ID")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub id: Option<String>,
+}
+
+impl From<Claims> for Value {
+	fn from(v: Claims) -> Value {
+		// Set default value
+		let mut out = Object::default();
+		// Add default fields
+		out.insert("iat".to_string(), v.iat.into());
+		out.insert("nbf".to_string(), v.nbf.into());
+		out.insert("exp".to_string(), v.exp.into());
+		out.insert("iss".to_string(), v.iss.into());
+		// Add NS field if set
+		if let Some(ns) = v.ns {
+			out.insert("NS".to_string(), ns.into());
+		}
+		// Add DB field if set
+		if let Some(db) = v.db {
+			out.insert("DB".to_string(), db.into());
+		}
+		// Add SC field if set
+		if let Some(sc) = v.sc {
+			out.insert("SC".to_string(), sc.into());
+		}
+		// Add TK field if set
+		if let Some(tk) = v.tk {
+			out.insert("TK".to_string(), tk.into());
+		}
+		// Add NS field if set
+		if let Some(id) = v.id {
+			out.insert("ID".to_string(), id.into());
+		}
+		// Return value
+		out.into()
+	}
 }
