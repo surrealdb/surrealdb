@@ -50,7 +50,7 @@ impl Default for Options {
 }
 
 impl Options {
-	// Create a new Options object
+	/// Create a new Options object
 	pub fn new(auth: Auth) -> Options {
 		Options {
 			ns: None,
@@ -70,17 +70,17 @@ impl Options {
 		}
 	}
 
-	// Get currently selected NS
+	/// Get currently selected NS
 	pub fn ns(&self) -> &str {
 		self.ns.as_ref().unwrap()
 	}
 
-	// Get currently selected DB
+	/// Get currently selected DB
 	pub fn db(&self) -> &str {
 		self.db.as_ref().unwrap()
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn dive(&self) -> Result<Options, Error> {
 		if self.dive < cnf::MAX_RECURSIVE_QUERIES {
 			Ok(Options {
@@ -95,7 +95,7 @@ impl Options {
 		}
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn debug(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -106,7 +106,7 @@ impl Options {
 		}
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn force(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -117,7 +117,7 @@ impl Options {
 		}
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn perms(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -128,7 +128,7 @@ impl Options {
 		}
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn fields(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -139,7 +139,7 @@ impl Options {
 		}
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn events(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -150,7 +150,7 @@ impl Options {
 		}
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn tables(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -161,7 +161,7 @@ impl Options {
 		}
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn indexes(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -172,7 +172,7 @@ impl Options {
 		}
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn import(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -185,7 +185,7 @@ impl Options {
 		}
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn strict(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -196,7 +196,7 @@ impl Options {
 		}
 	}
 
-	// Create a new Options object for a subquery
+	/// Create a new Options object for a subquery
 	pub fn futures(&self, v: bool) -> Options {
 		Options {
 			auth: self.auth.clone(),
@@ -207,7 +207,7 @@ impl Options {
 		}
 	}
 
-	// Check whether realtime queries are supported
+	/// Check whether realtime queries are supported
 	pub fn realtime(&self) -> Result<(), Error> {
 		if !self.live {
 			return Err(Error::RealtimeDisabled);
@@ -215,7 +215,7 @@ impl Options {
 		Ok(())
 	}
 
-	// Check whether the authentication permissions are ok
+	/// Check whether the authentication permissions are ok
 	pub fn check(&self, level: Level) -> Result<(), Error> {
 		if !self.auth.check(level) {
 			return Err(Error::QueryPermissions);
@@ -223,7 +223,7 @@ impl Options {
 		Ok(())
 	}
 
-	// Check whether the necessary NS / DB options have been set
+	/// Check whether the necessary NS / DB options have been set
 	pub fn needs(&self, level: Level) -> Result<(), Error> {
 		if self.ns.is_none() && matches!(level, Level::Ns | Level::Db) {
 			return Err(Error::NsEmpty);

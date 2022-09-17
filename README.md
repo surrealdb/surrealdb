@@ -93,7 +93,7 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 	- [Run using Docker](#run-using-docker)
 - [Getting started](#getting-started)
 	- [Client side apps](#client-side-apps)
-	- [Server side code](#server-side-apps)
+	- [Server side code](#server-side-code)
 - [Quick look](#quick-look)
 - [Why SurrealDB](#why-surrealdb)
 	- [Database, API, and permissions](#database-api-and-permissions)
@@ -133,14 +133,8 @@ For guidance on installation, development, deployment, and administration, see o
 
 SurrealDB is designed to be simple to install and simple to run - using just one command from your terminal. In addition to traditional installation, SurrealDB can be installed and run with HomeBrew, Docker, or using any other container orchestration tool such as Docker Compose, Docker Swarm, Rancher, or in Kubernetes.
 
-<h4>
-    <a href="https://surrealdb.com/install#gh-dark-mode-only">
-        <img width="20" src="/img/white/apple.svg">
-    </a>
-    <a href="https://surrealdb.com/install#gh-light-mode-only">
-        <img width="20" src="/img/black/apple.svg">
-    </a>
-    &nbsp; Install on macOS
+<h4><a href="https://surrealdb.com/install#gh-dark-mode-only"><img width="20" src="/img/white/apple.svg"></a><a href="https://surrealdb.com/install#gh-light-mode-only"><img width="20" src="/img/black/apple.svg"></a>
+&nbsp;Install on macOS
 </h4>
 
 The quickest way to get going with SurrealDB on macOS is to use Homebrew. This will install both the command-line tools, and the SurrealDB server as a single executable. If you don't use Homebrew, follow the instructions for Linux below to install SurrealDB.
@@ -149,14 +143,8 @@ The quickest way to get going with SurrealDB on macOS is to use Homebrew. This w
 brew install surrealdb/tap/surreal
 ```
 
-<h4>
-    <a href="https://surrealdb.com/install#gh-dark-mode-only">
-        <img width="20" src="/img/white/linux.svg">
-    </a>
-    <a href="https://surrealdb.com/install#gh-light-mode-only">
-        <img width="20" src="/img/black/linux.svg">
-    </a>
-    &nbsp; Install on Linux
+<h4><a href="https://surrealdb.com/install#gh-dark-mode-only"><img width="20" src="/img/white/linux.svg"></a><a href="https://surrealdb.com/install#gh-light-mode-only"><img width="20" src="/img/black/linux.svg"></a>
+&nbsp;Install on Linux
 </h4>
 
 The easiest and preferred way to get going with SurrealDB on Unix operating systems is to install and use the SurrealDB command-line tool. Run the following command in your terminal and follow the on-screen instructions.
@@ -165,14 +153,8 @@ The easiest and preferred way to get going with SurrealDB on Unix operating syst
 curl -sSf https://install.surrealdb.com | sh
 ```
 
-<h4>
-    <a href="https://surrealdb.com/install#gh-dark-mode-only">
-        <img width="20" src="/img/white/windows.svg">
-    </a>
-    <a href="https://surrealdb.com/install#gh-light-mode-only">
-        <img width="20" src="/img/black/windows.svg">
-    </a>
-    &nbsp; Install on Windows
+<h4><a href="https://surrealdb.com/install#gh-dark-mode-only"><img width="20" src="/img/white/windows.svg"></a><a href="https://surrealdb.com/install#gh-light-mode-only"><img width="20" src="/img/black/windows.svg"></a>
+&nbsp;Install on Windows
 </h4>
 
 The easiest and preferred way to get going with SurrealDB on Windows is to install and use the SurrealDB command-line tool. Run the following command in your terminal and follow the on-screen instructions.
@@ -181,23 +163,23 @@ The easiest and preferred way to get going with SurrealDB on Windows is to insta
 iwr https://windows.surrealdb.com -useb | iex
 ```
 
-<h4>
-    <a href="https://surrealdb.com/install#gh-dark-mode-only">
-        <img width="20" src="/img/white/docker.svg">
-    </a>
-    <a href="https://surrealdb.com/install#gh-light-mode-only">
-        <img width="20" src="/img/black/docker.svg">
-    </a>
-    &nbsp; Run using Docker
+<h4><a href="https://surrealdb.com/install#gh-dark-mode-only"><img width="20" src="/img/white/docker.svg"></a><a href="https://surrealdb.com/install#gh-light-mode-only"><img width="20" src="/img/black/docker.svg"></a>
+&nbsp;Run using Docker
 </h4>
 
 Docker can be used to manage and run SurrealDB database instances without the need to install any command-line tools. The SurrealDB docker container contains the full command-line tools for importing and exporting data from a running server, or for running a server itself.
 
 ```bash
-docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start
+docker run --rm --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start
 ```
 
-Update the image to the latest version:
+For just getting started with a demonstration server running in memory, you can pass the container a basic initialization to set the user and password as root and enable logging and limit access to localhost (do not run this in production!)
+
+```bash
+docker run --rm --name surrealdb -p 127.0.0.1:8000:8000 surrealdb/surrealdb:latest start --log trace --user root --pass root memory
+``` 
+
+To update the image to the latest version:
 
 ```bash
 docker pull surrealdb/surrealdb:latest

@@ -36,7 +36,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let select = warp::any()
 		.and(warp::get())
 		.and(session::build())
-		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String).and(warp::path::end()))
 		.and(warp::query())
 		.and_then(select_all);
@@ -44,7 +44,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let create = warp::any()
 		.and(warp::post())
 		.and(session::build())
-		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
@@ -53,7 +53,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let delete = warp::any()
 		.and(warp::delete())
 		.and(session::build())
-		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String).and(warp::path::end()))
 		.and_then(delete_all);
 	// Specify route
@@ -67,14 +67,14 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let select = warp::any()
 		.and(warp::get())
 		.and(session::build())
-		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and_then(select_one);
 	// Set create method
 	let create = warp::any()
 		.and(warp::post())
 		.and(session::build())
-		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
@@ -83,7 +83,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let update = warp::any()
 		.and(warp::put())
 		.and(session::build())
-		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
@@ -92,7 +92,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let modify = warp::any()
 		.and(warp::patch())
 		.and(session::build())
-		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
@@ -101,7 +101,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let delete = warp::any()
 		.and(warp::delete())
 		.and(session::build())
-		.and(warp::header::<String>(http::header::CONTENT_TYPE.as_str()))
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and_then(delete_one);
 	// Specify route

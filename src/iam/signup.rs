@@ -79,14 +79,17 @@ pub async fn sc(
 									id: Some(rid.to_raw()),
 									..Claims::default()
 								};
-								// Set the authentication on the sesssion
+								// Create the authentication token
+								let enc = encode(&*HEADER, &val, &key);
+								// Set the authentication on the session
+								session.tk = Some(val.into());
 								session.ns = Some(ns.to_owned());
 								session.db = Some(db.to_owned());
 								session.sc = Some(sc.to_owned());
 								session.sd = Some(Value::from(rid));
 								session.au = Arc::new(Auth::Sc(ns, db, sc));
 								// Create the authentication token
-								match encode(&*HEADER, &val, &key) {
+								match enc {
 									// The auth token was created successfully
 									Ok(tk) => Ok(tk),
 									// There was an error creating the token

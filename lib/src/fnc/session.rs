@@ -7,6 +7,7 @@ use crate::sql::paths::NS;
 use crate::sql::paths::OR;
 use crate::sql::paths::SC;
 use crate::sql::paths::SD;
+use crate::sql::paths::TK;
 use crate::sql::value::Value;
 
 pub fn db(ctx: &Context, _: ()) -> Result<Value, Error> {
@@ -35,4 +36,8 @@ pub fn sc(ctx: &Context, _: ()) -> Result<Value, Error> {
 
 pub fn sd(ctx: &Context, _: ()) -> Result<Value, Error> {
 	ctx.value("session").unwrap_or(&Value::None).pick(SD.as_ref()).ok()
+}
+
+pub fn token(ctx: &Context, _: ()) -> Result<Value, Error> {
+	ctx.value("session").unwrap_or(&Value::None).pick(TK.as_ref()).ok()
 }
