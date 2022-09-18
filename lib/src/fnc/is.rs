@@ -62,7 +62,11 @@ pub fn semver(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 
 #[inline]
 pub fn uuid(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(Uuid::parse_str(args.remove(0).as_string().as_str()).is_ok().into())
+	Ok(match args.remove(0) {
+		Value::Strand(v) => Uuid::parse_str(v.as_string().as_str()).is_ok().into(),
+		Value::Uuid(_) => true.into(),
+		_ => false.into(),
+	})
 }
 
 #[cfg(test)]
