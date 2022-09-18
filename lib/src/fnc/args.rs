@@ -2,7 +2,10 @@ use crate::err::Error;
 use crate::sql::value::Value;
 use crate::sql::{Number, Strand};
 
+/// Implemented by types that are commonly used, in a certain way, as arguments.
 pub trait FromArg: Sized {
+	/// Potentially fallible conversion from a Value to an argument. Errors will be propagated
+	/// to the caller, although it is also possible to return a none/null Value.
 	fn from_arg(arg: Value) -> Result<Self, Error>;
 }
 
@@ -48,20 +51,22 @@ impl FromArg for usize {
 	}
 }
 
-pub fn shim<A: FromArgs>(name: &str, args: Vec<Value>) -> Result<A, Error> {
-	A::from_args(name, args)
-}
-
 pub trait FromArgs: Sized {
+	/// Convert a collection of argument values into a certain argument format, failing if there are
+	/// too many or too few arguments, or if one of the arguments could not be converted.
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error>;
 }
 
+// Take ownership of the raw arguments collection, and assume responsibility of validating the
+// number of arguments and converting them as necessary.
 impl FromArgs for Vec<Value> {
 	fn from_args(_name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		Ok(args)
 	}
 }
 
+// Some functions take a fixed number of arguments.
+// The len must match the number of type idents that follow.
 macro_rules! impl_tuple {
 	($len:expr, $( $T:ident ),*) => {
 		impl<$($T:FromArg),*> FromArgs for ($($T,)*) {
@@ -82,11 +87,13 @@ macro_rules! impl_tuple {
 	}
 }
 
+// It is possible to add larger sequences to support higher quantities of fixed arguments.
 impl_tuple!(0,);
 impl_tuple!(1, A);
 impl_tuple!(2, A, B);
 impl_tuple!(3, A, B, C);
 
+// Some functions take a single, optional argument, or no arguments at all.
 impl<A: FromArg> FromArgs for (Option<A>,) {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let err = || Error::InvalidArguments {
@@ -107,6 +114,7 @@ impl<A: FromArg> FromArgs for (Option<A>,) {
 	}
 }
 
+// Some functions take 1 or 2 arguments, so the second argument is optional.
 impl<A: FromArg, B: FromArg> FromArgs for (A, Option<B>) {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let err = || Error::InvalidArguments {
@@ -128,6 +136,8 @@ impl<A: FromArg, B: FromArg> FromArgs for (A, Option<B>) {
 	}
 }
 
+// Some functions take 0, 1, or 2 arguments, so both arguments are optional.
+// It is safe to assume that, if the first argument is None, the second argument will also be None.
 impl<A: FromArg, B: FromArg> FromArgs for (Option<A>, Option<B>) {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let err = || Error::InvalidArguments {
@@ -152,6 +162,7 @@ impl<A: FromArg, B: FromArg> FromArgs for (Option<A>, Option<B>) {
 	}
 }
 
+// Some functions optionally take 2 arguments, or don't take any at all.
 impl<A: FromArg, B: FromArg> FromArgs for (Option<(A, B)>,) {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let err = || Error::InvalidArguments {
@@ -176,6 +187,8 @@ impl<A: FromArg, B: FromArg> FromArgs for (Option<(A, B)>,) {
 	}
 }
 
+// Some functions take 1, 2, or 3 arguments. It is safe to assume that, if the second argument is
+// None, the third argument will also be None.
 impl<A: FromArg, B: FromArg, C: FromArg> FromArgs for (A, Option<B>, Option<C>) {
 	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
 		let err = || Error::InvalidArguments {
