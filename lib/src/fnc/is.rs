@@ -166,11 +166,11 @@ mod tests {
 
 	#[test]
 	fn uuid() {
-		let input = (String::from("123e4567-e89b-12d3-a456-426614174000"),);
+		let input = (String::from("123e4567-e89b-12d3-a456-426614174000").into(),);
 		let value = super::uuid(input).unwrap();
 		assert_eq!(value, Value::True);
 
-		let input = (String::from("foo-bar"),);
+		let input = (String::from("foo-bar").into(),);
 		let value = super::uuid(input).unwrap();
 		assert_eq!(value, Value::False);
 	}

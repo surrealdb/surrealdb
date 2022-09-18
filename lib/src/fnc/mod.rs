@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::fnc::args::shim;
 use crate::sql::value::Value;
 
 pub mod args;
@@ -23,7 +22,7 @@ pub mod time;
 pub mod r#type;
 pub mod util;
 
-// Attempts to run any function
+/// Attempts to run any function.
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
@@ -46,7 +45,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 			{
 				match $name {
 					$($function_name => {
-						let args = shim($name, $args)?;
+						let args = args::FromArgs::from_args($name, $args)?;
 						$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
 					},)+
 					_ => unreachable!()
@@ -55,6 +54,11 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		};
 	}
 
+	// Each function is specified by its name (a string literal) followed by its path. The path
+	// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
+	// before the remainder of the arguments. The path may be followed by `.await` to signify that
+	// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
+	// `cpu_intensive`.
 	dispatch!(
 		name,
 		args,
