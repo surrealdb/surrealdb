@@ -148,10 +148,10 @@ pub fn sqrt(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	let v_float = v_number.clone().as_float();
 
 	match v_float {
-		num if num > 0.0 => Ok(v_number.sqrt().into()),
+		num if num >= 0.0 => Ok(v_number.sqrt().into()),
 		_ => Err(Error::InvalidArguments {
 			name: String::from("math::sqrt"),
-			message: String::from("The argument must be a number greater than 0."),
+			message: String::from("The argument must be a positive number."),
 		}),
 	}
 }
