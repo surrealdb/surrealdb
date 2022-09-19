@@ -283,6 +283,8 @@ fn function_crypto(i: &str) -> IResult<&str, &str> {
 		tag("crypto::sha1"),
 		tag("crypto::sha256"),
 		tag("crypto::sha512"),
+		tag("crypto::bcrypt::compare"),
+		tag("crypto::bcrypt::generate"),
 	))(i)
 }
 

@@ -64,6 +64,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"crypto::pbkdf2::generate" => args::check(ctx, name, args, Args::One, crypto::pbkdf2::gen),
 		"crypto::scrypt::compare" => args::check(ctx, name, args, Args::Two, crypto::scrypt::cmp),
 		"crypto::scrypt::generate" => args::check(ctx, name, args, Args::One, crypto::scrypt::gen),
+		"crypto::bcrypt::compare" => args::check(ctx, name, args, Args::Two, crypto::bcrypt::cmp),
+		"crypto::bcrypt::generate" => args::check(ctx, name, args, Args::One, crypto::bcrypt::gen),
 		//
 		"geo::area" => args::check(ctx, name, args, Args::One, geo::area),
 		"geo::bearing" => args::check(ctx, name, args, Args::Two, geo::bearing),

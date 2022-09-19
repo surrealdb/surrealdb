@@ -191,3 +191,23 @@ pub mod scrypt {
 		Ok(hash.into())
 	}
 }
+
+pub mod bcrypt {
+
+	use crate::ctx::Context;
+	use crate::err::Error;
+	use crate::sql::value::Value;
+	use bcrypt;
+
+	pub fn cmp(_: &Context, args: Vec<Value>) -> Result<Value, Error> {
+		let args: [Value; 2] = args.try_into().unwrap();
+		let [hash, pass] = args.map(Value::as_string);
+		Ok(bcrypt::verify(pass, &hash).unwrap_or(false).into())
+	}
+
+	pub fn gen(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
+		let pass = args.remove(0).as_string();
+		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST).unwrap();
+		Ok(hash.into())
+	}
+}
