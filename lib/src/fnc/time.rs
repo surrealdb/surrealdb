@@ -89,9 +89,9 @@ pub fn mins(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 
 pub fn month(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.len() {
-		0 => Ok(Utc::now().day().into()),
+		0 => Ok(Utc::now().month().into()),
 		_ => match args.remove(0) {
-			Value::Datetime(v) => Ok(v.day().into()),
+			Value::Datetime(v) => Ok(v.month().into()),
 			_ => Ok(Value::None),
 		},
 	}
