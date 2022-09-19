@@ -143,7 +143,17 @@ pub fn spread(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn sqrt(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(args.remove(0).as_number().sqrt().into())
+	let v = args.remove(0);
+	let v_number = v.as_number();
+	let v_float = v_number.clone().as_float();
+
+	match v_float {
+		num if num > 0.0 => Ok(v_number.sqrt().into()),
+		_ => Err(Error::InvalidArguments {
+			name: String::from("math::sqrt"),
+			message: String::from("The argument must be a number greater than 0."),
+		}),
+	}
 }
 
 pub fn stddev(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
