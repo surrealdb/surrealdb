@@ -68,7 +68,10 @@ pub fn max(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 
 pub fn mean(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
-		Value::Array(v) => Ok(v.as_numbers().mean().into()),
+		Value::Array(v) => match v.is_empty() {
+			true => Ok(Value::None),
+			false => Ok(v.as_numbers().mean().into()),
+		},
 		_ => Ok(Value::None),
 	}
 }
