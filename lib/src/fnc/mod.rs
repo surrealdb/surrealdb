@@ -13,6 +13,7 @@ pub mod geo;
 pub mod http;
 pub mod is;
 pub mod math;
+pub mod meta;
 pub mod operate;
 pub mod parse;
 pub mod rand;
@@ -107,6 +108,10 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"math::top" => args::check(ctx, name, args, Args::Two, math::top),
 		"math::trimean" => args::check(ctx, name, args, Args::One, math::trimean),
 		"math::variance" => args::check(ctx, name, args, Args::One, math::variance),
+		//
+		"meta::id" => args::check(ctx, name, args, Args::One, meta::id),
+		"meta::table" => args::check(ctx, name, args, Args::One, meta::tb),
+		"meta::tb" => args::check(ctx, name, args, Args::One, meta::tb),
 		//
 		"parse::email::host" => args::check(ctx, name, args, Args::One, parse::email::host),
 		"parse::email::user" => args::check(ctx, name, args, Args::One, parse::email::user),

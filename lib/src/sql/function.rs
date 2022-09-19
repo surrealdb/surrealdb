@@ -243,6 +243,7 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 		function_http,
 		function_is,
 		function_math,
+		function_meta,
 		function_parse,
 		function_rand,
 		function_session,
@@ -356,6 +357,10 @@ fn function_math(i: &str) -> IResult<&str, &str> {
 			tag("math::variance"),
 		)),
 	))(i)
+}
+
+fn function_meta(i: &str) -> IResult<&str, &str> {
+	alt((tag("meta::id"), tag("meta::table"), tag("meta::tb")))(i)
 }
 
 fn function_parse(i: &str) -> IResult<&str, &str> {
