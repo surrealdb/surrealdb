@@ -695,13 +695,7 @@ pub enum DefineTableOption {
 }
 
 fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
-	alt((
-		table_drop,
-		table_view,
-		table_schemaless,
-		table_schemafull,
-		table_permissions,
-	))(i)
+	alt((table_drop, table_view, table_schemaless, table_schemafull, table_permissions))(i)
 }
 
 fn table_drop(i: &str) -> IResult<&str, DefineTableOption> {
