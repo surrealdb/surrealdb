@@ -842,14 +842,14 @@ impl Value {
 	// -----------------------------------
 
 	/// Fetch the record id if there is one
-	pub fn rid(self) -> Option<Thing> {
+	pub fn record(self) -> Option<Thing> {
 		match self {
 			Value::Object(mut v) => match v.remove("id") {
 				Some(Value::Thing(v)) => Some(v),
 				_ => None,
 			},
 			Value::Array(mut v) => match v.len() {
-				1 => v.remove(0).rid(),
+				1 => v.remove(0).record(),
 				_ => None,
 			},
 			Value::Thing(v) => Some(v),
