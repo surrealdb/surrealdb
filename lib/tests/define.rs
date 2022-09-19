@@ -142,34 +142,6 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn define_statement_table_schemaful() -> Result<(), Error> {
-	let sql = "
-		DEFINE TABLE test SCHEMAFUL;
-		INFO FOR DB;
-	";
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
-			dl: {},
-			dt: {},
-			sc: {},
-			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },
-		}",
-	);
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
 async fn define_statement_event() -> Result<(), Error> {
 	let sql = "
 		DEFINE EVENT test ON user WHEN true THEN (
