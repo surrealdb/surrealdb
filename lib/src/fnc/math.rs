@@ -143,12 +143,8 @@ pub fn spread(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn sqrt(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	let v = args.remove(0);
-	let v_number = v.as_number();
-	let v_float = v_number.clone().as_float();
-
-	match v_float {
-		num if num >= 0.0 => Ok(v_number.sqrt().into()),
+	match args.remove(0).as_number() {
+		v if v >= Number::Int(0) => Ok(v.sqrt().into()),
 		_ => Err(Error::InvalidArguments {
 			name: String::from("math::sqrt"),
 			message: String::from("The argument must be a positive number."),
