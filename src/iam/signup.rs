@@ -58,7 +58,7 @@ pub async fn sc(
 					// Compute the value with the params
 					match kvs.compute(val, &sess, vars, opt.strict).await {
 						// The signin value succeeded
-						Ok(val) => match val.rid() {
+						Ok(val) => match val.record() {
 							// There is a record returned
 							Some(rid) => {
 								// Create the authentication key

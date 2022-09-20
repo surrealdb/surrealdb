@@ -12,6 +12,7 @@ pub mod geo;
 pub mod http;
 pub mod is;
 pub mod math;
+pub mod meta;
 pub mod operate;
 pub mod parse;
 pub mod rand;
@@ -61,6 +62,8 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"crypto::sha512" => crypto::sha512,
 		"crypto::argon2::compare" => crypto::argon2::cmp,
 		"crypto::argon2::generate" => crypto::argon2::gen,
+		"crypto::bcrypt::compare" => crypto::bcrypt::cmp,
+		"crypto::bcrypt::generate" => crypto::bcrypt::gen,
 		"crypto::pbkdf2::compare" => crypto::pbkdf2::cmp,
 		"crypto::pbkdf2::generate" => crypto::pbkdf2::gen,
 		"crypto::scrypt::compare" => crypto::scrypt::cmp,
@@ -115,6 +118,10 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"math::top" => math::top,
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
+		//
+		"meta::id" => meta::id,
+		"meta::table" => meta::tb,
+		"meta::tb" => meta::tb,
 		//
 		"parse::email::host" => parse::email::host,
 		"parse::email::user" => parse::email::user,

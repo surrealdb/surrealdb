@@ -116,13 +116,17 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 #[tokio::test]
 async fn define_statement_table_schemafull() -> Result<(), Error> {
 	let sql = "
+		DEFINE TABLE test SCHEMAFUL;
 		DEFINE TABLE test SCHEMAFULL;
 		INFO FOR DB;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());

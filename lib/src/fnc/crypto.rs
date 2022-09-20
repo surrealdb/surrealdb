@@ -178,3 +178,19 @@ pub mod scrypt {
 		Ok(hash.into())
 	}
 }
+
+pub mod bcrypt {
+
+	use crate::err::Error;
+	use crate::sql::value::Value;
+	use bcrypt;
+
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
+		Ok(bcrypt::verify(pass, &hash).unwrap_or(false).into())
+	}
+
+	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
+		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST).unwrap();
+		Ok(hash.into())
+	}
+}
