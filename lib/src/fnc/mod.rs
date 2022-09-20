@@ -12,6 +12,7 @@ pub mod geo;
 pub mod http;
 pub mod is;
 pub mod math;
+pub mod meta;
 pub mod operate;
 pub mod parse;
 pub mod rand;
@@ -81,6 +82,8 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"crypto::sha512" => crypto::sha512,
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
 		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
+		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
+		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
 		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
 		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
@@ -135,6 +138,10 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"math::top" => math::top,
 		"math::trimean" => math::trimean,
 		"math::variance" => math::variance,
+		//
+		"meta::id" => meta::id,
+		"meta::table" => meta::tb,
+		"meta::tb" => meta::tb,
 		//
 		"parse::email::host" => parse::email::host,
 		"parse::email::user" => parse::email::user,
