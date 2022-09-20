@@ -47,6 +47,7 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 				match $name {
 					$($function_name => {
 						let args = args::FromArgs::from_args($name, $args)?;
+						#[allow(clippy::redundant_closure_call)]
 						$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
 					},)+
 					_ => unreachable!()
