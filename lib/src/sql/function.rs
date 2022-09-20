@@ -276,6 +276,8 @@ fn function_crypto(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("crypto::argon2::compare"),
 		tag("crypto::argon2::generate"),
+		tag("crypto::bcrypt::compare"),
+		tag("crypto::bcrypt::generate"),
 		tag("crypto::md5"),
 		tag("crypto::pbkdf2::compare"),
 		tag("crypto::pbkdf2::generate"),
