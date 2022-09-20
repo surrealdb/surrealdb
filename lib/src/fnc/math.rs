@@ -68,14 +68,20 @@ pub fn max(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 
 pub fn mean(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
-		Value::Array(v) => Ok(v.as_numbers().mean().into()),
+		Value::Array(v) => match v.is_empty() {
+			true => Ok(Value::None),
+			false => Ok(v.as_numbers().mean().into()),
+		},
 		_ => Ok(Value::None),
 	}
 }
 
 pub fn median(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	match args.remove(0) {
-		Value::Array(v) => Ok(v.as_numbers().median().into()),
+		Value::Array(v) => match v.is_empty() {
+			true => Ok(Value::None),
+			false => Ok(v.as_numbers().median().into()),
+		},
 		_ => Ok(Value::None),
 	}
 }
@@ -137,7 +143,10 @@ pub fn spread(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 }
 
 pub fn sqrt(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	Ok(args.remove(0).as_number().sqrt().into())
+	match args.remove(0).as_number() {
+		v if v >= Number::Int(0) => Ok(v.sqrt().into()),
+		_ => Ok(Value::None),
+	}
 }
 
 pub fn stddev(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
