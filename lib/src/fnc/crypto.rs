@@ -163,6 +163,8 @@ pub mod scrypt {
 			.filter(|test| {
 				bounded_verify_password!(Scrypt, Scrypt, pass, test, |params: &Params| {
 					// Scrypt is slow, use lower cost allowance.
+					// Also note that the log_n parameter behaves exponentially, so add instead
+					// of multiplying.
 					params.log_n() <= Params::default().log_n().saturating_add(2)
 						&& params.r() <= Params::default().r().saturating_mul(2)
 						&& params.p() <= Params::default().p().saturating_mul(4)
@@ -182,11 +184,26 @@ pub mod scrypt {
 pub mod bcrypt {
 
 	use crate::err::Error;
+	use crate::fnc::crypto::COST_ALLOWANCE;
 	use crate::sql::value::Value;
 	use bcrypt;
+	use bcrypt::HashParts;
+	use std::str::FromStr;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
-		Ok(bcrypt::verify(pass, &hash).unwrap_or(false).into())
+		let parts = match HashParts::from_str(&hash) {
+			Ok(parts) => parts,
+			Err(_) => return Ok(Value::False),
+		};
+		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to multiplying.
+		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
+			// Too expensive to compute.
+			Value::False
+		} else {
+			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice, once
+			// above and once in verity, by using bcrypt::bcrypt.
+			bcrypt::verify(pass, &hash).unwrap_or(false).into()
+		})
 	}
 
 	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
