@@ -83,7 +83,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-	) -> Result<Arc<Vec<DefineTableStatement>>, Error> {
+	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the table definitions
@@ -94,7 +94,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-	) -> Result<Arc<Vec<DefineEventStatement>>, Error> {
+	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the event definitions
@@ -105,7 +105,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-	) -> Result<Arc<Vec<DefineFieldStatement>>, Error> {
+	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the field definitions
@@ -116,7 +116,7 @@ impl<'a> Document<'a> {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
-	) -> Result<Arc<Vec<DefineIndexStatement>>, Error> {
+	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the index definitions
