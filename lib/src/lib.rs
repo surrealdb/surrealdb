@@ -18,7 +18,6 @@ mod ctx;
 mod dbs;
 mod doc;
 mod err;
-#[cfg(feature = "parallel")]
 mod exe;
 mod fnc;
 mod key;
