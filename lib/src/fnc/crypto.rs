@@ -182,11 +182,25 @@ pub mod scrypt {
 pub mod bcrypt {
 
 	use crate::err::Error;
+	use crate::fnc::crypto::COST_ALLOWANCE;
 	use crate::sql::value::Value;
 	use bcrypt;
+	use bcrypt::HashParts;
+	use std::str::FromStr;
 
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
-		Ok(bcrypt::verify(pass, &hash).unwrap_or(false).into())
+		let parts = match HashParts::from_str(&hash) {
+			Ok(parts) => parts,
+			Err(_) => return Ok(Value::False),
+		};
+		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST + COST_ALLOWANCE {
+			// Too expensive to compute.
+			Value::False
+		} else {
+			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice, once
+			// above and once in verity, by using bcrypt::bcrypt.
+			bcrypt::verify(pass, &hash).unwrap_or(false).into()
+		})
 	}
 
 	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
