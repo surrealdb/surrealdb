@@ -163,6 +163,8 @@ pub mod scrypt {
 			.filter(|test| {
 				bounded_verify_password!(Scrypt, Scrypt, pass, test, |params: &Params| {
 					// Scrypt is slow, use lower cost allowance.
+					// Also note that the log_n parameter behaves exponentially, so add instead
+					// of multiplying.
 					params.log_n() <= Params::default().log_n().saturating_add(2)
 						&& params.r() <= Params::default().r().saturating_mul(2)
 						&& params.p() <= Params::default().p().saturating_mul(4)
@@ -193,7 +195,8 @@ pub mod bcrypt {
 			Ok(parts) => parts,
 			Err(_) => return Ok(Value::False),
 		};
-		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST + COST_ALLOWANCE {
+		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to multiplying.
+		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
 			// Too expensive to compute.
 			Value::False
 		} else {
