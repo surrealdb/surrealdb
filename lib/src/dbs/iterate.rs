@@ -23,7 +23,7 @@ impl Iterable {
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			// Guard against <future> recursion.
-			// Iteration has a very large stack frame, so dive really deep so dive multiple levels.
+			// Iteration has a very large stack frame, so dive multiple levels.
 			let opt = &opt.dive_n(4)?;
 
 			match self {
