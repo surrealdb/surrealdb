@@ -1,15 +1,12 @@
 pub mod email {
 
-	use crate::ctx::Context;
 	use crate::err::Error;
 	use crate::sql::value::Value;
 	use addr::email::Host;
 
-	pub fn host(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		// Convert to a String
-		let val = args.remove(0).as_string();
+	pub fn host((string,): (String,)) -> Result<Value, Error> {
 		// Parse the email address
-		match addr::parse_email_address(&val) {
+		match addr::parse_email_address(&string) {
 			// Return the host part
 			Ok(v) => match v.host() {
 				Host::Domain(name) => Ok(name.as_str().into()),
@@ -19,10 +16,9 @@ pub mod email {
 		}
 	}
 
-	pub fn user(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		let val = args.remove(0).as_string();
+	pub fn user((string,): (String,)) -> Result<Value, Error> {
 		// Parse the email address
-		match addr::parse_email_address(&val) {
+		match addr::parse_email_address(&string) {
 			// Return the user part
 			Ok(v) => Ok(v.user().into()),
 			Err(_) => Ok(Value::None),
@@ -33,15 +29,15 @@ pub mod email {
 	mod tests {
 		#[test]
 		fn host() {
-			let input = vec!["john.doe@example.com".into()];
-			let value = super::host(&Default::default(), input).unwrap();
+			let input = (String::from("john.doe@example.com"),);
+			let value = super::host(input).unwrap();
 			assert_eq!(value, "example.com".into());
 		}
 
 		#[test]
 		fn user() {
-			let input = vec!["john.doe@example.com".into()];
-			let value = super::user(&Default::default(), input).unwrap();
+			let input = (String::from("john.doe@example.com"),);
+			let value = super::user(input).unwrap();
 			assert_eq!(value, "john.doe".into());
 		}
 	}
@@ -49,16 +45,12 @@ pub mod email {
 
 pub mod url {
 
-	use crate::ctx::Context;
 	use crate::err::Error;
 	use crate::sql::value::Value;
 	use url::Url;
 
-	pub fn domain(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		// Convert to a String
-		let val = args.remove(0).as_string();
-		// Parse the URL
-		match Url::parse(&val) {
+	pub fn domain((string,): (String,)) -> Result<Value, Error> {
+		match Url::parse(&string) {
 			Ok(v) => match v.domain() {
 				Some(v) => Ok(v.into()),
 				None => Ok(Value::None),
@@ -67,11 +59,9 @@ pub mod url {
 		}
 	}
 
-	pub fn fragment(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		// Convert to a String
-		let val = args.remove(0).as_string();
+	pub fn fragment((string,): (String,)) -> Result<Value, Error> {
 		// Parse the URL
-		match Url::parse(&val) {
+		match Url::parse(&string) {
 			Ok(v) => match v.fragment() {
 				Some(v) => Ok(v.into()),
 				None => Ok(Value::None),
@@ -80,11 +70,9 @@ pub mod url {
 		}
 	}
 
-	pub fn host(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		// Convert to a String
-		let val = args.remove(0).as_string();
+	pub fn host((string,): (String,)) -> Result<Value, Error> {
 		// Parse the URL
-		match Url::parse(&val) {
+		match Url::parse(&string) {
 			Ok(v) => match v.host_str() {
 				Some(v) => Ok(v.into()),
 				None => Ok(Value::None),
@@ -93,21 +81,17 @@ pub mod url {
 		}
 	}
 
-	pub fn path(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		// Convert to a String
-		let val = args.remove(0).as_string();
+	pub fn path((string,): (String,)) -> Result<Value, Error> {
 		// Parse the URL
-		match Url::parse(&val) {
+		match Url::parse(&string) {
 			Ok(v) => Ok(v.path().into()),
 			Err(_) => Ok(Value::None),
 		}
 	}
 
-	pub fn port(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		// Convert to a String
-		let val = args.remove(0).as_string();
+	pub fn port((string,): (String,)) -> Result<Value, Error> {
 		// Parse the URL
-		match Url::parse(&val) {
+		match Url::parse(&string) {
 			Ok(v) => match v.port() {
 				Some(v) => Ok(v.into()),
 				None => Ok(Value::None),
@@ -116,11 +100,9 @@ pub mod url {
 		}
 	}
 
-	pub fn query(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		// Convert to a String
-		let val = args.remove(0).as_string();
+	pub fn query((string,): (String,)) -> Result<Value, Error> {
 		// Parse the URL
-		match Url::parse(&val) {
+		match Url::parse(&string) {
 			Ok(v) => match v.query() {
 				Some(v) => Ok(v.into()),
 				None => Ok(Value::None),
