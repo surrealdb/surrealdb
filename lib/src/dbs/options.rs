@@ -82,12 +82,18 @@ impl Options {
 
 	/// Create a new Options object for a function/subquery/future/etc.
 	pub fn dive(&self) -> Result<Options, Error> {
-		if self.dive < cnf::MAX_COMPUTATION_DEPTH {
+		self.dive_n(1)
+	}
+
+	/// Create a new Options object for an abnormally expensive function/subquery/future/etc.
+	pub fn dive_n(&self, n: usize) -> Result<Options, Error> {
+		let dive = self.dive + n;
+		if dive <= cnf::MAX_COMPUTATION_DEPTH {
 			Ok(Options {
 				auth: self.auth.clone(),
 				ns: self.ns.clone(),
 				db: self.db.clone(),
-				dive: self.dive + 1,
+				dive,
 				..*self
 			})
 		} else {

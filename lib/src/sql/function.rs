@@ -111,8 +111,8 @@ impl Function {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		let opt = opt.dive()?;
-		let opt = &opt;
+		// Guard against long function chains (e.g. <int><int>...<int>5) causing stack overflow.
+		let opt = &opt.dive()?;
 
 		match self {
 			Function::Future(v) => match opt.futures {
