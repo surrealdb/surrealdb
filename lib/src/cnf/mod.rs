@@ -2,8 +2,8 @@
 // Specifies how many concurrent jobs can be buffered in the worker channel.
 pub const MAX_CONCURRENT_TASKS: usize = 64;
 
-// Specifies how many subqueries will be processed recursively before the query fails.
-pub const MAX_RECURSIVE_QUERIES: usize = 16;
+// Specifies how deep various forms of computation will go before the query fails.
+pub const MAX_COMPUTATION_DEPTH: usize = 16;
 
 // The characters which are supported in server record IDs.
 pub const ID_CHARS: [char; 36] = [

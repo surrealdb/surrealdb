@@ -80,9 +80,9 @@ impl Options {
 		self.db.as_ref().unwrap()
 	}
 
-	/// Create a new Options object for a subquery
+	/// Create a new Options object for a function/subquery/future/etc.
 	pub fn dive(&self) -> Result<Options, Error> {
-		if self.dive < cnf::MAX_RECURSIVE_QUERIES {
+		if self.dive < cnf::MAX_COMPUTATION_DEPTH {
 			Ok(Options {
 				auth: self.auth.clone(),
 				ns: self.ns.clone(),
@@ -91,7 +91,7 @@ impl Options {
 				..*self
 			})
 		} else {
-			Err(Error::TooManySubqueries)
+			Err(Error::ComputationDepthExceeded)
 		}
 	}
 

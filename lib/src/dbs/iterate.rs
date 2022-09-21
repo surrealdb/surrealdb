@@ -22,6 +22,11 @@ impl Iterable {
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
+			// Guard against <future> recursion.
+			// Hack: iteration has a very large stack frame, so dive really deep.
+			let opt = opt.dive()?.dive()?.dive()?.dive()?;
+			let opt = &opt;
+
 			match self {
 				Iterable::Value(v) => {
 					// Pass the value through

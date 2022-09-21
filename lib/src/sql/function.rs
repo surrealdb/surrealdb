@@ -111,6 +111,9 @@ impl Function {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		let opt = opt.dive()?;
+		let opt = &opt;
+
 		match self {
 			Function::Future(v) => match opt.futures {
 				true => {
