@@ -4,7 +4,7 @@ use crate::sql::datetime::Datetime;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use nanoid::nanoid;
-use rand::distributions::Alphanumeric;
+use rand::distributions::{Alphanumeric, DistString};
 use rand::prelude::IteratorRandom;
 use rand::Rng;
 
@@ -103,12 +103,7 @@ pub fn string((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> 
 		32
 	};
 
-	Ok(rand::thread_rng()
-		.sample_iter(&Alphanumeric)
-		.take(len)
-		.map(char::from)
-		.collect::<String>()
-		.into())
+	Ok(Alphanumeric.sample_string(&mut rand::thread_rng(), len).into())
 }
 
 pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
