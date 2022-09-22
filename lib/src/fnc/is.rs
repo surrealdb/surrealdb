@@ -62,10 +62,11 @@ pub fn semver((arg,): (String,)) -> Result<Value, Error> {
 #[inline]
 pub fn uuid((arg,): (Value,)) -> Result<Value, Error> {
 	Ok(match arg {
-		Value::Strand(v) => Uuid::parse_str(v.as_string().as_str()).is_ok().into(),
-		Value::Uuid(_) => true.into(),
-		_ => false.into(),
-	})
+		Value::Strand(v) => Uuid::parse_str(v.as_string().as_str()).is_ok(),
+		Value::Uuid(_) => true,
+		_ => false,
+	}
+	.into())
 }
 
 #[cfg(test)]
