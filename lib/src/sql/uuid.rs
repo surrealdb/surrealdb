@@ -20,19 +20,13 @@ pub struct Uuid(pub uuid::Uuid);
 
 impl From<&str> for Uuid {
 	fn from(s: &str) -> Self {
-		match uuid::Uuid::try_parse(s) {
-			Ok(v) => Uuid(v),
-			_ => Uuid::default(),
-		}
+		uuid::Uuid::try_parse(s).map(Uuid).unwrap_or_default()
 	}
 }
 
 impl From<String> for Uuid {
 	fn from(s: String) -> Self {
-		match uuid::Uuid::try_parse(&s) {
-			Ok(v) => Uuid(v),
-			_ => Uuid::default(),
-		}
+		Self::from(s.as_str())
 	}
 }
 
