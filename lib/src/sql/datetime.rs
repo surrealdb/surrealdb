@@ -1,4 +1,4 @@
-use crate::sql::common::{take_digits, take_digits_range, take_u32};
+use crate::sql::common::{take_digits, take_digits_range, take_u32_len};
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
@@ -180,7 +180,17 @@ fn second(i: &str) -> IResult<&str, u32> {
 
 fn nanosecond(i: &str) -> IResult<&str, u32> {
 	let (i, _) = char('.')(i)?;
-	let (i, v) = take_u32(i)?;
+	let (i, (v, l)) = take_u32_len(i)?;
+	let v = match l {
+		l if l <= 2 => v * 10000000,
+		l if l <= 3 => v * 1000000,
+		l if l <= 4 => v * 100000,
+		l if l <= 5 => v * 10000,
+		l if l <= 6 => v * 1000,
+		l if l <= 7 => v * 100,
+		l if l <= 8 => v * 10,
+		_ => v,
+	};
 	Ok((i, v))
 }
 
@@ -245,16 +255,16 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-23T18:25:43.000005631Z\"", format!("{}", out));
+		assert_eq!("\"2012-04-23T18:25:43.563100Z\"", format!("{}", out));
 	}
 
 	#[test]
 	fn date_time_timezone_utc() {
-		let sql = "2012-04-23T18:25:43.511Z";
+		let sql = "2012-04-23T18:25:43.0000511Z";
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-23T18:25:43.000000511Z\"", format!("{}", out));
+		assert_eq!("\"2012-04-23T18:25:43.000051100Z\"", format!("{}", out));
 	}
 
 	#[test]
@@ -263,6 +273,6 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-24T02:25:43.000000511Z\"", format!("{}", out));
+		assert_eq!("\"2012-04-24T02:25:43.511Z\"", format!("{}", out));
 	}
 }
