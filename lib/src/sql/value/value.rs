@@ -1199,6 +1199,7 @@ impl ops::Sub for Value {
 	fn sub(self, other: Self) -> Self {
 		match (self, other) {
 			(Value::Number(v), Value::Number(w)) => Value::Number(v - w),
+			(Value::Datetime(v), Value::Datetime(w)) => Value::Duration(v - w),
 			(Value::Datetime(v), Value::Duration(w)) => Value::Datetime(w - v),
 			(Value::Duration(v), Value::Datetime(w)) => Value::Datetime(v - w),
 			(Value::Duration(v), Value::Duration(w)) => Value::Duration(v - w),
