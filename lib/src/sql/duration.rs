@@ -63,35 +63,30 @@ impl Duration {
 	pub fn mins(&self) -> Value {
 		let secs = self.0.as_secs();
 		let mins = secs / SECONDS_PER_MINUTE;
-
 		mins.into()
 	}
 
 	pub fn hours(&self) -> Value {
 		let secs = self.0.as_secs();
 		let hours = secs / SECONDS_PER_HOUR;
-
 		hours.into()
 	}
 
 	pub fn days(&self) -> Value {
 		let secs = self.0.as_secs();
 		let days = secs / SECONDS_PER_DAY;
-
 		days.into()
 	}
 
 	pub fn weeks(&self) -> Value {
 		let secs = self.0.as_secs();
 		let weeks = secs / SECONDS_PER_WEEK;
-
 		weeks.into()
 	}
 
 	pub fn years(&self) -> Value {
 		let secs = self.0.as_secs();
 		let years = secs / SECONDS_PER_YEAR;
-
 		years.into()
 	}
 }
