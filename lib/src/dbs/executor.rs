@@ -118,14 +118,14 @@ impl<'a> Executor<'a> {
 		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 		session.put(NS.as_ref(), ns.to_owned().into());
 		ctx.add_value(String::from("session"), session);
-		opt.ns = Some(Arc::new(ns.to_owned()));
+		opt.ns = Some(ns.into());
 	}
 
 	async fn set_db(&self, ctx: &mut Context<'_>, opt: &mut Options, db: &str) {
 		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 		session.put(DB.as_ref(), db.to_owned().into());
 		ctx.add_value(String::from("session"), session);
-		opt.db = Some(Arc::new(db.to_owned()));
+		opt.db = Some(db.into());
 	}
 
 	pub async fn execute(
