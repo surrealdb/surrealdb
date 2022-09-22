@@ -2,6 +2,7 @@ use crate::sql::common::take_u64;
 use crate::sql::datetime::Datetime;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
+use crate::sql::value::Value;
 use chrono::DurationRound;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -53,6 +54,45 @@ impl Deref for Duration {
 impl Duration {
 	pub fn to_raw(&self) -> String {
 		self.to_string()
+	}
+
+	pub fn secs(&self) -> Value {
+		self.0.as_secs().into()
+	}
+
+	pub fn mins(&self) -> Value {
+		let secs = self.0.as_secs();
+		let mins = secs / SECONDS_PER_MINUTE;
+
+		mins.into()
+	}
+
+	pub fn hours(&self) -> Value {
+		let secs = self.0.as_secs();
+		let hours = secs / SECONDS_PER_HOUR;
+
+		hours.into()
+	}
+
+	pub fn days(&self) -> Value {
+		let secs = self.0.as_secs();
+		let days = secs / SECONDS_PER_DAY;
+
+		days.into()
+	}
+
+	pub fn weeks(&self) -> Value {
+		let secs = self.0.as_secs();
+		let weeks = secs / SECONDS_PER_WEEK;
+
+		weeks.into()
+	}
+
+	pub fn years(&self) -> Value {
+		let secs = self.0.as_secs();
+		let years = secs / SECONDS_PER_YEAR;
+
+		years.into()
 	}
 }
 
