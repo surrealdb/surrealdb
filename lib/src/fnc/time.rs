@@ -18,19 +18,16 @@ pub fn day((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 }
 
 pub fn floor((datetime, duration): (Value, Value)) -> Result<Value, Error> {
-	match datetime {
-		Value::Datetime(v) => match duration {
-			Value::Duration(w) => match chrono::Duration::from_std(*w) {
-				Ok(d) => match v.duration_trunc(d) {
-					Ok(v) => Ok(v.into()),
-					_ => Ok(Value::None),
-				},
-				_ => Ok(Value::None),
+	Ok(match (datetime, duration) {
+		(Value::Datetime(v), Value::Duration(w)) => match chrono::Duration::from_std(*w) {
+			Ok(d) => match v.duration_trunc(d) {
+				Ok(v) => v.into(),
+				_ => Value::None,
 			},
-			_ => Ok(Value::None),
+			_ => Value::None,
 		},
-		_ => Ok(Value::None),
-	}
+		_ => Value::None,
+	})
 }
 
 pub fn group((datetime, strand): (Value, Value)) -> Result<Value, Error> {
@@ -111,19 +108,16 @@ pub fn now(_: ()) -> Result<Value, Error> {
 }
 
 pub fn round((datetime, duration): (Value, Value)) -> Result<Value, Error> {
-	match datetime {
-		Value::Datetime(v) => match duration {
-			Value::Duration(w) => match chrono::Duration::from_std(*w) {
-				Ok(d) => match v.duration_round(d) {
-					Ok(v) => Ok(v.into()),
-					_ => Ok(Value::None),
-				},
-				_ => Ok(Value::None),
+	Ok(match (datetime, duration) {
+		(Value::Datetime(v), Value::Duration(w)) => match chrono::Duration::from_std(*w) {
+			Ok(d) => match v.duration_round(d) {
+				Ok(v) => v.into(),
+				_ => Value::None,
 			},
-			_ => Ok(Value::None),
+			_ => Value::None,
 		},
-		_ => Ok(Value::None),
-	}
+		_ => Value::None,
+	})
 }
 
 pub fn secs((datetime,): (Option<Value>,)) -> Result<Value, Error> {

@@ -23,59 +23,38 @@ pub fn area((arg,): (Value,)) -> Result<Value, Error> {
 	}
 }
 
-pub fn bearing((a, b): (Value, Value)) -> Result<Value, Error> {
-	match a {
-		Value::Geometry(Geometry::Point(v)) => match b {
-			Value::Geometry(Geometry::Point(w)) => Ok(v.bearing(w).into()),
-			_ => Ok(Value::None),
-		},
-		_ => Ok(Value::None),
-	}
+pub fn bearing(points: (Value, Value)) -> Result<Value, Error> {
+	Ok(match points {
+		(Value::Geometry(Geometry::Point(v)), Value::Geometry(Geometry::Point(w))) => {
+			v.bearing(w).into()
+		}
+		_ => Value::None,
+	})
 }
 
 pub fn centroid((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
+	let centroid = match arg {
 		Value::Geometry(v) => match v {
-			Geometry::Point(v) => Ok(v.centroid().into()),
-			Geometry::Line(v) => match v.centroid() {
-				Some(x) => Ok(x.into()),
-				None => Ok(Value::None),
-			},
-			Geometry::Polygon(v) => match v.centroid() {
-				Some(x) => Ok(x.into()),
-				None => Ok(Value::None),
-			},
-			Geometry::MultiPoint(v) => match v.centroid() {
-				Some(x) => Ok(x.into()),
-				None => Ok(Value::None),
-			},
-			Geometry::MultiLine(v) => match v.centroid() {
-				Some(x) => Ok(x.into()),
-				None => Ok(Value::None),
-			},
-			Geometry::MultiPolygon(v) => match v.centroid() {
-				Some(x) => Ok(x.into()),
-				None => Ok(Value::None),
-			},
-			Geometry::Collection(v) => {
-				match v.into_iter().collect::<geo::Geometry<f64>>().centroid() {
-					Some(x) => Ok(x.into()),
-					None => Ok(Value::None),
-				}
-			}
+			Geometry::Point(v) => Some(v.centroid()),
+			Geometry::Line(v) => v.centroid(),
+			Geometry::Polygon(v) => v.centroid(),
+			Geometry::MultiPoint(v) => v.centroid(),
+			Geometry::MultiLine(v) => v.centroid(),
+			Geometry::MultiPolygon(v) => v.centroid(),
+			Geometry::Collection(v) => v.into_iter().collect::<geo::Geometry<f64>>().centroid(),
 		},
-		_ => Ok(Value::None),
-	}
+		_ => None,
+	};
+	Ok(centroid.map(Into::into).unwrap_or(Value::None))
 }
 
-pub fn distance((from, to): (Value, Value)) -> Result<Value, Error> {
-	match from {
-		Value::Geometry(Geometry::Point(v)) => match to {
-			Value::Geometry(Geometry::Point(w)) => Ok(v.haversine_distance(&w).into()),
-			_ => Ok(Value::None),
-		},
-		_ => Ok(Value::None),
-	}
+pub fn distance(points: (Value, Value)) -> Result<Value, Error> {
+	Ok(match points {
+		(Value::Geometry(Geometry::Point(v)), Value::Geometry(Geometry::Point(w))) => {
+			v.haversine_distance(&w).into()
+		}
+		_ => Value::None,
+	})
 }
 
 pub mod hash {
