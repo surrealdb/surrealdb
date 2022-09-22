@@ -535,6 +535,14 @@ impl Value {
 		matches!(self, Value::Thing(_))
 	}
 
+	pub fn is_model(&self) -> bool {
+		matches!(self, Value::Model(_))
+	}
+
+	pub fn is_range(&self) -> bool {
+		matches!(self, Value::Range(_))
+	}
+
 	pub fn is_strand(&self) -> bool {
 		matches!(self, Value::Strand(_))
 	}
