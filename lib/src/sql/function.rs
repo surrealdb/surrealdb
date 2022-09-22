@@ -292,10 +292,10 @@ fn function_crypto(i: &str) -> IResult<&str, &str> {
 
 fn function_duration(i: &str) -> IResult<&str, &str> {
 	alt((
-		tag("duration::secs"),
-		tag("duration::mins"),
-		tag("duration::hours"),
 		tag("duration::days"),
+		tag("duration::hours"),
+		tag("duration::mins"),
+		tag("duration::secs"),
 		tag("duration::weeks"),
 		tag("duration::years"),
 	))(i)
