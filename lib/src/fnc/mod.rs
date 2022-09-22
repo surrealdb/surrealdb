@@ -7,6 +7,7 @@ pub mod array;
 pub mod cast;
 pub mod count;
 pub mod crypto;
+pub mod duration;
 pub mod future;
 pub mod geo;
 pub mod http;
@@ -76,6 +77,13 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"crypto::sha1" => crypto::sha1,
 		"crypto::sha256" => crypto::sha256,
 		"crypto::sha512" => crypto::sha512,
+		//
+		"duration::days" => duration::days,
+		"duration::hours" => duration::hours,
+		"duration::mins" => duration::mins,
+		"duration::secs" => duration::secs,
+		"duration::weeks" => duration::weeks,
+		"duration::years" => duration::years,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
