@@ -1228,7 +1228,13 @@ impl ops::Div for Value {
 					Value::Number(v / w)
 				}
 			}
-			(Value::Datetime(v), Value::Duration(w)) => Value::Datetime(w / v),
+			(Value::Datetime(v), Value::Duration(w)) => {
+				if w.is_zero() {
+					Value::None
+				} else {
+					Value::Datetime(w / v)
+				}
+			}
 			(v, w) => {
 				let w = w.as_number();
 				if w == Number::Int(0) {
