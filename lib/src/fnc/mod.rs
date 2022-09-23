@@ -7,6 +7,7 @@ pub mod array;
 pub mod cast;
 pub mod count;
 pub mod crypto;
+pub mod duration;
 pub mod future;
 pub mod geo;
 pub mod http;
@@ -25,42 +26,37 @@ pub mod util;
 
 /// Attempts to run any function.
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
-	// Wrappers return a function as opposed to a value so that the dispatch! method can always
-	// perform a function call.
-	#[cfg(feature = "parallel")]
-	fn cpu_intensive<R: Send + 'static>(
-		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> executor::Task<R> {
-		|| crate::exe::spawn(async move { function() })
+	if name.starts_with("http")
+		|| (name.starts_with("crypto") && (name.ends_with("compare") || name.ends_with("generate")))
+	{
+		asynchronous(ctx, name, args).await
+	} else {
+		synchronous(ctx, name, args)
 	}
+}
 
-	#[cfg(not(feature = "parallel"))]
-	fn cpu_intensive<R: Send + 'static>(
-		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> std::future::Ready<R> {
-		|| std::future::ready(function())
-	}
-
-	macro_rules! dispatch {
-		($name: ident, $args: ident, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
-			{
-				match $name {
-					$($function_name => {
-						let args = args::FromArgs::from_args($name, $args)?;
-						#[allow(clippy::redundant_closure_call)]
-						$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
-					},)+
-					_ => unreachable!()
-				}
+// Each function is specified by its name (a string literal) followed by its path. The path
+// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
+// before the remainder of the arguments. The path may be followed by `.await` to signify that
+// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
+// `cpu_intensive`.
+macro_rules! dispatch {
+	($name: ident, $args: ident, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
+		{
+			match $name {
+				$($function_name => {
+					let args = args::FromArgs::from_args($name, $args)?;
+					#[allow(clippy::redundant_closure_call)]
+					$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
+				},)+
+				_ => unreachable!()
 			}
-		};
-	}
+		}
+	};
+}
 
-	// Each function is specified by its name (a string literal) followed by its path. The path
-	// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
-	// before the remainder of the arguments. The path may be followed by `.await` to signify that
-	// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
-	// `cpu_intensive`.
+/// Attempts to run any synchronous function.
+pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
 	dispatch!(
 		name,
 		args,
@@ -81,14 +77,13 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"crypto::sha1" => crypto::sha1,
 		"crypto::sha256" => crypto::sha256,
 		"crypto::sha512" => crypto::sha512,
-		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
-		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
-		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
-		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
-		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
-		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
-		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
-		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		//
+		"duration::days" => duration::days,
+		"duration::hours" => duration::hours,
+		"duration::mins" => duration::mins,
+		"duration::secs" => duration::secs,
+		"duration::weeks" => duration::weeks,
+		"duration::years" => duration::years,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
@@ -96,13 +91,6 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"geo::distance" => geo::distance,
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
-		//
-		"http::head" => http::head.await,
-		"http::get" => http::get.await,
-		"http::put" => http::put.await,
-		"http::post" =>  http::post.await,
-		"http::patch" => http::patch.await,
-		"http::delete" => http::delete.await,
 		//
 		"is::alphanum" => is::alphanum,
 		"is::alpha" => is::alpha,
@@ -216,5 +204,48 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
+	)
+}
+
+/// Attempts to run any asynchronous function.
+pub async fn asynchronous(
+	_ctx: &Context<'_>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
+	// Wrappers return a function as opposed to a value so that the dispatch! method can always
+	// perform a function call.
+	#[cfg(feature = "parallel")]
+	fn cpu_intensive<R: Send + 'static>(
+		function: impl FnOnce() -> R + Send + 'static,
+	) -> impl FnOnce() -> executor::Task<R> {
+		|| crate::exe::spawn(async move { function() })
+	}
+
+	#[cfg(not(feature = "parallel"))]
+	fn cpu_intensive<R: Send + 'static>(
+		function: impl FnOnce() -> R + Send + 'static,
+	) -> impl FnOnce() -> std::future::Ready<R> {
+		|| std::future::ready(function())
+	}
+
+	dispatch!(
+		name,
+		args,
+		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
+		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
+		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
+		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
+		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
+		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
+		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
+		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		//
+		"http::head" => http::head.await,
+		"http::get" => http::get.await,
+		"http::put" => http::put.await,
+		"http::post" =>  http::post.await,
+		"http::patch" => http::patch.await,
+		"http::delete" => http::delete.await,
 	)
 }

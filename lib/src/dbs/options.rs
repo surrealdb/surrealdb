@@ -14,9 +14,9 @@ use std::sync::Arc;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Options {
 	// Currently selected NS
-	pub ns: Option<Arc<String>>,
+	pub ns: Option<Arc<str>>,
 	// Currently selected DB
-	pub db: Option<Arc<String>>,
+	pub db: Option<Arc<str>>,
 	// Connection authentication data
 	pub auth: Arc<Auth>,
 	// How many subqueries have we gone into?

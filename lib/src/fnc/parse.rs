@@ -6,23 +6,23 @@ pub mod email {
 
 	pub fn host((string,): (String,)) -> Result<Value, Error> {
 		// Parse the email address
-		match addr::parse_email_address(&string) {
+		Ok(match addr::parse_email_address(&string) {
 			// Return the host part
 			Ok(v) => match v.host() {
-				Host::Domain(name) => Ok(name.as_str().into()),
-				Host::IpAddr(ip_addr) => Ok(ip_addr.to_string().into()),
+				Host::Domain(name) => name.as_str().into(),
+				Host::IpAddr(ip_addr) => ip_addr.to_string().into(),
 			},
-			Err(_) => Ok(Value::None),
-		}
+			Err(_) => Value::None,
+		})
 	}
 
 	pub fn user((string,): (String,)) -> Result<Value, Error> {
 		// Parse the email address
-		match addr::parse_email_address(&string) {
+		Ok(match addr::parse_email_address(&string) {
 			// Return the user part
-			Ok(v) => Ok(v.user().into()),
-			Err(_) => Ok(Value::None),
-		}
+			Ok(v) => v.user().into(),
+			Err(_) => Value::None,
+		})
 	}
 
 	#[cfg(test)]
