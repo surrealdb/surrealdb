@@ -38,21 +38,21 @@ impl<'js> FromJs<'js> for Value {
 				// Extract the value as an object
 				let v = val.into_object().unwrap();
 				// Check to see if this object is a duration
-				if (&v).instance_of::<classes::duration::duration::Duration>() {
+				if (v).instance_of::<classes::duration::duration::Duration>() {
 					let v = v.into_instance::<classes::duration::duration::Duration>().unwrap();
 					let v: &classes::duration::duration::Duration = v.as_ref();
 					let v = v.value.clone();
 					return Ok(Duration::from(v).into());
 				}
 				// Check to see if this object is a record
-				if (&v).instance_of::<classes::record::record::Record>() {
+				if (v).instance_of::<classes::record::record::Record>() {
 					let v = v.into_instance::<classes::record::record::Record>().unwrap();
 					let v: &classes::record::record::Record = v.as_ref();
 					let v = (v.tb.clone(), v.id.clone());
 					return Ok(Thing::from(v).into());
 				}
 				// Check to see if this object is a uuid
-				if (&v).instance_of::<classes::uuid::uuid::Uuid>() {
+				if (v).instance_of::<classes::uuid::uuid::Uuid>() {
 					let v = v.into_instance::<classes::uuid::uuid::Uuid>().unwrap();
 					let v: &classes::uuid::uuid::Uuid = v.as_ref();
 					let v = v.value.clone();
@@ -60,7 +60,7 @@ impl<'js> FromJs<'js> for Value {
 				}
 				// Check to see if this object is a date
 				let date: js::Object = ctx.globals().get("Date")?;
-				if (&v).is_instance_of(&date) {
+				if (v).is_instance_of(&date) {
 					let f: js::Function = v.get("getTime")?;
 					let m: i64 = f.call((js::This(v),))?;
 					let d = Utc.timestamp_millis(m);

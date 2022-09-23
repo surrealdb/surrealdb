@@ -83,12 +83,12 @@ impl Session {
 		self
 	}
 	/// Retrieves the selected namespace
-	pub(crate) fn ns(&self) -> Option<Arc<String>> {
-		self.ns.to_owned().map(Arc::new)
+	pub(crate) fn ns(&self) -> Option<Arc<str>> {
+		self.ns.as_deref().map(Into::into)
 	}
 	/// Retrieves the selected database
-	pub(crate) fn db(&self) -> Option<Arc<String>> {
-		self.db.to_owned().map(Arc::new)
+	pub(crate) fn db(&self) -> Option<Arc<str>> {
+		self.db.as_deref().map(Into::into)
 	}
 	/// Convert a session into a runtime
 	pub(crate) fn context<'a>(&self, mut ctx: Context<'a>) -> Context<'a> {

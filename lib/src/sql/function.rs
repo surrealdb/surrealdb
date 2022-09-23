@@ -239,6 +239,7 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 		function_array,
 		function_count,
 		function_crypto,
+		function_duration,
 		function_geo,
 		function_http,
 		function_is,
@@ -286,6 +287,17 @@ fn function_crypto(i: &str) -> IResult<&str, &str> {
 		tag("crypto::sha1"),
 		tag("crypto::sha256"),
 		tag("crypto::sha512"),
+	))(i)
+}
+
+fn function_duration(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("duration::days"),
+		tag("duration::hours"),
+		tag("duration::mins"),
+		tag("duration::secs"),
+		tag("duration::weeks"),
+		tag("duration::years"),
 	))(i)
 }
 

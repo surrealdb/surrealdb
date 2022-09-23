@@ -67,14 +67,22 @@ pub async fn init() -> Result<(), Error> {
 
 	if let (Some(c), Some(k)) = (&opt.crt, &opt.key) {
 		// Bind the server to the desired port
-		let (adr, srv) = warp::serve(net).tls().cert_path(c).key_path(k).bind_ephemeral(opt.bind);
+		let (adr, srv) = warp::serve(net)
+			.tls()
+			.cert_path(c)
+			.key_path(k)
+			.bind_with_graceful_shutdown(opt.bind, async move {
+				tokio::signal::ctrl_c().await.expect("Failed to listen to shutdown signal");
+			});
 		// Log the server startup status
 		info!(target: LOG, "Started web server on {}", &adr);
 		// Run the server forever
 		srv.await
 	} else {
 		// Bind the server to the desired port
-		let (adr, srv) = warp::serve(net).bind_ephemeral(opt.bind);
+		let (adr, srv) = warp::serve(net).bind_with_graceful_shutdown(opt.bind, async move {
+			tokio::signal::ctrl_c().await.expect("Failed to listen to shutdown signal");
+		});
 		// Log the server startup status
 		info!(target: LOG, "Started web server on {}", &adr);
 		// Run the server forever

@@ -7,34 +7,25 @@ use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
 
-pub fn concat((left, right): (Value, Value)) -> Result<Value, Error> {
-	match left {
-		Value::Array(v) => match right {
-			Value::Array(w) => Ok(v.concat(w).into()),
-			_ => Ok(Value::None),
-		},
-		_ => Ok(Value::None),
-	}
+pub fn concat(arrays: (Value, Value)) -> Result<Value, Error> {
+	Ok(match arrays {
+		(Value::Array(v), Value::Array(w)) => v.concat(w).into(),
+		_ => Value::None,
+	})
 }
 
-pub fn combine((left, right): (Value, Value)) -> Result<Value, Error> {
-	match left {
-		Value::Array(v) => match right {
-			Value::Array(w) => Ok(v.combine(w).into()),
-			_ => Ok(Value::None),
-		},
-		_ => Ok(Value::None),
-	}
+pub fn combine(arrays: (Value, Value)) -> Result<Value, Error> {
+	Ok(match arrays {
+		(Value::Array(v), Value::Array(w)) => v.combine(w).into(),
+		_ => Value::None,
+	})
 }
 
-pub fn difference((left, right): (Value, Value)) -> Result<Value, Error> {
-	match left {
-		Value::Array(v) => match right {
-			Value::Array(w) => Ok(v.difference(w).into()),
-			_ => Ok(Value::None),
-		},
-		_ => Ok(Value::None),
-	}
+pub fn difference(arrays: (Value, Value)) -> Result<Value, Error> {
+	Ok(match arrays {
+		(Value::Array(v), Value::Array(w)) => v.difference(w).into(),
+		_ => Value::None,
+	})
 }
 
 pub fn distinct((arg,): (Value,)) -> Result<Value, Error> {
@@ -44,14 +35,11 @@ pub fn distinct((arg,): (Value,)) -> Result<Value, Error> {
 	}
 }
 
-pub fn intersect((left, right): (Value, Value)) -> Result<Value, Error> {
-	match left {
-		Value::Array(v) => match right {
-			Value::Array(w) => Ok(v.intersect(w).into()),
-			_ => Ok(Value::None),
-		},
-		_ => Ok(Value::None),
-	}
+pub fn intersect(arrays: (Value, Value)) -> Result<Value, Error> {
+	Ok(match arrays {
+		(Value::Array(v), Value::Array(w)) => v.intersect(w).into(),
+		_ => Value::None,
+	})
 }
 
 pub fn len((arg,): (Value,)) -> Result<Value, Error> {
@@ -94,14 +82,11 @@ pub fn sort((array, order): (Value, Option<Value>)) -> Result<Value, Error> {
 	}
 }
 
-pub fn union((left, right): (Value, Value)) -> Result<Value, Error> {
-	match left {
-		Value::Array(v) => match right {
-			Value::Array(w) => Ok(v.union(w).into()),
-			_ => Ok(Value::None),
-		},
-		_ => Ok(Value::None),
-	}
+pub fn union(arrays: (Value, Value)) -> Result<Value, Error> {
+	Ok(match arrays {
+		(Value::Array(v), Value::Array(w)) => v.union(w).into(),
+		_ => Value::None,
+	})
 }
 
 pub mod sort {
