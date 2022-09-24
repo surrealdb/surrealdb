@@ -156,7 +156,7 @@ pub fn sqrt((arg,): (Number,)) -> Result<Value, Error> {
 
 pub fn stddev((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => v.as_numbers().deviation().into(),
+		Value::Array(v) => v.as_numbers().deviation(true).into(),
 		_ => Value::None,
 	})
 }
@@ -193,7 +193,7 @@ pub fn trimean((array,): (Value,)) -> Result<Value, Error> {
 
 pub fn variance((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => v.as_numbers().variance().into(),
+		Value::Array(v) => v.as_numbers().variance(true).into(),
 		_ => Value::None,
 	})
 }
