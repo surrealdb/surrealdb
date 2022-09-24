@@ -1,4 +1,4 @@
-use crate::sql::number::{Number,Sorted};
+use crate::sql::number::{Number, Sorted};
 
 pub trait Median {
 	fn median(self) -> Number;

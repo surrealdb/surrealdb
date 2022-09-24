@@ -1,5 +1,5 @@
-use crate::sql::number::{Number,Sorted};
 use super::percentile::Percentile;
+use crate::sql::number::{Number, Sorted};
 
 pub trait Nearestrank {
 	/// (Assuming this is an alias for Percentile or is this a numeric rank)

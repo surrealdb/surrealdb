@@ -1,5 +1,5 @@
-use crate::sql::number::{Number,Sorted};
 use super::percentile::Percentile;
+use crate::sql::number::{Number, Sorted};
 
 pub trait Interquartile {
 	/// the interquartile Range: Q_3 - Q_1 [ or P_75 - P-25 ]

@@ -1,10 +1,10 @@
 use crate::sql::number::Number;
-use std::collections::BinaryHeap;
 use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 pub trait Top {
 	/// Find the greatest `k` records from the collection, returned in arbetrary order  
-	/// O(n*k*log(k)) time complex 
+	/// O(n*k*log(k)) time complex
 	fn top(self, _c: i64) -> Vec<Number>;
 }
 
@@ -12,19 +12,17 @@ impl Top for Vec<Number> {
 	fn top(self, _c: i64) -> Vec<Number> {
 		let mut heap = BinaryHeap::new();
 
-		for idx in 0..self.len(){
+		for idx in 0..self.len() {
 			let n = Reverse(self.get(idx).unwrap().clone());
 
-			if idx>_c as usize{
+			if idx > _c as usize {
 				heap.push(n);
 				heap.pop();
-			}else{
+			} else {
 				heap.push(n);
 			}
-
-
 		}
 
-		heap.into_iter().map(|x|{x.0}).collect()
+		heap.into_iter().map(|x| x.0).collect()
 	}
 }

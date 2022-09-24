@@ -11,11 +11,11 @@ use nom::number::complete::recognize_float;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops;
 use std::str::FromStr;
-use std::hash::{Hash,Hasher};
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum Number {
@@ -499,24 +499,26 @@ impl<'a> Product<&'a Self> for Number {
 	}
 }
 
-impl Hash for Number{
+impl Hash for Number {
 	fn hash<H: Hasher>(&self, state: &mut H) {
-		match self{
+		match self {
 			Number::Int(v) => v.hash(state),
-			Number::Float(v) => v.to_string().hash(state), // floats are tricky to crush to a hash that is Eq 
+			Number::Float(v) => v.to_string().hash(state), // floats are tricky to crush to a hash that is Eq
 			Number::Decimal(v) => v.hash(state),
-}
+		}
 	}
 }
 
 pub struct Sorted<T>(pub T);
 
-pub trait Sort{
-	fn sorted(&mut self) -> Sorted<&Self> where Self: Sized;
+pub trait Sort {
+	fn sorted(&mut self) -> Sorted<&Self>
+	where
+		Self: Sized;
 }
 
-impl Sort for Vec<Number>{
-	fn sorted(&mut self) -> Sorted<&Vec<Number>>{
+impl Sort for Vec<Number> {
+	fn sorted(&mut self) -> Sorted<&Vec<Number>> {
 		self.sort();
 		Sorted(self)
 	}

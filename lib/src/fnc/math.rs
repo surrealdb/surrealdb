@@ -12,7 +12,7 @@ use crate::fnc::util::math::spread::Spread;
 use crate::fnc::util::math::top::Top;
 use crate::fnc::util::math::trimean::Trimean;
 use crate::fnc::util::math::variance::Variance;
-use crate::sql::number::{Number,Sort};
+use crate::sql::number::{Number, Sort};
 use crate::sql::value::Value;
 
 pub fn abs((arg,): (Number,)) -> Result<Value, Error> {
@@ -21,7 +21,16 @@ pub fn abs((arg,): (Number,)) -> Result<Value, Error> {
 
 pub fn bottom((array, c): (Value, i64)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => Value::Array(crate::sql::Array(v.as_numbers().bottom(c).into_iter().map(|x|{let y: Value= x.into();y}).collect())),
+		Value::Array(v) => Value::Array(crate::sql::Array(
+			v.as_numbers()
+				.bottom(c)
+				.into_iter()
+				.map(|x| {
+					let y: Value = x.into();
+					y
+				})
+				.collect(),
+		)),
 		_ => Value::None,
 	})
 }
@@ -161,7 +170,16 @@ pub fn sum((array,): (Value,)) -> Result<Value, Error> {
 
 pub fn top((array, c): (Value, i64)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => Value::Array(crate::sql::Array(v.as_numbers().top(c).into_iter().map(|x|{let y:Value=x.into();y}).collect())),
+		Value::Array(v) => Value::Array(crate::sql::Array(
+			v.as_numbers()
+				.top(c)
+				.into_iter()
+				.map(|x| {
+					let y: Value = x.into();
+					y
+				})
+				.collect(),
+		)),
 		_ => Value::None,
 	})
 }

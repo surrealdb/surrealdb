@@ -8,24 +8,18 @@ pub trait Spread {
 
 impl Spread for Vec<Number> {
 	fn spread(self) -> Number {
-
 		let init = self.get(0);
 
-		let min_max = self.iter().fold((init, init), |(mut min, mut max), val|{
-				min = std::cmp::min(min, Some(val));
-				max = std::cmp::max(max,Some(val));
+		let min_max = self.iter().fold((init, init), |(mut min, mut max), val| {
+			min = std::cmp::min(min, Some(val));
+			max = std::cmp::max(max, Some(val));
 
-				(min,max)
+			(min, max)
 		});
 
 		match min_max {
-
-			(Some(min),Some(max)) => {
-				max-min
-			},
-			_ => Number::Float(f64::NAN)
-
+			(Some(min), Some(max)) => max - min,
+			_ => Number::Float(f64::NAN),
 		}
-
 	}
 }
