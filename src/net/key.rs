@@ -145,8 +145,10 @@ async fn select_all(
 			"application/json" => Ok(output::json(res)),
 			"application/cbor" => Ok(output::cbor(res)),
 			"application/msgpack" => Ok(output::pack(&res)),
-			_ => Err(warp::reject::not_found()),
+			// An incorrect content-type was requested
+			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
+		// There was an error when executing the query
 		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }
@@ -179,8 +181,10 @@ async fn create_all(
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
-					_ => Err(warp::reject::not_found()),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
+				// There was an error when executing the query
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
@@ -209,8 +213,10 @@ async fn delete_all(
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
-			_ => Err(warp::reject::not_found()),
+			// An incorrect content-type was requested
+			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
+		// There was an error when executing the query
 		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }
@@ -242,8 +248,10 @@ async fn select_one(
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
-			_ => Err(warp::reject::not_found()),
+			// An incorrect content-type was requested
+			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
+		// There was an error when executing the query
 		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }
@@ -278,8 +286,10 @@ async fn create_one(
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
-					_ => Err(warp::reject::not_found()),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
+				// There was an error when executing the query
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
@@ -317,8 +327,10 @@ async fn update_one(
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
-					_ => Err(warp::reject::not_found()),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
+				// There was an error when executing the query
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
@@ -356,8 +368,10 @@ async fn modify_one(
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
-					_ => Err(warp::reject::not_found()),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
+				// There was an error when executing the query
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
@@ -388,8 +402,10 @@ async fn delete_one(
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
-			_ => Err(warp::reject::not_found()),
+			// An incorrect content-type was requested
+			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
+		// There was an error when executing the query
 		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }

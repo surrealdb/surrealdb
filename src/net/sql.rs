@@ -52,7 +52,7 @@ async fn handler(
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
 			// An incorrect content-type was requested
-			_ => Err(warp::reject::not_found()),
+			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
 		// There was an error when executing the query
 		Err(err) => Err(warp::reject::custom(Error::from(err))),
