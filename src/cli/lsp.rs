@@ -5,6 +5,7 @@ use crate::dbs;
 use crate::err::Error;
 use crate::iam;
 use crate::net;
+use crate::lsp;
 
 #[tokio::main]
 pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
@@ -27,7 +28,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
     .parse::<SocketAddr>()
     .expect("Unable to parse socket address");
 
-  // TODO: setup LSP
+  lsp::main(bind);
 
 	// All ok
 	Ok(())
