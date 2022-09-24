@@ -4,6 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
+use crate::sql::paths::ID;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
@@ -97,8 +98,8 @@ impl Subquery {
 				// Process subquery
 				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0)),
-						_ => Ok(v.into()),
+						1 => Ok(v.remove(0).pick(ID.as_ref())),
+						_ => Ok(Value::from(v).pick(ID.as_ref())),
 					},
 					v => Ok(v),
 				}
@@ -115,8 +116,8 @@ impl Subquery {
 				// Process subquery
 				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0)),
-						_ => Ok(v.into()),
+						1 => Ok(v.remove(0).pick(ID.as_ref())),
+						_ => Ok(Value::from(v).pick(ID.as_ref())),
 					},
 					v => Ok(v),
 				}
@@ -133,8 +134,8 @@ impl Subquery {
 				// Process subquery
 				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0)),
-						_ => Ok(v.into()),
+						1 => Ok(v.remove(0).pick(ID.as_ref())),
+						_ => Ok(Value::from(v).pick(ID.as_ref())),
 					},
 					v => Ok(v),
 				}
@@ -151,8 +152,8 @@ impl Subquery {
 				// Process subquery
 				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0)),
-						_ => Ok(v.into()),
+						1 => Ok(v.remove(0).pick(ID.as_ref())),
+						_ => Ok(Value::from(v).pick(ID.as_ref())),
 					},
 					v => Ok(v),
 				}
@@ -169,8 +170,8 @@ impl Subquery {
 				// Process subquery
 				match v.compute(&ctx, &opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0)),
-						_ => Ok(v.into()),
+						1 => Ok(v.remove(0).pick(ID.as_ref())),
+						_ => Ok(Value::from(v).pick(ID.as_ref())),
 					},
 					v => Ok(v),
 				}
