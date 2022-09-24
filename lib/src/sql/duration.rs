@@ -3,7 +3,6 @@ use crate::sql::datetime::Datetime;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
-use chrono::DurationRound;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::multi::many1;
@@ -199,19 +198,6 @@ impl ops::Sub<Datetime> for Duration {
 	fn sub(self, other: Datetime) -> Datetime {
 		match chrono::Duration::from_std(self.0) {
 			Ok(d) => Datetime::from(other.0 - d),
-			Err(_) => Datetime::default(),
-		}
-	}
-}
-
-impl ops::Div<Datetime> for Duration {
-	type Output = Datetime;
-	fn div(self, other: Datetime) -> Datetime {
-		match chrono::Duration::from_std(self.0) {
-			Ok(d) => match other.duration_trunc(d) {
-				Ok(v) => Datetime::from(v),
-				Err(_) => Datetime::default(),
-			},
 			Err(_) => Datetime::default(),
 		}
 	}
