@@ -36,6 +36,8 @@ Temporary Items
 /lib/target/
 .idea/
 /result
+/bin/
+/docker/
 /.direnv/
 
 # -----------------------------------
