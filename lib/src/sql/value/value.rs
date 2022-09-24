@@ -1229,10 +1229,9 @@ impl ops::Mul for Value {
 impl ops::Div for Value {
 	type Output = Self;
 	fn div(self, other: Self) -> Self {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => Value::Number(v / w),
-			(Value::Datetime(v), Value::Duration(w)) => Value::Datetime(w / v),
-			(v, w) => Value::from(v.as_number() / w.as_number()),
+		match (self.as_number(), other.as_number()) {
+			(_, w) if w == Number::Int(0) => Value::None,
+			(v, w) => Value::Number(v / w),
 		}
 	}
 }

@@ -1,9 +1,12 @@
+use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::operator::{assigner, Operator};
+use crate::sql::table::Table;
+use crate::sql::thing::Thing;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -27,6 +30,22 @@ pub enum Data {
 impl Default for Data {
 	fn default() -> Data {
 		Data::EmptyExpression
+	}
+}
+
+impl Data {
+	// Fetch
+	pub(crate) fn rid(&self, tb: &Table) -> Result<Thing, Error> {
+		match self {
+			Data::MergeExpression(v) => v.generate(tb, false),
+			Data::ReplaceExpression(v) => v.generate(tb, false),
+			Data::ContentExpression(v) => v.generate(tb, false),
+			Data::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
+				Some((_, _, v)) => v.generate(tb, false),
+				_ => Ok(tb.generate()),
+			},
+			_ => Ok(tb.generate()),
+		}
 	}
 }
 
