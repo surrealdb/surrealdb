@@ -21,7 +21,7 @@ pub fn abs((arg,): (Number,)) -> Result<Value, Error> {
 
 pub fn bottom((array, c): (Value, i64)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => v.as_numbers().bottom(c).into(),
+		Value::Array(v) => Value::Array(crate::sql::Array(v.as_numbers().bottom(c).into_iter().map(|x|{let y: Value= x.into();y}).collect())),
 		_ => Value::None,
 	})
 }
@@ -161,7 +161,7 @@ pub fn sum((array,): (Value,)) -> Result<Value, Error> {
 
 pub fn top((array, c): (Value, i64)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => v.as_numbers().top(c).into(),
+		Value::Array(v) => Value::Array(crate::sql::Array(v.as_numbers().top(c).into_iter().map(|x|{let y:Value=x.into();y}).collect())),
 		_ => Value::None,
 	})
 }
