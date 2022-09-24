@@ -1,7 +1,7 @@
 use crate::sql::number::{Number, Sorted};
 
 pub trait Nearestrank {
-	/// Pull the closest extant record from the dataset at the perc%-th percentile 
+	/// Pull the closest extant record from the dataset at the perc%-th percentile
 	fn nearestrank(self, rank: Number) -> Number;
 }
 
