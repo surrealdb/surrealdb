@@ -1230,9 +1230,28 @@ impl ops::Div for Value {
 	type Output = Self;
 	fn div(self, other: Self) -> Self {
 		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => Value::Number(v / w),
-			(Value::Datetime(v), Value::Duration(w)) => Value::Datetime(w / v),
-			(v, w) => Value::from(v.as_number() / w.as_number()),
+			(Value::Number(v), Value::Number(w)) => {
+				if w == Number::Int(0) {
+					Value::None
+				} else {
+					Value::Number(v / w)
+				}
+			}
+			(Value::Datetime(v), Value::Duration(w)) => {
+				if w.is_zero() {
+					Value::None
+				} else {
+					Value::Datetime(w / v)
+				}
+			}
+			(v, w) => {
+				let w = w.as_number();
+				if w == Number::Int(0) {
+					Value::None
+				} else {
+					Value::from(v.as_number() / w)
+				}
+			}
 		}
 	}
 }
