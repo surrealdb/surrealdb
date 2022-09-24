@@ -5,21 +5,19 @@ use std::collections::BinaryHeap;
 pub trait Top {
 	/// Find the greatest `k` records from the collection, returned in arbetrary order  
 	/// O(n*k*log(k)) time complex
-	fn top(self, _c: i64) -> Vec<Number>;
+	fn top(self, k: i64) -> Vec<Number>;
 }
 
 impl Top for Vec<Number> {
-	fn top(self, _c: i64) -> Vec<Number> {
+	fn top(self, k: i64) -> Vec<Number> {
 		let mut heap = BinaryHeap::new();
 
 		for idx in 0..self.len() {
 			let n = Reverse(self.get(idx).unwrap().clone());
+			heap.push(n);
 
-			if idx > _c as usize {
-				heap.push(n);
+			if idx >= k as usize {
 				heap.pop();
-			} else {
-				heap.push(n);
 			}
 		}
 
