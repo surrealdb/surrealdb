@@ -1,5 +1,4 @@
 use super::log;
-use crate::cnf::LOGO;
 use crate::err::Error;
 use crate::lsp;
 

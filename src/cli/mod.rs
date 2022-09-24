@@ -454,15 +454,6 @@ pub fn init() {
 			.display_order(7)
 			.about("Start the language server")
 			.arg(
-				Arg::new("bind")
-					.short('b')
-					.env("BIND")
-					.long("bind")
-					.forbid_empty_values(true)
-					.default_value("0.0.0.0:8888")
-					.help("The hostname or ip address to listen for connections on"),
-			)
-			.arg(
 				Arg::new("log")
 					.short('l')
 					.env("LOG")
@@ -470,7 +461,7 @@ pub fn init() {
 					.takes_value(true)
 					.default_value("info")
 					.forbid_empty_values(true)
-					.help("The logging level for the database server")
+					.help("The logging level for the language server")
 					.value_parser(["warn", "info", "debug", "trace", "full"]),
 			),
 	);
