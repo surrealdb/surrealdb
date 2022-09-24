@@ -34,11 +34,12 @@ pub async fn delete((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
 
 fn try_as_uri(fn_name: &str, value: Value) -> Result<Strand, Error> {
 	match value {
-		Value::Strand(uri) => Ok(uri),
+		// Avoid surf crate panic by pre-checking URI.
+		Value::Strand(uri) if crate::fnc::util::http::uri_is_valid(&uri) => Ok(uri),
 		_ => Err(Error::InvalidArguments {
 			name: fn_name.to_owned(),
 			// Assumption is that URI is first argument.
-			message: String::from("The first argument should be a string."),
+			message: String::from("The first argument should be a string containing a valid URI."),
 		}),
 	}
 }
