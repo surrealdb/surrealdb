@@ -11,7 +11,6 @@ use nom::number::complete::recognize_float;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops;
@@ -496,16 +495,6 @@ impl<'a> Product<&'a Self> for Number {
 		I: Iterator<Item = &'a Self>,
 	{
 		iter.fold(Number::Int(1), |a, b| &a * b)
-	}
-}
-
-impl Hash for Number {
-	fn hash<H: Hasher>(&self, state: &mut H) {
-		match self {
-			Number::Int(v) => v.hash(state),
-			Number::Float(v) => v.to_string().hash(state), // floats are tricky to crush to a hash that is Eq
-			Number::Decimal(v) => v.hash(state),
-		}
 	}
 }
 

@@ -1,5 +1,5 @@
 use crate::sql::number::Number;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 pub trait Mode {
 	/// Most Frequent Number in dataset
@@ -9,7 +9,7 @@ pub trait Mode {
 
 impl Mode for Vec<Number> {
 	fn mode(self) -> Number {
-		let frequencies = self.iter().fold(HashMap::new(), |mut freqs, value| {
+		let frequencies = self.iter().fold(BTreeMap::new(), |mut freqs, value| {
 			let entry = freqs.entry(value).or_insert(Number::from(0));
 
 			*freqs.entry(value).or_insert(Number::from(0)) = Number::from(1) + entry.clone();
