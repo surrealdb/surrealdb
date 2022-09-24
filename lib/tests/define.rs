@@ -656,11 +656,13 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 		INFO FOR TABLE user;
 		CREATE user:1 SET email = 'test@surrealdb.com';
 		CREATE user:2 SET email = 'test@surrealdb.com';
+		DELETE user:1;
+		CREATE user:2 SET email = 'test@surrealdb.com';
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
@@ -689,6 +691,13 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 		Some(e) if e.to_string() == r#"Database index `test` already contains "test@surrealdb.com", with record `user:2`"#
 	));
 	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: user:2, email: 'test@surrealdb.com' }]");
+	assert_eq!(tmp, val);
+	//
 	Ok(())
 }
 
@@ -702,11 +711,16 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 		CREATE user:2 SET account = 'tesla', email = 'test@surrealdb.com';
 		CREATE user:3 SET account = 'apple', email = 'test@surrealdb.com';
 		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
+		DELETE user:1;
+		CREATE user:3 SET account = 'apple', email = 'test@surrealdb.com';
+		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
+		DELETE user:2;
+		CREATE user:4 SET account = 'tesla', email = 'test@surrealdb.com';
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 7);
+	assert_eq!(res.len(), 12);
 	//
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
@@ -744,6 +758,26 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 		tmp.err(),
 		Some(e) if e.to_string() == r#"Database index `test` already contains ["tesla", "test@surrealdb.com"], with record `user:4`"#
 	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: user:3, account: 'apple', email: 'test@surrealdb.com' }]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == r#"Database index `test` already contains ["tesla", "test@surrealdb.com"], with record `user:4`"#
+	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: user:4, account: 'tesla', email: 'test@surrealdb.com' }]");
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
