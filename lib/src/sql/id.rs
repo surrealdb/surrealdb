@@ -5,6 +5,8 @@ use crate::sql::escape::escape_id;
 use crate::sql::ident::ident_raw;
 use crate::sql::number::integer;
 use crate::sql::object::{object, Object};
+use crate::sql::strand::Strand;
+use crate::sql::uuid::Uuid;
 use nanoid::nanoid;
 use nom::branch::alt;
 use nom::combinator::map;
@@ -37,6 +39,12 @@ impl From<u64> for Id {
 	}
 }
 
+impl From<String> for Id {
+	fn from(v: String) -> Self {
+		Id::String(v)
+	}
+}
+
 impl From<Array> for Id {
 	fn from(v: Array) -> Self {
 		Id::Array(v)
@@ -49,9 +57,15 @@ impl From<Object> for Id {
 	}
 }
 
-impl From<String> for Id {
-	fn from(v: String) -> Self {
-		Id::String(v)
+impl From<Uuid> for Id {
+	fn from(v: Uuid) -> Self {
+		Id::String(v.to_raw())
+	}
+}
+
+impl From<Strand> for Id {
+	fn from(v: Strand) -> Self {
+		Id::String(v.as_string())
 	}
 }
 
