@@ -448,6 +448,32 @@ pub fn init() {
 			),
 	);
 
+	let setup = setup.subcommand(
+		Command::new("lsp")
+			.display_order(7)
+			.about("Start the language server")
+			.arg(
+				Arg::new("bind")
+					.short('b')
+					.env("BIND")
+					.long("bind")
+					.forbid_empty_values(true)
+					.default_value("0.0.0.0:8888")
+					.help("The hostname or ip address to listen for connections on"),
+			)
+			.arg(
+				Arg::new("log")
+					.short('l')
+					.env("LOG")
+					.long("log")
+					.takes_value(true)
+					.default_value("info")
+					.forbid_empty_values(true)
+					.help("The logging level for the database server")
+					.value_parser(["warn", "info", "debug", "trace", "full"]),
+			),
+	);
+
 	let matches = setup.get_matches();
 
 	let output = match matches.subcommand() {
@@ -457,6 +483,7 @@ pub fn init() {
 		Some(("import", m)) => import::init(m),
 		Some(("export", m)) => export::init(m),
 		Some(("version", m)) => version::init(m),
+		Some(("lsp", m)) => lsp::init(m),
 		_ => Ok(()),
 	};
 
