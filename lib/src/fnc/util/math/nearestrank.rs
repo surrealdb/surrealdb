@@ -1,15 +1,32 @@
-use super::percentile::Percentile;
 use crate::sql::number::{Number, Sorted};
 
 pub trait Nearestrank {
-	/// (Assuming this is an alias for Percentile or is this a numeric rank)
+	/// Pull the closest extant record from the dataset at the perc%-th percentile 
 	fn nearestrank(self, rank: Number) -> Number;
 }
 
 impl Nearestrank for Sorted<&Vec<Number>> {
-	fn nearestrank(self, rank: Number) -> Number {
-		self.percentile(rank)
-		//   //  if this is numeric rank, get the lowest of the top `rank` items:
-		// super::top::Top::top(self, rank).iter().min().unwrap_or(&Number::Float(f64::NAN)).clone()
+	fn nearestrank(self, perc: Number) -> Number {
+		const NAN: Number = Number::Float(f64::NAN);
+
+		if self.0.len() == 0 {
+			return NAN;
+		}
+		if (perc <= Number::from(0)) | (perc > Number::from(100)) {
+			return NAN;
+		}
+
+		if perc == Number::from(100) {
+			return self.0.get(self.0.len()).unwrap_or(&NAN).clone();
+		}
+
+		let n_percent_idx =
+			(Number::from(self.0.len()) * perc / Number::from(100)).as_float().ceil() as usize;
+
+		match n_percent_idx {
+			0 => self.0.get(0).unwrap_or(&NAN),
+			idx => self.0.get(idx - 1).unwrap_or(&NAN),
+		}
+		.clone()
 	}
 }
