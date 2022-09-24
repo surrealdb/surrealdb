@@ -1,11 +1,13 @@
-use crate::sql::number::Number;
+use crate::sql::number::{Number,Sorted};
 
 pub trait Percentile {
-	fn percentile(self, _: Number) -> Number;
+	/// Gets the N percentile where N is an number (0-100)
+	fn percentile(&self, _: Number) -> Number;
 }
 
-impl Percentile for Vec<Number> {
-	fn percentile(self, _: Number) -> Number {
-		todo!()
+impl Percentile for Sorted<&Vec<Number>> {
+	fn percentile(&self, perc: Number) -> Number {
+		let n_percent_idx = (Number::from(self.0.len())*perc/Number::from(100)).round();
+		self.0.get(n_percent_idx.to_usize()).unwrap_or(&Number::Float(f64::NAN)).clone()
 	}
 }

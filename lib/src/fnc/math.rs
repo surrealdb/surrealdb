@@ -12,7 +12,7 @@ use crate::fnc::util::math::spread::Spread;
 use crate::fnc::util::math::top::Top;
 use crate::fnc::util::math::trimean::Trimean;
 use crate::fnc::util::math::variance::Variance;
-use crate::sql::number::Number;
+use crate::sql::number::{Number,Sort};
 use crate::sql::value::Value;
 
 pub fn abs((arg,): (Number,)) -> Result<Value, Error> {
@@ -47,7 +47,7 @@ pub fn floor((arg,): (Number,)) -> Result<Value, Error> {
 
 pub fn interquartile((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => v.as_numbers().interquartile().into(),
+		Value::Array(v) => v.as_numbers().sorted().interquartile().into(),
 		_ => Value::None,
 	})
 }
@@ -84,7 +84,7 @@ pub fn median((array,): (Value,)) -> Result<Value, Error> {
 
 pub fn midhinge((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => v.as_numbers().midhinge().into(),
+		Value::Array(v) => v.as_numbers().sorted().midhinge().into(),
 		_ => Value::None,
 	})
 }
@@ -108,14 +108,14 @@ pub fn mode((array,): (Value,)) -> Result<Value, Error> {
 
 pub fn nearestrank((array, n): (Value, Number)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => v.as_numbers().nearestrank(n).into(),
+		Value::Array(v) => v.as_numbers().sorted().nearestrank(n).into(),
 		_ => Value::None,
 	})
 }
 
 pub fn percentile((array, n): (Value, Number)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => v.as_numbers().percentile(n).into(),
+		Value::Array(v) => v.as_numbers().sorted().percentile(n).into(),
 		_ => Value::None,
 	})
 }
@@ -168,7 +168,7 @@ pub fn top((array, c): (Value, i64)) -> Result<Value, Error> {
 
 pub fn trimean((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => v.as_numbers().trimean().into(),
+		Value::Array(v) => v.as_numbers().sorted().trimean().into(),
 		_ => Value::None,
 	})
 }

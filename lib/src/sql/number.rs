@@ -509,6 +509,19 @@ impl Hash for Number{
 	}
 }
 
+pub struct Sorted<T>(pub T);
+
+pub trait Sort{
+	fn sorted(&mut self) -> Sorted<&Self> where Self: Sized;
+}
+
+impl Sort for Vec<Number>{
+	fn sorted(&mut self) -> Sorted<&Vec<Number>>{
+		self.sort();
+		Sorted(self)
+	}
+}
+
 pub fn number(i: &str) -> IResult<&str, Number> {
 	alt((map(integer, Number::from), map(decimal, Number::from)))(i)
 }
