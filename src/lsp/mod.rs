@@ -24,8 +24,12 @@ impl LanguageServer for Backend {
     }
 }
 
+
 #[tokio::main]
-async fn main(bind: String) {
+pub async fn main() {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
     let (service, socket) = LspService::new(|client| Backend { client });
-    Server::new(bind).serve(service).await;
+    Server::new(stdin, stdout, socket).serve(service).await;
 }

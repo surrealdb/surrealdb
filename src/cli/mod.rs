@@ -3,6 +3,7 @@ mod config;
 mod export;
 mod import;
 mod log;
+mod lsp;
 mod sql;
 mod start;
 mod version;

@@ -22,6 +22,7 @@ mod err;
 mod iam;
 mod net;
 mod rpc;
+mod lsp;
 
 fn main() {
 	cli::init(); // Initiate the command line

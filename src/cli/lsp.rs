@@ -1,14 +1,9 @@
-use super::config;
 use super::log;
 use crate::cnf::LOGO;
-use crate::dbs;
 use crate::err::Error;
-use crate::iam;
-use crate::net;
 use crate::lsp;
 
-#[tokio::main]
-pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Set the default log level
 	match matches.get_one::<String>("log").map(String::as_str) {
 		Some("warn") => log::init(0),
@@ -18,17 +13,8 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 		Some("full") => log::init(4),
 		_ => unreachable!(),
 	};
-	// Output SurrealDB logo
-	println!("{}", LOGO);
-	
-  // Parse the server binding address
-	let bind = matches
-    .value_of("bind")
-    .unwrap()
-    .parse::<SocketAddr>()
-    .expect("Unable to parse socket address");
 
-  lsp::main(bind);
+  	lsp::main();
 
 	// All ok
 	Ok(())
