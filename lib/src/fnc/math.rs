@@ -76,7 +76,7 @@ pub fn median((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
 		Value::Array(v) => match v.is_empty() {
 			true => Value::None,
-			false => v.as_numbers().median().into(),
+			false => v.as_numbers().sorted().median().into(),
 		},
 		_ => Value::None,
 	})
