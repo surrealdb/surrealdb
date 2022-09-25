@@ -35,19 +35,19 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set post method
 	let post = base
 		.and(warp::post())
-		.and(session::build())
 		.and(warp::header::optional::<String>(http::header::ACCEPT.as_str()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(session::build())
 		.and_then(handler);
 	// Specify route
 	opts.or(post)
 }
 
 async fn handler(
-	mut session: Session,
 	output: Option<String>,
 	body: Bytes,
+	mut session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Convert the HTTP body into text
 	let data = str::from_utf8(&body).unwrap();

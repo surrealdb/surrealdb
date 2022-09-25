@@ -14,17 +14,17 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	warp::path("import")
 		.and(warp::path::end())
 		.and(warp::post())
-		.and(session::build())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(session::build())
 		.and_then(handler)
 }
 
 async fn handler(
-	session: Session,
 	output: String,
 	sql: Bytes,
+	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Check the permissions
 	match session.au.is_db() {
