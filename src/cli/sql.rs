@@ -92,13 +92,18 @@ fn process(pretty: bool, res: reqwest::Result<Response>) -> Result<String, Error
 		// Don't prettify the response
 		false => Ok(res),
 		// Yes prettify the response
-		true => {
-			// Parse the JSON response
-			let res: Value = serde_json::from_str(&res)?;
-			// Pretty the JSON response
-			let res = serde_json::to_string_pretty(&res)?;
-			// Everything processed OK
-			Ok(res)
-		}
+		true => match res.is_empty() {
+			// This was an empty response
+			true => Ok(res),
+			// Let's make this response pretty
+			false => {
+				// Parse the JSON response
+				let res: Value = serde_json::from_str(&res)?;
+				// Pretty the JSON response
+				let res = serde_json::to_string_pretty(&res)?;
+				// Everything processed OK
+				Ok(res)
+			}
+		},
 	}
 }
