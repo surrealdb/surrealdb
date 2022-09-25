@@ -152,6 +152,12 @@ impl Serialize for Number {
 
 impl Number {
 	// -----------------------------------
+	// Constants
+	// -----------------------------------
+
+	pub const NAN: Number = Number::Float(f64::NAN);
+
+	// -----------------------------------
 	// Simple number detection
 	// -----------------------------------
 
@@ -178,6 +184,14 @@ impl Number {
 	// -----------------------------------
 	// Simple conversion of number
 	// -----------------------------------
+
+	pub fn as_usize(self) -> usize {
+		match self {
+			Number::Int(v) => v as usize,
+			Number::Float(v) => v as usize,
+			Number::Decimal(v) => v.to_usize().unwrap_or_default(),
+		}
+	}
 
 	pub fn as_int(self) -> i64 {
 		match self {
@@ -495,6 +509,21 @@ impl<'a> Product<&'a Self> for Number {
 		I: Iterator<Item = &'a Self>,
 	{
 		iter.fold(Number::Int(1), |a, b| &a * b)
+	}
+}
+
+pub struct Sorted<T>(pub T);
+
+pub trait Sort {
+	fn sorted(&mut self) -> Sorted<&Self>
+	where
+		Self: Sized;
+}
+
+impl Sort for Vec<Number> {
+	fn sorted(&mut self) -> Sorted<&Vec<Number>> {
+		self.sort();
+		Sorted(self)
 	}
 }
 

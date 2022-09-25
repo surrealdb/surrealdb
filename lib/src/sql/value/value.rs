@@ -398,6 +398,12 @@ impl From<Vec<Value>> for Value {
 	}
 }
 
+impl From<Vec<Number>> for Value {
+	fn from(v: Vec<Number>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<Vec<Operation>> for Value {
 	fn from(v: Vec<Operation>) -> Self {
 		Value::Array(Array::from(v))
