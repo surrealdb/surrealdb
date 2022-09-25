@@ -233,19 +233,27 @@ impl<'a> Executor<'a> {
 						// The transaction began successfully
 						false => {
 							// Process the statement
-							match stm.compute(&ctx, &opt, &self.txn(), None).await {
+							let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
+							//
+							match res {
 								Ok(val) => {
+									// Set the parameter
 									ctx.add_value(stm.name.to_owned(), val);
+									// Finalise transaction
+									match stm.writeable() {
+										true => self.commit(loc).await,
+										false => self.cancel(loc).await,
+									}
+									// Return nothing
+									Ok(Value::None)
 								}
-								_ => break,
+								Err(err) => {
+									// Cancel transaction
+									self.cancel(loc).await;
+									// Return error
+									Err(err)
+								}
 							}
-							// Cancel transaction
-							match stm.writeable() {
-								true => self.commit(loc).await,
-								false => self.cancel(loc).await,
-							};
-							// Return nothing
-							Ok(Value::None)
 						}
 					}
 				}
