@@ -19,7 +19,7 @@ impl Spread for Vec<Number> {
 		// Return the maximum - minimum or NaN
 		match min_max {
 			(Some(min), Some(max)) => max - min,
-			_ => Number::Float(f64::NAN),
+			_ => Number::NAN,
 		}
 	}
 }

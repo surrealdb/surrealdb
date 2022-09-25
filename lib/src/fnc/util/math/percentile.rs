@@ -1,32 +1,34 @@
 use crate::sql::number::{Number, Sorted};
 
 pub trait Percentile {
-	/// Gets the N percentile where N is an number (0-100) will average neighboring records if non-exact
-	fn percentile(&self, _: Number) -> Number;
+	/// Gets the N percentile, averaging neighboring records if non-exact
+	fn percentile(&self, perc: Number) -> Number;
 }
 
 impl Percentile for Sorted<&Vec<Number>> {
 	fn percentile(&self, perc: Number) -> Number {
-		const NAN: Number = Number::Float(f64::NAN);
-
-		if self.0.len() == 0 {
-			return NAN;
+		// If an empty set, then return NaN
+		if self.0.is_empty() {
+			return Number::NAN;
 		}
+		// If an invalid percentile, then return NaN
 		if (perc <= Number::from(0)) | (perc > Number::from(100)) {
-			return NAN;
+			return Number::NAN;
 		}
-
+		// Get the index of the specified percentile
 		let n_percent_idx = Number::from(self.0.len()) * perc / Number::from(100);
-
-		if n_percent_idx.clone().as_float().fract().abs() < 1e-10 {
-			let idx = n_percent_idx.as_int() as usize;
-			self.0.get(idx - 1).unwrap_or(&NAN).clone()
+		// Calculate the N percentile for the index
+		if n_percent_idx.to_float().fract().abs() < 1e-10 {
+			let idx = n_percent_idx.as_usize();
+			let val = self.0.get(idx - 1).unwrap_or(&Number::NAN).clone();
+			val
 		} else if n_percent_idx > Number::from(1) {
-			let idx = n_percent_idx.as_int() as usize;
-			(self.0.get(idx - 1).unwrap_or(&NAN) + self.0.get(idx).unwrap_or(&NAN))
-				/ Number::from(2)
+			let idx = n_percent_idx.as_usize();
+			let val = self.0.get(idx - 1).unwrap_or(&Number::NAN);
+			let val = val + self.0.get(idx).unwrap_or(&Number::NAN);
+			val / Number::from(2)
 		} else {
-			NAN
+			Number::NAN
 		}
 	}
 }

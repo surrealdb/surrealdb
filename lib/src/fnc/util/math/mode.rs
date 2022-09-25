@@ -9,18 +9,17 @@ pub trait Mode {
 
 impl Mode for Vec<Number> {
 	fn mode(self) -> Number {
-		let frequencies = self.iter().fold(BTreeMap::new(), |mut freqs, value| {
-			let entry = freqs.entry(value).or_insert(Number::from(0));
-
-			*freqs.entry(value).or_insert(Number::from(0)) = Number::from(1) + entry.clone();
+		// Iterate over all numbers, and get their frequency
+		let frequencies = self.into_iter().fold(BTreeMap::new(), |mut freqs, value| {
+			let entry = freqs.entry(value).or_insert_with(|| 0);
+			*entry += 1;
 			freqs
 		});
-
-		let mode = frequencies
+		// Get the maximum number by frequency
+		frequencies
 			.into_iter()
-			.max_by_key(|(_, count)| count.clone())
-			.map(|(value, _)| value.clone());
-
-		mode.unwrap_or(Number::Float(f64::NAN))
+			.max_by_key(|(_, n)| n.clone())
+			.map(|(v, _)| v)
+			.unwrap_or(Number::NAN)
 	}
 }

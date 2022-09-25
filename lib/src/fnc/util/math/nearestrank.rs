@@ -7,26 +7,24 @@ pub trait Nearestrank {
 
 impl Nearestrank for Sorted<&Vec<Number>> {
 	fn nearestrank(self, perc: Number) -> Number {
-		const NAN: Number = Number::Float(f64::NAN);
-
-		if self.0.len() == 0 {
-			return NAN;
+		// If an empty set, then return NaN
+		if self.0.is_empty() {
+			return Number::NAN;
 		}
+		// If an invalid percentile, then return NaN
 		if (perc <= Number::from(0)) | (perc > Number::from(100)) {
-			return NAN;
+			return Number::NAN;
 		}
-
+		// If 100%, then get the last value in the set
 		if perc == Number::from(100) {
-			return self.0.get(self.0.len()).unwrap_or(&NAN).clone();
+			return self.0.get(self.0.len()).unwrap_or(&Number::NAN).clone();
 		}
-
-		let n_percent_idx =
-			(Number::from(self.0.len()) * perc / Number::from(100)).as_float().ceil() as usize;
-
-		match n_percent_idx {
-			0 => self.0.get(0).unwrap_or(&NAN),
-			idx => self.0.get(idx - 1).unwrap_or(&NAN),
+		// Get the index of the specified percentile
+		let n_percent_idx = Number::from(self.0.len()) * perc / Number::from(100);
+		// Return the closest extant record for the index
+		match n_percent_idx.as_float().ceil() as usize {
+			0 => self.0.get(0).unwrap_or(&Number::NAN).clone(),
+			idx => self.0.get(idx - 1).unwrap_or(&Number::NAN).clone(),
 		}
-		.clone()
 	}
 }

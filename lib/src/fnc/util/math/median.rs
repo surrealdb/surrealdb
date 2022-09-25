@@ -6,6 +6,6 @@ pub trait Median {
 
 impl Median for Sorted<&Vec<Number>> {
 	fn median(self) -> Number {
-		self.0.get(self.0.len() / 2).unwrap_or(&Number::Float(f64::NAN)).clone()
+		self.0.get(self.0.len() / 2).unwrap_or(&Number::NAN).clone()
 	}
 }
