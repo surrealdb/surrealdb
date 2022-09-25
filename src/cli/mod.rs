@@ -3,6 +3,7 @@ mod config;
 mod export;
 mod import;
 mod log;
+mod lsp;
 mod sql;
 mod start;
 mod version;
@@ -448,6 +449,23 @@ pub fn init() {
 			),
 	);
 
+	let setup = setup.subcommand(
+		Command::new("lsp")
+			.display_order(7)
+			.about("Start the language server")
+			.arg(
+				Arg::new("log")
+					.short('l')
+					.env("LOG")
+					.long("log")
+					.takes_value(true)
+					.default_value("info")
+					.forbid_empty_values(true)
+					.help("The logging level for the language server")
+					.value_parser(["warn", "info", "debug", "trace", "full"]),
+			),
+	);
+
 	let matches = setup.get_matches();
 
 	let output = match matches.subcommand() {
@@ -457,6 +475,7 @@ pub fn init() {
 		Some(("import", m)) => import::init(m),
 		Some(("export", m)) => export::init(m),
 		Some(("version", m)) => version::init(m),
+		Some(("lsp", m)) => lsp::init(m),
 		_ => Ok(()),
 	};
 
