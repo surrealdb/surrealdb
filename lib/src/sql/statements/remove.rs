@@ -3,7 +3,7 @@ use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::sql::base::{base, Base};
+use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
@@ -290,7 +290,7 @@ impl RemoveTokenStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		match self.base {
+		match &self.base {
 			Base::Ns => {
 				// Selected NS?
 				opt.needs(Level::Ns)?;
@@ -321,6 +321,21 @@ impl RemoveTokenStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
+			Base::Sc(sc) => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
+				// Allowed to run?
+				opt.check(Level::Db)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Delete the definition
+				let key = crate::key::st::new(opt.ns(), opt.db(), sc, &self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
 			_ => unreachable!(),
 		}
 	}
@@ -341,7 +356,7 @@ fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, base) = base(i)?;
+	let (i, base) = base_or_scope(i)?;
 	Ok((
 		i,
 		RemoveTokenStatement {
@@ -379,6 +394,9 @@ impl RemoveScopeStatement {
 		// Delete the definition
 		let key = crate::key::sc::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
+		// Remove the resource data
+		let key = crate::key::scope::new(opt.ns(), opt.db(), &self.name);
+		run.delp(key, u32::MAX).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

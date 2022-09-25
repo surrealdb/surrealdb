@@ -166,7 +166,7 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				db: Some(db),
 				sc: Some(sc),
 				tk: Some(tk),
-				id: Some(id),
+				id,
 				..
 			} => {
 				// Log the decoded authentication claims
@@ -174,7 +174,10 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				// Create a new readonly transaction
 				let mut tx = kvs.transaction(false, false).await?;
 				// Parse the record id
-				let id = surrealdb::sql::thing(&id)?;
+				let id = match id {
+					Some(id) => surrealdb::sql::thing(&id)?.into(),
+					None => Value::None,
+				};
 				// Get the scope token
 				let de = tx.get_st(&ns, &db, &sc, &tk).await?;
 				let cf = config(de.kind, de.code)?;
@@ -183,11 +186,11 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 				// Log the success
 				debug!(target: LOG, "Authenticated to scope `{}` with token `{}`", sc, tk);
 				// Set the session
+				session.sd = Some(id);
 				session.tk = Some(value);
 				session.ns = Some(ns.to_owned());
 				session.db = Some(db.to_owned());
 				session.sc = Some(sc.to_owned());
-				session.sd = Some(Value::from(id));
 				session.au = Arc::new(Auth::Sc(ns, db, sc));
 				return Ok(());
 			}
