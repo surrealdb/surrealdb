@@ -16,10 +16,6 @@ impl Mode for Vec<Number> {
 			freqs
 		});
 		// Get the maximum number by frequency
-		frequencies
-			.into_iter()
-			.max_by_key(|(_, n)| n.clone())
-			.map(|(v, _)| v)
-			.unwrap_or(Number::NAN)
+		frequencies.into_iter().max_by_key(|(_, n)| *n).map(|(v, _)| v).unwrap_or(Number::NAN)
 	}
 }
