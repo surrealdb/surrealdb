@@ -64,7 +64,7 @@ impl Subquery {
 			Subquery::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Subquery::Select(ref v) => {
 				// Duplicate options
-				let opt = opt.dive()?;
+				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -87,7 +87,7 @@ impl Subquery {
 			}
 			Subquery::Create(ref v) => {
 				// Duplicate options
-				let opt = opt.dive()?;
+				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -105,7 +105,7 @@ impl Subquery {
 			}
 			Subquery::Update(ref v) => {
 				// Duplicate options
-				let opt = opt.dive()?;
+				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -123,7 +123,7 @@ impl Subquery {
 			}
 			Subquery::Delete(ref v) => {
 				// Duplicate options
-				let opt = opt.dive()?;
+				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -141,7 +141,7 @@ impl Subquery {
 			}
 			Subquery::Relate(ref v) => {
 				// Duplicate options
-				let opt = opt.dive()?;
+				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -159,7 +159,7 @@ impl Subquery {
 			}
 			Subquery::Insert(ref v) => {
 				// Duplicate options
-				let opt = opt.dive()?;
+				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document

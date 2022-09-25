@@ -19,8 +19,8 @@ pub struct Options {
 	pub db: Option<Arc<String>>,
 	// Connection authentication data
 	pub auth: Arc<Auth>,
-	// How many subqueries have we gone into?
-	pub dive: usize,
+	// Approximately how large is the current call stack?
+	dive: u8,
 	// Whether live queries are allowed?
 	pub live: bool,
 	// Should we debug query response SQL?
@@ -81,13 +81,11 @@ impl Options {
 	}
 
 	/// Create a new Options object for a function/subquery/future/etc.
-	pub fn dive(&self) -> Result<Options, Error> {
-		self.dive_n(1)
-	}
-
-	/// Create a new Options object for an abnormally expensive function/subquery/future/etc.
-	pub fn dive_n(&self, n: usize) -> Result<Options, Error> {
-		let dive = self.dive + n;
+	///
+	/// The parameter is the approximate cost of the operation (more concretely, the size of the
+	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
+	pub fn dive(&self, cost: u8) -> Result<Options, Error> {
+		let dive = self.dive.saturating_add(cost);
 		if dive <= cnf::MAX_COMPUTATION_DEPTH {
 			Ok(Options {
 				auth: self.auth.clone(),
