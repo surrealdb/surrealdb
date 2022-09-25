@@ -345,6 +345,9 @@ impl Iterator {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		// Guard against <future> recursion.
+		let opt = &opt.dive(4)?;
+
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
 			v.iterate(ctx, opt, txn, stm, self).await?;
@@ -363,6 +366,9 @@ impl Iterator {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		// Guard against <future> recursion.
+		let opt = &opt.dive(4)?;
+
 		match stm.parallel() {
 			// Run statements sequentially
 			false => {
