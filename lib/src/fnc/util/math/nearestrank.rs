@@ -1,8 +1,8 @@
 use crate::sql::number::{Number, Sorted};
 
 pub trait Nearestrank {
-	/// Pull the closest extant record from the dataset at the perc%-th percentile
-	fn nearestrank(self, rank: Number) -> Number;
+	/// Pull the closest extant record from the dataset at the %-th percentile
+	fn nearestrank(self, perc: Number) -> Number;
 }
 
 impl Nearestrank for Sorted<&Vec<Number>> {

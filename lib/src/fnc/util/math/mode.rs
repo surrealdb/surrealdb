@@ -2,7 +2,7 @@ use crate::sql::number::Number;
 use std::collections::BTreeMap;
 
 pub trait Mode {
-	/// Most Frequent Number in dataset
+	/// Find the most frequent number in collection
 	/// O(n*w) time complex s.t. w = distinct count
 	fn mode(self) -> Number;
 }

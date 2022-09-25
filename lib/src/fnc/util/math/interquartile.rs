@@ -2,7 +2,8 @@ use super::percentile::Percentile;
 use crate::sql::number::{Number, Sorted};
 
 pub trait Interquartile {
-	/// the interquartile Range: Q_3 - Q_1 [ or P_75 - P-25 ]
+	/// Interquartile Range - the difference between the upper and lower quartiles
+	/// Q_3 - Q_1 [ or P_75 - P-25 ]
 	fn interquartile(self) -> Number;
 }
 
