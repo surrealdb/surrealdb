@@ -158,3 +158,23 @@ async fn script_function_module_os() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn script_function_global_fetch() -> Result<(), Error> {
+	let sql = "
+		CREATE platform:test SET type = function() {
+			const resp = await fetch(\"https://httpbin.org/json\");
+			return (await resp.json()).slideshow.slides[1].type
+		};
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[{ id: platform:test, type: \"all\" }]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
