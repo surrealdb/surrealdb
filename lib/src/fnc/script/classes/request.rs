@@ -13,7 +13,6 @@ pub mod request {
 	use crate::throw_js_exception;
 	use futures::lock::Mutex;
 	use js::Rest;
-	use js::Result;
 	use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 
 	#[derive(Clone)]
@@ -39,7 +38,6 @@ pub mod request {
 	}
 
 	impl Request {
-		// TODO: change return type to Result<Self>
 		#[quickjs(constructor)]
 		pub fn new(input: RequestInput, mut args: Rest<RequestOptions>) -> Self {
 			let mut request = Self {
@@ -64,7 +62,7 @@ pub mod request {
 					request.url = Some(url);
 				}
 				RequestInput::Request(req) => {
-					request = req.clone().unwrap();
+					request = req.clone();
 				}
 			}
 
@@ -91,12 +89,12 @@ pub mod request {
 		}
 
 		#[quickjs(get)]
-		pub fn bodyUsed(self) -> bool {
+		pub fn bodyUsed(&self) -> bool {
 			self.bodyUsed.load(Ordering::SeqCst)
 		}
 
 		#[quickjs(get)]
-		pub fn method(self) -> String {
+		pub fn method(&self) -> String {
 			self.method.to_string()
 		}
 
@@ -137,7 +135,7 @@ pub mod request {
 				let data = body.into_bytes().await.map_err(|e| throw_js_exception!(e))?;
 				return Ok(Blob {
 					mime,
-					data: vec![],
+					data,
 				});
 			}
 			Ok(Blob {
@@ -176,27 +174,13 @@ pub mod request {
 			Ok(JsArrayBuffer(vec![]))
 		}
 
-		#[quickjs(skip)]
 		// Creates a copy of the request object
-		pub fn clone(&self) -> Result<Request> {
+		#[quickjs(rename = "clone")]
+		pub(crate) fn safe_clone(&self) -> js::Result<Request> {
 			if self.bodyUsed() {
 				return Err(throw_js_exception!("TypeError: Request body is already used"));
 			}
-			Ok(Request {
-				url: self.url.clone(),
-				body: self.body.clone(),
-				credentials: self.credentials.clone(),
-				headers: self.headers.clone(),
-				method: self.method.clone(),
-				mode: self.mode.clone(),
-				referrer: self.referrer.clone(),
-				bodyUsed: self.bodyUsed.clone(),
-				keepalive: self.keepalive,
-				cache: self.cache.clone(),
-				redirect: self.redirect.clone(),
-				referrerPolicy: self.referrerPolicy.clone(),
-				integrity: self.integrity.clone(),
-			})
+			Ok(Request::clone(&self))
 		}
 	}
 }
@@ -207,12 +191,12 @@ use crate::throw_js_exception;
 use std::str::FromStr;
 use surf::http;
 
-pub(crate) enum RequestInput {
+pub enum RequestInput {
 	URL(String),
 	Request(request::Request),
 }
 impl<'js> js::FromJs<'js> for RequestInput {
-	fn from_js(ctx: js::Ctx<'js>, value: js::Value<'js>) -> js::Result<Self> {
+	fn from_js(_ctx: js::Ctx<'js>, value: js::Value<'js>) -> js::Result<Self> {
 		if value.is_string() {
 			let url = value.as_string().map_or("".to_owned(), |s| s.to_string().unwrap());
 			return Ok(RequestInput::URL(url));
@@ -224,13 +208,14 @@ impl<'js> js::FromJs<'js> for RequestInput {
 			if (object).instance_of::<request::Request>() {
 				let request = object.into_instance::<request::Request>().unwrap();
 				let request: &request::Request = request.as_ref();
-				return Ok(RequestInput::Request(request.clone()?));
+				return Ok(RequestInput::Request(request.safe_clone()?));
 			}
 		}
 		Err(throw_js_exception!("TypeError: Unexpected fetch input"))
 	}
 }
 
+#[allow(dead_code)]
 #[derive(Default)]
 pub struct RequestOptions {
 	method: Option<http::Method>,
@@ -242,7 +227,7 @@ pub struct RequestOptions {
 	cache: Option<String>,
 	redirect: Option<String>,
 	referrer: Option<String>,
-	referrerPolicy: Option<String>,
+	referrer_policy: Option<String>,
 	integrity: Option<String>,
 	// TODO:
 	// signal: Option<AbortSignal>

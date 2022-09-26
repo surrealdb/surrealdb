@@ -11,8 +11,12 @@ use js::Result;
 #[allow(unused_variables)]
 pub(crate) async fn fetch(input: RequestInput, args: Rest<RequestOptions>) -> Result<Response> {
 	let request = Request::new(input, args);
-	let mut req: surf::Request = request.clone()?.into();
+	let mut req: surf::Request = request.clone().into();
+	// set redirect
 	let client = surf::client().with(surf::middleware::Redirect::new(5));
+	// set keepalibe
+	// client.config().set_http_keep_alive(request.keepalive);
+
 	if let Some(body) = request.take_body().await {
 		req.set_body(body);
 	}
