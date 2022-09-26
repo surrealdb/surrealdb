@@ -124,6 +124,59 @@ impl SelectStatement {
 		// Output the results
 		i.output(ctx, opt, txn, &stm).await
 	}
+
+	///Validate Query is Integral
+	fn check(mut self) -> IResult<&'static str, Self> {
+		// this is not a group query, all is good
+		if self.group.is_none() {
+			return Ok(("", self));
+		}
+
+		let group = self.group.clone().unwrap();
+
+		// get vector of Fields that need to be added to query because they did not exist in the original query
+		let to_add: Vec<Field> = group
+			.iter()
+			.map(|b| &b.0)
+			.filter(|idom| {
+				let contains = self.expr.0.iter().any(|x| match x {
+					crate::sql::Field::All => true,
+					crate::sql::Field::Alone(x) => match x {
+						crate::sql::Value::Idiom(i) => i == *idom,
+						_ => false,
+					},
+					crate::sql::Field::Alias(x, _) => match x {
+						crate::sql::Value::Idiom(i) => i == *idom,
+						_ => false,
+					},
+				});
+
+				!contains
+			})
+			.map(|i| Field::Alone(Value::Idiom(i.clone())))
+			.collect();
+
+		// add vector of needed groupby fields to expression
+		self.expr.0.extend(to_add);
+
+		// make sure all expressions only use aggregateable values
+		// based loosely from : https://github.com/surrealdb/surrealdb/blob/golang/sql/check.go
+		let non_aggregate_non_self_in_query = self.expr.0.iter().any(|field| {
+			match field {
+				Field::All => true, // cannot use * in group clause
+				Field::Alone(v) => !v.can_aggregate(&group),
+				Field::Alias(v, _) => !v.can_aggregate(&group),
+			}
+		});
+
+		// Throw an error if something was incorrectly used
+		// want to use crate::err:Error enum for graceful error but couldn't figure how
+		if non_aggregate_non_self_in_query {
+			return Err(nom::Err::Error(crate::sql::Error::ParserError("failing function names")));
+		}
+
+		Ok(("", self))
+	}
 }
 
 impl fmt::Display for SelectStatement {
@@ -181,23 +234,25 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, version) = opt(preceded(shouldbespace, version))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
-	Ok((
-		i,
-		SelectStatement {
-			expr,
-			what,
-			cond,
-			split,
-			group,
-			order,
-			limit,
-			start,
-			fetch,
-			version,
-			timeout,
-			parallel: parallel.is_some(),
-		},
-	))
+
+	let select = SelectStatement {
+		expr,
+		what,
+		cond,
+		split,
+		group,
+		order,
+		limit,
+		start,
+		fetch,
+		version,
+		timeout,
+		parallel: parallel.is_some(),
+	}
+	.check()?
+	.1;
+
+	Ok((i, select))
 }
 
 #[cfg(test)]

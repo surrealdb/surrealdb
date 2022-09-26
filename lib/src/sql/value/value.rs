@@ -1071,6 +1071,35 @@ impl Value {
 			_ => self.partial_cmp(other),
 		}
 	}
+
+	/// Given the group clause, can this Value aggregate
+	pub fn can_aggregate(&self, group: &super::super::Groups) -> bool {
+		match self {
+			Value::None => true,      // \
+			Value::Null => true,      //  \
+			Value::False => true,     //   | Statics
+			Value::True => true,      //  /
+			Value::Number(_) => true, // /
+			Value::Strand(_) => todo!(),
+			Value::Duration(_) => true, // ASSUMED static
+			Value::Datetime(_) => true, // ASSUMED static
+			Value::Uuid(_) => false,    // UUID would be unique on record no?
+			Value::Array(a) => a.0.iter().all(|v| v.can_aggregate(group)),
+			Value::Object(_) => todo!(),
+			Value::Geometry(_) => todo!(),
+			Value::Param(_) => todo!(),
+			Value::Idiom(i) => group.0.iter().any(|g| &g.0 == i), // An issue if this idiom is not one of the idioms for group by
+			Value::Table(_) => todo!(),
+			Value::Thing(_) => todo!(),
+			Value::Model(_) => todo!(),
+			Value::Regex(_) => todo!(),
+			Value::Range(_) => todo!(),
+			Value::Edges(_) => todo!(),
+			Value::Function(f) => f.is_aggregate(), // if this function is not an aggregate function  (we could call non-agg functions if they are only used on group columns...)
+			Value::Subquery(_) => todo!(),
+			Value::Expression(_) => todo!(),
+		}
+	}
 }
 
 impl fmt::Display for Value {

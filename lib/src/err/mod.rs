@@ -61,6 +61,12 @@ pub enum Error {
 		sql: String,
 	},
 
+	/// There was an error with the SQL query
+	#[error("Cannot use fields '{fields}' in groupby clause")]
+	InvalidAggregate {
+		fields: String,
+	},
+
 	/// There was an error with the provided JSON Patch
 	#[error("The JSON Patch contains invalid operations. {message}")]
 	InvalidPatch {
