@@ -17,6 +17,7 @@ pub mod request {
 
 	#[derive(Clone)]
 	#[quickjs(cloneable)]
+	#[allow(dead_code)]
 	pub struct Request {
 		#[quickjs(hide)]
 		pub(crate) url: Option<surf::Url>,
