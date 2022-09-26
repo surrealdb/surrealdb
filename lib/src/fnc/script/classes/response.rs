@@ -5,6 +5,7 @@
 pub mod response {
 	use crate::fnc::script::classes::headers::headers::Headers;
 	use crate::sql::{json, Value};
+	use crate::throw_js_exception;
 	use futures::lock::Mutex;
 	use js::Result;
 	use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
@@ -52,12 +53,7 @@ pub mod response {
 		#[quickjs(skip)]
 		fn set_body_used(&mut self) -> Result<()> {
 			if self.bodyUsed.fetch_or(true, Ordering::SeqCst) {
-				return Err(js::Error::Exception {
-					message: "TypeError: body stream already read".to_owned(),
-					file: file!().to_owned(),
-					line: line!() as i32,
-					stack: "".to_owned(),
-				});
+				return Err(throw_js_exception!("TypeError: body stream already read"));
 			}
 			Ok(())
 		}
@@ -65,44 +61,30 @@ pub mod response {
 		pub async fn text(mut self) -> Result<String> {
 			self.set_body_used()?;
 			let text =
-				self.inner.lock().await.body_string().await.map_err(|e| js::Error::Exception {
-					message: e.to_string(),
-					file: file!().to_owned(),
-					line: line!() as i32,
-					stack: "".to_owned(),
-				})?;
+				self.inner.lock().await.body_string().await.map_err(|e| throw_js_exception!(e))?;
 			Ok(text)
 		}
 
 		pub async fn json(mut self) -> Result<Value> {
 			self.set_body_used()?;
 			let text =
-				self.inner.lock().await.body_string().await.map_err(|e| js::Error::Exception {
-					message: e.to_string(),
-					file: file!().to_owned(),
-					line: line!() as i32,
-					stack: "".to_owned(),
-				})?;
-			json(&text).map_err(|e| js::Error::Exception {
-				message: e.to_string(),
-				file: file!().to_owned(),
-				line: line!() as i32,
-				stack: "".to_owned(),
-			})
+				self.inner.lock().await.body_string().await.map_err(|e| throw_js_exception!(e))?;
+			json(&text).map_err(|e| throw_js_exception!(e))
 		}
 
 		pub async fn arrayBuffer(mut self) -> Result<JsArrayBuffer> {
 			self.set_body_used()?;
 			let buf =
-				self.inner.lock().await.body_bytes().await.map_err(|e| js::Error::Exception {
-					message: e.to_string(),
-					file: file!().to_owned(),
-					line: line!() as i32,
-					stack: "".to_owned(),
-				})?;
+				self.inner.lock().await.body_bytes().await.map_err(|e| throw_js_exception!(e))?;
 			Ok(JsArrayBuffer(buf))
 		}
 
+		// Convert the object to a string
+		pub fn toString(&self) -> String {
+			String::from("[object Response]")
+		}
+
+		#[quickjs(skip)]
 		pub(crate) fn from_surf(resp: surf::Response) -> Self {
 			let headers: &surf::http::Headers = resp.as_ref();
 			let headers = Headers::from(headers);
@@ -120,7 +102,7 @@ pub mod response {
 
 use js::{ArrayBuffer, Ctx, Error, IntoJs};
 
-pub struct JsArrayBuffer(Vec<u8>);
+pub struct JsArrayBuffer(pub(crate) Vec<u8>);
 
 impl<'js> IntoJs<'js> for JsArrayBuffer {
 	fn into_js(self, ctx: Ctx<'js>) -> Result<js::Value<'js>, Error> {

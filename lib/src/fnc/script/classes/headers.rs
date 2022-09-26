@@ -80,6 +80,11 @@ pub mod headers {
 				.map(|v| v.iter().map(|v| v.as_str()).collect::<Vec<&str>>().join(","))
 				.collect::<Vec<String>>()
 		}
+
+		// Convert the object to a string
+		pub fn toString(&self) -> String {
+			String::from("[object Headers]")
+		}
 	}
 }
 
