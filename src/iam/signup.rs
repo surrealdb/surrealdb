@@ -65,14 +65,18 @@ pub async fn sc(
 								let key = EncodingKey::from_secret(sv.code.as_ref());
 								// Create the authentication claim
 								let val = Claims {
-									iss: SERVER_NAME.to_owned(),
-									iat: Utc::now().timestamp(),
-									nbf: Utc::now().timestamp(),
-									exp: match sv.session {
-										Some(v) => Utc::now() + Duration::from_std(v.0).unwrap(),
-										_ => Utc::now() + Duration::hours(1),
-									}
-									.timestamp(),
+									iss: Some(SERVER_NAME.to_owned()),
+									iat: Some(Utc::now().timestamp()),
+									nbf: Some(Utc::now().timestamp()),
+									exp: Some(
+										match sv.session {
+											Some(v) => {
+												Utc::now() + Duration::from_std(v.0).unwrap()
+											}
+											_ => Utc::now() + Duration::hours(1),
+										}
+										.timestamp(),
+									),
 									ns: Some(ns.to_owned()),
 									db: Some(db.to_owned()),
 									sc: Some(sc.to_owned()),

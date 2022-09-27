@@ -5,6 +5,7 @@ use crate::iam::token::Claims;
 use crate::iam::LOG;
 use argon2::password_hash::{PasswordHash, PasswordVerifier};
 use argon2::Argon2;
+use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
 use std::sync::Arc;
@@ -75,8 +76,8 @@ static KEY: Lazy<DecodingKey> = Lazy::new(|| DecodingKey::from_secret(&[]));
 static DUD: Lazy<Validation> = Lazy::new(|| {
 	let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
 	validation.insecure_disable_signature_validation();
-	validation.validate_nbf = true;
-	validation.validate_exp = true;
+	validation.validate_nbf = false;
+	validation.validate_exp = false;
 	validation
 });
 
@@ -158,6 +159,20 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 		let token = decode::<Claims>(auth, &KEY, &DUD)?;
 		// Parse the token and catch any errors
 		let value = super::parse::parse(auth)?;
+		// Check if the auth token can be used
+		if let Some(nbf) = token.claims.nbf {
+			if nbf > Utc::now().timestamp() {
+				trace!(target: LOG, "The 'nbf' field in the authentication token was invalid");
+				return Err(Error::InvalidAuth);
+			}
+		}
+		// Check if the auth token has expired
+		if let Some(exp) = token.claims.exp {
+			if exp < Utc::now().timestamp() {
+				trace!(target: LOG, "The 'exp' field in the authentication token was invalid");
+				return Err(Error::InvalidAuth);
+			}
+		}
 		// Check the token authentication claims
 		match token.claims {
 			// Check if this is scope token authentication
