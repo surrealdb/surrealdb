@@ -30,21 +30,21 @@ impl Default for Algorithm {
 
 impl fmt::Display for Algorithm {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Algorithm::EdDSA => write!(f, "EDDSA"),
-			Algorithm::Es256 => write!(f, "ES256"),
-			Algorithm::Es384 => write!(f, "ES384"),
-			Algorithm::Es512 => write!(f, "ES512"),
-			Algorithm::Hs256 => write!(f, "HS256"),
-			Algorithm::Hs384 => write!(f, "HS384"),
-			Algorithm::Hs512 => write!(f, "HS512"),
-			Algorithm::Ps256 => write!(f, "PS256"),
-			Algorithm::Ps384 => write!(f, "PS384"),
-			Algorithm::Ps512 => write!(f, "PS512"),
-			Algorithm::Rs256 => write!(f, "RS256"),
-			Algorithm::Rs384 => write!(f, "RS384"),
-			Algorithm::Rs512 => write!(f, "RS512"),
-		}
+		f.write_str(match self {
+			Algorithm::EdDSA => "EDDSA",
+			Algorithm::Es256 => "ES256",
+			Algorithm::Es384 => "ES384",
+			Algorithm::Es512 => "ES512",
+			Algorithm::Hs256 => "HS256",
+			Algorithm::Hs384 => "HS384",
+			Algorithm::Hs512 => "HS512",
+			Algorithm::Ps256 => "PS256",
+			Algorithm::Ps384 => "PS384",
+			Algorithm::Ps512 => "PS512",
+			Algorithm::Rs256 => "RS256",
+			Algorithm::Rs384 => "RS384",
+			Algorithm::Rs512 => "RS512",
+		})
 	}
 }
 

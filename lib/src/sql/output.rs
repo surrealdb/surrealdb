@@ -25,13 +25,13 @@ impl Default for Output {
 
 impl fmt::Display for Output {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RETURN ")?;
+		f.write_str("RETURN ")?;
 		match self {
-			Output::None => write!(f, "NONE"),
-			Output::Null => write!(f, "NULL"),
-			Output::Diff => write!(f, "DIFF"),
-			Output::After => write!(f, "AFTER"),
-			Output::Before => write!(f, "BEFORE"),
+			Output::None => f.write_str("NONE"),
+			Output::Null => f.write_str("NULL"),
+			Output::Diff => f.write_str("DIFF"),
+			Output::After => f.write_str("AFTER"),
+			Output::Before => f.write_str("BEFORE"),
 			Output::Fields(v) => write!(f, "{}", v),
 		}
 	}
