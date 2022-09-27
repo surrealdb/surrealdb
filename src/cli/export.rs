@@ -1,7 +1,7 @@
 use crate::cli::LOG;
 use crate::err::Error;
 use reqwest::blocking::Client;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::ACCEPT;
 use std::fs::OpenOptions;
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
