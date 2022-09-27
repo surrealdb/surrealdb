@@ -1,5 +1,7 @@
+use std::str;
+
 use bytes::Bytes;
-use warp::Filter;
+use warp::{path, Filter};
 
 use surrealdb::sql::serde::{beg_internal_serialization, end_internal_serialization};
 use surrealdb::Session;
