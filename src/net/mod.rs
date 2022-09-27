@@ -15,7 +15,7 @@ mod sql;
 mod status;
 mod sync;
 mod version;
-
+mod ast;
 use crate::cli::CF;
 use crate::err::Error;
 use warp::Filter;
@@ -45,6 +45,8 @@ pub async fn init() -> Result<(), Error> {
 		.or(rpc::config())
 		// SQL query endpoint
 		.or(sql::config())
+		// SQL AST endpoint
+		.or(ast::config())
 		// API query endpoint
 		.or(key::config())
 		// Catch all errors
