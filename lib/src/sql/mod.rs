@@ -40,7 +40,7 @@ pub(crate) mod query;
 pub(crate) mod range;
 pub(crate) mod regex;
 pub(crate) mod script;
-pub(crate) mod serde;
+pub mod serde;
 pub(crate) mod split;
 pub(crate) mod start;
 pub(crate) mod statement;

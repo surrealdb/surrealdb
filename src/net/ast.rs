@@ -1,13 +1,9 @@
 use bytes::Bytes;
-use futures::{SinkExt, StreamExt};
 use warp::Filter;
-use warp::ws::{Message, WebSocket, Ws};
 
 use surrealdb::Session;
-use surrealdb::sql::Query;
+use surrealdb::sql::serde::{beg_internal_serialization, end_internal_serialization};
 
-use crate::cli::CF;
-use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::output;
 use crate::net::session;
@@ -31,7 +27,11 @@ pub fn config() -> impl Filter<Extract=impl warp::Reply, Error=warp::Rejection> 
 	opts.or(post)
 }
 
-async fn handler(session: Session, sql: Bytes) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handler(
+	session: Session,
+	output: String,
+	sql: Bytes,
+) -> Result<impl warp::Reply, warp::Rejection> {
 	// Check the permissions
 	match session.au.is_kv() {
 		true => {
@@ -39,14 +39,31 @@ async fn handler(session: Session, sql: Bytes) -> Result<impl warp::Reply, warp:
 			let sql = std::str::from_utf8(&sql).unwrap();
 			// Get the AST of the query
 			let ast = surrealdb::sql::parse(&sql);
-			// Unwrap and send the json response back
-			match ast {
-				Ok(parsed_query) => {
-					debug!(target: "DEBUG", "Executing AST: {}", serde_json::to_string_pretty(&parsed_query).unwrap());
-					Ok(output::json(&parsed_query))
-				}
-				Err(err) => Err(warp::reject::custom(Error::from(err))),
+			// Handle our error if we have one
+			if ast.is_err() {
+				return Err(warp::reject::custom(Error::from(ast.err().unwrap())));
 			}
+
+			// Get the underlying query AST
+			let ast_result = ast.unwrap();
+
+			// Temporarily enable/disable internal serialization, so we get full AST output
+			beg_internal_serialization();
+
+			// Get the valid serialised response output
+			let response = match output.as_ref() {
+				"application/json" => Ok(output::json(&ast_result)),
+				"application/cbor" => Ok(output::cbor(&ast_result)),
+				"application/msgpack" => Ok(output::pack(&ast_result)),
+				// An incorrect content-type was requested
+				_ => Err(warp::reject::custom(Error::InvalidType)),
+			};
+
+			debug!(target: "DEBUG", "Executing AST: {}", serde_json::to_string_pretty(&ast_result).unwrap());
+
+			end_internal_serialization();
+
+			return response;
 		}
 		// There was an error with permissions
 		_ => Err(warp::reject::custom(Error::InvalidAuth)),
