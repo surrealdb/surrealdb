@@ -9,9 +9,10 @@ pub static HEADER: Lazy<Header> = Lazy::new(|| Header::new(Algorithm::HS512));
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Claims {
 	pub iat: i64,
-	pub nbf: i64,
 	pub exp: i64,
 	pub iss: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub nbf: Option<i64>,
 	#[serde(alias = "ns")]
 	#[serde(alias = "NS")]
 	#[serde(rename = "NS")]
@@ -45,9 +46,12 @@ impl From<Claims> for Value {
 		let mut out = Object::default();
 		// Add default fields
 		out.insert("iat".to_string(), v.iat.into());
-		out.insert("nbf".to_string(), v.nbf.into());
 		out.insert("exp".to_string(), v.exp.into());
 		out.insert("iss".to_string(), v.iss.into());
+		// Add nbf field if set
+		if let Some(nbf) = v.nbf {
+			out.insert("nbf".to_string(), nbf.into());
+		}
 		// Add NS field if set
 		if let Some(ns) = v.ns {
 			out.insert("NS".to_string(), ns.into());
