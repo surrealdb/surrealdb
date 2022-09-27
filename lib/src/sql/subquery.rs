@@ -59,12 +59,13 @@ impl Subquery {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Duplicate options
+		let opt = &opt.dive(2)?;
+
 		match self {
 			Subquery::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Subquery::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Subquery::Select(ref v) => {
-				// Duplicate options
-				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -72,22 +73,20 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				let res = v.compute(&ctx, &opt, txn, doc).await?;
+				let res = v.compute(&ctx, opt, txn, doc).await?;
 				// Process result
 				match v.limit() {
 					1 => match v.expr.single() {
-						Some(v) => res.first().get(&ctx, &opt, txn, &v).await,
+						Some(v) => res.first().get(&ctx, opt, txn, &v).await,
 						None => res.first().ok(),
 					},
 					_ => match v.expr.single() {
-						Some(v) => res.get(&ctx, &opt, txn, &v).await,
+						Some(v) => res.get(&ctx, opt, txn, &v).await,
 						None => res.ok(),
 					},
 				}
 			}
 			Subquery::Create(ref v) => {
-				// Duplicate options
-				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -95,7 +94,7 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.remove(0)),
 						_ => Ok(v.into()),
@@ -104,8 +103,6 @@ impl Subquery {
 				}
 			}
 			Subquery::Update(ref v) => {
-				// Duplicate options
-				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -113,7 +110,7 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.remove(0)),
 						_ => Ok(v.into()),
@@ -122,8 +119,6 @@ impl Subquery {
 				}
 			}
 			Subquery::Delete(ref v) => {
-				// Duplicate options
-				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -131,7 +126,7 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.remove(0)),
 						_ => Ok(v.into()),
@@ -140,8 +135,6 @@ impl Subquery {
 				}
 			}
 			Subquery::Relate(ref v) => {
-				// Duplicate options
-				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -149,7 +142,7 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.remove(0)),
 						_ => Ok(v.into()),
@@ -158,8 +151,6 @@ impl Subquery {
 				}
 			}
 			Subquery::Insert(ref v) => {
-				// Duplicate options
-				let opt = opt.dive(2)?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -167,7 +158,7 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
 						1 => Ok(v.remove(0)),
 						_ => Ok(v.into()),

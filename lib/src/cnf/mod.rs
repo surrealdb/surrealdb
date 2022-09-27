@@ -3,7 +3,7 @@
 pub const MAX_CONCURRENT_TASKS: usize = 64;
 
 // Specifies how deep various forms of computation will go before the query fails.
-pub const MAX_COMPUTATION_DEPTH: u8 = 16;
+pub const MAX_COMPUTATION_DEPTH: u8 = 20;
 
 // The characters which are supported in server record IDs.
 pub const ID_CHARS: [char; 36] = [
