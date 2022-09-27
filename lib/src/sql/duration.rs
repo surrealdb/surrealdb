@@ -232,23 +232,22 @@ fn duration_raw(i: &str) -> IResult<&str, Duration> {
 	Ok((
 		i,
 		Duration(match u {
-			"ns" => time::Duration::new(0, v as u32),
-			"µs" => time::Duration::new(0, v as u32 * 1000),
-			"ms" => time::Duration::new(0, v as u32 * 1000 * 1000),
-			"s" => time::Duration::new(v, 0),
-			"m" => time::Duration::new(v * 60, 0),
-			"h" => time::Duration::new(v * 60 * 60, 0),
-			"d" => time::Duration::new(v * 60 * 60 * 24, 0),
-			"w" => time::Duration::new(v * 60 * 60 * 24 * 7, 0),
-			"y" => time::Duration::new(v * 60 * 60 * 24 * 365, 0),
-			_ => time::Duration::new(0, 0),
+			"ns" => time::Duration::from_nanos(v),
+			"µs" => time::Duration::from_micros(v),
+			"ms" => time::Duration::from_millis(v),
+			"s" => time::Duration::from_secs(v),
+			"m" => time::Duration::from_secs(v * 60),
+			"h" => time::Duration::from_secs(v * 60 * 60),
+			"d" => time::Duration::from_secs(v * 60 * 60 * 24),
+			"w" => time::Duration::from_secs(v * 60 * 60 * 24 * 7),
+			"y" => time::Duration::from_secs(v * 60 * 60 * 24 * 365),
+			_ => time::Duration::ZERO,
 		}),
 	))
 }
 
 fn part(i: &str) -> IResult<&str, u64> {
-	let (i, v) = take_u64(i)?;
-	Ok((i, v))
+	take_u64(i)
 }
 
 fn unit(i: &str) -> IResult<&str, &str> {
