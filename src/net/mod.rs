@@ -1,3 +1,4 @@
+mod ast;
 mod export;
 mod fail;
 mod head;
@@ -15,7 +16,6 @@ mod sql;
 mod status;
 mod sync;
 mod version;
-mod ast;
 use crate::cli::CF;
 use crate::err::Error;
 use warp::Filter;

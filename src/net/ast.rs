@@ -1,8 +1,8 @@
 use bytes::Bytes;
 use warp::Filter;
 
-use surrealdb::Session;
 use surrealdb::sql::serde::{beg_internal_serialization, end_internal_serialization};
+use surrealdb::Session;
 
 use crate::err::Error;
 use crate::net::output;
@@ -10,7 +10,7 @@ use crate::net::session;
 
 const MAX: u64 = 1024 * 1024; // 1 MiB
 
-pub fn config() -> impl Filter<Extract=impl warp::Reply, Error=warp::Rejection> + Clone {
+pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	// Set base path
 	let base = warp::path("ast").and(warp::path::end());
 	// Set opts method
@@ -69,4 +69,3 @@ async fn handler(
 		_ => Err(warp::reject::custom(Error::InvalidAuth)),
 	}
 }
-
