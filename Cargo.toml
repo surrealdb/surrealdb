@@ -6,9 +6,12 @@ version = "1.0.0-beta.7"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
-default = []
+default = ["storage-rocksdb", "scripting", "http"]
+storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-tikv = ["surrealdb/kv-tikv"]
-storage-fdb = ["surrealdb/kv-fdb"]
+storage-fdb = ["surrealdb/kv-fdb-6_3"]
+scripting = ["surrealdb/scripting"]
+http = ["surrealdb/http"]
 
 [workspace]
 members = ["lib"]
@@ -40,7 +43,7 @@ serde = { version = "1.0.145", features = ["derive"] }
 serde_cbor = "0.11.2"
 serde_json = "1.0.85"
 serde_pack = { version = "1.1.0", package = "rmp-serde" }
-surrealdb = { path = "lib" }
+surrealdb = { path = "lib", default-features = false, features = ["kv-mem", "parallel"] }
 thiserror = "1.0.36"
 tokio = { version = "1.21.1", features = ["macros", "signal"] }
 warp = { version = "0.3.2", features = ["compression", "tls", "websocket"] }

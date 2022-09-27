@@ -17,12 +17,23 @@ license = "Apache-2.0"
 default = ["parallel", "kv-mem", "kv-rocksdb", "scripting", "http"]
 parallel = ["dep:executor"]
 kv-tikv = ["dep:tikv"]
-kv-fdb = ["dep:foundationdb"]
+kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb"]
+kv-fdb-5_2 = ["foundationdb/fdb-5_2", "kv-fdb"]
+kv-fdb-6_0 = ["foundationdb/fdb-6_0", "kv-fdb"]
+kv-fdb-6_1 = ["foundationdb/fdb-6_1", "kv-fdb"]
+kv-fdb-6_2 = ["foundationdb/fdb-6_2", "kv-fdb"]
+kv-fdb-6_3 = ["foundationdb/fdb-6_3", "kv-fdb"]
+kv-fdb-7_0 = ["foundationdb/fdb-7_0", "kv-fdb"]
+kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 kv-mem = ["dep:echodb"]
 kv-indxdb = ["dep:indxdb"]
 kv-rocksdb = ["dep:rocksdb"]
 scripting = ["dep:js", "dep:executor"]
 http = ["dep:surf"]
+
+# This is an internal feature. It shouldn't be activated directly.
+# One of the `kv-fdb-*` features that specify the version to use must be used instead.
+kv-fdb = ["foundationdb"]
 
 [dependencies]
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
@@ -37,7 +48,7 @@ dmp = "0.1.1"
 echodb = { version = "0.3.0", optional = true }
 executor = { version = "1.4.1", package = "async-executor", optional = true }
 futures = "0.3.24"
-foundationdb = { version = "0.7.0", default-features = false, features = ["fdb-6_3", "embedded-fdb-include"], optional = true }
+foundationdb = { version = "0.7.0", default-features = false, features = ["embedded-fdb-include"], optional = true }
 fuzzy-matcher = "0.3.7"
 geo = { version = "0.23.0", features = ["use-serde"] }
 indxdb = { version = "0.2.0", optional = true }
