@@ -11,6 +11,7 @@ use nom::number::complete::recognize_float;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
+use std::fmt::Display;
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops;
@@ -122,9 +123,9 @@ impl From<BigDecimal> for Number {
 impl fmt::Display for Number {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Number::Int(v) => write!(f, "{}", v),
-			Number::Float(v) => write!(f, "{}", v),
-			Number::Decimal(v) => write!(f, "{}", v),
+			Number::Int(v) => Display::fmt(v, f),
+			Number::Float(v) => Display::fmt(v, f),
+			Number::Decimal(v) => Display::fmt(v, f),
 		}
 	}
 }
