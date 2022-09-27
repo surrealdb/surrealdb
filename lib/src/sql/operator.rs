@@ -16,6 +16,7 @@ pub enum Operator {
 	//
 	Add, // +
 	Sub, // -
+	Pow, // **
 	Mul, // *
 	Div, // /
 	Inc, // +=
@@ -80,6 +81,7 @@ impl fmt::Display for Operator {
 			Operator::And => "AND",
 			Operator::Add => "+",
 			Operator::Sub => "-",
+			Operator::Pow => "**",
 			Operator::Mul => "*",
 			Operator::Div => "/",
 			Operator::Inc => "+=",
@@ -150,6 +152,7 @@ pub fn symbols(i: &str) -> IResult<&str, Operator> {
 		alt((
 			map(char('+'), |_| Operator::Add),
 			map(char('-'), |_| Operator::Sub),
+			map(tag("**"), |_| Operator::Pow),
 			map(char('*'), |_| Operator::Mul),
 			map(char('×'), |_| Operator::Mul),
 			map(char('∙'), |_| Operator::Mul),

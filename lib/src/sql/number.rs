@@ -1,6 +1,7 @@
 use crate::sql::ending::number as ending;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
+use bigdecimal::num_traits::Pow;
 use bigdecimal::BigDecimal;
 use bigdecimal::FromPrimitive;
 use bigdecimal::ToPrimitive;
@@ -307,6 +308,20 @@ impl Number {
 			Number::Int(v) => format!("{:.1$}", v, precision).into(),
 			Number::Float(v) => format!("{:.1$}", v, precision).into(),
 			Number::Decimal(v) => v.round(precision as i64).into(),
+		}
+	}
+
+	pub fn pow(self, power: Number) -> Number {
+		match (self, power) {
+			(Number::Int(v), Number::Int(p)) if p >= 0 && p < u32::MAX as i64 => {
+				Number::Int(v.pow(p as u32))
+			}
+			(Number::Decimal(v), Number::Int(p)) if p >= 0 && p < u32::MAX as i64 => {
+				let (as_int, scale) = v.as_bigint_and_exponent();
+				return Number::Decimal(BigDecimal::new(as_int.pow(p as u32), scale * p));
+			}
+			// TODO: Number::Decimal.pow(Number::Float) and Decimal.pow(Number::Decimal)
+			(v, p) => Number::Float(v.as_float().pow(p.as_float())),
 		}
 	}
 }
@@ -627,5 +642,73 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("-123.45", format!("{}", out));
 		assert_eq!(out, Number::from(-123.45));
+	}
+
+	#[test]
+	fn number_pow_int() {
+		let res = number("3");
+		assert!(res.is_ok());
+		let res = res.unwrap().1;
+
+		let power = number("4");
+		assert!(power.is_ok());
+		let power = power.unwrap().1;
+
+		assert_eq!(res.pow(power), Number::from(81));
+	}
+
+	#[test]
+	fn number_pow_negatives() {
+		let res = number("4");
+		assert!(res.is_ok());
+		let res = res.unwrap().1;
+
+		let power = number("-0.5");
+		assert!(power.is_ok());
+		let power = power.unwrap().1;
+
+		assert_eq!(res.pow(power), Number::from(0.5));
+	}
+
+	#[test]
+	fn number_pow_float() {
+		let res = number("2.5");
+		assert!(res.is_ok());
+		let res = res.unwrap().1;
+
+		let power = number("2");
+		assert!(power.is_ok());
+		let power = power.unwrap().1;
+
+		assert_eq!(res.pow(power), Number::from(6.25));
+	}
+
+	#[test]
+	fn number_pow_bigdecimal_one() {
+		let res = number("13.5719384719384719385639856394139476937756394756");
+		assert!(res.is_ok());
+		let res = res.unwrap().1;
+
+		let power = number("1");
+		assert!(power.is_ok());
+		let power = power.unwrap().1;
+
+		assert_eq!(
+			res.pow(power),
+			Number::from("13.5719384719384719385639856394139476937756394756")
+		);
+	}
+
+	#[test]
+	fn number_pow_bigdecimal_int() {
+		let res = number("13.5719384719384719385639856394139476937756394756");
+		assert!(res.is_ok());
+		let res = res.unwrap().1;
+
+		let power = number("2");
+		assert!(power.is_ok());
+		let power = power.unwrap().1;
+
+		assert_eq!(res.pow(power), Number::from("184.19751388608358465578173996877942643463869043732548087725588482334195240945031617770904299536"));
 	}
 }

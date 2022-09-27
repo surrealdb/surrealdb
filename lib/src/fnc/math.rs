@@ -120,6 +120,17 @@ pub fn percentile((array, n): (Value, Number)) -> Result<Value, Error> {
 	})
 }
 
+pub fn pow((v, p): (Number, Number)) -> Result<Value, Error> {
+	if (v.is_decimal() && !p.is_int()) || p.is_decimal() {
+		return Err(Error::InvalidArguments {
+			name: String::from("math::pow"),
+			message: String::from("math::pow is not yet implemented for BigDecimal in combination with float/BigDecimal"),
+		});
+	}
+
+	Ok(v.pow(p).into())
+}
+
 pub fn product((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
 		Value::Array(v) => v.as_numbers().into_iter().product::<Number>().into(),

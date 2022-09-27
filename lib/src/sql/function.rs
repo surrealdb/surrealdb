@@ -360,6 +360,7 @@ fn function_math(i: &str) -> IResult<&str, &str> {
 		alt((
 			tag("math::nearestrank"),
 			tag("math::percentile"),
+			tag("math::pow"),
 			tag("math::product"),
 			tag("math::round"),
 			tag("math::spread"),
