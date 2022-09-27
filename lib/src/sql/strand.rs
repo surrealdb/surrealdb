@@ -110,7 +110,7 @@ fn strand_single(i: &str) -> IResult<&str, String> {
 		'\\',
 		alt((
 			strand_unicode,
-			value('\u{1c}', char('\\')),
+			value('\u{5c}', char('\\')),
 			value('\u{27}', char('\'')),
 			value('\u{2f}', char('/')),
 			value('\u{08}', char('b')),
@@ -131,7 +131,7 @@ fn strand_double(i: &str) -> IResult<&str, String> {
 		'\\',
 		alt((
 			strand_unicode,
-			value('\u{1c}', char('\\')),
+			value('\u{5c}', char('\\')),
 			value('\u{22}', char('\"')),
 			value('\u{2f}', char('/')),
 			value('\u{08}', char('b')),
