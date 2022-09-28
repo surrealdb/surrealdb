@@ -125,6 +125,28 @@ impl SelectStatement {
 		i.output(ctx, opt, txn, &stm).await
 	}
 
+	fn idiom_in_fields(idom: &crate::sql::Idiom, expr: &Fields) -> bool {
+		log::info!("group idom {:?}", idom.0);
+
+		if idom.0.iter().any(|x| x == &crate::sql::Part::None) {
+			return false;
+		}
+
+		let contains = expr.0.iter().any(|x| match x {
+			crate::sql::Field::All => true,
+			crate::sql::Field::Alone(x) => match x {
+				crate::sql::Value::Idiom(i) => i == idom,
+				_ => false,
+			},
+			crate::sql::Field::Alias(x, _) => match x {
+				crate::sql::Value::Idiom(i) => i == idom,
+				_ => false,
+			},
+		});
+
+		!contains
+	}
+
 	///Validate Query is Integral
 	fn check(mut self) -> IResult<&'static str, Self> {
 		// this is not a group query, all is good
@@ -133,34 +155,59 @@ impl SelectStatement {
 		}
 
 		let group = self.group.clone().unwrap();
+		let exprs = &self.expr.clone();
 
 		// get vector of Fields that need to be added to query because they did not exist in the original query
-		let to_add: Vec<Field> = group
+		let mut to_add = vec![];
+
+		let groups_to_add: Vec<Field> = group
 			.iter()
 			.map(|b| &b.0)
-			.filter(|idom| {
-				log::info!("group idom {:?}", idom.0);
-
-				if idom.0.iter().any(|x| x == &crate::sql::Part::None) {
-					return false;
-				}
-
-				let contains = self.expr.0.iter().any(|x| match x {
-					crate::sql::Field::All => true,
-					crate::sql::Field::Alone(x) => match x {
-						crate::sql::Value::Idiom(i) => i == *idom,
-						_ => false,
-					},
-					crate::sql::Field::Alias(x, _) => match x {
-						crate::sql::Value::Idiom(i) => i == *idom,
-						_ => false,
-					},
-				});
-
-				!contains
-			})
+			.filter(|idom| Self::idiom_in_fields(idom, exprs))
 			.map(|i| Field::Alone(Value::Idiom(i.clone())))
 			.collect();
+
+		to_add.extend(groups_to_add);
+
+		let order_fields_to_add = match &self.order {
+			Some(o) => o
+				.iter()
+				.map(|x| crate::sql::Idiom(x.0.clone()))
+				.filter(|idom| Self::idiom_in_fields(idom, exprs))
+				.map(|i| Field::Alone(Value::Idiom(i.clone())))
+				.collect(),
+			None => vec![],
+		};
+
+		to_add.extend(order_fields_to_add);
+
+		let split_fields_to_add = match &self.split {
+			Some(o) => o
+				.iter()
+				.map(|x| &x.0)
+				.filter(|idom| Self::idiom_in_fields(idom, exprs))
+				.map(|i| Field::Alone(Value::Idiom(i.clone())))
+				.collect(),
+			None => vec![],
+		};
+
+		to_add.extend(split_fields_to_add);
+
+		let fetch_fields_to_add = match &self.fetch {
+			Some(o) => o
+				.iter()
+				.map(|x| &x.0)
+				.filter(|idom| Self::idiom_in_fields(idom, exprs))
+				.map(|i| Field::Alone(Value::Idiom(i.clone())))
+				.collect(),
+			None => vec![],
+		};
+
+		to_add.extend(fetch_fields_to_add);
+
+		// deduplicate the collected required adds
+		to_add.dedup();
+		// TODO should propbably also DROP columns that were added before emitted
 
 		// add vector of needed groupby fields to expression
 		self.expr.0.extend(to_add);
