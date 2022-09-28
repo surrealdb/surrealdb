@@ -612,7 +612,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Retrieve all namespace definitions in a datastore.
-	pub async fn all_ns(&mut self) -> Result<Arc<Vec<DefineNamespaceStatement>>, Error> {
+	pub async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
 		let key = crate::key::ns::prefix();
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -623,14 +623,14 @@ impl Transaction {
 				let beg = crate::key::ns::prefix();
 				let end = crate::key::ns::suffix();
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Nss(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Nss(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
 	}
 	/// Retrieve all namespace login definitions for a specific namespace.
-	pub async fn all_nl(&mut self, ns: &str) -> Result<Arc<Vec<DefineLoginStatement>>, Error> {
+	pub async fn all_nl(&mut self, ns: &str) -> Result<Arc<[DefineLoginStatement]>, Error> {
 		let key = crate::key::nl::prefix(ns);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -641,14 +641,14 @@ impl Transaction {
 				let beg = crate::key::nl::prefix(ns);
 				let end = crate::key::nl::suffix(ns);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Nls(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Nls(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
 	}
 	/// Retrieve all namespace token definitions for a specific namespace.
-	pub async fn all_nt(&mut self, ns: &str) -> Result<Arc<Vec<DefineTokenStatement>>, Error> {
+	pub async fn all_nt(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::nt::prefix(ns);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -659,14 +659,14 @@ impl Transaction {
 				let beg = crate::key::nt::prefix(ns);
 				let end = crate::key::nt::suffix(ns);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Nts(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Nts(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
 	}
 	/// Retrieve all database definitions for a specific namespace.
-	pub async fn all_db(&mut self, ns: &str) -> Result<Arc<Vec<DefineDatabaseStatement>>, Error> {
+	pub async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
 		let key = crate::key::db::prefix(ns);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -677,8 +677,8 @@ impl Transaction {
 				let beg = crate::key::db::prefix(ns);
 				let end = crate::key::db::suffix(ns);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Dbs(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Dbs(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -688,7 +688,7 @@ impl Transaction {
 		&mut self,
 		ns: &str,
 		db: &str,
-	) -> Result<Arc<Vec<DefineLoginStatement>>, Error> {
+	) -> Result<Arc<[DefineLoginStatement]>, Error> {
 		let key = crate::key::dl::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -699,8 +699,8 @@ impl Transaction {
 				let beg = crate::key::dl::prefix(ns, db);
 				let end = crate::key::dl::suffix(ns, db);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Dls(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Dls(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -710,7 +710,7 @@ impl Transaction {
 		&mut self,
 		ns: &str,
 		db: &str,
-	) -> Result<Arc<Vec<DefineTokenStatement>>, Error> {
+	) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::dt::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -721,8 +721,8 @@ impl Transaction {
 				let beg = crate::key::dt::prefix(ns, db);
 				let end = crate::key::dt::suffix(ns, db);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Dts(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Dts(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -732,7 +732,7 @@ impl Transaction {
 		&mut self,
 		ns: &str,
 		db: &str,
-	) -> Result<Arc<Vec<DefineScopeStatement>>, Error> {
+	) -> Result<Arc<[DefineScopeStatement]>, Error> {
 		let key = crate::key::sc::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -743,8 +743,8 @@ impl Transaction {
 				let beg = crate::key::sc::prefix(ns, db);
 				let end = crate::key::sc::suffix(ns, db);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Scs(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Scs(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -755,7 +755,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		sc: &str,
-	) -> Result<Arc<Vec<DefineTokenStatement>>, Error> {
+	) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::st::prefix(ns, db, sc);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -766,8 +766,8 @@ impl Transaction {
 				let beg = crate::key::st::prefix(ns, db, sc);
 				let end = crate::key::st::suffix(ns, db, sc);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Sts(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Sts(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -777,7 +777,7 @@ impl Transaction {
 		&mut self,
 		ns: &str,
 		db: &str,
-	) -> Result<Arc<Vec<DefineTableStatement>>, Error> {
+	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		let key = crate::key::tb::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -788,8 +788,8 @@ impl Transaction {
 				let beg = crate::key::tb::prefix(ns, db);
 				let end = crate::key::tb::suffix(ns, db);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Tbs(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Tbs(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -800,7 +800,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-	) -> Result<Arc<Vec<DefineEventStatement>>, Error> {
+	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		let key = crate::key::ev::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -811,8 +811,8 @@ impl Transaction {
 				let beg = crate::key::ev::prefix(ns, db, tb);
 				let end = crate::key::ev::suffix(ns, db, tb);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Evs(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Evs(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -823,7 +823,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-	) -> Result<Arc<Vec<DefineFieldStatement>>, Error> {
+	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		let key = crate::key::fd::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -834,8 +834,8 @@ impl Transaction {
 				let beg = crate::key::fd::prefix(ns, db, tb);
 				let end = crate::key::fd::suffix(ns, db, tb);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Fds(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Fds(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -846,7 +846,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-	) -> Result<Arc<Vec<DefineIndexStatement>>, Error> {
+	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		let key = crate::key::ix::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -857,8 +857,8 @@ impl Transaction {
 				let beg = crate::key::ix::prefix(ns, db, tb);
 				let end = crate::key::ix::suffix(ns, db, tb);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Ixs(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Ixs(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -869,7 +869,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-	) -> Result<Arc<Vec<DefineTableStatement>>, Error> {
+	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		let key = crate::key::ft::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -880,8 +880,8 @@ impl Transaction {
 				let beg = crate::key::ft::prefix(ns, db, tb);
 				let end = crate::key::ft::suffix(ns, db, tb);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Fts(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Fts(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -892,7 +892,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-	) -> Result<Arc<Vec<LiveStatement>>, Error> {
+	) -> Result<Arc<[LiveStatement]>, Error> {
 		let key = crate::key::lv::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -903,8 +903,8 @@ impl Transaction {
 				let beg = crate::key::lv::prefix(ns, db, tb);
 				let end = crate::key::lv::suffix(ns, db, tb);
 				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = Arc::new(val.convert());
-				self.cache.set(key, Entry::Lvs(val.clone()));
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -1034,6 +1034,31 @@ impl Transaction {
 			Ok(v) => Ok(v),
 		}
 	}
+	/// Add a scope with a default configuration, only if we are in dynamic mode.
+	pub async fn add_sc(
+		&mut self,
+		ns: &str,
+		db: &str,
+		sc: &str,
+		strict: bool,
+	) -> Result<DefineScopeStatement, Error> {
+		match self.get_sc(ns, db, sc).await {
+			Err(Error::ScNotFound) => match strict {
+				false => {
+					let key = crate::key::sc::new(ns, db, sc);
+					let val = DefineScopeStatement {
+						name: sc.to_owned().into(),
+						..DefineScopeStatement::default()
+					};
+					self.put(key, &val).await?;
+					Ok(val)
+				}
+				true => Err(Error::ScNotFound),
+			},
+			Err(e) => Err(e),
+			Ok(v) => Ok(v),
+		}
+	}
 	/// Add a table with a default configuration, only if we are in dynamic mode.
 	pub async fn add_tb(
 		&mut self,
@@ -1074,7 +1099,7 @@ impl Transaction {
 			_ => {
 				let val = self.get(key.clone()).await?.ok_or(Error::NsNotFound)?;
 				let val: Arc<DefineNamespaceStatement> = Arc::new(val.into());
-				self.cache.set(key, Entry::Ns(val.clone()));
+				self.cache.set(key, Entry::Ns(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -1094,7 +1119,7 @@ impl Transaction {
 			_ => {
 				let val = self.get(key.clone()).await?.ok_or(Error::DbNotFound)?;
 				let val: Arc<DefineDatabaseStatement> = Arc::new(val.into());
-				self.cache.set(key, Entry::Db(val.clone()));
+				self.cache.set(key, Entry::Db(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -1115,7 +1140,7 @@ impl Transaction {
 			_ => {
 				let val = self.get(key.clone()).await?.ok_or(Error::TbNotFound)?;
 				let val: Arc<DefineTableStatement> = Arc::new(val.into());
-				self.cache.set(key, Entry::Tb(val.clone()));
+				self.cache.set(key, Entry::Tb(Arc::clone(&val)));
 				Ok(val)
 			}
 		}

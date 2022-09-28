@@ -1,4 +1,3 @@
-use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::value::Value;
 use md5::Digest;
@@ -7,33 +6,33 @@ use sha1::Sha1;
 use sha2::Sha256;
 use sha2::Sha512;
 
-pub fn md5(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn md5((arg,): (String,)) -> Result<Value, Error> {
 	let mut hasher = Md5::new();
-	hasher.update(args.remove(0).as_string().as_str());
+	hasher.update(arg.as_str());
 	let val = hasher.finalize();
 	let val = format!("{:x}", val);
 	Ok(val.into())
 }
 
-pub fn sha1(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn sha1((arg,): (String,)) -> Result<Value, Error> {
 	let mut hasher = Sha1::new();
-	hasher.update(args.remove(0).as_string().as_str());
+	hasher.update(arg.as_str());
 	let val = hasher.finalize();
 	let val = format!("{:x}", val);
 	Ok(val.into())
 }
 
-pub fn sha256(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn sha256((arg,): (String,)) -> Result<Value, Error> {
 	let mut hasher = Sha256::new();
-	hasher.update(args.remove(0).as_string().as_str());
+	hasher.update(arg.as_str());
 	let val = hasher.finalize();
 	let val = format!("{:x}", val);
 	Ok(val.into())
 }
 
-pub fn sha512(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn sha512((arg,): (String,)) -> Result<Value, Error> {
 	let mut hasher = Sha512::new();
-	hasher.update(args.remove(0).as_string().as_str());
+	hasher.update(arg.as_str());
 	let val = hasher.finalize();
 	let val = format!("{:x}", val);
 	Ok(val.into())
@@ -81,7 +80,6 @@ macro_rules! bounded_verify_password {
 pub mod argon2 {
 
 	use super::COST_ALLOWANCE;
-	use crate::ctx::Context;
 	use crate::err::Error;
 	use crate::sql::value::Value;
 	use argon2::{
@@ -90,9 +88,7 @@ pub mod argon2 {
 	};
 	use rand::rngs::OsRng;
 
-	pub fn cmp(_: &Context, args: Vec<Value>) -> Result<Value, Error> {
-		let args: [Value; 2] = args.try_into().unwrap();
-		let [hash, pass] = args.map(Value::as_string);
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
 		type Params<'a> = <Argon2<'a> as PasswordHasher>::Params;
 		Ok(PasswordHash::new(&hash)
 			.ok()
@@ -107,9 +103,8 @@ pub mod argon2 {
 			.into())
 	}
 
-	pub fn gen(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
+	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
 		let algo = Argon2::default();
-		let pass = args.remove(0).as_string();
 		let salt = SaltString::generate(&mut OsRng);
 		let hash = algo.hash_password(pass.as_ref(), salt.as_ref()).unwrap().to_string();
 		Ok(hash.into())
@@ -119,7 +114,6 @@ pub mod argon2 {
 pub mod pbkdf2 {
 
 	use super::COST_ALLOWANCE;
-	use crate::ctx::Context;
 	use crate::err::Error;
 	use crate::sql::value::Value;
 	use pbkdf2::{
@@ -128,9 +122,7 @@ pub mod pbkdf2 {
 	};
 	use rand::rngs::OsRng;
 
-	pub fn cmp(_: &Context, args: Vec<Value>) -> Result<Value, Error> {
-		let args: [Value; 2] = args.try_into().unwrap();
-		let [hash, pass] = args.map(Value::as_string);
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
 		type Params = <Pbkdf2 as PasswordHasher>::Params;
 		Ok(PasswordHash::new(&hash)
 			.ok()
@@ -147,8 +139,7 @@ pub mod pbkdf2 {
 			.into())
 	}
 
-	pub fn gen(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		let pass = args.remove(0).as_string();
+	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
 		let salt = SaltString::generate(&mut OsRng);
 		let hash = Pbkdf2.hash_password(pass.as_ref(), salt.as_ref()).unwrap().to_string();
 		Ok(hash.into())
@@ -157,7 +148,6 @@ pub mod pbkdf2 {
 
 pub mod scrypt {
 
-	use crate::ctx::Context;
 	use crate::err::Error;
 	use crate::sql::value::Value;
 	use rand::rngs::OsRng;
@@ -166,15 +156,15 @@ pub mod scrypt {
 		Scrypt,
 	};
 
-	pub fn cmp(_: &Context, args: Vec<Value>) -> Result<Value, Error> {
-		let args: [Value; 2] = args.try_into().unwrap();
-		let [hash, pass] = args.map(Value::as_string);
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
 		type Params = <Scrypt as PasswordHasher>::Params;
 		Ok(PasswordHash::new(&hash)
 			.ok()
 			.filter(|test| {
 				bounded_verify_password!(Scrypt, Scrypt, pass, test, |params: &Params| {
 					// Scrypt is slow, use lower cost allowance.
+					// Also note that the log_n parameter behaves exponentially, so add instead
+					// of multiplying.
 					params.log_n() <= Params::default().log_n().saturating_add(2)
 						&& params.r() <= Params::default().r().saturating_mul(2)
 						&& params.p() <= Params::default().p().saturating_mul(4)
@@ -184,10 +174,40 @@ pub mod scrypt {
 			.into())
 	}
 
-	pub fn gen(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-		let pass = args.remove(0).as_string();
+	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
 		let salt = SaltString::generate(&mut OsRng);
 		let hash = Scrypt.hash_password(pass.as_ref(), salt.as_ref()).unwrap().to_string();
+		Ok(hash.into())
+	}
+}
+
+pub mod bcrypt {
+
+	use crate::err::Error;
+	use crate::fnc::crypto::COST_ALLOWANCE;
+	use crate::sql::value::Value;
+	use bcrypt;
+	use bcrypt::HashParts;
+	use std::str::FromStr;
+
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
+		let parts = match HashParts::from_str(&hash) {
+			Ok(parts) => parts,
+			Err(_) => return Ok(Value::False),
+		};
+		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to multiplying.
+		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
+			// Too expensive to compute.
+			Value::False
+		} else {
+			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice, once
+			// above and once in verity, by using bcrypt::bcrypt.
+			bcrypt::verify(pass, &hash).unwrap_or(false).into()
+		})
+	}
+
+	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
+		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST).unwrap();
 		Ok(hash.into())
 	}
 }

@@ -41,18 +41,21 @@ impl Value {
 						let path = path.next();
 						v.iter_mut().for_each(|v| v.put(path, val.clone()));
 					}
-					Part::First => match v.first_mut() {
-						Some(v) => v.put(path.next(), val),
-						None => (),
-					},
-					Part::Last => match v.last_mut() {
-						Some(v) => v.put(path.next(), val),
-						None => (),
-					},
-					Part::Index(i) => match v.get_mut(i.to_usize()) {
-						Some(v) => v.put(path.next(), val),
-						None => (),
-					},
+					Part::First => {
+						if let Some(v) = v.first_mut() {
+							v.put(path.next(), val)
+						}
+					}
+					Part::Last => {
+						if let Some(v) = v.last_mut() {
+							v.put(path.next(), val)
+						}
+					}
+					Part::Index(i) => {
+						if let Some(v) = v.get_mut(i.to_usize()) {
+							v.put(path.next(), val)
+						}
+					}
 					_ => {
 						v.iter_mut().for_each(|v| v.put(path, val.clone()));
 					}

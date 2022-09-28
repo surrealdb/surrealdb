@@ -18,6 +18,7 @@ mod ctx;
 mod dbs;
 mod doc;
 mod err;
+mod exe;
 mod fnc;
 mod key;
 mod kvs;

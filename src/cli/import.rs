@@ -1,7 +1,7 @@
 use crate::cli::LOG;
 use crate::err::Error;
 use reqwest::blocking::Client;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::ACCEPT;
 use std::fs::OpenOptions;
 use std::io::prelude::Read;
 
@@ -26,7 +26,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Import the data into the database
 	Client::new()
 		.post(&conn)
-		.header(CONTENT_TYPE, "application/octet-stream")
+		.header(ACCEPT, "application/octet-stream")
 		.basic_auth(user, Some(pass))
 		.header("NS", ns)
 		.header("DB", db)

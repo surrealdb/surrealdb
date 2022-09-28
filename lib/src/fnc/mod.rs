@@ -1,6 +1,5 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::fnc::args::Args;
 use crate::sql::value::Value;
 
 pub mod args;
@@ -8,11 +7,13 @@ pub mod array;
 pub mod cast;
 pub mod count;
 pub mod crypto;
+pub mod duration;
 pub mod future;
 pub mod geo;
 pub mod http;
 pub mod is;
 pub mod math;
+pub mod meta;
 pub mod operate;
 pub mod parse;
 pub mod rand;
@@ -23,178 +24,228 @@ pub mod time;
 pub mod r#type;
 pub mod util;
 
-// Attempts to run any function
+/// Attempts to run any function.
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
-	match name {
-		v if v.starts_with("http") => {
-			// HTTP functions are asynchronous
-			asynchronous(ctx, name, args).await
-		}
-		_ => {
-			// Other functions are synchronous
-			synchronous(ctx, name, args)
-		}
+	if name.starts_with("http")
+		|| (name.starts_with("crypto") && (name.ends_with("compare") || name.ends_with("generate")))
+	{
+		asynchronous(ctx, name, args).await
+	} else {
+		synchronous(ctx, name, args)
 	}
 }
 
-// Attempts to run a synchronous function
+// Each function is specified by its name (a string literal) followed by its path. The path
+// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
+// before the remainder of the arguments. The path may be followed by `.await` to signify that
+// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
+// `cpu_intensive`.
+macro_rules! dispatch {
+	($name: ident, $args: ident, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
+		{
+			match $name {
+				$($function_name => {
+					let args = args::FromArgs::from_args($name, $args)?;
+					#[allow(clippy::redundant_closure_call)]
+					$($wrapper)*(|| $($function_path)::+($($ctx_arg,)* args))()$(.$await)*
+				},)+
+				_ => unreachable!()
+			}
+		}
+	};
+}
+
+/// Attempts to run any synchronous function.
 pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
-	match name {
+	dispatch!(
+		name,
+		args,
+		"array::combine" => array::combine,
+		"array::concat" => array::concat,
+		"array::difference" => array::difference,
+		"array::distinct" => array::distinct,
+		"array::intersect" => array::intersect,
+		"array::len" => array::len,
+		"array::sort" => array::sort,
+		"array::union" => array::union,
+		"array::sort::asc" => array::sort::asc,
+		"array::sort::desc" => array::sort::desc,
 		//
-		"array::combine" => args::check(ctx, name, args, Args::Two, array::combine),
-		"array::concat" => args::check(ctx, name, args, Args::Two, array::concat),
-		"array::difference" => args::check(ctx, name, args, Args::Two, array::difference),
-		"array::distinct" => args::check(ctx, name, args, Args::One, array::distinct),
-		"array::intersect" => args::check(ctx, name, args, Args::Two, array::intersect),
-		"array::len" => args::check(ctx, name, args, Args::One, array::len),
-		"array::sort" => args::check(ctx, name, args, Args::OneTwo, array::sort),
-		"array::union" => args::check(ctx, name, args, Args::Two, array::union),
-		"array::sort::asc" => args::check(ctx, name, args, Args::One, array::sort::asc),
-		"array::sort::desc" => args::check(ctx, name, args, Args::One, array::sort::desc),
+		"count" => count::count,
 		//
-		"count" => args::check(ctx, name, args, Args::NoneOne, count::count),
+		"crypto::md5" => crypto::md5,
+		"crypto::sha1" => crypto::sha1,
+		"crypto::sha256" => crypto::sha256,
+		"crypto::sha512" => crypto::sha512,
 		//
-		"crypto::md5" => args::check(ctx, name, args, Args::One, crypto::md5),
-		"crypto::sha1" => args::check(ctx, name, args, Args::One, crypto::sha1),
-		"crypto::sha256" => args::check(ctx, name, args, Args::One, crypto::sha256),
-		"crypto::sha512" => args::check(ctx, name, args, Args::One, crypto::sha512),
-		"crypto::argon2::compare" => args::check(ctx, name, args, Args::Two, crypto::argon2::cmp),
-		"crypto::argon2::generate" => args::check(ctx, name, args, Args::One, crypto::argon2::gen),
-		"crypto::pbkdf2::compare" => args::check(ctx, name, args, Args::Two, crypto::pbkdf2::cmp),
-		"crypto::pbkdf2::generate" => args::check(ctx, name, args, Args::One, crypto::pbkdf2::gen),
-		"crypto::scrypt::compare" => args::check(ctx, name, args, Args::Two, crypto::scrypt::cmp),
-		"crypto::scrypt::generate" => args::check(ctx, name, args, Args::One, crypto::scrypt::gen),
+		"duration::days" => duration::days,
+		"duration::hours" => duration::hours,
+		"duration::mins" => duration::mins,
+		"duration::secs" => duration::secs,
+		"duration::weeks" => duration::weeks,
+		"duration::years" => duration::years,
 		//
-		"geo::area" => args::check(ctx, name, args, Args::One, geo::area),
-		"geo::bearing" => args::check(ctx, name, args, Args::Two, geo::bearing),
-		"geo::centroid" => args::check(ctx, name, args, Args::One, geo::centroid),
-		"geo::distance" => args::check(ctx, name, args, Args::Two, geo::distance),
-		"geo::hash::decode" => args::check(ctx, name, args, Args::One, geo::hash::decode),
-		"geo::hash::encode" => args::check(ctx, name, args, Args::OneTwo, geo::hash::encode),
+		"geo::area" => geo::area,
+		"geo::bearing" => geo::bearing,
+		"geo::centroid" => geo::centroid,
+		"geo::distance" => geo::distance,
+		"geo::hash::decode" => geo::hash::decode,
+		"geo::hash::encode" => geo::hash::encode,
 		//
-		"is::alphanum" => args::check(ctx, name, args, Args::One, is::alphanum),
-		"is::alpha" => args::check(ctx, name, args, Args::One, is::alpha),
-		"is::ascii" => args::check(ctx, name, args, Args::One, is::ascii),
-		"is::domain" => args::check(ctx, name, args, Args::One, is::domain),
-		"is::email" => args::check(ctx, name, args, Args::One, is::email),
-		"is::hexadecimal" => args::check(ctx, name, args, Args::One, is::hexadecimal),
-		"is::latitude" => args::check(ctx, name, args, Args::One, is::latitude),
-		"is::longitude" => args::check(ctx, name, args, Args::One, is::longitude),
-		"is::numeric" => args::check(ctx, name, args, Args::One, is::numeric),
-		"is::semver" => args::check(ctx, name, args, Args::One, is::semver),
-		"is::uuid" => args::check(ctx, name, args, Args::One, is::uuid),
+		"is::alphanum" => is::alphanum,
+		"is::alpha" => is::alpha,
+		"is::ascii" => is::ascii,
+		"is::domain" => is::domain,
+		"is::email" => is::email,
+		"is::hexadecimal" => is::hexadecimal,
+		"is::latitude" => is::latitude,
+		"is::longitude" => is::longitude,
+		"is::numeric" => is::numeric,
+		"is::semver" => is::semver,
+		"is::uuid" => is::uuid,
 		//
-		"math::abs" => args::check(ctx, name, args, Args::One, math::abs),
-		"math::bottom" => args::check(ctx, name, args, Args::Two, math::bottom),
-		"math::ceil" => args::check(ctx, name, args, Args::One, math::ceil),
-		"math::fixed" => args::check(ctx, name, args, Args::Two, math::fixed),
-		"math::floor" => args::check(ctx, name, args, Args::One, math::floor),
-		"math::interquartile" => args::check(ctx, name, args, Args::One, math::interquartile),
-		"math::max" => args::check(ctx, name, args, Args::One, math::max),
-		"math::mean" => args::check(ctx, name, args, Args::One, math::mean),
-		"math::median" => args::check(ctx, name, args, Args::One, math::median),
-		"math::midhinge" => args::check(ctx, name, args, Args::One, math::midhinge),
-		"math::min" => args::check(ctx, name, args, Args::One, math::min),
-		"math::mode" => args::check(ctx, name, args, Args::One, math::mode),
-		"math::nearestrank" => args::check(ctx, name, args, Args::Two, math::nearestrank),
-		"math::percentile" => args::check(ctx, name, args, Args::Two, math::percentile),
-		"math::product" => args::check(ctx, name, args, Args::One, math::product),
-		"math::round" => args::check(ctx, name, args, Args::One, math::round),
-		"math::spread" => args::check(ctx, name, args, Args::One, math::spread),
-		"math::sqrt" => args::check(ctx, name, args, Args::One, math::sqrt),
-		"math::stddev" => args::check(ctx, name, args, Args::One, math::stddev),
-		"math::sum" => args::check(ctx, name, args, Args::One, math::sum),
-		"math::top" => args::check(ctx, name, args, Args::Two, math::top),
-		"math::trimean" => args::check(ctx, name, args, Args::One, math::trimean),
-		"math::variance" => args::check(ctx, name, args, Args::One, math::variance),
+		"math::abs" => math::abs,
+		"math::bottom" => math::bottom,
+		"math::ceil" => math::ceil,
+		"math::fixed" => math::fixed,
+		"math::floor" => math::floor,
+		"math::interquartile" => math::interquartile,
+		"math::max" => math::max,
+		"math::mean" => math::mean,
+		"math::median" => math::median,
+		"math::midhinge" => math::midhinge,
+		"math::min" => math::min,
+		"math::mode" => math::mode,
+		"math::nearestrank" => math::nearestrank,
+		"math::percentile" => math::percentile,
+		"math::product" => math::product,
+		"math::round" => math::round,
+		"math::spread" => math::spread,
+		"math::sqrt" => math::sqrt,
+		"math::stddev" => math::stddev,
+		"math::sum" => math::sum,
+		"math::top" => math::top,
+		"math::trimean" => math::trimean,
+		"math::variance" => math::variance,
 		//
-		"parse::email::host" => args::check(ctx, name, args, Args::One, parse::email::host),
-		"parse::email::user" => args::check(ctx, name, args, Args::One, parse::email::user),
-		"parse::url::domain" => args::check(ctx, name, args, Args::One, parse::url::domain),
-		"parse::url::fragment" => args::check(ctx, name, args, Args::One, parse::url::fragment),
-		"parse::url::host" => args::check(ctx, name, args, Args::One, parse::url::host),
-		"parse::url::path" => args::check(ctx, name, args, Args::One, parse::url::path),
-		"parse::url::port" => args::check(ctx, name, args, Args::One, parse::url::port),
-		"parse::url::query" => args::check(ctx, name, args, Args::One, parse::url::query),
+		"meta::id" => meta::id,
+		"meta::table" => meta::tb,
+		"meta::tb" => meta::tb,
 		//
-		"rand::bool" => args::check(ctx, name, args, Args::None, rand::bool),
-		"rand::enum" => args::check(ctx, name, args, Args::Any, rand::r#enum),
-		"rand::float" => args::check(ctx, name, args, Args::NoneTwo, rand::float),
-		"rand::guid" => args::check(ctx, name, args, Args::NoneOne, rand::guid),
-		"rand::int" => args::check(ctx, name, args, Args::NoneTwo, rand::int),
-		"rand::string" => args::check(ctx, name, args, Args::NoneOneTwo, rand::string),
-		"rand::time" => args::check(ctx, name, args, Args::NoneTwo, rand::time),
-		"rand::uuid" => args::check(ctx, name, args, Args::None, rand::uuid),
-		"rand" => args::check(ctx, name, args, Args::None, rand::rand),
+		"parse::email::host" => parse::email::host,
+		"parse::email::user" => parse::email::user,
+		"parse::url::domain" => parse::url::domain,
+		"parse::url::fragment" => parse::url::fragment,
+		"parse::url::host" => parse::url::host,
+		"parse::url::path" => parse::url::path,
+		"parse::url::port" => parse::url::port,
+		"parse::url::query" => parse::url::query,
 		//
-		"session::db" => args::check(ctx, name, args, Args::None, session::db),
-		"session::id" => args::check(ctx, name, args, Args::None, session::id),
-		"session::ip" => args::check(ctx, name, args, Args::None, session::ip),
-		"session::ns" => args::check(ctx, name, args, Args::None, session::ns),
-		"session::origin" => args::check(ctx, name, args, Args::None, session::origin),
-		"session::sc" => args::check(ctx, name, args, Args::None, session::sc),
-		"session::sd" => args::check(ctx, name, args, Args::None, session::sd),
+		"rand::bool" => rand::bool,
+		"rand::enum" => rand::r#enum,
+		"rand::float" => rand::float,
+		"rand::guid" => rand::guid,
+		"rand::int" => rand::int,
+		"rand::string" => rand::string,
+		"rand::time" => rand::time,
+		"rand::uuid" => rand::uuid,
+		"rand" => rand::rand,
 		//
-		"string::concat" => args::check(ctx, name, args, Args::Any, string::concat),
-		"string::endsWith" => args::check(ctx, name, args, Args::Two, string::ends_with),
-		"string::join" => args::check(ctx, name, args, Args::Any, string::join),
-		"string::length" => args::check(ctx, name, args, Args::One, string::length),
-		"string::lowercase" => args::check(ctx, name, args, Args::One, string::lowercase),
-		"string::repeat" => args::check(ctx, name, args, Args::Two, string::repeat),
-		"string::replace" => args::check(ctx, name, args, Args::Three, string::replace),
-		"string::reverse" => args::check(ctx, name, args, Args::One, string::reverse),
-		"string::slice" => args::check(ctx, name, args, Args::Three, string::slice),
-		"string::slug" => args::check(ctx, name, args, Args::OneTwo, string::slug),
-		"string::split" => args::check(ctx, name, args, Args::Two, string::split),
-		"string::startsWith" => args::check(ctx, name, args, Args::Two, string::starts_with),
-		"string::trim" => args::check(ctx, name, args, Args::One, string::trim),
-		"string::uppercase" => args::check(ctx, name, args, Args::One, string::uppercase),
-		"string::words" => args::check(ctx, name, args, Args::One, string::words),
+		"session::db" => session::db(ctx),
+		"session::id" => session::id(ctx),
+		"session::ip" => session::ip(ctx),
+		"session::ns" => session::ns(ctx),
+		"session::origin" => session::origin(ctx),
+		"session::sc" => session::sc(ctx),
+		"session::sd" => session::sd(ctx),
+		"session::token" => session::token(ctx),
 		//
-		"time::day" => args::check(ctx, name, args, Args::NoneOne, time::day),
-		"time::floor" => args::check(ctx, name, args, Args::Two, time::floor),
-		"time::group" => args::check(ctx, name, args, Args::Two, time::group),
-		"time::hour" => args::check(ctx, name, args, Args::NoneOne, time::hour),
-		"time::mins" => args::check(ctx, name, args, Args::NoneOne, time::mins),
-		"time::month" => args::check(ctx, name, args, Args::NoneOne, time::month),
-		"time::nano" => args::check(ctx, name, args, Args::NoneOne, time::nano),
-		"time::now" => args::check(ctx, name, args, Args::None, time::now),
-		"time::round" => args::check(ctx, name, args, Args::Two, time::round),
-		"time::secs" => args::check(ctx, name, args, Args::NoneOne, time::secs),
-		"time::unix" => args::check(ctx, name, args, Args::NoneOne, time::unix),
-		"time::wday" => args::check(ctx, name, args, Args::NoneOne, time::wday),
-		"time::week" => args::check(ctx, name, args, Args::NoneOne, time::week),
-		"time::yday" => args::check(ctx, name, args, Args::NoneOne, time::yday),
-		"time::year" => args::check(ctx, name, args, Args::NoneOne, time::year),
+		"string::concat" => string::concat,
+		"string::endsWith" => string::ends_with,
+		"string::join" => string::join,
+		"string::length" => string::length,
+		"string::lowercase" => string::lowercase,
+		"string::repeat" => string::repeat,
+		"string::replace" => string::replace,
+		"string::reverse" => string::reverse,
+		"string::slice" => string::slice,
+		"string::slug" => string::slug,
+		"string::split" => string::split,
+		"string::startsWith" => string::starts_with,
+		"string::trim" => string::trim,
+		"string::uppercase" => string::uppercase,
+		"string::words" => string::words,
 		//
-		"type::bool" => args::check(ctx, name, args, Args::One, r#type::bool),
-		"type::datetime" => args::check(ctx, name, args, Args::One, r#type::datetime),
-		"type::decimal" => args::check(ctx, name, args, Args::One, r#type::decimal),
-		"type::duration" => args::check(ctx, name, args, Args::One, r#type::duration),
-		"type::float" => args::check(ctx, name, args, Args::One, r#type::float),
-		"type::int" => args::check(ctx, name, args, Args::One, r#type::int),
-		"type::number" => args::check(ctx, name, args, Args::One, r#type::number),
-		"type::point" => args::check(ctx, name, args, Args::OneTwo, r#type::point),
-		"type::regex" => args::check(ctx, name, args, Args::One, r#type::regex),
-		"type::string" => args::check(ctx, name, args, Args::One, r#type::string),
-		"type::table" => args::check(ctx, name, args, Args::One, r#type::table),
-		"type::thing" => args::check(ctx, name, args, Args::OneTwo, r#type::thing),
+		"time::day" => time::day,
+		"time::floor" => time::floor,
+		"time::group" => time::group,
+		"time::hour" => time::hour,
+		"time::mins" => time::mins,
+		"time::month" => time::month,
+		"time::nano" => time::nano,
+		"time::now" => time::now,
+		"time::round" => time::round,
+		"time::secs" => time::secs,
+		"time::unix" => time::unix,
+		"time::wday" => time::wday,
+		"time::week" => time::week,
+		"time::yday" => time::yday,
+		"time::year" => time::year,
 		//
-		_ => unreachable!(),
-	}
+		"type::bool" => r#type::bool,
+		"type::datetime" => r#type::datetime,
+		"type::decimal" => r#type::decimal,
+		"type::duration" => r#type::duration,
+		"type::float" => r#type::float,
+		"type::int" => r#type::int,
+		"type::number" => r#type::number,
+		"type::point" => r#type::point,
+		"type::regex" => r#type::regex,
+		"type::string" => r#type::string,
+		"type::table" => r#type::table,
+		"type::thing" => r#type::thing,
+	)
 }
 
-// Attempts to run an asynchronous function
-pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
-	match name {
-		//
-		"http::head" => http::head(ctx, args).await,
-		"http::get" => http::get(ctx, args).await,
-		"http::put" => http::put(ctx, args).await,
-		"http::post" => http::post(ctx, args).await,
-		"http::patch" => http::patch(ctx, args).await,
-		"http::delete" => http::delete(ctx, args).await,
-		//
-		_ => unreachable!(),
+/// Attempts to run any asynchronous function.
+pub async fn asynchronous(
+	_ctx: &Context<'_>,
+	name: &str,
+	args: Vec<Value>,
+) -> Result<Value, Error> {
+	// Wrappers return a function as opposed to a value so that the dispatch! method can always
+	// perform a function call.
+	#[cfg(feature = "parallel")]
+	fn cpu_intensive<R: Send + 'static>(
+		function: impl FnOnce() -> R + Send + 'static,
+	) -> impl FnOnce() -> executor::Task<R> {
+		|| crate::exe::spawn(async move { function() })
 	}
+
+	#[cfg(not(feature = "parallel"))]
+	fn cpu_intensive<R: Send + 'static>(
+		function: impl FnOnce() -> R + Send + 'static,
+	) -> impl FnOnce() -> std::future::Ready<R> {
+		|| std::future::ready(function())
+	}
+
+	dispatch!(
+		name,
+		args,
+		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
+		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::gen.await,
+		"crypto::bcrypt::compare" => (cpu_intensive) crypto::bcrypt::cmp.await,
+		"crypto::bcrypt::generate" => (cpu_intensive) crypto::bcrypt::gen.await,
+		"crypto::pbkdf2::compare" => (cpu_intensive) crypto::pbkdf2::cmp.await,
+		"crypto::pbkdf2::generate" => (cpu_intensive) crypto::pbkdf2::gen.await,
+		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
+		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
+		//
+		"http::head" => http::head.await,
+		"http::get" => http::get.await,
+		"http::put" => http::put.await,
+		"http::post" =>  http::post.await,
+		"http::patch" => http::patch.await,
+		"http::delete" => http::delete.await,
+	)
 }

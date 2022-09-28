@@ -6,6 +6,10 @@ use crate::sql::value::Value;
 use surf::Client;
 use surf::Config;
 
+pub(crate) fn uri_is_valid(uri: &str) -> bool {
+	surf::Url::parse(uri).is_ok()
+}
+
 pub async fn head(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Set a default client with no timeout
 	let cli: Client = Config::new().set_timeout(None).try_into().unwrap();

@@ -46,6 +46,12 @@ impl From<Vec<&str>> for Array {
 	}
 }
 
+impl From<Vec<Number>> for Array {
+	fn from(v: Vec<Number>) -> Self {
+		Array(v.into_iter().map(Value::from).collect())
+	}
+}
+
 impl From<Vec<Operation>> for Array {
 	fn from(v: Vec<Operation>) -> Self {
 		Array(v.into_iter().map(Value::from).collect())

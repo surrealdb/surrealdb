@@ -398,6 +398,12 @@ impl From<Vec<Value>> for Value {
 	}
 }
 
+impl From<Vec<Number>> for Value {
+	fn from(v: Vec<Number>) -> Self {
+		Value::Array(Array::from(v))
+	}
+}
+
 impl From<Vec<Operation>> for Value {
 	fn from(v: Vec<Operation>) -> Self {
 		Value::Array(Array::from(v))
@@ -533,6 +539,14 @@ impl Value {
 
 	pub fn is_thing(&self) -> bool {
 		matches!(self, Value::Thing(_))
+	}
+
+	pub fn is_model(&self) -> bool {
+		matches!(self, Value::Model(_))
+	}
+
+	pub fn is_range(&self) -> bool {
+		matches!(self, Value::Range(_))
 	}
 
 	pub fn is_strand(&self) -> bool {
@@ -842,14 +856,14 @@ impl Value {
 	// -----------------------------------
 
 	/// Fetch the record id if there is one
-	pub fn rid(self) -> Option<Thing> {
+	pub fn record(self) -> Option<Thing> {
 		match self {
 			Value::Object(mut v) => match v.remove("id") {
 				Some(Value::Thing(v)) => Some(v),
 				_ => None,
 			},
 			Value::Array(mut v) => match v.len() {
-				1 => v.remove(0).rid(),
+				1 => v.remove(0).record(),
 				_ => None,
 			},
 			Value::Thing(v) => Some(v),
@@ -1199,6 +1213,7 @@ impl ops::Sub for Value {
 	fn sub(self, other: Self) -> Self {
 		match (self, other) {
 			(Value::Number(v), Value::Number(w)) => Value::Number(v - w),
+			(Value::Datetime(v), Value::Datetime(w)) => Value::Duration(v - w),
 			(Value::Datetime(v), Value::Duration(w)) => Value::Datetime(w - v),
 			(Value::Duration(v), Value::Datetime(w)) => Value::Datetime(v - w),
 			(Value::Duration(v), Value::Duration(w)) => Value::Duration(v - w),
@@ -1220,10 +1235,9 @@ impl ops::Mul for Value {
 impl ops::Div for Value {
 	type Output = Self;
 	fn div(self, other: Self) -> Self {
-		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => Value::Number(v / w),
-			(Value::Datetime(v), Value::Duration(w)) => Value::Datetime(w / v),
-			(v, w) => Value::from(v.as_number() / w.as_number()),
+		match (self.as_number(), other.as_number()) {
+			(_, w) if w == Number::Int(0) => Value::None,
+			(v, w) => Value::Number(v / w),
 		}
 	}
 }

@@ -4,10 +4,7 @@ use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use futures::lock::Mutex;
-use rocksdb::Direction;
-use rocksdb::IteratorMode;
 use rocksdb::OptimisticTransactionDB;
-use rocksdb::ReadOptions;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -273,19 +270,30 @@ impl Transaction {
 		};
 		// Create result set
 		let mut res = vec![];
-		// Iterate forwards
-		let dir = Direction::Forward;
-		// Set the start key
-		let cnf = IteratorMode::From(&rng.start, dir);
-		// Set the maximum key
-		let mut opt = ReadOptions::default();
-		opt.set_iterate_range(..rng.end);
+		// Set the key range
+		let beg = rng.start.as_slice();
+		let end = rng.end.as_slice();
 		// Create the iterator
-		let ite = tx.iterator_opt(cnf, opt);
+		let mut iter = tx.raw_iterator();
+		// Seek to the start key
+		iter.seek(&rng.start);
 		// Scan the keys in the iterator
-		for item in ite.take(limit as usize) {
-			let (k, v) = item?;
-			res.push((k.into_vec(), v.into_vec()));
+		while iter.valid() {
+			// Check the scan limit
+			if res.len() < limit as usize {
+				// Get the key and value
+				let (k, v) = (iter.key(), iter.value());
+				// Check the key and value
+				if let (Some(k), Some(v)) = (k, v) {
+					if k > beg && k < end {
+						res.push((k.to_vec(), v.to_vec()));
+						iter.next();
+						continue;
+					}
+				}
+			}
+			// Exit
+			break;
 		}
 		// Return result
 		Ok(res)

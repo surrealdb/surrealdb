@@ -35,26 +35,26 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set select method
 	let select = warp::any()
 		.and(warp::get())
-		.and(session::build())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String).and(warp::path::end()))
 		.and(warp::query())
+		.and(session::build())
 		.and_then(select_all);
 	// Set create method
 	let create = warp::any()
 		.and(warp::post())
-		.and(session::build())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(session::build())
 		.and_then(create_all);
 	// Set delete method
 	let delete = warp::any()
 		.and(warp::delete())
-		.and(session::build())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String).and(warp::path::end()))
+		.and(session::build())
 		.and_then(delete_all);
 	// Specify route
 	let all = select.or(create).or(delete);
@@ -66,43 +66,43 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set select method
 	let select = warp::any()
 		.and(warp::get())
-		.and(session::build())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(session::build())
 		.and_then(select_one);
 	// Set create method
 	let create = warp::any()
 		.and(warp::post())
-		.and(session::build())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(session::build())
 		.and_then(create_one);
 	// Set update method
 	let update = warp::any()
 		.and(warp::put())
-		.and(session::build())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(session::build())
 		.and_then(update_one);
 	// Set modify method
 	let modify = warp::any()
 		.and(warp::patch())
-		.and(session::build())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(session::build())
 		.and_then(modify_one);
 	// Set delete method
 	let delete = warp::any()
 		.and(warp::delete())
-		.and(session::build())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(session::build())
 		.and_then(delete_one);
 	// Specify route
 	let one = select.or(create).or(update).or(modify).or(delete);
@@ -120,10 +120,10 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 // ------------------------------
 
 async fn select_all(
-	session: Session,
 	output: String,
 	table: String,
 	query: Query,
+	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
@@ -145,17 +145,19 @@ async fn select_all(
 			"application/json" => Ok(output::json(res)),
 			"application/cbor" => Ok(output::cbor(res)),
 			"application/msgpack" => Ok(output::pack(&res)),
-			_ => Err(warp::reject::not_found()),
+			// An incorrect content-type was requested
+			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
+		// There was an error when executing the query
 		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }
 
 async fn create_all(
-	session: Session,
 	output: String,
 	table: String,
 	body: Bytes,
+	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
@@ -179,8 +181,10 @@ async fn create_all(
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
-					_ => Err(warp::reject::not_found()),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
+				// There was an error when executing the query
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
@@ -189,9 +193,9 @@ async fn create_all(
 }
 
 async fn delete_all(
-	session: Session,
 	output: String,
 	table: String,
+	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
@@ -209,8 +213,10 @@ async fn delete_all(
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
-			_ => Err(warp::reject::not_found()),
+			// An incorrect content-type was requested
+			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
+		// There was an error when executing the query
 		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }
@@ -220,10 +226,10 @@ async fn delete_all(
 // ------------------------------
 
 async fn select_one(
-	session: Session,
 	output: String,
 	table: String,
 	id: String,
+	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
@@ -242,18 +248,20 @@ async fn select_one(
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
-			_ => Err(warp::reject::not_found()),
+			// An incorrect content-type was requested
+			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
+		// There was an error when executing the query
 		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }
 
 async fn create_one(
-	session: Session,
 	output: String,
 	table: String,
 	id: String,
 	body: Bytes,
+	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
@@ -278,8 +286,10 @@ async fn create_one(
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
-					_ => Err(warp::reject::not_found()),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
+				// There was an error when executing the query
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
@@ -288,11 +298,11 @@ async fn create_one(
 }
 
 async fn update_one(
-	session: Session,
 	output: String,
 	table: String,
 	id: String,
 	body: Bytes,
+	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
@@ -317,8 +327,10 @@ async fn update_one(
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
-					_ => Err(warp::reject::not_found()),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
+				// There was an error when executing the query
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
@@ -327,11 +339,11 @@ async fn update_one(
 }
 
 async fn modify_one(
-	session: Session,
 	output: String,
 	table: String,
 	id: String,
 	body: Bytes,
+	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
@@ -356,8 +368,10 @@ async fn modify_one(
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
 					"application/msgpack" => Ok(output::pack(&res)),
-					_ => Err(warp::reject::not_found()),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
+				// There was an error when executing the query
 				Err(err) => Err(warp::reject::custom(Error::from(err))),
 			}
 		}
@@ -366,10 +380,10 @@ async fn modify_one(
 }
 
 async fn delete_one(
-	session: Session,
 	output: String,
 	table: String,
 	id: String,
+	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
 	let db = DB.get().unwrap();
@@ -388,8 +402,10 @@ async fn delete_one(
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/msgpack" => Ok(output::pack(&res)),
-			_ => Err(warp::reject::not_found()),
+			// An incorrect content-type was requested
+			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
+		// There was an error when executing the query
 		Err(err) => Err(warp::reject::custom(Error::from(err))),
 	}
 }

@@ -19,11 +19,11 @@ impl Default for Dir {
 
 impl fmt::Display for Dir {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Dir::In => write!(f, "<-"),
-			Dir::Out => write!(f, "->"),
-			Dir::Both => write!(f, "<->"),
-		}
+		f.write_str(match self {
+			Dir::In => "<-",
+			Dir::Out => "->",
+			Dir::Both => "<->",
+		})
 	}
 }
 

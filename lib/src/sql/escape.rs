@@ -1,4 +1,5 @@
-use crate::sql::common::val_char;
+use crate::sql::common::val_u8;
+use std::borrow::Cow;
 
 const BRACKET_L: char = '⟨';
 const BRACKET_R: char = '⟩';
@@ -15,31 +16,36 @@ pub fn escape_strand(s: &str) -> String {
 }
 
 #[inline]
-pub fn escape_id(s: &str) -> String {
-	for x in s.chars() {
-		if !val_char(x) {
-			return format!("{}{}{}", BRACKET_L, s, BRACKET_R);
+pub fn escape_id(s: &str) -> Cow<'_, str> {
+	for x in s.bytes() {
+		if !val_u8(x) {
+			return Cow::Owned(format!("{}{}{}", BRACKET_L, s, BRACKET_R));
 		}
 	}
-	s.to_owned()
+	Cow::Borrowed(s)
 }
 
 #[inline]
-pub fn escape_key(s: &str) -> String {
-	for x in s.chars() {
-		if !val_char(x) {
-			return format!("{}{}{}", DOUBLE, s.replace(DOUBLE, DOUBLE_ESC), DOUBLE);
+pub fn escape_key(s: &str) -> Cow<'_, str> {
+	for x in s.bytes() {
+		if !val_u8(x) {
+			return Cow::Owned(format!("{}{}{}", DOUBLE, s.replace(DOUBLE, DOUBLE_ESC), DOUBLE));
 		}
 	}
-	s.to_owned()
+	Cow::Borrowed(s)
 }
 
 #[inline]
-pub fn escape_ident(s: &str) -> String {
-	for x in s.chars() {
-		if !val_char(x) {
-			return format!("{}{}{}", BACKTICK, s.replace(BACKTICK, BACKTICK_ESC), BACKTICK);
+pub fn escape_ident(s: &str) -> Cow<'_, str> {
+	for x in s.bytes() {
+		if !val_u8(x) {
+			return Cow::Owned(format!(
+				"{}{}{}",
+				BACKTICK,
+				s.replace(BACKTICK, BACKTICK_ESC),
+				BACKTICK
+			));
 		}
 	}
-	s.to_owned()
+	Cow::Borrowed(s)
 }

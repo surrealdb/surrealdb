@@ -1,23 +1,22 @@
 use crate::cnf::ID_CHARS;
-use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::datetime::Datetime;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use nanoid::nanoid;
-use rand::distributions::Alphanumeric;
+use rand::distributions::{Alphanumeric, DistString};
 use rand::prelude::IteratorRandom;
 use rand::Rng;
 
-pub fn rand(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
+pub fn rand(_: ()) -> Result<Value, Error> {
 	Ok(rand::random::<f64>().into())
 }
 
-pub fn bool(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
+pub fn bool(_: ()) -> Result<Value, Error> {
 	Ok(rand::random::<bool>().into())
 }
 
-pub fn r#enum(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn r#enum(mut args: Vec<Value>) -> Result<Value, Error> {
 	Ok(match args.len() {
 		0 => Value::None,
 		1 => match args.remove(0) {
@@ -28,127 +27,99 @@ pub fn r#enum(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
 	})
 }
 
-pub fn float(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	match args.len() {
-		2 => {
-			let min = args.remove(0).as_float();
-			match args.remove(0).as_float() {
-				max if max < min => Ok(rand::thread_rng().gen_range(max..=min).into()),
-				max => Ok(rand::thread_rng().gen_range(min..=max).into()),
-			}
+pub fn float((range,): (Option<(f64, f64)>,)) -> Result<Value, Error> {
+	Ok(if let Some((min, max)) = range {
+		if max < min {
+			rand::thread_rng().gen_range(max..=min)
+		} else {
+			rand::thread_rng().gen_range(min..=max)
 		}
-		0 => Ok(rand::random::<f64>().into()),
-		_ => unreachable!(),
+	} else {
+		rand::random::<f64>()
 	}
+	.into())
 }
 
-pub fn guid(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	match args.len() {
-		1 => {
-			// Only need 53 to uniquely identify all atoms in observable universe.
-			const LIMIT: usize = 64;
-			let len = args.remove(0).as_int() as usize;
-			if len > LIMIT {
-				Err(Error::InvalidArguments {
-					name: String::from("rand::guid"),
-					message: format!("The maximum length of a GUID is {}.", LIMIT),
-				})
-			} else {
-				Ok(nanoid!(len, &ID_CHARS).into())
-			}
+pub fn guid((len,): (Option<usize>,)) -> Result<Value, Error> {
+	// Only need 53 to uniquely identify all atoms in observable universe.
+	const LIMIT: usize = 64;
+
+	let len = match len {
+		Some(len) if len <= LIMIT => len,
+		None => 20,
+		_ => {
+			return Err(Error::InvalidArguments {
+				name: String::from("rand::guid"),
+				message: format!("The maximum length of a GUID is {}.", LIMIT),
+			})
 		}
-		0 => Ok(nanoid!(20, &ID_CHARS).into()),
-		_ => unreachable!(),
-	}
+	};
+
+	Ok(nanoid!(len, &ID_CHARS).into())
 }
 
-pub fn int(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	match args.len() {
-		2 => {
-			let min = args.remove(0).as_int();
-			match args.remove(0).as_int() {
-				max if max < min => Ok(rand::thread_rng().gen_range(max..=min).into()),
-				max => Ok(rand::thread_rng().gen_range(min..=max).into()),
-			}
+pub fn int((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
+	Ok(if let Some((min, max)) = range {
+		if max < min {
+			rand::thread_rng().gen_range(max..=min)
+		} else {
+			rand::thread_rng().gen_range(min..=max)
 		}
-		0 => Ok(rand::random::<i64>().into()),
-		_ => unreachable!(),
+	} else {
+		rand::random::<i64>()
 	}
+	.into())
 }
 
-pub fn string(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
+pub fn string((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
 	// Limit how much time and bandwidth is spent.
 	const LIMIT: i64 = 2i64.pow(16);
-	match args.len() {
-		2 => match args.remove(0).as_int() {
-			min if (0..=LIMIT).contains(&min) => match args.remove(0).as_int() {
-				max if min <= max && max <= LIMIT => Ok(rand::thread_rng()
-					.sample_iter(&Alphanumeric)
-					.take(rand::thread_rng().gen_range(min as usize..=max as usize))
-					.map(char::from)
-					.collect::<String>()
-					.into()),
-				max if max >= 0 && max <= min => Ok(rand::thread_rng()
-					.sample_iter(&Alphanumeric)
-					.take(rand::thread_rng().gen_range(max as usize..=min as usize))
-					.map(char::from)
-					.collect::<String>()
-					.into()),
-				_ => Err(Error::InvalidArguments {
+
+	let len = if let Some((min, max)) = arg1.zip(arg2) {
+		match min {
+			min if (0..=LIMIT).contains(&min) => match max {
+				max if min <= max && max <= LIMIT => rand::thread_rng().gen_range(min as usize..=max as usize),
+				max if max >= 0 && max <= min => rand::thread_rng().gen_range(max as usize..=min as usize),
+				_ => return Err(Error::InvalidArguments {
 					name: String::from("rand::string"),
 					message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {}.", LIMIT),
 				}),
 			},
-			_ => Err(Error::InvalidArguments {
+			_ => return Err(Error::InvalidArguments {
 				name: String::from("rand::string"),
 				message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {}.", LIMIT),
 			}),
-		},
-		1 => match args.remove(0).as_int() {
-			x if (0..=LIMIT).contains(&x) => Ok(rand::thread_rng()
-				.sample_iter(&Alphanumeric)
-				.take(x as usize)
-				.map(char::from)
-				.collect::<String>()
-				.into()),
-			_ => Err(Error::InvalidArguments {
+		}
+	} else if let Some(len) = arg1 {
+		if (0..=LIMIT).contains(&len) {
+			len as usize
+		} else {
+			return Err(Error::InvalidArguments {
 				name: String::from("rand::string"),
 				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {}.", LIMIT),
-			}),
-		},
-		0 => Ok(rand::thread_rng()
-			.sample_iter(&Alphanumeric)
-			.take(32)
-			.map(char::from)
-			.collect::<String>()
-			.into()),
-		_ => unreachable!(),
-	}
+			});
+		}
+	} else {
+		32
+	};
+
+	Ok(Alphanumeric.sample_string(&mut rand::thread_rng(), len).into())
 }
 
-pub fn time(_: &Context, mut args: Vec<Value>) -> Result<Value, Error> {
-	match args.len() {
-		2 => {
-			let min = args.remove(0).as_int();
-			match args.remove(0).as_int() {
-				max if max < min => {
-					let i = rand::thread_rng().gen_range(max..=min);
-					Ok(Datetime::from(i).into())
-				}
-				max => {
-					let i = rand::thread_rng().gen_range(min..=max);
-					Ok(Datetime::from(i).into())
-				}
-			}
-		}
-		0 => {
-			let i = rand::random::<i32>();
-			Ok(Datetime::from(i as i64).into())
-		}
-		_ => unreachable!(),
-	}
+pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
+	let i = if let Some((min, max)) = range {
+		let range = if max < min {
+			max..=min
+		} else {
+			min..=max
+		};
+		rand::thread_rng().gen_range(range)
+	} else {
+		rand::random::<i32>() as i64
+	};
+	Ok(Datetime::from(i).into())
 }
 
-pub fn uuid(_: &Context, _: Vec<Value>) -> Result<Value, Error> {
+pub fn uuid(_: ()) -> Result<Value, Error> {
 	Ok(Uuid::new().into())
 }
