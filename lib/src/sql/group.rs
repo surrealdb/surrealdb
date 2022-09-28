@@ -1,7 +1,8 @@
-use crate::sql::comment::shouldbespace;
+use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::idiom::{basic, Idiom};
+use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list1;
@@ -63,8 +64,16 @@ pub fn group(i: &str) -> IResult<&str, Groups> {
 }
 
 fn group_raw(i: &str) -> IResult<&str, Group> {
-	let (i, v) = basic(i)?;
+	let (i, v) = alt((basic, allow_empty_group))(i)?;
 	Ok((i, Group(v)))
+}
+
+fn allow_empty_group(i: &str) -> IResult<&str, Idiom> {
+	let (i, _) = tag_no_case("(")(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = tag_no_case(")")(i)?;
+
+	Ok((i, Idiom(vec![super::Part::None])))
 }
 
 #[cfg(test)]
