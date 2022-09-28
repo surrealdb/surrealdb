@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use warp::Filter;
 
+use surrealdb::sql::statements::DefineFieldStatement;
 use surrealdb::sql::{Kind, Object, Value};
 use surrealdb::Session;
 
@@ -56,28 +58,65 @@ async fn handler(session: Session) -> Result<impl warp::Reply, warp::Rejection> 
 		if fields.is_err() {
 			continue;
 		}
-		let fields = fields.unwrap();
-
-		// Create a temp array for storing all field objects of this table
-		let mut fields_collect: Vec<Object> = Vec::new();
-		fields.iter().for_each(|field| {
-			let field_type = field.kind.clone().unwrap();
-			// Add an object of {"name":"x", "type":"string"} or {"name":"x", "type":{"type": "record", "name": "table_name"}}
-			fields_collect.push(Object::from(map! {
-				"name".to_string() => Value::from(field.name.clone().to_string()),
-				"type".to_string() => match field_type {
-					Kind::Record(record) => Value::from(map!{
-						"type".to_string() => Value::from("record"),
-						"table".to_string() => Value::from(record.iter().map(|ref v| v.to_string()).collect::<Vec<_>>().join(", "))
-					}),
-					_ => Value::from(field_type.to_string())
-				}
-			}));
-		});
+		// Create an array of the fields, this will change the output for array type fields
+		let processed_fields = get_formatted_fields(fields.unwrap());
 		// Insert the table name => fields array into the table_definitions map
-		table_definitions.insert(table.name.to_string(), fields_collect);
+		table_definitions.insert(table.name.to_string(), processed_fields);
 	}
 
 	// Send response
 	Ok(output::json(&table_definitions))
+}
+
+// I feel this could be done tidier... but i don't know how and it works...
+// Idea is:
+// Array fields return as two separate fields, for ex:
+// {name: "field_name", type: "array"}
+// {name: "field_name[*]", type: "record(thing)"}
+// We want to take field_name, and field_name[*] and combine them into one field, using a "sub_type" instead.
+fn get_formatted_fields(fields: Arc<[DefineFieldStatement]>) -> Vec<Object> {
+	let mut fields_collect: BTreeMap<String, Object> = BTreeMap::new();
+
+	for field in fields.iter() {
+		// The type of our "sub_type" value if applicable, otherwise null
+		let mut sub_field_type: Value = Value::Null;
+		// The type of our field
+		let field_type = field.kind.as_ref().unwrap();
+
+		// If our field is an array, and we've already processed the original field def, we can skip it.
+		if field.name.to_string().contains("[*]")
+			&& fields_collect.contains_key(&field.name.to_string().replace("[*]", ""))
+		{
+			continue;
+		}
+
+		// If the field type is an array, look through our fields and find it's other field definition to get the underlying type
+		let out_field_type = match field_type {
+			Kind::Array => {
+				match fields.iter().find(|f| f.name.to_string() == field.name.to_string() + "[*]") {
+					None => Value::from(field_type.to_string()),
+					Some(arr_field_type) => {
+						// Set the sub type of this array
+						sub_field_type =
+							Value::from(arr_field_type.kind.as_ref().unwrap().to_string());
+						Value::from(field_type.to_string())
+					}
+				}
+			}
+			_ => Value::from(field_type.to_string()),
+		};
+
+		// Finally insert it...
+		fields_collect.insert(
+			field.name.to_string(),
+			Object::from(map! {
+				"name".to_string() => Value::from(field.name.to_string()),
+				"type".to_string() => out_field_type,
+				"sub_type".to_string() => sub_field_type
+			}),
+		);
+	}
+
+	// Return it as an array for the response
+	fields_collect.values().cloned().collect()
 }
