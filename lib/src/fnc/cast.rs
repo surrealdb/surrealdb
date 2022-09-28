@@ -22,50 +22,50 @@ pub fn bool(val: Value) -> Result<Value, Error> {
 }
 
 pub fn int(val: Value) -> Result<Value, Error> {
-	match val {
-		Value::Number(Number::Int(_)) => Ok(val),
-		_ => Ok(Value::Number(Number::Int(val.as_int()))),
-	}
+	Ok(match val {
+		Value::Number(Number::Int(_)) => val,
+		_ => Value::Number(Number::Int(val.as_int())),
+	})
 }
 
 pub fn float(val: Value) -> Result<Value, Error> {
-	match val {
-		Value::Number(Number::Float(_)) => Ok(val),
-		_ => Ok(Value::Number(Number::Float(val.as_float()))),
-	}
+	Ok(match val {
+		Value::Number(Number::Float(_)) => val,
+		_ => Value::Number(Number::Float(val.as_float())),
+	})
 }
 
 pub fn number(val: Value) -> Result<Value, Error> {
-	match val {
-		Value::Number(Number::Decimal(_)) => Ok(val),
-		_ => Ok(Value::Number(Number::Decimal(val.as_decimal()))),
-	}
+	Ok(match val {
+		Value::Number(Number::Decimal(_)) => val,
+		_ => Value::Number(Number::Decimal(val.as_decimal())),
+	})
 }
 
 pub fn decimal(val: Value) -> Result<Value, Error> {
-	match val {
-		Value::Number(Number::Decimal(_)) => Ok(val),
-		_ => Ok(Value::Number(Number::Decimal(val.as_decimal()))),
-	}
+	Ok(match val {
+		Value::Number(Number::Decimal(_)) => val,
+		_ => Value::Number(Number::Decimal(val.as_decimal())),
+	})
 }
 
 pub fn string(val: Value) -> Result<Value, Error> {
-	match val {
-		Value::Strand(_) => Ok(val),
-		_ => Ok(Value::Strand(val.as_strand())),
-	}
+	Ok(match val {
+		Value::Strand(_) => val,
+		_ => Value::Strand(val.as_strand()),
+	})
 }
 
 pub fn datetime(val: Value) -> Result<Value, Error> {
-	match val {
-		Value::Datetime(_) => Ok(val),
-		_ => Ok(Value::Datetime(val.as_datetime())),
-	}
+	Ok(match val {
+		Value::Datetime(_) => val,
+		_ => Value::Datetime(val.as_datetime()),
+	})
 }
 
 pub fn duration(val: Value) -> Result<Value, Error> {
-	match val {
-		Value::Duration(_) => Ok(val),
-		_ => Ok(Value::Duration(val.as_duration())),
-	}
+	Ok(match val {
+		Value::Duration(_) => val,
+		_ => Value::Duration(val.as_duration()),
+	})
 }

@@ -23,6 +23,9 @@ pub enum Error {
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
 
+	#[error("The specified media type is unsupported")]
+	InvalidType,
+
 	#[error("There was a problem connecting with the storage engine")]
 	InvalidStorage,
 

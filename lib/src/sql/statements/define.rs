@@ -4,7 +4,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
-use crate::sql::base::{base, Base};
+use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
@@ -349,7 +349,7 @@ impl DefineTokenStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		match self.base {
+		match &self.base {
 			Base::Ns => {
 				// Selected DB?
 				opt.needs(Level::Ns)?;
@@ -383,6 +383,24 @@ impl DefineTokenStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
+			Base::Sc(sc) => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
+				// Allowed to run?
+				opt.check(Level::Db)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Process the statement
+				let key = crate::key::st::new(opt.ns(), opt.db(), sc, &self.name);
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+				run.add_sc(opt.ns(), opt.db(), sc, opt.strict).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
 			_ => unreachable!(),
 		}
 	}
@@ -410,7 +428,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, base) = base(i)?;
+	let (i, base) = base_or_scope(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TYPE")(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -695,14 +713,7 @@ pub enum DefineTableOption {
 }
 
 fn table_opts(i: &str) -> IResult<&str, DefineTableOption> {
-	alt((
-		table_drop,
-		table_view,
-		table_schemaless,
-		table_schemafull,
-		table_schemaful,
-		table_permissions,
-	))(i)
+	alt((table_drop, table_view, table_schemaless, table_schemafull, table_permissions))(i)
 }
 
 fn table_drop(i: &str) -> IResult<&str, DefineTableOption> {
@@ -725,13 +736,7 @@ fn table_schemaless(i: &str) -> IResult<&str, DefineTableOption> {
 
 fn table_schemafull(i: &str) -> IResult<&str, DefineTableOption> {
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("SCHEMAFULL")(i)?;
-	Ok((i, DefineTableOption::Schemafull))
-}
-
-fn table_schemaful(i: &str) -> IResult<&str, DefineTableOption> {
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("SCHEMAFUL")(i)?;
+	let (i, _) = alt((tag_no_case("SCHEMAFULL"), tag_no_case("SCHEMAFUL")))(i)?;
 	Ok((i, DefineTableOption::Schemafull))
 }
 

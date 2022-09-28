@@ -239,10 +239,12 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 		function_array,
 		function_count,
 		function_crypto,
+		function_duration,
 		function_geo,
 		function_http,
 		function_is,
 		function_math,
+		function_meta,
 		function_parse,
 		function_rand,
 		function_session,
@@ -275,6 +277,8 @@ fn function_crypto(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("crypto::argon2::compare"),
 		tag("crypto::argon2::generate"),
+		tag("crypto::bcrypt::compare"),
+		tag("crypto::bcrypt::generate"),
 		tag("crypto::md5"),
 		tag("crypto::pbkdf2::compare"),
 		tag("crypto::pbkdf2::generate"),
@@ -283,6 +287,17 @@ fn function_crypto(i: &str) -> IResult<&str, &str> {
 		tag("crypto::sha1"),
 		tag("crypto::sha256"),
 		tag("crypto::sha512"),
+	))(i)
+}
+
+fn function_duration(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("duration::days"),
+		tag("duration::hours"),
+		tag("duration::mins"),
+		tag("duration::secs"),
+		tag("duration::weeks"),
+		tag("duration::years"),
 	))(i)
 }
 
@@ -358,6 +373,10 @@ fn function_math(i: &str) -> IResult<&str, &str> {
 	))(i)
 }
 
+fn function_meta(i: &str) -> IResult<&str, &str> {
+	alt((tag("meta::id"), tag("meta::table"), tag("meta::tb")))(i)
+}
+
 fn function_parse(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("parse::email::host"),
@@ -394,6 +413,7 @@ fn function_session(i: &str) -> IResult<&str, &str> {
 		tag("session::origin"),
 		tag("session::sc"),
 		tag("session::sd"),
+		tag("session::token"),
 	))(i)
 }
 

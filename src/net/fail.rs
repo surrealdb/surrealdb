@@ -25,6 +25,15 @@ pub async fn recover(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rej
 				}),
 				StatusCode::FORBIDDEN,
 			)),
+			Error::InvalidType => Ok(warp::reply::with_status(
+				warp::reply::json(&Message {
+					code: 415,
+					details: Some("Unsupported media type".to_string()),
+					description: Some("The request needs to adhere to certain constraints. Refer to the documentation for supported content types.".to_string()),
+					information: None,
+				}),
+				StatusCode::UNSUPPORTED_MEDIA_TYPE,
+			)),
 			Error::InvalidStorage => Ok(warp::reply::with_status(
 				warp::reply::json(&Message {
 					code: 500,
@@ -32,7 +41,7 @@ pub async fn recover(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rej
 					description: Some("The database health check for this instance failed. There was an issue with the underlying storage engine.".to_string()),
 					information: Some(err.to_string()),
 				}),
-				StatusCode::FORBIDDEN,
+				StatusCode::INTERNAL_SERVER_ERROR,
 			)),
 			_ => Ok(warp::reply::with_status(
 				warp::reply::json(&Message {
@@ -54,16 +63,6 @@ pub async fn recover(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rej
 			}),
 			StatusCode::NOT_FOUND,
 		))
-	} else if err.find::<warp::reject::MethodNotAllowed>().is_some() {
-		Ok(warp::reply::with_status(
-			warp::reply::json(&Message {
-				code: 405,
-				details: Some("Requested method not allowed".to_string()),
-				description: Some("The requested http method is not allowed for this resource. Refer to the documentation for allowed methods.".to_string()),
-				information: None,
-			}),
-			StatusCode::METHOD_NOT_ALLOWED,
-		))
 	} else if err.find::<warp::reject::MissingHeader>().is_some() {
 		Ok(warp::reply::with_status(
 			warp::reply::json(&Message {
@@ -84,16 +83,6 @@ pub async fn recover(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rej
 			}),
 			StatusCode::PAYLOAD_TOO_LARGE,
 		))
-	} else if err.find::<warp::reject::UnsupportedMediaType>().is_some() {
-		Ok(warp::reply::with_status(
-			warp::reply::json(&Message {
-				code: 415,
-				details: Some("Unsupported media type".to_string()),
-				description: Some("The request needs to adhere to certain constraints. Refer to the documentation for supported content types.".to_string()),
-				information: None,
-			}),
-			StatusCode::UNSUPPORTED_MEDIA_TYPE,
-		))
 	} else if err.find::<warp::reject::InvalidQuery>().is_some() {
 		Ok(warp::reply::with_status(
 			warp::reply::json(&Message {
@@ -113,6 +102,16 @@ pub async fn recover(err: warp::Rejection) -> Result<impl warp::Reply, warp::Rej
 				information: None,
 			}),
 			StatusCode::NOT_IMPLEMENTED,
+		))
+	} else if err.find::<warp::reject::MethodNotAllowed>().is_some() {
+		Ok(warp::reply::with_status(
+			warp::reply::json(&Message {
+				code: 405,
+				details: Some("Requested method not allowed".to_string()),
+				description: Some("The requested http method is not allowed for this resource. Refer to the documentation for allowed methods.".to_string()),
+				information: None,
+			}),
+			StatusCode::METHOD_NOT_ALLOWED,
 		))
 	} else {
 		Ok(warp::reply::with_status(

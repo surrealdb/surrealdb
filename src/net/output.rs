@@ -5,6 +5,7 @@ use serde::Serialize;
 pub enum Output {
 	None,
 	Fail,
+	Text(String),
 	Json(Vec<u8>), // JSON
 	Cbor(Vec<u8>), // CBOR
 	Pack(Vec<u8>), // MessagePack
@@ -12,6 +13,10 @@ pub enum Output {
 
 pub fn none() -> Output {
 	Output::None
+}
+
+pub fn text(val: String) -> Output {
+	Output::Text(val)
 }
 
 pub fn json<T>(val: &T) -> Output
@@ -47,6 +52,12 @@ where
 impl warp::Reply for Output {
 	fn into_response(self) -> warp::reply::Response {
 		match self {
+			Output::Text(v) => {
+				let mut res = warp::reply::Response::new(v.into());
+				let con = HeaderValue::from_static("text/plain");
+				res.headers_mut().insert(CONTENT_TYPE, con);
+				res
+			}
 			Output::Json(v) => {
 				let mut res = warp::reply::Response::new(v.into());
 				let con = HeaderValue::from_static("application/json");

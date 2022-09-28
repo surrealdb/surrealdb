@@ -1,4 +1,5 @@
 pub mod clear;
+pub mod parse;
 pub mod signin;
 pub mod signup;
 pub mod token;
@@ -6,6 +7,9 @@ pub mod verify;
 
 use crate::cli::CF;
 use crate::err::Error;
+
+pub const BASIC: &str = "Basic ";
+pub const TOKEN: &str = "Bearer ";
 
 const LOG: &str = "surrealdb::iam";
 

@@ -15,7 +15,7 @@ impl Value {
 				Value::Object(v) => match p {
 					Part::Field(f) => match v.get(f as &str) {
 						Some(v) => v._walk(path.next(), prev.push(p.clone())),
-						None => vec![(prev.push(p.clone()), Value::None)],
+						None => Value::None._walk(path.next(), prev.push(p.clone())),
 					},
 					Part::All => self._walk(path.next(), prev.push(p.clone())),
 					_ => vec![],
@@ -46,7 +46,11 @@ impl Value {
 						.collect::<Vec<_>>(),
 				},
 				// Ignore everything else
-				_ => vec![],
+				_ => match p {
+					Part::Field(_) => Value::None._walk(path.next(), prev.push(p.clone())),
+					Part::Index(_) => Value::None._walk(path.next(), prev.push(p.clone())),
+					_ => vec![],
+				},
 			},
 			// No more parts so get the value
 			None => vec![(prev, self.clone())],
@@ -62,11 +66,19 @@ mod tests {
 	use crate::sql::test::Parse;
 
 	#[test]
-	fn walk_none() {
+	fn walk_blank() {
 		let idi = Idiom::default();
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res =
 			vec![(Idiom::default(), Value::parse("{ test: { other: null, something: 123 } }"))];
+		assert_eq!(res, val.walk(&idi));
+	}
+
+	#[test]
+	fn walk_basic() {
+		let idi = Idiom::parse("test.something");
+		let val = Value::parse("{ test: { other: null, something: 123 } }");
+		let res = vec![(Idiom::parse("test.something"), Value::from(123))];
 		assert_eq!(res, val.walk(&idi));
 	}
 
@@ -79,10 +91,26 @@ mod tests {
 	}
 
 	#[test]
-	fn walk_basic() {
-		let idi = Idiom::parse("test.something");
-		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = vec![(Idiom::parse("test.something"), Value::from(123))];
+	fn walk_empty_object() {
+		let idi = Idiom::parse("none.something.age");
+		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = vec![(Idiom::parse("none.something.age"), Value::None)];
+		assert_eq!(res, val.walk(&idi));
+	}
+
+	#[test]
+	fn walk_empty_array() {
+		let idi = Idiom::parse("none.something.*.age");
+		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res: Vec<(Idiom, Value)> = vec![];
+		assert_eq!(res, val.walk(&idi));
+	}
+
+	#[test]
+	fn walk_empty_array_index() {
+		let idi = Idiom::parse("none.something[0].age");
+		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res = vec![(Idiom::parse("none.something[0].age"), Value::None)];
 		assert_eq!(res, val.walk(&idi));
 	}
 

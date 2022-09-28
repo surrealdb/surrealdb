@@ -1,3 +1,5 @@
+#![cfg(feature = "scripting")]
+
 mod parse;
 use parse::Parse;
 use surrealdb::sql::Value;
@@ -105,7 +107,7 @@ async fn script_function_types() -> Result<(), Error> {
 	let sql = "
 		CREATE article:test SET
 			created_at = function() {
-				return new Date('1995-12-17T03:24:00');
+				return new Date('1995-12-17T03:24:00Z');
 			},
 			next_signin = function() {
 				return new Duration('1w2d6h');
