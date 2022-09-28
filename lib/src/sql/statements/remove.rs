@@ -7,6 +7,8 @@ use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
+use crate::sql::idiom;
+use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -544,7 +546,7 @@ fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct RemoveFieldStatement {
-	pub name: Ident,
+	pub name: Idiom,
 	pub what: Ident,
 }
 
@@ -565,7 +567,7 @@ impl RemoveFieldStatement {
 		// Claim transaction
 		let mut run = run.lock().await;
 		// Delete the definition
-		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name.to_string());
 		run.del(key).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -583,7 +585,7 @@ fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FIELD")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
+	let (i, name) = idiom::local(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;
