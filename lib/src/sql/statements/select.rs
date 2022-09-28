@@ -139,6 +139,12 @@ impl SelectStatement {
 			.iter()
 			.map(|b| &b.0)
 			.filter(|idom| {
+				log::info!("group idom {:?}", idom.0);
+
+				if idom.0.iter().any(|x| x == &crate::sql::Part::None) {
+					return false;
+				}
+
 				let contains = self.expr.0.iter().any(|x| match x {
 					crate::sql::Field::All => true,
 					crate::sql::Field::Alone(x) => match x {
