@@ -20,6 +20,7 @@ mod signin;
 mod signup;
 mod sql;
 mod status;
+mod structure;
 mod sync;
 mod version;
 
@@ -50,7 +51,10 @@ pub async fn init() -> Result<(), Error> {
 		.or(sql::config())
 		// SQL AST endpoint
 		.or(ast::config())
+		// AST to SQL endpoint
 		.or(asttosql::config())
+		// Json array of table name => fields array for usage in type generation code
+		.or(structure::config())
 		// API query endpoint
 		.or(key::config())
 		// Catch all errors
