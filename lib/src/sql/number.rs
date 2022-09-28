@@ -11,13 +11,13 @@ use nom::combinator::map;
 use nom::number::complete::recognize_float;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::f64::consts;
 use std::fmt;
 use std::fmt::Display;
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops;
 use std::str::FromStr;
-use std::f64::consts;
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum Number {
@@ -531,15 +531,8 @@ impl Sort for Vec<Number> {
 }
 
 pub fn number(i: &str) -> IResult<&str, Number> {
-	alt(
-		(map(integer, Number::from), 
-		map(decimal, Number::from),
-		map(math_const, Number::from)
-	)
-	)(i)
+	alt((map(integer, Number::from), map(decimal, Number::from), map(math_const, Number::from)))(i)
 }
-
-
 
 pub fn integer(i: &str) -> IResult<&str, i64> {
 	let (i, v) = i64(i)?;
@@ -555,7 +548,7 @@ pub fn decimal(i: &str) -> IResult<&str, &str> {
 
 pub fn math_const(i: &str) -> IResult<&str, f64> {
 	let (i, _) = tag_no_case("MATH::")(i)?;
-	let(i, v) = alt((
+	let (i, v) = alt((
 		map(tag_no_case("PI"), |_| consts::PI),
 		map(tag_no_case("E"), |_| consts::E),
 		map(tag_no_case("TAU"), |_| consts::TAU),
@@ -564,7 +557,6 @@ pub fn math_const(i: &str) -> IResult<&str, f64> {
 	let (i, _) = ending(i)?;
 	Ok((i, v))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -651,7 +643,6 @@ mod tests {
 		assert_eq!(out, Number::from(-123.45));
 	}
 
-
 	#[test]
 	fn number_math_constant() {
 		let sql = "math::PI";
@@ -660,5 +651,4 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(out, Number::from(consts::PI));
 	}
-
 }
