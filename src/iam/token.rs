@@ -19,26 +19,36 @@ pub struct Claims {
 	#[serde(alias = "ns")]
 	#[serde(alias = "NS")]
 	#[serde(rename = "NS")]
+	#[serde(alias = "https://surrealdb.com/ns")]
+	#[serde(alias = "https://surrealdb.com/namespace")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub ns: Option<String>,
 	#[serde(alias = "db")]
 	#[serde(alias = "DB")]
 	#[serde(rename = "DB")]
+	#[serde(alias = "https://surrealdb.com/db")]
+	#[serde(alias = "https://surrealdb.com/database")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub db: Option<String>,
 	#[serde(alias = "sc")]
 	#[serde(alias = "SC")]
 	#[serde(rename = "SC")]
+	#[serde(alias = "https://surrealdb.com/sc")]
+	#[serde(alias = "https://surrealdb.com/scope")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub sc: Option<String>,
 	#[serde(alias = "tk")]
 	#[serde(alias = "TK")]
 	#[serde(rename = "TK")]
+	#[serde(alias = "https://surrealdb.com/tk")]
+	#[serde(alias = "https://surrealdb.com/token")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub tk: Option<String>,
 	#[serde(alias = "id")]
 	#[serde(alias = "ID")]
 	#[serde(rename = "ID")]
+	#[serde(alias = "https://surrealdb.com/id")]
+	#[serde(alias = "https://surrealdb.com/record")]
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub id: Option<String>,
 }
