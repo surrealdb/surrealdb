@@ -25,9 +25,11 @@ pub async fn run(
 	let exe = Executor::default();
 	// Create an JavaScript context
 	let run = js::Runtime::new().unwrap();
-	// Note: the default max_stack_size of rquickjs can be left as-is, but there is no default
-	// memory limit.
+	// Explicitly set max stack size to 256 KiB
+	run.set_max_stack_size(262_144);
+	// Explicitly set max memory size to 2 MB
 	run.set_memory_limit(2_000_000);
+	// Ensure scripts are cancelled with context
 	let cancellation = ctx.cancellation();
 	run.set_interrupt_handler(Some(Box::new(move || cancellation.is_done())));
 	// Create an execution context
