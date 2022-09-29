@@ -1,5 +1,6 @@
 use crate::sql::common::take_u64;
 use crate::sql::datetime::Datetime;
+use crate::sql::ending::duration as ending;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
@@ -223,6 +224,7 @@ impl<'a> Sum<&'a Self> for Duration {
 
 pub fn duration(i: &str) -> IResult<&str, Duration> {
 	let (i, v) = many1(duration_raw)(i)?;
+	let (i, _) = ending(i)?;
 	Ok((i, v.iter().sum::<Duration>()))
 }
 
