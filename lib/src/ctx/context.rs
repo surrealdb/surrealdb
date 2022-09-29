@@ -1,3 +1,4 @@
+use crate::ctx::cancellation::Cancellation;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 use crate::sql::value::Value;
@@ -65,6 +66,16 @@ impl<'a> Context<'a> {
 		Canceller::new(cancelled)
 	}
 
+	/// Get a 'static view into the cancellation status.
+	pub fn cancellation(&self) -> Cancellation {
+		Cancellation::new(
+			self.deadline,
+			std::iter::successors(Some(self), |ctx| ctx.parent)
+				.map(|ctx| ctx.cancelled.clone())
+				.collect(),
+		)
+	}
+
 	// Add a deadline to the context. If the current deadline is sooner than
 	// the provided deadline, this method does nothing.
 	pub fn add_deadline(&mut self, deadline: Instant) {
@@ -100,8 +111,7 @@ impl<'a> Context<'a> {
 	pub fn done(&self) -> Option<Reason> {
 		match self.deadline {
 			Some(deadline) if deadline <= Instant::now() => Some(Reason::Timedout),
-			// TODO: see if we can relax the ordering.
-			_ if self.cancelled.load(Ordering::SeqCst) => Some(Reason::Canceled),
+			_ if self.cancelled.load(Ordering::Relaxed) => Some(Reason::Canceled),
 			_ => match self.parent {
 				Some(ctx) => ctx.done(),
 				_ => None,
