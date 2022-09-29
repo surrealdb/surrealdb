@@ -28,7 +28,7 @@ impl<'a> Document<'a> {
 				}
 			}
 			// Loop over every field in the document
-			for fd in self.current.every().iter() {
+			for fd in self.current.every(true).iter() {
 				if !keys.contains(fd) {
 					match fd {
 						fd if fd.is_id() => continue,
