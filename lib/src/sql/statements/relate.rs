@@ -148,8 +148,17 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				let t = self.kind.generate();
-				i.ingest(Iterable::Relatable(f, t, w));
+				match &self.data {
+					// There is a data clause so check for a record id
+					Some(data) => match data.rid(&self.kind) {
+						// There was a problem creating the record id
+						Err(e) => return Err(e),
+						// There is an id field so use the record id
+						Ok(t) => i.ingest(Iterable::Relatable(f, t, w)),
+					},
+					// There is no data clause so create a record id
+					None => i.ingest(Iterable::Relatable(f, self.kind.generate(), w)),
+				};
 			}
 		}
 		// Assign the statement

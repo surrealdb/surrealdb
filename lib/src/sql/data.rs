@@ -37,11 +37,11 @@ impl Data {
 	// Fetch
 	pub(crate) fn rid(&self, tb: &Table) -> Result<Thing, Error> {
 		match self {
-			Data::MergeExpression(v) => v.generate(tb, false),
-			Data::ReplaceExpression(v) => v.generate(tb, false),
-			Data::ContentExpression(v) => v.generate(tb, false),
+			Data::MergeExpression(v) => v.rid().generate(tb, false),
+			Data::ReplaceExpression(v) => v.rid().generate(tb, false),
+			Data::ContentExpression(v) => v.rid().generate(tb, false),
 			Data::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
-				Some((_, _, v)) => v.generate(tb, false),
+				Some((_, _, v)) => v.clone().generate(tb, false),
 				_ => Ok(tb.generate()),
 			},
 			_ => Ok(tb.generate()),

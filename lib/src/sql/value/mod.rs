@@ -25,6 +25,7 @@ mod patch;
 mod pick;
 mod put;
 mod replace;
+mod rid;
 mod set;
 mod single;
 mod walk;
