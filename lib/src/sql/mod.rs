@@ -4,6 +4,7 @@ pub(crate) mod base;
 pub(crate) mod comment;
 pub(crate) mod common;
 pub(crate) mod cond;
+pub(crate) mod constant;
 pub(crate) mod data;
 pub(crate) mod datetime;
 pub(crate) mod dir;

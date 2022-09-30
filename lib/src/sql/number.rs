@@ -5,13 +5,11 @@ use bigdecimal::BigDecimal;
 use bigdecimal::FromPrimitive;
 use bigdecimal::ToPrimitive;
 use nom::branch::alt;
-use nom::bytes::complete::tag_no_case;
 use nom::character::complete::i64;
 use nom::combinator::map;
 use nom::number::complete::recognize_float;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::f64::consts;
 use std::fmt;
 use std::fmt::Display;
 use std::iter::Product;
@@ -531,7 +529,7 @@ impl Sort for Vec<Number> {
 }
 
 pub fn number(i: &str) -> IResult<&str, Number> {
-	alt((map(integer, Number::from), map(decimal, Number::from), map(math_const, Number::from)))(i)
+	alt((map(integer, Number::from), map(decimal, Number::from)))(i)
 }
 
 pub fn integer(i: &str) -> IResult<&str, i64> {
@@ -542,18 +540,6 @@ pub fn integer(i: &str) -> IResult<&str, i64> {
 
 pub fn decimal(i: &str) -> IResult<&str, &str> {
 	let (i, v) = recognize_float(i)?;
-	let (i, _) = ending(i)?;
-	Ok((i, v))
-}
-
-pub fn math_const(i: &str) -> IResult<&str, f64> {
-	let (i, _) = tag_no_case("MATH::")(i)?;
-	let (i, v) = alt((
-		map(tag_no_case("PI"), |_| consts::PI),
-		map(tag_no_case("E"), |_| consts::E),
-		map(tag_no_case("TAU"), |_| consts::TAU),
-		map(tag_no_case("SQRT_2"), |_| consts::SQRT_2),
-	))(i)?;
 	let (i, _) = ending(i)?;
 	Ok((i, v))
 }
@@ -641,14 +627,5 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("-123.45", format!("{}", out));
 		assert_eq!(out, Number::from(-123.45));
-	}
-
-	#[test]
-	fn number_math_constant() {
-		let sql = "math::PI";
-		let res = number(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!(out, Number::from(consts::PI));
 	}
 }
