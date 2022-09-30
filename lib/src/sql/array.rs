@@ -331,6 +331,7 @@ impl Uniq<Array> for Array {
 // ------------------------------
 
 pub fn array(i: &str) -> IResult<&str, Array> {
+	crate::sql::depth::limit()?;
 	let (i, _) = char('[')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = separated_list0(commas, item)(i)?;

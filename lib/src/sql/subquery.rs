@@ -196,6 +196,7 @@ impl fmt::Display for Subquery {
 }
 
 pub fn subquery(i: &str) -> IResult<&str, Subquery> {
+	crate::sql::depth::limit()?;
 	alt((subquery_ifelse, subquery_others))(i)
 }
 
