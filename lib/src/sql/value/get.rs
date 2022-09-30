@@ -36,17 +36,12 @@ impl Value {
 						None => Ok(Value::None),
 					},
 					Part::All => self.get(ctx, opt, txn, path.next()).await,
-					Part::Any => self.get(ctx, opt, txn, path.next()).await,
 					_ => Ok(Value::None),
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
-						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						try_join_all(futs).await.map(Into::into)
-					}
-					Part::Any => {
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
 						try_join_all(futs).await.map(Into::into)
 					}
@@ -135,13 +130,7 @@ impl Value {
 					}
 				}
 				// Ignore everything else
-				_ => match p {
-					Part::Any => match path.len() {
-						1 => Ok(self.clone()),
-						_ => Ok(Value::None),
-					},
-					_ => Ok(Value::None),
-				},
+				_ => Ok(Value::None),
 			},
 			// No more parts so get the value
 			None => Ok(self.clone()),

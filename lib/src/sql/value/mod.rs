@@ -13,6 +13,7 @@ mod del;
 mod diff;
 mod each;
 mod every;
+mod fetch;
 mod first;
 mod flatten;
 mod generate;
