@@ -3691,7 +3691,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.0.0-beta.7"
+version = "1.0.0-beta.8"
 dependencies = [
  "addr",
  "argon2",
