@@ -7,6 +7,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::common::commas;
+use crate::sql::constant::constant;
 use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
@@ -1261,6 +1262,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		alt((
 			map(subquery, Value::from),
 			map(function, Value::from),
+			map(constant, Value::from),
 			map(datetime, Value::from),
 			map(duration, Value::from),
 			map(geometry, Value::from),
@@ -1290,6 +1292,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(expression, Value::from),
 			map(subquery, Value::from),
 			map(function, Value::from),
+			map(constant, Value::from),
 			map(datetime, Value::from),
 			map(duration, Value::from),
 			map(geometry, Value::from),
@@ -1313,6 +1316,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 	alt((
 		map(subquery, Value::from),
 		map(function, Value::from),
+		map(constant, Value::from),
 		map(param, Value::from),
 		map(model, Value::from),
 		map(edges, Value::from),
