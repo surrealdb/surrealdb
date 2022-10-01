@@ -88,7 +88,10 @@ pub(crate) mod depth {
 	#[inline(never)]
 	#[must_use = "must store and implicitly drop when returning"]
 	pub(super) fn reset() -> Parsing {
-		INITIAL.with(|initial| initial.set(Some(0)));
+		INITIAL.with(|initial| {
+			debug_assert_eq!(initial.get(), None);
+			initial.set(Some(0))
+		});
 		Parsing
 	}
 
@@ -100,7 +103,7 @@ pub(crate) mod depth {
 		fn drop(&mut self) {
 			INITIAL.with(|initial| {
 				let old = initial.replace(None);
-				debug_assert!(old.is_some());
+				debug_assert_eq!(old, Some(0));
 			});
 		}
 	}
@@ -120,10 +123,7 @@ pub(crate) mod depth {
 				}
 			} else {
 				#[cfg(not(test))]
-				debug_assert!(
-					false,
-					"sql::parser::depth::reset not called during non-test parsing"
-				);
+				debug_assert!(false, "sql::parser::depth::dive not called during non-test parsing");
 				Ok(Diving)
 			}
 		})
