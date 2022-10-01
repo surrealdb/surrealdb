@@ -92,8 +92,14 @@ pub(crate) mod depth {
 	/// Get approximate address of stack frame.
 	#[inline(always)]
 	fn measure() -> usize {
-		let on_stack = 0x4BAD1DEA;
-		&on_stack as *const _ as usize
+		#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+		return {
+			let on_stack = 0x4BAD1DEA;
+			&on_stack as *const _ as usize
+		};
+
+		#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+		0
 	}
 
 	/// Call when starting the parser to reset the call stack depth measurement and start time.
@@ -120,7 +126,7 @@ pub(crate) mod depth {
 
 	/// Call in recursive parsing code paths to limit call stack depth and parsing time.
 	#[inline(never)]
-	#[must_use]
+	#[must_use = "use ? to error if the limit is exceeded"]
 	pub(crate) fn limit() -> Result<(), Err<crate::sql::Error<&'static str>>> {
 		if let Some((initial_frame, initial_time)) = INITIAL.with(|initial| initial.get()) {
 			if measure().saturating_add(SIZE_LIMIT) > initial_frame
@@ -128,11 +134,9 @@ pub(crate) mod depth {
 			{
 				Ok(())
 			} else {
-				println!("FAIL");
 				Err(Err::Failure(ExcessiveDepth))
 			}
 		} else {
-			println!("IGNORE");
 			#[cfg(not(test))]
 			debug_assert!(false, "sql::parser::depth::begin not called during non-test parsing");
 			Ok(())
@@ -162,7 +166,7 @@ pub(crate) mod depth {
 		}
 
 		#[test]
-		#[ignore = "takes 5 seconds"]
+		//#[ignore = "takes 5 seconds"]
 		fn timeout() {
 			let _parsing = begin();
 

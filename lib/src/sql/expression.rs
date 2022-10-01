@@ -2,10 +2,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::fnc;
 use crate::sql::error::IResult;
 use crate::sql::operator::{operator, Operator};
 use crate::sql::value::{single, value, Value};
-use crate::{fnc, sql};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
@@ -123,7 +123,7 @@ impl fmt::Display for Expression {
 }
 
 pub fn expression(i: &str) -> IResult<&str, Expression> {
-	sql::depth::limit()?;
+	crate::sql::depth::limit()?;
 	let (i, l) = single(i)?;
 	let (i, o) = operator(i)?;
 	let (i, r) = value(i)?;
