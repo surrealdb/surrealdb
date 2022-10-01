@@ -43,27 +43,27 @@ impl Constant {
 		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		match self {
-			Constant::MathE => Ok(std::f64::consts::E.into()),
-			Constant::MathFrac1Pi => Ok(std::f64::consts::FRAC_1_PI.into()),
-			Constant::MathFrac1Sqrt2 => Ok(std::f64::consts::FRAC_1_SQRT_2.into()),
-			Constant::MathFrac2Pi => Ok(std::f64::consts::FRAC_2_PI.into()),
-			Constant::MathFrac2SqrtPi => Ok(std::f64::consts::FRAC_2_SQRT_PI.into()),
-			Constant::MathFracPi2 => Ok(std::f64::consts::FRAC_PI_2.into()),
-			Constant::MathFracPi3 => Ok(std::f64::consts::FRAC_PI_3.into()),
-			Constant::MathFracPi4 => Ok(std::f64::consts::FRAC_PI_4.into()),
-			Constant::MathFracPi6 => Ok(std::f64::consts::FRAC_PI_6.into()),
-			Constant::MathFracPi8 => Ok(std::f64::consts::FRAC_PI_8.into()),
-			Constant::MathLn10 => Ok(std::f64::consts::LN_10.into()),
-			Constant::MathLn2 => Ok(std::f64::consts::LN_2.into()),
-			Constant::MathLog102 => Ok(std::f64::consts::LOG10_2.into()),
-			Constant::MathLog10E => Ok(std::f64::consts::LOG10_E.into()),
-			Constant::MathLog210 => Ok(std::f64::consts::LOG2_10.into()),
-			Constant::MathLog2E => Ok(std::f64::consts::LOG2_E.into()),
-			Constant::MathPi => Ok(std::f64::consts::PI.into()),
-			Constant::MathSqrt2 => Ok(std::f64::consts::SQRT_2.into()),
-			Constant::MathTau => Ok(std::f64::consts::TAU.into()),
-		}
+		Ok(match self {
+			Constant::MathE => std::f64::consts::E.into(),
+			Constant::MathFrac1Pi => std::f64::consts::FRAC_1_PI.into(),
+			Constant::MathFrac1Sqrt2 => std::f64::consts::FRAC_1_SQRT_2.into(),
+			Constant::MathFrac2Pi => std::f64::consts::FRAC_2_PI.into(),
+			Constant::MathFrac2SqrtPi => std::f64::consts::FRAC_2_SQRT_PI.into(),
+			Constant::MathFracPi2 => std::f64::consts::FRAC_PI_2.into(),
+			Constant::MathFracPi3 => std::f64::consts::FRAC_PI_3.into(),
+			Constant::MathFracPi4 => std::f64::consts::FRAC_PI_4.into(),
+			Constant::MathFracPi6 => std::f64::consts::FRAC_PI_6.into(),
+			Constant::MathFracPi8 => std::f64::consts::FRAC_PI_8.into(),
+			Constant::MathLn10 => std::f64::consts::LN_10.into(),
+			Constant::MathLn2 => std::f64::consts::LN_2.into(),
+			Constant::MathLog102 => std::f64::consts::LOG10_2.into(),
+			Constant::MathLog10E => std::f64::consts::LOG10_E.into(),
+			Constant::MathLog210 => std::f64::consts::LOG2_10.into(),
+			Constant::MathLog2E => std::f64::consts::LOG2_E.into(),
+			Constant::MathPi => std::f64::consts::PI.into(),
+			Constant::MathSqrt2 => std::f64::consts::SQRT_2.into(),
+			Constant::MathTau => std::f64::consts::TAU.into(),
+		})
 	}
 }
 
