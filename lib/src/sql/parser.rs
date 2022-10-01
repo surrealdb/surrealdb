@@ -166,7 +166,7 @@ pub(crate) mod depth {
 		}
 
 		#[test]
-		//#[ignore = "takes 5 seconds"]
+		#[ignore = "takes 5 seconds"]
 		fn timeout() {
 			let _parsing = begin();
 
@@ -266,6 +266,7 @@ mod tests {
 	}
 
 	#[test]
+	#[ignore = "takes ~10 seconds"]
 	fn depth_limit() {
 		fn nested_functions(n: usize) -> String {
 			let mut ret = String::from("SELECT * FROM ");
@@ -279,10 +280,15 @@ mod tests {
 			ret
 		}
 
-		for n in 0..=16 {
+		for n in (0..=64).step_by(4) {
 			let query = nested_functions(n);
 			let start = Instant::now();
 			let ok = sql::parse(&query).is_ok();
+			if n < 8 {
+				assert!(ok);
+			} else if n > 32 {
+				assert!(!ok);
+			}
 			let duration = start.elapsed().as_secs_f32();
 			println!("{n},{duration:.6},{ok}");
 		}
