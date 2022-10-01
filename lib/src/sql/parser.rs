@@ -123,7 +123,7 @@ pub(crate) mod depth {
 				}
 			} else {
 				#[cfg(not(test))]
-				debug_assert!(false, "sql::parser::depth::dive not called during non-test parsing");
+				debug_assert!(false, "sql::parser::depth::reset not called during non-test parsing");
 				Ok(Diving)
 			}
 		})
