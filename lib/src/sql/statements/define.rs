@@ -31,6 +31,7 @@ use rand::rngs::OsRng;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Display;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub enum DefineStatement {
@@ -54,15 +55,15 @@ impl DefineStatement {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			DefineStatement::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -70,15 +71,15 @@ impl DefineStatement {
 impl fmt::Display for DefineStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DefineStatement::Namespace(v) => write!(f, "{}", v),
-			DefineStatement::Database(v) => write!(f, "{}", v),
-			DefineStatement::Login(v) => write!(f, "{}", v),
-			DefineStatement::Token(v) => write!(f, "{}", v),
-			DefineStatement::Scope(v) => write!(f, "{}", v),
-			DefineStatement::Table(v) => write!(f, "{}", v),
-			DefineStatement::Event(v) => write!(f, "{}", v),
-			DefineStatement::Field(v) => write!(f, "{}", v),
-			DefineStatement::Index(v) => write!(f, "{}", v),
+			Self::Namespace(v) => Display::fmt(v, f),
+			Self::Database(v) => Display::fmt(v, f),
+			Self::Login(v) => Display::fmt(v, f),
+			Self::Token(v) => Display::fmt(v, f),
+			Self::Scope(v) => Display::fmt(v, f),
+			Self::Table(v) => Display::fmt(v, f),
+			Self::Event(v) => Display::fmt(v, f),
+			Self::Field(v) => Display::fmt(v, f),
+			Self::Index(v) => Display::fmt(v, f),
 		}
 	}
 }

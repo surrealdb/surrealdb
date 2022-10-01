@@ -42,7 +42,7 @@ impl Display for Graph {
 				_ => Display::fmt(&self.what, f),
 			}?;
 			if let Some(ref v) = self.cond {
-				Display::fmt(v, f)?;
+				write!(f, " {}", v)?
 			}
 			if let Some(ref v) = self.alias {
 				write!(f, " AS {}", v)?

@@ -130,7 +130,7 @@ impl fmt::Display for CreateStatement {
 			write!(f, " {}", v)?
 		}
 		if self.parallel {
-			write!(f, " PARALLEL")?
+			f.write_str(" PARALLEL")?
 		}
 		Ok(())
 	}

@@ -13,7 +13,7 @@ pub struct CancelStatement;
 
 impl fmt::Display for CancelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "CANCEL TRANSACTION")
+		f.write_str("CANCEL TRANSACTION")
 	}
 }
 
