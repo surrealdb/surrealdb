@@ -20,7 +20,7 @@ pub fn json(input: &str) -> Result<Value, Error> {
 }
 
 fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Result<O, Error> {
-	let _parsing = depth::begin();
+	let _parsing = depth::reset();
 
 	match input.trim().len() {
 		0 => Err(Error::QueryEmpty),
@@ -71,43 +71,24 @@ fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
 }
 
 pub(crate) mod depth {
+	use crate::cnf::MAX_RECURSIVE_QUERIES;
 	use crate::sql::Error::ExcessiveDepth;
 	use nom::Err;
 	use std::cell::Cell;
-	use std::time::{Duration, Instant};
-
-	/// Maximum bytes of call stack (guard against stack overflow).
-	const SIZE_LIMIT: usize = 500_000;
-	/// Maximum time to parse something (guard against exponential runtime).
-	const TIME_LIMIT: Duration = Duration::from_secs(4);
 
 	thread_local! {
-		/// Approximate address of the stack frame where the parsing began, and exact time when it
-		/// began.
-		///
-		/// If None, parsing as a test.
-		static INITIAL: Cell<Option<(usize, Instant)>> = Cell::new(None);
+		/// When parsing (not just calling raw nom parsers) began and how many recursion levels
+		/// were recorded.
+		static INITIAL: Cell<Option<usize>> = Cell::new(None);
 	}
 
-	/// Get approximate address of stack frame.
-	#[inline(always)]
-	fn measure() -> usize {
-		#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-		return {
-			let on_stack = 0x4BAD1DEA;
-			&on_stack as *const _ as usize
-		};
-
-		#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-		0
-	}
-
-	/// Call when starting the parser to reset the call stack depth measurement and start time.
+	/// Call when starting the parser to reset initial parsing state.
 	///
 	/// Returns a struct that, when dropped, will clear the effect.
 	#[inline(never)]
-	pub(super) fn begin() -> Parsing {
-		INITIAL.with(|initial| initial.set(Some((measure(), Instant::now()))));
+	#[must_use = "must store and implicitly drop when returning"]
+	pub(super) fn reset() -> Parsing {
+		INITIAL.with(|initial| initial.set(Some(0)));
 		Parsing
 	}
 
@@ -124,22 +105,43 @@ pub(crate) mod depth {
 		}
 	}
 
-	/// Call in recursive parsing code paths to limit call stack depth and parsing time.
+	/// Call at least once in recursive parsing code paths to limit recursion depth.
 	#[inline(never)]
-	#[must_use = "use ? to error if the limit is exceeded"]
-	pub(crate) fn limit() -> Result<(), Err<crate::sql::Error<&'static str>>> {
-		if let Some((initial_frame, initial_time)) = INITIAL.with(|initial| initial.get()) {
-			if measure().saturating_add(SIZE_LIMIT) > initial_frame
-				&& initial_time.elapsed() < TIME_LIMIT
-			{
-				Ok(())
+	#[must_use = "must store and implicitly drop when returning"]
+	pub(crate) fn dive() -> Result<Diving, Err<crate::sql::Error<&'static str>>> {
+		INITIAL.with(|initial| {
+			if let Some(depth) = initial.get() {
+				// TODO: Replace when https://github.com/surrealdb/surrealdb/pull/241 lands.
+				if depth < MAX_RECURSIVE_QUERIES {
+					initial.replace(Some(depth + 1));
+					Ok(Diving)
+				} else {
+					Err(Err::Failure(ExcessiveDepth))
+				}
 			} else {
-				Err(Err::Failure(ExcessiveDepth))
+				#[cfg(not(test))]
+				debug_assert!(
+					false,
+					"sql::parser::depth::reset not called during non-test parsing"
+				);
+				Ok(Diving)
 			}
-		} else {
-			#[cfg(not(test))]
-			debug_assert!(false, "sql::parser::depth::begin not called during non-test parsing");
-			Ok(())
+		})
+	}
+
+	#[must_use]
+	#[non_exhaustive]
+	pub(crate) struct Diving;
+
+	impl Drop for Diving {
+		fn drop(&mut self) {
+			INITIAL.with(|initial| {
+				if let Some(depth) = initial.get() {
+					initial.replace(Some(depth - 1));
+				} else {
+					debug_assert!(false);
+				}
+			});
 		}
 	}
 
@@ -150,42 +152,19 @@ pub(crate) mod depth {
 
 		#[test]
 		fn no_stack_overflow() {
-			let _parsing = begin();
-
 			static CALLS: AtomicUsize = AtomicUsize::new(0);
 
 			fn recursive(i: &str) -> Result<(), Err<crate::sql::Error<&str>>> {
+				let _diving = dive()?;
 				CALLS.fetch_add(1, Ordering::Relaxed);
-				limit()?;
 				recursive(i)
 			}
 
+			let parsing = reset();
 			assert!(recursive("foo").is_err());
-			println!("calls (stack size): {}", CALLS.load(Ordering::Relaxed));
-			assert!(CALLS.load(Ordering::Relaxed) >= 1000);
-		}
+			drop(parsing);
 
-		#[test]
-		#[ignore = "takes 5 seconds"]
-		fn timeout() {
-			let _parsing = begin();
-
-			static CALLS: AtomicUsize = AtomicUsize::new(0);
-
-			fn recursive_expensive(i: &str) -> Result<(), Err<crate::sql::Error<&str>>> {
-				CALLS.fetch_add(1, Ordering::Relaxed);
-				limit()?;
-				std::thread::sleep(Duration::from_secs(1));
-				recursive_expensive(i)
-			}
-
-			assert!(recursive_expensive("foo").is_err());
-
-			let expected = TIME_LIMIT.as_secs() as usize + 1;
-
-			println!("calls (timeout): {}", CALLS.load(Ordering::Relaxed));
-			assert!((expected.saturating_sub(1)..=expected.saturating_add(1))
-				.contains(&CALLS.load(Ordering::Relaxed)));
+			assert_eq!(CALLS.load(Ordering::Relaxed), MAX_RECURSIVE_QUERIES);
 		}
 	}
 }
@@ -194,7 +173,7 @@ pub(crate) mod depth {
 mod tests {
 	use super::*;
 	use crate::sql;
-	use std::time::Instant;
+	use std::time::{Duration, Instant};
 
 	#[test]
 	fn no_ending() {
@@ -266,7 +245,6 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore = "takes ~10 seconds"]
 	fn depth_limit() {
 		fn nested_functions(n: usize) -> String {
 			let mut ret = String::from("SELECT * FROM ");
@@ -289,8 +267,9 @@ mod tests {
 			} else if n > 32 {
 				assert!(!ok);
 			}
-			let duration = start.elapsed().as_secs_f32();
-			println!("{n},{duration:.6},{ok}");
+			assert!(start.elapsed() < Duration::from_secs(5));
+			// let duration = start.elapsed().as_secs_f32();
+			// println!("{n},{duration:.6},{ok}");
 		}
 	}
 }

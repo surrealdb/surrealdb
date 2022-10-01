@@ -173,7 +173,6 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	crate::sql::depth::limit()?;
 	alt((normal, script, future, cast))(i)
 }
 

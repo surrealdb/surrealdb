@@ -1251,6 +1251,7 @@ pub fn double(i: &str) -> IResult<&str, Value> {
 }
 
 pub fn single(i: &str) -> IResult<&str, Value> {
+	let _diving = crate::sql::parser::depth::dive()?;
 	alt((
 		alt((
 			map(tag_no_case("NONE"), |_| Value::None),

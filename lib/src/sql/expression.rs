@@ -123,7 +123,6 @@ impl fmt::Display for Expression {
 }
 
 pub fn expression(i: &str) -> IResult<&str, Expression> {
-	crate::sql::depth::limit()?;
 	let (i, l) = single(i)?;
 	let (i, o) = operator(i)?;
 	let (i, r) = value(i)?;
