@@ -42,7 +42,7 @@ pub struct Table(pub String);
 
 impl From<String> for Table {
 	fn from(v: String) -> Self {
-		Table(v)
+		Self(v)
 	}
 }
 
@@ -54,7 +54,7 @@ impl From<&str> for Table {
 
 impl From<Ident> for Table {
 	fn from(v: Ident) -> Self {
-		Table(v.0)
+		Self(v.0)
 	}
 }
 

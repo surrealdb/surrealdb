@@ -29,63 +29,63 @@ pub enum Part {
 
 impl From<i32> for Part {
 	fn from(v: i32) -> Self {
-		Part::Index(v.into())
+		Self::Index(v.into())
 	}
 }
 
 impl From<isize> for Part {
 	fn from(v: isize) -> Self {
-		Part::Index(v.into())
+		Self::Index(v.into())
 	}
 }
 
 impl From<usize> for Part {
 	fn from(v: usize) -> Self {
-		Part::Index(v.into())
+		Self::Index(v.into())
 	}
 }
 
 impl From<Number> for Part {
 	fn from(v: Number) -> Self {
-		Part::Index(v)
+		Self::Index(v)
 	}
 }
 
 impl From<Ident> for Part {
 	fn from(v: Ident) -> Self {
-		Part::Field(v)
+		Self::Field(v)
 	}
 }
 
 impl From<Value> for Part {
 	fn from(v: Value) -> Self {
-		Part::Where(v)
+		Self::Where(v)
 	}
 }
 
 impl From<Thing> for Part {
 	fn from(v: Thing) -> Self {
-		Part::Thing(v)
+		Self::Thing(v)
 	}
 }
 
 impl From<Graph> for Part {
 	fn from(v: Graph) -> Self {
-		Part::Graph(v)
+		Self::Graph(v)
 	}
 }
 
 impl From<String> for Part {
 	fn from(v: String) -> Self {
-		Part::Field(Ident(v))
+		Self::Field(Ident(v))
 	}
 }
 
 impl From<&str> for Part {
 	fn from(v: &str) -> Self {
 		match v.parse::<isize>() {
-			Ok(v) => Part::from(v),
-			_ => Part::from(v.to_owned()),
+			Ok(v) => Self::from(v),
+			_ => Self::from(v.to_owned()),
 		}
 	}
 }

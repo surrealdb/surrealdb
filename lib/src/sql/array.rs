@@ -24,37 +24,37 @@ pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {
 	fn from(v: Value) -> Self {
-		Array(vec![v])
+		vec![v].into()
 	}
 }
 
 impl From<Vec<Value>> for Array {
 	fn from(v: Vec<Value>) -> Self {
-		Array(v)
+		Self(v)
 	}
 }
 
 impl From<Vec<i32>> for Array {
 	fn from(v: Vec<i32>) -> Self {
-		Array(v.into_iter().map(Value::from).collect())
+		Self(v.into_iter().map(Value::from).collect())
 	}
 }
 
 impl From<Vec<&str>> for Array {
 	fn from(v: Vec<&str>) -> Self {
-		Array(v.into_iter().map(Value::from).collect())
+		Self(v.into_iter().map(Value::from).collect())
 	}
 }
 
 impl From<Vec<Number>> for Array {
 	fn from(v: Vec<Number>) -> Self {
-		Array(v.into_iter().map(Value::from).collect())
+		Self(v.into_iter().map(Value::from).collect())
 	}
 }
 
 impl From<Vec<Operation>> for Array {
 	fn from(v: Vec<Operation>) -> Self {
-		Array(v.into_iter().map(Value::from).collect())
+		Self(v.into_iter().map(Value::from).collect())
 	}
 }
 
@@ -81,11 +81,11 @@ impl IntoIterator for Array {
 
 impl Array {
 	pub fn new() -> Self {
-		Array(Vec::default())
+		Self::default()
 	}
 
 	pub fn with_capacity(len: usize) -> Self {
-		Array(Vec::with_capacity(len))
+		Self(Vec::with_capacity(len))
 	}
 
 	pub fn as_ints(self) -> Vec<i64> {
@@ -121,20 +121,20 @@ impl Array {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		let mut x = Vec::new();
+		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
 			match v.compute(ctx, opt, txn, doc).await {
 				Ok(v) => x.push(v),
 				Err(e) => return Err(e),
 			};
 		}
-		Ok(Value::Array(Array(x)))
+		Ok(Value::Array(x))
 	}
 }
 
 impl fmt::Display for Array {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "[{}]", self.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))
+		write!(f, "[{}]", self.iter().map(|ref v| v.to_string()).collect::<Vec<_>>().join(", "))
 	}
 }
 
@@ -230,8 +230,8 @@ pub trait Combine<T> {
 }
 
 impl Combine<Array> for Array {
-	fn combine(self, other: Array) -> Array {
-		let mut out = Array::new();
+	fn combine(self, other: Self) -> Array {
+		let mut out = Self::with_capacity(self.len().saturating_mul(other.len()));
 		for a in self.iter() {
 			for b in other.iter() {
 				out.push(vec![a.clone(), b.clone()].into());
@@ -282,9 +282,9 @@ pub trait Intersect<T> {
 	fn intersect(self, other: T) -> T;
 }
 
-impl Intersect<Array> for Array {
-	fn intersect(self, other: Array) -> Array {
-		let mut out = Array::new();
+impl Intersect<Self> for Array {
+	fn intersect(self, other: Self) -> Self {
+		let mut out = Self::new();
 		let mut other: Vec<_> = other.into_iter().collect();
 		for a in self.0.into_iter() {
 			if let Some(pos) = other.iter().position(|b| a == *b) {
@@ -302,8 +302,8 @@ pub trait Union<T> {
 	fn union(self, other: T) -> T;
 }
 
-impl Union<Array> for Array {
-	fn union(mut self, mut other: Array) -> Array {
+impl Union<Self> for Array {
+	fn union(mut self, mut other: Self) -> Array {
 		self.append(&mut other);
 		self.uniq()
 	}

@@ -7,7 +7,7 @@ use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -28,12 +28,12 @@ impl IntoIterator for Groups {
 	}
 }
 
-impl fmt::Display for Groups {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Groups {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(
 			f,
 			"GROUP BY {}",
-			self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", ")
+			self.0.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")
 		)
 	}
 }
@@ -48,9 +48,9 @@ impl Deref for Group {
 	}
 }
 
-impl fmt::Display for Group {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0)
+impl Display for Group {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&self.0, f)
 	}
 }
 

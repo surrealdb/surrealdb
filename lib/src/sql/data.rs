@@ -12,7 +12,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Data {
@@ -28,8 +28,8 @@ pub enum Data {
 }
 
 impl Default for Data {
-	fn default() -> Data {
-		Data::EmptyExpression
+	fn default() -> Self {
+		Self::EmptyExpression
 	}
 }
 
@@ -37,10 +37,10 @@ impl Data {
 	// Fetch
 	pub(crate) fn rid(&self, tb: &Table) -> Result<Thing, Error> {
 		match self {
-			Data::MergeExpression(v) => v.rid().generate(tb, false),
-			Data::ReplaceExpression(v) => v.rid().generate(tb, false),
-			Data::ContentExpression(v) => v.rid().generate(tb, false),
-			Data::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
+			Self::MergeExpression(v) => v.rid().generate(tb, false),
+			Self::ReplaceExpression(v) => v.rid().generate(tb, false),
+			Self::ContentExpression(v) => v.rid().generate(tb, false),
+			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
 				Some((_, _, v)) => v.clone().generate(tb, false),
 				_ => Ok(tb.generate()),
 			},
@@ -49,11 +49,11 @@ impl Data {
 	}
 }
 
-impl fmt::Display for Data {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Data {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Data::EmptyExpression => write!(f, ""),
-			Data::SetExpression(v) => write!(
+			Self::EmptyExpression => Ok(()),
+			Self::SetExpression(v) => write!(
 				f,
 				"SET {}",
 				v.iter()
@@ -61,18 +61,18 @@ impl fmt::Display for Data {
 					.collect::<Vec<_>>()
 					.join(", ")
 			),
-			Data::PatchExpression(v) => write!(f, "PATCH {}", v),
-			Data::MergeExpression(v) => write!(f, "MERGE {}", v),
-			Data::ReplaceExpression(v) => write!(f, "REPLACE {}", v),
-			Data::ContentExpression(v) => write!(f, "CONTENT {}", v),
-			Data::SingleExpression(v) => write!(f, "{}", v),
-			Data::ValuesExpression(v) => write!(
+			Self::PatchExpression(v) => write!(f, "PATCH {}", v),
+			Self::MergeExpression(v) => write!(f, "MERGE {}", v),
+			Self::ReplaceExpression(v) => write!(f, "REPLACE {}", v),
+			Self::ContentExpression(v) => write!(f, "CONTENT {}", v),
+			Self::SingleExpression(v) => Display::fmt(v, f),
+			Self::ValuesExpression(v) => write!(
 				f,
 				"({}) VALUES {}",
 				v.first()
 					.unwrap()
 					.iter()
-					.map(|v| format!("{}", v.0))
+					.map(|(v, _)| v.to_string())
 					.collect::<Vec<_>>()
 					.join(", "),
 				v.iter()
@@ -83,7 +83,7 @@ impl fmt::Display for Data {
 					.collect::<Vec<_>>()
 					.join(", ")
 			),
-			Data::UpdateExpression(v) => write!(
+			Self::UpdateExpression(v) => write!(
 				f,
 				"ON DUPLICATE KEY UPDATE {}",
 				v.iter()

@@ -30,7 +30,7 @@ impl From<String> for Strand {
 
 impl From<&str> for Strand {
 	fn from(s: &str) -> Self {
-		Strand(String::from(s))
+		Self::from(String::from(s))
 	}
 }
 

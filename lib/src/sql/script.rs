@@ -28,13 +28,13 @@ pub struct Script(pub String);
 
 impl From<String> for Script {
 	fn from(s: String) -> Self {
-		Script(s)
+		Self(s)
 	}
 }
 
 impl From<&str> for Script {
 	fn from(s: &str) -> Self {
-		Script(String::from(s))
+		Self::from(String::from(s))
 	}
 }
 

@@ -12,8 +12,8 @@ use std::str;
 pub struct Regex(String);
 
 impl From<&str> for Regex {
-	fn from(r: &str) -> Regex {
-		Regex(r.replace("\\/", "/"))
+	fn from(r: &str) -> Self {
+		Self(r.replace("\\/", "/"))
 	}
 }
 

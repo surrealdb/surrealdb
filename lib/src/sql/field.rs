@@ -12,7 +12,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -198,17 +198,17 @@ pub enum Field {
 }
 
 impl Default for Field {
-	fn default() -> Field {
-		Field::All
+	fn default() -> Self {
+		Self::All
 	}
 }
 
-impl fmt::Display for Field {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Field {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Field::All => write!(f, "*"),
-			Field::Alone(e) => write!(f, "{}", e),
-			Field::Alias(e, a) => write!(f, "{} AS {}", e, a),
+			Self::All => f.write_char('*'),
+			Self::Alone(e) => Display::fmt(e, f),
+			Self::Alias(e, a) => write!(f, "{} AS {}", e, a),
 		}
 	}
 }

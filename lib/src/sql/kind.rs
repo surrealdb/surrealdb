@@ -28,8 +28,8 @@ pub enum Kind {
 }
 
 impl Default for Kind {
-	fn default() -> Kind {
-		Kind::Any
+	fn default() -> Self {
+		Self::Any
 	}
 }
 

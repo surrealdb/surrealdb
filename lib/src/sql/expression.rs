@@ -29,15 +29,15 @@ impl Default for Expression {
 
 impl Expression {
 	// Create a new expression
-	fn new(l: Value, o: Operator, r: Value) -> Expression {
-		Expression {
+	fn new(l: Value, o: Operator, r: Value) -> Self {
+		Self {
 			l,
 			o,
 			r,
 		}
 	}
 	// Augment an existing expression
-	fn augment(mut self, l: Value, o: Operator) -> Expression {
+	fn augment(mut self, l: Value, o: Operator) -> Self {
 		if o.precedence() >= self.o.precedence() {
 			match self.l {
 				Value::Expression(x) => {
@@ -45,13 +45,13 @@ impl Expression {
 					self
 				}
 				_ => {
-					self.l = Expression::new(l, o, self.l).into();
+					self.l = Self::new(l, o, self.l).into();
 					self
 				}
 			}
 		} else {
 			let r = Value::from(self);
-			Expression::new(l, o, r)
+			Self::new(l, o, r)
 		}
 	}
 }

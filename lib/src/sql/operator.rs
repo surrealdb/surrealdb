@@ -53,8 +53,8 @@ pub enum Operator {
 }
 
 impl Default for Operator {
-	fn default() -> Operator {
-		Operator::Equal
+	fn default() -> Self {
+		Self::Equal
 	}
 }
 
@@ -76,39 +76,39 @@ impl Operator {
 impl fmt::Display for Operator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str(match self {
-			Operator::Or => "OR",
-			Operator::And => "AND",
-			Operator::Add => "+",
-			Operator::Sub => "-",
-			Operator::Mul => "*",
-			Operator::Div => "/",
-			Operator::Inc => "+=",
-			Operator::Dec => "-=",
-			Operator::Exact => "==",
-			Operator::Equal => "=",
-			Operator::NotEqual => "!=",
-			Operator::AllEqual => "*=",
-			Operator::AnyEqual => "?=",
-			Operator::Like => "~",
-			Operator::NotLike => "!~",
-			Operator::AllLike => "*~",
-			Operator::AnyLike => "?~",
-			Operator::LessThan => "<",
-			Operator::LessThanOrEqual => "<=",
-			Operator::MoreThan => ">",
-			Operator::MoreThanOrEqual => ">=",
-			Operator::Contain => "CONTAINS",
-			Operator::NotContain => "CONTAINSNOT",
-			Operator::ContainAll => "CONTAINSALL",
-			Operator::ContainAny => "CONTAINSANY",
-			Operator::ContainNone => "CONTAINSNONE",
-			Operator::Inside => "INSIDE",
-			Operator::NotInside => "NOTINSIDE",
-			Operator::AllInside => "ALLINSIDE",
-			Operator::AnyInside => "ANYINSIDE",
-			Operator::NoneInside => "NONEINSIDE",
-			Operator::Outside => "OUTSIDE",
-			Operator::Intersects => "INTERSECTS",
+			Self::Or => "OR",
+			Self::And => "AND",
+			Self::Add => "+",
+			Self::Sub => "-",
+			Self::Mul => "*",
+			Self::Div => "/",
+			Self::Inc => "+=",
+			Self::Dec => "-=",
+			Self::Exact => "==",
+			Self::Equal => "=",
+			Self::NotEqual => "!=",
+			Self::AllEqual => "*=",
+			Self::AnyEqual => "?=",
+			Self::Like => "~",
+			Self::NotLike => "!~",
+			Self::AllLike => "*~",
+			Self::AnyLike => "?~",
+			Self::LessThan => "<",
+			Self::LessThanOrEqual => "<=",
+			Self::MoreThan => ">",
+			Self::MoreThanOrEqual => ">=",
+			Self::Contain => "CONTAINS",
+			Self::NotContain => "CONTAINSNOT",
+			Self::ContainAll => "CONTAINSALL",
+			Self::ContainAny => "CONTAINSANY",
+			Self::ContainNone => "CONTAINSNONE",
+			Self::Inside => "INSIDE",
+			Self::NotInside => "NOTINSIDE",
+			Self::AllInside => "ALLINSIDE",
+			Self::AnyInside => "ANYINSIDE",
+			Self::NoneInside => "NONEINSIDE",
+			Self::Outside => "OUTSIDE",
+			Self::Intersects => "INTERSECTS",
 		})
 	}
 }

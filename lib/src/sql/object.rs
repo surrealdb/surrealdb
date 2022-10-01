@@ -30,25 +30,25 @@ pub struct Object(pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<String, Value>> for Object {
 	fn from(v: BTreeMap<String, Value>) -> Self {
-		Object(v)
+		Self(v)
 	}
 }
 
 impl From<HashMap<String, Value>> for Object {
 	fn from(v: HashMap<String, Value>) -> Self {
-		Object(v.into_iter().collect())
+		Self(v.into_iter().collect())
 	}
 }
 
-impl From<Option<Object>> for Object {
-	fn from(v: Option<Object>) -> Self {
+impl From<Option<Self>> for Object {
+	fn from(v: Option<Self>) -> Self {
 		v.unwrap_or_default()
 	}
 }
 
 impl From<Operation> for Object {
 	fn from(v: Operation) -> Self {
-		Object(map! {
+		Self(map! {
 			String::from("op") => match v.op {
 				Op::None => Value::from("none"),
 				Op::Add => Value::from("add"),
