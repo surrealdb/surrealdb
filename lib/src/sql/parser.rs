@@ -78,16 +78,16 @@ pub(crate) mod depth {
 	use std::thread::panicking;
 
 	thread_local! {
-		/// How many recursion levels deep parsing is.
-		static INITIAL: Cell<usize> = Cell::default();
+		/// How many recursion levels deep parsing is currently.
+		static DEPTH: Cell<usize> = Cell::default();
 	}
 
-	/// Call when starting the parser to reset initial parsing state.
+	/// Call when starting the parser to reset the recursion depth.
 	#[inline(never)]
 	pub(super) fn reset() {
-		INITIAL.with(|initial| {
-			debug_assert_eq!(initial.get(), 0);
-			initial.set(0)
+		DEPTH.with(|cell| {
+			debug_assert_eq!(cell.get(), 0);
+			cell.set(0)
 		});
 	}
 
@@ -95,11 +95,11 @@ pub(crate) mod depth {
 	#[inline(never)]
 	#[must_use = "must store and implicitly drop when returning"]
 	pub(crate) fn dive() -> Result<Diving, Err<crate::sql::Error<&'static str>>> {
-		INITIAL.with(|initial| {
-			let depth = initial.get();
+		DEPTH.with(|cell| {
+			let depth = cell.get();
 			// TODO: Replace when https://github.com/surrealdb/surrealdb/pull/241 lands.
 			if depth < MAX_RECURSIVE_QUERIES {
-				initial.replace(depth + 1);
+				cell.replace(depth + 1);
 				Ok(Diving)
 			} else {
 				Err(Err::Failure(ExcessiveDepth))
@@ -113,9 +113,9 @@ pub(crate) mod depth {
 
 	impl Drop for Diving {
 		fn drop(&mut self) {
-			INITIAL.with(|initial| {
-				if let Some(depth) = initial.get().checked_sub(1) {
-					initial.replace(depth);
+			DEPTH.with(|cell| {
+				if let Some(depth) = cell.get().checked_sub(1) {
+					cell.replace(depth);
 				} else {
 					debug_assert!(panicking());
 				}
