@@ -8,7 +8,7 @@ use nom::bytes::complete::take_while_m_n;
 use nom::character::complete::char;
 use nom::combinator::value;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::str;
@@ -53,9 +53,9 @@ impl Strand {
 	}
 }
 
-impl fmt::Display for Strand {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", escape_strand(&self.0))
+impl Display for Strand {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&escape_strand(&self.0), f)
 	}
 }
 

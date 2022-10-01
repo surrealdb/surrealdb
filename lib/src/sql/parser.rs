@@ -40,6 +40,7 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 }
 
 fn truncate(s: &str, l: usize) -> &str {
+	// TODO: use s.floor_char_boundary once https://github.com/rust-lang/rust/issues/93743 lands
 	match s.char_indices().nth(l) {
 		None => s,
 		Some((i, _)) => &s[..i],

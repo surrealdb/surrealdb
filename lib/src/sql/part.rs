@@ -103,9 +103,9 @@ impl Part {
 impl fmt::Display for Part {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Part::All => write!(f, "[*]"),
-			Part::Last => write!(f, "[$]"),
-			Part::First => write!(f, "[0]"),
+			Part::All => f.write_str("[*]"),
+			Part::Last => f.write_str("[$]"),
+			Part::First => f.write_str("[0]"),
 			Part::Field(v) => write!(f, ".{}", v),
 			Part::Index(v) => write!(f, "[{}]", v),
 			Part::Where(v) => write!(f, "[WHERE {}]", v),

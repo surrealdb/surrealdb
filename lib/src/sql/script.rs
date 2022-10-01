@@ -7,7 +7,7 @@ use nom::character::complete::one_of;
 use nom::combinator::recognize;
 use nom::multi::many1;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
@@ -45,9 +45,9 @@ impl Deref for Script {
 	}
 }
 
-impl fmt::Display for Script {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0)
+impl Display for Script {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&self.0, f)
 	}
 }
 

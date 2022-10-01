@@ -147,8 +147,8 @@ impl Default for Permission {
 impl fmt::Display for Permission {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Permission::None => write!(f, "NONE"),
-			Permission::Full => write!(f, "FULL"),
+			Permission::None => f.write_str("NONE"),
+			Permission::Full => f.write_str("FULL"),
 			Permission::Specific(ref v) => write!(f, "WHERE {}", v),
 		}
 	}

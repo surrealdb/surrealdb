@@ -3,7 +3,7 @@ use crate::sql::statement::{statements, Statement, Statements};
 use derive::Store;
 use nom::combinator::all_consuming;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
@@ -17,9 +17,9 @@ impl Deref for Query {
 	}
 }
 
-impl fmt::Display for Query {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0)
+impl Display for Query {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&self.0, f)
 	}
 }
 

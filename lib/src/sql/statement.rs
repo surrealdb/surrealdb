@@ -31,7 +31,7 @@ use nom::multi::many0;
 use nom::multi::separated_list1;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::time::Duration;
 
@@ -47,7 +47,10 @@ impl Deref for Statements {
 
 impl fmt::Display for Statements {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0.iter().map(|ref v| format!("{};", v)).collect::<Vec<_>>().join("\n"))
+		Display::fmt(
+			&self.0.iter().map(|ref v| format!("{};", v)).collect::<Vec<_>>().join("\n"),
+			f,
+		)
 	}
 }
 
@@ -142,28 +145,28 @@ impl Statement {
 	}
 }
 
-impl fmt::Display for Statement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Statement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Statement::Use(v) => write!(f, "{}", v),
-			Statement::Set(v) => write!(f, "{}", v),
-			Statement::Info(v) => write!(f, "{}", v),
-			Statement::Live(v) => write!(f, "{}", v),
-			Statement::Kill(v) => write!(f, "{}", v),
-			Statement::Begin(v) => write!(f, "{}", v),
-			Statement::Cancel(v) => write!(f, "{}", v),
-			Statement::Commit(v) => write!(f, "{}", v),
-			Statement::Output(v) => write!(f, "{}", v),
-			Statement::Ifelse(v) => write!(f, "{}", v),
-			Statement::Select(v) => write!(f, "{}", v),
-			Statement::Create(v) => write!(f, "{}", v),
-			Statement::Update(v) => write!(f, "{}", v),
-			Statement::Relate(v) => write!(f, "{}", v),
-			Statement::Delete(v) => write!(f, "{}", v),
-			Statement::Insert(v) => write!(f, "{}", v),
-			Statement::Define(v) => write!(f, "{}", v),
-			Statement::Remove(v) => write!(f, "{}", v),
-			Statement::Option(v) => write!(f, "{}", v),
+			Statement::Use(v) => Display::fmt(v, f),
+			Statement::Set(v) => Display::fmt(v, f),
+			Statement::Info(v) => Display::fmt(v, f),
+			Statement::Live(v) => Display::fmt(v, f),
+			Statement::Kill(v) => Display::fmt(v, f),
+			Statement::Begin(v) => Display::fmt(v, f),
+			Statement::Cancel(v) => Display::fmt(v, f),
+			Statement::Commit(v) => Display::fmt(v, f),
+			Statement::Output(v) => Display::fmt(v, f),
+			Statement::Ifelse(v) => Display::fmt(v, f),
+			Statement::Select(v) => Display::fmt(v, f),
+			Statement::Create(v) => Display::fmt(v, f),
+			Statement::Update(v) => Display::fmt(v, f),
+			Statement::Relate(v) => Display::fmt(v, f),
+			Statement::Delete(v) => Display::fmt(v, f),
+			Statement::Insert(v) => Display::fmt(v, f),
+			Statement::Define(v) => Display::fmt(v, f),
+			Statement::Remove(v) => Display::fmt(v, f),
+			Statement::Option(v) => Display::fmt(v, f),
 		}
 	}
 }

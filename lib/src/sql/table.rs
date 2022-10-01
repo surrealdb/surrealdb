@@ -6,7 +6,7 @@ use crate::sql::ident::{ident_raw, Ident};
 use crate::sql::thing::Thing;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
@@ -26,9 +26,9 @@ impl Deref for Tables {
 	}
 }
 
-impl fmt::Display for Tables {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))
+impl Display for Tables {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&self.0.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "), f)
 	}
 }
 
@@ -48,7 +48,7 @@ impl From<String> for Table {
 
 impl From<&str> for Table {
 	fn from(v: &str) -> Self {
-		Table(String::from(v))
+		Self::from(String::from(v))
 	}
 }
 
@@ -74,9 +74,9 @@ impl Table {
 	}
 }
 
-impl fmt::Display for Table {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", escape_ident(&self.0))
+impl Display for Table {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&escape_ident(&self.0), f)
 	}
 }
 

@@ -110,7 +110,7 @@ impl From<&str> for Number {
 
 impl From<String> for Number {
 	fn from(s: String) -> Self {
-		Number::Decimal(BigDecimal::from_str(&s).unwrap_or_default())
+		Self::from(s.as_str())
 	}
 }
 
