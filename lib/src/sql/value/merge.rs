@@ -15,7 +15,6 @@ impl Value {
 		match val {
 			v if v.is_object() => {
 				for k in v.every(false).iter() {
-					println!("{}", k);
 					match v.get(ctx, opt, txn, &k.0).await? {
 						Value::None => self.del(ctx, opt, txn, &k.0).await?,
 						v => self.set(ctx, opt, txn, &k.0, v).await?,
