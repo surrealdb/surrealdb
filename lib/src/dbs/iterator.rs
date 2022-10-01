@@ -64,6 +64,38 @@ impl Iterator {
 		self.entries.push(val)
 	}
 
+	/// Undo `SelectStatement::check` which adds some columns if grouping, ordering, splitting or fetching by a column that doesn't exist in the data.
+	#[inline]
+	async fn post_process(
+		&mut self,
+		_ctx: &Context<'_>,
+		_opt: &Options,
+		_txn: &Transaction,
+		stm: &Statement<'_>,
+	) -> Result<(), Error> {
+		if let Statement::Select(s) = stm {
+			if let Some(remove_cols) = &s.backend {
+				let returned_data = mem::take(&mut self.results);
+				for v in returned_data {
+					let res = if let Value::Object(mut obj) = v {
+						for key in &remove_cols.0 {
+							let col = key.to_string(); // TODO better Idiom to String
+
+							trace!("Dropping {}", col);
+
+							obj.0.remove(&col);
+						}
+						Value::Object(obj)
+					} else {
+						v
+					};
+					self.results.push(res);
+				}
+			}
+		}
+		Ok(())
+	}
+
 	// Process the records and output
 	pub async fn output(
 		&mut self,
@@ -95,6 +127,8 @@ impl Iterator {
 		self.output_limit(&ctx, opt, txn, stm).await?;
 		// Process any FETCH clause
 		self.output_fetch(&ctx, opt, txn, stm).await?;
+		// Remove any added columns
+		self.post_process(&ctx, opt, txn, stm).await?;
 		// Output the results
 		Ok(mem::take(&mut self.results).into())
 	}

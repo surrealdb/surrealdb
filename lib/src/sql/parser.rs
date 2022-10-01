@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::error::Error::ParserError;
+use crate::sql::error::Error::{CannotGroup, ParserError};
 use crate::sql::query::{query, Query};
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -20,6 +20,9 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 						sql: s.to_string(),
 					})
 				}
+				CannotGroup(s) => Err(Error::InvalidAggregate {
+					fields: s.to_owned(),
+				}),
 			},
 			Err(Err::Failure(e)) => match e {
 				ParserError(e) => {
@@ -30,6 +33,9 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 						sql: s.to_string(),
 					})
 				}
+				CannotGroup(s) => Err(Error::InvalidAggregate {
+					fields: s.to_owned(),
+				}),
 			},
 			_ => unreachable!(),
 		},
@@ -50,6 +56,9 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 						sql: s.to_string(),
 					})
 				}
+				CannotGroup(s) => Err(Error::InvalidAggregate {
+					fields: s.to_owned(),
+				}),
 			},
 			Err(Err::Failure(e)) => match e {
 				ParserError(e) => {
@@ -60,6 +69,9 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 						sql: s.to_string(),
 					})
 				}
+				CannotGroup(s) => Err(Error::InvalidAggregate {
+					fields: s.to_owned(),
+				}),
 			},
 			_ => unreachable!(),
 		},
@@ -80,6 +92,9 @@ pub fn json(input: &str) -> Result<Value, Error> {
 						sql: s.to_string(),
 					})
 				}
+				CannotGroup(s) => Err(Error::InvalidAggregate {
+					fields: s.to_owned(),
+				}),
 			},
 			Err(Err::Failure(e)) => match e {
 				ParserError(e) => {
@@ -90,6 +105,9 @@ pub fn json(input: &str) -> Result<Value, Error> {
 						sql: s.to_string(),
 					})
 				}
+				CannotGroup(s) => Err(Error::InvalidAggregate {
+					fields: s.to_owned(),
+				}),
 			},
 			_ => unreachable!(),
 		},

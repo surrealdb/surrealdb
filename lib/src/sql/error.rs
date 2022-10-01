@@ -6,6 +6,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum Error<I> {
 	ParserError(I),
+	CannotGroup(I),
 }
 
 pub type IResult<I, O, E = Error<I>> = Result<(I, O), Err<E>>;

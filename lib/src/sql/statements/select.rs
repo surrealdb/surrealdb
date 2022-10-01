@@ -40,6 +40,7 @@ pub struct SelectStatement {
 	pub version: Option<Version>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
+	pub backend: Option<Fields>,
 }
 
 impl SelectStatement {
@@ -126,8 +127,6 @@ impl SelectStatement {
 	}
 
 	fn idiom_in_fields(idom: &crate::sql::Idiom, expr: &Fields) -> bool {
-		log::info!("group idom {:?}", idom.0);
-
 		if idom.0.iter().any(|x| x == &crate::sql::Part::None) {
 			return false;
 		}
@@ -148,24 +147,27 @@ impl SelectStatement {
 	}
 
 	///Validate Query is Integral
-	fn check(mut self) -> IResult<&'static str, Self> {
+	fn check(mut self) -> Result<Self,nom::Err<crate::sql::Error<&'static str>>> {
 		// this is not a group query, all is good
-		if self.group.is_none() {
-			return Ok(("", self));
+		if self.group.is_none() & self.order.is_none() & self.split.is_none() & self.fetch.is_none()
+		{
+			return Ok(self);
 		}
 
-		let group = self.group.clone().unwrap();
 		let exprs = &self.expr.clone();
 
 		// get vector of Fields that need to be added to query because they did not exist in the original query
 		let mut to_add = vec![];
 
-		let groups_to_add: Vec<Field> = group
-			.iter()
-			.map(|b| &b.0)
-			.filter(|idom| Self::idiom_in_fields(idom, exprs))
-			.map(|i| Field::Alone(Value::Idiom(i.clone())))
-			.collect();
+		let groups_to_add: Vec<Field> = match &self.group {
+			Some(g) => g
+				.iter()
+				.map(|b| &b.0)
+				.filter(|idom| Self::idiom_in_fields(idom, exprs))
+				.map(|i| Field::Alone(Value::Idiom(i.clone())))
+				.collect(),
+			None => vec![],
+		};
 
 		to_add.extend(groups_to_add);
 
@@ -207,28 +209,35 @@ impl SelectStatement {
 
 		// deduplicate the collected required adds
 		to_add.dedup();
-		// TODO should propbably also DROP columns that were added before emitted
+
+		trace!("adding columns that were not mentioned in the fields because they were part of other parts of the query: {:?}", to_add);
+
+		self.backend = Some(Fields(to_add.clone()));
 
 		// add vector of needed groupby fields to expression
 		self.expr.0.extend(to_add);
 
-		// make sure all expressions only use aggregateable values
-		// based loosely from : https://github.com/surrealdb/surrealdb/blob/golang/sql/check.go
-		let non_aggregate_non_self_in_query = self.expr.0.iter().any(|field| {
-			match field {
-				Field::All => true, // cannot use * in group clause
-				Field::Alone(v) => !v.can_aggregate(&group),
-				Field::Alias(v, _) => !v.can_aggregate(&group),
+		// if this has a group clause
+		if let Some(group) = &self.group {
+			// make sure all expressions only use aggregateable values
+			// based loosely from : https://github.com/surrealdb/surrealdb/blob/golang/sql/check.go
+			let non_aggregate_non_self_in_query = self.expr.0.iter().any(|field| {
+				match field {
+					Field::All => true, // cannot use * in group clause
+					Field::Alone(v) => !v.can_aggregate(group),
+					Field::Alias(v, _) => !v.can_aggregate(group),
+				}
+			});
+
+			// Throw an error if something was incorrectly used
+			// want to use crate::err:Error enum for graceful error but couldn't figure how
+			if non_aggregate_non_self_in_query {
+				return Err(nom::Err::Error(crate::sql::Error::CannotGroup(
+					"failing function names",
+				)));
 			}
-		});
-
-		// Throw an error if something was incorrectly used
-		// want to use crate::err:Error enum for graceful error but couldn't figure how
-		if non_aggregate_non_self_in_query {
-			return Err(nom::Err::Error(crate::sql::Error::ParserError("failing function names")));
 		}
-
-		Ok(("", self))
+		Ok(self)
 	}
 }
 
@@ -301,9 +310,9 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 		version,
 		timeout,
 		parallel: parallel.is_some(),
+		backend: None,
 	}
-	.check()?
-	.1;
+	.check()?;
 
 	Ok((i, select))
 }
