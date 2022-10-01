@@ -95,7 +95,7 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 	- [Credentials](#Credentials)
 	- [Create](#create)
 	- [Select](#select)
-	- [relate](#relate)
+	- [Relate](#relate)
 - [Getting started](#getting-started)
 	- [Client side apps](#client-side-apps)
 	- [Server side code](#server-side-code)
