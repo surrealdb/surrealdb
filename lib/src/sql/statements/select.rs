@@ -120,8 +120,10 @@ impl SelectStatement {
 				v => i.ingest(Iterable::Value(v)),
 			};
 		}
+		let mut copy = self.clone();
+		copy.check()?;
 		// Assign the statement
-		let stm = Statement::from(self);
+		let stm = Statement::from(&copy);
 		// Output the results
 		i.output(ctx, opt, txn, &stm).await
 	}
@@ -147,11 +149,11 @@ impl SelectStatement {
 	}
 
 	///Validate Query is Integral
-	fn check(mut self) -> Result<Self,nom::Err<crate::sql::Error<&'static str>>> {
+	pub fn check(&mut self) -> Result<(),crate::Error> {
 		// this is not a group query, all is good
 		if self.group.is_none() & self.order.is_none() & self.split.is_none() & self.fetch.is_none()
 		{
-			return Ok(self);
+			return Ok(());
 		}
 
 		let exprs = &self.expr.clone();
@@ -232,12 +234,10 @@ impl SelectStatement {
 			// Throw an error if something was incorrectly used
 			// want to use crate::err:Error enum for graceful error but couldn't figure how
 			if non_aggregate_non_self_in_query {
-				return Err(nom::Err::Error(crate::sql::Error::CannotGroup(
-					"failing function names",
-				)));
+				return Err(crate::Error::InvalidAggregate{fields: "failing function names".to_owned(),});
 			}
 		}
-		Ok(self)
+		Ok(())
 	}
 }
 
@@ -311,8 +311,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 		timeout,
 		parallel: parallel.is_some(),
 		backend: None,
-	}
-	.check()?;
+	};
 
 	Ok((i, select))
 }
