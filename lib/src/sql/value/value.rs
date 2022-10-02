@@ -1106,7 +1106,7 @@ impl Value {
 			Value::Function(f) => f.is_aggregate(), // if this function is not an aggregate function  (we could call non-agg functions if they are only used on group columns...)
 			Value::Subquery(_) => todo!(),
 			Value::Expression(_) => todo!(),
-			Value::Constant(_) => true
+			Value::Constant(_) => true,
 		}
 	}
 }

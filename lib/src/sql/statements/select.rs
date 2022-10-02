@@ -219,23 +219,30 @@ impl SelectStatement {
 		// add vector of needed groupby fields to expression
 		self.expr.0.extend(to_add);
 
+		let mut incorrect_fields = vec![];
+
 		// if this has a group clause
 		if let Some(group) = &self.group {
 			// make sure all expressions only use aggregateable values
 			// based loosely from : https://github.com/surrealdb/surrealdb/blob/golang/sql/check.go
-			let non_aggregate_non_self_in_query = self.expr.0.iter().any(|field| {
-				match field {
+			let non_aggregate_non_self_in_query = self.expr.0.iter().fold(false, |x, field| {
+				let non_agg = match field {
 					Field::All => true, // cannot use * in group clause
 					Field::Alone(v) => !v.can_aggregate(group),
 					Field::Alias(v, _) => !v.can_aggregate(group),
+				};
+				if non_agg {
+					incorrect_fields.push(field.clone())
 				}
+
+				x | non_agg
 			});
 
 			// Throw an error if something was incorrectly used
 			// want to use crate::err:Error enum for graceful error but couldn't figure how
 			if non_aggregate_non_self_in_query {
 				return Err(crate::Error::InvalidAggregate {
-					fields: "failing function names".to_owned(),
+					fields: Fields(incorrect_fields).to_string(),
 				});
 			}
 		}
