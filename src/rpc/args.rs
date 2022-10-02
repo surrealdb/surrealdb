@@ -8,7 +8,7 @@ pub trait Take {
 }
 
 impl Take for Array {
-	// Convert the array to one argument
+	/// Convert the array to one argument
 	fn take_one(self) -> Value {
 		let mut x = self.into_iter();
 		match x.next() {
@@ -16,7 +16,7 @@ impl Take for Array {
 			None => Value::None,
 		}
 	}
-	// Convert the array to two arguments
+	/// Convert the array to two arguments
 	fn take_two(self) -> (Value, Value) {
 		let mut x = self.into_iter();
 		match (x.next(), x.next()) {
@@ -25,7 +25,7 @@ impl Take for Array {
 			(_, _) => (Value::None, Value::None),
 		}
 	}
-	// Convert the array to three arguments
+	/// Convert the array to three arguments
 	fn take_three(self) -> (Value, Value, Value) {
 		let mut x = self.into_iter();
 		match (x.next(), x.next(), x.next()) {

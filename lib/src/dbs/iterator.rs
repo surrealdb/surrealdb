@@ -497,7 +497,7 @@ impl Iterator {
 		self.result(res, stm);
 	}
 
-	// Accept a processed record result
+	/// Accept a processed record result
 	fn result(&mut self, res: Result<Value, Error>, stm: &Statement<'_>) {
 		// Process the result
 		match res {

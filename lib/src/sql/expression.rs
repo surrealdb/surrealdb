@@ -28,7 +28,7 @@ impl Default for Expression {
 }
 
 impl Expression {
-	// Create a new expression
+	/// Create a new expression
 	fn new(l: Value, o: Operator, r: Value) -> Expression {
 		Expression {
 			l,
@@ -36,7 +36,7 @@ impl Expression {
 			r,
 		}
 	}
-	// Augment an existing expression
+	/// Augment an existing expression
 	fn augment(mut self, l: Value, o: Operator) -> Expression {
 		if o.precedence() >= self.o.precedence() {
 			match self.l {
