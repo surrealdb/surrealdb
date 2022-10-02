@@ -273,33 +273,4 @@ mod tests {
 		let dec: Query = Query::from(enc);
 		assert_eq!(tmp, dec);
 	}
-
-	#[test]
-	fn depth_limit() {
-		fn nested_functions(n: usize) -> String {
-			let mut ret = String::from("SELECT * FROM ");
-			for _ in 0..n {
-				ret.push_str("array::sort(");
-			}
-			ret.push_str("[0]");
-			for _ in 0..n {
-				ret.push(')');
-			}
-			ret
-		}
-
-		for n in (0..=64).step_by(4) {
-			let query = nested_functions(n);
-			let start = Instant::now();
-			let ok = sql::parse(&query).is_ok();
-			if n < 8 {
-				assert!(ok);
-			} else if n > 32 {
-				assert!(!ok);
-			}
-			assert!(start.elapsed() < Duration::from_secs(5));
-			// let duration = start.elapsed().as_secs_f32();
-			// println!("{n},{duration:.6},{ok}");
-		}
-	}
 }
