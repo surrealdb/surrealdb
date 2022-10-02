@@ -149,7 +149,7 @@ impl SelectStatement {
 	}
 
 	///Validate Query is Integral
-	pub fn check(&mut self) -> Result<(),crate::Error> {
+	pub fn check(&mut self) -> Result<(), crate::Error> {
 		// this is not a group query, all is good
 		if self.group.is_none() & self.order.is_none() & self.split.is_none() & self.fetch.is_none()
 		{
@@ -234,7 +234,9 @@ impl SelectStatement {
 			// Throw an error if something was incorrectly used
 			// want to use crate::err:Error enum for graceful error but couldn't figure how
 			if non_aggregate_non_self_in_query {
-				return Err(crate::Error::InvalidAggregate{fields: "failing function names".to_owned(),});
+				return Err(crate::Error::InvalidAggregate {
+					fields: "failing function names".to_owned(),
+				});
 			}
 		}
 		Ok(())
