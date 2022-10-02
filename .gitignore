@@ -34,9 +34,11 @@ Temporary Items
 
 /target/
 /lib/target/
+.idea/
 
 # -----------------------------------
 # Specific
 # -----------------------------------
 
 surreal
+history.txt

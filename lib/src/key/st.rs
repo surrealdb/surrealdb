@@ -9,12 +9,10 @@ pub struct St {
 	_b: u8,
 	pub db: String,
 	_c: u8,
+	pub sc: String,
 	_d: u8,
 	_e: u8,
-	pub sc: String,
 	_f: u8,
-	_g: u8,
-	_h: u8,
 	pub tk: String,
 }
 
@@ -23,14 +21,14 @@ pub fn new(ns: &str, db: &str, sc: &str, tk: &str) -> St {
 }
 
 pub fn prefix(ns: &str, db: &str, sc: &str) -> Vec<u8> {
-	let mut k = super::sc::new(ns, db, sc).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x74, 0x6b, 0x00]);
+	let mut k = super::scope::new(ns, db, sc).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x73, 0x74, 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, sc: &str) -> Vec<u8> {
-	let mut k = super::sc::new(ns, db, sc).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x74, 0x6b, 0xff]);
+	let mut k = super::scope::new(ns, db, sc).encode().unwrap();
+	k.extend_from_slice(&[0x21, 0x73, 0x74, 0xff]);
 	k
 }
 
@@ -42,13 +40,11 @@ impl St {
 			ns,
 			_b: 0x2a, // *
 			db,
-			_c: 0x21, // !
-			_d: 0x73, // s
-			_e: 0x74, // t
+			_c: 0xb1, // ±
 			sc,
-			_f: 0x21, // !
-			_g: 0x74, // t
-			_h: 0x6b, // k
+			_d: 0x21, // !
+			_e: 0x73, // s
+			_f: 0x74, // t
 			tk,
 		}
 	}

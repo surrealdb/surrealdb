@@ -150,7 +150,13 @@ brew install surrealdb/tap/surreal
 The easiest and preferred way to get going with SurrealDB on Unix operating systems is to install and use the SurrealDB command-line tool. Run the following command in your terminal and follow the on-screen instructions.
 
 ```bash
-curl -sSf https://install.surrealdb.com | sh
+curl --proto '=https' --tlsv1.2 -sSf https://install.surrealdb.com | sh
+```
+
+If you want a binary newer than what's currently released, you can install the nightly one.
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://install.surrealdb.com | sh -s -- --nightly
 ```
 
 <h4><a href="https://surrealdb.com/install#gh-dark-mode-only"><img width="20" src="/img/white/windows.svg"></a><a href="https://surrealdb.com/install#gh-light-mode-only"><img width="20" src="/img/black/windows.svg"></a>

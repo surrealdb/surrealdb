@@ -222,9 +222,9 @@ fn zone_all(i: &str) -> IResult<&str, Option<FixedOffset>> {
 	if h == 0 && m == 0 {
 		Ok((i, None))
 	} else if s < 0 {
-		Ok((i, { Some(FixedOffset::west((h * 3600 + m) as i32)) }))
+		Ok((i, { Some(FixedOffset::west((h * 3600 + m * 60) as i32)) }))
 	} else if s > 0 {
-		Ok((i, { Some(FixedOffset::east((h * 3600 + m) as i32)) }))
+		Ok((i, { Some(FixedOffset::east((h * 3600 + m * 60) as i32)) }))
 	} else {
 		Ok((i, None))
 	}
@@ -285,5 +285,14 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("\"2012-04-24T02:25:43.511Z\"", format!("{}", out));
+	}
+
+	#[test]
+	fn date_time_timezone_pacific_partial() {
+		let sql = "2012-04-23T18:25:43.511-08:30";
+		let res = datetime_raw(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("\"2012-04-24T02:55:43.511Z\"", format!("{}", out));
 	}
 }

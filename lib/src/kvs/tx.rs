@@ -1034,6 +1034,31 @@ impl Transaction {
 			Ok(v) => Ok(v),
 		}
 	}
+	/// Add a scope with a default configuration, only if we are in dynamic mode.
+	pub async fn add_sc(
+		&mut self,
+		ns: &str,
+		db: &str,
+		sc: &str,
+		strict: bool,
+	) -> Result<DefineScopeStatement, Error> {
+		match self.get_sc(ns, db, sc).await {
+			Err(Error::ScNotFound) => match strict {
+				false => {
+					let key = crate::key::sc::new(ns, db, sc);
+					let val = DefineScopeStatement {
+						name: sc.to_owned().into(),
+						..DefineScopeStatement::default()
+					};
+					self.put(key, &val).await?;
+					Ok(val)
+				}
+				true => Err(Error::ScNotFound),
+			},
+			Err(e) => Err(e),
+			Ok(v) => Ok(v),
+		}
+	}
 	/// Add a table with a default configuration, only if we are in dynamic mode.
 	pub async fn add_tb(
 		&mut self,

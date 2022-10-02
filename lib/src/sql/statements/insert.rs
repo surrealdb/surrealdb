@@ -65,7 +65,7 @@ impl InsertStatement {
 						o.set(ctx, opt, txn, k, v).await?;
 					}
 					// Specify the new table record id
-					let id = o.generate(&self.into, true)?;
+					let id = o.rid().generate(&self.into, true)?;
 					// Pass the mergeable to the iterator
 					i.ingest(Iterable::Mergeable(id, o));
 				}
@@ -77,14 +77,14 @@ impl InsertStatement {
 					Value::Array(v) => {
 						for v in v {
 							// Specify the new table record id
-							let id = v.generate(&self.into, true)?;
+							let id = v.rid().generate(&self.into, true)?;
 							// Pass the mergeable to the iterator
 							i.ingest(Iterable::Mergeable(id, v));
 						}
 					}
 					Value::Object(_) => {
 						// Specify the new table record id
-						let id = v.generate(&self.into, true)?;
+						let id = v.rid().generate(&self.into, true)?;
 						// Pass the mergeable to the iterator
 						i.ingest(Iterable::Mergeable(id, v));
 					}

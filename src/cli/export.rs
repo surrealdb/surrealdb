@@ -1,7 +1,7 @@
 use crate::cli::LOG;
 use crate::err::Error;
 use reqwest::blocking::Client;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::ACCEPT;
 use std::fs::OpenOptions;
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
@@ -22,7 +22,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Export the data from the database
 	Client::new()
 		.get(&conn)
-		.header(CONTENT_TYPE, "application/octet-stream")
+		.header(ACCEPT, "application/octet-stream")
 		.basic_auth(user, Some(pass))
 		.header("NS", ns)
 		.header("DB", db)

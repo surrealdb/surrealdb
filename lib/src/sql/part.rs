@@ -18,7 +18,6 @@ use std::str;
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Part {
 	None,
-	Any,
 	All,
 	Last,
 	First,
@@ -106,7 +105,6 @@ impl fmt::Display for Part {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Part::None => write!(f, "none"),
-			Part::Any => write!(f, ".."),
 			Part::All => write!(f, "[*]"),
 			Part::Last => write!(f, "[$]"),
 			Part::First => write!(f, "[0]"),

@@ -3,28 +3,31 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
-	pub fn every(&self) -> Vec<Idiom> {
-		self._every(Idiom::default())
+	pub fn every(&self, split: bool) -> Vec<Idiom> {
+		self._every(split, Idiom::default())
 	}
-	fn _every(&self, prev: Idiom) -> Vec<Idiom> {
+	fn _every(&self, split: bool, prev: Idiom) -> Vec<Idiom> {
 		match self {
 			// Current path part is an object
 			Value::Object(v) => v
 				.iter()
 				.flat_map(|(k, v)| {
 					let p = Part::from(k.to_owned());
-					v._every(prev.clone().push(p))
+					v._every(split, prev.clone().push(p))
 				})
 				.collect::<Vec<_>>(),
 			// Current path part is an array
-			Value::Array(v) => v
-				.iter()
-				.enumerate()
-				.flat_map(|(i, v)| {
-					let p = Part::from(i.to_owned());
-					v._every(prev.clone().push(p))
-				})
-				.collect::<Vec<_>>(),
+			Value::Array(v) => match split {
+				true => v
+					.iter()
+					.enumerate()
+					.flat_map(|(i, v)| {
+						let p = Part::from(i.to_owned());
+						v._every(split, prev.clone().push(p))
+					})
+					.collect::<Vec<_>>(),
+				false => vec![prev],
+			},
 			// Process everything else
 			_ => vec![prev],
 		}
@@ -39,7 +42,14 @@ mod tests {
 	use crate::sql::test::Parse;
 
 	#[test]
-	fn every() {
+	fn every_without_array_indexes() {
+		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
+		let res = vec![Idiom::parse("test.something")];
+		assert_eq!(res, val.every(false));
+	}
+
+	#[test]
+	fn every_including_array_indexes() {
 		let val = Value::parse("{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }");
 		let res = vec![
 			Idiom::parse("test.something[0].age"),
@@ -49,6 +59,6 @@ mod tests {
 			Idiom::parse("test.something[1].tags[0]"),
 			Idiom::parse("test.something[1].tags[1]"),
 		];
-		assert_eq!(res, val.every());
+		assert_eq!(res, val.every(true));
 	}
 }
