@@ -188,6 +188,59 @@ mod tests {
 	}
 
 	#[test]
+	fn parse_ok_recursion() {
+		let sql = "SELECT * FROM ((SELECT * FROM (5))) * 5;";
+		let res = parse(sql);
+		assert!(res.is_ok());
+	}
+
+	#[test]
+	fn parse_also_ok_recursion() {
+		let sql = "SELECT * FROM (((( SELECT * FROM ((5)) + ((5)) + ((5)) )))) * ((( function() {return 5;} )));";
+		let start = Instant::now();
+		let res = parse(sql);
+		let elapsed = start.elapsed();
+		assert!(res.is_ok());
+		assert!(elapsed < Duration::from_millis(150), "previously took ~10ms in debug")
+	}
+
+	#[test]
+	fn parse_excessive_recursion() {
+		let sql = "SELECT * FROM (((( SELECT * FROM (((( SELECT * FROM ((( ((( ((( (((5))) * 5 ))) * 5 ))) * 5 ))) )))) )))) * 5;";
+		let start = Instant::now();
+		let res = parse(sql);
+		let elapsed = start.elapsed();
+		assert!(
+			matches!(res, Err(Error::TooManySubqueries)),
+			"expected too many subqueries, got {:?}",
+			res
+		);
+		assert!(elapsed < Duration::from_millis(150), "previously took ~1ms in debug")
+	}
+
+	#[test]
+	fn parse_also_excessive_recursion() {
+		let mut sql = String::from("SELECT * FROM ");
+		let n = 10000;
+		for _ in 0..n {
+			sql.push('(');
+		}
+		sql.push('5');
+		for _ in 0..n {
+			sql.push(')');
+		}
+		let start = Instant::now();
+		let res = parse(&sql);
+		let elapsed = start.elapsed();
+		assert!(
+			matches!(res, Err(Error::TooManySubqueries)),
+			"expected too many subqueries, got {:?}",
+			res
+		);
+		assert!(elapsed < Duration::from_millis(150), "previously took ~3ms in debug")
+	}
+
+	#[test]
 	fn parser_try() {
 		let sql = "
 			SELECT
