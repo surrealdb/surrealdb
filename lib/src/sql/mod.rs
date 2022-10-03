@@ -16,6 +16,7 @@ pub(crate) mod escape;
 pub(crate) mod expression;
 pub(crate) mod fetch;
 pub(crate) mod field;
+pub(crate) mod fmt;
 pub(crate) mod function;
 pub(crate) mod geometry;
 pub(crate) mod graph;
@@ -58,7 +59,6 @@ pub(crate) mod view;
 #[cfg(test)]
 pub(crate) mod test;
 
-pub mod fmt;
 pub mod statements;
 
 pub use self::parser::*;
