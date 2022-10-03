@@ -13,6 +13,7 @@ use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
 use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
+use crate::sql::fmt::Fmt;
 use crate::sql::function::{function, Function};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::Id;
@@ -48,7 +49,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::iter::FromIterator;
 use std::ops;
 use std::ops::Deref;
@@ -74,9 +75,9 @@ impl IntoIterator for Values {
 	}
 }
 
-impl fmt::Display for Values {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))
+impl Display for Values {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
 

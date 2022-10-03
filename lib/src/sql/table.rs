@@ -1,6 +1,7 @@
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_ident;
+use crate::sql::fmt::Fmt;
 use crate::sql::id::Id;
 use crate::sql::ident::{ident_raw, Ident};
 use crate::sql::thing::Thing;
@@ -28,7 +29,7 @@ impl Deref for Tables {
 
 impl Display for Tables {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "), f)
+		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
 

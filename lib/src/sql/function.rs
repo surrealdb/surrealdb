@@ -6,6 +6,7 @@ use crate::fnc;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::script::{script as func, Script};
 use crate::sql::value::{single, value, Value};
 use nom::branch::alt;
@@ -156,18 +157,10 @@ impl fmt::Display for Function {
 		match self {
 			Self::Future(ref e) => write!(f, "<future> {{ {} }}", e),
 			Self::Cast(ref s, ref e) => write!(f, "<{}> {}", s, e),
-			Self::Script(ref s, ref e) => write!(
-				f,
-				"function({}) {{{}}}",
-				e.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
-				s,
-			),
-			Self::Normal(ref s, ref e) => write!(
-				f,
-				"{}({})",
-				s,
-				e.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")
-			),
+			Self::Script(ref s, ref e) => {
+				write!(f, "function({}) {{{}}}", Fmt::comma_separated(e), s,)
+			}
+			Self::Normal(ref s, ref e) => write!(f, "{}({})", s, Fmt::comma_separated(e)),
 		}
 	}
 }

@@ -3,6 +3,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::operator::{assigner, Operator};
 use crate::sql::table::Table;
@@ -56,10 +57,11 @@ impl Display for Data {
 			Self::SetExpression(v) => write!(
 				f,
 				"SET {}",
-				v.iter()
-					.map(|(l, o, r)| format!("{} {} {}", l, o, r))
-					.collect::<Vec<_>>()
-					.join(", ")
+				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(
+					f,
+					"{} {} {}",
+					l, o, r
+				))))
 			),
 			Self::PatchExpression(v) => write!(f, "PATCH {}", v),
 			Self::MergeExpression(v) => write!(f, "MERGE {}", v),
@@ -69,27 +71,21 @@ impl Display for Data {
 			Self::ValuesExpression(v) => write!(
 				f,
 				"({}) VALUES {}",
-				v.first()
-					.unwrap()
-					.iter()
-					.map(|(v, _)| v.to_string())
-					.collect::<Vec<_>>()
-					.join(", "),
-				v.iter()
-					.map(|v| format!(
-						"({})",
-						v.iter().map(|v| format!("{}", v.1)).collect::<Vec<_>>().join(", ")
-					))
-					.collect::<Vec<_>>()
-					.join(", ")
+				Fmt::comma_separated(v.first().unwrap().iter().map(|(v, _)| v)),
+				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
+					f,
+					"({})",
+					Fmt::comma_separated(v.iter().map(|(_, v)| v))
+				))))
 			),
 			Self::UpdateExpression(v) => write!(
 				f,
 				"ON DUPLICATE KEY UPDATE {}",
-				v.iter()
-					.map(|(l, o, r)| format!("{} {} {}", l, o, r))
-					.collect::<Vec<_>>()
-					.join(", ")
+				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(
+					f,
+					"{} {} {}",
+					l, o, r
+				))))
 			),
 		}
 	}

@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::number::Number;
 use crate::sql::operation::Operation;
 use crate::sql::serde::is_internal_serialization;
@@ -14,7 +15,7 @@ use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -132,9 +133,9 @@ impl Array {
 	}
 }
 
-impl fmt::Display for Array {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "[{}]", self.iter().map(|ref v| v.to_string()).collect::<Vec<_>>().join(", "))
+impl Display for Array {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "[{}]", Fmt::comma_separated(self.as_slice()))
 	}
 }
 

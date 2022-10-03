@@ -1,6 +1,7 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{idiom, Idiom};
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
@@ -28,11 +29,7 @@ impl IntoIterator for Fetchs {
 
 impl fmt::Display for Fetchs {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"FETCH {}",
-			self.0.iter().map(|ref v| v.to_string()).collect::<Vec<_>>().join(", ")
-		)
+		write!(f, "FETCH {}", Fmt::comma_separated(&self.0))
 	}
 }
 

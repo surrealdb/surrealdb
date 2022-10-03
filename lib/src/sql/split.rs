@@ -1,6 +1,7 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{basic, Idiom};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -30,11 +31,7 @@ impl IntoIterator for Splits {
 
 impl fmt::Display for Splits {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"SPLIT ON {}",
-			self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", ")
-		)
+		write!(f, "SPLIT ON {}", Fmt::comma_separated(&self.0))
 	}
 }
 

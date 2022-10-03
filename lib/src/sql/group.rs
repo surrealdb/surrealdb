@@ -1,6 +1,7 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{basic, Idiom};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -30,11 +31,7 @@ impl IntoIterator for Groups {
 
 impl Display for Groups {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(
-			f,
-			"GROUP BY {}",
-			self.0.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")
-		)
+		write!(f, "GROUP BY {}", Fmt::comma_separated(&self.0))
 	}
 }
 

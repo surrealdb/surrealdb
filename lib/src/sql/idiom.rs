@@ -4,6 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::part::Next;
 use crate::sql::part::{all, field, first, graph, index, last, part, thing, Part};
 use crate::sql::paths::{ID, IN, OUT};
@@ -30,7 +31,7 @@ impl Deref for Idioms {
 
 impl Display for Idioms {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "), f)
+		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
 

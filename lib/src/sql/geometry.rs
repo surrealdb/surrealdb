@@ -1,6 +1,7 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::serde::is_internal_serialization;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
@@ -261,102 +262,99 @@ impl fmt::Display for Geometry {
 			Self::Line(v) => write!(
 				f,
 				"{{ type: 'LineString', coordinates: [{}] }}",
-				v.points()
-					.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-					.collect::<Vec<_>>()
-					.join(", ")
+				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
+					f,
+					"[{}, {}]",
+					v.x(),
+					v.y()
+				))))
 			),
 			Self::Polygon(v) => write!(
 				f,
 				"{{ type: 'Polygon', coordinates: [[{}]{}] }}",
-				v.exterior()
-					.points()
-					.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-					.collect::<Vec<_>>()
-					.join(", "),
-				match v.interiors().len() {
-					0 => String::new(),
-					_ => format!(
-						", [{}]",
-						v.interiors()
-							.iter()
-							.map(|i| {
-								format!(
+				Fmt::comma_separated(v.exterior().points().map(|v| Fmt::new(v, |v, f| write!(
+					f,
+					"[{}, {}]",
+					v.x(),
+					v.y()
+				)))),
+				Fmt::new(v.interiors(), |interiors, f| {
+					match interiors.len() {
+						0 => Ok(()),
+						_ => write!(
+							f,
+							", [{}]",
+							Fmt::comma_separated(interiors.iter().map(|i| Fmt::new(i, |i, f| {
+								write!(
+									f,
 									"[{}]",
-									i.points()
-										.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-										.collect::<Vec<_>>()
-										.join(", ")
+									Fmt::comma_separated(i.points().map(|v| Fmt::new(
+										v,
+										|v, f| write!(f, "[{}, {}]", v.x(), v.y())
+									)))
 								)
-							})
-							.collect::<Vec<_>>()
-							.join(", "),
-					),
-				}
+							})))
+						),
+					}
+				})
 			),
 			Self::MultiPoint(v) => {
 				write!(
 					f,
 					"{{ type: 'MultiPoint', coordinates: [{}] }}",
-					v.iter()
-						.map(|v| format!("[{}, {}]", v.x(), v.y()))
-						.collect::<Vec<_>>()
-						.join(", ")
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
+						f,
+						"[{}, {}]",
+						v.x(),
+						v.y()
+					))))
 				)
 			}
 			Self::MultiLine(v) => write!(
 				f,
 				"{{ type: 'MultiLineString', coordinates: [{}] }}",
-				v.iter()
-					.map(|v| format!(
-						"[{}]",
-						v.points()
-							.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-							.collect::<Vec<_>>()
-							.join(", ")
-					))
-					.collect::<Vec<_>>()
-					.join(", ")
+				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
+					f,
+					"[{}]",
+					Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
+						f,
+						"[{}, {}]",
+						v.x(),
+						v.y()
+					))))
+				))))
 			),
 			Self::MultiPolygon(v) => write!(
 				f,
 				"{{ type: 'MultiPolygon', coordinates: [{}] }}",
-				v.iter()
-					.map(|v| format!(
-						"[[{}]{}]",
-						v.exterior()
-							.points()
-							.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-							.collect::<Vec<_>>()
-							.join(", "),
-						match v.interiors().len() {
-							0 => String::new(),
-							_ => format!(
-								", [{}]",
-								v.interiors()
-									.iter()
-									.map(|i| {
-										format!(
-											"[{}]",
-											i.points()
-												.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-												.collect::<Vec<_>>()
-												.join(", ")
-										)
-									})
-									.collect::<Vec<_>>()
-									.join(", "),
-							),
-						}
-					))
-					.collect::<Vec<_>>()
-					.join(", "),
+				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| {
+					match v.interiors().len() {
+						0 => Ok(()),
+						_ => write!(
+							f,
+							", [{}]",
+							Fmt::comma_separated(v.interiors().iter().map(|i| Fmt::new(
+								i,
+								|i, f| {
+									write!(
+										f,
+										"[{}]",
+										Fmt::comma_separated(i.points().map(|v| Fmt::new(
+											v,
+											|v, f| write!(f, "[{}, {}]", v.x(), v.y())
+										)))
+									)
+								}
+							)))
+						),
+					}
+				}))),
 			),
 			Self::Collection(v) => {
 				write!(
 					f,
 					"{{ type: 'GeometryCollection', geometries: [{}] }}",
-					v.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(", ")
+					Fmt::comma_separated(v)
 				)
 			}
 		}

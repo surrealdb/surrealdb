@@ -6,6 +6,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::common::{commas, val_char};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_key;
+use crate::sql::fmt::Fmt;
 use crate::sql::operation::{Op, Operation};
 use crate::sql::serde::is_internal_serialization;
 use crate::sql::thing::Thing;
@@ -138,10 +139,11 @@ impl fmt::Display for Object {
 		write!(
 			f,
 			"{{ {} }}",
-			self.iter()
-				.map(|(k, v)| format!("{}: {}", escape_key(k), v))
-				.collect::<Vec<_>>()
-				.join(", ")
+			Fmt::comma_separated(
+				self.0.iter().map(|args| Fmt::new(args, |(k, v), f| {
+					write!(f, "{}: {}", escape_key(k), v)
+				}))
+			)
 		)
 	}
 }

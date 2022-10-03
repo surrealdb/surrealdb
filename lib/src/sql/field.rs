@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::part::Part;
 use crate::sql::value::{value, Value};
@@ -55,7 +56,7 @@ impl IntoIterator for Fields {
 
 impl Display for Fields {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "), f)
+		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
 
