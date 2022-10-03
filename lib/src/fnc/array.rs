@@ -2,6 +2,7 @@ use crate::err::Error;
 use crate::sql::array::Combine;
 use crate::sql::array::Concat;
 use crate::sql::array::Difference;
+use crate::sql::array::Flatten;
 use crate::sql::array::Intersect;
 use crate::sql::array::Union;
 use crate::sql::array::Uniq;
@@ -33,6 +34,13 @@ pub fn distinct((arg,): (Value,)) -> Result<Value, Error> {
 		Value::Array(v) => Ok(v.uniq().into()),
 		_ => Ok(Value::None),
 	}
+}
+
+pub fn flatten((arg,): (Value,)) -> Result<Value, Error> {
+	Ok(match arg {
+		Value::Array(v) => v.flatten().into(),
+		_ => Value::None,
+	})
 }
 
 pub fn intersect(arrays: (Value, Value)) -> Result<Value, Error> {

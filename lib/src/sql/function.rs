@@ -259,6 +259,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 		tag("array::combine"),
 		tag("array::concat"),
 		tag("array::difference"),
+		tag("array::flatten"),
 		tag("array::distinct"),
 		tag("array::intersect"),
 		tag("array::len"),
