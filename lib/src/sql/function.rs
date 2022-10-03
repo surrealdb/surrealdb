@@ -158,7 +158,7 @@ impl fmt::Display for Function {
 			Self::Future(ref e) => write!(f, "<future> {{ {} }}", e),
 			Self::Cast(ref s, ref e) => write!(f, "<{}> {}", s, e),
 			Self::Script(ref s, ref e) => {
-				write!(f, "function({}) {{{}}}", Fmt::comma_separated(e), s,)
+				write!(f, "function({}) {{{}}}", Fmt::comma_separated(e), s)
 			}
 			Self::Normal(ref s, ref e) => write!(f, "{}({})", s, Fmt::comma_separated(e)),
 		}

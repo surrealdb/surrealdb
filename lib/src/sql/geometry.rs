@@ -328,26 +328,40 @@ impl fmt::Display for Geometry {
 				f,
 				"{{ type: 'MultiPolygon', coordinates: [{}] }}",
 				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| {
-					match v.interiors().len() {
-						0 => Ok(()),
-						_ => write!(
-							f,
-							", [{}]",
-							Fmt::comma_separated(v.interiors().iter().map(|i| Fmt::new(
-								i,
-								|i, f| {
-									write!(
-										f,
-										"[{}]",
-										Fmt::comma_separated(i.points().map(|v| Fmt::new(
-											v,
-											|v, f| write!(f, "[{}, {}]", v.x(), v.y())
-										)))
-									)
-								}
+					write!(
+						f,
+						"[[{}]{}]",
+						Fmt::comma_separated(
+							v.exterior().points().map(|v| Fmt::new(v, |v, f| write!(
+								f,
+								"[{}, {}]",
+								v.x(),
+								v.y()
 							)))
 						),
-					}
+						Fmt::new(v.interiors(), |interiors, f| {
+							match interiors.len() {
+								0 => Ok(()),
+								_ => write!(
+									f,
+									", [{}]",
+									Fmt::comma_separated(interiors.iter().map(|i| Fmt::new(
+										i,
+										|i, f| {
+											write!(
+												f,
+												"[{}]",
+												Fmt::comma_separated(i.points().map(|v| Fmt::new(
+													v,
+													|v, f| write!(f, "[{}, {}]", v.x(), v.y())
+												)))
+											)
+										}
+									)))
+								),
+							}
+						})
+					)
 				}))),
 			),
 			Self::Collection(v) => {
