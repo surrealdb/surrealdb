@@ -140,6 +140,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"parse::url::path" => parse::url::path,
 		"parse::url::port" => parse::url::port,
 		"parse::url::query" => parse::url::query,
+		"parse::url::scheme" => parse::url::scheme,
 		//
 		"rand::bool" => rand::bool,
 		"rand::enum" => rand::r#enum,

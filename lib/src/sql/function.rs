@@ -387,6 +387,7 @@ fn function_parse(i: &str) -> IResult<&str, &str> {
 		tag("parse::url::port"),
 		tag("parse::url::path"),
 		tag("parse::url::query"),
+		tag("parse::url::scheme"),
 	))(i)
 }
 
