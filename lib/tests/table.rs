@@ -59,7 +59,7 @@ async fn define_foreign_table() -> Result<(), Error> {
 				age: 39,
 				average: 70,
 				count: 1,
-				id: 'person_by_age:39',
+				id: person_by_age:[39],
 				total: 39
 			}
 		]",
@@ -77,7 +77,7 @@ async fn define_foreign_table() -> Result<(), Error> {
 				age: 39,
 				average: 75,
 				count: 2,
-				id: 'person_by_age:39',
+				id: person_by_age:[39],
 				total: 78
 			}
 		]",
@@ -95,7 +95,7 @@ async fn define_foreign_table() -> Result<(), Error> {
 				age: 39,
 				average: 80,
 				count: 2,
-				id: 'person_by_age:39',
+				id: person_by_age:[39],
 				total: 78
 			}
 		]",
