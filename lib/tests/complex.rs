@@ -207,7 +207,7 @@ fn with_enough_stack(
 
 	#[cfg(debug_assertions)]
 	{
-		builder = builder.stack_size(100_000_000);
+		builder = builder.stack_size(10_000_000);
 	}
 
 	builder
