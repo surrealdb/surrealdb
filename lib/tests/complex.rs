@@ -120,7 +120,7 @@ fn ok_graph_traversal_depth() -> Result<(), Error> {
 		ret
 	}
 
-	for n in 1..=50 {
+	for n in 1..=40 {
 		with_enough_stack(async move {
 			let mut res = run_queries(&graph_traversal(n)).await?;
 
@@ -207,7 +207,7 @@ fn with_enough_stack(
 
 	#[cfg(debug_assertions)]
 	{
-		builder = builder.stack_size(10_000_000);
+		builder = builder.stack_size(16_000_000);
 	}
 
 	builder
