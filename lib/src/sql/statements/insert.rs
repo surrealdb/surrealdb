@@ -65,7 +65,7 @@ impl InsertStatement {
 						o.set(ctx, opt, txn, k, v).await?;
 					}
 					// Specify the new table record id
-					let id = o.retable(&self.into)?;
+					let id = o.rid().generate(&self.into, true)?;
 					// Pass the mergeable to the iterator
 					i.ingest(Iterable::Mergeable(id, o));
 				}
@@ -77,14 +77,14 @@ impl InsertStatement {
 					Value::Array(v) => {
 						for v in v {
 							// Specify the new table record id
-							let id = v.retable(&self.into)?;
+							let id = v.rid().generate(&self.into, true)?;
 							// Pass the mergeable to the iterator
 							i.ingest(Iterable::Mergeable(id, v));
 						}
 					}
 					Value::Object(_) => {
 						// Specify the new table record id
-						let id = v.retable(&self.into)?;
+						let id = v.rid().generate(&self.into, true)?;
 						// Pass the mergeable to the iterator
 						i.ingest(Iterable::Mergeable(id, v));
 					}
@@ -106,9 +106,9 @@ impl InsertStatement {
 
 impl fmt::Display for InsertStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "INSERT")?;
+		f.write_str("INSERT")?;
 		if self.ignore {
-			write!(f, " IGNORE")?
+			f.write_str(" IGNORE")?
 		}
 		write!(f, " INTO {} {}", self.into, self.data)?;
 		if let Some(ref v) = self.output {
@@ -118,7 +118,7 @@ impl fmt::Display for InsertStatement {
 			write!(f, " {}", v)?
 		}
 		if self.parallel {
-			write!(f, " PARALLEL")?
+			f.write_str(" PARALLEL")?
 		}
 		Ok(())
 	}

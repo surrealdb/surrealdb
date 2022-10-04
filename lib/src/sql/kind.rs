@@ -1,6 +1,7 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::table::{table, Table};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -8,7 +9,7 @@ use nom::character::complete::char;
 use nom::combinator::map;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Kind {
@@ -28,35 +29,27 @@ pub enum Kind {
 }
 
 impl Default for Kind {
-	fn default() -> Kind {
-		Kind::Any
+	fn default() -> Self {
+		Self::Any
 	}
 }
 
-impl fmt::Display for Kind {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Kind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Kind::Any => write!(f, "any"),
-			Kind::Array => write!(f, "array"),
-			Kind::Bool => write!(f, "bool"),
-			Kind::Datetime => write!(f, "datetime"),
-			Kind::Decimal => write!(f, "decimal"),
-			Kind::Duration => write!(f, "duration"),
-			Kind::Float => write!(f, "float"),
-			Kind::Int => write!(f, "int"),
-			Kind::Number => write!(f, "number"),
-			Kind::Object => write!(f, "object"),
-			Kind::String => write!(f, "string"),
-			Kind::Record(v) => write!(
-				f,
-				"record({})",
-				v.iter().map(|ref v| v.to_string()).collect::<Vec<_>>().join(", ")
-			),
-			Kind::Geometry(v) => write!(
-				f,
-				"geometry({})",
-				v.iter().map(|ref v| v.to_string()).collect::<Vec<_>>().join(", ")
-			),
+			Kind::Any => f.write_str("any"),
+			Kind::Array => f.write_str("array"),
+			Kind::Bool => f.write_str("bool"),
+			Kind::Datetime => f.write_str("datetime"),
+			Kind::Decimal => f.write_str("decimal"),
+			Kind::Duration => f.write_str("duration"),
+			Kind::Float => f.write_str("float"),
+			Kind::Int => f.write_str("int"),
+			Kind::Number => f.write_str("number"),
+			Kind::Object => f.write_str("object"),
+			Kind::String => f.write_str("string"),
+			Kind::Record(v) => write!(f, "record({})", Fmt::comma_separated(v)),
+			Kind::Geometry(v) => write!(f, "geometry({})", Fmt::comma_separated(v)),
 		}
 	}
 }

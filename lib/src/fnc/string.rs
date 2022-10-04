@@ -12,7 +12,7 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value, Error> {
 
 pub fn join(args: Vec<Value>) -> Result<Value, Error> {
 	let mut args = args.into_iter().map(Value::as_string);
-	let chr = args.next().ok_or(Error::InvalidArguments {
+	let chr = args.next().ok_or_else(|| Error::InvalidArguments {
 		name: String::from("string::join"),
 		message: String::from("Expected at least one argument"),
 	})?;

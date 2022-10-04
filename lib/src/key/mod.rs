@@ -10,9 +10,11 @@
 /// DL              /*{ns}*{db}!dl{us}
 /// DT              /*{ns}*{db}!dt{tk}
 /// SC              /*{ns}*{db}!sc{sc}
-/// ST              /*{ns}*{db}!st{sc}!tk{tk}
 /// TB              /*{ns}*{db}!tb{tb}
 /// LQ              /*{ns}*{db}!lq{lq}
+///
+/// Scope           /*{ns}*{db}±{sc}
+/// ST              /*{ns}*{db}±{sc}!st{tk}
 ///
 /// Table           /*{ns}*{db}*{tb}
 /// FT              /*{ns}*{db}*{tb}!ft{ft}
@@ -45,6 +47,7 @@ pub mod nl;
 pub mod ns;
 pub mod nt;
 pub mod sc;
+pub mod scope;
 pub mod st;
 pub mod table;
 pub mod tb;

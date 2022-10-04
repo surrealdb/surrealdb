@@ -4,6 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::part::Next;
 use crate::sql::part::{all, field, first, graph, index, last, part, thing, Part};
 use crate::sql::paths::{ID, IN, OUT};
@@ -14,7 +15,7 @@ use nom::branch::alt;
 use nom::multi::separated_list1;
 use nom::multi::{many0, many1};
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
@@ -28,9 +29,9 @@ impl Deref for Idioms {
 	}
 }
 
-impl fmt::Display for Idioms {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))
+impl Display for Idioms {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
 
@@ -51,13 +52,13 @@ impl Deref for Idiom {
 
 impl From<String> for Idiom {
 	fn from(v: String) -> Self {
-		Idiom(vec![Part::from(v)])
+		Self(vec![Part::from(v)])
 	}
 }
 
 impl From<Vec<Part>> for Idiom {
 	fn from(v: Vec<Part>) -> Self {
-		Idiom(v)
+		Self(v)
 	}
 }
 

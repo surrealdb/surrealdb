@@ -11,6 +11,7 @@ pub use self::canceller::*;
 pub use self::context::*;
 pub use self::reason::*;
 
+pub mod cancellation;
 pub mod canceller;
 pub mod context;
 pub mod reason;

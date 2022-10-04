@@ -4,7 +4,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
-use crate::sql::base::{base, Base};
+use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
@@ -31,6 +31,7 @@ use rand::rngs::OsRng;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Display;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub enum DefineStatement {
@@ -54,15 +55,15 @@ impl DefineStatement {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			DefineStatement::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -70,15 +71,15 @@ impl DefineStatement {
 impl fmt::Display for DefineStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DefineStatement::Namespace(v) => write!(f, "{}", v),
-			DefineStatement::Database(v) => write!(f, "{}", v),
-			DefineStatement::Login(v) => write!(f, "{}", v),
-			DefineStatement::Token(v) => write!(f, "{}", v),
-			DefineStatement::Scope(v) => write!(f, "{}", v),
-			DefineStatement::Table(v) => write!(f, "{}", v),
-			DefineStatement::Event(v) => write!(f, "{}", v),
-			DefineStatement::Field(v) => write!(f, "{}", v),
-			DefineStatement::Index(v) => write!(f, "{}", v),
+			Self::Namespace(v) => Display::fmt(v, f),
+			Self::Database(v) => Display::fmt(v, f),
+			Self::Login(v) => Display::fmt(v, f),
+			Self::Token(v) => Display::fmt(v, f),
+			Self::Scope(v) => Display::fmt(v, f),
+			Self::Table(v) => Display::fmt(v, f),
+			Self::Event(v) => Display::fmt(v, f),
+			Self::Field(v) => Display::fmt(v, f),
+			Self::Index(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -349,7 +350,7 @@ impl DefineTokenStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		match self.base {
+		match &self.base {
 			Base::Ns => {
 				// Selected DB?
 				opt.needs(Level::Ns)?;
@@ -383,6 +384,24 @@ impl DefineTokenStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
+			Base::Sc(sc) => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
+				// Allowed to run?
+				opt.check(Level::Db)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Process the statement
+				let key = crate::key::st::new(opt.ns(), opt.db(), sc, &self.name);
+				run.add_ns(opt.ns(), opt.strict).await?;
+				run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+				run.add_sc(opt.ns(), opt.db(), sc, opt.strict).await?;
+				run.set(key, self).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
 			_ => unreachable!(),
 		}
 	}
@@ -410,7 +429,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, base) = base(i)?;
+	let (i, base) = base_or_scope(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("TYPE")(i)?;
 	let (i, _) = shouldbespace(i)?;

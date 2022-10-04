@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::sql::error::Error::ParserError;
+use crate::sql::error::IResult;
 use crate::sql::query::{query, Query};
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
@@ -7,81 +8,23 @@ use nom::Err;
 use std::str;
 
 pub fn parse(input: &str) -> Result<Query, Error> {
-	match input.trim().len() {
-		0 => Err(Error::QueryEmpty),
-		_ => match query(input) {
-			Ok((_, query)) => Ok(query),
-			Err(Err::Error(e)) => match e {
-				ParserError(e) => {
-					let (s, l, c) = locate(input, e);
-					Err(Error::InvalidQuery {
-						line: l,
-						char: c,
-						sql: s.to_string(),
-					})
-				}
-			},
-			Err(Err::Failure(e)) => match e {
-				ParserError(e) => {
-					let (s, l, c) = locate(input, e);
-					Err(Error::InvalidQuery {
-						line: l,
-						char: c,
-						sql: s.to_string(),
-					})
-				}
-			},
-			_ => unreachable!(),
-		},
-	}
+	parse_impl(input, query)
 }
 
 pub fn thing(input: &str) -> Result<Thing, Error> {
-	match input.trim().len() {
-		0 => Err(Error::QueryEmpty),
-		_ => match super::thing::thing(input) {
-			Ok((_, query)) => Ok(query),
-			Err(Err::Error(e)) => match e {
-				ParserError(e) => {
-					let (s, l, c) = locate(input, e);
-					Err(Error::InvalidQuery {
-						line: l,
-						char: c,
-						sql: s.to_string(),
-					})
-				}
-			},
-			Err(Err::Failure(e)) => match e {
-				ParserError(e) => {
-					let (s, l, c) = locate(input, e);
-					Err(Error::InvalidQuery {
-						line: l,
-						char: c,
-						sql: s.to_string(),
-					})
-				}
-			},
-			_ => unreachable!(),
-		},
-	}
+	parse_impl(input, super::thing::thing)
 }
 
 pub fn json(input: &str) -> Result<Value, Error> {
+	parse_impl(input, super::value::json)
+}
+
+fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Result<O, Error> {
 	match input.trim().len() {
 		0 => Err(Error::QueryEmpty),
-		_ => match super::value::json(input) {
-			Ok((_, query)) => Ok(query),
-			Err(Err::Error(e)) => match e {
-				ParserError(e) => {
-					let (s, l, c) = locate(input, e);
-					Err(Error::InvalidQuery {
-						line: l,
-						char: c,
-						sql: s.to_string(),
-					})
-				}
-			},
-			Err(Err::Failure(e)) => match e {
+		_ => match parser(input) {
+			Ok((_, parsed)) => Ok(parsed),
+			Err(Err::Error(e)) | Err(Err::Failure(e)) => match e {
 				ParserError(e) => {
 					let (s, l, c) = locate(input, e);
 					Err(Error::InvalidQuery {
@@ -97,6 +40,7 @@ pub fn json(input: &str) -> Result<Value, Error> {
 }
 
 fn truncate(s: &str, l: usize) -> &str {
+	// TODO: use s.floor_char_boundary once https://github.com/rust-lang/rust/issues/93743 lands
 	match s.char_indices().nth(l) {
 		None => s,
 		Some((i, _)) => &s[..i],
@@ -106,8 +50,7 @@ fn truncate(s: &str, l: usize) -> &str {
 fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
 	let index = input.len() - tried.len();
 	let tried = truncate(tried, 100);
-	let lines = input.split('\n').collect::<Vec<&str>>();
-	let lines = lines.iter().map(|l| l.len()).enumerate();
+	let lines = input.split('\n').map(|l| l.len()).enumerate();
 	let (mut total, mut chars) = (0, 0);
 	for (line, size) in lines {
 		total += size + 1;

@@ -10,44 +10,44 @@ pub trait Parse<T> {
 	fn parse(val: &str) -> T;
 }
 
-impl Parse<Value> for Value {
-	fn parse(val: &str) -> Value {
+impl Parse<Self> for Value {
+	fn parse(val: &str) -> Self {
 		value(val).unwrap().1
 	}
 }
 
-impl Parse<Array> for Array {
-	fn parse(val: &str) -> Array {
+impl Parse<Self> for Array {
+	fn parse(val: &str) -> Self {
 		array(val).unwrap().1
 	}
 }
 
-impl Parse<Param> for Param {
-	fn parse(val: &str) -> Param {
+impl Parse<Self> for Param {
+	fn parse(val: &str) -> Self {
 		param(val).unwrap().1
 	}
 }
 
-impl Parse<Idiom> for Idiom {
-	fn parse(val: &str) -> Idiom {
+impl Parse<Self> for Idiom {
+	fn parse(val: &str) -> Self {
 		idiom(val).unwrap().1
 	}
 }
 
-impl Parse<Script> for Script {
-	fn parse(val: &str) -> Script {
+impl Parse<Self> for Script {
+	fn parse(val: &str) -> Self {
 		script(val).unwrap().1
 	}
 }
 
-impl Parse<Thing> for Thing {
-	fn parse(val: &str) -> Thing {
+impl Parse<Self> for Thing {
+	fn parse(val: &str) -> Self {
 		thing(val).unwrap().1
 	}
 }
 
-impl Parse<Expression> for Expression {
-	fn parse(val: &str) -> Expression {
+impl Parse<Self> for Expression {
+	fn parse(val: &str) -> Self {
 		expression(val).unwrap().1
 	}
 }

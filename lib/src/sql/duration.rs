@@ -1,8 +1,9 @@
 use crate::sql::common::take_u64;
 use crate::sql::datetime::Datetime;
+use crate::sql::ending::duration as ending;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
-use chrono::DurationRound;
+use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::multi::many1;
@@ -13,10 +14,10 @@ use std::ops;
 use std::ops::Deref;
 use std::time;
 
-static SECONDS_PER_YEAR: u64 = 31_536_000;
-static SECONDS_PER_WEEK: u64 = 604_800;
-static SECONDS_PER_DAY: u64 = 86400;
-static SECONDS_PER_HOUR: u64 = 3600;
+static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
+static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
+static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
+static SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
 static SECONDS_PER_MINUTE: u64 = 60;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
@@ -24,7 +25,7 @@ pub struct Duration(pub time::Duration);
 
 impl From<time::Duration> for Duration {
 	fn from(v: time::Duration) -> Self {
-		Duration(v)
+		Self(v)
 	}
 }
 
@@ -38,7 +39,7 @@ impl From<&str> for Duration {
 	fn from(s: &str) -> Self {
 		match duration(s) {
 			Ok((_, v)) => v,
-			Err(_) => Duration::default(),
+			Err(_) => Self::default(),
 		}
 	}
 }
@@ -53,6 +54,40 @@ impl Deref for Duration {
 impl Duration {
 	pub fn to_raw(&self) -> String {
 		self.to_string()
+	}
+
+	pub fn secs(&self) -> Value {
+		self.0.as_secs().into()
+	}
+
+	pub fn mins(&self) -> Value {
+		let secs = self.0.as_secs();
+		let mins = secs / SECONDS_PER_MINUTE;
+		mins.into()
+	}
+
+	pub fn hours(&self) -> Value {
+		let secs = self.0.as_secs();
+		let hours = secs / SECONDS_PER_HOUR;
+		hours.into()
+	}
+
+	pub fn days(&self) -> Value {
+		let secs = self.0.as_secs();
+		let days = secs / SECONDS_PER_DAY;
+		days.into()
+	}
+
+	pub fn weeks(&self) -> Value {
+		let secs = self.0.as_secs();
+		let weeks = secs / SECONDS_PER_WEEK;
+		weeks.into()
+	}
+
+	pub fn years(&self) -> Value {
+		let secs = self.0.as_secs();
+		let years = secs / SECONDS_PER_YEAR;
+		years.into()
 	}
 }
 
@@ -169,19 +204,6 @@ impl ops::Sub<Datetime> for Duration {
 	}
 }
 
-impl ops::Div<Datetime> for Duration {
-	type Output = Datetime;
-	fn div(self, other: Datetime) -> Datetime {
-		match chrono::Duration::from_std(self.0) {
-			Ok(d) => match other.duration_trunc(d) {
-				Ok(v) => Datetime::from(v),
-				Err(_) => Datetime::default(),
-			},
-			Err(_) => Datetime::default(),
-		}
-	}
-}
-
 impl Sum<Self> for Duration {
 	fn sum<I>(iter: I) -> Duration
 	where
@@ -202,6 +224,7 @@ impl<'a> Sum<&'a Self> for Duration {
 
 pub fn duration(i: &str) -> IResult<&str, Duration> {
 	let (i, v) = many1(duration_raw)(i)?;
+	let (i, _) = ending(i)?;
 	Ok((i, v.iter().sum::<Duration>()))
 }
 
@@ -211,23 +234,22 @@ fn duration_raw(i: &str) -> IResult<&str, Duration> {
 	Ok((
 		i,
 		Duration(match u {
-			"ns" => time::Duration::new(0, v as u32),
-			"µs" => time::Duration::new(0, v as u32 * 1000),
-			"ms" => time::Duration::new(0, v as u32 * 1000 * 1000),
-			"s" => time::Duration::new(v, 0),
-			"m" => time::Duration::new(v * 60, 0),
-			"h" => time::Duration::new(v * 60 * 60, 0),
-			"d" => time::Duration::new(v * 60 * 60 * 24, 0),
-			"w" => time::Duration::new(v * 60 * 60 * 24 * 7, 0),
-			"y" => time::Duration::new(v * 60 * 60 * 24 * 365, 0),
-			_ => time::Duration::new(0, 0),
+			"ns" => time::Duration::from_nanos(v),
+			"µs" => time::Duration::from_micros(v),
+			"ms" => time::Duration::from_millis(v),
+			"s" => time::Duration::from_secs(v),
+			"m" => time::Duration::from_secs(v * SECONDS_PER_MINUTE),
+			"h" => time::Duration::from_secs(v * SECONDS_PER_HOUR),
+			"d" => time::Duration::from_secs(v * SECONDS_PER_DAY),
+			"w" => time::Duration::from_secs(v * SECONDS_PER_WEEK),
+			"y" => time::Duration::from_secs(v * SECONDS_PER_YEAR),
+			_ => time::Duration::ZERO,
 		}),
 	))
 }
 
 fn part(i: &str) -> IResult<&str, u64> {
-	let (i, v) = take_u64(i)?;
-	Ok((i, v))
+	take_u64(i)
 }
 
 fn unit(i: &str) -> IResult<&str, &str> {

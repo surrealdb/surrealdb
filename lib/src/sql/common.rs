@@ -36,20 +36,17 @@ pub fn is_hex(chr: char) -> bool {
 
 #[inline]
 pub fn is_digit(chr: char) -> bool {
-	(0x30..=0x39).contains(&(chr as u8))
+	chr.is_ascii_digit()
 }
 
 #[inline]
 pub fn val_char(chr: char) -> bool {
-	is_alphanumeric(chr as u8) || chr == '_'
+	chr.is_ascii_alphanumeric() || chr == '_'
 }
 
-pub fn take_u32(i: &str) -> IResult<&str, u32> {
-	let (i, v) = take_while(is_digit)(i)?;
-	match v.parse::<u32>() {
-		Ok(v) => Ok((i, v)),
-		_ => Err(Error(ParserError(i))),
-	}
+#[inline]
+pub fn val_u8(chr: u8) -> bool {
+	is_alphanumeric(chr) || chr == b'_'
 }
 
 pub fn take_u64(i: &str) -> IResult<&str, u64> {
@@ -64,6 +61,14 @@ pub fn take_usize(i: &str) -> IResult<&str, usize> {
 	let (i, v) = take_while(is_digit)(i)?;
 	match v.parse::<usize>() {
 		Ok(v) => Ok((i, v)),
+		_ => Err(Error(ParserError(i))),
+	}
+}
+
+pub fn take_u32_len(i: &str) -> IResult<&str, (u32, usize)> {
+	let (i, v) = take_while(is_digit)(i)?;
+	match v.parse::<u32>() {
+		Ok(n) => Ok((i, (n, v.len()))),
 		_ => Err(Error(ParserError(i))),
 	}
 }

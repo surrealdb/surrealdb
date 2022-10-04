@@ -1,0 +1,60 @@
+name: Nix
+
+on:
+  - pull_request
+  - push
+
+jobs:
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: cachix/install-nix-action@v17
+      - run: nix flake check --show-trace
+
+  build-static:
+    name: Build static Linux binary
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: cachix/install-nix-action@v17
+      - uses: cachix/cachix-action@v10
+        with:
+          name: surrealdb
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          extraPullNames: nix-community
+      - run: nix build .#static-binary
+      - run: ./result/bin/surreal help
+
+  build-docker:
+    name: Build Docker image
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: cachix/install-nix-action@v17
+      - uses: cachix/cachix-action@v10
+        with:
+          name: surrealdb
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          extraPullNames: nix-community
+      - run: nix build .#docker-image
+      - run: docker load --input ./result
+
+  build-native-linux:
+    name: Build native Linux binary
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: cachix/install-nix-action@v17
+      - uses: cachix/cachix-action@v10
+        with:
+          name: surrealdb
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          extraPullNames: nix-community
+      - run: nix build .#x86_64-unknown-linux-gnu
+      - run: ./result/bin/surreal help

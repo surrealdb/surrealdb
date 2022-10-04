@@ -8,6 +8,9 @@ pub mod verify;
 use crate::cli::CF;
 use crate::err::Error;
 
+pub const BASIC: &str = "Basic ";
+pub const TOKEN: &str = "Bearer ";
+
 const LOG: &str = "surrealdb::iam";
 
 pub async fn init() -> Result<(), Error> {

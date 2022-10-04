@@ -148,8 +148,17 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				let t = self.kind.generate();
-				i.ingest(Iterable::Relatable(f, t, w));
+				match &self.data {
+					// There is a data clause so check for a record id
+					Some(data) => match data.rid(&self.kind) {
+						// There was a problem creating the record id
+						Err(e) => return Err(e),
+						// There is an id field so use the record id
+						Ok(t) => i.ingest(Iterable::Relatable(f, t, w)),
+					},
+					// There is no data clause so create a record id
+					None => i.ingest(Iterable::Relatable(f, self.kind.generate(), w)),
+				};
 			}
 		}
 		// Assign the statement
@@ -163,7 +172,7 @@ impl fmt::Display for RelateStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "RELATE {} -> {} -> {}", self.from, self.kind, self.with)?;
 		if self.uniq {
-			write!(f, " UNIQUE")?
+			f.write_str(" UNIQUE")?
 		}
 		if let Some(ref v) = self.data {
 			write!(f, " {}", v)?
@@ -175,7 +184,7 @@ impl fmt::Display for RelateStatement {
 			write!(f, " {}", v)?
 		}
 		if self.parallel {
-			write!(f, " PARALLEL")?
+			f.write_str(" PARALLEL")?
 		}
 		Ok(())
 	}

@@ -13,7 +13,7 @@ pub struct CommitStatement;
 
 impl fmt::Display for CommitStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "COMMIT TRANSACTION")
+		f.write_str("COMMIT TRANSACTION")
 	}
 }
 

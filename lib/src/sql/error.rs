@@ -12,7 +12,7 @@ pub type IResult<I, O, E = Error<I>> = Result<(I, O), Err<E>>;
 
 impl<I> ParseError<I> for Error<I> {
 	fn from_error_kind(input: I, _: ErrorKind) -> Self {
-		Error::ParserError(input)
+		Self::ParserError(input)
 	}
 	fn append(_: I, _: ErrorKind, other: Self) -> Self {
 		other

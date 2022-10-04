@@ -42,7 +42,7 @@ impl Value {
 							Ok(())
 						}
 					},
-					Part::Field(f) => match v.get_mut(f.to_raw().as_str()) {
+					Part::Field(f) => match v.get_mut(f as &str) {
 						Some(v) if v.is_some() => v.set(ctx, opt, txn, path.next(), val).await,
 						_ => {
 							let mut obj = Value::base();

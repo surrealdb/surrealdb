@@ -314,3 +314,52 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 ```
 
 </details>
+
+
+## Building on Windows-amd64 (Windows OS)
+
+<details><summary>Click to show details</summary>
+
+###  ✅ Compile for `windows-amd64`
+
+> Compiling SurrealDB with windows OS requires **Administrator** priveledge!
+
+⚠**Tested on Windows 10 build 22H2(19044.2006)**
+
+1. Install LLVM with Clang 👉 [Download Here](https://github.com/llvm/llvm-project/releases) *look for something end with `amd64.exe`*
+2. Install `MYSYS2` 👉 Follow instructions on [their website](https://www.msys2.org/)
+3. Add Symlinks for llvm
+
+   ```powershell
+   New-Item -Path "C:\Program Files\LLVM\x86_64-w64-mingw32" -ItemType SymbolicLink -Value "C:\msys64\mingw64\x86_64-w64-mingw32"
+   New-Item -Path "C:\Program Files\LLVM\i686-w64-mingw32" -ItemType SymbolicLink -Value "C:\msys64\mingw64\i686-w64-mingw32"
+    ```
+
+4. Add GCC binary path to environment
+
+    ```powershell
+    $PATH += "C:\msys64\mingw64\bin"
+    $PATH += "C:\msys64\mingw32\bin"
+    $CC_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-gcc"
+    $CC_i686_pc_windows_gnu = "i686-w64-mingw32-gcc"
+    $HOST_CC = "x86_64-w64-mingw32-gcc"
+    ```
+
+5. Install `patch` GNU Util
+    Go to GNUWin32 page for [*patch*](http://gnuwin32.sourceforge.net/packages/patch.htm) and
+    install the [*patch*](http://gnuwin32.sourceforge.net/downlinks/patch-bin-zip.php)
+    binaries.
+
+	> For some bizzare reasons, **patch.exe needs elevated priviledge** to be invoked during
+	> compilation
+
+    Add directory containing the `patch.exe` to your PATH
+
+6. Run cargo in an **elevated ⚠** shell
+
+    Running `cargo build` in an **elevated shell** will now build the `SurrealDB` in Windows OS.
+</details>
+
+## Building using the Nix package manager
+
+SurrealDB can be built [using the Nix package manager](../pkg/nix#nix-package-manager).

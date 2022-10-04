@@ -18,8 +18,8 @@ use std::str;
 pub struct Param(pub Idiom);
 
 impl From<Idiom> for Param {
-	fn from(p: Idiom) -> Param {
-		Param(p)
+	fn from(p: Idiom) -> Self {
+		Self(p)
 	}
 }
 

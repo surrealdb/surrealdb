@@ -5,11 +5,14 @@ use crate::sql::escape::escape_id;
 use crate::sql::ident::ident_raw;
 use crate::sql::number::integer;
 use crate::sql::object::{object, Object};
+use crate::sql::strand::Strand;
+use crate::sql::uuid::Uuid;
+use crate::sql::value::Value;
 use nanoid::nanoid;
 use nom::branch::alt;
 use nom::combinator::map;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Id {
@@ -21,67 +24,85 @@ pub enum Id {
 
 impl From<i64> for Id {
 	fn from(v: i64) -> Self {
-		Id::Number(v)
+		Self::Number(v)
 	}
 }
 
 impl From<i32> for Id {
 	fn from(v: i32) -> Self {
-		Id::Number(v as i64)
+		Self::Number(v as i64)
 	}
 }
 
 impl From<u64> for Id {
 	fn from(v: u64) -> Self {
-		Id::Number(v as i64)
-	}
-}
-
-impl From<Array> for Id {
-	fn from(v: Array) -> Self {
-		Id::Array(v)
-	}
-}
-
-impl From<Object> for Id {
-	fn from(v: Object) -> Self {
-		Id::Object(v)
+		Self::Number(v as i64)
 	}
 }
 
 impl From<String> for Id {
 	fn from(v: String) -> Self {
-		Id::String(v)
+		Self::String(v)
+	}
+}
+
+impl From<Array> for Id {
+	fn from(v: Array) -> Self {
+		Self::Array(v)
+	}
+}
+
+impl From<Object> for Id {
+	fn from(v: Object) -> Self {
+		Self::Object(v)
+	}
+}
+
+impl From<Uuid> for Id {
+	fn from(v: Uuid) -> Self {
+		Self::String(v.to_raw())
+	}
+}
+
+impl From<Strand> for Id {
+	fn from(v: Strand) -> Self {
+		Self::String(v.as_string())
 	}
 }
 
 impl From<&str> for Id {
 	fn from(v: &str) -> Self {
-		Id::String(v.to_owned())
+		Self::String(v.to_owned())
+	}
+}
+
+impl From<Vec<Value>> for Id {
+	fn from(v: Vec<Value>) -> Self {
+		Id::Array(v.into())
 	}
 }
 
 impl Id {
-	pub fn rand() -> Id {
-		Id::String(nanoid!(20, &ID_CHARS))
+	pub fn rand() -> Self {
+		Self::String(nanoid!(20, &ID_CHARS))
 	}
 	pub fn to_raw(&self) -> String {
 		match self {
-			Id::Number(v) => v.to_string(),
-			Id::String(v) => v.to_string(),
-			Id::Object(v) => v.to_string(),
-			Id::Array(v) => v.to_string(),
+			Self::Number(v) => v.to_string(),
+			Self::String(v) => v.to_string(),
+			Self::Object(v) => v.to_string(),
+			Self::Array(v) => v.to_string(),
 		}
 	}
 }
 
-impl fmt::Display for Id {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Id {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Id::Number(v) => write!(f, "{}", v),
-			Id::String(v) => write!(f, "{}", escape_id(v)),
-			Id::Object(v) => write!(f, "{}", v),
-			Id::Array(v) => write!(f, "{}", v),
+			Self::Number(v) => Display::fmt(v, f),
+			Self::String(v) => Display::fmt(&escape_id(v), f),
+			Self::Object(v) => Display::fmt(v, f),
+			Self::Array(v) => Display::fmt(v, f),
 		}
 	}
 }

@@ -17,7 +17,6 @@ use std::str;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Part {
-	Any,
 	All,
 	Last,
 	First,
@@ -30,63 +29,63 @@ pub enum Part {
 
 impl From<i32> for Part {
 	fn from(v: i32) -> Self {
-		Part::Index(v.into())
+		Self::Index(v.into())
 	}
 }
 
 impl From<isize> for Part {
 	fn from(v: isize) -> Self {
-		Part::Index(v.into())
+		Self::Index(v.into())
 	}
 }
 
 impl From<usize> for Part {
 	fn from(v: usize) -> Self {
-		Part::Index(v.into())
+		Self::Index(v.into())
 	}
 }
 
 impl From<Number> for Part {
 	fn from(v: Number) -> Self {
-		Part::Index(v)
+		Self::Index(v)
 	}
 }
 
 impl From<Ident> for Part {
 	fn from(v: Ident) -> Self {
-		Part::Field(v)
+		Self::Field(v)
 	}
 }
 
 impl From<Value> for Part {
 	fn from(v: Value) -> Self {
-		Part::Where(v)
+		Self::Where(v)
 	}
 }
 
 impl From<Thing> for Part {
 	fn from(v: Thing) -> Self {
-		Part::Thing(v)
+		Self::Thing(v)
 	}
 }
 
 impl From<Graph> for Part {
 	fn from(v: Graph) -> Self {
-		Part::Graph(v)
+		Self::Graph(v)
 	}
 }
 
 impl From<String> for Part {
 	fn from(v: String) -> Self {
-		Part::Field(Ident(v))
+		Self::Field(Ident(v))
 	}
 }
 
 impl From<&str> for Part {
 	fn from(v: &str) -> Self {
 		match v.parse::<isize>() {
-			Ok(v) => Part::from(v),
-			_ => Part::from(v.to_owned()),
+			Ok(v) => Self::from(v),
+			_ => Self::from(v.to_owned()),
 		}
 	}
 }
@@ -104,10 +103,9 @@ impl Part {
 impl fmt::Display for Part {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Part::Any => write!(f, ".."),
-			Part::All => write!(f, "[*]"),
-			Part::Last => write!(f, "[$]"),
-			Part::First => write!(f, "[0]"),
+			Part::All => f.write_str("[*]"),
+			Part::Last => f.write_str("[$]"),
+			Part::First => f.write_str("[0]"),
 			Part::Field(v) => write!(f, ".{}", v),
 			Part::Index(v) => write!(f, "[{}]", v),
 			Part::Where(v) => write!(f, "[WHERE {}]", v),
