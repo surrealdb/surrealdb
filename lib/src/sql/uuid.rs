@@ -20,7 +20,7 @@ pub struct Uuid(pub uuid::Uuid);
 
 impl From<&str> for Uuid {
 	fn from(s: &str) -> Self {
-		uuid::Uuid::try_parse(s).map(Uuid).unwrap_or_default()
+		uuid::Uuid::try_parse(s).map(Self).unwrap_or_default()
 	}
 }
 
@@ -39,7 +39,7 @@ impl Deref for Uuid {
 
 impl Uuid {
 	pub fn new() -> Self {
-		Uuid(uuid::Uuid::new_v4())
+		Self(uuid::Uuid::new_v4())
 	}
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()

@@ -140,16 +140,16 @@ pub enum Permission {
 
 impl Default for Permission {
 	fn default() -> Self {
-		Permission::Full
+		Self::Full
 	}
 }
 
 impl fmt::Display for Permission {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Permission::None => write!(f, "NONE"),
-			Permission::Full => write!(f, "FULL"),
-			Permission::Specific(ref v) => write!(f, "WHERE {}", v),
+			Self::None => f.write_str("NONE"),
+			Self::Full => f.write_str("FULL"),
+			Self::Specific(ref v) => write!(f, "WHERE {}", v),
 		}
 	}
 }

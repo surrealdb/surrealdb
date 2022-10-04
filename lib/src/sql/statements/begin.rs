@@ -13,7 +13,7 @@ pub struct BeginStatement;
 
 impl fmt::Display for BeginStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "BEGIN TRANSACTION")
+		f.write_str("BEGIN TRANSACTION")
 	}
 }
 

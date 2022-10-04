@@ -25,29 +25,23 @@ pub struct Thing {
 }
 
 impl From<(String, Id)> for Thing {
-	fn from(v: (String, Id)) -> Self {
-		Thing {
-			tb: v.0,
-			id: v.1,
+	fn from((tb, id): (String, Id)) -> Self {
+		Self {
+			tb,
+			id,
 		}
 	}
 }
 
 impl From<(String, String)> for Thing {
-	fn from(v: (String, String)) -> Self {
-		Thing {
-			tb: v.0,
-			id: Id::from(v.1),
-		}
+	fn from((tb, id): (String, String)) -> Self {
+		Self::from((tb, Id::from(id)))
 	}
 }
 
 impl From<(&str, &str)> for Thing {
-	fn from(v: (&str, &str)) -> Self {
-		Thing {
-			tb: v.0.to_owned(),
-			id: Id::from(v.1),
-		}
+	fn from((tb, id): (&str, &str)) -> Self {
+		Self::from((tb.to_owned(), Id::from(id)))
 	}
 }
 

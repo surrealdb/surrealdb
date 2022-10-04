@@ -15,7 +15,7 @@ pub struct UseStatement {
 
 impl fmt::Display for UseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "USE")?;
+		f.write_str("USE")?;
 		if let Some(ref ns) = self.ns {
 			write!(f, " NS {}", ns)?;
 		}

@@ -172,7 +172,7 @@ impl fmt::Display for RelateStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "RELATE {} -> {} -> {}", self.from, self.kind, self.with)?;
 		if self.uniq {
-			write!(f, " UNIQUE")?
+			f.write_str(" UNIQUE")?
 		}
 		if let Some(ref v) = self.data {
 			write!(f, " {}", v)?
@@ -184,7 +184,7 @@ impl fmt::Display for RelateStatement {
 			write!(f, " {}", v)?
 		}
 		if self.parallel {
-			write!(f, " PARALLEL")?
+			f.write_str(" PARALLEL")?
 		}
 		Ok(())
 	}

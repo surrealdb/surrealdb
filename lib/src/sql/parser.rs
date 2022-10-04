@@ -40,6 +40,7 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 }
 
 fn truncate(s: &str, l: usize) -> &str {
+	// TODO: use s.floor_char_boundary once https://github.com/rust-lang/rust/issues/93743 lands
 	match s.char_indices().nth(l) {
 		None => s,
 		Some((i, _)) => &s[..i],
@@ -49,8 +50,7 @@ fn truncate(s: &str, l: usize) -> &str {
 fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
 	let index = input.len() - tried.len();
 	let tried = truncate(tried, 100);
-	let lines = input.split('\n').collect::<Vec<&str>>();
-	let lines = lines.iter().map(|l| l.len()).enumerate();
+	let lines = input.split('\n').map(|l| l.len()).enumerate();
 	let (mut total, mut chars) = (0, 0);
 	for (line, size) in lines {
 		total += size + 1;

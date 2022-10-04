@@ -10,8 +10,7 @@ use nom::combinator::map;
 use nom::number::complete::recognize_float;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::fmt;
-use std::fmt::Display;
+use std::fmt::{self, Display, Formatter};
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops;
@@ -26,102 +25,102 @@ pub enum Number {
 
 impl Default for Number {
 	fn default() -> Self {
-		Number::Int(0)
+		Self::Int(0)
 	}
 }
 
 impl From<i8> for Number {
 	fn from(i: i8) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<i16> for Number {
 	fn from(i: i16) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<i32> for Number {
 	fn from(i: i32) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<i64> for Number {
 	fn from(i: i64) -> Self {
-		Number::Int(i)
+		Self::Int(i)
 	}
 }
 
 impl From<isize> for Number {
 	fn from(i: isize) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<u8> for Number {
 	fn from(i: u8) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<u16> for Number {
 	fn from(i: u16) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<u32> for Number {
 	fn from(i: u32) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<u64> for Number {
 	fn from(i: u64) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<usize> for Number {
 	fn from(i: usize) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<f32> for Number {
 	fn from(f: f32) -> Self {
-		Number::Float(f as f64)
+		Self::Float(f as f64)
 	}
 }
 
 impl From<f64> for Number {
 	fn from(f: f64) -> Self {
-		Number::Float(f as f64)
+		Self::Float(f as f64)
 	}
 }
 
 impl From<&str> for Number {
 	fn from(s: &str) -> Self {
-		Number::Decimal(BigDecimal::from_str(s).unwrap_or_default())
+		Self::Decimal(BigDecimal::from_str(s).unwrap_or_default())
 	}
 }
 
 impl From<String> for Number {
 	fn from(s: String) -> Self {
-		Number::Decimal(BigDecimal::from_str(&s).unwrap_or_default())
+		Self::from(s.as_str())
 	}
 }
 
 impl From<BigDecimal> for Number {
 	fn from(v: BigDecimal) -> Self {
-		Number::Decimal(v)
+		Self::Decimal(v)
 	}
 }
 
-impl fmt::Display for Number {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Number {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Number::Int(v) => Display::fmt(v, f),
 			Number::Float(v) => Display::fmt(v, f),

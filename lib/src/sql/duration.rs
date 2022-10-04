@@ -25,7 +25,7 @@ pub struct Duration(pub time::Duration);
 
 impl From<time::Duration> for Duration {
 	fn from(v: time::Duration) -> Self {
-		Duration(v)
+		Self(v)
 	}
 }
 
@@ -39,7 +39,7 @@ impl From<&str> for Duration {
 	fn from(s: &str) -> Self {
 		match duration(s) {
 			Ok((_, v)) => v,
-			Err(_) => Duration::default(),
+			Err(_) => Self::default(),
 		}
 	}
 }

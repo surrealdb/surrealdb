@@ -16,18 +16,18 @@ pub enum Base {
 }
 
 impl Default for Base {
-	fn default() -> Base {
-		Base::Kv
+	fn default() -> Self {
+		Self::Kv
 	}
 }
 
 impl fmt::Display for Base {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Base::Ns => write!(f, "NAMESPACE"),
-			Base::Db => write!(f, "DATABASE"),
-			Base::Sc(sc) => write!(f, "SCOPE {}", sc),
-			_ => write!(f, "KV"),
+			Self::Ns => f.write_str("NAMESPACE"),
+			Self::Db => f.write_str("DATABASE"),
+			Self::Sc(sc) => write!(f, "SCOPE {}", sc),
+			Self::Kv => f.write_str("KV"),
 		}
 	}
 }
