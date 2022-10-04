@@ -516,7 +516,68 @@ impl Serialize for Geometry {
 
 impl hash::Hash for Geometry {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		self.to_string().hash(state)
+		match self {
+			Geometry::Point(p) => {
+				"Point".hash(state);
+				p.x().to_bits().hash(state);
+				p.y().to_bits().hash(state);
+			}
+			Geometry::Line(l) => {
+				"Line".hash(state);
+				l.points().for_each(|v| {
+					v.x().to_bits().hash(state);
+					v.y().to_bits().hash(state);
+				});
+			}
+			Geometry::Polygon(p) => {
+				"Polygon".hash(state);
+				p.exterior().points().for_each(|ext| {
+					ext.x().to_bits().hash(state);
+					ext.y().to_bits().hash(state);
+				});
+				p.interiors().iter().for_each(|int| {
+					int.points().for_each(|v| {
+						v.x().to_bits().hash(state);
+						v.y().to_bits().hash(state);
+					});
+				});
+			}
+			Geometry::MultiPoint(v) => {
+				"MultiPoint".hash(state);
+				v.0.iter().for_each(|v| {
+					v.x().to_bits().hash(state);
+					v.y().to_bits().hash(state);
+				});
+			}
+			Geometry::MultiLine(ml) => {
+				"MultiLine".hash(state);
+				ml.0.iter().for_each(|ls| {
+					ls.points().for_each(|p| {
+						p.x().to_bits().hash(state);
+						p.y().to_bits().hash(state);
+					});
+				});
+			}
+			Geometry::MultiPolygon(mp) => {
+				"MultiPolygon".hash(state);
+				mp.0.iter().for_each(|p| {
+					p.exterior().points().for_each(|ext| {
+						ext.x().to_bits().hash(state);
+						ext.y().to_bits().hash(state);
+					});
+					p.interiors().iter().for_each(|int| {
+						int.points().for_each(|v| {
+							v.x().to_bits().hash(state);
+							v.y().to_bits().hash(state);
+						});
+					});
+				});
+			}
+			Geometry::Collection(v) => {
+				"GeometryCollection".hash(state);
+				v.iter().for_each(|v| v.hash(state));
+			}
+		}
 	}
 }
 
