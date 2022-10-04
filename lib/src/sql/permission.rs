@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
@@ -131,7 +131,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Permission {
 	None,
 	Full,

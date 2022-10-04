@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Fetchs(pub Vec<Fetch>);
 
 impl Deref for Fetchs {
@@ -33,7 +33,7 @@ impl fmt::Display for Fetchs {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Fetch(pub Idiom);
 
 impl Deref for Fetch {

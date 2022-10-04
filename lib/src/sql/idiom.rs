@@ -19,7 +19,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -40,7 +40,7 @@ pub fn locals(i: &str) -> IResult<&str, Idioms> {
 	Ok((i, Idioms(v)))
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {

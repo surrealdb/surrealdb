@@ -12,7 +12,7 @@ use nom::bytes::complete::tag_no_case;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct KillStatement {
 	pub id: Uuid,
 }

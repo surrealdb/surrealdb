@@ -8,7 +8,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Regex(String);
 
 impl From<&str> for Regex {

@@ -5,7 +5,7 @@ use nom::bytes::complete::tag_no_case;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Version(pub Datetime);
 
 impl fmt::Display for Version {

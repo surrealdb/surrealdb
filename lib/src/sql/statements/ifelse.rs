@@ -12,7 +12,7 @@ use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct IfelseStatement {
 	pub exprs: Vec<(Value, Value)>,
 	pub close: Option<Value>,

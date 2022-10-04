@@ -12,6 +12,7 @@ use nom::number::complete::recognize_float;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
+use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops;
@@ -383,6 +384,16 @@ impl Eq for Number {}
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.partial_cmp(other).unwrap_or(Ordering::Equal)
+	}
+}
+
+impl hash::Hash for Number {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		match self {
+			Number::Int(v) => v.hash(state),
+			Number::Float(v) => v.to_bits().hash(state),
+			Number::Decimal(v) => v.hash(state),
+		}
 	}
 }
 

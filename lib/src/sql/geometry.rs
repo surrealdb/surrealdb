@@ -18,8 +18,8 @@ use nom::sequence::preceded;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::fmt;
 use std::iter::FromIterator;
+use std::{fmt, hash};
 
 const SINGLE: char = '\'';
 const DOUBLE: char = '\"';
@@ -511,6 +511,12 @@ impl Serialize for Geometry {
 				}
 			}
 		}
+	}
+}
+
+impl hash::Hash for Geometry {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		self.to_string().hash(state)
 	}
 }
 

@@ -11,7 +11,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Tables(pub Vec<Table>);
 
 impl From<Table> for Tables {
@@ -38,7 +38,7 @@ pub fn tables(i: &str) -> IResult<&str, Tables> {
 	Ok((i, Tables(v)))
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Table(pub String);
 
 impl From<String> for Table {
