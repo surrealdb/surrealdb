@@ -442,6 +442,7 @@ fn function_time(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("time::day"),
 		tag("time::floor"),
+		tag("time::format"),
 		tag("time::group"),
 		tag("time::hour"),
 		tag("time::mins"),
