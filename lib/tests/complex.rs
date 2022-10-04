@@ -1,8 +1,9 @@
 mod parse;
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::thread::Builder;
-use surrealdb::sql::Value;
+use surrealdb::sql::{Array, Id, Object, Thing, Value};
 use surrealdb::Datastore;
 use surrealdb::Error;
 use surrealdb::Session;
@@ -103,6 +104,63 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<(), Error> {
 }
 
 #[test]
+fn ok_graph_traversal_depth() -> Result<(), Error> {
+	fn graph_traversal(n: usize) -> String {
+		let mut ret = String::from("CREATE node:0;\n");
+		for i in 1..=n {
+			let prev = i - 1;
+			ret.push_str(&format!("CREATE node:{i};\n"));
+			ret.push_str(&format!("RELATE node:{prev}->edge{i}->node:{i};\n"));
+		}
+		ret.push_str("SELECT ");
+		for i in 1..=n {
+			ret.push_str(&format!("->edge{i}->node"));
+		}
+		ret.push_str(" AS res FROM node:0;\n");
+		ret
+	}
+
+	for n in 1..=50 {
+		with_enough_stack(async move {
+			let mut res = run_queries(&graph_traversal(n)).await?;
+
+			let select_result = res.next_back().unwrap();
+
+			// Creates/relates must have succeeded.
+			assert!(res.all(|r| r.is_ok()));
+
+			match select_result {
+				Ok(res) => {
+					assert_eq!(
+						res,
+						Value::from(Array::from(vec![{
+							let mut obj = BTreeMap::new();
+							let thing = Value::from(Thing::from((
+								String::from("node"),
+								Id::Number(n as i64),
+							)));
+							let arr = Value::from(Array::from(vec![thing]));
+							obj.insert(String::from("res"), arr);
+							Value::from(Object::from(obj))
+						}]))
+					);
+				}
+				Err(res) => {
+					assert!(matches!(res, Error::ComputationDepthExceeded));
+					assert!(n > 10);
+					println!("max traversals: {}", n - 1);
+				}
+			}
+
+			Ok(())
+		})
+		.unwrap();
+	}
+
+	Ok(())
+}
+
+#[test]
 fn ok_cast_chain_depth() -> Result<(), Error> {
 	with_enough_stack(async {
 		let mut res = run_queries(&cast_chain(10)).await?;
@@ -132,7 +190,10 @@ fn excessive_cast_chain_depth() -> Result<(), Error> {
 
 async fn run_queries(
 	sql: &str,
-) -> Result<impl Iterator<Item = Result<Value, Error>> + ExactSizeIterator + 'static, Error> {
+) -> Result<
+	impl Iterator<Item = Result<Value, Error>> + ExactSizeIterator + DoubleEndedIterator + 'static,
+	Error,
+> {
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	dbs.execute(&sql, &ses, None, false).await.map(|v| v.into_iter().map(|res| res.result))
@@ -146,7 +207,7 @@ fn with_enough_stack(
 
 	#[cfg(debug_assertions)]
 	{
-		builder = builder.stack_size(8_000_000);
+		builder = builder.stack_size(100_000_000);
 	}
 
 	builder
