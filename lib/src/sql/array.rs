@@ -15,12 +15,13 @@ use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {
@@ -318,12 +319,17 @@ pub trait Uniq<T> {
 
 impl Uniq<Array> for Array {
 	fn uniq(mut self) -> Array {
-		for x in (0..self.len()).rev() {
-			for y in (x + 1..self.len()).rev() {
-				if self[x] == self[y] {
-					self.remove(y);
-				}
+		let mut set: HashSet<&Value> = HashSet::new();
+		let mut to_remove: Vec<usize> = Vec::new();
+		for i in 0..self.len() {
+			if set.contains(&self[i]) {
+				to_remove.push(i);
+			} else {
+				set.insert(&self[i]);
 			}
+		}
+		for i in to_remove.iter().rev() {
+			self.remove(*i);
 		}
 		self
 	}
