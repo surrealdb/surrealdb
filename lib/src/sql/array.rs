@@ -321,11 +321,9 @@ impl Uniq<Array> for Array {
 	fn uniq(mut self) -> Array {
 		let mut set: HashSet<&Value> = HashSet::new();
 		let mut to_remove: Vec<usize> = Vec::new();
-		for i in 0..self.len() {
-			if set.contains(&self[i]) {
+		for (i, item) in self.iter().enumerate() {
+			if !set.insert(item) {
 				to_remove.push(i);
-			} else {
-				set.insert(&self[i]);
 			}
 		}
 		for i in to_remove.iter().rev() {
