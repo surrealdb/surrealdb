@@ -530,6 +530,7 @@ impl Value {
 		match self {
 			Value::True => true,
 			Value::False => false,
+			Value::Uuid(_) => true,
 			Value::Thing(_) => true,
 			Value::Geometry(_) => true,
 			Value::Array(v) => !v.is_empty(),
@@ -1360,6 +1361,7 @@ mod tests {
 
 	use super::*;
 	use crate::sql::test::Parse;
+	use crate::sql::uuid::Uuid;
 
 	#[test]
 	fn check_none() {
@@ -1412,6 +1414,7 @@ mod tests {
 		assert_eq!(false, Value::from("false").is_truthy());
 		assert_eq!(true, Value::from("falsey").is_truthy());
 		assert_eq!(true, Value::from("something").is_truthy());
+		assert_eq!(true, Value::from(Uuid::new()).is_truthy());
 	}
 
 	#[test]
