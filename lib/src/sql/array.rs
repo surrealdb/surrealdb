@@ -377,6 +377,16 @@ mod tests {
 	}
 
 	#[test]
+	fn array_empty() {
+		let sql = "[]";
+		let res = array(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("[]", format!("{}", out));
+		assert_eq!(out.0.len(), 0);
+	}
+
+	#[test]
 	fn array_expression() {
 		let sql = "[1,2,3+1]";
 		let res = array(sql);
@@ -384,5 +394,15 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("[1, 2, 3 + 1]", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
+	}
+
+	#[test]
+	fn array_fnc_uniq_normal() {
+		let sql = "[1,2,1,3,3,4]";
+		let res = array(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1.uniq();
+		assert_eq!("[1, 2, 3, 4]", format!("{}", out));
+		assert_eq!(out.0.len(), 4);
 	}
 }
