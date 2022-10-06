@@ -178,6 +178,7 @@ fn ok_cast_chain_depth() -> Result<(), Error> {
 }
 
 #[test]
+#[ignore = "parser catches this before execution"]
 fn excessive_cast_chain_depth() -> Result<(), Error> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
