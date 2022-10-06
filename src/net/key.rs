@@ -237,10 +237,15 @@ async fn select_one(
 	let opt = CF.get().unwrap();
 	// Specify the request statement
 	let sql = "SELECT * FROM type::thing($table, $id)";
+	// Parse the Record ID as a SurrealQL value
+	let rid = match surrealdb::sql::json(&id) {
+		Ok(id) => id,
+		Err(_) => Value::from(id),
+	};
 	// Specify the request variables
 	let vars = map! {
 		String::from("table") => Value::from(table),
-		String::from("id") => Value::from(id),
+		String::from("id") => rid,
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars), opt.strict).await {
@@ -269,6 +274,11 @@ async fn create_one(
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
 	let data = str::from_utf8(&body).unwrap();
+	// Parse the Record ID as a SurrealQL value
+	let rid = match surrealdb::sql::json(&id) {
+		Ok(id) => id,
+		Err(_) => Value::from(id),
+	};
 	// Parse the request body as JSON
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -277,7 +287,7 @@ async fn create_one(
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
-				String::from("id") => Value::from(id),
+				String::from("id") => rid,
 				String::from("data") => data,
 			};
 			// Execute the query and return the result
@@ -310,6 +320,11 @@ async fn update_one(
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
 	let data = str::from_utf8(&body).unwrap();
+	// Parse the Record ID as a SurrealQL value
+	let rid = match surrealdb::sql::json(&id) {
+		Ok(id) => id,
+		Err(_) => Value::from(id),
+	};
 	// Parse the request body as JSON
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -318,7 +333,7 @@ async fn update_one(
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
-				String::from("id") => Value::from(id),
+				String::from("id") => rid,
 				String::from("data") => data,
 			};
 			// Execute the query and return the result
@@ -351,6 +366,11 @@ async fn modify_one(
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
 	let data = str::from_utf8(&body).unwrap();
+	// Parse the Record ID as a SurrealQL value
+	let rid = match surrealdb::sql::json(&id) {
+		Ok(id) => id,
+		Err(_) => Value::from(id),
+	};
 	// Parse the request body as JSON
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -359,7 +379,7 @@ async fn modify_one(
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
-				String::from("id") => Value::from(id),
+				String::from("id") => rid,
 				String::from("data") => data,
 			};
 			// Execute the query and return the result
@@ -391,10 +411,15 @@ async fn delete_one(
 	let opt = CF.get().unwrap();
 	// Specify the request statement
 	let sql = "DELETE type::thing($table, $id)";
+	// Parse the Record ID as a SurrealQL value
+	let rid = match surrealdb::sql::json(&id) {
+		Ok(id) => id,
+		Err(_) => Value::from(id),
+	};
 	// Specify the request variables
 	let vars = map! {
 		String::from("table") => Value::from(table),
-		String::from("id") => Value::from(id),
+		String::from("id") => rid,
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars), opt.strict).await {

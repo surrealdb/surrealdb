@@ -20,19 +20,19 @@ pub struct Datetime(pub DateTime<Utc>);
 
 impl Default for Datetime {
 	fn default() -> Self {
-		Datetime(Utc::now())
+		Self(Utc::now())
 	}
 }
 
 impl From<i64> for Datetime {
 	fn from(v: i64) -> Self {
-		Datetime(Utc.timestamp(v, 0))
+		Self(Utc.timestamp(v, 0))
 	}
 }
 
 impl From<DateTime<Utc>> for Datetime {
 	fn from(v: DateTime<Utc>) -> Self {
-		Datetime(v)
+		Self(v)
 	}
 }
 
@@ -40,7 +40,7 @@ impl From<&str> for Datetime {
 	fn from(s: &str) -> Self {
 		match datetime_raw(s) {
 			Ok((_, v)) => v,
-			Err(_) => Datetime::default(),
+			Err(_) => Self::default(),
 		}
 	}
 }
@@ -71,9 +71,9 @@ impl Serialize for Datetime {
 	}
 }
 
-impl ops::Sub<Datetime> for Datetime {
+impl ops::Sub<Self> for Datetime {
 	type Output = Duration;
-	fn sub(self, other: Datetime) -> Duration {
+	fn sub(self, other: Self) -> Duration {
 		match (self.0 - other.0).to_std() {
 			Ok(d) => Duration::from(d),
 			Err(_) => Duration::default(),

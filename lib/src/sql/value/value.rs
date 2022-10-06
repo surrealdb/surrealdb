@@ -7,11 +7,13 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::common::commas;
+use crate::sql::constant::{constant, Constant};
 use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
 use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
+use crate::sql::fmt::Fmt;
 use crate::sql::function::{function, Function};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::Id;
@@ -47,7 +49,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::iter::FromIterator;
 use std::ops;
 use std::ops::Deref;
@@ -73,9 +75,9 @@ impl IntoIterator for Values {
 	}
 }
 
-impl fmt::Display for Values {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))
+impl Display for Values {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
 
@@ -117,6 +119,7 @@ pub enum Value {
 	Regex(Regex),
 	Range(Box<Range>),
 	Edges(Box<Edges>),
+	Constant(Constant),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
@@ -227,6 +230,12 @@ impl From<Datetime> for Value {
 impl From<Duration> for Value {
 	fn from(v: Duration) -> Self {
 		Value::Duration(v)
+	}
+}
+
+impl From<Constant> for Value {
+	fn from(v: Constant) -> Self {
+		Value::Constant(v)
 	}
 }
 
@@ -521,6 +530,7 @@ impl Value {
 		match self {
 			Value::True => true,
 			Value::False => false,
+			Value::Uuid(_) => true,
 			Value::Thing(_) => true,
 			Value::Geometry(_) => true,
 			Value::Array(v) => !v.is_empty(),
@@ -1096,6 +1106,7 @@ impl fmt::Display for Value {
 			Value::Regex(v) => write!(f, "{}", v),
 			Value::Range(v) => write!(f, "{}", v),
 			Value::Edges(v) => write!(f, "{}", v),
+			Value::Constant(v) => write!(f, "{}", v),
 			Value::Function(v) => write!(f, "{}", v),
 			Value::Subquery(v) => write!(f, "{}", v),
 			Value::Expression(v) => write!(f, "{}", v),
@@ -1134,6 +1145,7 @@ impl Value {
 			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Object(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
@@ -1169,9 +1181,10 @@ impl Serialize for Value {
 				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
 				Value::Range(v) => s.serialize_newtype_variant("Value", 18, "Range", v),
 				Value::Edges(v) => s.serialize_newtype_variant("Value", 19, "Edges", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 20, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 21, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 22, "Expression", v),
+				Value::Constant(v) => s.serialize_newtype_variant("Value", 20, "Constant", v),
+				Value::Function(v) => s.serialize_newtype_variant("Value", 21, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant("Value", 22, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant("Value", 23, "Expression", v),
 			}
 		} else {
 			match self {
@@ -1188,6 +1201,7 @@ impl Serialize for Value {
 				Value::Geometry(v) => s.serialize_some(v),
 				Value::Duration(v) => s.serialize_some(v),
 				Value::Datetime(v) => s.serialize_some(v),
+				Value::Constant(v) => s.serialize_some(v),
 				_ => s.serialize_none(),
 			}
 		}
@@ -1262,6 +1276,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		alt((
 			map(subquery, Value::from),
 			map(function, Value::from),
+			map(constant, Value::from),
 			map(datetime, Value::from),
 			map(duration, Value::from),
 			map(geometry, Value::from),
@@ -1291,6 +1306,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(expression, Value::from),
 			map(subquery, Value::from),
 			map(function, Value::from),
+			map(constant, Value::from),
 			map(datetime, Value::from),
 			map(duration, Value::from),
 			map(geometry, Value::from),
@@ -1314,6 +1330,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 	alt((
 		map(subquery, Value::from),
 		map(function, Value::from),
+		map(constant, Value::from),
 		map(param, Value::from),
 		map(model, Value::from),
 		map(edges, Value::from),
@@ -1345,6 +1362,7 @@ mod tests {
 
 	use super::*;
 	use crate::sql::test::Parse;
+	use crate::sql::uuid::Uuid;
 
 	#[test]
 	fn check_none() {
@@ -1397,6 +1415,7 @@ mod tests {
 		assert_eq!(false, Value::from("false").is_truthy());
 		assert_eq!(true, Value::from("falsey").is_truthy());
 		assert_eq!(true, Value::from("something").is_truthy());
+		assert_eq!(true, Value::from(Uuid::new()).is_truthy());
 	}
 
 	#[test]

@@ -110,4 +110,12 @@ pub mod url {
 			Err(_) => Ok(Value::None),
 		}
 	}
+
+	pub fn scheme((string,): (String,)) -> Result<Value, Error> {
+		// Parse the URL
+		match Url::parse(&string) {
+			Ok(v) => Ok(v.scheme().into()),
+			Err(_) => Ok(Value::None),
+		}
+	}
 }

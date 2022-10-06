@@ -1,13 +1,12 @@
 use crate::err::Error;
 use crate::sql::id::Id;
-use crate::sql::paths::ID;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 
 impl Value {
-	pub fn generate(&self, tb: &Table, retable: bool) -> Result<Thing, Error> {
-		match self.pick(&*ID) {
+	pub fn generate(self, tb: &Table, retable: bool) -> Result<Thing, Error> {
+		match self {
 			// There is a floating point number for the id field
 			Value::Number(id) if id.is_float() => Ok(Thing {
 				tb: tb.to_string(),

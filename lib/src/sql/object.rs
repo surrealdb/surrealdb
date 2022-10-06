@@ -6,6 +6,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::common::{commas, val_char};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_key;
+use crate::sql::fmt::Fmt;
 use crate::sql::operation::{Op, Operation};
 use crate::sql::serde::is_internal_serialization;
 use crate::sql::thing::Thing;
@@ -30,25 +31,25 @@ pub struct Object(pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<String, Value>> for Object {
 	fn from(v: BTreeMap<String, Value>) -> Self {
-		Object(v)
+		Self(v)
 	}
 }
 
 impl From<HashMap<String, Value>> for Object {
 	fn from(v: HashMap<String, Value>) -> Self {
-		Object(v.into_iter().collect())
+		Self(v.into_iter().collect())
 	}
 }
 
-impl From<Option<Object>> for Object {
-	fn from(v: Option<Object>) -> Self {
+impl From<Option<Self>> for Object {
+	fn from(v: Option<Self>) -> Self {
 		v.unwrap_or_default()
 	}
 }
 
 impl From<Operation> for Object {
 	fn from(v: Operation) -> Self {
-		Object(map! {
+		Self(map! {
 			String::from("op") => match v.op {
 				Op::None => Value::from("none"),
 				Op::Add => Value::from("add"),
@@ -138,10 +139,11 @@ impl fmt::Display for Object {
 		write!(
 			f,
 			"{{ {} }}",
-			self.iter()
-				.map(|(k, v)| format!("{}: {}", escape_key(k), v))
-				.collect::<Vec<_>>()
-				.join(", ")
+			Fmt::comma_separated(
+				self.0.iter().map(|args| Fmt::new(args, |(k, v), f| {
+					write!(f, "{}: {}", escape_key(k), v)
+				}))
+			)
 		)
 	}
 }

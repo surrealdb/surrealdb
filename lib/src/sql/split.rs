@@ -1,13 +1,14 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{basic, Idiom};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list1;
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -30,11 +31,7 @@ impl IntoIterator for Splits {
 
 impl fmt::Display for Splits {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"SPLIT ON {}",
-			self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", ")
-		)
+		write!(f, "SPLIT ON {}", Fmt::comma_separated(&self.0))
 	}
 }
 
@@ -48,9 +45,9 @@ impl Deref for Split {
 	}
 }
 
-impl fmt::Display for Split {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0)
+impl Display for Split {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&self.0, f)
 	}
 }
 

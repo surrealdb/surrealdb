@@ -10,7 +10,7 @@ use nom::character::complete::char;
 use nom::character::complete::one_of;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
@@ -26,13 +26,13 @@ pub struct Ident(pub String);
 
 impl From<String> for Ident {
 	fn from(s: String) -> Self {
-		Ident(s)
+		Self(s)
 	}
 }
 
 impl From<&str> for Ident {
-	fn from(i: &str) -> Ident {
-		Ident(String::from(i))
+	fn from(i: &str) -> Self {
+		Self::from(String::from(i))
 	}
 }
 
@@ -49,9 +49,9 @@ impl Ident {
 	}
 }
 
-impl fmt::Display for Ident {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", escape_ident(&self.0))
+impl Display for Ident {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&escape_ident(&self.0), f)
 	}
 }
 

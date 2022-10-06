@@ -69,10 +69,8 @@ impl<'a> Document<'a> {
 							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.initial))),
 						)
 						.await?
-						.iter()
-						.map(|v| format!("{}", v))
+						.into_iter()
 						.collect::<Vec<_>>()
-						.join(" ")
 						.into(),
 					};
 					// Set the current record id
@@ -82,10 +80,8 @@ impl<'a> Document<'a> {
 							group.iter().map(|v| v.compute(ctx, opt, txn, Some(&self.current))),
 						)
 						.await?
-						.iter()
-						.map(|v| format!("{}", v))
+						.into_iter()
 						.collect::<Vec<_>>()
-						.join(" ")
 						.into(),
 					};
 					// Check if a WHERE clause is specified
