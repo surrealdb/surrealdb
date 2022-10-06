@@ -200,33 +200,6 @@ mod tests {
 	}
 
 	#[test]
-	fn parse_recursion_mixed() {
-		recursive("", "SELECT * FROM ((((", "5 * 5", ")))) * 5", 3, false);
-		recursive("", "SELECT * FROM ((((", "5 * 5", ")))) * 5", 8, true);
-	}
-
-	#[test]
-	fn parse_recursion_select() {
-		for p in 1..=3 {
-			recursive("SELECT * FROM ", "(SELECT * FROM ", "5", ")", 6usize.pow(p), p > 1);
-		}
-	}
-
-	#[test]
-	fn parse_recursion_javascript() {
-		for p in 1..=3 {
-			recursive("SELECT * FROM ", "function() {", "return 5;", "}", 10usize.pow(p), p > 1);
-		}
-	}
-
-	#[test]
-	fn parse_recursion_value_subquery() {
-		for p in 1..=4 {
-			recursive("SELECT * FROM ", "(", "5", ")", 10usize.pow(p), p > 1);
-		}
-	}
-
-	#[test]
 	fn parse_recursion_cast() {
 		for p in 1..=4 {
 			recursive("SELECT * FROM ", "<int>", "5", "", 10usize.pow(p), p > 1);
@@ -244,6 +217,40 @@ mod tests {
 				n,
 				n > 30,
 			);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_javascript() {
+		for p in 1..=3 {
+			recursive("SELECT * FROM ", "function() {", "return 5;", "}", 10usize.pow(p), p > 1);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_mixed() {
+		recursive("", "SELECT * FROM ((((", "5 * 5", ")))) * 5", 3, false);
+		recursive("", "SELECT * FROM ((((", "5 * 5", ")))) * 5", 8, true);
+	}
+
+	#[test]
+	fn parse_recursion_select() {
+		for p in 1..=3 {
+			recursive("SELECT * FROM ", "(SELECT * FROM ", "5", ")", 6usize.pow(p), p > 1);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_value_subquery() {
+		for p in 1..=4 {
+			recursive("SELECT * FROM ", "(", "5", ")", 10usize.pow(p), p > 1);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_if_subquery() {
+		for p in 1..=3 {
+			recursive("SELECT * FROM ", "IF true THEN ", "5", " ELSE 4 END", 10usize.pow(p), p > 1);
 		}
 	}
 
