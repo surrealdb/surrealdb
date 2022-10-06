@@ -227,7 +227,14 @@ mod tests {
 	}
 
 	#[test]
-	fn parse_recursion_value_geometry() {
+	fn parse_recursion_cast() {
+		for p in 1..=4 {
+			recursive("SELECT * FROM ", "<int>", "5", "", 10usize.pow(p), p > 1);
+		}
+	}
+
+	#[test]
+	fn parse_recursion_geometry() {
 		for n in [3, 40, 100] {
 			recursive(
 				"SELECT * FROM ",
