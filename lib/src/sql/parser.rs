@@ -35,10 +35,7 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 						sql: s.to_string(),
 					}
 				}
-				ExcessiveDepth => {
-					// TODO: Replace when https://github.com/surrealdb/surrealdb/pull/241 lands.
-					Error::TooManySubqueries
-				}
+				ExcessiveDepth => Error::ComputationDepthExceeded,
 			}),
 			_ => unreachable!(),
 		},
@@ -71,7 +68,7 @@ fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
 }
 
 pub(crate) mod depth {
-	use crate::cnf::MAX_RECURSIVE_QUERIES;
+	use crate::cnf::MAX_COMPUTATION_DEPTH;
 	use crate::sql::Error::ExcessiveDepth;
 	use nom::Err;
 	use std::cell::Cell;
@@ -79,7 +76,7 @@ pub(crate) mod depth {
 
 	thread_local! {
 		/// How many recursion levels deep parsing is currently.
-		static DEPTH: Cell<usize> = Cell::default();
+		static DEPTH: Cell<u8> = Cell::default();
 	}
 
 	/// Call when starting the parser to reset the recursion depth.
@@ -97,8 +94,7 @@ pub(crate) mod depth {
 	pub(crate) fn dive() -> Result<Diving, Err<crate::sql::Error<&'static str>>> {
 		DEPTH.with(|cell| {
 			let depth = cell.get();
-			// TODO: Replace when https://github.com/surrealdb/surrealdb/pull/241 lands.
-			if depth < MAX_RECURSIVE_QUERIES {
+			if depth < MAX_COMPUTATION_DEPTH {
 				cell.replace(depth + 1);
 				Ok(Diving)
 			} else {
@@ -126,11 +122,11 @@ pub(crate) mod depth {
 	#[cfg(test)]
 	mod tests {
 		use super::*;
-		use std::sync::atomic::{AtomicUsize, Ordering};
+		use std::sync::atomic::{AtomicU8, Ordering};
 
 		#[test]
 		fn no_stack_overflow() {
-			static CALLS: AtomicUsize = AtomicUsize::new(0);
+			static CALLS: AtomicU8 = AtomicU8::new(0);
 
 			fn recursive(i: &str) -> Result<(), Err<crate::sql::Error<&str>>> {
 				let _diving = dive()?;
@@ -141,7 +137,7 @@ pub(crate) mod depth {
 			reset();
 			assert!(recursive("foo").is_err());
 
-			assert_eq!(CALLS.load(Ordering::Relaxed), MAX_RECURSIVE_QUERIES);
+			assert_eq!(CALLS.load(Ordering::Relaxed), MAX_COMPUTATION_DEPTH);
 		}
 	}
 }
@@ -149,7 +145,6 @@ pub(crate) mod depth {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql;
 	use std::time::{Duration, Instant};
 
 	#[test]
@@ -201,43 +196,34 @@ mod tests {
 		let res = parse(sql);
 		let elapsed = start.elapsed();
 		assert!(res.is_ok());
-		assert!(elapsed < Duration::from_millis(150), "previously took ~10ms in debug")
+		assert!(elapsed < Duration::from_millis(150), "previously took ~15ms in debug")
 	}
 
 	#[test]
-	fn parse_excessive_recursion() {
-		let sql = "SELECT * FROM (((( SELECT * FROM (((( SELECT * FROM ((( ((( ((( (((5))) * 5 ))) * 5 ))) * 5 ))) )))) )))) * 5;";
-		let start = Instant::now();
-		let res = parse(sql);
-		let elapsed = start.elapsed();
-		assert!(
-			matches!(res, Err(Error::TooManySubqueries)),
-			"expected too many subqueries, got {:?}",
-			res
-		);
-		assert!(elapsed < Duration::from_millis(150), "previously took ~1ms in debug")
+	fn parse_recursion_mixed() {
+		recursive("", "SELECT * FROM ((((", "5 * 5", ")))) * 5", 3, false);
+		recursive("", "SELECT * FROM ((((", "5 * 5", ")))) * 5", 8, true);
 	}
 
 	#[test]
-	fn parse_also_excessive_recursion() {
-		let mut sql = String::from("SELECT * FROM ");
-		let n = 10000;
-		for _ in 0..n {
-			sql.push('(');
+	fn parse_recursion_select() {
+		for p in 1..=3 {
+			recursive("SELECT * FROM ", "(SELECT * FROM ", "5", ")", 6usize.pow(p), p > 1);
 		}
-		sql.push('5');
-		for _ in 0..n {
-			sql.push(')');
+	}
+
+	#[test]
+	fn parse_recursion_javascript() {
+		for p in 1..=3 {
+			recursive("SELECT * FROM ", "function() {", "return 5;", "}", 10usize.pow(p), p > 1);
 		}
-		let start = Instant::now();
-		let res = parse(&sql);
-		let elapsed = start.elapsed();
-		assert!(
-			matches!(res, Err(Error::TooManySubqueries)),
-			"expected too many subqueries, got {:?}",
-			res
-		);
-		assert!(elapsed < Duration::from_millis(150), "previously took ~3ms in debug")
+	}
+
+	#[test]
+	fn parse_recursion_value_subquery() {
+		for p in 1..=4 {
+			recursive("SELECT * FROM ", "(", "5", ")", 10usize.pow(p), p > 1);
+		}
 	}
 
 	#[test]
@@ -272,5 +258,45 @@ mod tests {
 		let enc: Vec<u8> = Vec::from(&tmp);
 		let dec: Query = Query::from(enc);
 		assert_eq!(tmp, dec);
+	}
+
+	fn recursive(
+		prefix: &str,
+		recursive_start: &str,
+		base: &str,
+		recursive_end: &str,
+		n: usize,
+		excessive: bool,
+	) {
+		let mut sql = String::from(prefix);
+		for _ in 0..n {
+			sql.push_str(recursive_start);
+		}
+		sql.push_str(base);
+		for _ in 0..n {
+			sql.push_str(recursive_end);
+		}
+		let start = Instant::now();
+		let res = parse(&sql);
+		let elapsed = start.elapsed();
+		if excessive {
+			assert!(
+				matches!(res, Err(Error::ComputationDepthExceeded)),
+				"expected computation depth exceeded, got {:?}",
+				res
+			);
+		} else {
+			res.unwrap();
+		}
+		// The parser can terminate faster in the excessive case.
+		let cutoff = if excessive {
+			200
+		} else {
+			400
+		};
+		assert!(
+			elapsed < Duration::from_millis(cutoff),
+			"previously must faster to parse {n} in debug mode"
+		)
 	}
 }

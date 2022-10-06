@@ -57,6 +57,7 @@ pub fn script(i: &str) -> IResult<&str, Script> {
 }
 
 fn script_raw(i: &str) -> IResult<&str, &str> {
+	let _diving = crate::sql::parser::depth::dive()?;
 	recognize(many1(alt((char_any, char_object, string_single, string_double, string_backtick))))(i)
 }
 
