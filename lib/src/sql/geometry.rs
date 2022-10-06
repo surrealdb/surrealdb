@@ -515,6 +515,7 @@ impl Serialize for Geometry {
 }
 
 pub fn geometry(i: &str) -> IResult<&str, Geometry> {
+	let _diving = crate::sql::parser::depth::dive()?;
 	alt((simple, point, line, polygon, multipoint, multiline, multipolygon, collection))(i)
 }
 

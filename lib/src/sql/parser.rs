@@ -227,6 +227,20 @@ mod tests {
 	}
 
 	#[test]
+	fn parse_recursion_value_geometry() {
+		for n in [3, 40, 100] {
+			recursive(
+				"SELECT * FROM ",
+				r#"{type: "GeometryCollection",geometries: ["#,
+				r#"{type: "MultiPoint",coordinates: [[10.0, 11.2],[10.5, 11.9]]}"#,
+				"]}",
+				n,
+				n > 30,
+			);
+		}
+	}
+
+	#[test]
 	fn parser_try() {
 		let sql = "
 			SELECT
@@ -290,13 +304,13 @@ mod tests {
 		}
 		// The parser can terminate faster in the excessive case.
 		let cutoff = if excessive {
-			200
+			250
 		} else {
-			400
+			500
 		};
 		assert!(
 			elapsed < Duration::from_millis(cutoff),
-			"previously must faster to parse {n} in debug mode"
+			"previously much faster to parse {n} in debug mode"
 		)
 	}
 }
