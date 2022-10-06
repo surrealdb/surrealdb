@@ -175,14 +175,7 @@ impl<'a> fmt::Debug for Context<'a> {
 			.field("parent", &self.parent)
 			.field("deadline", &self.deadline)
 			.field("cancelled", &self.cancelled)
-			.field(
-				"values",
-				&if self.values.is_empty() {
-					None
-				} else {
-					Some("values")
-				},
-			)
+			.field("values", &self.values)
 			.finish()
 	}
 }
