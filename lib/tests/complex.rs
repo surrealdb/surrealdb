@@ -164,7 +164,7 @@ fn ok_graph_traversal_depth() -> Result<(), Error> {
 fn ok_cast_chain_depth() -> Result<(), Error> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
-		// Run a chasting query which succeeds
+		// Run a casting query which succeeds
 		let mut res = run_queries(&cast_chain(10)).await?;
 		//
 		assert_eq!(res.len(), 1);
