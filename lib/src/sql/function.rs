@@ -112,6 +112,9 @@ impl Function {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Prevent long function chains
+		let opt = &opt.dive(1)?;
+		// Process the function type
 		match self {
 			Self::Future(v) => match opt.futures {
 				true => {

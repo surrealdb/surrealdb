@@ -152,9 +152,9 @@ pub enum Error {
 	#[error("Unable to perform the realtime query")]
 	RealtimeDisabled,
 
-	/// Too many recursive subqueries have been processed
-	#[error("Too many recursive subqueries have been processed")]
-	TooManySubqueries,
+	/// Reached excessive computation depth due to functions, subqueries, or futures
+	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
+	ComputationDepthExceeded,
 
 	/// Can not execute CREATE query using the specified value
 	#[error("Can not execute CREATE query using value '{value}'")]
