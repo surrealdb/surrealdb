@@ -1,76 +1,79 @@
 mod parse;
-
-use std::collections::BTreeMap;
+use parse::Parse;
 use std::future::Future;
 use std::thread::Builder;
-use surrealdb::sql::{Array, Id, Object, Thing, Value};
+use surrealdb::sql::Value;
 use surrealdb::Datastore;
 use surrealdb::Error;
 use surrealdb::Session;
 
 #[test]
 fn self_referential_field() -> Result<(), Error> {
+	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		let mut res = run_queries(
 			"
 			CREATE pet:dog SET tail = <future> { tail };
-		",
+			",
 		)
 		.await?;
-
+		//
 		assert_eq!(res.len(), 1);
-
-		let result = res.next().unwrap();
-		assert!(matches!(result, Err(Error::ComputationDepthExceeded)), "got: {:?}", result);
-
+		//
+		let tmp = res.next().unwrap();
+		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		//
 		Ok(())
 	})
 }
 
 #[test]
 fn cyclic_fields() -> Result<(), Error> {
+	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		let mut res = run_queries(
 			"
 			CREATE recycle SET consume = <future> { produce }, produce = <future> { consume };
-		",
+			",
 		)
 		.await?;
-
+		//
 		assert_eq!(res.len(), 1);
-
-		let result = res.next().unwrap();
-		assert!(matches!(result, Err(Error::ComputationDepthExceeded)), "got: {:?}", result);
-
+		//
+		let tmp = res.next().unwrap();
+		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		//
 		Ok(())
 	})
 }
 
 #[test]
 fn cyclic_records() -> Result<(), Error> {
+	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		let mut res = run_queries(
 			"
-		CREATE thing:one SET friend = <future> { thing:two.friend };
-		CREATE thing:two SET friend = <future> { thing:one.friend };
-	",
+			CREATE thing:one SET friend = <future> { thing:two.friend };
+			CREATE thing:two SET friend = <future> { thing:one.friend };
+			",
 		)
 		.await?;
-
+		//
 		assert_eq!(res.len(), 2);
-
+		//
 		let tmp = res.next().unwrap();
 		assert!(tmp.is_ok());
-
-		let result = res.next().unwrap();
-		assert!(matches!(result, Err(Error::ComputationDepthExceeded)));
-
+		//
+		let tmp = res.next().unwrap();
+		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		//
 		Ok(())
 	})
 }
 
 #[test]
 fn ok_future_graph_subquery_recursion_depth() -> Result<(), Error> {
+	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		let mut res = run_queries(
 			r#"
@@ -85,26 +88,28 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<(), Error> {
 			RELATE thing:zero->enemy->thing:one SET timestamp = time::now();
 
 			SELECT * FROM (SELECT * FROM (SELECT ->enemy->thing->friend->thing.fut as fut FROM thing:zero));
-		"#,
+			"#,
 		)
 		.await?;
-
+		//
 		assert_eq!(res.len(), 8);
-
+		//
 		for i in 0..7 {
 			let tmp = res.next().unwrap();
-			assert!(tmp.is_ok(), "{} resulted in {:?}", i, tmp);
+			assert!(tmp.is_ok(), "Statement {} resulted in {:?}", i, tmp);
 		}
-
-		let result = res.next().unwrap();
-		assert_eq!(result.unwrap(), Value::from(vec![Value::from(vec![Value::from(42)])]));
-
+		//
+		let tmp = res.next().unwrap()?;
+		let val = Value::parse("[ [42] ]");
+		assert_eq!(tmp, val);
+		//
 		Ok(())
 	})
 }
 
 #[test]
 fn ok_graph_traversal_depth() -> Result<(), Error> {
+	// Build the SQL traversal query
 	fn graph_traversal(n: usize) -> String {
 		let mut ret = String::from("CREATE node:0;\n");
 		for i in 1..=n {
@@ -119,36 +124,31 @@ fn ok_graph_traversal_depth() -> Result<(), Error> {
 		ret.push_str(" AS res FROM node:0;\n");
 		ret
 	}
-
+	// Test different traveral depths
 	for n in 1..=40 {
+		// Ensure a good stack size for tests
 		with_enough_stack(async move {
+			// Run the graph traversal queries
 			let mut res = run_queries(&graph_traversal(n)).await?;
-
-			let select_result = res.next_back().unwrap();
-
-			// Creates/relates must have succeeded.
+			// Remove the last result
+			let tmp = res.next_back().unwrap();
+			// Check all other queries
 			assert!(res.all(|r| r.is_ok()));
-
-			match select_result {
+			//
+			match tmp {
 				Ok(res) => {
-					assert_eq!(
-						res,
-						Value::from(Array::from(vec![{
-							let mut obj = BTreeMap::new();
-							let thing = Value::from(Thing::from((
-								String::from("node"),
-								Id::Number(n as i64),
-							)));
-							let arr = Value::from(Array::from(vec![thing]));
-							obj.insert(String::from("res"), arr);
-							Value::from(Object::from(obj))
-						}]))
-					);
+					let val = Value::parse(&format!(
+						"[
+							{{
+								res: [node:{n}],
+							}}
+						]"
+					));
+					assert_eq!(res, val);
 				}
 				Err(res) => {
 					assert!(matches!(res, Error::ComputationDepthExceeded));
-					assert!(n > 10);
-					println!("max traversals: {}", n - 1);
+					assert!(n > 10, "Max traversals: {}", n - 1);
 				}
 			}
 
@@ -162,28 +162,33 @@ fn ok_graph_traversal_depth() -> Result<(), Error> {
 
 #[test]
 fn ok_cast_chain_depth() -> Result<(), Error> {
+	// Ensure a good stack size for tests
 	with_enough_stack(async {
+		// Run a chasting query which succeeds
 		let mut res = run_queries(&cast_chain(10)).await?;
-
+		//
 		assert_eq!(res.len(), 1);
-
-		let result = res.next().unwrap();
-		assert_eq!(result.unwrap(), Value::from(vec![Value::from(5)]));
-
+		//
+		let tmp = res.next().unwrap()?;
+		let val = Value::from(vec![Value::from(5)]);
+		assert_eq!(tmp, val);
+		//
 		Ok(())
 	})
 }
 
 #[test]
 fn excessive_cast_chain_depth() -> Result<(), Error> {
+	// Ensure a good stack size for tests
 	with_enough_stack(async {
+		// Run a casting query which will fail
 		let mut res = run_queries(&cast_chain(35)).await?;
-
+		//
 		assert_eq!(res.len(), 1);
-
-		let result = res.next().unwrap();
-		assert!(matches!(result, Err(Error::ComputationDepthExceeded)), "got: {:?}", result);
-
+		//
+		let tmp = res.next().unwrap();
+		assert!(matches!(tmp, Err(Error::ComputationDepthExceeded)));
+		//
 		Ok(())
 	})
 }

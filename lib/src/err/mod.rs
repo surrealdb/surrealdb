@@ -152,8 +152,8 @@ pub enum Error {
 	#[error("Unable to perform the realtime query")]
 	RealtimeDisabled,
 
-	/// Reached excessive computation depth due to functions, subqueries, and/or futures
-	#[error("Reached excessive computation depth due to functions, subqueries, and/or futures")]
+	/// Reached excessive computation depth due to functions, subqueries, or futures
+	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
 	ComputationDepthExceeded,
 
 	/// Can not execute CREATE query using the specified value

@@ -60,9 +60,9 @@ impl Subquery {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		// Duplicate options
+		// Prevent deep recursion
 		let opt = &opt.dive(2)?;
-
+		// Process the subquery
 		match self {
 			Self::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
