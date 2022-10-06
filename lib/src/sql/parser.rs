@@ -250,7 +250,7 @@ mod tests {
 	#[test]
 	fn parse_recursion_if_subquery() {
 		for p in 1..=3 {
-			recursive("SELECT * FROM ", "IF true THEN ", "5", " ELSE 4 END", 10usize.pow(p), p > 1);
+			recursive("SELECT * FROM ", "IF true THEN ", "5", " ELSE 4 END", 6usize.pow(p), p > 1);
 		}
 	}
 
