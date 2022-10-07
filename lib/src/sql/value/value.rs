@@ -102,6 +102,7 @@ pub enum Value {
 	Null,
 	False,
 	True,
+	/// Invariant: Never contains `Number::Float(f64::NAN)`.
 	Number(Number),
 	Strand(Strand),
 	Duration(Duration),
@@ -109,6 +110,7 @@ pub enum Value {
 	Uuid(Uuid),
 	Array(Array),
 	Object(Object),
+	/// Invariant: Never contains `f64::NAN`.
 	Geometry(Geometry),
 	// ---
 	Param(Param),
@@ -205,7 +207,10 @@ impl From<Object> for Value {
 
 impl From<Number> for Value {
 	fn from(v: Number) -> Self {
-		Value::Number(v)
+		match v {
+			Number::Float(f) if f.is_nan() => Self::None,
+			_ => Self::Number(v),
+		}
 	}
 }
 
@@ -217,7 +222,11 @@ impl From<Strand> for Value {
 
 impl From<Geometry> for Value {
 	fn from(v: Geometry) -> Self {
-		Value::Geometry(v)
+		if v.is_nan() {
+			Value::None
+		} else {
+			Value::Geometry(v)
+		}
 	}
 }
 
@@ -331,13 +340,13 @@ impl From<usize> for Value {
 
 impl From<f32> for Value {
 	fn from(v: f32) -> Self {
-		Value::Number(Number::from(v))
+		Self::from(Number::from(v))
 	}
 }
 
 impl From<f64> for Value {
 	fn from(v: f64) -> Self {
-		Value::Number(Number::from(v))
+		Self::from(Number::from(v))
 	}
 }
 
@@ -367,19 +376,31 @@ impl From<DateTime<Utc>> for Value {
 
 impl From<(f64, f64)> for Value {
 	fn from(v: (f64, f64)) -> Self {
-		Value::Geometry(Geometry::from(v))
+		if v.0.is_nan() || v.1.is_nan() {
+			Value::None
+		} else {
+			Value::Geometry(Geometry::from(v))
+		}
 	}
 }
 
 impl From<[f64; 2]> for Value {
 	fn from(v: [f64; 2]) -> Self {
-		Value::Geometry(Geometry::from(v))
+		if v.iter().any(|f| f.is_nan()) {
+			Value::None
+		} else {
+			Value::Geometry(Geometry::from(v))
+		}
 	}
 }
 
 impl From<Point<f64>> for Value {
 	fn from(v: Point<f64>) -> Self {
-		Value::Geometry(Geometry::from(v))
+		if v.x().is_nan() || v.y().is_nan() {
+			Value::None
+		} else {
+			Value::Geometry(Geometry::from(v))
+		}
 	}
 }
 
@@ -1081,10 +1102,32 @@ impl Value {
 			_ => self.partial_cmp(other),
 		}
 	}
+
+	// -----------------------------------
+	// Invariant checks.
+	// -----------------------------------
+
+	#[cfg(debug_assertions)]
+	pub fn check_invariants(&self) {
+		match self {
+			Self::Number(Number::Float(f)) => {
+				assert!(!f.is_nan(), "invariant violated by Value::Number(Number::Float(f64::NAN))")
+			}
+			Self::Geometry(geo) => assert!(
+				!geo.is_nan(),
+				"invariant violated by Value::Geometry(Geometry::_(f64::NAN))"
+			),
+			_ => {}
+		}
+	}
+
+	#[cfg(not(debug_assertions))]
+	pub fn check_invariants(&self) {}
 }
 
 impl fmt::Display for Value {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		self.check_invariants();
 		match self {
 			Value::None => write!(f, "NONE"),
 			Value::Null => write!(f, "NULL"),
@@ -1159,6 +1202,7 @@ impl Serialize for Value {
 	where
 		S: serde::Serializer,
 	{
+		self.check_invariants();
 		if is_internal_serialization() {
 			match self {
 				Value::None => s.serialize_unit_variant("Value", 0, "None"),
@@ -1212,7 +1256,7 @@ impl ops::Add for Value {
 	type Output = Self;
 	fn add(self, other: Self) -> Self {
 		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => Value::Number(v + w),
+			(Value::Number(v), Value::Number(w)) => Value::from(v + w),
 			(Value::Strand(v), Value::Strand(w)) => Value::Strand(v + w),
 			(Value::Datetime(v), Value::Duration(w)) => Value::Datetime(w + v),
 			(Value::Duration(v), Value::Datetime(w)) => Value::Datetime(v + w),
@@ -1226,12 +1270,12 @@ impl ops::Sub for Value {
 	type Output = Self;
 	fn sub(self, other: Self) -> Self {
 		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => Value::Number(v - w),
+			(Value::Number(v), Value::Number(w)) => Value::from(v - w),
 			(Value::Datetime(v), Value::Datetime(w)) => Value::Duration(v - w),
 			(Value::Datetime(v), Value::Duration(w)) => Value::Datetime(w - v),
 			(Value::Duration(v), Value::Datetime(w)) => Value::Datetime(v - w),
 			(Value::Duration(v), Value::Duration(w)) => Value::Duration(v - w),
-			(v, w) => Value::from(v.as_number() - w.as_number()),
+			(v, w) => Self::from(v.as_number() - w.as_number()),
 		}
 	}
 }
@@ -1241,7 +1285,7 @@ impl ops::Mul for Value {
 	fn mul(self, other: Self) -> Self {
 		match (self, other) {
 			(Value::Number(v), Value::Number(w)) => Value::Number(v * w),
-			(v, w) => Value::from(v.as_number() * w.as_number()),
+			(v, w) => Self::from(v.as_number() * w.as_number()),
 		}
 	}
 }
@@ -1251,7 +1295,7 @@ impl ops::Div for Value {
 	fn div(self, other: Self) -> Self {
 		match (self.as_number(), other.as_number()) {
 			(_, w) if w == Number::Int(0) => Value::None,
-			(v, w) => Value::Number(v / w),
+			(v, w) => Self::from(v / w),
 		}
 	}
 }

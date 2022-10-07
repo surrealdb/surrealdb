@@ -251,6 +251,30 @@ impl Geometry {
 			Self::Collection(v) => v.iter().all(|x| x.intersects(other)),
 		}
 	}
+
+	/// Returns true if and only if contains at least one f64::NAN.
+	pub(crate) fn is_nan(&self) -> bool {
+		match self {
+			Self::Point(p) => p.x().is_nan() || p.y().is_nan(),
+			Self::Line(l) => l.into_iter().any(|p| p.x.is_nan() || p.y.is_nan()),
+			Self::Polygon(p) => p
+				.interiors()
+				.into_iter()
+				.chain(std::iter::once(p.exterior()))
+				.any(|l| l.into_iter().any(|p| p.x.is_nan() || p.y.is_nan())),
+			Self::MultiPoint(mp) => mp.into_iter().any(|p| p.x().is_nan() || p.y().is_nan()),
+			Self::MultiLine(ml) => {
+				ml.into_iter().any(|l| l.into_iter().any(|p| p.x.is_nan() || p.y.is_nan()))
+			}
+			Self::MultiPolygon(mp) => mp.into_iter().any(|p| {
+				p.interiors()
+					.into_iter()
+					.chain(std::iter::once(p.exterior()))
+					.any(|l| l.into_iter().any(|p| p.x.is_nan() || p.y.is_nan()))
+			}),
+			Self::Collection(c) => c.iter().any(Self::is_nan),
+		}
+	}
 }
 
 impl fmt::Display for Geometry {

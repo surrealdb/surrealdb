@@ -32,10 +32,13 @@ pub fn duration((arg,): (Value,)) -> Result<Value, Error> {
 }
 
 pub fn float((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Number(Number::Float(_)) => Ok(arg),
-		_ => Ok(Value::Number(Number::Float(arg.as_float()))),
-	}
+	Ok(match arg {
+		Value::Number(Number::Float(f)) => {
+			debug_assert!(!f.is_nan(), "unexpected NAN float value in fnc::type::float");
+			arg
+		}
+		_ => Value::Number(Number::Float(arg.as_float())),
+	})
 }
 
 pub fn int((arg,): (Value,)) -> Result<Value, Error> {
@@ -46,10 +49,15 @@ pub fn int((arg,): (Value,)) -> Result<Value, Error> {
 }
 
 pub fn number((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Number(_) => Ok(arg),
-		_ => Ok(Value::Number(arg.as_number())),
-	}
+	Ok(match &arg {
+		#[cfg(debug_assertions)]
+		Value::Number(Number::Float(f)) => {
+			assert!(!f.is_nan(), "unexpected NAN float in fnc::type::number");
+			arg
+		}
+		Value::Number(_) => arg,
+		_ => Value::Number(arg.as_number()),
+	})
 }
 
 pub fn point((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {

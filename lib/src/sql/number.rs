@@ -19,6 +19,7 @@ use std::str::FromStr;
 #[derive(Clone, Debug, Deserialize)]
 pub enum Number {
 	Int(i64),
+	/// May contain f64::NAN, but not when in `Value::Number`.
 	Float(f64),
 	Decimal(BigDecimal),
 }
@@ -155,6 +156,7 @@ impl Number {
 	// Constants
 	// -----------------------------------
 
+	/// Not a number; it's worth nothing that `Value::from` will convert this to `Value::None.
 	pub const NAN: Number = Number::Float(f64::NAN);
 
 	// -----------------------------------
@@ -176,7 +178,7 @@ impl Number {
 	pub fn is_truthy(&self) -> bool {
 		match self {
 			Number::Int(v) => v != &0,
-			Number::Float(v) => v != &0.0,
+			Number::Float(v) => !(v == &0.0 || v.is_nan()),
 			Number::Decimal(v) => v != &BigDecimal::default(),
 		}
 	}
@@ -310,11 +312,30 @@ impl Number {
 	}
 }
 
+// Warning: Only numbers known to not be `Number::Float(f64::NAN)` satisfy the reflexive property.
+// All numbers from `Value::Number` are known not to be `Number::Float(f64::NAN)`.
 impl Eq for Number {}
 
+// Warning: Only numbers known to not be `Number::Float(f64::NAN)` satisfy the transitive property.
+// All numbers from `Value::Number` are known not to be `Number::Float(f64::NAN)`, and this
+// requirement is checked in debug mode.
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
-		self.partial_cmp(other).unwrap_or(Ordering::Equal)
+		#[cfg(debug_assertions)]
+		{
+			if let Self::Float(s) = self {
+				assert!(!s.is_nan(), "attempted to Number::cmp on NAN float (first argument)")
+			}
+			if let Self::Float(o) = other {
+				assert!(!o.is_nan(), "attempted to Number::cmp on NAN float (second argument)")
+			}
+		}
+		if let Some(ret) = self.partial_cmp(other) {
+			ret
+		} else {
+			debug_assert!(false, "Number::partial_cmp returned None in Number::cmp");
+			Ordering::Equal
+		}
 	}
 }
 
