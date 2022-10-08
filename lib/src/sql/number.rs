@@ -97,7 +97,7 @@ impl From<f32> for Number {
 
 impl From<f64> for Number {
 	fn from(f: f64) -> Self {
-		Self::Float(f as f64)
+		Self::Float(f)
 	}
 }
 
@@ -122,9 +122,9 @@ impl From<BigDecimal> for Number {
 impl Display for Number {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Number::Int(v) => Display::fmt(v, f),
-			Number::Float(v) => Display::fmt(v, f),
-			Number::Decimal(v) => Display::fmt(v, f),
+			Self::Int(v) => Display::fmt(v, f),
+			Self::Float(v) => Display::fmt(v, f),
+			Self::Decimal(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -136,15 +136,15 @@ impl Serialize for Number {
 	{
 		if is_internal_serialization() {
 			match self {
-				Number::Int(v) => s.serialize_newtype_variant("Number", 0, "Int", v),
-				Number::Float(v) => s.serialize_newtype_variant("Number", 1, "Float", v),
-				Number::Decimal(v) => s.serialize_newtype_variant("Number", 2, "Decimal", v),
+				Self::Int(v) => s.serialize_newtype_variant("Number", 0, "Int", v),
+				Self::Float(v) => s.serialize_newtype_variant("Number", 1, "Float", v),
+				Self::Decimal(v) => s.serialize_newtype_variant("Number", 2, "Decimal", v),
 			}
 		} else {
 			match self {
-				Number::Int(v) => s.serialize_i64(*v),
-				Number::Float(v) => s.serialize_f64(*v),
-				Number::Decimal(v) => s.serialize_some(v),
+				Self::Int(v) => s.serialize_i64(*v),
+				Self::Float(v) => s.serialize_f64(*v),
+				Self::Decimal(v) => s.serialize_some(v),
 			}
 		}
 	}
@@ -155,29 +155,29 @@ impl Number {
 	// Constants
 	// -----------------------------------
 
-	pub const NAN: Number = Number::Float(f64::NAN);
+	pub const NAN: Self = Number::Float(f64::NAN);
 
 	// -----------------------------------
 	// Simple number detection
 	// -----------------------------------
 
 	pub fn is_int(&self) -> bool {
-		matches!(self, Number::Int(_))
+		matches!(self, Self::Int(_))
 	}
 
 	pub fn is_float(&self) -> bool {
-		matches!(self, Number::Float(_))
+		matches!(self, Self::Float(_))
 	}
 
 	pub fn is_decimal(&self) -> bool {
-		matches!(self, Number::Decimal(_))
+		matches!(self, Self::Decimal(_))
 	}
 
 	pub fn is_truthy(&self) -> bool {
 		match self {
-			Number::Int(v) => v != &0,
-			Number::Float(v) => v != &0.0,
-			Number::Decimal(v) => v != &BigDecimal::default(),
+			Self::Int(v) => v != &0,
+			Self::Float(v) => v != &0.0,
+			Self::Decimal(v) => v != &BigDecimal::default(),
 		}
 	}
 
@@ -187,33 +187,33 @@ impl Number {
 
 	pub fn as_usize(self) -> usize {
 		match self {
-			Number::Int(v) => v as usize,
-			Number::Float(v) => v as usize,
-			Number::Decimal(v) => v.to_usize().unwrap_or_default(),
+			Self::Int(v) => v as usize,
+			Self::Float(v) => v as usize,
+			Self::Decimal(v) => v.to_usize().unwrap_or_default(),
 		}
 	}
 
 	pub fn as_int(self) -> i64 {
 		match self {
-			Number::Int(v) => v,
-			Number::Float(v) => v as i64,
-			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
+			Self::Int(v) => v,
+			Self::Float(v) => v as i64,
+			Self::Decimal(v) => v.to_i64().unwrap_or_default(),
 		}
 	}
 
 	pub fn as_float(self) -> f64 {
 		match self {
-			Number::Int(v) => v as f64,
-			Number::Float(v) => v,
-			Number::Decimal(v) => v.to_f64().unwrap_or_default(),
+			Self::Int(v) => v as f64,
+			Self::Float(v) => v,
+			Self::Decimal(v) => v.to_f64().unwrap_or_default(),
 		}
 	}
 
 	pub fn as_decimal(self) -> BigDecimal {
 		match self {
-			Number::Int(v) => BigDecimal::from_i64(v).unwrap_or_default(),
-			Number::Float(v) => BigDecimal::from_f64(v).unwrap_or_default(),
-			Number::Decimal(v) => v,
+			Self::Int(v) => BigDecimal::from_i64(v).unwrap_or_default(),
+			Self::Float(v) => BigDecimal::from_f64(v).unwrap_or_default(),
+			Self::Decimal(v) => v,
 		}
 	}
 
@@ -223,33 +223,33 @@ impl Number {
 
 	pub fn to_usize(&self) -> usize {
 		match self {
-			Number::Int(v) => *v as usize,
-			Number::Float(v) => *v as usize,
-			Number::Decimal(v) => v.to_usize().unwrap_or_default(),
+			Self::Int(v) => *v as usize,
+			Self::Float(v) => *v as usize,
+			Self::Decimal(v) => v.to_usize().unwrap_or_default(),
 		}
 	}
 
 	pub fn to_int(&self) -> i64 {
 		match self {
-			Number::Int(v) => *v,
-			Number::Float(v) => *v as i64,
-			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
+			Self::Int(v) => *v,
+			Self::Float(v) => *v as i64,
+			Self::Decimal(v) => v.to_i64().unwrap_or_default(),
 		}
 	}
 
 	pub fn to_float(&self) -> f64 {
 		match self {
-			Number::Int(v) => *v as f64,
-			Number::Float(v) => *v,
-			Number::Decimal(v) => v.to_f64().unwrap_or_default(),
+			Self::Int(v) => *v as f64,
+			Self::Float(v) => *v,
+			Self::Decimal(v) => v.to_f64().unwrap_or_default(),
 		}
 	}
 
 	pub fn to_decimal(&self) -> BigDecimal {
 		match self {
-			Number::Int(v) => BigDecimal::from_i64(*v).unwrap_or_default(),
-			Number::Float(v) => BigDecimal::from_f64(*v).unwrap_or_default(),
-			Number::Decimal(v) => v.clone(),
+			Self::Int(v) => BigDecimal::from_i64(*v).unwrap_or_default(),
+			Self::Float(v) => BigDecimal::from_f64(*v).unwrap_or_default(),
+			Self::Decimal(v) => v.clone(),
 		}
 	}
 
@@ -259,41 +259,41 @@ impl Number {
 
 	pub fn abs(self) -> Self {
 		match self {
-			Number::Int(v) => v.abs().into(),
-			Number::Float(v) => v.abs().into(),
-			Number::Decimal(v) => v.abs().into(),
+			Self::Int(v) => v.abs().into(),
+			Self::Float(v) => v.abs().into(),
+			Self::Decimal(v) => v.abs().into(),
 		}
 	}
 
 	pub fn ceil(self) -> Self {
 		match self {
-			Number::Int(v) => v.into(),
-			Number::Float(v) => v.ceil().into(),
-			Number::Decimal(v) => (v + BigDecimal::from_f32(0.5).unwrap()).round(0).into(),
+			Self::Int(v) => v.into(),
+			Self::Float(v) => v.ceil().into(),
+			Self::Decimal(v) => (v + BigDecimal::from_f32(0.5).unwrap()).round(0).into(),
 		}
 	}
 
 	pub fn floor(self) -> Self {
 		match self {
-			Number::Int(v) => v.into(),
-			Number::Float(v) => v.floor().into(),
-			Number::Decimal(v) => (v - BigDecimal::from_f32(0.5).unwrap()).round(0).into(),
+			Self::Int(v) => v.into(),
+			Self::Float(v) => v.floor().into(),
+			Self::Decimal(v) => (v - BigDecimal::from_f32(0.5).unwrap()).round(0).into(),
 		}
 	}
 
 	pub fn round(self) -> Self {
 		match self {
-			Number::Int(v) => v.into(),
-			Number::Float(v) => v.round().into(),
-			Number::Decimal(v) => v.round(0).into(),
+			Self::Int(v) => v.into(),
+			Self::Float(v) => v.round().into(),
+			Self::Decimal(v) => v.round(0).into(),
 		}
 	}
 
 	pub fn sqrt(self) -> Self {
 		match self {
-			Number::Int(v) => (v as f64).sqrt().into(),
-			Number::Float(v) => v.sqrt().into(),
-			Number::Decimal(v) => v.sqrt().unwrap_or_default().into(),
+			Self::Int(v) => (v as f64).sqrt().into(),
+			Self::Float(v) => v.sqrt().into(),
+			Self::Decimal(v) => v.sqrt().unwrap_or_default().into(),
 		}
 	}
 
@@ -303,9 +303,9 @@ impl Number {
 
 	pub fn fixed(self, precision: usize) -> Number {
 		match self {
-			Number::Int(v) => format!("{:.1$}", v, precision).into(),
-			Number::Float(v) => format!("{:.1$}", v, precision).into(),
-			Number::Decimal(v) => v.round(precision as i64).into(),
+			Self::Int(v) => format!("{:.1$}", v, precision).into(),
+			Self::Float(v) => format!("{:.1$}", v, precision).into(),
+			Self::Decimal(v) => v.round(precision as i64).into(),
 		}
 	}
 }
@@ -321,20 +321,20 @@ impl Ord for Number {
 impl PartialEq for Number {
 	fn eq(&self, other: &Self) -> bool {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => v.eq(w),
-			(Number::Float(v), Number::Float(w)) => v.eq(w),
-			(Number::Decimal(v), Number::Decimal(w)) => v.eq(w),
+			(Self::Int(v), Self::Int(w)) => v.eq(w),
+			(Self::Float(v), Self::Float(w)) => v.eq(w),
+			(Self::Decimal(v), Self::Decimal(w)) => v.eq(w),
 			// ------------------------------
-			(Number::Int(v), Number::Float(w)) => (*v as f64).eq(w),
-			(Number::Float(v), Number::Int(w)) => v.eq(&(*w as f64)),
+			(Self::Int(v), Self::Float(w)) => (*v as f64).eq(w),
+			(Self::Float(v), Self::Int(w)) => v.eq(&(*w as f64)),
 			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => BigDecimal::from(*v).eq(w),
-			(Number::Decimal(v), Number::Int(w)) => v.eq(&BigDecimal::from(*w)),
+			(Self::Int(v), Self::Decimal(w)) => BigDecimal::from(*v).eq(w),
+			(Self::Decimal(v), Self::Int(w)) => v.eq(&BigDecimal::from(*w)),
 			// ------------------------------
-			(Number::Float(v), Number::Decimal(w)) => {
+			(Self::Float(v), Self::Decimal(w)) => {
 				BigDecimal::from_f64(*v).unwrap_or_default().eq(w)
 			}
-			(Number::Decimal(v), Number::Float(w)) => {
+			(Self::Decimal(v), Self::Float(w)) => {
 				v.eq(&BigDecimal::from_f64(*w).unwrap_or_default())
 			}
 		}
@@ -344,20 +344,20 @@ impl PartialEq for Number {
 impl PartialOrd for Number {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => v.partial_cmp(w),
-			(Number::Float(v), Number::Float(w)) => v.partial_cmp(w),
-			(Number::Decimal(v), Number::Decimal(w)) => v.partial_cmp(w),
+			(Self::Int(v), Self::Int(w)) => v.partial_cmp(w),
+			(Self::Float(v), Self::Float(w)) => v.partial_cmp(w),
+			(Self::Decimal(v), Self::Decimal(w)) => v.partial_cmp(w),
 			// ------------------------------
-			(Number::Int(v), Number::Float(w)) => (*v as f64).partial_cmp(w),
-			(Number::Float(v), Number::Int(w)) => v.partial_cmp(&(*w as f64)),
+			(Self::Int(v), Self::Float(w)) => (*v as f64).partial_cmp(w),
+			(Self::Float(v), Self::Int(w)) => v.partial_cmp(&(*w as f64)),
 			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => BigDecimal::from(*v).partial_cmp(w),
-			(Number::Decimal(v), Number::Int(w)) => v.partial_cmp(&BigDecimal::from(*w)),
+			(Self::Int(v), Self::Decimal(w)) => BigDecimal::from(*v).partial_cmp(w),
+			(Self::Decimal(v), Self::Int(w)) => v.partial_cmp(&BigDecimal::from(*w)),
 			// ------------------------------
-			(Number::Float(v), Number::Decimal(w)) => {
+			(Self::Float(v), Self::Decimal(w)) => {
 				BigDecimal::from_f64(*v).unwrap_or_default().partial_cmp(w)
 			}
-			(Number::Decimal(v), Number::Float(w)) => {
+			(Self::Decimal(v), Self::Float(w)) => {
 				v.partial_cmp(&BigDecimal::from_f64(*w).unwrap_or_default())
 			}
 		}
@@ -368,12 +368,12 @@ impl ops::Add for Number {
 	type Output = Self;
 	fn add(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v + w),
-			(Number::Float(v), Number::Float(w)) => Number::Float(v + w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v + w),
-			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 + w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v + w as f64),
-			(v, w) => Number::from(v.as_decimal() + w.as_decimal()),
+			(Self::Int(v), Self::Int(w)) => Self::Int(v + w),
+			(Self::Float(v), Self::Float(w)) => Self::Float(v + w),
+			(Self::Decimal(v), Self::Decimal(w)) => Self::Decimal(v + w),
+			(Self::Int(v), Self::Float(w)) => Self::Float(v as f64 + w),
+			(Self::Float(v), Self::Int(w)) => Self::Float(v + w as f64),
+			(v, w) => Self::from(v.as_decimal() + w.as_decimal()),
 		}
 	}
 }
@@ -396,12 +396,12 @@ impl ops::Sub for Number {
 	type Output = Self;
 	fn sub(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v - w),
-			(Number::Float(v), Number::Float(w)) => Number::Float(v - w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v - w),
-			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 - w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v - w as f64),
-			(v, w) => Number::from(v.as_decimal() - w.as_decimal()),
+			(Self::Int(v), Self::Int(w)) => Self::Int(v - w),
+			(Self::Float(v), Self::Float(w)) => Self::Float(v - w),
+			(Self::Decimal(v), Self::Decimal(w)) => Self::Decimal(v - w),
+			(Self::Int(v), Self::Float(w)) => Self::Float(v as f64 - w),
+			(Self::Float(v), Self::Int(w)) => Self::Float(v - w as f64),
+			(v, w) => Self::from(v.as_decimal() - w.as_decimal()),
 		}
 	}
 }
@@ -424,12 +424,12 @@ impl ops::Mul for Number {
 	type Output = Self;
 	fn mul(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
-			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v * w),
-			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 * w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v * w as f64),
-			(v, w) => Number::from(v.as_decimal() * w.as_decimal()),
+			(Self::Int(v), Self::Int(w)) => Self::Int(v * w),
+			(Self::Float(v), Self::Float(w)) => Self::Float(v * w),
+			(Self::Decimal(v), Self::Decimal(w)) => Self::Decimal(v * w),
+			(Self::Int(v), Self::Float(w)) => Self::Float(v as f64 * w),
+			(Self::Float(v), Self::Int(w)) => Self::Float(v * w as f64),
+			(v, w) => Self::from(v.as_decimal() * w.as_decimal()),
 		}
 	}
 }
@@ -452,11 +452,11 @@ impl ops::Div for Number {
 	type Output = Self;
 	fn div(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Float(v), Number::Float(w)) => Number::Float(v / w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v / w),
-			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 / w),
-			(Number::Float(v), Number::Int(w)) => Number::Float(v / w as f64),
-			(v, w) => Number::from(v.as_decimal() / w.as_decimal()),
+			(Self::Float(v), Self::Float(w)) => Self::Float(v / w),
+			(Self::Decimal(v), Self::Decimal(w)) => Self::Decimal(v / w),
+			(Self::Int(v), Self::Float(w)) => Self::Float(v as f64 / w),
+			(Self::Float(v), Self::Int(w)) => Self::Float(v / w as f64),
+			(v, w) => Self::from(v.as_decimal() / w.as_decimal()),
 		}
 	}
 }
@@ -477,20 +477,20 @@ impl<'a, 'b> ops::Div<&'b Number> for &'a Number {
 // ------------------------------
 
 impl Sum<Self> for Number {
-	fn sum<I>(iter: I) -> Number
+	fn sum<I>(iter: I) -> Self
 	where
 		I: Iterator<Item = Self>,
 	{
-		iter.fold(Number::Int(0), |a, b| a + b)
+		iter.fold(Self::Int(0), |a, b| a + b)
 	}
 }
 
 impl<'a> Sum<&'a Self> for Number {
-	fn sum<I>(iter: I) -> Number
+	fn sum<I>(iter: I) -> Self
 	where
 		I: Iterator<Item = &'a Self>,
 	{
-		iter.fold(Number::Int(0), |a, b| &a + b)
+		iter.fold(Self::Int(0), |a, b| &a + b)
 	}
 }
 
@@ -499,7 +499,7 @@ impl Product<Self> for Number {
 	where
 		I: Iterator<Item = Self>,
 	{
-		iter.fold(Number::Int(1), |a, b| a * b)
+		iter.fold(Self::Int(1), |a, b| a * b)
 	}
 }
 
@@ -508,7 +508,7 @@ impl<'a> Product<&'a Self> for Number {
 	where
 		I: Iterator<Item = &'a Self>,
 	{
-		iter.fold(Number::Int(1), |a, b| &a * b)
+		iter.fold(Self::Int(1), |a, b| &a * b)
 	}
 }
 
@@ -522,7 +522,7 @@ pub trait Sort {
 
 impl Sort for Vec<Number> {
 	fn sorted(&mut self) -> Sorted<&Vec<Number>> {
-		self.sort();
+		self.sort_unstable();
 		Sorted(self)
 	}
 }
