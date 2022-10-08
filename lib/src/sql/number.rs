@@ -157,7 +157,7 @@ impl Number {
 	// -----------------------------------
 
 	/// Not a number; it's worth nothing that `Value::from` will convert this to `Value::None`.
-	pub const NAN: Number = Number::Float(f64::NAN);
+	pub(crate) const NAN: Number = Number::Float(f64::NAN);
 
 	// -----------------------------------
 	// Simple number detection
