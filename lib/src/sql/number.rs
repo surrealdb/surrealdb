@@ -156,7 +156,7 @@ impl Number {
 	// Constants
 	// -----------------------------------
 
-	/// Not a number; it's worth nothing that `Value::from` will convert this to `Value::None.
+	/// Not a number; it's worth nothing that `Value::from` will convert this to `Value::None`.
 	pub const NAN: Number = Number::Float(f64::NAN);
 
 	// -----------------------------------

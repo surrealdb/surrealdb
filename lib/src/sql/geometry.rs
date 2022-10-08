@@ -50,7 +50,7 @@ impl PartialOrd for Geometry {
 		}
 
 		fn polygon(polygon: &Polygon) -> impl Iterator<Item = (f64, f64)> + '_ {
-			polygon.interiors().into_iter().chain(once(polygon.exterior())).flat_map(line)
+			polygon.interiors().iter().chain(once(polygon.exterior())).flat_map(line)
 		}
 
 		fn multi_point(multi_point: &MultiPoint) -> impl Iterator<Item = (f64, f64)> + '_ {
@@ -356,7 +356,7 @@ impl Geometry {
 		}
 
 		fn polygon(polygon: &Polygon) -> bool {
-			polygon.interiors().into_iter().chain(once(polygon.exterior())).any(line)
+			polygon.interiors().iter().chain(once(polygon.exterior())).any(line)
 		}
 
 		match self {
