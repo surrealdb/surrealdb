@@ -1,9 +1,9 @@
 use crate::sql::ending::number as ending;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
-use bigdecimal::BigDecimal;
 use bigdecimal::FromPrimitive;
 use bigdecimal::ToPrimitive;
+use bigdecimal::{BigDecimal, Signed};
 use nom::branch::alt;
 use nom::character::complete::i64;
 use nom::combinator::map;
@@ -293,9 +293,10 @@ impl Number {
 
 	pub fn sqrt(self) -> Self {
 		match self {
-			Number::Int(v) => (v as f64).sqrt().into(),
-			Number::Float(v) => v.sqrt().into(),
-			Number::Decimal(v) => v.sqrt().unwrap_or_default().into(),
+			Number::Int(v) if v >= 0 => (v as f64).sqrt().into(),
+			Number::Float(v) if v >= 0.0 => v.sqrt().into(),
+			Number::Decimal(v) if !v.is_negative() => v.sqrt().unwrap_or_default().into(),
+			_ => Self::NAN,
 		}
 	}
 

@@ -6,8 +6,12 @@ pub trait Mean {
 
 impl Mean for Vec<Number> {
 	fn mean(&self) -> Number {
-		let len = Number::from(self.len());
-		let sum = self.iter().sum::<Number>();
-		sum / len
+		if self.is_empty() {
+			Number::NAN
+		} else {
+			let len = Number::from(self.len());
+			let sum = self.iter().sum::<Number>();
+			sum / len
+		}
 	}
 }

@@ -64,20 +64,14 @@ pub fn max((array,): (Value,)) -> Result<Value, Error> {
 
 pub fn mean((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => match v.is_empty() {
-			true => Value::None,
-			false => v.as_numbers().mean().into(),
-		},
+		Value::Array(v) => v.as_numbers().mean().into(),
 		_ => Value::None,
 	})
 }
 
 pub fn median((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => match v.is_empty() {
-			true => Value::None,
-			false => v.as_numbers().sorted().median().into(),
-		},
+		Value::Array(v) => v.as_numbers().sorted().median().into(),
 		_ => Value::None,
 	})
 }
@@ -139,10 +133,7 @@ pub fn spread((array,): (Value,)) -> Result<Value, Error> {
 }
 
 pub fn sqrt((arg,): (Number,)) -> Result<Value, Error> {
-	Ok(match arg {
-		v if v >= Number::Int(0) => v.sqrt().into(),
-		_ => Value::None,
-	})
+	Ok(arg.sqrt().into())
 }
 
 pub fn stddev((array,): (Value,)) -> Result<Value, Error> {
