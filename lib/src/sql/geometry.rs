@@ -5,7 +5,7 @@ use crate::sql::fmt::Fmt;
 use crate::sql::serde::is_internal_serialization;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
-use geo::{LineString, Point, Polygon};
+use geo::{Coordinate, LineString, Point, Polygon};
 use geo::{MultiLineString, MultiPoint, MultiPolygon};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -19,7 +19,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
-use std::iter::FromIterator;
+use std::iter::{once, FromIterator};
 
 const SINGLE: char = '\'';
 const DOUBLE: char = '\"';
@@ -36,9 +36,98 @@ pub enum Geometry {
 }
 
 impl PartialOrd for Geometry {
-	#[inline]
-	fn partial_cmp(&self, _: &Self) -> Option<Ordering> {
-		None
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		fn coordinate(coordinate: &Coordinate) -> (f64, f64) {
+			coordinate.x_y()
+		}
+
+		fn point(point: &Point) -> (f64, f64) {
+			coordinate(&point.0)
+		}
+
+		fn line(line: &LineString) -> impl Iterator<Item = (f64, f64)> + '_ {
+			line.into_iter().map(coordinate)
+		}
+
+		fn polygon(polygon: &Polygon) -> impl Iterator<Item = (f64, f64)> + '_ {
+			polygon.interiors().into_iter().chain(once(polygon.exterior())).flat_map(line)
+		}
+
+		fn multi_point(multi_point: &MultiPoint) -> impl Iterator<Item = (f64, f64)> + '_ {
+			multi_point.iter().map(point)
+		}
+
+		fn multi_line(multi_line: &MultiLineString) -> impl Iterator<Item = (f64, f64)> + '_ {
+			multi_line.iter().flat_map(line)
+		}
+
+		fn multi_polygon(multi_polygon: &MultiPolygon) -> impl Iterator<Item = (f64, f64)> + '_ {
+			multi_polygon.iter().flat_map(polygon)
+		}
+
+		match (self, other) {
+			(Self::Point(one), Self::Point(two)) => point(one).partial_cmp(&point(two)),
+			(Self::Point(_), Self::Line(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::Polygon(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::MultiPoint(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::Point(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::Line(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::Line(one), Self::Line(two)) => line(one).partial_cmp(line(two)),
+			(Self::Line(_), Self::Polygon(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::MultiPoint(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::Line(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::Polygon(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::Polygon(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::Polygon(one), Self::Polygon(two)) => polygon(one).partial_cmp(polygon(two)),
+			(Self::Polygon(_), Self::MultiPoint(_)) => Some(Ordering::Less),
+			(Self::Polygon(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::Polygon(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::Polygon(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::MultiPoint(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::MultiPoint(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::MultiPoint(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::MultiPoint(one), Self::MultiPoint(two)) => {
+				multi_point(one).partial_cmp(multi_point(two))
+			}
+			(Self::MultiPoint(_), Self::MultiLine(_)) => Some(Ordering::Less),
+			(Self::MultiPoint(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::MultiPoint(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::MultiLine(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
+			(Self::MultiLine(one), Self::MultiLine(two)) => {
+				multi_line(one).partial_cmp(multi_line(two))
+			}
+			(Self::MultiLine(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
+			(Self::MultiLine(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::MultiPolygon(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(_), Self::MultiLine(_)) => Some(Ordering::Greater),
+			(Self::MultiPolygon(one), Self::MultiPolygon(two)) => {
+				multi_polygon(one).partial_cmp(multi_polygon(two))
+			}
+			(Self::MultiPolygon(_), Self::Collection(_)) => Some(Ordering::Less),
+			//
+			(Self::Collection(_), Self::Point(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::Line(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::Polygon(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::MultiLine(_)) => Some(Ordering::Greater),
+			(Self::Collection(_), Self::MultiPolygon(_)) => Some(Ordering::Greater),
+			(Self::Collection(one), Self::Collection(two)) => one.partial_cmp(two),
+		}
 	}
 }
 
@@ -254,24 +343,29 @@ impl Geometry {
 
 	/// Returns true if and only if contains at least one f64::NAN.
 	pub(crate) fn is_nan(&self) -> bool {
+		fn coordinate(coordinate: &Coordinate) -> bool {
+			coordinate.x.is_nan() || coordinate.y.is_nan()
+		}
+
+		fn point(point: &Point) -> bool {
+			coordinate(&point.0)
+		}
+
+		fn line(line: &LineString) -> bool {
+			line.into_iter().any(coordinate)
+		}
+
+		fn polygon(polygon: &Polygon) -> bool {
+			polygon.interiors().into_iter().chain(once(polygon.exterior())).any(line)
+		}
+
 		match self {
-			Self::Point(p) => p.x().is_nan() || p.y().is_nan(),
-			Self::Line(l) => l.into_iter().any(|p| p.x.is_nan() || p.y.is_nan()),
-			Self::Polygon(p) => p
-				.interiors()
-				.into_iter()
-				.chain(std::iter::once(p.exterior()))
-				.any(|l| l.into_iter().any(|p| p.x.is_nan() || p.y.is_nan())),
-			Self::MultiPoint(mp) => mp.into_iter().any(|p| p.x().is_nan() || p.y().is_nan()),
-			Self::MultiLine(ml) => {
-				ml.into_iter().any(|l| l.into_iter().any(|p| p.x.is_nan() || p.y.is_nan()))
-			}
-			Self::MultiPolygon(mp) => mp.into_iter().any(|p| {
-				p.interiors()
-					.into_iter()
-					.chain(std::iter::once(p.exterior()))
-					.any(|l| l.into_iter().any(|p| p.x.is_nan() || p.y.is_nan()))
-			}),
+			Self::Point(p) => point(p),
+			Self::Line(l) => line(l),
+			Self::Polygon(p) => polygon(p),
+			Self::MultiPoint(mp) => mp.into_iter().any(point),
+			Self::MultiLine(ml) => ml.into_iter().any(line),
+			Self::MultiPolygon(mp) => mp.into_iter().any(polygon),
 			Self::Collection(c) => c.iter().any(Self::is_nan),
 		}
 	}
