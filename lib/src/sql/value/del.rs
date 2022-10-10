@@ -47,7 +47,7 @@ impl Value {
 						_ => {
 							let path = path.next();
 							let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-							try_join_all(futs).await?;
+							futures::stream::iter(futs).buffered(10).await?;
 							Ok(())
 						}
 					},
@@ -114,7 +114,7 @@ impl Value {
 					},
 					_ => {
 						let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-						try_join_all(futs).await?;
+						futures::stream::iter(futs).buffered(10).await?;
 						Ok(())
 					}
 				},
