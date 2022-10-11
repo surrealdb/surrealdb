@@ -1,6 +1,8 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
 use crate::sql::common::colons;
@@ -24,6 +26,7 @@ use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::set::{set, SetStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::statements::yuse::{yuse, UseStatement};
+#[cfg(feature = "compute")]
 use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::combinator::map;
@@ -96,6 +99,7 @@ impl Statement {
 		}
 	}
 
+	#[cfg(feature = "compute")]
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Use(_) => false,
@@ -118,6 +122,7 @@ impl Statement {
 		}
 	}
 
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

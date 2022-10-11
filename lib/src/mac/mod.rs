@@ -1,3 +1,4 @@
+#[cfg(feature = "compute")]
 macro_rules! bytes {
 	($expression:expr) => {
 		format!("{}\n", $expression).into_bytes()
@@ -12,6 +13,7 @@ macro_rules! map {
     }};
 }
 
+#[cfg(feature = "compute")]
 macro_rules! get_cfg {
 	($i:ident : $($s:expr),+) => (
 		let $i = || { $( if cfg!($i=$s) { return $s; } );+ "unknown"};

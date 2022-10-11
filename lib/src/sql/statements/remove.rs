@@ -1,7 +1,8 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Level;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Level, Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::shouldbespace;
@@ -9,6 +10,7 @@ use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::Idiom;
+#[cfg(feature = "compute")]
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -32,6 +34,7 @@ pub enum RemoveStatement {
 }
 
 impl RemoveStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -93,6 +96,7 @@ pub struct RemoveNamespaceStatement {
 }
 
 impl RemoveNamespaceStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -149,6 +153,7 @@ pub struct RemoveDatabaseStatement {
 }
 
 impl RemoveDatabaseStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -206,6 +211,7 @@ pub struct RemoveLoginStatement {
 }
 
 impl RemoveLoginStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -285,6 +291,7 @@ pub struct RemoveTokenStatement {
 }
 
 impl RemoveTokenStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -378,6 +385,7 @@ pub struct RemoveScopeStatement {
 }
 
 impl RemoveScopeStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -434,6 +442,7 @@ pub struct RemoveTableStatement {
 }
 
 impl RemoveTableStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -491,6 +500,7 @@ pub struct RemoveEventStatement {
 }
 
 impl RemoveEventStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -551,6 +561,7 @@ pub struct RemoveFieldStatement {
 }
 
 impl RemoveFieldStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -611,6 +622,7 @@ pub struct RemoveIndexStatement {
 }
 
 impl RemoveIndexStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,

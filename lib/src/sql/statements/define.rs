@@ -1,7 +1,8 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Level;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Level, Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, base_or_scope, Base};
@@ -14,6 +15,7 @@ use crate::sql::idiom;
 use crate::sql::idiom::{Idiom, Idioms};
 use crate::sql::kind::{kind, Kind};
 use crate::sql::permission::{permissions, Permissions};
+#[cfg(feature = "compute")]
 use crate::sql::statements::UpdateStatement;
 use crate::sql::strand::strand_raw;
 use crate::sql::value::{value, values, Value, Values};
@@ -47,6 +49,7 @@ pub enum DefineStatement {
 }
 
 impl DefineStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -108,6 +111,7 @@ pub struct DefineNamespaceStatement {
 }
 
 impl DefineNamespaceStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -157,6 +161,7 @@ pub struct DefineDatabaseStatement {
 }
 
 impl DefineDatabaseStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -214,6 +219,7 @@ pub struct DefineLoginStatement {
 }
 
 impl DefineLoginStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -337,6 +343,7 @@ pub struct DefineTokenStatement {
 }
 
 impl DefineTokenStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -457,6 +464,7 @@ pub struct DefineScopeStatement {
 }
 
 impl DefineScopeStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -579,6 +587,7 @@ pub struct DefineTableStatement {
 }
 
 impl DefineTableStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -754,6 +763,7 @@ pub struct DefineEventStatement {
 }
 
 impl DefineEventStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -835,6 +845,7 @@ pub struct DefineFieldStatement {
 }
 
 impl DefineFieldStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -975,6 +986,7 @@ pub struct DefineIndexStatement {
 }
 
 impl DefineIndexStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

@@ -1,9 +1,12 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
+#[cfg(feature = "compute")]
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -36,6 +39,7 @@ pub enum Constant {
 }
 
 impl Constant {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,

@@ -49,6 +49,7 @@ impl Ident {
 		self.0.to_string()
 	}
 	/// Returns a yield if an alias is specified
+	#[cfg(feature = "compute")]
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.as_str() == "id"
 	}

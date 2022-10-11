@@ -1,17 +1,17 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Iterable;
-use crate::dbs::Iterator;
-use crate::dbs::Level;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Iterable, Iterator, Level, Options, Statement, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
 use crate::sql::timeout::{timeout, Timeout};
-use crate::sql::value::{whats, Value, Values};
+#[cfg(feature = "compute")]
+use crate::sql::value::Value;
+use crate::sql::value::{whats, Values};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -30,10 +30,12 @@ pub struct DeleteStatement {
 }
 
 impl DeleteStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
 
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

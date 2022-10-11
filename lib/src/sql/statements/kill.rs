@@ -1,11 +1,13 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Level;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Level, Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::uuid::{uuid, Uuid};
+#[cfg(feature = "compute")]
 use crate::sql::value::Value;
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
@@ -18,6 +20,7 @@ pub struct KillStatement {
 }
 
 impl KillStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,

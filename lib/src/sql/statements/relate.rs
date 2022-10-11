@@ -1,10 +1,8 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Iterable;
-use crate::dbs::Iterator;
-use crate::dbs::Level;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Iterable, Iterator, Level, Options, Statement, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::array::array;
 use crate::sql::comment::mightbespace;
@@ -41,10 +39,12 @@ pub struct RelateStatement {
 }
 
 impl RelateStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
 
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

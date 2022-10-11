@@ -1,5 +1,3 @@
-#![cfg(feature = "parallel")]
-
 use executor::{Executor, Task};
 use once_cell::sync::Lazy;
 use std::future::Future;

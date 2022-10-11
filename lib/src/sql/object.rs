@@ -1,6 +1,7 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{commas, val_char};
@@ -116,6 +117,7 @@ impl Object {
 }
 
 impl Object {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

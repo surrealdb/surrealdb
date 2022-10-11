@@ -1,11 +1,13 @@
-#[cfg(feature = "parallel")]
 /// Specifies how many concurrent jobs can be buffered in the worker channel.
+#[cfg(all(feature = "compute", feature = "parallel"))]
 pub const MAX_CONCURRENT_TASKS: usize = 64;
 
 /// Specifies how deep various forms of computation will go before the query fails.
+#[cfg(feature = "compute")]
 pub const MAX_COMPUTATION_DEPTH: u8 = 30;
 
 /// Specifies the names of parameters which can not be specified in a query.
+#[cfg(feature = "compute")]
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["auth", "scope", "token", "session"];
 
 /// The characters which are supported in server record IDs.

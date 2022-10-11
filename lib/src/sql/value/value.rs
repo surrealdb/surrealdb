@@ -1,8 +1,9 @@
 #![allow(clippy::derive_ord_xor_partial_ord)]
 
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::common::commas;
@@ -33,6 +34,7 @@ use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
 use crate::sql::thing::{thing, Thing};
 use crate::sql::uuid::{uuid as unique, Uuid};
+#[cfg(feature = "compute")]
 use async_recursion::async_recursion;
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
@@ -1252,6 +1254,7 @@ impl fmt::Display for Value {
 }
 
 impl Value {
+	#[cfg(feature = "compute")]
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.writeable()),
@@ -1265,6 +1268,7 @@ impl Value {
 
 	#[cfg_attr(feature = "parallel", async_recursion)]
 	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

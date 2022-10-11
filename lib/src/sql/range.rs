@@ -1,10 +1,15 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
+#[cfg(feature = "compute")]
 use crate::dbs::Options;
+#[cfg(feature = "compute")]
 use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
+#[cfg(feature = "compute")]
 use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::character::complete::char;
@@ -25,6 +30,7 @@ pub struct Range {
 }
 
 impl Range {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

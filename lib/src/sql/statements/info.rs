@@ -1,12 +1,15 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Level;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Level, Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
+#[cfg(feature = "compute")]
 use crate::sql::object::Object;
+#[cfg(feature = "compute")]
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -24,6 +27,7 @@ pub enum InfoStatement {
 }
 
 impl InfoStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,

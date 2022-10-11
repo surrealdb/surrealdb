@@ -1,12 +1,15 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::idiom;
 use crate::sql::idiom::Idiom;
-use crate::sql::part::Next;
-use crate::sql::part::Part;
+#[cfg(feature = "compute")]
+use crate::sql::part::{Next, Part};
+#[cfg(feature = "compute")]
 use crate::sql::value::Value;
 use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
@@ -31,6 +34,7 @@ impl Deref for Param {
 }
 
 impl Param {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

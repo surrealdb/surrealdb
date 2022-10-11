@@ -1,10 +1,8 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Iterable;
-use crate::dbs::Iterator;
-use crate::dbs::Level;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Iterable, Iterator, Level, Options, Statement, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::data::{single, update, values, Data};
@@ -12,6 +10,7 @@ use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
 use crate::sql::table::{table, Table};
 use crate::sql::timeout::{timeout, Timeout};
+#[cfg(feature = "compute")]
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -33,10 +32,12 @@ pub struct InsertStatement {
 }
 
 impl InsertStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
 
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

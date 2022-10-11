@@ -336,12 +336,14 @@ impl From<rocksdb::Error> for Error {
 	}
 }
 
+#[cfg(feature = "compute")]
 impl From<channel::RecvError> for Error {
 	fn from(e: channel::RecvError) -> Error {
 		Error::Channel(e.to_string())
 	}
 }
 
+#[cfg(feature = "compute")]
 impl<T> From<channel::SendError<T>> for Error {
 	fn from(e: channel::SendError<T>) -> Error {
 		Error::Channel(e.to_string())

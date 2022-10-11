@@ -1,9 +1,12 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
+#[cfg(feature = "compute")]
 use crate::sql::paths::ID;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
@@ -40,6 +43,7 @@ impl PartialOrd for Subquery {
 }
 
 impl Subquery {
+	#[cfg(feature = "compute")]
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Value(v) => v.writeable(),
@@ -53,6 +57,7 @@ impl Subquery {
 		}
 	}
 
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

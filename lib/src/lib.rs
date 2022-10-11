@@ -7,6 +7,7 @@
 //! persisted to disk, a browser-based embedded datastore backed by IndexedDB, or for connecting
 //! to a distributed [TiKV](https://tikv.org) key-value store.
 
+#[cfg(feature = "compute")]
 #[macro_use]
 extern crate log;
 
@@ -14,30 +15,36 @@ extern crate log;
 mod mac;
 
 mod cnf;
+#[cfg(feature = "compute")]
 mod ctx;
+#[cfg(feature = "compute")]
 mod dbs;
+#[cfg(feature = "compute")]
 mod doc;
-mod env;
 mod err;
+#[cfg(all(feature = "compute", feature = "parallel"))]
 mod exe;
+#[cfg(feature = "compute")]
 mod fnc;
+#[cfg(feature = "compute")]
 mod key;
+#[cfg(feature = "compute")]
 mod kvs;
 
+#[cfg(feature = "compute")]
+pub mod env;
 // SQL
 pub mod sql;
 
 // Exports
-pub use dbs::Auth;
-pub use dbs::Response;
-pub use dbs::Session;
+#[cfg(feature = "compute")]
+pub use dbs::{Auth, Response, Session};
 pub use err::Error;
-pub use kvs::Datastore;
-pub use kvs::Key;
-pub use kvs::Transaction;
-pub use kvs::Val;
+#[cfg(feature = "compute")]
+pub use kvs::{Datastore, Key, Transaction, Val};
 
 // Re-exports
+#[cfg(feature = "compute")]
 pub mod channel {
 	pub use channel::bounded as new;
 	pub use channel::Receiver;

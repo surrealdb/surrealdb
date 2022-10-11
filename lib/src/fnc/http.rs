@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::sql::value::Value;
+#[cfg(feature = "http")]
 use crate::sql::{Object, Strand};
 
 #[cfg(not(feature = "http"))]

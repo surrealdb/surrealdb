@@ -3,6 +3,7 @@ use crate::sql::ending::ident as ending;
 use crate::sql::error::IResult;
 use crate::sql::graph::{graph as graph_raw, Graph};
 use crate::sql::ident::{ident, Ident};
+#[cfg(feature = "compute")]
 use crate::sql::idiom::Idiom;
 use crate::sql::number::{number, Number};
 use crate::sql::thing::{thing as thing_raw, Thing};
@@ -92,6 +93,7 @@ impl From<&str> for Part {
 
 impl Part {
 	/// Returns a yield if an alias is specified
+	#[cfg(feature = "compute")]
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {
 			Part::Graph(v) => v.alias.as_ref(),

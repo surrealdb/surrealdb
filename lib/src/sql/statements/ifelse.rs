@@ -1,6 +1,8 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
@@ -19,6 +21,7 @@ pub struct IfelseStatement {
 }
 
 impl IfelseStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) fn writeable(&self) -> bool {
 		for (cond, then) in self.exprs.iter() {
 			if cond.writeable() || then.writeable() {
@@ -28,6 +31,7 @@ impl IfelseStatement {
 		self.close.as_ref().map_or(false, |v| v.writeable())
 	}
 
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

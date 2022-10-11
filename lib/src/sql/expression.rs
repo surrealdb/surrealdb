@@ -1,7 +1,10 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
+#[cfg(feature = "compute")]
 use crate::fnc;
 use crate::sql::error::IResult;
 use crate::sql::operator::{operator, Operator};
@@ -57,6 +60,7 @@ impl Expression {
 }
 
 impl Expression {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

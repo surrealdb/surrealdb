@@ -1,16 +1,21 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
+#[cfg(feature = "compute")]
 use crate::sql::part::Next;
 use crate::sql::part::{all, field, first, graph, index, last, part, thing, Part};
+#[cfg(feature = "compute")]
 use crate::sql::paths::{ID, IN, OUT};
+#[cfg(feature = "compute")]
 use crate::sql::value::Value;
-use md5::Digest;
-use md5::Md5;
+#[cfg(feature = "compute")]
+use md5::{Digest, Md5};
 use nom::branch::alt;
 use nom::multi::separated_list1;
 use nom::multi::{many0, many1};
@@ -69,6 +74,7 @@ impl Idiom {
 		self
 	}
 	/// Convert this Idiom to a unique hash
+	#[cfg(feature = "compute")]
 	pub(crate) fn to_hash(&self) -> String {
 		let mut hasher = Md5::new();
 		hasher.update(self.to_string().as_str());
@@ -88,28 +94,34 @@ impl Idiom {
 			.into()
 	}
 	/// Check if this expression is an 'id' field
+	#[cfg(feature = "compute")]
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&ID[0])
 	}
 	/// Check if this expression is an 'in' field
+	#[cfg(feature = "compute")]
 	pub(crate) fn is_in(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&IN[0])
 	}
 	/// Check if this expression is an 'out' field
+	#[cfg(feature = "compute")]
 	pub(crate) fn is_out(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&OUT[0])
 	}
 	/// Check if this is an expression with multiple yields
+	#[cfg(feature = "compute")]
 	pub(crate) fn is_multi_yield(&self) -> bool {
 		self.iter().any(Self::split_multi_yield)
 	}
 	/// Check if the path part is a yield in a multi-yield expression
+	#[cfg(feature = "compute")]
 	pub(crate) fn split_multi_yield(v: &Part) -> bool {
 		matches!(v, Part::Graph(g) if g.alias.is_some())
 	}
 }
 
 impl Idiom {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

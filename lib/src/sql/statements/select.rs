@@ -1,23 +1,25 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Iterable;
-use crate::dbs::Iterator;
-use crate::dbs::Level;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Iterable, Iterator, Level, Options, Statement, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
 use crate::sql::fetch::{fetch, Fetchs};
-use crate::sql::field::{fields, Field, Fields};
+#[cfg(feature = "compute")]
+use crate::sql::field::Field;
+use crate::sql::field::{fields, Fields};
 use crate::sql::group::{group, Groups};
 use crate::sql::limit::{limit, Limit};
 use crate::sql::order::{order, Orders};
 use crate::sql::split::{split, Splits};
 use crate::sql::start::{start, Start};
 use crate::sql::timeout::{timeout, Timeout};
-use crate::sql::value::{selects, Value, Values};
+#[cfg(feature = "compute")]
+use crate::sql::value::Value;
+use crate::sql::value::{selects, Values};
 use crate::sql::version::{version, Version};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
@@ -43,6 +45,7 @@ pub struct SelectStatement {
 }
 
 impl SelectStatement {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn limit(
 		&self,
 		ctx: &Context<'_>,
@@ -56,6 +59,7 @@ impl SelectStatement {
 		}
 	}
 
+	#[cfg(feature = "compute")]
 	pub(crate) fn writeable(&self) -> bool {
 		if self.expr.iter().any(|v| match v {
 			Field::All => false,
@@ -70,6 +74,7 @@ impl SelectStatement {
 		self.cond.as_ref().map_or(false, |v| v.writeable())
 	}
 
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

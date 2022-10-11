@@ -1,12 +1,15 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_rid;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
 use crate::sql::serde::is_internal_serialization;
+#[cfg(feature = "compute")]
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -57,6 +60,7 @@ impl fmt::Display for Thing {
 }
 
 impl Thing {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

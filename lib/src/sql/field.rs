@@ -1,12 +1,15 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{idiom, Idiom};
+#[cfg(feature = "compute")]
 use crate::sql::part::Part;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
@@ -61,6 +64,7 @@ impl Display for Fields {
 }
 
 impl Fields {
+	#[cfg(feature = "compute")]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

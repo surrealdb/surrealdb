@@ -1,6 +1,8 @@
+#[cfg(feature = "compute")]
 use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
+#[cfg(feature = "compute")]
+use crate::dbs::{Options, Transaction};
+#[cfg(feature = "compute")]
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
@@ -9,7 +11,9 @@ use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::operator::{assigner, Operator};
+#[cfg(feature = "compute")]
 use crate::sql::table::Table;
+#[cfg(feature = "compute")]
 use crate::sql::thing::Thing;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
@@ -39,6 +43,7 @@ impl Default for Data {
 
 impl Data {
 	/// Fetch the 'id' field if one has been specified
+	#[cfg(feature = "compute")]
 	pub(crate) async fn rid(
 		&self,
 		ctx: &Context<'_>,
