@@ -71,35 +71,6 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 
 <img src="https://github.com/surrealdb/surrealdb/blob/main/img/interface.png?raw=true">
 
-<h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/contents.svg?raw=true">&nbsp;&nbsp;Contents</h2>
-
-- [Features](#features)
-- [Documentation](#documentation)
-- [Installation](#installation)
-	- [Install on macOS](#---------install-on-macos)
-	- [Install on Linux](#---------install-on-linux)
-	- [Install on Windows](#---------install-on-windows)
-	- [Run using Docker](#---------run-using-docker)
-- [Getting started](#getting-started)
-	- [Client side apps](#client-side-apps)
-	- [Server side code](#server-side-apps)
-- [Quick look](#quick-look)
-- [Why SurrealDB](#why-surrealdb)
-	- [Database, API, and permissions](#database-api-and-permissions)
-	- [Tables, documents, and graph](#tables-documents-and-graph)
-	- [Advanced inter-document relations](#advanced-inter-document-relations-and-analysis-no-joins-no-pain)
-	- [Simple schema definition](#simple-schema-definition-for-frontend-and-backend-development)
-	- [Connect directly from web-browsers](#connect-and-query-directly-from-web-browsers-and-client-devices)
-	- [Multiple different query methods](#query-the-database-with-the-tools-you-want)
-	- [Realtime live queries and data changes](#realtime-live-queries-and-data-changes-direct-to-application)
-	- [Scale effortlessly for high-availability](#scale-effortlessly-to-hundreds-of-nodes-for-high-availability-and-scalability)
-	- [Extend your database with JavaScript](#extend-your-database-with-javascript-functions)
-	- [Designed to be embedded or in the cloud](#designed-to-be-embedded-or-to-run-distributed-in-the-cloud)
-- [Community](#community)
-- [Contributing](#contributing)
-- [Security](#security)
-- [License](#license)
-
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/features.svg?raw=true">&nbsp;&nbsp;Features</h2>
 
 - [x] Database server, or embedded library
