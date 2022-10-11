@@ -6,20 +6,6 @@ According to [Wikipedia]
 
 SurrealDB has support for the Nix package manager. It makes it easier to build the project from source and setting up development environments.
 
-## Table of Contents
-
-- [Running Nix from Docker](#running-nix-from-docker)
-  * [Building a Docker image (recommended)](#building-a-docker-image--recommended-)
-  * [Building a static binary](#building-a-static-binary)
-- [Installing Nix](#installing-nix)
-  * [Activating support for Nix Flakes (recommended)](#activating-support-for-nix-flakes--recommended-)
-  * [Setting up a binary cache (optional)](#setting-up-a-binary-cache--optional-)
-- [Installing SurrealDB](#installing-surrealdb)
-- [Setting up a development environment](#setting-up-a-development-environment)
-  * [Setting dependencies up automatically](#setting-dependencies-up-automatically)
-  * [Manually installing dependencies](#manually-installing-dependencies)
-- [Collecting garbage](#collecting-garbage)
-
 ## Running Nix from Docker
 
 If all you want is to build a Docker image or a static linux binary and you already have Docker installed, then you can do so without installing anything on your machine.
