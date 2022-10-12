@@ -10,7 +10,7 @@ use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
-use futures::future::try_join_all;
+use futures::stream::{StreamExt};
 
 impl Value {
 	#[cfg_attr(feature = "parallel", async_recursion)]
