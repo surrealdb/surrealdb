@@ -43,7 +43,7 @@ impl Value {
 					Part::All => {
 						let path = path.next();
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						futures::stream::iter(futs).buffered(10).collect().await.map(Into::into)
+						futures::stream::iter(futs).buffered(10)
 					}
 					Part::First => match v.first() {
 						Some(v) => v.get(ctx, opt, txn, path.next()).await,
@@ -69,7 +69,7 @@ impl Value {
 					}
 					_ => {
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						stream::iter(futs).buffered(10).collect().await.map(Into::into)
+						stream::iter(futs).buffered(10)
 					}
 				},
 				// Current path part is a thing
