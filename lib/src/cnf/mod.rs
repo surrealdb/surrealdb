@@ -10,7 +10,7 @@ pub const MAX_CONCURRENT_TASKS: usize = 64;
 /// this limit.
 ///
 /// During query execution, all potentially-recursive code paths count against this limit. Whereas
-/// parsing assigns equal eight to each recursion, certain expensive code paths are allowed to
+/// parsing assigns equal weight to each recursion, certain expensive code paths are allowed to
 /// count for more than one unit of depth during execution.
 pub const MAX_COMPUTATION_DEPTH: u8 = 30;
 
