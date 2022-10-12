@@ -2,7 +2,16 @@
 // Specifies how many concurrent jobs can be buffered in the worker channel.
 pub const MAX_CONCURRENT_TASKS: usize = 64;
 
-// Specifies how deep various forms of computation will go before the query fails.
+/// Specifies how deep various forms of computation will go before the query fails
+/// with [`Error::ComputationDepthExceeded`].
+///
+/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
+/// functions, objects, sub-queries), Javascript values, and geometry collections count against
+/// this limit.
+///
+/// During query execution, all potentially-recursive code paths count against this limit. Whereas
+/// parsing assigns equal eight to each recursion, certain expensive code paths are allowed to
+/// count for more than one unit of depth during execution.
 pub const MAX_COMPUTATION_DEPTH: u8 = 30;
 
 // The characters which are supported in server record IDs.
