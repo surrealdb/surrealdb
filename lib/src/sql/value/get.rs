@@ -10,7 +10,7 @@ use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
-use futures::stream::{StreamExt};
+use futures::stream::{self, StreamExt};
 
 impl Value {
 	#[cfg_attr(feature = "parallel", async_recursion)]
@@ -69,7 +69,7 @@ impl Value {
 					}
 					_ => {
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						futures::stream::iter(futs).buffered(10).await.map(Into::into)
+						stream::iter(futs).buffered(10).await.map(Into::into)
 					}
 				},
 				// Current path part is a thing

@@ -7,7 +7,7 @@ use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
-use futures::future::try_join_all;
+use futures::stream::{self, StreamExt};
 use std::collections::HashSet;
 
 impl Value {
@@ -47,7 +47,7 @@ impl Value {
 						_ => {
 							let path = path.next();
 							let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-							futures::stream::iter(futs).buffered(10).await?;
+							stream::iter(futs).buffered(10).await?;
 							Ok(())
 						}
 					},
@@ -114,7 +114,7 @@ impl Value {
 					},
 					_ => {
 						let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-						futures::stream::iter(futs).buffered(10).await?;
+						stream::iter(futs).buffered(10).await?;
 						Ok(())
 					}
 				},
