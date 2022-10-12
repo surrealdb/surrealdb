@@ -58,7 +58,7 @@ impl Value {
 					Part::All => {
 						let path = path.next();
 						let futs = v.iter_mut().map(|v| v.set(ctx, opt, txn, path, val.clone()));
-						stream::iter(futs).buffered(10).await?;
+						stream::iter(futs).buffered(10).collect().await?;
 						Ok(())
 					}
 					Part::First => match v.first_mut() {
@@ -84,7 +84,7 @@ impl Value {
 					}
 					_ => {
 						let futs = v.iter_mut().map(|v| v.set(ctx, opt, txn, path, val.clone()));
-						stream::iter(futs).buffered(10).await?;
+						stream::iter(futs).buffered(10).collect().await?;
 						Ok(())
 					}
 				},
