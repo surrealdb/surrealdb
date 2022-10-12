@@ -527,7 +527,7 @@ impl Value {
 			Self::Object(v) => !v.is_empty(),
 			Self::Strand(v) => !v.is_empty() && !v.eq_ignore_ascii_case("false"),
 			Self::Number(v) => v.is_truthy(),
-			Self::Duration(v) => v.as_nanos() > 0,
+			Self::Duration(v) => !v.is_zero(),
 			Self::Datetime(v) => v.timestamp() > 0,
 			_ => false,
 		}
@@ -1374,6 +1374,7 @@ mod tests {
 		assert_eq!(false, Value::False.is_true());
 		assert_eq!(false, Value::from(1).is_true());
 		assert_eq!(true, Value::from("true").is_true());
+		assert_eq!(true, Value::from("TrUe").is_true());
 		assert_eq!(false, Value::from("false").is_true());
 		assert_eq!(false, Value::from("something").is_true());
 	}
@@ -1386,8 +1387,10 @@ mod tests {
 		assert_eq!(false, Value::from(1).is_false());
 		assert_eq!(false, Value::from("true").is_false());
 		assert_eq!(true, Value::from("false").is_false());
+		assert_eq!(true, Value::from("FaLsE").is_false());
 		assert_eq!(false, Value::from("something").is_false());
 	}
+
 
 	#[test]
 	fn convert_bool() {
