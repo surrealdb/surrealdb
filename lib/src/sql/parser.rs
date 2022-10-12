@@ -7,6 +7,14 @@ use crate::sql::value::Value;
 use nom::Err;
 use std::str;
 
+/// During query parsing, the total depth of calls to parse values (including arrays, expressions,
+/// functions, objects, sub-queries), Javascript values, and geometry collections count against
+/// a computation depth limit. If the limit is reached, parsing will return
+/// [`Error::ComputationDepthExceeded`], as opposed to spending more time and potentially
+/// overflowing the call stack.
+///
+/// If you encounter this limit and believe that it should be increased,
+/// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 pub fn parse(input: &str) -> Result<Query, Error> {
 	parse_impl(input, query)
 }
