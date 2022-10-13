@@ -1,3 +1,5 @@
+#![cfg(feature = "scripting")]
+
 mod parse;
 use parse::Parse;
 use surrealdb::sql::Value;

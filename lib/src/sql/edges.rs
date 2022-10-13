@@ -41,8 +41,7 @@ pub fn edges(i: &str) -> IResult<&str, Edges> {
 }
 
 fn simple(i: &str) -> IResult<&str, Tables> {
-	let (i, w) = alt((any, one))(i)?;
-	Ok((i, w))
+	alt((any, one))(i)
 }
 
 fn custom(i: &str) -> IResult<&str, Tables> {

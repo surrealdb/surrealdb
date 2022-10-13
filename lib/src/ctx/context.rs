@@ -1,3 +1,4 @@
+use crate::ctx::cancellation::Cancellation;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 use crate::sql::value::Value;
@@ -28,7 +29,7 @@ pub struct Context<'a> {
 	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
-	values: Option<HashMap<String, Cow<'a, Value>>>,
+	values: HashMap<String, Cow<'a, Value>>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -41,7 +42,7 @@ impl<'a> Context<'a> {
 	// Create an empty background context.
 	pub fn background() -> Self {
 		Context {
-			values: None,
+			values: HashMap::default(),
 			parent: None,
 			deadline: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
@@ -51,7 +52,7 @@ impl<'a> Context<'a> {
 	// Create a new child from a frozen context.
 	pub fn new(parent: &'a Context) -> Self {
 		Context {
-			values: None,
+			values: HashMap::default(),
 			parent: Some(parent),
 			deadline: parent.deadline,
 			cancelled: Arc::new(AtomicBool::new(false)),
@@ -63,6 +64,16 @@ impl<'a> Context<'a> {
 	pub fn add_cancel(&mut self) -> Canceller {
 		let cancelled = self.cancelled.clone();
 		Canceller::new(cancelled)
+	}
+
+	/// Get a 'static view into the cancellation status.
+	pub fn cancellation(&self) -> Cancellation {
+		Cancellation::new(
+			self.deadline,
+			std::iter::successors(Some(self), |ctx| ctx.parent)
+				.map(|ctx| ctx.cancelled.clone())
+				.collect(),
+		)
 	}
 
 	// Add a deadline to the context. If the current deadline is sooner than
@@ -86,12 +97,7 @@ impl<'a> Context<'a> {
 	where
 		V: Into<Cow<'a, Value>>,
 	{
-		if let Some(ref mut values) = self.values {
-			values.insert(key, value.into());
-		} else {
-			self.values = Some(HashMap::new());
-			self.add_value(key, value);
-		}
+		self.values.insert(key, value.into());
 	}
 
 	// Get the deadline for this operation, if any. This is useful for
@@ -105,8 +111,7 @@ impl<'a> Context<'a> {
 	pub fn done(&self) -> Option<Reason> {
 		match self.deadline {
 			Some(deadline) if deadline <= Instant::now() => Some(Reason::Timedout),
-			// TODO: see if we can relax the ordering.
-			_ if self.cancelled.load(Ordering::SeqCst) => Some(Reason::Canceled),
+			_ if self.cancelled.load(Ordering::Relaxed) => Some(Reason::Canceled),
 			_ => match self.parent {
 				Some(ctx) => ctx.done(),
 				_ => None,
@@ -151,16 +156,10 @@ impl<'a> Context<'a> {
 	// Get a value from the context. If no value is stored under the
 	// provided key, then this will return None.
 	pub fn value(&self, key: &str) -> Option<&Value> {
-		match &self.values {
-			Some(v) => match v.get(key) {
-				Some(v) => match v {
-					Cow::Borrowed(v) => Some(*v),
-					Cow::Owned(v) => Some(v),
-				},
-				None => match self.parent {
-					Some(p) => p.value(key),
-					_ => None,
-				},
+		match self.values.get(key) {
+			Some(v) => match v {
+				Cow::Borrowed(v) => Some(*v),
+				Cow::Owned(v) => Some(v),
 			},
 			None => match self.parent {
 				Some(p) => p.value(key),
@@ -176,7 +175,7 @@ impl<'a> fmt::Debug for Context<'a> {
 			.field("parent", &self.parent)
 			.field("deadline", &self.deadline)
 			.field("cancelled", &self.cancelled)
-			.field("values", &self.values.as_ref().map(|_| "values"))
+			.field("values", &self.values)
 			.finish()
 	}
 }

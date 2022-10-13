@@ -43,3 +43,20 @@ pub fn ident(i: &str) -> IResult<&str, ()> {
 		map(eof, |_| ()),
 	)))(i)
 }
+
+pub fn duration(i: &str) -> IResult<&str, ()> {
+	peek(alt((
+		map(multispace1, |_| ()),
+		map(operator, |_| ()),
+		map(assigner, |_| ()),
+		map(comment, |_| ()),
+		map(char(')'), |_| ()),
+		map(char(']'), |_| ()),
+		map(char('}'), |_| ()),
+		map(char(';'), |_| ()),
+		map(char(','), |_| ()),
+		map(char('.'), |_| ()),
+		map(char('-'), |_| ()),
+		map(eof, |_| ()),
+	)))(i)
+}

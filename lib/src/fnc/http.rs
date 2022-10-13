@@ -32,6 +32,7 @@ pub async fn delete((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
+#[cfg(feature = "http")]
 fn try_as_uri(fn_name: &str, value: Value) -> Result<Strand, Error> {
 	match value {
 		// Avoid surf crate panic by pre-checking URI.
@@ -44,6 +45,7 @@ fn try_as_uri(fn_name: &str, value: Value) -> Result<Strand, Error> {
 	}
 }
 
+#[cfg(feature = "http")]
 fn try_as_opts(
 	fn_name: &str,
 	error_message: &str,

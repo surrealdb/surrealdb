@@ -2,7 +2,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
@@ -14,9 +13,12 @@ impl Value {
 		val: Value,
 	) -> Result<(), Error> {
 		match val {
-			Value::Object(v) => {
-				for (k, v) in v {
-					self.set(ctx, opt, txn, &[Part::from(k)], v).await?;
+			v if v.is_object() => {
+				for k in v.every(false).iter() {
+					match v.get(ctx, opt, txn, &k.0).await? {
+						Value::None => self.del(ctx, opt, txn, &k.0).await?,
+						v => self.set(ctx, opt, txn, &k.0, v).await?,
+					}
 				}
 				Ok(())
 			}

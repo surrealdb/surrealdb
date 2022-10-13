@@ -9,7 +9,6 @@ use crate::err::Error;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
-use crate::sql::part::Part;
 use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
@@ -305,30 +304,11 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		if let Some(fetchs) = stm.fetch() {
-			for fetch in &fetchs.0 {
-				// Loop over each value
+			for fetch in fetchs.iter() {
+				// Loop over each result value
 				for obj in &mut self.results {
-					// Get the value at the path
-					let val = obj.get(ctx, opt, txn, fetch).await?;
-					// Set the value at the path
-					match val {
-						Value::Array(v) => {
-							// Fetch all remote records
-							let val = Value::Array(v).get(ctx, opt, txn, &[Part::Any]).await?;
-							// Set the value at the path
-							obj.set(ctx, opt, txn, fetch, val).await?;
-						}
-						Value::Thing(v) => {
-							// Fetch all remote records
-							let val = Value::Thing(v).get(ctx, opt, txn, &[Part::All]).await?;
-							// Set the value at the path
-							obj.set(ctx, opt, txn, fetch, val).await?;
-						}
-						_ => {
-							// Set the value at the path
-							obj.set(ctx, opt, txn, fetch, val).await?;
-						}
-					}
+					// Fetch the value at the path
+					obj.fetch(ctx, opt, txn, fetch).await?;
 				}
 			}
 		}
@@ -345,6 +325,8 @@ impl Iterator {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		// Prevent deep recursion
+		let opt = &opt.dive(4)?;
 		// Process all prepared values
 		for v in mem::take(&mut self.entries) {
 			v.iterate(ctx, opt, txn, stm, self).await?;
@@ -363,6 +345,9 @@ impl Iterator {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
+		// Prevent deep recursion
+		let opt = &opt.dive(4)?;
+		// Check if iterating in parallel
 		match stm.parallel() {
 			// Run statements sequentially
 			false => {

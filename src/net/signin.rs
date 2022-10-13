@@ -1,13 +1,31 @@
 use crate::err::Error;
+use crate::net::output;
 use crate::net::session;
 use bytes::Bytes;
+use serde::Serialize;
 use std::str;
 use surrealdb::sql::Value;
 use surrealdb::Session;
-use warp::http::Response;
 use warp::Filter;
 
 const MAX: u64 = 1024; // 1 KiB
+
+#[derive(Serialize)]
+struct Success {
+	code: u16,
+	details: String,
+	token: String,
+}
+
+impl Success {
+	fn new(token: String) -> Success {
+		Success {
+			token,
+			code: 200,
+			details: String::from("Authentication succeeded"),
+		}
+	}
+}
 
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	// Set base path
@@ -17,15 +35,20 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	// Set post method
 	let post = base
 		.and(warp::post())
-		.and(session::build())
+		.and(warp::header::optional::<String>(http::header::ACCEPT.as_str()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(session::build())
 		.and_then(handler);
 	// Specify route
 	opts.or(post)
 }
 
-async fn handler(mut session: Session, body: Bytes) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handler(
+	output: Option<String>,
+	body: Bytes,
+	mut session: Session,
+) -> Result<impl warp::Reply, warp::Rejection> {
 	// Convert the HTTP body into text
 	let data = str::from_utf8(&body).unwrap();
 	// Parse the provided data as JSON
@@ -33,7 +56,15 @@ async fn handler(mut session: Session, body: Bytes) -> Result<impl warp::Reply, 
 		// The provided value was an object
 		Ok(Value::Object(vars)) => match crate::iam::signin::signin(&mut session, vars).await {
 			// Authentication was successful
-			Ok(v) => Ok(Response::builder().body(v)),
+			Ok(v) => match output.as_deref() {
+				Some("application/json") => Ok(output::json(&Success::new(v))),
+				Some("application/cbor") => Ok(output::cbor(&Success::new(v))),
+				Some("application/msgpack") => Ok(output::pack(&Success::new(v))),
+				Some("text/plain") => Ok(output::text(v)),
+				None => Ok(output::text(v)),
+				// An incorrect content-type was requested
+				_ => Err(warp::reject::custom(Error::InvalidType)),
+			},
 			// There was an error with authentication
 			Err(e) => Err(warp::reject::custom(e)),
 		},

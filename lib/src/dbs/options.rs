@@ -19,8 +19,8 @@ pub struct Options {
 	pub db: Option<Arc<str>>,
 	// Connection authentication data
 	pub auth: Arc<Auth>,
-	// How many subqueries have we gone into?
-	pub dive: usize,
+	// Approximately how large is the current call stack?
+	dive: u8,
 	// Whether live queries are allowed?
 	pub live: bool,
 	// Should we debug query response SQL?
@@ -80,18 +80,22 @@ impl Options {
 		self.db.as_ref().unwrap()
 	}
 
-	/// Create a new Options object for a subquery
-	pub fn dive(&self) -> Result<Options, Error> {
-		if self.dive < cnf::MAX_RECURSIVE_QUERIES {
+	/// Create a new Options object for a function/subquery/future/etc.
+	///
+	/// The parameter is the approximate cost of the operation (more concretely, the size of the
+	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
+	pub fn dive(&self, cost: u8) -> Result<Options, Error> {
+		let dive = self.dive.saturating_add(cost);
+		if dive <= cnf::MAX_COMPUTATION_DEPTH {
 			Ok(Options {
 				auth: self.auth.clone(),
 				ns: self.ns.clone(),
 				db: self.db.clone(),
-				dive: self.dive + 1,
+				dive,
 				..*self
 			})
 		} else {
-			Err(Error::TooManySubqueries)
+			Err(Error::ComputationDepthExceeded)
 		}
 	}
 

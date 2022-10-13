@@ -36,12 +36,17 @@ pub fn is_hex(chr: char) -> bool {
 
 #[inline]
 pub fn is_digit(chr: char) -> bool {
-	(0x30..=0x39).contains(&(chr as u8))
+	chr.is_ascii_digit()
 }
 
 #[inline]
 pub fn val_char(chr: char) -> bool {
-	is_alphanumeric(chr as u8) || chr == '_'
+	chr.is_ascii_alphanumeric() || chr == '_'
+}
+
+#[inline]
+pub fn val_u8(chr: u8) -> bool {
+	is_alphanumeric(chr) || chr == b'_'
 }
 
 pub fn take_u64(i: &str) -> IResult<&str, u64> {

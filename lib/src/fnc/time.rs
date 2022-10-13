@@ -30,6 +30,13 @@ pub fn floor((datetime, duration): (Value, Value)) -> Result<Value, Error> {
 	})
 }
 
+pub fn format((datetime, format): (Value, String)) -> Result<Value, Error> {
+	Ok(match datetime {
+		Value::Datetime(v) => v.format(&format).to_string().into(),
+		_ => Value::None,
+	})
+}
+
 pub fn group((datetime, strand): (Value, Value)) -> Result<Value, Error> {
 	match datetime {
 		Value::Datetime(v) => match strand {

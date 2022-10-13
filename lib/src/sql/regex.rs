@@ -1,8 +1,8 @@
 use crate::sql::error::IResult;
 use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
+use nom::character::complete::anychar;
 use nom::character::complete::char;
-use nom::character::complete::one_of;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
@@ -12,8 +12,8 @@ use std::str;
 pub struct Regex(String);
 
 impl From<&str> for Regex {
-	fn from(r: &str) -> Regex {
-		Regex(r.replace("\\/", "/"))
+	fn from(r: &str) -> Self {
+		Self(r.replace("\\/", "/"))
 	}
 }
 
@@ -38,7 +38,7 @@ impl Regex {
 
 pub fn regex(i: &str) -> IResult<&str, Regex> {
 	let (i, _) = char('/')(i)?;
-	let (i, v) = escaped(is_not("\\/"), '\\', one_of("/"))(i)?;
+	let (i, v) = escaped(is_not("\\/"), '\\', anychar)(i)?;
 	let (i, _) = char('/')(i)?;
 	Ok((i, Regex::from(v)))
 }
@@ -60,11 +60,11 @@ mod tests {
 
 	#[test]
 	fn regex_complex() {
-		let sql = r"/test\/[a-z]+\/.*/";
+		let sql = r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/";
 		let res = regex(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r"/test/[a-z]+/.*/", format!("{}", out));
-		assert_eq!(out, Regex::from("test/[a-z]+/.*"));
+		assert_eq!(r"/(?i)test/[a-z]+/\s\d\w{1}.*/", format!("{}", out));
+		assert_eq!(out, Regex::from(r"(?i)test/[a-z]+/\s\d\w{1}.*"));
 	}
 }

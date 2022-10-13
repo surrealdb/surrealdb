@@ -11,7 +11,7 @@ impl Value {
 		_opt: &Options,
 		_txn: &Transaction,
 	) -> Result<(), Error> {
-		*self = Value::base();
+		*self = Value::None;
 		Ok(())
 	}
 }
@@ -24,19 +24,10 @@ mod tests {
 	use crate::sql::test::Parse;
 
 	#[tokio::test]
-	async fn clear_none() {
+	async fn clear_value() {
 		let (ctx, opt, txn) = mock().await;
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::parse("{}");
-		val.clear(&ctx, &opt, &txn).await.unwrap();
-		assert_eq!(res, val);
-	}
-
-	#[tokio::test]
-	async fn clear_path() {
-		let (ctx, opt, txn) = mock().await;
-		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = Value::parse("{}");
+		let res = Value::None;
 		val.clear(&ctx, &opt, &txn).await.unwrap();
 		assert_eq!(res, val);
 	}

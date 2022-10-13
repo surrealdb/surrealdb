@@ -359,3 +359,7 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 
     Running `cargo build` in an **elevated shell** will now build the `SurrealDB` in Windows OS.
 </details>
+
+## Building using the Nix package manager
+
+SurrealDB can be built [using the Nix package manager](../pkg/nix#nix-package-manager).

@@ -3,10 +3,12 @@ use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::sql::base::{base, Base};
+use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
+use crate::sql::idiom;
+use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -14,7 +16,7 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub enum RemoveStatement {
@@ -38,31 +40,31 @@ impl RemoveStatement {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			RemoveStatement::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
 
-impl fmt::Display for RemoveStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			RemoveStatement::Namespace(v) => write!(f, "{}", v),
-			RemoveStatement::Database(v) => write!(f, "{}", v),
-			RemoveStatement::Login(v) => write!(f, "{}", v),
-			RemoveStatement::Token(v) => write!(f, "{}", v),
-			RemoveStatement::Scope(v) => write!(f, "{}", v),
-			RemoveStatement::Table(v) => write!(f, "{}", v),
-			RemoveStatement::Event(v) => write!(f, "{}", v),
-			RemoveStatement::Field(v) => write!(f, "{}", v),
-			RemoveStatement::Index(v) => write!(f, "{}", v),
+			Self::Namespace(v) => Display::fmt(v, f),
+			Self::Database(v) => Display::fmt(v, f),
+			Self::Login(v) => Display::fmt(v, f),
+			Self::Token(v) => Display::fmt(v, f),
+			Self::Scope(v) => Display::fmt(v, f),
+			Self::Table(v) => Display::fmt(v, f),
+			Self::Event(v) => Display::fmt(v, f),
+			Self::Field(v) => Display::fmt(v, f),
+			Self::Index(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -290,7 +292,7 @@ impl RemoveTokenStatement {
 		txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		match self.base {
+		match &self.base {
 			Base::Ns => {
 				// Selected NS?
 				opt.needs(Level::Ns)?;
@@ -321,6 +323,21 @@ impl RemoveTokenStatement {
 				// Ok all good
 				Ok(Value::None)
 			}
+			Base::Sc(sc) => {
+				// Selected DB?
+				opt.needs(Level::Db)?;
+				// Allowed to run?
+				opt.check(Level::Db)?;
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Delete the definition
+				let key = crate::key::st::new(opt.ns(), opt.db(), sc, &self.name);
+				run.del(key).await?;
+				// Ok all good
+				Ok(Value::None)
+			}
 			_ => unreachable!(),
 		}
 	}
@@ -341,7 +358,7 @@ fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, base) = base(i)?;
+	let (i, base) = base_or_scope(i)?;
 	Ok((
 		i,
 		RemoveTokenStatement {
@@ -379,6 +396,9 @@ impl RemoveScopeStatement {
 		// Delete the definition
 		let key = crate::key::sc::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
+		// Remove the resource data
+		let key = crate::key::scope::new(opt.ns(), opt.db(), &self.name);
+		run.delp(key, u32::MAX).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -526,7 +546,7 @@ fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
 pub struct RemoveFieldStatement {
-	pub name: Ident,
+	pub name: Idiom,
 	pub what: Ident,
 }
 
@@ -547,7 +567,7 @@ impl RemoveFieldStatement {
 		// Claim transaction
 		let mut run = run.lock().await;
 		// Delete the definition
-		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name);
+		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name.to_string());
 		run.del(key).await?;
 		// Ok all good
 		Ok(Value::None)
@@ -565,7 +585,7 @@ fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FIELD")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
+	let (i, name) = idiom::local(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ON")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("TABLE"))))(i)?;

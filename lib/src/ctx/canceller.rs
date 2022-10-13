@@ -16,6 +16,6 @@ impl Canceller {
 	}
 	// Cancel the context.
 	pub fn cancel(&self) {
-		self.cancelled.store(true, Ordering::SeqCst);
+		self.cancelled.store(true, Ordering::Relaxed);
 	}
 }

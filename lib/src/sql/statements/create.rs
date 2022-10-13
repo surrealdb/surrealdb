@@ -52,7 +52,17 @@ impl CreateStatement {
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;
 			match v {
-				Value::Table(v) => i.ingest(Iterable::Thing(v.generate())),
+				Value::Table(v) => match &self.data {
+					// There is a data clause so check for a record id
+					Some(data) => match data.rid(&v) {
+						// There was a problem creating the record id
+						Err(e) => return Err(e),
+						// There is an id field so use the record id
+						Ok(v) => i.ingest(Iterable::Thing(v)),
+					},
+					// There is no data clause so create a record id
+					None => i.ingest(Iterable::Thing(v.generate())),
+				},
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Model(v) => {
 					for v in v {
@@ -120,7 +130,7 @@ impl fmt::Display for CreateStatement {
 			write!(f, " {}", v)?
 		}
 		if self.parallel {
-			write!(f, " PARALLEL")?
+			f.write_str(" PARALLEL")?
 		}
 		Ok(())
 	}

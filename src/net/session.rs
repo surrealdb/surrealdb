@@ -1,11 +1,10 @@
 use crate::err::Error;
 use crate::iam::verify::{basic, token};
+use crate::iam::BASIC;
+use crate::iam::TOKEN;
 use std::net::SocketAddr;
 use surrealdb::Session;
 use warp::Filter;
-
-const BASIC: &str = "Basic ";
-const TOKEN: &str = "Bearer ";
 
 pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + Clone {
 	// Enable on any path

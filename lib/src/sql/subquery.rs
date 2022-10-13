@@ -4,6 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
+use crate::sql::paths::ID;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
@@ -17,7 +18,7 @@ use nom::character::complete::char;
 use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Subquery {
@@ -41,14 +42,14 @@ impl PartialOrd for Subquery {
 impl Subquery {
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
-			Subquery::Value(v) => v.writeable(),
-			Subquery::Ifelse(v) => v.writeable(),
-			Subquery::Select(v) => v.writeable(),
-			Subquery::Create(v) => v.writeable(),
-			Subquery::Update(v) => v.writeable(),
-			Subquery::Delete(v) => v.writeable(),
-			Subquery::Relate(v) => v.writeable(),
-			Subquery::Insert(v) => v.writeable(),
+			Self::Value(v) => v.writeable(),
+			Self::Ifelse(v) => v.writeable(),
+			Self::Select(v) => v.writeable(),
+			Self::Create(v) => v.writeable(),
+			Self::Update(v) => v.writeable(),
+			Self::Delete(v) => v.writeable(),
+			Self::Relate(v) => v.writeable(),
+			Self::Insert(v) => v.writeable(),
 		}
 	}
 
@@ -59,12 +60,13 @@ impl Subquery {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
+		// Prevent deep recursion
+		let opt = &opt.dive(2)?;
+		// Process the subquery
 		match self {
-			Subquery::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Subquery::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Subquery::Select(ref v) => {
-				// Duplicate options
-				let opt = opt.dive()?;
+			Self::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Select(ref v) => {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -72,22 +74,20 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				let res = v.compute(&ctx, &opt, txn, doc).await?;
+				let res = v.compute(&ctx, opt, txn, doc).await?;
 				// Process result
 				match v.limit() {
 					1 => match v.expr.single() {
-						Some(v) => res.first().get(&ctx, &opt, txn, &v).await,
+						Some(v) => res.first().get(&ctx, opt, txn, &v).await,
 						None => res.first().ok(),
 					},
 					_ => match v.expr.single() {
-						Some(v) => res.get(&ctx, &opt, txn, &v).await,
+						Some(v) => res.get(&ctx, opt, txn, &v).await,
 						None => res.ok(),
 					},
 				}
 			}
-			Subquery::Create(ref v) => {
-				// Duplicate options
-				let opt = opt.dive()?;
+			Self::Create(ref v) => {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -95,17 +95,15 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0)),
-						_ => Ok(v.into()),
+						1 => Ok(v.remove(0).pick(ID.as_ref())),
+						_ => Ok(Value::from(v).pick(ID.as_ref())),
 					},
 					v => Ok(v),
 				}
 			}
-			Subquery::Update(ref v) => {
-				// Duplicate options
-				let opt = opt.dive()?;
+			Self::Update(ref v) => {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -113,17 +111,15 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0)),
-						_ => Ok(v.into()),
+						1 => Ok(v.remove(0).pick(ID.as_ref())),
+						_ => Ok(Value::from(v).pick(ID.as_ref())),
 					},
 					v => Ok(v),
 				}
 			}
-			Subquery::Delete(ref v) => {
-				// Duplicate options
-				let opt = opt.dive()?;
+			Self::Delete(ref v) => {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -131,17 +127,15 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0)),
-						_ => Ok(v.into()),
+						1 => Ok(v.remove(0).pick(ID.as_ref())),
+						_ => Ok(Value::from(v).pick(ID.as_ref())),
 					},
 					v => Ok(v),
 				}
 			}
-			Subquery::Relate(ref v) => {
-				// Duplicate options
-				let opt = opt.dive()?;
+			Self::Relate(ref v) => {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -149,17 +143,15 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0)),
-						_ => Ok(v.into()),
+						1 => Ok(v.remove(0).pick(ID.as_ref())),
+						_ => Ok(Value::from(v).pick(ID.as_ref())),
 					},
 					v => Ok(v),
 				}
 			}
-			Subquery::Insert(ref v) => {
-				// Duplicate options
-				let opt = opt.dive()?;
+			Self::Insert(ref v) => {
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -167,10 +159,10 @@ impl Subquery {
 					ctx.add_value("parent".into(), doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, &opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, doc).await? {
 					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0)),
-						_ => Ok(v.into()),
+						1 => Ok(v.remove(0).pick(ID.as_ref())),
+						_ => Ok(Value::from(v).pick(ID.as_ref())),
 					},
 					v => Ok(v),
 				}
@@ -179,17 +171,17 @@ impl Subquery {
 	}
 }
 
-impl fmt::Display for Subquery {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Subquery {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Subquery::Value(v) => write!(f, "({})", v),
-			Subquery::Select(v) => write!(f, "({})", v),
-			Subquery::Create(v) => write!(f, "({})", v),
-			Subquery::Update(v) => write!(f, "({})", v),
-			Subquery::Delete(v) => write!(f, "({})", v),
-			Subquery::Relate(v) => write!(f, "({})", v),
-			Subquery::Insert(v) => write!(f, "({})", v),
-			Subquery::Ifelse(v) => write!(f, "{}", v),
+			Self::Value(v) => write!(f, "({})", v),
+			Self::Select(v) => write!(f, "({})", v),
+			Self::Create(v) => write!(f, "({})", v),
+			Self::Update(v) => write!(f, "({})", v),
+			Self::Delete(v) => write!(f, "({})", v),
+			Self::Relate(v) => write!(f, "({})", v),
+			Self::Insert(v) => write!(f, "({})", v),
+			Self::Ifelse(v) => Display::fmt(v, f),
 		}
 	}
 }

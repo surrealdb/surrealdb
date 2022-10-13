@@ -1,6 +1,7 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{basic, Idiom};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -31,11 +32,7 @@ impl IntoIterator for Orders {
 
 impl fmt::Display for Orders {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"ORDER BY {}",
-			self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", ")
-		)
+		write!(f, "ORDER BY {}", Fmt::comma_separated(&self.0))
 	}
 }
 

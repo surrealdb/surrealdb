@@ -31,7 +31,7 @@ use nom::multi::many0;
 use nom::multi::separated_list1;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::time::Duration;
 
@@ -47,7 +47,10 @@ impl Deref for Statements {
 
 impl fmt::Display for Statements {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0.iter().map(|ref v| format!("{};", v)).collect::<Vec<_>>().join("\n"))
+		Display::fmt(
+			&self.0.iter().map(|ref v| format!("{};", v)).collect::<Vec<_>>().join("\n"),
+			f,
+		)
 	}
 }
 
@@ -83,34 +86,34 @@ pub enum Statement {
 impl Statement {
 	pub fn timeout(&self) -> Option<Duration> {
 		match self {
-			Statement::Select(v) => v.timeout.as_ref().map(|v| *v.0),
-			Statement::Create(v) => v.timeout.as_ref().map(|v| *v.0),
-			Statement::Update(v) => v.timeout.as_ref().map(|v| *v.0),
-			Statement::Relate(v) => v.timeout.as_ref().map(|v| *v.0),
-			Statement::Delete(v) => v.timeout.as_ref().map(|v| *v.0),
-			Statement::Insert(v) => v.timeout.as_ref().map(|v| *v.0),
+			Self::Select(v) => v.timeout.as_ref().map(|v| *v.0),
+			Self::Create(v) => v.timeout.as_ref().map(|v| *v.0),
+			Self::Update(v) => v.timeout.as_ref().map(|v| *v.0),
+			Self::Relate(v) => v.timeout.as_ref().map(|v| *v.0),
+			Self::Delete(v) => v.timeout.as_ref().map(|v| *v.0),
+			Self::Insert(v) => v.timeout.as_ref().map(|v| *v.0),
 			_ => None,
 		}
 	}
 
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
-			Statement::Use(_) => false,
-			Statement::Set(v) => v.writeable(),
-			Statement::Info(_) => false,
-			Statement::Live(_) => true,
-			Statement::Kill(_) => true,
-			Statement::Output(v) => v.writeable(),
-			Statement::Ifelse(v) => v.writeable(),
-			Statement::Select(v) => v.writeable(),
-			Statement::Create(v) => v.writeable(),
-			Statement::Update(v) => v.writeable(),
-			Statement::Relate(v) => v.writeable(),
-			Statement::Delete(v) => v.writeable(),
-			Statement::Insert(v) => v.writeable(),
-			Statement::Define(_) => true,
-			Statement::Remove(_) => true,
-			Statement::Option(_) => false,
+			Self::Use(_) => false,
+			Self::Set(v) => v.writeable(),
+			Self::Info(_) => false,
+			Self::Live(_) => true,
+			Self::Kill(_) => true,
+			Self::Output(v) => v.writeable(),
+			Self::Ifelse(v) => v.writeable(),
+			Self::Select(v) => v.writeable(),
+			Self::Create(v) => v.writeable(),
+			Self::Update(v) => v.writeable(),
+			Self::Relate(v) => v.writeable(),
+			Self::Delete(v) => v.writeable(),
+			Self::Insert(v) => v.writeable(),
+			Self::Define(_) => true,
+			Self::Remove(_) => true,
+			Self::Option(_) => false,
 			_ => unreachable!(),
 		}
 	}
@@ -123,47 +126,47 @@ impl Statement {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			Statement::Set(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Info(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Live(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Kill(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Output(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Ifelse(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Select(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Create(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Update(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Relate(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Delete(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Insert(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Define(v) => v.compute(ctx, opt, txn, doc).await,
-			Statement::Remove(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Set(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Info(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Live(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Kill(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Output(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Ifelse(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Select(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Create(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Update(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Relate(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Delete(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Insert(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Define(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Remove(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => unreachable!(),
 		}
 	}
 }
 
-impl fmt::Display for Statement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Statement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Statement::Use(v) => write!(f, "{}", v),
-			Statement::Set(v) => write!(f, "{}", v),
-			Statement::Info(v) => write!(f, "{}", v),
-			Statement::Live(v) => write!(f, "{}", v),
-			Statement::Kill(v) => write!(f, "{}", v),
-			Statement::Begin(v) => write!(f, "{}", v),
-			Statement::Cancel(v) => write!(f, "{}", v),
-			Statement::Commit(v) => write!(f, "{}", v),
-			Statement::Output(v) => write!(f, "{}", v),
-			Statement::Ifelse(v) => write!(f, "{}", v),
-			Statement::Select(v) => write!(f, "{}", v),
-			Statement::Create(v) => write!(f, "{}", v),
-			Statement::Update(v) => write!(f, "{}", v),
-			Statement::Relate(v) => write!(f, "{}", v),
-			Statement::Delete(v) => write!(f, "{}", v),
-			Statement::Insert(v) => write!(f, "{}", v),
-			Statement::Define(v) => write!(f, "{}", v),
-			Statement::Remove(v) => write!(f, "{}", v),
-			Statement::Option(v) => write!(f, "{}", v),
+			Self::Use(v) => Display::fmt(v, f),
+			Self::Set(v) => Display::fmt(v, f),
+			Self::Info(v) => Display::fmt(v, f),
+			Self::Live(v) => Display::fmt(v, f),
+			Self::Kill(v) => Display::fmt(v, f),
+			Self::Begin(v) => Display::fmt(v, f),
+			Self::Cancel(v) => Display::fmt(v, f),
+			Self::Commit(v) => Display::fmt(v, f),
+			Self::Output(v) => Display::fmt(v, f),
+			Self::Ifelse(v) => Display::fmt(v, f),
+			Self::Select(v) => Display::fmt(v, f),
+			Self::Create(v) => Display::fmt(v, f),
+			Self::Update(v) => Display::fmt(v, f),
+			Self::Relate(v) => Display::fmt(v, f),
+			Self::Delete(v) => Display::fmt(v, f),
+			Self::Insert(v) => Display::fmt(v, f),
+			Self::Define(v) => Display::fmt(v, f),
+			Self::Remove(v) => Display::fmt(v, f),
+			Self::Option(v) => Display::fmt(v, f),
 		}
 	}
 }

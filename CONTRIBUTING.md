@@ -4,7 +4,7 @@ We would &nbsp;<img width="15" src="/img/love.svg">&nbsp; for you to contribute 
 
 ## How to start
 
-If you are worried or don’t know where to start, check out our next section explaining what kind of help we could use and where can you get involved. You can ask us a question on [Github discussions](https://github.com/surrealdb/surrealdb/discussions), or by tweeting [@tobiemh](https://twitter.com/tobiemh) or [@surrealdb](https://twitter.com/surrealdb) on Twitter. Alternatively chat with the [SurrealDB team on Discord](https://surrealdb.com/discord).
+If you are worried or don’t know where to start, check out our next section explaining what kind of help we could use and where can you get involved. You can ask us a question on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions), or by tweeting [@tobiemh](https://twitter.com/tobiemh) or [@surrealdb](https://twitter.com/surrealdb) on Twitter. Alternatively chat with the [SurrealDB team on Discord](https://surrealdb.com/discord).
 
 ## Code of conduct
 
@@ -20,7 +20,7 @@ rustup component add rustfmt
 
 ## Getting started from source
 
-To set up a working **development environment**, ensure that you have `rustup` installed, and fork the project git repository.
+To set up a working **development environment**, you can either [use the Nix package manager](pkg/nix#readme) or you can [install dependencies manually](doc/BUILDING.md#building-surrealdb) and ensure that you have `rustup` installed, and fork the project git repository.
 
 > Please note that these instructions are for setting up a functional dev environment. If you just want to install SurrealDB for day-to-day usage and not as a code maintainer use this [installation guide](https://surrealdb.com/docs/install). If you want to get started integrating SurrealDB into your app, view the [integration tutorials](https://surrealdb.com/docs/integration).
 
@@ -90,7 +90,7 @@ Please avoid introducing new dependencies to SurrealDB without consulting the te
 
 ## Introducing new features
 
-We would &nbsp;<img width="15" src="/img/love.svg">&nbsp; you to contribute to SurrealDB, but we would also like to make sure SurrealDB is as great as possible and loyal to its vision and mission statement. For us to find the right balance, please open a question on [Github discussions](https://github.com/surrealdb/surrealdb/discussions) with any ideas before introducing a new pull request. This will allow the SurrealDB community to have sufficient discussion about the new feature value and how it fits in the product roadmap and vision.
+We would &nbsp;<img width="15" src="/img/love.svg">&nbsp; you to contribute to SurrealDB, but we would also like to make sure SurrealDB is as great as possible and loyal to its vision and mission statement. For us to find the right balance, please open a question on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions) with any ideas before introducing a new pull request. This will allow the SurrealDB community to have sufficient discussion about the new feature value and how it fits in the product roadmap and vision.
 
 This is also important for the SurrealDB lead developers to be able to give technical input and different emphasis regarding the feature design and architecture. Some bigger features might need to go through our [RFC process](https://github.com/surrealdb/rfc).
 
@@ -146,7 +146,7 @@ git commit -m "[your commit message]"
 git push origin "[the name of your branch]"
 ```
 
-6. Submit your changes for review, by going to your repository on Github and clicking the `Compare & pull request` button.
+6. Submit your changes for review, by going to your repository on GitHub and clicking the `Compare & pull request` button.
 
 7. Ensure that you have entered a commit message which details about the changes, and what the pull request is for.
 
@@ -170,7 +170,7 @@ Presenting at meetups and conferences about your SurrealDB projects. Your unique
 
 ### Feedback, bugs, and ideas
 
-Sending feedback is a great way for us to understand your different use cases of SurrealDB better. If you want to share your experience with SurrealDB, or if you want to discuss any ideas, you can start a discussion on [Github discussions](https://github.com/surrealdb/surrealdb/discussions), chat with the [SurrealDB team on Discord](https://surrealdb.com/discord), or you can tweet [@tobiemh](https://twitter.com/tobiemh) or [@surrealdb](https://twitter.com/surrealdb) on Twitter. If you have any issues, or have found a bug, then feel free to create an issue on [Github issues](https://github.com/surrealdb/surrealdb/issues).
+Sending feedback is a great way for us to understand your different use cases of SurrealDB better. If you want to share your experience with SurrealDB, or if you want to discuss any ideas, you can start a discussion on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions), chat with the [SurrealDB team on Discord](https://surrealdb.com/discord), or you can tweet [@tobiemh](https://twitter.com/tobiemh) or [@surrealdb](https://twitter.com/surrealdb) on Twitter. If you have any issues, or have found a bug, then feel free to create an issue on [GitHub issues](https://github.com/surrealdb/surrealdb/issues).
 
 ### Documentation improvements
 

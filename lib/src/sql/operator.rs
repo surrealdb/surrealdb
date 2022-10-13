@@ -53,8 +53,8 @@ pub enum Operator {
 }
 
 impl Default for Operator {
-	fn default() -> Operator {
-		Operator::Equal
+	fn default() -> Self {
+		Self::Equal
 	}
 }
 
@@ -75,41 +75,41 @@ impl Operator {
 
 impl fmt::Display for Operator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Operator::Or => write!(f, "OR"),
-			Operator::And => write!(f, "AND"),
-			Operator::Add => write!(f, "+"),
-			Operator::Sub => write!(f, "-"),
-			Operator::Mul => write!(f, "*"),
-			Operator::Div => write!(f, "/"),
-			Operator::Inc => write!(f, "+="),
-			Operator::Dec => write!(f, "-="),
-			Operator::Exact => write!(f, "=="),
-			Operator::Equal => write!(f, "="),
-			Operator::NotEqual => write!(f, "!="),
-			Operator::AllEqual => write!(f, "*="),
-			Operator::AnyEqual => write!(f, "?="),
-			Operator::Like => write!(f, "~"),
-			Operator::NotLike => write!(f, "!~"),
-			Operator::AllLike => write!(f, "*~"),
-			Operator::AnyLike => write!(f, "?~"),
-			Operator::LessThan => write!(f, "<"),
-			Operator::LessThanOrEqual => write!(f, "<="),
-			Operator::MoreThan => write!(f, ">"),
-			Operator::MoreThanOrEqual => write!(f, ">="),
-			Operator::Contain => write!(f, "CONTAINS"),
-			Operator::NotContain => write!(f, "CONTAINSNOT"),
-			Operator::ContainAll => write!(f, "CONTAINSALL"),
-			Operator::ContainAny => write!(f, "CONTAINSANY"),
-			Operator::ContainNone => write!(f, "CONTAINSNONE"),
-			Operator::Inside => write!(f, "INSIDE"),
-			Operator::NotInside => write!(f, "NOTINSIDE"),
-			Operator::AllInside => write!(f, "ALLINSIDE"),
-			Operator::AnyInside => write!(f, "ANYINSIDE"),
-			Operator::NoneInside => write!(f, "NONEINSIDE"),
-			Operator::Outside => write!(f, "OUTSIDE"),
-			Operator::Intersects => write!(f, "INTERSECTS"),
-		}
+		f.write_str(match self {
+			Self::Or => "OR",
+			Self::And => "AND",
+			Self::Add => "+",
+			Self::Sub => "-",
+			Self::Mul => "*",
+			Self::Div => "/",
+			Self::Inc => "+=",
+			Self::Dec => "-=",
+			Self::Exact => "==",
+			Self::Equal => "=",
+			Self::NotEqual => "!=",
+			Self::AllEqual => "*=",
+			Self::AnyEqual => "?=",
+			Self::Like => "~",
+			Self::NotLike => "!~",
+			Self::AllLike => "*~",
+			Self::AnyLike => "?~",
+			Self::LessThan => "<",
+			Self::LessThanOrEqual => "<=",
+			Self::MoreThan => ">",
+			Self::MoreThanOrEqual => ">=",
+			Self::Contain => "CONTAINS",
+			Self::NotContain => "CONTAINSNOT",
+			Self::ContainAll => "CONTAINSALL",
+			Self::ContainAny => "CONTAINSANY",
+			Self::ContainNone => "CONTAINSNONE",
+			Self::Inside => "INSIDE",
+			Self::NotInside => "NOTINSIDE",
+			Self::AllInside => "ALLINSIDE",
+			Self::AnyInside => "ANYINSIDE",
+			Self::NoneInside => "NONEINSIDE",
+			Self::Outside => "OUTSIDE",
+			Self::Intersects => "INTERSECTS",
+		})
 	}
 }
 

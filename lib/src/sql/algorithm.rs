@@ -23,28 +23,28 @@ pub enum Algorithm {
 }
 
 impl Default for Algorithm {
-	fn default() -> Algorithm {
-		Algorithm::Hs512
+	fn default() -> Self {
+		Self::Hs512
 	}
 }
 
 impl fmt::Display for Algorithm {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Algorithm::EdDSA => write!(f, "EDDSA"),
-			Algorithm::Es256 => write!(f, "ES256"),
-			Algorithm::Es384 => write!(f, "ES384"),
-			Algorithm::Es512 => write!(f, "ES512"),
-			Algorithm::Hs256 => write!(f, "HS256"),
-			Algorithm::Hs384 => write!(f, "HS384"),
-			Algorithm::Hs512 => write!(f, "HS512"),
-			Algorithm::Ps256 => write!(f, "PS256"),
-			Algorithm::Ps384 => write!(f, "PS384"),
-			Algorithm::Ps512 => write!(f, "PS512"),
-			Algorithm::Rs256 => write!(f, "RS256"),
-			Algorithm::Rs384 => write!(f, "RS384"),
-			Algorithm::Rs512 => write!(f, "RS512"),
-		}
+		f.write_str(match self {
+			Self::EdDSA => "EDDSA",
+			Self::Es256 => "ES256",
+			Self::Es384 => "ES384",
+			Self::Es512 => "ES512",
+			Self::Hs256 => "HS256",
+			Self::Hs384 => "HS384",
+			Self::Hs512 => "HS512",
+			Self::Ps256 => "PS256",
+			Self::Ps384 => "PS384",
+			Self::Ps512 => "PS512",
+			Self::Rs256 => "RS256",
+			Self::Rs384 => "RS384",
+			Self::Rs512 => "RS512",
+		})
 	}
 }
 

@@ -1,15 +1,19 @@
+use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{idiom, Idiom};
 use crate::sql::operator::{assigner, Operator};
+use crate::sql::table::Table;
+use crate::sql::thing::Thing;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Data {
@@ -25,52 +29,63 @@ pub enum Data {
 }
 
 impl Default for Data {
-	fn default() -> Data {
-		Data::EmptyExpression
+	fn default() -> Self {
+		Self::EmptyExpression
 	}
 }
 
-impl fmt::Display for Data {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Data {
+	// Fetch
+	pub(crate) fn rid(&self, tb: &Table) -> Result<Thing, Error> {
 		match self {
-			Data::EmptyExpression => write!(f, ""),
-			Data::SetExpression(v) => write!(
+			Self::MergeExpression(v) => v.rid().generate(tb, false),
+			Self::ReplaceExpression(v) => v.rid().generate(tb, false),
+			Self::ContentExpression(v) => v.rid().generate(tb, false),
+			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
+				Some((_, _, v)) => v.clone().generate(tb, false),
+				_ => Ok(tb.generate()),
+			},
+			_ => Ok(tb.generate()),
+		}
+	}
+}
+
+impl Display for Data {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			Self::EmptyExpression => Ok(()),
+			Self::SetExpression(v) => write!(
 				f,
 				"SET {}",
-				v.iter()
-					.map(|(l, o, r)| format!("{} {} {}", l, o, r))
-					.collect::<Vec<_>>()
-					.join(", ")
+				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(
+					f,
+					"{} {} {}",
+					l, o, r
+				))))
 			),
-			Data::PatchExpression(v) => write!(f, "PATCH {}", v),
-			Data::MergeExpression(v) => write!(f, "MERGE {}", v),
-			Data::ReplaceExpression(v) => write!(f, "REPLACE {}", v),
-			Data::ContentExpression(v) => write!(f, "CONTENT {}", v),
-			Data::SingleExpression(v) => write!(f, "{}", v),
-			Data::ValuesExpression(v) => write!(
+			Self::PatchExpression(v) => write!(f, "PATCH {}", v),
+			Self::MergeExpression(v) => write!(f, "MERGE {}", v),
+			Self::ReplaceExpression(v) => write!(f, "REPLACE {}", v),
+			Self::ContentExpression(v) => write!(f, "CONTENT {}", v),
+			Self::SingleExpression(v) => Display::fmt(v, f),
+			Self::ValuesExpression(v) => write!(
 				f,
 				"({}) VALUES {}",
-				v.first()
-					.unwrap()
-					.iter()
-					.map(|v| format!("{}", v.0))
-					.collect::<Vec<_>>()
-					.join(", "),
-				v.iter()
-					.map(|v| format!(
-						"({})",
-						v.iter().map(|v| format!("{}", v.1)).collect::<Vec<_>>().join(", ")
-					))
-					.collect::<Vec<_>>()
-					.join(", ")
+				Fmt::comma_separated(v.first().unwrap().iter().map(|(v, _)| v)),
+				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
+					f,
+					"({})",
+					Fmt::comma_separated(v.iter().map(|(_, v)| v))
+				))))
 			),
-			Data::UpdateExpression(v) => write!(
+			Self::UpdateExpression(v) => write!(
 				f,
 				"ON DUPLICATE KEY UPDATE {}",
-				v.iter()
-					.map(|(l, o, r)| format!("{} {} {}", l, o, r))
-					.collect::<Vec<_>>()
-					.join(", ")
+				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(
+					f,
+					"{} {} {}",
+					l, o, r
+				))))
 			),
 		}
 	}

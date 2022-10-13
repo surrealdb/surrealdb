@@ -188,11 +188,11 @@ impl InfoStatement {
 impl fmt::Display for InfoStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			InfoStatement::Kv => write!(f, "INFO FOR KV"),
-			InfoStatement::Ns => write!(f, "INFO FOR NAMESPACE"),
-			InfoStatement::Db => write!(f, "INFO FOR DATABASE"),
-			InfoStatement::Sc(ref s) => write!(f, "INFO FOR SCOPE {}", s),
-			InfoStatement::Tb(ref t) => write!(f, "INFO FOR TABLE {}", t),
+			Self::Kv => f.write_str("INFO FOR KV"),
+			Self::Ns => f.write_str("INFO FOR NAMESPACE"),
+			Self::Db => f.write_str("INFO FOR DATABASE"),
+			Self::Sc(ref s) => write!(f, "INFO FOR SCOPE {}", s),
+			Self::Tb(ref t) => write!(f, "INFO FOR TABLE {}", t),
 		}
 	}
 }
