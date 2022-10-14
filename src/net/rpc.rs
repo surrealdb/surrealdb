@@ -114,6 +114,7 @@ impl Rpc {
 		let id = match req.pick(&*ID) {
 			Value::Uuid(v) => Some(v.to_raw()),
 			Value::Strand(v) => Some(v.to_raw()),
+			Value::Number(v) => Some(v.to_string()),
 			_ => return Response::failure(None, Failure::INVALID_REQUEST).send(chn).await,
 		};
 		// Fetch the 'method' argument
