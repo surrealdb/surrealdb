@@ -54,6 +54,10 @@ pub enum Error {
 	QueryEmpty,
 
 	/// There was an error with the SQL query
+	#[error("The SQL query was not parsed fully")]
+	QueryRemaining,
+
+	/// There was an error with the SQL query
 	#[error("Parse error on line {line} at character {char} when parsing '{sql}'")]
 	InvalidQuery {
 		line: usize,

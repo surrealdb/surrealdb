@@ -20,13 +20,23 @@ pub fn json(input: &str) -> Result<Value, Error> {
 }
 
 fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Result<O, Error> {
+	// Check the length of the input
 	match input.trim().len() {
+		// The input query was empty
 		0 => Err(Error::QueryEmpty),
+		// Continue parsing the query
 		_ => match parser(input) {
-			Ok((_, parsed)) => Ok(parsed),
+			// The query was parsed successfully
+			Ok((v, parsed)) if v.len() == 0 => Ok(parsed),
+			// There was unparsed SQL remaining
+			Ok((_, _)) => Err(Error::QueryRemaining),
+			// There was an error when parsing the query
 			Err(Err::Error(e)) | Err(Err::Failure(e)) => match e {
+				// There was a parsing error
 				ParserError(e) => {
+					// Locate the parser position
 					let (s, l, c) = locate(input, e);
+					// Return the parser error
 					Err(Error::InvalidQuery {
 						line: l,
 						char: c,
