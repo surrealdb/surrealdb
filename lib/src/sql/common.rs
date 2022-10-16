@@ -40,13 +40,13 @@ pub fn is_digit(chr: char) -> bool {
 }
 
 #[inline]
-pub fn val_char(chr: char) -> bool {
-	chr.is_ascii_alphanumeric() || chr == '_'
+pub fn val_u8(chr: u8) -> bool {
+	is_alphanumeric(chr) || chr == b'_'
 }
 
 #[inline]
-pub fn val_u8(chr: u8) -> bool {
-	is_alphanumeric(chr) || chr == b'_'
+pub fn val_char(chr: char) -> bool {
+	chr.is_ascii_alphanumeric() || chr == '_'
 }
 
 pub fn take_u64(i: &str) -> IResult<&str, u64> {
