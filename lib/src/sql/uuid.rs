@@ -1,5 +1,6 @@
 use crate::sql::common::is_hex;
 use crate::sql::error::IResult;
+use crate::sql::escape::escape_str;
 use crate::sql::serde::is_internal_serialization;
 use nom::branch::alt;
 use nom::bytes::complete::take_while_m_n;
@@ -8,7 +9,7 @@ use nom::combinator::recognize;
 use nom::sequence::delimited;
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
@@ -43,9 +44,9 @@ impl Uuid {
 	}
 }
 
-impl fmt::Display for Uuid {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "\"{}\"", self.0)
+impl Display for Uuid {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&escape_str(&self.0.to_string()), f)
 	}
 }
 
