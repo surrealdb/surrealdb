@@ -39,6 +39,12 @@ impl Uuid {
 	pub fn new() -> Self {
 		Self(uuid::Uuid::new_v4())
 	}
+	pub fn new_v4() -> Self {
+		Self(uuid::Uuid::new_v4())
+	}
+	pub fn new_v7() -> Self {
+		Self(uuid::Uuid::now_v7())
+	}
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
 	}
