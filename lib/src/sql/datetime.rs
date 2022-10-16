@@ -1,16 +1,18 @@
 use crate::sql::common::{take_digits, take_digits_range, take_u32_len};
 use crate::sql::duration::Duration;
 use crate::sql::error::IResult;
+use crate::sql::escape::escape_str;
 use crate::sql::serde::is_internal_serialization;
-use chrono::{DateTime, FixedOffset, TimeZone, Utc};
+use chrono::{DateTime, FixedOffset, SecondsFormat, TimeZone, Utc};
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display, Formatter};
+use std::ops;
 use std::ops::Deref;
 use std::str;
-use std::{fmt, ops};
 
 const SINGLE: char = '\'';
 const DOUBLE: char = '"';
@@ -52,9 +54,15 @@ impl Deref for Datetime {
 	}
 }
 
-impl fmt::Display for Datetime {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "\"{:?}\"", self.0)
+impl Datetime {
+	pub fn to_raw(&self) -> String {
+		self.0.to_string()
+	}
+}
+
+impl Display for Datetime {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&escape_str(&self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)), f)
 	}
 }
 

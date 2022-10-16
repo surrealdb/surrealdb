@@ -656,7 +656,9 @@ impl Value {
 	pub fn as_strand(self) -> Strand {
 		match self {
 			Value::Strand(v) => v,
-			_ => Strand::from(self.to_string()),
+			Value::Uuid(v) => v.to_raw().into(),
+			Value::Datetime(v) => v.to_raw().into(),
+			_ => self.to_string().into(),
 		}
 	}
 
@@ -701,7 +703,9 @@ impl Value {
 	pub fn to_strand(&self) -> Strand {
 		match self {
 			Value::Strand(v) => v.clone(),
-			_ => Strand::from(self.to_string()),
+			Value::Uuid(v) => v.to_raw().into(),
+			Value::Datetime(v) => v.to_raw().into(),
+			_ => self.to_string().into(),
 		}
 	}
 

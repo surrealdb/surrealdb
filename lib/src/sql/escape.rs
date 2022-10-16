@@ -11,7 +11,7 @@ const BACKTICK: char = '`';
 const BACKTICK_ESC: &str = r#"\`"#;
 
 #[inline]
-pub fn escape_strand(s: &str) -> String {
+pub fn escape_str(s: &str) -> String {
 	format!("{}{}{}", DOUBLE, s, DOUBLE)
 }
 

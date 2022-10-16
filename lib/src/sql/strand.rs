@@ -1,5 +1,5 @@
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_strand;
+use crate::sql::escape::escape_str;
 use crate::sql::serde::is_internal_serialization;
 use nom::branch::alt;
 use nom::bytes::complete::escaped_transform;
@@ -55,7 +55,7 @@ impl Strand {
 
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&escape_strand(&self.0), f)
+		Display::fmt(&escape_str(&self.0), f)
 	}
 }
 
