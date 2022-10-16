@@ -14,9 +14,6 @@ use std::ops;
 use std::ops::Deref;
 use std::str;
 
-const SINGLE: char = '\'';
-const DOUBLE: char = '"';
-
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize)]
 pub struct Datetime(pub DateTime<Utc>);
 
@@ -91,8 +88,8 @@ impl ops::Sub<Self> for Datetime {
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
 	alt((
-		delimited(char(DOUBLE), datetime_raw, char(DOUBLE)),
-		delimited(char(SINGLE), datetime_raw, char(SINGLE)),
+		delimited(char('\''), datetime_raw, char('\'')),
+		delimited(char('\"'), datetime_raw, char('\"')),
 	))(i)
 }
 

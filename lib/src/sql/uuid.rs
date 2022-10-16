@@ -12,9 +12,6 @@ use std::fmt;
 use std::ops::Deref;
 use std::str;
 
-const SINGLE: char = '\'';
-const DOUBLE: char = '"';
-
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
 pub struct Uuid(pub uuid::Uuid);
 
@@ -66,10 +63,15 @@ impl Serialize for Uuid {
 }
 
 pub fn uuid(i: &str) -> IResult<&str, Uuid> {
-	alt((
-		delimited(char(DOUBLE), uuid_raw, char(DOUBLE)),
-		delimited(char(SINGLE), uuid_raw, char(SINGLE)),
-	))(i)
+	alt((uuid_single, uuid_double))(i)
+}
+
+fn uuid_single(i: &str) -> IResult<&str, Uuid> {
+	delimited(char('\''), uuid_raw, char('\''))(i)
+}
+
+fn uuid_double(i: &str) -> IResult<&str, Uuid> {
+	delimited(char('\"'), uuid_raw, char('\"'))(i)
 }
 
 fn uuid_raw(i: &str) -> IResult<&str, Uuid> {
