@@ -86,6 +86,12 @@ pub fn param(i: &str) -> IResult<&str, Param> {
 	Ok((i, Param::from(v)))
 }
 
+pub fn basic(i: &str) -> IResult<&str, Param> {
+	let (i, _) = char('$')(i)?;
+	let (i, v) = idiom::basic(i)?;
+	Ok((i, Param::from(v)))
+}
+
 #[cfg(test)]
 mod tests {
 
