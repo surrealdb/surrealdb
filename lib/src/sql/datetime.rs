@@ -37,7 +37,7 @@ impl From<DateTime<Utc>> for Datetime {
 
 impl From<&str> for Datetime {
 	fn from(s: &str) -> Self {
-		match datetime_raw(s) {
+		match datetime_all_raw(s) {
 			Ok((_, v)) => v,
 			Err(_) => Self::default(),
 		}
@@ -87,14 +87,23 @@ impl ops::Sub<Self> for Datetime {
 }
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
-	alt((
-		delimited(char('\''), datetime_raw, char('\'')),
-		delimited(char('\"'), datetime_raw, char('\"')),
-	))(i)
+	alt((datetime_single, datetime_double))(i)
+}
+
+fn datetime_single(i: &str) -> IResult<&str, Datetime> {
+	delimited(char('\''), datetime_raw, char('\''))(i)
+}
+
+fn datetime_double(i: &str) -> IResult<&str, Datetime> {
+	delimited(char('\"'), datetime_raw, char('\"'))(i)
+}
+
+fn datetime_all_raw(i: &str) -> IResult<&str, Datetime> {
+	alt((nano, time, date))(i)
 }
 
 fn datetime_raw(i: &str) -> IResult<&str, Datetime> {
-	alt((nano, time, date))(i)
+	alt((nano, time))(i)
 }
 
 fn date(i: &str) -> IResult<&str, Datetime> {
@@ -246,15 +255,6 @@ fn sign(i: &str) -> IResult<&str, i32> {
 mod tests {
 
 	use super::*;
-
-	#[test]
-	fn date() {
-		let sql = "2012-04-23";
-		let res = datetime_raw(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-23T00:00:00Z\"", format!("{}", out));
-	}
 
 	#[test]
 	fn date_time() {

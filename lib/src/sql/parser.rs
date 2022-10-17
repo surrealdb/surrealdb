@@ -134,7 +134,7 @@ mod tests {
 				AND ages CONTAINS 18
 				AND if IS true
 			SPLIT test.things
-			VERSION '2019-01-01'
+			VERSION '2019-01-01T08:00:00Z'
 			TIMEOUT 2w;
 
 			CREATE person SET name = 'Tobie', age += 18;
