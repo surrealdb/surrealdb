@@ -571,6 +571,26 @@ impl Value {
 		matches!(self, Value::Object(_))
 	}
 
+	pub fn is_int(&self) -> bool {
+		matches!(self, Value::Number(Number::Int(_)))
+	}
+
+	pub fn is_float(&self) -> bool {
+		matches!(self, Value::Number(Number::Float(_)))
+	}
+
+	pub fn is_decimal(&self) -> bool {
+		matches!(self, Value::Number(Number::Decimal(_)))
+	}
+
+	pub fn is_integer(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_integer())
+	}
+
+	pub fn is_positive(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_positive())
+	}
+
 	pub fn is_type_record(&self, types: &[Table]) -> bool {
 		match self {
 			Value::Thing(v) => types.iter().any(|tb| tb.0 == v.tb),
@@ -682,6 +702,13 @@ impl Value {
 		match self {
 			Value::Strand(v) => v.as_string(),
 			_ => self.to_string(),
+		}
+	}
+
+	pub fn as_usize(self) -> usize {
+		match self {
+			Value::Number(v) => v.as_usize(),
+			_ => 0,
 		}
 	}
 

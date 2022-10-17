@@ -57,14 +57,6 @@ pub fn take_u64(i: &str) -> IResult<&str, u64> {
 	}
 }
 
-pub fn take_usize(i: &str) -> IResult<&str, usize> {
-	let (i, v) = take_while(is_digit)(i)?;
-	match v.parse::<usize>() {
-		Ok(v) => Ok((i, v)),
-		_ => Err(Error(ParserError(i))),
-	}
-}
-
 pub fn take_u32_len(i: &str) -> IResult<&str, (u32, usize)> {
 	let (i, v) = take_while(is_digit)(i)?;
 	match v.parse::<u32>() {

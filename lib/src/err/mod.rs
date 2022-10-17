@@ -75,6 +75,18 @@ pub enum Error {
 	#[error("Remote HTTP request functions are not enabled")]
 	HttpDisabled,
 
+	/// The LIMIT clause must evaluate to a positive integer
+	#[error("Found {value} but the LIMIT clause must evaluate to a positive integer")]
+	InvalidLimit {
+		value: String,
+	},
+
+	/// The START clause must evaluate to a positive integer
+	#[error("Found {value} but the START clause must evaluate to a positive integer")]
+	InvalidStart {
+		value: String,
+	},
+
 	/// There was an error with the provided JavaScript code
 	#[error("Problem with embedded script function. {message}")]
 	InvalidScript {

@@ -76,7 +76,7 @@ impl Subquery {
 				// Process subquery
 				let res = v.compute(&ctx, opt, txn, doc).await?;
 				// Process result
-				match v.limit() {
+				match v.limit(&ctx, opt, txn, doc).await? {
 					1 => match v.expr.single() {
 						Some(v) => res.first().get(&ctx, opt, txn, &v).await,
 						None => res.first().ok(),
