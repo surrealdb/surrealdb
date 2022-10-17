@@ -7,6 +7,7 @@ mod index;
 mod key;
 mod log;
 mod output;
+mod params;
 mod rpc;
 mod session;
 mod signin;

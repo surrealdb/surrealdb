@@ -123,3 +123,18 @@ pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 pub fn uuid(_: ()) -> Result<Value, Error> {
 	Ok(Uuid::new().into())
 }
+
+pub mod uuid {
+
+	use crate::err::Error;
+	use crate::sql::uuid::Uuid;
+	use crate::sql::value::Value;
+
+	pub fn v4(_: ()) -> Result<Value, Error> {
+		Ok(Uuid::new_v4().into())
+	}
+
+	pub fn v7(_: ()) -> Result<Value, Error> {
+		Ok(Uuid::new_v7().into())
+	}
+}

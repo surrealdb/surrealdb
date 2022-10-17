@@ -1,5 +1,7 @@
 use crate::cli::CF;
 use crate::cnf::MAX_CONCURRENT_CALLS;
+use crate::cnf::PKG_NAME;
+use crate::cnf::PKG_VERS;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::session;
@@ -112,6 +114,7 @@ impl Rpc {
 		let id = match req.pick(&*ID) {
 			Value::Uuid(v) => Some(v.to_raw()),
 			Value::Strand(v) => Some(v.to_raw()),
+			Value::Number(v) => Some(v.to_string()),
 			_ => return Response::failure(None, Failure::INVALID_REQUEST).send(chn).await,
 		};
 		// Fetch the 'method' argument
@@ -207,6 +210,10 @@ impl Rpc {
 			"delete" => match params.take_one() {
 				v if v.is_thing() => rpc.read().await.delete(v).await,
 				v if v.is_strand() => rpc.read().await.delete(v).await,
+				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+			},
+			"version" => match params.len() {
+				0 => Ok(format!("{}-{}", PKG_NAME, *PKG_VERS).into()),
 				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			_ => return Response::failure(id, Failure::METHOD_NOT_FOUND).send(chn).await,

@@ -1,7 +1,7 @@
 use crate::cnf::ID_CHARS;
 use crate::sql::array::{array, Array};
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_id;
+use crate::sql::escape::escape_rid;
 use crate::sql::ident::ident_raw;
 use crate::sql::number::integer;
 use crate::sql::object::{object, Object};
@@ -100,7 +100,7 @@ impl Display for Id {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
-			Self::String(v) => Display::fmt(&escape_id(v), f),
+			Self::String(v) => Display::fmt(&escape_rid(v), f),
 			Self::Object(v) => Display::fmt(v, f),
 			Self::Array(v) => Display::fmt(v, f),
 		}
@@ -128,6 +128,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(Id::from(1), out);
+		assert_eq!("1", format!("{}", out));
 	}
 
 	#[test]
@@ -137,6 +138,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(Id::from(100), out);
+		assert_eq!("100", format!("{}", out));
 	}
 
 	#[test]
@@ -146,6 +148,17 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(Id::from("test"), out);
+		assert_eq!("test", format!("{}", out));
+	}
+
+	#[test]
+	fn id_numeric() {
+		let sql = "⟨100⟩";
+		let res = id(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(Id::from("100"), out);
+		assert_eq!("⟨100⟩", format!("{}", out));
 	}
 
 	#[test]
@@ -155,5 +168,6 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(Id::from("100test"), out);
+		assert_eq!("100test", format!("{}", out));
 	}
 }
