@@ -571,6 +571,10 @@ impl Value {
 		matches!(self, Value::Object(_))
 	}
 
+	pub fn is_number(&self) -> bool {
+		matches!(self, Value::Number(_))
+	}
+
 	pub fn is_int(&self) -> bool {
 		matches!(self, Value::Number(Number::Int(_)))
 	}

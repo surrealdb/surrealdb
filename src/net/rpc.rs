@@ -9,9 +9,10 @@ use crate::net::session;
 use crate::net::LOG;
 use crate::rpc::args::Take;
 use crate::rpc::paths::{ID, METHOD, PARAMS};
+use crate::rpc::res;
 use crate::rpc::res::Failure;
-use crate::rpc::res::Response;
 use futures::{SinkExt, StreamExt};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel;
@@ -127,24 +128,24 @@ impl Rpc {
 		// Convert the message
 		let str = match msg.to_str() {
 			Ok(v) => v,
-			_ => return Response::failure(None, Failure::INTERNAL_ERROR).send(chn).await,
+			_ => return res::failure(None, Failure::INTERNAL_ERROR).send(chn).await,
 		};
 		// Parse the request
 		let req = match surrealdb::sql::json(str) {
 			Ok(v) if v.is_some() => v,
-			_ => return Response::failure(None, Failure::PARSE_ERROR).send(chn).await,
+			_ => return res::failure(None, Failure::PARSE_ERROR).send(chn).await,
 		};
 		// Fetch the 'id' argument
 		let id = match req.pick(&*ID) {
-			Value::Uuid(v) => Some(v.to_raw()),
-			Value::Strand(v) => Some(v.to_raw()),
-			Value::Number(v) => Some(v.to_string()),
-			_ => return Response::failure(None, Failure::INVALID_REQUEST).send(chn).await,
+			v if v.is_uuid() || v.is_strand() || v.is_number() || v.is_none() || v.is_null() => {
+				Some(v)
+			}
+			_ => return res::failure(None, Failure::INVALID_REQUEST).send(chn).await,
 		};
 		// Fetch the 'method' argument
 		let method = match req.pick(&*METHOD) {
 			Value::Strand(v) => v.to_raw(),
-			_ => return Response::failure(id, Failure::INVALID_REQUEST).send(chn).await,
+			_ => return res::failure(id, Failure::INVALID_REQUEST).send(chn).await,
 		};
 		// Fetch the 'params' argument
 		let params = match req.pick(&*PARAMS) {
@@ -153,99 +154,111 @@ impl Rpc {
 		};
 		// Match the method to a function
 		let res = match &method[..] {
-			"ping" => Ok(Value::True),
+			"ping" => Ok(Value::None),
 			"info" => match params.len() {
 				0 => rpc.read().await.info().await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"use" => match params.take_two() {
 				(Value::Strand(ns), Value::Strand(db)) => rpc.write().await.yuse(ns, db).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"signup" => match params.take_one() {
 				Value::Object(v) => rpc.write().await.signup(v).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"signin" => match params.take_one() {
 				Value::Object(v) => rpc.write().await.signin(v).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"invalidate" => match params.len() {
 				0 => rpc.write().await.invalidate().await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"authenticate" => match params.take_one() {
 				Value::None => rpc.write().await.invalidate().await,
 				Value::Strand(v) => rpc.write().await.authenticate(v).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"kill" => match params.take_one() {
 				v if v.is_uuid() => rpc.read().await.kill(v).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"live" => match params.take_one() {
 				v if v.is_strand() => rpc.read().await.live(v).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"let" => match params.take_two() {
 				(Value::Strand(s), v) => rpc.write().await.set(s, v).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"set" => match params.take_two() {
 				(Value::Strand(s), v) => rpc.write().await.set(s, v).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"query" => match params.take_two() {
-				(Value::Strand(s), o) if o.is_none() => rpc.read().await.query(s).await,
-				(Value::Strand(s), Value::Object(o)) => rpc.read().await.query_with(s, o).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				(Value::Strand(s), o) if o.is_none() => {
+					let res = rpc.read().await.query(s).await;
+					return match res {
+						Ok(v) => res::success(id, v).send(chn).await,
+						Err(e) => res::failure(id, Failure::custom(e.to_string())).send(chn).await,
+					};
+				}
+				(Value::Strand(s), Value::Object(o)) => {
+					let res = rpc.read().await.query_with(s, o).await;
+					return match res {
+						Ok(v) => res::success(id, v).send(chn).await,
+						Err(e) => res::failure(id, Failure::custom(e.to_string())).send(chn).await,
+					};
+				}
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"select" => match params.take_one() {
 				v if v.is_thing() => rpc.read().await.select(v).await,
 				v if v.is_strand() => rpc.read().await.select(v).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"create" => match params.take_two() {
 				(v, o) if v.is_thing() && o.is_none() => rpc.read().await.create(v, None).await,
 				(v, o) if v.is_strand() && o.is_none() => rpc.read().await.create(v, None).await,
 				(v, o) if v.is_thing() && o.is_object() => rpc.read().await.create(v, o).await,
 				(v, o) if v.is_strand() && o.is_object() => rpc.read().await.create(v, o).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"update" => match params.take_two() {
 				(v, o) if v.is_thing() && o.is_none() => rpc.read().await.update(v, None).await,
 				(v, o) if v.is_strand() && o.is_none() => rpc.read().await.update(v, None).await,
 				(v, o) if v.is_thing() && o.is_object() => rpc.read().await.update(v, o).await,
 				(v, o) if v.is_strand() && o.is_object() => rpc.read().await.update(v, o).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"change" => match params.take_two() {
 				(v, o) if v.is_thing() && o.is_none() => rpc.read().await.change(v, None).await,
 				(v, o) if v.is_strand() && o.is_none() => rpc.read().await.change(v, None).await,
 				(v, o) if v.is_thing() && o.is_object() => rpc.read().await.change(v, o).await,
 				(v, o) if v.is_strand() && o.is_object() => rpc.read().await.change(v, o).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"modify" => match params.take_two() {
 				(v, o) if v.is_thing() && o.is_array() => rpc.read().await.modify(v, o).await,
 				(v, o) if v.is_strand() && o.is_array() => rpc.read().await.modify(v, o).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"delete" => match params.take_one() {
 				v if v.is_thing() => rpc.read().await.delete(v).await,
 				v if v.is_strand() => rpc.read().await.delete(v).await,
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
 			"version" => match params.len() {
 				0 => Ok(format!("{}-{}", PKG_NAME, *PKG_VERS).into()),
-				_ => return Response::failure(id, Failure::INVALID_PARAMS).send(chn).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(chn).await,
 			},
-			_ => return Response::failure(id, Failure::METHOD_NOT_FOUND).send(chn).await,
+			_ => return res::failure(id, Failure::METHOD_NOT_FOUND).send(chn).await,
 		};
 		// Return the final response
 		match res {
-			Ok(v) => Response::success(id, v).send(chn).await,
-			Err(e) => Response::failure(id, Failure::custom(e.to_string())).send(chn).await,
+			Ok(v) => res::success(id, v).send(chn).await,
+			Err(e) => res::failure(id, Failure::custom(e.to_string())).send(chn).await,
 		}
 	}
 
@@ -260,17 +273,11 @@ impl Rpc {
 	}
 
 	async fn signup(&mut self, vars: Object) -> Result<Value, Error> {
-		crate::iam::signup::signup(&mut self.session, vars)
-			.await
-			.map(Into::into)
-			.map_err(Into::into)
+		crate::iam::signup::signup(&mut self.session, vars).await.map_err(Into::into)
 	}
 
 	async fn signin(&mut self, vars: Object) -> Result<Value, Error> {
-		crate::iam::signin::signin(&mut self.session, vars)
-			.await
-			.map(Into::into)
-			.map_err(Into::into)
+		crate::iam::signin::signin(&mut self.session, vars).await.map_err(Into::into)
 	}
 
 	async fn invalidate(&mut self) -> Result<Value, Error> {
@@ -369,7 +376,7 @@ impl Rpc {
 	// Methods for querying
 	// ------------------------------
 
-	async fn query(&self, sql: Strand) -> Result<Value, Error> {
+	async fn query(&self, sql: Strand) -> Result<impl Serialize, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -378,13 +385,11 @@ impl Rpc {
 		let var = Some(self.vars.clone());
 		// Execute the query on the database
 		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
-		// Extract the first query result
-		let res = res.into_iter().collect::<Vec<Value>>().into();
 		// Return the result to the client
 		Ok(res)
 	}
 
-	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<Value, Error> {
+	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<impl Serialize, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -393,8 +398,6 @@ impl Rpc {
 		let var = Some(mrg! { vars.0, &self.vars });
 		// Execute the query on the database
 		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
-		// Extract the first query result
-		let res = res.into_iter().collect::<Vec<Value>>().into();
 		// Return the result to the client
 		Ok(res)
 	}
