@@ -75,7 +75,7 @@ impl Rpc {
 				// Create the ping message
 				let msg = Message::ping(vec![]);
 				// Send the message to the client
-				if let Err(_) = png.send(msg).await {
+				if png.send(msg).await.is_err() {
 					// Exit out of the loop
 					break;
 				}
