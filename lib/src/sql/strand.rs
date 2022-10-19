@@ -184,7 +184,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""""#, format!("{}", out));
+		assert_eq!(r#"''"#, format!("{}", out));
 		assert_eq!(out, Strand::from(""));
 	}
 
@@ -194,7 +194,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""test""#, format!("{}", out));
+		assert_eq!(r#"'test'"#, format!("{}", out));
 		assert_eq!(out, Strand::from("test"));
 	}
 
@@ -204,7 +204,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""test""#, format!("{}", out));
+		assert_eq!(r#"'test'"#, format!("{}", out));
 		assert_eq!(out, Strand::from("test"));
 	}
 
@@ -224,7 +224,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""te"st""#, format!("{}", out));
+		assert_eq!(r#"'te"st'"#, format!("{}", out));
 		assert_eq!(out, Strand::from(r#"te"st"#));
 	}
 
@@ -234,7 +234,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"te\"st\n\tand\u{08}some\u{05d9}\"", format!("{}", out));
+		assert_eq!("'te\"st\n\tand\u{08}some\u{05d9}'", format!("{}", out));
 		assert_eq!(out, Strand::from("te\"st\n\tand\u{08}some\u{05d9}"));
 	}
 }

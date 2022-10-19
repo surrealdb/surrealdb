@@ -202,7 +202,7 @@ mod tests {
 		let res = thing(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#"test:{ location: "GBR", year: 2022 }"#, format!("{}", out));
+		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
 		assert_eq!(
 			out,
 			Thing {
@@ -221,7 +221,7 @@ mod tests {
 		let res = thing(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#"test:["GBR", 2022]"#, format!("{}", out));
+		assert_eq!("test:['GBR', 2022]", format!("{}", out));
 		assert_eq!(
 			out,
 			Thing {

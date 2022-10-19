@@ -33,6 +33,6 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(out, Version(Datetime::from("2020-01-01T00:00:00Z")));
-		assert_eq!("VERSION \"2020-01-01T00:00:00Z\"", format!("{}", out));
+		assert_eq!("VERSION '2020-01-01T00:00:00Z'", format!("{}", out));
 	}
 }

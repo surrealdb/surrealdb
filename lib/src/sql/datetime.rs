@@ -263,7 +263,7 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-23T18:25:43Z\"", format!("{}", out));
+		assert_eq!("'2012-04-23T18:25:43Z'", format!("{}", out));
 	}
 
 	#[test]
@@ -272,7 +272,7 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-23T18:25:43.563100Z\"", format!("{}", out));
+		assert_eq!("'2012-04-23T18:25:43.563100Z'", format!("{}", out));
 	}
 
 	#[test]
@@ -281,7 +281,7 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-23T18:25:43.000051100Z\"", format!("{}", out));
+		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
 	}
 
 	#[test]
@@ -290,7 +290,7 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-24T02:25:43.511Z\"", format!("{}", out));
+		assert_eq!("'2012-04-24T02:25:43.511Z'", format!("{}", out));
 	}
 
 	#[test]
@@ -299,6 +299,6 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-24T02:55:43.511Z\"", format!("{}", out));
+		assert_eq!("'2012-04-24T02:55:43.511Z'", format!("{}", out));
 	}
 }

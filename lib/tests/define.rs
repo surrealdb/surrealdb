@@ -258,12 +258,12 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
-			ev: { test: 'DEFINE EVENT test ON user WHEN $event = \"CREATE\" THEN (CREATE activity SET user = $this, value = $after.email, action = $event)' },
+		r#"{
+			ev: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, value = $after.email, action = $event)" },
 			fd: {},
 			ft: {},
 			ix: {},
-		}",
+		}"#,
 	);
 	assert_eq!(tmp, val);
 	//
@@ -428,12 +428,12 @@ async fn define_statement_field_value() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
+		r#"{
 			ev: {},
-			fd: { test: 'DEFINE FIELD test ON user VALUE $value OR \"GBR\"' },
+			fd: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR'" },
 			ft: {},
 			ix: {},
-		}",
+		}"#,
 	);
 	assert_eq!(tmp, val);
 	//
@@ -492,12 +492,12 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
+		r#"{
 			ev: {},
-			fd: { test: 'DEFINE FIELD test ON user TYPE string VALUE $value OR \"GBR\" ASSERT $value != NONE AND $value = /[A-Z]{3}/' },
+			fd: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/" },
 			ft: {},
 			ix: {},
-		}",
+		}"#,
 	);
 	assert_eq!(tmp, val);
 	//
@@ -688,7 +688,7 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains "test@surrealdb.com", with record `user:2`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:2`"#
 	));
 	//
 	let tmp = res.remove(0).result;
@@ -750,13 +750,13 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ["apple", "test@surrealdb.com"], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ["tesla", "test@surrealdb.com"], with record `user:4`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:4`"#
 	));
 	//
 	let tmp = res.remove(0).result;
@@ -769,7 +769,7 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ["tesla", "test@surrealdb.com"], with record `user:4`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:4`"#
 	));
 	//
 	let tmp = res.remove(0).result;
@@ -809,13 +809,13 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains "test@surrealdb.com", with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains "test@surrealdb.com", with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result?;
@@ -863,13 +863,13 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ["apple", "test@surrealdb.com"], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ["apple", "test@surrealdb.com"], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result?;

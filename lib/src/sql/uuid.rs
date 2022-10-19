@@ -121,7 +121,7 @@ mod tests {
 		let res = uuid_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"e72bee20-f49b-11ec-b939-0242ac120002\"", format!("{}", out));
+		assert_eq!("'e72bee20-f49b-11ec-b939-0242ac120002'", format!("{}", out));
 		assert_eq!(out, Uuid::from("e72bee20-f49b-11ec-b939-0242ac120002"));
 	}
 
@@ -131,7 +131,7 @@ mod tests {
 		let res = uuid_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"b19bc00b-aa98-486c-ae37-c8e1c54295b1\"", format!("{}", out));
+		assert_eq!("'b19bc00b-aa98-486c-ae37-c8e1c54295b1'", format!("{}", out));
 		assert_eq!(out, Uuid::from("b19bc00b-aa98-486c-ae37-c8e1c54295b1"));
 	}
 }
