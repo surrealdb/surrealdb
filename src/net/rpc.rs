@@ -102,6 +102,9 @@ impl Rpc {
 			match msg {
 				// We've received a message from the client
 				Ok(msg) => {
+					if msg.is_ping() {
+						let _ = chn.send(Message::pong(vec![]));
+					}
 					if msg.is_text() {
 						tokio::task::spawn(Rpc::call(rpc.clone(), msg, chn.clone()));
 					}
