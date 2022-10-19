@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
+use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
 use surrealdb::sql::Value;
@@ -145,7 +146,7 @@ impl Rpc {
 		// Fetch the 'params' argument
 		let params = match req.pick(&*PARAMS) {
 			Value::Array(v) => v,
-			_ => return Response::failure(id, Failure::INVALID_REQUEST).send(chn).await,
+			_ => Array::new(),
 		};
 		// Match the method to a function
 		let res = match &method[..] {
