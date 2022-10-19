@@ -13,7 +13,7 @@ use surrealdb::sql::Value;
 use surrealdb::Auth;
 use surrealdb::Session;
 
-pub async fn signin(session: &mut Session, vars: Object) -> Result<String, Error> {
+pub async fn signin(session: &mut Session, vars: Object) -> Result<Value, Error> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -26,9 +26,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<String, Error
 			let db = db.to_strand().as_string();
 			let sc = sc.to_strand().as_string();
 			// Attempt to signin to specified scope
-			let res = super::signin::sc(session, ns, db, sc, vars).await?;
-			// Return the result to the client
-			Ok(res)
+			super::signin::sc(session, ns, db, sc, vars).await
 		}
 		(Some(ns), Some(db), None) => {
 			// Get the provided user and pass
@@ -44,9 +42,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<String, Error
 					let user = user.to_strand().as_string();
 					let pass = pass.to_strand().as_string();
 					// Attempt to signin to database
-					let res = super::signin::db(session, ns, db, user, pass).await?;
-					// Return the result to the client
-					Ok(res)
+					super::signin::db(session, ns, db, user, pass).await
 				}
 				// There is no username or password
 				_ => Err(Error::InvalidAuth),
@@ -65,9 +61,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<String, Error
 					let user = user.to_strand().as_string();
 					let pass = pass.to_strand().as_string();
 					// Attempt to signin to namespace
-					let res = super::signin::ns(session, ns, user, pass).await?;
-					// Return the result to the client
-					Ok(res)
+					super::signin::ns(session, ns, user, pass).await
 				}
 				// There is no username or password
 				_ => Err(Error::InvalidAuth),
@@ -85,9 +79,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<String, Error
 					let user = user.to_strand().as_string();
 					let pass = pass.to_strand().as_string();
 					// Attempt to signin to namespace
-					let res = super::signin::su(session, user, pass).await?;
-					// Return the result to the client
-					Ok(res)
+					super::signin::su(session, user, pass).await
 				}
 				// There is no username or password
 				_ => Err(Error::InvalidAuth),
@@ -103,7 +95,7 @@ pub async fn sc(
 	db: String,
 	sc: String,
 	vars: Object,
-) -> Result<String, Error> {
+) -> Result<Value, Error> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Get local copy of options
@@ -160,7 +152,7 @@ pub async fn sc(
 								// Check the authentication token
 								match enc {
 									// The auth token was created successfully
-									Ok(tk) => Ok(tk),
+									Ok(tk) => Ok(tk.into()),
 									// There was an error creating the token
 									_ => Err(Error::InvalidAuth),
 								}
@@ -187,7 +179,7 @@ pub async fn db(
 	db: String,
 	user: String,
 	pass: String,
-) -> Result<String, Error> {
+) -> Result<Value, Error> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Create a new readonly transaction
@@ -223,7 +215,7 @@ pub async fn db(
 					// Check the authentication token
 					match enc {
 						// The auth token was created successfully
-						Ok(tk) => Ok(tk),
+						Ok(tk) => Ok(tk.into()),
 						// There was an error creating the token
 						_ => Err(Error::InvalidAuth),
 					}
@@ -242,7 +234,7 @@ pub async fn ns(
 	ns: String,
 	user: String,
 	pass: String,
-) -> Result<String, Error> {
+) -> Result<Value, Error> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Create a new readonly transaction
@@ -276,7 +268,7 @@ pub async fn ns(
 					// Check the authentication token
 					match enc {
 						// The auth token was created successfully
-						Ok(tk) => Ok(tk),
+						Ok(tk) => Ok(tk.into()),
 						// There was an error creating the token
 						_ => Err(Error::InvalidAuth),
 					}
@@ -290,14 +282,14 @@ pub async fn ns(
 	}
 }
 
-pub async fn su(session: &mut Session, user: String, pass: String) -> Result<String, Error> {
+pub async fn su(session: &mut Session, user: String, pass: String) -> Result<Value, Error> {
 	// Get the config options
 	let opts = CF.get().unwrap();
 	// Attempt to verify the root user
 	if let Some(root) = &opts.pass {
 		if user == opts.user && &pass == root {
 			session.au = Arc::new(Auth::Kv);
-			return Ok(String::from(""));
+			return Ok(Value::None);
 		}
 	}
 	// The specified user login does not exist

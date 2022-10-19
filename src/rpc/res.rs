@@ -5,40 +5,26 @@ use surrealdb::sql::Value;
 use warp::ws::Message;
 
 #[derive(Serialize)]
-enum Content {
+enum Content<T> {
 	#[serde(rename = "result")]
-	Success(Value),
+	Success(T),
 	#[serde(rename = "error")]
 	Failure(Failure),
 }
 
 #[derive(Serialize)]
-pub struct Response {
-	id: Option<String>,
+pub struct Response<T> {
+	id: Option<Value>,
 	#[serde(flatten)]
-	content: Content,
+	content: Content<T>,
 }
 
-impl Response {
+impl<T: Serialize> Response<T> {
 	// Send the response to the channel
 	pub async fn send(self, chn: Sender<Message>) {
 		let res = serde_json::to_string(&self).unwrap();
 		let res = Message::text(res);
 		let _ = chn.send(res).await;
-	}
-	// Create a JSON RPC result response
-	pub fn success(id: Option<String>, val: Value) -> Response {
-		Response {
-			id,
-			content: Content::Success(val),
-		}
-	}
-	// Create a JSON RPC failure response
-	pub fn failure(id: Option<String>, err: Failure) -> Response {
-		Response {
-			id,
-			content: Content::Failure(err),
-		}
 	}
 }
 
@@ -82,5 +68,21 @@ impl Failure {
 			code: -32000,
 			message: message.into(),
 		}
+	}
+}
+
+// Create a JSON RPC result response
+pub fn success<S: Serialize>(id: Option<Value>, val: S) -> Response<S> {
+	Response {
+		id,
+		content: Content::Success(val),
+	}
+}
+
+// Create a JSON RPC failure response
+pub fn failure(id: Option<Value>, err: Failure) -> Response<Value> {
+	Response {
+		id,
+		content: Content::Failure(err),
 	}
 }

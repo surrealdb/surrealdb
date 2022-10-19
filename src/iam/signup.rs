@@ -11,7 +11,7 @@ use surrealdb::sql::Value;
 use surrealdb::Auth;
 use surrealdb::Session;
 
-pub async fn signup(session: &mut Session, vars: Object) -> Result<String, Error> {
+pub async fn signup(session: &mut Session, vars: Object) -> Result<Value, Error> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
@@ -24,9 +24,7 @@ pub async fn signup(session: &mut Session, vars: Object) -> Result<String, Error
 			let db = db.to_strand().as_string();
 			let sc = sc.to_strand().as_string();
 			// Attempt to signin to specified scope
-			let res = super::signup::sc(session, ns, db, sc, vars).await?;
-			// Return the result to the client
-			Ok(res)
+			super::signup::sc(session, ns, db, sc, vars).await
 		}
 		_ => Err(Error::InvalidAuth),
 	}
@@ -38,7 +36,7 @@ pub async fn sc(
 	db: String,
 	sc: String,
 	vars: Object,
-) -> Result<String, Error> {
+) -> Result<Value, Error> {
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Get local copy of options
@@ -95,7 +93,7 @@ pub async fn sc(
 								// Create the authentication token
 								match enc {
 									// The auth token was created successfully
-									Ok(tk) => Ok(tk),
+									Ok(tk) => Ok(tk.into()),
 									// There was an error creating the token
 									_ => Err(Error::InvalidAuth),
 								}
