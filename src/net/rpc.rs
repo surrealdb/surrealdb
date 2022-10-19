@@ -102,14 +102,23 @@ impl Rpc {
 		while let Some(msg) = wrx.next().await {
 			match msg {
 				// We've received a message from the client
-				Ok(msg) => {
-					if msg.is_ping() {
+				Ok(msg) => match msg {
+					msg if msg.is_ping() => {
 						let _ = chn.send(Message::pong(vec![]));
 					}
-					if msg.is_text() {
+					msg if msg.is_text() => {
 						tokio::task::spawn(Rpc::call(rpc.clone(), msg, chn.clone()));
 					}
-				}
+					msg if msg.is_close() => {
+						break;
+					}
+					msg if msg.is_pong() => {
+						continue;
+					}
+					_ => {
+						// Ignore everything else
+					}
+				},
 				// There was an error receiving the message
 				Err(err) => {
 					// Output the WebSocket error to the logs
