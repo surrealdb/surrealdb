@@ -44,6 +44,7 @@ impl From<(&str, &str)> for Thing {
 }
 
 impl Thing {
+	/// Convert the Thing to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}

@@ -83,9 +83,11 @@ impl From<Vec<Value>> for Id {
 }
 
 impl Id {
+	/// Generate a new random ID
 	pub fn rand() -> Self {
 		Self::String(nanoid!(20, &ID_CHARS))
 	}
+	/// Convert the Id to a raw String
 	pub fn to_raw(&self) -> String {
 		match self {
 			Self::Number(v) => v.to_string(),

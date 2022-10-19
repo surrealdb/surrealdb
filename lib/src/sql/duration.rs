@@ -52,38 +52,39 @@ impl Deref for Duration {
 }
 
 impl Duration {
+	/// Convert the Duration to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}
-
+	/// Get the total number of seconds
 	pub fn secs(&self) -> Value {
 		self.0.as_secs().into()
 	}
-
+	/// Get the total number of minutes
 	pub fn mins(&self) -> Value {
 		let secs = self.0.as_secs();
 		let mins = secs / SECONDS_PER_MINUTE;
 		mins.into()
 	}
-
+	/// Get the total number of hours
 	pub fn hours(&self) -> Value {
 		let secs = self.0.as_secs();
 		let hours = secs / SECONDS_PER_HOUR;
 		hours.into()
 	}
-
+	/// Get the total number of dats
 	pub fn days(&self) -> Value {
 		let secs = self.0.as_secs();
 		let days = secs / SECONDS_PER_DAY;
 		days.into()
 	}
-
+	/// Get the total number of months
 	pub fn weeks(&self) -> Value {
 		let secs = self.0.as_secs();
 		let weeks = secs / SECONDS_PER_WEEK;
 		weeks.into()
 	}
-
+	/// Get the total number of years
 	pub fn years(&self) -> Value {
 		let secs = self.0.as_secs();
 		let years = secs / SECONDS_PER_YEAR;

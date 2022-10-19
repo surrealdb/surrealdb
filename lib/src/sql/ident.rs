@@ -44,6 +44,7 @@ impl Deref for Ident {
 }
 
 impl Ident {
+	/// Convert the Ident to a raw String
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
 	}

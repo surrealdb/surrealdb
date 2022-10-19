@@ -44,12 +44,15 @@ impl Deref for Strand {
 }
 
 impl Strand {
+	/// Get the underlying String slice
 	pub fn as_str(&self) -> &str {
 		self.0.as_str()
 	}
+	/// Returns the underlying String
 	pub fn as_string(self) -> String {
 		self.0
 	}
+	/// Convert the Strand to a raw String
 	pub fn to_raw(self) -> String {
 		self.0
 	}

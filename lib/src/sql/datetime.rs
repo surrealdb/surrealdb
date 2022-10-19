@@ -52,6 +52,7 @@ impl Deref for Datetime {
 }
 
 impl Datetime {
+	/// Convert the Datetime to a raw String
 	pub fn to_raw(&self) -> String {
 		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 	}
