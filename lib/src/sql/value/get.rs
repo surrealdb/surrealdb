@@ -4,10 +4,12 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
+use crate::sql::id::Id;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
+use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
@@ -27,6 +29,19 @@ impl Value {
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
+					// If requesting an `id` field, check if it is a complex Record ID
+					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f as &str) {
+						Some(Value::Thing(Thing {
+							id: Id::Object(v),
+							..
+						})) => Value::Object(v.clone()).get(ctx, opt, txn, path.next()).await,
+						Some(Value::Thing(Thing {
+							id: Id::Array(v),
+							..
+						})) => Value::Array(v.clone()).get(ctx, opt, txn, path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						None => Ok(Value::None),
+					},
 					Part::Graph(_) => match v.rid() {
 						Some(v) => Value::Thing(v).get(ctx, opt, txn, path).await,
 						None => Ok(Value::None),
