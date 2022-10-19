@@ -150,8 +150,6 @@ impl Datastore {
 
 	/// Create a new transaction on this datastore
 	///
-	/// *You must ensure that a [`Transaction`] does not ever outlive a [`Datastore`] instance.*
-	///
 	/// ```rust,no_run
 	/// use surrealdb::Datastore;
 	/// use surrealdb::Error;
