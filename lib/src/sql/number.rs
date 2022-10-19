@@ -285,7 +285,14 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.ceil().into(),
-			Number::Decimal(v) => (v + BigDecimal::from_f32(0.5).unwrap()).round(0).into(),
+			Number::Decimal(v) => {
+				if v.digits() > 16 {
+					let v = (v.to_f64().unwrap_or_default() + 0.5).round();
+					BigDecimal::from_f64(v).unwrap_or_default().into()
+				} else {
+					(v + BigDecimal::from_f32(0.5).unwrap()).round(0).into()
+				}
+			}
 		}
 	}
 
@@ -293,7 +300,14 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.floor().into(),
-			Number::Decimal(v) => (v - BigDecimal::from_f32(0.5).unwrap()).round(0).into(),
+			Number::Decimal(v) => {
+				if v.digits() > 16 {
+					let v = (v.to_f64().unwrap_or_default() - 0.5).round();
+					BigDecimal::from_f64(v).unwrap_or_default().into()
+				} else {
+					(v - BigDecimal::from_f32(0.5).unwrap()).round(0).into()
+				}
+			}
 		}
 	}
 
@@ -301,7 +315,14 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.round().into(),
-			Number::Decimal(v) => v.round(0).into(),
+			Number::Decimal(v) => {
+				if v.digits() > 16 {
+					let v = v.to_f64().unwrap_or_default().round();
+					BigDecimal::from_f64(v).unwrap_or_default().into()
+				} else {
+					v.round(0).into()
+				}
+			}
 		}
 	}
 
