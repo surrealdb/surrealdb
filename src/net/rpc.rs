@@ -2,6 +2,7 @@ use crate::cli::CF;
 use crate::cnf::MAX_CONCURRENT_CALLS;
 use crate::cnf::PKG_NAME;
 use crate::cnf::PKG_VERS;
+use crate::cnf::WEBSOCKET_PING_FREQUENCY;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::session;
@@ -61,6 +62,25 @@ impl Rpc {
 		let (chn, mut rcv) = channel::new(MAX_CONCURRENT_CALLS);
 		// Split the socket into send and recv
 		let (mut wtx, mut wrx) = ws.split();
+		// Clone the channel for sending pings
+		let png = chn.clone();
+		// Send messages to the client
+		tokio::task::spawn(async move {
+			// Create the interval ticker
+			let mut interval = tokio::time::interval(WEBSOCKET_PING_FREQUENCY);
+			// Loop indefinitely
+			loop {
+				// Wait for the timer
+				interval.tick().await;
+				// Create the ping message
+				let msg = Message::ping(vec![]);
+				// Send the message to the client
+				if let Err(_) = png.send(msg).await {
+					// Exit out of the loop
+					break;
+				}
+			}
+		});
 		// Send messages to the client
 		tokio::task::spawn(async move {
 			// Wait for the next message to send

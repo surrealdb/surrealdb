@@ -1,4 +1,5 @@
 use once_cell::sync::Lazy;
+use std::time::Duration;
 
 pub const LOGO: &str = "
  .d8888b.                                             888 8888888b.  888888b.
@@ -20,6 +21,9 @@ pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 
 /// How many concurrent tasks can be handled in a WebSocket
 pub const MAX_CONCURRENT_CALLS: usize = 24;
+
+/// Specifies the frequency with which ping messages should be sent to the client.
+pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
 /// The package identifier of this build
 pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");
