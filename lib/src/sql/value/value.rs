@@ -1003,7 +1003,7 @@ impl Value {
 				Value::Strand(_) => v == &other.to_datetime(),
 				_ => false,
 			},
-			_ => unreachable!(),
+			_ => self == other,
 		}
 	}
 
