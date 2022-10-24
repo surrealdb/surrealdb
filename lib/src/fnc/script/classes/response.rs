@@ -4,13 +4,13 @@
 #[allow(clippy::module_inception)]
 pub mod response {
 	use crate::fnc::script::classes::headers::headers::Headers;
-	use crate::sql::{json, Value};
+	use crate::sql::Value;
 	use crate::throw_js_exception;
 	use futures::lock::Mutex;
 	use js::Result;
 	use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 
-	use super::JsArrayBuffer;
+	use super::{JSONStr, JsArrayBuffer};
 
 	#[quickjs(cloneable)]
 	#[derive(Clone)]
@@ -65,11 +65,11 @@ pub mod response {
 			Ok(text)
 		}
 
-		pub async fn json(mut self) -> Result<Value> {
+		pub async fn json(mut self) -> Result<JSONStr> {
 			self.set_body_used()?;
 			let text =
 				self.inner.lock().await.body_string().await.map_err(|e| throw_js_exception!(e))?;
-			json(&text).map_err(|e| throw_js_exception!(e))
+			Ok(JSONStr(text))
 		}
 
 		pub async fn arrayBuffer(mut self) -> Result<JsArrayBuffer> {
@@ -100,7 +100,7 @@ pub mod response {
 	}
 }
 
-use js::{ArrayBuffer, Ctx, Error, IntoJs};
+use js::{ArrayBuffer, Ctx, Error, IntoJs, This};
 
 pub struct JsArrayBuffer(pub(crate) Vec<u8>);
 
@@ -110,13 +110,12 @@ impl<'js> IntoJs<'js> for JsArrayBuffer {
 	}
 }
 
-// TODO: just convert once
-// pub struct JSONStr(String);
+pub struct JSONStr(String);
 
-// impl<'js> IntoJs<'js> for JSONStr {
-// 	fn into_js(self, ctx: Ctx<'js>) -> Result<js::Value<'js>, Error> {
-// 		let json = ctx.globals().get::<_, js::Object>("JSON").unwrap();
-// 		let json_parse = json.get::<_, js::Function>("parse").unwrap();
-// 		json_parse.call::<_, js::Value>((This(json), self.0))
-// 	}
-// }
+impl<'js> IntoJs<'js> for JSONStr {
+	fn into_js(self, ctx: Ctx<'js>) -> Result<js::Value<'js>, Error> {
+		let json = ctx.globals().get::<_, js::Object>("JSON").unwrap();
+		let json_parse = json.get::<_, js::Function>("parse").unwrap();
+		json_parse.call::<_, js::Value>((This(json), self.0))
+	}
+}
