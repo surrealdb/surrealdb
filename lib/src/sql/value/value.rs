@@ -1391,7 +1391,6 @@ mod tests {
 		assert_eq!(false, Value::from("something").is_false());
 	}
 
-
 	#[test]
 	fn convert_bool() {
 		assert_eq!(false, Value::None.is_truthy());
