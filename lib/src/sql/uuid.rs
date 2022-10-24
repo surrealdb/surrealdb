@@ -22,6 +22,12 @@ impl From<&str> for Uuid {
 	}
 }
 
+impl From<uuid::Uuid> for Uuid{
+    fn from(v: uuid::Uuid) -> Self {
+        Uuid(v) 
+    }
+}
+
 impl From<String> for Uuid {
 	fn from(s: String) -> Self {
 		Self::from(s.as_str())
