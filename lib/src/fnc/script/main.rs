@@ -45,11 +45,14 @@ pub async fn run(
 		// Get the context global object
 		let global = ctx.globals();
 		// Register the fetch function as a global object
-		global.init_def::<globals::fetch::Fetch>()?;
-		global.init_def::<classes::blob::Blob>()?;
-		global.init_def::<classes::headers::Headers>()?;
-		global.init_def::<classes::request::Request>()?;
-		global.init_def::<classes::response::Response>()?;
+		#[cfg(feature = "http")]
+		{
+			global.init_def::<globals::fetch::Fetch>()?;
+			global.init_def::<classes::blob::Blob>()?;
+			global.init_def::<classes::headers::Headers>()?;
+			global.init_def::<classes::request::Request>()?;
+			global.init_def::<classes::response::Response>()?;
+		}
 		// Register the Duration type as a global class
 		global.init_def::<classes::duration::Duration>()?;
 		// Register the Record type as a global class
