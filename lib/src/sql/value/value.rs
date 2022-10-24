@@ -155,10 +155,10 @@ impl From<Uuid> for Value {
 	}
 }
 
-impl From<uuid::Uuid> for Value{
-    fn from(v: uuid::Uuid) -> Self {
-        Value::Uuid(Uuid(v))
-    }
+impl From<uuid::Uuid> for Value {
+	fn from(v: uuid::Uuid) -> Self {
+		Value::Uuid(Uuid(v))
+	}
 }
 
 impl From<Param> for Value {
