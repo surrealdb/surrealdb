@@ -22,6 +22,12 @@ impl From<&str> for Uuid {
 	}
 }
 
+impl From<uuid::Uuid> for Uuid{
+    fn from(v: uuid::Uuid) -> Self {
+        Uuid(v) 
+    }
+}
+
 impl From<String> for Uuid {
 	fn from(s: String) -> Self {
 		Self::from(s.as_str())
@@ -36,15 +42,19 @@ impl Deref for Uuid {
 }
 
 impl Uuid {
+	/// Generate a new V4 UUID
 	pub fn new() -> Self {
 		Self(uuid::Uuid::new_v4())
 	}
+	/// Generate a new V4 UUID
 	pub fn new_v4() -> Self {
 		Self(uuid::Uuid::new_v4())
 	}
+	/// Generate a new V7 UUID
 	pub fn new_v7() -> Self {
 		Self(uuid::Uuid::now_v7())
 	}
+	/// Convert the Uuid to a raw String
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
 	}
@@ -117,7 +127,7 @@ mod tests {
 		let res = uuid_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"e72bee20-f49b-11ec-b939-0242ac120002\"", format!("{}", out));
+		assert_eq!("'e72bee20-f49b-11ec-b939-0242ac120002'", format!("{}", out));
 		assert_eq!(out, Uuid::from("e72bee20-f49b-11ec-b939-0242ac120002"));
 	}
 
@@ -127,7 +137,7 @@ mod tests {
 		let res = uuid_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"b19bc00b-aa98-486c-ae37-c8e1c54295b1\"", format!("{}", out));
+		assert_eq!("'b19bc00b-aa98-486c-ae37-c8e1c54295b1'", format!("{}", out));
 		assert_eq!(out, Uuid::from("b19bc00b-aa98-486c-ae37-c8e1c54295b1"));
 	}
 }

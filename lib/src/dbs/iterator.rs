@@ -78,30 +78,30 @@ impl Iterator {
 		// Log the statement
 		trace!(target: LOG, "Iterating: {}", stm);
 		// Enable context override
-		let mut ctx = Context::new(ctx);
-		self.run = ctx.add_cancel();
+		let mut run = Context::new(ctx);
+		self.run = run.add_cancel();
 		// Process the query LIMIT clause
-		self.setup_limit(&ctx, opt, txn, stm).await?;
+		self.setup_limit(&run, opt, txn, stm).await?;
 		// Process the query START clause
-		self.setup_start(&ctx, opt, txn, stm).await?;
+		self.setup_start(&run, opt, txn, stm).await?;
 		// Process prepared values
-		self.iterate(&ctx, opt, txn, stm).await?;
+		self.iterate(&run, opt, txn, stm).await?;
 		// Return any document errors
 		if let Some(e) = self.error.take() {
 			return Err(e);
 		}
 		// Process any SPLIT clause
-		self.output_split(&ctx, opt, txn, stm).await?;
+		self.output_split(ctx, opt, txn, stm).await?;
 		// Process any GROUP clause
-		self.output_group(&ctx, opt, txn, stm).await?;
+		self.output_group(ctx, opt, txn, stm).await?;
 		// Process any ORDER clause
-		self.output_order(&ctx, opt, txn, stm).await?;
+		self.output_order(ctx, opt, txn, stm).await?;
 		// Process any START clause
-		self.output_start(&ctx, opt, txn, stm).await?;
+		self.output_start(ctx, opt, txn, stm).await?;
 		// Process any LIMIT clause
-		self.output_limit(&ctx, opt, txn, stm).await?;
+		self.output_limit(ctx, opt, txn, stm).await?;
 		// Process any FETCH clause
-		self.output_fetch(&ctx, opt, txn, stm).await?;
+		self.output_fetch(ctx, opt, txn, stm).await?;
 		// Output the results
 		Ok(mem::take(&mut self.results).into())
 	}

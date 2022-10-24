@@ -2,6 +2,8 @@ use crate::sql::common::val_u8;
 use nom::character::is_digit;
 use std::borrow::Cow;
 
+const SINGLE: char = '\'';
+
 const BRACKETL: char = '⟨';
 const BRACKETR: char = '⟩';
 const BRACKET_ESC: &str = r#"\⟩"#;
@@ -14,7 +16,11 @@ const BACKTICK_ESC: &str = r#"\`"#;
 
 #[inline]
 pub fn escape_str(s: &str) -> String {
-	format!("{}{}{}", DOUBLE, s, DOUBLE)
+	if s.contains(SINGLE) {
+		format!("{}{}{}", DOUBLE, s, DOUBLE)
+	} else {
+		format!("{}{}{}", SINGLE, s, SINGLE)
+	}
 }
 
 #[inline]

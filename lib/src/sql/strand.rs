@@ -44,12 +44,15 @@ impl Deref for Strand {
 }
 
 impl Strand {
+	/// Get the underlying String slice
 	pub fn as_str(&self) -> &str {
 		self.0.as_str()
 	}
+	/// Returns the underlying String
 	pub fn as_string(self) -> String {
 		self.0
 	}
+	/// Convert the Strand to a raw String
 	pub fn to_raw(self) -> String {
 		self.0
 	}
@@ -181,7 +184,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""""#, format!("{}", out));
+		assert_eq!(r#"''"#, format!("{}", out));
 		assert_eq!(out, Strand::from(""));
 	}
 
@@ -191,7 +194,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""test""#, format!("{}", out));
+		assert_eq!(r#"'test'"#, format!("{}", out));
 		assert_eq!(out, Strand::from("test"));
 	}
 
@@ -201,7 +204,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""test""#, format!("{}", out));
+		assert_eq!(r#"'test'"#, format!("{}", out));
 		assert_eq!(out, Strand::from("test"));
 	}
 
@@ -221,7 +224,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""te"st""#, format!("{}", out));
+		assert_eq!(r#"'te"st'"#, format!("{}", out));
 		assert_eq!(out, Strand::from(r#"te"st"#));
 	}
 
@@ -231,7 +234,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"te\"st\n\tand\u{08}some\u{05d9}\"", format!("{}", out));
+		assert_eq!("'te\"st\n\tand\u{08}some\u{05d9}'", format!("{}", out));
 		assert_eq!(out, Strand::from("te\"st\n\tand\u{08}some\u{05d9}"));
 	}
 }

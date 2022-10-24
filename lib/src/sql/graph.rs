@@ -22,6 +22,7 @@ pub struct Graph {
 }
 
 impl Graph {
+	/// Convert the graph edge to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}

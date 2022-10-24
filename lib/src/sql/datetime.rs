@@ -52,6 +52,7 @@ impl Deref for Datetime {
 }
 
 impl Datetime {
+	/// Convert the Datetime to a raw String
 	pub fn to_raw(&self) -> String {
 		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 	}
@@ -262,7 +263,7 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-23T18:25:43Z\"", format!("{}", out));
+		assert_eq!("'2012-04-23T18:25:43Z'", format!("{}", out));
 	}
 
 	#[test]
@@ -271,7 +272,7 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-23T18:25:43.563100Z\"", format!("{}", out));
+		assert_eq!("'2012-04-23T18:25:43.563100Z'", format!("{}", out));
 	}
 
 	#[test]
@@ -280,7 +281,7 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-23T18:25:43.000051100Z\"", format!("{}", out));
+		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
 	}
 
 	#[test]
@@ -289,7 +290,7 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-24T02:25:43.511Z\"", format!("{}", out));
+		assert_eq!("'2012-04-24T02:25:43.511Z'", format!("{}", out));
 	}
 
 	#[test]
@@ -298,6 +299,6 @@ mod tests {
 		let res = datetime_raw(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-24T02:55:43.511Z\"", format!("{}", out));
+		assert_eq!("'2012-04-24T02:55:43.511Z'", format!("{}", out));
 	}
 }

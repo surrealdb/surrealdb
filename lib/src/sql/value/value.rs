@@ -155,6 +155,12 @@ impl From<Uuid> for Value {
 	}
 }
 
+impl From<uuid::Uuid> for Value{
+    fn from(v: uuid::Uuid) -> Self {
+        Value::Uuid(Uuid(v))
+    }
+}
+
 impl From<Param> for Value {
 	fn from(v: Param) -> Self {
 		Self::Param(v)
@@ -559,6 +565,10 @@ impl Value {
 
 	pub fn is_object(&self) -> bool {
 		matches!(self, Self::Object(_))
+	}
+
+	pub fn is_number(&self) -> bool {
+		matches!(self, Value::Number(_))
 	}
 
 	pub fn is_int(&self) -> bool {
@@ -989,7 +999,7 @@ impl Value {
 				Self::Strand(_) => v == &other.to_datetime(),
 				_ => false,
 			},
-			_ => unreachable!(),
+			_ => self == other,
 		}
 	}
 
@@ -1034,6 +1044,10 @@ impl Value {
 	pub fn contains(&self, other: &Value) -> bool {
 		match self {
 			Self::Array(v) => v.iter().any(|v| v.equal(other)),
+			Self::Thing(v) => match other {
+				Self::Strand(w) => v.to_string().contains(w.as_str()),
+				_ => v.to_string().contains(&other.to_string().as_str()),
+			},
 			Self::Strand(v) => match other {
 				Self::Strand(w) => v.contains(w.as_str()),
 				_ => v.contains(&other.to_string().as_str()),
