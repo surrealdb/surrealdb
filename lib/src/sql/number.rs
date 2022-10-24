@@ -173,11 +173,27 @@ impl Number {
 		matches!(self, Self::Decimal(_))
 	}
 
+	pub fn is_integer(&self) -> bool {
+		match self {
+			Number::Int(_) => true,
+			Number::Float(_) => false,
+			Number::Decimal(v) => v.is_integer(),
+		}
+	}
+
 	pub fn is_truthy(&self) -> bool {
 		match self {
 			Self::Int(v) => v != &0,
 			Self::Float(v) => v != &0.0,
 			Self::Decimal(v) => v != &BigDecimal::default(),
+		}
+	}
+
+	pub fn is_positive(&self) -> bool {
+		match self {
+			Number::Int(v) => v > &0,
+			Number::Float(v) => v > &0.0,
+			Number::Decimal(v) => v > &BigDecimal::from(0),
 		}
 	}
 

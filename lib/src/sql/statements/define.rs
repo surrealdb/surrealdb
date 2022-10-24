@@ -8,7 +8,7 @@ use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_strand;
+use crate::sql::escape::escape_str;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::{Idiom, Idioms};
@@ -262,13 +262,7 @@ impl DefineLoginStatement {
 
 impl fmt::Display for DefineLoginStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"DEFINE LOGIN {} ON {} PASSHASH {}",
-			self.name,
-			self.base,
-			escape_strand(&self.hash)
-		)
+		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, escape_str(&self.hash))
 	}
 }
 
@@ -415,7 +409,7 @@ impl fmt::Display for DefineTokenStatement {
 			self.name,
 			self.base,
 			self.kind,
-			escape_strand(&self.code)
+			escape_str(&self.code)
 		)
 	}
 }

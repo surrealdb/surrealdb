@@ -1,19 +1,18 @@
 use crate::sql::common::{take_digits, take_digits_range, take_u32_len};
 use crate::sql::duration::Duration;
 use crate::sql::error::IResult;
+use crate::sql::escape::escape_str;
 use crate::sql::serde::is_internal_serialization;
-use chrono::{DateTime, FixedOffset, TimeZone, Utc};
+use chrono::{DateTime, FixedOffset, SecondsFormat, TimeZone, Utc};
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display, Formatter};
+use std::ops;
 use std::ops::Deref;
 use std::str;
-use std::{fmt, ops};
-
-const SINGLE: char = '\'';
-const DOUBLE: char = '"';
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize)]
 pub struct Datetime(pub DateTime<Utc>);
@@ -38,7 +37,7 @@ impl From<DateTime<Utc>> for Datetime {
 
 impl From<&str> for Datetime {
 	fn from(s: &str) -> Self {
-		match datetime_raw(s) {
+		match datetime_all_raw(s) {
 			Ok((_, v)) => v,
 			Err(_) => Self::default(),
 		}
@@ -52,9 +51,15 @@ impl Deref for Datetime {
 	}
 }
 
-impl fmt::Display for Datetime {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "\"{:?}\"", self.0)
+impl Datetime {
+	pub fn to_raw(&self) -> String {
+		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+	}
+}
+
+impl Display for Datetime {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&escape_str(&self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)), f)
 	}
 }
 
@@ -82,14 +87,23 @@ impl ops::Sub<Self> for Datetime {
 }
 
 pub fn datetime(i: &str) -> IResult<&str, Datetime> {
-	alt((
-		delimited(char(DOUBLE), datetime_raw, char(DOUBLE)),
-		delimited(char(SINGLE), datetime_raw, char(SINGLE)),
-	))(i)
+	alt((datetime_single, datetime_double))(i)
+}
+
+fn datetime_single(i: &str) -> IResult<&str, Datetime> {
+	delimited(char('\''), datetime_raw, char('\''))(i)
+}
+
+fn datetime_double(i: &str) -> IResult<&str, Datetime> {
+	delimited(char('\"'), datetime_raw, char('\"'))(i)
+}
+
+fn datetime_all_raw(i: &str) -> IResult<&str, Datetime> {
+	alt((nano, time, date))(i)
 }
 
 fn datetime_raw(i: &str) -> IResult<&str, Datetime> {
-	alt((nano, time, date))(i)
+	alt((nano, time))(i)
 }
 
 fn date(i: &str) -> IResult<&str, Datetime> {
@@ -241,15 +255,6 @@ fn sign(i: &str) -> IResult<&str, i32> {
 mod tests {
 
 	use super::*;
-
-	#[test]
-	fn date() {
-		let sql = "2012-04-23";
-		let res = datetime_raw(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("\"2012-04-23T00:00:00Z\"", format!("{}", out));
-	}
 
 	#[test]
 	fn date_time() {

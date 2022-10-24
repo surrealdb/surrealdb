@@ -149,6 +149,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"rand::int" => rand::int,
 		"rand::string" => rand::string,
 		"rand::time" => rand::time,
+		"rand::uuid::v4" => rand::uuid::v4,
+		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
 		"rand" => rand::rand,
 		//

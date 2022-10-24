@@ -74,7 +74,7 @@ thiserror = "1.0.37"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
 trice = "0.1.0"
 url = "2.3.1"
-uuid = { version = "1.1.2", features = ["serde", "v4"] }
+uuid = { version = "1.2.1", features = ["serde", "v4", "v7"] }
 bcrypt = "0.13.0"
 
 [dev-dependencies]

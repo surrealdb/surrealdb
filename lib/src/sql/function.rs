@@ -396,6 +396,8 @@ fn function_rand(i: &str) -> IResult<&str, &str> {
 		tag("rand::int"),
 		tag("rand::string"),
 		tag("rand::time"),
+		tag("rand::uuid::v4"),
+		tag("rand::uuid::v7"),
 		tag("rand::uuid"),
 		tag("rand"),
 	))(i)

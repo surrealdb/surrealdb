@@ -94,7 +94,6 @@ impl<'a> Executor<'a> {
 
 	fn buf_cancel(&self, v: Response) -> Response {
 		Response {
-			sql: v.sql,
 			time: v.time,
 			result: Err(Error::QueryCancelled),
 		}
@@ -103,7 +102,6 @@ impl<'a> Executor<'a> {
 	fn buf_commit(&self, v: Response) -> Response {
 		match &self.err {
 			true => Response {
-				sql: v.sql,
 				time: v.time,
 				result: match v.result {
 					Ok(_) => Err(Error::QueryNotExecuted),
@@ -163,7 +161,6 @@ impl<'a> Executor<'a> {
 						"TABLES" => opt = opt.tables(stm.what),
 						"IMPORT" => opt = opt.import(stm.what),
 						"FORCE" => opt = opt.force(stm.what),
-						"DEBUG" => opt = opt.debug(stm.what),
 						_ => break,
 					}
 					// Continue
@@ -309,20 +306,12 @@ impl<'a> Executor<'a> {
 			// Produce the response
 			let res = match res {
 				Ok(v) => Response {
-					sql: match opt.debug {
-						true => Some(format!("{}", stm)),
-						false => None,
-					},
 					time: dur,
 					result: Ok(v),
 				},
 				Err(e) => {
 					// Produce the response
 					let res = Response {
-						sql: match opt.debug {
-							true => Some(format!("{}", stm)),
-							false => None,
-						},
 						time: dur,
 						result: Err(e),
 					};

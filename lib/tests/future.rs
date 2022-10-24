@@ -9,8 +9,8 @@ use surrealdb::Session;
 async fn future_function_simple() -> Result<(), Error> {
 	let sql = "
 		UPDATE person:test SET can_drive = <future> { birthday && time::now() > birthday + 18y };
-		UPDATE person:test SET birthday = '2007-06-22';
-		UPDATE person:test SET birthday = '2001-06-22';
+		UPDATE person:test SET birthday = <datetime> '2007-06-22';
+		UPDATE person:test SET birthday = <datetime> '2001-06-22';
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
