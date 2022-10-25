@@ -1,6 +1,5 @@
 use crate::err::Error;
 use crate::sql::value::Value;
-use crate::sql::Object;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use std::time::Duration;
@@ -22,28 +21,6 @@ impl Response {
 		match &self.result {
 			Ok(v) => Ok(v),
 			Err(e) => Err(e),
-		}
-	}
-}
-
-impl From<Response> for Value {
-	fn from(v: Response) -> Value {
-		// Get the response speed
-		let time = v.speed();
-		// Get the response status
-		let status = v.output().map_or_else(|_| "ERR", |_| "OK");
-		// Convert the response
-		match v.result {
-			Ok(val) => Value::Object(Object(map! {
-				String::from("time") => time.into(),
-				String::from("status") => status.into(),
-				String::from("result") => val,
-			})),
-			Err(err) => Value::Object(Object(map! {
-				String::from("time") => time.into(),
-				String::from("status") => status.into(),
-				String::from("detail") => err.to_string().into(),
-			})),
 		}
 	}
 }
