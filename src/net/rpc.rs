@@ -287,10 +287,10 @@ impl Rpc {
 			"change" | "merge" => match params.take_two() {
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"modify" => match params.take_two() {
 				(v, o) if v.is_thing() && o.is_array() => rpc.read().await.modify(v, o).await,
 				(v, o) if v.is_strand() && o.is_array() => rpc.read().await.modify(v, o).await,
 			// Update a value or values in the database using `PATCH`
+			"modify" | "patch" => match params.take_two() {
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"delete" => match params.take_one() {
