@@ -279,12 +279,12 @@ impl Rpc {
 			// Update a value or values in the database using `CONTENT`
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"change" => match params.take_two() {
 				(v, o) if v.is_thing() && o.is_none() => rpc.read().await.change(v, None).await,
 				(v, o) if v.is_strand() && o.is_none() => rpc.read().await.change(v, None).await,
 				(v, o) if v.is_thing() && o.is_object() => rpc.read().await.change(v, o).await,
 				(v, o) if v.is_strand() && o.is_object() => rpc.read().await.change(v, o).await,
 			// Update a value or values in the database using `MERGE`
+			"change" | "merge" => match params.take_two() {
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"modify" => match params.take_two() {
