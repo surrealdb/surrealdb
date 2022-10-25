@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::borrow::Cow;
 use surrealdb::channel::Sender;
+use surrealdb::sql::serde::serialize_internal;
 use surrealdb::sql::Value;
 use warp::ws::Message;
 
@@ -44,6 +45,11 @@ impl<T: Serialize> Response<T> {
 			}
 			Output::Pack => {
 				let res = serde_pack::to_vec(&self).unwrap();
+				let res = Message::binary(res);
+				let _ = chn.send(res).await;
+			}
+			Output::Full => {
+				let res = serialize_internal(|| serde_pack::to_vec(&self).unwrap());
 				let res = Message::binary(res);
 				let _ = chn.send(res).await;
 			}

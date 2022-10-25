@@ -114,6 +114,9 @@ impl Rpc {
 					msg if msg.is_text() => {
 						tokio::task::spawn(Rpc::call(rpc.clone(), msg, chn.clone()));
 					}
+					msg if msg.is_binary() => {
+						tokio::task::spawn(Rpc::call(rpc.clone(), msg, chn.clone()));
+					}
 					msg if msg.is_close() => {
 						break;
 					}
@@ -138,11 +141,18 @@ impl Rpc {
 	// Call RPC methods from the WebSocket
 	async fn call(rpc: Arc<RwLock<Rpc>>, msg: Message, chn: Sender<Message>) {
 		// Get the current output format
-		let out = { rpc.read().await.format.clone() };
+		let mut out = { rpc.read().await.format.clone() };
 		// Clone the RPC
 		let rpc = rpc.clone();
 		// Parse the request
 		let req = match msg {
+			// This is a binary message
+			m if m.is_binary() => {
+				// Use binary output
+				out = Output::Full;
+				// Deserialize the input
+				Value::from(m.into_bytes())
+			}
 			// This is a text message
 			m if m.is_text() => {
 				// This won't panic due to the check above
