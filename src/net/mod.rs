@@ -1,3 +1,10 @@
+use warp::Filter;
+
+use crate::cli::CF;
+use crate::err::Error;
+
+mod ast;
+mod asttosql;
 mod export;
 mod fail;
 mod head;
@@ -14,12 +21,9 @@ mod signin;
 mod signup;
 mod sql;
 mod status;
+mod structure;
 mod sync;
 mod version;
-
-use crate::cli::CF;
-use crate::err::Error;
-use warp::Filter;
 
 const LOG: &str = "surrealdb::net";
 
@@ -46,12 +50,18 @@ pub async fn init() -> Result<(), Error> {
 		.or(rpc::config())
 		// SQL query endpoint
 		.or(sql::config())
+		// SQL AST endpoint
+		.or(ast::config())
+		// AST to SQL endpoint
+		.or(asttosql::config())
+		// Json array of table name => fields array for usage in type generation code
+		.or(structure::config())
 		// API query endpoint
 		.or(key::config())
 		// Catch all errors
 		.recover(fail::recover)
 		// End routes setup
-	;
+		;
 	// Specify a generic version header
 	let net = net.with(head::version());
 	// Specify a generic server header
