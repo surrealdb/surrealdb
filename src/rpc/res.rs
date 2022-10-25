@@ -4,12 +4,12 @@ use surrealdb::channel::Sender;
 use surrealdb::sql::Value;
 use warp::ws::Message;
 
-#[derive(Serialize)]
-enum Content<T> {
-	#[serde(rename = "result")]
-	Success(T),
-	#[serde(rename = "error")]
-	Failure(Failure),
+#[derive(Clone)]
+pub enum Output {
+	Json, // JSON
+	Cbor, // CBOR
+	Pack, // MsgPack
+	Full, // Full type serialization
 }
 
 #[derive(Serialize)]
@@ -19,12 +19,34 @@ pub struct Response<T> {
 	content: Content<T>,
 }
 
+#[derive(Serialize)]
+enum Content<T> {
+	#[serde(rename = "result")]
+	Success(T),
+	#[serde(rename = "error")]
+	Failure(Failure),
+}
+
 impl<T: Serialize> Response<T> {
 	// Send the response to the channel
-	pub async fn send(self, chn: Sender<Message>) {
-		let res = serde_json::to_string(&self).unwrap();
-		let res = Message::text(res);
-		let _ = chn.send(res).await;
+	pub async fn send(self, out: Output, chn: Sender<Message>) {
+		match out {
+			Output::Json => {
+				let res = serde_json::to_string(&self).unwrap();
+				let res = Message::text(res);
+				let _ = chn.send(res).await;
+			}
+			Output::Cbor => {
+				let res = serde_cbor::to_vec(&self).unwrap();
+				let res = Message::binary(res);
+				let _ = chn.send(res).await;
+			}
+			Output::Pack => {
+				let res = serde_pack::to_vec(&self).unwrap();
+				let res = Message::binary(res);
+				let _ = chn.send(res).await;
+			}
+		}
 	}
 }
 
