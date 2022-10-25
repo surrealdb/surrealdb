@@ -134,6 +134,7 @@ pub mod uuid {
 		Ok(Uuid::new_v4().into())
 	}
 
+	#[cfg(uuid_unstable)]
 	pub fn v7(_: ()) -> Result<Value, Error> {
 		Ok(Uuid::new_v7().into())
 	}

@@ -51,6 +51,7 @@ impl Uuid {
 		Self(uuid::Uuid::new_v4())
 	}
 	/// Generate a new V7 UUID
+	#[cfg(uuid_unstable)]
 	pub fn new_v7() -> Self {
 		Self(uuid::Uuid::now_v7())
 	}
