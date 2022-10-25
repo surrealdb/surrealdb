@@ -2,26 +2,6 @@ use crate::fnc::script::classes::headers::headers::Headers;
 #[cfg(feature = "http")]
 use surf::http;
 
-#[macro_export]
-macro_rules! throw_js_exception {
-	($e:ident) => {
-		js::Error::Exception {
-			line: line!() as i32,
-			message: $e.to_string(),
-			file: file!().to_owned(),
-			stack: "".to_owned(),
-		}
-	};
-	($str:expr) => {
-		js::Error::Exception {
-			line: line!() as i32,
-			message: $str.to_owned(),
-			file: file!().to_owned(),
-			stack: "".to_owned(),
-		}
-	};
-}
-
 // check js_object to see if value is a typed_array
 pub fn is_typed_array<'js>(ctx: js::Ctx<'js>, value: js::Object<'js>) -> js::Result<bool> {
 	let array_buffer: js::Object = ctx.globals().get("ArrayBuffer")?;

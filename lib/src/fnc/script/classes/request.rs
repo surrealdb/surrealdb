@@ -10,7 +10,6 @@ pub mod request {
 	use crate::fnc::script::classes::response::JsArrayBuffer;
 	use crate::sql::json;
 	use crate::sql::Value;
-	use crate::throw_js_exception;
 	use futures::lock::Mutex;
 	use js::Rest;
 	use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
@@ -188,7 +187,6 @@ pub mod request {
 
 use crate::fnc::script::classes::headers::headers::Headers;
 use crate::fnc::script::util::{take_http_body, take_http_headers};
-use crate::throw_js_exception;
 use std::str::FromStr;
 use surf::http;
 

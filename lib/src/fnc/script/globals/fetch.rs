@@ -2,7 +2,6 @@ use crate::fnc::script::classes::request::request::Request;
 use crate::fnc::script::classes::request::RequestInput;
 use crate::fnc::script::classes::request::RequestOptions;
 use crate::fnc::script::classes::response::response::Response;
-use crate::throw_js_exception;
 use js::Rest;
 use js::Result;
 

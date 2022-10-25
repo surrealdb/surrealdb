@@ -4,8 +4,6 @@
 #[allow(clippy::module_inception)]
 pub mod response {
 	use crate::fnc::script::classes::headers::headers::Headers;
-	use crate::sql::Value;
-	use crate::throw_js_exception;
 	use futures::lock::Mutex;
 	use js::Result;
 	use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};

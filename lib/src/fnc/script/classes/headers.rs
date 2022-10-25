@@ -7,8 +7,6 @@ pub mod headers {
 	use std::str::FromStr;
 	use surf::http::headers::HeaderName;
 
-	use crate::throw_js_exception;
-
 	#[derive(Clone)]
 	#[quickjs(class)]
 	pub struct Headers {

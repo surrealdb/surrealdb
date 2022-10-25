@@ -51,7 +51,7 @@ use std::str::FromStr;
 
 use surf::http::Mime;
 
-use crate::{fnc::script::util::is_typed_array, throw_js_exception};
+use crate::fnc::script::util::is_typed_array;
 
 #[derive(Default, Clone)]
 pub struct BlobOptions {
