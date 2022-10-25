@@ -146,10 +146,13 @@ impl Rpc {
 		};
 		// Fetch the 'id' argument
 		let id = match req.pick(&*ID) {
-			v if v.is_uuid() || v.is_strand() || v.is_number() || v.is_none() || v.is_null() => {
-				Some(v)
-			}
-			_ => return res::failure(None, Failure::INVALID_REQUEST).send(chn).await,
+			v if v.is_none() => None,
+			v if v.is_null() => Some(v),
+			v if v.is_uuid() => Some(v),
+			v if v.is_number() => Some(v),
+			v if v.is_strand() => Some(v),
+			v if v.is_datetime() => Some(v),
+			_ => return res::failure(None, Failure::INVALID_REQUEST).send(out, chn).await,
 		};
 		// Fetch the 'method' argument
 		let method = match req.pick(&*METHOD) {

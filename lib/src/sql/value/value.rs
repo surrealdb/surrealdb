@@ -589,6 +589,10 @@ impl Value {
 		matches!(self, Value::Number(v) if v.is_positive())
 	}
 
+	pub fn is_datetime(&self) -> bool {
+		matches!(self, Value::Datetime(_))
+	}
+
 	pub fn is_type_record(&self, types: &[Table]) -> bool {
 		match self {
 			Value::Thing(v) => types.iter().any(|tb| tb.0 == v.tb),
