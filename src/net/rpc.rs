@@ -187,19 +187,19 @@ impl Rpc {
 				0 => rpc.read().await.info().await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"use" => match params.take_two() {
-				(Value::Strand(ns), Value::Strand(db)) => rpc.write().await.yuse(ns, db).await,
 			// Switch to a specific namespace and database
+			"use" => match params.needs_two() {
+				Ok((Value::Strand(ns), Value::Strand(db))) => rpc.write().await.yuse(ns, db).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"signup" => match params.take_one() {
-				Value::Object(v) => rpc.write().await.signup(v).await,
 			// Signup to a specific authentication scope
+			"signup" => match params.needs_one() {
+				Ok(Value::Object(v)) => rpc.write().await.signup(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"signin" => match params.take_one() {
-				Value::Object(v) => rpc.write().await.signin(v).await,
 			// Signin as a root, namespace, database or scope user
+			"signin" => match params.needs_one() {
+				Ok(Value::Object(v)) => rpc.write().await.signin(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Invalidate the current authentication session
@@ -207,34 +207,34 @@ impl Rpc {
 				0 => rpc.write().await.invalidate().await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"authenticate" => match params.take_one() {
-				Value::Strand(v) => rpc.write().await.authenticate(v).await,
 			// Authenticate using an authentication token
+			"authenticate" => match params.needs_one() {
+				Ok(Value::Strand(v)) => rpc.write().await.authenticate(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"kill" => match params.take_one() {
-				v if v.is_uuid() => rpc.read().await.kill(v).await,
 			// Kill a live query using a query id
+			"kill" => match params.needs_one() {
+				Ok(v) if v.is_uuid() => rpc.read().await.kill(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"live" => match params.take_one() {
-				v if v.is_strand() => rpc.read().await.live(v).await,
 			// Setup a live query on a specific table
+			"live" => match params.needs_one() {
+				Ok(v) if v.is_strand() => rpc.read().await.live(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"let" => match params.take_two() {
-				(Value::Strand(s), v) => rpc.write().await.set(s, v).await,
 			// Specify a connection-wide parameter
+			"let" => match params.needs_one_or_two() {
+				Ok((Value::Strand(s), v)) => rpc.write().await.set(s, v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"set" => match params.take_two() {
-				(Value::Strand(s), v) => rpc.write().await.set(s, v).await,
 			// Specify a connection-wide parameter
+			"set" => match params.needs_one_or_two() {
+				Ok((Value::Strand(s), v)) => rpc.write().await.set(s, v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"query" => match params.take_two() {
-				(Value::Strand(s), o) if o.is_none() => {
 			// Run a full SurrealQL query against the database
+			"query" => match params.needs_one_or_two() {
+				Ok((Value::Strand(s), o)) if o.is_none() => {
 					return match rpc.read().await.query(s).await {
 						Ok(v) => res::success(id, v).send(out, chn).await,
 						Err(e) => {
@@ -242,7 +242,7 @@ impl Rpc {
 						}
 					};
 				}
-				(Value::Strand(s), Value::Object(o)) => {
+				Ok((Value::Strand(s), Value::Object(o))) => {
 					return match rpc.read().await.query_with(s, o).await {
 						Ok(v) => res::success(id, v).send(out, chn).await,
 						Err(e) => {
@@ -252,51 +252,39 @@ impl Rpc {
 				}
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"select" => match params.take_one() {
-				v if v.is_thing() => rpc.read().await.select(v).await,
-				v if v.is_strand() => rpc.read().await.select(v).await,
 			// Unset and clear a connection-wide parameter
 			"unset" => match params.needs_one() {
 				Ok(Value::Strand(s)) => rpc.write().await.unset(s).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Select a value or values from the database
+			"select" => match params.needs_one() {
+				Ok(v) => rpc.read().await.select(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"create" => match params.take_two() {
-				(v, o) if v.is_thing() && o.is_none() => rpc.read().await.create(v, None).await,
-				(v, o) if v.is_strand() && o.is_none() => rpc.read().await.create(v, None).await,
-				(v, o) if v.is_thing() && o.is_object() => rpc.read().await.create(v, o).await,
-				(v, o) if v.is_strand() && o.is_object() => rpc.read().await.create(v, o).await,
 			// Create a value or values in the database
+			"create" => match params.needs_one_or_two() {
+				Ok((v, o)) => rpc.read().await.create(v, o).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"update" => match params.take_two() {
-				(v, o) if v.is_thing() && o.is_none() => rpc.read().await.update(v, None).await,
-				(v, o) if v.is_strand() && o.is_none() => rpc.read().await.update(v, None).await,
-				(v, o) if v.is_thing() && o.is_object() => rpc.read().await.update(v, o).await,
-				(v, o) if v.is_strand() && o.is_object() => rpc.read().await.update(v, o).await,
 			// Update a value or values in the database using `CONTENT`
+			"update" => match params.needs_one_or_two() {
+				Ok((v, o)) => rpc.read().await.update(v, o).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-				(v, o) if v.is_thing() && o.is_none() => rpc.read().await.change(v, None).await,
-				(v, o) if v.is_strand() && o.is_none() => rpc.read().await.change(v, None).await,
-				(v, o) if v.is_thing() && o.is_object() => rpc.read().await.change(v, o).await,
-				(v, o) if v.is_strand() && o.is_object() => rpc.read().await.change(v, o).await,
 			// Update a value or values in the database using `MERGE`
-			"change" | "merge" => match params.take_two() {
+			"change" | "merge" => match params.needs_one_or_two() {
+				Ok((v, o)) => rpc.read().await.change(v, o).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-				(v, o) if v.is_thing() && o.is_array() => rpc.read().await.modify(v, o).await,
-				(v, o) if v.is_strand() && o.is_array() => rpc.read().await.modify(v, o).await,
 			// Update a value or values in the database using `PATCH`
-			"modify" | "patch" => match params.take_two() {
+			"modify" | "patch" => match params.needs_one_or_two() {
+				Ok((v, o)) => rpc.read().await.modify(v, o).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			"delete" => match params.take_one() {
-				v if v.is_thing() => rpc.read().await.delete(v).await,
-				v if v.is_strand() => rpc.read().await.delete(v).await,
 			// Delete a value or values from teh database
+			"delete" => match params.needs_one() {
+				Ok(v) => rpc.read().await.delete(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Specify the output format for text requests
@@ -496,7 +484,7 @@ impl Rpc {
 	// Methods for creating
 	// ------------------------------
 
-	async fn create(&self, what: Value, data: impl Into<Option<Value>>) -> Result<Value, Error> {
+	async fn create(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -505,8 +493,8 @@ impl Rpc {
 		let sql = "CREATE $what CONTENT $data RETURN AFTER";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("data") => data.into().into(),
 			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -521,7 +509,7 @@ impl Rpc {
 	// Methods for updating
 	// ------------------------------
 
-	async fn update(&self, what: Value, data: impl Into<Option<Value>>) -> Result<Value, Error> {
+	async fn update(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -530,8 +518,8 @@ impl Rpc {
 		let sql = "UPDATE $what CONTENT $data RETURN AFTER";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("data") => data.into().into(),
 			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -546,7 +534,7 @@ impl Rpc {
 	// Methods for changing
 	// ------------------------------
 
-	async fn change(&self, what: Value, data: impl Into<Option<Value>>) -> Result<Value, Error> {
+	async fn change(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -555,8 +543,8 @@ impl Rpc {
 		let sql = "UPDATE $what MERGE $data RETURN AFTER";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("data") => data.into().into(),
 			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -571,7 +559,7 @@ impl Rpc {
 	// Methods for modifying
 	// ------------------------------
 
-	async fn modify(&self, what: Value, data: impl Into<Option<Value>>) -> Result<Value, Error> {
+	async fn modify(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -580,8 +568,8 @@ impl Rpc {
 		let sql = "UPDATE $what PATCH $data RETURN DIFF";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("data") => data.into().into(),
 			String::from("what") => what.could_be_table(),
+			String::from("data") => data,
 			=> &self.vars
 		});
 		// Execute the query on the database
