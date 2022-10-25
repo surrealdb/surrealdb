@@ -208,7 +208,6 @@ impl Rpc {
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"authenticate" => match params.take_one() {
-				Value::None => rpc.write().await.invalidate().await,
 				Value::Strand(v) => rpc.write().await.authenticate(v).await,
 			// Authenticate using an authentication token
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
