@@ -1332,6 +1332,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(regex, Value::from),
 			map(model, Value::from),
 			map(idiom, Value::from),
+			map(range, Value::from),
 			map(thing, Value::from),
 			map(strand, Value::from),
 		)),
