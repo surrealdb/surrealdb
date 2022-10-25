@@ -461,6 +461,8 @@ impl Rpc {
 	// ------------------------------
 
 	async fn select(&self, what: Value) -> Result<Value, Error> {
+		// Return a single result?
+		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -475,7 +477,10 @@ impl Rpc {
 		// Execute the query on the database
 		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
 		// Return the result to the client
 		Ok(res)
 	}
@@ -485,6 +490,8 @@ impl Rpc {
 	// ------------------------------
 
 	async fn create(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Return a single result?
+		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -500,7 +507,10 @@ impl Rpc {
 		// Execute the query on the database
 		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
 		// Return the result to the client
 		Ok(res)
 	}
@@ -510,6 +520,8 @@ impl Rpc {
 	// ------------------------------
 
 	async fn update(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Return a single result?
+		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -525,7 +537,10 @@ impl Rpc {
 		// Execute the query on the database
 		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
 		// Return the result to the client
 		Ok(res)
 	}
@@ -535,6 +550,8 @@ impl Rpc {
 	// ------------------------------
 
 	async fn change(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Return a single result?
+		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -550,7 +567,10 @@ impl Rpc {
 		// Execute the query on the database
 		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
 		// Return the result to the client
 		Ok(res)
 	}
@@ -560,6 +580,8 @@ impl Rpc {
 	// ------------------------------
 
 	async fn modify(&self, what: Value, data: Value) -> Result<Value, Error> {
+		// Return a single result?
+		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -575,7 +597,10 @@ impl Rpc {
 		// Execute the query on the database
 		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
 		// Return the result to the client
 		Ok(res)
 	}
@@ -585,6 +610,8 @@ impl Rpc {
 	// ------------------------------
 
 	async fn delete(&self, what: Value) -> Result<Value, Error> {
+		// Return a single result?
+		let one = what.is_thing();
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -599,7 +626,10 @@ impl Rpc {
 		// Execute the query on the database
 		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
+		let res = match one {
+			true => res.remove(0).result?.first(),
+			false => res.remove(0).result?,
+		};
 		// Return the result to the client
 		Ok(res)
 	}
