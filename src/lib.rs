@@ -13,19 +13,17 @@ pub fn store(input: TokenStream) -> TokenStream {
 
 		impl From<#name> for Vec<u8> {
 			fn from(v: #name) -> Vec<u8> {
-				crate::sql::serde::beg_internal_serialization();
-				let v = msgpack::to_vec(&v).unwrap_or_default();
-				crate::sql::serde::end_internal_serialization();
-				v
+				crate::sql::serde::serialize_internal(|| {
+					msgpack::to_vec(&v).unwrap_or_default()
+				})
 			}
 		}
 
 		impl From<&#name> for Vec<u8> {
 			fn from(v: &#name) -> Vec<u8> {
-				crate::sql::serde::beg_internal_serialization();
-				let v = msgpack::to_vec(&v).unwrap_or_default();
-				crate::sql::serde::end_internal_serialization();
-				v
+				crate::sql::serde::serialize_internal(|| {
+					msgpack::to_vec(&v).unwrap_or_default()
+				})
 			}
 		}
 
