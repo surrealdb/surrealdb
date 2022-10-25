@@ -180,23 +180,29 @@ impl Rpc {
 		};
 		// Match the method to a function
 		let res = match &method[..] {
+			// Handle a ping message
 			"ping" => Ok(Value::None),
+			// Retrieve the current auth record
 			"info" => match params.len() {
 				0 => rpc.read().await.info().await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"use" => match params.take_two() {
 				(Value::Strand(ns), Value::Strand(db)) => rpc.write().await.yuse(ns, db).await,
+			// Switch to a specific namespace and database
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"signup" => match params.take_one() {
 				Value::Object(v) => rpc.write().await.signup(v).await,
+			// Signup to a specific authentication scope
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"signin" => match params.take_one() {
 				Value::Object(v) => rpc.write().await.signin(v).await,
+			// Signin as a root, namespace, database or scope user
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
+			// Invalidate the current authentication session
 			"invalidate" => match params.len() {
 				0 => rpc.write().await.invalidate().await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
@@ -204,26 +210,32 @@ impl Rpc {
 			"authenticate" => match params.take_one() {
 				Value::None => rpc.write().await.invalidate().await,
 				Value::Strand(v) => rpc.write().await.authenticate(v).await,
+			// Authenticate using an authentication token
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"kill" => match params.take_one() {
 				v if v.is_uuid() => rpc.read().await.kill(v).await,
+			// Kill a live query using a query id
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"live" => match params.take_one() {
 				v if v.is_strand() => rpc.read().await.live(v).await,
+			// Setup a live query on a specific table
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"let" => match params.take_two() {
 				(Value::Strand(s), v) => rpc.write().await.set(s, v).await,
+			// Specify a connection-wide parameter
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"set" => match params.take_two() {
 				(Value::Strand(s), v) => rpc.write().await.set(s, v).await,
+			// Specify a connection-wide parameter
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"query" => match params.take_two() {
 				(Value::Strand(s), o) if o.is_none() => {
+			// Run a full SurrealQL query against the database
 					return match rpc.read().await.query(s).await {
 						Ok(v) => res::success(id, v).send(out, chn).await,
 						Err(e) => {
@@ -244,6 +256,7 @@ impl Rpc {
 			"select" => match params.take_one() {
 				v if v.is_thing() => rpc.read().await.select(v).await,
 				v if v.is_strand() => rpc.read().await.select(v).await,
+			// Select a value or values from the database
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"create" => match params.take_two() {
@@ -251,6 +264,7 @@ impl Rpc {
 				(v, o) if v.is_strand() && o.is_none() => rpc.read().await.create(v, None).await,
 				(v, o) if v.is_thing() && o.is_object() => rpc.read().await.create(v, o).await,
 				(v, o) if v.is_strand() && o.is_object() => rpc.read().await.create(v, o).await,
+			// Create a value or values in the database
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"update" => match params.take_two() {
@@ -258,6 +272,7 @@ impl Rpc {
 				(v, o) if v.is_strand() && o.is_none() => rpc.read().await.update(v, None).await,
 				(v, o) if v.is_thing() && o.is_object() => rpc.read().await.update(v, o).await,
 				(v, o) if v.is_strand() && o.is_object() => rpc.read().await.update(v, o).await,
+			// Update a value or values in the database using `CONTENT`
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"change" => match params.take_two() {
@@ -265,16 +280,19 @@ impl Rpc {
 				(v, o) if v.is_strand() && o.is_none() => rpc.read().await.change(v, None).await,
 				(v, o) if v.is_thing() && o.is_object() => rpc.read().await.change(v, o).await,
 				(v, o) if v.is_strand() && o.is_object() => rpc.read().await.change(v, o).await,
+			// Update a value or values in the database using `MERGE`
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"modify" => match params.take_two() {
 				(v, o) if v.is_thing() && o.is_array() => rpc.read().await.modify(v, o).await,
 				(v, o) if v.is_strand() && o.is_array() => rpc.read().await.modify(v, o).await,
+			// Update a value or values in the database using `PATCH`
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			"delete" => match params.take_one() {
 				v if v.is_thing() => rpc.read().await.delete(v).await,
 				v if v.is_strand() => rpc.read().await.delete(v).await,
+			// Delete a value or values from teh database
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Specify the output format for text requests
@@ -282,6 +300,7 @@ impl Rpc {
 				Ok(Value::Strand(v)) => rpc.write().await.format(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
+			// Get the current server version
 			"version" => match params.len() {
 				0 => Ok(format!("{}-{}", PKG_NAME, *PKG_VERS).into()),
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
