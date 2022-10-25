@@ -172,6 +172,10 @@ pub enum Error {
 	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
 	ComputationDepthExceeded,
 
+	/// Conversion error
+	#[error("Cannot convert from '{0}' to '{1}'")]
+	TryFromError(&'static str, &'static str),
+
 	/// Can not execute CREATE query using the specified value
 	#[error("Can not execute CREATE query using value '{value}'")]
 	CreateStatement {
