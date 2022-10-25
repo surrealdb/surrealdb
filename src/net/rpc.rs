@@ -242,26 +242,6 @@ impl Rpc {
 				Ok((Value::Strand(s), v)) => rpc.write().await.set(s, v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			// Run a full SurrealQL query against the database
-			"query" => match params.needs_one_or_two() {
-				Ok((Value::Strand(s), o)) if o.is_none() => {
-					return match rpc.read().await.query(s).await {
-						Ok(v) => res::success(id, v).send(out, chn).await,
-						Err(e) => {
-							res::failure(id, Failure::custom(e.to_string())).send(out, chn).await
-						}
-					};
-				}
-				Ok((Value::Strand(s), Value::Object(o))) => {
-					return match rpc.read().await.query_with(s, o).await {
-						Ok(v) => res::success(id, v).send(out, chn).await,
-						Err(e) => {
-							res::failure(id, Failure::custom(e.to_string())).send(out, chn).await
-						}
-					};
-				}
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
-			},
 			// Unset and clear a connection-wide parameter
 			"unset" => match params.needs_one() {
 				Ok(Value::Strand(s)) => rpc.write().await.unset(s).await,
@@ -305,6 +285,26 @@ impl Rpc {
 			// Get the current server version
 			"version" => match params.len() {
 				0 => Ok(format!("{}-{}", PKG_NAME, *PKG_VERS).into()),
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+			},
+			// Run a full SurrealQL query against the database
+			"query" => match params.needs_one_or_two() {
+				Ok((Value::Strand(s), o)) if o.is_none() => {
+					return match rpc.read().await.query(s).await {
+						Ok(v) => res::success(id, v).send(out, chn).await,
+						Err(e) => {
+							res::failure(id, Failure::custom(e.to_string())).send(out, chn).await
+						}
+					};
+				}
+				Ok((Value::Strand(s), Value::Object(o))) => {
+					return match rpc.read().await.query_with(s, o).await {
+						Ok(v) => res::success(id, v).send(out, chn).await,
+						Err(e) => {
+							res::failure(id, Failure::custom(e.to_string())).send(out, chn).await
+						}
+					};
+				}
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			_ => return res::failure(id, Failure::METHOD_NOT_FOUND).send(out, chn).await,
@@ -432,36 +432,6 @@ impl Rpc {
 		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
-		// Return the result to the client
-		Ok(res)
-	}
-
-	// ------------------------------
-	// Methods for querying
-	// ------------------------------
-
-	async fn query(&self, sql: Strand) -> Result<impl Serialize, Error> {
-		// Get a database reference
-		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
-		// Specify the query parameters
-		let var = Some(self.vars.clone());
-		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
-		// Return the result to the client
-		Ok(res)
-	}
-
-	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<impl Serialize, Error> {
-		// Get a database reference
-		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
-		// Specify the query parameters
-		let var = Some(mrg! { vars.0, &self.vars });
-		// Execute the query on the database
-		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
 		// Return the result to the client
 		Ok(res)
 	}
@@ -640,6 +610,36 @@ impl Rpc {
 			true => res.remove(0).result?.first(),
 			false => res.remove(0).result?,
 		};
+		// Return the result to the client
+		Ok(res)
+	}
+
+	// ------------------------------
+	// Methods for querying
+	// ------------------------------
+
+	async fn query(&self, sql: Strand) -> Result<impl Serialize, Error> {
+		// Get a database reference
+		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
+		// Specify the query parameters
+		let var = Some(self.vars.clone());
+		// Execute the query on the database
+		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
+		// Return the result to the client
+		Ok(res)
+	}
+
+	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<impl Serialize, Error> {
+		// Get a database reference
+		let kvs = DB.get().unwrap();
+		// Get local copy of options
+		let opt = CF.get().unwrap();
+		// Specify the query parameters
+		let var = Some(mrg! { vars.0, &self.vars });
+		// Execute the query on the database
+		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
 		// Return the result to the client
 		Ok(res)
 	}
