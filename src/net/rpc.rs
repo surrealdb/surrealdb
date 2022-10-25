@@ -256,6 +256,11 @@ impl Rpc {
 			"select" => match params.take_one() {
 				v if v.is_thing() => rpc.read().await.select(v).await,
 				v if v.is_strand() => rpc.read().await.select(v).await,
+			// Unset and clear a connection-wide parameter
+			"unset" => match params.needs_one() {
+				Ok(Value::Strand(s)) => rpc.write().await.unset(s).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+			},
 			// Select a value or values from the database
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
@@ -377,17 +382,17 @@ impl Rpc {
 
 	async fn set(&mut self, key: Strand, val: Value) -> Result<Value, Error> {
 		match val {
-			// Remove the variable if the value is NULL
-			v if v.is_null() => {
-				self.vars.remove(&key.0);
-				Ok(Value::Null)
-			}
-			// Store the variable if not NULL
-			v => {
-				self.vars.insert(key.0, v);
-				Ok(Value::Null)
-			}
-		}
+			// Remove the variable if undefined
+			Value::None => self.vars.remove(&key.0),
+			// Store the variable if defined
+			v => self.vars.insert(key.0, v),
+		};
+		Ok(Value::Null)
+	}
+
+	async fn unset(&mut self, key: Strand) -> Result<Value, Error> {
+		self.vars.remove(&key.0);
+		Ok(Value::Null)
 	}
 
 	// ------------------------------
