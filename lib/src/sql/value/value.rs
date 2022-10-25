@@ -847,20 +847,10 @@ impl Value {
 		}
 	}
 
-	pub fn make_table(self) -> Value {
+	pub fn could_be_table(self) -> Value {
 		match self {
-			Value::Table(_) => self,
-			Value::Strand(v) => Value::Table(Table(v.0)),
-			_ => Value::Table(Table(self.as_strand().0)),
-		}
-	}
-
-	pub fn make_table_or_thing(self) -> Value {
-		match self {
-			Value::Table(_) => self,
-			Value::Thing(_) => self,
-			Value::Strand(v) => Value::Table(Table(v.0)),
-			_ => Value::Table(Table(self.as_strand().0)),
+			Value::Strand(v) => Table::from(v.0).into(),
+			_ => self,
 		}
 	}
 

@@ -373,7 +373,7 @@ impl Rpc {
 		let sql = "LIVE SELECT * FROM $tb";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("tb") => tb.make_table(),
+			String::from("tb") => tb.could_be_table(),
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -427,7 +427,7 @@ impl Rpc {
 		let sql = "SELECT * FROM $what";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.make_table_or_thing(),
+			String::from("what") => what.could_be_table(),
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -451,8 +451,8 @@ impl Rpc {
 		let sql = "CREATE $what CONTENT $data RETURN AFTER";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.make_table_or_thing(),
 			String::from("data") => data.into().into(),
+			String::from("what") => what.could_be_table(),
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -476,8 +476,8 @@ impl Rpc {
 		let sql = "UPDATE $what CONTENT $data RETURN AFTER";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.make_table_or_thing(),
 			String::from("data") => data.into().into(),
+			String::from("what") => what.could_be_table(),
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -501,8 +501,8 @@ impl Rpc {
 		let sql = "UPDATE $what MERGE $data RETURN AFTER";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.make_table_or_thing(),
 			String::from("data") => data.into().into(),
+			String::from("what") => what.could_be_table(),
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -526,8 +526,8 @@ impl Rpc {
 		let sql = "UPDATE $what PATCH $data RETURN DIFF";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.make_table_or_thing(),
 			String::from("data") => data.into().into(),
+			String::from("what") => what.could_be_table(),
 			=> &self.vars
 		});
 		// Execute the query on the database
@@ -551,7 +551,7 @@ impl Rpc {
 		let sql = "DELETE $what";
 		// Specify the query parameters
 		let var = Some(map! {
-			String::from("what") => what.make_table_or_thing(),
+			String::from("what") => what.could_be_table(),
 			=> &self.vars
 		});
 		// Execute the query on the database
