@@ -174,7 +174,7 @@ pub enum Error {
 
 	/// Conversion error
 	#[error("Cannot convert from '{0}' to '{1}'")]
-	TryFromError(&'static str, &'static str),
+	TryFromError(String, &'static str),
 
 	/// Can not execute CREATE query using the specified value
 	#[error("Can not execute CREATE query using value '{value}'")]

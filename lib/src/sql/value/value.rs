@@ -469,7 +469,7 @@ impl TryFrom<Value> for i64 {
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFromError("Value", "i64")),
+			_ => Err(Error::TryFromError(value.to_string(), "i64")),
 		}
 	}
 }
@@ -479,7 +479,7 @@ impl TryFrom<Value> for f64 {
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFromError("Value", "f64")),
+			_ => Err(Error::TryFromError(value.to_string(), "f64")),
 		}
 	}
 }
@@ -489,7 +489,7 @@ impl TryFrom<Value> for BigDecimal {
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Number(x) => x.try_into(),
-			_ => Err(Error::TryFromError("Value", "BigDecimal")),
+			_ => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
 		}
 	}
 }
@@ -499,7 +499,7 @@ impl TryFrom<Value> for String {
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Strand(x) => Ok(x.into()),
-			_ => Err(Error::TryFromError("Value", "String")),
+			_ => Err(Error::TryFromError(value.to_string(), "String")),
 		}
 	}
 }
@@ -510,7 +510,7 @@ impl TryFrom<Value> for bool {
 		match value {
 			Value::True => Ok(true),
 			Value::False => Ok(false),
-			_ => Err(Error::TryFromError("Value", "bool")),
+			_ => Err(Error::TryFromError(value.to_string(), "bool")),
 		}
 	}
 }
@@ -520,7 +520,7 @@ impl TryFrom<Value> for std::time::Duration {
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Duration(x) => Ok(x.into()),
-			_ => Err(Error::TryFromError("Value", "time::Duration")),
+			_ => Err(Error::TryFromError(value.to_string(), "time::Duration")),
 		}
 	}
 }
@@ -530,7 +530,7 @@ impl TryFrom<Value> for DateTime<Utc> {
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
 			Value::Datetime(x) => Ok(x.into()),
-			_ => Err(Error::TryFromError("Value", "chrono::DateTime<Utc>")),
+			_ => Err(Error::TryFromError(value.to_string(), "chrono::DateTime<Utc>")),
 		}
 	}
 }

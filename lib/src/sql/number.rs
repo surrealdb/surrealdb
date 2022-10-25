@@ -125,7 +125,7 @@ impl TryFrom<Number> for i64 {
 	fn try_from(value: Number) -> Result<Self, Self::Error> {
 		match value {
 			Number::Int(x) => Ok(x),
-			_ => Err(Error::TryFromError("Number", "i64")),
+			_ => Err(Error::TryFromError(value.to_string(), "i64")),
 		}
 	}
 }
@@ -135,7 +135,7 @@ impl TryFrom<Number> for f64 {
 	fn try_from(value: Number) -> Result<Self, Self::Error> {
 		match value {
 			Number::Float(x) => Ok(x),
-			_ => Err(Error::TryFromError("Number", "f64")),
+			_ => Err(Error::TryFromError(value.to_string(), "f64")),
 		}
 	}
 }
@@ -145,7 +145,7 @@ impl TryFrom<Number> for BigDecimal {
 	fn try_from(value: Number) -> Result<Self, Self::Error> {
 		match value {
 			Number::Decimal(x) => Ok(x),
-			_ => Err(Error::TryFromError("Number", "BigDecimal")),
+			_ => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
 		}
 	}
 }
