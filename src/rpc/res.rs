@@ -14,6 +14,7 @@ pub enum Output {
 
 #[derive(Serialize)]
 pub struct Response<T> {
+	#[serde(skip_serializing_if = "Option::is_none")]
 	id: Option<Value>,
 	#[serde(flatten)]
 	content: Content<T>,
