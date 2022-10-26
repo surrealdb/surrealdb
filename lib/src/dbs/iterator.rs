@@ -250,7 +250,7 @@ impl Iterator {
 								}
 								_ => {
 									let x = vals.first();
-									let x = v.compute(ctx, opt, txn, Some(&x)).await?;
+									let x = i.compute(ctx, opt, txn, Some(&x)).await?;
 									obj.set(ctx, opt, txn, i, x).await?;
 								}
 							}
