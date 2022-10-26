@@ -41,6 +41,10 @@ pub enum Error {
 	#[error("The key being inserted already exists")]
 	TxKeyAlreadyExists,
 
+	/// It's is not possible to convert between the two types
+	#[error("Cannot convert from '{0}' to '{1}'")]
+	TryFromError(String, &'static str),
+
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
 	NsEmpty,
@@ -171,10 +175,6 @@ pub enum Error {
 	/// Reached excessive computation depth due to functions, subqueries, or futures
 	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
 	ComputationDepthExceeded,
-
-	/// Conversion error
-	#[error("Cannot convert from '{0}' to '{1}'")]
-	TryFromError(String, &'static str),
 
 	/// Can not execute CREATE query using the specified value
 	#[error("Can not execute CREATE query using value '{value}'")]
