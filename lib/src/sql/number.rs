@@ -1,3 +1,4 @@
+use crate::err::Error;
 use crate::sql::ending::number as ending;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
@@ -116,6 +117,36 @@ impl From<String> for Number {
 impl From<BigDecimal> for Number {
 	fn from(v: BigDecimal) -> Self {
 		Self::Decimal(v)
+	}
+}
+
+impl TryFrom<Number> for i64 {
+	type Error = Error;
+	fn try_from(value: Number) -> Result<Self, Self::Error> {
+		match value {
+			Number::Int(x) => Ok(x),
+			_ => Err(Error::TryFromError(value.to_string(), "i64")),
+		}
+	}
+}
+
+impl TryFrom<Number> for f64 {
+	type Error = Error;
+	fn try_from(value: Number) -> Result<Self, Self::Error> {
+		match value {
+			Number::Float(x) => Ok(x),
+			_ => Err(Error::TryFromError(value.to_string(), "f64")),
+		}
+	}
+}
+
+impl TryFrom<Number> for BigDecimal {
+	type Error = Error;
+	fn try_from(value: Number) -> Result<Self, Self::Error> {
+		match value {
+			Number::Decimal(x) => Ok(x),
+			_ => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
+		}
 	}
 }
 

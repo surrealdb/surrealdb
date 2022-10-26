@@ -44,6 +44,12 @@ impl From<&str> for Duration {
 	}
 }
 
+impl From<Duration> for time::Duration {
+	fn from(s: Duration) -> Self {
+		s.0
+	}
+}
+
 impl Deref for Duration {
 	type Target = time::Duration;
 	fn deref(&self) -> &Self::Target {

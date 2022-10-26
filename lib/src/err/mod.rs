@@ -41,6 +41,10 @@ pub enum Error {
 	#[error("The key being inserted already exists")]
 	TxKeyAlreadyExists,
 
+	/// It's is not possible to convert between the two types
+	#[error("Cannot convert from '{0}' to '{1}'")]
+	TryFromError(String, &'static str),
+
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
 	NsEmpty,

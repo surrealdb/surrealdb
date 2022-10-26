@@ -43,6 +43,12 @@ impl Deref for Strand {
 	}
 }
 
+impl From<Strand> for String {
+	fn from(s: Strand) -> Self {
+		s.0
+	}
+}
+
 impl Strand {
 	/// Get the underlying String slice
 	pub fn as_str(&self) -> &str {

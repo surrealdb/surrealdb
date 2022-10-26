@@ -51,6 +51,12 @@ impl Deref for Datetime {
 	}
 }
 
+impl From<Datetime> for DateTime<Utc> {
+	fn from(x: Datetime) -> Self {
+		x.0
+	}
+}
+
 impl Datetime {
 	/// Convert the Datetime to a raw String
 	pub fn to_raw(&self) -> String {

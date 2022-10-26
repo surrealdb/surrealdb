@@ -464,6 +464,77 @@ impl From<Id> for Value {
 	}
 }
 
+impl TryFrom<Value> for i64 {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => x.try_into(),
+			_ => Err(Error::TryFromError(value.to_string(), "i64")),
+		}
+	}
+}
+
+impl TryFrom<Value> for f64 {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => x.try_into(),
+			_ => Err(Error::TryFromError(value.to_string(), "f64")),
+		}
+	}
+}
+
+impl TryFrom<Value> for BigDecimal {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => x.try_into(),
+			_ => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
+		}
+	}
+}
+
+impl TryFrom<Value> for String {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Strand(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "String")),
+		}
+	}
+}
+
+impl TryFrom<Value> for bool {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::True => Ok(true),
+			Value::False => Ok(false),
+			_ => Err(Error::TryFromError(value.to_string(), "bool")),
+		}
+	}
+}
+
+impl TryFrom<Value> for std::time::Duration {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Duration(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "time::Duration")),
+		}
+	}
+}
+
+impl TryFrom<Value> for DateTime<Utc> {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Datetime(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "chrono::DateTime<Utc>")),
+		}
+	}
+}
+
 impl Value {
 	// -----------------------------------
 	// Initial record value
