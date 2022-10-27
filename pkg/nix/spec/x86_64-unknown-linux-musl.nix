@@ -6,7 +6,6 @@
   buildSpec = with pkgs; {
     nativeBuildInputs = with pkgsStatic; [ stdenv.cc openssl ];
 
-    CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
     CARGO_BUILD_TARGET = target;
 
     OPENSSL_NO_VENDOR = "true";

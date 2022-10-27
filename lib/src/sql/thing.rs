@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_id;
+use crate::sql::escape::escape_rid;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
 use crate::sql::serde::is_internal_serialization;
@@ -11,14 +11,12 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::character::complete::char;
+use nom::sequence::delimited;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-const SINGLE: char = '\'';
-const DOUBLE: char = '"';
-
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store, Hash)]
 pub struct Thing {
 	pub tb: String,
 	pub id: Id,
@@ -46,6 +44,7 @@ impl From<(&str, &str)> for Thing {
 }
 
 impl Thing {
+	/// Convert the Thing to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}
@@ -53,7 +52,7 @@ impl Thing {
 
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", escape_id(&self.tb), self.id)
+		write!(f, "{}:{}", escape_rid(&self.tb), self.id)
 	}
 }
 
@@ -101,15 +100,18 @@ impl Serialize for Thing {
 }
 
 pub fn thing(i: &str) -> IResult<&str, Thing> {
-	let (i, v) = thing_raw(i)?;
-	Ok((i, v))
+	alt((thing_raw, thing_single, thing_double))(i)
+}
+
+fn thing_single(i: &str) -> IResult<&str, Thing> {
+	delimited(char('\''), thing_raw, char('\''))(i)
+}
+
+fn thing_double(i: &str) -> IResult<&str, Thing> {
+	delimited(char('\"'), thing_raw, char('\"'))(i)
 }
 
 fn thing_raw(i: &str) -> IResult<&str, Thing> {
-	alt((thing_normal, thing_single, thing_double))(i)
-}
-
-fn thing_normal(i: &str) -> IResult<&str, Thing> {
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, v) = id(i)?;
@@ -120,20 +122,6 @@ fn thing_normal(i: &str) -> IResult<&str, Thing> {
 			id: v,
 		},
 	))
-}
-
-fn thing_single(i: &str) -> IResult<&str, Thing> {
-	let (i, _) = char(SINGLE)(i)?;
-	let (i, v) = thing_normal(i)?;
-	let (i, _) = char(SINGLE)(i)?;
-	Ok((i, v))
-}
-
-fn thing_double(i: &str) -> IResult<&str, Thing> {
-	let (i, _) = char(DOUBLE)(i)?;
-	let (i, v) = thing_normal(i)?;
-	let (i, _) = char(DOUBLE)(i)?;
-	Ok((i, v))
 }
 
 #[cfg(test)]
@@ -214,7 +202,7 @@ mod tests {
 		let res = thing(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#"test:{ location: "GBR", year: 2022 }"#, format!("{}", out));
+		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
 		assert_eq!(
 			out,
 			Thing {
@@ -233,7 +221,7 @@ mod tests {
 		let res = thing(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#"test:["GBR", 2022]"#, format!("{}", out));
+		assert_eq!("test:['GBR', 2022]", format!("{}", out));
 		assert_eq!(
 			out,
 			Thing {

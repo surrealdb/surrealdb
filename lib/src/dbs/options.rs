@@ -23,8 +23,6 @@ pub struct Options {
 	dive: u8,
 	// Whether live queries are allowed?
 	pub live: bool,
-	// Should we debug query response SQL?
-	pub debug: bool,
 	// Should we force tables/events to re-run?
 	pub force: bool,
 	// Should we run permissions checks?
@@ -58,7 +56,6 @@ impl Options {
 			dive: 0,
 			live: false,
 			perms: true,
-			debug: false,
 			force: false,
 			strict: false,
 			fields: true,
@@ -96,17 +93,6 @@ impl Options {
 			})
 		} else {
 			Err(Error::ComputationDepthExceeded)
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn debug(&self, v: bool) -> Options {
-		Options {
-			auth: self.auth.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			debug: v,
-			..*self
 		}
 	}
 

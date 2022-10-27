@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Part {
 	All,
 	Last,
@@ -91,7 +91,7 @@ impl From<&str> for Part {
 }
 
 impl Part {
-	// Returns a yield if an alias is specified
+	/// Returns a yield if an alias is specified
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {
 			Part::Graph(v) => v.alias.as_ref(),

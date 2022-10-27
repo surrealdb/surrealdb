@@ -14,7 +14,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Param(pub Idiom);
 
 impl From<Idiom> for Param {
@@ -83,6 +83,12 @@ impl fmt::Display for Param {
 pub fn param(i: &str) -> IResult<&str, Param> {
 	let (i, _) = char('$')(i)?;
 	let (i, v) = idiom::param(i)?;
+	Ok((i, Param::from(v)))
+}
+
+pub fn basic(i: &str) -> IResult<&str, Param> {
+	let (i, _) = char('$')(i)?;
+	let (i, v) = idiom::basic(i)?;
 	Ok((i, Param::from(v)))
 }
 

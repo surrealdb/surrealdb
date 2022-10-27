@@ -11,7 +11,7 @@ use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct OptionStatement {
 	pub name: Ident,
 	pub what: bool,

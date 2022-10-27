@@ -17,6 +17,7 @@ mod cnf;
 mod ctx;
 mod dbs;
 mod doc;
+mod env;
 mod err;
 mod exe;
 mod fnc;

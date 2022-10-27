@@ -44,7 +44,7 @@ impl Iterator for IntoIter {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Model {
 	Count(String, u64),
 	Range(String, u64, u64),

@@ -26,7 +26,7 @@ use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub what: Values,
@@ -43,19 +43,16 @@ pub struct SelectStatement {
 }
 
 impl SelectStatement {
-	/// Return the statement limit number or 0 if not set
-	pub fn limit(&self) -> usize {
-		match self.limit {
-			Some(Limit(v)) => v,
-			None => 0,
-		}
-	}
-
-	/// Return the statement start number or 0 if not set
-	pub fn start(&self) -> usize {
-		match self.start {
-			Some(Start(v)) => v,
-			None => 0,
+	pub(crate) async fn limit(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&Value>,
+	) -> Result<usize, Error> {
+		match &self.limit {
+			Some(v) => v.process(ctx, opt, txn, doc).await,
+			None => Ok(0),
 		}
 	}
 

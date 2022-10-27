@@ -42,7 +42,6 @@ pub(crate) mod query;
 pub(crate) mod range;
 pub(crate) mod regex;
 pub(crate) mod script;
-pub(crate) mod serde;
 pub(crate) mod split;
 pub(crate) mod start;
 pub(crate) mod statement;
@@ -59,6 +58,7 @@ pub(crate) mod view;
 #[cfg(test)]
 pub(crate) mod test;
 
+pub mod serde;
 pub mod statements;
 
 pub use self::parser::*;

@@ -26,7 +26,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Object(pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<String, Value>> for Object {

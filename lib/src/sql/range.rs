@@ -5,7 +5,7 @@ use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Range {
 	pub tb: String,
 	pub beg: Id,
@@ -55,7 +55,7 @@ mod tests {
 		let res = range(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#"person:["USA", 10]..["USA", 100]"#, format!("{}", out));
+		assert_eq!("person:['USA', 10]..['USA', 100]", format!("{}", out));
 	}
 
 	#[test]
@@ -65,7 +65,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
-			r#"person:{ country: "USA", position: 10 }..{ country: "USA", position: 100 }"#,
+			"person:{ country: 'USA', position: 10 }..{ country: 'USA', position: 100 }",
 			format!("{}", out)
 		);
 	}

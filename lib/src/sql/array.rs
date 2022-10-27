@@ -15,12 +15,13 @@ use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {
@@ -318,12 +319,15 @@ pub trait Uniq<T> {
 
 impl Uniq<Array> for Array {
 	fn uniq(mut self) -> Array {
-		for x in (0..self.len()).rev() {
-			for y in (x + 1..self.len()).rev() {
-				if self[x] == self[y] {
-					self.remove(y);
-				}
+		let mut set: HashSet<&Value> = HashSet::new();
+		let mut to_remove: Vec<usize> = Vec::new();
+		for (i, item) in self.iter().enumerate() {
+			if !set.insert(item) {
+				to_remove.push(i);
 			}
+		}
+		for i in to_remove.iter().rev() {
+			self.remove(*i);
 		}
 		self
 	}
@@ -353,6 +357,16 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn array_empty() {
+		let sql = "[]";
+		let res = array(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("[]", format!("{}", out));
+		assert_eq!(out.0.len(), 0);
+	}
+
+	#[test]
 	fn array_normal() {
 		let sql = "[1,2,3]";
 		let res = array(sql);
@@ -380,5 +394,15 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("[1, 2, 3 + 1]", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
+	}
+
+	#[test]
+	fn array_fnc_uniq_normal() {
+		let sql = "[1,2,1,3,3,4]";
+		let res = array(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1.uniq();
+		assert_eq!("[1, 2, 3, 4]", format!("{}", out));
+		assert_eq!(out.0.len(), 4);
 	}
 }

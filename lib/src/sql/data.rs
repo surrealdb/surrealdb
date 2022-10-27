@@ -1,3 +1,6 @@
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
@@ -15,7 +18,7 @@ use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Data {
 	EmptyExpression,
 	SetExpression(Vec<(Idiom, Operator, Value)>),
@@ -35,16 +38,36 @@ impl Default for Data {
 }
 
 impl Data {
-	// Fetch
-	pub(crate) fn rid(&self, tb: &Table) -> Result<Thing, Error> {
+	/// Fetch the 'id' field if one has been specified
+	pub(crate) async fn rid(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		tb: &Table,
+	) -> Result<Thing, Error> {
 		match self {
-			Self::MergeExpression(v) => v.rid().generate(tb, false),
-			Self::ReplaceExpression(v) => v.rid().generate(tb, false),
-			Self::ContentExpression(v) => v.rid().generate(tb, false),
+			Self::MergeExpression(v) => {
+				// This MERGE expression has an 'id' field
+				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
+			}
+			Self::ReplaceExpression(v) => {
+				// This REPLACE expression has an 'id' field
+				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
+			}
+			Self::ContentExpression(v) => {
+				// This CONTENT expression has an 'id' field
+				v.compute(ctx, opt, txn, None).await?.rid().generate(tb, false)
+			}
 			Self::SetExpression(v) => match v.iter().find(|f| f.0.is_id()) {
-				Some((_, _, v)) => v.clone().generate(tb, false),
+				Some((_, _, v)) => {
+					// This SET expression has an 'id' field
+					v.compute(ctx, opt, txn, None).await?.generate(tb, false)
+				}
+				// This SET expression had no 'id' field
 				_ => Ok(tb.generate()),
 			},
+			// Generate a random id for all other data clauses
 			_ => Ok(tb.generate()),
 		}
 	}

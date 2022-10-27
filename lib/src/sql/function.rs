@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Function {
 	Future(Value),
 	Cast(String, Value),
@@ -396,6 +396,8 @@ fn function_rand(i: &str) -> IResult<&str, &str> {
 		tag("rand::int"),
 		tag("rand::string"),
 		tag("rand::time"),
+		tag("rand::uuid::v4"),
+		tag("rand::uuid::v7"),
 		tag("rand::uuid"),
 		tag("rand"),
 	))(i)

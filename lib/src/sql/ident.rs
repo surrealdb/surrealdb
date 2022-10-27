@@ -21,7 +21,7 @@ const BRACKET_END: &str = r#"⟩"#;
 const BACKTICK: &str = r#"`"#;
 const BACKTICK_ESC: &str = r#"\`"#;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Ident(pub String);
 
 impl From<String> for Ident {
@@ -44,8 +44,13 @@ impl Deref for Ident {
 }
 
 impl Ident {
+	/// Convert the Ident to a raw String
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
+	}
+	/// Returns a yield if an alias is specified
+	pub(crate) fn is_id(&self) -> bool {
+		self.0.as_str() == "id"
 	}
 }
 

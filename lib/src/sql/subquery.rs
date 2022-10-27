@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Subquery {
 	Value(Value),
 	Ifelse(IfelseStatement),
@@ -76,7 +76,7 @@ impl Subquery {
 				// Process subquery
 				let res = v.compute(&ctx, opt, txn, doc).await?;
 				// Process result
-				match v.limit() {
+				match v.limit(&ctx, opt, txn, doc).await? {
 					1 => match v.expr.single() {
 						Some(v) => res.first().get(&ctx, opt, txn, &v).await,
 						None => res.first().ok(),

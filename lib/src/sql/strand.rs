@@ -1,5 +1,6 @@
+use crate::sql::error::Error::ParserError;
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_strand;
+use crate::sql::escape::escape_str;
 use crate::sql::serde::is_internal_serialization;
 use nom::branch::alt;
 use nom::bytes::complete::escaped_transform;
@@ -7,6 +8,7 @@ use nom::bytes::complete::is_not;
 use nom::bytes::complete::take_while_m_n;
 use nom::character::complete::char;
 use nom::combinator::value;
+use nom::Err::Error;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops;
@@ -19,7 +21,7 @@ const SINGLE_ESC: &str = r#"\'"#;
 const DOUBLE: char = '"';
 const DOUBLE_ESC: &str = r#"\""#;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Strand(pub String);
 
 impl From<String> for Strand {
@@ -41,13 +43,22 @@ impl Deref for Strand {
 	}
 }
 
+impl From<Strand> for String {
+	fn from(s: Strand) -> Self {
+		s.0
+	}
+}
+
 impl Strand {
+	/// Get the underlying String slice
 	pub fn as_str(&self) -> &str {
 		self.0.as_str()
 	}
+	/// Returns the underlying String
 	pub fn as_string(self) -> String {
 		self.0
 	}
+	/// Convert the Strand to a raw String
 	pub fn to_raw(self) -> String {
 		self.0
 	}
@@ -55,7 +66,7 @@ impl Strand {
 
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&escape_strand(&self.0), f)
+		Display::fmt(&escape_str(&self.0), f)
 	}
 }
 
@@ -148,13 +159,23 @@ fn strand_double(i: &str) -> IResult<&str, String> {
 fn strand_unicode(i: &str) -> IResult<&str, char> {
 	// Read the \u character
 	let (i, _) = char('u')(i)?;
-	// Let's read the next 4 ascii hexadecimal characters
-	let (i, v) = take_while_m_n(1, 4, |c: char| c.is_ascii_hexdigit())(i)?;
-	// We can convert this to u32 as we only have 4 chars
-	let v = u32::from_str_radix(v, 16).unwrap();
+	// Let's read the next 6 ascii hexadecimal characters
+	let (i, v) = take_while_m_n(1, 6, |c: char| c.is_ascii_hexdigit())(i)?;
+	// We can convert this to u32 as we only have 6 chars
+	let v = match u32::from_str_radix(v, 16) {
+		// We found an invalid unicode sequence
+		Err(_) => return Err(Error(ParserError(i))),
+		// The unicode sequence was valid
+		Ok(v) => v,
+	};
 	// We can convert this to char as we know it is valid
-	let v = std::char::from_u32(v).unwrap();
-	// Return the unicode char
+	let v = match std::char::from_u32(v) {
+		// We found an invalid unicode sequence
+		None => return Err(Error(ParserError(i))),
+		// The unicode sequence was valid
+		Some(v) => v,
+	};
+	// Return the char
 	Ok((i, v))
 }
 
@@ -169,7 +190,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""""#, format!("{}", out));
+		assert_eq!(r#"''"#, format!("{}", out));
 		assert_eq!(out, Strand::from(""));
 	}
 
@@ -179,7 +200,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""test""#, format!("{}", out));
+		assert_eq!(r#"'test'"#, format!("{}", out));
 		assert_eq!(out, Strand::from("test"));
 	}
 
@@ -189,7 +210,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""test""#, format!("{}", out));
+		assert_eq!(r#"'test'"#, format!("{}", out));
 		assert_eq!(out, Strand::from("test"));
 	}
 
@@ -209,7 +230,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""te"st""#, format!("{}", out));
+		assert_eq!(r#"'te"st'"#, format!("{}", out));
 		assert_eq!(out, Strand::from(r#"te"st"#));
 	}
 
@@ -219,7 +240,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"te\"st\n\tand\u{08}some\u{05d9}\"", format!("{}", out));
+		assert_eq!("'te\"st\n\tand\u{08}some\u{05d9}'", format!("{}", out));
 		assert_eq!(out, Strand::from("te\"st\n\tand\u{08}some\u{05d9}"));
 	}
 }

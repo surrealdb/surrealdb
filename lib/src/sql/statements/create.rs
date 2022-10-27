@@ -19,7 +19,7 @@ use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct CreateStatement {
 	pub what: Values,
 	pub data: Option<Data>,
@@ -54,7 +54,7 @@ impl CreateStatement {
 			match v {
 				Value::Table(v) => match &self.data {
 					// There is a data clause so check for a record id
-					Some(data) => match data.rid(&v) {
+					Some(data) => match data.rid(ctx, opt, txn, &v).await {
 						// There was a problem creating the record id
 						Err(e) => return Err(e),
 						// There is an id field so use the record id

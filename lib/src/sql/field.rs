@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Fields(pub Vec<Field>);
 
 impl Fields {
@@ -191,7 +191,7 @@ pub fn fields(i: &str) -> IResult<&str, Fields> {
 	Ok((i, Fields(v)))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Field {
 	All,
 	Alone(Value),

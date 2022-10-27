@@ -21,7 +21,7 @@ use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct LiveStatement {
 	pub id: Uuid,
 	pub expr: Fields,
