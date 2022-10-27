@@ -1,3 +1,5 @@
+#![allow(clippy::derive_hash_xor_eq)]
+
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
