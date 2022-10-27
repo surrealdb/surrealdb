@@ -59,6 +59,12 @@ impl From<Vec<Operation>> for Array {
 	}
 }
 
+impl From<Array> for Vec<Value> {
+	fn from(s: Array) -> Self {
+		s.0
+	}
+}
+
 impl Deref for Array {
 	type Target = Vec<Value>;
 	fn deref(&self) -> &Self::Target {

@@ -535,6 +535,36 @@ impl TryFrom<Value> for DateTime<Utc> {
 	}
 }
 
+impl TryFrom<Value> for uuid::Uuid {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Uuid(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "uuid::Uuid")),
+		}
+	}
+}
+
+impl TryFrom<Value> for Vec<Value> {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Array(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "Vec<Value>")),
+		}
+	}
+}
+
+impl TryFrom<Value> for Object {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Object(x) => Ok(x),
+			_ => Err(Error::TryFromError(value.to_string(), "Object")),
+		}
+	}
+}
+
 impl Value {
 	// -----------------------------------
 	// Initial record value
