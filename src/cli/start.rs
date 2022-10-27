@@ -2,6 +2,7 @@ use super::config;
 use super::log;
 use crate::cnf::LOGO;
 use crate::dbs;
+use crate::env;
 use crate::err::Error;
 use crate::iam;
 use crate::net;
@@ -21,6 +22,8 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	println!("{}", LOGO);
 	// Setup the cli options
 	config::init(matches);
+	// Initiate environment
+	env::init().await?;
 	// Initiate master auth
 	iam::init().await?;
 	// Start the kvs server

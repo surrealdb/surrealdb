@@ -14,6 +14,9 @@ Y88b  d88P Y88b 888 888     888     Y8b.     888  888 888 888  .d88P 888   d88P
 ";
 
 /// The publicly visible name of the server
+pub const PKG_NAME: &str = "surrealdb";
+
+/// The publicly visible name of the server
 pub const SERVER_NAME: &str = "SurrealDB";
 
 /// The public endpoint for the administration interface
@@ -25,11 +28,8 @@ pub const MAX_CONCURRENT_CALLS: usize = 24;
 /// Specifies the frequency with which ping messages should be sent to the client.
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
-/// The package identifier of this build
-pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");
-
 /// The version identifier of this build
-pub static PKG_VERS: Lazy<String> = Lazy::new(|| match option_env!("SURREAL_BUILD_METADATA") {
+pub static PKG_VERSION: Lazy<String> = Lazy::new(|| match option_env!("SURREAL_BUILD_METADATA") {
 	Some(metadata) if !metadata.trim().is_empty() => {
 		let version = env!("CARGO_PKG_VERSION");
 		format!("{version}+{metadata}")

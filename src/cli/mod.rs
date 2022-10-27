@@ -5,7 +5,7 @@ mod import;
 mod log;
 mod sql;
 mod start;
-pub(crate) mod version;
+mod version;
 
 pub use config::CF;
 

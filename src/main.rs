@@ -18,6 +18,7 @@ mod mac;
 mod cli;
 mod cnf;
 mod dbs;
+mod env;
 mod err;
 mod iam;
 mod net;
