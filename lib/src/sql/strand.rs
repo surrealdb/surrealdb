@@ -21,7 +21,7 @@ const SINGLE_ESC: &str = r#"\'"#;
 const DOUBLE: char = '"';
 const DOUBLE_ESC: &str = r#"\""#;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Strand(pub String);
 
 impl From<String> for Strand {

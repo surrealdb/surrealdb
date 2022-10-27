@@ -14,7 +14,7 @@ use std::ops;
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Datetime(pub DateTime<Utc>);
 
 impl Default for Datetime {

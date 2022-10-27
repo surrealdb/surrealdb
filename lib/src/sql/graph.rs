@@ -13,7 +13,7 @@ use nom::combinator::opt;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Graph {
 	pub dir: Dir,
 	pub what: Tables,

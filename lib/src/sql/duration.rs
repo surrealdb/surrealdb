@@ -20,7 +20,7 @@ static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
 static SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
 static SECONDS_PER_MINUTE: u64 = 60;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Duration(pub time::Duration);
 
 impl From<time::Duration> for Duration {

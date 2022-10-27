@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
@@ -102,7 +102,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineNamespaceStatement {
 	pub name: Ident,
 }
@@ -151,7 +151,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineDatabaseStatement {
 	pub name: Ident,
 }
@@ -205,7 +205,7 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -328,7 +328,7 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -447,7 +447,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineScopeStatement {
 	pub name: Ident,
 	pub code: String,
@@ -530,7 +530,7 @@ fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum DefineScopeOption {
 	Session(Duration),
 	Signup(Value),
@@ -569,7 +569,7 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineTableStatement {
 	pub name: Ident,
 	pub drop: bool,
@@ -698,7 +698,7 @@ fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum DefineTableOption {
 	Drop,
 	View(View),
@@ -745,7 +745,7 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -824,7 +824,7 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -920,7 +920,7 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum DefineFieldOption {
 	Kind(Kind),
 	Value(Value),
@@ -966,7 +966,7 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineIndexStatement {
 	pub name: Ident,
 	pub what: Ident,

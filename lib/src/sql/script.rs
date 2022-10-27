@@ -23,7 +23,7 @@ const BACKTICK_ESC: &str = r#"\`"#;
 const OBJECT_BEG: &str = "{";
 const OBJECT_END: &str = "}";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Script(pub String);
 
 impl From<String> for Script {

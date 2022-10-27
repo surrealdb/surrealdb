@@ -12,7 +12,7 @@ use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store, Hash)]
 pub enum Constant {
 	MathE,
 	MathFrac1Pi,

@@ -55,7 +55,7 @@ use std::str::FromStr;
 
 static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Values(pub Vec<Value>);
 
 impl Deref for Values {
@@ -94,7 +94,7 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 	Ok((i, Values(v)))
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Store)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Store, Hash)]
 pub enum Value {
 	None,
 	Null,

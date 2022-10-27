@@ -16,7 +16,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store, Hash)]
 pub struct Thing {
 	pub tb: String,
 	pub id: Id,

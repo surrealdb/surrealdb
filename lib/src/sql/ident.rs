@@ -21,7 +21,7 @@ const BRACKET_END: &str = r#"⟩"#;
 const BACKTICK: &str = r#"`"#;
 const BACKTICK_ESC: &str = r#"\`"#;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Ident(pub String);
 
 impl From<String> for Ident {
