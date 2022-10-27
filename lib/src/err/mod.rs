@@ -97,6 +97,13 @@ pub enum Error {
 		message: String,
 	},
 
+	/// There was a problem running the specified function
+	#[error("There was a problem running the {name}() function. {message}")]
+	InvalidFunction {
+		name: String,
+		message: String,
+	},
+
 	/// The wrong quantity or magnitude of arguments was given for the specified function
 	#[error("Incorrect arguments for function {name}(). {message}")]
 	InvalidArguments {
