@@ -146,8 +146,8 @@ async fn script_function_types() -> Result<(), Error> {
 async fn script_function_module_os() -> Result<(), Error> {
 	let sql = "
 		CREATE platform:test SET version = function() {
-			const { release } = await import('os');
-			return release();
+			const { platform } = await import('os');
+			return platform();
 		};
 	";
 	let dbs = Datastore::new("memory").await?;

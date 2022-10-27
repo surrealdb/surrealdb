@@ -1,7 +1,7 @@
 use crate::cli::CF;
 use crate::cnf::MAX_CONCURRENT_CALLS;
 use crate::cnf::PKG_NAME;
-use crate::cnf::PKG_VERS;
+use crate::cnf::PKG_VERSION;
 use crate::cnf::WEBSOCKET_PING_FREQUENCY;
 use crate::dbs::DB;
 use crate::err::Error;
@@ -284,7 +284,7 @@ impl Rpc {
 			},
 			// Get the current server version
 			"version" => match params.len() {
-				0 => Ok(format!("{}-{}", PKG_NAME, *PKG_VERS).into()),
+				0 => Ok(format!("{}-{}", PKG_NAME, *PKG_VERSION).into()),
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Run a full SurrealQL query against the database
