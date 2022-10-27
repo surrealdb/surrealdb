@@ -2,7 +2,6 @@
 
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Response;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
@@ -50,7 +49,6 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
-use std::iter::FromIterator;
 use std::ops;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -152,6 +150,12 @@ impl From<bool> for Value {
 impl From<Uuid> for Value {
 	fn from(v: Uuid) -> Self {
 		Value::Uuid(v)
+	}
+}
+
+impl From<uuid::Uuid> for Value {
+	fn from(v: uuid::Uuid) -> Self {
+		Value::Uuid(Uuid(v))
 	}
 }
 
@@ -460,13 +464,74 @@ impl From<Id> for Value {
 	}
 }
 
-impl FromIterator<Response> for Vec<Value> {
-	fn from_iter<I: IntoIterator<Item = Response>>(iter: I) -> Self {
-		let mut c: Vec<Value> = vec![];
-		for i in iter {
-			c.push(i.into())
+impl TryFrom<Value> for i64 {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => x.try_into(),
+			_ => Err(Error::TryFromError(value.to_string(), "i64")),
 		}
-		c
+	}
+}
+
+impl TryFrom<Value> for f64 {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => x.try_into(),
+			_ => Err(Error::TryFromError(value.to_string(), "f64")),
+		}
+	}
+}
+
+impl TryFrom<Value> for BigDecimal {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => x.try_into(),
+			_ => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
+		}
+	}
+}
+
+impl TryFrom<Value> for String {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Strand(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "String")),
+		}
+	}
+}
+
+impl TryFrom<Value> for bool {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::True => Ok(true),
+			Value::False => Ok(false),
+			_ => Err(Error::TryFromError(value.to_string(), "bool")),
+		}
+	}
+}
+
+impl TryFrom<Value> for std::time::Duration {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Duration(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "time::Duration")),
+		}
+	}
+}
+
+impl TryFrom<Value> for DateTime<Utc> {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Datetime(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "chrono::DateTime<Utc>")),
+		}
 	}
 }
 
@@ -571,6 +636,34 @@ impl Value {
 		matches!(self, Value::Object(_))
 	}
 
+	pub fn is_number(&self) -> bool {
+		matches!(self, Value::Number(_))
+	}
+
+	pub fn is_int(&self) -> bool {
+		matches!(self, Value::Number(Number::Int(_)))
+	}
+
+	pub fn is_float(&self) -> bool {
+		matches!(self, Value::Number(Number::Float(_)))
+	}
+
+	pub fn is_decimal(&self) -> bool {
+		matches!(self, Value::Number(Number::Decimal(_)))
+	}
+
+	pub fn is_integer(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_integer())
+	}
+
+	pub fn is_positive(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_positive())
+	}
+
+	pub fn is_datetime(&self) -> bool {
+		matches!(self, Value::Datetime(_))
+	}
+
 	pub fn is_type_record(&self, types: &[Table]) -> bool {
 		match self {
 			Value::Thing(v) => types.iter().any(|tb| tb.0 == v.tb),
@@ -656,7 +749,9 @@ impl Value {
 	pub fn as_strand(self) -> Strand {
 		match self {
 			Value::Strand(v) => v,
-			_ => Strand::from(self.to_string()),
+			Value::Uuid(v) => v.to_raw().into(),
+			Value::Datetime(v) => v.to_raw().into(),
+			_ => self.to_string().into(),
 		}
 	}
 
@@ -683,6 +778,13 @@ impl Value {
 		}
 	}
 
+	pub fn as_usize(self) -> usize {
+		match self {
+			Value::Number(v) => v.as_usize(),
+			_ => 0,
+		}
+	}
+
 	// -----------------------------------
 	// Expensive conversion of value
 	// -----------------------------------
@@ -701,7 +803,9 @@ impl Value {
 	pub fn to_strand(&self) -> Strand {
 		match self {
 			Value::Strand(v) => v.clone(),
-			_ => Strand::from(self.to_string()),
+			Value::Uuid(v) => v.to_raw().into(),
+			Value::Datetime(v) => v.to_raw().into(),
+			_ => self.to_string().into(),
 		}
 	}
 
@@ -814,20 +918,10 @@ impl Value {
 		}
 	}
 
-	pub fn make_table(self) -> Value {
+	pub fn could_be_table(self) -> Value {
 		match self {
-			Value::Table(_) => self,
-			Value::Strand(v) => Value::Table(Table(v.0)),
-			_ => Value::Table(Table(self.as_strand().0)),
-		}
-	}
-
-	pub fn make_table_or_thing(self) -> Value {
-		match self {
-			Value::Table(_) => self,
-			Value::Thing(_) => self,
-			Value::Strand(v) => Value::Table(Table(v.0)),
-			_ => Value::Table(Table(self.as_strand().0)),
+			Value::Strand(v) => Table::from(v.0).into(),
+			_ => self,
 		}
 	}
 
@@ -968,7 +1062,7 @@ impl Value {
 				Value::Strand(_) => v == &other.to_datetime(),
 				_ => false,
 			},
-			_ => unreachable!(),
+			_ => self == other,
 		}
 	}
 
@@ -1013,6 +1107,10 @@ impl Value {
 	pub fn contains(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
+			Value::Thing(v) => match other {
+				Value::Strand(w) => v.to_string().contains(w.as_str()),
+				_ => v.to_string().contains(&other.to_string().as_str()),
+			},
 			Value::Strand(v) => match other {
 				Value::Strand(w) => v.contains(w.as_str()),
 				_ => v.contains(&other.to_string().as_str()),
@@ -1287,6 +1385,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(regex, Value::from),
 			map(model, Value::from),
 			map(idiom, Value::from),
+			map(range, Value::from),
 			map(thing, Value::from),
 			map(strand, Value::from),
 		)),

@@ -57,11 +57,11 @@ async fn handler(
 		Ok(Value::Object(vars)) => match crate::iam::signup::signup(&mut session, vars).await {
 			// Authentication was successful
 			Ok(v) => match output.as_deref() {
-				Some("application/json") => Ok(output::json(&Success::new(v))),
-				Some("application/cbor") => Ok(output::cbor(&Success::new(v))),
-				Some("application/msgpack") => Ok(output::pack(&Success::new(v))),
-				Some("text/plain") => Ok(output::text(v)),
-				None => Ok(output::text(v)),
+				Some("application/json") => Ok(output::json(&Success::new(v.as_string()))),
+				Some("application/cbor") => Ok(output::cbor(&Success::new(v.as_string()))),
+				Some("application/msgpack") => Ok(output::pack(&Success::new(v.as_string()))),
+				Some("text/plain") => Ok(output::text(v.as_string())),
+				None => Ok(output::text(v.as_string())),
 				// An incorrect content-type was requested
 				_ => Err(warp::reject::custom(Error::InvalidType)),
 			},

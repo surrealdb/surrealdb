@@ -44,8 +44,13 @@ impl Deref for Ident {
 }
 
 impl Ident {
+	/// Convert the Ident to a raw String
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
+	}
+	/// Returns a yield if an alias is specified
+	pub(crate) fn is_id(&self) -> bool {
+		self.0.as_str() == "id"
 	}
 }
 

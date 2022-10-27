@@ -40,26 +40,18 @@ pub fn is_digit(chr: char) -> bool {
 }
 
 #[inline]
-pub fn val_char(chr: char) -> bool {
-	chr.is_ascii_alphanumeric() || chr == '_'
+pub fn val_u8(chr: u8) -> bool {
+	is_alphanumeric(chr) || chr == b'_'
 }
 
 #[inline]
-pub fn val_u8(chr: u8) -> bool {
-	is_alphanumeric(chr) || chr == b'_'
+pub fn val_char(chr: char) -> bool {
+	chr.is_ascii_alphanumeric() || chr == '_'
 }
 
 pub fn take_u64(i: &str) -> IResult<&str, u64> {
 	let (i, v) = take_while(is_digit)(i)?;
 	match v.parse::<u64>() {
-		Ok(v) => Ok((i, v)),
-		_ => Err(Error(ParserError(i))),
-	}
-}
-
-pub fn take_usize(i: &str) -> IResult<&str, usize> {
-	let (i, v) = take_while(is_digit)(i)?;
-	match v.parse::<usize>() {
 		Ok(v) => Ok((i, v)),
 		_ => Err(Error(ParserError(i))),
 	}

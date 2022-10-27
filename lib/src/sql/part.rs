@@ -91,7 +91,7 @@ impl From<&str> for Part {
 }
 
 impl Part {
-	// Returns a yield if an alias is specified
+	/// Returns a yield if an alias is specified
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {
 			Part::Graph(v) => v.alias.as_ref(),

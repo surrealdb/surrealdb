@@ -12,6 +12,13 @@ macro_rules! map {
     }};
 }
 
+
+macro_rules! get_cfg {
+	($i:ident : $($s:expr),+) => (
+		let $i = || { $( if cfg!($i=$s) { return $s; } );+ "unknown"};
+	)
+}
+
 #[cfg(feature = "scripting")]
 macro_rules! throw_js_exception {
 	($e:ident) => {
@@ -30,4 +37,4 @@ macro_rules! throw_js_exception {
 			stack: "".to_owned(),
 		}
 	};
-}
+ }
