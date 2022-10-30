@@ -19,7 +19,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 		_ => unreachable!(),
 	};
 	// Output SurrealDB logo
-	println!("{}", LOGO);
+	println!("{LOGO}");
 	// Setup the cli options
 	config::init(matches);
 	// Initiate environment

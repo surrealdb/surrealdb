@@ -18,10 +18,10 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let ns = matches.value_of("ns").unwrap();
 	let db = matches.value_of("db").unwrap();
 	// Set the correct export URL
-	let conn = format!("{}/export", conn);
+	let conn = format!("{conn}/export");
 	// Export the data from the database
 	Client::new()
-		.get(&conn)
+		.get(conn)
 		.header(ACCEPT, "application/octet-stream")
 		.basic_auth(user, Some(pass))
 		.header("NS", ns)

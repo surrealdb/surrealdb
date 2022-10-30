@@ -27,6 +27,8 @@ use tokio::sync::RwLock;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 
+// FIXME: It finds a trait that isn't `pub` or something in this way.
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	warp::path("rpc")
 		.and(warp::path::end())
@@ -284,7 +286,7 @@ impl Rpc {
 			},
 			// Get the current server version
 			"version" => match params.len() {
-				0 => Ok(format!("{}-{}", PKG_NAME, *PKG_VERSION).into()),
+				0 => Ok(format!("{PKG_NAME}-{}", *PKG_VERSION).into()),
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Run a full SurrealQL query against the database

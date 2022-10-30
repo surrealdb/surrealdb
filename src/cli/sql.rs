@@ -19,7 +19,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// If we should pretty-print responses
 	let pretty = matches.is_present("pretty");
 	// Set the correct import URL
-	let conn = format!("{}/sql", conn);
+	let conn = format!("{conn}/sql");
 	// Create a new terminal REPL
 	let mut rl = Editor::<()>::new().unwrap();
 	// Load the command-line history
@@ -39,6 +39,9 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				// Add the entry to the history
 				rl.add_history_entry(line.as_str());
 				// Make a new remote request
+				// If use `cargo clippy --fix --allow-dirty` it will failed due to it will remove a refernce, so value will be moved.
+				// Opened issue: https://github.com/rust-lang/rust/issues/103776.
+				#[allow(clippy::needless_borrow)]
 				let res = Client::new()
 					.post(&conn)
 					.header(ACCEPT, "application/json")
@@ -57,8 +60,8 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				let res = res.body(line).send();
 				// Get the request response
 				match process(pretty, res) {
-					Ok(v) => println!("{}", v),
-					Err(e) => eprintln!("{}", e),
+					Ok(v) => println!("{v}"),
+					Err(e) => eprintln!("{e}"),
 				}
 			}
 			// The user types CTRL-C
@@ -71,7 +74,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 			}
 			// There was en error
 			Err(err) => {
-				eprintln!("Error: {:?}", err);
+				eprintln!("Error: {err:?}");
 				break;
 			}
 		}
