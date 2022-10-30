@@ -272,7 +272,7 @@ impl Rpc {
 				Ok((v, o)) => rpc.read().await.modify(v, o).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			// Delete a value or values from teh database
+			// Delete a value or values from the database
 			"delete" => match params.needs_one() {
 				Ok(v) => rpc.read().await.delete(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
