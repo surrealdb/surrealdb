@@ -1,6 +1,7 @@
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
+use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::params::Params;
 use crate::net::session;
@@ -172,7 +173,7 @@ async fn create_all(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the request body as JSON
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -285,7 +286,7 @@ async fn create_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
 	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
@@ -333,7 +334,7 @@ async fn update_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
 	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
@@ -381,7 +382,7 @@ async fn modify_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
 	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,

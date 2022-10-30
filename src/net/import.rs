@@ -1,6 +1,7 @@
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
+use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::session;
 use bytes::Bytes;
@@ -34,7 +35,7 @@ async fn handler(
 			// Get local copy of options
 			let opt = CF.get().unwrap();
 			// Convert the body to a byte slice
-			let sql = std::str::from_utf8(&sql).unwrap();
+			let sql = bytes_to_utf8(&sql)?;
 			// Execute the sql query in the database
 			match db.execute(sql, &session, None, opt.strict).await {
 				Ok(res) => match output.as_ref() {
