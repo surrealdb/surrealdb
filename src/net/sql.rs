@@ -1,6 +1,7 @@
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
+use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::params::Params;
 use crate::net::session;
@@ -46,7 +47,7 @@ async fn handler(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the received sql query
-	let sql = std::str::from_utf8(&sql).unwrap();
+	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query
 	match db.execute(sql, &session, params.parse().into(), opt.strict).await {
 		// Convert the response to JSON

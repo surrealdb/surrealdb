@@ -1,9 +1,9 @@
 use crate::err::Error;
+use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::session;
 use bytes::Bytes;
 use serde::Serialize;
-use std::str;
 use surrealdb::sql::Value;
 use surrealdb::Session;
 use warp::Filter;
@@ -50,7 +50,7 @@ async fn handler(
 	mut session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Convert the HTTP body into text
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the provided data as JSON
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
