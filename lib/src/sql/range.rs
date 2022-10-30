@@ -1,36 +1,113 @@
 use crate::sql::error::IResult;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
+use nom::branch::alt;
 use nom::character::complete::char;
+use nom::combinator::map;
+use nom::combinator::opt;
+use nom::sequence::preceded;
+use nom::sequence::terminated;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fmt;
+use std::ops::Bound;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Range {
 	pub tb: String,
-	pub beg: Id,
-	pub end: Id,
+	pub beg: Bound<Id>,
+	pub end: Bound<Id>,
+}
+
+impl PartialOrd for Range {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		match self.tb.partial_cmp(&other.tb) {
+			Some(Ordering::Equal) => match &self.beg {
+				Bound::Unbounded => match &other.beg {
+					Bound::Unbounded => Some(Ordering::Equal),
+					_ => Some(Ordering::Less),
+				},
+				Bound::Included(v) => match &other.beg {
+					Bound::Unbounded => Some(Ordering::Greater),
+					Bound::Included(w) => match v.partial_cmp(w) {
+						Some(Ordering::Equal) => match &self.end {
+							Bound::Unbounded => match &other.end {
+								Bound::Unbounded => Some(Ordering::Equal),
+								_ => Some(Ordering::Greater),
+							},
+							Bound::Included(v) => match &other.end {
+								Bound::Unbounded => Some(Ordering::Less),
+								Bound::Included(w) => v.partial_cmp(w),
+								_ => Some(Ordering::Greater),
+							},
+							Bound::Excluded(v) => match &other.end {
+								Bound::Excluded(w) => v.partial_cmp(w),
+								_ => Some(Ordering::Less),
+							},
+						},
+						ordering => ordering,
+					},
+					_ => Some(Ordering::Less),
+				},
+				Bound::Excluded(v) => match &other.beg {
+					Bound::Excluded(w) => match v.partial_cmp(w) {
+						Some(Ordering::Equal) => match &self.end {
+							Bound::Unbounded => match &other.end {
+								Bound::Unbounded => Some(Ordering::Equal),
+								_ => Some(Ordering::Greater),
+							},
+							Bound::Included(v) => match &other.end {
+								Bound::Unbounded => Some(Ordering::Less),
+								Bound::Included(w) => v.partial_cmp(w),
+								_ => Some(Ordering::Greater),
+							},
+							Bound::Excluded(v) => match &other.end {
+								Bound::Excluded(w) => v.partial_cmp(w),
+								_ => Some(Ordering::Less),
+							},
+						},
+						ordering => ordering,
+					},
+					_ => Some(Ordering::Greater),
+				},
+			},
+			ordering => ordering,
+		}
+	}
 }
 
 impl fmt::Display for Range {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}..{}", self.tb, self.beg, self.end)
+		write!(f, "{}:", self.tb)?;
+		match &self.beg {
+			Bound::Unbounded => write!(f, ""),
+			Bound::Included(id) => write!(f, "{}", id),
+			Bound::Excluded(id) => write!(f, "{}>", id),
+		}?;
+		match &self.end {
+			Bound::Unbounded => write!(f, ".."),
+			Bound::Excluded(id) => write!(f, "..{}", id),
+			Bound::Included(id) => write!(f, "..={}", id),
+		}?;
+		Ok(())
 	}
 }
 
 pub fn range(i: &str) -> IResult<&str, Range> {
 	let (i, tb) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
-	let (i, beg) = id(i)?;
+	let (i, beg) =
+		opt(alt((map(terminated(id, char('>')), Bound::Excluded), map(id, Bound::Included))))(i)?;
 	let (i, _) = char('.')(i)?;
 	let (i, _) = char('.')(i)?;
-	let (i, end) = id(i)?;
+	let (i, end) =
+		opt(alt((map(preceded(char('='), id), Bound::Included), map(id, Bound::Excluded))))(i)?;
 	Ok((
 		i,
 		Range {
 			tb,
-			beg,
-			end,
+			beg: beg.unwrap_or(Bound::Unbounded),
+			end: end.unwrap_or(Bound::Unbounded),
 		},
 	))
 }
