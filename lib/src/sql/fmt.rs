@@ -98,6 +98,22 @@ fn fmt_new_line_separated<T: Display>(
 	Ok(())
 }
 
+/// Creates a formatting function that joins iterators with an arbitrary separator.
+pub fn fmt_separated_by<T: Display, II: IntoIterator<Item = T>>(
+	separator: impl Display,
+) -> impl Fn(II, &mut Formatter) -> fmt::Result {
+	move |into_iter: II, f: &mut Formatter| {
+		for (i, v) in into_iter.into_iter().enumerate() {
+			if i > 0 {
+				// This separator goes after the item formatted in the last iteration.
+				Display::fmt(&separator, f)?;
+			}
+			Display::fmt(&v, f)?;
+		}
+		Ok(())
+	}
+}
+
 thread_local! {
 	// Avoid `RefCell`/`UnsafeCell` by using atomic types. Access is synchronized due to
 	// `thread_local!` so all accesses can use `Ordering::Relaxed`.

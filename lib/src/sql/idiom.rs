@@ -4,7 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
-use crate::sql::fmt::Fmt;
+use crate::sql::fmt::{fmt_separated_by, Fmt};
 use crate::sql::part::Next;
 use crate::sql::part::{all, field, first, graph, index, last, part, thing, Part};
 use crate::sql::paths::{ID, IN, OUT};
@@ -141,18 +141,17 @@ impl Idiom {
 
 impl fmt::Display for Idiom {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
+		Display::fmt(
+			&Fmt::new(
+				self.0.iter().enumerate().map(|args| {
+					Fmt::new(args, |(i, p), f| match (i, p) {
+						(0, Part::Field(v)) => Display::fmt(v, f),
+						_ => Display::fmt(p, f),
+					})
+				}),
+				fmt_separated_by(""),
+			),
 			f,
-			"{}",
-			self.0
-				.iter()
-				.enumerate()
-				.map(|(i, p)| match (i, p) {
-					(0, Part::Field(v)) => format!("{}", v),
-					_ => format!("{}", p),
-				})
-				.collect::<Vec<_>>()
-				.join("")
 		)
 	}
 }
