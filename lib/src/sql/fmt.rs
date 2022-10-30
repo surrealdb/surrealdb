@@ -32,8 +32,21 @@ impl<I: IntoIterator<Item = T>, T: Display> Fmt<I, fn(I, &mut Formatter) -> fmt:
 		Self::new(into_iter, fmt_comma_separated)
 	}
 
+	/// Formats values with a comma and a space separating them or, if pretty printing is in
+	/// effect, a comma, a newline, and indentation.
+	pub(crate) fn pretty_comma_separated(into_iter: I) -> Self {
+		Self::new(
+			into_iter,
+			if is_pretty() {
+				fmt_pretty_comma_separated
+			} else {
+				fmt_comma_separated
+			},
+		)
+	}
+
 	/// Formats values with a new line separating them.
-	pub(crate) fn new_line_separated(into_iter: I) -> Self {
+	pub(crate) fn pretty_new_line_separated(into_iter: I) -> Self {
 		Self::new(into_iter, fmt_new_line_separated)
 	}
 }
@@ -44,14 +57,23 @@ fn fmt_comma_separated<T: Display>(
 ) -> fmt::Result {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
+			f.write_str(", ")?;
+		}
+		Display::fmt(&v, f)?;
+	}
+	Ok(())
+}
+
+fn fmt_pretty_comma_separated<T: Display>(
+	into_iter: impl IntoIterator<Item = T>,
+	f: &mut Formatter,
+) -> fmt::Result {
+	for (i, v) in into_iter.into_iter().enumerate() {
+		if i > 0 {
 			// One of the few cases where the raw string data depends on is pretty i.e. we don't
 			// need a space after the comma if we are going to have a newline.
-			if is_pretty() {
-				f.write_str(",")?;
-				pretty_sequence_item();
-			} else {
-				f.write_str(", ")?;
-			}
+			f.write_str(",")?;
+			pretty_sequence_item();
 		}
 		Display::fmt(&v, f)?;
 	}

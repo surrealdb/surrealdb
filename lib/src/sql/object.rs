@@ -143,7 +143,7 @@ impl Display for Object {
 		}
 		let indent = pretty_indent();
 		Display::fmt(
-			&Fmt::comma_separated(
+			&Fmt::pretty_comma_separated(
 				self.0
 					.iter()
 					.map(|args| Fmt::new(args, |(k, v), f| write!(f, "{}: {}", escape_key(k), v))),

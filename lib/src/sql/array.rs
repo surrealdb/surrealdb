@@ -138,7 +138,7 @@ impl Display for Array {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		f.write_char('[')?;
 		let indent = pretty_indent();
-		Display::fmt(&Fmt::comma_separated(self.as_slice()), f)?;
+		Display::fmt(&Fmt::pretty_comma_separated(self.as_slice()), f)?;
 		drop(indent);
 		f.write_char(']')
 	}
