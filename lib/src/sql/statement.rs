@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
 use crate::sql::common::colons;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::statements::begin::{begin, BeginStatement};
 use crate::sql::statements::cancel::{cancel, CancelStatement};
 use crate::sql::statements::commit::{commit, CommitStatement};
@@ -48,7 +49,9 @@ impl Deref for Statements {
 impl fmt::Display for Statements {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		Display::fmt(
-			&self.0.iter().map(|ref v| format!("{};", v)).collect::<Vec<_>>().join("\n"),
+			&Fmt::new_line_separated(
+				self.0.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{};", v))),
+			),
 			f,
 		)
 	}

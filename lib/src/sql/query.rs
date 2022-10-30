@@ -1,4 +1,5 @@
 use crate::sql::error::IResult;
+use crate::sql::fmt::Pretty;
 use crate::sql::statement::{statements, Statement, Statements};
 use derive::Store;
 use nom::combinator::all_consuming;
@@ -19,7 +20,8 @@ impl Deref for Query {
 
 impl Display for Query {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0, f)
+		use std::fmt::Write;
+		write!(Pretty::from(f), "{}", &self.0)
 	}
 }
 
