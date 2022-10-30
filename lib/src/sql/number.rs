@@ -105,7 +105,13 @@ impl From<f64> for Number {
 
 impl From<&str> for Number {
 	fn from(s: &str) -> Self {
-		Self::Decimal(BigDecimal::from_str(s).unwrap_or_default())
+		// Attempt to parse as i64
+		match s.parse::<i64>() {
+			// Store it as an i64
+			Ok(v) => Self::Int(v),
+			// It wasn't parsed as a i64 so store as a decimal
+			_ => Self::Decimal(BigDecimal::from_str(s).unwrap_or_default()),
+		}
 	}
 }
 
@@ -607,7 +613,7 @@ impl Sort for Vec<Number> {
 }
 
 pub fn number(i: &str) -> IResult<&str, Number> {
-	alt((map(integer, Number::from), map(decimal, Number::from)))(i)
+	alt((map(decimal, Number::from), map(integer, Number::from)))(i)
 }
 
 pub fn integer(i: &str) -> IResult<&str, i64> {
