@@ -19,7 +19,6 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Function {
-	Future(Value),
 	Cast(String, Value),
 	Normal(String, Vec<Value>),
 	Script(Script, Vec<Value>),
@@ -116,13 +115,6 @@ impl Function {
 		let opt = &opt.dive(1)?;
 		// Process the function type
 		match self {
-			Self::Future(v) => match opt.futures {
-				true => {
-					let v = v.compute(ctx, opt, txn, doc).await?;
-					fnc::future::run(ctx, v)
-				}
-				false => Ok(self.to_owned().into()),
-			},
 			Self::Cast(s, x) => {
 				let v = x.compute(ctx, opt, txn, doc).await?;
 				fnc::cast::run(ctx, s, v)
@@ -158,7 +150,6 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Future(ref e) => write!(f, "<future> {{ {} }}", e),
 			Self::Cast(ref s, ref e) => write!(f, "<{}> {}", s, e),
 			Self::Script(ref s, ref e) => {
 				write!(f, "function({}) {{{}}}", Fmt::comma_separated(e), s)
@@ -169,7 +160,7 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((normal, script, future, cast))(i)
+	alt((normal, script, cast))(i)
 }
 
 fn normal(i: &str) -> IResult<&str, Function> {
@@ -193,19 +184,6 @@ fn script(i: &str) -> IResult<&str, Function> {
 	let (i, v) = func(i)?;
 	let (i, _) = char('}')(i)?;
 	Ok((i, Function::Script(v, a)))
-}
-
-fn future(i: &str) -> IResult<&str, Function> {
-	let (i, _) = char('<')(i)?;
-	let (i, _) = tag("future")(i)?;
-	let (i, _) = char('>')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = value(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
-	Ok((i, Function::Future(v)))
 }
 
 fn cast(i: &str) -> IResult<&str, Function> {
@@ -478,7 +456,6 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 mod tests {
 
 	use super::*;
-	use crate::sql::expression::Expression;
 	use crate::sql::test::Parse;
 
 	#[test]
@@ -529,16 +506,6 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("<string> 1.2345", format!("{}", out));
 		assert_eq!(out, Function::Cast(String::from("string"), 1.2345.into()));
-	}
-
-	#[test]
-	fn function_future_expression() {
-		let sql = "<future> { 1.2345 + 5.4321 }";
-		let res = function(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("<future> { 1.2345 + 5.4321 }", format!("{}", out));
-		assert_eq!(out, Function::Future(Value::from(Expression::parse("1.2345 + 5.4321"))));
 	}
 
 	#[test]

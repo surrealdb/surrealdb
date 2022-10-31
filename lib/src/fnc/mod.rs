@@ -8,7 +8,6 @@ pub mod cast;
 pub mod count;
 pub mod crypto;
 pub mod duration;
-pub mod future;
 pub mod geo;
 pub mod http;
 pub mod is;

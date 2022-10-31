@@ -14,6 +14,7 @@ use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
 use crate::sql::fmt::Fmt;
 use crate::sql::function::{function, Function};
+use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::Id;
 use crate::sql::idiom::{idiom, Idiom};
@@ -117,6 +118,7 @@ pub enum Value {
 	Regex(Regex),
 	Range(Box<Range>),
 	Edges(Box<Edges>),
+	Future(Box<Future>),
 	Constant(Constant),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
@@ -252,6 +254,12 @@ impl From<Range> for Value {
 impl From<Edges> for Value {
 	fn from(v: Edges) -> Self {
 		Value::Edges(Box::new(v))
+	}
+}
+
+impl From<Future> for Value {
+	fn from(v: Future) -> Self {
+		Value::Future(Box::new(v))
 	}
 }
 
@@ -861,8 +869,8 @@ impl Value {
 			Value::Idiom(v) => v.simplify(),
 			Value::Strand(v) => v.0.to_string().into(),
 			Value::Datetime(v) => v.0.to_string().into(),
+			Value::Future(_) => "fn::future".to_string().into(),
 			Value::Function(v) => match v.as_ref() {
-				Function::Future(_) => "fn::future".to_string().into(),
 				Function::Script(_, _) => "fn::script".to_string().into(),
 				Function::Normal(f, _) => f.to_string().into(),
 				Function::Cast(_, v) => v.to_idiom(),
@@ -1234,6 +1242,7 @@ impl fmt::Display for Value {
 			Value::Regex(v) => write!(f, "{}", v),
 			Value::Range(v) => write!(f, "{}", v),
 			Value::Edges(v) => write!(f, "{}", v),
+			Value::Future(v) => write!(f, "{}", v),
 			Value::Constant(v) => write!(f, "{}", v),
 			Value::Function(v) => write!(f, "{}", v),
 			Value::Subquery(v) => write!(f, "{}", v),
@@ -1273,6 +1282,7 @@ impl Value {
 			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Object(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
@@ -1309,10 +1319,11 @@ impl Serialize for Value {
 				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
 				Value::Range(v) => s.serialize_newtype_variant("Value", 18, "Range", v),
 				Value::Edges(v) => s.serialize_newtype_variant("Value", 19, "Edges", v),
-				Value::Constant(v) => s.serialize_newtype_variant("Value", 20, "Constant", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 21, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 22, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 23, "Expression", v),
+				Value::Future(v) => s.serialize_newtype_variant("Value", 20, "Future", v),
+				Value::Constant(v) => s.serialize_newtype_variant("Value", 21, "Constant", v),
+				Value::Function(v) => s.serialize_newtype_variant("Value", 22, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant("Value", 23, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant("Value", 24, "Expression", v),
 			}
 		} else {
 			match self {
@@ -1407,6 +1418,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(datetime, Value::from),
 			map(duration, Value::from),
 			map(geometry, Value::from),
+			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
 			map(object, Value::from),
@@ -1438,6 +1450,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(datetime, Value::from),
 			map(duration, Value::from),
 			map(geometry, Value::from),
+			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
 			map(object, Value::from),
@@ -1459,6 +1472,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 		map(subquery, Value::from),
 		map(function, Value::from),
 		map(constant, Value::from),
+		map(future, Value::from),
 		map(param, Value::from),
 		map(model, Value::from),
 		map(edges, Value::from),

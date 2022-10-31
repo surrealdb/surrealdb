@@ -308,14 +308,14 @@ impl Datastore {
 	/// use surrealdb::Datastore;
 	/// use surrealdb::Error;
 	/// use surrealdb::Session;
-	/// use surrealdb::sql::Function;
+	/// use surrealdb::sql::Future;
 	/// use surrealdb::sql::Value;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::for_kv();
-	///     let val = Value::Function(Box::new(Function::Future(Value::True)));
+	///     let val = Value::Future(Box::new(Future(Value::True)));
 	///     let res = ds.compute(val, &ses, None, false).await?;
 	///     Ok(())
 	/// }
