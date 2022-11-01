@@ -79,6 +79,12 @@ pub enum Error {
 	#[error("Remote HTTP request functions are not enabled")]
 	HttpDisabled,
 
+	/// it is not possible to set a variable with the specified name
+	#[error("Found '{name}' but it is not possible to set a variable with this name")]
+	InvalidParam {
+		name: String,
+	},
+
 	/// The LIMIT clause must evaluate to a positive integer
 	#[error("Found {value} but the LIMIT clause must evaluate to a positive integer")]
 	InvalidLimit {

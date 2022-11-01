@@ -239,7 +239,7 @@ impl Datastore {
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx);
+		let ctx = vars.attach(ctx)?;
 		// Parse the SQL query text
 		let ast = sql::parse(txt)?;
 		// Setup the auth options
@@ -288,7 +288,7 @@ impl Datastore {
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx);
+		let ctx = vars.attach(ctx)?;
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Setup the live options
@@ -338,7 +338,7 @@ impl Datastore {
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx);
+		let ctx = vars.attach(ctx)?;
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Set current NS and DB
