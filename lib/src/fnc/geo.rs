@@ -1,23 +1,25 @@
 use crate::err::Error;
 use crate::sql::geometry::Geometry;
 use crate::sql::value::Value;
-use geo::algorithm::area::Area;
 use geo::algorithm::bearing::Bearing;
 use geo::algorithm::centroid::Centroid;
+use geo::algorithm::chamberlain_duquette_area::ChamberlainDuquetteArea;
 use geo::algorithm::haversine_distance::HaversineDistance;
 
 pub fn area((arg,): (Value,)) -> Result<Value, Error> {
 	match arg {
 		Value::Geometry(v) => match v {
-			Geometry::Point(v) => Ok(v.signed_area().into()),
-			Geometry::Line(v) => Ok(v.signed_area().into()),
-			Geometry::Polygon(v) => Ok(v.signed_area().into()),
-			Geometry::MultiPoint(v) => Ok(v.signed_area().into()),
-			Geometry::MultiLine(v) => Ok(v.signed_area().into()),
-			Geometry::MultiPolygon(v) => Ok(v.signed_area().into()),
-			Geometry::Collection(v) => {
-				Ok(v.into_iter().collect::<geo::Geometry<f64>>().signed_area().into())
-			}
+			Geometry::Point(v) => Ok(v.chamberlain_duquette_unsigned_area().into()),
+			Geometry::Line(v) => Ok(v.chamberlain_duquette_unsigned_area().into()),
+			Geometry::Polygon(v) => Ok(v.chamberlain_duquette_unsigned_area().into()),
+			Geometry::MultiPoint(v) => Ok(v.chamberlain_duquette_unsigned_area().into()),
+			Geometry::MultiLine(v) => Ok(v.chamberlain_duquette_unsigned_area().into()),
+			Geometry::MultiPolygon(v) => Ok(v.chamberlain_duquette_unsigned_area().into()),
+			Geometry::Collection(v) => Ok(v
+				.into_iter()
+				.collect::<geo::Geometry<f64>>()
+				.chamberlain_duquette_unsigned_area()
+				.into()),
 		},
 		_ => Ok(Value::None),
 	}
