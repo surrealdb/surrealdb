@@ -101,6 +101,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"is::longitude" => is::longitude,
 		"is::numeric" => is::numeric,
 		"is::semver" => is::semver,
+		"is::url" => is::url,
 		"is::uuid" => is::uuid,
 		//
 		"math::abs" => math::abs,

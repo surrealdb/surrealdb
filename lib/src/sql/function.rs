@@ -309,6 +309,7 @@ fn function_is(i: &str) -> IResult<&str, &str> {
 		tag("is::longitude"),
 		tag("is::numeric"),
 		tag("is::semver"),
+		tag("is::url"),
 		tag("is::uuid"),
 	))(i)
 }
