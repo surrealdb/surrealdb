@@ -80,7 +80,7 @@ pub fn hour((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 	Ok(date.hour().into())
 }
 
-pub fn mins((datetime,): (Option<Value>,)) -> Result<Value, Error> {
+pub fn minute((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 	let date = match datetime {
 		Some(Value::Datetime(v)) => v,
 		None => Datetime::default(),
@@ -127,7 +127,7 @@ pub fn round((datetime, duration): (Value, Value)) -> Result<Value, Error> {
 	})
 }
 
-pub fn secs((datetime,): (Option<Value>,)) -> Result<Value, Error> {
+pub fn second((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 	let date = match datetime {
 		Some(Value::Datetime(v)) => v,
 		None => Datetime::default(),
