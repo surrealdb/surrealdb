@@ -1278,6 +1278,7 @@ impl Value {
 			Value::True => Ok(Value::True),
 			Value::False => Ok(Value::False),
 			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Range(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Param(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,

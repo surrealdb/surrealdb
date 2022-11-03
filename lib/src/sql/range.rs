@@ -1,6 +1,11 @@
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::dbs::Transaction;
+use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
+use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
@@ -17,6 +22,30 @@ pub struct Range {
 	pub tb: String,
 	pub beg: Bound<Id>,
 	pub end: Bound<Id>,
+}
+
+impl Range {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		Ok(Value::Range(Box::new(Range {
+			tb: self.tb.clone(),
+			beg: match &self.beg {
+				Bound::Included(id) => Bound::Included(id.compute(ctx, opt, txn, doc).await?),
+				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt, txn, doc).await?),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match &self.end {
+				Bound::Included(id) => Bound::Included(id.compute(ctx, opt, txn, doc).await?),
+				Bound::Excluded(id) => Bound::Excluded(id.compute(ctx, opt, txn, doc).await?),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+		})))
+	}
 }
 
 impl PartialOrd for Range {
