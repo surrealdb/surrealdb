@@ -48,8 +48,9 @@ pub enum Operator {
 	AllInside,   // ⊆
 	AnyInside,   // ⊂
 	NoneInside,  // ⊄
-	Outside,     // ∈
-	Intersects,  // ∩
+	//
+	Outside,
+	Intersects,
 }
 
 impl Default for Operator {

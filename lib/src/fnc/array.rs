@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::sql::array::Combine;
+use crate::sql::array::Complement;
 use crate::sql::array::Concat;
 use crate::sql::array::Difference;
 use crate::sql::array::Intersect;
@@ -7,16 +8,23 @@ use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
 
-pub fn concat(arrays: (Value, Value)) -> Result<Value, Error> {
+pub fn combine(arrays: (Value, Value)) -> Result<Value, Error> {
 	Ok(match arrays {
-		(Value::Array(v), Value::Array(w)) => v.concat(w).into(),
+		(Value::Array(v), Value::Array(w)) => v.combine(w).into(),
 		_ => Value::None,
 	})
 }
 
-pub fn combine(arrays: (Value, Value)) -> Result<Value, Error> {
+pub fn complement(arrays: (Value, Value)) -> Result<Value, Error> {
 	Ok(match arrays {
-		(Value::Array(v), Value::Array(w)) => v.combine(w).into(),
+		(Value::Array(v), Value::Array(w)) => v.complement(w).into(),
+		_ => Value::None,
+	})
+}
+
+pub fn concat(arrays: (Value, Value)) -> Result<Value, Error> {
+	Ok(match arrays {
+		(Value::Array(v), Value::Array(w)) => v.concat(w).into(),
 		_ => Value::None,
 	})
 }

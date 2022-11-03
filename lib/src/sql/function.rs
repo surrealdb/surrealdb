@@ -231,6 +231,7 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 fn function_array(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("array::combine"),
+		tag("array::complement"),
 		tag("array::concat"),
 		tag("array::difference"),
 		tag("array::distinct"),

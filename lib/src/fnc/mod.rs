@@ -60,6 +60,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		name,
 		args,
 		"array::combine" => array::combine,
+		"array::complement" => array::complement,
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
