@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::sql::decimal::{lexical_decode, Decimal};
 use crate::sql::ending::number as ending;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
@@ -22,7 +23,7 @@ use std::str::FromStr;
 pub enum Number {
 	Int(i64),
 	Float(f64),
-	Decimal(BigDecimal),
+	Decimal(#[serde(deserialize_with = "lexical_decode")] BigDecimal),
 }
 
 impl Default for Number {
@@ -176,13 +177,15 @@ impl Serialize for Number {
 			match self {
 				Number::Int(v) => s.serialize_newtype_variant("Number", 0, "Int", v),
 				Number::Float(v) => s.serialize_newtype_variant("Number", 1, "Float", v),
-				Number::Decimal(v) => s.serialize_newtype_variant("Number", 2, "Decimal", v),
+				Number::Decimal(v) => {
+					s.serialize_newtype_variant("Number", 2, "Decimal", &Decimal::from(v))
+				}
 			}
 		} else {
 			match self {
 				Number::Int(v) => s.serialize_i64(*v),
 				Number::Float(v) => s.serialize_f64(*v),
-				Number::Decimal(v) => s.serialize_some(v),
+				Number::Decimal(v) => s.serialize_some(&Decimal::from(v)),
 			}
 		}
 	}

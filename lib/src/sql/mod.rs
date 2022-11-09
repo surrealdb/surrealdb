@@ -7,6 +7,7 @@ pub(crate) mod cond;
 pub(crate) mod constant;
 pub(crate) mod data;
 pub(crate) mod datetime;
+pub(crate) mod decimal;
 pub(crate) mod dir;
 pub(crate) mod duration;
 pub(crate) mod edges;

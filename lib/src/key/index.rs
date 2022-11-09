@@ -90,6 +90,7 @@ impl Index {
 
 #[cfg(test)]
 mod tests {
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -105,5 +106,36 @@ mod tests {
 		let enc = Index::encode(&val).unwrap();
 		let dec = Index::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	#[test]
+	fn compare() {
+		use super::*;
+		use bigdecimal::BigDecimal;
+		use bigdecimal::FromPrimitive;
+
+		use crate::sql::Number;
+
+		let val = Index::new(
+			"test".to_string(),
+			"test".to_string(),
+			"test".to_string(),
+			"test".to_string(),
+			vec![Number::Decimal(BigDecimal::from_f32(9.99).unwrap())].into(),
+			Some("test".into()),
+		);
+		let enc1 = Index::encode(&val).unwrap();
+
+		let val = Index::new(
+			"test".to_string(),
+			"test".to_string(),
+			"test".to_string(),
+			"test".to_string(),
+			vec![Number::Decimal(BigDecimal::from_f32(10.0).unwrap())].into(),
+			Some("test".into()),
+		);
+		let enc2 = Index::encode(&val).unwrap();
+
+		assert!(enc1 < enc2);
 	}
 }
