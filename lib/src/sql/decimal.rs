@@ -131,7 +131,7 @@ where
 					exp_part = u64::MAX - exp_part;
 					(Sign::Minus, false)
 				}
-				_ => unreachable!(),
+				_ => return Err(de::Error::custom(format!("Unexpected sign part {}", sign_part))),
 			};
 
 			let mut int_part = seq.next_element::<u8>()?.unwrap();
