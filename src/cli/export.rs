@@ -20,17 +20,22 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Set the correct export URL
 	let conn = format!("{}/export", conn);
 	// Export the data from the database
-	Client::new()
+	let mut res = Client::new()
 		.get(&conn)
 		.header(ACCEPT, "application/octet-stream")
 		.basic_auth(user, Some(pass))
 		.header("NS", ns)
 		.header("DB", db)
-		.send()?
-		.error_for_status()?
-		.copy_to(&mut file)?;
-	// Output a success message
-	info!(target: LOG, "The SQL file was exported successfully");
+		.send()?;
+	// Check import result and report error
+	if res.status().is_success() {
+		res.copy_to(&mut file)?;
+		info!(target: LOG, "The SQL file was exported successfully");
+	} else if res.status().is_client_error() || res.status().is_server_error() {
+		error!(target: LOG, "Request failed with status {}. Body: {}", res.status(), res.text()?);
+	} else {
+		error!(target: LOG, "Unexpected response status {}", res.status());
+	}
 	// Everything OK
 	Ok(())
 }
