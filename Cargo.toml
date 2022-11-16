@@ -14,7 +14,7 @@ scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 
 [workspace]
-members = ["lib"]
+members = ["lib", "client"]
 
 [profile.release]
 lto = true

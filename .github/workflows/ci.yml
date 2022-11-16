@@ -37,10 +37,10 @@ jobs:
           override: true
 
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --workspace
+        run: |
+          cargo build
+          (&>/dev/null cargo run -- start --log trace --user root --pass root memory &)
+          cargo test --workspace
 
   lint:
     name: Lint
