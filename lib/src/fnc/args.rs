@@ -65,8 +65,8 @@ impl FromArgs for Vec<Value> {
 	}
 }
 
-// Some functions take a fixed number of arguments.
-// The len must match the number of type idents that follow.
+/// Some functions take a fixed number of arguments.
+/// The len must match the number of type idents that follow.
 macro_rules! impl_tuple {
 	($len:expr, $( $T:ident ),*) => {
 		impl<$($T:FromArg),*> FromArgs for ($($T,)*) {

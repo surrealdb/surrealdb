@@ -47,7 +47,7 @@ pub struct Rpc {
 }
 
 impl Rpc {
-	// Instantiate a new RPC
+	/// Instantiate a new RPC
 	pub fn new(mut session: Session) -> Arc<RwLock<Rpc>> {
 		// Create a new RPC variables store
 		let vars = BTreeMap::new();
@@ -63,7 +63,7 @@ impl Rpc {
 		}))
 	}
 
-	// Serve the RPC endpoint
+	/// Serve the RPC endpoint
 	pub async fn serve(rpc: Arc<RwLock<Rpc>>, ws: WebSocket) {
 		// Create a channel for sending messages
 		let (chn, mut rcv) = channel::new(MAX_CONCURRENT_CALLS);
@@ -138,7 +138,7 @@ impl Rpc {
 		}
 	}
 
-	// Call RPC methods from the WebSocket
+	/// Call RPC methods from the WebSocket
 	async fn call(rpc: Arc<RwLock<Rpc>>, msg: Message, chn: Sender<Message>) {
 		// Get the current output format
 		let mut out = { rpc.read().await.format.clone() };

@@ -34,11 +34,11 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 	}
 }
 
-// Each function is specified by its name (a string literal) followed by its path. The path
-// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
-// before the remainder of the arguments. The path may be followed by `.await` to signify that
-// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
-// `cpu_intensive`.
+/// Each function is specified by its name (a string literal) followed by its path. The path
+/// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
+/// before the remainder of the arguments. The path may be followed by `.await` to signify that
+/// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
+/// `cpu_intensive`.
 macro_rules! dispatch {
 	($name: ident, $args: ident, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
 		{

@@ -4,12 +4,12 @@ use crate::dbs::Level;
 use crate::err::Error;
 use std::sync::Arc;
 
-// An Options is passed around when processing a set of query
-// statements. An Options contains specific information for how
-// to process each particular statement, including the record
-// version to retrieve, whether futures should be processed, and
-// whether field/event/table queries should be processed (useful
-// when importing data, where these queries might fail).
+/// An Options is passed around when processing a set of query
+/// statements. An Options contains specific information for how
+/// to process each particular statement, including the record
+/// version to retrieve, whether futures should be processed, and
+/// whether field/event/table queries should be processed (useful
+/// when importing data, where these queries might fail).
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Options {
