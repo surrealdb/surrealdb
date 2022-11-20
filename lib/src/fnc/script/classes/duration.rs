@@ -22,7 +22,7 @@ pub mod duration {
 		pub fn value(&self) -> &str {
 			&self.value
 		}
-		// Convert the object to a string
+		/// Convert the object to a string
 		pub fn toString(&self) -> String {
 			self.value.to_owned()
 		}

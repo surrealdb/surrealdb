@@ -57,17 +57,17 @@ pub struct Iterator {
 }
 
 impl Iterator {
-	// Creates a new iterator
+	/// Creates a new iterator
 	pub fn new() -> Self {
 		Self::default()
 	}
 
-	// Prepares a value for processing
+	/// Prepares a value for processing
 	pub fn ingest(&mut self, val: Iterable) {
 		self.entries.push(val)
 	}
 
-	// Process the records and output
+	/// Process the records and output
 	pub async fn output(
 		&mut self,
 		ctx: &Context<'_>,
@@ -449,7 +449,7 @@ impl Iterator {
 		}
 	}
 
-	// Process a new record Thing and Value
+	/// Process a new record Thing and Value
 	pub async fn process(
 		&mut self,
 		ctx: &Context<'_>,
@@ -484,7 +484,7 @@ impl Iterator {
 		self.result(res, stm);
 	}
 
-	// Accept a processed record result
+	/// Accept a processed record result
 	fn result(&mut self, res: Result<Value, Error>, stm: &Statement<'_>) {
 		// Process the result
 		match res {

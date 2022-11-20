@@ -29,7 +29,7 @@ pub mod record {
 		pub fn id(&self) -> &str {
 			&self.id
 		}
-		// Convert the object to a string
+		/// Convert the object to a string
 		pub fn toString(&self) -> String {
 			format!("{}:{}", self.tb, self.id)
 		}

@@ -8,13 +8,13 @@ pub struct Canceller {
 }
 
 impl Canceller {
-	// Create a new Canceller
+	/// Create a new Canceller
 	pub fn new(cancelled: Arc<AtomicBool>) -> Canceller {
 		Canceller {
 			cancelled,
 		}
 	}
-	// Cancel the context.
+	/// Cancel the context.
 	pub fn cancel(&self) {
 		self.cancelled.store(true, Ordering::Relaxed);
 	}
