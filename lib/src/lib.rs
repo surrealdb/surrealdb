@@ -50,3 +50,5 @@ pub mod channel {
 	pub use channel::Receiver;
 	pub use channel::Sender;
 }
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
