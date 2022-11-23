@@ -38,12 +38,12 @@ pub struct Transaction {
 }
 
 impl Datastore {
-	// Open a new database
-	//
-	// path must be an empty string or a local file path to a FDB cluster file.
-	// An empty string results in using the default cluster file placed
-	// at a system-dependent location defined by FDB.
-	// See https://apple.github.io/foundationdb/administration.html#default-cluster-file for more information on that.
+	/// Open a new database
+	///
+	/// path must be an empty string or a local file path to a FDB cluster file.
+	/// An empty string results in using the default cluster file placed
+	/// at a system-dependent location defined by FDB.
+	/// See https://apple.github.io/foundationdb/administration.html#default-cluster-file for more information on that.
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
 		static FDBNET: Lazy<Arc<foundationdb::api::NetworkAutoStop>> =
 			Lazy::new(|| Arc::new(unsafe { foundationdb::boot() }));
@@ -57,7 +57,7 @@ impl Datastore {
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
-	// Start a new transaction
+	/// Start a new transaction
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		match self.db.create_trx() {
 			Ok(tx) => Ok(Transaction {
@@ -72,22 +72,22 @@ impl Datastore {
 }
 
 impl Transaction {
-	// Check if closed
+	/// Check if closed
 	pub fn closed(&self) -> bool {
 		self.ok
 	}
-	// We use lock=true to enable the tikv's own pessimistic tx (https://docs.pingcap.com/tidb/v4.0/pessimistic-transaction)
-	// for tikv kvs.
-	// FDB's standard transaction(snapshot=false) behaves like a tikv perssimistic tx
-	// by automatically retrying on conflict at the fdb client layer.
-	// So in fdb kvs we assume that lock=true is basically a request to
-	// use the standard fdb tx to make transactions Serializable.
-	// In case the tx is rw, we assume the user never wants to lose serializability
-	// so we go with the standard fdb serializable tx in that case too.
+	/// We use lock=true to enable the tikv's own pessimistic tx (https://docs.pingcap.com/tidb/v4.0/pessimistic-transaction)
+	/// for tikv kvs.
+	/// FDB's standard transaction(snapshot=false) behaves like a tikv perssimistic tx
+	/// by automatically retrying on conflict at the fdb client layer.
+	/// So in fdb kvs we assume that lock=true is basically a request to
+	/// use the standard fdb tx to make transactions Serializable.
+	/// In case the tx is rw, we assume the user never wants to lose serializability
+	/// so we go with the standard fdb serializable tx in that case too.
 	fn snapshot(&self) -> bool {
 		!self.rw && !self.lock
 	}
-	// Cancel a transaction
+	/// Cancel a transaction
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
@@ -113,7 +113,7 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
-	// Commit a transaction
+	/// Commit a transaction
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
@@ -145,7 +145,7 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
-	// Check if a key exists
+	/// Check if a key exists
 	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key>,
@@ -169,7 +169,7 @@ impl Transaction {
 			.map(|v| v.is_some())
 			.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)))
 	}
-	// Fetch a key from the database
+	/// Fetch a key from the database
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key>,
@@ -195,7 +195,7 @@ impl Transaction {
 			.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)));
 		res
 	}
-	// Insert or update a key in the database
+	/// Insert or update a key in the database
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -220,16 +220,16 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	// Insert a key if it doesn't exist in the database
-	//
-	// This function is used when the client sent a CREATE query,
-	// where the key is derived from namespace, database, table name,
-	// and either an auto-generated record ID or a the record ID specified by the client
-	// after the colon in the CREATE query's first argument.
-	//
-	// Suppose you've sent a query like `CREATE author:john SET ...` with
-	// the namespace `test` and the database `test`-
-	// You'll see SurrealDB sets a value to the key `/*test\x00*test\x00*author\x00*\x00\x00\x00\x01john\x00`.
+	/// Insert a key if it doesn't exist in the database
+	///
+	/// This function is used when the client sent a CREATE query,
+	/// where the key is derived from namespace, database, table name,
+	/// and either an auto-generated record ID or a the record ID specified by the client
+	/// after the colon in the CREATE query's first argument.
+	///
+	/// Suppose you've sent a query like `CREATE author:john SET ...` with
+	/// the namespace `test` and the database `test`-
+	/// You'll see SurrealDB sets a value to the key `/*test\x00*test\x00*author\x00*\x00\x00\x00\x01john\x00`.
 	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -257,7 +257,7 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	// Insert a key if it doesn't exist in the database
+	/// Insert a key if it doesn't exist in the database
 	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -298,7 +298,7 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	// Delete a key
+	/// Delete a key
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -320,7 +320,7 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	// Delete a key
+	/// Delete a key
 	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -350,7 +350,7 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	// Retrieve a range of keys from the databases
+	/// Retrieve a range of keys from the databases
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key>,
