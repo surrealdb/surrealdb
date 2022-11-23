@@ -21,7 +21,7 @@ use once_cell::sync::Lazy;
 // In case you're curious why FDB store doesn't work as you've expected,
 // run a few queries via surrealdb-sql or via the REST API, and
 // run the following command to what have been saved to FDB:
-///   fdbcli --exec 'getrangekeys \x00 \xff'
+//   fdbcli --exec 'getrangekeys \x00 \xff'
 pub struct Datastore {
 	db: foundationdb::Database,
 	_fdbnet: Arc<foundationdb::api::NetworkAutoStop>,
