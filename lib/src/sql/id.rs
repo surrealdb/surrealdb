@@ -10,6 +10,7 @@ use crate::sql::ident::ident_raw;
 use crate::sql::number::integer;
 use crate::sql::object::{object, Object};
 use crate::sql::strand::Strand;
+use crate::sql::thing::Thing;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use nanoid::nanoid;
@@ -83,6 +84,12 @@ impl From<&str> for Id {
 impl From<Vec<Value>> for Id {
 	fn from(v: Vec<Value>) -> Self {
 		Id::Array(v.into())
+	}
+}
+
+impl From<Thing> for Id {
+	fn from(v: Thing) -> Self {
+		v.id
 	}
 }
 

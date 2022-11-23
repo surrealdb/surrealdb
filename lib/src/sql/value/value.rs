@@ -465,7 +465,7 @@ impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {
 			Id::Number(v) => v.into(),
-			Id::String(v) => Strand::from(v).into(),
+			Id::String(v) => v.into(),
 			Id::Object(v) => v.into(),
 			Id::Array(v) => v.into(),
 		}
