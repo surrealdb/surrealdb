@@ -62,7 +62,7 @@ pub fn sort((array, order): (Value, Option<Value>)) -> Result<Value, Error> {
 		Value::Array(mut v) => match order {
 			// If "asc", sort ascending
 			Some(Value::Strand(s)) if s.as_str() == "asc" => {
-				v.sort_unstable_by(|a, b| a.cmp(b));
+				v.sort_unstable();
 				Ok(v.into())
 			}
 			// If "desc", sort descending
@@ -72,7 +72,7 @@ pub fn sort((array, order): (Value, Option<Value>)) -> Result<Value, Error> {
 			}
 			// If true, sort ascending
 			Some(Value::True) => {
-				v.sort_unstable_by(|a, b| a.cmp(b));
+				v.sort_unstable();
 				Ok(v.into())
 			}
 			// If false, sort descending
@@ -82,7 +82,7 @@ pub fn sort((array, order): (Value, Option<Value>)) -> Result<Value, Error> {
 			}
 			// Sort ascending by default
 			_ => {
-				v.sort_unstable_by(|a, b| a.cmp(b));
+				v.sort_unstable();
 				Ok(v.into())
 			}
 		},
@@ -105,7 +105,7 @@ pub mod sort {
 	pub fn asc((array,): (Value,)) -> Result<Value, Error> {
 		match array {
 			Value::Array(mut v) => {
-				v.sort_unstable_by(|a, b| a.cmp(b));
+				v.sort_unstable();
 				Ok(v.into())
 			}
 			v => Ok(v),

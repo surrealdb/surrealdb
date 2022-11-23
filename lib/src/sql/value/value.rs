@@ -1147,11 +1147,11 @@ impl Value {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
 			Value::Thing(v) => match other {
 				Value::Strand(w) => v.to_string().contains(w.as_str()),
-				_ => v.to_string().contains(&other.to_string().as_str()),
+				_ => v.to_string().contains(other.to_string().as_str()),
 			},
 			Value::Strand(v) => match other {
 				Value::Strand(w) => v.contains(w.as_str()),
-				_ => v.contains(&other.to_string().as_str()),
+				_ => v.contains(other.to_string().as_str()),
 			},
 			Value::Geometry(v) => match other {
 				Value::Geometry(w) => v.contains(w),
