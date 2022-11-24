@@ -50,12 +50,10 @@ pub fn int((arg,): (Value,)) -> Result<Value, Error> {
 
 pub fn number((arg,): (Value,)) -> Result<Value, Error> {
 	Ok(match &arg {
-		#[cfg(debug_assertions)]
 		Value::Number(Number::Float(f)) => {
-			assert!(!f.is_nan(), "unexpected NAN float in fnc::type::number");
+			debug_assert!(!f.is_nan(), "unexpected NAN float in fnc::type::number");
 			arg
 		}
-		Value::Number(_) => arg,
 		_ => Value::Number(arg.as_number()),
 	})
 }
