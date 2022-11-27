@@ -45,6 +45,12 @@ impl FromArg for i64 {
 	}
 }
 
+impl FromArg for isize {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		Ok(arg.as_int() as isize)
+	}
+}
+
 impl FromArg for usize {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		Ok(arg.as_int() as usize)
