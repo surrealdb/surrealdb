@@ -78,7 +78,9 @@ pub async fn put(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<Va
 		req = req.header(k.as_str(), v.to_strand().as_str());
 	}
 	// Submit the request body
-	req = req.body_json(&body)?;
+	if body.is_some() {
+		req = req.body_json(&body)?;
+	}
 	// Send the request and wait
 	let mut res = req.send().await?;
 	// Check the response status
@@ -112,7 +114,9 @@ pub async fn post(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<V
 		req = req.header(k.as_str(), v.to_strand().as_str());
 	}
 	// Submit the request body
-	req = req.body_json(&body)?;
+	if body.is_some() {
+		req = req.body_json(&body)?;
+	}
 	// Send the request and wait
 	let mut res = req.send().await?;
 	// Check the response status
@@ -146,7 +150,9 @@ pub async fn patch(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<
 		req = req.header(k.as_str(), v.to_strand().as_str());
 	}
 	// Submit the request body
-	req = req.body_json(&body)?;
+	if body.is_some() {
+		req = req.body_json(&body)?;
+	}
 	// Send the request and wait
 	let mut res = req.send().await?;
 	// Check the response status
