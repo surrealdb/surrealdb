@@ -259,7 +259,7 @@ impl Complement<Array> for Array {
 	fn complement(self, other: Self) -> Array {
 		let mut out = Array::new();
 		for v in self.into_iter() {
-			if other.contains(&v) {
+			if !other.contains(&v) {
 				out.push(v)
 			}
 		}

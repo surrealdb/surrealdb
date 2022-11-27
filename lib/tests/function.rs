@@ -6,21 +6,16 @@ use surrealdb::Error;
 use surrealdb::Session;
 
 #[tokio::test]
-async fn function_array_distinct() -> Result<(), Error> {
+async fn function_array_combine() -> Result<(), Error> {
 	let sql = r#"
-		RETURN array::distinct([1, 3, 2, 1, 3, 3, 4]);
-		RETURN array::distinct([]);
-		RETURN array::distinct("something");
-		RETURN array::distinct(["something"]);
+		RETURN array::combine([], []);
+		RETURN array::combine(3, true);
+		RETURN array::combine([1,2], [2,3]);
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 4);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[1, 3, 2, 4]");
-	assert_eq!(tmp, val);
+	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[]");
@@ -31,7 +26,169 @@ async fn function_array_distinct() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("['something']");
+	let val = Value::parse("[ [1,2], [1,3], [2,2], [2,3] ]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_complement() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::complement([], []);
+		RETURN array::complement(3, true);
+		RETURN array::complement([1,2,3,4], [3,4,5,6]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_concat() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::concat([], []);
+		RETURN array::concat(3, true);
+		RETURN array::concat([1,2,3,4], [3,4,5,6]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3,4,3,4,5,6]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_difference() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::difference([], []);
+		RETURN array::difference(3, true);
+		RETURN array::difference([1,2,3,4], [3,4,5,6]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,5,6]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_distinct() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::distinct([]);
+		RETURN array::distinct("some text");
+		RETURN array::distinct([1,2,1,3,3,4]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3,4]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_intersect() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::intersect([], []);
+		RETURN array::intersect(3, true);
+		RETURN array::intersect([1,2,3,4], [3,4,5,6]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[3,4]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_union() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::union([], []);
+		RETURN array::union(3, true);
+		RETURN array::union([1,2,1,6], [1,3,4,5,6]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,6,3,4,5]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
