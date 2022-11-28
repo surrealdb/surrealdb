@@ -150,4 +150,16 @@ mod tests {
 			)
 		);
 	}
+
+	/* 
+	#[test]
+	fn script_ends_before() {
+		let sql = r#"\\} return "hello";"#;
+		let res = script(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		//assert_eq!("return { test: true, something: { other: true } };", format!("{}", out));
+		assert_eq!(out, Script::from(r#"\\} return "hello";"#));
+	}*/
+
 }

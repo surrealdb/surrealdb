@@ -16,6 +16,7 @@ use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
+use nom::bytes::streaming::take_until1;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Function {
@@ -160,7 +161,7 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((normal, script, cast))(i)
+	alt((js_script, normal, script, cast))(i)
 }
 
 fn normal(i: &str) -> IResult<&str, Function> {
@@ -185,6 +186,34 @@ fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = char('}')(i)?;
 	Ok((i, Function::Script(v, a)))
 }
+
+fn js_script(i: &str) -> IResult<&str, Function> {
+	/* Design decisions:
+			You can choice if creates a new tag (  E.g fn::js::script()[ ... ]  ) 
+			Or makes compatible the last tags but using a "[" "]" for give users a alternative 
+			when they javascript have conflicts. 
+
+	*/ 
+	//let (i, _) = tag("fn::js::script")(i)?;
+	let (i, _) = alt((tag("fn::script"), tag("fn"), tag("function")))(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = tag("(")(i)?;
+	let (i, a) = separated_list0(commas, value)(i)?;
+	let (i, _) = tag(")")(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, v) = secure_func(i)?;
+	Ok((i, Function::Script(v, a)))
+}
+
+fn secure_func(i: &str) -> IResult<&str, Script> {
+	let (i, _) = char('[')(i)?;
+	let (i, v) = take_until1("]")(i)?;
+	let (i, _) = char(']')(i)?;
+
+	let secure_js = format!(" try {{{}}} catch (error) {{ return \"SecureCatch::\" + error.message; }}", v);
+	Ok((i, Script(secure_js)))
+}
+
 
 fn cast(i: &str) -> IResult<&str, Function> {
 	let (i, _) = char('<')(i)?;
@@ -525,6 +554,53 @@ mod tests {
 			out,
 			Function::Script(
 				Script::parse(" return this.tags.filter(t => { return t.length > 3; }); "),
+				vec![]
+			)
+		);
+	}
+
+	#[test]
+	fn function_secure_avoiding_throws() {
+		let funstr = "[ throw \"abc\" ]";
+		let embedfun = secure_func(funstr);
+		assert_eq!(
+			" try { throw \"abc\" } catch (error) { return \"SecureCatch::\" + error.message; }",
+			format!("{}", embedfun.unwrap().1)
+		);
+
+		let sql = "function() [ throw \"abc\" }); ]";
+		let res = function(sql);
+
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(
+			"function() { try { throw \"abc\" }); } catch (error) { return \"SecureCatch::\" + error.message; }}",
+			format!("{}", out)
+		);
+		assert_eq!(
+			out,
+			Function::Script(
+				Script::from(" try { throw \"abc\" }); } catch (error) { return \"SecureCatch::\" + error.message; }"),
+				vec![]
+			)
+		);
+	}
+
+
+	#[test]
+	fn function_avoid_brackets_incompatibility() {
+		let sql = r#"function() [ \\} return "hello"; ]"#;
+		let res = function(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(
+			"function() { try { \\\\} return \"hello\"; } catch (error) { return \"SecureCatch::\" + error.message; }}",
+			format!("{}", out)
+		);
+		assert_eq!(
+			out,
+			Function::Script(
+				Script::from(" try { \\\\} return \"hello\"; } catch (error) { return \"SecureCatch::\" + error.message; }"),
 				vec![]
 			)
 		);
