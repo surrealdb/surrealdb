@@ -303,6 +303,25 @@ impl Difference<Array> for Array {
 
 // ------------------------------
 
+pub trait Flatten<T> {
+	fn flatten(self) -> T;
+}
+
+impl Flatten<Array> for Array {
+	fn flatten(self) -> Array {
+		let mut out = Array::new();
+		for v in self.into_iter() {
+			match v {
+				Value::Array(mut a) => out.append(&mut a),
+				_ => out.push(v),
+			}
+		}
+		out
+	}
+}
+
+// ------------------------------
+
 pub trait Intersect<T> {
 	fn intersect(self, other: T) -> T;
 }
