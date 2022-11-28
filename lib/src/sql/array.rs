@@ -312,7 +312,7 @@ impl Flatten<Array> for Array {
 		let mut out = Array::new();
 		for v in self.into_iter() {
 			match v {
-				Value::Array(a) => out.append(&mut a.clone()),
+				Value::Array(mut a) => out.append(&mut a),
 				_ => out.push(v),
 			}
 		}
