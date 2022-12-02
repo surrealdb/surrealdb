@@ -610,7 +610,7 @@ impl Value {
 	}
 
 	pub fn is_some(&self) -> bool {
-		!self.is_none()
+		!self.is_none() && !self.is_null()
 	}
 
 	pub fn is_true(&self) -> bool {

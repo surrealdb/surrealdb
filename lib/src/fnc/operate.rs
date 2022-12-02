@@ -19,6 +19,20 @@ pub fn and(a: Value, b: Value) -> Result<Value, Error> {
 	})
 }
 
+pub fn tco(a: Value, b: Value) -> Result<Value, Error> {
+	Ok(match a.is_truthy() {
+		true => a,
+		false => b,
+	})
+}
+
+pub fn nco(a: Value, b: Value) -> Result<Value, Error> {
+	Ok(match a.is_some() {
+		true => a,
+		false => b,
+	})
+}
+
 pub fn add(a: Value, b: Value) -> Result<Value, Error> {
 	Ok(a.add(b))
 }
@@ -198,6 +212,66 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap();
 		assert_eq!("0", format!("{}", out));
+	}
+
+	#[test]
+	fn tco_true() {
+		let one = Value::from(1);
+		let two = Value::from(2);
+		let res = tco(one, two);
+		assert!(res.is_ok());
+		let out = res.unwrap();
+		assert_eq!("1", format!("{}", out));
+	}
+
+	#[test]
+	fn tco_false_one() {
+		let one = Value::from(0);
+		let two = Value::from(1);
+		let res = tco(one, two);
+		assert!(res.is_ok());
+		let out = res.unwrap();
+		assert_eq!("1", format!("{}", out));
+	}
+
+	#[test]
+	fn tco_false_two() {
+		let one = Value::from(1);
+		let two = Value::from(0);
+		let res = tco(one, two);
+		assert!(res.is_ok());
+		let out = res.unwrap();
+		assert_eq!("1", format!("{}", out));
+	}
+
+	#[test]
+	fn nco_true() {
+		let one = Value::from(1);
+		let two = Value::from(2);
+		let res = nco(one, two);
+		assert!(res.is_ok());
+		let out = res.unwrap();
+		assert_eq!("1", format!("{}", out));
+	}
+
+	#[test]
+	fn nco_false_one() {
+		let one = Value::None;
+		let two = Value::from(1);
+		let res = nco(one, two);
+		assert!(res.is_ok());
+		let out = res.unwrap();
+		assert_eq!("1", format!("{}", out));
+	}
+
+	#[test]
+	fn nco_false_two() {
+		let one = Value::from(1);
+		let two = Value::None;
+		let res = nco(one, two);
+		assert!(res.is_ok());
+		let out = res.unwrap();
+		assert_eq!("1", format!("{}", out));
 	}
 
 	#[test]

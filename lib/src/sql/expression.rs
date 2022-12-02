@@ -76,12 +76,24 @@ impl Expression {
 					return Ok(l);
 				}
 			}
+			Operator::Tco => {
+				if let true = l.is_truthy() {
+					return Ok(l);
+				}
+			}
+			Operator::Nco => {
+				if let true = l.is_some() {
+					return Ok(l);
+				}
+			}
 			_ => {} // Continue
 		}
 		let r = self.r.compute(ctx, opt, txn, doc).await?;
 		match self.o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
+			Operator::Tco => fnc::operate::tco(l, r),
+			Operator::Nco => fnc::operate::nco(l, r),
 			Operator::Add => fnc::operate::add(l, r),
 			Operator::Sub => fnc::operate::sub(l, r),
 			Operator::Mul => fnc::operate::mul(l, r),
