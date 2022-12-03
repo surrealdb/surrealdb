@@ -235,11 +235,12 @@ async fn function_string_slice() -> Result<(), Error> {
 		RETURN string::slice("the quick brown fox jumps over the lazy dog.", 0, -1);
 		RETURN string::slice("the quick brown fox jumps over the lazy dog.", 16, -1);
 		RETURN string::slice("the quick brown fox jumps over the lazy dog.", -9, -1);
+		RETURN string::slice("the quick brown fox jumps over the lazy dog.", -100, -100);
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("'the quick brown fox jumps over the lazy dog.'");
@@ -263,6 +264,10 @@ async fn function_string_slice() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("'lazy dog'");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("''");
 	assert_eq!(tmp, val);
 	//
 	Ok(())

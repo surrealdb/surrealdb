@@ -53,12 +53,16 @@ pub fn reverse((string,): (String,)) -> Result<Value, Error> {
 
 pub fn slice((val, beg, lim): (String, Option<isize>, Option<isize>)) -> Result<Value, Error> {
 	let val = match beg {
-		Some(v) if v < 0 => val.chars().skip(val.len() - v.unsigned_abs()).collect::<String>(),
+		Some(v) if v < 0 => {
+			val.chars().skip(val.len().saturating_sub(v.unsigned_abs())).collect::<String>()
+		}
 		Some(v) => val.chars().skip(v as usize).collect::<String>(),
 		None => val,
 	};
 	let val = match lim {
-		Some(v) if v < 0 => val.chars().take(val.len() - v.unsigned_abs()).collect::<String>(),
+		Some(v) if v < 0 => {
+			val.chars().take(val.len().saturating_sub(v.unsigned_abs())).collect::<String>()
+		}
 		Some(v) => val.chars().take(v as usize).collect::<String>(),
 		None => val,
 	};
