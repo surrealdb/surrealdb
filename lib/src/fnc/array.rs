@@ -105,6 +105,24 @@ pub fn union(arrays: (Value, Value)) -> Result<Value, Error> {
 	})
 }
 
+pub fn insert((array, data, index): (Value, Value, Value)) -> Result<Value, Error> {
+	match (array, index) {
+		(Value::Array(mut v), Value::Number(index)) => {
+			let mut index = index.as_int();
+			if index < 0 {
+				index = v.len() as i64 + index;
+			}
+			v.insert(index as usize, data);
+			Ok(v.into())
+		}
+		(Value::Array(mut v), Value::None) => {
+			v.push(data);
+			Ok(v.into())
+		}
+		(_, _) => Ok(Value::None),
+	}
+}
+
 pub mod sort {
 
 	use crate::err::Error;
