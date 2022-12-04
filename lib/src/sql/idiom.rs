@@ -181,6 +181,12 @@ pub fn param(i: &str) -> IResult<&str, Idiom> {
 	Ok((i, Idiom::from(v)))
 }
 
+/// Used in a RELATE statement
+pub fn plain(i: &str) -> IResult<&str, Idiom> {
+	let (i, p) = first(i)?;
+	Ok((i, Idiom::from(vec![p])))
+}
+
 pub fn idiom(i: &str) -> IResult<&str, Idiom> {
 	alt((
 		|i| {
