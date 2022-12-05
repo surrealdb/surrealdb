@@ -193,7 +193,7 @@ async fn function_array_insert() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("[1,2,3,4,5]");
+	let val = Value::parse("[1,2,3,5,4]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
