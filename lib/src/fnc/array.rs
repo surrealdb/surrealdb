@@ -110,7 +110,12 @@ pub fn insert((array, data, index): (Value, Value, Value)) -> Result<Value, Erro
 		(Value::Array(mut v), Value::Number(index)) => {
 			let mut index = index.as_int();
 			if index < 0 {
-				index = v.len() as i64 + index;
+				// negative index means start from the back
+				index += v.len() as i64;
+			}
+			if index > v.len() as i64 || index < 0 {
+				// insert will panic
+				return Ok(Value::None);
 			}
 			v.insert(index as usize, data);
 			Ok(v.into())
