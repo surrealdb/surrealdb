@@ -51,6 +51,29 @@ pub fn flatten((arg,): (Value,)) -> Result<Value, Error> {
 	})
 }
 
+pub fn insert((array, data, index): (Value, Value, Value)) -> Result<Value, Error> {
+	match (array, index) {
+		(Value::Array(mut v), Value::Number(index)) => {
+			let mut index = index.as_int();
+			if index < 0 {
+				// negative index means start from the back
+				index += v.len() as i64;
+			}
+			if index >= v.len() as i64 || index < 0 {
+				// invalid index returning array as it is
+				return Ok(v.into());
+			}
+			v.insert(index as usize, data);
+			Ok(v.into())
+		}
+		(Value::Array(mut v), Value::None) => {
+			v.push(data);
+			Ok(v.into())
+		}
+		(_, _) => Ok(Value::None),
+	}
+}
+
 pub fn intersect(arrays: (Value, Value)) -> Result<Value, Error> {
 	Ok(match arrays {
 		(Value::Array(v), Value::Array(w)) => v.intersect(w).into(),
@@ -103,29 +126,6 @@ pub fn union(arrays: (Value, Value)) -> Result<Value, Error> {
 		(Value::Array(v), Value::Array(w)) => v.union(w).into(),
 		_ => Value::None,
 	})
-}
-
-pub fn insert((array, data, index): (Value, Value, Value)) -> Result<Value, Error> {
-	match (array, index) {
-		(Value::Array(mut v), Value::Number(index)) => {
-			let mut index = index.as_int();
-			if index < 0 {
-				// negative index means start from the back
-				index += v.len() as i64;
-			}
-			if index > v.len() as i64 || index < 0 {
-				// insert will panic
-				return Ok(Value::None);
-			}
-			v.insert(index as usize, data);
-			Ok(v.into())
-		}
-		(Value::Array(mut v), Value::None) => {
-			v.push(data);
-			Ok(v.into())
-		}
-		(_, _) => Ok(Value::None),
-	}
 }
 
 pub mod sort {
