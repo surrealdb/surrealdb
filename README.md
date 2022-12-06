@@ -412,7 +412,7 @@ Embedded JavaScript functions allow for advanced, custom functionality, with com
 
 #### Designed to be embedded or to run distributed in the cloud
 
-Built entirely in Rust as a single library, SurrealDB is designed to be used as both an embedded database library with advanced querying functionality, and as a database server which can operate in a distributed cluster. With low memory usage and cpu requirements, the system requirements have been specifically thought through for running in all types of environment.
+Built entirely in Rust as a single library, SurrealDB is designed to be used as both an embedded database library with advanced querying functionality, and as a database server which can operate in a distributed cluster. With low memory usage and cpu requirements, the system requirements have been specifically thought through for running in all types of environments.
 
 ![Designed to be embedded or in the cloud](/img/illustrations/cloud-or-embedded.png)
 
