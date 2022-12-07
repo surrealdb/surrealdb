@@ -4287,6 +4287,7 @@ dependencies = [
  "atomic",
  "getrandom 0.2.7",
  "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]

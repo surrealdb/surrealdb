@@ -16,6 +16,7 @@ use futures::lock::Mutex;
 use std::sync::Arc;
 
 /// The underlying datastore instance which stores the dataset.
+#[allow(dead_code)]
 pub struct Datastore {
 	pub(super) inner: Inner,
 }
@@ -144,7 +145,10 @@ impl Datastore {
 				v
 			}
 			// The datastore path is not valid
-			_ => Err(Error::Ds("Unable to load the specified datastore".into())),
+			_ => {
+				info!(target: LOG, "Unable to load the specified datastore {}", path);
+				Err(Error::Ds("Unable to load the specified datastore".into()))
+			}
 		}
 	}
 
@@ -163,6 +167,7 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+		#![allow(unused_variables)]
 		match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
@@ -204,6 +209,8 @@ impl Datastore {
 					cache: super::cache::Cache::default(),
 				})
 			}
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 
