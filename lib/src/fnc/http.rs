@@ -34,7 +34,7 @@ pub async fn delete((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
 #[cfg(feature = "http")]
 fn try_as_uri(fn_name: &str, value: Value) -> Result<crate::sql::Strand, Error> {
 	match value {
-		// Avoid surf crate panic by pre-checking URI.
+		// Pre-check URI.
 		Value::Strand(uri) if crate::fnc::util::http::uri_is_valid(&uri) => Ok(uri),
 		_ => Err(Error::InvalidArguments {
 			name: fn_name.to_owned(),

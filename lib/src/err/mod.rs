@@ -349,8 +349,8 @@ impl<T> From<channel::SendError<T>> for Error {
 }
 
 #[cfg(feature = "http")]
-impl From<surf::Error> for Error {
-	fn from(e: surf::Error) -> Error {
+impl From<reqwest::Error> for Error {
+	fn from(e: reqwest::Error) -> Error {
 		Error::Http(e.to_string())
 	}
 }
