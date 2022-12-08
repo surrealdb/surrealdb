@@ -14,6 +14,7 @@ use channel::Sender;
 use std::ops::Bound;
 
 impl Iterable {
+	#[allow(dead_code)]
 	pub(crate) async fn channel(
 		self,
 		ctx: &Context<'_>,

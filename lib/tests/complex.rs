@@ -6,7 +6,7 @@ use std::future::Future;
 use std::thread::Builder;
 use surrealdb::sql::Value;
 use surrealdb::Datastore;
-use surrealdb::Error;
+use surrealdb::DbError as Error;
 use surrealdb::Session;
 
 #[test]

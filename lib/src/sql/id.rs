@@ -81,6 +81,12 @@ impl From<&str> for Id {
 	}
 }
 
+impl From<&String> for Id {
+	fn from(v: &String) -> Self {
+		Self::String(v.to_owned())
+	}
+}
+
 impl From<Vec<Value>> for Id {
 	fn from(v: Vec<Value>) -> Self {
 		Id::Array(v.into())

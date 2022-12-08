@@ -1,3 +1,5 @@
+//! SQL types
+
 pub(crate) mod algorithm;
 pub(crate) mod array;
 pub(crate) mod base;

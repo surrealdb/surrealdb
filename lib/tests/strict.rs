@@ -2,7 +2,7 @@ mod parse;
 use parse::Parse;
 use surrealdb::sql::Value;
 use surrealdb::Datastore;
-use surrealdb::Error;
+use surrealdb::DbError as Error;
 use surrealdb::Session;
 
 #[tokio::test]
