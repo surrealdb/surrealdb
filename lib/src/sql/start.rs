@@ -23,7 +23,7 @@ impl Start {
 		doc: Option<&Value>,
 	) -> Result<usize, Error> {
 		match self.0.compute(ctx, opt, txn, doc).await {
-			Ok(v) if v.is_integer() && v.is_positive() => Ok(v.as_usize()),
+			Ok(v) if v.is_integer() && v.is_zero_or_positive() => Ok(v.as_usize()),
 			Ok(v) => Err(Error::InvalidStart {
 				value: v.as_string(),
 			}),
