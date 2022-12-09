@@ -3,10 +3,10 @@
     "A scalable, distributed, collaborative, document-graph database, for the realtime web";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.05-small";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.11-small";
     flake-utils.url = "github:numtide/flake-utils/v1.0.0";
     crane = {
-      url = "github:ipetkov/crane/v0.7.0";
+      url = "github:ipetkov/crane/v0.10.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     fenix = {
@@ -76,6 +76,9 @@
           # nix build .#static-binary
           static-binary = packages.x86_64-unknown-linux-musl;
 
+          # nix build .#wasm
+          wasm = packages.wasm32-unknown-unknown;
+
           # nix build .#windows-binary
           windows-binary = packages.x86_64-pc-windows-gnu;
         } // (pkgs.lib.attrsets.mapAttrs (target: _:
@@ -95,6 +98,9 @@
           # nix develop .#static-binary
           static-binary = devShells.x86_64-unknown-linux-musl;
 
+          # nix develop .#wasm
+          wasm = devShells.wasm32-unknown-unknown;
+
           # nix develop .#windows-binary
           windows-binary = devShells.x86_64-pc-windows-gnu;
         } // (pkgs.lib.attrsets.mapAttrs (target: _:
@@ -108,7 +114,7 @@
             hardeningDisable = [ "fortify" ];
 
             depsBuildBuild = buildSpec.depsBuildBuild or [ ]
-              ++ [ rustToolchain ] ++ (with pkgs; [ nixfmt cargo-watch ]);
+              ++ [ rustToolchain ] ++ (with pkgs; [ nixfmt cargo-watch wasm-pack ]);
 
             inherit (util) SURREAL_BUILD_METADATA;
           })) util.platforms);
