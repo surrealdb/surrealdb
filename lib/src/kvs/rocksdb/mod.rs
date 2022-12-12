@@ -285,7 +285,7 @@ impl Transaction {
 				let (k, v) = (iter.key(), iter.value());
 				// Check the key and value
 				if let (Some(k), Some(v)) = (k, v) {
-					if k > beg && k < end {
+					if k >= beg && k < end {
 						res.push((k.to_vec(), v.to_vec()));
 						iter.next();
 						continue;
