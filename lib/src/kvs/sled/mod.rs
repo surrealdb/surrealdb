@@ -327,14 +327,90 @@ impl Transaction {
 
 #[cfg(test)]
 mod tests {
-	#[tokio::test]
-	async fn sled_transaction() {
-		let mut transaction = get_transaction().await;
-		transaction.put("flip", "flop").await.unwrap();
+	use crate::Error::TxConditionNotMet;
+	use sled::IVec;
+	use std::collections::HashMap;
+	use std::fs;
+	use std::path::PathBuf;
+	use std::sync::atomic::{AtomicU16, Ordering};
 
-		async fn get_transaction() -> crate::Transaction {
-			let datastore = crate::Datastore::new("sled:/tmp/sled.db").await.unwrap();
-			datastore.transaction(true, false).await.unwrap()
+	/// This value is automatically incremented for each test
+	/// so that each test has a dedicated id
+	static TEST_ID: AtomicU16 = AtomicU16::new(1);
+
+	pub fn next_test_id() -> usize {
+		TEST_ID.fetch_add(1, Ordering::SeqCst) as usize
+	}
+
+	pub fn new_tmp_path(path: &str, delete_existing: bool) -> PathBuf {
+		let mut path_buf = PathBuf::from("/tmp");
+		if !path_buf.exists() {
+			fs::create_dir(path_buf.as_path()).unwrap();
 		}
+		path_buf.push(path);
+		if delete_existing && path_buf.exists() {
+			if path_buf.is_dir() {
+				fs::remove_dir_all(&path_buf).unwrap();
+			} else if path_buf.is_file() {
+				fs::remove_file(&path_buf).unwrap()
+			}
+		}
+		path_buf
+	}
+
+	fn new_store_path() -> String {
+		let store_path = format!("/tmp/sled.{}", next_test_id());
+		new_tmp_path(&store_path, true);
+		store_path
+	}
+
+	async fn get_transaction(store_path: &str) -> crate::Transaction {
+		let datastore = crate::Datastore::new(&format!("sled:{}", store_path)).await.unwrap();
+		datastore.transaction(true, false).await.unwrap()
+	}
+
+	fn check_store(store_path: &str, key_values: HashMap<&'static str, &'static str>) {
+		let db = sled::open(store_path).unwrap();
+		assert_eq!(db.len(), key_values.len());
+		for (key, value) in key_values {
+			assert_eq!(db.get(key).unwrap(), Some(IVec::from(value.as_bytes())));
+		}
+	}
+
+	#[tokio::test]
+	async fn test_transaction_sled_put() {
+		let store_path = new_store_path();
+		{
+			let mut transaction = get_transaction(&store_path).await;
+			transaction.put("flip", "flop").await.unwrap();
+			transaction.commit().await.unwrap();
+		}
+		check_store(&store_path, HashMap::from([("flip", "flop")]));
+	}
+
+	#[tokio::test]
+	async fn test_transaction_sled_putc_err() {
+		let store_path = new_store_path();
+		{
+			let mut transaction = get_transaction(&store_path).await;
+			transaction.put("flip", "flop").await.unwrap();
+			assert_eq!(
+				transaction.putc("flip", "flap", Some("nada")).await.err().unwrap().to_string(),
+				"Value being checked was not correct"
+			);
+		}
+		check_store(&store_path, HashMap::from([]));
+	}
+
+	#[tokio::test]
+	async fn test_transaction_sled_putc_ok() {
+		let store_path = new_store_path();
+		{
+			let mut transaction = get_transaction(&store_path).await;
+			transaction.put("flip", "flop").await.unwrap();
+			transaction.putc("flip", "flap", Some("flop")).await.unwrap();
+			transaction.commit().await.unwrap();
+		}
+		check_store(&store_path, HashMap::from([("flip", "flap")]));
 	}
 }
