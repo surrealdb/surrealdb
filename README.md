@@ -165,7 +165,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://install.surrealdb.com | sh -s -- --
 
 The easiest and preferred way to get going with SurrealDB on Windows is to install and use the SurrealDB command-line tool. Run the following command in your terminal and follow the on-screen instructions.
 
-```bash
+```ps1
 iwr https://windows.surrealdb.com -useb | iex
 ```
 
