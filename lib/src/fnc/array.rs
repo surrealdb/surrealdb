@@ -51,6 +51,30 @@ pub fn flatten((arg,): (Value,)) -> Result<Value, Error> {
 	})
 }
 
+pub fn insert((array, value, index): (Value, Value, Option<Value>)) -> Result<Value, Error> {
+	match (array, index) {
+		(Value::Array(mut v), Some(Value::Number(i))) => {
+			let mut i = i.as_int();
+			// Negative index means start from the back
+			if i < 0 {
+				i += v.len() as i64;
+			}
+			// Invalid index so return array unaltered
+			if i > v.len() as i64 || i < 0 {
+				return Ok(v.into());
+			}
+			// Insert the value into the array
+			v.insert(i as usize, value);
+			Ok(v.into())
+		}
+		(Value::Array(mut v), None) => {
+			v.push(value);
+			Ok(v.into())
+		}
+		(_, _) => Ok(Value::None),
+	}
+}
+
 pub fn intersect(arrays: (Value, Value)) -> Result<Value, Error> {
 	Ok(match arrays {
 		(Value::Array(v), Value::Array(w)) => v.intersect(w).into(),
