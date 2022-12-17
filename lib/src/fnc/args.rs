@@ -142,6 +142,29 @@ impl<A: FromArg, B: FromArg> FromArgs for (A, Option<B>) {
 	}
 }
 
+// Some functions take 2 or 3 arguments, so the third argument is optional.
+impl<A: FromArg, B: FromArg, C: FromArg> FromArgs for (A, B, Option<C>) {
+	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
+		let err = || Error::InvalidArguments {
+			name: name.to_owned(),
+			message: String::from("Expected 2 or 3 arguments."),
+		};
+
+		let mut args = args.into_iter();
+		let a = A::from_arg(args.next().ok_or_else(err)?)?;
+		let b = B::from_arg(args.next().ok_or_else(err)?)?;
+		let c = match args.next() {
+			Some(c) => Some(C::from_arg(c)?),
+			None => None,
+		};
+		if args.next().is_some() {
+			// Too many.
+			return Err(err());
+		}
+		Ok((a, b, c))
+	}
+}
+
 // Some functions take 0, 1, or 2 arguments, so both arguments are optional.
 // It is safe to assume that, if the first argument is None, the second argument will also be None.
 impl<A: FromArg, B: FromArg> FromArgs for (Option<A>, Option<B>) {

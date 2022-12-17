@@ -51,33 +51,24 @@ pub fn flatten((arg,): (Value,)) -> Result<Value, Error> {
 	})
 }
 
-pub fn insert(args: Vec<Value>) -> Result<Value, Error> {
-	if args.len() < 2 {
-		return Err(Error::InvalidArguments {
-			name: String::from("array::insert"),
-			message: String::from("Expected at least two argument"),
-		});
-	}
-	let mut args = args.into_iter();
-	let array = args.next().unwrap();
-	let data = args.next().unwrap();
-	let index = args.next().unwrap_or(Value::None);
+pub fn insert((array, value, index): (Value, Value, Option<Value>)) -> Result<Value, Error> {
 	match (array, index) {
-		(Value::Array(mut v), Value::Number(index)) => {
-			let mut index = index.as_int();
-			if index < 0 {
-				// negative index means start from the back
-				index += v.len() as i64;
+		(Value::Array(mut v), Some(Value::Number(i))) => {
+			let mut i = i.as_int();
+			// Negative index means start from the back
+			if i < 0 {
+				i += v.len() as i64;
 			}
-			if index > v.len() as i64 || index < 0 {
-				// invalid index returning array as it is
+			// Invalid index so return array unaltered
+			if i > v.len() as i64 || i < 0 {
 				return Ok(v.into());
 			}
-			v.insert(index as usize, data);
+			// Insert the value into the array
+			v.insert(i as usize, value);
 			Ok(v.into())
 		}
-		(Value::Array(mut v), Value::None) => {
-			v.push(data);
+		(Value::Array(mut v), None) => {
+			v.push(value);
 			Ok(v.into())
 		}
 		(_, _) => Ok(Value::None),
