@@ -10,7 +10,7 @@
 
     nativeBuildInputs = [ pkg-config ];
 
-    buildInputs = [ openssl ];
+    buildInputs = [ openssl libiconv darwin.apple_sdk.frameworks.Security ];
 
     CARGO_BUILD_TARGET = target;
 
