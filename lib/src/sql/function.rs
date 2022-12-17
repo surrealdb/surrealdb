@@ -177,7 +177,9 @@ fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = alt((tag("fn::script"), tag("fn"), tag("function")))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("(")(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag(")")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('{')(i)?;
