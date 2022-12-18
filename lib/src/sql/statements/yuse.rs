@@ -7,7 +7,7 @@ use nom::bytes::complete::tag_no_case;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct UseStatement {
 	pub ns: Option<String>,
 	pub db: Option<String>,
@@ -15,7 +15,7 @@ pub struct UseStatement {
 
 impl fmt::Display for UseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "USE")?;
+		f.write_str("USE")?;
 		if let Some(ref ns) = self.ns {
 			write!(f, " NS {}", ns)?;
 		}

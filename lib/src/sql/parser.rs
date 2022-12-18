@@ -7,26 +7,39 @@ use crate::sql::value::Value;
 use nom::Err;
 use std::str;
 
+/// Parses a SurrealQL [`Query`]
 pub fn parse(input: &str) -> Result<Query, Error> {
 	parse_impl(input, query)
 }
 
+/// Parses a SurrealQL [`Thing`]
 pub fn thing(input: &str) -> Result<Thing, Error> {
 	parse_impl(input, super::thing::thing)
 }
 
+/// Parses a SurrealQL [`Value`]
 pub fn json(input: &str) -> Result<Value, Error> {
 	parse_impl(input, super::value::json)
 }
 
 fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Result<O, Error> {
+	// Check the length of the input
 	match input.trim().len() {
+		// The input query was empty
 		0 => Err(Error::QueryEmpty),
+		// Continue parsing the query
 		_ => match parser(input) {
-			Ok((_, parsed)) => Ok(parsed),
+			// The query was parsed successfully
+			Ok((v, parsed)) if v.is_empty() => Ok(parsed),
+			// There was unparsed SQL remaining
+			Ok((_, _)) => Err(Error::QueryRemaining),
+			// There was an error when parsing the query
 			Err(Err::Error(e)) | Err(Err::Failure(e)) => match e {
+				// There was a parsing error
 				ParserError(e) => {
+					// Locate the parser position
 					let (s, l, c) = locate(input, e);
+					// Return the parser error
 					Err(Error::InvalidQuery {
 						line: l,
 						char: c,
@@ -40,6 +53,7 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 }
 
 fn truncate(s: &str, l: usize) -> &str {
+	// TODO: use s.floor_char_boundary once https://github.com/rust-lang/rust/issues/93743 lands
 	match s.char_indices().nth(l) {
 		None => s,
 		Some((i, _)) => &s[..i],
@@ -49,8 +63,7 @@ fn truncate(s: &str, l: usize) -> &str {
 fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
 	let index = input.len() - tried.len();
 	let tried = truncate(tried, 100);
-	let lines = input.split('\n').collect::<Vec<&str>>();
-	let lines = lines.iter().map(|l| l.len()).enumerate();
+	let lines = input.split('\n').map(|l| l.len()).enumerate();
 	let (mut total, mut chars) = (0, 0);
 	for (line, size) in lines {
 		total += size + 1;
@@ -124,7 +137,7 @@ mod tests {
 				AND ages CONTAINS 18
 				AND if IS true
 			SPLIT test.things
-			VERSION '2019-01-01'
+			VERSION '2019-01-01T08:00:00Z'
 			TIMEOUT 2w;
 
 			CREATE person SET name = 'Tobie', age += 18;

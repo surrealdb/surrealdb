@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::number::Number;
 use crate::sql::operation::Operation;
 use crate::sql::serde::is_internal_serialization;
@@ -14,47 +15,54 @@ use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::collections::HashSet;
+use std::fmt::{self, Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {
 	fn from(v: Value) -> Self {
-		Array(vec![v])
+		vec![v].into()
 	}
 }
 
 impl From<Vec<Value>> for Array {
 	fn from(v: Vec<Value>) -> Self {
-		Array(v)
+		Self(v)
 	}
 }
 
 impl From<Vec<i32>> for Array {
 	fn from(v: Vec<i32>) -> Self {
-		Array(v.into_iter().map(Value::from).collect())
+		Self(v.into_iter().map(Value::from).collect())
 	}
 }
 
 impl From<Vec<&str>> for Array {
 	fn from(v: Vec<&str>) -> Self {
-		Array(v.into_iter().map(Value::from).collect())
+		Self(v.into_iter().map(Value::from).collect())
 	}
 }
 
 impl From<Vec<Number>> for Array {
 	fn from(v: Vec<Number>) -> Self {
-		Array(v.into_iter().map(Value::from).collect())
+		Self(v.into_iter().map(Value::from).collect())
 	}
 }
 
 impl From<Vec<Operation>> for Array {
 	fn from(v: Vec<Operation>) -> Self {
-		Array(v.into_iter().map(Value::from).collect())
+		Self(v.into_iter().map(Value::from).collect())
+	}
+}
+
+impl From<Array> for Vec<Value> {
+	fn from(s: Array) -> Self {
+		s.0
 	}
 }
 
@@ -81,11 +89,11 @@ impl IntoIterator for Array {
 
 impl Array {
 	pub fn new() -> Self {
-		Array(Vec::default())
+		Self::default()
 	}
 
 	pub fn with_capacity(len: usize) -> Self {
-		Array(Vec::with_capacity(len))
+		Self(Vec::with_capacity(len))
 	}
 
 	pub fn as_ints(self) -> Vec<i64> {
@@ -121,20 +129,20 @@ impl Array {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		let mut x = Vec::new();
+		let mut x = Self::with_capacity(self.len());
 		for v in self.iter() {
 			match v.compute(ctx, opt, txn, doc).await {
 				Ok(v) => x.push(v),
 				Err(e) => return Err(e),
 			};
 		}
-		Ok(Value::Array(Array(x)))
+		Ok(Value::Array(x))
 	}
 }
 
-impl fmt::Display for Array {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "[{}]", self.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))
+impl Display for Array {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "[{}]", Fmt::comma_separated(self.as_slice()))
 	}
 }
 
@@ -230,11 +238,29 @@ pub trait Combine<T> {
 }
 
 impl Combine<Array> for Array {
-	fn combine(self, other: Array) -> Array {
-		let mut out = Array::new();
+	fn combine(self, other: Self) -> Array {
+		let mut out = Self::with_capacity(self.len().saturating_mul(other.len()));
 		for a in self.iter() {
 			for b in other.iter() {
 				out.push(vec![a.clone(), b.clone()].into());
+			}
+		}
+		out
+	}
+}
+
+// ------------------------------
+
+pub trait Complement<T> {
+	fn complement(self, other: T) -> T;
+}
+
+impl Complement<Array> for Array {
+	fn complement(self, other: Self) -> Array {
+		let mut out = Array::new();
+		for v in self.into_iter() {
+			if !other.contains(&v) {
+				out.push(v)
 			}
 		}
 		out
@@ -261,17 +287,35 @@ pub trait Difference<T> {
 }
 
 impl Difference<Array> for Array {
-	fn difference(self, other: Array) -> Array {
+	fn difference(self, mut other: Array) -> Array {
 		let mut out = Array::new();
-		let mut other: Vec<_> = other.into_iter().collect();
-		for a in self.into_iter() {
-			if let Some(pos) = other.iter().position(|b| a == *b) {
+		for v in self.into_iter() {
+			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
 			} else {
-				out.push(a);
+				out.push(v);
 			}
 		}
 		out.append(&mut other);
+		out
+	}
+}
+
+// ------------------------------
+
+pub trait Flatten<T> {
+	fn flatten(self) -> T;
+}
+
+impl Flatten<Array> for Array {
+	fn flatten(self) -> Array {
+		let mut out = Array::new();
+		for v in self.into_iter() {
+			match v {
+				Value::Array(mut a) => out.append(&mut a),
+				_ => out.push(v),
+			}
+		}
 		out
 	}
 }
@@ -282,14 +326,13 @@ pub trait Intersect<T> {
 	fn intersect(self, other: T) -> T;
 }
 
-impl Intersect<Array> for Array {
-	fn intersect(self, other: Array) -> Array {
-		let mut out = Array::new();
-		let mut other: Vec<_> = other.into_iter().collect();
-		for a in self.0.into_iter() {
-			if let Some(pos) = other.iter().position(|b| a == *b) {
-				out.push(a);
+impl Intersect<Self> for Array {
+	fn intersect(self, mut other: Self) -> Self {
+		let mut out = Self::new();
+		for v in self.0.into_iter() {
+			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
+				out.push(v);
 			}
 		}
 		out
@@ -302,8 +345,8 @@ pub trait Union<T> {
 	fn union(self, other: T) -> T;
 }
 
-impl Union<Array> for Array {
-	fn union(mut self, mut other: Array) -> Array {
+impl Union<Self> for Array {
+	fn union(mut self, mut other: Self) -> Array {
 		self.append(&mut other);
 		self.uniq()
 	}
@@ -317,12 +360,15 @@ pub trait Uniq<T> {
 
 impl Uniq<Array> for Array {
 	fn uniq(mut self) -> Array {
-		for x in (0..self.len()).rev() {
-			for y in (x + 1..self.len()).rev() {
-				if self[x] == self[y] {
-					self.remove(y);
-				}
+		let mut set: HashSet<&Value> = HashSet::new();
+		let mut to_remove: Vec<usize> = Vec::new();
+		for (i, item) in self.iter().enumerate() {
+			if !set.insert(item) {
+				to_remove.push(i);
 			}
+		}
+		for i in to_remove.iter().rev() {
+			self.remove(*i);
 		}
 		self
 	}
@@ -352,6 +398,16 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn array_empty() {
+		let sql = "[]";
+		let res = array(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("[]", format!("{}", out));
+		assert_eq!(out.0.len(), 0);
+	}
+
+	#[test]
 	fn array_normal() {
 		let sql = "[1,2,3]";
 		let res = array(sql);
@@ -379,5 +435,15 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("[1, 2, 3 + 1]", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
+	}
+
+	#[test]
+	fn array_fnc_uniq_normal() {
+		let sql = "[1,2,1,3,3,4]";
+		let res = array(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1.uniq();
+		assert_eq!("[1, 2, 3, 4]", format!("{}", out));
+		assert_eq!(out.0.len(), 4);
 	}
 }

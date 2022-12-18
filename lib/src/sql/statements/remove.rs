@@ -16,9 +16,9 @@ use nom::bytes::complete::tag_no_case;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
@@ -40,31 +40,31 @@ impl RemoveStatement {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			RemoveStatement::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
-			RemoveStatement::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
 
-impl fmt::Display for RemoveStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			RemoveStatement::Namespace(v) => write!(f, "{}", v),
-			RemoveStatement::Database(v) => write!(f, "{}", v),
-			RemoveStatement::Login(v) => write!(f, "{}", v),
-			RemoveStatement::Token(v) => write!(f, "{}", v),
-			RemoveStatement::Scope(v) => write!(f, "{}", v),
-			RemoveStatement::Table(v) => write!(f, "{}", v),
-			RemoveStatement::Event(v) => write!(f, "{}", v),
-			RemoveStatement::Field(v) => write!(f, "{}", v),
-			RemoveStatement::Index(v) => write!(f, "{}", v),
+			Self::Namespace(v) => Display::fmt(v, f),
+			Self::Database(v) => Display::fmt(v, f),
+			Self::Login(v) => Display::fmt(v, f),
+			Self::Token(v) => Display::fmt(v, f),
+			Self::Scope(v) => Display::fmt(v, f),
+			Self::Table(v) => Display::fmt(v, f),
+			Self::Event(v) => Display::fmt(v, f),
+			Self::Field(v) => Display::fmt(v, f),
+			Self::Index(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -87,7 +87,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RemoveNamespaceStatement {
 	pub name: Ident,
 }
@@ -143,7 +143,7 @@ fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RemoveDatabaseStatement {
 	pub name: Ident,
 }
@@ -199,7 +199,7 @@ fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RemoveLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -278,7 +278,7 @@ fn login(i: &str) -> IResult<&str, RemoveLoginStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RemoveTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -372,7 +372,7 @@ fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RemoveScopeStatement {
 	pub name: Ident,
 }
@@ -428,7 +428,7 @@ fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RemoveTableStatement {
 	pub name: Ident,
 }
@@ -484,7 +484,7 @@ fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -509,6 +509,9 @@ impl RemoveEventStatement {
 		// Delete the definition
 		let key = crate::key::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
+		// Clear the cache
+		let key = crate::key::ev::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -544,7 +547,7 @@ fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -569,6 +572,9 @@ impl RemoveFieldStatement {
 		// Delete the definition
 		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name.to_string());
 		run.del(key).await?;
+		// Clear the cache
+		let key = crate::key::fd::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -604,7 +610,7 @@ fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RemoveIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -629,6 +635,9 @@ impl RemoveIndexStatement {
 		// Delete the definition
 		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
+		// Clear the cache
+		let key = crate::key::ix::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Remove the resource data
 		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);
 		let end = crate::key::index::suffix(opt.ns(), opt.db(), &self.what, &self.name);

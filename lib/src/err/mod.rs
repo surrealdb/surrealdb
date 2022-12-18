@@ -41,6 +41,10 @@ pub enum Error {
 	#[error("The key being inserted already exists")]
 	TxKeyAlreadyExists,
 
+	/// It's is not possible to convert between the two types
+	#[error("Cannot convert from '{0}' to '{1}'")]
+	TryFromError(String, &'static str),
+
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
 	NsEmpty,
@@ -52,6 +56,10 @@ pub enum Error {
 	/// No SQL query has been specified
 	#[error("Specify some SQL code to execute")]
 	QueryEmpty,
+
+	/// There was an error with the SQL query
+	#[error("The SQL query was not parsed fully")]
+	QueryRemaining,
 
 	/// There was an error with the SQL query
 	#[error("Parse error on line {line} at character {char} when parsing '{sql}'")]
@@ -71,9 +79,34 @@ pub enum Error {
 	#[error("Remote HTTP request functions are not enabled")]
 	HttpDisabled,
 
+	/// it is not possible to set a variable with the specified name
+	#[error("Found '{name}' but it is not possible to set a variable with this name")]
+	InvalidParam {
+		name: String,
+	},
+
+	/// The LIMIT clause must evaluate to a positive integer
+	#[error("Found {value} but the LIMIT clause must evaluate to a positive integer")]
+	InvalidLimit {
+		value: String,
+	},
+
+	/// The START clause must evaluate to a positive integer
+	#[error("Found {value} but the START clause must evaluate to a positive integer")]
+	InvalidStart {
+		value: String,
+	},
+
 	/// There was an error with the provided JavaScript code
 	#[error("Problem with embedded script function. {message}")]
 	InvalidScript {
+		message: String,
+	},
+
+	/// There was a problem running the specified function
+	#[error("There was a problem running the {name}() function. {message}")]
+	InvalidFunction {
+		name: String,
 		message: String,
 	},
 
@@ -152,9 +185,9 @@ pub enum Error {
 	#[error("Unable to perform the realtime query")]
 	RealtimeDisabled,
 
-	/// Too many recursive subqueries have been processed
-	#[error("Too many recursive subqueries have been processed")]
-	TooManySubqueries,
+	/// Reached excessive computation depth due to functions, subqueries, or futures
+	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
+	ComputationDepthExceeded,
 
 	/// Can not execute CREATE query using the specified value
 	#[error("Can not execute CREATE query using value '{value}'")]
@@ -316,8 +349,8 @@ impl<T> From<channel::SendError<T>> for Error {
 }
 
 #[cfg(feature = "http")]
-impl From<surf::Error> for Error {
-	fn from(e: surf::Error) -> Error {
+impl From<reqwest::Error> for Error {
+	fn from(e: reqwest::Error) -> Error {
 		Error::Http(e.to_string())
 	}
 }

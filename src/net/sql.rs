@@ -1,7 +1,9 @@
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
+use crate::net::input::bytes_to_utf8;
 use crate::net::output;
+use crate::net::params::Params;
 use crate::net::session;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
@@ -22,6 +24,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(warp::query())
 		.and(session::build())
 		.and_then(handler);
 	// Set sock method
@@ -36,6 +39,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 async fn handler(
 	output: String,
 	sql: Bytes,
+	params: Params,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get a database reference
@@ -43,9 +47,9 @@ async fn handler(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the received sql query
-	let sql = std::str::from_utf8(&sql).unwrap();
+	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query
-	match db.execute(sql, &session, None, opt.strict).await {
+	match db.execute(sql, &session, params.parse().into(), opt.strict).await {
 		// Convert the response to JSON
 		Ok(res) => match output.as_ref() {
 			"application/json" => Ok(output::json(&res)),

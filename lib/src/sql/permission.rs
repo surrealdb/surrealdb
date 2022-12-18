@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
@@ -131,7 +131,7 @@ fn specific(i: &str) -> IResult<&str, Permissions> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Permission {
 	None,
 	Full,
@@ -140,16 +140,16 @@ pub enum Permission {
 
 impl Default for Permission {
 	fn default() -> Self {
-		Permission::Full
+		Self::Full
 	}
 }
 
 impl fmt::Display for Permission {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Permission::None => write!(f, "NONE"),
-			Permission::Full => write!(f, "FULL"),
-			Permission::Specific(ref v) => write!(f, "WHERE {}", v),
+			Self::None => f.write_str("NONE"),
+			Self::Full => f.write_str("FULL"),
+			Self::Specific(ref v) => write!(f, "WHERE {}", v),
 		}
 	}
 }

@@ -1,9 +1,9 @@
 use crate::err::Error;
+use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::session;
 use bytes::Bytes;
 use serde::Serialize;
-use std::str;
 use surrealdb::sql::Value;
 use surrealdb::Session;
 use warp::Filter;
@@ -50,18 +50,18 @@ async fn handler(
 	mut session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Convert the HTTP body into text
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the provided data as JSON
 	match surrealdb::sql::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => match crate::iam::signin::signin(&mut session, vars).await {
 			// Authentication was successful
 			Ok(v) => match output.as_deref() {
-				Some("application/json") => Ok(output::json(&Success::new(v))),
-				Some("application/cbor") => Ok(output::cbor(&Success::new(v))),
-				Some("application/msgpack") => Ok(output::pack(&Success::new(v))),
-				Some("text/plain") => Ok(output::text(v)),
-				None => Ok(output::text(v)),
+				Some("application/json") => Ok(output::json(&Success::new(v.as_string()))),
+				Some("application/cbor") => Ok(output::cbor(&Success::new(v.as_string()))),
+				Some("application/msgpack") => Ok(output::pack(&Success::new(v.as_string()))),
+				Some("text/plain") => Ok(output::text(v.as_string())),
+				None => Ok(output::text(v.as_string())),
 				// An incorrect content-type was requested
 				_ => Err(warp::reject::custom(Error::InvalidType)),
 			},

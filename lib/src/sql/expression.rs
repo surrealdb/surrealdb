@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Expression {
 	pub l: Value,
 	pub o: Operator,
@@ -28,16 +28,16 @@ impl Default for Expression {
 }
 
 impl Expression {
-	// Create a new expression
-	fn new(l: Value, o: Operator, r: Value) -> Expression {
-		Expression {
+	/// Create a new expression
+	fn new(l: Value, o: Operator, r: Value) -> Self {
+		Self {
 			l,
 			o,
 			r,
 		}
 	}
-	// Augment an existing expression
-	fn augment(mut self, l: Value, o: Operator) -> Expression {
+	/// Augment an existing expression
+	fn augment(mut self, l: Value, o: Operator) -> Self {
 		if o.precedence() >= self.o.precedence() {
 			match self.l {
 				Value::Expression(x) => {
@@ -45,13 +45,13 @@ impl Expression {
 					self
 				}
 				_ => {
-					self.l = Expression::new(l, o, self.l).into();
+					self.l = Self::new(l, o, self.l).into();
 					self
 				}
 			}
 		} else {
 			let r = Value::from(self);
-			Expression::new(l, o, r)
+			Self::new(l, o, r)
 		}
 	}
 }
@@ -76,12 +76,24 @@ impl Expression {
 					return Ok(l);
 				}
 			}
+			Operator::Tco => {
+				if let true = l.is_truthy() {
+					return Ok(l);
+				}
+			}
+			Operator::Nco => {
+				if let true = l.is_some() {
+					return Ok(l);
+				}
+			}
 			_ => {} // Continue
 		}
 		let r = self.r.compute(ctx, opt, txn, doc).await?;
 		match self.o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
+			Operator::Tco => fnc::operate::tco(l, r),
+			Operator::Nco => fnc::operate::nco(l, r),
 			Operator::Add => fnc::operate::add(l, r),
 			Operator::Sub => fnc::operate::sub(l, r),
 			Operator::Mul => fnc::operate::mul(l, r),

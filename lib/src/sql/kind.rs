@@ -1,6 +1,7 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::table::{table, Table};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -8,9 +9,9 @@ use nom::character::complete::char;
 use nom::combinator::map;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Kind {
 	Any,
 	Array,
@@ -28,13 +29,13 @@ pub enum Kind {
 }
 
 impl Default for Kind {
-	fn default() -> Kind {
-		Kind::Any
+	fn default() -> Self {
+		Self::Any
 	}
 }
 
-impl fmt::Display for Kind {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Kind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Kind::Any => f.write_str("any"),
 			Kind::Array => f.write_str("array"),
@@ -47,16 +48,8 @@ impl fmt::Display for Kind {
 			Kind::Number => f.write_str("number"),
 			Kind::Object => f.write_str("object"),
 			Kind::String => f.write_str("string"),
-			Kind::Record(v) => write!(
-				f,
-				"record({})",
-				v.iter().map(|ref v| v.to_string()).collect::<Vec<_>>().join(", ")
-			),
-			Kind::Geometry(v) => write!(
-				f,
-				"geometry({})",
-				v.iter().map(|ref v| v.to_string()).collect::<Vec<_>>().join(", ")
-			),
+			Kind::Record(v) => write!(f, "record({})", Fmt::comma_separated(v)),
+			Kind::Geometry(v) => write!(f, "geometry({})", Fmt::comma_separated(v)),
 		}
 	}
 }

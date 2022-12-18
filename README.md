@@ -76,7 +76,7 @@
 
 <h2><img height="20" src="/img/whatissurreal.svg">&nbsp;&nbsp;What is SurrealDB?</h2>
 
-SurrealDB is an end-to-end cloud native database for web, mobile, serverless, jamstack, backend, and traditional applications. SurrealDB reduces the development time of modern applications by simplifying your database and API stack, removing the need for most server-side components, allowing you to build secure, performant apps quicker and cheaper. SurrealDB acts as both a database and a modern, realtime, collaborative API backend layer. SurrealDB can run as a single server or in a highly-available, highly-scalable distributed mode - with support for SQL querying from client devices, GraphQL, ACID transactions, WebSocket connections, structured and unstructured data, graph querying, full-text indexing, geospatial querying, and row-by-row permissions-based access.
+SurrealDB is an end-to-end cloud native database for web, mobile, serverless, Jamstack, backend, and traditional applications. SurrealDB reduces the development time of modern applications by simplifying your database and API stack, removing the need for most server-side components, and allowing you to build secure, performant apps quicker and cheaper. SurrealDB acts as both a database and a modern, real-time, collaborative API backend layer. SurrealDB can run as a single server or in a highly-available, highly-scalable distributed mode, with support for SQL querying from client devices, GraphQL, ACID transactions, WebSocket connections, structured and unstructured data, graph querying, full-text indexing, geospatial querying, and row-by-row permissions-based access.
 
 View the [features](https://surrealdb.com/features), the latest [releases](https://surrealdb.com/releases), the product [roadmap](https://surrealdb.com/roadmap), and [documentation](https://surrealdb.com/docs).
 
@@ -150,7 +150,13 @@ brew install surrealdb/tap/surreal
 The easiest and preferred way to get going with SurrealDB on Unix operating systems is to install and use the SurrealDB command-line tool. Run the following command in your terminal and follow the on-screen instructions.
 
 ```bash
-curl -sSf https://install.surrealdb.com | sh
+curl --proto '=https' --tlsv1.2 -sSf https://install.surrealdb.com | sh
+```
+
+If you want a binary newer than what's currently released, you can install the nightly one.
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://install.surrealdb.com | sh -s -- --nightly
 ```
 
 <h4><a href="https://surrealdb.com/install#gh-dark-mode-only"><img width="20" src="/img/white/windows.svg"></a><a href="https://surrealdb.com/install#gh-light-mode-only"><img width="20" src="/img/black/windows.svg"></a>
@@ -159,7 +165,7 @@ curl -sSf https://install.surrealdb.com | sh
 
 The easiest and preferred way to get going with SurrealDB on Windows is to install and use the SurrealDB command-line tool. Run the following command in your terminal and follow the on-screen instructions.
 
-```bash
+```ps1
 iwr https://windows.surrealdb.com -useb | iex
 ```
 

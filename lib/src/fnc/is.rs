@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use semver::Version;
 use std::char;
+use url::Url;
 use uuid::Uuid;
 
 #[rustfmt::skip] static LATITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
@@ -57,6 +58,11 @@ pub fn numeric((arg,): (String,)) -> Result<Value, Error> {
 #[inline]
 pub fn semver((arg,): (String,)) -> Result<Value, Error> {
 	Ok(Version::parse(arg.as_str()).is_ok().into())
+}
+
+#[inline]
+pub fn url((arg,): (String,)) -> Result<Value, Error> {
+	Ok(Url::parse(&arg).is_ok().into())
 }
 
 #[inline]

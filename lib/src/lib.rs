@@ -7,6 +7,9 @@
 //! persisted to disk, a browser-based embedded datastore backed by IndexedDB, or for connecting
 //! to a distributed [TiKV](https://tikv.org) key-value store.
 
+#![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
+#![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
+
 #[macro_use]
 extern crate log;
 
@@ -22,6 +25,9 @@ mod exe;
 mod fnc;
 mod key;
 mod kvs;
+
+// ENV
+pub mod env;
 
 // SQL
 pub mod sql;
@@ -42,3 +48,7 @@ pub mod channel {
 	pub use channel::Receiver;
 	pub use channel::Sender;
 }
+
+// Version
+#[doc(inline)]
+pub use env::VERSION;

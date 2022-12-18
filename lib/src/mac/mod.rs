@@ -6,8 +6,14 @@ macro_rules! bytes {
 
 macro_rules! map {
     ($($k:expr => $v:expr),* $(,)?) => {{
-        let mut m = ::std::collections::BTreeMap::new();
-        $(m.insert($k, $v);)+
-        m
+        ::std::collections::BTreeMap::from([
+            $(($k, $v),)+
+        ])
     }};
+}
+
+macro_rules! get_cfg {
+	($i:ident : $($s:expr),+) => (
+		let $i = || { $( if cfg!($i=$s) { return $s; } );+ "unknown"};
+	)
 }

@@ -12,7 +12,7 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::data::{data, Data};
 use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
-use crate::sql::param::param;
+use crate::sql::param::plain as param;
 use crate::sql::subquery::subquery;
 use crate::sql::table::{table, Table};
 use crate::sql::thing::thing;
@@ -28,7 +28,7 @@ use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RelateStatement {
 	pub kind: Table,
 	pub from: Value,
@@ -148,8 +148,17 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				let t = self.kind.generate();
-				i.ingest(Iterable::Relatable(f, t, w));
+				match &self.data {
+					// There is a data clause so check for a record id
+					Some(data) => match data.rid(ctx, opt, txn, &self.kind).await {
+						// There was a problem creating the record id
+						Err(e) => return Err(e),
+						// There is an id field so use the record id
+						Ok(t) => i.ingest(Iterable::Relatable(f, t, w)),
+					},
+					// There is no data clause so create a record id
+					None => i.ingest(Iterable::Relatable(f, self.kind.generate(), w)),
+				};
 			}
 		}
 		// Assign the statement
@@ -163,7 +172,7 @@ impl fmt::Display for RelateStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "RELATE {} -> {} -> {}", self.from, self.kind, self.with)?;
 		if self.uniq {
-			write!(f, " UNIQUE")?
+			f.write_str(" UNIQUE")?
 		}
 		if let Some(ref v) = self.data {
 			write!(f, " {}", v)?
@@ -175,7 +184,7 @@ impl fmt::Display for RelateStatement {
 			write!(f, " {}", v)?
 		}
 		if self.parallel {
-			write!(f, " PARALLEL")?
+			f.write_str(" PARALLEL")?
 		}
 		Ok(())
 	}
@@ -262,7 +271,7 @@ mod tests {
 
 	#[test]
 	fn relate_statement_in() {
-		let sql = "RELATE person:tobie->like->animal:koala";
+		let sql = "RELATE animal:koala<-like<-person:tobie";
 		let res = relate(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
@@ -271,10 +280,19 @@ mod tests {
 
 	#[test]
 	fn relate_statement_out() {
-		let sql = "RELATE animal:koala<-like<-person:tobie";
+		let sql = "RELATE person:tobie->like->animal:koala";
 		let res = relate(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("RELATE person:tobie -> like -> animal:koala", format!("{}", out))
+	}
+
+	#[test]
+	fn relate_statement_params() {
+		let sql = "RELATE $tobie->like->$koala";
+		let res = relate(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("RELATE $tobie -> like -> $koala", format!("{}", out))
 	}
 }

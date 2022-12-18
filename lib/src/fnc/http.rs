@@ -1,6 +1,5 @@
 use crate::err::Error;
 use crate::sql::value::Value;
-use crate::sql::{Object, Strand};
 
 #[cfg(not(feature = "http"))]
 pub async fn head((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
@@ -33,9 +32,9 @@ pub async fn delete((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
 }
 
 #[cfg(feature = "http")]
-fn try_as_uri(fn_name: &str, value: Value) -> Result<Strand, Error> {
+fn try_as_uri(fn_name: &str, value: Value) -> Result<crate::sql::Strand, Error> {
 	match value {
-		// Avoid surf crate panic by pre-checking URI.
+		// Pre-check URI.
 		Value::Strand(uri) if crate::fnc::util::http::uri_is_valid(&uri) => Ok(uri),
 		_ => Err(Error::InvalidArguments {
 			name: fn_name.to_owned(),
@@ -50,7 +49,7 @@ fn try_as_opts(
 	fn_name: &str,
 	error_message: &str,
 	value: Option<Value>,
-) -> Result<Option<Object>, Error> {
+) -> Result<Option<crate::sql::Object>, Error> {
 	match value {
 		Some(Value::Object(opts)) => Ok(Some(opts)),
 		None => Ok(None),

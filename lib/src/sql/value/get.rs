@@ -4,10 +4,12 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
+use crate::sql::id::Id;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::paths::ID;
 use crate::sql::statements::select::SelectStatement;
+use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
@@ -26,7 +28,30 @@ impl Value {
 			// Get the current path part
 			Some(p) => match self {
 				// Current path part is an object
+				Value::Future(v) => {
+					// Check how many path parts are remaining
+					match path.len() {
+						// No further embedded fields, so just return this
+						0 => Ok(Value::Future(v.clone())),
+						//
+						_ => v.compute(ctx, opt, txn, None).await?.get(ctx, opt, txn, path).await,
+					}
+				}
+				// Current path part is an object
 				Value::Object(v) => match p {
+					// If requesting an `id` field, check if it is a complex Record ID
+					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f as &str) {
+						Some(Value::Thing(Thing {
+							id: Id::Object(v),
+							..
+						})) => Value::Object(v.clone()).get(ctx, opt, txn, path.next()).await,
+						Some(Value::Thing(Thing {
+							id: Id::Array(v),
+							..
+						})) => Value::Array(v.clone()).get(ctx, opt, txn, path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						None => Ok(Value::None),
+					},
 					Part::Graph(_) => match v.rid() {
 						Some(v) => Value::Thing(v).get(ctx, opt, txn, path).await,
 						None => Ok(Value::None),
@@ -36,17 +61,12 @@ impl Value {
 						None => Ok(Value::None),
 					},
 					Part::All => self.get(ctx, opt, txn, path.next()).await,
-					Part::Any => self.get(ctx, opt, txn, path.next()).await,
 					_ => Ok(Value::None),
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
-						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						try_join_all(futs).await.map(Into::into)
-					}
-					Part::Any => {
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
 						try_join_all(futs).await.map(Into::into)
 					}
@@ -135,13 +155,7 @@ impl Value {
 					}
 				}
 				// Ignore everything else
-				_ => match p {
-					Part::Any => match path.len() {
-						1 => Ok(self.clone()),
-						_ => Ok(Value::None),
-					},
-					_ => Ok(Value::None),
-				},
+				_ => Ok(Value::None),
 			},
 			// No more parts so get the value
 			None => Ok(self.clone()),

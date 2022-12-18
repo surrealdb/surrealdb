@@ -1,3 +1,4 @@
+use crate::err::Error;
 use crate::sql::ending::number as ending;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
@@ -11,8 +12,8 @@ use nom::combinator::map;
 use nom::number::complete::recognize_float;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::fmt;
-use std::fmt::Display;
+use std::fmt::{self, Display, Formatter};
+use std::hash;
 use std::iter::Product;
 use std::iter::Sum;
 use std::ops;
@@ -27,102 +28,138 @@ pub enum Number {
 
 impl Default for Number {
 	fn default() -> Self {
-		Number::Int(0)
+		Self::Int(0)
 	}
 }
 
 impl From<i8> for Number {
 	fn from(i: i8) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<i16> for Number {
 	fn from(i: i16) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<i32> for Number {
 	fn from(i: i32) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<i64> for Number {
 	fn from(i: i64) -> Self {
-		Number::Int(i)
+		Self::Int(i)
 	}
 }
 
 impl From<isize> for Number {
 	fn from(i: isize) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<u8> for Number {
 	fn from(i: u8) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<u16> for Number {
 	fn from(i: u16) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<u32> for Number {
 	fn from(i: u32) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<u64> for Number {
 	fn from(i: u64) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<usize> for Number {
 	fn from(i: usize) -> Self {
-		Number::Int(i as i64)
+		Self::Int(i as i64)
 	}
 }
 
 impl From<f32> for Number {
 	fn from(f: f32) -> Self {
-		Number::Float(f as f64)
+		Self::Float(f as f64)
 	}
 }
 
 impl From<f64> for Number {
 	fn from(f: f64) -> Self {
-		Number::Float(f as f64)
+		Self::Float(f as f64)
 	}
 }
 
 impl From<&str> for Number {
 	fn from(s: &str) -> Self {
-		Number::Decimal(BigDecimal::from_str(s).unwrap_or_default())
+		// Attempt to parse as i64
+		match s.parse::<i64>() {
+			// Store it as an i64
+			Ok(v) => Self::Int(v),
+			// It wasn't parsed as a i64 so store as a decimal
+			_ => Self::Decimal(BigDecimal::from_str(s).unwrap_or_default()),
+		}
 	}
 }
 
 impl From<String> for Number {
 	fn from(s: String) -> Self {
-		Number::Decimal(BigDecimal::from_str(&s).unwrap_or_default())
+		Self::from(s.as_str())
 	}
 }
 
 impl From<BigDecimal> for Number {
 	fn from(v: BigDecimal) -> Self {
-		Number::Decimal(v)
+		Self::Decimal(v)
 	}
 }
 
-impl fmt::Display for Number {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl TryFrom<Number> for i64 {
+	type Error = Error;
+	fn try_from(value: Number) -> Result<Self, Self::Error> {
+		match value {
+			Number::Int(x) => Ok(x),
+			_ => Err(Error::TryFromError(value.to_string(), "i64")),
+		}
+	}
+}
+
+impl TryFrom<Number> for f64 {
+	type Error = Error;
+	fn try_from(value: Number) -> Result<Self, Self::Error> {
+		match value {
+			Number::Float(x) => Ok(x),
+			_ => Err(Error::TryFromError(value.to_string(), "f64")),
+		}
+	}
+}
+
+impl TryFrom<Number> for BigDecimal {
+	type Error = Error;
+	fn try_from(value: Number) -> Result<Self, Self::Error> {
+		match value {
+			Number::Decimal(x) => Ok(x),
+			_ => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
+		}
+	}
+}
+
+impl Display for Number {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Number::Int(v) => Display::fmt(v, f),
 			Number::Float(v) => Display::fmt(v, f),
@@ -175,11 +212,51 @@ impl Number {
 		matches!(self, Number::Decimal(_))
 	}
 
+	pub fn is_integer(&self) -> bool {
+		match self {
+			Number::Int(_) => true,
+			Number::Float(_) => false,
+			Number::Decimal(v) => v.is_integer(),
+		}
+	}
+
 	pub fn is_truthy(&self) -> bool {
 		match self {
 			Number::Int(v) => v != &0,
 			Number::Float(v) => v != &0.0,
 			Number::Decimal(v) => v != &BigDecimal::default(),
+		}
+	}
+
+	pub fn is_positive(&self) -> bool {
+		match self {
+			Number::Int(v) => v > &0,
+			Number::Float(v) => v > &0.0,
+			Number::Decimal(v) => v > &BigDecimal::from(0),
+		}
+	}
+
+	pub fn is_negative(&self) -> bool {
+		match self {
+			Number::Int(v) => v < &0,
+			Number::Float(v) => v < &0.0,
+			Number::Decimal(v) => v < &BigDecimal::from(0),
+		}
+	}
+
+	pub fn is_zero_or_positive(&self) -> bool {
+		match self {
+			Number::Int(v) => v >= &0,
+			Number::Float(v) => v >= &0.0,
+			Number::Decimal(v) => v >= &BigDecimal::from(0),
+		}
+	}
+
+	pub fn is_zero_or_negative(&self) -> bool {
+		match self {
+			Number::Int(v) => v <= &0,
+			Number::Float(v) => v <= &0.0,
+			Number::Decimal(v) => v <= &BigDecimal::from(0),
 		}
 	}
 
@@ -271,7 +348,14 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.ceil().into(),
-			Number::Decimal(v) => (v + BigDecimal::from_f32(0.5).unwrap()).round(0).into(),
+			Number::Decimal(v) => {
+				if v.digits() > 16 {
+					let v = (v.to_f64().unwrap_or_default() + 0.5).round();
+					BigDecimal::from_f64(v).unwrap_or_default().into()
+				} else {
+					(v + BigDecimal::from_f32(0.5).unwrap()).round(0).into()
+				}
+			}
 		}
 	}
 
@@ -279,7 +363,14 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.floor().into(),
-			Number::Decimal(v) => (v - BigDecimal::from_f32(0.5).unwrap()).round(0).into(),
+			Number::Decimal(v) => {
+				if v.digits() > 16 {
+					let v = (v.to_f64().unwrap_or_default() - 0.5).round();
+					BigDecimal::from_f64(v).unwrap_or_default().into()
+				} else {
+					(v - BigDecimal::from_f32(0.5).unwrap()).round(0).into()
+				}
+			}
 		}
 	}
 
@@ -287,7 +378,14 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.round().into(),
-			Number::Decimal(v) => v.round(0).into(),
+			Number::Decimal(v) => {
+				if v.digits() > 16 {
+					let v = v.to_f64().unwrap_or_default().round();
+					BigDecimal::from_f64(v).unwrap_or_default().into()
+				} else {
+					v.round(0).into()
+				}
+			}
 		}
 	}
 
@@ -331,6 +429,16 @@ impl Eq for Number {}
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.partial_cmp(other).unwrap_or(Ordering::Equal)
+	}
+}
+
+impl hash::Hash for Number {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		match self {
+			Number::Int(v) => v.hash(state),
+			Number::Float(v) => v.to_bits().hash(state),
+			Number::Decimal(v) => v.hash(state),
+		}
 	}
 }
 
@@ -544,7 +652,7 @@ impl Sort for Vec<Number> {
 }
 
 pub fn number(i: &str) -> IResult<&str, Number> {
-	alt((map(integer, Number::from), map(decimal, Number::from)))(i)
+	alt((map(decimal, Number::from), map(integer, Number::from)))(i)
 }
 
 pub fn integer(i: &str) -> IResult<&str, i64> {

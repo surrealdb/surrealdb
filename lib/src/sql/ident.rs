@@ -10,7 +10,7 @@ use nom::character::complete::char;
 use nom::character::complete::one_of;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
@@ -21,18 +21,18 @@ const BRACKET_END: &str = r#"⟩"#;
 const BACKTICK: &str = r#"`"#;
 const BACKTICK_ESC: &str = r#"\`"#;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Ident(pub String);
 
 impl From<String> for Ident {
 	fn from(s: String) -> Self {
-		Ident(s)
+		Self(s)
 	}
 }
 
 impl From<&str> for Ident {
-	fn from(i: &str) -> Ident {
-		Ident(String::from(i))
+	fn from(i: &str) -> Self {
+		Self::from(String::from(i))
 	}
 }
 
@@ -44,14 +44,19 @@ impl Deref for Ident {
 }
 
 impl Ident {
+	/// Convert the Ident to a raw String
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
 	}
+	/// Returns a yield if an alias is specified
+	pub(crate) fn is_id(&self) -> bool {
+		self.0.as_str() == "id"
+	}
 }
 
-impl fmt::Display for Ident {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", escape_ident(&self.0))
+impl Display for Ident {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&escape_ident(&self.0), f)
 	}
 }
 

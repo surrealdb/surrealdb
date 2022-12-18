@@ -1,8 +1,12 @@
 use crate::sql::common::val_u8;
+use nom::character::is_digit;
 use std::borrow::Cow;
 
-const BRACKET_L: char = '⟨';
-const BRACKET_R: char = '⟩';
+const SINGLE: char = '\'';
+
+const BRACKETL: char = '⟨';
+const BRACKETR: char = '⟩';
+const BRACKET_ESC: &str = r#"\⟩"#;
 
 const DOUBLE: char = '"';
 const DOUBLE_ESC: &str = r#"\""#;
@@ -11,41 +15,65 @@ const BACKTICK: char = '`';
 const BACKTICK_ESC: &str = r#"\`"#;
 
 #[inline]
-pub fn escape_strand(s: &str) -> String {
-	format!("{}{}{}", DOUBLE, s, DOUBLE)
-}
-
-#[inline]
-pub fn escape_id(s: &str) -> Cow<'_, str> {
-	for x in s.bytes() {
-		if !val_u8(x) {
-			return Cow::Owned(format!("{}{}{}", BRACKET_L, s, BRACKET_R));
-		}
+pub fn escape_str(s: &str) -> Cow<'_, str> {
+	if s.contains(SINGLE) {
+		escape_normal(s, DOUBLE, DOUBLE, DOUBLE_ESC)
+	} else {
+		Cow::Owned(format!("{}{}{}", SINGLE, s, SINGLE))
 	}
-	Cow::Borrowed(s)
 }
 
 #[inline]
+/// Escapes a key if necessary
 pub fn escape_key(s: &str) -> Cow<'_, str> {
+	escape_normal(s, DOUBLE, DOUBLE, DOUBLE_ESC)
+}
+
+#[inline]
+/// Escapes an id if necessary
+pub fn escape_rid(s: &str) -> Cow<'_, str> {
+	escape_numeric(s, BRACKETL, BRACKETR, BRACKET_ESC)
+}
+
+#[inline]
+/// Escapes an ident if necessary
+pub fn escape_ident(s: &str) -> Cow<'_, str> {
+	escape_numeric(s, BACKTICK, BACKTICK, BACKTICK_ESC)
+}
+
+#[inline]
+pub fn escape_normal<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> {
+	// Loop over each character
 	for x in s.bytes() {
+		// Check if character is allowed
 		if !val_u8(x) {
-			return Cow::Owned(format!("{}{}{}", DOUBLE, s.replace(DOUBLE, DOUBLE_ESC), DOUBLE));
+			return Cow::Owned(format!("{}{}{}", l, s.replace(r, e), r));
 		}
 	}
+	// Output the value
 	Cow::Borrowed(s)
 }
 
 #[inline]
-pub fn escape_ident(s: &str) -> Cow<'_, str> {
+pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> {
+	// Presume this is numeric
+	let mut numeric = true;
+	// Loop over each character
 	for x in s.bytes() {
+		// Check if character is allowed
 		if !val_u8(x) {
-			return Cow::Owned(format!(
-				"{}{}{}",
-				BACKTICK,
-				s.replace(BACKTICK, BACKTICK_ESC),
-				BACKTICK
-			));
+			return Cow::Owned(format!("{}{}{}", l, s.replace(r, e), r));
+		}
+		// Check if character is non-numeric
+		if !is_digit(x) {
+			numeric = false;
 		}
 	}
-	Cow::Borrowed(s)
+	// Output the id value
+	match numeric {
+		// This is numeric so escape it
+		true => Cow::Owned(format!("{}{}{}", l, s.replace(r, e), r)),
+		// No need to escape the value
+		_ => Cow::Borrowed(s),
+	}
 }

@@ -9,22 +9,24 @@ use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Operator {
+	//
 	Or,  // ||
 	And, // &&
+	Tco, // ?: Ternary conditional operator
+	Nco, // ?? Null coalescing operator
 	//
 	Add, // +
 	Sub, // -
-	Pow, // **
 	Mul, // *
 	Div, // /
+	Pow, // **
 	Inc, // +=
 	Dec, // -=
 	//
-	Exact, // ==
-	//
 	Equal,    // =
+	Exact,    // ==
 	NotEqual, // !=
 	AllEqual, // *=
 	AnyEqual, // ?=
@@ -49,13 +51,14 @@ pub enum Operator {
 	AllInside,   // ⊆
 	AnyInside,   // ⊂
 	NoneInside,  // ⊄
-	Outside,     // ∈
-	Intersects,  // ∩
+	//
+	Outside,
+	Intersects,
 }
 
 impl Default for Operator {
-	fn default() -> Operator {
-		Operator::Equal
+	fn default() -> Self {
+		Self::Equal
 	}
 }
 
@@ -65,11 +68,13 @@ impl Operator {
 		match self {
 			Operator::Or => 1,
 			Operator::And => 2,
-			Operator::Sub => 4,
-			Operator::Add => 5,
-			Operator::Mul => 6,
-			Operator::Div => 7,
-			_ => 3,
+			Operator::Tco => 3,
+			Operator::Nco => 4,
+			Operator::Sub => 6,
+			Operator::Add => 7,
+			Operator::Mul => 8,
+			Operator::Div => 9,
+			_ => 5,
 		}
 	}
 }
@@ -77,40 +82,42 @@ impl Operator {
 impl fmt::Display for Operator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str(match self {
-			Operator::Or => "OR",
-			Operator::And => "AND",
-			Operator::Add => "+",
-			Operator::Sub => "-",
-			Operator::Pow => "**",
-			Operator::Mul => "*",
-			Operator::Div => "/",
-			Operator::Inc => "+=",
-			Operator::Dec => "-=",
-			Operator::Exact => "==",
-			Operator::Equal => "=",
-			Operator::NotEqual => "!=",
-			Operator::AllEqual => "*=",
-			Operator::AnyEqual => "?=",
-			Operator::Like => "~",
-			Operator::NotLike => "!~",
-			Operator::AllLike => "*~",
-			Operator::AnyLike => "?~",
-			Operator::LessThan => "<",
-			Operator::LessThanOrEqual => "<=",
-			Operator::MoreThan => ">",
-			Operator::MoreThanOrEqual => ">=",
-			Operator::Contain => "CONTAINS",
-			Operator::NotContain => "CONTAINSNOT",
-			Operator::ContainAll => "CONTAINSALL",
-			Operator::ContainAny => "CONTAINSANY",
-			Operator::ContainNone => "CONTAINSNONE",
-			Operator::Inside => "INSIDE",
-			Operator::NotInside => "NOTINSIDE",
-			Operator::AllInside => "ALLINSIDE",
-			Operator::AnyInside => "ANYINSIDE",
-			Operator::NoneInside => "NONEINSIDE",
-			Operator::Outside => "OUTSIDE",
-			Operator::Intersects => "INTERSECTS",
+			Self::Or => "OR",
+			Self::And => "AND",
+			Self::Tco => "?:",
+			Self::Nco => "??",
+			Self::Add => "+",
+			Self::Sub => "-",
+			Self::Mul => "*",
+			Self::Div => "/",
+			Self::Pow => "**",
+			Self::Inc => "+=",
+			Self::Dec => "-=",
+			Self::Equal => "=",
+			Self::Exact => "==",
+			Self::NotEqual => "!=",
+			Self::AllEqual => "*=",
+			Self::AnyEqual => "?=",
+			Self::Like => "~",
+			Self::NotLike => "!~",
+			Self::AllLike => "*~",
+			Self::AnyLike => "?~",
+			Self::LessThan => "<",
+			Self::LessThanOrEqual => "<=",
+			Self::MoreThan => ">",
+			Self::MoreThanOrEqual => ">=",
+			Self::Contain => "CONTAINS",
+			Self::NotContain => "CONTAINSNOT",
+			Self::ContainAll => "CONTAINSALL",
+			Self::ContainAny => "CONTAINSANY",
+			Self::ContainNone => "CONTAINSNONE",
+			Self::Inside => "INSIDE",
+			Self::NotInside => "NOTINSIDE",
+			Self::AllInside => "ALLINSIDE",
+			Self::AnyInside => "ANYINSIDE",
+			Self::NoneInside => "NONEINSIDE",
+			Self::Outside => "OUTSIDE",
+			Self::Intersects => "INTERSECTS",
 		})
 	}
 }
@@ -130,6 +137,12 @@ pub fn operator(i: &str) -> IResult<&str, Operator> {
 pub fn symbols(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
+		alt((
+			map(tag("||"), |_| Operator::Or),
+			map(tag("&&"), |_| Operator::And),
+			map(tag("?:"), |_| Operator::Tco),
+			map(tag("??"), |_| Operator::Nco),
+		)),
 		alt((
 			map(tag("=="), |_| Operator::Exact),
 			map(tag("!="), |_| Operator::NotEqual),
@@ -152,12 +165,12 @@ pub fn symbols(i: &str) -> IResult<&str, Operator> {
 		alt((
 			map(char('+'), |_| Operator::Add),
 			map(char('-'), |_| Operator::Sub),
-			map(tag("**"), |_| Operator::Pow),
 			map(char('*'), |_| Operator::Mul),
 			map(char('×'), |_| Operator::Mul),
 			map(char('∙'), |_| Operator::Mul),
 			map(char('/'), |_| Operator::Div),
 			map(char('÷'), |_| Operator::Div),
+			map(tag("**"), |_| Operator::Pow),
 		)),
 		alt((
 			map(char('∋'), |_| Operator::Contain),
@@ -180,12 +193,8 @@ pub fn phrases(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = alt((
 		alt((
-			map(tag_no_case("&&"), |_| Operator::And),
-			map(tag_no_case("AND"), |_| Operator::And),
-			map(tag_no_case("||"), |_| Operator::Or),
 			map(tag_no_case("OR"), |_| Operator::Or),
-		)),
-		alt((
+			map(tag_no_case("AND"), |_| Operator::And),
 			map(tag_no_case("IS NOT"), |_| Operator::NotEqual),
 			map(tag_no_case("IS"), |_| Operator::Equal),
 		)),

@@ -2,17 +2,19 @@
 
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::Response;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::common::commas;
+use crate::sql::constant::{constant, Constant};
 use crate::sql::datetime::{datetime, Datetime};
 use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
 use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
+use crate::sql::fmt::Fmt;
 use crate::sql::function::{function, Function};
+use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::Id;
 use crate::sql::idiom::{idiom, Idiom};
@@ -47,15 +49,14 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fmt;
-use std::iter::FromIterator;
+use std::fmt::{self, Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::str::FromStr;
 
 static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Values(pub Vec<Value>);
 
 impl Deref for Values {
@@ -73,9 +74,9 @@ impl IntoIterator for Values {
 	}
 }
 
-impl fmt::Display for Values {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.0.iter().map(|ref v| format!("{}", v)).collect::<Vec<_>>().join(", "))
+impl Display for Values {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&Fmt::comma_separated(&self.0), f)
 	}
 }
 
@@ -94,7 +95,7 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 	Ok((i, Values(v)))
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Store)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Store, Hash)]
 pub enum Value {
 	None,
 	Null,
@@ -117,6 +118,8 @@ pub enum Value {
 	Regex(Regex),
 	Range(Box<Range>),
 	Edges(Box<Edges>),
+	Future(Box<Future>),
+	Constant(Constant),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
@@ -149,6 +152,12 @@ impl From<bool> for Value {
 impl From<Uuid> for Value {
 	fn from(v: Uuid) -> Self {
 		Value::Uuid(v)
+	}
+}
+
+impl From<uuid::Uuid> for Value {
+	fn from(v: uuid::Uuid) -> Self {
+		Value::Uuid(Uuid(v))
 	}
 }
 
@@ -230,6 +239,12 @@ impl From<Duration> for Value {
 	}
 }
 
+impl From<Constant> for Value {
+	fn from(v: Constant) -> Self {
+		Value::Constant(v)
+	}
+}
+
 impl From<Range> for Value {
 	fn from(v: Range) -> Self {
 		Value::Range(Box::new(v))
@@ -239,6 +254,12 @@ impl From<Range> for Value {
 impl From<Edges> for Value {
 	fn from(v: Edges) -> Self {
 		Value::Edges(Box::new(v))
+	}
+}
+
+impl From<Future> for Value {
+	fn from(v: Future) -> Self {
+		Value::Future(Box::new(v))
 	}
 }
 
@@ -444,20 +465,111 @@ impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {
 			Id::Number(v) => v.into(),
-			Id::String(v) => Strand::from(v).into(),
+			Id::String(v) => v.into(),
 			Id::Object(v) => v.into(),
 			Id::Array(v) => v.into(),
 		}
 	}
 }
 
-impl FromIterator<Response> for Vec<Value> {
-	fn from_iter<I: IntoIterator<Item = Response>>(iter: I) -> Self {
-		let mut c: Vec<Value> = vec![];
-		for i in iter {
-			c.push(i.into())
+impl TryFrom<Value> for i64 {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => x.try_into(),
+			_ => Err(Error::TryFromError(value.to_string(), "i64")),
 		}
-		c
+	}
+}
+
+impl TryFrom<Value> for f64 {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => x.try_into(),
+			_ => Err(Error::TryFromError(value.to_string(), "f64")),
+		}
+	}
+}
+
+impl TryFrom<Value> for BigDecimal {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Number(x) => x.try_into(),
+			_ => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
+		}
+	}
+}
+
+impl TryFrom<Value> for String {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Strand(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "String")),
+		}
+	}
+}
+
+impl TryFrom<Value> for bool {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::True => Ok(true),
+			Value::False => Ok(false),
+			_ => Err(Error::TryFromError(value.to_string(), "bool")),
+		}
+	}
+}
+
+impl TryFrom<Value> for std::time::Duration {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Duration(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "time::Duration")),
+		}
+	}
+}
+
+impl TryFrom<Value> for DateTime<Utc> {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Datetime(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "chrono::DateTime<Utc>")),
+		}
+	}
+}
+
+impl TryFrom<Value> for uuid::Uuid {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Uuid(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "uuid::Uuid")),
+		}
+	}
+}
+
+impl TryFrom<Value> for Vec<Value> {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Array(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "Vec<Value>")),
+		}
+	}
+}
+
+impl TryFrom<Value> for Object {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Object(x) => Ok(x),
+			_ => Err(Error::TryFromError(value.to_string(), "Object")),
+		}
 	}
 }
 
@@ -498,7 +610,7 @@ impl Value {
 	}
 
 	pub fn is_some(&self) -> bool {
-		!self.is_none()
+		!self.is_none() && !self.is_null()
 	}
 
 	pub fn is_true(&self) -> bool {
@@ -521,6 +633,7 @@ impl Value {
 		match self {
 			Value::True => true,
 			Value::False => false,
+			Value::Uuid(_) => true,
 			Value::Thing(_) => true,
 			Value::Geometry(_) => true,
 			Value::Array(v) => !v.is_empty(),
@@ -559,6 +672,46 @@ impl Value {
 
 	pub fn is_object(&self) -> bool {
 		matches!(self, Value::Object(_))
+	}
+
+	pub fn is_number(&self) -> bool {
+		matches!(self, Value::Number(_))
+	}
+
+	pub fn is_int(&self) -> bool {
+		matches!(self, Value::Number(Number::Int(_)))
+	}
+
+	pub fn is_float(&self) -> bool {
+		matches!(self, Value::Number(Number::Float(_)))
+	}
+
+	pub fn is_decimal(&self) -> bool {
+		matches!(self, Value::Number(Number::Decimal(_)))
+	}
+
+	pub fn is_integer(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_integer())
+	}
+
+	pub fn is_positive(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_positive())
+	}
+
+	pub fn is_negative(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_negative())
+	}
+
+	pub fn is_zero_or_positive(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_zero_or_positive())
+	}
+
+	pub fn is_zero_or_negative(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_zero_or_negative())
+	}
+
+	pub fn is_datetime(&self) -> bool {
+		matches!(self, Value::Datetime(_))
 	}
 
 	pub fn is_type_record(&self, types: &[Table]) -> bool {
@@ -646,7 +799,9 @@ impl Value {
 	pub fn as_strand(self) -> Strand {
 		match self {
 			Value::Strand(v) => v,
-			_ => Strand::from(self.to_string()),
+			Value::Uuid(v) => v.to_raw().into(),
+			Value::Datetime(v) => v.to_raw().into(),
+			_ => self.to_string().into(),
 		}
 	}
 
@@ -673,6 +828,13 @@ impl Value {
 		}
 	}
 
+	pub fn as_usize(self) -> usize {
+		match self {
+			Value::Number(v) => v.as_usize(),
+			_ => 0,
+		}
+	}
+
 	// -----------------------------------
 	// Expensive conversion of value
 	// -----------------------------------
@@ -691,7 +853,9 @@ impl Value {
 	pub fn to_strand(&self) -> Strand {
 		match self {
 			Value::Strand(v) => v.clone(),
-			_ => Strand::from(self.to_string()),
+			Value::Uuid(v) => v.to_raw().into(),
+			Value::Datetime(v) => v.to_raw().into(),
+			_ => self.to_string().into(),
 		}
 	}
 
@@ -717,8 +881,8 @@ impl Value {
 			Value::Idiom(v) => v.simplify(),
 			Value::Strand(v) => v.0.to_string().into(),
 			Value::Datetime(v) => v.0.to_string().into(),
+			Value::Future(_) => "fn::future".to_string().into(),
 			Value::Function(v) => match v.as_ref() {
-				Function::Future(_) => "fn::future".to_string().into(),
 				Function::Script(_, _) => "fn::script".to_string().into(),
 				Function::Normal(f, _) => f.to_string().into(),
 				Function::Cast(_, v) => v.to_idiom(),
@@ -804,20 +968,10 @@ impl Value {
 		}
 	}
 
-	pub fn make_table(self) -> Value {
+	pub fn could_be_table(self) -> Value {
 		match self {
-			Value::Table(_) => self,
-			Value::Strand(v) => Value::Table(Table(v.0)),
-			_ => Value::Table(Table(self.as_strand().0)),
-		}
-	}
-
-	pub fn make_table_or_thing(self) -> Value {
-		match self {
-			Value::Table(_) => self,
-			Value::Thing(_) => self,
-			Value::Strand(v) => Value::Table(Table(v.0)),
-			_ => Value::Table(Table(self.as_strand().0)),
+			Value::Strand(v) => Table::from(v.0).into(),
+			_ => self,
 		}
 	}
 
@@ -958,7 +1112,7 @@ impl Value {
 				Value::Strand(_) => v == &other.to_datetime(),
 				_ => false,
 			},
-			_ => unreachable!(),
+			_ => self == other,
 		}
 	}
 
@@ -1003,9 +1157,13 @@ impl Value {
 	pub fn contains(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
+			Value::Thing(v) => match other {
+				Value::Strand(w) => v.to_string().contains(w.as_str()),
+				_ => v.to_string().contains(other.to_string().as_str()),
+			},
 			Value::Strand(v) => match other {
 				Value::Strand(w) => v.contains(w.as_str()),
-				_ => v.contains(&other.to_string().as_str()),
+				_ => v.contains(other.to_string().as_str()),
 			},
 			Value::Geometry(v) => match other {
 				Value::Geometry(w) => v.contains(w),
@@ -1096,6 +1254,8 @@ impl fmt::Display for Value {
 			Value::Regex(v) => write!(f, "{}", v),
 			Value::Range(v) => write!(f, "{}", v),
 			Value::Edges(v) => write!(f, "{}", v),
+			Value::Future(v) => write!(f, "{}", v),
+			Value::Constant(v) => write!(f, "{}", v),
 			Value::Function(v) => write!(f, "{}", v),
 			Value::Subquery(v) => write!(f, "{}", v),
 			Value::Expression(v) => write!(f, "{}", v),
@@ -1130,10 +1290,13 @@ impl Value {
 			Value::True => Ok(Value::True),
 			Value::False => Ok(Value::False),
 			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Range(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Param(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Object(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
@@ -1169,9 +1332,11 @@ impl Serialize for Value {
 				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
 				Value::Range(v) => s.serialize_newtype_variant("Value", 18, "Range", v),
 				Value::Edges(v) => s.serialize_newtype_variant("Value", 19, "Edges", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 20, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 21, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 22, "Expression", v),
+				Value::Future(v) => s.serialize_newtype_variant("Value", 20, "Future", v),
+				Value::Constant(v) => s.serialize_newtype_variant("Value", 21, "Constant", v),
+				Value::Function(v) => s.serialize_newtype_variant("Value", 22, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant("Value", 23, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant("Value", 24, "Expression", v),
 			}
 		} else {
 			match self {
@@ -1188,6 +1353,7 @@ impl Serialize for Value {
 				Value::Geometry(v) => s.serialize_some(v),
 				Value::Duration(v) => s.serialize_some(v),
 				Value::Datetime(v) => s.serialize_some(v),
+				Value::Constant(v) => s.serialize_some(v),
 				_ => s.serialize_none(),
 			}
 		}
@@ -1261,9 +1427,11 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		alt((
 			map(subquery, Value::from),
 			map(function, Value::from),
+			map(constant, Value::from),
 			map(datetime, Value::from),
 			map(duration, Value::from),
 			map(geometry, Value::from),
+			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
 			map(object, Value::from),
@@ -1272,6 +1440,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(regex, Value::from),
 			map(model, Value::from),
 			map(idiom, Value::from),
+			map(range, Value::from),
 			map(thing, Value::from),
 			map(strand, Value::from),
 		)),
@@ -1290,9 +1459,11 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(expression, Value::from),
 			map(subquery, Value::from),
 			map(function, Value::from),
+			map(constant, Value::from),
 			map(datetime, Value::from),
 			map(duration, Value::from),
 			map(geometry, Value::from),
+			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
 			map(object, Value::from),
@@ -1313,6 +1484,8 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 	alt((
 		map(subquery, Value::from),
 		map(function, Value::from),
+		map(constant, Value::from),
+		map(future, Value::from),
 		map(param, Value::from),
 		map(model, Value::from),
 		map(edges, Value::from),
@@ -1344,6 +1517,7 @@ mod tests {
 
 	use super::*;
 	use crate::sql::test::Parse;
+	use crate::sql::uuid::Uuid;
 
 	#[test]
 	fn check_none() {
@@ -1396,6 +1570,7 @@ mod tests {
 		assert_eq!(false, Value::from("false").is_truthy());
 		assert_eq!(true, Value::from("falsey").is_truthy());
 		assert_eq!(true, Value::from("something").is_truthy());
+		assert_eq!(true, Value::from(Uuid::new()).is_truthy());
 	}
 
 	#[test]
@@ -1486,8 +1661,8 @@ mod tests {
 	#[test]
 	fn check_size() {
 		assert_eq!(64, std::mem::size_of::<Value>());
-		assert_eq!(112, std::mem::size_of::<Result<Value, Error>>());
-		assert_eq!(48, std::mem::size_of::<crate::sql::number::Number>());
+		assert_eq!(104, std::mem::size_of::<Result<Value, Error>>());
+		assert_eq!(40, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
 		assert_eq!(12, std::mem::size_of::<crate::sql::datetime::Datetime>());
@@ -1498,7 +1673,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
-		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
+		assert_eq!(40, std::mem::size_of::<crate::sql::model::Model>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());

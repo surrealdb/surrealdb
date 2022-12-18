@@ -1,5 +1,5 @@
 use crate::cnf::PKG_NAME;
-use crate::cnf::PKG_VERS;
+use crate::cnf::PKG_VERSION;
 use crate::cnf::SERVER_NAME;
 
 const ID: &str = "ID";
@@ -9,7 +9,7 @@ const SERVER: &str = "Server";
 const VERSION: &str = "Version";
 
 pub fn version() -> warp::filters::reply::WithHeader {
-	let val = format!("{}-{}", PKG_NAME, *PKG_VERS);
+	let val = format!("{}-{}", PKG_NAME, *PKG_VERSION);
 	warp::reply::with::header(VERSION, val)
 }
 

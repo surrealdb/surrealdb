@@ -14,12 +14,12 @@ use std::fmt;
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Param(pub Idiom);
 
 impl From<Idiom> for Param {
-	fn from(p: Idiom) -> Param {
-		Param(p)
+	fn from(p: Idiom) -> Self {
+		Self(p)
 	}
 }
 
@@ -83,6 +83,12 @@ impl fmt::Display for Param {
 pub fn param(i: &str) -> IResult<&str, Param> {
 	let (i, _) = char('$')(i)?;
 	let (i, v) = idiom::param(i)?;
+	Ok((i, Param::from(v)))
+}
+
+pub fn plain(i: &str) -> IResult<&str, Param> {
+	let (i, _) = char('$')(i)?;
+	let (i, v) = idiom::plain(i)?;
 	Ok((i, Param::from(v)))
 }
 

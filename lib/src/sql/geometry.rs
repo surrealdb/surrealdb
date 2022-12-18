@@ -1,6 +1,9 @@
+#![allow(clippy::derive_hash_xor_eq)]
+
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::serde::is_internal_serialization;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
@@ -17,8 +20,8 @@ use nom::sequence::preceded;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::fmt;
 use std::iter::FromIterator;
+use std::{fmt, hash};
 
 const SINGLE: char = '\'';
 const DOUBLE: char = '\"';
@@ -43,73 +46,73 @@ impl PartialOrd for Geometry {
 
 impl From<(f64, f64)> for Geometry {
 	fn from(v: (f64, f64)) -> Self {
-		Geometry::Point(v.into())
+		Self::Point(v.into())
 	}
 }
 
 impl From<[f64; 2]> for Geometry {
 	fn from(v: [f64; 2]) -> Self {
-		Geometry::Point(v.into())
+		Self::Point(v.into())
 	}
 }
 
 impl From<Point<f64>> for Geometry {
 	fn from(v: Point<f64>) -> Self {
-		Geometry::Point(v)
+		Self::Point(v)
 	}
 }
 
 impl From<LineString<f64>> for Geometry {
 	fn from(v: LineString<f64>) -> Self {
-		Geometry::Line(v)
+		Self::Line(v)
 	}
 }
 
 impl From<Polygon<f64>> for Geometry {
 	fn from(v: Polygon<f64>) -> Self {
-		Geometry::Polygon(v)
+		Self::Polygon(v)
 	}
 }
 
 impl From<MultiPoint<f64>> for Geometry {
 	fn from(v: MultiPoint<f64>) -> Self {
-		Geometry::MultiPoint(v)
+		Self::MultiPoint(v)
 	}
 }
 
 impl From<MultiLineString<f64>> for Geometry {
 	fn from(v: MultiLineString<f64>) -> Self {
-		Geometry::MultiLine(v)
+		Self::MultiLine(v)
 	}
 }
 
 impl From<MultiPolygon<f64>> for Geometry {
 	fn from(v: MultiPolygon<f64>) -> Self {
-		Geometry::MultiPolygon(v)
+		Self::MultiPolygon(v)
 	}
 }
 
 impl From<Vec<Geometry>> for Geometry {
 	fn from(v: Vec<Geometry>) -> Self {
-		Geometry::Collection(v)
+		Self::Collection(v)
 	}
 }
 
 impl From<Vec<Point<f64>>> for Geometry {
 	fn from(v: Vec<Point<f64>>) -> Self {
-		Geometry::MultiPoint(MultiPoint(v))
+		Self::MultiPoint(MultiPoint(v))
 	}
 }
 
 impl From<Vec<LineString<f64>>> for Geometry {
 	fn from(v: Vec<LineString<f64>>) -> Self {
-		Geometry::MultiLine(MultiLineString(v))
+		Self::MultiLine(MultiLineString(v))
 	}
 }
 
 impl From<Vec<Polygon<f64>>> for Geometry {
 	fn from(v: Vec<Polygon<f64>>) -> Self {
-		Geometry::MultiPolygon(MultiPolygon(v))
+		Self::MultiPolygon(MultiPolygon(v))
 	}
 }
 
@@ -142,112 +145,112 @@ impl Geometry {
 	// Value operations
 	// -----------------------------------
 
-	pub fn contains(&self, other: &Geometry) -> bool {
+	pub fn contains(&self, other: &Self) -> bool {
 		match self {
-			Geometry::Point(v) => match other {
-				Geometry::Point(w) => v.contains(w),
-				Geometry::MultiPoint(w) => w.iter().all(|x| v.contains(x)),
-				Geometry::Collection(w) => w.iter().all(|x| self.contains(x)),
+			Self::Point(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::MultiPoint(w) => w.iter().all(|x| v.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
 				_ => false,
 			},
-			Geometry::Line(v) => match other {
-				Geometry::Point(w) => v.contains(w),
-				Geometry::Line(w) => v.contains(w),
-				Geometry::MultiLine(w) => w.iter().all(|x| w.contains(x)),
-				Geometry::Collection(w) => w.iter().all(|x| self.contains(x)),
+			Self::Line(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
 				_ => false,
 			},
-			Geometry::Polygon(v) => match other {
-				Geometry::Point(w) => v.contains(w),
-				Geometry::Line(w) => v.contains(w),
-				Geometry::Polygon(w) => v.contains(w),
-				Geometry::MultiPolygon(w) => w.iter().all(|x| w.contains(x)),
-				Geometry::Collection(w) => w.iter().all(|x| self.contains(x)),
+			Self::Polygon(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::Polygon(w) => v.contains(w),
+				Self::MultiPolygon(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
 				_ => false,
 			},
-			Geometry::MultiPoint(v) => match other {
-				Geometry::Point(w) => v.contains(w),
-				Geometry::MultiPoint(w) => w.iter().all(|x| w.contains(x)),
-				Geometry::Collection(w) => w.iter().all(|x| self.contains(x)),
+			Self::MultiPoint(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::MultiPoint(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
 				_ => false,
 			},
-			Geometry::MultiLine(v) => match other {
-				Geometry::Point(w) => v.contains(w),
-				Geometry::Line(w) => v.contains(w),
-				Geometry::MultiLine(w) => w.iter().all(|x| w.contains(x)),
-				Geometry::Collection(w) => w.iter().all(|x| self.contains(x)),
+			Self::MultiLine(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
 				_ => false,
 			},
-			Geometry::MultiPolygon(v) => match other {
-				Geometry::Point(w) => v.contains(w),
-				Geometry::Line(w) => v.contains(w),
-				Geometry::Polygon(w) => v.contains(w),
-				Geometry::MultiPoint(w) => v.contains(w),
-				Geometry::MultiLine(w) => v.contains(w),
-				Geometry::MultiPolygon(w) => v.contains(w),
-				Geometry::Collection(w) => w.iter().all(|x| self.contains(x)),
+			Self::MultiPolygon(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::Polygon(w) => v.contains(w),
+				Self::MultiPoint(w) => v.contains(w),
+				Self::MultiLine(w) => v.contains(w),
+				Self::MultiPolygon(w) => v.contains(w),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
 			},
-			Geometry::Collection(v) => v.iter().all(|x| x.contains(other)),
+			Self::Collection(v) => v.iter().all(|x| x.contains(other)),
 		}
 	}
 
-	pub fn intersects(&self, other: &Geometry) -> bool {
+	pub fn intersects(&self, other: &Self) -> bool {
 		match self {
-			Geometry::Point(v) => match other {
-				Geometry::Point(w) => v.intersects(w),
-				Geometry::Line(w) => v.intersects(w),
-				Geometry::Polygon(w) => v.intersects(w),
-				Geometry::MultiPoint(w) => v.intersects(w),
-				Geometry::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Geometry::MultiPolygon(w) => v.intersects(w),
-				Geometry::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			Self::Point(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
 			},
-			Geometry::Line(v) => match other {
-				Geometry::Point(w) => v.intersects(w),
-				Geometry::Line(w) => v.intersects(w),
-				Geometry::Polygon(w) => v.intersects(w),
-				Geometry::MultiPoint(w) => v.intersects(w),
-				Geometry::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Geometry::MultiPolygon(w) => v.intersects(w),
-				Geometry::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			Self::Line(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
 			},
-			Geometry::Polygon(v) => match other {
-				Geometry::Point(w) => v.intersects(w),
-				Geometry::Line(w) => v.intersects(w),
-				Geometry::Polygon(w) => v.intersects(w),
-				Geometry::MultiPoint(w) => v.intersects(w),
-				Geometry::MultiLine(w) => v.intersects(w),
-				Geometry::MultiPolygon(w) => v.intersects(w),
-				Geometry::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			Self::Polygon(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => v.intersects(w),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
 			},
-			Geometry::MultiPoint(v) => match other {
-				Geometry::Point(w) => v.intersects(w),
-				Geometry::Line(w) => v.intersects(w),
-				Geometry::Polygon(w) => v.intersects(w),
-				Geometry::MultiPoint(w) => v.intersects(w),
-				Geometry::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Geometry::MultiPolygon(w) => v.intersects(w),
-				Geometry::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			Self::MultiPoint(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
 			},
-			Geometry::MultiLine(v) => match other {
-				Geometry::Point(w) => v.intersects(w),
-				Geometry::Line(w) => v.intersects(w),
-				Geometry::Polygon(w) => v.intersects(w),
-				Geometry::MultiPoint(w) => v.intersects(w),
-				Geometry::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Geometry::MultiPolygon(w) => v.intersects(w),
-				Geometry::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			Self::MultiLine(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
 			},
-			Geometry::MultiPolygon(v) => match other {
-				Geometry::Point(w) => v.intersects(w),
-				Geometry::Line(w) => v.intersects(w),
-				Geometry::Polygon(w) => v.intersects(w),
-				Geometry::MultiPoint(w) => v.intersects(w),
-				Geometry::MultiLine(w) => v.intersects(w),
-				Geometry::MultiPolygon(w) => v.intersects(w),
-				Geometry::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			Self::MultiPolygon(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => v.intersects(w),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
 			},
-			Geometry::Collection(v) => v.iter().all(|x| x.intersects(other)),
+			Self::Collection(v) => v.iter().all(|x| x.intersects(other)),
 		}
 	}
 }
@@ -255,108 +258,119 @@ impl Geometry {
 impl fmt::Display for Geometry {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Geometry::Point(v) => {
+			Self::Point(v) => {
 				write!(f, "({}, {})", v.x(), v.y())
 			}
-			Geometry::Line(v) => write!(
+			Self::Line(v) => write!(
 				f,
 				"{{ type: 'LineString', coordinates: [{}] }}",
-				v.points()
-					.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-					.collect::<Vec<_>>()
-					.join(", ")
+				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
+					f,
+					"[{}, {}]",
+					v.x(),
+					v.y()
+				))))
 			),
-			Geometry::Polygon(v) => write!(
+			Self::Polygon(v) => write!(
 				f,
 				"{{ type: 'Polygon', coordinates: [[{}]{}] }}",
-				v.exterior()
-					.points()
-					.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-					.collect::<Vec<_>>()
-					.join(", "),
-				match v.interiors().len() {
-					0 => String::new(),
-					_ => format!(
-						", [{}]",
-						v.interiors()
-							.iter()
-							.map(|i| {
-								format!(
+				Fmt::comma_separated(v.exterior().points().map(|v| Fmt::new(v, |v, f| write!(
+					f,
+					"[{}, {}]",
+					v.x(),
+					v.y()
+				)))),
+				Fmt::new(v.interiors(), |interiors, f| {
+					match interiors.len() {
+						0 => Ok(()),
+						_ => write!(
+							f,
+							", [{}]",
+							Fmt::comma_separated(interiors.iter().map(|i| Fmt::new(i, |i, f| {
+								write!(
+									f,
 									"[{}]",
-									i.points()
-										.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-										.collect::<Vec<_>>()
-										.join(", ")
+									Fmt::comma_separated(i.points().map(|v| Fmt::new(
+										v,
+										|v, f| write!(f, "[{}, {}]", v.x(), v.y())
+									)))
 								)
-							})
-							.collect::<Vec<_>>()
-							.join(", "),
-					),
-				}
+							})))
+						),
+					}
+				})
 			),
-			Geometry::MultiPoint(v) => {
+			Self::MultiPoint(v) => {
 				write!(
 					f,
 					"{{ type: 'MultiPoint', coordinates: [{}] }}",
-					v.iter()
-						.map(|v| format!("[{}, {}]", v.x(), v.y()))
-						.collect::<Vec<_>>()
-						.join(", ")
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
+						f,
+						"[{}, {}]",
+						v.x(),
+						v.y()
+					))))
 				)
 			}
-			Geometry::MultiLine(v) => write!(
+			Self::MultiLine(v) => write!(
 				f,
 				"{{ type: 'MultiLineString', coordinates: [{}] }}",
-				v.iter()
-					.map(|v| format!(
-						"[{}]",
-						v.points()
-							.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-							.collect::<Vec<_>>()
-							.join(", ")
-					))
-					.collect::<Vec<_>>()
-					.join(", ")
+				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
+					f,
+					"[{}]",
+					Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
+						f,
+						"[{}, {}]",
+						v.x(),
+						v.y()
+					))))
+				))))
 			),
-			Geometry::MultiPolygon(v) => write!(
+			Self::MultiPolygon(v) => write!(
 				f,
 				"{{ type: 'MultiPolygon', coordinates: [{}] }}",
-				v.iter()
-					.map(|v| format!(
+				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| {
+					write!(
+						f,
 						"[[{}]{}]",
-						v.exterior()
-							.points()
-							.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-							.collect::<Vec<_>>()
-							.join(", "),
-						match v.interiors().len() {
-							0 => String::new(),
-							_ => format!(
-								", [{}]",
-								v.interiors()
-									.iter()
-									.map(|i| {
-										format!(
-											"[{}]",
-											i.points()
-												.map(|ref v| format!("[{}, {}]", v.x(), v.y()))
-												.collect::<Vec<_>>()
-												.join(", ")
-										)
-									})
-									.collect::<Vec<_>>()
-									.join(", "),
-							),
-						}
-					))
-					.collect::<Vec<_>>()
-					.join(", "),
+						Fmt::comma_separated(
+							v.exterior().points().map(|v| Fmt::new(v, |v, f| write!(
+								f,
+								"[{}, {}]",
+								v.x(),
+								v.y()
+							)))
+						),
+						Fmt::new(v.interiors(), |interiors, f| {
+							match interiors.len() {
+								0 => Ok(()),
+								_ => write!(
+									f,
+									", [{}]",
+									Fmt::comma_separated(interiors.iter().map(|i| Fmt::new(
+										i,
+										|i, f| {
+											write!(
+												f,
+												"[{}]",
+												Fmt::comma_separated(i.points().map(|v| Fmt::new(
+													v,
+													|v, f| write!(f, "[{}, {}]", v.x(), v.y())
+												)))
+											)
+										}
+									)))
+								),
+							}
+						})
+					)
+				}))),
 			),
-			Geometry::Collection(v) => {
+			Self::Collection(v) => {
 				write!(
 					f,
 					"{{ type: 'GeometryCollection', geometries: [{}] }}",
-					v.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(", ")
+					Fmt::comma_separated(v)
 				)
 			}
 		}
@@ -370,25 +384,19 @@ impl Serialize for Geometry {
 	{
 		if is_internal_serialization() {
 			match self {
-				Geometry::Point(v) => s.serialize_newtype_variant("Geometry", 0, "Point", v),
-				Geometry::Line(v) => s.serialize_newtype_variant("Geometry", 1, "Line", v),
-				Geometry::Polygon(v) => s.serialize_newtype_variant("Geometry", 2, "Polygon", v),
-				Geometry::MultiPoint(v) => {
-					s.serialize_newtype_variant("Geometry", 3, "MultiPoint", v)
-				}
-				Geometry::MultiLine(v) => {
-					s.serialize_newtype_variant("Geometry", 4, "MultiLine", v)
-				}
-				Geometry::MultiPolygon(v) => {
+				Self::Point(v) => s.serialize_newtype_variant("Geometry", 0, "Point", v),
+				Self::Line(v) => s.serialize_newtype_variant("Geometry", 1, "Line", v),
+				Self::Polygon(v) => s.serialize_newtype_variant("Geometry", 2, "Polygon", v),
+				Self::MultiPoint(v) => s.serialize_newtype_variant("Geometry", 3, "MultiPoint", v),
+				Self::MultiLine(v) => s.serialize_newtype_variant("Geometry", 4, "MultiLine", v),
+				Self::MultiPolygon(v) => {
 					s.serialize_newtype_variant("Geometry", 5, "MultiPolygon", v)
 				}
-				Geometry::Collection(v) => {
-					s.serialize_newtype_variant("Geometry", 6, "Collection", v)
-				}
+				Self::Collection(v) => s.serialize_newtype_variant("Geometry", 6, "Collection", v),
 			}
 		} else {
 			match self {
-				Geometry::Point(v) => {
+				Self::Point(v) => {
 					let mut map = s.serialize_map(Some(2))?;
 					map.serialize_key("type")?;
 					map.serialize_value("Point")?;
@@ -396,7 +404,7 @@ impl Serialize for Geometry {
 					map.serialize_value(vec![v.x(), v.y()].as_slice())?;
 					map.end()
 				}
-				Geometry::Line(v) => {
+				Self::Line(v) => {
 					let mut map = s.serialize_map(Some(2))?;
 					map.serialize_key("type")?;
 					map.serialize_value("LineString")?;
@@ -409,7 +417,7 @@ impl Serialize for Geometry {
 					)?;
 					map.end()
 				}
-				Geometry::Polygon(v) => {
+				Self::Polygon(v) => {
 					let mut map = s.serialize_map(Some(2))?;
 					map.serialize_key("type")?;
 					map.serialize_value("Polygon")?;
@@ -436,7 +444,7 @@ impl Serialize for Geometry {
 					)?;
 					map.end()
 				}
-				Geometry::MultiPoint(v) => {
+				Self::MultiPoint(v) => {
 					let mut map = s.serialize_map(Some(2))?;
 					map.serialize_key("type")?;
 					map.serialize_value("MultiPoint")?;
@@ -449,7 +457,7 @@ impl Serialize for Geometry {
 					)?;
 					map.end()
 				}
-				Geometry::MultiLine(v) => {
+				Self::MultiLine(v) => {
 					let mut map = s.serialize_map(Some(2))?;
 					map.serialize_key("type")?;
 					map.serialize_value("MultiLineString")?;
@@ -464,7 +472,7 @@ impl Serialize for Geometry {
 					)?;
 					map.end()
 				}
-				Geometry::MultiPolygon(v) => {
+				Self::MultiPolygon(v) => {
 					let mut map = s.serialize_map(Some(2))?;
 					map.serialize_key("type")?;
 					map.serialize_value("MultiPolygon")?;
@@ -495,7 +503,7 @@ impl Serialize for Geometry {
 					)?;
 					map.end()
 				}
-				Geometry::Collection(v) => {
+				Self::Collection(v) => {
 					let mut map = s.serialize_map(Some(2))?;
 					map.serialize_key("type")?;
 					map.serialize_value("GeometryCollection")?;
@@ -503,6 +511,73 @@ impl Serialize for Geometry {
 					map.serialize_value(v)?;
 					map.end()
 				}
+			}
+		}
+	}
+}
+
+impl hash::Hash for Geometry {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		match self {
+			Geometry::Point(p) => {
+				"Point".hash(state);
+				p.x().to_bits().hash(state);
+				p.y().to_bits().hash(state);
+			}
+			Geometry::Line(l) => {
+				"Line".hash(state);
+				l.points().for_each(|v| {
+					v.x().to_bits().hash(state);
+					v.y().to_bits().hash(state);
+				});
+			}
+			Geometry::Polygon(p) => {
+				"Polygon".hash(state);
+				p.exterior().points().for_each(|ext| {
+					ext.x().to_bits().hash(state);
+					ext.y().to_bits().hash(state);
+				});
+				p.interiors().iter().for_each(|int| {
+					int.points().for_each(|v| {
+						v.x().to_bits().hash(state);
+						v.y().to_bits().hash(state);
+					});
+				});
+			}
+			Geometry::MultiPoint(v) => {
+				"MultiPoint".hash(state);
+				v.0.iter().for_each(|v| {
+					v.x().to_bits().hash(state);
+					v.y().to_bits().hash(state);
+				});
+			}
+			Geometry::MultiLine(ml) => {
+				"MultiLine".hash(state);
+				ml.0.iter().for_each(|ls| {
+					ls.points().for_each(|p| {
+						p.x().to_bits().hash(state);
+						p.y().to_bits().hash(state);
+					});
+				});
+			}
+			Geometry::MultiPolygon(mp) => {
+				"MultiPolygon".hash(state);
+				mp.0.iter().for_each(|p| {
+					p.exterior().points().for_each(|ext| {
+						ext.x().to_bits().hash(state);
+						ext.y().to_bits().hash(state);
+					});
+					p.interiors().iter().for_each(|int| {
+						int.points().for_each(|v| {
+							v.x().to_bits().hash(state);
+							v.y().to_bits().hash(state);
+						});
+					});
+				});
+			}
+			Geometry::Collection(v) => {
+				"GeometryCollection".hash(state);
+				v.iter().for_each(|v| v.hash(state));
 			}
 		}
 	}

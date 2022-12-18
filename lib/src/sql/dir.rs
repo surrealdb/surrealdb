@@ -4,7 +4,7 @@ use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Dir {
 	In,
 	Out,
@@ -12,17 +12,17 @@ pub enum Dir {
 }
 
 impl Default for Dir {
-	fn default() -> Dir {
-		Dir::Both
+	fn default() -> Self {
+		Self::Both
 	}
 }
 
 impl fmt::Display for Dir {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str(match self {
-			Dir::In => "<-",
-			Dir::Out => "->",
-			Dir::Both => "<->",
+			Self::In => "<-",
+			Self::Out => "->",
+			Self::Both => "<->",
 		})
 	}
 }

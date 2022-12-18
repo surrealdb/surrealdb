@@ -1,7 +1,9 @@
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
+use crate::net::input::bytes_to_utf8;
 use crate::net::output;
+use crate::net::params::Params;
 use crate::net::session;
 use bytes::Bytes;
 use serde::Deserialize;
@@ -47,6 +49,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(path!("key" / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(warp::query())
 		.and(session::build())
 		.and_then(create_all);
 	// Set delete method
@@ -54,6 +57,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(warp::delete())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String).and(warp::path::end()))
+		.and(warp::query())
 		.and(session::build())
 		.and_then(delete_all);
 	// Specify route
@@ -77,6 +81,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(warp::query())
 		.and(session::build())
 		.and_then(create_one);
 	// Set update method
@@ -86,6 +91,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(warp::query())
 		.and(session::build())
 		.and_then(update_one);
 	// Set modify method
@@ -95,6 +101,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(path!("key" / String / String).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
+		.and(warp::query())
 		.and(session::build())
 		.and_then(modify_one);
 	// Set delete method
@@ -102,6 +109,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(warp::delete())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
 		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(warp::query())
 		.and(session::build())
 		.and_then(delete_one);
 	// Specify route
@@ -157,6 +165,7 @@ async fn create_all(
 	output: String,
 	table: String,
 	body: Bytes,
+	params: Params,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
@@ -164,7 +173,7 @@ async fn create_all(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the request body as JSON
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -174,6 +183,7 @@ async fn create_all(
 			let vars = map! {
 				String::from("table") => Value::from(table),
 				String::from("data") => data,
+				=> params.parse()
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
@@ -195,6 +205,7 @@ async fn create_all(
 async fn delete_all(
 	output: String,
 	table: String,
+	params: Params,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
@@ -206,6 +217,7 @@ async fn delete_all(
 	// Specify the request variables
 	let vars = map! {
 		String::from("table") => Value::from(table),
+		=> params.parse()
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars), opt.strict).await {
@@ -237,10 +249,15 @@ async fn select_one(
 	let opt = CF.get().unwrap();
 	// Specify the request statement
 	let sql = "SELECT * FROM type::thing($table, $id)";
+	// Parse the Record ID as a SurrealQL value
+	let rid = match surrealdb::sql::json(&id) {
+		Ok(id) => id,
+		Err(_) => Value::from(id),
+	};
 	// Specify the request variables
 	let vars = map! {
 		String::from("table") => Value::from(table),
-		String::from("id") => Value::from(id),
+		String::from("id") => rid,
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars), opt.strict).await {
@@ -261,6 +278,7 @@ async fn create_one(
 	table: String,
 	id: String,
 	body: Bytes,
+	params: Params,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
@@ -268,7 +286,12 @@ async fn create_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
+	// Parse the Record ID as a SurrealQL value
+	let rid = match surrealdb::sql::json(&id) {
+		Ok(id) => id,
+		Err(_) => Value::from(id),
+	};
 	// Parse the request body as JSON
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -277,8 +300,9 @@ async fn create_one(
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
-				String::from("id") => Value::from(id),
+				String::from("id") => rid,
 				String::from("data") => data,
+				=> params.parse()
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
@@ -302,6 +326,7 @@ async fn update_one(
 	table: String,
 	id: String,
 	body: Bytes,
+	params: Params,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
@@ -309,7 +334,12 @@ async fn update_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
+	// Parse the Record ID as a SurrealQL value
+	let rid = match surrealdb::sql::json(&id) {
+		Ok(id) => id,
+		Err(_) => Value::from(id),
+	};
 	// Parse the request body as JSON
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -318,8 +348,9 @@ async fn update_one(
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
-				String::from("id") => Value::from(id),
+				String::from("id") => rid,
 				String::from("data") => data,
+				=> params.parse()
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
@@ -343,6 +374,7 @@ async fn modify_one(
 	table: String,
 	id: String,
 	body: Bytes,
+	params: Params,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
@@ -350,7 +382,12 @@ async fn modify_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
+	// Parse the Record ID as a SurrealQL value
+	let rid = match surrealdb::sql::json(&id) {
+		Ok(id) => id,
+		Err(_) => Value::from(id),
+	};
 	// Parse the request body as JSON
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -359,8 +396,9 @@ async fn modify_one(
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
-				String::from("id") => Value::from(id),
+				String::from("id") => rid,
 				String::from("data") => data,
+				=> params.parse()
 			};
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
@@ -383,6 +421,7 @@ async fn delete_one(
 	output: String,
 	table: String,
 	id: String,
+	params: Params,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
@@ -391,10 +430,16 @@ async fn delete_one(
 	let opt = CF.get().unwrap();
 	// Specify the request statement
 	let sql = "DELETE type::thing($table, $id)";
+	// Parse the Record ID as a SurrealQL value
+	let rid = match surrealdb::sql::json(&id) {
+		Ok(id) => id,
+		Err(_) => Value::from(id),
+	};
 	// Specify the request variables
 	let vars = map! {
 		String::from("table") => Value::from(table),
-		String::from("id") => Value::from(id),
+		String::from("id") => rid,
+		=> params.parse()
 	};
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars), opt.strict).await {

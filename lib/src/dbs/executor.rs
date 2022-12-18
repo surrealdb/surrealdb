@@ -1,3 +1,4 @@
+use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::response::Response;
 use crate::dbs::Auth;
@@ -94,7 +95,6 @@ impl<'a> Executor<'a> {
 
 	fn buf_cancel(&self, v: Response) -> Response {
 		Response {
-			sql: v.sql,
 			time: v.time,
 			result: Err(Error::QueryCancelled),
 		}
@@ -103,7 +103,6 @@ impl<'a> Executor<'a> {
 	fn buf_commit(&self, v: Response) -> Response {
 		match &self.err {
 			true => Response {
-				sql: v.sql,
 				time: v.time,
 				result: match v.result {
 					Ok(_) => Err(Error::QueryNotExecuted),
@@ -163,7 +162,6 @@ impl<'a> Executor<'a> {
 						"TABLES" => opt = opt.tables(stm.what),
 						"IMPORT" => opt = opt.import(stm.what),
 						"FORCE" => opt = opt.force(stm.what),
-						"DEBUG" => opt = opt.debug(stm.what),
 						_ => break,
 					}
 					// Continue
@@ -232,9 +230,16 @@ impl<'a> Executor<'a> {
 						true => Err(Error::TxFailure),
 						// The transaction began successfully
 						false => {
-							// Process the statement
-							let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
-							//
+							// Check if the variable is a protected variable
+							let res = match PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
+								// The variable isn't protected and can be stored
+								false => stm.compute(&ctx, &opt, &self.txn(), None).await,
+								// The user tried to set a protected variable
+								true => Err(Error::InvalidParam {
+									name: stm.name.to_owned(),
+								}),
+							};
+							// Check the statement
 							match res {
 								Ok(val) => {
 									// Set the parameter
@@ -309,20 +314,12 @@ impl<'a> Executor<'a> {
 			// Produce the response
 			let res = match res {
 				Ok(v) => Response {
-					sql: match opt.debug {
-						true => Some(format!("{}", stm)),
-						false => None,
-					},
 					time: dur,
 					result: Ok(v),
 				},
 				Err(e) => {
 					// Produce the response
 					let res = Response {
-						sql: match opt.debug {
-							true => Some(format!("{}", stm)),
-							false => None,
-						},
 						time: dur,
 						result: Err(e),
 					};

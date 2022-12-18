@@ -26,7 +26,7 @@ use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub what: Values,
@@ -43,19 +43,16 @@ pub struct SelectStatement {
 }
 
 impl SelectStatement {
-	/// Return the statement limit number or 0 if not set
-	pub fn limit(&self) -> usize {
-		match self.limit {
-			Some(Limit(v)) => v,
-			None => 0,
-		}
-	}
-
-	/// Return the statement start number or 0 if not set
-	pub fn start(&self) -> usize {
-		match self.start {
-			Some(Start(v)) => v,
-			None => 0,
+	pub(crate) async fn limit(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&Value>,
+	) -> Result<usize, Error> {
+		match &self.limit {
+			Some(v) => v.process(ctx, opt, txn, doc).await,
+			None => Ok(0),
 		}
 	}
 
@@ -86,8 +83,8 @@ impl SelectStatement {
 		opt.check(Level::No)?;
 		// Create a new iterator
 		let mut i = Iterator::new();
-		// Ensure futures are processed
-		let opt = &opt.futures(true);
+		// Ensure futures are stored
+		let opt = &opt.futures(false);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;
@@ -157,7 +154,7 @@ impl fmt::Display for SelectStatement {
 			write!(f, " {}", v)?
 		}
 		if self.parallel {
-			write!(f, " PARALLEL")?
+			f.write_str(" PARALLEL")?
 		}
 		Ok(())
 	}

@@ -5,9 +5,9 @@ use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Output {
 	None,
 	Null,
@@ -18,21 +18,21 @@ pub enum Output {
 }
 
 impl Default for Output {
-	fn default() -> Output {
-		Output::None
+	fn default() -> Self {
+		Self::None
 	}
 }
 
-impl fmt::Display for Output {
+impl Display for Output {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("RETURN ")?;
 		match self {
-			Output::None => f.write_str("NONE"),
-			Output::Null => f.write_str("NULL"),
-			Output::Diff => f.write_str("DIFF"),
-			Output::After => f.write_str("AFTER"),
-			Output::Before => f.write_str("BEFORE"),
-			Output::Fields(v) => write!(f, "{}", v),
+			Self::None => f.write_str("NONE"),
+			Self::Null => f.write_str("NULL"),
+			Self::Diff => f.write_str("DIFF"),
+			Self::After => f.write_str("AFTER"),
+			Self::Before => f.write_str("BEFORE"),
+			Self::Fields(v) => Display::fmt(v, f),
 		}
 	}
 }

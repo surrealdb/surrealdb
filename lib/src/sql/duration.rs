@@ -20,12 +20,12 @@ static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
 static SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
 static SECONDS_PER_MINUTE: u64 = 60;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Duration(pub time::Duration);
 
 impl From<time::Duration> for Duration {
 	fn from(v: time::Duration) -> Self {
-		Duration(v)
+		Self(v)
 	}
 }
 
@@ -39,8 +39,14 @@ impl From<&str> for Duration {
 	fn from(s: &str) -> Self {
 		match duration(s) {
 			Ok((_, v)) => v,
-			Err(_) => Duration::default(),
+			Err(_) => Self::default(),
 		}
+	}
+}
+
+impl From<Duration> for time::Duration {
+	fn from(s: Duration) -> Self {
+		s.0
 	}
 }
 
@@ -52,38 +58,39 @@ impl Deref for Duration {
 }
 
 impl Duration {
+	/// Convert the Duration to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}
-
+	/// Get the total number of seconds
 	pub fn secs(&self) -> Value {
 		self.0.as_secs().into()
 	}
-
+	/// Get the total number of minutes
 	pub fn mins(&self) -> Value {
 		let secs = self.0.as_secs();
 		let mins = secs / SECONDS_PER_MINUTE;
 		mins.into()
 	}
-
+	/// Get the total number of hours
 	pub fn hours(&self) -> Value {
 		let secs = self.0.as_secs();
 		let hours = secs / SECONDS_PER_HOUR;
 		hours.into()
 	}
-
+	/// Get the total number of dats
 	pub fn days(&self) -> Value {
 		let secs = self.0.as_secs();
 		let days = secs / SECONDS_PER_DAY;
 		days.into()
 	}
-
+	/// Get the total number of months
 	pub fn weeks(&self) -> Value {
 		let secs = self.0.as_secs();
 		let weeks = secs / SECONDS_PER_WEEK;
 		weeks.into()
 	}
-
+	/// Get the total number of years
 	pub fn years(&self) -> Value {
 		let secs = self.0.as_secs();
 		let years = secs / SECONDS_PER_YEAR;

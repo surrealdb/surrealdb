@@ -45,6 +45,12 @@ impl FromArg for i64 {
 	}
 }
 
+impl FromArg for isize {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		Ok(arg.as_int() as isize)
+	}
+}
+
 impl FromArg for usize {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		Ok(arg.as_int() as usize)
@@ -65,8 +71,8 @@ impl FromArgs for Vec<Value> {
 	}
 }
 
-// Some functions take a fixed number of arguments.
-// The len must match the number of type idents that follow.
+/// Some functions take a fixed number of arguments.
+/// The len must match the number of type idents that follow.
 macro_rules! impl_tuple {
 	($len:expr, $( $T:ident ),*) => {
 		impl<$($T:FromArg),*> FromArgs for ($($T,)*) {
@@ -133,6 +139,29 @@ impl<A: FromArg, B: FromArg> FromArgs for (A, Option<B>) {
 			return Err(err());
 		}
 		Ok((a, b))
+	}
+}
+
+// Some functions take 2 or 3 arguments, so the third argument is optional.
+impl<A: FromArg, B: FromArg, C: FromArg> FromArgs for (A, B, Option<C>) {
+	fn from_args(name: &str, args: Vec<Value>) -> Result<Self, Error> {
+		let err = || Error::InvalidArguments {
+			name: name.to_owned(),
+			message: String::from("Expected 2 or 3 arguments."),
+		};
+
+		let mut args = args.into_iter();
+		let a = A::from_arg(args.next().ok_or_else(err)?)?;
+		let b = B::from_arg(args.next().ok_or_else(err)?)?;
+		let c = match args.next() {
+			Some(c) => Some(C::from_arg(c)?),
+			None => None,
+		};
+		if args.next().is_some() {
+			// Too many.
+			return Err(err());
+		}
+		Ok((a, b, c))
 	}
 }
 

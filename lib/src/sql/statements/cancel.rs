@@ -8,12 +8,12 @@ use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct CancelStatement;
 
 impl fmt::Display for CancelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "CANCEL TRANSACTION")
+		f.write_str("CANCEL TRANSACTION")
 	}
 }
 

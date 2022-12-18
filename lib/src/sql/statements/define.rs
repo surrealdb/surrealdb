@@ -8,7 +8,7 @@ use crate::sql::base::{base, base_or_scope, Base};
 use crate::sql::comment::shouldbespace;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_strand;
+use crate::sql::escape::escape_str;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::{Idiom, Idioms};
@@ -31,8 +31,9 @@ use rand::rngs::OsRng;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Display;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
@@ -54,15 +55,15 @@ impl DefineStatement {
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
 		match self {
-			DefineStatement::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
-			DefineStatement::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -70,15 +71,15 @@ impl DefineStatement {
 impl fmt::Display for DefineStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DefineStatement::Namespace(v) => write!(f, "{}", v),
-			DefineStatement::Database(v) => write!(f, "{}", v),
-			DefineStatement::Login(v) => write!(f, "{}", v),
-			DefineStatement::Token(v) => write!(f, "{}", v),
-			DefineStatement::Scope(v) => write!(f, "{}", v),
-			DefineStatement::Table(v) => write!(f, "{}", v),
-			DefineStatement::Event(v) => write!(f, "{}", v),
-			DefineStatement::Field(v) => write!(f, "{}", v),
-			DefineStatement::Index(v) => write!(f, "{}", v),
+			Self::Namespace(v) => Display::fmt(v, f),
+			Self::Database(v) => Display::fmt(v, f),
+			Self::Login(v) => Display::fmt(v, f),
+			Self::Token(v) => Display::fmt(v, f),
+			Self::Scope(v) => Display::fmt(v, f),
+			Self::Table(v) => Display::fmt(v, f),
+			Self::Event(v) => Display::fmt(v, f),
+			Self::Field(v) => Display::fmt(v, f),
+			Self::Index(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -101,7 +102,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineNamespaceStatement {
 	pub name: Ident,
 }
@@ -150,7 +151,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineDatabaseStatement {
 	pub name: Ident,
 }
@@ -204,7 +205,7 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -261,13 +262,7 @@ impl DefineLoginStatement {
 
 impl fmt::Display for DefineLoginStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"DEFINE LOGIN {} ON {} PASSHASH {}",
-			self.name,
-			self.base,
-			escape_strand(&self.hash)
-		)
+		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, escape_str(&self.hash))
 	}
 }
 
@@ -333,7 +328,7 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -414,7 +409,7 @@ impl fmt::Display for DefineTokenStatement {
 			self.name,
 			self.base,
 			self.kind,
-			escape_strand(&self.code)
+			escape_str(&self.code)
 		)
 	}
 }
@@ -452,7 +447,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineScopeStatement {
 	pub name: Ident,
 	pub code: String,
@@ -535,7 +530,7 @@ fn scope(i: &str) -> IResult<&str, DefineScopeStatement> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum DefineScopeOption {
 	Session(Duration),
 	Signup(Value),
@@ -574,7 +569,7 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineTableStatement {
 	pub name: Ident,
 	pub drop: bool,
@@ -614,6 +609,9 @@ impl DefineTableStatement {
 				// Save the view config
 				let key = crate::key::ft::new(opt.ns(), opt.db(), v, &self.name);
 				run.set(key, self).await?;
+				// Clear the cache
+				let key = crate::key::ft::prefix(opt.ns(), opt.db(), v);
+				run.clr(key).await?;
 			}
 			// Release the transaction
 			drop(run);
@@ -703,7 +701,7 @@ fn table(i: &str) -> IResult<&str, DefineTableStatement> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum DefineTableOption {
 	Drop,
 	View(View),
@@ -750,7 +748,7 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -780,6 +778,9 @@ impl DefineEventStatement {
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+		// Clear the cache
+		let key = crate::key::ev::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -829,7 +830,7 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -861,6 +862,9 @@ impl DefineFieldStatement {
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+		// Clear the cache
+		let key = crate::key::fd::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -925,7 +929,7 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 	))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum DefineFieldOption {
 	Kind(Kind),
 	Value(Value),
@@ -971,7 +975,7 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 // --------------------------------------------------
 // --------------------------------------------------
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct DefineIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -1001,6 +1005,9 @@ impl DefineIndexStatement {
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+		// Clear the cache
+		let key = crate::key::ix::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Remove the index data
 		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);
 		let end = crate::key::index::suffix(opt.ns(), opt.db(), &self.what, &self.name);

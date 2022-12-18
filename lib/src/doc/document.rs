@@ -37,15 +37,15 @@ impl<'a> Document<'a> {
 }
 
 impl<'a> Document<'a> {
-	// Check if document has changed
+	/// Check if document has changed
 	pub fn changed(&self) -> bool {
 		self.initial != self.current
 	}
-	// Check if document has changed
+	/// Check if document has changed
 	pub fn is_new(&self) -> bool {
 		self.initial.is_none()
 	}
-	// Get the table for this document
+	/// Get the table for this document
 	pub async fn tb(
 		&self,
 		opt: &Options,
@@ -78,7 +78,7 @@ impl<'a> Document<'a> {
 			Ok(tb) => Ok(tb),
 		}
 	}
-	// Get the foreign tables for this document
+	/// Get the foreign tables for this document
 	pub async fn ft(
 		&self,
 		opt: &Options,
@@ -89,7 +89,7 @@ impl<'a> Document<'a> {
 		// Get the table definitions
 		txn.clone().lock().await.all_ft(opt.ns(), opt.db(), &id.tb).await
 	}
-	// Get the events for this document
+	/// Get the events for this document
 	pub async fn ev(
 		&self,
 		opt: &Options,
@@ -100,7 +100,7 @@ impl<'a> Document<'a> {
 		// Get the event definitions
 		txn.clone().lock().await.all_ev(opt.ns(), opt.db(), &id.tb).await
 	}
-	// Get the fields for this document
+	/// Get the fields for this document
 	pub async fn fd(
 		&self,
 		opt: &Options,
@@ -111,7 +111,7 @@ impl<'a> Document<'a> {
 		// Get the field definitions
 		txn.clone().lock().await.all_fd(opt.ns(), opt.db(), &id.tb).await
 	}
-	// Get the indexes for this document
+	/// Get the indexes for this document
 	pub async fn ix(
 		&self,
 		opt: &Options,

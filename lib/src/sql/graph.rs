@@ -11,9 +11,9 @@ use nom::character::complete::char;
 use nom::combinator::map;
 use nom::combinator::opt;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter, Write};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Graph {
 	pub dir: Dir,
 	pub what: Tables,
@@ -22,24 +22,25 @@ pub struct Graph {
 }
 
 impl Graph {
+	/// Convert the graph edge to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}
 }
 
-impl fmt::Display for Graph {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Graph {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		if self.what.0.len() <= 1 && self.cond.is_none() && self.alias.is_none() {
-			write!(f, "{}", self.dir)?;
+			Display::fmt(&self.dir, f)?;
 			match self.what.len() {
-				0 => write!(f, "?"),
-				_ => write!(f, "{}", self.what),
+				0 => f.write_char('?'),
+				_ => Display::fmt(&self.what, f),
 			}
 		} else {
 			write!(f, "{}(", self.dir)?;
 			match self.what.len() {
-				0 => write!(f, "?"),
-				_ => write!(f, "{}", self.what),
+				0 => f.write_char('?'),
+				_ => Display::fmt(&self.what, f),
 			}?;
 			if let Some(ref v) = self.cond {
 				write!(f, " {}", v)?
@@ -47,7 +48,7 @@ impl fmt::Display for Graph {
 			if let Some(ref v) = self.alias {
 				write!(f, " AS {}", v)?
 			}
-			write!(f, ")")
+			f.write_char(')')
 		}
 	}
 }
