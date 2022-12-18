@@ -1,3 +1,5 @@
+#![cfg(feature = "parallel")]
+
 mod parse;
 use parse::Parse;
 use std::future::Future;

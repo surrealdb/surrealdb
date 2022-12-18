@@ -69,7 +69,13 @@ jobs:
           override: true
           components: rustfmt, clippy
 
-      - name: Run cargo check
+      - name: Run cargo check --package surrealdb
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --no-default-features --package surrealdb
+
+      - name: Run cargo check --workspace
         uses: actions-rs/cargo@v1
         with:
           command: check

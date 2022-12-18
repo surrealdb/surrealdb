@@ -16,6 +16,7 @@ use futures::lock::Mutex;
 use std::sync::Arc;
 
 /// The underlying datastore instance which stores the dataset.
+#[allow(dead_code)]
 pub struct Datastore {
 	pub(super) inner: Inner,
 }
@@ -144,7 +145,10 @@ impl Datastore {
 				v
 			}
 			// The datastore path is not valid
-			_ => Err(Error::Ds("Unable to load the specified datastore".into())),
+			_ => {
+				info!(target: LOG, "Unable to load the specified datastore {}", path);
+				Err(Error::Ds("Unable to load the specified datastore".into()))
+			}
 		}
 	}
 
@@ -163,6 +167,7 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+		#![allow(unused_variables)]
 		match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
@@ -204,6 +209,8 @@ impl Datastore {
 					cache: super::cache::Cache::default(),
 				})
 			}
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 
@@ -239,7 +246,7 @@ impl Datastore {
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx);
+		let ctx = vars.attach(ctx)?;
 		// Parse the SQL query text
 		let ast = sql::parse(txt)?;
 		// Setup the auth options
@@ -288,7 +295,7 @@ impl Datastore {
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx);
+		let ctx = vars.attach(ctx)?;
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Setup the live options
@@ -308,14 +315,14 @@ impl Datastore {
 	/// use surrealdb::Datastore;
 	/// use surrealdb::Error;
 	/// use surrealdb::Session;
-	/// use surrealdb::sql::Function;
+	/// use surrealdb::sql::Future;
 	/// use surrealdb::sql::Value;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::for_kv();
-	///     let val = Value::Function(Box::new(Function::Future(Value::True)));
+	///     let val = Value::Future(Box::new(Future(Value::True)));
 	///     let res = ds.compute(val, &ses, None, false).await?;
 	///     Ok(())
 	/// }
@@ -338,7 +345,7 @@ impl Datastore {
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
-		let ctx = vars.attach(ctx);
+		let ctx = vars.attach(ctx)?;
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Set current NS and DB

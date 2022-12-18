@@ -235,6 +235,30 @@ impl Number {
 		}
 	}
 
+	pub fn is_negative(&self) -> bool {
+		match self {
+			Number::Int(v) => v < &0,
+			Number::Float(v) => v < &0.0,
+			Number::Decimal(v) => v < &BigDecimal::from(0),
+		}
+	}
+
+	pub fn is_zero_or_positive(&self) -> bool {
+		match self {
+			Number::Int(v) => v >= &0,
+			Number::Float(v) => v >= &0.0,
+			Number::Decimal(v) => v >= &BigDecimal::from(0),
+		}
+	}
+
+	pub fn is_zero_or_negative(&self) -> bool {
+		match self {
+			Number::Int(v) => v <= &0,
+			Number::Float(v) => v <= &0.0,
+			Number::Decimal(v) => v <= &BigDecimal::from(0),
+		}
+	}
+
 	// -----------------------------------
 	// Simple conversion of number
 	// -----------------------------------

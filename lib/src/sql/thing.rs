@@ -66,18 +66,7 @@ impl Thing {
 	) -> Result<Value, Error> {
 		Ok(Value::Thing(Thing {
 			tb: self.tb.clone(),
-			id: match &self.id {
-				Id::Number(v) => Id::Number(*v),
-				Id::String(v) => Id::String(v.clone()),
-				Id::Object(v) => match v.compute(ctx, opt, txn, doc).await? {
-					Value::Object(v) => Id::Object(v),
-					_ => unreachable!(),
-				},
-				Id::Array(v) => match v.compute(ctx, opt, txn, doc).await? {
-					Value::Array(v) => Id::Array(v),
-					_ => unreachable!(),
-				},
-			},
+			id: self.id.compute(ctx, opt, txn, doc).await?,
 		}))
 	}
 }

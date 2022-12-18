@@ -1,3 +1,4 @@
+use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::response::Response;
 use crate::dbs::Auth;
@@ -229,9 +230,16 @@ impl<'a> Executor<'a> {
 						true => Err(Error::TxFailure),
 						// The transaction began successfully
 						false => {
-							// Process the statement
-							let res = stm.compute(&ctx, &opt, &self.txn(), None).await;
-							//
+							// Check if the variable is a protected variable
+							let res = match PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
+								// The variable isn't protected and can be stored
+								false => stm.compute(&ctx, &opt, &self.txn(), None).await,
+								// The user tried to set a protected variable
+								true => Err(Error::InvalidParam {
+									name: stm.name.to_owned(),
+								}),
+							};
+							// Check the statement
 							match res {
 								Ok(val) => {
 									// Set the parameter

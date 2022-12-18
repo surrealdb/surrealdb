@@ -9,10 +9,15 @@ pub trait Variance {
 
 impl Variance for Vec<Number> {
 	fn variance(self, sample: bool) -> Number {
-		let mean = self.mean();
-		let len = Number::from(self.len() - sample as usize);
-		let out = self.iter().map(|x| (x - &mean) * (x - &mean)).sum::<Number>() / len;
-
-		out
+		match self.len() {
+			0 => Number::NAN,
+			1 => Number::from(0),
+			len => {
+				let mean = self.mean();
+				let len = Number::from(len - sample as usize);
+				let out = self.iter().map(|x| (x - &mean) * (x - &mean)).sum::<Number>() / len;
+				out
+			}
+		}
 	}
 }

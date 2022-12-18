@@ -15,11 +15,11 @@ const BACKTICK: char = '`';
 const BACKTICK_ESC: &str = r#"\`"#;
 
 #[inline]
-pub fn escape_str(s: &str) -> String {
+pub fn escape_str(s: &str) -> Cow<'_, str> {
 	if s.contains(SINGLE) {
-		format!("{}{}{}", DOUBLE, s, DOUBLE)
+		escape_normal(s, DOUBLE, DOUBLE, DOUBLE_ESC)
 	} else {
-		format!("{}{}{}", SINGLE, s, SINGLE)
+		Cow::Owned(format!("{}{}{}", SINGLE, s, SINGLE))
 	}
 }
 

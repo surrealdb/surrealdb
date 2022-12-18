@@ -19,7 +19,6 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Function {
-	Future(Value),
 	Cast(String, Value),
 	Normal(String, Vec<Value>),
 	Script(Script, Vec<Value>),
@@ -33,21 +32,21 @@ impl PartialOrd for Function {
 }
 
 impl Function {
-	// Get function name if applicable
+	/// Get function name if applicable
 	pub fn name(&self) -> &str {
 		match self {
 			Self::Normal(n, _) => n.as_str(),
 			_ => unreachable!(),
 		}
 	}
-	// Get function arguments if applicable
+	/// Get function arguments if applicable
 	pub fn args(&self) -> &[Value] {
 		match self {
 			Self::Normal(_, a) => a,
 			_ => &[],
 		}
 	}
-	// Convert this function to an aggregate
+	/// Convert this function to an aggregate
 	pub fn aggregate(&self, val: Value) -> Self {
 		match self {
 			Self::Normal(n, a) => {
@@ -64,7 +63,7 @@ impl Function {
 			_ => unreachable!(),
 		}
 	}
-	// Check if this function is a rolling function
+	/// Check if this function is a rolling function
 	pub fn is_rolling(&self) -> bool {
 		match self {
 			Self::Normal(f, _) if f == "count" => true,
@@ -75,7 +74,7 @@ impl Function {
 			_ => false,
 		}
 	}
-	// Check if this function is a grouping function
+	/// Check if this function is a grouping function
 	pub fn is_aggregate(&self) -> bool {
 		match self {
 			Self::Normal(f, _) if f == "array::concat" => true,
@@ -116,13 +115,6 @@ impl Function {
 		let opt = &opt.dive(1)?;
 		// Process the function type
 		match self {
-			Self::Future(v) => match opt.futures {
-				true => {
-					let v = v.compute(ctx, opt, txn, doc).await?;
-					fnc::future::run(ctx, v)
-				}
-				false => Ok(self.to_owned().into()),
-			},
 			Self::Cast(s, x) => {
 				let v = x.compute(ctx, opt, txn, doc).await?;
 				fnc::cast::run(ctx, s, v)
@@ -158,7 +150,6 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Future(ref e) => write!(f, "<future> {{ {} }}", e),
 			Self::Cast(ref s, ref e) => write!(f, "<{}> {}", s, e),
 			Self::Script(ref s, ref e) => {
 				write!(f, "function({}) {{{}}}", Fmt::comma_separated(e), s)
@@ -169,7 +160,7 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((normal, script, future, cast))(i)
+	alt((normal, script, cast))(i)
 }
 
 fn normal(i: &str) -> IResult<&str, Function> {
@@ -186,26 +177,15 @@ fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = alt((tag("fn::script"), tag("fn"), tag("function")))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("(")(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag(")")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('{')(i)?;
 	let (i, v) = func(i)?;
 	let (i, _) = char('}')(i)?;
 	Ok((i, Function::Script(v, a)))
-}
-
-fn future(i: &str) -> IResult<&str, Function> {
-	let (i, _) = char('<')(i)?;
-	let (i, _) = tag("future")(i)?;
-	let (i, _) = char('>')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = value(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
-	Ok((i, Function::Future(v)))
 }
 
 fn cast(i: &str) -> IResult<&str, Function> {
@@ -253,9 +233,12 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 fn function_array(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("array::combine"),
+		tag("array::complement"),
 		tag("array::concat"),
 		tag("array::difference"),
+		tag("array::flatten"),
 		tag("array::distinct"),
+		tag("array::insert"),
 		tag("array::intersect"),
 		tag("array::len"),
 		tag("array::sort::asc"),
@@ -331,6 +314,7 @@ fn function_is(i: &str) -> IResult<&str, &str> {
 		tag("is::longitude"),
 		tag("is::numeric"),
 		tag("is::semver"),
+		tag("is::url"),
 		tag("is::uuid"),
 	))(i)
 }
@@ -443,12 +427,12 @@ fn function_time(i: &str) -> IResult<&str, &str> {
 		tag("time::format"),
 		tag("time::group"),
 		tag("time::hour"),
-		tag("time::mins"),
+		tag("time::minute"),
 		tag("time::month"),
 		tag("time::nano"),
 		tag("time::now"),
 		tag("time::round"),
-		tag("time::secs"),
+		tag("time::second"),
 		tag("time::unix"),
 		tag("time::wday"),
 		tag("time::week"),
@@ -478,7 +462,6 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 mod tests {
 
 	use super::*;
-	use crate::sql::expression::Expression;
 	use crate::sql::test::Parse;
 
 	#[test]
@@ -529,16 +512,6 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("<string> 1.2345", format!("{}", out));
 		assert_eq!(out, Function::Cast(String::from("string"), 1.2345.into()));
-	}
-
-	#[test]
-	fn function_future_expression() {
-		let sql = "<future> { 1.2345 + 5.4321 }";
-		let res = function(sql);
-		assert!(res.is_ok());
-		let out = res.unwrap().1;
-		assert_eq!("<future> { 1.2345 + 5.4321 }", format!("{}", out));
-		assert_eq!(out, Function::Future(Value::from(Expression::parse("1.2345 + 5.4321"))));
 	}
 
 	#[test]

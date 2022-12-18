@@ -83,8 +83,8 @@ impl SelectStatement {
 		opt.check(Level::No)?;
 		// Create a new iterator
 		let mut i = Iterator::new();
-		// Ensure futures are processed
-		let opt = &opt.futures(true);
+		// Ensure futures are stored
+		let opt = &opt.futures(false);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;

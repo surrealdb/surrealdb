@@ -11,8 +11,11 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Operator {
+	//
 	Or,  // ||
 	And, // &&
+	Tco, // ?: Ternary conditional operator
+	Nco, // ?? Null coalescing operator
 	//
 	Add, // +
 	Sub, // -
@@ -21,9 +24,8 @@ pub enum Operator {
 	Inc, // +=
 	Dec, // -=
 	//
-	Exact, // ==
-	//
 	Equal,    // =
+	Exact,    // ==
 	NotEqual, // !=
 	AllEqual, // *=
 	AnyEqual, // ?=
@@ -48,8 +50,9 @@ pub enum Operator {
 	AllInside,   // ⊆
 	AnyInside,   // ⊂
 	NoneInside,  // ⊄
-	Outside,     // ∈
-	Intersects,  // ∩
+	//
+	Outside,
+	Intersects,
 }
 
 impl Default for Operator {
@@ -64,11 +67,13 @@ impl Operator {
 		match self {
 			Operator::Or => 1,
 			Operator::And => 2,
-			Operator::Sub => 4,
-			Operator::Add => 5,
-			Operator::Mul => 6,
-			Operator::Div => 7,
-			_ => 3,
+			Operator::Tco => 3,
+			Operator::Nco => 4,
+			Operator::Sub => 6,
+			Operator::Add => 7,
+			Operator::Mul => 8,
+			Operator::Div => 9,
+			_ => 5,
 		}
 	}
 }
@@ -78,14 +83,16 @@ impl fmt::Display for Operator {
 		f.write_str(match self {
 			Self::Or => "OR",
 			Self::And => "AND",
+			Self::Tco => "?:",
+			Self::Nco => "??",
 			Self::Add => "+",
 			Self::Sub => "-",
 			Self::Mul => "*",
 			Self::Div => "/",
 			Self::Inc => "+=",
 			Self::Dec => "-=",
-			Self::Exact => "==",
 			Self::Equal => "=",
+			Self::Exact => "==",
 			Self::NotEqual => "!=",
 			Self::AllEqual => "*=",
 			Self::AnyEqual => "?=",
@@ -128,6 +135,12 @@ pub fn operator(i: &str) -> IResult<&str, Operator> {
 pub fn symbols(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
+		alt((
+			map(tag("||"), |_| Operator::Or),
+			map(tag("&&"), |_| Operator::And),
+			map(tag("?:"), |_| Operator::Tco),
+			map(tag("??"), |_| Operator::Nco),
+		)),
 		alt((
 			map(tag("=="), |_| Operator::Exact),
 			map(tag("!="), |_| Operator::NotEqual),
@@ -177,12 +190,8 @@ pub fn phrases(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = alt((
 		alt((
-			map(tag_no_case("&&"), |_| Operator::And),
-			map(tag_no_case("AND"), |_| Operator::And),
-			map(tag_no_case("||"), |_| Operator::Or),
 			map(tag_no_case("OR"), |_| Operator::Or),
-		)),
-		alt((
+			map(tag_no_case("AND"), |_| Operator::And),
 			map(tag_no_case("IS NOT"), |_| Operator::NotEqual),
 			map(tag_no_case("IS"), |_| Operator::Equal),
 		)),

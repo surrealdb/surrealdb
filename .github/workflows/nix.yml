@@ -6,17 +6,8 @@ on:
 
 jobs:
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: cachix/install-nix-action@v17
-      - run: nix flake check --show-trace
-
   build-static:
     name: Build static Linux binary
-    needs: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -31,7 +22,6 @@ jobs:
 
   build-docker:
     name: Build Docker image
-    needs: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -46,7 +36,6 @@ jobs:
 
   build-native-linux:
     name: Build native Linux binary
-    needs: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2

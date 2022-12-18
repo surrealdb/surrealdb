@@ -6,7 +6,7 @@ use surrealdb::Error;
 use surrealdb::Session;
 
 #[tokio::test]
-async fn complex_string() -> Result<(), Error> {
+async fn complex_ids() -> Result<(), Error> {
 	let sql = r#"
 		CREATE person:100 SET test = 'One';
 		CREATE person:00100;
@@ -80,6 +80,43 @@ async fn complex_string() -> Result<(), Error> {
 			}
 		]",
 	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn complex_strings() -> Result<(), Error> {
+	let sql = r#"
+		RETURN 'String with no complex characters';
+		RETURN 'String with some "double quoted" characters';
+		RETURN 'String with some \'escaped single quoted\' characters';
+		RETURN "String with some \"escaped double quoted\" characters";
+		RETURN "String with some 'single' and \"double\" quoted characters";
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"'String with no complex characters'"#);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"'String with some "double quoted" characters'"#);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#""String with some 'escaped single quoted' characters""#);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#"'String with some "escaped double quoted" characters'"#);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(r#""String with some 'single' and \"double\" quoted characters""#);
 	assert_eq!(tmp, val);
 	//
 	Ok(())

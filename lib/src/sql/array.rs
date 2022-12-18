@@ -251,6 +251,24 @@ impl Combine<Array> for Array {
 
 // ------------------------------
 
+pub trait Complement<T> {
+	fn complement(self, other: T) -> T;
+}
+
+impl Complement<Array> for Array {
+	fn complement(self, other: Self) -> Array {
+		let mut out = Array::new();
+		for v in self.into_iter() {
+			if !other.contains(&v) {
+				out.push(v)
+			}
+		}
+		out
+	}
+}
+
+// ------------------------------
+
 pub trait Concat<T> {
 	fn concat(self, other: T) -> T;
 }
@@ -269,17 +287,35 @@ pub trait Difference<T> {
 }
 
 impl Difference<Array> for Array {
-	fn difference(self, other: Array) -> Array {
+	fn difference(self, mut other: Array) -> Array {
 		let mut out = Array::new();
-		let mut other: Vec<_> = other.into_iter().collect();
-		for a in self.into_iter() {
-			if let Some(pos) = other.iter().position(|b| a == *b) {
+		for v in self.into_iter() {
+			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
 			} else {
-				out.push(a);
+				out.push(v);
 			}
 		}
 		out.append(&mut other);
+		out
+	}
+}
+
+// ------------------------------
+
+pub trait Flatten<T> {
+	fn flatten(self) -> T;
+}
+
+impl Flatten<Array> for Array {
+	fn flatten(self) -> Array {
+		let mut out = Array::new();
+		for v in self.into_iter() {
+			match v {
+				Value::Array(mut a) => out.append(&mut a),
+				_ => out.push(v),
+			}
+		}
 		out
 	}
 }
@@ -291,13 +327,12 @@ pub trait Intersect<T> {
 }
 
 impl Intersect<Self> for Array {
-	fn intersect(self, other: Self) -> Self {
+	fn intersect(self, mut other: Self) -> Self {
 		let mut out = Self::new();
-		let mut other: Vec<_> = other.into_iter().collect();
-		for a in self.0.into_iter() {
-			if let Some(pos) = other.iter().position(|b| a == *b) {
-				out.push(a);
+		for v in self.0.into_iter() {
+			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
+				out.push(v);
 			}
 		}
 		out
