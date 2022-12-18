@@ -397,6 +397,21 @@ impl Number {
 		}
 	}
 
+	pub fn pow(self, power: Number) -> Number {
+		match (self, power) {
+			(Number::Int(v), Number::Int(p)) if p >= 0 && p < u32::MAX as i64 => {
+				Number::Int(v.pow(p as u32))
+			}
+			(Number::Decimal(v), Number::Int(p)) if p >= 0 && p < u32::MAX as i64 => {
+				let (as_int, scale) = v.as_bigint_and_exponent();
+				Number::Decimal(BigDecimal::new(as_int.pow(p as u32), scale * p))
+			}
+			// TODO: (Number::Decimal(v), Number::Float(p)) => todo!(),
+			// TODO: (Number::Decimal(v), Number::Decimal(p)) => todo!(),
+			(v, p) => Number::Float(v.as_float().pow(p.as_float())),
+		}
+	}
+
 	// -----------------------------------
 	//
 	// -----------------------------------
@@ -406,20 +421,6 @@ impl Number {
 			Number::Int(v) => format!("{:.1$}", v, precision).into(),
 			Number::Float(v) => format!("{:.1$}", v, precision).into(),
 			Number::Decimal(v) => v.round(precision as i64).into(),
-		}
-	}
-
-	pub fn pow(self, power: Number) -> Number {
-		match (self, power) {
-			(Number::Int(v), Number::Int(p)) if p >= 0 && p < u32::MAX as i64 => {
-				Number::Int(v.pow(p as u32))
-			}
-			(Number::Decimal(v), Number::Int(p)) if p >= 0 && p < u32::MAX as i64 => {
-				let (as_int, scale) = v.as_bigint_and_exponent();
-				return Number::Decimal(BigDecimal::new(as_int.pow(p as u32), scale * p));
-			}
-			// TODO: Number::Decimal.pow(Number::Float) and Decimal.pow(Number::Decimal)
-			(v, p) => Number::Float(v.as_float().pow(p.as_float())),
 		}
 	}
 }

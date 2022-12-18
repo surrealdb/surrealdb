@@ -1229,6 +1229,14 @@ impl Value {
 			_ => self.partial_cmp(other),
 		}
 	}
+
+	// -----------------------------------
+	// Mathematical operations
+	// -----------------------------------
+
+	pub fn pow(self, other: Value) -> Value {
+		self.as_number().pow(other.as_number()).into()
+	}
 }
 
 impl fmt::Display for Value {
