@@ -41,10 +41,10 @@ fn backup_http_to_file(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 	// Parse the specified password
 	let pass = matches.value_of("pass").unwrap();
 	// Set the correct source URL
-	let from = format!("{}/sync", from);
+	let from = format!("{from}/sync");
 	// Try to open the source http
 	let mut from = Client::new()
-		.get(&from)
+		.get(from)
 		.basic_auth(user, Some(pass))
 		.header(CONTENT_TYPE, TYPE)
 		.send()?
@@ -65,10 +65,10 @@ fn backup_file_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 	// Try to open the source file
 	let from = OpenOptions::new().read(true).open(from)?;
 	// Set the correct output URL
-	let into = format!("{}/sync", into);
+	let into = format!("{into}/sync");
 	// Copy the data to the destination
 	Client::new()
-		.post(&into)
+		.post(into)
 		.basic_auth(user, Some(pass))
 		.header(CONTENT_TYPE, TYPE)
 		.body(from)
@@ -84,19 +84,19 @@ fn backup_http_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 	// Parse the specified password
 	let pass = matches.value_of("pass").unwrap();
 	// Set the correct source URL
-	let from = format!("{}/sync", from);
+	let from = format!("{from}/sync");
 	// Set the correct output URL
-	let into = format!("{}/sync", into);
+	let into = format!("{into}/sync");
 	// Try to open the source file
 	let from = Client::new()
-		.get(&from)
+		.get(from)
 		.basic_auth(user, Some(pass))
 		.header(CONTENT_TYPE, TYPE)
 		.send()?
 		.error_for_status()?;
 	// Copy the data to the destination
 	Client::new()
-		.post(&into)
+		.post(into)
 		.basic_auth(user, Some(pass))
 		.header(CONTENT_TYPE, TYPE)
 		.body(Body::new(from))

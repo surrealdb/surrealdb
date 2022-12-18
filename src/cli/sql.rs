@@ -19,7 +19,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// If we should pretty-print responses
 	let pretty = matches.is_present("pretty");
 	// Set the correct import URL
-	let conn = format!("{}/sql", conn);
+	let conn = format!("{conn}/sql");
 	// Create a new terminal REPL
 	let mut rl = Editor::<()>::new().unwrap();
 	// Load the command-line history
@@ -57,8 +57,8 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				let res = res.body(line).send();
 				// Get the request response
 				match process(pretty, res) {
-					Ok(v) => println!("{}", v),
-					Err(e) => eprintln!("{}", e),
+					Ok(v) => println!("{v}"),
+					Err(e) => eprintln!("{e}"),
 				}
 			}
 			// The user types CTRL-C
@@ -71,7 +71,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 			}
 			// There was en error
 			Err(err) => {
-				eprintln!("Error: {:?}", err);
+				eprintln!("Error: {err:?}");
 				break;
 			}
 		}

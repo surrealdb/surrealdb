@@ -22,10 +22,10 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let ns = matches.value_of("ns").unwrap();
 	let db = matches.value_of("db").unwrap();
 	// Set the correct import URL
-	let conn = format!("{}/import", conn);
+	let conn = format!("{conn}/import");
 	// Import the data into the database
 	let res = Client::new()
-		.post(&conn)
+		.post(conn)
 		.header(ACCEPT, "application/octet-stream")
 		.basic_auth(user, Some(pass))
 		.header("NS", ns)

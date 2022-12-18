@@ -284,7 +284,7 @@ impl Rpc {
 			},
 			// Get the current server version
 			"version" => match params.len() {
-				0 => Ok(format!("{}-{}", PKG_NAME, *PKG_VERSION).into()),
+				0 => Ok(format!("{PKG_NAME}-{}", *PKG_VERSION).into()),
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Run a full SurrealQL query against the database
