@@ -3,8 +3,9 @@
 use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use sled::Db;
-use std::collections::{HashMap, HashSet};
+use sled::{Db, Iter};
+use std::collections::btree_map::Range as BTreeMapRange;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 
 pub struct Datastore {
@@ -19,7 +20,7 @@ pub struct Transaction {
 	// The DB this translation is related to
 	db: Db,
 	// Key/Value pair to set
-	set: Option<HashMap<Key, Val>>,
+	set: Option<BTreeMap<Key, Val>>,
 	// Keys to delete
 	del: Option<HashSet<Key>>,
 }
@@ -98,8 +99,22 @@ impl Transaction {
 		Ok(())
 	}
 
+	fn _key_updated_by_tx(&self, key: &Key) -> bool {
+		if let Some(set) = &self.set {
+			if set.contains_key(key) {
+				return true;
+			}
+		}
+		if let Some(del) = &self.del {
+			if del.contains(key) {
+				return true;
+			}
+		}
+		false
+	}
+
 	/// Check if the key exists (without any pre-check)
-	fn _exi(&mut self, key: &Key) -> Result<bool, Error> {
+	fn _exi(&self, key: &Key) -> Result<bool, Error> {
 		// We check in key set in the transaction
 		if let Some(set) = &self.set {
 			if set.contains_key(key) {
@@ -164,7 +179,7 @@ impl Transaction {
 		match &mut self.set {
 			None => {
 				// Create an hashmap if it didn't exist
-				self.set = Some(HashMap::from([(key, val)]));
+				self.set = Some(BTreeMap::from([(key, val)]));
 			}
 			Some(set) => {
 				// Update the hashmap
@@ -297,6 +312,7 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
+
 	/// Retrieve a range of keys from the databases
 	pub fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
@@ -311,23 +327,121 @@ impl Transaction {
 			start: rng.start.into(),
 			end: rng.end.into(),
 		};
+
 		// Scan the keys
 		let mut res = Vec::new();
-		for kv in self.db.range(rng) {
+		let mut iterator = ParallelIterator::new(&self, rng)?;
+		while let Some(key_val) = iterator.try_next()? {
 			if res.len() == limit as usize {
 				break;
 			}
-			let kv = kv?;
-			res.push((kv.0.to_vec(), kv.1.to_vec()));
+			res.push(key_val);
 		}
 		// Return result
 		Ok(res)
 	}
 }
 
+/// This iterator is a specialized iterator.
+/// It iterates over a pair of keys/value iterators:
+/// 1. Key/values extracted from the transaction (In memory).
+/// 2. Key/values extracted from the store (Sled).
+/// If a key is present in both iterators,
+/// the key/value extracted from the transaction is returned,
+/// the one extracted from the store is ignored.
+struct ParallelIterator<'a> {
+	tx: &'a Transaction,
+	db_kvs: Iter,
+	tx_kvs: Option<BTreeMapRange<'a, Key, Val>>,
+	db_next_kv: Option<(Key, Val)>,
+	tx_next_kv: Option<(Key, Val)>,
+}
+
+impl<'a> ParallelIterator<'a> {
+	fn new(tx: &'a Transaction, rng: Range<Key>) -> Result<ParallelIterator, Error> {
+		// Extract the key/values meeting the range in the transaction
+		// and the initial key/value
+		let (tx_kvs, tx_next_kv) = if let Some(set) = &tx.set {
+			let mut range = set.range(rng.clone());
+			let next = range.next().map(|(key, val)| (key.clone(), val.clone()));
+			(Some(range), next)
+		} else {
+			(None, None)
+		};
+
+		// Extract key/values meeting the range in the store
+		let mut db_kvs = tx.db.range(rng);
+		// Extract the initial key/value from the store
+		let db_next_kv = Self::next_db_kv(&mut db_kvs)?;
+
+		Ok(Self {
+			tx,
+			db_kvs,
+			tx_kvs,
+			db_next_kv,
+			tx_next_kv,
+		})
+	}
+
+	fn next_db_kv(iter: &mut Iter) -> Result<Option<(Key, Val)>, Error> {
+		if let Some(kv) = iter.next() {
+			let (key_vec, value_vec) = kv?;
+			Ok(Some((key_vec.to_vec(), value_vec.to_vec())))
+		} else {
+			Ok(None)
+		}
+	}
+
+	fn next_from_tx(&mut self) -> Option<(Key, Val)> {
+		if let Some(tx_iter) = &mut self.tx_kvs {
+			let next_kv = self.tx_next_kv.take();
+			if next_kv.is_none() {
+				return None;
+			}
+			self.tx_next_kv = tx_iter.next().map(|(key, val)| (key.clone(), val.clone()));
+			next_kv
+		} else {
+			None
+		}
+	}
+
+	fn next_from_db(&mut self) -> Result<Option<(Key, Val)>, Error> {
+		let next = self.db_next_kv.take();
+		if next.is_none() {
+			return Ok(None);
+		}
+		// Now we advance the iterator to prepare the next iteration.
+		// We use a loop here, because we want to ignore a key
+		// if it exists in the transaction
+		while let Some(kv) = self.db_kvs.next() {
+			let (key_vec, value_vec) = kv?;
+			let key = key_vec.to_vec();
+			// Check if the key is not updated in the transaction...
+			if !self.tx._key_updated_by_tx(&key) {
+				// ... if not we can use it for the next candidate value
+				self.db_next_kv = Some((key, value_vec.to_vec()));
+				break;
+			}
+		}
+		Ok(next)
+	}
+
+	fn try_next(&mut self) -> Result<Option<(Key, Val)>, Error> {
+		if let Some((db_next_key, _)) = &self.db_next_kv {
+			if let Some((tx_next_key, _)) = &self.tx_next_kv {
+				if tx_next_key.le(db_next_key) {
+					return Ok(self.next_from_tx());
+				}
+				return self.next_from_db();
+			}
+			return self.next_from_db();
+		}
+		Ok(self.next_from_tx())
+	}
+}
+
 #[cfg(test)]
 mod tests {
-	use crate::Error::TxConditionNotMet;
 	use sled::IVec;
 	use std::collections::HashMap;
 	use std::fs;
