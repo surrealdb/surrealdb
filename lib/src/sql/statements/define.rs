@@ -609,6 +609,9 @@ impl DefineTableStatement {
 				// Save the view config
 				let key = crate::key::ft::new(opt.ns(), opt.db(), v, &self.name);
 				run.set(key, self).await?;
+				// Clear the cache
+				let key = crate::key::ft::prefix(opt.ns(), opt.db(), v);
+				run.clr(key).await?;
 			}
 			// Release the transaction
 			drop(run);
@@ -775,6 +778,9 @@ impl DefineEventStatement {
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+		// Clear the cache
+		let key = crate::key::ev::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -856,6 +862,9 @@ impl DefineFieldStatement {
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+		// Clear the cache
+		let key = crate::key::fd::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -996,6 +1005,9 @@ impl DefineIndexStatement {
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+		// Clear the cache
+		let key = crate::key::ix::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Remove the index data
 		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);
 		let end = crate::key::index::suffix(opt.ns(), opt.db(), &self.what, &self.name);

@@ -45,8 +45,12 @@ impl Cache {
 	pub fn set(&mut self, key: Key, val: Entry) {
 		self.0.insert(key, val);
 	}
-	// get a key from the cache
+	// Get a key from the cache
 	pub fn get(&mut self, key: &Key) -> Option<Entry> {
 		self.0.get(key).cloned()
+	}
+	// Delete a key from the cache
+	pub fn del(&mut self, key: &Key) -> Option<Entry> {
+		self.0.remove(key)
 	}
 }

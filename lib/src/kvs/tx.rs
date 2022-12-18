@@ -642,6 +642,15 @@ impl Transaction {
 		}
 		Ok(())
 	}
+	/// Clear any cache entry for the specified key.
+	pub async fn clr<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		let key: Key = key.into();
+		self.cache.del(&key);
+		Ok(())
+	}
 	/// Retrieve all namespace definitions in a datastore.
 	pub async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
 		let key = crate::key::ns::prefix();

@@ -509,6 +509,9 @@ impl RemoveEventStatement {
 		// Delete the definition
 		let key = crate::key::ev::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
+		// Clear the cache
+		let key = crate::key::ev::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -569,6 +572,9 @@ impl RemoveFieldStatement {
 		// Delete the definition
 		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name.to_string());
 		run.del(key).await?;
+		// Clear the cache
+		let key = crate::key::fd::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -629,6 +635,9 @@ impl RemoveIndexStatement {
 		// Delete the definition
 		let key = crate::key::ix::new(opt.ns(), opt.db(), &self.what, &self.name);
 		run.del(key).await?;
+		// Clear the cache
+		let key = crate::key::ix::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Remove the resource data
 		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);
 		let end = crate::key::index::suffix(opt.ns(), opt.db(), &self.what, &self.name);
