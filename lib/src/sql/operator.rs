@@ -211,6 +211,8 @@ pub fn phrases(i: &str) -> IResult<&str, Operator> {
 			map(tag_no_case("INSIDE"), |_| Operator::Inside),
 			map(tag_no_case("OUTSIDE"), |_| Operator::Outside),
 			map(tag_no_case("INTERSECTS"), |_| Operator::Intersects),
+			map(tag_no_case("NOT IN"), |_| Operator::NotInside),
+			map(tag_no_case("IN"), |_| Operator::Inside),
 		)),
 	))(i)?;
 	let (i, _) = shouldbespace(i)?;
