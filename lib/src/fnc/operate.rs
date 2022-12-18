@@ -49,6 +49,10 @@ pub fn div(a: Value, b: Value) -> Result<Value, Error> {
 	Ok(a.div(b))
 }
 
+pub fn pow(a: Value, b: Value) -> Result<Value, Error> {
+	Ok(a.pow(b))
+}
+
 pub fn exact(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(Value::from(a == b))
 }

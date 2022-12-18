@@ -121,6 +121,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"math::mode" => math::mode,
 		"math::nearestrank" => math::nearestrank,
 		"math::percentile" => math::percentile,
+		"math::pow" => math::pow,
 		"math::product" => math::product,
 		"math::round" => math::round,
 		"math::spread" => math::spread,

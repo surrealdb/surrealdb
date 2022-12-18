@@ -120,6 +120,10 @@ pub fn percentile((array, n): (Value, Number)) -> Result<Value, Error> {
 	})
 }
 
+pub fn pow((arg, pow): (Number, Number)) -> Result<Value, Error> {
+	Ok(arg.pow(pow).into())
+}
+
 pub fn product((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
 		Value::Array(v) => v.as_numbers().into_iter().product::<Number>().into(),

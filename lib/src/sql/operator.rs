@@ -21,6 +21,7 @@ pub enum Operator {
 	Sub, // -
 	Mul, // *
 	Div, // /
+	Pow, // **
 	Inc, // +=
 	Dec, // -=
 	//
@@ -89,6 +90,7 @@ impl fmt::Display for Operator {
 			Self::Sub => "-",
 			Self::Mul => "*",
 			Self::Div => "/",
+			Self::Pow => "**",
 			Self::Inc => "+=",
 			Self::Dec => "-=",
 			Self::Equal => "=",
@@ -168,6 +170,7 @@ pub fn symbols(i: &str) -> IResult<&str, Operator> {
 			map(char('∙'), |_| Operator::Mul),
 			map(char('/'), |_| Operator::Div),
 			map(char('÷'), |_| Operator::Div),
+			map(tag("**"), |_| Operator::Pow),
 		)),
 		alt((
 			map(char('∋'), |_| Operator::Contain),

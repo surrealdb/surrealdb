@@ -98,6 +98,7 @@ impl Expression {
 			Operator::Sub => fnc::operate::sub(l, r),
 			Operator::Mul => fnc::operate::mul(l, r),
 			Operator::Div => fnc::operate::div(l, r),
+			Operator::Pow => fnc::operate::pow(l, r),
 			Operator::Equal => fnc::operate::equal(&l, &r),
 			Operator::Exact => fnc::operate::exact(&l, &r),
 			Operator::NotEqual => fnc::operate::not_equal(&l, &r),
