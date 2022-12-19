@@ -357,98 +357,120 @@ impl Transaction {
 /// the key/value extracted from the transaction is returned,
 /// the one extracted from the store is ignored.
 struct ParallelIterator<'a> {
-	tx: &'a Transaction,
-	db_kvs: Iter,
-	tx_kvs: Option<BTreeMapRange<'a, Key, Val>>,
-	db_next_kv: Option<(Key, Val)>,
-	tx_next_kv: Option<(Key, Val)>,
+	db_iter: SledIterator<'a>,
+	tx_iter: TxIterator<'a>,
 }
 
 impl<'a> ParallelIterator<'a> {
 	fn new(tx: &'a Transaction, rng: Range<Key>) -> Result<ParallelIterator, Error> {
-		// Extract the key/values meeting the range in the transaction
-		// and the initial key/value
-		let (tx_kvs, tx_next_kv) = if let Some(set) = &tx.set {
-			// Treemap.range panics if start is greater than end
-			if rng.start.le(&rng.end) {
-				let mut range = set.range(rng.clone());
-				let next = range.next().map(|(key, val)| (key.clone(), val.clone()));
-				(Some(range), next)
-			} else {
-				(None, None)
-			}
-		} else {
-			(None, None)
-		};
-
-		// Extract key/values meeting the range in the store
-		let mut db_kvs = tx.db.range(rng);
-		// Extract the initial key/value from the store
-		let db_next_kv = Self::next_db_kv(&mut db_kvs)?;
-
 		Ok(Self {
-			tx,
-			db_kvs,
-			tx_kvs,
-			db_next_kv,
-			tx_next_kv,
+			db_iter: SledIterator::new(tx, rng.clone())?,
+			tx_iter: TxIterator::new(tx, rng),
 		})
 	}
 
-	fn next_db_kv(iter: &mut Iter) -> Result<Option<(Key, Val)>, Error> {
-		if let Some(kv) = iter.next() {
-			let (key_vec, value_vec) = kv?;
-			Ok(Some((key_vec.to_vec(), value_vec.to_vec())))
-		} else {
-			Ok(None)
+	fn try_next(&mut self) -> Result<Option<(Key, Val)>, Error> {
+		if let Some(db_next_key) = &self.db_iter.next_key() {
+			if let Some(tx_next_key) = &self.tx_iter.next_key() {
+				if tx_next_key.le(db_next_key) {
+					return Ok(self.tx_iter.next());
+				}
+				return self.db_iter.try_next();
+			}
+			return self.db_iter.try_next();
+		}
+		Ok(self.tx_iter.next())
+	}
+}
+
+struct TxIterator<'a> {
+	iter: Option<BTreeMapRange<'a, Key, Val>>,
+	next: Option<(Key, Val)>,
+}
+
+impl<'a> TxIterator<'a> {
+	fn new(tx: &'a Transaction, rng: Range<Key>) -> Self {
+		// Extract the key/values meeting the range in the transaction
+		// and the initial key/value
+		if let Some(set) = &tx.set {
+			// Treemap.range panics if start is greater than end
+			if rng.start.le(&rng.end) {
+				let mut range = set.range(rng);
+				let next = range.next().map(|(key, val)| (key.clone(), val.clone()));
+				return Self {
+					iter: Some(range),
+					next,
+				};
+			}
+		}
+		Self {
+			iter: None,
+			next: None,
 		}
 	}
 
-	fn next_from_tx(&mut self) -> Option<(Key, Val)> {
-		if let Some(tx_iter) = &mut self.tx_kvs {
-			let next_kv = self.tx_next_kv.take();
-			if next_kv.is_none() {
+	fn next_key(&self) -> &Option<(Key, Val)> {
+		&self.next
+	}
+
+	fn next(&mut self) -> Option<(Key, Val)> {
+		if let Some(iter) = &mut self.iter {
+			let kv = self.next.take();
+			if kv.is_none() {
 				return None;
 			}
-			self.tx_next_kv = tx_iter.next().map(|(key, val)| (key.clone(), val.clone()));
-			next_kv
-		} else {
-			None
+			self.next = iter.next().map(|(key, val)| (key.clone(), val.clone()));
+			return kv;
 		}
+		None
+	}
+}
+struct SledIterator<'a> {
+	tx: &'a Transaction,
+	iter: Iter,
+	next: Option<(Key, Val)>,
+}
+
+impl<'a> SledIterator<'a> {
+	fn new(tx: &'a Transaction, rng: Range<Key>) -> Result<Self, Error> {
+		// Extract key/values meeting the range in the store
+		let mut iter = Self {
+			tx,
+			iter: tx.db.range(rng),
+			next: None,
+		};
+		iter._advance_db()?;
+		Ok(iter)
 	}
 
-	fn next_from_db(&mut self) -> Result<Option<(Key, Val)>, Error> {
-		let next = self.db_next_kv.take();
-		if next.is_none() {
-			return Ok(None);
-		}
-		// Now we advance the iterator to prepare the next iteration.
+	fn next_key(&self) -> &Option<(Key, Val)> {
+		&self.next
+	}
+
+	/// advance the iterator to prepare the next iteration
+	fn _advance_db(&mut self) -> Result<(), Error> {
 		// We use a loop here, because we want to ignore a key
 		// if it exists in the transaction
-		while let Some(kv) = self.db_kvs.next() {
+		while let Some(kv) = self.iter.next() {
 			let (key_vec, value_vec) = kv?;
 			let key = key_vec.to_vec();
 			// Check if the key is not updated in the transaction...
 			if !self.tx._key_updated_by_tx(&key) {
 				// ... if not we can use it for the next candidate value
-				self.db_next_kv = Some((key, value_vec.to_vec()));
+				self.next = Some((key, value_vec.to_vec()));
 				break;
 			}
 		}
-		Ok(next)
+		Ok(())
 	}
 
 	fn try_next(&mut self) -> Result<Option<(Key, Val)>, Error> {
-		if let Some((db_next_key, _)) = &self.db_next_kv {
-			if let Some((tx_next_key, _)) = &self.tx_next_kv {
-				if tx_next_key.le(db_next_key) {
-					return Ok(self.next_from_tx());
-				}
-				return self.next_from_db();
-			}
-			return self.next_from_db();
+		let kv = self.next.take();
+		if kv.is_none() {
+			return Ok(None);
 		}
-		Ok(self.next_from_tx())
+		self._advance_db()?;
+		Ok(kv)
 	}
 }
 
@@ -512,7 +534,7 @@ mod tests {
 			tx.commit().await.unwrap();
 		}
 		{
-			// New transaction with the commited data
+			// New transaction with the committed data
 			let mut tx = get_transaction(&store_path).await;
 			// The key exists
 			assert_eq!(tx.exi("flip").await.unwrap(), true);
@@ -655,6 +677,30 @@ mod tests {
 		{
 			// then, given two key/values added in the transaction
 			let mut tx = get_transaction(&store_path).await;
+			tx.put("k1", "v1").await.unwrap();
+			tx.put("k4", "v4").await.unwrap();
+
+			// Then, I can successfully use the range method on mixed key/values
+			scan_suite_checks(&mut tx).await;
+		}
+	}
+
+	#[tokio::test]
+	async fn test_transaction_sled_scan_mixed_with_deletion() {
+		let store_path = new_store_path();
+		{
+			// Given three key/values added in the transaction and stored
+			let mut tx = get_transaction(&store_path).await;
+			tx.put("k3", "v3").await.unwrap();
+			tx.put("k2", "v2").await.unwrap();
+			tx.put("k5", "v5").await.unwrap();
+			tx.put("k6", "v6").await.unwrap();
+			tx.commit().await.unwrap();
+		}
+		{
+			// then, given two key/values added in the transaction
+			let mut tx = get_transaction(&store_path).await;
+			tx.del("k6").await.unwrap();
 			tx.put("k1", "v1").await.unwrap();
 			tx.put("k4", "v4").await.unwrap();
 
