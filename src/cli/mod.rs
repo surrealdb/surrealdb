@@ -238,6 +238,14 @@ pub fn init() {
 					.forbid_empty_values(true)
 					.help("The logging level for the database server")
 					.value_parser(["warn", "info", "debug", "trace", "full"]),
+			)
+			.arg(
+				Arg::new("no-banner")
+					.env("NO_BANNER")
+					.long("no-banner")
+					.required(false)
+					.takes_value(false)
+					.help("Whether a banner should be outputted"),
 			),
 	);
 
