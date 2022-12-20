@@ -70,7 +70,7 @@ pub fn slice((val, beg, lim): (String, Option<isize>, Option<isize>)) -> Result<
 }
 
 pub fn slug((string,): (String,)) -> Result<Value, Error> {
-	Ok(string::slug(&string).into())
+	Ok(string::slug(string).into())
 }
 
 pub fn split((val, chr): (String, String)) -> Result<Value, Error> {

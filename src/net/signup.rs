@@ -27,6 +27,7 @@ impl Success {
 	}
 }
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	// Set base path
 	let base = warp::path("signup").and(warp::path::end());

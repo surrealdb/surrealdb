@@ -27,6 +27,7 @@ use tokio::sync::RwLock;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	warp::path("rpc")
 		.and(warp::path::end())

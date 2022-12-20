@@ -21,6 +21,7 @@ struct Query {
 	pub start: Option<String>,
 }
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	// ------------------------------
 	// Routes for OPTIONS

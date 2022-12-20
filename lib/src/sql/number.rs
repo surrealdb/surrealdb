@@ -100,7 +100,7 @@ impl From<f32> for Number {
 
 impl From<f64> for Number {
 	fn from(f: f64) -> Self {
-		Self::Float(f as f64)
+		Self::Float(f)
 	}
 }
 
