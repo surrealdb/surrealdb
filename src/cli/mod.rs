@@ -245,7 +245,7 @@ pub fn init() {
 					.long("no-banner")
 					.required(false)
 					.takes_value(false)
-					.help("Whether a banner should be outputted"),
+					.help("Whether to hide the startup banner"),
 			),
 	);
 
