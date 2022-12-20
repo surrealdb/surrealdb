@@ -20,8 +20,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	};
 
 	// Check if a banner should be outputted
-	let no_banner = matches.is_present("no-banner");
-	if !no_banner {
+	if !matches.is_present("no-banner") {
 		// Output SurrealDB logo
 		println!("{LOGO}");
 	}
