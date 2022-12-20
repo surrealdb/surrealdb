@@ -134,7 +134,7 @@ impl Datastore {
 				info!(target: LOG, "Connected to kvs store at {}", path);
 				v
 			}
-			// Parse and initiate a TiKV database
+			// Parse and initiate a Sled database
 			#[cfg(feature = "kv-sled")]
 			s if s.starts_with("sled:") => {
 				info!(target: LOG, "Starting kvs store at {}", path);

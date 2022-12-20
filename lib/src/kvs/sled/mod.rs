@@ -478,9 +478,11 @@ impl<'a> SledIterator<'a> {
 mod tests {
 	use crate::kvs::tx::Transaction;
 	use crate::kvs::{Key, Val};
+	use std::collections::{BTreeMap, HashSet};
 	use std::fs;
 	use std::path::PathBuf;
 	use std::sync::atomic::{AtomicU16, Ordering};
+	use std::time::SystemTime;
 
 	/// This value is automatically incremented for each test
 	/// so that each test has a dedicated id
@@ -778,5 +780,99 @@ mod tests {
 			assert_eq!(tx.get("k1").await.unwrap(), Some("v1".as_bytes().to_vec()));
 			assert_eq!(tx.get("k2").await.unwrap(), Some("v2".as_bytes().to_vec()));
 		}
+	}
+
+	/// This test justifies the rationale of enclosing the `BTreeMap` in an `Option`.
+	/// Mostly, this test evaluates the performance of `Option::is_none` versus `BTreeMap::is_empty`.
+	/// The test passes if `is_none` is at least 2 times faster than `is_empty`.
+	///
+	/// We also check the cost of encapsulating the new map in an Option vs just using the new map.
+	/// The test passes if the difference is less than 10%.
+	///
+	/// This test checks only the time factor benefit. But there is also a space factor benefit
+	/// as the `BTreeMap` structure contains several properties.
+	///
+	/// Note that the `BTreeMap` is also using a similar approach by encapsulating the root of the
+	/// map in an Option: `root: Option<Root<K, V>>`.
+	///
+	#[tokio::test]
+	async fn test_transaction_btreemap_vs_option_rationale() {
+		// Evaluating BTreeMap creation + BTreeMap::is_empty()
+		let time = SystemTime::now();
+		for _ in 0..10000 {
+			let map = BTreeMap::<Key, Val>::new();
+			assert!(map.is_empty());
+		}
+		let map_time = time.elapsed().unwrap();
+
+		// Evaluating Option creation + Option::is_none()
+		let time = SystemTime::now();
+		for _ in 0..10000 {
+			let map: Option<BTreeMap<Key, Val>> = None;
+			assert!(map.is_none());
+		}
+		let option_time = time.elapsed().unwrap();
+
+		// Evaluating Map encapsulated in an Option + Option::is_none()
+		let time = SystemTime::now();
+		for _ in 0..10000 {
+			let map = Some(BTreeMap::<Key, Val>::new());
+			assert!(map.is_some());
+		}
+		let option_map_time = time.elapsed().unwrap();
+
+		let map_vs_option = map_time.as_micros() as f64 / option_time.as_micros() as f64;
+		let map_vs_option_map = map_time.as_micros() as f64 / option_map_time.as_micros() as f64;
+
+		println!("map: {}", map_time.as_micros());
+		println!("option: {}", option_time.as_micros());
+		println!("option_map: {}", option_map_time.as_micros());
+		println!("map / option : {:.2}", map_vs_option);
+		println!("map / option_map : {:.2}", map_vs_option_map);
+
+		assert!(map_vs_option > 2.0);
+		assert!(map_vs_option_map < 1.15);
+		assert!(map_vs_option_map > 0.85);
+	}
+
+	/// Derivation of `test_transaction_btreemap_vs_option_rationale` for HashSet.
+	#[tokio::test]
+	async fn test_transaction_hashset_vs_option_rationale() {
+		// Evaluating BTreeMap creation + HashSet::is_empty()
+		let time = SystemTime::now();
+		for _ in 0..10000 {
+			let set = HashSet::<Key>::new();
+			assert!(set.is_empty());
+		}
+		let set_time = time.elapsed().unwrap();
+
+		// Evaluating Option creation + Option::is_none()
+		let time = SystemTime::now();
+		for _ in 0..10000 {
+			let set: Option<HashSet<Key>> = None;
+			assert!(set.is_none());
+		}
+		let option_time = time.elapsed().unwrap();
+
+		// Evaluating Map encapsulated in an Option + Option::is_none()
+		let time = SystemTime::now();
+		for _ in 0..10000 {
+			let set = Some(HashSet::<Key>::new());
+			assert!(set.is_some());
+		}
+		let option_set_time = time.elapsed().unwrap();
+
+		let set_vs_option = set_time.as_micros() as f64 / option_time.as_micros() as f64;
+		let set_vs_option_map = set_time.as_micros() as f64 / option_set_time.as_micros() as f64;
+
+		println!("set: {}", set_time.as_micros());
+		println!("option: {}", option_time.as_micros());
+		println!("option_set: {}", option_set_time.as_micros());
+		println!("set / option : {:.2}", set_vs_option);
+		println!("set / option_map : {:.2}", set_vs_option_map);
+
+		assert!(set_vs_option > 2.0);
+		assert!(set_vs_option_map < 1.15);
+		assert!(set_vs_option_map > 0.85);
 	}
 }
