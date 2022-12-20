@@ -1,7 +1,9 @@
+use crate::cnf::SERVER_AGENT;
 use crate::err::Error;
 use reqwest::blocking::Body;
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
+use reqwest::header::USER_AGENT;
 use std::fs::OpenOptions;
 use std::io::copy;
 
@@ -46,6 +48,7 @@ fn backup_http_to_file(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 	let mut from = Client::new()
 		.get(from)
 		.basic_auth(user, Some(pass))
+		.header(USER_AGENT, SERVER_AGENT)
 		.header(CONTENT_TYPE, TYPE)
 		.send()?
 		.error_for_status()?;
@@ -70,6 +73,7 @@ fn backup_file_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 	Client::new()
 		.post(into)
 		.basic_auth(user, Some(pass))
+		.header(USER_AGENT, SERVER_AGENT)
 		.header(CONTENT_TYPE, TYPE)
 		.body(from)
 		.send()?
@@ -91,6 +95,7 @@ fn backup_http_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 	let from = Client::new()
 		.get(from)
 		.basic_auth(user, Some(pass))
+		.header(USER_AGENT, SERVER_AGENT)
 		.header(CONTENT_TYPE, TYPE)
 		.send()?
 		.error_for_status()?;
@@ -98,6 +103,7 @@ fn backup_http_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 	Client::new()
 		.post(into)
 		.basic_auth(user, Some(pass))
+		.header(USER_AGENT, SERVER_AGENT)
 		.header(CONTENT_TYPE, TYPE)
 		.body(Body::new(from))
 		.send()?

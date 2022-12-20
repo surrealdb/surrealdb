@@ -1,7 +1,9 @@
+use crate::cnf::SERVER_AGENT;
 use crate::err::Error;
 use reqwest::blocking::Client;
 use reqwest::blocking::Response;
 use reqwest::header::ACCEPT;
+use reqwest::header::USER_AGENT;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use serde_json::Value;
@@ -15,11 +17,26 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let conn = matches.value_of("conn").unwrap();
 	let ns = matches.value_of("ns");
 	let db = matches.value_of("db");
-
 	// If we should pretty-print responses
 	let pretty = matches.is_present("pretty");
 	// Set the correct import URL
 	let conn = format!("{conn}/sql");
+	// Make a new remote request
+	let res = Client::new()
+		.post(conn)
+		.header(USER_AGENT, SERVER_AGENT)
+		.header(ACCEPT, "application/json")
+		.basic_auth(user, Some(pass));
+	// Add NS header if specified
+	let res = match ns {
+		Some(ns) => res.header("NS", ns),
+		None => res,
+	};
+	// Add DB header if specified
+	let res = match db {
+		Some(db) => res.header("DB", db),
+		None => res,
+	};
 	// Create a new terminal REPL
 	let mut rl = Editor::<()>::new().unwrap();
 	// Load the command-line history
@@ -38,22 +55,9 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				}
 				// Add the entry to the history
 				rl.add_history_entry(line.as_str());
-				// Make a new remote request
-				let res = Client::new()
-					.post(&conn)
-					.header(ACCEPT, "application/json")
-					.basic_auth(user, Some(pass));
-				// Add NS header if specified
-				let res = match ns {
-					Some(ns) => res.header("NS", ns),
-					None => res,
-				};
-				// Add DB header if specified
-				let res = match db {
-					Some(db) => res.header("DB", db),
-					None => res,
-				};
-				// Complete request
+				// Clone the request infallibly
+				let res = res.try_clone().unwrap();
+				// Complete the request
 				let res = res.body(line).send();
 				// Get the request response
 				match process(pretty, res) {
