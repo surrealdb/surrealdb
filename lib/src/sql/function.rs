@@ -113,6 +113,8 @@ impl Function {
 	) -> Result<Value, Error> {
 		// Prevent long function chains
 		let opt = &opt.dive(1)?;
+		// Ensure futures are run
+		let opt = &opt.futures(true);
 		// Process the function type
 		match self {
 			Self::Cast(s, x) => {
