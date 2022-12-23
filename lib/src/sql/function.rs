@@ -223,6 +223,7 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 		function_is,
 		function_math,
 		function_meta,
+		function_not,
 		function_parse,
 		function_rand,
 		function_session,
@@ -360,6 +361,10 @@ fn function_meta(i: &str) -> IResult<&str, &str> {
 	alt((tag("meta::id"), tag("meta::table"), tag("meta::tb")))(i)
 }
 
+fn function_not(i: &str) -> IResult<&str, &str> {
+	tag("not")(i)
+}
+
 fn function_parse(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("parse::email::host"),
@@ -475,6 +480,16 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("count()", format!("{}", out));
 		assert_eq!(out, Function::Normal(String::from("count"), vec![]));
+	}
+
+	#[test]
+	fn function_single_not() {
+		let sql = "not(1.2345)";
+		let res = function(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("not(1.2345)", format!("{}", out));
+		assert_eq!(out, Function::Normal("not".to_owned(), vec![1.2345.into()]));
 	}
 
 	#[test]
