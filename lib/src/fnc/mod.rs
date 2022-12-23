@@ -13,6 +13,7 @@ pub mod http;
 pub mod is;
 pub mod math;
 pub mod meta;
+pub mod not;
 pub mod operate;
 pub mod parse;
 pub mod rand;

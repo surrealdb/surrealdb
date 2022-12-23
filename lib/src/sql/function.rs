@@ -3,14 +3,14 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
-use crate::sql::comment::mightbespace;
+use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::script::{script as func, Script};
 use crate::sql::value::{single, value, Value};
 use nom::branch::alt;
-use nom::bytes::complete::tag;
+use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::char;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,7 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Function {
 	Cast(String, Value),
+	Not(Value),
 	Normal(String, Vec<Value>),
 	Script(Script, Vec<Value>),
 }
@@ -121,6 +122,10 @@ impl Function {
 				let v = x.compute(ctx, opt, txn, doc).await?;
 				fnc::cast::run(ctx, s, v)
 			}
+			Self::Not(x) => {
+				let v = x.compute(ctx, opt, txn, doc).await?;
+				fnc::not::run(ctx, v)
+			}
 			Self::Normal(s, x) => {
 				let mut a: Vec<Value> = Vec::with_capacity(x.len());
 				for v in x {
@@ -153,6 +158,7 @@ impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Cast(ref s, ref e) => write!(f, "<{}> {}", s, e),
+			Self::Not(ref e) => write!(f, "NOT {}", e),
 			Self::Script(ref s, ref e) => {
 				write!(f, "function({}) {{{}}}", Fmt::comma_separated(e), s)
 			}
@@ -162,7 +168,7 @@ impl fmt::Display for Function {
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((normal, script, cast))(i)
+	alt((normal, script, cast, not))(i)
 }
 
 fn normal(i: &str) -> IResult<&str, Function> {
@@ -210,6 +216,13 @@ fn function_casts(i: &str) -> IResult<&str, &str> {
 		tag("datetime"),
 		tag("duration"),
 	))(i)
+}
+
+fn not(i: &str) -> IResult<&str, Function> {
+	let (i, _) = tag_no_case("NOT")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = single(i)?;
+	Ok((i, Function::Not(v)))
 }
 
 fn function_names(i: &str) -> IResult<&str, &str> {
@@ -515,6 +528,20 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("<string> 1.2345", format!("{}", out));
 		assert_eq!(out, Function::Cast(String::from("string"), 1.2345.into()));
+	}
+
+	#[test]
+	fn function_not() {
+		let sql = "NOT1.2345";
+		let res = function(sql);
+		assert!(res.is_err());
+
+		let sql = "NOT 1.2345";
+		let res = function(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("NOT 1.2345", format!("{}", out));
+		assert_eq!(out, Function::Not(1.2345.into()));
 	}
 
 	#[test]
