@@ -1,7 +1,9 @@
 use crate::cli::LOG;
+use crate::cnf::SERVER_AGENT;
 use crate::err::Error;
 use reqwest::blocking::Client;
 use reqwest::header::ACCEPT;
+use reqwest::header::USER_AGENT;
 use std::fs::OpenOptions;
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
@@ -18,19 +20,25 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let ns = matches.value_of("ns").unwrap();
 	let db = matches.value_of("db").unwrap();
 	// Set the correct export URL
-	let conn = format!("{}/export", conn);
+	let conn = format!("{conn}/export");
 	// Export the data from the database
-	Client::new()
-		.get(&conn)
+	let mut res = Client::new()
+		.get(conn)
+		.header(USER_AGENT, SERVER_AGENT)
 		.header(ACCEPT, "application/octet-stream")
 		.basic_auth(user, Some(pass))
 		.header("NS", ns)
 		.header("DB", db)
-		.send()?
-		.error_for_status()?
-		.copy_to(&mut file)?;
-	// Output a success message
-	info!(target: LOG, "The SQL file was exported successfully");
+		.send()?;
+	// Check import result and report error
+	if res.status().is_success() {
+		res.copy_to(&mut file)?;
+		info!(target: LOG, "The SQL file was exported successfully");
+	} else if res.status().is_client_error() || res.status().is_server_error() {
+		error!(target: LOG, "Request failed with status {}. Body: {}", res.status(), res.text()?);
+	} else {
+		error!(target: LOG, "Unexpected response status {}", res.status());
+	}
 	// Everything OK
 	Ok(())
 }

@@ -8,7 +8,7 @@ pub trait Take {
 }
 
 impl Take for Array {
-	// Convert the array to one argument
+	/// Convert the array to one argument
 	fn needs_one(self) -> Result<Value, ()> {
 		if self.len() < 1 {
 			return Err(());
@@ -19,7 +19,7 @@ impl Take for Array {
 			None => Ok(Value::None),
 		}
 	}
-	// Convert the array to two arguments
+	/// Convert the array to two arguments
 	fn needs_two(self) -> Result<(Value, Value), ()> {
 		if self.len() < 2 {
 			return Err(());
@@ -31,7 +31,7 @@ impl Take for Array {
 			(_, _) => Ok((Value::None, Value::None)),
 		}
 	}
-	// Convert the array to two arguments
+	/// Convert the array to two arguments
 	fn needs_one_or_two(self) -> Result<(Value, Value), ()> {
 		if self.len() < 1 {
 			return Err(());

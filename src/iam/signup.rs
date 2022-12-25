@@ -82,7 +82,7 @@ pub async fn sc(
 									..Claims::default()
 								};
 								// Create the authentication token
-								let enc = encode(&*HEADER, &val, &key);
+								let enc = encode(&HEADER, &val, &key);
 								// Set the authentication on the session
 								session.tk = Some(val.into());
 								session.ns = Some(ns.to_owned());

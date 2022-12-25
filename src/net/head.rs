@@ -9,7 +9,7 @@ const SERVER: &str = "Server";
 const VERSION: &str = "Version";
 
 pub fn version() -> warp::filters::reply::WithHeader {
-	let val = format!("{}-{}", PKG_NAME, *PKG_VERSION);
+	let val = format!("{PKG_NAME}-{}", *PKG_VERSION);
 	warp::reply::with::header(VERSION, val)
 }
 

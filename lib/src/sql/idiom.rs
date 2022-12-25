@@ -63,22 +63,22 @@ impl From<Vec<Part>> for Idiom {
 }
 
 impl Idiom {
-	// Appends a part to the end of this Idiom
+	/// Appends a part to the end of this Idiom
 	pub(crate) fn push(mut self, n: Part) -> Idiom {
 		self.0.push(n);
 		self
 	}
-	// Convert this Idiom to a unique hash
+	/// Convert this Idiom to a unique hash
 	pub(crate) fn to_hash(&self) -> String {
 		let mut hasher = Md5::new();
 		hasher.update(self.to_string().as_str());
 		format!("{:x}", hasher.finalize())
 	}
-	// Convert this Idiom to a JSON Path string
+	/// Convert this Idiom to a JSON Path string
 	pub(crate) fn to_path(&self) -> String {
 		format!("/{}", self).replace(']', "").replace(&['.', '['][..], "/")
 	}
-	// Simplifies this Idiom for use in object keys
+	/// Simplifies this Idiom for use in object keys
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
 			.iter()
@@ -87,23 +87,23 @@ impl Idiom {
 			.collect::<Vec<_>>()
 			.into()
 	}
-	// Check if this expression is an 'id' field
+	/// Check if this expression is an 'id' field
 	pub(crate) fn is_id(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&ID[0])
 	}
-	// Check if this expression is an 'in' field
+	/// Check if this expression is an 'in' field
 	pub(crate) fn is_in(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&IN[0])
 	}
-	// Check if this expression is an 'out' field
+	/// Check if this expression is an 'out' field
 	pub(crate) fn is_out(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&OUT[0])
 	}
-	// Check if this is an expression with multiple yields
+	/// Check if this is an expression with multiple yields
 	pub(crate) fn is_multi_yield(&self) -> bool {
 		self.iter().any(Self::split_multi_yield)
 	}
-	// Check if the path part is a yield in a multi-yield expression
+	/// Check if the path part is a yield in a multi-yield expression
 	pub(crate) fn split_multi_yield(v: &Part) -> bool {
 		matches!(v, Part::Graph(g) if g.alias.is_some())
 	}
@@ -157,7 +157,7 @@ impl fmt::Display for Idiom {
 	}
 }
 
-// Used in a DEFINE FIELD and DEFINE INDEX clauses
+/// Used in a DEFINE FIELD and DEFINE INDEX clauses
 pub fn local(i: &str) -> IResult<&str, Idiom> {
 	let (i, p) = first(i)?;
 	let (i, mut v) = many0(alt((all, index, field)))(i)?;
@@ -165,7 +165,7 @@ pub fn local(i: &str) -> IResult<&str, Idiom> {
 	Ok((i, Idiom::from(v)))
 }
 
-// Used in a SPLIT, ORDER, and GROUP clauses
+/// Used in a SPLIT, ORDER, and GROUP clauses
 pub fn basic(i: &str) -> IResult<&str, Idiom> {
 	let (i, p) = first(i)?;
 	let (i, mut v) = many0(alt((all, last, index, field)))(i)?;
@@ -173,12 +173,18 @@ pub fn basic(i: &str) -> IResult<&str, Idiom> {
 	Ok((i, Idiom::from(v)))
 }
 
-// Used in a $param definition
+/// Used in a $param definition
 pub fn param(i: &str) -> IResult<&str, Idiom> {
 	let (i, p) = first(i)?;
 	let (i, mut v) = many0(part)(i)?;
 	v.insert(0, p);
 	Ok((i, Idiom::from(v)))
+}
+
+/// Used in a RELATE statement
+pub fn plain(i: &str) -> IResult<&str, Idiom> {
+	let (i, p) = first(i)?;
+	Ok((i, Idiom::from(vec![p])))
 }
 
 pub fn idiom(i: &str) -> IResult<&str, Idiom> {

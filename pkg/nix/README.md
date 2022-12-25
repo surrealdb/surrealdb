@@ -9,11 +9,11 @@ SurrealDB has support for the Nix package manager. It makes it easier to build t
 ## Table of Contents
 
 - [Running Nix from Docker](#running-nix-from-docker)
-  * [Building a Docker image (recommended)](#building-a-docker-image--recommended-)
+  * [Building a Docker image (recommended)](#building-a-docker-image-recommended)
   * [Building a static binary](#building-a-static-binary)
 - [Installing Nix](#installing-nix)
-  * [Activating support for Nix Flakes (recommended)](#activating-support-for-nix-flakes--recommended-)
-  * [Setting up a binary cache (optional)](#setting-up-a-binary-cache--optional-)
+  * [Activating support for Nix Flakes (recommended)](#activating-support-for-nix-flakes-recommended)
+  * [Setting up a binary cache (optional)](#setting-up-a-binary-cache-optional)
 - [Installing SurrealDB](#installing-surrealdb)
 - [Setting up a development environment](#setting-up-a-development-environment)
   * [Setting dependencies up automatically](#setting-dependencies-up-automatically)

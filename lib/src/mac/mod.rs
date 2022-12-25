@@ -6,9 +6,9 @@ macro_rules! bytes {
 
 macro_rules! map {
     ($($k:expr => $v:expr),* $(,)?) => {{
-        let mut m = ::std::collections::BTreeMap::new();
-        $(m.insert($k, $v);)+
-        m
+        ::std::collections::BTreeMap::from([
+            $(($k, $v),)+
+        ])
     }};
 }
 

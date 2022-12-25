@@ -26,7 +26,7 @@ impl<'js> IntoJs<'js> for &Value {
 			Value::False => Ok(js::Value::new_bool(ctx, false)),
 			Value::Strand(v) => js::String::from_str(ctx, v)?.into_js(ctx),
 			Value::Number(Number::Int(v)) => Ok(js::Value::new_int(ctx, *v as i32)),
-			Value::Number(Number::Float(v)) => Ok(js::Value::new_float(ctx, *v as f64)),
+			Value::Number(Number::Float(v)) => Ok(js::Value::new_float(ctx, *v)),
 			Value::Number(Number::Decimal(v)) => match v.is_integer() {
 				true => Ok(js::Value::new_int(ctx, v.to_i32().unwrap_or_default())),
 				false => Ok(js::Value::new_float(ctx, v.to_f64().unwrap_or_default())),

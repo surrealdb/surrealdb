@@ -39,7 +39,9 @@ pub async fn run(
 	// Enable async code in the runtime
 	run.spawn_executor(&exe).detach();
 	// Create the main function structure
-	let src = format!("export default async function() {{ {} }}", src);
+	let src = format!(
+		"export default async function() {{ try {{ {src} }} catch(e) {{ return (e instanceof Error) ? e : new Error(e); }} }}"
+	);
 	// Attempt to execute the script
 	let res: Result<Promise<Value>, js::Error> = ctx.with(|ctx| {
 		// Get the context global object

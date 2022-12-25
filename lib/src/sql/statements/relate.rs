@@ -12,7 +12,7 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::data::{data, Data};
 use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
-use crate::sql::param::basic as param;
+use crate::sql::param::plain as param;
 use crate::sql::subquery::subquery;
 use crate::sql::table::{table, Table};
 use crate::sql::thing::thing;

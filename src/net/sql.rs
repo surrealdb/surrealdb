@@ -1,6 +1,7 @@
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
+use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::params::Params;
 use crate::net::session;
@@ -12,6 +13,7 @@ use warp::Filter;
 
 const MAX: u64 = 1024 * 1024; // 1 MiB
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	// Set base path
 	let base = warp::path("sql").and(warp::path::end());
@@ -46,7 +48,7 @@ async fn handler(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the received sql query
-	let sql = std::str::from_utf8(&sql).unwrap();
+	let sql = bytes_to_utf8(&sql)?;
 	// Execute the received sql query
 	match db.execute(sql, &session, params.parse().into(), opt.strict).await {
 		// Convert the response to JSON

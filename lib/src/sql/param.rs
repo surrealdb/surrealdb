@@ -86,9 +86,9 @@ pub fn param(i: &str) -> IResult<&str, Param> {
 	Ok((i, Param::from(v)))
 }
 
-pub fn basic(i: &str) -> IResult<&str, Param> {
+pub fn plain(i: &str) -> IResult<&str, Param> {
 	let (i, _) = char('$')(i)?;
-	let (i, v) = idiom::basic(i)?;
+	let (i, v) = idiom::plain(i)?;
 	Ok((i, Param::from(v)))
 }
 

@@ -11,19 +11,22 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Operator {
+	//
 	Or,  // ||
 	And, // &&
+	Tco, // ?: Ternary conditional operator
+	Nco, // ?? Null coalescing operator
 	//
 	Add, // +
 	Sub, // -
 	Mul, // *
 	Div, // /
+	Pow, // **
 	Inc, // +=
 	Dec, // -=
 	//
-	Exact, // ==
-	//
 	Equal,    // =
+	Exact,    // ==
 	NotEqual, // !=
 	AllEqual, // *=
 	AnyEqual, // ?=
@@ -48,8 +51,9 @@ pub enum Operator {
 	AllInside,   // ⊆
 	AnyInside,   // ⊂
 	NoneInside,  // ⊄
-	Outside,     // ∈
-	Intersects,  // ∩
+	//
+	Outside,
+	Intersects,
 }
 
 impl Default for Operator {
@@ -64,11 +68,13 @@ impl Operator {
 		match self {
 			Operator::Or => 1,
 			Operator::And => 2,
-			Operator::Sub => 4,
-			Operator::Add => 5,
-			Operator::Mul => 6,
-			Operator::Div => 7,
-			_ => 3,
+			Operator::Tco => 3,
+			Operator::Nco => 4,
+			Operator::Sub => 6,
+			Operator::Add => 7,
+			Operator::Mul => 8,
+			Operator::Div => 9,
+			_ => 5,
 		}
 	}
 }
@@ -78,14 +84,17 @@ impl fmt::Display for Operator {
 		f.write_str(match self {
 			Self::Or => "OR",
 			Self::And => "AND",
+			Self::Tco => "?:",
+			Self::Nco => "??",
 			Self::Add => "+",
 			Self::Sub => "-",
 			Self::Mul => "*",
 			Self::Div => "/",
+			Self::Pow => "**",
 			Self::Inc => "+=",
 			Self::Dec => "-=",
-			Self::Exact => "==",
 			Self::Equal => "=",
+			Self::Exact => "==",
 			Self::NotEqual => "!=",
 			Self::AllEqual => "*=",
 			Self::AnyEqual => "?=",
@@ -129,6 +138,12 @@ pub fn symbols(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		alt((
+			map(tag("||"), |_| Operator::Or),
+			map(tag("&&"), |_| Operator::And),
+			map(tag("?:"), |_| Operator::Tco),
+			map(tag("??"), |_| Operator::Nco),
+		)),
+		alt((
 			map(tag("=="), |_| Operator::Exact),
 			map(tag("!="), |_| Operator::NotEqual),
 			map(tag("*="), |_| Operator::AllEqual),
@@ -155,6 +170,7 @@ pub fn symbols(i: &str) -> IResult<&str, Operator> {
 			map(char('∙'), |_| Operator::Mul),
 			map(char('/'), |_| Operator::Div),
 			map(char('÷'), |_| Operator::Div),
+			map(tag("**"), |_| Operator::Pow),
 		)),
 		alt((
 			map(char('∋'), |_| Operator::Contain),
@@ -177,12 +193,8 @@ pub fn phrases(i: &str) -> IResult<&str, Operator> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = alt((
 		alt((
-			map(tag_no_case("&&"), |_| Operator::And),
-			map(tag_no_case("AND"), |_| Operator::And),
-			map(tag_no_case("||"), |_| Operator::Or),
 			map(tag_no_case("OR"), |_| Operator::Or),
-		)),
-		alt((
+			map(tag_no_case("AND"), |_| Operator::And),
 			map(tag_no_case("IS NOT"), |_| Operator::NotEqual),
 			map(tag_no_case("IS"), |_| Operator::Equal),
 		)),
@@ -199,6 +211,8 @@ pub fn phrases(i: &str) -> IResult<&str, Operator> {
 			map(tag_no_case("INSIDE"), |_| Operator::Inside),
 			map(tag_no_case("OUTSIDE"), |_| Operator::Outside),
 			map(tag_no_case("INTERSECTS"), |_| Operator::Intersects),
+			map(tag_no_case("NOT IN"), |_| Operator::NotInside),
+			map(tag_no_case("IN"), |_| Operator::Inside),
 		)),
 	))(i)?;
 	let (i, _) = shouldbespace(i)?;

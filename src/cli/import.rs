@@ -1,7 +1,9 @@
 use crate::cli::LOG;
+use crate::cnf::SERVER_AGENT;
 use crate::err::Error;
 use reqwest::blocking::Client;
 use reqwest::header::ACCEPT;
+use reqwest::header::USER_AGENT;
 use std::fs::OpenOptions;
 use std::io::prelude::Read;
 
@@ -22,19 +24,25 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let ns = matches.value_of("ns").unwrap();
 	let db = matches.value_of("db").unwrap();
 	// Set the correct import URL
-	let conn = format!("{}/import", conn);
+	let conn = format!("{conn}/import");
 	// Import the data into the database
-	Client::new()
-		.post(&conn)
+	let res = Client::new()
+		.post(conn)
+		.header(USER_AGENT, SERVER_AGENT)
 		.header(ACCEPT, "application/octet-stream")
 		.basic_auth(user, Some(pass))
 		.header("NS", ns)
 		.header("DB", db)
 		.body(body)
-		.send()?
-		.error_for_status()?;
-	// Output a success message
-	info!(target: LOG, "The SQL file was imported successfully");
+		.send()?;
+	// Check import result and report error
+	if res.status().is_success() {
+		info!(target: LOG, "The SQL file was imported successfully");
+	} else if res.status().is_client_error() || res.status().is_server_error() {
+		error!(target: LOG, "Request failed with status {}. Body: {}", res.status(), res.text()?);
+	} else {
+		error!(target: LOG, "Unexpected response status {}", res.status());
+	}
 	// Everything OK
 	Ok(())
 }

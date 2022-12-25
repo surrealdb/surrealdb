@@ -27,6 +27,7 @@ use tokio::sync::RwLock;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	warp::path("rpc")
 		.and(warp::path::end())
@@ -47,7 +48,7 @@ pub struct Rpc {
 }
 
 impl Rpc {
-	// Instantiate a new RPC
+	/// Instantiate a new RPC
 	pub fn new(mut session: Session) -> Arc<RwLock<Rpc>> {
 		// Create a new RPC variables store
 		let vars = BTreeMap::new();
@@ -63,7 +64,7 @@ impl Rpc {
 		}))
 	}
 
-	// Serve the RPC endpoint
+	/// Serve the RPC endpoint
 	pub async fn serve(rpc: Arc<RwLock<Rpc>>, ws: WebSocket) {
 		// Create a channel for sending messages
 		let (chn, mut rcv) = channel::new(MAX_CONCURRENT_CALLS);
@@ -138,7 +139,7 @@ impl Rpc {
 		}
 	}
 
-	// Call RPC methods from the WebSocket
+	/// Call RPC methods from the WebSocket
 	async fn call(rpc: Arc<RwLock<Rpc>>, msg: Message, chn: Sender<Message>) {
 		// Get the current output format
 		let mut out = { rpc.read().await.format.clone() };
@@ -272,7 +273,7 @@ impl Rpc {
 				Ok((v, o)) => rpc.read().await.modify(v, o).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
-			// Delete a value or values from teh database
+			// Delete a value or values from the database
 			"delete" => match params.needs_one() {
 				Ok(v) => rpc.read().await.delete(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
@@ -284,7 +285,7 @@ impl Rpc {
 			},
 			// Get the current server version
 			"version" => match params.len() {
-				0 => Ok(format!("{}-{}", PKG_NAME, *PKG_VERSION).into()),
+				0 => Ok(format!("{PKG_NAME}-{}", *PKG_VERSION).into()),
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Run a full SurrealQL query against the database

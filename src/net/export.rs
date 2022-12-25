@@ -6,6 +6,7 @@ use hyper::body::Body;
 use surrealdb::Session;
 use warp::Filter;
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	warp::path("export")
 		.and(warp::path::end())

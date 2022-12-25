@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
+use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::data::Data;
@@ -23,6 +24,22 @@ impl<'a> Document<'a> {
 		// The statement has a data clause
 		if let Some(v) = stm.data() {
 			match v {
+				Data::PatchExpression(data) => {
+					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
+					self.current.to_mut().patch(ctx, opt, txn, data).await?
+				}
+				Data::MergeExpression(data) => {
+					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
+					self.current.to_mut().merge(ctx, opt, txn, data).await?
+				}
+				Data::ReplaceExpression(data) => {
+					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
+					self.current.to_mut().replace(ctx, opt, txn, data).await?
+				}
+				Data::ContentExpression(data) => {
+					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
+					self.current.to_mut().replace(ctx, opt, txn, data).await?
+				}
 				Data::SetExpression(x) => {
 					for x in x.iter() {
 						let v = x.2.compute(ctx, opt, txn, Some(&self.current)).await?;
@@ -44,40 +61,31 @@ impl<'a> Document<'a> {
 					}
 				}
 				Data::UpdateExpression(x) => {
+					// Duplicate context
+					let mut ctx = Context::new(ctx);
+					// Add insertable value
+					if let Workable::Insert(value) = &self.extras {
+						ctx.add_value("value".into(), value);
+					}
+					// Process ON DUPLICATE KEY clause
 					for x in x.iter() {
-						let v = x.2.compute(ctx, opt, txn, Some(&self.current)).await?;
+						let v = x.2.compute(&ctx, opt, txn, Some(&self.current)).await?;
 						match x.1 {
 							Operator::Equal => match v {
 								Value::None => {
-									self.current.to_mut().del(ctx, opt, txn, &x.0).await?
+									self.current.to_mut().del(&ctx, opt, txn, &x.0).await?
 								}
-								_ => self.current.to_mut().set(ctx, opt, txn, &x.0, v).await?,
+								_ => self.current.to_mut().set(&ctx, opt, txn, &x.0, v).await?,
 							},
 							Operator::Inc => {
-								self.current.to_mut().increment(ctx, opt, txn, &x.0, v).await?
+								self.current.to_mut().increment(&ctx, opt, txn, &x.0, v).await?
 							}
 							Operator::Dec => {
-								self.current.to_mut().decrement(ctx, opt, txn, &x.0, v).await?
+								self.current.to_mut().decrement(&ctx, opt, txn, &x.0, v).await?
 							}
 							_ => unreachable!(),
 						}
 					}
-				}
-				Data::PatchExpression(data) => {
-					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
-					self.current.to_mut().patch(ctx, opt, txn, data).await?
-				}
-				Data::MergeExpression(data) => {
-					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
-					self.current.to_mut().merge(ctx, opt, txn, data).await?
-				}
-				Data::ReplaceExpression(data) => {
-					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
-					self.current.to_mut().replace(ctx, opt, txn, data).await?
-				}
-				Data::ContentExpression(data) => {
-					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
-					self.current.to_mut().replace(ctx, opt, txn, data).await?
 				}
 				_ => unreachable!(),
 			};

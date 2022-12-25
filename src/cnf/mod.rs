@@ -19,13 +19,16 @@ pub const PKG_NAME: &str = "surrealdb";
 /// The publicly visible name of the server
 pub const SERVER_NAME: &str = "SurrealDB";
 
+/// The publicly visible user-agent of the command-line tool
+pub const SERVER_AGENT: &str = concat!("SurrealDB ", env!("CARGO_PKG_VERSION"));
+
 /// The public endpoint for the administration interface
 pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 
 /// How many concurrent tasks can be handled in a WebSocket
 pub const MAX_CONCURRENT_CALLS: usize = 24;
 
-/// Specifies the frequency with which ping messages should be sent to the client.
+/// Specifies the frequency with which ping messages should be sent to the client
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
 /// The version identifier of this build
