@@ -172,13 +172,13 @@ fn convert(
 	zone: FixedOffset,
 ) -> IResult<&str, Datetime> {
 	let n = NaiveDate::from_ymd_opt(year, mon, day)
-		.ok_or(Err::Error(error_position!(i, ErrorKind::Verify)))?;
+		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?;
 
 	let d = zone
 		.from_local_date(&n)
 		.unwrap()
 		.and_hms_nano_opt(hour, min, sec, nano)
-		.ok_or(Err::Error(error_position!(i, ErrorKind::Verify)))?
+		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?
 		.with_timezone(&Utc);
 
 	Ok((i, Datetime(d)))
