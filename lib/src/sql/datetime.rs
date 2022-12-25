@@ -200,7 +200,7 @@ fn day(i: &str) -> IResult<&str, u32> {
 }
 
 fn hour(i: &str) -> IResult<&str, u32> {
-	take_digits_range(i, 2, 0..=24)
+	take_digits_range(i, 2, 0..=23)
 }
 
 fn minute(i: &str) -> IResult<&str, u32> {
@@ -208,7 +208,8 @@ fn minute(i: &str) -> IResult<&str, u32> {
 }
 
 fn second(i: &str) -> IResult<&str, u32> {
-	take_digits_range(i, 2, 0..=59)
+	// 60 is for leap seconds
+	take_digits_range(i, 2, 0..=60)
 }
 
 fn nanosecond(i: &str) -> IResult<&str, u32> {
