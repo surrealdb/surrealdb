@@ -388,31 +388,19 @@ impl From<DateTime<Utc>> for Value {
 
 impl From<(f64, f64)> for Value {
 	fn from(v: (f64, f64)) -> Self {
-		if v.0.is_nan() || v.1.is_nan() {
-			Value::None
-		} else {
-			Value::Geometry(Geometry::from(v))
-		}
+		Self::from(Geometry::from(v))
 	}
 }
 
 impl From<[f64; 2]> for Value {
 	fn from(v: [f64; 2]) -> Self {
-		if v.iter().any(|f| f.is_nan()) {
-			Value::None
-		} else {
-			Value::Geometry(Geometry::from(v))
-		}
+		Self::from(Geometry::from(v))
 	}
 }
 
 impl From<Point<f64>> for Value {
 	fn from(v: Point<f64>) -> Self {
-		if v.x().is_nan() || v.y().is_nan() {
-			Value::None
-		} else {
-			Value::Geometry(Geometry::from(v))
-		}
+		Self::from(Geometry::from(v))
 	}
 }
 
@@ -1251,6 +1239,7 @@ impl Value {
 		}
 	}
 
+	// -----------------------------------
 	// Mathematical operations
 	// -----------------------------------
 
