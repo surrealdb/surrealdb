@@ -72,11 +72,11 @@ jobs:
       matrix:
         include:
           - arch: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-11
             file: surreal-${{ github.ref_name }}.darwin-amd64
             opts: --features storage-tikv
           - arch: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-11
             file: surreal-${{ github.ref_name }}.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
@@ -188,7 +188,7 @@ jobs:
   package:
     name: Package macOS
     needs: [build]
-    runs-on: macos-latest
+    runs-on: macos-11
     steps:
 
       - name: Download amd64 binary
