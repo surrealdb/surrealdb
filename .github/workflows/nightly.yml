@@ -71,11 +71,11 @@ jobs:
       matrix:
         include:
           - arch: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-11
             file: surreal-nightly.darwin-amd64
             opts: --features storage-tikv
           - arch: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-11
             file: surreal-nightly.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
@@ -145,7 +145,7 @@ jobs:
           BINDGEN_EXTRA_CLANG_ARGS_aarch64-unknown-linux-gnu: "-I/usr/aarch64-linux-gnu/include/"
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v1-node16
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -187,7 +187,7 @@ jobs:
   package:
     name: Package macOS
     needs: [build]
-    runs-on: macos-latest
+    runs-on: macos-11
     steps:
 
       - name: Download amd64 binary
@@ -203,7 +203,7 @@ jobs:
           path: arm64
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v1-node16
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -230,7 +230,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v1-node16
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
