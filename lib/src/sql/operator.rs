@@ -163,6 +163,7 @@ pub fn symbols(i: &str) -> IResult<&str, Operator> {
 			map(char('>'), |_| Operator::MoreThan),
 		)),
 		alt((
+			map(tag("**"), |_| Operator::Pow),
 			map(char('+'), |_| Operator::Add),
 			map(char('-'), |_| Operator::Sub),
 			map(char('*'), |_| Operator::Mul),
@@ -170,7 +171,6 @@ pub fn symbols(i: &str) -> IResult<&str, Operator> {
 			map(char('∙'), |_| Operator::Mul),
 			map(char('/'), |_| Operator::Div),
 			map(char('÷'), |_| Operator::Div),
-			map(tag("**"), |_| Operator::Pow),
 		)),
 		alt((
 			map(char('∋'), |_| Operator::Contain),
