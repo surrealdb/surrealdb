@@ -354,7 +354,8 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 	```powershell
 	[System.Environment]::SetEnvironmentVariable(
 		"PATH", 
-		[System.Environment]::GetEnvironmentVariable("PATH", "Machine") +
+		[System.Environment]::GetEnvironmentVariable("PATH", "Machine") + 
+		";" +
 		"C:\msys64\mingw64\bin;" +
 		"C:\msys64\mingw32\bin;" +
 		"C:\patch\bin;",
