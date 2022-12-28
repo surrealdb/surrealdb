@@ -2,30 +2,24 @@ pub mod engines;
 pub mod method;
 pub mod opt;
 
+mod conn;
 pub(super) mod err;
 
 pub use method::query::QueryResponse;
 
+use crate::api::conn::DbResponse;
+use crate::api::conn::Router;
 use crate::api::err::Error;
-use crate::api::opt::DbResponse;
-use crate::api::opt::Param;
 use crate::api::opt::ServerAddrs;
 use crate::api::opt::ToServerAddrs;
-use flume::Receiver;
-use flume::Sender;
-use method::Method;
 use once_cell::sync::OnceCell;
 use semver::BuildMetadata;
 use semver::VersionReq;
-use serde::de::DeserializeOwned;
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::atomic::AtomicI64;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 /// A specialized `Result` type
@@ -35,65 +29,7 @@ const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0-beta.8, <2.0.0", "20221030.c1
 const LOG: &str = "surrealdb::api";
 
 /// Connection trait implemented by supported protocols
-pub trait Connection: Sized + Send + Sync + 'static {
-	/// Constructs a new client without connecting to the server
-	fn new(method: Method) -> Self;
-
-	/// Connect to the server
-	fn connect(
-		address: ServerAddrs,
-		capacity: usize,
-	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>>;
-
-	/// Send a query to the server
-	#[allow(clippy::type_complexity)]
-	fn send<'r>(
-		&'r mut self,
-		router: &'r Router<Self>,
-		param: opt::Param,
-	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>>;
-
-	/// Receive responses for all methods except `query`
-	fn recv<R>(
-		&mut self,
-		receiver: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + '_>>
-	where
-		R: DeserializeOwned;
-
-	/// Receive the response of the `query` method
-	fn recv_query(
-		&mut self,
-		receiver: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<QueryResponse>> + Send + Sync + '_>>;
-
-	/// Execute all methods except `query`
-	fn execute<'r, R>(
-		&'r mut self,
-		router: &'r Router<Self>,
-		param: opt::Param,
-	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + 'r>>
-	where
-		R: DeserializeOwned,
-	{
-		Box::pin(async move {
-			let rx = self.send(router, param).await?;
-			self.recv(rx).await
-		})
-	}
-
-	/// Execute the `query` method
-	fn execute_query<'r>(
-		&'r mut self,
-		router: &'r Router<Self>,
-		param: opt::Param,
-	) -> Pin<Box<dyn Future<Output = Result<QueryResponse>> + Send + Sync + 'r>> {
-		Box::pin(async move {
-			let rx = self.send(router, param).await?;
-			self.recv_query(rx).await
-		})
-	}
-}
+pub trait Connection: conn::Connection {}
 
 /// Connect future created by `Surreal::connect`
 #[derive(Debug)]
@@ -185,44 +121,10 @@ where
 	}
 }
 
-#[derive(Debug)]
-#[allow(dead_code)] // used by the embedded and remote connections
-pub(crate) struct Route {
-	request: (i64, Method, Param),
-	response: Sender<Result<DbResponse>>,
-}
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
-enum ExtraFeatures {
+pub(crate) enum ExtraFeatures {
 	Auth,
 	Backup,
-}
-
-/// Message router
-#[derive(Debug)]
-pub struct Router<C: Connection> {
-	conn: PhantomData<C>,
-	sender: Sender<Option<Route>>,
-	last_id: AtomicI64,
-	features: HashSet<ExtraFeatures>,
-}
-
-impl<C> Router<C>
-where
-	C: Connection,
-{
-	fn next_id(&self) -> i64 {
-		self.last_id.fetch_add(1, Ordering::SeqCst)
-	}
-}
-
-impl<C> Drop for Router<C>
-where
-	C: Connection,
-{
-	fn drop(&mut self) {
-		let _res = self.sender.send(None);
-	}
 }
 
 /// `SurrealDB` instance or client

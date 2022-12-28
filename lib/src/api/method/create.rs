@@ -1,10 +1,10 @@
+use crate::api::conn::Method;
+use crate::api::conn::Param;
+use crate::api::conn::Router;
 use crate::api::method::Content;
-use crate::api::method::Method;
 use crate::api::opt::DbResource;
-use crate::api::opt::Param;
 use crate::api::Connection;
 use crate::api::Result;
-use crate::api::Router;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::future::Future;

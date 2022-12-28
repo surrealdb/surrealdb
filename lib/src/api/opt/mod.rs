@@ -11,14 +11,12 @@ use crate::api::Result;
 use crate::sql;
 use crate::sql::Thing;
 use crate::sql::Value;
-use crate::QueryResponse;
 use dmp::Diff;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::json;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 pub use query::*;
 pub use resource::*;
@@ -144,50 +142,6 @@ impl PatchOp {
 		}));
 		Self(value)
 	}
-}
-
-/// Holds the parameters given to the caller
-#[derive(Debug)]
-#[allow(dead_code)] // used by the embedded and remote connections
-pub struct Param {
-	pub(crate) query: Option<(sql::Query, BTreeMap<String, Value>)>,
-	pub(crate) other: Vec<Value>,
-	pub(crate) file: Option<PathBuf>,
-}
-
-impl Param {
-	pub(crate) fn new(other: Vec<Value>) -> Self {
-		Self {
-			other,
-			query: None,
-			file: None,
-		}
-	}
-
-	pub(crate) fn query(query: sql::Query, bindings: BTreeMap<String, Value>) -> Self {
-		Self {
-			query: Some((query, bindings)),
-			other: Vec::new(),
-			file: None,
-		}
-	}
-
-	pub(crate) fn file(file: PathBuf) -> Self {
-		Self {
-			query: None,
-			other: Vec::new(),
-			file: Some(file),
-		}
-	}
-}
-
-/// The database response sent from the router to the caller
-#[derive(Debug)]
-pub enum DbResponse {
-	/// The response sent for the `query` method
-	Query(QueryResponse),
-	/// The response sent for any method except `query`
-	Other(sql::Value),
 }
 
 /// Deserializes a value `T` from `SurrealDB` [`Value`]

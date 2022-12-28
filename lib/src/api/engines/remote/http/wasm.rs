@@ -1,16 +1,16 @@
 use super::Client;
 use super::LOG;
+use crate::api::conn::Connection;
+use crate::api::conn::DbResponse;
+use crate::api::conn::Method;
+use crate::api::conn::Param;
+use crate::api::conn::Route;
+use crate::api::conn::Router;
 use crate::api::opt::from_value;
-use crate::api::opt::DbResponse;
-use crate::api::opt::Param;
 use crate::api::opt::ServerAddrs;
-use crate::api::Connection;
 use crate::api::ExtraFeatures;
-use crate::api::Method;
 use crate::api::QueryResponse;
 use crate::api::Result;
-use crate::api::Route;
-use crate::api::Router;
 use crate::api::Surreal;
 use flume::Receiver;
 use flume::Sender;
@@ -30,6 +30,8 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use url::Url;
 use wasm_bindgen_futures::spawn_local;
+
+impl crate::api::Connection for Client {}
 
 impl Connection for Client {
 	fn new(method: Method) -> Self {

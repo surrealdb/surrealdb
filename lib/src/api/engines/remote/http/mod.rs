@@ -5,6 +5,9 @@ pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 
+use crate::api::conn::DbResponse;
+use crate::api::conn::Method;
+use crate::api::conn::Param;
 use crate::api::engines::create_statement;
 use crate::api::engines::delete_statement;
 use crate::api::engines::merge_statement;
@@ -16,9 +19,6 @@ use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
 use crate::api::opt::from_json;
 use crate::api::opt::from_value;
-use crate::api::opt::DbResponse;
-use crate::api::opt::Param;
-use crate::api::Method;
 use crate::api::Result;
 use crate::sql::Array;
 use crate::sql::Strand;

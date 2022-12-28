@@ -1,19 +1,19 @@
+use crate::api::conn::Connection;
+use crate::api::conn::Method;
+use crate::api::conn::Param;
+use crate::api::conn::Route;
+use crate::api::conn::Router;
+#[allow(unused_imports)] // used by the DB engines
+use crate::api::engines;
 use crate::api::engines::any::Any;
-use crate::api::engines::local;
-use crate::api::engines::remote;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
 use crate::api::opt::ServerAddrs;
-use crate::api::Connection;
 use crate::api::DbResponse;
 #[allow(unused_imports)] // used by the `ws` and `http` protocols
 use crate::api::ExtraFeatures;
-use crate::api::Method;
-use crate::api::Param;
 use crate::api::QueryResponse;
 use crate::api::Result;
-use crate::api::Route;
-use crate::api::Router;
 use crate::api::Surreal;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
@@ -25,6 +25,8 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 
+impl crate::api::Connection for Any {}
+
 impl Connection for Any {
 	fn new(method: Method) -> Self {
 		Self {
@@ -33,6 +35,7 @@ impl Connection for Any {
 		}
 	}
 
+	#[allow(unused_variables, unreachable_code, unused_mut)] // these are all used depending on feature
 	fn connect(
 		address: ServerAddrs,
 		capacity: usize,
@@ -43,14 +46,13 @@ impl Connection for Any {
 				capacity => flume::bounded(capacity),
 			};
 
-			#[allow(unused_variables)] // used by storage engines
 			let (conn_tx, conn_rx) = flume::bounded::<Result<()>>(1);
 			let mut features = HashSet::new();
 
 			match address.endpoint.scheme() {
 				#[cfg(feature = "kv-fdb")]
 				"fdb" => {
-					local::wasm::router(address, conn_tx, route_rx);
+					engines::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -58,7 +60,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-indxdb")]
 				"indxdb" => {
-					local::wasm::router(address, conn_tx, route_rx);
+					engines::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -66,7 +68,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-mem")]
 				"mem" => {
-					local::wasm::router(address, conn_tx, route_rx);
+					engines::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -74,7 +76,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-rocksdb")]
 				"rocksdb" => {
-					local::wasm::router(address, conn_tx, route_rx);
+					engines::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -82,7 +84,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-rocksdb")]
 				"file" => {
-					local::wasm::router(address, conn_tx, route_rx);
+					engines::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -90,7 +92,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-tikv")]
 				"tikv" => {
-					local::wasm::router(address, conn_tx, route_rx);
+					engines::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -99,15 +101,15 @@ impl Connection for Any {
 				#[cfg(feature = "protocol-http")]
 				"http" | "https" => {
 					features.insert(ExtraFeatures::Auth);
-					remote::http::wasm::router(address, conn_tx, route_rx);
+					engines::remote::http::wasm::router(address, conn_tx, route_rx);
 				}
 
 				#[cfg(feature = "protocol-ws")]
 				"ws" | "wss" => {
 					features.insert(ExtraFeatures::Auth);
 					let mut address = address;
-					address.endpoint = address.endpoint.join(remote::ws::PATH)?;
-					remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
+					address.endpoint = address.endpoint.join(engines::remote::ws::PATH)?;
+					engines::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}

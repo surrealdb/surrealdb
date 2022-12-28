@@ -26,6 +26,9 @@ pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 
+use crate::api::conn::DbResponse;
+use crate::api::conn::Method;
+use crate::api::conn::Param;
 use crate::api::engines::create_statement;
 use crate::api::engines::delete_statement;
 use crate::api::engines::merge_statement;
@@ -34,9 +37,6 @@ use crate::api::engines::select_statement;
 use crate::api::engines::update_statement;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
-use crate::api::opt::DbResponse;
-use crate::api::opt::Param;
-use crate::api::Method;
 use crate::api::QueryResponse;
 use crate::api::Result;
 #[cfg(not(target_arch = "wasm32"))]
@@ -299,7 +299,7 @@ pub struct FDb;
 /// on `Db`
 #[derive(Debug, Clone)]
 pub struct Db {
-	pub(crate) method: crate::api::method::Method,
+	pub(crate) method: crate::api::conn::Method,
 }
 
 fn process(responses: Vec<Response>) -> Result<QueryResponse> {

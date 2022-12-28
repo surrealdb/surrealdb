@@ -87,6 +87,7 @@ mod native;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
+use crate::api::conn::Method;
 use crate::api::err::Error;
 use crate::api::opt::ServerAddrs;
 #[cfg(any(
@@ -100,7 +101,6 @@ use crate::api::opt::Strict;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::Connect;
-use crate::api::Method;
 use crate::api::Result;
 use crate::api::Surreal;
 use std::marker::PhantomData;

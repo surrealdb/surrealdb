@@ -5,10 +5,10 @@ pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 
+use crate::api::conn::DbResponse;
+use crate::api::conn::Method;
 use crate::api::engines::remote::Status;
 use crate::api::err::Error;
-use crate::api::method::Method;
-use crate::api::opt::DbResponse;
 use crate::api::Result;
 use crate::sql::Array;
 use crate::sql::Value;

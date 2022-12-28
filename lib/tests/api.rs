@@ -54,7 +54,7 @@ mod ws {
 	use surrealdb::engines::remote::ws::Ws;
 
 	async fn new_db() -> Surreal<Client> {
-		let db = Surreal::connect::<Ws>("localhost:8000").await.unwrap();
+		let db = Surreal::connect::<Ws>("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
 			password: ROOT_PASS,
@@ -75,7 +75,7 @@ mod http {
 	use surrealdb::engines::remote::http::Http;
 
 	async fn new_db() -> Surreal<Client> {
-		let db = Surreal::connect::<Http>("localhost:8000").await.unwrap();
+		let db = Surreal::connect::<Http>("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
 			password: ROOT_PASS,
@@ -126,7 +126,7 @@ mod tikv {
 	use surrealdb::engines::local::TiKv;
 
 	async fn new_db() -> Surreal<Db> {
-		Surreal::connect::<TiKv>("localhost:2379").await.unwrap()
+		Surreal::connect::<TiKv>("127.0.0.1:2379").await.unwrap()
 	}
 
 	include!("api/mod.rs");
@@ -153,7 +153,7 @@ mod any {
 	use surrealdb::engines::any::Any;
 
 	async fn new_db() -> Surreal<Any> {
-		let db = surrealdb::engines::any::connect("http://localhost:8000").await.unwrap();
+		let db = surrealdb::engines::any::connect("http://127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
 			password: ROOT_PASS,

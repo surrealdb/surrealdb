@@ -1,10 +1,10 @@
-use crate::api::method::Method;
-use crate::api::opt::Param;
+use crate::api::conn::Method;
+use crate::api::conn::Param;
+use crate::api::conn::Router;
 use crate::api::Connection;
 use crate::api::Error;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
-use crate::api::Router;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::pin::Pin;

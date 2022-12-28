@@ -1,22 +1,22 @@
 use super::LOG;
 use super::PATH;
+use crate::api::conn::Connection;
+use crate::api::conn::DbResponse;
+use crate::api::conn::Method;
+use crate::api::conn::Param;
+use crate::api::conn::Route;
+use crate::api::conn::Router;
 use crate::api::engines::remote::ws::Client;
 use crate::api::engines::remote::ws::Response;
 use crate::api::engines::remote::ws::PING_INTERVAL;
 use crate::api::engines::remote::ws::PING_METHOD;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
-use crate::api::opt::DbResponse;
-use crate::api::opt::Param;
 use crate::api::opt::ServerAddrs;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
-use crate::api::Connection;
 use crate::api::ExtraFeatures;
-use crate::api::Method;
 use crate::api::Result;
-use crate::api::Route;
-use crate::api::Router;
 use crate::api::Surreal;
 use crate::sql::Strand;
 use crate::sql::Value;
@@ -90,6 +90,8 @@ pub(crate) async fn connect(
 
 	Ok(socket)
 }
+
+impl crate::api::Connection for Client {}
 
 impl Connection for Client {
 	fn new(method: Method) -> Self {

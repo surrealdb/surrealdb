@@ -1,3 +1,9 @@
+use crate::api::conn::Connection;
+use crate::api::conn::Method;
+use crate::api::conn::Param;
+use crate::api::conn::Route;
+use crate::api::conn::Router;
+#[allow(unused_imports)] // used by the DB engines
 use crate::api::engines;
 use crate::api::engines::any::Any;
 use crate::api::err::Error;
@@ -6,15 +12,11 @@ use crate::api::opt::ServerAddrs;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
-use crate::api::Connection;
 use crate::api::DbResponse;
+#[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
-use crate::api::Method;
-use crate::api::Param;
 use crate::api::QueryResponse;
 use crate::api::Result;
-use crate::api::Route;
-use crate::api::Router;
 use crate::api::Surreal;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
@@ -39,6 +41,8 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use tokio_tungstenite::Connector;
 
+impl crate::api::Connection for Any {}
+
 impl Connection for Any {
 	fn new(method: Method) -> Self {
 		Self {
@@ -47,6 +51,7 @@ impl Connection for Any {
 		}
 	}
 
+	#[allow(unused_variables, unreachable_code, unused_mut)] // these are all used depending on feature
 	fn connect(
 		address: ServerAddrs,
 		capacity: usize,
@@ -57,7 +62,6 @@ impl Connection for Any {
 				capacity => flume::bounded(capacity),
 			};
 
-			#[allow(unused_variables)] // used by storage engines
 			let (conn_tx, conn_rx) = flume::bounded::<Result<()>>(1);
 			let mut features = HashSet::new();
 

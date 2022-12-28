@@ -1,11 +1,11 @@
+use crate::api::conn::Method;
+use crate::api::conn::Param;
+use crate::api::conn::Router;
 use crate::api::err::Error;
-use crate::api::method::Method;
 use crate::api::opt;
 use crate::api::opt::from_json;
-use crate::api::opt::Param;
 use crate::api::Connection;
 use crate::api::Result;
-use crate::api::Router;
 use crate::sql;
 use crate::sql::Array;
 use crate::sql::Object;
@@ -249,7 +249,7 @@ mod tests {
 		body: String,
 	}
 
-	fn to_map(vec: Vec<QueryResult>) -> HashMap<usize, QueryResult> {
+	fn to_map(vec: Vec<QueryResult>) -> IndexMap<usize, QueryResult> {
 		vec.into_iter().enumerate().collect()
 	}
 
