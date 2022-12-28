@@ -6,7 +6,7 @@
 //! use serde::{Serialize, Deserialize};
 //! use serde_json::json;
 //! use std::borrow::Cow;
-//! use surrealdb::opt::Root;
+//! use surrealdb::opt::auth::Root;
 //!
 //! #[derive(Serialize, Deserialize)]
 //! struct Name {
@@ -23,7 +23,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> surrealdb::Result<()> {
-//!     let db = surrealdb::any::connect("ws://127.0.0.1:8000").await?;
+//!     let db = surrealdb::any::connect("ws://localhost:8000").await?;
 //!
 //!     // Signin as a namespace, database, or root user
 //!     db.signin(Root {
@@ -230,7 +230,7 @@ where
 ///
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// DB.connect("ws://127.0.0.1:8000").await?;
+/// DB.connect("ws://localhost:8000").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -287,7 +287,7 @@ impl StaticConnect for Surreal<Any> {
 /// let db = surrealdb::any::connect("indxdb://MyDatabase").await?;
 ///
 /// // Instantiate a TiKV-backed instance
-/// let db = surrealdb::any::connect("tikv://127.0.0.1:2379").await?;
+/// let db = surrealdb::any::connect("tikv://localhost:2379").await?;
 ///
 /// // Instantiate a FoundationDB-backed instance
 /// let db = surrealdb::any::connect("fdb://fdb.cluster").await?;

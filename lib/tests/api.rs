@@ -5,11 +5,11 @@ use serde::Serialize;
 use serde_json::json;
 use std::borrow::Cow;
 use std::ops::Bound;
+use surrealdb::opt::auth::Jwt;
+use surrealdb::opt::auth::Root;
 use surrealdb::opt::Database;
-use surrealdb::opt::Jwt;
 use surrealdb::opt::NameSpace;
 use surrealdb::opt::PatchOp;
-use surrealdb::opt::Root;
 use surrealdb::opt::Scope;
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
@@ -126,7 +126,7 @@ mod tikv {
 	use surrealdb::storage::TiKv;
 
 	async fn new_db() -> Surreal<Db> {
-		Surreal::connect::<TiKv>("127.0.0.1:2379").await.unwrap()
+		Surreal::connect::<TiKv>("localhost:2379").await.unwrap()
 	}
 
 	include!("api/mod.rs");

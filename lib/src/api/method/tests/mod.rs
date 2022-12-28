@@ -6,11 +6,11 @@ mod server;
 mod types;
 
 use crate::api::method::tests::types::AuthParams;
+use crate::api::opt::auth::Jwt;
+use crate::api::opt::auth::Root;
 use crate::api::opt::Database;
-use crate::api::opt::Jwt;
 use crate::api::opt::NameSpace;
 use crate::api::opt::PatchOp;
-use crate::api::opt::Root;
 use crate::api::opt::Scope;
 use crate::api::QueryResponse;
 use crate::api::StaticConnect;

@@ -1,7 +1,7 @@
 //! Parameter types
 
-mod credentials;
-mod jwt;
+pub mod auth;
+
 mod query;
 mod resource;
 mod server_addrs;
@@ -20,8 +20,6 @@ use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-pub use credentials::*;
-pub use jwt::*;
 pub use query::*;
 pub use resource::*;
 pub use server_addrs::*;

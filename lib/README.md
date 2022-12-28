@@ -43,7 +43,9 @@ This library enables simple and advanced querying of an embedded or remote datab
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::borrow::Cow;
-use surrealdb::opt::Root;
+use surrealdb::Surreal;
+use surrealdb::opt::auth::Root;
+use surrealdb::protocol::Ws;
 
 #[derive(Serialize, Deserialize)]
 struct Name {
@@ -62,7 +64,7 @@ struct Person {
 
 #[tokio::main]
 async fn main() -> surrealdb::Result<()> {
-    let db = surrealdb::connect("ws://localhost:8000").await?;
+    let db = Surreal::connect::<Ws>("localhost:8000").await?;
 
     // Signin as a namespace, database, or root user
     db.signin(Root {

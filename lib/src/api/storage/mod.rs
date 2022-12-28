@@ -207,7 +207,7 @@ pub struct IndxDb;
 /// use surrealdb::Surreal;
 /// use surrealdb::storage::TiKv;
 ///
-/// let db = Surreal::connect::<TiKv>("127.0.0.1:2379").await?;
+/// let db = Surreal::connect::<TiKv>("localhost:2379").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -221,7 +221,7 @@ pub struct IndxDb;
 /// use surrealdb::Surreal;
 /// use surrealdb::storage::TiKv;
 ///
-/// let db = Surreal::connect::<TiKv>(("127.0.0.1:2379", Strict)).await?;
+/// let db = Surreal::connect::<TiKv>(("localhost:2379", Strict)).await?;
 /// # Ok(())
 /// # }
 /// ```

@@ -63,6 +63,9 @@ pub use use_ns::UseNsDb;
 pub use version::Version;
 
 use crate::api::opt;
+use crate::api::opt::auth;
+use crate::api::opt::auth::Credentials;
+use crate::api::opt::auth::Jwt;
 use crate::api::opt::from_json;
 use crate::api::opt::ToServerAddrs;
 use crate::api::Connect;
@@ -187,7 +190,7 @@ where
 	/// use serde::{Serialize, Deserialize};
 	/// use std::borrow::Cow;
 	/// use surrealdb::{Result, Surreal, StaticConnect};
-	/// use surrealdb::opt::Root;
+	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::protocol::Ws;
 	/// use surrealdb::net::WsClient;
 	///
@@ -230,7 +233,7 @@ where
 	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::any::{Any, StaticConnect};
-	/// use surrealdb::opt::Root;
+	/// use surrealdb::opt::auth::Root;
 	///
 	/// // Creates a new static instance of the client
 	/// static DB: Surreal<Any> = Surreal::new();
@@ -413,8 +416,8 @@ where
 	///
 	/// ```no_run
 	/// use serde::Serialize;
-	/// use surrealdb::opt::Root;
-	/// use surrealdb::opt::Scope;
+	/// use surrealdb::opt::auth::Root;
+	/// use surrealdb::opt::auth::Scope;
 	///
 	/// #[derive(Debug, Serialize)]
 	/// struct AuthParams<'a> {
@@ -458,7 +461,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R>(&self, credentials: impl opt::Credentials<opt::Signup, R>) -> Signup<C, R> {
+	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			router: self.router.extract(),
 			credentials: Ok(from_json(json!(credentials))),
@@ -477,8 +480,8 @@ where
 	/// Namespace signin
 	///
 	/// ```no_run
-	/// use surrealdb::opt::Root;
-	/// use surrealdb::opt::NameSpace;
+	/// use surrealdb::opt::auth::Root;
+	/// use surrealdb::opt::auth::NameSpace;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -512,8 +515,8 @@ where
 	/// Database signin
 	///
 	/// ```no_run
-	/// use surrealdb::opt::Root;
-	/// use surrealdb::opt::Database;
+	/// use surrealdb::opt::auth::Root;
+	/// use surrealdb::opt::auth::Database;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -549,8 +552,8 @@ where
 	///
 	/// ```no_run
 	/// use serde::Serialize;
-	/// use surrealdb::opt::Root;
-	/// use surrealdb::opt::Scope;
+	/// use surrealdb::opt::auth::Root;
+	/// use surrealdb::opt::auth::Scope;
 	///
 	/// #[derive(Debug, Serialize)]
 	/// struct AuthParams<'a> {
@@ -579,7 +582,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signin<R>(&self, credentials: impl opt::Credentials<opt::Signin, R>) -> Signin<C, R> {
+	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			router: self.router.extract(),
 			credentials: Ok(from_json(json!(credentials))),
@@ -626,7 +629,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn authenticate(&self, token: impl Into<opt::Jwt>) -> Authenticate<C> {
+	pub fn authenticate(&self, token: impl Into<Jwt>) -> Authenticate<C> {
 		Authenticate {
 			router: self.router.extract(),
 			token: token.into(),

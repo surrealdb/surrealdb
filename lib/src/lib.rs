@@ -18,7 +18,7 @@
 //! use serde_json::json;
 //! use std::borrow::Cow;
 //! use surrealdb::{Result, Surreal};
-//! use surrealdb::opt::Root;
+//! use surrealdb::opt::auth::Root;
 //! use surrealdb::protocol::Ws;
 //!
 //! #[derive(Serialize, Deserialize)]
@@ -36,7 +36,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<()> {
-//!     let db = Surreal::connect::<Ws>("127.0.0.1:8000").await?;
+//!     let db = Surreal::connect::<Ws>("localhost:8000").await?;
 //!
 //!     // Signin as a namespace, database, or root user
 //!     db.signin(Root {

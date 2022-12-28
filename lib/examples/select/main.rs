@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use surrealdb::opt::Root;
+use surrealdb::opt::auth::Root;
 
 const ACCOUNT: &str = "account";
 

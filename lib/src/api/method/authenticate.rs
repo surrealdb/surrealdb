@@ -1,5 +1,5 @@
 use crate::api::method::Method;
-use crate::api::opt::Jwt;
+use crate::api::opt::auth::Jwt;
 use crate::api::opt::Param;
 use crate::api::Connection;
 use crate::api::Error;

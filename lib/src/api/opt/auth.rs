@@ -1,5 +1,9 @@
-use crate::api::opt::Jwt;
+//! Authentication types
+
+use crate::sql::Value;
+use serde::Deserialize;
 use serde::Serialize;
+use std::fmt;
 
 /// A signup action
 #[derive(Debug)]
@@ -77,5 +81,38 @@ pub struct Scope<'a, P> {
 	pub params: P,
 }
 
-impl<P> Credentials<Signup, Jwt> for Scope<'_, P> where P: Serialize {}
-impl<P> Credentials<Signin, Jwt> for Scope<'_, P> where P: Serialize {}
+impl<T, P> Credentials<T, Jwt> for Scope<'_, P> where P: Serialize {}
+
+/// A JSON Web Token for authenticating with the server
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Jwt(pub(crate) String);
+
+impl From<String> for Jwt {
+	fn from(jwt: String) -> Self {
+		Jwt(jwt)
+	}
+}
+
+impl<'a> From<&'a String> for Jwt {
+	fn from(jwt: &'a String) -> Self {
+		Jwt(jwt.to_owned())
+	}
+}
+
+impl<'a> From<&'a str> for Jwt {
+	fn from(jwt: &'a str) -> Self {
+		Jwt(jwt.to_owned())
+	}
+}
+
+impl From<Jwt> for Value {
+	fn from(Jwt(jwt): Jwt) -> Self {
+		jwt.into()
+	}
+}
+
+impl fmt::Debug for Jwt {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "Jwt(REDUCTED)")
+	}
+}

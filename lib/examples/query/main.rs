@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
-use surrealdb::opt::Root;
+use surrealdb::opt::auth::Root;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(dead_code)]

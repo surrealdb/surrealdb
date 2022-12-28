@@ -4,7 +4,7 @@ mod person;
 use actix_web::{App, HttpServer};
 use surrealdb::any::Any;
 use surrealdb::any::StaticConnect;
-use surrealdb::opt::Root;
+use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 
 static DB: Surreal<Any> = Surreal::new();
@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			.service(person::delete)
 			.service(person::list)
 	})
-	.bind(("127.0.0.1", 8080))?
+	.bind(("localhost", 8080))?
 	.run()
 	.await?;
 
