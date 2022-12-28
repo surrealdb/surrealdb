@@ -1,15 +1,16 @@
-use surrealdb::any::Any;
-use surrealdb::any::StaticConnect;
+use surrealdb::net::WsClient;
+use surrealdb::protocol::Ws;
+use surrealdb::StaticConnect;
 use surrealdb::Surreal;
 use tokio::sync::mpsc;
 
-static DB: Surreal<Any> = Surreal::new();
+static DB: Surreal<WsClient> = Surreal::new();
 
 const NUM: usize = 100_000;
 
 #[tokio::main]
 async fn main() -> surrealdb::Result<()> {
-	DB.connect("ws://localhost:8000").with_capacity(NUM).await?;
+	DB.connect::<Ws>("localhost:8000").with_capacity(NUM).await?;
 
 	DB.use_ns("namespace").use_db("database").await?;
 

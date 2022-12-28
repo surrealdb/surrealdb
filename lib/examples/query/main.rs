@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use serde::Serialize;
 use surrealdb::opt::auth::Root;
+use surrealdb::protocol::Ws;
+use surrealdb::Surreal;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(dead_code)]
@@ -12,7 +14,7 @@ struct User {
 
 #[tokio::main]
 async fn main() -> surrealdb::Result<()> {
-	let db = surrealdb::any::connect("ws://localhost:8000").await?;
+	let db = Surreal::connect::<Ws>("localhost:8000").await?;
 
 	db.signin(Root {
 		username: "root",

@@ -2,16 +2,17 @@ mod error;
 mod person;
 
 use actix_web::{App, HttpServer};
-use surrealdb::any::Any;
-use surrealdb::any::StaticConnect;
+use surrealdb::net::WsClient;
 use surrealdb::opt::auth::Root;
+use surrealdb::protocol::Ws;
+use surrealdb::StaticConnect;
 use surrealdb::Surreal;
 
-static DB: Surreal<Any> = Surreal::new();
+static DB: Surreal<WsClient> = Surreal::new();
 
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-	DB.connect("ws://localhost:8000").await?;
+	DB.connect::<Ws>("localhost:8000").await?;
 
 	DB.signin(Root {
 		username: "root",

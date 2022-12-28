@@ -1,10 +1,12 @@
 use surrealdb::opt::auth::Root;
+use surrealdb::protocol::Ws;
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
+use surrealdb::Surreal;
 
 #[tokio::main]
 async fn main() -> surrealdb::Result<()> {
-	let db = surrealdb::any::connect("ws://localhost:8000").await?;
+	let db = Surreal::connect::<Ws>("localhost:8000").await?;
 
 	db.signin(Root {
 		username: "root",
