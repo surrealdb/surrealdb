@@ -13,7 +13,7 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/features.svg?raw=true">&nbsp;&nbsp;Features</h2>
 
 - [x] Can be used as an embedded database (`Surreal<Db>`)
-- [x] Connects to remote servers (`Surreal<WsClient>` or `Surreal<HttpClient>`)
+- [x] Connects to remote servers (`Surreal<ws::Client>` or `Surreal<http::Client>`)
 - [x] Allows picking any protocol or storage engine at run-time (`Surreal<Any>`)
 - [x] Compiles to WebAssembly
 - [x] Supports typed SQL statements
@@ -44,8 +44,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::borrow::Cow;
 use surrealdb::Surreal;
+use surrealdb::engines::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::protocol::Ws;
 
 #[derive(Serialize, Deserialize)]
 struct Name {

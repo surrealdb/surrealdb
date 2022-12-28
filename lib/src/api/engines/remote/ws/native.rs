@@ -1,5 +1,9 @@
 use super::LOG;
 use super::PATH;
+use crate::api::engines::remote::ws::Client;
+use crate::api::engines::remote::ws::Response;
+use crate::api::engines::remote::ws::PING_INTERVAL;
+use crate::api::engines::remote::ws::PING_METHOD;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
 use crate::api::opt::DbResponse;
@@ -7,10 +11,6 @@ use crate::api::opt::Param;
 use crate::api::opt::ServerAddrs;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
-use crate::api::protocol::ws::Client;
-use crate::api::protocol::ws::Response;
-use crate::api::protocol::ws::PING_INTERVAL;
-use crate::api::protocol::ws::PING_METHOD;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Method;

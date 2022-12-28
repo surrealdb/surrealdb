@@ -6,6 +6,7 @@
 //! use serde::{Serialize, Deserialize};
 //! use serde_json::json;
 //! use std::borrow::Cow;
+//! use surrealdb::engines::any::connect;
 //! use surrealdb::opt::auth::Root;
 //!
 //! #[derive(Serialize, Deserialize)]
@@ -23,7 +24,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> surrealdb::Result<()> {
-//!     let db = surrealdb::any::connect("ws://localhost:8000").await?;
+//!     let db = connect("ws://localhost:8000").await?;
 //!
 //!     // Signin as a namespace, database, or root user
 //!     db.signin(Root {
@@ -224,7 +225,7 @@ where
 ///
 /// ```no_run
 /// use surrealdb::Surreal;
-/// use surrealdb::any::{Any, StaticConnect};
+/// use surrealdb::engines::any::{Any, StaticConnect};
 ///
 /// static DB: Surreal<Any> = Surreal::new();
 ///
@@ -263,34 +264,36 @@ impl StaticConnect for Surreal<Any> {
 /// # Examples
 ///
 /// ```no_run
+/// use surrealdb::engines::any::connect;
+///
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// // Connect to a local endpoint
-/// let db = surrealdb::any::connect("ws://localhost:8000").await?;
+/// let db = connect("ws://localhost:8000").await?;
 ///
 /// // Connect to a remote endpoint
-/// let db = surrealdb::any::connect("wss://cloud.surrealdb.com").await?;
+/// let db = connect("wss://cloud.surrealdb.com").await?;
 ///
 /// // Connect using HTTP
-/// let db = surrealdb::any::connect("http://localhost:8000").await?;
+/// let db = connect("http://localhost:8000").await?;
 ///
 /// // Connect using HTTPS
-/// let db = surrealdb::any::connect("https://cloud.surrealdb.com").await?;
+/// let db = connect("https://cloud.surrealdb.com").await?;
 ///
 /// // Instantiate an in-memory instance
-/// let db = surrealdb::any::connect("mem://").await?;
+/// let db = connect("mem://").await?;
 ///
 /// // Instantiate an file-backed instance
-/// let db = surrealdb::any::connect("file://temp.db").await?;
+/// let db = connect("file://temp.db").await?;
 ///
 /// // Instantiate an IndxDB-backed instance
-/// let db = surrealdb::any::connect("indxdb://MyDatabase").await?;
+/// let db = connect("indxdb://MyDatabase").await?;
 ///
 /// // Instantiate a TiKV-backed instance
-/// let db = surrealdb::any::connect("tikv://localhost:2379").await?;
+/// let db = connect("tikv://localhost:2379").await?;
 ///
 /// // Instantiate a FoundationDB-backed instance
-/// let db = surrealdb::any::connect("fdb://fdb.cluster").await?;
+/// let db = connect("fdb://fdb.cluster").await?;
 /// # Ok(())
 /// # }
 /// ```

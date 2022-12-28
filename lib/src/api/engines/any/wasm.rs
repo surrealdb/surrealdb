@@ -1,13 +1,12 @@
-use crate::api;
-use crate::api::any::Any;
+use crate::api::engines::any::Any;
+use crate::api::engines::local;
+use crate::api::engines::remote;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
 use crate::api::opt::ServerAddrs;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-#[cfg(feature = "protocol-http")]
-use crate::api::opt::Tls;
 use crate::api::Connection;
 use crate::api::DbResponse;
+#[allow(unused_imports)] // used by the `ws` and `http` protocols
 use crate::api::ExtraFeatures;
 use crate::api::Method;
 use crate::api::Param;
@@ -18,14 +17,6 @@ use crate::api::Router;
 use crate::api::Surreal;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
-#[cfg(feature = "protocol-http")]
-use reqwest::header::HeaderMap;
-#[cfg(feature = "protocol-http")]
-use reqwest::header::HeaderValue;
-#[cfg(feature = "protocol-http")]
-use reqwest::header::ACCEPT;
-#[cfg(feature = "protocol-http")]
-use reqwest::ClientBuilder;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::future::Future;
@@ -33,11 +24,6 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
-#[cfg(feature = "protocol-ws")]
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-#[cfg(feature = "protocol-ws")]
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-use tokio_tungstenite::Connector;
 
 impl Connection for Any {
 	fn new(method: Method) -> Self {
@@ -64,8 +50,15 @@ impl Connection for Any {
 			match address.endpoint.scheme() {
 				#[cfg(feature = "kv-fdb")]
 				"fdb" => {
-					features.insert(ExtraFeatures::Backup);
-					api::storage::native::router(address, conn_tx, route_rx);
+					local::wasm::router(address, conn_tx, route_rx);
+					if let Err(error) = conn_rx.into_recv_async().await? {
+						return Err(error);
+					}
+				}
+
+				#[cfg(feature = "kv-indxdb")]
+				"indxdb" => {
+					local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -73,8 +66,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-mem")]
 				"mem" => {
-					features.insert(ExtraFeatures::Backup);
-					api::storage::native::router(address, conn_tx, route_rx);
+					local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -82,8 +74,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-rocksdb")]
 				"rocksdb" => {
-					features.insert(ExtraFeatures::Backup);
-					api::storage::native::router(address, conn_tx, route_rx);
+					local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -91,8 +82,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-rocksdb")]
 				"file" => {
-					features.insert(ExtraFeatures::Backup);
-					api::storage::native::router(address, conn_tx, route_rx);
+					local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -100,8 +90,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-tikv")]
 				"tikv" => {
-					features.insert(ExtraFeatures::Backup);
-					api::storage::native::router(address, conn_tx, route_rx);
+					local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -110,60 +99,18 @@ impl Connection for Any {
 				#[cfg(feature = "protocol-http")]
 				"http" | "https" => {
 					features.insert(ExtraFeatures::Auth);
-					features.insert(ExtraFeatures::Backup);
-					let mut headers = HeaderMap::new();
-					headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
-					#[allow(unused_mut)]
-					let mut builder = ClientBuilder::new().default_headers(headers);
-					#[cfg(any(feature = "native-tls", feature = "rustls"))]
-					if let Some(tls) = address.tls_config {
-						builder = match tls {
-							#[cfg(feature = "native-tls")]
-							Tls::Native(config) => builder.use_preconfigured_tls(config),
-							#[cfg(feature = "rustls")]
-							Tls::Rust(config) => builder.use_preconfigured_tls(config),
-						};
-					}
-					let client = builder.build()?;
-					let base_url = address.endpoint;
-					api::protocol::http::health(
-						client.get(base_url.join(Method::Health.as_str())?),
-					)
-					.await?;
-					api::protocol::http::native::router(base_url, client, route_rx);
+					remote::http::wasm::router(address, conn_tx, route_rx);
 				}
 
 				#[cfg(feature = "protocol-ws")]
 				"ws" | "wss" => {
 					features.insert(ExtraFeatures::Auth);
-					let url = address.endpoint.join(api::protocol::ws::PATH)?;
-					#[cfg(any(feature = "native-tls", feature = "rustls"))]
-					let maybe_connector = address.tls_config.map(Connector::from);
-					#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
-					let maybe_connector = None;
-					let config = WebSocketConfig {
-						max_send_queue: match capacity {
-							0 => None,
-							capacity => Some(capacity),
-						},
-						max_message_size: Some(api::protocol::ws::native::MAX_MESSAGE_SIZE),
-						max_frame_size: Some(api::protocol::ws::native::MAX_FRAME_SIZE),
-						accept_unmasked_frames: false,
-					};
-					let socket = api::protocol::ws::native::connect(
-						&url,
-						Some(config),
-						maybe_connector.clone(),
-					)
-					.await?;
-					api::protocol::ws::native::router(
-						url,
-						maybe_connector,
-						capacity,
-						config,
-						socket,
-						route_rx,
-					);
+					let mut address = address;
+					address.endpoint = address.endpoint.join(remote::ws::PATH)?;
+					remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
+					if let Err(error) = conn_rx.into_recv_async().await? {
+						return Err(error);
+					}
 				}
 
 				scheme => {

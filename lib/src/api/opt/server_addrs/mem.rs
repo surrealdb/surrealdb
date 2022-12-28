@@ -1,8 +1,8 @@
-use crate::api::embedded::Db;
+use crate::api::engines::local::Db;
+use crate::api::engines::local::Mem;
 use crate::api::opt::ServerAddrs;
 use crate::api::opt::Strict;
 use crate::api::opt::ToServerAddrs;
-use crate::api::storage::Mem;
 use crate::api::Result;
 use url::Url;
 

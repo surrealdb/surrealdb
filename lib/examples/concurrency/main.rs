@@ -1,10 +1,10 @@
-use surrealdb::net::WsClient;
-use surrealdb::protocol::Ws;
+use surrealdb::engines::remote::ws::Client;
+use surrealdb::engines::remote::ws::Ws;
 use surrealdb::StaticConnect;
 use surrealdb::Surreal;
 use tokio::sync::mpsc;
 
-static DB: Surreal<WsClient> = Surreal::new();
+static DB: Surreal<Client> = Surreal::new();
 
 const NUM: usize = 100_000;
 

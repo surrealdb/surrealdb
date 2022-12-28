@@ -1,10 +1,37 @@
-//! Database storage engines
+//! Embedded database instance
+//!
+//! `SurrealDB` itself can be embedded in this library, allowing you to query it using the same
+//! crate and API that you would use when connecting to it remotely via WebSockets or HTTP.
+//! All storage engines are supported but you have to activate their feature
+//! flags first.
+//!
+//! **NB**: Some storage engines like `TiKV` and `RocksDB` depend on non-Rust libraries so you need
+//! to install those libraries before you can build this crate when you activate their feature
+//! flags. Please refer to [these instructions](https://github.com/surrealdb/surrealdb/blob/main/doc/BUILDING.md)
+//! for more details on how to install them. If you are on Linux and you use
+//! [the Nix package manager](https://github.com/surrealdb/surrealdb/tree/main/pkg/nix#installing-nix)
+//! you can just run
+//!
+//! ```bash
+//! nix develop github:surrealdb/surrealdb
+//! ```
+//!
+//! which will drop you into a shell with all the dependencies available. One tip you may find
+//! useful is to only enable the in-memory engine (`kv-mem`) during development. Besides letting you not
+//! worry about those dependencies on your dev machine, it allows you to keep compile times low
+//! during development while allowing you to test your code fully.
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 
+use crate::api::engines::create_statement;
+use crate::api::engines::delete_statement;
+use crate::api::engines::merge_statement;
+use crate::api::engines::patch_statement;
+use crate::api::engines::select_statement;
+use crate::api::engines::update_statement;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
 use crate::api::opt::DbResponse;
@@ -45,8 +72,8 @@ const LOG: &str = "surrealdb::api::storage";
 ///
 /// ```
 /// use surrealdb::{Result, Surreal};
-/// use surrealdb::embedded::Db;
-/// use surrealdb::storage::Mem;
+/// use surrealdb::engines::local::Db;
+/// use surrealdb::engines::local::Mem;
 /// use surrealdb::StaticConnect;
 ///
 /// static DB: Surreal<Db> = Surreal::new();
@@ -63,7 +90,7 @@ const LOG: &str = "surrealdb::api::storage";
 ///
 /// ```
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::Mem;
+/// use surrealdb::engines::local::Mem;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
@@ -77,7 +104,7 @@ const LOG: &str = "surrealdb::api::storage";
 /// ```
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::Mem;
+/// use surrealdb::engines::local::Mem;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
@@ -100,7 +127,7 @@ pub struct Mem;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::File;
+/// use surrealdb::engines::local::File;
 ///
 /// let db = Surreal::connect::<File>("temp.db").await?;
 /// # Ok(())
@@ -114,7 +141,7 @@ pub struct Mem;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::File;
+/// use surrealdb::engines::local::File;
 ///
 /// let db = Surreal::connect::<File>(("temp.db", Strict)).await?;
 /// # Ok(())
@@ -135,7 +162,7 @@ pub struct File;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::RocksDb;
+/// use surrealdb::engines::local::RocksDb;
 ///
 /// let db = Surreal::connect::<RocksDb>("temp.db").await?;
 /// # Ok(())
@@ -149,7 +176,7 @@ pub struct File;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::RocksDb;
+/// use surrealdb::engines::local::RocksDb;
 ///
 /// let db = Surreal::connect::<RocksDb>(("temp.db", Strict)).await?;
 /// # Ok(())
@@ -170,7 +197,7 @@ pub struct RocksDb;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::IndxDb;
+/// use surrealdb::engines::local::IndxDb;
 ///
 /// let db = Surreal::connect::<IndxDb>("MyDatabase").await?;
 /// # Ok(())
@@ -184,7 +211,7 @@ pub struct RocksDb;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::IndxDb;
+/// use surrealdb::engines::local::IndxDb;
 ///
 /// let db = Surreal::connect::<IndxDb>(("MyDatabase", Strict)).await?;
 /// # Ok(())
@@ -205,7 +232,7 @@ pub struct IndxDb;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::TiKv;
+/// use surrealdb::engines::local::TiKv;
 ///
 /// let db = Surreal::connect::<TiKv>("localhost:2379").await?;
 /// # Ok(())
@@ -219,7 +246,7 @@ pub struct IndxDb;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::TiKv;
+/// use surrealdb::engines::local::TiKv;
 ///
 /// let db = Surreal::connect::<TiKv>(("localhost:2379", Strict)).await?;
 /// # Ok(())
@@ -241,7 +268,7 @@ pub struct TiKv;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::FDb;
+/// use surrealdb::engines::local::FDb;
 ///
 /// let db = Surreal::connect::<FDb>("fdb.cluster").await?;
 /// # Ok(())
@@ -255,7 +282,7 @@ pub struct TiKv;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::storage::FDb;
+/// use surrealdb::engines::local::FDb;
 ///
 /// let db = Surreal::connect::<FDb>(("fdb.cluster", Strict)).await?;
 /// # Ok(())
@@ -265,6 +292,15 @@ pub struct TiKv;
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb")))]
 #[derive(Debug)]
 pub struct FDb;
+
+/// An embedded database
+///
+/// Authentication methods (`signup`, `signin`, `authentication` and `invalidate`) are not availabe
+/// on `Db`
+#[derive(Debug, Clone)]
+pub struct Db {
+	pub(crate) method: crate::api::method::Method,
+}
 
 fn process(responses: Vec<Response>) -> Result<QueryResponse> {
 	let mut map = HashMap::with_capacity(responses.len());
@@ -333,42 +369,42 @@ async fn router(
 			unreachable!()
 		}
 		Method::Create => {
-			let statement = crate::api::create_statement(&mut params);
+			let statement = create_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Create(statement)]));
 			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
 			let value = take(true, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Update => {
-			let (one, statement) = crate::api::update_statement(&mut params);
+			let (one, statement) = update_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Update(statement)]));
 			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Patch => {
-			let (one, statement) = crate::api::patch_statement(&mut params);
+			let (one, statement) = patch_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Update(statement)]));
 			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Merge => {
-			let (one, statement) = crate::api::merge_statement(&mut params);
+			let (one, statement) = merge_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Update(statement)]));
 			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Select => {
-			let (one, statement) = crate::api::select_statement(&mut params);
+			let (one, statement) = select_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Select(statement)]));
 			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
 			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Delete => {
-			let statement = crate::api::delete_statement(&mut params);
+			let statement = delete_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Delete(statement)]));
 			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
 			let value = take(true, response).await?;

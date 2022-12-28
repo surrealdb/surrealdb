@@ -1,5 +1,5 @@
 use super::LOG;
-use crate::api::embedded::Db;
+use crate::api::engines::local::Db;
 use crate::api::opt::from_value;
 use crate::api::opt::DbResponse;
 use crate::api::opt::Param;

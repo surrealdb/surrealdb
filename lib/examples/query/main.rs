@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
+use surrealdb::engines::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::protocol::Ws;
 use surrealdb::Surreal;
 
 #[derive(Debug, Serialize, Deserialize)]

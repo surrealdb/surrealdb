@@ -19,7 +19,7 @@
 //! use std::borrow::Cow;
 //! use surrealdb::{Result, Surreal};
 //! use surrealdb::opt::auth::Root;
-//! use surrealdb::protocol::Ws;
+//! use surrealdb::engines::remote::ws::Ws;
 //!
 //! #[derive(Serialize, Deserialize)]
 //! struct Name {

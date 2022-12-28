@@ -1,9 +1,9 @@
-use crate::api::embedded::Db;
+use crate::api::engines::local::Db;
+use crate::api::engines::local::TiKv;
 use crate::api::err::Error;
 use crate::api::opt::ServerAddrs;
 use crate::api::opt::Strict;
 use crate::api::opt::ToServerAddrs;
-use crate::api::storage::TiKv;
 use crate::api::Result;
 use std::net::SocketAddr;
 use url::Url;

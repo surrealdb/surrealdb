@@ -5,12 +5,12 @@ use serde::Serialize;
 use serde_json::json;
 use std::borrow::Cow;
 use std::ops::Bound;
+use surrealdb::opt::auth::Database;
 use surrealdb::opt::auth::Jwt;
+use surrealdb::opt::auth::NameSpace;
 use surrealdb::opt::auth::Root;
-use surrealdb::opt::Database;
-use surrealdb::opt::NameSpace;
+use surrealdb::opt::auth::Scope;
 use surrealdb::opt::PatchOp;
-use surrealdb::opt::Scope;
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
 use surrealdb::Surreal;
@@ -50,10 +50,10 @@ struct AuthParams<'a> {
 #[cfg(feature = "protocol-ws")]
 mod ws {
 	use super::*;
-	use surrealdb::net::WsClient;
-	use surrealdb::protocol::Ws;
+	use surrealdb::engines::remote::ws::Client;
+	use surrealdb::engines::remote::ws::Ws;
 
-	async fn new_db() -> Surreal<WsClient> {
+	async fn new_db() -> Surreal<Client> {
 		let db = Surreal::connect::<Ws>("localhost:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
@@ -71,10 +71,10 @@ mod ws {
 #[cfg(feature = "protocol-http")]
 mod http {
 	use super::*;
-	use surrealdb::net::HttpClient;
-	use surrealdb::protocol::Http;
+	use surrealdb::engines::remote::http::Client;
+	use surrealdb::engines::remote::http::Http;
 
-	async fn new_db() -> Surreal<HttpClient> {
+	async fn new_db() -> Surreal<Client> {
 		let db = Surreal::connect::<Http>("localhost:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
@@ -93,8 +93,8 @@ mod http {
 #[cfg(feature = "kv-mem")]
 mod mem {
 	use super::*;
-	use surrealdb::embedded::Db;
-	use surrealdb::storage::Mem;
+	use surrealdb::engines::local::Db;
+	use surrealdb::engines::local::Mem;
 
 	async fn new_db() -> Surreal<Db> {
 		Surreal::connect::<Mem>(()).await.unwrap()
@@ -107,8 +107,8 @@ mod mem {
 #[cfg(feature = "kv-rocksdb")]
 mod file {
 	use super::*;
-	use surrealdb::embedded::Db;
-	use surrealdb::storage::File;
+	use surrealdb::engines::local::Db;
+	use surrealdb::engines::local::File;
 
 	async fn new_db() -> Surreal<Db> {
 		let path = format!("/tmp/{}.db", Ulid::new());
@@ -122,8 +122,8 @@ mod file {
 #[cfg(feature = "kv-tikv")]
 mod tikv {
 	use super::*;
-	use surrealdb::embedded::Db;
-	use surrealdb::storage::TiKv;
+	use surrealdb::engines::local::Db;
+	use surrealdb::engines::local::TiKv;
 
 	async fn new_db() -> Surreal<Db> {
 		Surreal::connect::<TiKv>("localhost:2379").await.unwrap()
@@ -136,8 +136,8 @@ mod tikv {
 #[cfg(feature = "kv-fdb")]
 mod fdb {
 	use super::*;
-	use surrealdb::embedded::Db;
-	use surrealdb::storage::FDb;
+	use surrealdb::engines::local::Db;
+	use surrealdb::engines::local::FDb;
 
 	async fn new_db() -> Surreal<Db> {
 		Surreal::connect::<FDb>("/tmp/fdb.cluster").await.unwrap()
@@ -150,10 +150,10 @@ mod fdb {
 #[cfg(feature = "protocol-http")]
 mod any {
 	use super::*;
-	use surrealdb::any::Any;
+	use surrealdb::engines::any::Any;
 
 	async fn new_db() -> Surreal<Any> {
-		let db = surrealdb::any::connect("http://localhost:8000").await.unwrap();
+		let db = surrealdb::engines::any::connect("http://localhost:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
 			password: ROOT_PASS,

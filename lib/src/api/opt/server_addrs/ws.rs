@@ -1,17 +1,17 @@
+use crate::api::engines::remote::ws::Client;
+use crate::api::engines::remote::ws::Ws;
+use crate::api::engines::remote::ws::Wss;
 use crate::api::err::Error;
-use crate::api::net::WsClient;
 use crate::api::opt::ServerAddrs;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::opt::ToServerAddrs;
-use crate::api::protocol::Ws;
-use crate::api::protocol::Wss;
 use crate::api::Result;
 use std::net::SocketAddr;
 use url::Url;
 
 impl ToServerAddrs<Ws> for &str {
-	type Client = WsClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("ws://{self}");
@@ -25,7 +25,7 @@ impl ToServerAddrs<Ws> for &str {
 }
 
 impl ToServerAddrs<Ws> for SocketAddr {
-	type Client = WsClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("ws://{self}");
@@ -39,7 +39,7 @@ impl ToServerAddrs<Ws> for SocketAddr {
 }
 
 impl ToServerAddrs<Ws> for String {
-	type Client = WsClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("ws://{self}");
@@ -53,7 +53,7 @@ impl ToServerAddrs<Ws> for String {
 }
 
 impl ToServerAddrs<Wss> for &str {
-	type Client = WsClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("wss://{self}");
@@ -67,7 +67,7 @@ impl ToServerAddrs<Wss> for &str {
 }
 
 impl ToServerAddrs<Wss> for SocketAddr {
-	type Client = WsClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("wss://{self}");
@@ -81,7 +81,7 @@ impl ToServerAddrs<Wss> for SocketAddr {
 }
 
 impl ToServerAddrs<Wss> for String {
-	type Client = WsClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("wss://{self}");
@@ -100,7 +100,7 @@ impl<T> ToServerAddrs<Wss> for (T, native_tls::TlsConnector)
 where
 	T: ToServerAddrs<Wss>,
 {
-	type Client = WsClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let (address, config) = self;
@@ -116,7 +116,7 @@ impl<T> ToServerAddrs<Wss> for (T, rustls::ClientConfig)
 where
 	T: ToServerAddrs<Wss>,
 {
-	type Client = WsClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let (address, config) = self;

@@ -1,17 +1,17 @@
+use crate::api::engines::remote::http::Client;
+use crate::api::engines::remote::http::Http;
+use crate::api::engines::remote::http::Https;
 use crate::api::err::Error;
-use crate::api::net::HttpClient;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::opt::ToServerAddrs;
-use crate::api::protocol::Http;
-use crate::api::protocol::Https;
 use crate::api::Result;
 use crate::api::ServerAddrs;
 use std::net::SocketAddr;
 use url::Url;
 
 impl ToServerAddrs<Http> for &str {
-	type Client = HttpClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("http://{self}");
@@ -25,7 +25,7 @@ impl ToServerAddrs<Http> for &str {
 }
 
 impl ToServerAddrs<Http> for SocketAddr {
-	type Client = HttpClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("http://{self}");
@@ -39,7 +39,7 @@ impl ToServerAddrs<Http> for SocketAddr {
 }
 
 impl ToServerAddrs<Http> for String {
-	type Client = HttpClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("http://{self}");
@@ -53,7 +53,7 @@ impl ToServerAddrs<Http> for String {
 }
 
 impl ToServerAddrs<Https> for &str {
-	type Client = HttpClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("https://{self}");
@@ -67,7 +67,7 @@ impl ToServerAddrs<Https> for &str {
 }
 
 impl ToServerAddrs<Https> for SocketAddr {
-	type Client = HttpClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("https://{self}");
@@ -81,7 +81,7 @@ impl ToServerAddrs<Https> for SocketAddr {
 }
 
 impl ToServerAddrs<Https> for String {
-	type Client = HttpClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let url = format!("https://{self}");
@@ -100,7 +100,7 @@ impl<T> ToServerAddrs<Https> for (T, native_tls::TlsConnector)
 where
 	T: ToServerAddrs<Https>,
 {
-	type Client = HttpClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let (address, config) = self;
@@ -116,7 +116,7 @@ impl<T> ToServerAddrs<Https> for (T, rustls::ClientConfig)
 where
 	T: ToServerAddrs<Https>,
 {
-	type Client = HttpClient;
+	type Client = Client;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let (address, config) = self;

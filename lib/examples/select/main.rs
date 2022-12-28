@@ -1,6 +1,6 @@
 use serde::Deserialize;
+use surrealdb::engines::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::protocol::Ws;
 use surrealdb::Surreal;
 
 const ACCOUNT: &str = "account";

@@ -1,9 +1,9 @@
-use crate::api::embedded::Db;
+use crate::api::engines::local::Db;
+use crate::api::engines::local::FDb;
 use crate::api::err::Error;
 use crate::api::opt::ServerAddrs;
 use crate::api::opt::Strict;
 use crate::api::opt::ToServerAddrs;
-use crate::api::storage::FDb;
 use crate::api::Result;
 use std::path::Path;
 use url::Url;

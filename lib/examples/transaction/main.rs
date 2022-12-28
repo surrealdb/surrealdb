@@ -1,5 +1,5 @@
+use surrealdb::engines::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::protocol::Ws;
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
 use surrealdb::Surreal;

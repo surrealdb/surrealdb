@@ -1,9 +1,9 @@
-use crate::api::embedded::Db;
+use crate::api::engines::local::Db;
+use crate::api::engines::local::IndxDb;
 use crate::api::err::Error;
 use crate::api::opt::ServerAddrs;
 use crate::api::opt::Strict;
 use crate::api::opt::ToServerAddrs;
-use crate::api::storage::IndxDb;
 use crate::api::Result;
 use url::Url;
 

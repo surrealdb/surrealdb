@@ -1,12 +1,14 @@
+//! WebSocket engine
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 
+use crate::api::engines::remote::Status;
 use crate::api::err::Error;
 use crate::api::method::Method;
 use crate::api::opt::DbResponse;
-use crate::api::protocol::Status;
 use crate::api::Result;
 use crate::sql::Array;
 use crate::sql::Value;
@@ -18,7 +20,15 @@ use std::time::Duration;
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
 const PING_METHOD: &str = "ping";
-const LOG: &str = "surrealdb::api::protocol::ws";
+const LOG: &str = "surrealdb::engines::remote::ws";
+
+/// The WS scheme used to connect to `ws://` endpoints
+#[derive(Debug)]
+pub struct Ws;
+
+/// The WSS scheme used to connect to `wss://` endpoints
+#[derive(Debug)]
+pub struct Wss;
 
 /// A WebSocket client for communicating with the server via WebSockets
 #[derive(Debug, Clone)]
@@ -116,7 +126,7 @@ impl DbResponse {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Response {
+pub(crate) struct Response {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	id: Option<Value>,
 	#[serde(flatten)]

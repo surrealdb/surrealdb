@@ -2,13 +2,13 @@ mod error;
 mod person;
 
 use actix_web::{App, HttpServer};
-use surrealdb::net::WsClient;
+use surrealdb::engines::remote::ws::Client;
+use surrealdb::engines::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::protocol::Ws;
 use surrealdb::StaticConnect;
 use surrealdb::Surreal;
 
-static DB: Surreal<WsClient> = Surreal::new();
+static DB: Surreal<Client> = Surreal::new();
 
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

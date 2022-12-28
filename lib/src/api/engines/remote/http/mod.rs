@@ -1,15 +1,23 @@
+//! HTTP engine
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod native;
 #[cfg(target_arch = "wasm32")]
 pub(crate) mod wasm;
 
+use crate::api::engines::create_statement;
+use crate::api::engines::delete_statement;
+use crate::api::engines::merge_statement;
+use crate::api::engines::patch_statement;
+use crate::api::engines::remote::Status;
+use crate::api::engines::select_statement;
+use crate::api::engines::update_statement;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
 use crate::api::opt::from_json;
 use crate::api::opt::from_value;
 use crate::api::opt::DbResponse;
 use crate::api::opt::Param;
-use crate::api::protocol::Status;
 use crate::api::Method;
 use crate::api::Result;
 use crate::sql::Array;
@@ -43,7 +51,15 @@ use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
 const SQL_PATH: &str = "sql";
-const LOG: &str = "surrealdb::api::protocol::http";
+const LOG: &str = "surrealdb::engines::remote::http";
+
+/// The HTTP scheme used to connect to `http://` endpoints
+#[derive(Debug)]
+pub struct Http;
+
+/// The HTTPS scheme used to connect to `https://` endpoints
+#[derive(Debug)]
+pub struct Https;
 
 /// An HTTP client for communicating with the server via HTTP
 #[derive(Debug, Clone)]
@@ -370,7 +386,7 @@ async fn router(
 		}
 		Method::Create => {
 			let path = base_url.join(SQL_PATH)?;
-			let statement = crate::api::create_statement(&mut params);
+			let statement = create_statement(&mut params);
 			let request =
 				client.post(path).headers(headers.clone()).auth(&auth).body(statement.to_string());
 			let value = take(true, request).await?;
@@ -378,7 +394,7 @@ async fn router(
 		}
 		Method::Update => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = crate::api::update_statement(&mut params);
+			let (one, statement) = update_statement(&mut params);
 			let request =
 				client.post(path).headers(headers.clone()).auth(&auth).body(statement.to_string());
 			let value = take(one, request).await?;
@@ -386,7 +402,7 @@ async fn router(
 		}
 		Method::Patch => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = crate::api::patch_statement(&mut params);
+			let (one, statement) = patch_statement(&mut params);
 			let request =
 				client.post(path).headers(headers.clone()).auth(&auth).body(statement.to_string());
 			let value = take(one, request).await?;
@@ -394,7 +410,7 @@ async fn router(
 		}
 		Method::Merge => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = crate::api::merge_statement(&mut params);
+			let (one, statement) = merge_statement(&mut params);
 			let request =
 				client.post(path).headers(headers.clone()).auth(&auth).body(statement.to_string());
 			let value = take(one, request).await?;
@@ -402,7 +418,7 @@ async fn router(
 		}
 		Method::Select => {
 			let path = base_url.join(SQL_PATH)?;
-			let (one, statement) = crate::api::select_statement(&mut params);
+			let (one, statement) = select_statement(&mut params);
 			let request =
 				client.post(path).headers(headers.clone()).auth(&auth).body(statement.to_string());
 			let value = take(one, request).await?;
@@ -410,7 +426,7 @@ async fn router(
 		}
 		Method::Delete => {
 			let path = base_url.join(SQL_PATH)?;
-			let statement = crate::api::delete_statement(&mut params);
+			let statement = delete_statement(&mut params);
 			let request =
 				client.post(path).headers(headers.clone()).auth(&auth).body(statement.to_string());
 			let value = take(true, request).await?;
