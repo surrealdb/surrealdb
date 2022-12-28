@@ -13,11 +13,11 @@ use crate::sql::Statement;
 use crate::sql::Statements;
 use crate::sql::Strand;
 use crate::sql::Value;
+use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::mem;
@@ -125,7 +125,7 @@ pub(crate) type QueryResult = Result<Vec<Value>>;
 
 /// `Surreal::query` response type
 #[derive(Debug)]
-pub struct QueryResponse(pub(crate) HashMap<usize, QueryResult>);
+pub struct QueryResponse(pub(crate) IndexMap<usize, QueryResult>);
 
 impl QueryResponse {
 	/// Takes and returns records returned from the database
@@ -196,7 +196,24 @@ impl QueryResponse {
 		index.query_result(self)
 	}
 
-	/// Check query response for errors
+	/// Take all errors from the query response
+	pub fn take_errors(&mut self) -> Vec<crate::Error> {
+		let mut keys = Vec::new();
+		for (key, result) in &self.0 {
+			if result.is_err() {
+				keys.push(*key);
+			}
+		}
+		let mut errors = Vec::with_capacity(keys.len());
+		for key in keys {
+			if let Some(Err(error)) = self.0.remove(&key) {
+				errors.push(error);
+			}
+		}
+		errors
+	}
+
+	/// Check query response for errors and return the first error, if any, or the response
 	pub fn check(mut self) -> Result<Self> {
 		let mut first_error = None;
 		for (key, result) in &self.0 {

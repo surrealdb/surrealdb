@@ -36,7 +36,6 @@ use reqwest::header::CONTENT_TYPE;
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
@@ -146,7 +145,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 			.into());
 		}
 	};
-	let mut map = HashMap::<usize, QueryResult>::with_capacity(responses.len());
+	let mut map = IndexMap::<usize, QueryResult>::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		match response.status {
 			Status::Ok => {

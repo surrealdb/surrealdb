@@ -50,8 +50,8 @@ use crate::sql::Value;
 use crate::Datastore;
 use crate::Response;
 use crate::Session;
+use indexmap::IndexMap;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
@@ -303,7 +303,7 @@ pub struct Db {
 }
 
 fn process(responses: Vec<Response>) -> Result<QueryResponse> {
-	let mut map = HashMap::with_capacity(responses.len());
+	let mut map = IndexMap::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		match response.result {
 			Ok(value) => match value {
