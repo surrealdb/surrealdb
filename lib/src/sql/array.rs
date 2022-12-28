@@ -48,6 +48,12 @@ impl From<Vec<&str>> for Array {
 	}
 }
 
+impl From<Vec<String>> for Array {
+	fn from(v: Vec<String>) -> Self {
+		Self(v.into_iter().map(Value::from).collect())
+	}
+}
+
 impl From<Vec<Number>> for Array {
 	fn from(v: Vec<Number>) -> Self {
 		Self(v.into_iter().map(Value::from).collect())
