@@ -26,8 +26,6 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 
-static DB: OnceCell<Datastore> = OnceCell::new();
-
 impl Connection for Db {
 	fn new(method: Method) -> Self {
 		Self {
@@ -126,25 +124,24 @@ pub(crate) fn router(
 			_ => url.as_str(),
 		};
 
-		let kvs = match DB.get() {
-			Some(kvs) => kvs,
-			None => match Datastore::new(path).await {
-				Ok(kvs) => DB.get_or_init(|| kvs),
-				Err(error) => {
-					let _ = conn_tx.into_send_async(Err(error.into())).await;
-					return;
-				}
-			},
+		let kvs = match Datastore::new(path).await {
+			Ok(kvs) => {
+				let _ = conn_tx.into_send_async(Ok(())).await;
+				kvs
+			}
+			Err(error) => {
+				let _ = conn_tx.into_send_async(Err(error.into())).await;
+				return;
+			}
 		};
-
-		let _ = conn_tx.into_send_async(Ok(())).await;
 
 		let mut session = Session::for_kv();
 		let mut vars = BTreeMap::new();
 		let mut stream = route_rx.into_stream();
 
 		while let Some(Some(route)) = stream.next().await {
-			match super::router(route.request, kvs, &mut session, &mut vars, address.strict).await {
+			match super::router(route.request, &kvs, &mut session, &mut vars, address.strict).await
+			{
 				Ok(value) => {
 					let _ = route.response.into_send_async(Ok(value)).await;
 				}

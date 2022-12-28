@@ -345,8 +345,7 @@ async fn take(one: bool, responses: Vec<Response>) -> Result<Value> {
 
 async fn router(
 	(_, method, param): (i64, Method, Param),
-	#[cfg(target_arch = "wasm32")] kvs: &Datastore,
-	#[cfg(not(target_arch = "wasm32"))] kvs: &'static Datastore,
+	kvs: &Datastore,
 	session: &mut Session,
 	vars: &mut BTreeMap<String, Value>,
 	strict: bool,
@@ -426,14 +425,9 @@ async fn router(
 		Method::Export | Method::Import => unreachable!(),
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Export => {
-			let (tx, rx) = channel::new(1);
+			let (tx, rx) = channel::new::<Vec<u8>>(1);
 			let ns = session.ns.clone().unwrap_or_default();
 			let db = session.db.clone().unwrap_or_default();
-			tokio::spawn(async move {
-				if let Err(error) = kvs.export(ns, db, tx).await {
-					error!(target: LOG, "{error}");
-				}
-			});
 			let (mut writer, mut reader) = io::duplex(10_240);
 			tokio::spawn(async move {
 				while let Ok(value) = rx.recv().await {
@@ -442,6 +436,9 @@ async fn router(
 					}
 				}
 			});
+			if let Err(error) = kvs.export(ns, db, tx).await {
+				error!(target: LOG, "{error}");
+			}
 			let path = param.file.expect("file to export into");
 			let mut file = match OpenOptions::new()
 				.write(true)
