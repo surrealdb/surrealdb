@@ -47,7 +47,6 @@ pub mod storage;
 
 pub(super) mod err;
 
-pub use any::connect;
 pub use method::query::QueryResponse;
 
 use crate::api::err::Error;

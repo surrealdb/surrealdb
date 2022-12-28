@@ -23,7 +23,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> surrealdb::Result<()> {
-//!     let db = surrealdb::connect("ws://127.0.0.1:8000").await?;
+//!     let db = surrealdb::any::connect("ws://127.0.0.1:8000").await?;
 //!
 //!     // Signin as a namespace, database, or root user
 //!     db.signin(Root {
@@ -266,31 +266,31 @@ impl StaticConnect for Surreal<Any> {
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// // Connect to a local endpoint
-/// let db = surrealdb::connect("ws://localhost:8000").await?;
+/// let db = surrealdb::any::connect("ws://localhost:8000").await?;
 ///
 /// // Connect to a remote endpoint
-/// let db = surrealdb::connect("wss://cloud.surrealdb.com").await?;
+/// let db = surrealdb::any::connect("wss://cloud.surrealdb.com").await?;
 ///
 /// // Connect using HTTP
-/// let db = surrealdb::connect("http://localhost:8000").await?;
+/// let db = surrealdb::any::connect("http://localhost:8000").await?;
 ///
 /// // Connect using HTTPS
-/// let db = surrealdb::connect("https://cloud.surrealdb.com").await?;
+/// let db = surrealdb::any::connect("https://cloud.surrealdb.com").await?;
 ///
 /// // Instantiate an in-memory instance
-/// let db = surrealdb::connect("mem://").await?;
+/// let db = surrealdb::any::connect("mem://").await?;
 ///
 /// // Instantiate an file-backed instance
-/// let db = surrealdb::connect("file://temp.db").await?;
+/// let db = surrealdb::any::connect("file://temp.db").await?;
 ///
 /// // Instantiate an IndxDB-backed instance
-/// let db = surrealdb::connect("indxdb://MyDatabase").await?;
+/// let db = surrealdb::any::connect("indxdb://MyDatabase").await?;
 ///
 /// // Instantiate a TiKV-backed instance
-/// let db = surrealdb::connect("tikv://127.0.0.1:2379").await?;
+/// let db = surrealdb::any::connect("tikv://127.0.0.1:2379").await?;
 ///
 /// // Instantiate a FoundationDB-backed instance
-/// let db = surrealdb::connect("fdb://fdb.cluster").await?;
+/// let db = surrealdb::any::connect("fdb://fdb.cluster").await?;
 /// # Ok(())
 /// # }
 /// ```

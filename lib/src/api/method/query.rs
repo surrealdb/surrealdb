@@ -71,7 +71,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// let response = db.query("CREATE user SET name = $name")
 	///     .bind(("name", "John Doe"))
 	///     .await?;
@@ -91,7 +91,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// let response = db.query("CREATE user SET name = $name")
 	///     .bind(User {
 	///         name: "John Doe",
@@ -148,7 +148,7 @@ impl QueryResponse {
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// let mut response = db
 	///     // Get `john`'s details
@@ -220,7 +220,7 @@ impl QueryResponse {
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// let response = db.query("SELECT * FROM user:john; SELECT * FROM user;").await?;
 	///
 	/// assert_eq!(response.num_statements(), 2);

@@ -312,7 +312,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// db.use_ns("test").use_db("test").await?;
 	/// # Ok(())
 	/// # }
@@ -339,7 +339,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
@@ -379,7 +379,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
@@ -424,7 +424,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Sign in as root
 	/// db.signin(Root {
@@ -485,7 +485,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Sign in as root
 	/// db.signin(Root {
@@ -520,7 +520,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Sign in as root
 	/// db.signin(Root {
@@ -563,7 +563,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
@@ -604,7 +604,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// db.invalidate().await?;
 	/// # Ok(())
 	/// # }
@@ -626,7 +626,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// # let token = String::new();
 	/// db.authenticate(token).await?;
 	/// # Ok(())
@@ -648,7 +648,7 @@ where
 	/// # struct Person;
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Run queries
 	/// let mut result = db
@@ -684,7 +684,7 @@ where
 	/// #
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Select all records from a table
 	/// let people: Vec<Person> = db.select("person").await?;
@@ -731,7 +731,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Create a record with a random ID
 	/// let person: Person = db.create("person").await?;
@@ -784,7 +784,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Update all records in a table
 	/// let people: Vec<Person> = db.update("person").await?;
@@ -831,7 +831,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Update all records in a table
 	/// let people: Vec<Person> = db.update("person")
@@ -882,7 +882,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Update all records in a table
 	/// let people: Vec<Person> = db.update("person")
@@ -915,7 +915,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// #
 	/// // Delete all records from a table
 	/// db.delete("person").await?;
@@ -942,7 +942,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// let version = db.version().await?;
 	/// # Ok(())
 	/// # }
@@ -960,7 +960,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// db.health().await?;
 	/// # Ok(())
 	/// # }
@@ -998,7 +998,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// db.export("backup.sql").await?;
 	/// # Ok(())
 	/// # }
@@ -1024,7 +1024,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::connect("mem://").await?;
+	/// # let db = surrealdb::any::connect("mem://").await?;
 	/// db.import("backup.sql").await?;
 	/// # Ok(())
 	/// # }

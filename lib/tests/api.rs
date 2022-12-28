@@ -153,7 +153,7 @@ mod any {
 	use surrealdb::any::Any;
 
 	async fn new_db() -> Surreal<Any> {
-		let db = surrealdb::connect("http://localhost:8000").await.unwrap();
+		let db = surrealdb::any::connect("http://localhost:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
 			password: ROOT_PASS,
