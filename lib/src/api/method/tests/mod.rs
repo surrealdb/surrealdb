@@ -6,12 +6,12 @@ mod server;
 mod types;
 
 use crate::api::method::tests::types::AuthParams;
-use crate::api::param::Database;
-use crate::api::param::Jwt;
-use crate::api::param::NameSpace;
-use crate::api::param::PatchOp;
-use crate::api::param::Root;
-use crate::api::param::Scope;
+use crate::api::opt::Database;
+use crate::api::opt::Jwt;
+use crate::api::opt::NameSpace;
+use crate::api::opt::PatchOp;
+use crate::api::opt::Root;
+use crate::api::opt::Scope;
 use crate::api::QueryResponse;
 use crate::api::StaticConnect;
 use crate::api::Surreal;

@@ -1,20 +1,20 @@
 use crate::api::err::Error;
-use crate::api::net::WsClient;
-use crate::api::param::ServerAddrs;
+use crate::api::net::HttpClient;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
-use crate::api::param::Tls;
-use crate::api::param::ToServerAddrs;
-use crate::api::protocol::Ws;
-use crate::api::protocol::Wss;
+use crate::api::opt::Tls;
+use crate::api::opt::ToServerAddrs;
+use crate::api::protocol::Http;
+use crate::api::protocol::Https;
 use crate::api::Result;
+use crate::api::ServerAddrs;
 use std::net::SocketAddr;
 use url::Url;
 
-impl ToServerAddrs<Ws> for &str {
-	type Client = WsClient;
+impl ToServerAddrs<Http> for &str {
+	type Client = HttpClient;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		let url = format!("ws://{self}");
+		let url = format!("http://{self}");
 		Ok(ServerAddrs {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
@@ -24,11 +24,11 @@ impl ToServerAddrs<Ws> for &str {
 	}
 }
 
-impl ToServerAddrs<Ws> for SocketAddr {
-	type Client = WsClient;
+impl ToServerAddrs<Http> for SocketAddr {
+	type Client = HttpClient;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		let url = format!("ws://{self}");
+		let url = format!("http://{self}");
 		Ok(ServerAddrs {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
@@ -38,11 +38,11 @@ impl ToServerAddrs<Ws> for SocketAddr {
 	}
 }
 
-impl ToServerAddrs<Ws> for String {
-	type Client = WsClient;
+impl ToServerAddrs<Http> for String {
+	type Client = HttpClient;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		let url = format!("ws://{self}");
+		let url = format!("http://{self}");
 		Ok(ServerAddrs {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
@@ -52,11 +52,11 @@ impl ToServerAddrs<Ws> for String {
 	}
 }
 
-impl ToServerAddrs<Wss> for &str {
-	type Client = WsClient;
+impl ToServerAddrs<Https> for &str {
+	type Client = HttpClient;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		let url = format!("wss://{self}");
+		let url = format!("https://{self}");
 		Ok(ServerAddrs {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
@@ -66,11 +66,11 @@ impl ToServerAddrs<Wss> for &str {
 	}
 }
 
-impl ToServerAddrs<Wss> for SocketAddr {
-	type Client = WsClient;
+impl ToServerAddrs<Https> for SocketAddr {
+	type Client = HttpClient;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		let url = format!("wss://{self}");
+		let url = format!("https://{self}");
 		Ok(ServerAddrs {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
@@ -80,11 +80,11 @@ impl ToServerAddrs<Wss> for SocketAddr {
 	}
 }
 
-impl ToServerAddrs<Wss> for String {
-	type Client = WsClient;
+impl ToServerAddrs<Https> for String {
+	type Client = HttpClient;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		let url = format!("wss://{self}");
+		let url = format!("https://{self}");
 		Ok(ServerAddrs {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
@@ -96,11 +96,11 @@ impl ToServerAddrs<Wss> for String {
 
 #[cfg(feature = "native-tls")]
 #[cfg_attr(docsrs, doc(cfg(feature = "native-tls")))]
-impl<T> ToServerAddrs<Wss> for (T, native_tls::TlsConnector)
+impl<T> ToServerAddrs<Https> for (T, native_tls::TlsConnector)
 where
-	T: ToServerAddrs<Wss>,
+	T: ToServerAddrs<Https>,
 {
-	type Client = WsClient;
+	type Client = HttpClient;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let (address, config) = self;
@@ -112,11 +112,11 @@ where
 
 #[cfg(feature = "rustls")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rustls")))]
-impl<T> ToServerAddrs<Wss> for (T, rustls::ClientConfig)
+impl<T> ToServerAddrs<Https> for (T, rustls::ClientConfig)
 where
-	T: ToServerAddrs<Wss>,
+	T: ToServerAddrs<Https>,
 {
-	type Client = WsClient;
+	type Client = HttpClient;
 
 	fn to_server_addrs(self) -> Result<ServerAddrs> {
 		let (address, config) = self;

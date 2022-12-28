@@ -1,8 +1,8 @@
 use crate::api::embedded::Db;
-use crate::api::param::from_value;
-use crate::api::param::DbResponse;
-use crate::api::param::Param;
-use crate::api::param::ServerAddrs;
+use crate::api::opt::from_value;
+use crate::api::opt::DbResponse;
+use crate::api::opt::Param;
+use crate::api::opt::ServerAddrs;
 use crate::api::Connection;
 use crate::api::ExtraFeatures;
 use crate::api::Method;

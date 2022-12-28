@@ -22,7 +22,7 @@ pub mod embedded;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "protocol-http", feature = "protocol-ws"))))]
 pub mod net;
-pub mod param;
+pub mod opt;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "protocol-http", feature = "protocol-ws"))))]
 pub mod protocol;
@@ -50,10 +50,10 @@ pub(super) mod err;
 pub use method::query::QueryResponse;
 
 use crate::api::err::Error;
-use crate::api::param::DbResponse;
-use crate::api::param::Param;
-use crate::api::param::ServerAddrs;
-use crate::api::param::ToServerAddrs;
+use crate::api::opt::DbResponse;
+use crate::api::opt::Param;
+use crate::api::opt::ServerAddrs;
+use crate::api::opt::ToServerAddrs;
 use crate::sql::statements::CreateStatement;
 use crate::sql::statements::DeleteStatement;
 use crate::sql::statements::SelectStatement;
@@ -105,7 +105,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn send<'r>(
 		&'r mut self,
 		router: &'r Router<Self>,
-		param: param::Param,
+		param: opt::Param,
 	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>>;
 
 	/// Receive responses for all methods except `query`
@@ -126,7 +126,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn execute<'r, R>(
 		&'r mut self,
 		router: &'r Router<Self>,
-		param: param::Param,
+		param: opt::Param,
 	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + 'r>>
 	where
 		R: DeserializeOwned,
@@ -141,7 +141,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn execute_query<'r>(
 		&'r mut self,
 		router: &'r Router<Self>,
-		param: param::Param,
+		param: opt::Param,
 	) -> Pin<Box<dyn Future<Output = Result<QueryResponse>> + Send + Sync + 'r>> {
 		Box::pin(async move {
 			let rx = self.send(router, param).await?;

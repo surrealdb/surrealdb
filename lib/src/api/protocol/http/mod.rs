@@ -5,10 +5,10 @@ pub(crate) mod wasm;
 
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
-use crate::api::param::from_json;
-use crate::api::param::from_value;
-use crate::api::param::DbResponse;
-use crate::api::param::Param;
+use crate::api::opt::from_json;
+use crate::api::opt::from_value;
+use crate::api::opt::DbResponse;
+use crate::api::opt::Param;
 use crate::api::protocol::Status;
 use crate::api::Method;
 use crate::api::Result;

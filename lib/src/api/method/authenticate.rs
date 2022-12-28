@@ -1,6 +1,6 @@
 use crate::api::method::Method;
-use crate::api::param::Jwt;
-use crate::api::param::Param;
+use crate::api::opt::Jwt;
+use crate::api::opt::Param;
 use crate::api::Connection;
 use crate::api::Error;
 use crate::api::ExtraFeatures;

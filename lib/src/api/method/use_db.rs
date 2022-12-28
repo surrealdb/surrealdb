@@ -1,7 +1,7 @@
 use crate::api::method::Method;
 use std::future::Future;
 use std::pin::Pin;
-use crate::api::param::Param;
+use crate::api::opt::Param;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::Router;

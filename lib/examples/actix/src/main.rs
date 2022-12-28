@@ -4,7 +4,7 @@ mod person;
 use actix_web::{App, HttpServer};
 use surrealdb::any::Any;
 use surrealdb::any::StaticConnect;
-use surrealdb::param::Root;
+use surrealdb::opt::Root;
 use surrealdb::Surreal;
 
 static DB: Surreal<Any> = Surreal::new();

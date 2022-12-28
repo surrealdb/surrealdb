@@ -1,6 +1,6 @@
 use crate::api::err::Error;
+use crate::api::opt::from_value;
 use crate::api::Result;
-use crate::param::from_value;
 use crate::sql;
 use crate::sql::statements::*;
 use crate::sql::Object;

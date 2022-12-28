@@ -6,7 +6,7 @@
 //! use serde::{Serialize, Deserialize};
 //! use serde_json::json;
 //! use std::borrow::Cow;
-//! use surrealdb::param::Root;
+//! use surrealdb::opt::Root;
 //!
 //! #[derive(Serialize, Deserialize)]
 //! struct Name {
@@ -87,7 +87,7 @@ mod native;
 mod wasm;
 
 use crate::api::err::Error;
-use crate::api::param::ServerAddrs;
+use crate::api::opt::ServerAddrs;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-tikv",
@@ -95,9 +95,9 @@ use crate::api::param::ServerAddrs;
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 ))]
-use crate::api::param::Strict;
+use crate::api::opt::Strict;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
-use crate::api::param::Tls;
+use crate::api::opt::Tls;
 use crate::api::Connect;
 use crate::api::Method;
 use crate::api::Result;

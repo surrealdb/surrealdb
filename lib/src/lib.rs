@@ -18,7 +18,7 @@
 //! use serde_json::json;
 //! use std::borrow::Cow;
 //! use surrealdb::{Result, Surreal};
-//! use surrealdb::param::Root;
+//! use surrealdb::opt::Root;
 //! use surrealdb::protocol::Ws;
 //!
 //! #[derive(Serialize, Deserialize)]

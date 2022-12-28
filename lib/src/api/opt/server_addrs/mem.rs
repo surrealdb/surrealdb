@@ -1,7 +1,7 @@
 use crate::api::embedded::Db;
-use crate::api::param::ServerAddrs;
-use crate::api::param::Strict;
-use crate::api::param::ToServerAddrs;
+use crate::api::opt::ServerAddrs;
+use crate::api::opt::Strict;
+use crate::api::opt::ToServerAddrs;
 use crate::api::storage::Mem;
 use crate::api::Result;
 use url::Url;

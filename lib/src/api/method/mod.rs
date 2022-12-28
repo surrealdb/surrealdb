@@ -62,9 +62,9 @@ pub use use_ns::UseNs;
 pub use use_ns::UseNsDb;
 pub use version::Version;
 
-use crate::api::param;
-use crate::api::param::from_json;
-use crate::api::param::ToServerAddrs;
+use crate::api::opt;
+use crate::api::opt::from_json;
+use crate::api::opt::ToServerAddrs;
 use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::ExtractRouter;
@@ -187,7 +187,7 @@ where
 	/// use serde::{Serialize, Deserialize};
 	/// use std::borrow::Cow;
 	/// use surrealdb::{Result, Surreal, StaticConnect};
-	/// use surrealdb::param::Root;
+	/// use surrealdb::opt::Root;
 	/// use surrealdb::protocol::Ws;
 	/// use surrealdb::net::WsClient;
 	///
@@ -230,7 +230,7 @@ where
 	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::any::{Any, StaticConnect};
-	/// use surrealdb::param::Root;
+	/// use surrealdb::opt::Root;
 	///
 	/// // Creates a new static instance of the client
 	/// static DB: Surreal<Any> = Surreal::new();
@@ -413,8 +413,8 @@ where
 	///
 	/// ```no_run
 	/// use serde::Serialize;
-	/// use surrealdb::param::Root;
-	/// use surrealdb::param::Scope;
+	/// use surrealdb::opt::Root;
+	/// use surrealdb::opt::Scope;
 	///
 	/// #[derive(Debug, Serialize)]
 	/// struct AuthParams<'a> {
@@ -458,10 +458,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R>(
-		&self,
-		credentials: impl param::Credentials<param::Signup, R>,
-	) -> Signup<C, R> {
+	pub fn signup<R>(&self, credentials: impl opt::Credentials<opt::Signup, R>) -> Signup<C, R> {
 		Signup {
 			router: self.router.extract(),
 			credentials: Ok(from_json(json!(credentials))),
@@ -480,8 +477,8 @@ where
 	/// Namespace signin
 	///
 	/// ```no_run
-	/// use surrealdb::param::Root;
-	/// use surrealdb::param::NameSpace;
+	/// use surrealdb::opt::Root;
+	/// use surrealdb::opt::NameSpace;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -515,8 +512,8 @@ where
 	/// Database signin
 	///
 	/// ```no_run
-	/// use surrealdb::param::Root;
-	/// use surrealdb::param::Database;
+	/// use surrealdb::opt::Root;
+	/// use surrealdb::opt::Database;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -552,8 +549,8 @@ where
 	///
 	/// ```no_run
 	/// use serde::Serialize;
-	/// use surrealdb::param::Root;
-	/// use surrealdb::param::Scope;
+	/// use surrealdb::opt::Root;
+	/// use surrealdb::opt::Scope;
 	///
 	/// #[derive(Debug, Serialize)]
 	/// struct AuthParams<'a> {
@@ -582,10 +579,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signin<R>(
-		&self,
-		credentials: impl param::Credentials<param::Signin, R>,
-	) -> Signin<C, R> {
+	pub fn signin<R>(&self, credentials: impl opt::Credentials<opt::Signin, R>) -> Signin<C, R> {
 		Signin {
 			router: self.router.extract(),
 			credentials: Ok(from_json(json!(credentials))),
@@ -632,7 +626,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn authenticate(&self, token: impl Into<param::Jwt>) -> Authenticate<C> {
+	pub fn authenticate(&self, token: impl Into<opt::Jwt>) -> Authenticate<C> {
 		Authenticate {
 			router: self.router.extract(),
 			token: token.into(),
@@ -666,7 +660,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn query(&self, query: impl param::Query) -> Query<C> {
+	pub fn query(&self, query: impl opt::Query) -> Query<C> {
 		Query {
 			router: self.router.extract(),
 			query: vec![query.try_into_query()],
@@ -698,7 +692,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<R>(&self, resource: impl param::Resource<R>) -> Select<C, R> {
+	pub fn select<R>(&self, resource: impl opt::Resource<R>) -> Select<C, R> {
 		Select {
 			router: self.router.extract(),
 			resource: resource.into_db_resource(),
@@ -750,7 +744,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl param::Resource<R>) -> Create<C, R> {
+	pub fn create<R>(&self, resource: impl opt::Resource<R>) -> Create<C, R> {
 		Create {
 			router: self.router.extract(),
 			resource: resource.into_db_resource(),
@@ -858,7 +852,7 @@ where
 	///
 	/// ```no_run
 	/// use serde::Serialize;
-	/// use surrealdb::param::PatchOp;
+	/// use surrealdb::opt::PatchOp;
 	/// use time::OffsetDateTime;
 	///
 	/// # #[derive(serde::Deserialize)]
@@ -899,7 +893,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn update<R>(&self, resource: impl param::Resource<R>) -> Update<C, R> {
+	pub fn update<R>(&self, resource: impl opt::Resource<R>) -> Update<C, R> {
 		Update {
 			router: self.router.extract(),
 			resource: resource.into_db_resource(),
@@ -926,7 +920,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn delete<R>(&self, resource: impl param::Resource<R>) -> Delete<C, R> {
+	pub fn delete<R>(&self, resource: impl opt::Resource<R>) -> Delete<C, R> {
 		Delete {
 			router: self.router.extract(),
 			resource: resource.into_db_resource(),

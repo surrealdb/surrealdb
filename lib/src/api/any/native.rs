@@ -1,11 +1,11 @@
 use crate::api;
 use crate::api::any::Any;
 use crate::api::err::Error;
-use crate::api::param::from_value;
-use crate::api::param::ServerAddrs;
+use crate::api::opt::from_value;
+use crate::api::opt::ServerAddrs;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
-use crate::api::param::Tls;
+use crate::api::opt::Tls;
 use crate::api::Connection;
 use crate::api::DbResponse;
 use crate::api::ExtraFeatures;

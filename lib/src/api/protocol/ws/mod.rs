@@ -5,7 +5,7 @@ pub(crate) mod wasm;
 
 use crate::api::err::Error;
 use crate::api::method::Method;
-use crate::api::param::DbResponse;
+use crate::api::opt::DbResponse;
 use crate::api::protocol::Status;
 use crate::api::Result;
 use crate::sql::Array;

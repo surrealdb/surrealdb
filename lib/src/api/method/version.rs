@@ -1,6 +1,6 @@
 use crate::api::err::Error;
 use crate::api::method::Method;
-use crate::api::param::Param;
+use crate::api::opt::Param;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::Router;

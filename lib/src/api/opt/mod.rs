@@ -72,7 +72,7 @@ impl PatchOp {
 	///
 	/// ```
 	/// # use serde_json::json;
-	/// # use surrealdb::param::PatchOp;
+	/// # use surrealdb::opt::PatchOp;
 	/// PatchOp::add("/biscuits/1", json!({ "name": "Ginger Nut" }))
 	/// # ;
 	/// ```
@@ -93,7 +93,7 @@ impl PatchOp {
 	/// # Examples
 	///
 	/// ```
-	/// # use surrealdb::param::PatchOp;
+	/// # use surrealdb::opt::PatchOp;
 	/// PatchOp::remove("/biscuits")
 	/// # ;
 	/// ```
@@ -102,7 +102,7 @@ impl PatchOp {
 	/// (or just removes the “0” key if `biscuits` is an object)
 	///
 	/// ```
-	/// # use surrealdb::param::PatchOp;
+	/// # use surrealdb::opt::PatchOp;
 	/// PatchOp::remove("/biscuits/0")
 	/// # ;
 	/// ```
@@ -121,7 +121,7 @@ impl PatchOp {
 	/// # Examples
 	///
 	/// ```
-	/// # use surrealdb::param::PatchOp;
+	/// # use surrealdb::opt::PatchOp;
 	/// PatchOp::replace("/biscuits/0/name", "Chocolate Digestive")
 	/// # ;
 	/// ```

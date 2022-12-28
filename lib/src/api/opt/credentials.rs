@@ -1,4 +1,4 @@
-use crate::api::param::Jwt;
+use crate::api::opt::Jwt;
 use serde::Serialize;
 
 /// A signup action

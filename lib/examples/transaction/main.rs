@@ -1,4 +1,4 @@
-use surrealdb::param::Root;
+use surrealdb::opt::Root;
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
 

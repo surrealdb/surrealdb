@@ -1,8 +1,8 @@
 use crate::api::err::Error;
 use crate::api::method::Method;
-use crate::api::param;
-use crate::api::param::from_json;
-use crate::api::param::Param;
+use crate::api::opt;
+use crate::api::opt::from_json;
+use crate::api::opt::Param;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::api::Router;
@@ -57,7 +57,7 @@ where
 	C: Connection,
 {
 	/// Chains a query onto an existing query
-	pub fn query(mut self, query: impl param::Query) -> Self {
+	pub fn query(mut self, query: impl opt::Query) -> Self {
 		self.query.push(query.try_into_query());
 		self
 	}
@@ -189,7 +189,7 @@ impl QueryResponse {
 	///
 	/// The indices are stable. Taking one index doesn't affect the numbering
 	/// of the other indices, so you can take them in any order you see fit.
-	pub fn take<R>(&mut self, index: impl param::QueryResult<R>) -> Result<R>
+	pub fn take<R>(&mut self, index: impl opt::QueryResult<R>) -> Result<R>
 	where
 		R: DeserializeOwned,
 	{

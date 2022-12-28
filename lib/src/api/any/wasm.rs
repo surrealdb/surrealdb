@@ -1,8 +1,8 @@
 use crate::api;
 use crate::api::any::Any;
 use crate::api::err::Error;
-use crate::api::param::from_value;
-use crate::api::param::ServerAddrs;
+use crate::api::opt::from_value;
+use crate::api::opt::ServerAddrs;
 use crate::api::Connection;
 use crate::api::DbResponse;
 #[allow(unused_imports)] // used by the `ws` and `http` protocols

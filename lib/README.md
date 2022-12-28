@@ -43,7 +43,7 @@ This library enables simple and advanced querying of an embedded or remote datab
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::borrow::Cow;
-use surrealdb::param::Root;
+use surrealdb::opt::Root;
 
 #[derive(Serialize, Deserialize)]
 struct Name {

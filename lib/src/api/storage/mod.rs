@@ -7,8 +7,8 @@ pub(crate) mod wasm;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
-use crate::api::param::DbResponse;
-use crate::api::param::Param;
+use crate::api::opt::DbResponse;
+use crate::api::opt::Param;
 use crate::api::Method;
 use crate::api::QueryResponse;
 use crate::api::Result;
@@ -75,7 +75,7 @@ const LOG: &str = "surrealdb::api::storage";
 /// Instantiating an in-memory strict instance
 ///
 /// ```
-/// use surrealdb::param::Strict;
+/// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
 /// use surrealdb::storage::Mem;
 ///
@@ -112,7 +112,7 @@ pub struct Mem;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::param::Strict;
+/// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
 /// use surrealdb::storage::File;
 ///
@@ -147,7 +147,7 @@ pub struct File;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::param::Strict;
+/// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
 /// use surrealdb::storage::RocksDb;
 ///
@@ -182,7 +182,7 @@ pub struct RocksDb;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::param::Strict;
+/// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
 /// use surrealdb::storage::IndxDb;
 ///
@@ -217,7 +217,7 @@ pub struct IndxDb;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::param::Strict;
+/// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
 /// use surrealdb::storage::TiKv;
 ///
@@ -239,7 +239,7 @@ pub struct TiKv;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::param::Strict;
+/// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
 /// use surrealdb::storage::FDb;
 ///
@@ -253,7 +253,7 @@ pub struct TiKv;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::param::Strict;
+/// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
 /// use surrealdb::storage::FDb;
 ///
