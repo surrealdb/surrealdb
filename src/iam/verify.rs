@@ -11,10 +11,10 @@ use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
 use std::sync::Arc;
+use surrealdb::dbs::Auth;
+use surrealdb::dbs::Session;
 use surrealdb::sql::Algorithm;
 use surrealdb::sql::Value;
-use surrealdb::Auth;
-use surrealdb::Session;
 
 fn config(algo: Algorithm, code: String) -> Result<(DecodingKey, Validation), Error> {
 	match algo {

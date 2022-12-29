@@ -8,8 +8,8 @@ use crate::net::session;
 use bytes::Bytes;
 use serde::Deserialize;
 use std::str;
+use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
-use surrealdb::Session;
 use warp::path;
 use warp::Filter;
 

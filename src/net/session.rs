@@ -3,7 +3,7 @@ use crate::iam::verify::{basic, token};
 use crate::iam::BASIC;
 use crate::iam::TOKEN;
 use std::net::SocketAddr;
-use surrealdb::Session;
+use surrealdb::dbs::Session;
 use warp::Filter;
 
 pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + Clone {

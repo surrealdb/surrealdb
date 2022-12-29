@@ -1,9 +1,9 @@
 mod parse;
 use parse::Parse;
+use surrealdb::dbs::Session;
+use surrealdb::err::Error;
+use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
-use surrealdb::Datastore;
-use surrealdb::Error;
-use surrealdb::Session;
 
 #[tokio::test]
 async fn field_definition_value_assert_failure() -> Result<(), Error> {

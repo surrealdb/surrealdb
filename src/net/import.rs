@@ -5,7 +5,7 @@ use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::session;
 use bytes::Bytes;
-use surrealdb::Session;
+use surrealdb::dbs::Session;
 use warp::http;
 use warp::Filter;
 

@@ -105,61 +105,61 @@ extern crate log;
 #[macro_use]
 mod mac;
 
+mod api;
 mod cnf;
 mod ctx;
-mod dbs;
 mod doc;
-mod err;
 mod exe;
 mod fnc;
 mod key;
-mod kvs;
 
-pub(crate) mod api;
-
-// ENV
-#[doc(hidden)] // For internal use only
-pub mod env;
-
-// SQL
 pub mod sql;
 
-// Exports
-pub use api::err::Error as ApiError;
-pub use api::*;
-pub use err::Error as DbError;
+#[doc(hidden)]
+pub mod dbs;
+#[doc(hidden)]
+pub mod env;
+#[doc(hidden)]
+pub mod err;
+#[doc(hidden)]
+pub mod kvs;
 
-#[doc(hidden)] // For internal use only
-pub use dbs::Auth;
-#[doc(hidden)] // For internal use only
-pub use dbs::Response;
-#[doc(hidden)] // For internal use only
-pub use dbs::Session;
-#[doc(hidden)] // For internal use only
-pub use kvs::Datastore;
-#[doc(hidden)] // For internal use only
-pub use kvs::Key;
-#[doc(hidden)] // For internal use only
-pub use kvs::Transaction;
-#[doc(hidden)] // For internal use only
-pub use kvs::Val;
+#[doc(inline)]
+pub use api::engines;
+#[doc(inline)]
+pub use api::method;
+#[doc(inline)]
+pub use api::opt;
+#[doc(inline)]
+pub use api::Connect;
+#[doc(inline)]
+pub use api::QueryResponse;
+#[doc(inline)]
+pub use api::Result;
+#[doc(inline)]
+pub use api::Surreal;
 
-// Re-exports
-#[doc(hidden)] // For internal use only
+#[doc(hidden)]
+/// Channels for receiving a SurrealQL database export
 pub mod channel {
 	pub use channel::bounded as new;
 	pub use channel::Receiver;
 	pub use channel::Sender;
 }
 
-/// An error originating from the SurrealDB client library.
+/// Different error types for embedded and remote databases
+pub mod error {
+	pub use crate::api::err::Error as Api;
+	pub use crate::err::Error as Db;
+}
+
+/// An error originating from the SurrealDB client library
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-	/// API error
-	#[error("API error: {0}")]
-	Api(#[from] ApiError),
-
-	/// Embedded database error
+	/// An error with an embedded storage engine
 	#[error("Database error: {0}")]
-	Db(#[from] DbError),
+	Db(#[from] crate::error::Db),
+	/// An error with a remote database instance
+	#[error("API error: {0}")]
+	Api(#[from] crate::error::Api),
 }

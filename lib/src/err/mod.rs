@@ -1,5 +1,3 @@
-//! This module holds the error type for embedded databases
-
 use crate::sql::idiom::Idiom;
 use msgpack::encode::Error as SerdeError;
 use serde::Serialize;

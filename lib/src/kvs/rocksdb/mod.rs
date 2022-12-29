@@ -308,8 +308,8 @@ mod tests {
 		let mut transaction = get_transaction().await;
 		transaction.put("uh", "oh").await.unwrap();
 
-		async fn get_transaction() -> crate::Transaction {
-			let datastore = crate::Datastore::new("rocksdb:/tmp/rocks.db").await.unwrap();
+		async fn get_transaction() -> crate::kvs::Transaction {
+			let datastore = crate::kvs::Datastore::new("rocksdb:/tmp/rocks.db").await.unwrap();
 			datastore.transaction(true, false).await.unwrap()
 		}
 	}

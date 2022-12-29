@@ -25,7 +25,8 @@ macro_rules! get_cfg {
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```no_run,no_test
+/// # use surrealdb::sql;
 /// let query = sql!("LET $name = 'Tobie'; SELECT * FROM user WHERE name = $name;");
 /// ```
 #[macro_export]

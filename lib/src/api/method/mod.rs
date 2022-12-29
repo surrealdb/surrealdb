@@ -1,4 +1,4 @@
-//! SurrealDB method types
+//! Methods to use when interacting with a SurrealDB instance
 
 pub(crate) mod query;
 

@@ -32,7 +32,7 @@ const LOG: &str = "surrealdb::api";
 /// Connection trait implemented by supported protocols
 pub trait Connection: conn::Connection {}
 
-/// Connect future created by `Surreal::new`
+/// The future returned when creating a new SurrealDB instance
 #[derive(Debug)]
 pub struct Connect<'r, C: Connection, Response> {
 	router: Option<&'r OnceCell<Arc<Router<C>>>>,
@@ -128,7 +128,7 @@ pub(crate) enum ExtraFeatures {
 	Backup,
 }
 
-/// `SurrealDB` instance or client
+/// A database client instance for embedded or remote databases
 #[derive(Debug)]
 pub struct Surreal<C: Connection> {
 	router: OnceCell<Arc<Router<C>>>,

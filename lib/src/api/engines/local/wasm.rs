@@ -11,7 +11,7 @@ use crate::api::opt::ServerAddrs;
 use crate::api::QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::Datastore;
+use crate::kvs::Datastore;
 use crate::Session;
 use flume::Receiver;
 use flume::Sender;

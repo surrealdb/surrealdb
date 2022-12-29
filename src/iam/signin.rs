@@ -8,10 +8,10 @@ use argon2::Argon2;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
+use surrealdb::dbs::Auth;
+use surrealdb::dbs::Session;
 use surrealdb::sql::Object;
 use surrealdb::sql::Value;
-use surrealdb::Auth;
-use surrealdb::Session;
 
 pub async fn signin(session: &mut Session, vars: Object) -> Result<Value, Error> {
 	// Parse the specified variables

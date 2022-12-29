@@ -1,5 +1,3 @@
-//! This module holds the error type for remote databases
-
 use crate::api::QueryResponse;
 use crate::sql::Array;
 use crate::sql::Edges;

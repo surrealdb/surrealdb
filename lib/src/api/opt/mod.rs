@@ -1,4 +1,4 @@
-//! A collection of options and types for use in API functions
+//! The different options and types for use in API functions
 
 pub mod auth;
 

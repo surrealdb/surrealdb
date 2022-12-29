@@ -7,7 +7,7 @@ use crate::net::params::Params;
 use crate::net::session;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use surrealdb::Session;
+use surrealdb::dbs::Session;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 

@@ -14,7 +14,6 @@ use crate::sql::statements::insert::InsertStatement;
 use crate::sql::statements::relate::RelateStatement;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::statements::update::UpdateStatement;
-use crate::sql::version::Version;
 use std::fmt;
 
 #[derive(Clone, Debug)]
@@ -161,14 +160,6 @@ impl<'a> Statement<'a> {
 	pub fn limit(&self) -> Option<&Limit> {
 		match self {
 			Statement::Select(v) => v.limit.as_ref(),
-			_ => None,
-		}
-	}
-	/// Returns any VERSION clause if specified
-	#[inline]
-	pub fn version(&self) -> Option<&Version> {
-		match self {
-			Statement::Select(v) => v.version.as_ref(),
 			_ => None,
 		}
 	}
