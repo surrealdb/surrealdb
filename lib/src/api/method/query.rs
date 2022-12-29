@@ -18,6 +18,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::mem;
@@ -202,8 +203,8 @@ impl Response {
 
 	/// Take all errors from the query response
 	///
-	/// The errors are returned in the order the database sent them. Afterwards the response is
-	/// left with only statements that did not produce any errors.
+	/// The errors are keyed by the corresponding index of the statement that failed.
+	/// Afterwards the response is left with only statements that did not produce any errors.
 	///
 	/// # Examples
 	///
@@ -218,17 +219,17 @@ impl Response {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take_errors(&mut self) -> Vec<crate::Error> {
+	pub fn take_errors(&mut self) -> HashMap<usize, crate::Error> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.0 {
 			if result.is_err() {
 				keys.push(*key);
 			}
 		}
-		let mut errors = Vec::with_capacity(keys.len());
+		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
 			if let Some(Err(error)) = self.0.remove(&key) {
-				errors.push(error);
+				errors.insert(key, error);
 			}
 		}
 		errors
@@ -475,17 +476,17 @@ mod tests {
 			Err(Error::AuthNotSupported.into()),
 		];
 		let mut response = Response(to_map(response));
-		let mut errors = response.take_errors();
+		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		let crate::Error::Api(Error::AuthNotSupported) = errors.pop().unwrap() else {
-            panic!("last error is not `AuthNotSupported`");
+		let crate::Error::Api(Error::AuthNotSupported) = errors.get(&10).unwrap() else {
+            panic!("index `10` is not `AuthNotSupported`");
         };
-		let crate::Error::Api(Error::BackupsNotSupported) = errors.pop().unwrap() else {
-            panic!("second error is not `BackupsNotSupported`");
+		let crate::Error::Api(Error::BackupsNotSupported) = errors.get(&7).unwrap() else {
+            panic!("index `7` is not `BackupsNotSupported`");
         };
-		let crate::Error::Api(Error::ConnectionUninitialised) = errors.pop().unwrap() else {
-            panic!("first error is not `ConnectionUninitialised`");
+		let crate::Error::Api(Error::ConnectionUninitialised) = errors.get(&3).unwrap() else {
+            panic!("index `3` is not `ConnectionUninitialised`");
         };
 		let Some(value): Option<i32> = response.take(2).unwrap() else {
             panic!("statement not found");
