@@ -62,7 +62,7 @@ use tokio::io::AsyncReadExt;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
-const LOG: &str = "surrealdb::api::storage";
+const LOG: &str = "surrealdb::api::engines::local";
 
 /// In-memory database
 ///
