@@ -219,35 +219,30 @@ where
 }
 
 /// A dynamic connection that supports any engine and allows you to pick at runtime
-///
-/// # Examples
-///
-/// ```no_run
-/// use surrealdb::Surreal;
-/// use surrealdb::engines::any::{Any, StaticConnect};
-///
-/// static DB: Surreal<Any> = Surreal::new();
-///
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// DB.connect("ws://localhost:8000").await?;
-/// # Ok(())
-/// # }
-/// ```
 #[derive(Debug)]
 pub struct Any {
 	id: i64,
 	method: Method,
 }
 
-/// Exposes a `connect` method for use with `Surreal::new`
-pub trait StaticConnect {
+impl Surreal<Any> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
-	fn connect(&self, address: impl ToServerAddrs) -> Connect<Any, ()>;
-}
-
-impl StaticConnect for Surreal<Any> {
-	fn connect(&self, address: impl ToServerAddrs) -> Connect<Any, ()> {
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use surrealdb::Surreal;
+	/// use surrealdb::engines::any::Any;
+	///
+	/// static DB: Surreal<Any> = Surreal::init();
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// DB.connect("ws://localhost:8000").await?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn connect(&'static self, address: impl ToServerAddrs) -> Connect<Any, ()> {
 		Connect {
 			router: Some(&self.router),
 			address: address.to_server_addrs(),

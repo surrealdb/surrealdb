@@ -13,7 +13,6 @@ use crate::api::opt::auth::Root;
 use crate::api::opt::auth::Scope;
 use crate::api::opt::PatchOp;
 use crate::api::QueryResponse;
-use crate::api::StaticConnect;
 use crate::api::Surreal;
 use crate::sql::statements::BeginStatement;
 use crate::sql::statements::CommitStatement;
@@ -24,7 +23,7 @@ use std::ops::Bound;
 use types::User;
 use types::USER;
 
-static DB: Surreal<Client> = Surreal::new();
+static DB: Surreal<Client> = Surreal::init();
 
 #[tokio::test]
 async fn api() {
@@ -169,7 +168,7 @@ fn send_and_sync(_: impl Send + Sync) {}
 #[test]
 fn futures_are_send_and_sync() {
 	send_and_sync(async {
-		let db = Surreal::connect::<Test>(()).await.unwrap();
+		let db = Surreal::new::<Test>(()).await.unwrap();
 		db.signin(Root {
 			username: "root",
 			password: "root",

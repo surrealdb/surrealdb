@@ -54,7 +54,7 @@ mod ws {
 	use surrealdb::engines::remote::ws::Ws;
 
 	async fn new_db() -> Surreal<Client> {
-		let db = Surreal::connect::<Ws>("127.0.0.1:8000").await.unwrap();
+		let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
 			password: ROOT_PASS,
@@ -75,7 +75,7 @@ mod http {
 	use surrealdb::engines::remote::http::Http;
 
 	async fn new_db() -> Surreal<Client> {
-		let db = Surreal::connect::<Http>("127.0.0.1:8000").await.unwrap();
+		let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
 			password: ROOT_PASS,
@@ -97,7 +97,7 @@ mod mem {
 	use surrealdb::engines::local::Mem;
 
 	async fn new_db() -> Surreal<Db> {
-		Surreal::connect::<Mem>(()).await.unwrap()
+		Surreal::new::<Mem>(()).await.unwrap()
 	}
 
 	include!("api/mod.rs");
@@ -112,7 +112,7 @@ mod file {
 
 	async fn new_db() -> Surreal<Db> {
 		let path = format!("/tmp/{}.db", Ulid::new());
-		Surreal::connect::<File>(path.as_str()).await.unwrap()
+		Surreal::new::<File>(path.as_str()).await.unwrap()
 	}
 
 	include!("api/mod.rs");
@@ -126,7 +126,7 @@ mod tikv {
 	use surrealdb::engines::local::TiKv;
 
 	async fn new_db() -> Surreal<Db> {
-		Surreal::connect::<TiKv>("127.0.0.1:2379").await.unwrap()
+		Surreal::new::<TiKv>("127.0.0.1:2379").await.unwrap()
 	}
 
 	include!("api/mod.rs");
@@ -140,7 +140,7 @@ mod fdb {
 	use surrealdb::engines::local::FDb;
 
 	async fn new_db() -> Surreal<Db> {
-		Surreal::connect::<FDb>("/tmp/fdb.cluster").await.unwrap()
+		Surreal::new::<FDb>("/tmp/fdb.cluster").await.unwrap()
 	}
 
 	include!("api/mod.rs");

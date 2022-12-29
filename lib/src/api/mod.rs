@@ -11,7 +11,6 @@ use crate::api::conn::DbResponse;
 use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt::ServerAddrs;
-use crate::api::opt::ToServerAddrs;
 use once_cell::sync::OnceCell;
 use semver::BuildMetadata;
 use semver::VersionReq;
@@ -31,7 +30,7 @@ const LOG: &str = "surrealdb::api";
 /// Connection trait implemented by supported protocols
 pub trait Connection: conn::Connection {}
 
-/// Connect future created by `Surreal::connect`
+/// Connect future created by `Surreal::new`
 #[derive(Debug)]
 pub struct Connect<'r, C: Connection, Response> {
 	router: Option<&'r OnceCell<Arc<Router<C>>>>,
@@ -65,7 +64,7 @@ where
 	/// use surrealdb::engines::remote::ws::Ws;
 	/// use surrealdb::Surreal;
 	///
-	/// let db = Surreal::connect::<Ws>("localhost:8000")
+	/// let db = Surreal::new::<Ws>("localhost:8000")
 	///     .with_capacity(100_000)
 	///     .await?;
 	/// # Ok(())
@@ -171,15 +170,6 @@ where
 			router: self.router.clone(),
 		}
 	}
-}
-
-/// Exposes a `connect` method for use with `Surreal::new`
-pub trait StaticConnect<C>
-where
-	C: Connection,
-{
-	/// Connects to a specific database endpoint, saving the connection on the static client
-	fn connect<P>(&self, address: impl ToServerAddrs<P, Client = C>) -> Connect<C, ()>;
 }
 
 trait ExtractRouter<C>

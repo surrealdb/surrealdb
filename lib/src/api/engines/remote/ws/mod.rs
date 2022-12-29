@@ -9,11 +9,15 @@ use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
 use crate::api::engines::remote::Status;
 use crate::api::err::Error;
+use crate::api::Connect;
 use crate::api::Result;
+use crate::api::Surreal;
+use crate::opt::ToServerAddrs;
 use crate::sql::Array;
 use crate::sql::Value;
 use crate::QueryResponse;
 use serde::Deserialize;
+use std::marker::PhantomData;
 use std::mem;
 use std::time::Duration;
 
@@ -35,6 +39,37 @@ pub struct Wss;
 pub struct Client {
 	pub(crate) id: i64,
 	method: Method,
+}
+
+impl Surreal<Client> {
+	/// Connects to a specific database endpoint, saving the connection on the static client
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use surrealdb::Surreal;
+	/// use surrealdb::engines::remote::ws::Client;
+	///
+	/// static DB: Surreal<Client> = Surreal::init();
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// DB.connect("ws://localhost:8000").await?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn connect<P>(
+		&'static self,
+		address: impl ToServerAddrs<P, Client = Client>,
+	) -> Connect<Client, ()> {
+		Connect {
+			router: Some(&self.router),
+			address: address.to_server_addrs(),
+			capacity: 0,
+			client: PhantomData,
+			response_type: PhantomData,
+		}
+	}
 }
 
 #[derive(Clone, Debug, Deserialize)]

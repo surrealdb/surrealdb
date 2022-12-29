@@ -14,7 +14,7 @@ struct User {
 
 #[tokio::main]
 async fn main() -> surrealdb::Result<()> {
-	let db = Surreal::connect::<Ws>("localhost:8000").await?;
+	let db = Surreal::new::<Ws>("localhost:8000").await?;
 
 	db.signin(Root {
 		username: "root",

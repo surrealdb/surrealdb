@@ -37,10 +37,13 @@ use crate::api::engines::select_statement;
 use crate::api::engines::update_statement;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
+use crate::api::Connect;
 use crate::api::QueryResponse;
 use crate::api::Result;
+use crate::api::Surreal;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::channel;
+use crate::opt::ToServerAddrs;
 use crate::sql::Array;
 use crate::sql::Query;
 use crate::sql::Statement;
@@ -52,6 +55,7 @@ use crate::Response;
 use crate::Session;
 use indexmap::IndexMap;
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
@@ -74,9 +78,8 @@ const LOG: &str = "surrealdb::api::engines::local";
 /// use surrealdb::{Result, Surreal};
 /// use surrealdb::engines::local::Db;
 /// use surrealdb::engines::local::Mem;
-/// use surrealdb::StaticConnect;
 ///
-/// static DB: Surreal<Db> = Surreal::new();
+/// static DB: Surreal<Db> = Surreal::init();
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<()> {
@@ -94,7 +97,7 @@ const LOG: &str = "surrealdb::api::engines::local";
 ///
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// let db = Surreal::connect::<Mem>(()).await?;
+/// let db = Surreal::new::<Mem>(()).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -108,7 +111,7 @@ const LOG: &str = "surrealdb::api::engines::local";
 ///
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// let db = Surreal::connect::<Mem>(Strict).await?;
+/// let db = Surreal::new::<Mem>(Strict).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -129,7 +132,7 @@ pub struct Mem;
 /// use surrealdb::Surreal;
 /// use surrealdb::engines::local::File;
 ///
-/// let db = Surreal::connect::<File>("temp.db").await?;
+/// let db = Surreal::new::<File>("temp.db").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -143,7 +146,7 @@ pub struct Mem;
 /// use surrealdb::Surreal;
 /// use surrealdb::engines::local::File;
 ///
-/// let db = Surreal::connect::<File>(("temp.db", Strict)).await?;
+/// let db = Surreal::new::<File>(("temp.db", Strict)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -164,7 +167,7 @@ pub struct File;
 /// use surrealdb::Surreal;
 /// use surrealdb::engines::local::RocksDb;
 ///
-/// let db = Surreal::connect::<RocksDb>("temp.db").await?;
+/// let db = Surreal::new::<RocksDb>("temp.db").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -178,7 +181,7 @@ pub struct File;
 /// use surrealdb::Surreal;
 /// use surrealdb::engines::local::RocksDb;
 ///
-/// let db = Surreal::connect::<RocksDb>(("temp.db", Strict)).await?;
+/// let db = Surreal::new::<RocksDb>(("temp.db", Strict)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -199,7 +202,7 @@ pub struct RocksDb;
 /// use surrealdb::Surreal;
 /// use surrealdb::engines::local::IndxDb;
 ///
-/// let db = Surreal::connect::<IndxDb>("MyDatabase").await?;
+/// let db = Surreal::new::<IndxDb>("MyDatabase").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -213,7 +216,7 @@ pub struct RocksDb;
 /// use surrealdb::Surreal;
 /// use surrealdb::engines::local::IndxDb;
 ///
-/// let db = Surreal::connect::<IndxDb>(("MyDatabase", Strict)).await?;
+/// let db = Surreal::new::<IndxDb>(("MyDatabase", Strict)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -234,7 +237,7 @@ pub struct IndxDb;
 /// use surrealdb::Surreal;
 /// use surrealdb::engines::local::TiKv;
 ///
-/// let db = Surreal::connect::<TiKv>("localhost:2379").await?;
+/// let db = Surreal::new::<TiKv>("localhost:2379").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -248,7 +251,7 @@ pub struct IndxDb;
 /// use surrealdb::Surreal;
 /// use surrealdb::engines::local::TiKv;
 ///
-/// let db = Surreal::connect::<TiKv>(("localhost:2379", Strict)).await?;
+/// let db = Surreal::new::<TiKv>(("localhost:2379", Strict)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -270,7 +273,7 @@ pub struct TiKv;
 /// use surrealdb::Surreal;
 /// use surrealdb::engines::local::FDb;
 ///
-/// let db = Surreal::connect::<FDb>("fdb.cluster").await?;
+/// let db = Surreal::new::<FDb>("fdb.cluster").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -284,7 +287,7 @@ pub struct TiKv;
 /// use surrealdb::Surreal;
 /// use surrealdb::engines::local::FDb;
 ///
-/// let db = Surreal::connect::<FDb>(("fdb.cluster", Strict)).await?;
+/// let db = Surreal::new::<FDb>(("fdb.cluster", Strict)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -300,6 +303,37 @@ pub struct FDb;
 #[derive(Debug, Clone)]
 pub struct Db {
 	pub(crate) method: crate::api::conn::Method,
+}
+
+impl Surreal<Db> {
+	/// Connects to a specific database endpoint, saving the connection on the static client
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use surrealdb::Surreal;
+	/// use surrealdb::engines::local::Db;
+	///
+	/// static DB: Surreal<Db> = Surreal::init();
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// DB.connect("ws://localhost:8000").await?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn connect<P>(
+		&'static self,
+		address: impl ToServerAddrs<P, Client = Db>,
+	) -> Connect<Db, ()> {
+		Connect {
+			router: Some(&self.router),
+			address: address.to_server_addrs(),
+			capacity: 0,
+			client: PhantomData,
+			response_type: PhantomData,
+		}
+	}
 }
 
 fn process(responses: Vec<Response>) -> Result<QueryResponse> {

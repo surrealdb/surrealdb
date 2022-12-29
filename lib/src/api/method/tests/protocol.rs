@@ -8,6 +8,7 @@ use crate::api::conn::Router;
 use crate::api::opt::from_value;
 use crate::api::opt::ServerAddrs;
 use crate::api::opt::ToServerAddrs;
+use crate::api::Connect;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
@@ -42,6 +43,21 @@ impl ToServerAddrs<Test> for () {
 #[derive(Debug, Clone)]
 pub struct Client {
 	method: Method,
+}
+
+impl Surreal<Client> {
+	pub fn connect<P>(
+		&'static self,
+		address: impl ToServerAddrs<P, Client = Client>,
+	) -> Connect<Client, ()> {
+		Connect {
+			router: Some(&self.router),
+			address: address.to_server_addrs(),
+			capacity: 0,
+			client: PhantomData,
+			response_type: PhantomData,
+		}
+	}
 }
 
 impl crate::api::Connection for Client {}

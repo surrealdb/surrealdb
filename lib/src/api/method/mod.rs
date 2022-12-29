@@ -72,7 +72,6 @@ use crate::api::opt::ToServerAddrs;
 use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::ExtractRouter;
-use crate::api::StaticConnect;
 use crate::api::Surreal;
 use crate::sql::Uuid;
 use once_cell::sync::OnceCell;
@@ -109,21 +108,6 @@ impl Method {
 	}
 }
 
-impl<C> StaticConnect<C> for Surreal<C>
-where
-	C: Connection,
-{
-	fn connect<P>(&self, address: impl ToServerAddrs<P, Client = C>) -> Connect<C, ()> {
-		Connect {
-			router: Some(&self.router),
-			address: address.to_server_addrs(),
-			capacity: 0,
-			client: PhantomData,
-			response_type: PhantomData,
-		}
-	}
-}
-
 impl<C> Surreal<C>
 where
 	C: Connection,
@@ -142,13 +126,13 @@ where
 	/// ```no_run
 	/// use serde::{Serialize, Deserialize};
 	/// use std::borrow::Cow;
-	/// use surrealdb::{Result, Surreal, StaticConnect};
+	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::engines::remote::ws::Ws;
 	/// use surrealdb::engines::remote::ws::Client;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Surreal<Client> = Surreal::new();
+	/// static DB: Surreal<Client> = Surreal::init();
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -156,7 +140,7 @@ where
 	/// }
 	///
 	/// #[tokio::main]
-	/// async fn main() -> Result<()> {
+	/// async fn main() -> surrealdb::Result<()> {
 	///     // Connect to the database
 	///     DB.connect::<Ws>("localhost:8000").await?;
 	///
@@ -166,7 +150,7 @@ where
 	///         password: "root",
 	///     }).await?;
 	///
-	///     // Select a namespace + database
+	///     // Select a namespace/database
 	///     DB.use_ns("namespace").use_db("database").await?;
 	///
 	///     // Create or update a specific record
@@ -185,11 +169,11 @@ where
 	/// use serde::{Serialize, Deserialize};
 	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
-	/// use surrealdb::engines::any::{Any, StaticConnect};
+	/// use surrealdb::engines::any::Any;
 	/// use surrealdb::opt::auth::Root;
 	///
 	/// // Creates a new static instance of the client
-	/// static DB: Surreal<Any> = Surreal::new();
+	/// static DB: Surreal<Any> = Surreal::init();
 	///
 	/// #[derive(Serialize, Deserialize)]
 	/// struct Person {
@@ -207,7 +191,7 @@ where
 	///         password: "root",
 	///     }).await?;
 	///
-	///     // Select a namespace + database
+	///     // Select a namespace/database
 	///     DB.use_ns("namespace").use_db("database").await?;
 	///
 	///     // Create or update a specific record
@@ -219,7 +203,7 @@ where
 	///     Ok(())
 	/// }
 	/// ```
-	pub const fn new() -> Self {
+	pub const fn init() -> Self {
 		Self {
 			router: OnceCell::new(),
 		}
@@ -236,15 +220,15 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// // Connect to a local endpoint
-	/// let db = Surreal::connect::<Ws>("localhost:8000").await?;
+	/// let db = Surreal::new::<Ws>("localhost:8000").await?;
 	///
 	/// // Connect to a remote endpoint
-	/// let db = Surreal::connect::<Wss>("cloud.surrealdb.com").await?;
+	/// let db = Surreal::new::<Wss>("cloud.surrealdb.com").await?;
 	/// #
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn connect<P>(address: impl ToServerAddrs<P, Client = C>) -> Connect<'static, C, Self> {
+	pub fn new<P>(address: impl ToServerAddrs<P, Client = C>) -> Connect<'static, C, Self> {
 		Connect {
 			router: None,
 			address: address.to_server_addrs(),

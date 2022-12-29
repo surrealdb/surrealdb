@@ -19,7 +19,10 @@ use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
 use crate::api::opt::from_json;
 use crate::api::opt::from_value;
+use crate::api::Connect;
 use crate::api::Result;
+use crate::api::Surreal;
+use crate::opt::ToServerAddrs;
 use crate::sql::Array;
 use crate::sql::Strand;
 use crate::sql::Value;
@@ -36,6 +39,7 @@ use reqwest::header::CONTENT_TYPE;
 use reqwest::RequestBuilder;
 use serde::Deserialize;
 use serde::Serialize;
+use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
@@ -64,6 +68,37 @@ pub struct Https;
 #[derive(Debug, Clone)]
 pub struct Client {
 	method: Method,
+}
+
+impl Surreal<Client> {
+	/// Connects to a specific database endpoint, saving the connection on the static client
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// use surrealdb::Surreal;
+	/// use surrealdb::engines::remote::http::Client;
+	///
+	/// static DB: Surreal<Client> = Surreal::init();
+	///
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// DB.connect("ws://localhost:8000").await?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn connect<P>(
+		&'static self,
+		address: impl ToServerAddrs<P, Client = Client>,
+	) -> Connect<Client, ()> {
+		Connect {
+			router: Some(&self.router),
+			address: address.to_server_addrs(),
+			capacity: 0,
+			client: PhantomData,
+			response_type: PhantomData,
+		}
+	}
 }
 
 enum Auth {

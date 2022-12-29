@@ -5,10 +5,9 @@ use actix_web::{App, HttpServer};
 use surrealdb::engines::remote::ws::Client;
 use surrealdb::engines::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
-use surrealdb::StaticConnect;
 use surrealdb::Surreal;
 
-static DB: Surreal<Client> = Surreal::new();
+static DB: Surreal<Client> = Surreal::init();
 
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -36,7 +36,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<()> {
-//!     let db = Surreal::connect::<Ws>("localhost:8000").await?;
+//!     let db = Surreal::new::<Ws>("localhost:8000").await?;
 //!
 //!     // Signin as a namespace, database, or root user
 //!     db.signin(Root {
