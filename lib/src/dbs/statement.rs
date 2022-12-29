@@ -177,6 +177,7 @@ impl<'a> Statement<'a> {
 	}
 	/// Returns any RETURN clause if specified
 	#[inline]
+	#[allow(dead_code)]
 	pub fn parallel(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.parallel,

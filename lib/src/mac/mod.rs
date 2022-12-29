@@ -25,16 +25,16 @@ macro_rules! get_cfg {
 ///
 /// # Examples
 ///
-/// ```no_run,no_test
+/// ```no_run
 /// # use surrealdb::sql;
-/// let query = sql!("LET $name = 'Tobie'; SELECT * FROM user WHERE name = $name;");
+/// let query = sql!(LET $name = "Tobie"; SELECT * FROM user WHERE name = $name;);
 /// ```
 #[macro_export]
 macro_rules! sql {
-	($expression:expr) => {
-		match $crate::sql::parse($expression) {
+	($($query:tt)*) => {
+		match $crate::sql::parse(stringify!($($query)*)) {
 			Ok(v) => v,
-			Err(e) => compile_error!(e.to_string()),
+			Err(e) => { return Err(e.into()); },
 		}
 	};
 }
