@@ -27,7 +27,13 @@ macro_rules! get_cfg {
 ///
 /// ```no_run
 /// # use surrealdb::sql;
-/// let query = sql!(LET $name = "Tobie"; SELECT * FROM user WHERE name = $name;);
+/// # fn main() -> surrealdb::Result<()> {
+/// let query = sql! {
+///     LET $name = "Tobie";
+///     SELECT * FROM user WHERE name = $name;
+/// };
+/// # Ok(())
+/// # }
 /// ```
 #[macro_export]
 macro_rules! sql {
