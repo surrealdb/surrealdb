@@ -4,9 +4,9 @@ use crate::api::conn::Router;
 use crate::api::method::Content;
 use crate::api::method::Merge;
 use crate::api::method::Patch;
-use crate::api::opt::DbResource;
 use crate::api::opt::PatchOp;
 use crate::api::opt::Range;
+use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::sql::Id;
@@ -21,7 +21,7 @@ use std::pin::Pin;
 #[derive(Debug)]
 pub struct Update<'r, C: Connection, R> {
 	pub(super) router: Result<&'r Router<C>>,
-	pub(super) resource: Result<DbResource>,
+	pub(super) resource: Result<Resource>,
 	pub(super) range: Option<Range<Id>>,
 	pub(super) response_type: PhantomData<R>,
 }

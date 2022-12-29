@@ -2,8 +2,8 @@ use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::conn::Router;
 use crate::api::opt::from_json;
-use crate::api::opt::DbResource;
 use crate::api::opt::Range;
+use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::sql::Id;
@@ -19,7 +19,7 @@ use std::pin::Pin;
 #[derive(Debug)]
 pub struct Merge<'r, C: Connection, D, R> {
 	pub(super) router: Result<&'r Router<C>>,
-	pub(super) resource: Result<DbResource>,
+	pub(super) resource: Result<Resource>,
 	pub(super) range: Option<Range<Id>>,
 	pub(super) content: D,
 	pub(super) response_type: PhantomData<R>,

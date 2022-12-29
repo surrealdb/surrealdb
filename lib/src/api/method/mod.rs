@@ -643,10 +643,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn select<R>(&self, resource: impl opt::Resource<R>) -> Select<C, R> {
+	pub fn select<R>(&self, resource: impl opt::IntoResource<R>) -> Select<C, R> {
 		Select {
 			router: self.router.extract(),
-			resource: resource.into_db_resource(),
+			resource: resource.into_resource(),
 			range: None,
 			response_type: PhantomData,
 		}
@@ -698,10 +698,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn create<R>(&self, resource: impl opt::Resource<R>) -> Create<C, R> {
+	pub fn create<R>(&self, resource: impl opt::IntoResource<R>) -> Create<C, R> {
 		Create {
 			router: self.router.extract(),
-			resource: resource.into_db_resource(),
+			resource: resource.into_resource(),
 			response_type: PhantomData,
 		}
 	}
@@ -856,10 +856,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn update<R>(&self, resource: impl opt::Resource<R>) -> Update<C, R> {
+	pub fn update<R>(&self, resource: impl opt::IntoResource<R>) -> Update<C, R> {
 		Update {
 			router: self.router.extract(),
-			resource: resource.into_db_resource(),
+			resource: resource.into_resource(),
 			range: None,
 			response_type: PhantomData,
 		}
@@ -886,10 +886,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn delete<R>(&self, resource: impl opt::Resource<R>) -> Delete<C, R> {
+	pub fn delete<R>(&self, resource: impl opt::IntoResource<R>) -> Delete<C, R> {
 		Delete {
 			router: self.router.extract(),
-			resource: resource.into_db_resource(),
+			resource: resource.into_resource(),
 			range: None,
 			response_type: PhantomData,
 		}

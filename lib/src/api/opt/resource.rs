@@ -16,7 +16,7 @@ use std::ops::Bound;
 #[derive(Serialize)]
 #[serde(untagged)]
 #[derive(Debug)]
-pub enum DbResource {
+pub enum Resource {
 	/// Table name
 	Table(Table),
 	/// Record ID
@@ -29,80 +29,80 @@ pub enum DbResource {
 	Edges(Edges),
 }
 
-impl DbResource {
+impl Resource {
 	pub(crate) fn with_range(self, range: Range<Id>) -> Result<Value> {
 		match self {
-			DbResource::Table(Table(table)) => Ok(sql::Range {
+			Resource::Table(Table(table)) => Ok(sql::Range {
 				tb: table,
 				beg: range.start,
 				end: range.end,
 			}
 			.into()),
-			DbResource::RecordId(record_id) => Err(Error::RangeOnRecordId(record_id).into()),
-			DbResource::Object(object) => Err(Error::RangeOnObject(object).into()),
-			DbResource::Array(array) => Err(Error::RangeOnArray(array).into()),
-			DbResource::Edges(edges) => Err(Error::RangeOnEdges(edges).into()),
+			Resource::RecordId(record_id) => Err(Error::RangeOnRecordId(record_id).into()),
+			Resource::Object(object) => Err(Error::RangeOnObject(object).into()),
+			Resource::Array(array) => Err(Error::RangeOnArray(array).into()),
+			Resource::Edges(edges) => Err(Error::RangeOnEdges(edges).into()),
 		}
 	}
 }
 
-impl From<DbResource> for Value {
-	fn from(resource: DbResource) -> Self {
+impl From<Resource> for Value {
+	fn from(resource: Resource) -> Self {
 		match resource {
-			DbResource::Table(resource) => resource.into(),
-			DbResource::RecordId(resource) => resource.into(),
-			DbResource::Object(resource) => resource.into(),
-			DbResource::Array(resource) => resource.into(),
-			DbResource::Edges(resource) => resource.into(),
+			Resource::Table(resource) => resource.into(),
+			Resource::RecordId(resource) => resource.into(),
+			Resource::Object(resource) => resource.into(),
+			Resource::Array(resource) => resource.into(),
+			Resource::Edges(resource) => resource.into(),
 		}
 	}
 }
 
 /// A trait for converting inputs into database resources
-pub trait Resource<Response>: Sized {
+pub trait IntoResource<Response>: Sized {
 	/// Converts an input into a database resource
-	fn into_db_resource(self) -> Result<DbResource>;
+	fn into_resource(self) -> Result<Resource>;
 }
 
-impl<R> Resource<Option<R>> for Object {
-	fn into_db_resource(self) -> Result<DbResource> {
-		Ok(DbResource::Object(self))
+impl<R> IntoResource<Option<R>> for Object {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(Resource::Object(self))
 	}
 }
 
-impl<R> Resource<Option<R>> for Thing {
-	fn into_db_resource(self) -> Result<DbResource> {
-		Ok(DbResource::RecordId(self))
+impl<R> IntoResource<Option<R>> for Thing {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(Resource::RecordId(self))
 	}
 }
 
-impl<R, T, I> Resource<Option<R>> for (T, I)
+impl<R, T, I> IntoResource<Option<R>> for (T, I)
 where
 	T: Into<String>,
 	I: Into<Id>,
 {
-	fn into_db_resource(self) -> Result<DbResource> {
+	fn into_resource(self) -> Result<Resource> {
 		let (table, id) = self;
 		let record_id = (table.into(), id.into());
-		Ok(DbResource::RecordId(record_id.into()))
+		Ok(Resource::RecordId(record_id.into()))
 	}
 }
 
-impl<R> Resource<Vec<R>> for Array {
-	fn into_db_resource(self) -> Result<DbResource> {
-		Ok(DbResource::Array(self))
+impl<R> IntoResource<Vec<R>> for Array {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(Resource::Array(self))
 	}
 }
 
-impl<R> Resource<Vec<R>> for Edges {
-	fn into_db_resource(self) -> Result<DbResource> {
-		Ok(DbResource::Edges(self))
+impl<R> IntoResource<Vec<R>> for Edges {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(Resource::Edges(self))
 	}
 }
 
-impl<R> Resource<Vec<R>> for Table {
-	fn into_db_resource(self) -> Result<DbResource> {
-		Ok(DbResource::Table(self))
+impl<R> IntoResource<Vec<R>> for Table {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(Resource::Table(self))
 	}
 }
 
@@ -121,24 +121,24 @@ fn blacklist_colon(input: &str) -> Result<()> {
 	}
 }
 
-impl<R> Resource<Vec<R>> for &str {
-	fn into_db_resource(self) -> Result<DbResource> {
+impl<R> IntoResource<Vec<R>> for &str {
+	fn into_resource(self) -> Result<Resource> {
 		blacklist_colon(self)?;
-		Ok(DbResource::Table(Table(self.to_owned())))
+		Ok(Resource::Table(Table(self.to_owned())))
 	}
 }
 
-impl<R> Resource<Vec<R>> for &String {
-	fn into_db_resource(self) -> Result<DbResource> {
+impl<R> IntoResource<Vec<R>> for &String {
+	fn into_resource(self) -> Result<Resource> {
 		blacklist_colon(self)?;
-		Ok(DbResource::Table(Table(self.to_owned())))
+		Ok(Resource::Table(Table(self.to_owned())))
 	}
 }
 
-impl<R> Resource<Vec<R>> for String {
-	fn into_db_resource(self) -> Result<DbResource> {
+impl<R> IntoResource<Vec<R>> for String {
+	fn into_resource(self) -> Result<Resource> {
 		blacklist_colon(&self)?;
-		Ok(DbResource::Table(Table(self)))
+		Ok(Resource::Table(Table(self)))
 	}
 }
 
