@@ -74,7 +74,7 @@ async fn main() -> surrealdb::Result<()> {
     .await?;
 
     // Select a specific namespace and database
-    db.use_ns("test").use_db("test").await?;
+    db.use_ns("namespace").use_db("database").await?;
 
     // Create a new person with a random ID
     let tobie: Person = db

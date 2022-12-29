@@ -1,4 +1,4 @@
-//! Dynamic support for any protocol or storage engine
+//! Dynamic support for any engine
 //!
 //! # Examples
 //!
@@ -33,7 +33,7 @@
 //!     }).await?;
 //!
 //!     // Select a specific namespace / database
-//!     db.use_ns("test").use_db("test").await?;
+//!     db.use_ns("namespace").use_db("database").await?;
 //!
 //!     // Create a new person with a random ID
 //!     let created: Person = db.create("person")
@@ -218,8 +218,7 @@ where
 	}
 }
 
-/// A dynamic connection that supports any protocol or storage engine and allows you to pick at
-/// runtime
+/// A dynamic connection that supports any engine and allows you to pick at runtime
 ///
 /// # Examples
 ///

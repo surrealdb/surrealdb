@@ -56,8 +56,8 @@ pub struct ServerAddrs {
 }
 
 /// A trait for converting inputs to a server address object
-pub trait ToServerAddrs<T> {
-	/// The client implied by this address and protocol combination
+pub trait ToServerAddrs<Scheme> {
+	/// The client implied by this scheme and address combination
 	type Client: Connection;
 
 	/// Converts an input into a server address object

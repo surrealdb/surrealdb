@@ -197,6 +197,21 @@ impl QueryResponse {
 	}
 
 	/// Take all errors from the query response
+	///
+	/// The errors are returned in the order the database sent them. Afterwards the response is
+	/// left with only statements that did not produce any errors.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let mut response = db.query("SELECT * FROM user;").await?;
+	/// let errors = response.take_errors();
+	/// # Ok(())
+	/// # }
+	/// ```
 	pub fn take_errors(&mut self) -> Vec<crate::Error> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.0 {
@@ -214,6 +229,18 @@ impl QueryResponse {
 	}
 
 	/// Check query response for errors and return the first error, if any, or the response
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let response = db.query("SELECT * FROM user;").await?;
+	/// response.check()?;
+	/// # Ok(())
+	/// # }
+	/// ```
 	pub fn check(mut self) -> Result<Self> {
 		let mut first_error = None;
 		for (key, result) in &self.0 {
@@ -399,5 +426,64 @@ mod tests {
         };
 		let records = map.remove(&0).unwrap().unwrap();
 		assert_eq!(records, vec![true.into(), false.into()]);
+	}
+
+	#[test]
+	fn check_returns_the_first_error() {
+		let response = vec![
+			Ok(vec![0.into()]),
+			Ok(vec![1.into()]),
+			Ok(vec![2.into()]),
+			Err(Error::ConnectionUninitialised.into()),
+			Ok(vec![3.into()]),
+			Ok(vec![4.into()]),
+			Ok(vec![5.into()]),
+			Err(Error::BackupsNotSupported.into()),
+			Ok(vec![6.into()]),
+			Ok(vec![7.into()]),
+			Err(Error::AuthNotSupported.into()),
+		];
+		let response = QueryResponse(to_map(response));
+		let crate::Error::Api(Error::ConnectionUninitialised) = response.check().unwrap_err() else {
+            panic!("check did not return the first error");
+        };
+	}
+
+	#[test]
+	fn take_errors() {
+		let response = vec![
+			Ok(vec![0.into()]),
+			Ok(vec![1.into()]),
+			Ok(vec![2.into()]),
+			Err(Error::ConnectionUninitialised.into()),
+			Ok(vec![3.into()]),
+			Ok(vec![4.into()]),
+			Ok(vec![5.into()]),
+			Err(Error::BackupsNotSupported.into()),
+			Ok(vec![6.into()]),
+			Ok(vec![7.into()]),
+			Err(Error::AuthNotSupported.into()),
+		];
+		let mut response = QueryResponse(to_map(response));
+		let mut errors = response.take_errors();
+		assert_eq!(response.num_statements(), 8);
+		assert_eq!(errors.len(), 3);
+		let crate::Error::Api(Error::AuthNotSupported) = errors.pop().unwrap() else {
+            panic!("last error is not `AuthNotSupported`");
+        };
+		let crate::Error::Api(Error::BackupsNotSupported) = errors.pop().unwrap() else {
+            panic!("second error is not `BackupsNotSupported`");
+        };
+		let crate::Error::Api(Error::ConnectionUninitialised) = errors.pop().unwrap() else {
+            panic!("first error is not `ConnectionUninitialised`");
+        };
+		let Some(value): Option<i32> = response.take(2).unwrap() else {
+            panic!("statement not found");
+        };
+		assert_eq!(value, 2);
+		let Some(value): Option<i32> = response.take(4).unwrap() else {
+            panic!("statement not found");
+        };
+		assert_eq!(value, 3);
 	}
 }

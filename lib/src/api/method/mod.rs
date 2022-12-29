@@ -167,7 +167,7 @@ where
 	///     }).await?;
 	///
 	///     // Select a namespace + database
-	///     DB.use_ns("test").use_db("test").await?;
+	///     DB.use_ns("namespace").use_db("database").await?;
 	///
 	///     // Create or update a specific record
 	///     let tobie: Option<Person> = DB.update(("person", "tobie"))
@@ -208,7 +208,7 @@ where
 	///     }).await?;
 	///
 	///     // Select a namespace + database
-	///     DB.use_ns("test").use_db("test").await?;
+	///     DB.use_ns("namespace").use_db("database").await?;
 	///
 	///     // Create or update a specific record
 	///     let tobie: Option<Person> = DB.update(("person", "tobie"))
@@ -269,7 +269,7 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engines::any::connect("mem://").await?;
-	/// db.use_ns("test").use_db("test").await?;
+	/// db.use_ns("namespace").use_db("database").await?;
 	/// # Ok(())
 	/// # }
 	/// ```
@@ -600,6 +600,9 @@ where
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engines::any::connect("mem://").await?;
 	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
 	/// // Run queries
 	/// let mut result = db
 	///     .query("CREATE person")
@@ -636,6 +639,9 @@ where
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engines::any::connect("mem://").await?;
 	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
 	/// // Select all records from a table
 	/// let people: Vec<Person> = db.select("person").await?;
 	///
@@ -683,6 +689,9 @@ where
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engines::any::connect("mem://").await?;
 	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
 	/// // Create a record with a random ID
 	/// let person: Person = db.create("person").await?;
 	///
@@ -736,6 +745,9 @@ where
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engines::any::connect("mem://").await?;
 	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
 	/// // Update all records in a table
 	/// let people: Vec<Person> = db.update("person").await?;
 	///
@@ -783,6 +795,9 @@ where
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engines::any::connect("mem://").await?;
 	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
 	/// // Update all records in a table
 	/// let people: Vec<Person> = db.update("person")
 	///     .merge(UpdatedAt {
@@ -834,6 +849,9 @@ where
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engines::any::connect("mem://").await?;
 	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
 	/// // Update all records in a table
 	/// let people: Vec<Person> = db.update("person")
 	///     .patch(PatchOp::replace("/created_at", OffsetDateTime::now_utc()))
@@ -867,6 +885,9 @@ where
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engines::any::connect("mem://").await?;
 	/// #
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
 	/// // Delete all records from a table
 	/// db.delete("person").await?;
 	///
@@ -941,7 +962,7 @@ where
 	///
 	/// # Support
 	///
-	/// Currently only supported by the HTTP protocol and the storage engines. *Not* supported on WebAssembly.
+	/// Currently only supported by HTTP and the local engines. *Not* supported on WebAssembly.
 	///
 	/// # Examples
 	///
@@ -949,6 +970,9 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
 	/// db.export("backup.sql").await?;
 	/// # Ok(())
 	/// # }
@@ -967,7 +991,7 @@ where
 	///
 	/// # Support
 	///
-	/// Currently only supported by the HTTP protocol and the storage engines. *Not* supported on WebAssembly.
+	/// Currently only supported by HTTP and the local engines. *Not* supported on WebAssembly.
 	///
 	/// # Examples
 	///
@@ -975,6 +999,9 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// // Select the namespace/database to use
+	/// db.use_ns("namespace").use_db("database").await?;
+	///
 	/// db.import("backup.sql").await?;
 	/// # Ok(())
 	/// # }
