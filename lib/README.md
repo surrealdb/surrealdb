@@ -43,6 +43,7 @@ This library enables simple and advanced querying of an embedded or remote datab
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::borrow::Cow;
+use surrealdb::sql;
 use surrealdb::Surreal;
 use surrealdb::engines::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
@@ -122,11 +123,11 @@ async fn main() -> surrealdb::Result<()> {
     assert!(!people.is_empty());
 
     // Perform a custom advanced query
-    let sql = "
+    let sql = sql! {
         SELECT marketing, count()
         FROM type::table($table)
         GROUP BY marketing
-    ";
+    };
 
     let groups = db.query(sql)
         .bind(("table", "person"))

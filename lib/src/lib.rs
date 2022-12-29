@@ -18,6 +18,7 @@
 //! use serde_json::json;
 //! use std::borrow::Cow;
 //! use surrealdb::{Result, Surreal};
+//! use surrealdb::sql;
 //! use surrealdb::opt::auth::Root;
 //! use surrealdb::engines::remote::ws::Ws;
 //!
@@ -80,11 +81,11 @@
 //!     let people: Vec<Person> = db.select("person").await?;
 //!
 //!     // Perform a custom advanced query
-//!     let sql = "
+//!     let sql = sql! {
 //!         SELECT marketing, count()
 //!         FROM type::table($table)
 //!         GROUP BY marketing
-//!     ";
+//!     };
 //!
 //!     let groups = db.query(sql)
 //!         .bind(("table", "person"))
