@@ -21,7 +21,7 @@ macro_rules! get_cfg {
 	)
 }
 
-/// Parses a set of SurrealQL statements at compile time
+/// Parses a set of SurrealQL statements
 ///
 /// # Examples
 ///
