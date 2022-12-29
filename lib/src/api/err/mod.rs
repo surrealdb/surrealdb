@@ -1,3 +1,5 @@
+//! This module holds the error type for remote databases
+
 use crate::api::QueryResponse;
 use crate::sql::Array;
 use crate::sql::Edges;
@@ -8,7 +10,7 @@ use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
 
-/// API error
+/// An error originating from a remote SurrealDB database.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {

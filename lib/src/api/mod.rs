@@ -1,9 +1,11 @@
+//! Functionality for connecting to local and remote databases
+
 pub mod engines;
+pub mod err;
 pub mod method;
 pub mod opt;
 
 mod conn;
-pub(super) mod err;
 
 pub use method::query::QueryResponse;
 

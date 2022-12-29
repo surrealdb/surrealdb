@@ -152,7 +152,7 @@ pub mod channel {
 	pub use channel::Sender;
 }
 
-/// `SurrealDB` error
+/// An error originating from the SurrealDB client library.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
 	/// API error

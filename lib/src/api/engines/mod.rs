@@ -1,4 +1,4 @@
-//! Database engines
+//! Different embedded and remote database engines
 
 pub mod any;
 #[cfg(any(
