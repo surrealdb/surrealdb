@@ -11,7 +11,7 @@ use crate::api::opt::ServerAddrs;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::ExtraFeatures;
-use crate::api::QueryResponse;
+use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use flume::Receiver;

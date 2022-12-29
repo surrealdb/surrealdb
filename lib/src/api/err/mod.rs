@@ -1,4 +1,4 @@
-use crate::api::QueryResponse;
+use crate::api::Response;
 use crate::sql::Array;
 use crate::sql::Edges;
 use crate::sql::Object;
@@ -139,7 +139,7 @@ pub enum Error {
 
 	/// Tried to take only a single result when the query returned multiple records
 	#[error("Tried to take only a single result from a query that contains multiple")]
-	LossyTake(QueryResponse),
+	LossyTake(Response),
 
 	/// The protocol or storage engine being used does not support backups on the architecture
 	/// it's running on

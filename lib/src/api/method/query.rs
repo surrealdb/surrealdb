@@ -35,7 +35,7 @@ impl<'r, Client> IntoFuture for Query<'r, Client>
 where
 	Client: Connection,
 {
-	type Output = Result<QueryResponse>;
+	type Output = Result<Response>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	fn into_future(self) -> Self::IntoFuture {
@@ -128,9 +128,9 @@ pub(crate) type QueryResult = Result<Vec<Value>>;
 
 /// `Surreal::query` response type
 #[derive(Debug)]
-pub struct QueryResponse(pub(crate) IndexMap<usize, QueryResult>);
+pub struct Response(pub(crate) IndexMap<usize, QueryResult>);
 
-impl QueryResponse {
+impl Response {
 	/// Takes and returns records returned from the database
 	///
 	/// A query that only returns one result can be deserialized into an
@@ -309,28 +309,28 @@ mod tests {
 
 	#[test]
 	fn take_from_an_empty_response() {
-		let mut response = QueryResponse(Default::default());
+		let mut response = Response(Default::default());
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
-		let mut response = QueryResponse(Default::default());
+		let mut response = Response(Default::default());
 		let vec: Vec<String> = response.take(0).unwrap();
 		assert!(vec.is_empty());
 	}
 
 	#[test]
 	fn take_from_an_errored_query() {
-		let mut response = QueryResponse(to_map(vec![Err(Error::ConnectionUninitialised.into())]));
+		let mut response = Response(to_map(vec![Err(Error::ConnectionUninitialised.into())]));
 		response.take::<Option<()>>(0).unwrap_err();
 	}
 
 	#[test]
 	fn take_from_empty_records() {
-		let mut response = QueryResponse(to_map(vec![Ok(vec![])]));
+		let mut response = Response(to_map(vec![Ok(vec![])]));
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
-		let mut response = QueryResponse(to_map(vec![Ok(vec![])]));
+		let mut response = Response(to_map(vec![Ok(vec![])]));
 		let vec: Vec<String> = response.take(0).unwrap();
 		assert!(vec.is_empty());
 	}
@@ -339,28 +339,28 @@ mod tests {
 	fn take_from_a_scalar_response() {
 		let scalar = 265;
 
-		let mut response = QueryResponse(to_map(vec![Ok(vec![scalar.into()])]));
+		let mut response = Response(to_map(vec![Ok(vec![scalar.into()])]));
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
-		let mut response = QueryResponse(to_map(vec![Ok(vec![scalar.into()])]));
+		let mut response = Response(to_map(vec![Ok(vec![scalar.into()])]));
 		let vec: Vec<usize> = response.take(0).unwrap();
 		assert_eq!(vec, vec![scalar]);
 
 		let scalar = true;
 
-		let mut response = QueryResponse(to_map(vec![Ok(vec![scalar.into()])]));
+		let mut response = Response(to_map(vec![Ok(vec![scalar.into()])]));
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
-		let mut response = QueryResponse(to_map(vec![Ok(vec![scalar.into()])]));
+		let mut response = Response(to_map(vec![Ok(vec![scalar.into()])]));
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![scalar]);
 	}
 
 	#[test]
 	fn take_preserves_order() {
-		let mut response = QueryResponse(to_map(vec![
+		let mut response = Response(to_map(vec![
 			Ok(vec![0.into()]),
 			Ok(vec![1.into()]),
 			Ok(vec![2.into()]),
@@ -394,13 +394,13 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 		};
 
-		let mut response = QueryResponse(to_map(vec![Ok(vec![from_json(json!(summary.clone()))])]));
+		let mut response = Response(to_map(vec![Ok(vec![from_json(json!(summary.clone()))])]));
 		let Some(title): Option<String> = response.take("title").unwrap() else {
             panic!("title not found");
         };
 		assert_eq!(title, summary.title);
 
-		let mut response = QueryResponse(to_map(vec![Ok(vec![from_json(json!(summary.clone()))])]));
+		let mut response = Response(to_map(vec![Ok(vec![from_json(json!(summary.clone()))])]));
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![summary.title]);
 
@@ -409,7 +409,7 @@ mod tests {
 			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
 		};
 
-		let mut response = QueryResponse(to_map(vec![Ok(vec![from_json(json!(article.clone()))])]));
+		let mut response = Response(to_map(vec![Ok(vec![from_json(json!(article.clone()))])]));
 		let Some(title): Option<String> = response.take("title").unwrap() else {
             panic!("title not found");
         };
@@ -419,19 +419,19 @@ mod tests {
         };
 		assert_eq!(body, article.body);
 
-		let mut response = QueryResponse(to_map(vec![Ok(vec![from_json(json!(article.clone()))])]));
+		let mut response = Response(to_map(vec![Ok(vec![from_json(json!(article.clone()))])]));
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![article.title]);
 	}
 
 	#[test]
 	fn take_partial_records() {
-		let mut response = QueryResponse(to_map(vec![Ok(vec![true.into(), false.into()])]));
+		let mut response = Response(to_map(vec![Ok(vec![true.into(), false.into()])]));
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![true, false]);
 
-		let mut response = QueryResponse(to_map(vec![Ok(vec![true.into(), false.into()])]));
-		let Err(Api(Error::LossyTake(QueryResponse(mut map)))): Result<Option<bool>> = response.take(0) else {
+		let mut response = Response(to_map(vec![Ok(vec![true.into(), false.into()])]));
+		let Err(Api(Error::LossyTake(Response(mut map)))): Result<Option<bool>> = response.take(0) else {
             panic!("silently dropping records not allowed");
         };
 		let records = map.remove(&0).unwrap().unwrap();
@@ -453,7 +453,7 @@ mod tests {
 			Ok(vec![7.into()]),
 			Err(Error::AuthNotSupported.into()),
 		];
-		let response = QueryResponse(to_map(response));
+		let response = Response(to_map(response));
 		let crate::Error::Api(Error::ConnectionUninitialised) = response.check().unwrap_err() else {
             panic!("check did not return the first error");
         };
@@ -474,7 +474,7 @@ mod tests {
 			Ok(vec![7.into()]),
 			Err(Error::AuthNotSupported.into()),
 		];
-		let mut response = QueryResponse(to_map(response));
+		let mut response = Response(to_map(response));
 		let mut errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);

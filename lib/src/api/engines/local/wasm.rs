@@ -8,7 +8,7 @@ use crate::api::conn::Router;
 use crate::api::engines::local::Db;
 use crate::api::opt::from_value;
 use crate::api::opt::ServerAddrs;
-use crate::api::QueryResponse;
+use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;

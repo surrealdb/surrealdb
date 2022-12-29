@@ -16,11 +16,11 @@ use crate::api::opt::ServerAddrs;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::ExtraFeatures;
+use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::sql::Strand;
 use crate::sql::Value;
-use crate::QueryResponse;
 use flume::Receiver;
 use futures::stream::SplitSink;
 use futures::SinkExt;

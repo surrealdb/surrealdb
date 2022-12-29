@@ -14,7 +14,7 @@ use crate::api::err::Error;
 use crate::api::opt::from_value;
 use crate::api::opt::ServerAddrs;
 use crate::api::ExtraFeatures;
-use crate::api::QueryResponse;
+use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::sql::Strand;

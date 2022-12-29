@@ -20,13 +20,13 @@ use crate::api::method::query::QueryResult;
 use crate::api::opt::from_json;
 use crate::api::opt::from_value;
 use crate::api::Connect;
+use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::ToServerAddrs;
 use crate::sql::Array;
 use crate::sql::Strand;
 use crate::sql::Value;
-use crate::QueryResponse;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::TryStreamExt;
 use indexmap::IndexMap;

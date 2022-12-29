@@ -1,5 +1,5 @@
 use crate::api;
-use crate::api::method::query::QueryResponse;
+use crate::api::method::query::Response;
 use crate::api::opt::ServerAddrs;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -105,7 +105,7 @@ pub enum Method {
 #[derive(Debug)]
 pub enum DbResponse {
 	/// The response sent for the `query` method
-	Query(QueryResponse),
+	Query(Response),
 	/// The response sent for any method except `query`
 	Other(Value),
 }
@@ -180,7 +180,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn recv_query(
 		&mut self,
 		receiver: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<QueryResponse>> + Send + Sync + '_>>;
+	) -> Pin<Box<dyn Future<Output = Result<Response>> + Send + Sync + '_>>;
 
 	/// Execute all methods except `query`
 	fn execute<'r, R>(
@@ -203,7 +203,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 		&'r mut self,
 		router: &'r Router<Self>,
 		param: Param,
-	) -> Pin<Box<dyn Future<Output = Result<QueryResponse>> + Send + Sync + 'r>>
+	) -> Pin<Box<dyn Future<Output = Result<Response>> + Send + Sync + 'r>>
 	where
 		Self: api::Connection,
 	{

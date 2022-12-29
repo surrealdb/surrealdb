@@ -7,7 +7,7 @@ pub mod opt;
 
 mod conn;
 
-pub use method::query::QueryResponse;
+pub use method::query::Response;
 
 use crate::api::conn::DbResponse;
 use crate::api::conn::Router;

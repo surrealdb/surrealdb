@@ -12,7 +12,7 @@ use crate::api::opt::ServerAddrs;
 use crate::api::DbResponse;
 #[allow(unused_imports)] // used by the `ws` and `http` protocols
 use crate::api::ExtraFeatures;
-use crate::api::QueryResponse;
+use crate::api::Response;
 use crate::api::Result;
 use crate::api::Surreal;
 use flume::Receiver;
@@ -167,7 +167,7 @@ impl Connection for Any {
 	fn recv_query(
 		&mut self,
 		receiver: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<QueryResponse>> + Send + Sync + '_>> {
+	) -> Pin<Box<dyn Future<Output = Result<Response>> + Send + Sync + '_>> {
 		Box::pin(async move {
 			let response = receiver.into_recv_async().await?;
 			match response? {

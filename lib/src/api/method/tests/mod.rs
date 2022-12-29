@@ -12,7 +12,7 @@ use crate::api::opt::auth::NameSpace;
 use crate::api::opt::auth::Root;
 use crate::api::opt::auth::Scope;
 use crate::api::opt::PatchOp;
-use crate::api::QueryResponse;
+use crate::api::Response as QueryResponse;
 use crate::api::Surreal;
 use crate::sql::statements::BeginStatement;
 use crate::sql::statements::CommitStatement;

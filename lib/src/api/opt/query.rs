@@ -1,5 +1,6 @@
 use crate::api::err::Error;
 use crate::api::opt::from_value;
+use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::sql;
 use crate::sql::statements::*;
@@ -7,7 +8,6 @@ use crate::sql::Object;
 use crate::sql::Statement;
 use crate::sql::Statements;
 use crate::sql::Value;
-use crate::QueryResponse;
 use serde::de::DeserializeOwned;
 use std::mem;
 

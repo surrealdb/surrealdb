@@ -38,7 +38,7 @@ use crate::api::engines::update_statement;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
 use crate::api::Connect;
-use crate::api::QueryResponse;
+use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 #[cfg(not(target_arch = "wasm32"))]

@@ -134,7 +134,7 @@ pub use api::opt;
 #[doc(inline)]
 pub use api::Connect;
 #[doc(inline)]
-pub use api::QueryResponse;
+pub use api::Response;
 #[doc(inline)]
 pub use api::Result;
 #[doc(inline)]
