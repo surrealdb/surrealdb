@@ -2,6 +2,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use surrealdb::engines::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
+use surrealdb::sql;
 use surrealdb::Surreal;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,11 +25,11 @@ async fn main() -> surrealdb::Result<()> {
 
 	db.use_ns("namespace").use_db("database").await?;
 
-	let sql = "
-        CREATE user
-        SET name = $name,
-            company = $company
-    ";
+	let sql = sql! {
+		CREATE user
+		SET name = $name,
+			company = $company
+	};
 
 	let mut results = db
 		.query(sql)
@@ -43,7 +44,7 @@ async fn main() -> surrealdb::Result<()> {
 	let user: Option<User> = results.take(0)?;
 	println!("{user:?}");
 
-	let mut response = db.query("SELECT * FROM user WHERE name.first = 'John'").await?;
+	let mut response = db.query(sql!(SELECT * FROM user WHERE name.first = "John")).await?;
 
 	// print all users:
 	let users: Vec<User> = response.take(0)?;
