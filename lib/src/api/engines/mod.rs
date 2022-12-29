@@ -8,19 +8,8 @@ pub mod any;
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 ))]
-#[cfg_attr(
-	docsrs,
-	doc(cfg(any(
-		feature = "kv-mem",
-		feature = "kv-tikv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-indxdb",
-	)))
-)]
 pub mod local;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "protocol-http", feature = "protocol-ws"))))]
 pub mod remote;
 
 use crate::sql::statements::CreateStatement;
