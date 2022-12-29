@@ -57,8 +57,8 @@ where
 	C: Connection,
 {
 	/// Chains a query onto an existing query
-	pub fn query(mut self, query: impl opt::Query) -> Self {
-		self.query.push(query.try_into_query());
+	pub fn query(mut self, query: impl opt::IntoQuery) -> Self {
+		self.query.push(query.into_query());
 		self
 	}
 

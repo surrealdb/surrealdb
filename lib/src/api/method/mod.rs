@@ -608,10 +608,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn query(&self, query: impl opt::Query) -> Query<C> {
+	pub fn query(&self, query: impl opt::IntoQuery) -> Query<C> {
 		Query {
 			router: self.router.extract(),
-			query: vec![query.try_into_query()],
+			query: vec![query.into_query()],
 			bindings: Ok(Default::default()),
 		}
 	}
