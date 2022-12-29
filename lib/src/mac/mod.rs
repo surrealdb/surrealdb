@@ -20,3 +20,21 @@ macro_rules! get_cfg {
 		let $i = || { $( if cfg!($i=$s) { return $s; } );+ "unknown"};
 	)
 }
+
+/// Parses a set of SurrealQL statements at compile time
+///
+/// # Examples
+///
+/// ```no_run,no_test
+/// # use surrealdb::sql;
+/// let query = sql!("LET $name = 'Tobie'; SELECT * FROM user WHERE name = $name;");
+/// ```
+#[macro_export]
+macro_rules! sql {
+	($expression:expr) => {
+		match $crate::sql::parse($expression) {
+			Ok(v) => v,
+			Err(e) => compile_error!(e.to_string()),
+		}
+	};
+}
