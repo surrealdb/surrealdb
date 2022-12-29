@@ -42,6 +42,13 @@ parallel = ["dep:executor"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
+features = [
+    "protocol-ws", "protocol-http",
+    "kv-mem", "kv-indxdb", "kv-rocksdb", "kv-tikv", "kv-fdb",
+    "rustls", "native-tls",
+    "http", "scripting"
+]
+targets = []
 
 [dependencies]
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
