@@ -18,7 +18,7 @@ use crate::sql::version::Version;
 use std::fmt;
 
 #[derive(Clone, Debug)]
-pub enum Statement<'a> {
+pub(crate) enum Statement<'a> {
 	Select(&'a SelectStatement),
 	Create(&'a CreateStatement),
 	Update(&'a UpdateStatement),

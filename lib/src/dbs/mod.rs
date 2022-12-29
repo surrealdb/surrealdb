@@ -28,4 +28,4 @@ pub use self::channel::*;
 #[cfg(test)]
 pub(crate) mod test;
 
-pub const LOG: &str = "surrealdb::dbs";
+pub(crate) const LOG: &str = "surrealdb::dbs";

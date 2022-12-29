@@ -18,7 +18,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
 
-pub enum Iterable {
+pub(crate) enum Iterable {
 	Value(Value),
 	Table(Table),
 	Thing(Thing),
@@ -28,20 +28,20 @@ pub enum Iterable {
 	Relatable(Thing, Thing, Thing),
 }
 
-pub enum Operable {
+pub(crate) enum Operable {
 	Value(Value),
 	Mergeable(Value, Value),
 	Relatable(Thing, Value, Thing),
 }
 
-pub enum Workable {
+pub(crate) enum Workable {
 	Normal,
 	Insert(Value),
 	Relate(Thing, Thing),
 }
 
 #[derive(Default)]
-pub struct Iterator {
+pub(crate) struct Iterator {
 	// Iterator status
 	run: Canceller,
 	// Iterator limit value
