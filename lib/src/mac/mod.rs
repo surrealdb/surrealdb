@@ -25,14 +25,8 @@ macro_rules! get_cfg {
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// # use surrealdb::Datastore;
-/// # use surrealdb::Error;
-/// # #[tokio::main]
-/// # fn main() -> Result<(), Error> {
+/// ```no_run
 /// let query = sql!("LET $name = 'Tobie'; SELECT * FROM user WHERE name = $name;");
-/// # Ok(())
-/// # }
 /// ```
 #[macro_export]
 macro_rules! sql {

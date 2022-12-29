@@ -78,12 +78,13 @@ impl Surreal<Client> {
 	/// ```no_run
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engines::remote::http::Client;
+	/// use surrealdb::engines::remote::http::Http;
 	///
 	/// static DB: Surreal<Client> = Surreal::init();
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// DB.connect("ws://localhost:8000").await?;
+	/// DB.connect::<Http>("localhost:8000").await?;
 	/// # Ok(())
 	/// # }
 	/// ```

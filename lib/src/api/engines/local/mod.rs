@@ -307,21 +307,6 @@ pub struct Db {
 
 impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
-	///
-	/// # Examples
-	///
-	/// ```no_run
-	/// use surrealdb::Surreal;
-	/// use surrealdb::engines::local::Db;
-	///
-	/// static DB: Surreal<Db> = Surreal::init();
-	///
-	/// # #[tokio::main]
-	/// # async fn main() -> surrealdb::Result<()> {
-	/// DB.connect("ws://localhost:8000").await?;
-	/// # Ok(())
-	/// # }
-	/// ```
 	pub fn connect<P>(
 		&'static self,
 		address: impl ToServerAddrs<P, Client = Db>,
