@@ -11,8 +11,8 @@ use crate::api::ExtraFeatures;
 use crate::api::QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::Datastore;
-use crate::Session;
+use crate::dbs::Session;
+use crate::kvs::Datastore;
 use flume::Receiver;
 use flume::Sender;
 use futures::StreamExt;
@@ -49,9 +49,7 @@ impl Connection for Db {
 
 			router(address, conn_tx, route_rx);
 
-			if let Err(error) = conn_rx.into_recv_async().await? {
-				return Err(error);
-			}
+			conn_rx.into_recv_async().await??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);

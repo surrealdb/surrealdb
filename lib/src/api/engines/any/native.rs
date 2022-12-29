@@ -70,45 +70,35 @@ impl Connection for Any {
 				"fdb" => {
 					features.insert(ExtraFeatures::Backup);
 					engines::local::native::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
+					conn_rx.into_recv_async().await??
 				}
 
 				#[cfg(feature = "kv-mem")]
 				"mem" => {
 					features.insert(ExtraFeatures::Backup);
 					engines::local::native::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
+					conn_rx.into_recv_async().await??
 				}
 
 				#[cfg(feature = "kv-rocksdb")]
 				"rocksdb" => {
 					features.insert(ExtraFeatures::Backup);
 					engines::local::native::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
+					conn_rx.into_recv_async().await??
 				}
 
 				#[cfg(feature = "kv-rocksdb")]
 				"file" => {
 					features.insert(ExtraFeatures::Backup);
 					engines::local::native::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
+					conn_rx.into_recv_async().await??
 				}
 
 				#[cfg(feature = "kv-tikv")]
 				"tikv" => {
 					features.insert(ExtraFeatures::Backup);
 					engines::local::native::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
+					conn_rx.into_recv_async().await??
 				}
 
 				#[cfg(feature = "protocol-http")]
