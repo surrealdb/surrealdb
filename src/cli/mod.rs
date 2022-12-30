@@ -28,7 +28,13 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 ";
 
 fn split_endpoint(v: &str) -> (&str, &str) {
-	v.split_once("://").unwrap_or_default()
+	match v {
+		"memory" => ("mem", ""),
+		v => match v.split_once("://") {
+			Some(parts) => parts,
+			None => v.split_once(':').unwrap_or_default(),
+		},
+	}
 }
 
 fn file_valid(v: &str) -> Result<(), String> {
