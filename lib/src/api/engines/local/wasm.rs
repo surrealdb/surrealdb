@@ -7,7 +7,7 @@ use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engines::local::Db;
 use crate::api::opt::from_value;
-use crate::api::opt::ServerAddrs;
+use crate::api::opt::Endpoint;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
@@ -37,7 +37,7 @@ impl Connection for Db {
 	}
 
 	fn connect(
-		address: ServerAddrs,
+		address: Endpoint,
 		capacity: usize,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
@@ -114,7 +114,7 @@ impl Connection for Db {
 }
 
 pub(crate) fn router(
-	address: ServerAddrs,
+	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Option<Route>>,
 ) {

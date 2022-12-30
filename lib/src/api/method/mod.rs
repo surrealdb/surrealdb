@@ -68,7 +68,7 @@ use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
 use crate::api::opt::auth::Jwt;
 use crate::api::opt::from_json;
-use crate::api::opt::ToServerAddrs;
+use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::ExtractRouter;
@@ -228,10 +228,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn new<P>(address: impl ToServerAddrs<P, Client = C>) -> Connect<'static, C, Self> {
+	pub fn new<P>(address: impl IntoEndpoint<P, Client = C>) -> Connect<'static, C, Self> {
 		Connect {
 			router: None,
-			address: address.to_server_addrs(),
+			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
 			response_type: PhantomData,

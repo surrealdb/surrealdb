@@ -12,7 +12,7 @@ use crate::api::engines::remote::ws::PING_INTERVAL;
 use crate::api::engines::remote::ws::PING_METHOD;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
-use crate::api::opt::ServerAddrs;
+use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
@@ -66,7 +66,7 @@ impl Connection for Client {
 	}
 
 	fn connect(
-		mut address: ServerAddrs,
+		mut address: Endpoint,
 		capacity: usize,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
@@ -147,7 +147,7 @@ impl Connection for Client {
 }
 
 pub(crate) fn router(
-	address: ServerAddrs,
+	address: Endpoint,
 	capacity: usize,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Option<Route>>,

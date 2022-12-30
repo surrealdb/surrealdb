@@ -6,8 +6,8 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::opt::from_value;
-use crate::api::opt::ServerAddrs;
-use crate::api::opt::ToServerAddrs;
+use crate::api::opt::Endpoint;
+use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
 use crate::api::ExtraFeatures;
 use crate::api::Response as QueryResponse;
@@ -27,11 +27,11 @@ use url::Url;
 #[derive(Debug)]
 pub struct Test;
 
-impl ToServerAddrs<Test> for () {
+impl IntoEndpoint<Test> for () {
 	type Client = Client;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		Ok(ServerAddrs {
+	fn into_endpoint(self) -> Result<Endpoint> {
+		Ok(Endpoint {
 			endpoint: Url::parse("test://")?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -48,11 +48,11 @@ pub struct Client {
 impl Surreal<Client> {
 	pub fn connect<P>(
 		&'static self,
-		address: impl ToServerAddrs<P, Client = Client>,
+		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
 			router: Some(&self.router),
-			address: address.to_server_addrs(),
+			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
 			response_type: PhantomData,
@@ -70,7 +70,7 @@ impl Connection for Client {
 	}
 
 	fn connect(
-		_address: ServerAddrs,
+		_address: Endpoint,
 		capacity: usize,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {

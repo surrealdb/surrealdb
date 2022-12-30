@@ -7,7 +7,7 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::opt::from_value;
-use crate::api::opt::ServerAddrs;
+use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
@@ -41,7 +41,7 @@ impl Connection for Client {
 	}
 
 	fn connect(
-		address: ServerAddrs,
+		address: Endpoint,
 		capacity: usize,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
@@ -132,7 +132,7 @@ async fn client(base_url: &Url) -> Result<reqwest::Client> {
 }
 
 pub(crate) fn router(
-	address: ServerAddrs,
+	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Option<Route>>,
 ) {

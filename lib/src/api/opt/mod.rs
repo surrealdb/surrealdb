@@ -2,9 +2,9 @@
 
 pub mod auth;
 
+mod endpoint;
 mod query;
 mod resource;
-mod server_addrs;
 mod strict;
 mod tls;
 
@@ -20,9 +20,9 @@ use serde_json::json;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 
+pub use endpoint::*;
 pub use query::*;
 pub use resource::*;
-pub use server_addrs::*;
 pub use strict::*;
 pub use tls::*;
 

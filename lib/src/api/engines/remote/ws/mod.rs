@@ -13,7 +13,7 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::opt::ToServerAddrs;
+use crate::opt::IntoEndpoint;
 use crate::sql::Array;
 use crate::sql::Value;
 use serde::Deserialize;
@@ -61,11 +61,11 @@ impl Surreal<Client> {
 	/// ```
 	pub fn connect<P>(
 		&'static self,
-		address: impl ToServerAddrs<P, Client = Client>,
+		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
 			router: Some(&self.router),
-			address: address.to_server_addrs(),
+			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
 			response_type: PhantomData,

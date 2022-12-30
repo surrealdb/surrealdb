@@ -1,19 +1,19 @@
 use crate::api::engines::local::Db;
 use crate::api::engines::local::TiKv;
 use crate::api::err::Error;
-use crate::api::opt::ServerAddrs;
+use crate::api::opt::Endpoint;
+use crate::api::opt::IntoEndpoint;
 use crate::api::opt::Strict;
-use crate::api::opt::ToServerAddrs;
 use crate::api::Result;
 use std::net::SocketAddr;
 use url::Url;
 
-impl ToServerAddrs<TiKv> for &str {
+impl IntoEndpoint<TiKv> for &str {
 	type Client = Db;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let url = format!("tikv://{self}");
-		Ok(ServerAddrs {
+		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -22,12 +22,12 @@ impl ToServerAddrs<TiKv> for &str {
 	}
 }
 
-impl ToServerAddrs<TiKv> for SocketAddr {
+impl IntoEndpoint<TiKv> for SocketAddr {
 	type Client = Db;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let url = format!("tikv://{self}");
-		Ok(ServerAddrs {
+		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -36,12 +36,12 @@ impl ToServerAddrs<TiKv> for SocketAddr {
 	}
 }
 
-impl ToServerAddrs<TiKv> for String {
+impl IntoEndpoint<TiKv> for String {
 	type Client = Db;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let url = format!("tikv://{self}");
-		Ok(ServerAddrs {
+		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -50,14 +50,14 @@ impl ToServerAddrs<TiKv> for String {
 	}
 }
 
-impl<T> ToServerAddrs<TiKv> for (T, Strict)
+impl<T> IntoEndpoint<TiKv> for (T, Strict)
 where
-	T: ToServerAddrs<TiKv>,
+	T: IntoEndpoint<TiKv>,
 {
 	type Client = Db;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		let mut address = self.0.to_server_addrs()?;
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let mut address = self.0.into_endpoint()?;
 		address.strict = true;
 		Ok(address)
 	}

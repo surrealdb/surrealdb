@@ -2,20 +2,20 @@ use crate::api::engines::remote::ws::Client;
 use crate::api::engines::remote::ws::Ws;
 use crate::api::engines::remote::ws::Wss;
 use crate::api::err::Error;
-use crate::api::opt::ServerAddrs;
+use crate::api::opt::Endpoint;
+use crate::api::opt::IntoEndpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
-use crate::api::opt::ToServerAddrs;
 use crate::api::Result;
 use std::net::SocketAddr;
 use url::Url;
 
-impl ToServerAddrs<Ws> for &str {
+impl IntoEndpoint<Ws> for &str {
 	type Client = Client;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let url = format!("ws://{self}");
-		Ok(ServerAddrs {
+		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -24,12 +24,12 @@ impl ToServerAddrs<Ws> for &str {
 	}
 }
 
-impl ToServerAddrs<Ws> for SocketAddr {
+impl IntoEndpoint<Ws> for SocketAddr {
 	type Client = Client;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let url = format!("ws://{self}");
-		Ok(ServerAddrs {
+		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -38,12 +38,12 @@ impl ToServerAddrs<Ws> for SocketAddr {
 	}
 }
 
-impl ToServerAddrs<Ws> for String {
+impl IntoEndpoint<Ws> for String {
 	type Client = Client;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let url = format!("ws://{self}");
-		Ok(ServerAddrs {
+		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -52,12 +52,12 @@ impl ToServerAddrs<Ws> for String {
 	}
 }
 
-impl ToServerAddrs<Wss> for &str {
+impl IntoEndpoint<Wss> for &str {
 	type Client = Client;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let url = format!("wss://{self}");
-		Ok(ServerAddrs {
+		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -66,12 +66,12 @@ impl ToServerAddrs<Wss> for &str {
 	}
 }
 
-impl ToServerAddrs<Wss> for SocketAddr {
+impl IntoEndpoint<Wss> for SocketAddr {
 	type Client = Client;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let url = format!("wss://{self}");
-		Ok(ServerAddrs {
+		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -80,12 +80,12 @@ impl ToServerAddrs<Wss> for SocketAddr {
 	}
 }
 
-impl ToServerAddrs<Wss> for String {
+impl IntoEndpoint<Wss> for String {
 	type Client = Client;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let url = format!("wss://{self}");
-		Ok(ServerAddrs {
+		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -96,15 +96,15 @@ impl ToServerAddrs<Wss> for String {
 
 #[cfg(feature = "native-tls")]
 #[cfg_attr(docsrs, doc(cfg(feature = "native-tls")))]
-impl<T> ToServerAddrs<Wss> for (T, native_tls::TlsConnector)
+impl<T> IntoEndpoint<Wss> for (T, native_tls::TlsConnector)
 where
-	T: ToServerAddrs<Wss>,
+	T: IntoEndpoint<Wss>,
 {
 	type Client = Client;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let (address, config) = self;
-		let mut address = address.to_server_addrs()?;
+		let mut address = address.into_endpoint()?;
 		address.tls_config = Some(Tls::Native(config));
 		Ok(address)
 	}
@@ -112,15 +112,15 @@ where
 
 #[cfg(feature = "rustls")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rustls")))]
-impl<T> ToServerAddrs<Wss> for (T, rustls::ClientConfig)
+impl<T> IntoEndpoint<Wss> for (T, rustls::ClientConfig)
 where
-	T: ToServerAddrs<Wss>,
+	T: IntoEndpoint<Wss>,
 {
 	type Client = Client;
 
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let (address, config) = self;
-		let mut address = address.to_server_addrs()?;
+		let mut address = address.into_endpoint()?;
 		address.tls_config = Some(Tls::Rust(config));
 		Ok(address)
 	}

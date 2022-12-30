@@ -90,7 +90,7 @@ mod wasm;
 
 use crate::api::conn::Method;
 use crate::api::err::Error;
-use crate::api::opt::ServerAddrs;
+use crate::api::opt::Endpoint;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-tikv",
@@ -108,14 +108,14 @@ use std::marker::PhantomData;
 use url::Url;
 
 /// A trait for converting inputs to a server address object
-pub trait ToServerAddrs {
+pub trait IntoEndpoint {
 	/// Converts an input into a server address object
-	fn to_server_addrs(self) -> Result<ServerAddrs>;
+	fn into_endpoint(self) -> Result<Endpoint>;
 }
 
-impl ToServerAddrs for &str {
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		Ok(ServerAddrs {
+impl IntoEndpoint for &str {
+	fn into_endpoint(self) -> Result<Endpoint> {
+		Ok(Endpoint {
 			endpoint: Url::parse(self).map_err(|_| Error::InvalidUrl(self.to_owned()))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -124,15 +124,15 @@ impl ToServerAddrs for &str {
 	}
 }
 
-impl ToServerAddrs for &String {
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		self.as_str().to_server_addrs()
+impl IntoEndpoint for &String {
+	fn into_endpoint(self) -> Result<Endpoint> {
+		self.as_str().into_endpoint()
 	}
 }
 
-impl ToServerAddrs for String {
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		Ok(ServerAddrs {
+impl IntoEndpoint for String {
+	fn into_endpoint(self) -> Result<Endpoint> {
+		Ok(Endpoint {
 			endpoint: Url::parse(&self).map_err(|_| Error::InvalidUrl(self))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -143,13 +143,13 @@ impl ToServerAddrs for String {
 
 #[cfg(feature = "rustls")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rustls")))]
-impl<T> ToServerAddrs for (T, rustls::ClientConfig)
+impl<T> IntoEndpoint for (T, rustls::ClientConfig)
 where
 	T: Into<String>,
 {
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let (address, config) = self;
-		let mut address = address.into().to_server_addrs()?;
+		let mut address = address.into().into_endpoint()?;
 		address.tls_config = Some(Tls::Rust(config));
 		Ok(address)
 	}
@@ -172,12 +172,12 @@ where
 		feature = "kv-indxdb",
 	)))
 )]
-impl<T> ToServerAddrs for (T, Strict)
+impl<T> IntoEndpoint for (T, Strict)
 where
 	T: Into<String>,
 {
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
-		let mut address = ToServerAddrs::to_server_addrs(self.0.into())?;
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let mut address = IntoEndpoint::into_endpoint(self.0.into())?;
 		address.strict = true;
 		Ok(address)
 	}
@@ -206,13 +206,13 @@ where
 		feature = "rustls",
 	)))
 )]
-impl<T> ToServerAddrs for (T, rustls::ClientConfig, Strict)
+impl<T> IntoEndpoint for (T, rustls::ClientConfig, Strict)
 where
 	T: Into<String>,
 {
-	fn to_server_addrs(self) -> Result<ServerAddrs> {
+	fn into_endpoint(self) -> Result<Endpoint> {
 		let (address, config, _) = self;
-		let mut address = address.into().to_server_addrs()?;
+		let mut address = address.into().into_endpoint()?;
 		address.tls_config = Some(Tls::Rust(config));
 		address.strict = true;
 		Ok(address)
@@ -243,10 +243,10 @@ impl Surreal<Any> {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn connect(&'static self, address: impl ToServerAddrs) -> Connect<Any, ()> {
+	pub fn connect(&'static self, address: impl IntoEndpoint) -> Connect<Any, ()> {
 		Connect {
 			router: Some(&self.router),
-			address: address.to_server_addrs(),
+			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
 			response_type: PhantomData,
@@ -292,10 +292,10 @@ impl Surreal<Any> {
 /// # Ok(())
 /// # }
 /// ```
-pub fn connect(address: impl ToServerAddrs) -> Connect<'static, Any, Surreal<Any>> {
+pub fn connect(address: impl IntoEndpoint) -> Connect<'static, Any, Surreal<Any>> {
 	Connect {
 		router: None,
-		address: address.to_server_addrs(),
+		address: address.into_endpoint(),
 		capacity: 0,
 		client: PhantomData,
 		response_type: PhantomData,

@@ -1,6 +1,6 @@
 use crate::api;
 use crate::api::method::query::Response;
-use crate::api::opt::ServerAddrs;
+use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
@@ -152,7 +152,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 
 	/// Connect to the server
 	fn connect(
-		address: ServerAddrs,
+		address: Endpoint,
 		capacity: usize,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>>
 	where

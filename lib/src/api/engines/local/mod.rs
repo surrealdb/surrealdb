@@ -46,7 +46,7 @@ use crate::channel;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
-use crate::opt::ToServerAddrs;
+use crate::opt::IntoEndpoint;
 use crate::sql::Array;
 use crate::sql::Query;
 use crate::sql::Statement;
@@ -309,11 +309,11 @@ impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
 	pub fn connect<P>(
 		&'static self,
-		address: impl ToServerAddrs<P, Client = Db>,
+		address: impl IntoEndpoint<P, Client = Db>,
 	) -> Connect<Db, ()> {
 		Connect {
 			router: Some(&self.router),
-			address: address.to_server_addrs(),
+			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
 			response_type: PhantomData,

@@ -12,7 +12,7 @@ pub use method::query::Response;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Router;
 use crate::api::err::Error;
-use crate::api::opt::ServerAddrs;
+use crate::api::opt::Endpoint;
 use once_cell::sync::OnceCell;
 use semver::BuildMetadata;
 use semver::VersionReq;
@@ -36,7 +36,7 @@ pub trait Connection: conn::Connection {}
 #[derive(Debug)]
 pub struct Connect<'r, C: Connection, Response> {
 	router: Option<&'r OnceCell<Arc<Router<C>>>>,
-	address: Result<ServerAddrs>,
+	address: Result<Endpoint>,
 	capacity: usize,
 	client: PhantomData<C>,
 	response_type: PhantomData<Response>,

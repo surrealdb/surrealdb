@@ -8,7 +8,7 @@ use crate::api::engines;
 use crate::api::engines::any::Any;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
-use crate::api::opt::ServerAddrs;
+use crate::api::opt::Endpoint;
 use crate::api::DbResponse;
 #[allow(unused_imports)] // used by the `ws` and `http` protocols
 use crate::api::ExtraFeatures;
@@ -37,7 +37,7 @@ impl Connection for Any {
 
 	#[allow(unused_variables, unreachable_code, unused_mut)] // these are all used depending on feature
 	fn connect(
-		address: ServerAddrs,
+		address: Endpoint,
 		capacity: usize,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
