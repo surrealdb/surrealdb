@@ -324,36 +324,46 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 
 > Compiling SurrealDB with windows OS requires **Administrator** priveledge!
 
-⚠**Tested on Windows 10 build 22H2(19044.2006)**
+⚠**Tested on Windows 11 build 22H2(22621.963)**
 
-1. Install LLVM with Clang 👉 [Download Here](https://github.com/llvm/llvm-project/releases) *look for something end with `amd64.exe`*
+1. Install LLVM 👉 [Download Here](https://github.com/llvm/llvm-project/releases) *look for something like `LLVM-X.Y.Z-win64.exe`*
+
 2. Install `MYSYS2` 👉 Follow instructions on [their website](https://www.msys2.org/)
-3. Add Symlinks for llvm
 
-   ```powershell
-   New-Item -Path "C:\Program Files\LLVM\x86_64-w64-mingw32" -ItemType SymbolicLink -Value "C:\msys64\mingw64\x86_64-w64-mingw32"
-   New-Item -Path "C:\Program Files\LLVM\i686-w64-mingw32" -ItemType SymbolicLink -Value "C:\msys64\mingw64\i686-w64-mingw32"
-    ```
+3. When `MYSYS2` is installed it opens a shell. Install GCC via that shell
 
-4. Add GCC binary path to environment
+	```bash
+	pacman -S mingw-w64-i686-gcc
+	pacman -S mingw-w64-x86_64-gcc
+	```
 
-    ```powershell
-    $PATH += "C:\msys64\mingw64\bin"
-    $PATH += "C:\msys64\mingw32\bin"
-    $CC_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-gcc"
-    $CC_i686_pc_windows_gnu = "i686-w64-mingw32-gcc"
-    $HOST_CC = "x86_64-w64-mingw32-gcc"
-    ```
+4. Install `patch` GNU Util
 
-5. Install `patch` GNU Util
-    Go to GNUWin32 page for [*patch*](http://gnuwin32.sourceforge.net/packages/patch.htm) and
-    install the [*patch*](http://gnuwin32.sourceforge.net/downlinks/patch-bin-zip.php)
-    binaries.
+	Go to GNUWin32 page for [*patch*](http://gnuwin32.sourceforge.net/packages/patch.htm) and
+	extract the [*patch*](http://gnuwin32.sourceforge.net/downlinks/patch-bin-zip.php)
+	binaries onto your drive. 
+	
+	e.g. "C:\patch"
 
-	> For some bizzare reasons, **patch.exe needs elevated priviledge** to be invoked during
-	> compilation
+	> For some bizzare reasons, **patch.exe needs elevated priviledge** to be invoked during compilation
 
-    Add directory containing the `patch.exe` to your PATH
+5. Add `gcc` and `patch` binary path to environment
+
+	> Setting the environment variables for the entire system requires an **elevated ⚠** shell.
+
+	```powershell
+	[System.Environment]::SetEnvironmentVariable(
+		"PATH", 
+		[System.Environment]::GetEnvironmentVariable("PATH", "Machine") + 
+		";" +
+		"C:\msys64\mingw64\bin;" +
+		"C:\msys64\mingw32\bin;" +
+		"C:\patch\bin;",
+		"Machine"
+	)
+	```
+
+	Or do it manually via `sysdm.cpl`.
 
 6. Run cargo in an **elevated ⚠** shell
 
