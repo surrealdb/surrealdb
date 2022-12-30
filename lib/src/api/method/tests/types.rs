@@ -18,7 +18,7 @@ pub enum Credentials {
 		user: String,
 		pass: String,
 	},
-	NameSpace {
+	Namespace {
 		ns: String,
 		user: String,
 		pass: String,

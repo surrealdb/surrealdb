@@ -420,7 +420,7 @@ where
 	/// ```no_run
 	/// use surrealdb::sql;
 	/// use surrealdb::opt::auth::Root;
-	/// use surrealdb::opt::auth::NameSpace;
+	/// use surrealdb::opt::auth::Namespace;
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -441,7 +441,7 @@ where
 	/// db.query(sql).await?.check()?;
 	///
 	/// // Sign a user in
-	/// db.signin(NameSpace {
+	/// db.signin(Namespace {
 	///     namespace: "namespace",
 	///     username: "johndoe",
 	///     password: "password123",
