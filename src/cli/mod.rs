@@ -27,6 +27,10 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 ----------
 ";
 
+fn split_endpoint(v: &str) -> (&str, &str) {
+	v.split_once("://").unwrap_or_default()
+}
+
 fn file_valid(v: &str) -> Result<(), String> {
 	match v {
 		v if !v.is_empty() => Ok(()),
@@ -54,9 +58,9 @@ fn path_valid(v: &str) -> Result<(), String> {
 }
 
 fn conn_valid(v: &str) -> Result<(), String> {
-	match v {
-		v if v.starts_with("http://") => Ok(()),
-		v if v.starts_with("https://") => Ok(()),
+	let scheme = split_endpoint(v).0;
+	match scheme {
+		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "file" | "tikv" => Ok(()),
 		_ => Err(String::from(
 			"\
 			Provide a valid database connection string\
@@ -459,7 +463,7 @@ pub fn init() {
 	let matches = setup.get_matches();
 
 	let output = match matches.subcommand() {
-		Some(("sql", m)) => sql::init(m),
+		Some(("sql", m)) => futures::executor::block_on(sql::init(m)),
 		Some(("start", m)) => start::init(m),
 		Some(("backup", m)) => backup::init(m),
 		Some(("import", m)) => import::init(m),
