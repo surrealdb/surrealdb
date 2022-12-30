@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::ops::Bound;
 use surrealdb::opt::auth::Database;
 use surrealdb::opt::auth::Jwt;
-use surrealdb::opt::auth::NameSpace;
+use surrealdb::opt::auth::Namespace;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::auth::Scope;
 use surrealdb::opt::PatchOp;

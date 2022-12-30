@@ -22,10 +22,9 @@ use std::collections::BTreeMap;
 
 pub use query::*;
 pub use resource::*;
+pub use server_addrs::*;
 pub use strict::*;
 pub use tls::*;
-
-pub(crate) use server_addrs::*;
 
 /// Record ID
 pub type RecordId = Thing;

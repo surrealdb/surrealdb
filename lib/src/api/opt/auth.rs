@@ -31,7 +31,7 @@ impl Credentials<Signin, ()> for Root<'_> {}
 
 /// Credentials for the namespace user
 #[derive(Debug, Serialize)]
-pub struct NameSpace<'a> {
+pub struct Namespace<'a> {
 	/// The namespace the user has access to
 	#[serde(rename = "ns")]
 	pub namespace: &'a str,
@@ -43,7 +43,7 @@ pub struct NameSpace<'a> {
 	pub password: &'a str,
 }
 
-impl Credentials<Signin, Jwt> for NameSpace<'_> {}
+impl Credentials<Signin, Jwt> for Namespace<'_> {}
 
 /// Credentials for the database user
 #[derive(Debug, Serialize)]

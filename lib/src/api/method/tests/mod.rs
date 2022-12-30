@@ -8,7 +8,7 @@ mod types;
 use crate::api::method::tests::types::AuthParams;
 use crate::api::opt::auth::Database;
 use crate::api::opt::auth::Jwt;
-use crate::api::opt::auth::NameSpace;
+use crate::api::opt::auth::Namespace;
 use crate::api::opt::auth::Root;
 use crate::api::opt::auth::Scope;
 use crate::api::opt::PatchOp;
@@ -59,7 +59,7 @@ async fn api() {
 		.await
 		.unwrap();
 	let _: Jwt = DB
-		.signin(NameSpace {
+		.signin(Namespace {
 			namespace: "test-ns",
 			username: "user",
 			password: "pass",
