@@ -93,11 +93,17 @@ mod http {
 #[cfg(feature = "kv-mem")]
 mod mem {
 	use super::*;
+	use surrealdb::engines::any;
 	use surrealdb::engines::local::Db;
 	use surrealdb::engines::local::Mem;
 
 	async fn new_db() -> Surreal<Db> {
 		Surreal::new::<Mem>(()).await.unwrap()
+	}
+
+	#[tokio::test]
+	async fn memory_allowed_as_address() {
+		any::connect("memory").await.unwrap();
 	}
 
 	include!("api/mod.rs");
