@@ -115,8 +115,12 @@ pub trait IntoEndpoint {
 
 impl IntoEndpoint for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
+		let url = match self {
+			"memory" => "mem://",
+			_ => self,
+		};
 		Ok(Endpoint {
-			endpoint: Url::parse(self).map_err(|_| Error::InvalidUrl(self.to_owned()))?,
+			endpoint: Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?,
 			strict: false,
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			tls_config: None,
@@ -132,12 +136,7 @@ impl IntoEndpoint for &String {
 
 impl IntoEndpoint for String {
 	fn into_endpoint(self) -> Result<Endpoint> {
-		Ok(Endpoint {
-			endpoint: Url::parse(&self).map_err(|_| Error::InvalidUrl(self))?,
-			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
-			tls_config: None,
-		})
+		self.as_str().into_endpoint()
 	}
 }
 
