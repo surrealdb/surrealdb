@@ -103,7 +103,7 @@ mod mem {
 
 	#[tokio::test]
 	async fn memory_allowed_as_address() {
-		any::connect("memory").unwrap();
+		any::connect("memory").await.unwrap();
 	}
 
 	include!("api/mod.rs");
