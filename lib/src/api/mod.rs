@@ -29,7 +29,7 @@ pub type Result<T> = std::result::Result<T, crate::Error>;
 const SUPPORTED_VERSIONS: (&str, &str) = (">=1.0.0-beta.8, <2.0.0", "20221030.c12a1cc");
 const LOG: &str = "surrealdb::api";
 
-/// Connection trait implemented by supported protocols
+/// Connection trait implemented by supported engines
 pub trait Connection: conn::Connection {}
 
 /// The future returned when creating a new SurrealDB instance
