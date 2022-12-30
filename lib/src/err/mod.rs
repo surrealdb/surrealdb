@@ -5,8 +5,9 @@ use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
 use thiserror::Error;
 
-/// An error originating from the SurrealDB client library.
+/// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
 	/// This error is used for ignoring a document when processing a query
 	#[doc(hidden)]

@@ -41,8 +41,8 @@ impl Datastore {
 	/// # Examples
 	///
 	/// ```rust,no_run
-	/// # use surrealdb::Datastore;
-	/// # use surrealdb::Error;
+	/// # use surrealdb::kvs::Datastore;
+	/// # use surrealdb::err::Error;
 	/// # #[tokio::main]
 	/// # async fn main() -> Result<(), Error> {
 	/// let ds = Datastore::new("memory").await?;
@@ -53,8 +53,8 @@ impl Datastore {
 	/// Or to create a file-backed store:
 	///
 	/// ```rust,no_run
-	/// # use surrealdb::Datastore;
-	/// # use surrealdb::Error;
+	/// # use surrealdb::kvs::Datastore;
+	/// # use surrealdb::err::Error;
 	/// # #[tokio::main]
 	/// # async fn main() -> Result<(), Error> {
 	/// let ds = Datastore::new("file://temp.db").await?;
@@ -65,8 +65,8 @@ impl Datastore {
 	/// Or to connect to a tikv-backed distributed store:
 	///
 	/// ```rust,no_run
-	/// # use surrealdb::Datastore;
-	/// # use surrealdb::Error;
+	/// # use surrealdb::kvs::Datastore;
+	/// # use surrealdb::err::Error;
 	/// # #[tokio::main]
 	/// # async fn main() -> Result<(), Error> {
 	/// let ds = Datastore::new("tikv://127.0.0.1:2379").await?;
@@ -155,8 +155,8 @@ impl Datastore {
 	/// Create a new transaction on this datastore
 	///
 	/// ```rust,no_run
-	/// use surrealdb::Datastore;
-	/// use surrealdb::Error;
+	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::err::Error;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
@@ -217,9 +217,9 @@ impl Datastore {
 	/// Parse and execute an SQL query
 	///
 	/// ```rust,no_run
-	/// use surrealdb::Datastore;
-	/// use surrealdb::Error;
-	/// use surrealdb::Session;
+	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::err::Error;
+	/// use surrealdb::dbs::Session;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(), Error> {
@@ -265,9 +265,9 @@ impl Datastore {
 	/// Execute a pre-parsed SQL query
 	///
 	/// ```rust,no_run
-	/// use surrealdb::Datastore;
-	/// use surrealdb::Error;
-	/// use surrealdb::Session;
+	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::err::Error;
+	/// use surrealdb::dbs::Session;
 	/// use surrealdb::sql::parse;
 	///
 	/// #[tokio::main]
@@ -312,9 +312,9 @@ impl Datastore {
 	/// Ensure a SQL [`Value`] is fully computed
 	///
 	/// ```rust,no_run
-	/// use surrealdb::Datastore;
-	/// use surrealdb::Error;
-	/// use surrealdb::Session;
+	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::err::Error;
+	/// use surrealdb::dbs::Session;
 	/// use surrealdb::sql::Future;
 	/// use surrealdb::sql::Value;
 	///

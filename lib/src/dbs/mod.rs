@@ -10,14 +10,15 @@ mod transaction;
 mod variables;
 
 pub use self::auth::*;
-pub use self::executor::*;
-pub use self::iterator::*;
 pub use self::options::*;
 pub use self::response::*;
 pub use self::session::*;
-pub use self::statement::*;
-pub use self::transaction::*;
-pub use self::variables::*;
+
+pub(crate) use self::executor::*;
+pub(crate) use self::iterator::*;
+pub(crate) use self::statement::*;
+pub(crate) use self::transaction::*;
+pub(crate) use self::variables::*;
 
 #[cfg(feature = "parallel")]
 mod channel;
@@ -28,4 +29,4 @@ pub use self::channel::*;
 #[cfg(test)]
 pub(crate) mod test;
 
-pub const LOG: &str = "surrealdb::dbs";
+pub(crate) const LOG: &str = "surrealdb::dbs";

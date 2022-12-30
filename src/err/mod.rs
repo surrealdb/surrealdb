@@ -6,7 +6,7 @@ use serde_json::error::Error as JsonError;
 use serde_pack::encode::Error as PackError;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error as Utf8Error;
-use surrealdb::Error as DbError;
+use surrealdb::err::Error as DbError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

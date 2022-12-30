@@ -11,6 +11,7 @@ use crate::sql::value::Value;
 use channel::Sender;
 
 impl<'a> Document<'a> {
+	#[allow(dead_code)]
 	pub(crate) async fn compute(
 		ctx: &Context<'_>,
 		opt: &Options,

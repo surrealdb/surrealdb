@@ -3,7 +3,7 @@ use crate::err::Error;
 use crate::net::session;
 use bytes::Bytes;
 use hyper::body::Body;
-use surrealdb::Session;
+use surrealdb::dbs::Session;
 use warp::Filter;
 
 #[allow(opaque_hidden_inferred_bound)]

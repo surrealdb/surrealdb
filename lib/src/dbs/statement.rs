@@ -14,11 +14,10 @@ use crate::sql::statements::insert::InsertStatement;
 use crate::sql::statements::relate::RelateStatement;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::statements::update::UpdateStatement;
-use crate::sql::version::Version;
 use std::fmt;
 
 #[derive(Clone, Debug)]
-pub enum Statement<'a> {
+pub(crate) enum Statement<'a> {
 	Select(&'a SelectStatement),
 	Create(&'a CreateStatement),
 	Update(&'a UpdateStatement),
@@ -164,14 +163,6 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	/// Returns any VERSION clause if specified
-	#[inline]
-	pub fn version(&self) -> Option<&Version> {
-		match self {
-			Statement::Select(v) => v.version.as_ref(),
-			_ => None,
-		}
-	}
 	/// Returns any RETURN clause if specified
 	#[inline]
 	pub fn output(&self) -> Option<&Output> {
@@ -186,6 +177,7 @@ impl<'a> Statement<'a> {
 	}
 	/// Returns any RETURN clause if specified
 	#[inline]
+	#[allow(dead_code)]
 	pub fn parallel(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.parallel,

@@ -1,3 +1,5 @@
+//! The full type definitions for the SurrealQL query language
+
 pub(crate) mod algorithm;
 pub(crate) mod array;
 pub(crate) mod base;

@@ -12,7 +12,7 @@ use crate::sql::value::Value;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-pub struct Document<'a> {
+pub(crate) struct Document<'a> {
 	pub(super) id: Option<Thing>,
 	pub(super) extras: Workable,
 	pub(super) current: Cow<'a, Value>,

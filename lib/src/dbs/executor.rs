@@ -17,7 +17,7 @@ use futures::lock::Mutex;
 use std::sync::Arc;
 use trice::Instant;
 
-pub struct Executor<'a> {
+pub(crate) struct Executor<'a> {
 	err: bool,
 	kvs: &'a Datastore,
 	txn: Option<Transaction>,

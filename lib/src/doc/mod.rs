@@ -1,4 +1,4 @@
-pub use self::document::*;
+pub(crate) use self::document::*;
 
 #[cfg(feature = "parallel")]
 mod compute;

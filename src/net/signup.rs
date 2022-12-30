@@ -4,8 +4,8 @@ use crate::net::output;
 use crate::net::session;
 use bytes::Bytes;
 use serde::Serialize;
+use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
-use surrealdb::Session;
 use warp::Filter;
 
 const MAX: u64 = 1024; // 1 KiB
