@@ -505,7 +505,7 @@ async fn router(
 			let request = client
 				.post(path)
 				.headers(headers.clone())
-				.auth(&auth)
+				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			let value = import(request, file).await?;
 			Ok(DbResponse::Other(value))
