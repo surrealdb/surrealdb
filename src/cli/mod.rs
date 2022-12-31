@@ -469,7 +469,7 @@ pub fn init() {
 	let matches = setup.get_matches();
 
 	let output = match matches.subcommand() {
-		Some(("sql", m)) => futures::executor::block_on(sql::init(m)),
+		Some(("sql", m)) => sql::init(m),
 		Some(("start", m)) => start::init(m),
 		Some(("backup", m)) => backup::init(m),
 		Some(("import", m)) => import::init(m),

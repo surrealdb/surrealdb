@@ -11,6 +11,7 @@ use surrealdb::sql::Statement;
 use surrealdb::Error as SurrealError;
 use surrealdb::Response;
 
+#[tokio::main]
 pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Set the default logging level
 	crate::cli::log::init(0);
@@ -22,7 +23,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let mut db = matches.value_of("db").map(str::to_string);
 	// If we should pretty-print responses
 	let pretty = matches.is_present("pretty");
-	// Make a new remote request
+	// Connect to the database engine
 	let client = connect(endpoint).await?;
 	// Sign in to the server if the specified dabatabase engine supports it
 	let root = Root {
