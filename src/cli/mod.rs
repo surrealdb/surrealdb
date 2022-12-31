@@ -11,6 +11,7 @@ pub use config::CF;
 
 use crate::cnf::LOGO;
 use clap::{Arg, Command};
+use std::process::ExitCode;
 
 pub const LOG: &str = "surrealdb::cli";
 
@@ -118,7 +119,7 @@ fn key_valid(v: &str) -> Result<(), String> {
 	}
 }
 
-pub fn init() {
+pub fn init() -> ExitCode {
 	let setup = Command::new("SurrealDB command-line interface and server")
 		.about(INFO)
 		.before_help(LOGO)
@@ -480,5 +481,8 @@ pub fn init() {
 
 	if let Err(e) = output {
 		error!(target: LOG, "{}", e);
+		return ExitCode::FAILURE;
 	}
+
+	ExitCode::SUCCESS
 }
