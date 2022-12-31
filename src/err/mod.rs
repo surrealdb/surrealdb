@@ -29,7 +29,7 @@ pub enum Error {
 	#[error("There was a problem connecting with the storage engine")]
 	InvalidStorage,
 
-	#[error("There was a problem with the database: {0}")]
+	#[error("{0}")]
 	Db(#[from] SurrealError),
 
 	#[error("Couldn't open the specified file: {0}")]
