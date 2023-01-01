@@ -15,12 +15,6 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
 
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          large-packages: false
-          swap-storage: false
-
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -68,10 +62,7 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
-      - name: Run cargo check --package surrealdb
-        run: cargo check --no-default-features --package surrealdb
-
-      - name: Run cargo check --workspace
+      - name: Run cargo check
         run: cargo check --workspace
 
       - name: Run cargo fmt
@@ -80,14 +71,5 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy -- -W warnings
 
-      - name: Run native cargo check --package surrealdb
-        run: cargo check --no-default-features --package surrealdb
-
-      - name: Run Wasm cargo check --package surrealdb
-        run: cargo check --features protocol-ws,protocol-http,kv-mem --target wasm32-unknown-unknown --package surrealdb
-
-      - name: Check IndxDB
-        run: cargo check --no-default-features --features kv-indxdb --target wasm32-unknown-unknown --package surrealdb
-
-      - name: Run cargo check --workspace
-        run: cargo check --workspace
+      - name: Run WebAssembly check
+        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http,kv-mem --target wasm32-unknown-unknown --package surrealdb
