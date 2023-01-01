@@ -65,7 +65,7 @@ impl<'a> Document<'a> {
 					let mut ctx = Context::new(ctx);
 					// Add insertable value
 					if let Workable::Insert(value) = &self.extras {
-						ctx.add_value("value".into(), value);
+						ctx.add_value("input".into(), value);
 					}
 					// Process ON DUPLICATE KEY clause
 					for x in x.iter() {
