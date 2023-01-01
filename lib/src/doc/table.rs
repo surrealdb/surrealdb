@@ -44,6 +44,8 @@ impl<'a> Document<'a> {
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
+		// Don't run permissions
+		let opt = &opt.perms(false);
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the query action
