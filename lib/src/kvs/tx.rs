@@ -45,6 +45,8 @@ pub(super) enum Inner {
 	IndxDB(super::indxdb::Transaction),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Transaction),
+	#[cfg(feature = "kv-sled")]
+	Sled(super::sled::Transaction),
 	#[cfg(feature = "kv-fdb")]
 	FDB(super::fdb::Transaction),
 }
@@ -76,6 +78,11 @@ impl Transaction {
 			#[cfg(feature = "kv-tikv")]
 			Transaction {
 				inner: Inner::TiKV(v),
+				..
+			} => v.closed(),
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
 				..
 			} => v.closed(),
 			#[cfg(feature = "kv-fdb")]
@@ -112,6 +119,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.cancel().await,
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.cancel(),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
@@ -146,6 +158,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.commit().await,
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.commit(),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
@@ -182,6 +199,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.del(key).await,
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.del(key),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
@@ -218,6 +240,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.exi(key).await,
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.exi(key),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
@@ -254,6 +281,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.get(key).await,
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.get(key),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
@@ -291,6 +323,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.set(key, val).await,
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.set(key, val),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
@@ -328,6 +365,16 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.put(key, val).await,
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.put(key, val),
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.put(key, val),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
@@ -366,6 +413,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.scan(rng, limit),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
@@ -403,6 +455,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.putc(key, val, chk).await,
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.putc(key, val, chk),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
@@ -440,6 +497,11 @@ impl Transaction {
 				inner: Inner::TiKV(v),
 				..
 			} => v.delc(key, chk).await,
+			#[cfg(feature = "kv-sled")]
+			Transaction {
+				inner: Inner::Sled(v),
+				..
+			} => v.delc(key, chk),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),

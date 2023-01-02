@@ -125,7 +125,7 @@ impl Transaction {
 		}
 		// Mark this transaction as done
 		self.ok = true;
-		// Cancel this transaction
+		// Commit this transaction
 		//
 		// To overcome the limitation in the rust fdb client that
 		// it's `cancel` and `commit` methods require you to move the

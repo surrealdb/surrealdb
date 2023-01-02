@@ -31,6 +31,8 @@ pub(super) enum Inner {
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Datastore),
+	#[cfg(feature = "kv-sled")]
+	Sled(super::sled::Datastore),
 	#[cfg(feature = "kv-fdb")]
 	FDB(super::fdb::Datastore),
 }
@@ -132,6 +134,18 @@ impl Datastore {
 				info!(target: LOG, "Connected to kvs store at {}", path);
 				v
 			}
+			// Parse and initiate a TiKV database
+			#[cfg(feature = "kv-sled")]
+			s if s.starts_with("sled:") => {
+				info!(target: LOG, "Starting kvs store at {}", path);
+				let s = s.trim_start_matches("sled://");
+				let s = s.trim_start_matches("sled:");
+				let v = super::sled::Datastore::new(s).await.map(|v| Datastore {
+					inner: Inner::Sled(v),
+				});
+				info!(target: LOG, "Starting kvs store at {}", path);
+				v
+			}
 			// Parse and initiate a FoundationDB database
 			#[cfg(feature = "kv-fdb")]
 			s if s.starts_with("fdb:") => {
@@ -198,6 +212,14 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
 					inner: super::tx::Inner::TiKV(tx),
+					cache: super::cache::Cache::default(),
+				})
+			}
+			#[cfg(feature = "kv-sled")]
+			Inner::Sled(v) => {
+				let tx = v.transaction(write, lock).await?;
+				Ok(Transaction {
+					inner: super::tx::Inner::Sled(tx),
 					cache: super::cache::Cache::default(),
 				})
 			}

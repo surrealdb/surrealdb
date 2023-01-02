@@ -91,7 +91,7 @@ impl Transaction {
 		}
 		// Mark this transaction as done
 		self.ok = true;
-		// Cancel this transaction
+		// Commit this transaction
 		match self.tx.lock().await.take() {
 			Some(tx) => tx.commit()?,
 			None => unreachable!(),

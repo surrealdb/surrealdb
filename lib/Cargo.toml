@@ -24,6 +24,7 @@ kv-mem = ["dep:echodb"]
 kv-indxdb = ["dep:indxdb"]
 kv-rocksdb = ["dep:rocksdb"]
 kv-tikv = ["dep:tikv"]
+kv-sled = ["dep:sled"]
 kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb"]
 kv-fdb-5_2 = ["foundationdb/fdb-5_2", "kv-fdb"]
 kv-fdb-6_0 = ["foundationdb/fdb-6_0", "kv-fdb"]
@@ -32,7 +33,7 @@ kv-fdb-6_2 = ["foundationdb/fdb-6_2", "kv-fdb"]
 kv-fdb-6_3 = ["foundationdb/fdb-6_3", "kv-fdb"]
 kv-fdb-7_0 = ["foundationdb/fdb-7_0", "kv-fdb"]
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
-scripting = ["dep:js"]
+scripting = ["dep:js", "dep:executor"]
 http = ["dep:reqwest"]
 native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
 rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls"]
@@ -90,6 +91,7 @@ serde = { version = "1.0.152", features = ["derive"] }
 serde_json = "1.0.93"
 sha-1 = "0.10.1"
 sha2 = "0.10.6"
+sled = {version= "0.34.7", optional = true}
 storekey = "0.4.0"
 thiserror = "1.0.38"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
@@ -117,6 +119,7 @@ features = [
 [dev-dependencies]
 time = { version = "0.3.17", features = ["serde"] }
 tokio = { version = "1.25.0", features = ["macros", "rt", "rt-multi-thread"] }
+ulid = { version = "1.0.0", features = ["serde"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"

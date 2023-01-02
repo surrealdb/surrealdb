@@ -358,6 +358,23 @@ impl From<tikv::Error> for Error {
 	}
 }
 
+#[cfg(feature = "kv-sled")]
+impl From<sled::Error> for Error {
+	fn from(e: sled::Error) -> Error {
+		Error::Tx(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-sled")]
+impl From<sled::transaction::TransactionError> for Error {
+	fn from(e: sled::transaction::TransactionError) -> Error {
+		match e {
+			sled::transaction::TransactionError::Abort(e) => Error::Tx(e.to_string()),
+			sled::transaction::TransactionError::Storage(e) => Error::Tx(e.to_string()),
+		}
+	}
+}
+
 #[cfg(feature = "kv-rocksdb")]
 impl From<rocksdb::Error> for Error {
 	fn from(e: rocksdb::Error) -> Error {

@@ -68,7 +68,7 @@ impl Transaction {
 		}
 		// Mark this transaction as done
 		self.ok = true;
-		// Cancel this transaction
+		// Commit this transaction
 		self.tx.commit()?;
 		// Continue
 		Ok(())

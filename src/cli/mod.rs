@@ -56,6 +56,7 @@ fn path_valid(v: &str) -> Result<(), String> {
 		v if v.starts_with("rocksdb:") => Ok(()),
 		v if v.starts_with("tikv:") => Ok(()),
 		v if v.starts_with("fdb:") => Ok(()),
+		v if v.starts_with("sled:") => Ok(()),
 		_ => Err(String::from(
 			"\
 			Provide a valid database path parameter\
