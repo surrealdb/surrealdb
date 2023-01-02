@@ -370,11 +370,6 @@ impl Transaction {
 				inner: Inner::Sled(v),
 				..
 			} => v.put(key, val),
-			#[cfg(feature = "kv-sled")]
-			Transaction {
-				inner: Inner::Sled(v),
-				..
-			} => v.put(key, val),
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),

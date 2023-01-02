@@ -44,7 +44,7 @@ kv-fdb = ["foundationdb"]
 rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "protocol-ws", "protocol-http",
-    "kv-mem", "kv-indxdb", "kv-rocksdb", "kv-tikv", "kv-fdb",
+    "kv-mem", "kv-indxdb", "kv-rocksdb", "kv-tikv", "kv-sled", "kv-fdb",
     "rustls", "native-tls",
     "http", "scripting"
 ]
