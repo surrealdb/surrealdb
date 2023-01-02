@@ -68,7 +68,7 @@ jobs:
         run: cargo clippy -- -W warnings
 
       - name: Run WebAssembly check
-        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http,kv-mem --target wasm32-unknown-unknown --package surrealdb
+        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb
 
   build:
     name: Build ${{ matrix.arch }}
