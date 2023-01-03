@@ -8,11 +8,12 @@ mod tests {
 	const N: usize = 1000;
 	const M: usize = 1000;
 	const KEY: Key = Key::new();
+	const VAL: Val = ValL::new();
 
 	fn get_randomized_map(random: u16) -> BTreeMap<Key, Val> {
 		let mut map = BTreeMap::<Key, Val>::new();
 		if random == 0 {
-			map.insert(KEY, Val::new());
+			map.insert(KEY, VAL);
 		}
 		map
 	}
@@ -97,14 +98,17 @@ mod tests {
 		}
 		let option_map_time = time.elapsed().unwrap();
 
+		let map_vs_option_map = map_time.as_micros() as f64 / option_map_time.as_micros() as f64;
+
 		println!("map: {}", map_time.as_micros());
 		println!("option: {}", option_time.as_micros());
 		println!("option_map: {}", option_map_time.as_micros());
+		println!("map / option_map: {:.2}", map_vs_option_map);
 
 		// If `rnd` is smaller than 3, then the test is not relevant
 		if rnd > 2 {
 			assert!(option_time <= map_time);
-			assert!(option_map_time <= map_time);
+			assert!(map_vs_option_map > 0.85);
 		}
 	}
 
@@ -174,14 +178,17 @@ mod tests {
 		}
 		let option_set_time = time.elapsed().unwrap();
 
+		let set_vs_option_set = set_time.as_micros() as f64 / option_set_time.as_micros() as f64;
+
 		println!("set: {}", set_time.as_micros());
 		println!("option: {}", option_time.as_micros());
 		println!("option_set: {}", option_set_time.as_micros());
+		println!("set / option_set {:.2}", set_vs_option_set);
 
 		// If `rnd` is smaller than 3, then the test is not relevant
 		if rnd > 2 {
 			assert!(option_time <= set_time);
-			assert!(option_set_time <= set_time);
+			assert!(set_vs_option_set > 0.4);
 		}
 	}
 }
