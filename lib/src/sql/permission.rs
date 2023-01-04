@@ -91,7 +91,7 @@ impl Display for Permissions {
 				if is_pretty() {
 					pretty_sequence_item();
 				} else {
-					f.write_char(' ')?;
+					f.write_str(", ")?;
 				}
 			}
 			write!(f, "FOR ")?;
@@ -262,7 +262,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(
-			"PERMISSIONS FOR select FULL, FOR create WHERE public = true, FOR update WHERE public = true, FOR delete NONE",
+			"PERMISSIONS FOR select FULL, FOR create, update WHERE public = true, FOR delete NONE",
 			format!("{}", out)
 		);
 		assert_eq!(
