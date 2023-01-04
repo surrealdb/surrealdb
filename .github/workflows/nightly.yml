@@ -14,17 +14,6 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v3
 
-      - name: Cache cargo assets
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ubuntu-20.04-test-cargo-${{ hashFiles('**/Cargo.lock') }}
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -40,17 +29,6 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
-
-      - name: Cache cargo assets
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ubuntu-20.04-lint-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -101,17 +79,6 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@v3
-
-      - name: Cache cargo assets
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ matrix.arch }}-build-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Prepare environment
         if: contains(matrix.arch, 'windows') && endsWith(matrix.arch, '-gnu')
