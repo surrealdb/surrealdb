@@ -2,14 +2,18 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::common::commasorspace;
 use crate::sql::error::IResult;
+use crate::sql::fmt::pretty_indent;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
 use nom::{multi::separated_list0, sequence::tuple};
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 use std::str;
+
+use super::fmt::is_pretty;
+use super::fmt::pretty_sequence_item;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Permissions {
@@ -53,8 +57,9 @@ impl Permissions {
 	}
 }
 
-impl fmt::Display for Permissions {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Permissions {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		use std::fmt::Write;
 		write!(f, "PERMISSIONS")?;
 		if self.is_none() {
 			return write!(f, " NONE");
@@ -62,11 +67,56 @@ impl fmt::Display for Permissions {
 		if self.is_full() {
 			return write!(f, " FULL");
 		}
-		write!(
-			f,
-			" FOR select {}, FOR create {}, FOR update {}, FOR delete {}",
-			self.select, self.create, self.update, self.delete
-		)
+		let mut lines = Vec::<(Vec<char>, &Permission)>::new();
+		for (c, permission) in ['s', 'c', 'u', 'd'].into_iter().zip([
+			&self.select,
+			&self.create,
+			&self.update,
+			&self.delete,
+		]) {
+			if let Some((existing, _)) = lines.iter_mut().find(|(_, p)| *p == permission) {
+				existing.push(c);
+			} else {
+				lines.push((vec![c], permission));
+			}
+		}
+		let indent = if is_pretty() {
+			Some(pretty_indent())
+		} else {
+			f.write_char(' ')?;
+			None
+		};
+		for (i, (kinds, permission)) in lines.into_iter().enumerate() {
+			if i > 0 {
+				if is_pretty() {
+					pretty_sequence_item();
+				} else {
+					f.write_char(' ')?;
+				}
+			}
+			write!(f, "FOR ")?;
+			for (i, kind) in kinds.into_iter().enumerate() {
+				if i > 0 {
+					f.write_str(", ")?;
+				}
+				f.write_str(match kind {
+					's' => "select",
+					'c' => "create",
+					'u' => "update",
+					'd' => "delete",
+					_ => unreachable!(),
+				})?;
+			}
+			match permission {
+				Permission::Specific(_) if is_pretty() => {
+					let _indent = pretty_indent();
+					Display::fmt(permission, f)?;
+				}
+				_ => write!(f, " {}", permission)?,
+			}
+		}
+		drop(indent);
+		Ok(())
 	}
 }
 
@@ -144,8 +194,8 @@ impl Default for Permission {
 	}
 }
 
-impl fmt::Display for Permission {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Permission {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::None => f.write_str("NONE"),
 			Self::Full => f.write_str("FULL"),

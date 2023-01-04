@@ -257,6 +257,13 @@ mod tests {
 	}
 
 	#[test]
+	fn pretty_define_query() {
+		let query = parse("DEFINE TABLE test SCHEMAFULL PERMISSIONS FOR create, update, delete NONE FOR select WHERE public = true;").unwrap();
+		assert_eq!(format!("{}", query), "DEFINE TABLE test SCHEMAFULL PERMISSIONS FOR select WHERE public = true FOR create, update, delete NONE;");
+		assert_eq!(format!("{:#}", query), "DEFINE TABLE test SCHEMAFULL\n\tPERMISSIONS\n\t\tFOR select\n\t\t\tWHERE public = true\n\t\tFOR create, update, delete NONE\n;");
+	}
+
+	#[test]
 	fn pretty_value() {
 		let value = value("{foo: [1, 2, 3]};").unwrap().1;
 		assert_eq!(format!("{}", value), "{ foo: [1, 2, 3] }");
