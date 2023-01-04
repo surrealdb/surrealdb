@@ -1,12 +1,14 @@
 use super::classes;
 use super::executor::Executor;
 use super::globals;
+use super::modules;
 use super::modules::loader;
 use super::modules::resolver;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::sql::value::Value;
 use js::Function;
+use js::Module;
 use js::Promise;
 use js::Rest;
 use js::This;
@@ -46,13 +48,18 @@ pub async fn run(
 	let res: Result<Promise<Value>, js::Error> = ctx.with(|ctx| {
 		// Get the context global object
 		let global = ctx.globals();
-		// Register the fetch function as a global object
+		// Register the surrealdb module as a global object
+		global.set(
+			"surrealdb",
+			Module::new_def::<modules::surrealdb::Package, _>(ctx, "surrealdb")?
+				.eval()?
+				.get::<_, js::Value>("default")?,
+		)?;
+		// Register the fetch function to the globals
 		global.init_def::<globals::fetch::Fetch>()?;
-		// Register the Duration type as a global class
+		// Register the special SurrealDB types as classes
 		global.init_def::<classes::duration::Duration>()?;
-		// Register the Record type as a global class
 		global.init_def::<classes::record::Record>()?;
-		// Register the Uuid type as a global class
 		global.init_def::<classes::uuid::Uuid>()?;
 		// Attempt to compile the script
 		let res = ctx.compile("script", src)?;
