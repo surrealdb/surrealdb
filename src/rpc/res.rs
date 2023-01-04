@@ -30,7 +30,7 @@ enum Content<T> {
 }
 
 impl<T: Serialize> Response<T> {
-	// Send the response to the channel
+	/// Send the response to the channel
 	pub async fn send(self, out: Output, chn: Sender<Message>) {
 		match out {
 			Output::Json => {
@@ -100,7 +100,7 @@ impl Failure {
 	}
 }
 
-// Create a JSON RPC result response
+/// Create a JSON RPC result response
 pub fn success<S: Serialize>(id: Option<Value>, val: S) -> Response<S> {
 	Response {
 		id,
@@ -108,7 +108,7 @@ pub fn success<S: Serialize>(id: Option<Value>, val: S) -> Response<S> {
 	}
 }
 
-// Create a JSON RPC failure response
+/// Create a JSON RPC failure response
 pub fn failure(id: Option<Value>, err: Failure) -> Response<Value> {
 	Response {
 		id,

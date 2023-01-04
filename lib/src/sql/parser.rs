@@ -7,14 +7,17 @@ use crate::sql::value::Value;
 use nom::Err;
 use std::str;
 
+/// Parses a SurrealQL [`Query`]
 pub fn parse(input: &str) -> Result<Query, Error> {
 	parse_impl(input, query)
 }
 
+/// Parses a SurrealQL [`Thing`]
 pub fn thing(input: &str) -> Result<Thing, Error> {
 	parse_impl(input, super::thing::thing)
 }
 
+/// Parses a SurrealQL [`Value`]
 pub fn json(input: &str) -> Result<Value, Error> {
 	parse_impl(input, super::value::json)
 }

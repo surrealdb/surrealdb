@@ -3,7 +3,7 @@
 {
   inherit target;
 
-  features = with util.features; [ http ];
+  features = with util.features; [ storage-mem http ];
 
   buildSpec = with pkgs; {
     depsBuildBuild = [ clang protobuf perl ];

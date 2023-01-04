@@ -1,14 +1,15 @@
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
+use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::params::Params;
 use crate::net::session;
 use bytes::Bytes;
 use serde::Deserialize;
 use std::str;
+use surrealdb::dbs::Session;
 use surrealdb::sql::Value;
-use surrealdb::Session;
 use warp::path;
 use warp::Filter;
 
@@ -20,6 +21,7 @@ struct Query {
 	pub start: Option<String>,
 }
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	// ------------------------------
 	// Routes for OPTIONS
@@ -172,7 +174,7 @@ async fn create_all(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the request body as JSON
 	match surrealdb::sql::json(data) {
 		Ok(data) => {
@@ -285,7 +287,7 @@ async fn create_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
 	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
@@ -333,7 +335,7 @@ async fn update_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
 	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
@@ -381,7 +383,7 @@ async fn modify_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Convert the HTTP request body
-	let data = str::from_utf8(&body).unwrap();
+	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
 	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,

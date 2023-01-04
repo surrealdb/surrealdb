@@ -1,15 +1,17 @@
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
+use crate::net::input::bytes_to_utf8;
 use crate::net::output;
 use crate::net::session;
 use bytes::Bytes;
-use surrealdb::Session;
+use surrealdb::dbs::Session;
 use warp::http;
 use warp::Filter;
 
 const MAX: u64 = 1024 * 1024 * 1024 * 4; // 4 GiB
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	warp::path("import")
 		.and(warp::path::end())
@@ -34,7 +36,7 @@ async fn handler(
 			// Get local copy of options
 			let opt = CF.get().unwrap();
 			// Convert the body to a byte slice
-			let sql = std::str::from_utf8(&sql).unwrap();
+			let sql = bytes_to_utf8(&sql)?;
 			// Execute the sql query in the database
 			match db.execute(sql, &session, None, opt.strict).await {
 				Ok(res) => match output.as_ref() {

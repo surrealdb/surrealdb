@@ -37,6 +37,16 @@ impl<'js> FromJs<'js> for Value {
 			val if val.is_object() => {
 				// Extract the value as an object
 				let v = val.into_object().unwrap();
+				// Check to see if this object is an error
+				if v.is_error() {
+					let e: String = v.get("message")?;
+					return Err(Error::Exception {
+						line: -1,
+						message: e,
+						file: String::new(),
+						stack: String::new(),
+					});
+				}
 				// Check to see if this object is a duration
 				if (v).instance_of::<classes::duration::duration::Duration>() {
 					let v = v.into_instance::<classes::duration::duration::Duration>().unwrap();

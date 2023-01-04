@@ -3,6 +3,8 @@
 {
   inherit target;
 
+  features = with util.features; [ storage-mem ];
+
   buildSpec = with pkgs; {
     nativeBuildInputs = with pkgsStatic; [ stdenv.cc openssl ];
 

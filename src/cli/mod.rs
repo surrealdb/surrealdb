@@ -11,6 +11,7 @@ pub use config::CF;
 
 use crate::cnf::LOGO;
 use clap::{Arg, Command};
+use std::process::ExitCode;
 
 pub const LOG: &str = "surrealdb::cli";
 
@@ -26,6 +27,16 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 
 ----------
 ";
+
+fn split_endpoint(v: &str) -> (&str, &str) {
+	match v {
+		"memory" => ("mem", ""),
+		v => match v.split_once("://") {
+			Some(parts) => parts,
+			None => v.split_once(':').unwrap_or_default(),
+		},
+	}
+}
 
 fn file_valid(v: &str) -> Result<(), String> {
 	match v {
@@ -54,9 +65,9 @@ fn path_valid(v: &str) -> Result<(), String> {
 }
 
 fn conn_valid(v: &str) -> Result<(), String> {
-	match v {
-		v if v.starts_with("http://") => Ok(()),
-		v if v.starts_with("https://") => Ok(()),
+	let scheme = split_endpoint(v).0;
+	match scheme {
+		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "file" | "tikv" => Ok(()),
 		_ => Err(String::from(
 			"\
 			Provide a valid database connection string\
@@ -108,7 +119,7 @@ fn key_valid(v: &str) -> Result<(), String> {
 	}
 }
 
-pub fn init() {
+pub fn init() -> ExitCode {
 	let setup = Command::new("SurrealDB command-line interface and server")
 		.about(INFO)
 		.before_help(LOGO)
@@ -238,6 +249,14 @@ pub fn init() {
 					.forbid_empty_values(true)
 					.help("The logging level for the database server")
 					.value_parser(["warn", "info", "debug", "trace", "full"]),
+			)
+			.arg(
+				Arg::new("no-banner")
+					.env("NO_BANNER")
+					.long("no-banner")
+					.required(false)
+					.takes_value(false)
+					.help("Whether to hide the startup banner"),
 			),
 	);
 
@@ -462,5 +481,8 @@ pub fn init() {
 
 	if let Err(e) = output {
 		error!(target: LOG, "{}", e);
+		return ExitCode::FAILURE;
 	}
+
+	ExitCode::SUCCESS
 }

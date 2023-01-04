@@ -23,6 +23,8 @@ impl<'a> Document<'a> {
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
+		// Don't run permissions
+		let opt = &opt.perms(false);
 		// Loop through all event statements
 		for ev in self.ev(opt, txn).await?.iter() {
 			// Get the event action

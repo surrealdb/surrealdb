@@ -1,33 +1,63 @@
 use crate::err::Error;
-use reqwest::blocking::Client;
-use reqwest::blocking::Response;
-use reqwest::header::ACCEPT;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use serde_json::Value;
+use surrealdb::engines::any::connect;
+use surrealdb::error::Api as ApiError;
+use surrealdb::opt::auth::Root;
+use surrealdb::sql;
+use surrealdb::sql::statements::SetStatement;
+use surrealdb::sql::Statement;
+use surrealdb::Error as SurrealError;
+use surrealdb::Response;
 
-pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+#[tokio::main]
+pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Set the default logging level
-	crate::cli::log::init(3);
+	crate::cli::log::init(0);
 	// Parse all other cli arguments
-	let user = matches.value_of("user").unwrap();
-	let pass = matches.value_of("pass").unwrap();
-	let conn = matches.value_of("conn").unwrap();
-	let ns = matches.value_of("ns");
-	let db = matches.value_of("db");
-
+	let username = matches.value_of("user").unwrap();
+	let password = matches.value_of("pass").unwrap();
+	let endpoint = matches.value_of("conn").unwrap();
+	let mut ns = matches.value_of("ns").map(str::to_string);
+	let mut db = matches.value_of("db").map(str::to_string);
 	// If we should pretty-print responses
 	let pretty = matches.is_present("pretty");
-	// Set the correct import URL
-	let conn = format!("{}/sql", conn);
+	// Connect to the database engine
+	let client = connect(endpoint).await?;
+	// Sign in to the server if the specified dabatabase engine supports it
+	let root = Root {
+		username,
+		password,
+	};
+	if let Err(error) = client.signin(root).await {
+		match error {
+			// Authentication not supported by this engine, we can safely continue
+			SurrealError::Api(ApiError::AuthNotSupported) => {}
+			error => {
+				return Err(error.into());
+			}
+		}
+	}
 	// Create a new terminal REPL
 	let mut rl = Editor::<()>::new().unwrap();
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
+	// Configure the prompt
+	let mut prompt = "> ".to_owned();
 	// Loop over each command-line input
 	loop {
+		// Use namespace / database if specified
+		if let (Some(namespace), Some(database)) = (&ns, &db) {
+			match client.use_ns(namespace).use_db(database).await {
+				Ok(()) => {
+					prompt = format!("{namespace}/{database}> ");
+				}
+				Err(error) => eprintln!("{error}"),
+			}
+		}
 		// Prompt the user to input SQL
-		let readline = rl.readline("> ");
+		let readline = rl.readline(&prompt);
 		// Check the user input
 		match readline {
 			// The user typed a query
@@ -38,27 +68,38 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				}
 				// Add the entry to the history
 				rl.add_history_entry(line.as_str());
-				// Make a new remote request
-				let res = Client::new()
-					.post(&conn)
-					.header(ACCEPT, "application/json")
-					.basic_auth(user, Some(pass));
-				// Add NS header if specified
-				let res = match ns {
-					Some(ns) => res.header("NS", ns),
-					None => res,
-				};
-				// Add DB header if specified
-				let res = match db {
-					Some(db) => res.header("DB", db),
-					None => res,
-				};
-				// Complete request
-				let res = res.body(line).send();
-				// Get the request response
-				match process(pretty, res) {
-					Ok(v) => println!("{}", v),
-					Err(e) => eprintln!("{}", e),
+				// Complete the request
+				match sql::parse(&line) {
+					Ok(query) => {
+						for statement in query.iter() {
+							match statement {
+								Statement::Use(stmt) => {
+									if let Some(namespace) = &stmt.ns {
+										ns = Some(namespace.clone());
+									}
+									if let Some(database) = &stmt.db {
+										db = Some(database.clone());
+									}
+								}
+								Statement::Set(SetStatement {
+									name,
+									what,
+								}) => {
+									if let Err(error) = client.set(name, what).await {
+										eprintln!("{error}");
+									}
+								}
+								_ => {}
+							}
+						}
+						let res = client.query(query).await;
+						// Get the request response
+						match process(pretty, res) {
+							Ok(v) => println!("{v}"),
+							Err(e) => eprintln!("{e}"),
+						}
+					}
+					Err(error) => eprintln!("{error}"),
 				}
 			}
 			// The user types CTRL-C
@@ -71,7 +112,7 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 			}
 			// There was en error
 			Err(err) => {
-				eprintln!("Error: {:?}", err);
+				eprintln!("Error: {err:?}");
 				break;
 			}
 		}
@@ -82,28 +123,20 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	Ok(())
 }
 
-fn process(pretty: bool, res: reqwest::Result<Response>) -> Result<String, Error> {
+fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
 	// Catch any errors
-	let res = res?;
-	// Process the TEXT response
-	let res = res.text()?;
+	let values: Vec<Value> = res?.take(0)?;
+	let value = Value::Array(values);
 	// Check if we should prettify
 	match pretty {
 		// Don't prettify the response
-		false => Ok(res),
+		false => Ok(value.to_string()),
 		// Yes prettify the response
-		true => match res.is_empty() {
-			// This was an empty response
-			true => Ok(res),
-			// Let's make this response pretty
-			false => {
-				// Parse the JSON response
-				let res: Value = serde_json::from_str(&res)?;
-				// Pretty the JSON response
-				let res = serde_json::to_string_pretty(&res)?;
-				// Everything processed OK
-				Ok(res)
-			}
-		},
+		true => {
+			// Pretty the JSON response
+			let res = serde_json::to_string_pretty(&value)?;
+			// Everything processed OK
+			Ok(res)
+		}
 	}
 }

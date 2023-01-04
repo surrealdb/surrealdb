@@ -28,6 +28,16 @@ impl Value {
 			// Get the current path part
 			Some(p) => match self {
 				// Current path part is an object
+				Value::Future(v) => {
+					// Check how many path parts are remaining
+					match path.len() {
+						// No further embedded fields, so just return this
+						0 => Ok(Value::Future(v.clone())),
+						//
+						_ => v.compute(ctx, opt, txn, None).await?.get(ctx, opt, txn, path).await,
+					}
+				}
+				// Current path part is an object
 				Value::Object(v) => match p {
 					// If requesting an `id` field, check if it is a complex Record ID
 					Part::Field(f) if f.is_id() && path.len() > 1 => match v.get(f as &str) {

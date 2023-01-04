@@ -4,6 +4,7 @@ mod head;
 mod health;
 mod import;
 mod index;
+mod input;
 mod key;
 mod log;
 mod output;

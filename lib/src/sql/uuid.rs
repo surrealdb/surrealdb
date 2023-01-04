@@ -34,6 +34,12 @@ impl From<String> for Uuid {
 	}
 }
 
+impl From<Uuid> for uuid::Uuid {
+	fn from(s: Uuid) -> Self {
+		s.0
+	}
+}
+
 impl Deref for Uuid {
 	type Target = uuid::Uuid;
 	fn deref(&self) -> &Self::Target {

@@ -2,10 +2,40 @@
 
 mod parse;
 use parse::Parse;
+use surrealdb::dbs::Session;
+use surrealdb::err::Error;
+use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
-use surrealdb::Datastore;
-use surrealdb::Error;
-use surrealdb::Session;
+
+#[tokio::test]
+async fn script_function_error() -> Result<(), Error> {
+	let sql = "
+		SELECT * FROM function() {
+			throw 'error';
+		};
+		SELECT * FROM function() {
+			throw new Error('error');
+		};
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Problem with embedded script function. An exception occurred: error"
+	));
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Problem with embedded script function. An exception occurred: error"
+	));
+	//
+	Ok(())
+}
 
 #[tokio::test]
 async fn script_function_simple() -> Result<(), Error> {

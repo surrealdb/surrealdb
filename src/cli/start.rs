@@ -18,8 +18,13 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 		Some("full") => log::init(4),
 		_ => unreachable!(),
 	};
-	// Output SurrealDB logo
-	println!("{}", LOGO);
+
+	// Check if a banner should be outputted
+	if !matches.is_present("no-banner") {
+		// Output SurrealDB logo
+		println!("{LOGO}");
+	}
+
 	// Setup the cli options
 	config::init(matches);
 	// Initiate environment

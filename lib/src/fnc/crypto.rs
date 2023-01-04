@@ -111,6 +111,37 @@ pub mod argon2 {
 	}
 }
 
+pub mod bcrypt {
+
+	use crate::err::Error;
+	use crate::fnc::crypto::COST_ALLOWANCE;
+	use crate::sql::value::Value;
+	use bcrypt;
+	use bcrypt::HashParts;
+	use std::str::FromStr;
+
+	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
+		let parts = match HashParts::from_str(&hash) {
+			Ok(parts) => parts,
+			Err(_) => return Ok(Value::False),
+		};
+		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to multiplying.
+		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
+			// Too expensive to compute.
+			Value::False
+		} else {
+			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice, once
+			// above and once in verity, by using bcrypt::bcrypt.
+			bcrypt::verify(pass, &hash).unwrap_or(false).into()
+		})
+	}
+
+	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
+		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST).unwrap();
+		Ok(hash.into())
+	}
+}
+
 pub mod pbkdf2 {
 
 	use super::COST_ALLOWANCE;
@@ -177,37 +208,6 @@ pub mod scrypt {
 	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
 		let salt = SaltString::generate(&mut OsRng);
 		let hash = Scrypt.hash_password(pass.as_ref(), salt.as_ref()).unwrap().to_string();
-		Ok(hash.into())
-	}
-}
-
-pub mod bcrypt {
-
-	use crate::err::Error;
-	use crate::fnc::crypto::COST_ALLOWANCE;
-	use crate::sql::value::Value;
-	use bcrypt;
-	use bcrypt::HashParts;
-	use std::str::FromStr;
-
-	pub fn cmp((hash, pass): (String, String)) -> Result<Value, Error> {
-		let parts = match HashParts::from_str(&hash) {
-			Ok(parts) => parts,
-			Err(_) => return Ok(Value::False),
-		};
-		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to multiplying.
-		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
-			// Too expensive to compute.
-			Value::False
-		} else {
-			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice, once
-			// above and once in verity, by using bcrypt::bcrypt.
-			bcrypt::verify(pass, &hash).unwrap_or(false).into()
-		})
-	}
-
-	pub fn gen((pass,): (String,)) -> Result<Value, Error> {
-		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST).unwrap();
 		Ok(hash.into())
 	}
 }

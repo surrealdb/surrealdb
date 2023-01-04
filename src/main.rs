@@ -24,6 +24,8 @@ mod iam;
 mod net;
 mod rpc;
 
-fn main() {
-	cli::init(); // Initiate the command line
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+	cli::init() // Initiate the command line
 }

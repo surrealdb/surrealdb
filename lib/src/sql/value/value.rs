@@ -14,6 +14,7 @@ use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
 use crate::sql::function::{function, Function};
+use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::Id;
 use crate::sql::idiom::{idiom, Idiom};
@@ -117,6 +118,7 @@ pub enum Value {
 	Regex(Regex),
 	Range(Box<Range>),
 	Edges(Box<Edges>),
+	Future(Box<Future>),
 	Constant(Constant),
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
@@ -252,6 +254,12 @@ impl From<Range> for Value {
 impl From<Edges> for Value {
 	fn from(v: Edges) -> Self {
 		Value::Edges(Box::new(v))
+	}
+}
+
+impl From<Future> for Value {
+	fn from(v: Future) -> Self {
+		Value::Future(Box::new(v))
 	}
 }
 
@@ -457,7 +465,7 @@ impl From<Id> for Value {
 	fn from(v: Id) -> Self {
 		match v {
 			Id::Number(v) => v.into(),
-			Id::String(v) => Strand::from(v).into(),
+			Id::String(v) => v.into(),
 			Id::Object(v) => v.into(),
 			Id::Array(v) => v.into(),
 		}
@@ -535,6 +543,36 @@ impl TryFrom<Value> for DateTime<Utc> {
 	}
 }
 
+impl TryFrom<Value> for uuid::Uuid {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Uuid(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "uuid::Uuid")),
+		}
+	}
+}
+
+impl TryFrom<Value> for Vec<Value> {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Array(x) => Ok(x.into()),
+			_ => Err(Error::TryFromError(value.to_string(), "Vec<Value>")),
+		}
+	}
+}
+
+impl TryFrom<Value> for Object {
+	type Error = Error;
+	fn try_from(value: Value) -> Result<Self, Self::Error> {
+		match value {
+			Value::Object(x) => Ok(x),
+			_ => Err(Error::TryFromError(value.to_string(), "Object")),
+		}
+	}
+}
+
 impl Value {
 	// -----------------------------------
 	// Initial record value
@@ -572,7 +610,7 @@ impl Value {
 	}
 
 	pub fn is_some(&self) -> bool {
-		!self.is_none()
+		!self.is_none() && !self.is_null()
 	}
 
 	pub fn is_true(&self) -> bool {
@@ -658,6 +696,18 @@ impl Value {
 
 	pub fn is_positive(&self) -> bool {
 		matches!(self, Value::Number(v) if v.is_positive())
+	}
+
+	pub fn is_negative(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_negative())
+	}
+
+	pub fn is_zero_or_positive(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_zero_or_positive())
+	}
+
+	pub fn is_zero_or_negative(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_zero_or_negative())
 	}
 
 	pub fn is_datetime(&self) -> bool {
@@ -831,8 +881,8 @@ impl Value {
 			Value::Idiom(v) => v.simplify(),
 			Value::Strand(v) => v.0.to_string().into(),
 			Value::Datetime(v) => v.0.to_string().into(),
+			Value::Future(_) => "fn::future".to_string().into(),
 			Value::Function(v) => match v.as_ref() {
-				Function::Future(_) => "fn::future".to_string().into(),
 				Function::Script(_, _) => "fn::script".to_string().into(),
 				Function::Normal(f, _) => f.to_string().into(),
 				Function::Cast(_, v) => v.to_idiom(),
@@ -1109,11 +1159,11 @@ impl Value {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
 			Value::Thing(v) => match other {
 				Value::Strand(w) => v.to_string().contains(w.as_str()),
-				_ => v.to_string().contains(&other.to_string().as_str()),
+				_ => v.to_string().contains(other.to_string().as_str()),
 			},
 			Value::Strand(v) => match other {
 				Value::Strand(w) => v.contains(w.as_str()),
-				_ => v.contains(&other.to_string().as_str()),
+				_ => v.contains(other.to_string().as_str()),
 			},
 			Value::Geometry(v) => match other {
 				Value::Geometry(w) => v.contains(w),
@@ -1179,6 +1229,14 @@ impl Value {
 			_ => self.partial_cmp(other),
 		}
 	}
+
+	// -----------------------------------
+	// Mathematical operations
+	// -----------------------------------
+
+	pub fn pow(self, other: Value) -> Value {
+		self.as_number().pow(other.as_number()).into()
+	}
 }
 
 impl fmt::Display for Value {
@@ -1206,6 +1264,7 @@ impl fmt::Display for Value {
 			Value::Regex(v) => write!(f, "{}", v),
 			Value::Range(v) => write!(f, "{}", v),
 			Value::Edges(v) => write!(f, "{}", v),
+			Value::Future(v) => write!(f, "{}", v),
 			Value::Constant(v) => write!(f, "{}", v),
 			Value::Function(v) => write!(f, "{}", v),
 			Value::Subquery(v) => write!(f, "{}", v),
@@ -1241,10 +1300,12 @@ impl Value {
 			Value::True => Ok(Value::True),
 			Value::False => Ok(Value::False),
 			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Range(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Param(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Array(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Object(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Future(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
@@ -1281,10 +1342,11 @@ impl Serialize for Value {
 				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
 				Value::Range(v) => s.serialize_newtype_variant("Value", 18, "Range", v),
 				Value::Edges(v) => s.serialize_newtype_variant("Value", 19, "Edges", v),
-				Value::Constant(v) => s.serialize_newtype_variant("Value", 20, "Constant", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 21, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 22, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 23, "Expression", v),
+				Value::Future(v) => s.serialize_newtype_variant("Value", 20, "Future", v),
+				Value::Constant(v) => s.serialize_newtype_variant("Value", 21, "Constant", v),
+				Value::Function(v) => s.serialize_newtype_variant("Value", 22, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant("Value", 23, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant("Value", 24, "Expression", v),
 			}
 		} else {
 			match self {
@@ -1379,6 +1441,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(datetime, Value::from),
 			map(duration, Value::from),
 			map(geometry, Value::from),
+			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
 			map(object, Value::from),
@@ -1410,6 +1473,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(datetime, Value::from),
 			map(duration, Value::from),
 			map(geometry, Value::from),
+			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
 			map(object, Value::from),
@@ -1431,6 +1495,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 		map(subquery, Value::from),
 		map(function, Value::from),
 		map(constant, Value::from),
+		map(future, Value::from),
 		map(param, Value::from),
 		map(model, Value::from),
 		map(edges, Value::from),
@@ -1606,8 +1671,8 @@ mod tests {
 	#[test]
 	fn check_size() {
 		assert_eq!(64, std::mem::size_of::<Value>());
-		assert_eq!(112, std::mem::size_of::<Result<Value, Error>>());
-		assert_eq!(48, std::mem::size_of::<crate::sql::number::Number>());
+		assert_eq!(104, std::mem::size_of::<Result<Value, Error>>());
+		assert_eq!(40, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
 		assert_eq!(12, std::mem::size_of::<crate::sql::datetime::Datetime>());
@@ -1618,7 +1683,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::idiom::Idiom>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
-		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
+		assert_eq!(40, std::mem::size_of::<crate::sql::model::Model>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());

@@ -8,10 +8,10 @@ use argon2::Argon2;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
+use surrealdb::dbs::Auth;
+use surrealdb::dbs::Session;
 use surrealdb::sql::Object;
 use surrealdb::sql::Value;
-use surrealdb::Auth;
-use surrealdb::Session;
 
 pub async fn signin(session: &mut Session, vars: Object) -> Result<Value, Error> {
 	// Parse the specified variables
@@ -141,7 +141,7 @@ pub async fn sc(
 									..Claims::default()
 								};
 								// Create the authentication token
-								let enc = encode(&*HEADER, &val, &key);
+								let enc = encode(&HEADER, &val, &key);
 								// Set the authentication on the session
 								session.tk = Some(val.into());
 								session.ns = Some(ns.to_owned());
@@ -206,7 +206,7 @@ pub async fn db(
 						..Claims::default()
 					};
 					// Create the authentication token
-					let enc = encode(&*HEADER, &val, &key);
+					let enc = encode(&HEADER, &val, &key);
 					// Set the authentication on the session
 					session.tk = Some(val.into());
 					session.ns = Some(ns.to_owned());
@@ -260,7 +260,7 @@ pub async fn ns(
 						..Claims::default()
 					};
 					// Create the authentication token
-					let enc = encode(&*HEADER, &val, &key);
+					let enc = encode(&HEADER, &val, &key);
 					// Set the authentication on the session
 					session.tk = Some(val.into());
 					session.ns = Some(ns.to_owned());

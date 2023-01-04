@@ -14,11 +14,10 @@ use crate::sql::statements::insert::InsertStatement;
 use crate::sql::statements::relate::RelateStatement;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::statements::update::UpdateStatement;
-use crate::sql::version::Version;
 use std::fmt;
 
 #[derive(Clone, Debug)]
-pub enum Statement<'a> {
+pub(crate) enum Statement<'a> {
 	Select(&'a SelectStatement),
 	Create(&'a CreateStatement),
 	Update(&'a UpdateStatement),
@@ -77,17 +76,17 @@ impl<'a> fmt::Display for Statement<'a> {
 }
 
 impl<'a> Statement<'a> {
-	// Check the type of statement
+	/// Check the type of statement
 	#[inline]
 	pub fn is_select(&self) -> bool {
 		matches!(self, Statement::Select(_))
 	}
-	// Check the type of statement
+	/// Check the type of statement
 	#[inline]
 	pub fn is_delete(&self) -> bool {
 		matches!(self, Statement::Delete(_))
 	}
-	// Returns any query fields if specified
+	/// Returns any query fields if specified
 	#[inline]
 	pub fn expr(&self) -> Option<&Fields> {
 		match self {
@@ -95,7 +94,7 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	// Returns any SET clause if specified
+	/// Returns any SET clause if specified
 	#[inline]
 	pub fn data(&self) -> Option<&Data> {
 		match self {
@@ -106,7 +105,7 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	// Returns any WHERE clause if specified
+	/// Returns any WHERE clause if specified
 	#[inline]
 	pub fn conds(&self) -> Option<&Cond> {
 		match self {
@@ -116,7 +115,7 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	// Returns any SPLIT clause if specified
+	/// Returns any SPLIT clause if specified
 	#[inline]
 	pub fn split(&self) -> Option<&Splits> {
 		match self {
@@ -124,7 +123,7 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	// Returns any GROUP clause if specified
+	/// Returns any GROUP clause if specified
 	#[inline]
 	pub fn group(&self) -> Option<&Groups> {
 		match self {
@@ -132,7 +131,7 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	// Returns any ORDER clause if specified
+	/// Returns any ORDER clause if specified
 	#[inline]
 	pub fn order(&self) -> Option<&Orders> {
 		match self {
@@ -140,7 +139,7 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	// Returns any FETCH clause if specified
+	/// Returns any FETCH clause if specified
 	#[inline]
 	pub fn fetch(&self) -> Option<&Fetchs> {
 		match self {
@@ -148,7 +147,7 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	// Returns any START clause if specified
+	/// Returns any START clause if specified
 	#[inline]
 	pub fn start(&self) -> Option<&Start> {
 		match self {
@@ -156,7 +155,7 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	// Returns any LIMIT clause if specified
+	/// Returns any LIMIT clause if specified
 	#[inline]
 	pub fn limit(&self) -> Option<&Limit> {
 		match self {
@@ -164,15 +163,7 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	// Returns any VERSION clause if specified
-	#[inline]
-	pub fn version(&self) -> Option<&Version> {
-		match self {
-			Statement::Select(v) => v.version.as_ref(),
-			_ => None,
-		}
-	}
-	// Returns any RETURN clause if specified
+	/// Returns any RETURN clause if specified
 	#[inline]
 	pub fn output(&self) -> Option<&Output> {
 		match self {
@@ -184,8 +175,9 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	// Returns any RETURN clause if specified
+	/// Returns any RETURN clause if specified
 	#[inline]
+	#[allow(dead_code)]
 	pub fn parallel(&self) -> bool {
 		match self {
 			Statement::Select(v) => v.parallel,

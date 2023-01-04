@@ -8,11 +8,11 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Cache cargo assets
         uses: actions/cache@v3
@@ -23,28 +23,23 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ubuntu-latest-test-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ubuntu-20.04-test-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --workspace
+        run: |
+          (&>/dev/null cargo run -- start --log trace --user root --pass root memory &)
+          cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Cache cargo assets
         uses: actions/cache@v3
@@ -55,33 +50,25 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ubuntu-latest-lint-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ubuntu-20.04-lint-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
       - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --workspace
+        run: cargo check --workspace
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -W warnings
+        run: cargo clippy -- -W warnings
+
+      - name: Run WebAssembly check
+        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb
 
   build:
     name: Build ${{ matrix.arch }}
@@ -90,19 +77,19 @@ jobs:
       matrix:
         include:
           - arch: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-11
             file: surreal-nightly.darwin-amd64
             opts: --features storage-tikv
           - arch: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-11
             file: surreal-nightly.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04
             file: surreal-nightly.linux-amd64
             opts: --features storage-tikv
           - arch: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04
             file: surreal-nightly.linux-arm64
             opts: --features storage-tikv
           - arch: x86_64-pc-windows-msvc
@@ -113,7 +100,7 @@ jobs:
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Cache cargo assets
         uses: actions/cache@v3
@@ -151,25 +138,20 @@ jobs:
           rm -rf foundationdb-clients_6.3.23-1_amd64.deb
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
-          target: ${{ matrix.arch }}
+          targets: ${{ matrix.arch }}
 
       - name: Output package versions
         run: go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
 
       - name: Run cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: ${{ matrix.opts }} --release --locked --target ${{ matrix.arch }}
+        run: cargo build ${{ matrix.opts }} --release --locked --target ${{ matrix.arch }}
         env:
           BINDGEN_EXTRA_CLANG_ARGS_aarch64-unknown-linux-gnu: "-I/usr/aarch64-linux-gnu/include/"
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v1-node16
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -199,7 +181,7 @@ jobs:
           cd -
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.file }}
           path: |
@@ -211,7 +193,7 @@ jobs:
   package:
     name: Package macOS
     needs: [build]
-    runs-on: macos-latest
+    runs-on: macos-11
     steps:
 
       - name: Download amd64 binary
@@ -227,7 +209,7 @@ jobs:
           path: arm64
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v1-node16
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -247,14 +229,14 @@ jobs:
   deploy:
     name: Deploy
     needs: [package]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v1-node16
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -274,11 +256,11 @@ jobs:
   docker:
     name: Docker
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Download amd64 binary
         uses: actions/download-artifact@v3

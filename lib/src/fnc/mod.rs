@@ -8,12 +8,12 @@ pub mod cast;
 pub mod count;
 pub mod crypto;
 pub mod duration;
-pub mod future;
 pub mod geo;
 pub mod http;
 pub mod is;
 pub mod math;
 pub mod meta;
+pub mod not;
 pub mod operate;
 pub mod parse;
 pub mod rand;
@@ -35,11 +35,11 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 	}
 }
 
-// Each function is specified by its name (a string literal) followed by its path. The path
-// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
-// before the remainder of the arguments. The path may be followed by `.await` to signify that
-// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
-// `cpu_intensive`.
+/// Each function is specified by its name (a string literal) followed by its path. The path
+/// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
+/// before the remainder of the arguments. The path may be followed by `.await` to signify that
+/// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
+/// `cpu_intensive`.
 macro_rules! dispatch {
 	($name: ident, $args: ident, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
 		{
@@ -61,9 +61,12 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		name,
 		args,
 		"array::combine" => array::combine,
+		"array::complement" => array::complement,
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
+		"array::flatten" => array::flatten,
+		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
 		"array::len" => array::len,
 		"array::sort" => array::sort,
@@ -102,6 +105,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"is::longitude" => is::longitude,
 		"is::numeric" => is::numeric,
 		"is::semver" => is::semver,
+		"is::url" => is::url,
 		"is::uuid" => is::uuid,
 		//
 		"math::abs" => math::abs,
@@ -118,6 +122,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"math::mode" => math::mode,
 		"math::nearestrank" => math::nearestrank,
 		"math::percentile" => math::percentile,
+		"math::pow" => math::pow,
 		"math::product" => math::product,
 		"math::round" => math::round,
 		"math::spread" => math::spread,
@@ -131,6 +136,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"meta::id" => meta::id,
 		"meta::table" => meta::tb,
 		"meta::tb" => meta::tb,
+		//
+		"not" => not::not,
 		//
 		"parse::email::host" => parse::email::host,
 		"parse::email::user" => parse::email::user,
@@ -184,12 +191,12 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"time::format" => time::format,
 		"time::group" => time::group,
 		"time::hour" => time::hour,
-		"time::mins" => time::mins,
+		"time::minute" => time::minute,
 		"time::month" => time::month,
 		"time::nano" => time::nano,
 		"time::now" => time::now,
 		"time::round" => time::round,
-		"time::secs" => time::secs,
+		"time::second" => time::second,
 		"time::unix" => time::unix,
 		"time::wday" => time::wday,
 		"time::week" => time::week,

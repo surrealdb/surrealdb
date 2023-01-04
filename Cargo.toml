@@ -6,7 +6,8 @@ version = "1.0.0-beta.8"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
-default = ["storage-rocksdb", "scripting", "http"]
+default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
+storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-tikv = ["surrealdb/kv-tikv"]
 storage-fdb = ["surrealdb/kv-fdb-6_3"]
@@ -14,7 +15,7 @@ scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 
 [workspace]
-members = ["lib"]
+members = ["lib", "lib/examples/actix"]
 
 [profile.release]
 lto = true
@@ -37,13 +38,13 @@ jsonwebtoken = "8.1.1"
 log = "0.4.17"
 once_cell = "1.15.0"
 rand = "0.8.5"
-reqwest = { version = "0.11.12", features = ["blocking"] }
+reqwest = { version = "0.11.13", features = ["blocking"] }
 rustyline = "10.0.0"
 serde = { version = "1.0.145", features = ["derive"] }
 serde_cbor = "0.11.2"
 serde_json = "1.0.85"
 serde_pack = { version = "1.1.1", package = "rmp-serde" }
-surrealdb = { path = "lib", default-features = false, features = ["kv-mem", "parallel"] }
+surrealdb = { path = "lib", features = ["parallel", "protocol-http", "protocol-ws", "rustls"] }
 thiserror = "1.0.37"
 tokio = { version = "1.21.2", features = ["macros", "signal"] }
 warp = { version = "0.3.3", features = ["compression", "tls", "websocket"] }

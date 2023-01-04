@@ -12,11 +12,11 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Cache cargo assets
         uses: actions/cache@v3
@@ -27,28 +27,23 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ubuntu-latest-test-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ubuntu-20.04-test-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --workspace
+        run: |
+          (&>/dev/null cargo run -- start --log trace --user root --pass root memory &)
+          cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Cache cargo assets
         uses: actions/cache@v3
@@ -59,30 +54,22 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ubuntu-latest-lint-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ubuntu-20.04-lint-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
       - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --workspace
+        run: cargo check --workspace
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -W warnings
+        run: cargo clippy -- -W warnings
+
+      - name: Run WebAssembly check
+        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb

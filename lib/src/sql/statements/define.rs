@@ -611,6 +611,9 @@ impl DefineTableStatement {
 				// Save the view config
 				let key = crate::key::ft::new(opt.ns(), opt.db(), v, &self.name);
 				run.set(key, self).await?;
+				// Clear the cache
+				let key = crate::key::ft::prefix(opt.ns(), opt.db(), v);
+				run.clr(key).await?;
 			}
 			// Release the transaction
 			drop(run);
@@ -783,6 +786,9 @@ impl DefineEventStatement {
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+		// Clear the cache
+		let key = crate::key::ev::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -836,6 +842,7 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
+	pub flex: bool,
 	pub kind: Option<Kind>,
 	pub value: Option<Value>,
 	pub assert: Option<Value>,
@@ -864,6 +871,9 @@ impl DefineFieldStatement {
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+		// Clear the cache
+		let key = crate::key::fd::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -872,6 +882,9 @@ impl DefineFieldStatement {
 impl fmt::Display for DefineFieldStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FIELD {} ON {}", self.name, self.what)?;
+		if self.flex {
+			write!(f, " FLEXIBLE")?
+		}
 		if let Some(ref v) = self.kind {
 			write!(f, " TYPE {}", v)?
 		}
@@ -905,6 +918,13 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 		DefineFieldStatement {
 			name,
 			what,
+			flex: opts
+				.iter()
+				.find_map(|x| match x {
+					DefineFieldOption::Flex => Some(true),
+					_ => None,
+				})
+				.unwrap_or_default(),
 			kind: opts.iter().find_map(|x| match x {
 				DefineFieldOption::Kind(ref v) => Some(v.to_owned()),
 				_ => None,
@@ -930,6 +950,7 @@ fn field(i: &str) -> IResult<&str, DefineFieldStatement> {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum DefineFieldOption {
+	Flex,
 	Kind(Kind),
 	Value(Value),
 	Assert(Value),
@@ -937,7 +958,13 @@ pub enum DefineFieldOption {
 }
 
 fn field_opts(i: &str) -> IResult<&str, DefineFieldOption> {
-	alt((field_kind, field_value, field_assert, field_permissions))(i)
+	alt((field_flex, field_kind, field_value, field_assert, field_permissions))(i)
+}
+
+fn field_flex(i: &str) -> IResult<&str, DefineFieldOption> {
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = alt((tag_no_case("FLEXIBLE"), tag_no_case("FLEXI"), tag_no_case("FLEX")))(i)?;
+	Ok((i, DefineFieldOption::Flex))
 }
 
 fn field_kind(i: &str) -> IResult<&str, DefineFieldOption> {
@@ -1004,6 +1031,9 @@ impl DefineIndexStatement {
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;
 		run.set(key, self).await?;
+		// Clear the cache
+		let key = crate::key::ix::prefix(opt.ns(), opt.db(), &self.what);
+		run.clr(key).await?;
 		// Remove the index data
 		let beg = crate::key::index::prefix(opt.ns(), opt.db(), &self.what, &self.name);
 		let end = crate::key::index::suffix(opt.ns(), opt.db(), &self.what, &self.name);

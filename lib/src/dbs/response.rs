@@ -16,12 +16,9 @@ impl Response {
 	pub fn speed(&self) -> String {
 		format!("{:?}", self.time)
 	}
-	/// Retrieve the response as a result by reference
-	pub fn output(&self) -> Result<&Value, &Error> {
-		match &self.result {
-			Ok(v) => Ok(v),
-			Err(e) => Err(e),
-		}
+	/// Retrieve the response as a normal result
+	pub fn output(self) -> Result<Value, Error> {
+		self.result
 	}
 }
 
