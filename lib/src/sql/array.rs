@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
-use crate::sql::fmt::{pretty_indent, Fmt};
+use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::number::Number;
 use crate::sql::operation::Operation;
 use crate::sql::serde::is_internal_serialization;
@@ -136,9 +136,10 @@ impl Array {
 
 impl Display for Array {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		let mut f = Pretty::from(f);
 		f.write_char('[')?;
 		let indent = pretty_indent();
-		Display::fmt(&Fmt::pretty_comma_separated(self.as_slice()), f)?;
+		write!(f, "{}", Fmt::pretty_comma_separated(self.as_slice()))?;
 		drop(indent);
 		f.write_char(']')
 	}

@@ -12,7 +12,7 @@ use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
 use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
-use crate::sql::fmt::Fmt;
+use crate::sql::fmt::{Fmt, Pretty};
 use crate::sql::function::{function, Function};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::Id;
@@ -1183,6 +1183,8 @@ impl Value {
 
 impl fmt::Display for Value {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use std::fmt::Write;
+		let mut f = Pretty::from(f);
 		match self {
 			Value::None => write!(f, "NONE"),
 			Value::Null => write!(f, "NULL"),
