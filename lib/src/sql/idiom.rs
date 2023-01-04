@@ -62,6 +62,12 @@ impl From<Vec<Part>> for Idiom {
 	}
 }
 
+impl From<&[Part]> for Idiom {
+	fn from(v: &[Part]) -> Self {
+		Self(v.to_vec())
+	}
+}
+
 impl Idiom {
 	/// Appends a part to the end of this Idiom
 	pub(crate) fn push(mut self, n: Part) -> Idiom {

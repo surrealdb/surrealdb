@@ -22,13 +22,24 @@ impl<'a> Document<'a> {
 			let mut keys: Vec<Idiom> = vec![];
 			// Loop through all field statements
 			for fd in self.fd(opt, txn).await?.iter() {
-				// Loop over this field in the document
-				for k in self.current.each(&fd.name).into_iter() {
-					keys.push(k);
+				// Is this a schemaless field?
+				match fd.flex {
+					false => {
+						// Loop over this field in the document
+						for k in self.current.each(&fd.name).into_iter() {
+							keys.push(k);
+						}
+					}
+					true => {
+						// Loop over every field under this field in the document
+						for k in self.current.every(Some(&fd.name), true, true).into_iter() {
+							keys.push(k);
+						}
+					}
 				}
 			}
 			// Loop over every field in the document
-			for fd in self.current.every(true, true).iter() {
+			for fd in self.current.every(None, true, true).iter() {
 				if !keys.contains(fd) {
 					match fd {
 						fd if fd.is_id() => continue,

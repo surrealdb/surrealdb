@@ -14,7 +14,7 @@ impl Value {
 	) -> Result<(), Error> {
 		match val {
 			v if v.is_object() => {
-				for k in v.every(false, false).iter() {
+				for k in v.every(None, false, false).iter() {
 					match v.get(ctx, opt, txn, &k.0).await? {
 						Value::None => self.del(ctx, opt, txn, &k.0).await?,
 						v => self.set(ctx, opt, txn, &k.0, v).await?,
