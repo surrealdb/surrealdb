@@ -8,7 +8,7 @@ mod tests {
 	const N: usize = 1000;
 	const M: usize = 1000;
 	const KEY: Key = Key::new();
-	const VAL: Val = ValL::new();
+	const VAL: Val = Val::new();
 
 	fn get_randomized_map(random: u16) -> BTreeMap<Key, Val> {
 		let mut map = BTreeMap::<Key, Val>::new();
