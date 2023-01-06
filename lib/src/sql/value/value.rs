@@ -602,11 +602,11 @@ impl Value {
 	// -----------------------------------
 
 	pub fn is_none(&self) -> bool {
-		matches!(self, Value::None | Value::Null)
+		matches!(self, Value::None)
 	}
 
 	pub fn is_null(&self) -> bool {
-		matches!(self, Value::None | Value::Null)
+		matches!(self, Value::Null)
 	}
 
 	pub fn is_some(&self) -> bool {
@@ -1002,6 +1002,7 @@ impl Value {
 				true => self,
 				_ => Value::None,
 			},
+			Kind::Option(v) => todo!(),
 		}
 	}
 
@@ -1530,14 +1531,14 @@ mod tests {
 	#[test]
 	fn check_none() {
 		assert_eq!(true, Value::None.is_none());
-		assert_eq!(true, Value::Null.is_none());
+		assert_eq!(false, Value::Null.is_none());
 		assert_eq!(false, Value::from(1).is_none());
 	}
 
 	#[test]
 	fn check_null() {
-		assert_eq!(true, Value::None.is_null());
 		assert_eq!(true, Value::Null.is_null());
+		assert_eq!(false, Value::None.is_null());
 		assert_eq!(false, Value::from(1).is_null());
 	}
 
