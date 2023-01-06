@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use surrealdb::engines::remote::ws::Ws;
+use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 

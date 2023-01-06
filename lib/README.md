@@ -45,7 +45,7 @@ use serde_json::json;
 use std::borrow::Cow;
 use surrealdb::sql;
 use surrealdb::Surreal;
-use surrealdb::engines::remote::ws::Ws;
+use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 
 #[derive(Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-use surrealdb::engines::remote::ws::Ws;
+use surrealdb::engine::remote::ws::Ws;
 use surrealdb::Surreal;
 
 #[tokio::main]

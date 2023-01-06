@@ -128,8 +128,8 @@ where
 	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
-	/// use surrealdb::engines::remote::ws::Ws;
-	/// use surrealdb::engines::remote::ws::Client;
+	/// use surrealdb::engine::remote::ws::Ws;
+	/// use surrealdb::engine::remote::ws::Client;
 	///
 	/// // Creates a new static instance of the client
 	/// static DB: Surreal<Client> = Surreal::init();
@@ -169,7 +169,7 @@ where
 	/// use serde::{Serialize, Deserialize};
 	/// use std::borrow::Cow;
 	/// use surrealdb::Surreal;
-	/// use surrealdb::engines::any::Any;
+	/// use surrealdb::engine::any::Any;
 	/// use surrealdb::opt::auth::Root;
 	///
 	/// // Creates a new static instance of the client
@@ -215,7 +215,7 @@ where
 	///
 	/// ```no_run
 	/// use surrealdb::Surreal;
-	/// use surrealdb::engines::remote::ws::{Ws, Wss};
+	/// use surrealdb::engine::remote::ws::{Ws, Wss};
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -252,7 +252,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// db.use_ns("namespace").use_db("database").await?;
 	/// # Ok(())
 	/// # }
@@ -279,7 +279,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
@@ -319,7 +319,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Assign the variable on the connection
 	/// db.set("name", Name {
@@ -365,7 +365,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Sign in as root
 	/// db.signin(Root {
@@ -424,7 +424,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Sign in as root
 	/// db.signin(Root {
@@ -460,7 +460,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Sign in as root
 	/// db.signin(Root {
@@ -503,7 +503,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
@@ -541,7 +541,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// db.invalidate().await?;
 	/// # Ok(())
 	/// # }
@@ -563,7 +563,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// # let token = String::new();
 	/// db.authenticate(token).await?;
 	/// # Ok(())
@@ -587,7 +587,7 @@ where
 	/// # struct Person;
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
@@ -626,7 +626,7 @@ where
 	/// #
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
@@ -676,7 +676,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
@@ -732,7 +732,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
@@ -782,7 +782,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
@@ -836,7 +836,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
@@ -872,7 +872,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
@@ -902,7 +902,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// let version = db.version().await?;
 	/// # Ok(())
 	/// # }
@@ -920,7 +920,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// db.health().await?;
 	/// # Ok(())
 	/// # }
@@ -958,7 +958,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
@@ -987,7 +987,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// // Select the namespace/database to use
 	/// db.use_ns("namespace").use_db("database").await?;
 	///

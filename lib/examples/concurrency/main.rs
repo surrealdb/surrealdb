@@ -1,5 +1,5 @@
-use surrealdb::engines::remote::ws::Client;
-use surrealdb::engines::remote::ws::Ws;
+use surrealdb::engine::remote::ws::Client;
+use surrealdb::engine::remote::ws::Ws;
 use surrealdb::Surreal;
 use tokio::sync::mpsc;
 

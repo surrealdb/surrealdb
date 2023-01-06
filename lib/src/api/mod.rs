@@ -1,6 +1,6 @@
 //! Functionality for connecting to local and remote databases
 
-pub mod engines;
+pub mod engine;
 pub mod err;
 pub mod method;
 pub mod opt;
@@ -63,7 +63,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// use surrealdb::engines::remote::ws::Ws;
+	/// use surrealdb::engine::remote::ws::Ws;
 	/// use surrealdb::Surreal;
 	///
 	/// let db = Surreal::new::<Ws>("localhost:8000")

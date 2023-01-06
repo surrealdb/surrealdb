@@ -1,6 +1,6 @@
-use crate::api::engines::local::Db;
-use crate::api::engines::local::File;
-use crate::api::engines::local::RocksDb;
+use crate::api::engine::local::Db;
+use crate::api::engine::local::File;
+use crate::api::engine::local::RocksDb;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
