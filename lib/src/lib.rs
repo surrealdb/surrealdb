@@ -20,7 +20,7 @@
 //! use surrealdb::{Result, Surreal};
 //! use surrealdb::sql;
 //! use surrealdb::opt::auth::Root;
-//! use surrealdb::engines::remote::ws::Ws;
+//! use surrealdb::engine::remote::ws::Ws;
 //!
 //! #[derive(Serialize, Deserialize)]
 //! struct Name {
@@ -126,7 +126,7 @@ pub mod err;
 pub mod kvs;
 
 #[doc(inline)]
-pub use api::engines;
+pub use api::engine;
 #[doc(inline)]
 pub use api::method;
 #[doc(inline)]

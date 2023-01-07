@@ -2,8 +2,8 @@ mod error;
 mod person;
 
 use actix_web::{App, HttpServer};
-use surrealdb::engines::remote::ws::Client;
-use surrealdb::engines::remote::ws::Ws;
+use surrealdb::engine::remote::ws::Client;
+use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 

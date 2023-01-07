@@ -4,8 +4,8 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 #[allow(unused_imports)] // used by the DB engines
-use crate::api::engines;
-use crate::api::engines::any::Any;
+use crate::api::engine;
+use crate::api::engine::any::Any;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
 use crate::api::opt::Endpoint;
@@ -69,35 +69,35 @@ impl Connection for Any {
 				#[cfg(feature = "kv-fdb")]
 				"fdb" => {
 					features.insert(ExtraFeatures::Backup);
-					engines::local::native::router(address, conn_tx, route_rx);
+					engine::local::native::router(address, conn_tx, route_rx);
 					conn_rx.into_recv_async().await??
 				}
 
 				#[cfg(feature = "kv-mem")]
 				"mem" => {
 					features.insert(ExtraFeatures::Backup);
-					engines::local::native::router(address, conn_tx, route_rx);
+					engine::local::native::router(address, conn_tx, route_rx);
 					conn_rx.into_recv_async().await??
 				}
 
 				#[cfg(feature = "kv-rocksdb")]
 				"rocksdb" => {
 					features.insert(ExtraFeatures::Backup);
-					engines::local::native::router(address, conn_tx, route_rx);
+					engine::local::native::router(address, conn_tx, route_rx);
 					conn_rx.into_recv_async().await??
 				}
 
 				#[cfg(feature = "kv-rocksdb")]
 				"file" => {
 					features.insert(ExtraFeatures::Backup);
-					engines::local::native::router(address, conn_tx, route_rx);
+					engine::local::native::router(address, conn_tx, route_rx);
 					conn_rx.into_recv_async().await??
 				}
 
 				#[cfg(feature = "kv-tikv")]
 				"tikv" => {
 					features.insert(ExtraFeatures::Backup);
-					engines::local::native::router(address, conn_tx, route_rx);
+					engine::local::native::router(address, conn_tx, route_rx);
 					conn_rx.into_recv_async().await??
 				}
 
@@ -120,17 +120,17 @@ impl Connection for Any {
 					}
 					let client = builder.build()?;
 					let base_url = address.endpoint;
-					engines::remote::http::health(
+					engine::remote::http::health(
 						client.get(base_url.join(Method::Health.as_str())?),
 					)
 					.await?;
-					engines::remote::http::native::router(base_url, client, route_rx);
+					engine::remote::http::native::router(base_url, client, route_rx);
 				}
 
 				#[cfg(feature = "protocol-ws")]
 				"ws" | "wss" => {
 					features.insert(ExtraFeatures::Auth);
-					let url = address.endpoint.join(engines::remote::ws::PATH)?;
+					let url = address.endpoint.join(engine::remote::ws::PATH)?;
 					#[cfg(any(feature = "native-tls", feature = "rustls"))]
 					let maybe_connector = address.tls_config.map(Connector::from);
 					#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
@@ -140,17 +140,17 @@ impl Connection for Any {
 							0 => None,
 							capacity => Some(capacity),
 						},
-						max_message_size: Some(engines::remote::ws::native::MAX_MESSAGE_SIZE),
-						max_frame_size: Some(engines::remote::ws::native::MAX_FRAME_SIZE),
+						max_message_size: Some(engine::remote::ws::native::MAX_MESSAGE_SIZE),
+						max_frame_size: Some(engine::remote::ws::native::MAX_FRAME_SIZE),
 						accept_unmasked_frames: false,
 					};
-					let socket = engines::remote::ws::native::connect(
+					let socket = engine::remote::ws::native::connect(
 						&url,
 						Some(config),
 						maybe_connector.clone(),
 					)
 					.await?;
-					engines::remote::ws::native::router(
+					engine::remote::ws::native::router(
 						url,
 						maybe_connector,
 						capacity,

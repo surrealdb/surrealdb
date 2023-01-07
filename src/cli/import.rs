@@ -1,6 +1,6 @@
 use crate::cli::LOG;
 use crate::err::Error;
-use surrealdb::engines::any::connect;
+use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
 use surrealdb::Error as SurrealError;

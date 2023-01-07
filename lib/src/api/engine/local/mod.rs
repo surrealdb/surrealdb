@@ -29,12 +29,12 @@ pub(crate) mod wasm;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
 use crate::api::conn::Param;
-use crate::api::engines::create_statement;
-use crate::api::engines::delete_statement;
-use crate::api::engines::merge_statement;
-use crate::api::engines::patch_statement;
-use crate::api::engines::select_statement;
-use crate::api::engines::update_statement;
+use crate::api::engine::create_statement;
+use crate::api::engine::delete_statement;
+use crate::api::engine::merge_statement;
+use crate::api::engine::patch_statement;
+use crate::api::engine::select_statement;
+use crate::api::engine::update_statement;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::api::err::Error;
 use crate::api::Connect;
@@ -66,7 +66,7 @@ use tokio::io::AsyncReadExt;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
-const LOG: &str = "surrealdb::api::engines::local";
+const LOG: &str = "surrealdb::api::engine::local";
 
 /// In-memory database
 ///
@@ -76,8 +76,8 @@ const LOG: &str = "surrealdb::api::engines::local";
 ///
 /// ```
 /// use surrealdb::{Result, Surreal};
-/// use surrealdb::engines::local::Db;
-/// use surrealdb::engines::local::Mem;
+/// use surrealdb::engine::local::Db;
+/// use surrealdb::engine::local::Mem;
 ///
 /// static DB: Surreal<Db> = Surreal::init();
 ///
@@ -93,7 +93,7 @@ const LOG: &str = "surrealdb::api::engines::local";
 ///
 /// ```
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::Mem;
+/// use surrealdb::engine::local::Mem;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
@@ -107,7 +107,7 @@ const LOG: &str = "surrealdb::api::engines::local";
 /// ```
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::Mem;
+/// use surrealdb::engine::local::Mem;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
@@ -130,7 +130,7 @@ pub struct Mem;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::File;
+/// use surrealdb::engine::local::File;
 ///
 /// let db = Surreal::new::<File>("temp.db").await?;
 /// # Ok(())
@@ -144,7 +144,7 @@ pub struct Mem;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::File;
+/// use surrealdb::engine::local::File;
 ///
 /// let db = Surreal::new::<File>(("temp.db", Strict)).await?;
 /// # Ok(())
@@ -165,7 +165,7 @@ pub struct File;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::RocksDb;
+/// use surrealdb::engine::local::RocksDb;
 ///
 /// let db = Surreal::new::<RocksDb>("temp.db").await?;
 /// # Ok(())
@@ -179,7 +179,7 @@ pub struct File;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::RocksDb;
+/// use surrealdb::engine::local::RocksDb;
 ///
 /// let db = Surreal::new::<RocksDb>(("temp.db", Strict)).await?;
 /// # Ok(())
@@ -200,7 +200,7 @@ pub struct RocksDb;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::IndxDb;
+/// use surrealdb::engine::local::IndxDb;
 ///
 /// let db = Surreal::new::<IndxDb>("MyDatabase").await?;
 /// # Ok(())
@@ -214,7 +214,7 @@ pub struct RocksDb;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::IndxDb;
+/// use surrealdb::engine::local::IndxDb;
 ///
 /// let db = Surreal::new::<IndxDb>(("MyDatabase", Strict)).await?;
 /// # Ok(())
@@ -235,7 +235,7 @@ pub struct IndxDb;
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::TiKv;
+/// use surrealdb::engine::local::TiKv;
 ///
 /// let db = Surreal::new::<TiKv>("localhost:2379").await?;
 /// # Ok(())
@@ -249,7 +249,7 @@ pub struct IndxDb;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::TiKv;
+/// use surrealdb::engine::local::TiKv;
 ///
 /// let db = Surreal::new::<TiKv>(("localhost:2379", Strict)).await?;
 /// # Ok(())
@@ -271,7 +271,7 @@ pub struct TiKv;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::FDb;
+/// use surrealdb::engine::local::FDb;
 ///
 /// let db = Surreal::new::<FDb>("fdb.cluster").await?;
 /// # Ok(())
@@ -285,7 +285,7 @@ pub struct TiKv;
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::engines::local::FDb;
+/// use surrealdb::engine::local::FDb;
 ///
 /// let db = Surreal::new::<FDb>(("fdb.cluster", Strict)).await?;
 /// # Ok(())

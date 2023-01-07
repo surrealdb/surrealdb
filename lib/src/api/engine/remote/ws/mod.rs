@@ -7,7 +7,7 @@ pub(crate) mod wasm;
 
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
-use crate::api::engines::remote::Status;
+use crate::api::engine::remote::Status;
 use crate::api::err::Error;
 use crate::api::Connect;
 use crate::api::Response as QueryResponse;
@@ -24,7 +24,7 @@ use std::time::Duration;
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
 const PING_METHOD: &str = "ping";
-const LOG: &str = "surrealdb::engines::remote::ws";
+const LOG: &str = "surrealdb::engine::remote::ws";
 
 /// The WS scheme used to connect to `ws://` endpoints
 #[derive(Debug)]
@@ -48,8 +48,8 @@ impl Surreal<Client> {
 	///
 	/// ```no_run
 	/// use surrealdb::Surreal;
-	/// use surrealdb::engines::remote::ws::Client;
-	/// use surrealdb::engines::remote::ws::Ws;
+	/// use surrealdb::engine::remote::ws::Client;
+	/// use surrealdb::engine::remote::ws::Ws;
 	///
 	/// static DB: Surreal<Client> = Surreal::init();
 	///
