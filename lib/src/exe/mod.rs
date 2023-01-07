@@ -1,4 +1,4 @@
-#![cfg(feature = "parallel")]
+#![cfg(not(target_arch = "wasm32"))]
 
 use executor::{Executor, Task};
 use once_cell::sync::Lazy;

@@ -20,10 +20,10 @@ pub(crate) use self::statement::*;
 pub(crate) use self::transaction::*;
 pub(crate) use self::variables::*;
 
-#[cfg(feature = "parallel")]
+#[cfg(not(target_arch = "wasm32"))]
 mod channel;
 
-#[cfg(feature = "parallel")]
+#[cfg(not(target_arch = "wasm32"))]
 pub use self::channel::*;
 
 #[cfg(test)]
