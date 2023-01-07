@@ -1002,7 +1002,6 @@ impl Value {
 				true => self,
 				_ => Value::None,
 			},
-			Kind::Option(v) => todo!(),
 		}
 	}
 
