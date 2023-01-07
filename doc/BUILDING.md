@@ -2,6 +2,8 @@
 
 This file contains a set of instructions for building SurrealDB on a number of different platforms. Currently, SurrealDB is built for release automatically in a [Github Actions](https://github.com/surrealdb/surrealdb/actions) continuous-integration environment, on macOS, Ubuntu, and Windows.
 
+While installing `rustup`, use the default (`stable`) release channel of Rust for best results. If you already have a different release channel, you can run `rustup override set stable` from within the top level directory of this repository.
+
 <!-- -------------------------------------------------- -->
 <!-- -------------------------------------------------- -->
 <!-- -------------------------------------------------- -->
