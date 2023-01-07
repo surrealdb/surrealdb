@@ -79,6 +79,7 @@ impl Function {
 		match self {
 			Self::Normal(f, _) if f == "array::concat" => true,
 			Self::Normal(f, _) if f == "array::distinct" => true,
+			Self::Normal(f, _) if f == "array::group" => true,
 			Self::Normal(f, _) if f == "array::union" => true,
 			Self::Normal(f, _) if f == "count" => true,
 			Self::Normal(f, _) if f == "math::bottom" => true,
@@ -241,6 +242,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 		tag("array::difference"),
 		tag("array::distinct"),
 		tag("array::flatten"),
+		tag("array::group"),
 		tag("array::insert"),
 		tag("array::intersect"),
 		tag("array::len"),

@@ -51,6 +51,13 @@ pub fn flatten((arg,): (Value,)) -> Result<Value, Error> {
 	})
 }
 
+pub fn group((arg,): (Value,)) -> Result<Value, Error> {
+	Ok(match arg {
+		Value::Array(v) => v.uniq().flatten().into(),
+		_ => Value::None,
+	})
+}
+
 pub fn insert((array, value, index): (Value, Value, Option<Value>)) -> Result<Value, Error> {
 	match (array, index) {
 		(Value::Array(mut v), Some(Value::Number(i))) => {
