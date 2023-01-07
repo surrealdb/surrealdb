@@ -53,7 +53,7 @@ pub fn flatten((arg,): (Value,)) -> Result<Value, Error> {
 
 pub fn group((arg,): (Value,)) -> Result<Value, Error> {
 	Ok(match arg {
-		Value::Array(v) => v.uniq().flatten().into(),
+		Value::Array(v) => v.flatten().uniq().into(),
 		_ => Value::None,
 	})
 }

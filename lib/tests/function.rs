@@ -173,6 +173,33 @@ async fn function_array_flatten() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_group() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::group([]);
+		RETURN array::group(3);
+		RETURN array::group([ [1,2,3,4], [3,4,5,6] ]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3,4,5,6]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_insert() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::insert([], 1);
