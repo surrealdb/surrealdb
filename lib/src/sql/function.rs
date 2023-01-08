@@ -77,10 +77,8 @@ impl Function {
 	/// Check if this function is a grouping function
 	pub fn is_aggregate(&self) -> bool {
 		match self {
-			Self::Normal(f, _) if f == "array::concat" => true,
 			Self::Normal(f, _) if f == "array::distinct" => true,
 			Self::Normal(f, _) if f == "array::group" => true,
-			Self::Normal(f, _) if f == "array::union" => true,
 			Self::Normal(f, _) if f == "count" => true,
 			Self::Normal(f, _) if f == "math::bottom" => true,
 			Self::Normal(f, _) if f == "math::interquartile" => true,
