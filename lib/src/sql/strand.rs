@@ -1,4 +1,4 @@
-use crate::sql::error::Error::ParserError;
+use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
 use crate::sql::serde::is_internal_serialization;
@@ -164,14 +164,14 @@ fn strand_unicode(i: &str) -> IResult<&str, char> {
 	// We can convert this to u32 as we only have 6 chars
 	let v = match u32::from_str_radix(v, 16) {
 		// We found an invalid unicode sequence
-		Err(_) => return Err(Error(ParserError(i))),
+		Err(_) => return Err(Error(Parser(i))),
 		// The unicode sequence was valid
 		Ok(v) => v,
 	};
 	// We can convert this to char as we know it is valid
 	let v = match std::char::from_u32(v) {
 		// We found an invalid unicode sequence
-		None => return Err(Error(ParserError(i))),
+		None => return Err(Error(Parser(i))),
 		// The unicode sequence was valid
 		Some(v) => v,
 	};

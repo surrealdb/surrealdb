@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::error::Error::ParserError;
+use crate::sql::error::Error::{Field, Group, Order, Parser, Split};
 use crate::sql::error::IResult;
 use crate::sql::query::{query, Query};
 use crate::sql::thing::Thing;
@@ -34,19 +34,39 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 			// There was unparsed SQL remaining
 			Ok((_, _)) => Err(Error::QueryRemaining),
 			// There was an error when parsing the query
-			Err(Err::Error(e)) | Err(Err::Failure(e)) => match e {
+			Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(match e {
 				// There was a parsing error
-				ParserError(e) => {
+				Parser(e) => {
 					// Locate the parser position
 					let (s, l, c) = locate(input, e);
 					// Return the parser error
-					Err(Error::InvalidQuery {
+					Error::InvalidQuery {
 						line: l,
 						char: c,
 						sql: s.to_string(),
-					})
+					}
 				}
-			},
+				// There was a SPLIT ON error
+				Field(e, f) => Error::InvalidField {
+					line: locate(input, e).1,
+					field: f,
+				},
+				// There was a SPLIT ON error
+				Split(e, f) => Error::InvalidSplit {
+					line: locate(input, e).1,
+					field: f,
+				},
+				// There was a ORDER BY error
+				Order(e, f) => Error::InvalidOrder {
+					line: locate(input, e).1,
+					field: f,
+				},
+				// There was a GROUP BY error
+				Group(e, f) => Error::InvalidGroup {
+					line: locate(input, e).1,
+					field: f,
+				},
+			}),
 			_ => unreachable!(),
 		},
 	}

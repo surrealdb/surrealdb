@@ -1029,7 +1029,8 @@ impl Value {
 	// JSON Path conversion
 	// -----------------------------------
 
-	pub fn jsonpath(&self) -> Idiom {
+	/// Converts this value to a JSONPatch path
+	pub(crate) fn jsonpath(&self) -> Idiom {
 		self.to_strand()
 			.as_str()
 			.trim_start_matches('/')
@@ -1037,6 +1038,30 @@ impl Value {
 			.map(Part::from)
 			.collect::<Vec<Part>>()
 			.into()
+	}
+
+	// -----------------------------------
+	// JSON Path conversion
+	// -----------------------------------
+
+	/// Checkes whether this value is a static value
+	pub(crate) fn is_static(&self) -> bool {
+		match self {
+			Value::None => true,
+			Value::Null => true,
+			Value::False => true,
+			Value::True => true,
+			Value::Uuid(_) => true,
+			Value::Number(_) => true,
+			Value::Strand(_) => true,
+			Value::Duration(_) => true,
+			Value::Datetime(_) => true,
+			Value::Geometry(_) => true,
+			Value::Array(v) => v.iter().all(Value::is_static),
+			Value::Object(v) => v.values().all(Value::is_static),
+			Value::Constant(_) => true,
+			_ => false,
+		}
 	}
 
 	// -----------------------------------
