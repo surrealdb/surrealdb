@@ -160,9 +160,9 @@ pub mod error {
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
 	/// An error with an embedded storage engine
-	#[error("Database error: {0}")]
+	#[error("{0}")]
 	Db(#[from] crate::error::Db),
 	/// An error with a remote database instance
-	#[error("API error: {0}")]
+	#[error("{0}")]
 	Api(#[from] crate::error::Api),
 }
