@@ -28,6 +28,7 @@ impl ModuleDef for Package {
 		module.add("now")?;
 		module.add("round")?;
 		module.add("secs")?;
+		module.add("timezone")?;
 		module.add("unix")?;
 		module.add("wday")?;
 		module.add("week")?;
@@ -48,6 +49,7 @@ impl ModuleDef for Package {
 		module.set("now", Func::from(|v: Any| run("time::now", v.0)))?;
 		module.set("round", Func::from(|v: Any| run("time::round", v.0)))?;
 		module.set("secs", Func::from(|v: Any| run("time::secs", v.0)))?;
+		module.set("timezone", Func::from(|v: Any| run("time::timezone", v.0)))?;
 		module.set("unix", Func::from(|v: Any| run("time::unix", v.0)))?;
 		module.set("wday", Func::from(|v: Any| run("time::wday", v.0)))?;
 		module.set("week", Func::from(|v: Any| run("time::week", v.0)))?;
@@ -65,6 +67,7 @@ impl ModuleDef for Package {
 		default.set("now", Func::from(|v: Any| run("time::now", v.0)))?;
 		default.set("round", Func::from(|v: Any| run("time::round", v.0)))?;
 		default.set("secs", Func::from(|v: Any| run("time::secs", v.0)))?;
+		default.set("timezone", Func::from(|v: Any| run("time::timezone", v.0)))?;
 		default.set("unix", Func::from(|v: Any| run("time::unix", v.0)))?;
 		default.set("wday", Func::from(|v: Any| run("time::wday", v.0)))?;
 		default.set("week", Func::from(|v: Any| run("time::week", v.0)))?;

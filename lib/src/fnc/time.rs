@@ -1,9 +1,10 @@
 use crate::err::Error;
 use crate::sql::datetime::Datetime;
 use crate::sql::value::Value;
-use chrono::prelude::*;
+use chrono::offset::TimeZone;
 use chrono::Datelike;
 use chrono::DurationRound;
+use chrono::Local;
 use chrono::Timelike;
 use chrono::Utc;
 
@@ -13,7 +14,6 @@ pub fn day((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.day().into())
 }
 
@@ -76,7 +76,6 @@ pub fn hour((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.hour().into())
 }
 
@@ -86,7 +85,6 @@ pub fn minute((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.minute().into())
 }
 
@@ -96,7 +94,6 @@ pub fn month((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.month().into())
 }
 
@@ -106,7 +103,6 @@ pub fn nano((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.timestamp_nanos().into())
 }
 
@@ -133,8 +129,11 @@ pub fn second((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.second().into())
+}
+
+pub fn timezone(_: ()) -> Result<Value, Error> {
+	Ok(Local::now().offset().to_string().into())
 }
 
 pub fn unix((datetime,): (Option<Value>,)) -> Result<Value, Error> {
@@ -143,7 +142,6 @@ pub fn unix((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.timestamp().into())
 }
 
@@ -153,7 +151,6 @@ pub fn wday((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.weekday().number_from_monday().into())
 }
 
@@ -163,7 +160,6 @@ pub fn week((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.iso_week().week().into())
 }
 
@@ -173,7 +169,6 @@ pub fn yday((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.ordinal().into())
 }
 
@@ -183,6 +178,5 @@ pub fn year((datetime,): (Option<Value>,)) -> Result<Value, Error> {
 		None => Datetime::default(),
 		Some(_) => return Ok(Value::None),
 	};
-
 	Ok(date.year().into())
 }

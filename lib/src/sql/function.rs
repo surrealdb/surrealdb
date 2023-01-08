@@ -441,6 +441,7 @@ fn function_time(i: &str) -> IResult<&str, &str> {
 		tag("time::now"),
 		tag("time::round"),
 		tag("time::second"),
+		tag("time::timezone"),
 		tag("time::unix"),
 		tag("time::wday"),
 		tag("time::week"),

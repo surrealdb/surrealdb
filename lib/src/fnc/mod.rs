@@ -198,6 +198,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"time::now" => time::now,
 		"time::round" => time::round,
 		"time::second" => time::second,
+		"time::timezone" => time::timezone,
 		"time::unix" => time::unix,
 		"time::wday" => time::wday,
 		"time::week" => time::week,
