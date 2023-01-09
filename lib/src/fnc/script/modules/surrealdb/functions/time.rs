@@ -20,6 +20,7 @@ impl ModuleDef for Package {
 		module.add("default")?;
 		module.add("day")?;
 		module.add("floor")?;
+		module.add("format")?;
 		module.add("group")?;
 		module.add("hour")?;
 		module.add("mins")?;
@@ -41,6 +42,7 @@ impl ModuleDef for Package {
 		// Set specific exports
 		module.set("day", Func::from(|v: Any| run("time::day", v.0)))?;
 		module.set("floor", Func::from(|v: Any| run("time::floor", v.0)))?;
+		module.set("format", Func::from(|v: Any| run("time::format", v.0)))?;
 		module.set("group", Func::from(|v: Any| run("time::group", v.0)))?;
 		module.set("hour", Func::from(|v: Any| run("time::hour", v.0)))?;
 		module.set("mins", Func::from(|v: Any| run("time::mins", v.0)))?;
@@ -59,6 +61,7 @@ impl ModuleDef for Package {
 		let default = Object::new(ctx)?;
 		default.set("day", Func::from(|v: Any| run("time::day", v.0)))?;
 		default.set("floor", Func::from(|v: Any| run("time::floor", v.0)))?;
+		default.set("format", Func::from(|v: Any| run("time::format", v.0)))?;
 		default.set("group", Func::from(|v: Any| run("time::group", v.0)))?;
 		default.set("hour", Func::from(|v: Any| run("time::hour", v.0)))?;
 		default.set("mins", Func::from(|v: Any| run("time::mins", v.0)))?;
