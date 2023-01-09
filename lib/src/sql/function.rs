@@ -310,6 +310,7 @@ fn function_is(i: &str) -> IResult<&str, &str> {
 		tag("is::alphanum"),
 		tag("is::alpha"),
 		tag("is::ascii"),
+		tag("is::datetime"),
 		tag("is::domain"),
 		tag("is::email"),
 		tag("is::hexadecimal"),

@@ -99,6 +99,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"is::alphanum" => is::alphanum,
 		"is::alpha" => is::alpha,
 		"is::ascii" => is::ascii,
+		"is::datetime" => is::datetime,
 		"is::domain" => is::domain,
 		"is::email" => is::email,
 		"is::hexadecimal" => is::hexadecimal,
