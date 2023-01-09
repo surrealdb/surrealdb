@@ -42,6 +42,7 @@ impl Param {
 		match self.first() {
 			// The first part will be a field
 			Some(Part::Field(v)) => match v.as_str() {
+				// This is a special param
 				"this" | "self" => match doc {
 					// The base document exists
 					Some(v) => {
@@ -55,8 +56,9 @@ impl Param {
 					// The base document does not exist
 					None => Ok(Value::None),
 				},
+				// This is a normal param
 				_ => match ctx.value(v) {
-					// The base variable exists
+					// The param has been set locally
 					Some(v) => {
 						// Get the path parts
 						let pth: &[Part] = self;
@@ -65,8 +67,22 @@ impl Param {
 						// Return the desired field
 						res.get(ctx, opt, txn, pth.next()).await
 					}
-					// The base variable does not exist
-					None => Ok(Value::None),
+					// The param has not been set locally
+					None => {
+						// Clone transaction
+						let run = txn.clone();
+						// Claim transaction
+						let mut run = run.lock().await;
+						// Get the param definition
+						let val = run.get_pa(opt.ns(), opt.db(), v).await;
+						// Check if the param has been set globally
+						match val {
+							// The param has been set globally
+							Ok(v) => Ok(v.value),
+							// The param has not been set globally
+							Err(_) => Ok(Value::None),
+						}
+					}
 				},
 			},
 			_ => unreachable!(),

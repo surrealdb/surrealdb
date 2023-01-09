@@ -16,6 +16,7 @@ use sql::statements::DefineFieldStatement;
 use sql::statements::DefineIndexStatement;
 use sql::statements::DefineLoginStatement;
 use sql::statements::DefineNamespaceStatement;
+use sql::statements::DefineParamStatement;
 use sql::statements::DefineScopeStatement;
 use sql::statements::DefineTableStatement;
 use sql::statements::DefineTokenStatement;
@@ -812,6 +813,28 @@ impl Transaction {
 			}
 		}
 	}
+	/// Retrieve all scope definitions for a specific database.
+	pub async fn all_pa(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineParamStatement]>, Error> {
+		let key = crate::key::pa::prefix(ns, db);
+		match self.cache.exi(&key) {
+			true => match self.cache.get(&key) {
+				Some(Entry::Pas(v)) => Ok(v),
+				_ => unreachable!(),
+			},
+			_ => {
+				let beg = crate::key::pa::prefix(ns, db);
+				let end = crate::key::pa::suffix(ns, db);
+				let val = self.getr(beg..end, u32::MAX).await?;
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Pas(Arc::clone(&val)));
+				Ok(val)
+			}
+		}
+	}
 	/// Retrieve all table definitions for a specific database.
 	pub async fn all_tb(
 		&mut self,
@@ -1016,6 +1039,17 @@ impl Transaction {
 	) -> Result<DefineTokenStatement, Error> {
 		let key = crate::key::st::new(ns, db, sc, st);
 		let val = self.get(key).await?.ok_or(Error::StNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific param definition.
+	pub async fn get_pa(
+		&mut self,
+		ns: &str,
+		db: &str,
+		pa: &str,
+	) -> Result<DefineParamStatement, Error> {
+		let key = crate::key::pa::new(ns, db, pa);
+		let val = self.get(key).await?.ok_or(Error::PaNotFound)?;
 		Ok(val.into())
 	}
 	/// Retrieve a specific table definition.
@@ -1325,6 +1359,20 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 				for sc in scs.iter() {
 					chn.send(bytes!(format!("{};", sc))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
+		// Output PARAMS
+		{
+			let pas = self.all_pa(ns, db).await?;
+			if !pas.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- PARAMS")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for pa in pas.iter() {
+					chn.send(bytes!(format!("{};", pa))).await?;
 				}
 				chn.send(bytes!("")).await?;
 			}

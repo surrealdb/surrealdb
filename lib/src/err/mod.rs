@@ -202,6 +202,10 @@ pub enum Error {
 	#[error("The scope token does not exist")]
 	StNotFound,
 
+	/// The requested param does not exist
+	#[error("The param does not exist")]
+	PaNotFound,
+
 	/// The requested table does not exist
 	#[error("The table does not exist")]
 	TbNotFound,

@@ -10,6 +10,7 @@
 /// DL              /*{ns}*{db}!dl{us}
 /// DT              /*{ns}*{db}!dt{tk}
 /// SC              /*{ns}*{db}!sc{sc}
+/// PA              /*{ns}*{db}!pa{pa}
 /// TB              /*{ns}*{db}!tb{tb}
 /// LQ              /*{ns}*{db}!lq{lq}
 ///
@@ -46,6 +47,7 @@ pub mod namespace;
 pub mod nl;
 pub mod ns;
 pub mod nt;
+pub mod pa;
 pub mod sc;
 pub mod scope;
 pub mod st;

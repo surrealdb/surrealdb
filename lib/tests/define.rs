@@ -76,6 +76,9 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
+			sc: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
 		}",
@@ -104,6 +107,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMALESS' },
 		}",
@@ -136,6 +140,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },
 		}",
@@ -164,6 +169,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },
 		}",
