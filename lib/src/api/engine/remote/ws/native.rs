@@ -40,7 +40,6 @@ use std::mem;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::net::TcpStream;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
@@ -51,6 +50,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::Connector;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
+use trice::Instant;
 use url::Url;
 
 type WsResult<T> = std::result::Result<T, WsError>;
