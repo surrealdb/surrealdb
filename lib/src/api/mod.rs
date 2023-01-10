@@ -22,6 +22,10 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::spawn;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as spawn;
 
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;
@@ -140,7 +144,7 @@ where
 {
 	fn check_server_version(&self) {
 		let conn = self.clone();
-		tokio::spawn(async move {
+		spawn(async move {
 			let (versions, build_meta) = SUPPORTED_VERSIONS;
 			// invalid version requirements should be caught during development
 			let req = VersionReq::parse(versions).expect("valid supported versions");
