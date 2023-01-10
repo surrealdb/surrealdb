@@ -38,7 +38,7 @@ macro_rules! get_cfg {
 #[macro_export]
 macro_rules! sql {
 	($($query:tt)*) => {
-		match $crate::sql::parse(stringify!($($query)*)) {
+		match $crate::sql::parse(stringify!($($query)*).replace(" :: ", "::").as_str()) {
 			Ok(v) => v,
 			Err(e) => { return Err(e.into()); },
 		}
