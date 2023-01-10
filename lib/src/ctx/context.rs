@@ -7,8 +7,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
-use trice::Instant;
+use trice::{Instant, Duration};
 
 impl<'a> From<Value> for Cow<'a, Value> {
 	fn from(v: Value) -> Cow<'a, Value> {
