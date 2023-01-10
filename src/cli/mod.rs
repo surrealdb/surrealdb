@@ -439,7 +439,7 @@ pub fn init() -> ExitCode {
 					.alias("host")
 					.forbid_empty_values(true)
 					.validator(conn_valid)
-					.default_value("https://cloud.surrealdb.com")
+					.default_value("wss://cloud.surrealdb.com")
 					.help("Remote database server url to connect to"),
 			)
 			.arg(
