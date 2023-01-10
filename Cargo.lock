@@ -3881,9 +3881,9 @@ dependencies = [
 
 [[package]]
 name = "trice"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27a3a110aba3d0ffc4dac3eedbce006dce1a3db5b484c94313940b999c9409ef"
+checksum = "6fd6accd04d9bcc587c77f2df66cddaba0d4247dcdf9127c74e3c7a461568132"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
