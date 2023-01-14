@@ -18,7 +18,6 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::json;
 use serde_json::Value as JsonValue;
-use std::collections::BTreeMap;
 
 pub use endpoint::*;
 pub use query::*;
@@ -174,24 +173,9 @@ where
 }
 
 pub(crate) fn from_json(json: JsonValue) -> sql::Value {
-	match json {
-		JsonValue::Null => sql::Value::None,
-		JsonValue::Bool(boolean) => boolean.into(),
-		JsonValue::Number(number) => match (number.as_u64(), number.as_i64(), number.as_f64()) {
-			(Some(number), _, _) => number.into(),
-			(_, Some(number), _) => number.into(),
-			(_, _, Some(number)) => number.into(),
-			_ => unreachable!(),
-		},
-		JsonValue::String(string) => match sql::thing(&string) {
-			Ok(thing) => thing.into(),
-			Err(_) => string.into(),
-		},
-		JsonValue::Array(array) => array.into_iter().map(from_json).collect::<Vec<_>>().into(),
-		JsonValue::Object(object) => object
-			.into_iter()
-			.map(|(key, value)| (key, from_json(value)))
-			.collect::<BTreeMap<_, _>>()
-			.into(),
+	match sql::json(&json.to_string()) {
+		Ok(value) => value,
+		// It shouldn't get to this as `JsonValue` will always produce valid JSON
+		Err(_) => unreachable!(),
 	}
 }
