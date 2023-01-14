@@ -1,11 +1,7 @@
-sign-commit = false
 pre-release-commit-message = "Release {{version}}"
-post-release-commit-message = "Start next development iteration {{next_version}}"
-dev-version-ext = "dev"
+sign-commit = false
 tag-message = ""
 tag-prefix = ""
-consolidate-commits = false
-consolidate-pushes = true
-publish = false
-push = false
+publish = true
+push = true
 tag = true
