@@ -835,6 +835,15 @@ impl Value {
 		}
 	}
 
+	pub fn as_raw_string(self) -> String {
+		match self {
+			Value::Strand(v) => v.0,
+			Value::Uuid(v) => v.to_raw(),
+			Value::Datetime(v) => v.to_raw(),
+			_ => self.as_string(),
+		}
+	}
+
 	// -----------------------------------
 	// Expensive conversion of value
 	// -----------------------------------
@@ -872,6 +881,15 @@ impl Value {
 			Value::Strand(v) => Duration::from(v.as_str()),
 			Value::Duration(v) => v.clone(),
 			_ => Duration::default(),
+		}
+	}
+
+	pub fn to_raw_string(&self) -> String {
+		match self {
+			Value::Strand(v) => v.0.to_owned(),
+			Value::Uuid(v) => v.to_raw(),
+			Value::Datetime(v) => v.to_raw(),
+			_ => self.to_string(),
 		}
 	}
 
