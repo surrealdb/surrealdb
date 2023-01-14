@@ -7,6 +7,8 @@ use crate::iam::LOG;
 use crate::iam::TOKEN;
 use argon2::password_hash::{PasswordHash, PasswordVerifier};
 use argon2::Argon2;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
@@ -93,7 +95,7 @@ pub async fn basic(session: &mut Session, auth: String) -> Result<(), Error> {
 	// Get the config options
 	let opts = CF.get().unwrap();
 	// Decode the encoded auth data
-	let auth = base64::decode(auth)?;
+	let auth = BASE64.decode(auth)?;
 	// Convert the auth data to String
 	let auth = String::from_utf8(auth)?;
 	// Split the auth data into user and pass

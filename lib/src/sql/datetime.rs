@@ -3,7 +3,8 @@ use crate::sql::duration::Duration;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
 use crate::sql::serde::is_internal_serialization;
-use chrono::{DateTime, FixedOffset, NaiveDate, Offset, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, FixedOffset, Offset, SecondsFormat, TimeZone, Utc};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
@@ -22,12 +23,6 @@ pub struct Datetime(pub DateTime<Utc>);
 impl Default for Datetime {
 	fn default() -> Self {
 		Self(Utc::now())
-	}
-}
-
-impl From<i64> for Datetime {
-	fn from(v: i64) -> Self {
-		Self(Utc.timestamp(v, 0))
 	}
 }
 
@@ -164,13 +159,17 @@ fn convert(
 	zone: FixedOffset,
 ) -> IResult<&str, Datetime> {
 	// Attempt to create date
-	let n = NaiveDate::from_ymd_opt(year, mon, day)
+	let d = NaiveDate::from_ymd_opt(year, mon, day)
 		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?;
 	// Attempt to create time
+	let t = NaiveTime::from_hms_nano_opt(hour, min, sec, nano)
+		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?;
+	//
+	let v = NaiveDateTime::new(d, t);
+	// Attempt to create time
 	let d = zone
-		.from_local_date(&n)
-		.unwrap()
-		.and_hms_nano_opt(hour, min, sec, nano)
+		.from_local_datetime(&v)
+		.earliest()
 		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?
 		.with_timezone(&Utc);
 	// This is a valid datetime
@@ -237,9 +236,15 @@ fn zone_all(i: &str) -> IResult<&str, FixedOffset> {
 	if h == 0 && m == 0 {
 		Ok((i, Utc.fix()))
 	} else if s < 0 {
-		Ok((i, FixedOffset::west((h * 3600 + m * 60) as i32)))
+		match FixedOffset::west_opt((h * 3600 + m * 60) as i32) {
+			Some(v) => Ok((i, v)),
+			None => Err(Err::Error(error_position!(i, ErrorKind::Verify))),
+		}
 	} else if s > 0 {
-		Ok((i, FixedOffset::east((h * 3600 + m * 60) as i32)))
+		match FixedOffset::east_opt((h * 3600 + m * 60) as i32) {
+			Some(v) => Ok((i, v)),
+			None => Err(Err::Error(error_position!(i, ErrorKind::Verify))),
+		}
 	} else {
 		Ok((i, Utc.fix()))
 	}

@@ -41,23 +41,35 @@ pub fn group((datetime, strand): (Value, Value)) -> Result<Value, Error> {
 	match datetime {
 		Value::Datetime(v) => match strand {
 			Value::Strand(g) => match g.as_str() {
-				"year" => Ok(Utc.ymd(v.year(), 1, 1).and_hms(0, 0, 0).into()),
-				"month" => Ok(Utc.ymd(v.year(), v.month(), 1).and_hms(0, 0, 0).into()),
+				"year" => Ok(Utc
+					.with_ymd_and_hms(v.year(), 1, 1, 0,0,0)
+					.earliest()
+					.unwrap()
+					.into()),
+				"month" => Ok(Utc
+					.with_ymd_and_hms(v.year(), v.month(), 1, 0,0,0)
+					.earliest()
+					.unwrap()
+					.into()),
 				"day" => Ok(Utc
-					.ymd(v.year(), v.month(), v.day())
-					.and_hms(0, 0, 0)
+					.with_ymd_and_hms(v.year(), v.month(), v.day(), 0,0,0)
+					.earliest()
+					.unwrap()
 					.into()),
 				"hour" => Ok(Utc
-					.ymd(v.year(), v.month(), v.day())
-					.and_hms(v.hour(), 0, 0)
+					.with_ymd_and_hms(v.year(), v.month(), v.day(), v.hour(),0,0)
+					.earliest()
+					.unwrap()
 					.into()),
 				"minute" => Ok(Utc
-					.ymd(v.year(), v.month(), v.day())
-					.and_hms(v.hour(), v.minute(), 0)
+					.with_ymd_and_hms(v.year(), v.month(), v.day(), v.hour(),v.minute(),0)
+					.earliest()
+					.unwrap()
 					.into()),
 				"second" => Ok(Utc
-					.ymd(v.year(), v.month(), v.day())
-					.and_hms(v.hour(), v.minute(), v.second())
+					.with_ymd_and_hms(v.year(), v.month(), v.day(), v.hour(), v.minute(), v.second())
+					.earliest()
+					.unwrap()
 					.into()),
 				_ => Err(Error::InvalidArguments {
 					name: String::from("time::group"),
