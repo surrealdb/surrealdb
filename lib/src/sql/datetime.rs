@@ -121,7 +121,7 @@ fn date(i: &str) -> IResult<&str, Datetime> {
 	let (i, mon) = month(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, day) = day(i)?;
-	convert(i, year, mon, day, 0, 0, 0, 0, Utc.fix())
+	convert(i, (year, mon, day), (0, 0, 0, 0), Utc.fix())
 }
 
 fn time(i: &str) -> IResult<&str, Datetime> {
@@ -137,7 +137,7 @@ fn time(i: &str) -> IResult<&str, Datetime> {
 	let (i, _) = char(':')(i)?;
 	let (i, sec) = second(i)?;
 	let (i, zone) = zone(i)?;
-	convert(i, year, mon, day, hour, min, sec, 0, zone)
+	convert(i, (year, mon, day), (hour, min, sec, 0), zone)
 }
 
 fn nano(i: &str) -> IResult<&str, Datetime> {
@@ -154,18 +154,13 @@ fn nano(i: &str) -> IResult<&str, Datetime> {
 	let (i, sec) = second(i)?;
 	let (i, nano) = nanosecond(i)?;
 	let (i, zone) = zone(i)?;
-	convert(i, year, mon, day, hour, min, sec, nano, zone)
+	convert(i, (year, mon, day), (hour, min, sec, nano), zone)
 }
 
 fn convert(
 	i: &str,
-	year: i32,
-	mon: u32,
-	day: u32,
-	hour: u32,
-	min: u32,
-	sec: u32,
-	nano: u32,
+	(year, mon, day): (i32, u32, u32),
+	(hour, min, sec, nano): (u32, u32, u32, u32),
 	zone: FixedOffset,
 ) -> IResult<&str, Datetime> {
 	let n = NaiveDate::from_ymd_opt(year, mon, day)
