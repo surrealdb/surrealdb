@@ -163,16 +163,17 @@ fn convert(
 	(hour, min, sec, nano): (u32, u32, u32, u32),
 	zone: FixedOffset,
 ) -> IResult<&str, Datetime> {
+	// Attempt to create date
 	let n = NaiveDate::from_ymd_opt(year, mon, day)
 		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?;
-
+	// Attempt to create time
 	let d = zone
 		.from_local_date(&n)
 		.unwrap()
 		.and_hms_nano_opt(hour, min, sec, nano)
 		.ok_or_else(|| Err::Error(error_position!(i, ErrorKind::Verify)))?
 		.with_timezone(&Utc);
-
+	// This is a valid datetime
 	Ok((i, Datetime(d)))
 }
 
