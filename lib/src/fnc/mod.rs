@@ -60,6 +60,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 	dispatch!(
 		name,
 		args,
+		"array::all" => array::all,
+		"array::any" => array::any,
 		"array::combine" => array::combine,
 		"array::complement" => array::complement,
 		"array::concat" => array::concat,
@@ -70,6 +72,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
 		"array::len" => array::len,
+		"array::max" => array::max,
+		"array::min" => array::min,
 		"array::sort" => array::sort,
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,

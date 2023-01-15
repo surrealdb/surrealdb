@@ -234,6 +234,8 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 
 fn function_array(i: &str) -> IResult<&str, &str> {
 	alt((
+		tag("array::all"),
+		tag("array::any"),
 		tag("array::combine"),
 		tag("array::complement"),
 		tag("array::concat"),
@@ -244,6 +246,8 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 		tag("array::insert"),
 		tag("array::intersect"),
 		tag("array::len"),
+		tag("array::max"),
+		tag("array::min"),
 		tag("array::sort::asc"),
 		tag("array::sort::desc"),
 		tag("array::sort"),

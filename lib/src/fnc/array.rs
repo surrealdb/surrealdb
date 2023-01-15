@@ -9,6 +9,20 @@ use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
 
+pub fn all((arg,): (Value,)) -> Result<Value, Error> {
+	match arg {
+		Value::Array(v) => Ok(v.iter().all(Value::is_truthy).into()),
+		_ => Ok(Value::False),
+	}
+}
+
+pub fn any((arg,): (Value,)) -> Result<Value, Error> {
+	match arg {
+		Value::Array(v) => Ok(v.iter().any(Value::is_truthy).into()),
+		_ => Ok(Value::False),
+	}
+}
+
 pub fn combine(arrays: (Value, Value)) -> Result<Value, Error> {
 	Ok(match arrays {
 		(Value::Array(v), Value::Array(w)) => v.combine(w).into(),
@@ -92,6 +106,20 @@ pub fn intersect(arrays: (Value, Value)) -> Result<Value, Error> {
 pub fn len((arg,): (Value,)) -> Result<Value, Error> {
 	match arg {
 		Value::Array(v) => Ok(v.len().into()),
+		_ => Ok(Value::None),
+	}
+}
+
+pub fn max((arg,): (Value,)) -> Result<Value, Error> {
+	match arg {
+		Value::Array(v) => Ok(v.into_iter().max().unwrap_or(Value::None)),
+		_ => Ok(Value::None),
+	}
+}
+
+pub fn min((arg,): (Value,)) -> Result<Value, Error> {
+	match arg {
+		Value::Array(v) => Ok(v.into_iter().min().unwrap_or(Value::None)),
 		_ => Ok(Value::None),
 	}
 }
