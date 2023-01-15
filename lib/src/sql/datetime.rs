@@ -121,7 +121,6 @@ fn date(i: &str) -> IResult<&str, Datetime> {
 	let (i, mon) = month(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, day) = day(i)?;
-
 	convert(i, year, mon, day, 0, 0, 0, 0, Utc.fix())
 }
 
@@ -138,7 +137,6 @@ fn time(i: &str) -> IResult<&str, Datetime> {
 	let (i, _) = char(':')(i)?;
 	let (i, sec) = second(i)?;
 	let (i, zone) = zone(i)?;
-
 	convert(i, year, mon, day, hour, min, sec, 0, zone)
 }
 
@@ -156,7 +154,6 @@ fn nano(i: &str) -> IResult<&str, Datetime> {
 	let (i, sec) = second(i)?;
 	let (i, nano) = nanosecond(i)?;
 	let (i, zone) = zone(i)?;
-
 	convert(i, year, mon, day, hour, min, sec, nano, zone)
 }
 
