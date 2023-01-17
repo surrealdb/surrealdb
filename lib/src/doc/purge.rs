@@ -6,6 +6,7 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::dir::Dir;
 use crate::sql::edges::Edges;
+use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::statements::DeleteStatement;
@@ -38,8 +39,8 @@ impl<'a> Document<'a> {
 		let key = crate::key::thing::new(opt.ns(), opt.db(), &rid.tb, &rid.id);
 		run.del(key).await?;
 		// Purge the record edges
-		match (self.initial.pick(&*IN), self.initial.pick(&*OUT)) {
-			(Value::Thing(ref l), Value::Thing(ref r)) => {
+		match (self.initial.pick(&*EDGE), self.initial.pick(&*IN), self.initial.pick(&*OUT)) {
+			(Value::True, Value::Thing(ref l), Value::Thing(ref r)) => {
 				// Get temporary edge references
 				let (ref o, ref i) = (Dir::Out, Dir::In);
 				// Purge the left pointer edge

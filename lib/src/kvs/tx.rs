@@ -7,7 +7,11 @@ use crate::key::thing;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::sql;
+use crate::sql::paths::EDGE;
+use crate::sql::paths::IN;
+use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
+use crate::sql::Value;
 use channel::Sender;
 use sql::permission::Permissions;
 use sql::statements::DefineDatabaseStatement;
@@ -1461,12 +1465,26 @@ impl Transaction {
 								if n == i + 1 {
 									nxt = Some(k.clone());
 								}
-								// Parse the key-value
+								// Parse the key and the value
 								let k: crate::key::thing::Thing = (&k).into();
 								let v: crate::sql::value::Value = (&v).into();
 								let t = Thing::from((k.tb, k.id));
-								// Write record
-								chn.send(bytes!(format!("UPDATE {} CONTENT {};", t, v))).await?;
+								// Check if this is a graph edge
+								match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
+									// This is a graph edge record
+									(Value::True, Value::Thing(l), Value::Thing(r)) => {
+										let sql = format!(
+											"RELATE {} -> {} -> {} CONTENT {};",
+											l, t, r, v
+										);
+										chn.send(bytes!(sql)).await?;
+									}
+									// This is a normal record
+									_ => {
+										let sql = format!("UPDATE {} CONTENT {};", t, v);
+										chn.send(bytes!(sql)).await?;
+									}
+								}
 							}
 							continue;
 						}
