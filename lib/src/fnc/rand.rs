@@ -7,6 +7,7 @@ use nanoid::nanoid;
 use rand::distributions::{Alphanumeric, DistString};
 use rand::prelude::IteratorRandom;
 use rand::Rng;
+use ulid::Ulid;
 
 pub fn rand(_: ()) -> Result<Value, Error> {
 	Ok(rand::random::<f64>().into())
@@ -118,6 +119,10 @@ pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 		rand::random::<i32>() as i64
 	};
 	Ok(Datetime::from(i).into())
+}
+
+pub fn ulid(_: ()) -> Result<Value, Error> {
+	Ok(Ulid::new().to_string().into())
 }
 
 pub fn uuid(_: ()) -> Result<Value, Error> {

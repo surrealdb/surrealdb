@@ -155,12 +155,6 @@ impl From<Uuid> for Value {
 	}
 }
 
-impl From<uuid::Uuid> for Value {
-	fn from(v: uuid::Uuid) -> Self {
-		Value::Uuid(Uuid(v))
-	}
-}
-
 impl From<Param> for Value {
 	fn from(v: Param) -> Self {
 		Value::Param(v)
@@ -398,6 +392,12 @@ impl From<Point<f64>> for Value {
 impl From<Operation> for Value {
 	fn from(v: Operation) -> Self {
 		Value::Object(Object::from(v))
+	}
+}
+
+impl From<uuid::Uuid> for Value {
+	fn from(v: uuid::Uuid) -> Self {
+		Value::Uuid(Uuid(v))
 	}
 }
 
