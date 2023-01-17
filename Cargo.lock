@@ -3465,6 +3465,7 @@ dependencies = [
  "surrealdb",
  "thiserror",
  "tokio",
+ "urlencoding",
  "warp",
 ]
 
