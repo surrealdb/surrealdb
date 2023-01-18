@@ -23,6 +23,8 @@ impl ModuleDef for Package {
 		module.add("concat")?;
 		module.add("difference")?;
 		module.add("distinct")?;
+		module.add("flatten")?;
+		module.add("group")?;
 		module.add("insert")?;
 		module.add("intersect")?;
 		module.add("len")?;
@@ -38,6 +40,8 @@ impl ModuleDef for Package {
 		module.set("concat", Func::from(|v: Any| run("array::concat", v.0)))?;
 		module.set("difference", Func::from(|v: Any| run("array::difference", v.0)))?;
 		module.set("distinct", Func::from(|v: Any| run("array::distinct", v.0)))?;
+		module.set("flatten", Func::from(|v: Any| run("array::flatten", v.0)))?;
+		module.set("group", Func::from(|v: Any| run("array::group", v.0)))?;
 		module.set("insert", Func::from(|v: Any| run("array::insert", v.0)))?;
 		module.set("intersect", Func::from(|v: Any| run("array::intersect", v.0)))?;
 		module.set("len", Func::from(|v: Any| run("array::len", v.0)))?;
@@ -50,6 +54,8 @@ impl ModuleDef for Package {
 		default.set("concat", Func::from(|v: Any| run("array::concat", v.0)))?;
 		default.set("difference", Func::from(|v: Any| run("array::difference", v.0)))?;
 		default.set("distinct", Func::from(|v: Any| run("array::distinct", v.0)))?;
+		default.set("flatten", Func::from(|v: Any| run("array::flatten", v.0)))?;
+		default.set("group", Func::from(|v: Any| run("array::group", v.0)))?;
 		default.set("insert", Func::from(|v: Any| run("array::insert", v.0)))?;
 		default.set("intersect", Func::from(|v: Any| run("array::intersect", v.0)))?;
 		default.set("len", Func::from(|v: Any| run("array::len", v.0)))?;

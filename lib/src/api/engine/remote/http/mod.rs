@@ -8,13 +8,13 @@ pub(crate) mod wasm;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
 use crate::api::conn::Param;
-use crate::api::engines::create_statement;
-use crate::api::engines::delete_statement;
-use crate::api::engines::merge_statement;
-use crate::api::engines::patch_statement;
-use crate::api::engines::remote::Status;
-use crate::api::engines::select_statement;
-use crate::api::engines::update_statement;
+use crate::api::engine::create_statement;
+use crate::api::engine::delete_statement;
+use crate::api::engine::merge_statement;
+use crate::api::engine::patch_statement;
+use crate::api::engine::remote::Status;
+use crate::api::engine::select_statement;
+use crate::api::engine::update_statement;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
 use crate::api::opt::from_json;
@@ -54,7 +54,7 @@ use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
 const SQL_PATH: &str = "sql";
-const LOG: &str = "surrealdb::engines::remote::http";
+const LOG: &str = "surrealdb::engine::remote::http";
 
 /// The HTTP scheme used to connect to `http://` endpoints
 #[derive(Debug)]
@@ -77,8 +77,8 @@ impl Surreal<Client> {
 	///
 	/// ```no_run
 	/// use surrealdb::Surreal;
-	/// use surrealdb::engines::remote::http::Client;
-	/// use surrealdb::engines::remote::http::Http;
+	/// use surrealdb::engine::remote::http::Client;
+	/// use surrealdb::engine::remote::http::Http;
 	///
 	/// static DB: Surreal<Client> = Surreal::init();
 	///

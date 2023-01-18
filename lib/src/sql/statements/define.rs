@@ -25,6 +25,7 @@ use argon2::Argon2;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::character::complete::char;
 use nom::combinator::{map, opt};
 use nom::multi::many0;
 use nom::sequence::tuple;
@@ -42,6 +43,7 @@ pub enum DefineStatement {
 	Login(DefineLoginStatement),
 	Token(DefineTokenStatement),
 	Scope(DefineScopeStatement),
+	Param(DefineParamStatement),
 	Table(DefineTableStatement),
 	Event(DefineEventStatement),
 	Field(DefineFieldStatement),
@@ -62,6 +64,7 @@ impl DefineStatement {
 			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Param(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
@@ -78,6 +81,7 @@ impl fmt::Display for DefineStatement {
 			Self::Login(v) => Display::fmt(v, f),
 			Self::Token(v) => Display::fmt(v, f),
 			Self::Scope(v) => Display::fmt(v, f),
+			Self::Param(v) => Display::fmt(v, f),
 			Self::Table(v) => Display::fmt(v, f),
 			Self::Event(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
@@ -93,6 +97,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 		map(login, DefineStatement::Login),
 		map(token, DefineStatement::Token),
 		map(scope, DefineStatement::Scope),
+		map(param, DefineStatement::Param),
 		map(table, DefineStatement::Table),
 		map(event, DefineStatement::Event),
 		map(field, DefineStatement::Field),
@@ -565,6 +570,68 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, v) = value(i)?;
 	Ok((i, DefineScopeOption::Signin(v)))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub struct DefineParamStatement {
+	pub name: Ident,
+	pub value: Value,
+}
+
+impl DefineParamStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Process the statement
+		let key = crate::key::pa::new(opt.ns(), opt.db(), &self.name);
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.set(key, self).await?;
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl fmt::Display for DefineParamStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE PARAM ${} VALUE {}", self.name, self.value)
+	}
+}
+
+fn param(i: &str) -> IResult<&str, DefineParamStatement> {
+	let (i, _) = tag_no_case("DEFINE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("PARAM")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = char('$')(i)?;
+	let (i, name) = ident(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("VALUE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, value) = value(i)?;
+	Ok((
+		i,
+		DefineParamStatement {
+			name,
+			value,
+		},
+	))
 }
 
 // --------------------------------------------------

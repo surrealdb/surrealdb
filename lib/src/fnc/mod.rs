@@ -60,15 +60,20 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 	dispatch!(
 		name,
 		args,
+		"array::all" => array::all,
+		"array::any" => array::any,
 		"array::combine" => array::combine,
 		"array::complement" => array::complement,
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
 		"array::flatten" => array::flatten,
+		"array::group" => array::group,
 		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
 		"array::len" => array::len,
+		"array::max" => array::max,
+		"array::min" => array::min,
 		"array::sort" => array::sort,
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
@@ -98,6 +103,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"is::alphanum" => is::alphanum,
 		"is::alpha" => is::alpha,
 		"is::ascii" => is::ascii,
+		"is::datetime" => is::datetime,
 		"is::domain" => is::domain,
 		"is::email" => is::email,
 		"is::hexadecimal" => is::hexadecimal,
@@ -156,6 +162,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"rand::int" => rand::int,
 		"rand::string" => rand::string,
 		"rand::time" => rand::time,
+		"rand::ulid" => rand::ulid,
 		"rand::uuid::v4" => rand::uuid::v4,
 		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
@@ -197,6 +204,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"time::now" => time::now,
 		"time::round" => time::round,
 		"time::second" => time::second,
+		"time::timezone" => time::timezone,
 		"time::unix" => time::unix,
 		"time::wday" => time::wday,
 		"time::week" => time::week,
@@ -226,14 +234,14 @@ pub async fn asynchronous(
 ) -> Result<Value, Error> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
-	#[cfg(feature = "parallel")]
+	#[cfg(not(target_arch = "wasm32"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
 	) -> impl FnOnce() -> executor::Task<R> {
 		|| crate::exe::spawn(async move { function() })
 	}
 
-	#[cfg(not(feature = "parallel"))]
+	#[cfg(target_arch = "wasm32")]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
 	) -> impl FnOnce() -> std::future::Ready<R> {

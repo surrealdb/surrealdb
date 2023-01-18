@@ -21,6 +21,7 @@ impl ModuleDef for Package {
 		module.add("alphanum")?;
 		module.add("alpha")?;
 		module.add("ascii")?;
+		module.add("datetime")?;
 		module.add("domain")?;
 		module.add("email")?;
 		module.add("hexadecimal")?;
@@ -38,6 +39,7 @@ impl ModuleDef for Package {
 		module.set("alphanum", Func::from(|v: Any| run("is::alphanum", v.0)))?;
 		module.set("alpha", Func::from(|v: Any| run("is::alpha", v.0)))?;
 		module.set("ascii", Func::from(|v: Any| run("is::ascii", v.0)))?;
+		module.set("datetime", Func::from(|v: Any| run("is::datetime", v.0)))?;
 		module.set("domain", Func::from(|v: Any| run("is::domain", v.0)))?;
 		module.set("email", Func::from(|v: Any| run("is::email", v.0)))?;
 		module.set("hexadecimal", Func::from(|v: Any| run("is::hexadecimal", v.0)))?;
@@ -52,6 +54,7 @@ impl ModuleDef for Package {
 		default.set("alphanum", Func::from(|v: Any| run("is::alphanum", v.0)))?;
 		default.set("alpha", Func::from(|v: Any| run("is::alpha", v.0)))?;
 		default.set("ascii", Func::from(|v: Any| run("is::ascii", v.0)))?;
+		default.set("datetime", Func::from(|v: Any| run("is::datetime", v.0)))?;
 		default.set("domain", Func::from(|v: Any| run("is::domain", v.0)))?;
 		default.set("email", Func::from(|v: Any| run("is::email", v.0)))?;
 		default.set("hexadecimal", Func::from(|v: Any| run("is::hexadecimal", v.0)))?;

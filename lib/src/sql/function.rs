@@ -77,9 +77,8 @@ impl Function {
 	/// Check if this function is a grouping function
 	pub fn is_aggregate(&self) -> bool {
 		match self {
-			Self::Normal(f, _) if f == "array::concat" => true,
 			Self::Normal(f, _) if f == "array::distinct" => true,
-			Self::Normal(f, _) if f == "array::union" => true,
+			Self::Normal(f, _) if f == "array::group" => true,
 			Self::Normal(f, _) if f == "count" => true,
 			Self::Normal(f, _) if f == "math::bottom" => true,
 			Self::Normal(f, _) if f == "math::interquartile" => true,
@@ -235,15 +234,20 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 
 fn function_array(i: &str) -> IResult<&str, &str> {
 	alt((
+		tag("array::all"),
+		tag("array::any"),
 		tag("array::combine"),
 		tag("array::complement"),
 		tag("array::concat"),
 		tag("array::difference"),
 		tag("array::distinct"),
 		tag("array::flatten"),
+		tag("array::group"),
 		tag("array::insert"),
 		tag("array::intersect"),
 		tag("array::len"),
+		tag("array::max"),
+		tag("array::min"),
 		tag("array::sort::asc"),
 		tag("array::sort::desc"),
 		tag("array::sort"),
@@ -310,6 +314,7 @@ fn function_is(i: &str) -> IResult<&str, &str> {
 		tag("is::alphanum"),
 		tag("is::alpha"),
 		tag("is::ascii"),
+		tag("is::datetime"),
 		tag("is::domain"),
 		tag("is::email"),
 		tag("is::hexadecimal"),
@@ -388,6 +393,7 @@ fn function_rand(i: &str) -> IResult<&str, &str> {
 		tag("rand::int"),
 		tag("rand::string"),
 		tag("rand::time"),
+		tag("rand::ulid"),
 		tag("rand::uuid::v4"),
 		tag("rand::uuid::v7"),
 		tag("rand::uuid"),
@@ -441,6 +447,7 @@ fn function_time(i: &str) -> IResult<&str, &str> {
 		tag("time::now"),
 		tag("time::round"),
 		tag("time::second"),
+		tag("time::timezone"),
 		tag("time::unix"),
 		tag("time::wday"),
 		tag("time::week"),

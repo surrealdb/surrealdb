@@ -25,6 +25,7 @@ To set up a working **development environment**, you can either [use the Nix pac
 > Please note that these instructions are for setting up a functional dev environment. If you just want to install SurrealDB for day-to-day usage and not as a code maintainer use this [installation guide](https://surrealdb.com/docs/install). If you want to get started integrating SurrealDB into your app, view the [integration tutorials](https://surrealdb.com/docs/integration).
 
 ```bash
+# Use the default (stable) release channel if prompted
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone git@github.com:[YOUR_FORK_HERE]/surrealdb.git
 cd surrealdb

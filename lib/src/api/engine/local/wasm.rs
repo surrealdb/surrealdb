@@ -5,7 +5,7 @@ use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
-use crate::api::engines::local::Db;
+use crate::api::engine::local::Db;
 use crate::api::opt::from_value;
 use crate::api::opt::Endpoint;
 use crate::api::Response as QueryResponse;

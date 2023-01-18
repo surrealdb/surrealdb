@@ -22,3 +22,5 @@ pub static IN: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("in")]);
 pub static OUT: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("out")]);
 
 pub static META: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("__")]);
+
+pub static EDGE: Lazy<[Part; 1]> = Lazy::new(|| [Part::from("__")]);

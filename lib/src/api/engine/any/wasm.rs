@@ -4,8 +4,8 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 #[allow(unused_imports)] // used by the DB engines
-use crate::api::engines;
-use crate::api::engines::any::Any;
+use crate::api::engine;
+use crate::api::engine::any::Any;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
 use crate::api::opt::Endpoint;
@@ -52,7 +52,7 @@ impl Connection for Any {
 			match address.endpoint.scheme() {
 				#[cfg(feature = "kv-fdb")]
 				"fdb" => {
-					engines::local::wasm::router(address, conn_tx, route_rx);
+					engine::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -60,7 +60,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-indxdb")]
 				"indxdb" => {
-					engines::local::wasm::router(address, conn_tx, route_rx);
+					engine::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -68,7 +68,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-mem")]
 				"mem" => {
-					engines::local::wasm::router(address, conn_tx, route_rx);
+					engine::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -76,7 +76,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-rocksdb")]
 				"rocksdb" => {
-					engines::local::wasm::router(address, conn_tx, route_rx);
+					engine::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -84,7 +84,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-rocksdb")]
 				"file" => {
-					engines::local::wasm::router(address, conn_tx, route_rx);
+					engine::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -92,7 +92,7 @@ impl Connection for Any {
 
 				#[cfg(feature = "kv-tikv")]
 				"tikv" => {
-					engines::local::wasm::router(address, conn_tx, route_rx);
+					engine::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}
@@ -101,15 +101,15 @@ impl Connection for Any {
 				#[cfg(feature = "protocol-http")]
 				"http" | "https" => {
 					features.insert(ExtraFeatures::Auth);
-					engines::remote::http::wasm::router(address, conn_tx, route_rx);
+					engine::remote::http::wasm::router(address, conn_tx, route_rx);
 				}
 
 				#[cfg(feature = "protocol-ws")]
 				"ws" | "wss" => {
 					features.insert(ExtraFeatures::Auth);
 					let mut address = address;
-					address.endpoint = address.endpoint.join(engines::remote::ws::PATH)?;
-					engines::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
+					address.endpoint = address.endpoint.join(engine::remote::ws::PATH)?;
+					engine::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);
 					}

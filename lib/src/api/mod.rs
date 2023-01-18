@@ -1,6 +1,6 @@
 //! Functionality for connecting to local and remote databases
 
-pub mod engines;
+pub mod engine;
 pub mod err;
 pub mod method;
 pub mod opt;
@@ -22,6 +22,10 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::spawn;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local as spawn;
 
 /// A specialized `Result` type
 pub type Result<T> = std::result::Result<T, crate::Error>;
@@ -63,7 +67,7 @@ where
 	/// ```no_run
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// use surrealdb::engines::remote::ws::Ws;
+	/// use surrealdb::engine::remote::ws::Ws;
 	/// use surrealdb::Surreal;
 	///
 	/// let db = Surreal::new::<Ws>("localhost:8000")
@@ -140,7 +144,7 @@ where
 {
 	fn check_server_version(&self) {
 		let conn = self.clone();
-		tokio::spawn(async move {
+		spawn(async move {
 			let (versions, build_meta) = SUPPORTED_VERSIONS;
 			// invalid version requirements should be caught during development
 			let req = VersionReq::parse(versions).expect("valid supported versions");

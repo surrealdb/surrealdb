@@ -18,6 +18,7 @@ use nom::branch::alt;
 use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
+use ulid::Ulid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Id {
@@ -115,6 +116,20 @@ impl Id {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
 		Self::String(nanoid!(20, &ID_CHARS))
+	}
+	/// Generate a new random ULID
+	pub fn ulid() -> Self {
+		Self::String(Ulid::new().to_string())
+	}
+	/// Generate a new random UUID
+	#[cfg(uuid_unstable)]
+	pub fn uuid() -> Self {
+		Self::String(Uuid::new_v7().to_raw())
+	}
+	/// Generate a new random UUID
+	#[cfg(not(uuid_unstable))]
+	pub fn uuid() -> Self {
+		Self::String(Uuid::new_v4().to_raw())
 	}
 	/// Convert the Id to a raw String
 	pub fn to_raw(&self) -> String {

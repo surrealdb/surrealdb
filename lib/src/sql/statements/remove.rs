@@ -13,6 +13,7 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::character::complete::char;
 use nom::combinator::{map, opt};
 use nom::sequence::tuple;
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,7 @@ pub enum RemoveStatement {
 	Login(RemoveLoginStatement),
 	Token(RemoveTokenStatement),
 	Scope(RemoveScopeStatement),
+	Param(RemoveParamStatement),
 	Table(RemoveTableStatement),
 	Event(RemoveEventStatement),
 	Field(RemoveFieldStatement),
@@ -45,6 +47,7 @@ impl RemoveStatement {
 			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Param(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Table(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
@@ -61,6 +64,7 @@ impl Display for RemoveStatement {
 			Self::Login(v) => Display::fmt(v, f),
 			Self::Token(v) => Display::fmt(v, f),
 			Self::Scope(v) => Display::fmt(v, f),
+			Self::Param(v) => Display::fmt(v, f),
 			Self::Table(v) => Display::fmt(v, f),
 			Self::Event(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
@@ -76,6 +80,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 		map(login, RemoveStatement::Login),
 		map(token, RemoveStatement::Token),
 		map(scope, RemoveStatement::Scope),
+		map(param, RemoveStatement::Param),
 		map(table, RemoveStatement::Table),
 		map(event, RemoveStatement::Event),
 		map(field, RemoveStatement::Field),
@@ -419,6 +424,60 @@ fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 	Ok((
 		i,
 		RemoveScopeStatement {
+			name,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub struct RemoveParamStatement {
+	pub name: Ident,
+}
+
+impl RemoveParamStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::pa::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl fmt::Display for RemoveParamStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE PARAM {}", self.name)
+	}
+}
+
+fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
+	let (i, _) = tag_no_case("REMOVE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("PARAM")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = char('$')(i)?;
+	let (i, name) = ident(i)?;
+	Ok((
+		i,
+		RemoveParamStatement {
 			name,
 		},
 	))

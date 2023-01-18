@@ -192,6 +192,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
 		}",

@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::sql::value::Value;
+use chrono::NaiveDateTime;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use semver::Version;
@@ -23,6 +24,11 @@ pub fn alpha((arg,): (String,)) -> Result<Value, Error> {
 #[inline]
 pub fn ascii((arg,): (String,)) -> Result<Value, Error> {
 	Ok(arg.is_ascii().into())
+}
+
+#[inline]
+pub fn datetime((arg, fmt): (String, String)) -> Result<Value, Error> {
+	Ok(NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into())
 }
 
 #[inline]

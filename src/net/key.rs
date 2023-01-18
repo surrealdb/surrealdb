@@ -3,7 +3,7 @@ use crate::dbs::DB;
 use crate::err::Error;
 use crate::net::input::bytes_to_utf8;
 use crate::net::output;
-use crate::net::params::Params;
+use crate::net::params::{Param, Params};
 use crate::net::session;
 use bytes::Bytes;
 use serde::Deserialize;
@@ -39,7 +39,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let select = warp::any()
 		.and(warp::get())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
-		.and(path!("key" / String).and(warp::path::end()))
+		.and(path!("key" / Param).and(warp::path::end()))
 		.and(warp::query())
 		.and(session::build())
 		.and_then(select_all);
@@ -47,7 +47,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let create = warp::any()
 		.and(warp::post())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
-		.and(path!("key" / String).and(warp::path::end()))
+		.and(path!("key" / Param).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and(warp::query())
@@ -57,7 +57,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let delete = warp::any()
 		.and(warp::delete())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
-		.and(path!("key" / String).and(warp::path::end()))
+		.and(path!("key" / Param).and(warp::path::end()))
 		.and(warp::query())
 		.and(session::build())
 		.and_then(delete_all);
@@ -72,14 +72,14 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let select = warp::any()
 		.and(warp::get())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
-		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(path!("key" / Param / Param).and(warp::path::end()))
 		.and(session::build())
 		.and_then(select_one);
 	// Set create method
 	let create = warp::any()
 		.and(warp::post())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
-		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(path!("key" / Param / Param).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and(warp::query())
@@ -89,7 +89,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let update = warp::any()
 		.and(warp::put())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
-		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(path!("key" / Param / Param).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and(warp::query())
@@ -99,7 +99,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let modify = warp::any()
 		.and(warp::patch())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
-		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(path!("key" / Param / Param).and(warp::path::end()))
 		.and(warp::body::content_length_limit(MAX))
 		.and(warp::body::bytes())
 		.and(warp::query())
@@ -109,7 +109,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	let delete = warp::any()
 		.and(warp::delete())
 		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
-		.and(path!("key" / String / String).and(warp::path::end()))
+		.and(path!("key" / Param / Param).and(warp::path::end()))
 		.and(warp::query())
 		.and(session::build())
 		.and_then(delete_one);
@@ -130,7 +130,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 
 async fn select_all(
 	output: String,
-	table: String,
+	table: Param,
 	query: Query,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
@@ -164,7 +164,7 @@ async fn select_all(
 
 async fn create_all(
 	output: String,
-	table: String,
+	table: Param,
 	body: Bytes,
 	params: Params,
 	session: Session,
@@ -205,7 +205,7 @@ async fn create_all(
 
 async fn delete_all(
 	output: String,
-	table: String,
+	table: Param,
 	params: Params,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
@@ -240,8 +240,8 @@ async fn delete_all(
 
 async fn select_one(
 	output: String,
-	table: String,
-	id: String,
+	table: Param,
+	id: Param,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 	// Get the datastore reference
@@ -276,8 +276,8 @@ async fn select_one(
 
 async fn create_one(
 	output: String,
-	table: String,
-	id: String,
+	table: Param,
+	id: Param,
 	body: Bytes,
 	params: Params,
 	session: Session,
@@ -324,8 +324,8 @@ async fn create_one(
 
 async fn update_one(
 	output: String,
-	table: String,
-	id: String,
+	table: Param,
+	id: Param,
 	body: Bytes,
 	params: Params,
 	session: Session,
@@ -372,8 +372,8 @@ async fn update_one(
 
 async fn modify_one(
 	output: String,
-	table: String,
-	id: String,
+	table: Param,
+	id: Param,
 	body: Bytes,
 	params: Params,
 	session: Session,
@@ -420,8 +420,8 @@ async fn modify_one(
 
 async fn delete_one(
 	output: String,
-	table: String,
-	id: String,
+	table: Param,
+	id: Param,
 	params: Params,
 	session: Session,
 ) -> Result<impl warp::Reply, warp::Rejection> {

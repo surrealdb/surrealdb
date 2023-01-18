@@ -6,6 +6,6 @@ publish = false
 
 [dependencies]
 actix-web = { version = "4.2.1", features = ["macros"] }
-serde = { version = "1.0.147", features = ["derive"] }
+serde = { version = "1.0.152", features = ["derive"] }
 surrealdb = { path = "../.." }
-thiserror = "1.0.37"
+thiserror = "1.0.38"

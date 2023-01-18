@@ -11,8 +11,8 @@ use futures::future::try_join_all;
 use std::collections::HashSet;
 
 impl Value {
-	#[cfg_attr(feature = "parallel", async_recursion)]
-	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub async fn del(
 		&mut self,
 		ctx: &Context<'_>,

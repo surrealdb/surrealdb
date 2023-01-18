@@ -2,7 +2,7 @@ use crate::err::Error;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use serde_json::Value;
-use surrealdb::engines::any::connect;
+use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
 use surrealdb::sql;

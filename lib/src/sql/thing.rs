@@ -10,7 +10,9 @@ use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
+use nom::bytes::complete::tag;
 use nom::character::complete::char;
+use nom::combinator::map;
 use nom::sequence::delimited;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
@@ -103,7 +105,12 @@ fn thing_double(i: &str) -> IResult<&str, Thing> {
 fn thing_raw(i: &str) -> IResult<&str, Thing> {
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
-	let (i, v) = id(i)?;
+	let (i, v) = alt((
+		map(tag("rand()"), |_| Id::rand()),
+		map(tag("ulid()"), |_| Id::ulid()),
+		map(tag("uuid()"), |_| Id::uuid()),
+		id,
+	))(i)?;
 	Ok((
 		i,
 		Thing {

@@ -74,7 +74,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// let response = db.query(sql!(CREATE user SET name = $name))
 	///     .bind(("name", "John Doe"))
 	///     .await?;
@@ -95,7 +95,7 @@ where
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// let response = db.query(sql!(CREATE user SET name = $name))
 	///     .bind(User {
 	///         name: "John Doe",
@@ -153,7 +153,7 @@ impl Response {
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// let mut response = db
 	///     // Get `john`'s details
@@ -213,7 +213,7 @@ impl Response {
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// # let mut response = db.query(sql!(SELECT * FROM user)).await?;
 	/// let errors = response.take_errors();
 	/// # Ok(())
@@ -244,7 +244,7 @@ impl Response {
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// # let response = db.query(sql!(SELECT * FROM user)).await?;
 	/// response.check()?;
 	/// # Ok(())
@@ -275,7 +275,7 @@ impl Response {
 	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engines::any::connect("mem://").await?;
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// let response = db.query(sql!(SELECT * FROM user:john; SELECT * FROM user;)).await?;
 	///
 	/// assert_eq!(response.num_statements(), 2);

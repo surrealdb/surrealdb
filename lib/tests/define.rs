@@ -76,6 +76,9 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
+			sc: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
 		}",
@@ -104,6 +107,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMALESS' },
 		}",
@@ -136,6 +140,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },
 		}",
@@ -164,6 +169,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },
 		}",
@@ -186,7 +192,7 @@ async fn define_statement_event() -> Result<(), Error> {
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
-		SELECT count() FROM activity GROUP BY ALL;
+		SELECT count() FROM activity GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -243,7 +249,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
-		SELECT count() FROM activity GROUP BY ALL;
+		SELECT count() FROM activity GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -300,7 +306,7 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
-		SELECT count() FROM activity GROUP BY ALL;
+		SELECT count() FROM activity GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");

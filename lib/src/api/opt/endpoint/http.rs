@@ -1,6 +1,6 @@
-use crate::api::engines::remote::http::Client;
-use crate::api::engines::remote::http::Http;
-use crate::api::engines::remote::http::Https;
+use crate::api::engine::remote::http::Client;
+use crate::api::engine::remote::http::Http;
+use crate::api::engine::remote::http::Https;
 use crate::api::err::Error;
 use crate::api::opt::IntoEndpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]

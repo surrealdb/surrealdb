@@ -18,7 +18,7 @@ async fn select_limit_fetch() -> Result<(), Error> {
 		CREATE temperature:8 SET country = 'AUD', time = '2021-01-01T08:00:00Z';
 		CREATE temperature:9 SET country = 'CHF', time = '2023-01-01T08:00:00Z';
 		SELECT *, time::year(time) AS year FROM temperature;
-		SELECT count(), time::year(time) AS year, country FROM temperature GROUP BY country;
+		SELECT count(), time::year(time) AS year, country FROM temperature GROUP BY country, year;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -213,9 +213,14 @@ async fn select_limit_fetch() -> Result<(), Error> {
 				year: 2021
 			},
 			{
-				count: 5,
+				count: 3,
 				country: 'GBP',
 				year: 2020
+			},
+			{
+				count: 2,
+				country: 'GBP',
+				year: 2021
 			},
 			{
 				count: 1,

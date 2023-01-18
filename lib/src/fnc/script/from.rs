@@ -73,7 +73,7 @@ impl<'js> FromJs<'js> for Value {
 				if (v).is_instance_of(&date) {
 					let f: js::Function = v.get("getTime")?;
 					let m: i64 = f.call((js::This(v),))?;
-					let d = Utc.timestamp_millis(m);
+					let d = Utc.timestamp_millis_opt(m).unwrap();
 					return Ok(Datetime::from(d).into());
 				}
 				// Check to see if this object is an array

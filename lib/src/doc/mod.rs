@@ -1,6 +1,6 @@
 pub(crate) use self::document::*;
 
-#[cfg(feature = "parallel")]
+#[cfg(not(target_arch = "wasm32"))]
 mod compute;
 
 mod allow;

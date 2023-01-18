@@ -86,6 +86,30 @@ pub enum Error {
 		name: String,
 	},
 
+	#[error("Found '{field}' in SELECT clause on line {line}, but field is not an aggregate function, and is not present in GROUP BY expression")]
+	InvalidField {
+		line: usize,
+		field: String,
+	},
+
+	#[error("Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression")]
+	InvalidSplit {
+		line: usize,
+		field: String,
+	},
+
+	#[error("Found '{field}' in ORDER BY clause on line {line}, but field is not present in SELECT expression")]
+	InvalidOrder {
+		line: usize,
+		field: String,
+	},
+
+	#[error("Found '{field}' in GROUP BY clause on line {line}, but field is not present in SELECT expression")]
+	InvalidGroup {
+		line: usize,
+		field: String,
+	},
+
 	/// The LIMIT clause must evaluate to a positive integer
 	#[error("Found {value} but the LIMIT clause must evaluate to a positive integer")]
 	InvalidLimit {
@@ -177,6 +201,10 @@ pub enum Error {
 	/// The requested scope token does not exist
 	#[error("The scope token does not exist")]
 	StNotFound,
+
+	/// The requested param does not exist
+	#[error("The param does not exist")]
+	PaNotFound,
 
 	/// The requested table does not exist
 	#[error("The table does not exist")]

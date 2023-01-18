@@ -155,12 +155,6 @@ impl From<Uuid> for Value {
 	}
 }
 
-impl From<uuid::Uuid> for Value {
-	fn from(v: uuid::Uuid) -> Self {
-		Value::Uuid(Uuid(v))
-	}
-}
-
 impl From<Param> for Value {
 	fn from(v: Param) -> Self {
 		Value::Param(v)
@@ -401,6 +395,12 @@ impl From<Operation> for Value {
 	}
 }
 
+impl From<uuid::Uuid> for Value {
+	fn from(v: uuid::Uuid) -> Self {
+		Value::Uuid(Uuid(v))
+	}
+}
+
 impl From<Vec<&str>> for Value {
 	fn from(v: Vec<&str>) -> Self {
 		Value::Array(Array::from(v))
@@ -602,11 +602,11 @@ impl Value {
 	// -----------------------------------
 
 	pub fn is_none(&self) -> bool {
-		matches!(self, Value::None | Value::Null)
+		matches!(self, Value::None)
 	}
 
 	pub fn is_null(&self) -> bool {
-		matches!(self, Value::None | Value::Null)
+		matches!(self, Value::Null)
 	}
 
 	pub fn is_some(&self) -> bool {
@@ -835,6 +835,15 @@ impl Value {
 		}
 	}
 
+	pub fn as_raw_string(self) -> String {
+		match self {
+			Value::Strand(v) => v.0,
+			Value::Uuid(v) => v.to_raw(),
+			Value::Datetime(v) => v.to_raw(),
+			_ => self.as_string(),
+		}
+	}
+
 	// -----------------------------------
 	// Expensive conversion of value
 	// -----------------------------------
@@ -872,6 +881,15 @@ impl Value {
 			Value::Strand(v) => Duration::from(v.as_str()),
 			Value::Duration(v) => v.clone(),
 			_ => Duration::default(),
+		}
+	}
+
+	pub fn to_raw_string(&self) -> String {
+		match self {
+			Value::Strand(v) => v.0.to_owned(),
+			Value::Uuid(v) => v.to_raw(),
+			Value::Datetime(v) => v.to_raw(),
+			_ => self.to_string(),
 		}
 	}
 
@@ -1029,7 +1047,8 @@ impl Value {
 	// JSON Path conversion
 	// -----------------------------------
 
-	pub fn jsonpath(&self) -> Idiom {
+	/// Converts this value to a JSONPatch path
+	pub(crate) fn jsonpath(&self) -> Idiom {
 		self.to_strand()
 			.as_str()
 			.trim_start_matches('/')
@@ -1037,6 +1056,30 @@ impl Value {
 			.map(Part::from)
 			.collect::<Vec<Part>>()
 			.into()
+	}
+
+	// -----------------------------------
+	// JSON Path conversion
+	// -----------------------------------
+
+	/// Checkes whether this value is a static value
+	pub(crate) fn is_static(&self) -> bool {
+		match self {
+			Value::None => true,
+			Value::Null => true,
+			Value::False => true,
+			Value::True => true,
+			Value::Uuid(_) => true,
+			Value::Number(_) => true,
+			Value::Strand(_) => true,
+			Value::Duration(_) => true,
+			Value::Datetime(_) => true,
+			Value::Geometry(_) => true,
+			Value::Array(v) => v.iter().all(Value::is_static),
+			Value::Object(v) => v.values().all(Value::is_static),
+			Value::Constant(_) => true,
+			_ => false,
+		}
 	}
 
 	// -----------------------------------
@@ -1285,8 +1328,8 @@ impl Value {
 		}
 	}
 
-	#[cfg_attr(feature = "parallel", async_recursion)]
-	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -1532,14 +1575,14 @@ mod tests {
 	#[test]
 	fn check_none() {
 		assert_eq!(true, Value::None.is_none());
-		assert_eq!(true, Value::Null.is_none());
+		assert_eq!(false, Value::Null.is_none());
 		assert_eq!(false, Value::from(1).is_none());
 	}
 
 	#[test]
 	fn check_null() {
-		assert_eq!(true, Value::None.is_null());
 		assert_eq!(true, Value::Null.is_null());
+		assert_eq!(false, Value::None.is_null());
 		assert_eq!(false, Value::from(1).is_null());
 	}
 
