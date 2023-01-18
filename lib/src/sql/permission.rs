@@ -2,18 +2,18 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::common::commasorspace;
 use crate::sql::error::IResult;
+use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
+use crate::sql::fmt::pretty_sequence_item;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
 use nom::{multi::separated_list0, sequence::tuple};
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 use std::fmt::{self, Display, Formatter};
 use std::str;
-
-use super::fmt::is_pretty;
-use super::fmt::pretty_sequence_item;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Permissions {
@@ -59,7 +59,6 @@ impl Permissions {
 
 impl Display for Permissions {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		use std::fmt::Write;
 		write!(f, "PERMISSIONS")?;
 		if self.is_none() {
 			return write!(f, " NONE");

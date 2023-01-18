@@ -33,8 +33,7 @@ use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::Display;
+use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub enum DefineStatement {
@@ -725,7 +724,6 @@ impl fmt::Display for DefineTableStatement {
 			let _indent = if is_pretty() {
 				Some(pretty_indent())
 			} else {
-				use std::fmt::Write;
 				f.write_char(' ')?;
 				None
 			};
