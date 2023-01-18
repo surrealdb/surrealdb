@@ -22,7 +22,7 @@ async fn function_array_all() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::None;
+	let val = Value::False;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -45,11 +45,11 @@ async fn function_array_any() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::False;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::None;
+	let val = Value::False;
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -328,7 +328,7 @@ async fn function_array_max() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("4");
+	let val = Value::parse("'text'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
