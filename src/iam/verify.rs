@@ -7,7 +7,7 @@ use crate::iam::LOG;
 use crate::iam::TOKEN;
 use argon2::password_hash::{PasswordHash, PasswordVerifier};
 use argon2::Argon2;
-use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::engine::general_purpose::STANDARD_NO_PAD as BASE64;
 use base64::Engine;
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
