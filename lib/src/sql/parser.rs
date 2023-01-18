@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::sql::error::Error::{ExcessiveDepth, ParserError};
+use crate::sql::error::Error::{ExcessiveDepth, Field, Group, Order, Parser, Split};
 use crate::sql::error::IResult;
 use crate::sql::query::{query, Query};
 use crate::sql::thing::Thing;
@@ -7,6 +7,8 @@ use crate::sql::value::Value;
 use nom::Err;
 use std::str;
 
+/// Parses a SurrealQL [`Query`]
+///
 /// During query parsing, the total depth of calls to parse values (including arrays, expressions,
 /// functions, objects, sub-queries), Javascript values, and geometry collections count against
 /// a computation depth limit. If the limit is reached, parsing will return
@@ -19,10 +21,12 @@ pub fn parse(input: &str) -> Result<Query, Error> {
 	parse_impl(input, query)
 }
 
+/// Parses a SurrealQL [`Thing`]
 pub fn thing(input: &str) -> Result<Thing, Error> {
 	parse_impl(input, super::thing::thing)
 }
 
+/// Parses a SurrealQL [`Value`]
 pub fn json(input: &str) -> Result<Value, Error> {
 	parse_impl(input, super::value::json)
 }
@@ -44,7 +48,7 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 			// There was an error when parsing the query
 			Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(match e {
 				// There was a parsing error
-				ParserError(e) => {
+				Parser(e) => {
 					// Locate the parser position
 					let (s, l, c) = locate(input, e);
 					// Return the parser error
@@ -54,7 +58,28 @@ fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Resu
 						sql: s.to_string(),
 					}
 				}
+				// There was a parsing error
 				ExcessiveDepth => Error::ComputationDepthExceeded,
+				// There was a SPLIT ON error
+				Field(e, f) => Error::InvalidField {
+					line: locate(input, e).1,
+					field: f,
+				},
+				// There was a SPLIT ON error
+				Split(e, f) => Error::InvalidSplit {
+					line: locate(input, e).1,
+					field: f,
+				},
+				// There was a ORDER BY error
+				Order(e, f) => Error::InvalidOrder {
+					line: locate(input, e).1,
+					field: f,
+				},
+				// There was a GROUP BY error
+				Group(e, f) => Error::InvalidGroup {
+					line: locate(input, e).1,
+					field: f,
+				},
 			}),
 			_ => unreachable!(),
 		},

@@ -3,6 +3,7 @@ use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{basic, Idiom};
+use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list1;
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Groups(pub Vec<Group>);
 
 impl Deref for Groups {
@@ -35,7 +36,7 @@ impl Display for Groups {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Group(pub Idiom);
 
 impl Deref for Group {
@@ -52,6 +53,17 @@ impl Display for Group {
 }
 
 pub fn group(i: &str) -> IResult<&str, Groups> {
+	alt((group_all, group_any))(i)
+}
+
+fn group_all(i: &str) -> IResult<&str, Groups> {
+	let (i, _) = tag_no_case("GROUP")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ALL")(i)?;
+	Ok((i, Groups(vec![])))
+}
+
+fn group_any(i: &str) -> IResult<&str, Groups> {
 	let (i, _) = tag_no_case("GROUP")(i)?;
 	let (i, _) = opt(tuple((shouldbespace, tag_no_case("BY"))))(i)?;
 	let (i, _) = shouldbespace(i)?;

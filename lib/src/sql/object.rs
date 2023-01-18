@@ -26,7 +26,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Object(pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<String, Value>> for Object {
@@ -85,14 +85,14 @@ impl IntoIterator for Object {
 }
 
 impl Object {
-	// Fetch the record id if there is one
+	/// Fetch the record id if there is one
 	pub fn rid(&self) -> Option<Thing> {
 		match self.get("id") {
 			Some(Value::Thing(v)) => Some(v.clone()),
 			_ => None,
 		}
 	}
-	// Convert this object to a diff-match-patch operation
+	/// Convert this object to a diff-match-patch operation
 	pub fn to_operation(&self) -> Result<Operation, Error> {
 		match self.get("op") {
 			Some(o) => match self.get("path") {

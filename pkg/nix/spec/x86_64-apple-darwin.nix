@@ -3,14 +3,14 @@
 {
   inherit target;
 
-  features = with util.features; [ http ];
+  features = with util.features; [ storage-mem http ];
 
   buildSpec = with pkgs; {
     depsBuildBuild = [ clang protobuf perl ];
 
     nativeBuildInputs = [ pkg-config ];
 
-    buildInputs = [ openssl ];
+    buildInputs = [ openssl libiconv darwin.apple_sdk.frameworks.Security ];
 
     CARGO_BUILD_TARGET = target;
 

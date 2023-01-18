@@ -1,11 +1,13 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 mod parse;
 use parse::Parse;
 use std::future::Future;
 use std::thread::Builder;
+use surrealdb::dbs::Session;
+use surrealdb::err::Error;
+use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
-use surrealdb::Datastore;
-use surrealdb::Error;
-use surrealdb::Session;
 
 #[test]
 fn self_referential_field() -> Result<(), Error> {

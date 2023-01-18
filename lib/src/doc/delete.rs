@@ -16,10 +16,10 @@ impl<'a> Document<'a> {
 	) -> Result<Value, Error> {
 		// Check where clause
 		self.check(ctx, opt, txn, stm).await?;
-		// Erase document
-		self.erase(ctx, opt, txn, stm).await?;
 		// Check if allowed
 		self.allow(ctx, opt, txn, stm).await?;
+		// Erase document
+		self.erase(ctx, opt, txn, stm).await?;
 		// Purge index data
 		self.index(ctx, opt, txn, stm).await?;
 		// Purge record data

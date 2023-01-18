@@ -1,4 +1,5 @@
-#[cfg(feature = "parallel")]
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 /// Specifies how many concurrent jobs can be buffered in the worker channel.
 pub const MAX_CONCURRENT_TASKS: usize = 64;
 
@@ -13,6 +14,9 @@ pub const MAX_CONCURRENT_TASKS: usize = 64;
 /// parsing assigns equal weight to each recursion, certain expensive code paths are allowed to
 /// count for more than one unit of depth during execution.
 pub const MAX_COMPUTATION_DEPTH: u8 = 30;
+
+/// Specifies the names of parameters which can not be specified in a query.
+pub const PROTECTED_PARAM_NAMES: &[&str] = &["auth", "scope", "token", "session"];
 
 /// The characters which are supported in server record IDs.
 pub const ID_CHARS: [char; 36] = [

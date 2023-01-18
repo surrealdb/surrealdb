@@ -12,4 +12,4 @@ pub use self::ds::*;
 pub use self::kv::*;
 pub use self::tx::*;
 
-pub const LOG: &str = "surrealdb::kvs";
+pub(crate) const LOG: &str = "surrealdb::kvs";

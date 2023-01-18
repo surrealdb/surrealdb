@@ -14,6 +14,9 @@ use crate::sql::field::{fields, Field, Fields};
 use crate::sql::group::{group, Groups};
 use crate::sql::limit::{limit, Limit};
 use crate::sql::order::{order, Orders};
+use crate::sql::special::check_group_by_fields;
+use crate::sql::special::check_order_by_fields;
+use crate::sql::special::check_split_on_fields;
 use crate::sql::split::{split, Splits};
 use crate::sql::start::{start, Start};
 use crate::sql::timeout::{timeout, Timeout};
@@ -26,7 +29,7 @@ use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct SelectStatement {
 	pub expr: Fields,
 	pub what: Values,
@@ -83,8 +86,8 @@ impl SelectStatement {
 		opt.check(Level::No)?;
 		// Create a new iterator
 		let mut i = Iterator::new();
-		// Ensure futures are processed
-		let opt = &opt.futures(true);
+		// Ensure futures are stored
+		let opt = &opt.futures(false);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;
@@ -170,8 +173,11 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, what) = selects(i)?;
 	let (i, cond) = opt(preceded(shouldbespace, cond))(i)?;
 	let (i, split) = opt(preceded(shouldbespace, split))(i)?;
+	check_split_on_fields(i, &expr, &split)?;
 	let (i, group) = opt(preceded(shouldbespace, group))(i)?;
+	check_group_by_fields(i, &expr, &group)?;
 	let (i, order) = opt(preceded(shouldbespace, order))(i)?;
+	check_order_by_fields(i, &expr, &order)?;
 	let (i, limit) = opt(preceded(shouldbespace, limit))(i)?;
 	let (i, start) = opt(preceded(shouldbespace, start))(i)?;
 	let (i, fetch) = opt(preceded(shouldbespace, fetch))(i)?;

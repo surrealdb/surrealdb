@@ -1,9 +1,9 @@
 mod parse;
 use parse::Parse;
+use surrealdb::dbs::Session;
+use surrealdb::err::Error;
+use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
-use surrealdb::Datastore;
-use surrealdb::Error;
-use surrealdb::Session;
 
 #[tokio::test]
 async fn define_statement_namespace() -> Result<(), Error> {
@@ -76,6 +76,9 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
+			sc: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
 		}",
@@ -104,6 +107,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMALESS' },
 		}",
@@ -136,6 +140,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },
 		}",
@@ -164,6 +169,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },
 		}",
@@ -186,7 +192,7 @@ async fn define_statement_event() -> Result<(), Error> {
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
-		SELECT count() FROM activity GROUP BY ALL;
+		SELECT count() FROM activity GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -243,7 +249,7 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
-		SELECT count() FROM activity GROUP BY ALL;
+		SELECT count() FROM activity GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -258,12 +264,12 @@ async fn define_statement_event_when_event() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
-			ev: { test: 'DEFINE EVENT test ON user WHEN $event = \"CREATE\" THEN (CREATE activity SET user = $this, value = $after.email, action = $event)' },
+		r#"{
+			ev: { test: "DEFINE EVENT test ON user WHEN $event = 'CREATE' THEN (CREATE activity SET user = $this, value = $after.email, action = $event)" },
 			fd: {},
 			ft: {},
 			ix: {},
-		}",
+		}"#,
 	);
 	assert_eq!(tmp, val);
 	//
@@ -300,7 +306,7 @@ async fn define_statement_event_when_logic() -> Result<(), Error> {
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'info@surrealdb.com', updated_at = time::now();
 		UPDATE user:test SET email = 'test@surrealdb.com', updated_at = time::now();
-		SELECT count() FROM activity GROUP BY ALL;
+		SELECT count() FROM activity GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -428,12 +434,12 @@ async fn define_statement_field_value() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
+		r#"{
 			ev: {},
-			fd: { test: 'DEFINE FIELD test ON user VALUE $value OR \"GBR\"' },
+			fd: { test: "DEFINE FIELD test ON user VALUE $value OR 'GBR'" },
 			ft: {},
 			ix: {},
-		}",
+		}"#,
 	);
 	assert_eq!(tmp, val);
 	//
@@ -492,12 +498,12 @@ async fn define_statement_field_type_value_assert() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
-		"{
+		r#"{
 			ev: {},
-			fd: { test: 'DEFINE FIELD test ON user TYPE string VALUE $value OR \"GBR\" ASSERT $value != NONE AND $value = /[A-Z]{3}/' },
+			fd: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z]{3}/" },
 			ft: {},
 			ix: {},
-		}",
+		}"#,
 	);
 	assert_eq!(tmp, val);
 	//
@@ -688,7 +694,7 @@ async fn define_statement_index_single_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains "test@surrealdb.com", with record `user:2`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:2`"#
 	));
 	//
 	let tmp = res.remove(0).result;
@@ -750,13 +756,13 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ["apple", "test@surrealdb.com"], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ["tesla", "test@surrealdb.com"], with record `user:4`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:4`"#
 	));
 	//
 	let tmp = res.remove(0).result;
@@ -769,7 +775,7 @@ async fn define_statement_index_multiple_unique() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ["tesla", "test@surrealdb.com"], with record `user:4`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['tesla', 'test@surrealdb.com'], with record `user:4`"#
 	));
 	//
 	let tmp = res.remove(0).result;
@@ -809,13 +815,13 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains "test@surrealdb.com", with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains "test@surrealdb.com", with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains 'test@surrealdb.com', with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result?;
@@ -863,13 +869,13 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ["apple", "test@surrealdb.com"], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
 		tmp.err(),
-		Some(e) if e.to_string() == r#"Database index `test` already contains ["apple", "test@surrealdb.com"], with record `user:3`"#
+		Some(e) if e.to_string() == r#"Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:3`"#
 	));
 	//
 	let tmp = res.remove(0).result?;

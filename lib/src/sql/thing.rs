@@ -10,13 +10,15 @@ use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
+use nom::bytes::complete::tag;
 use nom::character::complete::char;
+use nom::combinator::map;
 use nom::sequence::delimited;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store, Hash)]
 pub struct Thing {
 	pub tb: String,
 	pub id: Id,
@@ -44,6 +46,7 @@ impl From<(&str, &str)> for Thing {
 }
 
 impl Thing {
+	/// Convert the Thing to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}
@@ -65,18 +68,7 @@ impl Thing {
 	) -> Result<Value, Error> {
 		Ok(Value::Thing(Thing {
 			tb: self.tb.clone(),
-			id: match &self.id {
-				Id::Number(v) => Id::Number(*v),
-				Id::String(v) => Id::String(v.clone()),
-				Id::Object(v) => match v.compute(ctx, opt, txn, doc).await? {
-					Value::Object(v) => Id::Object(v),
-					_ => unreachable!(),
-				},
-				Id::Array(v) => match v.compute(ctx, opt, txn, doc).await? {
-					Value::Array(v) => Id::Array(v),
-					_ => unreachable!(),
-				},
-			},
+			id: self.id.compute(ctx, opt, txn, doc).await?,
 		}))
 	}
 }
@@ -113,7 +105,12 @@ fn thing_double(i: &str) -> IResult<&str, Thing> {
 fn thing_raw(i: &str) -> IResult<&str, Thing> {
 	let (i, t) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
-	let (i, v) = id(i)?;
+	let (i, v) = alt((
+		map(tag("rand()"), |_| Id::rand()),
+		map(tag("ulid()"), |_| Id::ulid()),
+		map(tag("uuid()"), |_| Id::uuid()),
+		id,
+	))(i)?;
 	Ok((
 		i,
 		Thing {
@@ -201,7 +198,7 @@ mod tests {
 		let res = thing(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#"test:{ location: "GBR", year: 2022 }"#, format!("{}", out));
+		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
 		assert_eq!(
 			out,
 			Thing {
@@ -220,7 +217,7 @@ mod tests {
 		let res = thing(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#"test:["GBR", 2022]"#, format!("{}", out));
+		assert_eq!("test:['GBR', 2022]", format!("{}", out));
 		assert_eq!(
 			out,
 			Thing {

@@ -21,7 +21,7 @@ pub struct Transaction {
 }
 
 impl Datastore {
-	// Open a new database
+	/// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
 		match tikv::TransactionClient::new(vec![path]).await {
 			Ok(db) => Ok(Datastore {
@@ -30,7 +30,7 @@ impl Datastore {
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
-	// Start a new transaction
+	/// Start a new transaction
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		match lock {
 			false => {
@@ -72,11 +72,11 @@ impl Datastore {
 }
 
 impl Transaction {
-	// Check if closed
+	/// Check if closed
 	pub fn closed(&self) -> bool {
 		self.ok
 	}
-	// Cancel a transaction
+	/// Cancel a transaction
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
@@ -89,7 +89,7 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
-	// Commit a transaction
+	/// Commit a transaction
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
@@ -106,7 +106,7 @@ impl Transaction {
 		// Continue
 		Ok(())
 	}
-	// Check if a key exists
+	/// Check if a key exists
 	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key>,
@@ -120,7 +120,7 @@ impl Transaction {
 		// Return result
 		Ok(res)
 	}
-	// Fetch a key from the database
+	/// Fetch a key from the database
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key>,
@@ -134,7 +134,7 @@ impl Transaction {
 		// Return result
 		Ok(res)
 	}
-	// Insert or update a key in the database
+	/// Insert or update a key in the database
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -153,7 +153,7 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	// Insert a key if it doesn't exist in the database
+	/// Insert a key if it doesn't exist in the database
 	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -172,7 +172,7 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	// Insert a key if it doesn't exist in the database
+	/// Insert a key if it doesn't exist in the database
 	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -201,7 +201,7 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	// Delete a key
+	/// Delete a key
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -219,7 +219,7 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	// Delete a key
+	/// Delete a key
 	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key>,
@@ -246,7 +246,7 @@ impl Transaction {
 		// Return result
 		Ok(())
 	}
-	// Retrieve a range of keys from the databases
+	/// Retrieve a range of keys from the databases
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key>,

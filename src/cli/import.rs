@@ -1,39 +1,42 @@
 use crate::cli::LOG;
 use crate::err::Error;
-use reqwest::blocking::Client;
-use reqwest::header::ACCEPT;
-use std::fs::OpenOptions;
-use std::io::prelude::Read;
+use surrealdb::engine::any::connect;
+use surrealdb::error::Api as ApiError;
+use surrealdb::opt::auth::Root;
+use surrealdb::Error as SurrealError;
 
-pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+#[tokio::main]
+pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Set the default logging level
-	crate::cli::log::init(3);
+	crate::cli::log::init(1);
 	// Try to parse the file argument
 	let file = matches.value_of("file").unwrap();
-	// Try to open the specified file
-	let mut file = OpenOptions::new().read(true).open(file)?;
-	// Read the full contents of the file
-	let mut body = String::new();
-	file.read_to_string(&mut body)?;
 	// Parse all other cli arguments
-	let user = matches.value_of("user").unwrap();
-	let pass = matches.value_of("pass").unwrap();
-	let conn = matches.value_of("conn").unwrap();
+	let username = matches.value_of("user").unwrap();
+	let password = matches.value_of("pass").unwrap();
+	let endpoint = matches.value_of("conn").unwrap();
 	let ns = matches.value_of("ns").unwrap();
 	let db = matches.value_of("db").unwrap();
-	// Set the correct import URL
-	let conn = format!("{}/import", conn);
+	// Connect to the database engine
+	let client = connect(endpoint).await?;
+	// Sign in to the server if the specified dabatabase engine supports it
+	let root = Root {
+		username,
+		password,
+	};
+	if let Err(error) = client.signin(root).await {
+		match error {
+			// Authentication not supported by this engine, we can safely continue
+			SurrealError::Api(ApiError::AuthNotSupported) => {}
+			error => {
+				return Err(error.into());
+			}
+		}
+	}
+	// Use the specified namespace / database
+	client.use_ns(ns).use_db(db).await?;
 	// Import the data into the database
-	Client::new()
-		.post(&conn)
-		.header(ACCEPT, "application/octet-stream")
-		.basic_auth(user, Some(pass))
-		.header("NS", ns)
-		.header("DB", db)
-		.body(body)
-		.send()?
-		.error_for_status()?;
-	// Output a success message
+	client.import(file).await?;
 	info!(target: LOG, "The SQL file was imported successfully");
 	// Everything OK
 	Ok(())

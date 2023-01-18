@@ -2,12 +2,11 @@ use crate::sql::common::val_char;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_ident;
 use nom::branch::alt;
-use nom::bytes::complete::escaped;
+use nom::bytes::complete::escaped_transform;
 use nom::bytes::complete::is_not;
-use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
-use nom::character::complete::one_of;
+use nom::combinator::value;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -18,10 +17,10 @@ const BRACKET_L: char = '⟨';
 const BRACKET_R: char = '⟩';
 const BRACKET_END: &str = r#"⟩"#;
 
-const BACKTICK: &str = r#"`"#;
+const BACKTICK: char = '`';
 const BACKTICK_ESC: &str = r#"\`"#;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Ident(pub String);
 
 impl From<String> for Ident {
@@ -44,8 +43,13 @@ impl Deref for Ident {
 }
 
 impl Ident {
+	/// Convert the Ident to a raw String
 	pub fn to_raw(&self) -> String {
 		self.0.to_string()
+	}
+	/// Returns a yield if an alias is specified
+	pub(crate) fn is_id(&self) -> bool {
+		self.0.as_str() == "id"
 	}
 }
 
@@ -71,10 +75,23 @@ fn ident_default(i: &str) -> IResult<&str, String> {
 }
 
 fn ident_backtick(i: &str) -> IResult<&str, String> {
-	let (i, _) = char('`')(i)?;
-	let (i, v) = alt((escaped(is_not(BACKTICK_ESC), '\\', one_of(BACKTICK)), tag("")))(i)?;
-	let (i, _) = char('`')(i)?;
-	Ok((i, String::from(v).replace(BACKTICK_ESC, BACKTICK)))
+	let (i, _) = char(BACKTICK)(i)?;
+	let (i, v) = escaped_transform(
+		is_not(BACKTICK_ESC),
+		'\\',
+		alt((
+			value('\u{5c}', char('\\')),
+			value('\u{60}', char('`')),
+			value('\u{2f}', char('/')),
+			value('\u{08}', char('b')),
+			value('\u{0c}', char('f')),
+			value('\u{0a}', char('n')),
+			value('\u{0d}', char('r')),
+			value('\u{09}', char('t')),
+		)),
+	)(i)?;
+	let (i, _) = char(BACKTICK)(i)?;
+	Ok((i, v))
 }
 
 fn ident_brackets(i: &str) -> IResult<&str, String> {

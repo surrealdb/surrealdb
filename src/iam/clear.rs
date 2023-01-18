@@ -1,7 +1,7 @@
 use crate::err::Error;
 use std::sync::Arc;
-use surrealdb::Auth;
-use surrealdb::Session;
+use surrealdb::dbs::Auth;
+use surrealdb::dbs::Session;
 
 pub async fn clear(session: &mut Session) -> Result<(), Error> {
 	session.au = Arc::new(Auth::No);

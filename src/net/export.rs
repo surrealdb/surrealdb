@@ -3,9 +3,10 @@ use crate::err::Error;
 use crate::net::session;
 use bytes::Bytes;
 use hyper::body::Body;
-use surrealdb::Session;
+use surrealdb::dbs::Session;
 use warp::Filter;
 
+#[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
 	warp::path("export")
 		.and(warp::path::end())

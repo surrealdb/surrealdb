@@ -5,6 +5,7 @@ use crate::sql::statements::DefineFieldStatement;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::statements::DefineLoginStatement;
 use crate::sql::statements::DefineNamespaceStatement;
+use crate::sql::statements::DefineParamStatement;
 use crate::sql::statements::DefineScopeStatement;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::DefineTokenStatement;
@@ -25,6 +26,7 @@ pub enum Entry {
 	Dts(Arc<[DefineTokenStatement]>),
 	Scs(Arc<[DefineScopeStatement]>),
 	Sts(Arc<[DefineTokenStatement]>),
+	Pas(Arc<[DefineParamStatement]>),
 	Tbs(Arc<[DefineTableStatement]>),
 	Evs(Arc<[DefineEventStatement]>),
 	Fds(Arc<[DefineFieldStatement]>),
@@ -45,8 +47,12 @@ impl Cache {
 	pub fn set(&mut self, key: Key, val: Entry) {
 		self.0.insert(key, val);
 	}
-	// get a key from the cache
+	// Get a key from the cache
 	pub fn get(&mut self, key: &Key) -> Option<Entry> {
 		self.0.get(key).cloned()
+	}
+	// Delete a key from the cache
+	pub fn del(&mut self, key: &Key) -> Option<Entry> {
+		self.0.remove(key)
 	}
 }

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Expression {
 	pub l: Value,
 	pub o: Operator,
@@ -28,7 +28,7 @@ impl Default for Expression {
 }
 
 impl Expression {
-	// Create a new expression
+	/// Create a new expression
 	fn new(l: Value, o: Operator, r: Value) -> Self {
 		Self {
 			l,
@@ -36,7 +36,7 @@ impl Expression {
 			r,
 		}
 	}
-	// Augment an existing expression
+	/// Augment an existing expression
 	fn augment(mut self, l: Value, o: Operator) -> Self {
 		if o.precedence() >= self.o.precedence() {
 			match self.l {
@@ -76,16 +76,29 @@ impl Expression {
 					return Ok(l);
 				}
 			}
+			Operator::Tco => {
+				if let true = l.is_truthy() {
+					return Ok(l);
+				}
+			}
+			Operator::Nco => {
+				if let true = l.is_some() {
+					return Ok(l);
+				}
+			}
 			_ => {} // Continue
 		}
 		let r = self.r.compute(ctx, opt, txn, doc).await?;
 		match self.o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
+			Operator::Tco => fnc::operate::tco(l, r),
+			Operator::Nco => fnc::operate::nco(l, r),
 			Operator::Add => fnc::operate::add(l, r),
 			Operator::Sub => fnc::operate::sub(l, r),
 			Operator::Mul => fnc::operate::mul(l, r),
 			Operator::Div => fnc::operate::div(l, r),
+			Operator::Pow => fnc::operate::pow(l, r),
 			Operator::Equal => fnc::operate::equal(&l, &r),
 			Operator::Exact => fnc::operate::exact(&l, &r),
 			Operator::NotEqual => fnc::operate::not_equal(&l, &r),

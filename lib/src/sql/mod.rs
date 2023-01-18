@@ -1,3 +1,5 @@
+//! The full type definitions for the SurrealQL query language
+
 pub(crate) mod algorithm;
 pub(crate) mod array;
 pub(crate) mod base;
@@ -18,6 +20,7 @@ pub(crate) mod fetch;
 pub(crate) mod field;
 pub(crate) mod fmt;
 pub(crate) mod function;
+pub(crate) mod future;
 pub(crate) mod geometry;
 pub(crate) mod graph;
 pub(crate) mod group;
@@ -42,7 +45,7 @@ pub(crate) mod query;
 pub(crate) mod range;
 pub(crate) mod regex;
 pub(crate) mod script;
-pub(crate) mod serde;
+pub(crate) mod special;
 pub(crate) mod split;
 pub(crate) mod start;
 pub(crate) mod statement;
@@ -59,6 +62,7 @@ pub(crate) mod view;
 #[cfg(test)]
 pub(crate) mod test;
 
+pub mod serde;
 pub mod statements;
 
 pub use self::parser::*;
@@ -79,6 +83,7 @@ pub use self::fetch::Fetchs;
 pub use self::field::Field;
 pub use self::field::Fields;
 pub use self::function::Function;
+pub use self::future::Future;
 pub use self::geometry::Geometry;
 pub use self::graph::Graph;
 pub use self::group::Group;

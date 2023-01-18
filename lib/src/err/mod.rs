@@ -5,8 +5,9 @@ use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
 use thiserror::Error;
 
-/// An error originating from the SurrealDB client library.
+/// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
 	/// This error is used for ignoring a document when processing a query
 	#[doc(hidden)]
@@ -40,6 +41,10 @@ pub enum Error {
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists")]
 	TxKeyAlreadyExists,
+
+	/// It's is not possible to convert between the two types
+	#[error("Cannot convert from '{0}' to '{1}'")]
+	TryFromError(String, &'static str),
 
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
@@ -75,6 +80,36 @@ pub enum Error {
 	#[error("Remote HTTP request functions are not enabled")]
 	HttpDisabled,
 
+	/// it is not possible to set a variable with the specified name
+	#[error("Found '{name}' but it is not possible to set a variable with this name")]
+	InvalidParam {
+		name: String,
+	},
+
+	#[error("Found '{field}' in SELECT clause on line {line}, but field is not an aggregate function, and is not present in GROUP BY expression")]
+	InvalidField {
+		line: usize,
+		field: String,
+	},
+
+	#[error("Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression")]
+	InvalidSplit {
+		line: usize,
+		field: String,
+	},
+
+	#[error("Found '{field}' in ORDER BY clause on line {line}, but field is not present in SELECT expression")]
+	InvalidOrder {
+		line: usize,
+		field: String,
+	},
+
+	#[error("Found '{field}' in GROUP BY clause on line {line}, but field is not present in SELECT expression")]
+	InvalidGroup {
+		line: usize,
+		field: String,
+	},
+
 	/// The LIMIT clause must evaluate to a positive integer
 	#[error("Found {value} but the LIMIT clause must evaluate to a positive integer")]
 	InvalidLimit {
@@ -90,6 +125,13 @@ pub enum Error {
 	/// There was an error with the provided JavaScript code
 	#[error("Problem with embedded script function. {message}")]
 	InvalidScript {
+		message: String,
+	},
+
+	/// There was a problem running the specified function
+	#[error("There was a problem running the {name}() function. {message}")]
+	InvalidFunction {
+		name: String,
 		message: String,
 	},
 
@@ -159,6 +201,10 @@ pub enum Error {
 	/// The requested scope token does not exist
 	#[error("The scope token does not exist")]
 	StNotFound,
+
+	/// The requested param does not exist
+	#[error("The param does not exist")]
+	PaNotFound,
 
 	/// The requested table does not exist
 	#[error("The table does not exist")]
@@ -332,8 +378,8 @@ impl<T> From<channel::SendError<T>> for Error {
 }
 
 #[cfg(feature = "http")]
-impl From<surf::Error> for Error {
-	fn from(e: surf::Error) -> Error {
+impl From<reqwest::Error> for Error {
+	fn from(e: reqwest::Error) -> Error {
 		Error::Http(e.to_string())
 	}
 }

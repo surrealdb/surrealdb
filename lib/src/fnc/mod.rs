@@ -8,12 +8,12 @@ pub mod cast;
 pub mod count;
 pub mod crypto;
 pub mod duration;
-pub mod future;
 pub mod geo;
 pub mod http;
 pub mod is;
 pub mod math;
 pub mod meta;
+pub mod not;
 pub mod operate;
 pub mod parse;
 pub mod rand;
@@ -35,11 +35,11 @@ pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Valu
 	}
 }
 
-// Each function is specified by its name (a string literal) followed by its path. The path
-// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
-// before the remainder of the arguments. The path may be followed by `.await` to signify that
-// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
-// `cpu_intensive`.
+/// Each function is specified by its name (a string literal) followed by its path. The path
+/// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
+/// before the remainder of the arguments. The path may be followed by `.await` to signify that
+/// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
+/// `cpu_intensive`.
 macro_rules! dispatch {
 	($name: ident, $args: ident, $($function_name: literal => $(($wrapper: tt))* $($function_path: ident)::+ $(($ctx_arg: expr))* $(.$await:tt)*,)+) => {
 		{
@@ -60,12 +60,20 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 	dispatch!(
 		name,
 		args,
+		"array::all" => array::all,
+		"array::any" => array::any,
 		"array::combine" => array::combine,
+		"array::complement" => array::complement,
 		"array::concat" => array::concat,
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
+		"array::flatten" => array::flatten,
+		"array::group" => array::group,
+		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
 		"array::len" => array::len,
+		"array::max" => array::max,
+		"array::min" => array::min,
 		"array::sort" => array::sort,
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
@@ -95,6 +103,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"is::alphanum" => is::alphanum,
 		"is::alpha" => is::alpha,
 		"is::ascii" => is::ascii,
+		"is::datetime" => is::datetime,
 		"is::domain" => is::domain,
 		"is::email" => is::email,
 		"is::hexadecimal" => is::hexadecimal,
@@ -102,6 +111,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"is::longitude" => is::longitude,
 		"is::numeric" => is::numeric,
 		"is::semver" => is::semver,
+		"is::url" => is::url,
 		"is::uuid" => is::uuid,
 		//
 		"math::abs" => math::abs,
@@ -118,6 +128,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"math::mode" => math::mode,
 		"math::nearestrank" => math::nearestrank,
 		"math::percentile" => math::percentile,
+		"math::pow" => math::pow,
 		"math::product" => math::product,
 		"math::round" => math::round,
 		"math::spread" => math::spread,
@@ -131,6 +142,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"meta::id" => meta::id,
 		"meta::table" => meta::tb,
 		"meta::tb" => meta::tb,
+		//
+		"not" => not::not,
 		//
 		"parse::email::host" => parse::email::host,
 		"parse::email::user" => parse::email::user,
@@ -149,6 +162,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"rand::int" => rand::int,
 		"rand::string" => rand::string,
 		"rand::time" => rand::time,
+		"rand::ulid" => rand::ulid,
 		"rand::uuid::v4" => rand::uuid::v4,
 		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
@@ -184,12 +198,13 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"time::format" => time::format,
 		"time::group" => time::group,
 		"time::hour" => time::hour,
-		"time::mins" => time::mins,
+		"time::minute" => time::minute,
 		"time::month" => time::month,
 		"time::nano" => time::nano,
 		"time::now" => time::now,
 		"time::round" => time::round,
-		"time::secs" => time::secs,
+		"time::second" => time::second,
+		"time::timezone" => time::timezone,
 		"time::unix" => time::unix,
 		"time::wday" => time::wday,
 		"time::week" => time::week,
@@ -219,14 +234,14 @@ pub async fn asynchronous(
 ) -> Result<Value, Error> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
-	#[cfg(feature = "parallel")]
+	#[cfg(not(target_arch = "wasm32"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
 	) -> impl FnOnce() -> executor::Task<R> {
 		|| crate::exe::spawn(async move { function() })
 	}
 
-	#[cfg(not(feature = "parallel"))]
+	#[cfg(target_arch = "wasm32")]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
 	) -> impl FnOnce() -> std::future::Ready<R> {

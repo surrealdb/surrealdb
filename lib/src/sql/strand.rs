@@ -1,4 +1,4 @@
-use crate::sql::error::Error::ParserError;
+use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
 use crate::sql::serde::is_internal_serialization;
@@ -21,7 +21,7 @@ const SINGLE_ESC: &str = r#"\'"#;
 const DOUBLE: char = '"';
 const DOUBLE_ESC: &str = r#"\""#;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Strand(pub String);
 
 impl From<String> for Strand {
@@ -43,13 +43,22 @@ impl Deref for Strand {
 	}
 }
 
+impl From<Strand> for String {
+	fn from(s: Strand) -> Self {
+		s.0
+	}
+}
+
 impl Strand {
+	/// Get the underlying String slice
 	pub fn as_str(&self) -> &str {
 		self.0.as_str()
 	}
+	/// Returns the underlying String
 	pub fn as_string(self) -> String {
 		self.0
 	}
+	/// Convert the Strand to a raw String
 	pub fn to_raw(self) -> String {
 		self.0
 	}
@@ -155,14 +164,14 @@ fn strand_unicode(i: &str) -> IResult<&str, char> {
 	// We can convert this to u32 as we only have 6 chars
 	let v = match u32::from_str_radix(v, 16) {
 		// We found an invalid unicode sequence
-		Err(_) => return Err(Error(ParserError(i))),
+		Err(_) => return Err(Error(Parser(i))),
 		// The unicode sequence was valid
 		Ok(v) => v,
 	};
 	// We can convert this to char as we know it is valid
 	let v = match std::char::from_u32(v) {
 		// We found an invalid unicode sequence
-		None => return Err(Error(ParserError(i))),
+		None => return Err(Error(Parser(i))),
 		// The unicode sequence was valid
 		Some(v) => v,
 	};
@@ -181,7 +190,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""""#, format!("{}", out));
+		assert_eq!(r#"''"#, format!("{}", out));
 		assert_eq!(out, Strand::from(""));
 	}
 
@@ -191,7 +200,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""test""#, format!("{}", out));
+		assert_eq!(r#"'test'"#, format!("{}", out));
 		assert_eq!(out, Strand::from("test"));
 	}
 
@@ -201,7 +210,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""test""#, format!("{}", out));
+		assert_eq!(r#"'test'"#, format!("{}", out));
 		assert_eq!(out, Strand::from("test"));
 	}
 
@@ -221,7 +230,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(r#""te"st""#, format!("{}", out));
+		assert_eq!(r#"'te"st'"#, format!("{}", out));
 		assert_eq!(out, Strand::from(r#"te"st"#));
 	}
 
@@ -231,7 +240,7 @@ mod tests {
 		let res = strand(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("\"te\"st\n\tand\u{08}some\u{05d9}\"", format!("{}", out));
+		assert_eq!("'te\"st\n\tand\u{08}some\u{05d9}'", format!("{}", out));
 		assert_eq!(out, Strand::from("te\"st\n\tand\u{08}some\u{05d9}"));
 	}
 }

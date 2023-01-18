@@ -6,7 +6,7 @@ use serde_json::error::Error as JsonError;
 use serde_pack::encode::Error as PackError;
 use std::io::Error as IoError;
 use std::string::FromUtf8Error as Utf8Error;
-use surrealdb::Error as DbError;
+use surrealdb::Error as SurrealError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -30,7 +30,7 @@ pub enum Error {
 	InvalidStorage,
 
 	#[error("There was a problem with the database: {0}")]
-	Db(#[from] DbError),
+	Db(#[from] SurrealError),
 
 	#[error("Couldn't open the specified file: {0}")]
 	Io(#[from] IoError),
@@ -71,5 +71,11 @@ impl From<Utf8Error> for Error {
 impl From<JWTError> for Error {
 	fn from(_: JWTError) -> Error {
 		Error::InvalidAuth
+	}
+}
+
+impl From<surrealdb::error::Db> for Error {
+	fn from(error: surrealdb::error::Db) -> Error {
+		Error::Db(error.into())
 	}
 }

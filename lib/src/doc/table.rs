@@ -44,6 +44,8 @@ impl<'a> Document<'a> {
 		if !opt.force && !self.changed() {
 			return Ok(());
 		}
+		// Don't run permissions
+		let opt = &opt.perms(false);
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Get the query action
@@ -326,11 +328,11 @@ impl<'a> Document<'a> {
 		//
 		Ok(Data::SetExpression(ops))
 	}
-	// Set the field in the foreign table
+	/// Set the field in the foreign table
 	fn set(&self, ops: &mut Ops, key: Idiom, val: Value) {
 		ops.push((key, Operator::Equal, val));
 	}
-	// Increment or decrement the field in the foreign table
+	/// Increment or decrement the field in the foreign table
 	fn chg(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
 		ops.push((
 			key,
@@ -342,7 +344,7 @@ impl<'a> Document<'a> {
 			val,
 		));
 	}
-	// Set the new minimum value for the field in the foreign table
+	/// Set the new minimum value for the field in the foreign table
 	fn min(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
 		if act == &Action::Update {
 			ops.push((
@@ -362,7 +364,7 @@ impl<'a> Document<'a> {
 			));
 		}
 	}
-	// Set the new maximum value for the field in the foreign table
+	/// Set the new maximum value for the field in the foreign table
 	fn max(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
 		if act == &Action::Update {
 			ops.push((
@@ -382,7 +384,7 @@ impl<'a> Document<'a> {
 			));
 		}
 	}
-	// Set the new average value for the field in the foreign table
+	/// Set the new average value for the field in the foreign table
 	fn mean(&self, ops: &mut Ops, act: &Action, key: Idiom, val: Value) {
 		//
 		let mut key_c = Idiom::from(vec![Part::from("__")]);

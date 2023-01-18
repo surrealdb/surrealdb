@@ -1,9 +1,9 @@
 mod parse;
 use parse::Parse;
+use surrealdb::dbs::Session;
+use surrealdb::err::Error;
+use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
-use surrealdb::Datastore;
-use surrealdb::Error;
-use surrealdb::Session;
 
 #[tokio::test]
 async fn strict_mode_no_namespace() -> Result<(), Error> {
@@ -192,6 +192,7 @@ async fn loose_mode_all_ok() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMALESS PERMISSIONS NONE' },
 		}",

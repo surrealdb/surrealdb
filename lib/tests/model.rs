@@ -1,15 +1,15 @@
 mod parse;
 use parse::Parse;
+use surrealdb::dbs::Session;
+use surrealdb::err::Error;
+use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
-use surrealdb::Datastore;
-use surrealdb::Error;
-use surrealdb::Session;
 
 #[tokio::test]
 async fn model_count() -> Result<(), Error> {
 	let sql = "
 		CREATE |test:1000| SET time = time::now();
-		SELECT count() FROM test GROUP BY ALL;
+		SELECT count() FROM test GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -34,7 +34,7 @@ async fn model_count() -> Result<(), Error> {
 async fn model_range() -> Result<(), Error> {
 	let sql = "
 		CREATE |test:1..1000| SET time = time::now();
-		SELECT count() FROM test GROUP BY ALL;
+		SELECT count() FROM test GROUP ALL;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");

@@ -7,7 +7,11 @@ use crate::key::thing;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::sql;
+use crate::sql::paths::EDGE;
+use crate::sql::paths::IN;
+use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
+use crate::sql::Value;
 use channel::Sender;
 use sql::permission::Permissions;
 use sql::statements::DefineDatabaseStatement;
@@ -16,6 +20,7 @@ use sql::statements::DefineFieldStatement;
 use sql::statements::DefineIndexStatement;
 use sql::statements::DefineLoginStatement;
 use sql::statements::DefineNamespaceStatement;
+use sql::statements::DefineParamStatement;
 use sql::statements::DefineScopeStatement;
 use sql::statements::DefineTableStatement;
 use sql::statements::DefineTokenStatement;
@@ -24,6 +29,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 /// A set of undoable updates and requests against a dataset.
+#[allow(dead_code)]
 pub struct Transaction {
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
@@ -77,6 +83,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.closed(),
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Cancel a transaction.
@@ -109,6 +117,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.cancel().await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Commit a transaction.
@@ -141,6 +151,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.commit().await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Delete a key from the datastore.
@@ -148,6 +160,7 @@ impl Transaction {
 	where
 		K: Into<Key>,
 	{
+		#![allow(unused_variables)]
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -174,6 +187,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.del(key).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Check if a key exists in the datastore.
@@ -181,6 +196,7 @@ impl Transaction {
 	where
 		K: Into<Key>,
 	{
+		#![allow(unused_variables)]
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -207,6 +223,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.exi(key).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Fetch a key from the datastore.
@@ -214,6 +232,7 @@ impl Transaction {
 	where
 		K: Into<Key>,
 	{
+		#![allow(unused_variables)]
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -240,6 +259,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.get(key).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Insert or update a key in the datastore.
@@ -248,6 +269,7 @@ impl Transaction {
 		K: Into<Key>,
 		V: Into<Val>,
 	{
+		#![allow(unused_variables)]
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -274,6 +296,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.set(key, val).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Insert a key if it doesn't exist in the datastore.
@@ -282,6 +306,7 @@ impl Transaction {
 		K: Into<Key>,
 		V: Into<Val>,
 	{
+		#![allow(unused_variables)]
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -308,6 +333,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.put(key, val).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Retrieve a specific range of keys from the datastore.
@@ -317,6 +344,7 @@ impl Transaction {
 	where
 		K: Into<Key>,
 	{
+		#![allow(unused_variables)]
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -343,6 +371,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.scan(rng, limit).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Update a key in the datastore if the current value matches a condition.
@@ -351,6 +381,7 @@ impl Transaction {
 		K: Into<Key>,
 		V: Into<Val>,
 	{
+		#![allow(unused_variables)]
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -377,6 +408,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.putc(key, val, chk).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Delete a key from the datastore if the current value matches a condition.
@@ -385,6 +418,7 @@ impl Transaction {
 		K: Into<Key>,
 		V: Into<Val>,
 	{
+		#![allow(unused_variables)]
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -411,6 +445,8 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.delc(key, chk).await,
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 	/// Retrieve a specific range of keys from the datastore.
@@ -611,6 +647,15 @@ impl Transaction {
 		}
 		Ok(())
 	}
+	/// Clear any cache entry for the specified key.
+	pub async fn clr<K>(&mut self, key: K) -> Result<(), Error>
+	where
+		K: Into<Key>,
+	{
+		let key: Key = key.into();
+		self.cache.del(&key);
+		Ok(())
+	}
 	/// Retrieve all namespace definitions in a datastore.
 	pub async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
 		let key = crate::key::ns::prefix();
@@ -768,6 +813,28 @@ impl Transaction {
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
 				self.cache.set(key, Entry::Sts(Arc::clone(&val)));
+				Ok(val)
+			}
+		}
+	}
+	/// Retrieve all scope definitions for a specific database.
+	pub async fn all_pa(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineParamStatement]>, Error> {
+		let key = crate::key::pa::prefix(ns, db);
+		match self.cache.exi(&key) {
+			true => match self.cache.get(&key) {
+				Some(Entry::Pas(v)) => Ok(v),
+				_ => unreachable!(),
+			},
+			_ => {
+				let beg = crate::key::pa::prefix(ns, db);
+				let end = crate::key::pa::suffix(ns, db);
+				let val = self.getr(beg..end, u32::MAX).await?;
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Pas(Arc::clone(&val)));
 				Ok(val)
 			}
 		}
@@ -976,6 +1043,17 @@ impl Transaction {
 	) -> Result<DefineTokenStatement, Error> {
 		let key = crate::key::st::new(ns, db, sc, st);
 		let val = self.get(key).await?.ok_or(Error::StNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific param definition.
+	pub async fn get_pa(
+		&mut self,
+		ns: &str,
+		db: &str,
+		pa: &str,
+	) -> Result<DefineParamStatement, Error> {
+		let key = crate::key::pa::new(ns, db, pa);
+		let val = self.get(key).await?.ok_or(Error::PaNotFound)?;
 		Ok(val.into())
 	}
 	/// Retrieve a specific table definition.
@@ -1289,6 +1367,20 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 			}
 		}
+		// Output PARAMS
+		{
+			let pas = self.all_pa(ns, db).await?;
+			if !pas.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- PARAMS")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for pa in pas.iter() {
+					chn.send(bytes!(format!("{};", pa))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
 		// Output TABLES
 		{
 			let tbs = self.all_tb(ns, db).await?;
@@ -1373,12 +1465,26 @@ impl Transaction {
 								if n == i + 1 {
 									nxt = Some(k.clone());
 								}
-								// Parse the key-value
+								// Parse the key and the value
 								let k: crate::key::thing::Thing = (&k).into();
 								let v: crate::sql::value::Value = (&v).into();
 								let t = Thing::from((k.tb, k.id));
-								// Write record
-								chn.send(bytes!(format!("UPDATE {} CONTENT {};", t, v))).await?;
+								// Check if this is a graph edge
+								match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
+									// This is a graph edge record
+									(Value::True, Value::Thing(l), Value::Thing(r)) => {
+										let sql = format!(
+											"RELATE {} -> {} -> {} CONTENT {};",
+											l, t, r, v
+										);
+										chn.send(bytes!(sql)).await?;
+									}
+									// This is a normal record
+									_ => {
+										let sql = format!("UPDATE {} CONTENT {};", t, v);
+										chn.send(bytes!(sql)).await?;
+									}
+								}
 							}
 							continue;
 						}

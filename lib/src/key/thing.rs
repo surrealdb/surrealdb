@@ -63,4 +63,24 @@ mod tests {
 		let dec = Thing::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
+	#[test]
+	fn key_complex() {
+		use super::*;
+		//
+		let id1 = "['test']";
+		let (_, id1) = crate::sql::id::id(id1).expect("Failed to parse the ID");
+		let val = Thing::new("test".to_string(), "test".to_string(), "test".to_string(), id1);
+		let enc = Thing::encode(&val).unwrap();
+		let dec = Thing::decode(&enc).unwrap();
+		assert_eq!(val, dec);
+		println!("---");
+		//
+		let id2 = "['f8e238f2-e734-47b8-9a16-476b291bd78a']";
+		let (_, id2) = crate::sql::id::id(id2).expect("Failed to parse the ID");
+		let val = Thing::new("test".to_string(), "test".to_string(), "test".to_string(), id2);
+		let enc = Thing::encode(&val).unwrap();
+		let dec = Thing::decode(&enc).unwrap();
+		assert_eq!(val, dec);
+		println!("---");
+	}
 }

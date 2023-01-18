@@ -1,9 +1,11 @@
 use crate::err::Error;
 use crate::sql::value::Value;
+use chrono::NaiveDateTime;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use semver::Version;
 use std::char;
+use url::Url;
 use uuid::Uuid;
 
 #[rustfmt::skip] static LATITUDE_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
@@ -22,6 +24,11 @@ pub fn alpha((arg,): (String,)) -> Result<Value, Error> {
 #[inline]
 pub fn ascii((arg,): (String,)) -> Result<Value, Error> {
 	Ok(arg.is_ascii().into())
+}
+
+#[inline]
+pub fn datetime((arg, fmt): (String, String)) -> Result<Value, Error> {
+	Ok(NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into())
 }
 
 #[inline]
@@ -57,6 +64,11 @@ pub fn numeric((arg,): (String,)) -> Result<Value, Error> {
 #[inline]
 pub fn semver((arg,): (String,)) -> Result<Value, Error> {
 	Ok(Version::parse(arg.as_str()).is_ok().into())
+}
+
+#[inline]
+pub fn url((arg,): (String,)) -> Result<Value, Error> {
+	Ok(Url::parse(&arg).is_ok().into())
 }
 
 #[inline]

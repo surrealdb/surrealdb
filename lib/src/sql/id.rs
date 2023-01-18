@@ -1,4 +1,8 @@
 use crate::cnf::ID_CHARS;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::dbs::Transaction;
+use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_rid;
@@ -6,6 +10,7 @@ use crate::sql::ident::ident_raw;
 use crate::sql::number::integer;
 use crate::sql::object::{object, Object};
 use crate::sql::strand::Strand;
+use crate::sql::thing::Thing;
 use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use nanoid::nanoid;
@@ -13,8 +18,9 @@ use nom::branch::alt;
 use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
+use ulid::Ulid;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Id {
 	Number(i64),
 	String(String),
@@ -76,16 +82,56 @@ impl From<&str> for Id {
 	}
 }
 
+impl From<&String> for Id {
+	fn from(v: &String) -> Self {
+		Self::String(v.to_owned())
+	}
+}
+
+impl From<Vec<&str>> for Id {
+	fn from(v: Vec<&str>) -> Self {
+		Id::Array(v.into())
+	}
+}
+
+impl From<Vec<String>> for Id {
+	fn from(v: Vec<String>) -> Self {
+		Id::Array(v.into())
+	}
+}
+
 impl From<Vec<Value>> for Id {
 	fn from(v: Vec<Value>) -> Self {
 		Id::Array(v.into())
 	}
 }
 
+impl From<Thing> for Id {
+	fn from(v: Thing) -> Self {
+		v.id
+	}
+}
+
 impl Id {
+	/// Generate a new random ID
 	pub fn rand() -> Self {
 		Self::String(nanoid!(20, &ID_CHARS))
 	}
+	/// Generate a new random ULID
+	pub fn ulid() -> Self {
+		Self::String(Ulid::new().to_string())
+	}
+	/// Generate a new random UUID
+	#[cfg(uuid_unstable)]
+	pub fn uuid() -> Self {
+		Self::String(Uuid::new_v7().to_raw())
+	}
+	/// Generate a new random UUID
+	#[cfg(not(uuid_unstable))]
+	pub fn uuid() -> Self {
+		Self::String(Uuid::new_v4().to_raw())
+	}
+	/// Convert the Id to a raw String
 	pub fn to_raw(&self) -> String {
 		match self {
 			Self::Number(v) => v.to_string(),
@@ -103,6 +149,29 @@ impl Display for Id {
 			Self::String(v) => Display::fmt(&escape_rid(v), f),
 			Self::Object(v) => Display::fmt(v, f),
 			Self::Array(v) => Display::fmt(v, f),
+		}
+	}
+}
+
+impl Id {
+	pub(crate) async fn compute(
+		&self,
+		ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		doc: Option<&Value>,
+	) -> Result<Id, Error> {
+		match self {
+			Id::Number(v) => Ok(Id::Number(*v)),
+			Id::String(v) => Ok(Id::String(v.clone())),
+			Id::Object(v) => match v.compute(ctx, opt, txn, doc).await? {
+				Value::Object(v) => Ok(Id::Object(v)),
+				_ => unreachable!(),
+			},
+			Id::Array(v) => match v.compute(ctx, opt, txn, doc).await? {
+				Value::Array(v) => Ok(Id::Array(v)),
+				_ => unreachable!(),
+			},
 		}
 	}
 }

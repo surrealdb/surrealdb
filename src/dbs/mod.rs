@@ -1,7 +1,7 @@
 use crate::cli::CF;
 use crate::err::Error;
 use once_cell::sync::OnceCell;
-use surrealdb::Datastore;
+use surrealdb::kvs::Datastore;
 
 pub static DB: OnceCell<Datastore> = OnceCell::new();
 

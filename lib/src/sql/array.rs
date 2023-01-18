@@ -15,12 +15,13 @@ use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {
@@ -47,6 +48,12 @@ impl From<Vec<&str>> for Array {
 	}
 }
 
+impl From<Vec<String>> for Array {
+	fn from(v: Vec<String>) -> Self {
+		Self(v.into_iter().map(Value::from).collect())
+	}
+}
+
 impl From<Vec<Number>> for Array {
 	fn from(v: Vec<Number>) -> Self {
 		Self(v.into_iter().map(Value::from).collect())
@@ -56,6 +63,12 @@ impl From<Vec<Number>> for Array {
 impl From<Vec<Operation>> for Array {
 	fn from(v: Vec<Operation>) -> Self {
 		Self(v.into_iter().map(Value::from).collect())
+	}
+}
+
+impl From<Array> for Vec<Value> {
+	fn from(s: Array) -> Self {
+		s.0
 	}
 }
 
@@ -244,6 +257,24 @@ impl Combine<Array> for Array {
 
 // ------------------------------
 
+pub trait Complement<T> {
+	fn complement(self, other: T) -> T;
+}
+
+impl Complement<Array> for Array {
+	fn complement(self, other: Self) -> Array {
+		let mut out = Array::new();
+		for v in self.into_iter() {
+			if !other.contains(&v) {
+				out.push(v)
+			}
+		}
+		out
+	}
+}
+
+// ------------------------------
+
 pub trait Concat<T> {
 	fn concat(self, other: T) -> T;
 }
@@ -262,17 +293,35 @@ pub trait Difference<T> {
 }
 
 impl Difference<Array> for Array {
-	fn difference(self, other: Array) -> Array {
+	fn difference(self, mut other: Array) -> Array {
 		let mut out = Array::new();
-		let mut other: Vec<_> = other.into_iter().collect();
-		for a in self.into_iter() {
-			if let Some(pos) = other.iter().position(|b| a == *b) {
+		for v in self.into_iter() {
+			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
 			} else {
-				out.push(a);
+				out.push(v);
 			}
 		}
 		out.append(&mut other);
+		out
+	}
+}
+
+// ------------------------------
+
+pub trait Flatten<T> {
+	fn flatten(self) -> T;
+}
+
+impl Flatten<Array> for Array {
+	fn flatten(self) -> Array {
+		let mut out = Array::new();
+		for v in self.into_iter() {
+			match v {
+				Value::Array(mut a) => out.append(&mut a),
+				_ => out.push(v),
+			}
+		}
 		out
 	}
 }
@@ -284,13 +333,12 @@ pub trait Intersect<T> {
 }
 
 impl Intersect<Self> for Array {
-	fn intersect(self, other: Self) -> Self {
+	fn intersect(self, mut other: Self) -> Self {
 		let mut out = Self::new();
-		let mut other: Vec<_> = other.into_iter().collect();
-		for a in self.0.into_iter() {
-			if let Some(pos) = other.iter().position(|b| a == *b) {
-				out.push(a);
+		for v in self.0.into_iter() {
+			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
+				out.push(v);
 			}
 		}
 		out
@@ -318,12 +366,15 @@ pub trait Uniq<T> {
 
 impl Uniq<Array> for Array {
 	fn uniq(mut self) -> Array {
-		for x in (0..self.len()).rev() {
-			for y in (x + 1..self.len()).rev() {
-				if self[x] == self[y] {
-					self.remove(y);
-				}
+		let mut set: HashSet<&Value> = HashSet::new();
+		let mut to_remove: Vec<usize> = Vec::new();
+		for (i, item) in self.iter().enumerate() {
+			if !set.insert(item) {
+				to_remove.push(i);
 			}
+		}
+		for i in to_remove.iter().rev() {
+			self.remove(*i);
 		}
 		self
 	}
@@ -353,6 +404,16 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn array_empty() {
+		let sql = "[]";
+		let res = array(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("[]", format!("{}", out));
+		assert_eq!(out.0.len(), 0);
+	}
+
+	#[test]
 	fn array_normal() {
 		let sql = "[1,2,3]";
 		let res = array(sql);
@@ -380,5 +441,15 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("[1, 2, 3 + 1]", format!("{}", out));
 		assert_eq!(out.0.len(), 3);
+	}
+
+	#[test]
+	fn array_fnc_uniq_normal() {
+		let sql = "[1,2,1,3,3,4]";
+		let res = array(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1.uniq();
+		assert_eq!("[1, 2, 3, 4]", format!("{}", out));
+		assert_eq!(out.0.len(), 4);
 	}
 }

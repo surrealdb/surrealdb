@@ -12,9 +12,9 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::data::{data, Data};
 use crate::sql::error::IResult;
 use crate::sql::output::{output, Output};
-use crate::sql::param::basic as param;
+use crate::sql::param::plain as param;
 use crate::sql::subquery::subquery;
-use crate::sql::table::{table, Table};
+use crate::sql::table::table;
 use crate::sql::thing::thing;
 use crate::sql::timeout::{timeout, Timeout};
 use crate::sql::value::Value;
@@ -28,9 +28,9 @@ use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct RelateStatement {
-	pub kind: Table,
+	pub kind: Value,
 	pub from: Value,
 	pub with: Value,
 	pub uniq: bool,
@@ -148,16 +148,23 @@ impl RelateStatement {
 			for w in with.iter() {
 				let f = f.clone();
 				let w = w.clone();
-				match &self.data {
-					// There is a data clause so check for a record id
-					Some(data) => match data.rid(&self.kind) {
-						// There was a problem creating the record id
-						Err(e) => return Err(e),
-						// There is an id field so use the record id
-						Ok(t) => i.ingest(Iterable::Relatable(f, t, w)),
+				match &self.kind {
+					// The relation has a specific record id
+					Value::Thing(id) => i.ingest(Iterable::Relatable(f, id.to_owned(), w)),
+					// The relation does not have a specific record id
+					Value::Table(tb) => match &self.data {
+						// There is a data clause so check for a record id
+						Some(data) => match data.rid(ctx, opt, txn, tb).await {
+							// There was a problem creating the record id
+							Err(e) => return Err(e),
+							// There is an id field so use the record id
+							Ok(t) => i.ingest(Iterable::Relatable(f, t, w)),
+						},
+						// There is no data clause so create a record id
+						None => i.ingest(Iterable::Relatable(f, tb.generate(), w)),
 					},
-					// There is no data clause so create a record id
-					None => i.ingest(Iterable::Relatable(f, self.kind.generate(), w)),
+					// The relation can not be any other type
+					_ => unreachable!(),
 				};
 			}
 		}
@@ -214,7 +221,7 @@ pub fn relate(i: &str) -> IResult<&str, RelateStatement> {
 	))
 }
 
-fn relate_o(i: &str) -> IResult<&str, (Table, Value, Value)> {
+fn relate_o(i: &str) -> IResult<&str, (Value, Value, Value)> {
 	let (i, from) = alt((
 		map(subquery, Value::from),
 		map(array, Value::from),
@@ -225,7 +232,7 @@ fn relate_o(i: &str) -> IResult<&str, (Table, Value, Value)> {
 	let (i, _) = char('-')(i)?;
 	let (i, _) = char('>')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = table(i)?;
+	let (i, kind) = alt((map(thing, Value::from), map(table, Value::from)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, _) = char('>')(i)?;
@@ -239,7 +246,7 @@ fn relate_o(i: &str) -> IResult<&str, (Table, Value, Value)> {
 	Ok((i, (kind, from, with)))
 }
 
-fn relate_i(i: &str) -> IResult<&str, (Table, Value, Value)> {
+fn relate_i(i: &str) -> IResult<&str, (Value, Value, Value)> {
 	let (i, with) = alt((
 		map(subquery, Value::from),
 		map(array, Value::from),
@@ -250,7 +257,7 @@ fn relate_i(i: &str) -> IResult<&str, (Table, Value, Value)> {
 	let (i, _) = char('<')(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, kind) = table(i)?;
+	let (i, kind) = alt((map(thing, Value::from), map(table, Value::from)))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('<')(i)?;
 	let (i, _) = char('-')(i)?;

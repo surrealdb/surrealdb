@@ -18,7 +18,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
 
-pub enum Iterable {
+pub(crate) enum Iterable {
 	Value(Value),
 	Table(Table),
 	Thing(Thing),
@@ -28,20 +28,20 @@ pub enum Iterable {
 	Relatable(Thing, Thing, Thing),
 }
 
-pub enum Operable {
+pub(crate) enum Operable {
 	Value(Value),
 	Mergeable(Value, Value),
 	Relatable(Thing, Value, Thing),
 }
 
-pub enum Workable {
+pub(crate) enum Workable {
 	Normal,
 	Insert(Value),
 	Relate(Thing, Thing),
 }
 
 #[derive(Default)]
-pub struct Iterator {
+pub(crate) struct Iterator {
 	// Iterator status
 	run: Canceller,
 	// Iterator limit value
@@ -57,17 +57,17 @@ pub struct Iterator {
 }
 
 impl Iterator {
-	// Creates a new iterator
+	/// Creates a new iterator
 	pub fn new() -> Self {
 		Self::default()
 	}
 
-	// Prepares a value for processing
+	/// Prepares a value for processing
 	pub fn ingest(&mut self, val: Iterable) {
 		self.entries.push(val)
 	}
 
-	// Process the records and output
+	/// Process the records and output
 	pub async fn output(
 		&mut self,
 		ctx: &Context<'_>,
@@ -78,30 +78,30 @@ impl Iterator {
 		// Log the statement
 		trace!(target: LOG, "Iterating: {}", stm);
 		// Enable context override
-		let mut ctx = Context::new(ctx);
-		self.run = ctx.add_cancel();
+		let mut run = Context::new(ctx);
+		self.run = run.add_cancel();
 		// Process the query LIMIT clause
-		self.setup_limit(&ctx, opt, txn, stm).await?;
+		self.setup_limit(&run, opt, txn, stm).await?;
 		// Process the query START clause
-		self.setup_start(&ctx, opt, txn, stm).await?;
+		self.setup_start(&run, opt, txn, stm).await?;
 		// Process prepared values
-		self.iterate(&ctx, opt, txn, stm).await?;
+		self.iterate(&run, opt, txn, stm).await?;
 		// Return any document errors
 		if let Some(e) = self.error.take() {
 			return Err(e);
 		}
 		// Process any SPLIT clause
-		self.output_split(&ctx, opt, txn, stm).await?;
+		self.output_split(ctx, opt, txn, stm).await?;
 		// Process any GROUP clause
-		self.output_group(&ctx, opt, txn, stm).await?;
+		self.output_group(ctx, opt, txn, stm).await?;
 		// Process any ORDER clause
-		self.output_order(&ctx, opt, txn, stm).await?;
+		self.output_order(ctx, opt, txn, stm).await?;
 		// Process any START clause
-		self.output_start(&ctx, opt, txn, stm).await?;
+		self.output_start(ctx, opt, txn, stm).await?;
 		// Process any LIMIT clause
-		self.output_limit(&ctx, opt, txn, stm).await?;
+		self.output_limit(ctx, opt, txn, stm).await?;
 		// Process any FETCH clause
-		self.output_fetch(&ctx, opt, txn, stm).await?;
+		self.output_fetch(ctx, opt, txn, stm).await?;
 		// Output the results
 		Ok(mem::take(&mut self.results).into())
 	}
@@ -250,7 +250,7 @@ impl Iterator {
 								}
 								_ => {
 									let x = vals.first();
-									let x = v.compute(ctx, opt, txn, Some(&x)).await?;
+									let x = i.compute(ctx, opt, txn, Some(&x)).await?;
 									obj.set(ctx, opt, txn, i, x).await?;
 								}
 							}
@@ -351,9 +351,8 @@ impl Iterator {
 		Ok(())
 	}
 
-	#[cfg(any(target_arch = "wasm32", not(feature = "parallel")))]
-	#[cfg_attr(feature = "parallel", async_recursion)]
-	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
+	#[cfg(target_arch = "wasm32")]
+	#[async_recursion(?Send)]
 	async fn iterate(
 		&mut self,
 		ctx: &Context<'_>,
@@ -371,9 +370,8 @@ impl Iterator {
 		Ok(())
 	}
 
-	#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-	#[cfg_attr(feature = "parallel", async_recursion)]
-	#[cfg_attr(not(feature = "parallel"), async_recursion(?Send))]
+	#[cfg(not(target_arch = "wasm32"))]
+	#[async_recursion]
 	async fn iterate(
 		&mut self,
 		ctx: &Context<'_>,
@@ -449,7 +447,7 @@ impl Iterator {
 		}
 	}
 
-	// Process a new record Thing and Value
+	/// Process a new record Thing and Value
 	pub async fn process(
 		&mut self,
 		ctx: &Context<'_>,
@@ -484,7 +482,7 @@ impl Iterator {
 		self.result(res, stm);
 	}
 
-	// Accept a processed record result
+	/// Accept a processed record result
 	fn result(&mut self, res: Result<Value, Error>, stm: &Statement<'_>) {
 		// Process the result
 		match res {

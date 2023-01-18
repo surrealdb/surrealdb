@@ -11,6 +11,7 @@ use crate::key::thing;
 use crate::sql::dir::Dir;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use std::ops::Bound;
 
 impl Iterable {
 	pub(crate) async fn iterate(
@@ -134,9 +135,32 @@ impl Iterable {
 				Iterable::Range(v) => {
 					// Check that the table exists
 					txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v.tb, opt.strict).await?;
-					// Prepare the start and end keys
-					let beg = thing::new(opt.ns(), opt.db(), &v.tb, &v.beg).encode().unwrap();
-					let end = thing::new(opt.ns(), opt.db(), &v.tb, &v.end).encode().unwrap();
+					// Prepare the range start key
+					let beg = match &v.beg {
+						Bound::Unbounded => thing::prefix(opt.ns(), opt.db(), &v.tb),
+						Bound::Included(id) => {
+							thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap()
+						}
+						Bound::Excluded(id) => {
+							let mut key =
+								thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap();
+							key.push(0x00);
+							key
+						}
+					};
+					// Prepare the range end key
+					let end = match &v.end {
+						Bound::Unbounded => thing::suffix(opt.ns(), opt.db(), &v.tb),
+						Bound::Excluded(id) => {
+							thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap()
+						}
+						Bound::Included(id) => {
+							let mut key =
+								thing::new(opt.ns(), opt.db(), &v.tb, id).encode().unwrap();
+							key.push(0x00);
+							key
+						}
+					};
 					// Prepare the next holder key
 					let mut nxt: Option<Vec<u8>> = None;
 					// Loop until no more keys

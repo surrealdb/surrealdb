@@ -2,6 +2,8 @@ use crate::sql::common::val_u8;
 use nom::character::is_digit;
 use std::borrow::Cow;
 
+const SINGLE: char = '\'';
+
 const BRACKETL: char = '⟨';
 const BRACKETR: char = '⟩';
 const BRACKET_ESC: &str = r#"\⟩"#;
@@ -13,8 +15,12 @@ const BACKTICK: char = '`';
 const BACKTICK_ESC: &str = r#"\`"#;
 
 #[inline]
-pub fn escape_str(s: &str) -> String {
-	format!("{}{}{}", DOUBLE, s, DOUBLE)
+pub fn escape_str(s: &str) -> Cow<'_, str> {
+	if s.contains(SINGLE) {
+		escape_normal(s, DOUBLE, DOUBLE, DOUBLE_ESC)
+	} else {
+		Cow::Owned(format!("{}{}{}", SINGLE, s, SINGLE))
+	}
 }
 
 #[inline]

@@ -1,3 +1,5 @@
+#![allow(clippy::derive_hash_xor_eq)]
+
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
@@ -10,6 +12,7 @@ use geo::{MultiLineString, MultiPoint, MultiPolygon};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
+use nom::combinator::opt;
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::number::complete::double;
@@ -18,8 +21,8 @@ use nom::sequence::preceded;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::fmt;
 use std::iter::FromIterator;
+use std::{fmt, hash};
 
 const SINGLE: char = '\'';
 const DOUBLE: char = '\"';
@@ -514,6 +517,73 @@ impl Serialize for Geometry {
 	}
 }
 
+impl hash::Hash for Geometry {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		match self {
+			Geometry::Point(p) => {
+				"Point".hash(state);
+				p.x().to_bits().hash(state);
+				p.y().to_bits().hash(state);
+			}
+			Geometry::Line(l) => {
+				"Line".hash(state);
+				l.points().for_each(|v| {
+					v.x().to_bits().hash(state);
+					v.y().to_bits().hash(state);
+				});
+			}
+			Geometry::Polygon(p) => {
+				"Polygon".hash(state);
+				p.exterior().points().for_each(|ext| {
+					ext.x().to_bits().hash(state);
+					ext.y().to_bits().hash(state);
+				});
+				p.interiors().iter().for_each(|int| {
+					int.points().for_each(|v| {
+						v.x().to_bits().hash(state);
+						v.y().to_bits().hash(state);
+					});
+				});
+			}
+			Geometry::MultiPoint(v) => {
+				"MultiPoint".hash(state);
+				v.0.iter().for_each(|v| {
+					v.x().to_bits().hash(state);
+					v.y().to_bits().hash(state);
+				});
+			}
+			Geometry::MultiLine(ml) => {
+				"MultiLine".hash(state);
+				ml.0.iter().for_each(|ls| {
+					ls.points().for_each(|p| {
+						p.x().to_bits().hash(state);
+						p.y().to_bits().hash(state);
+					});
+				});
+			}
+			Geometry::MultiPolygon(mp) => {
+				"MultiPolygon".hash(state);
+				mp.0.iter().for_each(|p| {
+					p.exterior().points().for_each(|ext| {
+						ext.x().to_bits().hash(state);
+						ext.y().to_bits().hash(state);
+					});
+					p.interiors().iter().for_each(|int| {
+						int.points().for_each(|v| {
+							v.x().to_bits().hash(state);
+							v.y().to_bits().hash(state);
+						});
+					});
+				});
+			}
+			Geometry::Collection(v) => {
+				"GeometryCollection".hash(state);
+				v.iter().for_each(|v| v.hash(state));
+			}
+		}
+	}
+}
+
 pub fn geometry(i: &str) -> IResult<&str, Geometry> {
 	let _diving = crate::sql::parser::depth::dive()?;
 	alt((simple, point, line, polygon, multipoint, multiline, multipolygon, collection))(i)
@@ -523,9 +593,7 @@ fn simple(i: &str) -> IResult<&str, Geometry> {
 	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, x) = double(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(',')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = commas(i)?;
 	let (i, y) = double(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(')')(i)?;
@@ -538,14 +606,20 @@ fn point(i: &str) -> IResult<&str, Geometry> {
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, point_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, point_vals)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, point_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, point_type)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
@@ -560,14 +634,20 @@ fn line(i: &str) -> IResult<&str, Geometry> {
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, line_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, line_vals)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, line_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, line_type)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
@@ -582,14 +662,20 @@ fn polygon(i: &str) -> IResult<&str, Geometry> {
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, polygon_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, polygon_vals)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, polygon_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, polygon_type)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
@@ -604,14 +690,20 @@ fn multipoint(i: &str) -> IResult<&str, Geometry> {
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, multipoint_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, multipoint_vals)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, multipoint_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, multipoint_type)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
@@ -626,14 +718,20 @@ fn multiline(i: &str) -> IResult<&str, Geometry> {
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, multiline_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, multiline_vals)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, multiline_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, multiline_type)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
@@ -648,14 +746,20 @@ fn multipolygon(i: &str) -> IResult<&str, Geometry> {
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, multipolygon_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, multipolygon_vals)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, multipolygon_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, multipolygon_type)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
@@ -670,14 +774,20 @@ fn collection(i: &str) -> IResult<&str, Geometry> {
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, collection_type)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_geom, collection_vals)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_geom, collection_vals)(i)?;
-			let (i, _) = delimited(mightbespace, char(','), mightbespace)(i)?;
+			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, collection_type)(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = opt(char(','))(i)?;
+			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
@@ -700,6 +810,8 @@ fn line_vals(i: &str) -> IResult<&str, LineString<f64>> {
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = separated_list1(commas, coordinate)(i)?;
 	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(']')(i)?;
 	Ok((i, v.into()))
 }
@@ -709,11 +821,15 @@ fn polygon_vals(i: &str) -> IResult<&str, Polygon<f64>> {
 	let (i, _) = mightbespace(i)?;
 	let (i, e) = line_vals(i)?;
 	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(']')(i)?;
 	let (i, v) = separated_list0(commas, |i| {
 		let (i, _) = char('[')(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, v) = line_vals(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = opt(char(','))(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = char(']')(i)?;
 		Ok((i, v))
@@ -726,6 +842,8 @@ fn multipoint_vals(i: &str) -> IResult<&str, Vec<Point<f64>>> {
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = separated_list1(commas, point_vals)(i)?;
 	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(']')(i)?;
 	Ok((i, v))
 }
@@ -734,6 +852,8 @@ fn multiline_vals(i: &str) -> IResult<&str, Vec<LineString<f64>>> {
 	let (i, _) = char('[')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = separated_list1(commas, line_vals)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(']')(i)?;
 	Ok((i, v))
@@ -744,6 +864,8 @@ fn multipolygon_vals(i: &str) -> IResult<&str, Vec<Polygon<f64>>> {
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = separated_list1(commas, polygon_vals)(i)?;
 	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(']')(i)?;
 	Ok((i, v))
 }
@@ -752,6 +874,8 @@ fn collection_vals(i: &str) -> IResult<&str, Vec<Geometry>> {
 	let (i, _) = char('[')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = separated_list1(commas, geometry)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(']')(i)?;
 	Ok((i, v))
