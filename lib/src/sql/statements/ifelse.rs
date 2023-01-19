@@ -4,6 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
+use crate::sql::fmt::{fmt_separated_by, Fmt};
 use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
@@ -11,6 +12,7 @@ use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Display;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct IfelseStatement {
@@ -48,21 +50,21 @@ impl IfelseStatement {
 	}
 }
 
-impl fmt::Display for IfelseStatement {
+impl Display for IfelseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
+		Display::fmt(
+			&Fmt::new(
+				self.exprs.iter().map(|args| {
+					Fmt::new(args, |(cond, then), f| write!(f, "IF {} THEN {}", cond, then))
+				}),
+				fmt_separated_by(" ELSE "),
+			),
 			f,
-			"{}",
-			self.exprs
-				.iter()
-				.map(|(ref cond, ref then)| format!("IF {} THEN {}", cond, then))
-				.collect::<Vec<_>>()
-				.join(" ELSE ")
 		)?;
 		if let Some(ref v) = self.close {
 			write!(f, " ELSE {}", v)?
 		}
-		write!(f, " END")?;
+		f.write_str(" END")?;
 		Ok(())
 	}
 }

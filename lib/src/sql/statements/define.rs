@@ -9,6 +9,8 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
+use crate::sql::fmt::is_pretty;
+use crate::sql::fmt::pretty_indent;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::{Idiom, Idioms};
@@ -31,8 +33,7 @@ use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::Display;
+use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub enum DefineStatement {
@@ -709,19 +710,24 @@ impl fmt::Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE TABLE {}", self.name)?;
 		if self.drop {
-			write!(f, " DROP")?
+			f.write_str(" DROP")?;
 		}
-		if self.full {
-			write!(f, " SCHEMAFULL")?
-		}
-		if !self.full {
-			write!(f, " SCHEMALESS")?
-		}
+		f.write_str(if self.full {
+			" SCHEMAFULL"
+		} else {
+			" SCHEMALESS"
+		})?;
 		if let Some(ref v) = self.view {
 			write!(f, " {}", v)?
 		}
 		if !self.permissions.is_full() {
-			write!(f, " {}", self.permissions)?;
+			let _indent = if is_pretty() {
+				Some(pretty_indent())
+			} else {
+				f.write_char(' ')?;
+				None
+			};
+			write!(f, "{}", self.permissions)?;
 		}
 		Ok(())
 	}

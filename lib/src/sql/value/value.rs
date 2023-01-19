@@ -12,7 +12,7 @@ use crate::sql::duration::{duration, Duration};
 use crate::sql::edges::{edges, Edges};
 use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
-use crate::sql::fmt::Fmt;
+use crate::sql::fmt::{Fmt, Pretty};
 use crate::sql::function::{function, Function};
 use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
@@ -49,7 +49,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -1284,6 +1284,7 @@ impl Value {
 
 impl fmt::Display for Value {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let mut f = Pretty::from(f);
 		match self {
 			Value::None => write!(f, "NONE"),
 			Value::Null => write!(f, "NULL"),

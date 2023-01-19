@@ -5,6 +5,8 @@ use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
 use crate::sql::common::colons;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
+use crate::sql::fmt::Pretty;
 use crate::sql::statements::begin::{begin, BeginStatement};
 use crate::sql::statements::cancel::{cancel, CancelStatement};
 use crate::sql::statements::commit::{commit, CommitStatement};
@@ -31,7 +33,7 @@ use nom::multi::many0;
 use nom::multi::separated_list1;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::time::Duration;
 
@@ -48,7 +50,9 @@ impl Deref for Statements {
 impl fmt::Display for Statements {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		Display::fmt(
-			&self.0.iter().map(|ref v| format!("{};", v)).collect::<Vec<_>>().join("\n"),
+			&Fmt::pretty_new_line_separated(
+				self.0.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{};", v))),
+			),
 			f,
 		)
 	}
@@ -148,25 +152,25 @@ impl Statement {
 impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Use(v) => Display::fmt(v, f),
-			Self::Set(v) => Display::fmt(v, f),
-			Self::Info(v) => Display::fmt(v, f),
-			Self::Live(v) => Display::fmt(v, f),
-			Self::Kill(v) => Display::fmt(v, f),
-			Self::Begin(v) => Display::fmt(v, f),
-			Self::Cancel(v) => Display::fmt(v, f),
-			Self::Commit(v) => Display::fmt(v, f),
-			Self::Output(v) => Display::fmt(v, f),
-			Self::Ifelse(v) => Display::fmt(v, f),
-			Self::Select(v) => Display::fmt(v, f),
-			Self::Create(v) => Display::fmt(v, f),
-			Self::Update(v) => Display::fmt(v, f),
-			Self::Relate(v) => Display::fmt(v, f),
-			Self::Delete(v) => Display::fmt(v, f),
-			Self::Insert(v) => Display::fmt(v, f),
-			Self::Define(v) => Display::fmt(v, f),
-			Self::Remove(v) => Display::fmt(v, f),
-			Self::Option(v) => Display::fmt(v, f),
+			Self::Use(v) => write!(Pretty::from(f), "{}", v),
+			Self::Set(v) => write!(Pretty::from(f), "{}", v),
+			Self::Info(v) => write!(Pretty::from(f), "{}", v),
+			Self::Live(v) => write!(Pretty::from(f), "{}", v),
+			Self::Kill(v) => write!(Pretty::from(f), "{}", v),
+			Self::Begin(v) => write!(Pretty::from(f), "{}", v),
+			Self::Cancel(v) => write!(Pretty::from(f), "{}", v),
+			Self::Commit(v) => write!(Pretty::from(f), "{}", v),
+			Self::Output(v) => write!(Pretty::from(f), "{}", v),
+			Self::Ifelse(v) => write!(Pretty::from(f), "{}", v),
+			Self::Select(v) => write!(Pretty::from(f), "{}", v),
+			Self::Create(v) => write!(Pretty::from(f), "{}", v),
+			Self::Update(v) => write!(Pretty::from(f), "{}", v),
+			Self::Relate(v) => write!(Pretty::from(f), "{}", v),
+			Self::Delete(v) => write!(Pretty::from(f), "{}", v),
+			Self::Insert(v) => write!(Pretty::from(f), "{}", v),
+			Self::Define(v) => write!(Pretty::from(f), "{}", v),
+			Self::Remove(v) => write!(Pretty::from(f), "{}", v),
+			Self::Option(v) => write!(Pretty::from(f), "{}", v),
 		}
 	}
 }

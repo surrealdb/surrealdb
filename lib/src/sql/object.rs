@@ -6,7 +6,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::common::{commas, val_char};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_key;
-use crate::sql::fmt::Fmt;
+use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::operation::{Op, Operation};
 use crate::sql::serde::is_internal_serialization;
 use crate::sql::thing::Thing;
@@ -22,7 +22,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fmt;
+use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
 
@@ -134,17 +134,33 @@ impl Object {
 	}
 }
 
-impl fmt::Display for Object {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Object {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		let mut f = Pretty::from(f);
+		if is_pretty() {
+			f.write_char('{')?;
+		} else {
+			f.write_str("{ ")?;
+		}
+		let indent = pretty_indent();
 		write!(
 			f,
-			"{{ {} }}",
-			Fmt::comma_separated(
-				self.0.iter().map(|args| Fmt::new(args, |(k, v), f| {
-					write!(f, "{}: {}", escape_key(k), v)
-				}))
+			"{}",
+			Fmt::pretty_comma_separated(
+				self.0.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
+					f,
+					"{}: {}",
+					escape_key(k),
+					v
+				))),
 			)
-		)
+		)?;
+		drop(indent);
+		if is_pretty() {
+			f.write_char('}')
+		} else {
+			f.write_str(" }")
+		}
 	}
 }
 

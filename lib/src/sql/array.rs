@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
-use crate::sql::fmt::Fmt;
+use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::number::Number;
 use crate::sql::operation::Operation;
 use crate::sql::serde::is_internal_serialization;
@@ -16,7 +16,7 @@ use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -148,7 +148,12 @@ impl Array {
 
 impl Display for Array {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "[{}]", Fmt::comma_separated(self.as_slice()))
+		let mut f = Pretty::from(f);
+		f.write_char('[')?;
+		let indent = pretty_indent();
+		write!(f, "{}", Fmt::pretty_comma_separated(self.as_slice()))?;
+		drop(indent);
+		f.write_char(']')
 	}
 }
 
