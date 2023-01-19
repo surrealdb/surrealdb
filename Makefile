@@ -32,7 +32,7 @@ serve:
 
 .PHONY: sql
 sql:
-	cargo run -- sql --conn http://0.0.0.0:8000 --user root --pass root --ns test --db test
+	cargo run -- sql --conn ws://0.0.0.0:8000 --user root --pass root --ns test --db test
 
 .PHONY: quick
 quick:
