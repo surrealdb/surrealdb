@@ -290,7 +290,7 @@ impl Rpc {
 			},
 			// Run a full SurrealQL query against the database
 			"query" => match params.needs_one_or_two() {
-				Ok((Value::Strand(s), o)) if o.is_none() => {
+				Ok((Value::Strand(s), o)) if o.is_none_or_null() => {
 					return match rpc.read().await.query(s).await {
 						Ok(v) => res::success(id, v).send(out, chn).await,
 						Err(e) => {

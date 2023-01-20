@@ -601,6 +601,10 @@ impl Value {
 	// Simple value detection
 	// -----------------------------------
 
+	pub fn is_none_or_null(&self) -> bool {
+		matches!(self, Value::None | Value::Null)
+	}
+
 	pub fn is_none(&self) -> bool {
 		matches!(self, Value::None)
 	}
