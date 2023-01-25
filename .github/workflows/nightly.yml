@@ -91,11 +91,17 @@ jobs:
           vcpkg install openssl:x64-windows-static
 
       - name: Install dependencies
+        if: contains(matrix.arch, 'apple') && endsWith(matrix.arch, '-darwin')
+        run: |
+          brew install protobuf
+
+      - name: Install dependencies
         if: contains(matrix.arch, 'linux') && endsWith(matrix.arch, '-gnu')
         run: |
           sudo apt-get -y update
           sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
           sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
+          sudo apt-get -y install protobuf-compiler
 
       - name: Install FoundationDB
         if: contains(matrix.arch, 'linux') && startsWith(matrix.arch, 'x86_64')
