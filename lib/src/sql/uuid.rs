@@ -49,7 +49,6 @@ impl Deref for Uuid {
 
 impl Uuid {
 	/// Generate a new V4 UUID
-	#[cfg(uuid_unstable)]
 	pub fn new() -> Self {
 		#[cfg(uuid_unstable)]
 		{
