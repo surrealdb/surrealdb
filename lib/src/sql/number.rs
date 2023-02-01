@@ -389,6 +389,14 @@ impl Number {
 		}
 	}
 
+	pub fn fixed(self, precision: usize) -> Number {
+		match self {
+			Number::Int(v) => format!("{:.1$}", v, precision).into(),
+			Number::Float(v) => format!("{:.1$}", v, precision).into(),
+			Number::Decimal(v) => format!("{:.1$}", v, precision).into(),
+		}
+	}
+
 	pub fn sqrt(self) -> Self {
 		match self {
 			Number::Int(v) => (v as f64).sqrt().into(),
@@ -409,18 +417,6 @@ impl Number {
 			// TODO: (Number::Decimal(v), Number::Float(p)) => todo!(),
 			// TODO: (Number::Decimal(v), Number::Decimal(p)) => todo!(),
 			(v, p) => Number::Float(v.as_float().pow(p.as_float())),
-		}
-	}
-
-	// -----------------------------------
-	//
-	// -----------------------------------
-
-	pub fn fixed(self, precision: usize) -> Number {
-		match self {
-			Number::Int(v) => format!("{:.1$}", v, precision).into(),
-			Number::Float(v) => format!("{:.1$}", v, precision).into(),
-			Number::Decimal(v) => v.round(precision as i64).into(),
 		}
 	}
 }
