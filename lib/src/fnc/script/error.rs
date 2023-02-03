@@ -12,7 +12,7 @@ impl From<js::Error> for Error {
 				message: format!(
 					"An exception occurred{}: {}{}",
 					match file.is_empty() {
-						false => format!(" at {}:{}", file, line),
+						false => format!(" at {file}:{line}"),
 						true => String::default(),
 					},
 					match message.is_empty() {
@@ -20,7 +20,7 @@ impl From<js::Error> for Error {
 						true => String::default(),
 					},
 					match stack.is_empty() {
-						false => format!("\n{}", stack),
+						false => format!("\n{stack}"),
 						true => String::default(),
 					}
 				),

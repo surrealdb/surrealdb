@@ -110,13 +110,13 @@ impl fmt::Display for Range {
 		write!(f, "{}:", self.tb)?;
 		match &self.beg {
 			Bound::Unbounded => write!(f, ""),
-			Bound::Included(id) => write!(f, "{}", id),
-			Bound::Excluded(id) => write!(f, "{}>", id),
+			Bound::Included(id) => write!(f, "{id}"),
+			Bound::Excluded(id) => write!(f, "{id}>"),
 		}?;
 		match &self.end {
 			Bound::Unbounded => write!(f, ".."),
-			Bound::Excluded(id) => write!(f, "..{}", id),
-			Bound::Included(id) => write!(f, "..={}", id),
+			Bound::Excluded(id) => write!(f, "..{id}"),
+			Bound::Included(id) => write!(f, "..={id}"),
 		}?;
 		Ok(())
 	}

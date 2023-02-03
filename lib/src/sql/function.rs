@@ -151,11 +151,11 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Cast(ref s, ref e) => write!(f, "<{}> {}", s, e),
+			Self::Cast(ref s, ref e) => write!(f, "<{s}> {e}"),
 			Self::Script(ref s, ref e) => {
-				write!(f, "function({}) {{{}}}", Fmt::comma_separated(e), s)
+				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e))
 			}
-			Self::Normal(ref s, ref e) => write!(f, "{}({})", s, Fmt::comma_separated(e)),
+			Self::Normal(ref s, ref e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 		}
 	}
 }

@@ -43,10 +43,10 @@ impl Display for Graph {
 				_ => Display::fmt(&self.what, f),
 			}?;
 			if let Some(ref v) = self.cond {
-				write!(f, " {}", v)?
+				write!(f, " {v}")?
 			}
 			if let Some(ref v) = self.alias {
-				write!(f, " AS {}", v)?
+				write!(f, " AS {v}")?
 			}
 			f.write_char(')')
 		}

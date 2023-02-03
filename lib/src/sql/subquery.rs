@@ -174,13 +174,13 @@ impl Subquery {
 impl Display for Subquery {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Value(v) => write!(f, "({})", v),
-			Self::Select(v) => write!(f, "({})", v),
-			Self::Create(v) => write!(f, "({})", v),
-			Self::Update(v) => write!(f, "({})", v),
-			Self::Delete(v) => write!(f, "({})", v),
-			Self::Relate(v) => write!(f, "({})", v),
-			Self::Insert(v) => write!(f, "({})", v),
+			Self::Value(v) => write!(f, "({v})"),
+			Self::Select(v) => write!(f, "({v})"),
+			Self::Create(v) => write!(f, "({v})"),
+			Self::Update(v) => write!(f, "({v})"),
+			Self::Delete(v) => write!(f, "({v})"),
+			Self::Relate(v) => write!(f, "({v})"),
+			Self::Insert(v) => write!(f, "({v})"),
 			Self::Ifelse(v) => Display::fmt(v, f),
 		}
 	}

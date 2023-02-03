@@ -36,7 +36,7 @@ pub fn repeat((val, num): (String, usize)) -> Result<Value, Error> {
 	if val.len().saturating_mul(num) > LIMIT {
 		Err(Error::InvalidArguments {
 			name: String::from("string::repeat"),
-			message: format!("Output must not exceed {} bytes.", LIMIT),
+			message: format!("Output must not exceed {LIMIT} bytes."),
 		})
 	} else {
 		Ok(val.repeat(num).into())

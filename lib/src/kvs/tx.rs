@@ -1334,7 +1334,7 @@ impl Transaction {
 				chn.send(bytes!("-- ------------------------------")).await?;
 				chn.send(bytes!("")).await?;
 				for dl in dls.iter() {
-					chn.send(bytes!(format!("{};", dl))).await?;
+					chn.send(bytes!(format!("{dl};"))).await?;
 				}
 				chn.send(bytes!("")).await?;
 			}
@@ -1348,7 +1348,7 @@ impl Transaction {
 				chn.send(bytes!("-- ------------------------------")).await?;
 				chn.send(bytes!("")).await?;
 				for dt in dts.iter() {
-					chn.send(bytes!(format!("{};", dt))).await?;
+					chn.send(bytes!(format!("{dt};"))).await?;
 				}
 				chn.send(bytes!("")).await?;
 			}
@@ -1362,7 +1362,7 @@ impl Transaction {
 				chn.send(bytes!("-- ------------------------------")).await?;
 				chn.send(bytes!("")).await?;
 				for sc in scs.iter() {
-					chn.send(bytes!(format!("{};", sc))).await?;
+					chn.send(bytes!(format!("{sc};"))).await?;
 				}
 				chn.send(bytes!("")).await?;
 			}
@@ -1376,7 +1376,7 @@ impl Transaction {
 				chn.send(bytes!("-- ------------------------------")).await?;
 				chn.send(bytes!("")).await?;
 				for pa in pas.iter() {
-					chn.send(bytes!(format!("{};", pa))).await?;
+					chn.send(bytes!(format!("{pa};"))).await?;
 				}
 				chn.send(bytes!("")).await?;
 			}
@@ -1391,14 +1391,14 @@ impl Transaction {
 					chn.send(bytes!(format!("-- TABLE: {}", tb.name))).await?;
 					chn.send(bytes!("-- ------------------------------")).await?;
 					chn.send(bytes!("")).await?;
-					chn.send(bytes!(format!("{};", tb))).await?;
+					chn.send(bytes!(format!("{tb};"))).await?;
 					chn.send(bytes!("")).await?;
 					// Output FIELDS
 					{
 						let fds = self.all_fd(ns, db, &tb.name).await?;
 						if !fds.is_empty() {
 							for fd in fds.iter() {
-								chn.send(bytes!(format!("{};", fd))).await?;
+								chn.send(bytes!(format!("{fd};"))).await?;
 							}
 							chn.send(bytes!("")).await?;
 						}
@@ -1407,7 +1407,7 @@ impl Transaction {
 					let ixs = self.all_ix(ns, db, &tb.name).await?;
 					if !ixs.is_empty() {
 						for ix in ixs.iter() {
-							chn.send(bytes!(format!("{};", ix))).await?;
+							chn.send(bytes!(format!("{ix};"))).await?;
 						}
 						chn.send(bytes!("")).await?;
 					}
@@ -1415,7 +1415,7 @@ impl Transaction {
 					let evs = self.all_ev(ns, db, &tb.name).await?;
 					if !evs.is_empty() {
 						for ev in evs.iter() {
-							chn.send(bytes!(format!("{};", ev))).await?;
+							chn.send(bytes!(format!("{ev};"))).await?;
 						}
 						chn.send(bytes!("")).await?;
 					}
@@ -1473,15 +1473,12 @@ impl Transaction {
 								match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 									// This is a graph edge record
 									(Value::True, Value::Thing(l), Value::Thing(r)) => {
-										let sql = format!(
-											"RELATE {} -> {} -> {} CONTENT {};",
-											l, t, r, v
-										);
+										let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
 										chn.send(bytes!(sql)).await?;
 									}
 									// This is a normal record
 									_ => {
-										let sql = format!("UPDATE {} CONTENT {};", t, v);
+										let sql = format!("UPDATE {t} CONTENT {v};");
 										chn.send(bytes!(sql)).await?;
 									}
 								}

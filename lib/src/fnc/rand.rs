@@ -52,12 +52,12 @@ pub fn guid((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
 				max if max >= 1 && max <= min => rand::thread_rng().gen_range(max as usize..=min as usize),
 				_ => return Err(Error::InvalidArguments {
 					name: String::from("rand::guid"),
-					message: format!("To generate a guid of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {}.", LIMIT),
+					message: format!("To generate a guid of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
 				}),
 			},
 			_ => return Err(Error::InvalidArguments {
 				name: String::from("rand::guid"),
-				message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {}.", LIMIT),
+				message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
 			}),
 		}
 	} else if let Some(len) = arg1 {
@@ -66,7 +66,7 @@ pub fn guid((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
 		} else {
 			return Err(Error::InvalidArguments {
 				name: String::from("rand::guid"),
-				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {}.", LIMIT),
+				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
 			});
 		}
 	} else {
@@ -100,12 +100,12 @@ pub fn string((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> 
 				max if max >= 1 && max <= min => rand::thread_rng().gen_range(max as usize..=min as usize),
 				_ => return Err(Error::InvalidArguments {
 					name: String::from("rand::string"),
-					message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {}.", LIMIT),
+					message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
 				}),
 			},
 			_ => return Err(Error::InvalidArguments {
 				name: String::from("rand::string"),
-				message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {}.", LIMIT),
+				message: format!("To generate a string of between X and Y characters in length, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
 			}),
 		}
 	} else if let Some(len) = arg1 {
@@ -114,7 +114,7 @@ pub fn string((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> 
 		} else {
 			return Err(Error::InvalidArguments {
 				name: String::from("rand::string"),
-				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {}.", LIMIT),
+				message: format!("To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."),
 			});
 		}
 	} else {
@@ -135,12 +135,12 @@ pub fn time((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
 				max if max >= 1 && max <= min => rand::thread_rng().gen_range(max..=min),
 				_ => return Err(Error::InvalidArguments {
 					name: String::from("rand::time"),
-					message: format!("To generate a time between X and Y seconds, the 2 arguments must be positive numbers and no higher than {}.", LIMIT),
+					message: format!("To generate a time between X and Y seconds, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
 				}),
 			},
 			_ => return Err(Error::InvalidArguments {
 				name: String::from("rand::time"),
-				message: format!("To generate a time between X and Y seconds, the 2 arguments must be positive numbers and no higher than {}.", LIMIT),
+				message: format!("To generate a time between X and Y seconds, the 2 arguments must be positive numbers and no higher than {LIMIT}."),
 			}),
 		}
 	} else {

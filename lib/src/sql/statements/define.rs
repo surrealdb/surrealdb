@@ -492,13 +492,13 @@ impl fmt::Display for DefineScopeStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE SCOPE {}", self.name)?;
 		if let Some(ref v) = self.session {
-			write!(f, " SESSION {}", v)?
+			write!(f, " SESSION {v}")?
 		}
 		if let Some(ref v) = self.signup {
-			write!(f, " SIGNUP {}", v)?
+			write!(f, " SIGNUP {v}")?
 		}
 		if let Some(ref v) = self.signin {
-			write!(f, " SIGNIN {}", v)?
+			write!(f, " SIGNIN {v}")?
 		}
 		Ok(())
 	}
@@ -718,7 +718,7 @@ impl fmt::Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref v) = self.view {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if !self.permissions.is_full() {
 			let _indent = if is_pretty() {
@@ -951,13 +951,13 @@ impl fmt::Display for DefineFieldStatement {
 			write!(f, " FLEXIBLE")?
 		}
 		if let Some(ref v) = self.kind {
-			write!(f, " TYPE {}", v)?
+			write!(f, " TYPE {v}")?
 		}
 		if let Some(ref v) = self.value {
-			write!(f, " VALUE {}", v)?
+			write!(f, " VALUE {v}")?
 		}
 		if let Some(ref v) = self.assert {
-			write!(f, " ASSERT {}", v)?
+			write!(f, " ASSERT {v}")?
 		}
 		if !self.permissions.is_full() {
 			write!(f, " {}", self.permissions)?;

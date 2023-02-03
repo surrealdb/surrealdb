@@ -19,7 +19,7 @@ pub fn escape_str(s: &str) -> Cow<'_, str> {
 	if s.contains(SINGLE) {
 		escape_normal(s, DOUBLE, DOUBLE, DOUBLE_ESC)
 	} else {
-		Cow::Owned(format!("{}{}{}", SINGLE, s, SINGLE))
+		Cow::Owned(format!("{SINGLE}{s}{SINGLE}"))
 	}
 }
 
@@ -47,7 +47,7 @@ pub fn escape_normal<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str> 
 	for x in s.bytes() {
 		// Check if character is allowed
 		if !val_u8(x) {
-			return Cow::Owned(format!("{}{}{}", l, s.replace(r, e), r));
+			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
 		}
 	}
 	// Output the value
@@ -62,7 +62,7 @@ pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str>
 	for x in s.bytes() {
 		// Check if character is allowed
 		if !val_u8(x) {
-			return Cow::Owned(format!("{}{}{}", l, s.replace(r, e), r));
+			return Cow::Owned(format!("{l}{}{r}", s.replace(r, e)));
 		}
 		// Check if character is non-numeric
 		if !is_digit(x) {
@@ -72,7 +72,7 @@ pub fn escape_numeric<'a>(s: &'a str, l: char, r: char, e: &str) -> Cow<'a, str>
 	// Output the id value
 	match numeric {
 		// This is numeric so escape it
-		true => Cow::Owned(format!("{}{}{}", l, s.replace(r, e), r)),
+		true => Cow::Owned(format!("{l}{}{r}", s.replace(r, e))),
 		// No need to escape the value
 		_ => Cow::Borrowed(s),
 	}

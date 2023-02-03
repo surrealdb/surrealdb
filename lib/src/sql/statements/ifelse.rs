@@ -55,14 +55,14 @@ impl Display for IfelseStatement {
 		Display::fmt(
 			&Fmt::new(
 				self.exprs.iter().map(|args| {
-					Fmt::new(args, |(cond, then), f| write!(f, "IF {} THEN {}", cond, then))
+					Fmt::new(args, |(cond, then), f| write!(f, "IF {cond} THEN {then}"))
 				}),
 				fmt_separated_by(" ELSE "),
 			),
 			f,
 		)?;
 		if let Some(ref v) = self.close {
-			write!(f, " ELSE {}", v)?
+			write!(f, " ELSE {v}")?
 		}
 		f.write_str(" END")?;
 		Ok(())

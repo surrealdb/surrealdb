@@ -391,9 +391,9 @@ impl Number {
 
 	pub fn fixed(self, precision: usize) -> Number {
 		match self {
-			Number::Int(v) => format!("{:.1$}", v, precision).into(),
-			Number::Float(v) => format!("{:.1$}", v, precision).into(),
-			Number::Decimal(v) => format!("{:.1$}", v, precision).into(),
+			Number::Int(v) => format!("{v:.precision$}").into(),
+			Number::Float(v) => format!("{v:.precision$}").into(),
+			Number::Decimal(v) => format!("{v:.precision$}").into(),
 		}
 	}
 

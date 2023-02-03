@@ -112,10 +112,10 @@ impl fmt::Display for InsertStatement {
 		}
 		write!(f, " INTO {} {}", self.into, self.data)?;
 		if let Some(ref v) = self.output {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?

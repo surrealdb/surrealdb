@@ -50,7 +50,7 @@ impl fmt::Display for OutputStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "RETURN {}", self.what)?;
 		if let Some(ref v) = self.fetch {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		Ok(())
 	}

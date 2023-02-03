@@ -130,31 +130,31 @@ impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {} FROM {}", self.expr, self.what)?;
 		if let Some(ref v) = self.cond {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.split {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.group {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.order {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.limit {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.start {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.fetch {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?

@@ -65,12 +65,12 @@ impl<'a> From<&'a InsertStatement> for Statement<'a> {
 impl<'a> fmt::Display for Statement<'a> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Statement::Select(v) => write!(f, "{}", v),
-			Statement::Create(v) => write!(f, "{}", v),
-			Statement::Update(v) => write!(f, "{}", v),
-			Statement::Relate(v) => write!(f, "{}", v),
-			Statement::Delete(v) => write!(f, "{}", v),
-			Statement::Insert(v) => write!(f, "{}", v),
+			Statement::Select(v) => write!(f, "{v}"),
+			Statement::Create(v) => write!(f, "{v}"),
+			Statement::Update(v) => write!(f, "{v}"),
+			Statement::Relate(v) => write!(f, "{v}"),
+			Statement::Delete(v) => write!(f, "{v}"),
+			Statement::Insert(v) => write!(f, "{v}"),
 		}
 	}
 }

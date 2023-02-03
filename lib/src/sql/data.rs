@@ -80,16 +80,14 @@ impl Display for Data {
 			Self::SetExpression(v) => write!(
 				f,
 				"SET {}",
-				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(
-					f,
-					"{} {} {}",
-					l, o, r
-				))))
+				Fmt::comma_separated(
+					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
+				)
 			),
-			Self::PatchExpression(v) => write!(f, "PATCH {}", v),
-			Self::MergeExpression(v) => write!(f, "MERGE {}", v),
-			Self::ReplaceExpression(v) => write!(f, "REPLACE {}", v),
-			Self::ContentExpression(v) => write!(f, "CONTENT {}", v),
+			Self::PatchExpression(v) => write!(f, "PATCH {v}"),
+			Self::MergeExpression(v) => write!(f, "MERGE {v}"),
+			Self::ReplaceExpression(v) => write!(f, "REPLACE {v}"),
+			Self::ContentExpression(v) => write!(f, "CONTENT {v}"),
 			Self::SingleExpression(v) => Display::fmt(v, f),
 			Self::ValuesExpression(v) => write!(
 				f,
@@ -104,11 +102,9 @@ impl Display for Data {
 			Self::UpdateExpression(v) => write!(
 				f,
 				"ON DUPLICATE KEY UPDATE {}",
-				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(
-					f,
-					"{} {} {}",
-					l, o, r
-				))))
+				Fmt::comma_separated(
+					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
+				)
 			),
 		}
 	}

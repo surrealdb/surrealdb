@@ -115,13 +115,13 @@ impl fmt::Display for DeleteStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DELETE {}", self.what)?;
 		if let Some(ref v) = self.cond {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.output {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?

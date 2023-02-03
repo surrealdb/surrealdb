@@ -51,7 +51,7 @@ impl fmt::Display for Statements {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		Display::fmt(
 			&Fmt::pretty_new_line_separated(
-				self.0.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{};", v))),
+				self.0.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};"))),
 			),
 			f,
 		)
@@ -152,25 +152,25 @@ impl Statement {
 impl Display for Statement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Use(v) => write!(Pretty::from(f), "{}", v),
-			Self::Set(v) => write!(Pretty::from(f), "{}", v),
-			Self::Info(v) => write!(Pretty::from(f), "{}", v),
-			Self::Live(v) => write!(Pretty::from(f), "{}", v),
-			Self::Kill(v) => write!(Pretty::from(f), "{}", v),
-			Self::Begin(v) => write!(Pretty::from(f), "{}", v),
-			Self::Cancel(v) => write!(Pretty::from(f), "{}", v),
-			Self::Commit(v) => write!(Pretty::from(f), "{}", v),
-			Self::Output(v) => write!(Pretty::from(f), "{}", v),
-			Self::Ifelse(v) => write!(Pretty::from(f), "{}", v),
-			Self::Select(v) => write!(Pretty::from(f), "{}", v),
-			Self::Create(v) => write!(Pretty::from(f), "{}", v),
-			Self::Update(v) => write!(Pretty::from(f), "{}", v),
-			Self::Relate(v) => write!(Pretty::from(f), "{}", v),
-			Self::Delete(v) => write!(Pretty::from(f), "{}", v),
-			Self::Insert(v) => write!(Pretty::from(f), "{}", v),
-			Self::Define(v) => write!(Pretty::from(f), "{}", v),
-			Self::Remove(v) => write!(Pretty::from(f), "{}", v),
-			Self::Option(v) => write!(Pretty::from(f), "{}", v),
+			Self::Use(v) => write!(Pretty::from(f), "{v}"),
+			Self::Set(v) => write!(Pretty::from(f), "{v}"),
+			Self::Info(v) => write!(Pretty::from(f), "{v}"),
+			Self::Live(v) => write!(Pretty::from(f), "{v}"),
+			Self::Kill(v) => write!(Pretty::from(f), "{v}"),
+			Self::Begin(v) => write!(Pretty::from(f), "{v}"),
+			Self::Cancel(v) => write!(Pretty::from(f), "{v}"),
+			Self::Commit(v) => write!(Pretty::from(f), "{v}"),
+			Self::Output(v) => write!(Pretty::from(f), "{v}"),
+			Self::Ifelse(v) => write!(Pretty::from(f), "{v}"),
+			Self::Select(v) => write!(Pretty::from(f), "{v}"),
+			Self::Create(v) => write!(Pretty::from(f), "{v}"),
+			Self::Update(v) => write!(Pretty::from(f), "{v}"),
+			Self::Relate(v) => write!(Pretty::from(f), "{v}"),
+			Self::Delete(v) => write!(Pretty::from(f), "{v}"),
+			Self::Insert(v) => write!(Pretty::from(f), "{v}"),
+			Self::Define(v) => write!(Pretty::from(f), "{v}"),
+			Self::Remove(v) => write!(Pretty::from(f), "{v}"),
+			Self::Option(v) => write!(Pretty::from(f), "{v}"),
 		}
 	}
 }

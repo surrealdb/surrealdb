@@ -111,7 +111,7 @@ impl Display for Permissions {
 					let _indent = pretty_indent();
 					Display::fmt(permission, f)?;
 				}
-				_ => write!(f, " {}", permission)?,
+				_ => write!(f, " {permission}")?,
 			}
 		}
 		drop(indent);
@@ -198,7 +198,7 @@ impl Display for Permission {
 		match self {
 			Self::None => f.write_str("NONE"),
 			Self::Full => f.write_str("FULL"),
-			Self::Specific(ref v) => write!(f, "WHERE {}", v),
+			Self::Specific(ref v) => write!(f, "WHERE {v}"),
 		}
 	}
 }

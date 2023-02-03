@@ -209,7 +209,7 @@ impl Display for Field {
 		match self {
 			Self::All => f.write_char('*'),
 			Self::Alone(e) => Display::fmt(e, f),
-			Self::Alias(e, a) => write!(f, "{} AS {}", e, a),
+			Self::Alias(e, a) => write!(f, "{e} AS {a}"),
 		}
 	}
 }

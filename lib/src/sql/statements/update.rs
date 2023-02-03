@@ -116,16 +116,16 @@ impl fmt::Display for UpdateStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "UPDATE {}", self.what)?;
 		if let Some(ref v) = self.data {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.cond {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.output {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {}", v)?
+			write!(f, " {v}")?
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?

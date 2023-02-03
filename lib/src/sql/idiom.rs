@@ -82,7 +82,7 @@ impl Idiom {
 	}
 	/// Convert this Idiom to a JSON Path string
 	pub(crate) fn to_path(&self) -> String {
-		format!("/{}", self).replace(']', "").replace(&['.', '['][..], "/")
+		format!("/{self}").replace(']', "").replace(&['.', '['][..], "/")
 	}
 	/// Simplifies this Idiom for use in object keys
 	pub(crate) fn simplify(&self) -> Idiom {

@@ -106,11 +106,11 @@ impl fmt::Display for Part {
 			Part::All => f.write_str("[*]"),
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
-			Part::Field(v) => write!(f, ".{}", v),
-			Part::Index(v) => write!(f, "[{}]", v),
-			Part::Where(v) => write!(f, "[WHERE {}]", v),
-			Part::Thing(v) => write!(f, "{}", v),
-			Part::Graph(v) => write!(f, "{}", v),
+			Part::Field(v) => write!(f, ".{v}"),
+			Part::Index(v) => write!(f, "[{v}]"),
+			Part::Where(v) => write!(f, "[WHERE {v}]"),
+			Part::Thing(v) => write!(f, "{v}"),
+			Part::Graph(v) => write!(f, "{v}"),
 		}
 	}
 }
