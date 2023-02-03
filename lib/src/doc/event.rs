@@ -41,8 +41,6 @@ impl<'a> Document<'a> {
 			ctx.add_value("value".into(), self.current.deref());
 			ctx.add_value("after".into(), self.current.deref());
 			ctx.add_value("before".into(), self.initial.deref());
-			// Ensure event queries run
-			let opt = &opt.perms(false);
 			// Process conditional clause
 			let val = ev.when.compute(&ctx, opt, txn, Some(&self.current)).await?;
 			// Execute event if value is truthy
