@@ -93,7 +93,7 @@ Please avoid introducing new dependencies to SurrealDB without consulting the te
 
 We would &nbsp;<img width="15" src="/img/love.svg">&nbsp; you to contribute to SurrealDB, but we would also like to make sure SurrealDB is as great as possible and loyal to its vision and mission statement. For us to find the right balance, please open a question on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions) with any ideas before introducing a new pull request. This will allow the SurrealDB community to have sufficient discussion about the new feature value and how it fits in the product roadmap and vision.
 
-This is also important for the SurrealDB lead developers to be able to give technical input and different emphasis regarding the feature design and architecture. Some bigger features might need to go through our [RFC process](https://github.com/surrealdb/rfcs/README.md).
+This is also important for the SurrealDB lead developers to be able to give technical input and different emphasis regarding the feature design and architecture. Some bigger features might need to go through our [RFC process](https://github.com/surrealdb/rfcs).
 
 ## Submitting a pull request
 
