@@ -76,7 +76,7 @@ pub async fn init() -> Result<(), Error> {
 			.key_path(k)
 			.bind_with_graceful_shutdown(opt.bind, async move {
 				// Capture the shutdown signals and log that the graceful shutdown has started
-				let result = signals::shutdown_signals().await.expect("Failed to listen to shutdown signal");
+				let result = signals::listen().await.expect("Failed to listen to shutdown signal");
 				info!(target: LOG, "{} received. Start graceful shutdown...", result);
 			});
 		// Log the server startup status
@@ -89,7 +89,7 @@ pub async fn init() -> Result<(), Error> {
 		// Bind the server to the desired port
 		let (adr, srv) = warp::serve(net).bind_with_graceful_shutdown(opt.bind, async move {
 			// Capture the shutdown signals and log that the graceful shutdown has started
-			let result = signals::shutdown_signals().await.expect("Failed to listen to shutdown signal");
+			let result = signals::listen().await.expect("Failed to listen to shutdown signal");
 			info!(target: LOG, "{} received. Start graceful shutdown...", result);
 		});
 		// Log the server startup status
