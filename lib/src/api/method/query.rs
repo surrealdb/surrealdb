@@ -75,7 +75,7 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// let response = db.query(sql!(CREATE user SET name = $name))
+	/// let response = db.query("CREATE user SET name = $name")
 	///     .bind(("name", "John Doe"))
 	///     .await?;
 	/// # Ok(())
@@ -96,7 +96,7 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// let response = db.query(sql!(CREATE user SET name = $name))
+	/// let response = db.query("CREATE user SET name = $name")
 	///     .bind(User {
 	///         name: "John Doe",
 	///     })
@@ -157,13 +157,13 @@ impl Response {
 	/// #
 	/// let mut response = db
 	///     // Get `john`'s details
-	///     .query(sql!(SELECT * FROM user:john))
+	///     .query("SELECT * FROM user:john")
 	///     // List all users whose first name is John
-	///     .query(sql!(SELECT * FROM user WHERE name.first = "John"))
+	///     .query("SELECT * FROM user WHERE name.first = 'John'")
 	///     // Get John's address
-	///     .query(sql!(SELECT address FROM user:john))
+	///     .query("SELECT address FROM user:john")
 	///     // Get all users' addresses
-	///     .query(sql!(SELECT address FROM user))
+	///     .query("SELECT address FROM user")
 	///     .await?;
 	///
 	/// // Get the first (and only) user from the first query
@@ -180,7 +180,7 @@ impl Response {
 	///
 	/// // You can continue taking more fields on the same response
 	/// // object when extracting individual fields
-	/// let mut response = db.query(sql!(SELECT * FROM user)).await?;
+	/// let mut response = db.query("SELECT * FROM user").await?;
 	///
 	/// // Since the query we want to access is at index 0, we can use
 	/// // a shortcut instead of `response.take((0, "field"))`
@@ -214,7 +214,7 @@ impl Response {
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// # let mut response = db.query(sql!(SELECT * FROM user)).await?;
+	/// # let mut response = db.query("SELECT * FROM user").await?;
 	/// let errors = response.take_errors();
 	/// # Ok(())
 	/// # }
@@ -245,7 +245,7 @@ impl Response {
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// # let response = db.query(sql!(SELECT * FROM user)).await?;
+	/// # let response = db.query("SELECT * FROM user").await?;
 	/// response.check()?;
 	/// # Ok(())
 	/// # }
@@ -276,7 +276,7 @@ impl Response {
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// let response = db.query(sql!(SELECT * FROM user:john; SELECT * FROM user;)).await?;
+	/// let response = db.query("SELECT * FROM user:john; SELECT * FROM user;").await?;
 	///
 	/// assert_eq!(response.num_statements(), 2);
 	/// #

@@ -378,11 +378,11 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Define the scope
-	/// let sql = sql! {
+	/// let sql = r#"
 	///     DEFINE SCOPE user_scope SESSION 24h
 	///     SIGNUP ( CREATE user SET email = $email, password = crypto::argon2::generate($password) )
 	///     SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(password, $password) )
-	/// };
+	/// "#;
 	/// db.query(sql).await?.check()?;
 	///
 	/// // Sign a user up
@@ -437,7 +437,7 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Define the login
-	/// let sql = sql!(DEFINE LOGIN johndoe ON NAMESPACE PASSWORD "password123");
+	/// let sql = "DEFINE LOGIN johndoe ON NAMESPACE PASSWORD 'password123'";
 	/// db.query(sql).await?.check()?;
 	///
 	/// // Sign a user in
@@ -473,7 +473,7 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Define the login
-	/// let sql = sql!(DEFINE LOGIN johndoe ON DATABASE PASSWORD "password123");
+	/// let sql = "DEFINE LOGIN johndoe ON DATABASE PASSWORD 'password123'";
 	/// db.query(sql).await?.check()?;
 	///
 	/// // Sign a user in
@@ -594,8 +594,8 @@ where
 	///
 	/// // Run queries
 	/// let mut result = db
-	///     .query(sql!(CREATE person))
-	///     .query(sql!(SELECT * FROM type::table($table)))
+	///     .query("CREATE person")
+	///     .query("SELECT * FROM type::table($table)")
 	///     .bind(("table", "person"))
 	///     .await?;
 	///

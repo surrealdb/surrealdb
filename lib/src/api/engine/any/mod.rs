@@ -69,11 +69,11 @@
 //!     let people: Vec<Person> = db.select("person").await?;
 //!
 //!     // Perform a custom advanced query
-//!     let sql = sql! {
+//!     let sql = r#"
 //!         SELECT marketing, count()
 //!         FROM type::table($table)
 //!         GROUP BY marketing
-//!     };
+//!     "#;
 //!
 //!     let groups = db.query(sql)
 //!         .bind(("table", "person"))
