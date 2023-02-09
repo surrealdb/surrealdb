@@ -1,6 +1,5 @@
 use crate::err::Error;
-use base64::engine::general_purpose::STANDARD_NO_PAD as BASE64;
-use base64::Engine;
+use crate::iam::base::{Engine, BASE64};
 use std::str;
 use surrealdb::sql::json;
 use surrealdb::sql::Value;

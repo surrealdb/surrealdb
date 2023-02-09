@@ -1,3 +1,4 @@
+pub mod base;
 pub mod clear;
 pub mod parse;
 pub mod signin;

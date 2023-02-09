@@ -1,14 +1,13 @@
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
+use crate::iam::base::{Engine, BASE64};
 use crate::iam::token::Claims;
 use crate::iam::BASIC;
 use crate::iam::LOG;
 use crate::iam::TOKEN;
 use argon2::password_hash::{PasswordHash, PasswordVerifier};
 use argon2::Argon2;
-use base64::engine::general_purpose::STANDARD_NO_PAD as BASE64;
-use base64::Engine;
 use chrono::Utc;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use once_cell::sync::Lazy;
