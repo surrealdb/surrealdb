@@ -1,3 +1,4 @@
+use crate::cli::LOG;
 use crate::err::Error;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
@@ -93,6 +94,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 							}
 						}
 						let res = client.query(query).await;
+						trace!(target: LOG, "Tracing response from query: {res:?}");
 						// Get the request response
 						match process(pretty, res) {
 							Ok(v) => println!("{v}"),

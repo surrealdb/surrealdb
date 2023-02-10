@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::dbs::Workable;
+use crate::dbs::LOG;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::data::Data;
@@ -25,22 +26,27 @@ impl<'a> Document<'a> {
 		if let Some(v) = stm.data() {
 			match v {
 				Data::PatchExpression(data) => {
+					trace!(target: LOG, "The alter was a patch expression data={data:?}");
 					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
 					self.current.to_mut().patch(ctx, opt, txn, data).await?
 				}
 				Data::MergeExpression(data) => {
+					trace!(target: LOG, "The alter was a merge expression data={data:?}");
 					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
 					self.current.to_mut().merge(ctx, opt, txn, data).await?
 				}
 				Data::ReplaceExpression(data) => {
+					trace!(target: LOG, "The alter was a replace expression data={data:?}");
 					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
 					self.current.to_mut().replace(ctx, opt, txn, data).await?
 				}
 				Data::ContentExpression(data) => {
+					trace!(target: LOG, "The alter was a content expression data={data:?}");
 					let data = data.compute(ctx, opt, txn, Some(&self.current)).await?;
 					self.current.to_mut().replace(ctx, opt, txn, data).await?
 				}
 				Data::SetExpression(x) => {
+					trace!(target: LOG, "The alter was a set expression x={x:?}");
 					for x in x.iter() {
 						let v = x.2.compute(ctx, opt, txn, Some(&self.current)).await?;
 						match x.1 {
@@ -61,6 +67,7 @@ impl<'a> Document<'a> {
 					}
 				}
 				Data::UpdateExpression(x) => {
+					trace!(target: LOG, "The alter was a update expression x={x:?}");
 					// Duplicate context
 					let mut ctx = Context::new(ctx);
 					// Add insertable value

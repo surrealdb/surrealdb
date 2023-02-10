@@ -54,6 +54,7 @@ impl LiveStatement {
 				// Insert the live query
 				let key = crate::key::lq::new(opt.ns(), opt.db(), &self.id);
 				run.putc(key, tb.as_str(), None).await?;
+				// TODO this is done - being recorded
 				// Insert the table live query
 				let key = crate::key::lv::new(opt.ns(), opt.db(), &tb, &self.id);
 				run.putc(key, self.clone(), None).await?;
@@ -66,6 +67,7 @@ impl LiveStatement {
 		};
 		// Return the query id
 		Ok(self.id.clone().into())
+		// Ok(Value::from("random-string-hugh"))
 	}
 }
 

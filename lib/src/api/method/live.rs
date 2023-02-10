@@ -6,6 +6,7 @@ use crate::api::Result;
 use crate::sql::Table;
 use crate::sql::Uuid;
 use crate::sql::Value;
+// use crate::sql::Value::Strand;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::pin::Pin;
@@ -27,7 +28,10 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let mut conn = Client::new(Method::Live);
+			// TODO taking string turning into table, we are expecting a string
 			conn.execute(self.router?, Param::new(vec![Value::Table(Table(self.table_name))])).await
+			// conn.execute(self.router?, Param::new(vec![Value::Strand(Strand(self.table_name))]))
+			// 	.await
 		})
 	}
 }

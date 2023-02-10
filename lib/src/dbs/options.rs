@@ -22,7 +22,7 @@ pub struct Options {
 	// Approximately how large is the current call stack?
 	dive: u8,
 	// Whether live queries are allowed?
-	pub live: bool,
+	pub live: bool, // This needs to be open vai WS. Instead do api test
 	// Should we force tables/events to re-run?
 	pub force: bool,
 	// Should we run permissions checks?

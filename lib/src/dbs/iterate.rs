@@ -1,4 +1,5 @@
 use crate::ctx::Context;
+use crate::dbs::LOG;
 use crate::dbs::Iterable;
 use crate::dbs::Iterator;
 use crate::dbs::Operable;
@@ -77,11 +78,13 @@ impl Iterable {
 					ite.process(ctx, opt, txn, stm, Some(v), val).await;
 				}
 				Iterable::Table(v) => {
+					trace!(target: LOG, "Inside iterate table: v__={:?}", v);
 					// Check that the table exists
 					txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
 					// Prepare the start and end keys
 					let beg = thing::prefix(opt.ns(), opt.db(), &v);
 					let end = thing::suffix(opt.ns(), opt.db(), &v);
+					trace!(target: LOG, "Inside iterate table: beg__={:?}     end__={:?}", beg, end);
 					// Prepare the next holder key
 					let mut nxt: Option<Vec<u8>> = None;
 					// Loop until no more keys
@@ -104,6 +107,7 @@ impl Iterable {
 								txn.clone().lock().await.scan(min..max, 1000).await?
 							}
 						};
+						trace!(target: LOG, " inside iterate table after scan beg__={:?}    end__={:?}    res_empty__={}", beg, end, res.is_empty());
 						// If there are key-value entries then fetch them
 						if !res.is_empty() {
 							// Get total results
@@ -118,9 +122,12 @@ impl Iterable {
 								if n == i + 1 {
 									nxt = Some(k.clone());
 								}
+								trace!(target: LOG, "inside iterate processing KV serdes   k__={:?}   v))={:?}", k, v);
 								// Parse the data from the store
 								let key: crate::key::thing::Thing = (&k).into();
 								let val: crate::sql::value::Value = (&v).into();
+								trace!(target: LOG, "deserialised {:?} : {:?}", key, val);
+								// map.Get(val.Table)?.WriteChannelMessage(Update{val})
 								let rid = Thing::from((key.tb, key.id));
 								// Create a new operable value
 								let val = Operable::Value(val);

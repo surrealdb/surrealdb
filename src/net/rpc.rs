@@ -15,17 +15,16 @@ use crate::rpc::res::Output;
 use futures::{SinkExt, StreamExt};
 use once_cell::sync::Lazy;
 use serde::Serialize;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::borrow::Borrow;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
 use surrealdb::dbs::Session;
-use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
-use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
+use surrealdb::sql::{Array, Uuid};
 use tokio::sync::RwLock;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
@@ -78,13 +77,12 @@ impl Rpc {
 	/// Serve the RPC endpoint
 	pub async fn serve(rpc: Arc<RwLock<Rpc>>, ws: WebSocket) {
 		// Create a channel for sending messages
-		let (chn, mut rcv) = channel::new(MAX_CONCURRENT_CALLS);
+		let (db_inbound_sender, mut db_outbound_receiver) = channel::new(MAX_CONCURRENT_CALLS);
 		// Split the socket into send and recv
-		let (mut wtx, mut wrx) = ws.split();
+		let (mut ws_outbound, mut ws_inbound) = ws.split();
 		// Clone the channel for sending pings
-		let png = chn.clone();
-		// The WebSocket has connected
-		Rpc::connected(rpc.clone(), chn.clone()).await;
+		let db_ping_sender = db_inbound_sender.clone();
+		Rpc::connected(rpc.clone(), db_inbound_sender.clone()).await;
 		// Send messages to the client
 		tokio::task::spawn(async move {
 			// Create the interval ticker
@@ -96,7 +94,7 @@ impl Rpc {
 				// Create the ping message
 				let msg = Message::ping(vec![]);
 				// Send the message to the client
-				if png.send(msg).await.is_err() {
+				if db_ping_sender.send(msg).await.is_err() {
 					// Exit out of the loop
 					break;
 				}
@@ -105,31 +103,34 @@ impl Rpc {
 		// Send messages to the client
 		tokio::task::spawn(async move {
 			// Wait for the next message to send
-			while let Some(res) = rcv.next().await {
+			while let Some(res) = db_outbound_receiver.next().await {
+				trace!(target: LOG, "Received message in net/rpc is {res:?}");
 				// Send the message to the client
-				if let Err(err) = wtx.send(res).await {
+				if let Err(err) = ws_outbound.send(res).await {
 					// Output the WebSocket error to the logs
 					trace!(target: LOG, "WebSocket error: {:?}", err);
 					// It's already failed, so ignore error
-					let _ = wtx.close().await;
+					let _ = ws_outbound.close().await;
 					// Exit out of the loop
 					break;
 				}
 			}
 		});
 		// Get messages from the client
-		while let Some(msg) = wrx.next().await {
+		while let Some(msg) = ws_inbound.next().await {
 			match msg {
 				// We've received a message from the client
 				Ok(msg) => match msg {
 					msg if msg.is_ping() => {
-						let _ = chn.send(Message::pong(vec![])).await;
+						let _ = db_inbound_sender.send(Message::pong(vec![])).await;
 					}
 					msg if msg.is_text() => {
-						tokio::task::spawn(Rpc::call(rpc.clone(), msg, chn.clone()));
+						trace!(target: LOG, "WS inbound message is text: {msg:?}");
+						tokio::task::spawn(Rpc::call(rpc.clone(), msg, db_inbound_sender.clone()));
 					}
 					msg if msg.is_binary() => {
-						tokio::task::spawn(Rpc::call(rpc.clone(), msg, chn.clone()));
+						trace!(target: LOG, "WS inbound message is binary: {msg:?}");
+						tokio::task::spawn(Rpc::call(rpc.clone(), msg, db_inbound_sender.clone()));
 					}
 					msg if msg.is_close() => {
 						break;
@@ -152,6 +153,9 @@ impl Rpc {
 		}
 		// The WebSocket has disconnected
 		Rpc::disconnected(rpc.clone()).await;
+		let id = rpc.read().await.uuid.clone();
+		trace!(target: LOG, "Removing id {id:?} from listened websockets");
+		WEBSOCKETS.write().await.remove(id.borrow());
 	}
 
 	async fn connected(rpc: Arc<RwLock<Rpc>>, chn: Sender<Message>) {
@@ -173,7 +177,7 @@ impl Rpc {
 	}
 
 	/// Call RPC methods from the WebSocket
-	async fn call(rpc: Arc<RwLock<Rpc>>, msg: Message, chn: Sender<Message>) {
+	async fn call(rpc: Arc<RwLock<Rpc>>, msg: Message, db_response_sender: Sender<Message>) {
 		// Get the current output format
 		let mut out = { rpc.read().await.format.clone() };
 		// Clone the RPC
@@ -196,11 +200,19 @@ impl Rpc {
 					// The SurrealQL message parsed ok
 					Ok(v) => v,
 					// The SurrealQL message failed to parse
-					_ => return res::failure(None, Failure::PARSE_ERROR).send(out, chn).await,
+					_ => {
+						return res::failure(None, Failure::PARSE_ERROR)
+							.send(out, db_response_sender)
+							.await
+					}
 				}
 			}
 			// Unsupported message type
-			_ => return res::failure(None, Failure::INTERNAL_ERROR).send(out, chn).await,
+			_ => {
+				return res::failure(None, Failure::INTERNAL_ERROR)
+					.send(out, db_response_sender)
+					.await
+			}
 		};
 		// Fetch the 'id' argument
 		let id = match req.pick(&*ID) {
@@ -210,18 +222,28 @@ impl Rpc {
 			v if v.is_number() => Some(v),
 			v if v.is_strand() => Some(v),
 			v if v.is_datetime() => Some(v),
-			_ => return res::failure(None, Failure::INVALID_REQUEST).send(out, chn).await,
+			_ => {
+				return res::failure(None, Failure::INVALID_REQUEST)
+					.send(out, db_response_sender)
+					.await
+			}
 		};
 		// Fetch the 'method' argument
 		let method = match req.pick(&*METHOD) {
 			Value::Strand(v) => v.to_raw(),
-			_ => return res::failure(id, Failure::INVALID_REQUEST).send(out, chn).await,
+			_ => {
+				return res::failure(id, Failure::INVALID_REQUEST)
+					.send(out, db_response_sender)
+					.await
+			}
 		};
+		trace!(target: LOG, "Evaluating target, it is {method:?} for req {req:?}");
 		// Fetch the 'params' argument
 		let params = match req.pick(&*PARAMS) {
 			Value::Array(v) => v,
 			_ => Array::new(),
 		};
+		println!("The params are: {params:?}");
 		// Match the method to a function
 		let res = match &method[..] {
 			// Handle a ping message
@@ -229,125 +251,223 @@ impl Rpc {
 			// Retrieve the current auth record
 			"info" => match params.len() {
 				0 => rpc.read().await.info().await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Switch to a specific namespace and database
 			"use" => match params.needs_two() {
 				Ok((Value::Strand(ns), Value::Strand(db))) => rpc.write().await.yuse(ns, db).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Signup to a specific authentication scope
 			"signup" => match params.needs_one() {
 				Ok(Value::Object(v)) => rpc.write().await.signup(v).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Signin as a root, namespace, database or scope user
 			"signin" => match params.needs_one() {
 				Ok(Value::Object(v)) => rpc.write().await.signin(v).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Invalidate the current authentication session
 			"invalidate" => match params.len() {
 				0 => rpc.write().await.invalidate().await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Authenticate using an authentication token
 			"authenticate" => match params.needs_one() {
 				Ok(Value::Strand(v)) => rpc.write().await.authenticate(v).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Kill a live query using a query id
 			"kill" => match params.needs_one() {
 				Ok(v) if v.is_uuid() => rpc.read().await.kill(v).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Setup a live query on a specific table
 			"live" => match params.needs_one() {
 				Ok(v) if v.is_table() => rpc.read().await.live(v).await,
 				Ok(v) if v.is_strand() => rpc.read().await.live(v).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					// let acshual = params.clone().needs_one().clone();
+					// trace!(target: LOG, "Failed to process live query?!? acshually = {acshual:?}");
+					trace!(target: LOG, "Failed to process live query?!?");
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await;
+				}
 			},
 			// Specify a connection-wide parameter
 			"let" => match params.needs_one_or_two() {
 				Ok((Value::Strand(s), v)) => rpc.write().await.set(s, v).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Specify a connection-wide parameter
 			"set" => match params.needs_one_or_two() {
 				Ok((Value::Strand(s), v)) => rpc.write().await.set(s, v).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Unset and clear a connection-wide parameter
 			"unset" => match params.needs_one() {
 				Ok(Value::Strand(s)) => rpc.write().await.unset(s).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Select a value or values from the database
 			"select" => match params.needs_one() {
 				Ok(v) => rpc.read().await.select(v).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Create a value or values in the database
 			"create" => match params.needs_one_or_two() {
 				Ok((v, o)) => rpc.read().await.create(v, o).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Update a value or values in the database using `CONTENT`
 			"update" => match params.needs_one_or_two() {
 				Ok((v, o)) => rpc.read().await.update(v, o).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Update a value or values in the database using `MERGE`
 			"change" | "merge" => match params.needs_one_or_two() {
 				Ok((v, o)) => rpc.read().await.change(v, o).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Update a value or values in the database using `PATCH`
 			"modify" | "patch" => match params.needs_one_or_two() {
 				Ok((v, o)) => rpc.read().await.modify(v, o).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Delete a value or values from the database
 			"delete" => match params.needs_one() {
 				Ok(v) => rpc.read().await.delete(v).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Specify the output format for text requests
 			"format" => match params.needs_one() {
 				Ok(Value::Strand(v)) => rpc.write().await.format(v).await,
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Get the current server version
 			"version" => match params.len() {
 				0 => Ok(format!("{PKG_NAME}-{}", *PKG_VERSION).into()),
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
 			// Run a full SurrealQL query against the database
 			"query" => match params.needs_one_or_two() {
 				Ok((Value::Strand(s), o)) if o.is_none_or_null() => {
 					return match rpc.read().await.query(s).await {
-						Ok(v) => res::success(id, v).send(out, chn).await,
+						Ok(v) => res::success(id, v).send(out, db_response_sender).await,
 						Err(e) => {
-							res::failure(id, Failure::custom(e.to_string())).send(out, chn).await
+							res::failure(id, Failure::custom(e.to_string()))
+								.send(out, db_response_sender)
+								.await
 						}
 					};
 				}
 				Ok((Value::Strand(s), Value::Object(o))) => {
 					return match rpc.read().await.query_with(s, o).await {
-						Ok(v) => res::success(id, v).send(out, chn).await,
+						Ok(v) => res::success(id, v).send(out, db_response_sender).await,
 						Err(e) => {
-							res::failure(id, Failure::custom(e.to_string())).send(out, chn).await
+							res::failure(id, Failure::custom(e.to_string()))
+								.send(out, db_response_sender)
+								.await
 						}
 					};
 				}
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+				_ => {
+					return res::failure(id, Failure::INVALID_PARAMS)
+						.send(out, db_response_sender)
+						.await
+				}
 			},
-			_ => return res::failure(id, Failure::METHOD_NOT_FOUND).send(out, chn).await,
+			_ => {
+				trace!(target: LOG, "Method not found");
+				return res::failure(id, Failure::METHOD_NOT_FOUND)
+					.send(out, db_response_sender)
+					.await;
+			}
 		};
 		// Return the final response
+		trace!(
+			target: LOG,
+			"The query result was completed: {res:?}, sending result back to websocket handler"
+		);
 		match res {
-			Ok(v) => res::success(id, v).send(out, chn).await,
-			Err(e) => res::failure(id, Failure::custom(e.to_string())).send(out, chn).await,
+			Ok(v) => res::success(id, v).send(out, db_response_sender).await,
+			Err(e) => {
+				res::failure(id, Failure::custom(e.to_string())).send(out, db_response_sender).await
+			}
 		}
 	}
 
@@ -458,6 +578,7 @@ impl Rpc {
 	}
 
 	async fn live(&self, tb: Value) -> Result<Value, Error> {
+		trace!(target: LOG, "Inside the rpc live processing, the value is {tb:?}");
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -469,10 +590,13 @@ impl Rpc {
 			String::from("tb") => tb.could_be_table(),
 			=> &self.vars
 		});
+		trace!(target: LOG, "About to execute query {sql:?} with vars {var:?}");
 		// Execute the query on the database
 		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		trace!(target: LOG, "The res was {res:?}");
 		// Extract the first query result
 		let res = res.remove(0).result?;
+		trace!(target: LOG, "After removing first index {res:?}");
 		// Return the result to the client
 		Ok(res)
 	}

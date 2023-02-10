@@ -152,6 +152,7 @@ pub(crate) fn from_value<T>(value: sql::Value) -> Result<T>
 where
 	T: DeserializeOwned,
 {
+	println!("in opt/mod, Deserialising {value:?}");
 	let bytes = match msgpack::to_vec(&value) {
 		Ok(bytes) => bytes,
 		Err(error) => {
@@ -162,8 +163,12 @@ where
 			.into());
 		}
 	};
+	println!("in opt/mod, before some weird bytes stuff {bytes:?}");
 	match msgpack::from_slice(&bytes) {
-		Ok(response) => Ok(response),
+		Ok(response) => {
+			println!("Deserialising was ok");
+			Ok(response)
+		}
 		Err(error) => Err(Error::FromValue {
 			value,
 			error: error.to_string(),

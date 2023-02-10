@@ -960,6 +960,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
+		// TODO this already exists for live queries
 		let key = crate::key::lv::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {

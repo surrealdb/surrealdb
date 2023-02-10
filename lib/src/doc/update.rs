@@ -33,6 +33,7 @@ impl<'a> Document<'a> {
 		// Run table queries
 		self.table(ctx, opt, txn, stm).await?;
 		// Run lives queries
+		// this in relation to sec/allow
 		self.lives(ctx, opt, txn, stm).await?;
 		// Run event queries
 		self.event(ctx, opt, txn, stm).await?;

@@ -11,6 +11,7 @@ use crate::api::engine::remote::ws::Response;
 use crate::api::engine::remote::ws::PING_INTERVAL;
 use crate::api::engine::remote::ws::PING_METHOD;
 use crate::api::err::Error;
+use crate::api::opt::from_json;
 use crate::api::opt::from_value;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -29,6 +30,7 @@ use futures_concurrency::stream::Merge as _;
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
+use serde_json::json;
 use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
@@ -171,8 +173,12 @@ impl Connection for Client {
 	{
 		Box::pin(async move {
 			let response = rx.into_recv_async().await?;
+			println!("Inside the ws recv and the response is {response:?}");
 			match response? {
-				DbResponse::Other(value) => from_value(value),
+				DbResponse::Other(value) => {
+					let v = from_json(json!(value));
+					from_value(v)
+				}
 				DbResponse::Query(..) => unreachable!(),
 			}
 		})

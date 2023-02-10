@@ -18,6 +18,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::mem;
 
+#[derive(Debug)]
 pub(crate) enum Iterable {
 	Value(Value),
 	Table(Table),
@@ -28,12 +29,14 @@ pub(crate) enum Iterable {
 	Relatable(Thing, Thing, Thing),
 }
 
+#[derive(Debug)]
 pub(crate) enum Operable {
 	Value(Value),
 	Mergeable(Value, Value),
 	Relatable(Thing, Value, Thing),
 }
 
+#[derive(Debug)]
 pub(crate) enum Workable {
 	Normal,
 	Insert(Value),
@@ -387,7 +390,9 @@ impl Iterator {
 			false => {
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
+					trace!(target: LOG, "Single threaded iteration: stm__={:?}    v__={:?}", stm, v);
 					v.iterate(ctx, opt, txn, stm, self).await?;
+					trace!(target: LOG, "Single threaded after iteration: stm__={:?}", stm);
 				}
 				// Everything processed ok
 				Ok(())
@@ -406,6 +411,7 @@ impl Iterator {
 				let adocs = async {
 					// Process all prepared values
 					for v in vals {
+						trace!(target: LOG, "Inside adocs: stm__={}   v__={:?}", stm, v);
 						exe.spawn(v.channel(ctx, opt, txn, stm, chn.clone()))
 							// Ensure we detach the spawned task
 							.detach();
@@ -419,6 +425,7 @@ impl Iterator {
 				let avals = async {
 					// Process all received values
 					while let Ok((k, v)) = docs.recv().await {
+						trace!(target: LOG, "Inside avals: stm__={}    k__={:?}    v__={:?}", stm, k, v);
 						exe.spawn(Document::compute(ctx, opt, txn, stm, chn.clone(), k, v))
 							// Ensure we detach the spawned task
 							.detach();
@@ -430,6 +437,7 @@ impl Iterator {
 				let aproc = async {
 					// Process all processed values
 					while let Ok(r) = vals.recv().await {
+						trace!(target: LOG, "Inside aproc: stm__={}    result={:?}", stm, r);
 						self.result(r, stm);
 					}
 					// Shutdown the executor
@@ -468,7 +476,8 @@ impl Iterator {
 			Operable::Relatable(f, v, w) => (v, Workable::Relate(f, w)),
 		};
 		// Setup a new document
-		let mut doc = Document::new(thg, &val.0, val.1);
+		let mut doc = Document::new(thg, &val.0, val.1); // ext= mergable, relatbale etc
+		trace!(target: LOG, "Now processing the doc: doc__={:?}", doc);
 		// Process the document
 		let res = match stm {
 			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,

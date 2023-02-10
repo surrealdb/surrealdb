@@ -37,7 +37,7 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check events
-		if !opt.tables {
+		if !opt.tables { // foreign tables disabled? schema only, not link
 			return Ok(());
 		}
 		// Check if forced
@@ -57,7 +57,7 @@ impl<'a> Document<'a> {
 			Action::Update
 		};
 		// Loop through all foreign table statements
-		for ft in self.ft(opt, txn).await?.iter() {
+		for ft in self.ft(opt, txn).await?.iter() { // Get all the foreign tables (for live query)
 			// Get the table definition
 			let tb = ft.view.as_ref().unwrap();
 			// Check if there is a GROUP BY clause

@@ -62,6 +62,7 @@ impl<'a> Document<'a> {
 						});
 					}
 				}
+				// This is where permissions are checked
 				// Check for a PERMISSIONS clause
 				if opt.perms && opt.auth.perms() {
 					// Get the permission clause
@@ -85,6 +86,7 @@ impl<'a> Document<'a> {
 							ctx.add_value("after".into(), &val);
 							ctx.add_value("before".into(), &old);
 							// Process the PERMISSION clause
+							// Actual logic happening here
 							if !e.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 								val = old
 							}

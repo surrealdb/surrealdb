@@ -7,11 +7,13 @@ use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
 use crate::sql::statements::define::DefineIndexStatement;
 use crate::sql::statements::define::DefineTableStatement;
+use crate::sql::statements::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::borrow::Cow;
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub(crate) struct Document<'a> {
 	pub(super) id: Option<Thing>,
 	pub(super) extras: Workable,
@@ -28,6 +30,7 @@ impl<'a> From<&Document<'a>> for Vec<u8> {
 impl<'a> Document<'a> {
 	pub fn new(id: Option<Thing>, val: &'a Value, ext: Workable) -> Self {
 		Document {
+			// This is where CDC is recorded
 			id,
 			extras: ext,
 			current: Cow::Borrowed(val),
@@ -80,13 +83,14 @@ impl<'a> Document<'a> {
 	}
 	/// Get the foreign tables for this document
 	pub async fn ft(
+		// implementation, uses memoization behind the scenes
 		&self,
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		// Get the record id
-		let id = self.id.as_ref().unwrap();
-		// Get the table definitions
+		let id = self.id.as_ref().unwrap(); // This is where grabbing doc happens. Doc has {initial, current, id}
+									// Get the table definitions
 		txn.clone().lock().await.all_ft(opt.ns(), opt.db(), &id.tb).await
 	}
 	/// Get the events for this document
@@ -95,6 +99,7 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		txn: &Transaction,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
+		// Defining schema
 		// Get the record id
 		let id = self.id.as_ref().unwrap();
 		// Get the event definitions
@@ -121,5 +126,17 @@ impl<'a> Document<'a> {
 		let id = self.id.as_ref().unwrap();
 		// Get the index definitions
 		txn.clone().lock().await.all_ix(opt.ns(), opt.db(), &id.tb).await
+	}
+
+	/// Get the live queries for this document
+	pub async fn lv(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Arc<[LiveStatement]>, Error> {
+		// Get the record id
+		let id = self.id.as_ref().unwrap();
+		// Get the index definitions
+		txn.clone().lock().await.all_lv(opt.ns(), opt.db(), &id.tb).await // TODO this needs to include remote node info and that must be correlated with heartbeats and GC
 	}
 }
