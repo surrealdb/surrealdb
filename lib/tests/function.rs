@@ -481,3 +481,59 @@ async fn function_not() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn function_type_thing() -> Result<(), Error> {
+	let sql = r#"
+		CREATE type::thing('person', 'test');
+		CREATE type::thing('person', 1434619);
+		CREATE type::thing('city', '8e60244d-95f6-4f95-9e30-09a98977efb0');
+		CREATE type::thing('temperature', ['London', '2022-09-30T20:25:01.406828Z']);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:test,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: person:1434619,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: city:⟨8e60244d-95f6-4f95-9e30-09a98977efb0⟩,
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				id: temperature:['London', '2022-09-30T20:25:01.406828Z'],
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}

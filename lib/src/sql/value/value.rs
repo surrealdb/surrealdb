@@ -827,7 +827,9 @@ impl Value {
 
 	pub fn as_string(self) -> String {
 		match self {
-			Value::Strand(v) => v.as_string(),
+			Value::Strand(v) => v.0,
+			Value::Uuid(v) => v.to_raw(),
+			Value::Datetime(v) => v.to_raw(),
 			_ => self.to_string(),
 		}
 	}
@@ -844,7 +846,7 @@ impl Value {
 			Value::Strand(v) => v.0,
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.to_raw(),
-			_ => self.as_string(),
+			_ => self.to_string(),
 		}
 	}
 
