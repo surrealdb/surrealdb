@@ -338,11 +338,17 @@ impl Rpc {
 	}
 
 	async fn signup(&mut self, vars: Object) -> Result<Value, Error> {
-		crate::iam::signup::signup(&mut self.session, vars).await.map_err(Into::into)
+		crate::iam::signup::signup(&mut self.session, vars)
+			.await
+			.map(Into::into)
+			.map_err(Into::into)
 	}
 
 	async fn signin(&mut self, vars: Object) -> Result<Value, Error> {
-		crate::iam::signin::signin(&mut self.session, vars).await.map_err(Into::into)
+		crate::iam::signin::signin(&mut self.session, vars)
+			.await
+			.map(Into::into)
+			.map_err(Into::into)
 	}
 
 	async fn invalidate(&mut self) -> Result<Value, Error> {

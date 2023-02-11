@@ -14,11 +14,12 @@ const MAX: u64 = 1024; // 1 KiB
 struct Success {
 	code: u16,
 	details: String,
-	token: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	token: Option<String>,
 }
 
 impl Success {
-	fn new(token: String) -> Success {
+	fn new(token: Option<String>) -> Success {
 		Success {
 			token,
 			code: 200,
@@ -58,11 +59,11 @@ async fn handler(
 		Ok(Value::Object(vars)) => match crate::iam::signup::signup(&mut session, vars).await {
 			// Authentication was successful
 			Ok(v) => match output.as_deref() {
-				Some("application/json") => Ok(output::json(&Success::new(v.as_string()))),
-				Some("application/cbor") => Ok(output::cbor(&Success::new(v.as_string()))),
-				Some("application/msgpack") => Ok(output::pack(&Success::new(v.as_string()))),
-				Some("text/plain") => Ok(output::text(v.as_string())),
-				None => Ok(output::text(v.as_string())),
+				Some("application/json") => Ok(output::json(&Success::new(v))),
+				Some("application/cbor") => Ok(output::cbor(&Success::new(v))),
+				Some("application/msgpack") => Ok(output::pack(&Success::new(v))),
+				Some("text/plain") => Ok(output::text(v.unwrap_or_default())),
+				None => Ok(output::none()),
 				// An incorrect content-type was requested
 				_ => Err(warp::reject::custom(Error::InvalidType)),
 			},
