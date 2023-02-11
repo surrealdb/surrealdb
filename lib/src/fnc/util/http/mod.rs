@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::sql::json;
 use crate::sql::object::Object;
 use crate::sql::strand::Strand;
 use crate::sql::value::Value;
@@ -49,8 +50,20 @@ pub async fn get(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
 	// Check the response status
 	match res.status() {
 		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
-			Some(mime) if mime == "application/json" => Ok(res.json().await?),
-			_ => Ok(res.text().await?.into()),
+			Some(mime) => match mime.to_str() {
+				Ok(v) if v.starts_with("application/json") => {
+					let txt = res.text().await?;
+					let val = json(&txt)?;
+					Ok(val)
+				}
+				Ok(v) if v.starts_with("text") => {
+					let txt = res.text().await?;
+					let val = txt.into();
+					Ok(val)
+				}
+				_ => Ok(Value::None),
+			},
+			_ => Ok(Value::None),
 		},
 		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
 	}
@@ -78,8 +91,20 @@ pub async fn put(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<Va
 	// Check the response status
 	match res.status() {
 		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
-			Some(mime) if mime == "application/json" => Ok(res.json().await?),
-			_ => Ok(res.text().await?.into()),
+			Some(mime) => match mime.to_str() {
+				Ok(v) if v.starts_with("application/json") => {
+					let txt = res.text().await?;
+					let val = json(&txt)?;
+					Ok(val)
+				}
+				Ok(v) if v.starts_with("text") => {
+					let txt = res.text().await?;
+					let val = txt.into();
+					Ok(val)
+				}
+				_ => Ok(Value::None),
+			},
+			_ => Ok(Value::None),
 		},
 		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
 	}
@@ -107,8 +132,20 @@ pub async fn post(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<V
 	// Check the response status
 	match res.status() {
 		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
-			Some(mime) if mime == "application/json" => Ok(res.json().await?),
-			_ => Ok(res.text().await?.into()),
+			Some(mime) => match mime.to_str() {
+				Ok(v) if v.starts_with("application/json") => {
+					let txt = res.text().await?;
+					let val = json(&txt)?;
+					Ok(val)
+				}
+				Ok(v) if v.starts_with("text") => {
+					let txt = res.text().await?;
+					let val = txt.into();
+					Ok(val)
+				}
+				_ => Ok(Value::None),
+			},
+			_ => Ok(Value::None),
 		},
 		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
 	}
@@ -136,8 +173,20 @@ pub async fn patch(uri: Strand, body: Value, opts: impl Into<Object>) -> Result<
 	// Check the response status
 	match res.status() {
 		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
-			Some(mime) if mime == "application/json" => Ok(res.json().await?),
-			_ => Ok(res.text().await?.into()),
+			Some(mime) => match mime.to_str() {
+				Ok(v) if v.starts_with("application/json") => {
+					let txt = res.text().await?;
+					let val = json(&txt)?;
+					Ok(val)
+				}
+				Ok(v) if v.starts_with("text") => {
+					let txt = res.text().await?;
+					let val = txt.into();
+					Ok(val)
+				}
+				_ => Ok(Value::None),
+			},
+			_ => Ok(Value::None),
 		},
 		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
 	}
@@ -161,8 +210,20 @@ pub async fn delete(uri: Strand, opts: impl Into<Object>) -> Result<Value, Error
 	// Check the response status
 	match res.status() {
 		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
-			Some(mime) if mime == "application/json" => Ok(res.json().await?),
-			_ => Ok(res.text().await?.into()),
+			Some(mime) => match mime.to_str() {
+				Ok(v) if v.starts_with("application/json") => {
+					let txt = res.text().await?;
+					let val = json(&txt)?;
+					Ok(val)
+				}
+				Ok(v) if v.starts_with("text") => {
+					let txt = res.text().await?;
+					let val = txt.into();
+					Ok(val)
+				}
+				_ => Ok(Value::None),
+			},
+			_ => Ok(Value::None),
 		},
 		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
 	}
