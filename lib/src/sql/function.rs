@@ -9,6 +9,7 @@ use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::script::{script as func, Script};
 use crate::sql::value::{single, value, Value};
+use futures::future::try_join_all;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
@@ -117,25 +118,25 @@ impl Function {
 		// Process the function type
 		match self {
 			Self::Cast(s, x) => {
-				let v = x.compute(ctx, opt, txn, doc).await?;
-				fnc::cast::run(ctx, s, v)
+				// Compute the value to be cast
+				let a = x.compute(ctx, opt, txn, doc).await?;
+				// Run the cast function
+				fnc::cast::run(ctx, s, a)
 			}
 			Self::Normal(s, x) => {
-				let mut a: Vec<Value> = Vec::with_capacity(x.len());
-				for v in x {
-					a.push(v.compute(ctx, opt, txn, doc).await?);
-				}
+				// Compute the function arguments
+				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+				// Run the normal function
 				fnc::run(ctx, s, a).await
 			}
 			#[allow(unused_variables)]
 			Self::Script(s, x) => {
 				#[cfg(feature = "scripting")]
 				{
-					let mut a: Vec<Value> = Vec::with_capacity(x.len());
-					for v in x {
-						a.push(v.compute(ctx, opt, txn, doc).await?);
-					}
-					fnc::script::run(ctx, doc, s, a).await
+					// Compute the function arguments
+					let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+					// Run the script function
+					fnc::script::run(ctx, opt, txn, doc, s, a).await
 				}
 				#[cfg(not(feature = "scripting"))]
 				{
