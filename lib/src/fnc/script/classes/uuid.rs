@@ -17,7 +17,7 @@ pub mod uuid {
 
 	impl Uuid {
 		#[quickjs(constructor)]
-		pub fn new(value: String) -> Self {
+		pub fn new(value: String, args: Rest<Value>) -> Self {
 			Self {
 				value,
 			}
@@ -27,7 +27,7 @@ pub mod uuid {
 			&self.value
 		}
 		/// Convert the object to a string
-		pub fn toString(&self) -> String {
+		pub fn toString(&self, args: Rest<Value>) -> String {
 			self.value.to_owned()
 		}
 		/// Convert the object to JSON

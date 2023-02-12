@@ -19,7 +19,7 @@ pub mod record {
 
 	impl Record {
 		#[quickjs(constructor)]
-		pub fn new(tb: String, id: String) -> Self {
+		pub fn new(tb: String, id: String, args: Rest<Value>) -> Self {
 			Self {
 				tb,
 				id,
@@ -34,7 +34,7 @@ pub mod record {
 			&self.id
 		}
 		/// Convert the object to a string
-		pub fn toString(&self) -> String {
+		pub fn toString(&self, args: Rest<Value>) -> String {
 			format!("{}:{}", self.tb, self.id)
 		}
 		/// Convert the object to JSON
