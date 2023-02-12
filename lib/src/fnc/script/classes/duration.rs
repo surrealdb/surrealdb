@@ -26,6 +26,10 @@ pub mod duration {
 		pub fn value(&self) -> &str {
 			&self.value
 		}
+		// Compare two Duration instances
+		pub fn is(a: &Duration, b: &Duration, args: Rest<Value>) -> bool {
+			a.value == b.value
+		}
 		/// Convert the object to a string
 		pub fn toString(&self, args: Rest<Value>) -> String {
 			self.value.to_owned()

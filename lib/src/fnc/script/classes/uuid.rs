@@ -26,6 +26,10 @@ pub mod uuid {
 		pub fn value(&self) -> &str {
 			&self.value
 		}
+		// Compare two Uuid instances
+		pub fn is(a: &Uuid, b: &Uuid, args: Rest<Value>) -> bool {
+			a.value == b.value
+		}
 		/// Convert the object to a string
 		pub fn toString(&self, args: Rest<Value>) -> String {
 			self.value.to_owned()

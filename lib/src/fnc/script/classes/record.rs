@@ -33,6 +33,10 @@ pub mod record {
 		pub fn id(&self) -> &str {
 			&self.id
 		}
+		// Compare two Record instances
+		pub fn is(a: &Record, b: &Record, args: Rest<Value>) -> bool {
+			a.tb == b.tb && a.id == b.id
+		}
 		/// Convert the object to a string
 		pub fn toString(&self, args: Rest<Value>) -> String {
 			format!("{}:{}", self.tb, self.id)
