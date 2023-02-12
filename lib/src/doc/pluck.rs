@@ -62,6 +62,8 @@ impl<'a> Document<'a> {
 							Permission::Full => (),
 							Permission::None => out.del(ctx, opt, txn, k).await?,
 							Permission::Specific(e) => {
+								// Disable permissions
+								let opt = &opt.perms(false);
 								// Get the current value
 								let val = self.current.pick(k);
 								// Configure the context

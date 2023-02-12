@@ -33,7 +33,7 @@ impl<'a> Document<'a> {
 				Permission::None => return Err(Error::Ignore),
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {
-					// Ensure permissions are disabled
+					// Disable permissions
 					let opt = &opt.perms(false);
 					// Process the PERMISSION clause
 					if !e.compute(ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
