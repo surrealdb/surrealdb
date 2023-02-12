@@ -5,6 +5,8 @@ use super::modules;
 use super::modules::loader;
 use super::modules::resolver;
 use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::value::Value;
 use js::Function;
@@ -15,6 +17,8 @@ use js::This;
 
 pub async fn run(
 	ctx: &Context<'_>,
+	_opt: &Options,
+	_txn: &Transaction,
 	doc: Option<&Value>,
 	src: &str,
 	arg: Vec<Value>,
@@ -57,6 +61,8 @@ pub async fn run(
 		)?;
 		// Register the fetch function to the globals
 		global.init_def::<globals::fetch::Fetch>()?;
+		// Register the console function to the globals
+		global.init_def::<globals::console::Console>()?;
 		// Register the special SurrealDB types as classes
 		global.init_def::<classes::duration::Duration>()?;
 		global.init_def::<classes::record::Record>()?;
