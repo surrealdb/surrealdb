@@ -243,6 +243,7 @@ fn duration_raw(i: &str) -> IResult<&str, Duration> {
 		Duration(match u {
 			"ns" => time::Duration::from_nanos(v),
 			"µs" => time::Duration::from_micros(v),
+			"us" => time::Duration::from_micros(v),
 			"ms" => time::Duration::from_millis(v),
 			"s" => time::Duration::from_secs(v),
 			"m" => time::Duration::from_secs(v * SECONDS_PER_MINUTE),
@@ -263,6 +264,7 @@ fn unit(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("ns"),
 		tag("µs"),
+		tag("us"),
 		tag("ms"),
 		tag("s"),
 		tag("m"),
