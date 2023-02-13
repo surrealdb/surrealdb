@@ -10,6 +10,7 @@ pub mod record {
 
 	#[derive(Clone)]
 	#[quickjs(class)]
+	#[quickjs(cloneable)]
 	pub struct Record {
 		#[quickjs(hide)]
 		pub(crate) tb: String,

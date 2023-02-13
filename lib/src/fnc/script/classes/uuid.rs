@@ -10,6 +10,7 @@ pub mod uuid {
 
 	#[derive(Clone)]
 	#[quickjs(class)]
+	#[quickjs(cloneable)]
 	pub struct Uuid {
 		#[quickjs(hide)]
 		pub(crate) value: String,

@@ -10,6 +10,7 @@ pub mod duration {
 
 	#[derive(Clone)]
 	#[quickjs(class)]
+	#[quickjs(cloneable)]
 	pub struct Duration {
 		#[quickjs(hide)]
 		pub(crate) value: String,
