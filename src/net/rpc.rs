@@ -13,8 +13,10 @@ use crate::rpc::res;
 use crate::rpc::res::Failure;
 use crate::rpc::res::Output;
 use futures::{SinkExt, StreamExt};
+use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
@@ -22,10 +24,15 @@ use surrealdb::dbs::Session;
 use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
+use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 use tokio::sync::RwLock;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
+
+type WebSockets = RwLock<HashMap<Uuid, Sender<Message>>>;
+
+static WEBSOCKETS: Lazy<WebSockets> = Lazy::new(|| WebSockets::default());
 
 #[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
@@ -44,6 +51,7 @@ async fn socket(ws: WebSocket, session: Session) {
 pub struct Rpc {
 	session: Session,
 	format: Output,
+	uuid: Uuid,
 	vars: BTreeMap<String, Value>,
 }
 
@@ -54,12 +62,15 @@ impl Rpc {
 		let vars = BTreeMap::new();
 		// Set the default output format
 		let format = Output::Json;
+		// Create a unique WebSocket id
+		let uuid = Uuid::new_v4();
 		// Enable real-time live queries
 		session.rt = true;
 		// Create and store the Rpc connection
 		Arc::new(RwLock::new(Rpc {
 			session,
 			format,
+			uuid,
 			vars,
 		}))
 	}
@@ -72,6 +83,8 @@ impl Rpc {
 		let (mut wtx, mut wrx) = ws.split();
 		// Clone the channel for sending pings
 		let png = chn.clone();
+		// The WebSocket has connected
+		Rpc::connected(rpc.clone(), chn.clone()).await;
 		// Send messages to the client
 		tokio::task::spawn(async move {
 			// Create the interval ticker
@@ -137,6 +150,26 @@ impl Rpc {
 				}
 			}
 		}
+		// The WebSocket has disconnected
+		Rpc::disconnected(rpc.clone()).await;
+	}
+
+	async fn connected(rpc: Arc<RwLock<Rpc>>, chn: Sender<Message>) {
+		// Fetch the unique id of the WebSocket
+		let id = rpc.read().await.uuid.clone();
+		// Log that the WebSocket has connected
+		trace!(target: LOG, "WebSocket {} connected", id);
+		// Store this WebSocket in the list of WebSockets
+		WEBSOCKETS.write().await.insert(id, chn);
+	}
+
+	async fn disconnected(rpc: Arc<RwLock<Rpc>>) {
+		// Fetch the unique id of the WebSocket
+		let id = rpc.read().await.uuid.clone();
+		// Log that the WebSocket has disconnected
+		trace!(target: LOG, "WebSocket {} disconnected", id);
+		// Remove this WebSocket from the list of WebSockets
+		WEBSOCKETS.write().await.remove(&id);
 	}
 
 	/// Call RPC methods from the WebSocket
