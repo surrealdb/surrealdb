@@ -32,7 +32,7 @@ use warp::Filter;
 
 type WebSockets = RwLock<HashMap<Uuid, Sender<Message>>>;
 
-static WEBSOCKETS: Lazy<WebSockets> = Lazy::new(|| WebSockets::default());
+static WEBSOCKETS: Lazy<WebSockets> = Lazy::new(WebSockets::default);
 
 #[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
