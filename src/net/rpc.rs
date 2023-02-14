@@ -263,6 +263,7 @@ impl Rpc {
 			},
 			// Setup a live query on a specific table
 			"live" => match params.needs_one() {
+				Ok(v) if v.is_table() => rpc.read().await.live(v).await,
 				Ok(v) if v.is_strand() => rpc.read().await.live(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},

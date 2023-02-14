@@ -666,6 +666,10 @@ impl Value {
 		matches!(self, Value::Range(_))
 	}
 
+	pub fn is_table(&self) -> bool {
+		matches!(self, Value::Table(_))
+	}
+
 	pub fn is_strand(&self) -> bool {
 		matches!(self, Value::Strand(_))
 	}
