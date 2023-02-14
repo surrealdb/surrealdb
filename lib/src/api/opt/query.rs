@@ -206,7 +206,7 @@ where
 			[] => Ok(None),
 			[value] => {
 				let value = mem::take(value);
-				from_value(value)
+				from_value(value).map_err(Into::into)
 			}
 			_ => Err(Error::LossyTake(QueryResponse(mem::take(map))).into()),
 		};
@@ -257,7 +257,7 @@ where
 				let Some(value) = object.remove(key) else {
                     return Ok(None);
                 };
-				from_value(value)
+				from_value(value).map_err(Into::into)
 			}
 			_ => Ok(None),
 		}
@@ -275,7 +275,7 @@ where
 				return Ok(vec![]);
 			}
 		};
-		from_value(vec.into())
+		from_value(vec.into()).map_err(Into::into)
 	}
 }
 
@@ -306,7 +306,7 @@ where
 				}
 			}
 		}
-		from_value(vec.into())
+		from_value(vec.into()).map_err(Into::into)
 	}
 }
 

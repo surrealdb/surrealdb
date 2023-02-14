@@ -57,6 +57,8 @@ use std::str::FromStr;
 
 static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Values(pub Vec<Value>);
 
@@ -1446,32 +1448,32 @@ impl Serialize for Value {
 	{
 		if is_internal_serialization() {
 			match self {
-				Value::None => s.serialize_unit_variant("Value", 0, "None"),
-				Value::Null => s.serialize_unit_variant("Value", 1, "Null"),
-				Value::False => s.serialize_unit_variant("Value", 2, "False"),
-				Value::True => s.serialize_unit_variant("Value", 3, "True"),
-				Value::Number(v) => s.serialize_newtype_variant("Value", 4, "Number", v),
-				Value::Strand(v) => s.serialize_newtype_variant("Value", 5, "Strand", v),
-				Value::Duration(v) => s.serialize_newtype_variant("Value", 6, "Duration", v),
-				Value::Datetime(v) => s.serialize_newtype_variant("Value", 7, "Datetime", v),
-				Value::Uuid(v) => s.serialize_newtype_variant("Value", 8, "Uuid", v),
-				Value::Array(v) => s.serialize_newtype_variant("Value", 9, "Array", v),
-				Value::Object(v) => s.serialize_newtype_variant("Value", 10, "Object", v),
-				Value::Geometry(v) => s.serialize_newtype_variant("Value", 11, "Geometry", v),
-				Value::Param(v) => s.serialize_newtype_variant("Value", 12, "Param", v),
-				Value::Idiom(v) => s.serialize_newtype_variant("Value", 13, "Idiom", v),
-				Value::Table(v) => s.serialize_newtype_variant("Value", 14, "Table", v),
-				Value::Thing(v) => s.serialize_newtype_variant("Value", 15, "Thing", v),
-				Value::Model(v) => s.serialize_newtype_variant("Value", 16, "Model", v),
-				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
-				Value::Block(v) => s.serialize_newtype_variant("Value", 18, "Block", v),
-				Value::Range(v) => s.serialize_newtype_variant("Value", 19, "Range", v),
-				Value::Edges(v) => s.serialize_newtype_variant("Value", 20, "Edges", v),
-				Value::Future(v) => s.serialize_newtype_variant("Value", 21, "Future", v),
-				Value::Constant(v) => s.serialize_newtype_variant("Value", 22, "Constant", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 23, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 24, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 25, "Expression", v),
+				Value::None => s.serialize_unit_variant(TOKEN, 0, "None"),
+				Value::Null => s.serialize_unit_variant(TOKEN, 1, "Null"),
+				Value::False => s.serialize_unit_variant(TOKEN, 2, "False"),
+				Value::True => s.serialize_unit_variant(TOKEN, 3, "True"),
+				Value::Number(v) => s.serialize_newtype_variant(TOKEN, 4, "Number", v),
+				Value::Strand(v) => s.serialize_newtype_variant(TOKEN, 5, "Strand", v),
+				Value::Duration(v) => s.serialize_newtype_variant(TOKEN, 6, "Duration", v),
+				Value::Datetime(v) => s.serialize_newtype_variant(TOKEN, 7, "Datetime", v),
+				Value::Uuid(v) => s.serialize_newtype_variant(TOKEN, 8, "Uuid", v),
+				Value::Array(v) => s.serialize_newtype_variant(TOKEN, 9, "Array", v),
+				Value::Object(v) => s.serialize_newtype_variant(TOKEN, 10, "Object", v),
+				Value::Geometry(v) => s.serialize_newtype_variant(TOKEN, 11, "Geometry", v),
+				Value::Param(v) => s.serialize_newtype_variant(TOKEN, 12, "Param", v),
+				Value::Idiom(v) => s.serialize_newtype_variant(TOKEN, 13, "Idiom", v),
+				Value::Table(v) => s.serialize_newtype_variant(TOKEN, 14, "Table", v),
+				Value::Thing(v) => s.serialize_newtype_variant(TOKEN, 15, "Thing", v),
+				Value::Model(v) => s.serialize_newtype_variant(TOKEN, 16, "Model", v),
+				Value::Regex(v) => s.serialize_newtype_variant(TOKEN, 17, "Regex", v),
+				Value::Block(v) => s.serialize_newtype_variant(TOKEN, 18, "Block", v),
+				Value::Range(v) => s.serialize_newtype_variant(TOKEN, 19, "Range", v),
+				Value::Edges(v) => s.serialize_newtype_variant(TOKEN, 20, "Edges", v),
+				Value::Future(v) => s.serialize_newtype_variant(TOKEN, 21, "Future", v),
+				Value::Constant(v) => s.serialize_newtype_variant(TOKEN, 22, "Constant", v),
+				Value::Function(v) => s.serialize_newtype_variant(TOKEN, 23, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant(TOKEN, 24, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant(TOKEN, 25, "Expression", v),
 			}
 		} else {
 			match self {

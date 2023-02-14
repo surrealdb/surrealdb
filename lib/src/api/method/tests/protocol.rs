@@ -123,7 +123,7 @@ impl Connection for Client {
 		Box::pin(async move {
 			let result = rx.into_recv_async().await.unwrap();
 			match result.unwrap() {
-				DbResponse::Other(value) => from_value(value),
+				DbResponse::Other(value) => from_value(value).map_err(Into::into),
 				DbResponse::Query(..) => unreachable!(),
 			}
 		})
