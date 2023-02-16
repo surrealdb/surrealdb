@@ -8,7 +8,7 @@ use nom::bytes::complete::is_not;
 use nom::bytes::complete::take_while_m_n;
 use nom::character::complete::char;
 use nom::combinator::value;
-use nom::Err::Error;
+use nom::Err::Failure;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops;
@@ -20,6 +20,8 @@ const SINGLE_ESC: &str = r#"\'"#;
 
 const DOUBLE: char = '"';
 const DOUBLE_ESC: &str = r#"\""#;
+
+const SURROGATES: [u32; 2] = [55296, 57343];
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Strand(pub String);
@@ -164,14 +166,19 @@ fn strand_unicode(i: &str) -> IResult<&str, char> {
 	// We can convert this to u32 as we only have 6 chars
 	let v = match u32::from_str_radix(v, 16) {
 		// We found an invalid unicode sequence
-		Err(_) => return Err(Error(Parser(i))),
+		Err(_) => return Err(Failure(Parser(i))),
 		// The unicode sequence was valid
-		Ok(v) => v,
+		Ok(v) => match v {
+			// This is a surrogate, so convert to a space
+			v if v >= SURROGATES[0] && v <= SURROGATES[1] => 32,
+			// This is a valid UTF-8 / UTF-16 character
+			_ => v,
+		},
 	};
 	// We can convert this to char as we know it is valid
 	let v = match std::char::from_u32(v) {
 		// We found an invalid unicode sequence
-		None => return Err(Error(Parser(i))),
+		None => return Err(Failure(Parser(i))),
 		// The unicode sequence was valid
 		Some(v) => v,
 	};
