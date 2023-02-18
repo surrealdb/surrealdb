@@ -175,7 +175,7 @@ impl<'a> Statement<'a> {
 			_ => None,
 		}
 	}
-	/// Returns any RETURN clause if specified
+	/// Returns any PARALLEL clause if specified
 	#[inline]
 	#[allow(dead_code)]
 	pub fn parallel(&self) -> bool {
