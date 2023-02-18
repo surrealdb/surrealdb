@@ -180,7 +180,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::concat" => string::concat,
 		"string::endsWith" => string::ends_with,
 		"string::join" => string::join,
-		"string::length" => string::length,
+		"string::len" => string::len,
 		"string::lowercase" => string::lowercase,
 		"string::repeat" => string::repeat,
 		"string::replace" => string::replace,

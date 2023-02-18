@@ -22,7 +22,7 @@ pub fn join(args: Vec<Value>) -> Result<Value, Error> {
 	Ok(val.into())
 }
 
-pub fn length((string,): (String,)) -> Result<Value, Error> {
+pub fn len((string,): (String,)) -> Result<Value, Error> {
 	let num = string.chars().count() as i64;
 	Ok(num.into())
 }

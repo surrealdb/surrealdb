@@ -420,7 +420,7 @@ fn function_string(i: &str) -> IResult<&str, &str> {
 		tag("string::concat"),
 		tag("string::endsWith"),
 		tag("string::join"),
-		tag("string::length"),
+		tag("string::len"),
 		tag("string::lowercase"),
 		tag("string::repeat"),
 		tag("string::replace"),
