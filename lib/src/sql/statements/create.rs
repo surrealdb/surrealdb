@@ -33,6 +33,15 @@ impl CreateStatement {
 		true
 	}
 
+	pub(crate) fn single(&self) -> bool {
+		match self.what.len() {
+			1 if self.what[0].is_object() => true,
+			1 if self.what[0].is_thing() => true,
+			1 if self.what[0].is_table() => true,
+			_ => false,
+		}
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

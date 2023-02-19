@@ -37,6 +37,14 @@ impl InsertStatement {
 		true
 	}
 
+	pub(crate) fn single(&self) -> bool {
+		match &self.data {
+			Data::SingleExpression(v) if v.is_object() => true,
+			Data::ValuesExpression(v) if v.len() == 1 => true,
+			_ => false,
+		}
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

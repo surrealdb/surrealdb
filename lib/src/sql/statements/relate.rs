@@ -45,6 +45,16 @@ impl RelateStatement {
 		true
 	}
 
+	pub(crate) fn single(&self) -> bool {
+		match (&self.from, &self.with) {
+			(v, w) if v.is_object() && w.is_object() => true,
+			(v, w) if v.is_object() && w.is_thing() => true,
+			(v, w) if v.is_thing() && w.is_object() => true,
+			(v, w) if v.is_thing() && w.is_thing() => true,
+			_ => false,
+		}
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

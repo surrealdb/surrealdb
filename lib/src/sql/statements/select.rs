@@ -46,19 +46,6 @@ pub struct SelectStatement {
 }
 
 impl SelectStatement {
-	pub(crate) async fn limit(
-		&self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		doc: Option<&Value>,
-	) -> Result<usize, Error> {
-		match &self.limit {
-			Some(v) => v.process(ctx, opt, txn, doc).await,
-			None => Ok(0),
-		}
-	}
-
 	pub(crate) fn writeable(&self) -> bool {
 		if self.expr.iter().any(|v| match v {
 			Field::All => false,
@@ -71,6 +58,14 @@ impl SelectStatement {
 			return true;
 		}
 		self.cond.as_ref().map_or(false, |v| v.writeable())
+	}
+
+	pub(crate) fn single(&self) -> bool {
+		match self.what.len() {
+			1 if self.what[0].is_object() => true,
+			1 if self.what[0].is_thing() => true,
+			_ => false,
+		}
 	}
 
 	pub(crate) async fn compute(

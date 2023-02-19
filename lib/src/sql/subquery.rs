@@ -4,7 +4,6 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::error::IResult;
-use crate::sql::paths::ID;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
@@ -67,27 +66,8 @@ impl Subquery {
 			Self::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Select(ref v) => {
-				// Duplicate context
-				let mut ctx = Context::new(ctx);
-				// Add parent document
-				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
-				}
-				// Process subquery
-				let res = v.compute(&ctx, opt, txn, doc).await?;
-				// Process result
-				match v.limit(&ctx, opt, txn, doc).await? {
-					1 => match v.expr.single() {
-						Some(v) => res.first().get(&ctx, opt, txn, &v).await,
-						None => res.first().ok(),
-					},
-					_ => match v.expr.single() {
-						Some(v) => res.get(&ctx, opt, txn, &v).await,
-						None => res.ok(),
-					},
-				}
-			}
-			Self::Create(ref v) => {
+				// Is this a single output?
+				let one = v.single();
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -96,14 +76,42 @@ impl Subquery {
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
-					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0).pick(ID.as_ref())),
-						_ => Ok(Value::from(v).pick(ID.as_ref())),
+					// This is a single record result
+					Value::Array(mut a) if one => match a.len() {
+						// There was at least one result
+						v if v > 0 => Ok(a.remove(0)),
+						// There were no results
+						_ => Ok(Value::None),
 					},
+					// This is standard query result
+					v => Ok(v),
+				}
+			}
+			Self::Create(ref v) => {
+				// Is this a single output?
+				let one = v.single();
+				// Duplicate context
+				let mut ctx = Context::new(ctx);
+				// Add parent document
+				if let Some(doc) = doc {
+					ctx.add_value("parent".into(), doc);
+				}
+				// Process subquery
+				match v.compute(&ctx, opt, txn, doc).await? {
+					// This is a single record result
+					Value::Array(mut a) if one => match a.len() {
+						// There was at least one result
+						v if v > 0 => Ok(a.remove(0)),
+						// There were no results
+						_ => Ok(Value::None),
+					},
+					// This is standard query result
 					v => Ok(v),
 				}
 			}
 			Self::Update(ref v) => {
+				// Is this a single output?
+				let one = v.single();
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -112,14 +120,20 @@ impl Subquery {
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
-					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0).pick(ID.as_ref())),
-						_ => Ok(Value::from(v).pick(ID.as_ref())),
+					// This is a single record result
+					Value::Array(mut a) if one => match a.len() {
+						// There was at least one result
+						v if v > 0 => Ok(a.remove(0)),
+						// There were no results
+						_ => Ok(Value::None),
 					},
+					// This is standard query result
 					v => Ok(v),
 				}
 			}
 			Self::Delete(ref v) => {
+				// Is this a single output?
+				let one = v.single();
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -128,14 +142,20 @@ impl Subquery {
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
-					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0).pick(ID.as_ref())),
-						_ => Ok(Value::from(v).pick(ID.as_ref())),
+					// This is a single record result
+					Value::Array(mut a) if one => match a.len() {
+						// There was at least one result
+						v if v > 0 => Ok(a.remove(0)),
+						// There were no results
+						_ => Ok(Value::None),
 					},
+					// This is standard query result
 					v => Ok(v),
 				}
 			}
 			Self::Relate(ref v) => {
+				// Is this a single output?
+				let one = v.single();
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -144,14 +164,20 @@ impl Subquery {
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
-					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0).pick(ID.as_ref())),
-						_ => Ok(Value::from(v).pick(ID.as_ref())),
+					// This is a single record result
+					Value::Array(mut a) if one => match a.len() {
+						// There was at least one result
+						v if v > 0 => Ok(a.remove(0)),
+						// There were no results
+						_ => Ok(Value::None),
 					},
+					// This is standard query result
 					v => Ok(v),
 				}
 			}
 			Self::Insert(ref v) => {
+				// Is this a single output?
+				let one = v.single();
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Add parent document
@@ -160,10 +186,14 @@ impl Subquery {
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
-					Value::Array(mut v) => match v.len() {
-						1 => Ok(v.remove(0).pick(ID.as_ref())),
-						_ => Ok(Value::from(v).pick(ID.as_ref())),
+					// This is a single record result
+					Value::Array(mut a) if one => match a.len() {
+						// There was at least one result
+						v if v > 0 => Ok(a.remove(0)),
+						// There were no results
+						_ => Ok(Value::None),
 					},
+					// This is standard query result
 					v => Ok(v),
 				}
 			}
