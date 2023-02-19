@@ -8,6 +8,7 @@ use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
 use crate::sql::statements::insert::{insert, InsertStatement};
+use crate::sql::statements::output::{output, OutputStatement};
 use crate::sql::statements::relate::{relate, RelateStatement};
 use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
@@ -23,6 +24,7 @@ use std::fmt::{self, Display, Formatter};
 pub enum Subquery {
 	Value(Value),
 	Ifelse(IfelseStatement),
+	Output(OutputStatement),
 	Select(SelectStatement),
 	Create(CreateStatement),
 	Update(UpdateStatement),
@@ -43,6 +45,7 @@ impl Subquery {
 		match self {
 			Self::Value(v) => v.writeable(),
 			Self::Ifelse(v) => v.writeable(),
+			Self::Output(v) => v.writeable(),
 			Self::Select(v) => v.writeable(),
 			Self::Create(v) => v.writeable(),
 			Self::Update(v) => v.writeable(),
@@ -65,6 +68,7 @@ impl Subquery {
 		match self {
 			Self::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Output(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Select(ref v) => {
 				// Is this a single output?
 				let one = v.single();
@@ -205,6 +209,7 @@ impl Display for Subquery {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Value(v) => write!(f, "({v})"),
+			Self::Output(v) => write!(f, "({v})"),
 			Self::Select(v) => write!(f, "({v})"),
 			Self::Create(v) => write!(f, "({v})"),
 			Self::Update(v) => write!(f, "({v})"),
@@ -229,6 +234,7 @@ fn subquery_others(i: &str) -> IResult<&str, Subquery> {
 	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
+		map(output, Subquery::Output),
 		map(select, Subquery::Select),
 		map(create, Subquery::Create),
 		map(update, Subquery::Update),
