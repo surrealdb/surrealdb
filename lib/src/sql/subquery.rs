@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
+use crate::sql::ending::subquery as ending;
 use crate::sql::error::IResult;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
@@ -222,7 +223,7 @@ impl Display for Subquery {
 }
 
 pub fn subquery(i: &str) -> IResult<&str, Subquery> {
-	alt((subquery_ifelse, subquery_others))(i)
+	alt((subquery_ifelse, subquery_other, subquery_value))(i)
 }
 
 fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
@@ -230,10 +231,35 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 	Ok((i, v))
 }
 
-fn subquery_others(i: &str) -> IResult<&str, Subquery> {
+fn subquery_value(i: &str) -> IResult<&str, Subquery> {
 	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = alt((
+	let (i, v) = map(value, Subquery::Value)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char(')')(i)?;
+	Ok((i, v))
+}
+
+fn subquery_other(i: &str) -> IResult<&str, Subquery> {
+	alt((
+		|i| {
+			let (i, _) = char('(')(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, v) = subquery_inner(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = char(')')(i)?;
+			Ok((i, v))
+		},
+		|i| {
+			let (i, v) = subquery_inner(i)?;
+			let (i, _) = ending(i)?;
+			Ok((i, v))
+		},
+	))(i)
+}
+
+fn subquery_inner(i: &str) -> IResult<&str, Subquery> {
+	alt((
 		map(output, Subquery::Output),
 		map(select, Subquery::Select),
 		map(create, Subquery::Create),
@@ -241,11 +267,7 @@ fn subquery_others(i: &str) -> IResult<&str, Subquery> {
 		map(delete, Subquery::Delete),
 		map(relate, Subquery::Relate),
 		map(insert, Subquery::Insert),
-		map(value, Subquery::Value),
-	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
-	Ok((i, v))
+	))(i)
 }
 
 #[cfg(test)]

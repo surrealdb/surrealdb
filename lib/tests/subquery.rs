@@ -110,19 +110,19 @@ async fn subquery_ifelse() -> Result<(), Error> {
 		RETURN $record;
 		-- Update the record field if it exists
 		IF $record.count THEN
-			( UPDATE person:test SET sport += 'football' RETURN sport )
+			(UPDATE person:test SET sport += 'football' RETURN sport)
 		ELSE
-			( UPDATE person:test SET sport = ['basketball'] RETURN sport )
+			(UPDATE person:test SET sport = ['basketball'] RETURN sport)
 		END;
 		-- Check if the record exists
-		LET $record = (SELECT *, count() AS count FROM person:test);
+		LET $record = SELECT *, count() AS count FROM person:test;
 		-- Return the specified record
 		RETURN $record;
 		-- Update the record field if it exists
 		IF $record.count THEN
-			( UPDATE person:test SET sport += 'football' RETURN sport )
+			UPDATE person:test SET sport += 'football' RETURN sport
 		ELSE
-			( UPDATE person:test SET sport = ['basketball'] RETURN sport )
+			UPDATE person:test SET sport = ['basketball'] RETURN sport
 		END;
 	";
 	let dbs = Datastore::new("memory").await?;
