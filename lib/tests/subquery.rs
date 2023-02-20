@@ -124,11 +124,21 @@ async fn subquery_ifelse() -> Result<(), Error> {
 		ELSE
 			UPDATE person:test SET sport = ['basketball'] RETURN sport
 		END;
+		-- Check if the record exists
+		LET $record = SELECT *, count() AS count FROM person:test;
+		-- Return the specified record
+		RETURN $record;
+		-- Update the record field if it exists
+		IF $record.count THEN
+			UPDATE person:test SET sport += 'football' RETURN sport;
+		ELSE
+			UPDATE person:test SET sport = ['basketball'] RETURN sport;
+		END;
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 6);
+	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
@@ -159,6 +169,34 @@ async fn subquery_ifelse() -> Result<(), Error> {
 			id: person:test,
 			sport: [
 				'basketball'
+			]
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			sport: [
+				'basketball',
+				'football'
+			]
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			count: 1,
+			id: person:test,
+			sport: [
+				'basketball',
+				'football'
 			]
 		}",
 	);

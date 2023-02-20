@@ -1,5 +1,5 @@
 use crate::sql::comment::comment;
-use crate::sql::comment::shouldbespace;
+use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
 use crate::sql::operator::{assigner, operator};
 use nom::branch::alt;
@@ -67,15 +67,27 @@ pub fn duration(i: &str) -> IResult<&str, ()> {
 }
 
 pub fn subquery(i: &str) -> IResult<&str, ()> {
-	peek(alt((
-		map(preceded(shouldbespace, tag_no_case("THEN")), |_| ()),
-		map(preceded(shouldbespace, tag_no_case("ELSE")), |_| ()),
-		map(preceded(shouldbespace, tag_no_case("END")), |_| ()),
-		map(comment, |_| ()),
-		map(char(']'), |_| ()),
-		map(char('}'), |_| ()),
-		map(char(';'), |_| ()),
-		map(char(','), |_| ()),
-		map(eof, |_| ()),
-	)))(i)
+	alt((
+		|i| {
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = char(';')(i)?;
+			let (i, _) = peek(alt((
+				preceded(shouldbespace, tag_no_case("THEN")),
+				preceded(shouldbespace, tag_no_case("ELSE")),
+				preceded(shouldbespace, tag_no_case("END")),
+			)))(i)?;
+			Ok((i, ()))
+		},
+		peek(alt((
+			map(preceded(shouldbespace, tag_no_case("THEN")), |_| ()),
+			map(preceded(shouldbespace, tag_no_case("ELSE")), |_| ()),
+			map(preceded(shouldbespace, tag_no_case("END")), |_| ()),
+			map(comment, |_| ()),
+			map(char(']'), |_| ()),
+			map(char('}'), |_| ()),
+			map(char(';'), |_| ()),
+			map(char(','), |_| ()),
+			map(eof, |_| ()),
+		))),
+	))(i)
 }
