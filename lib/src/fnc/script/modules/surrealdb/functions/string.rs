@@ -21,7 +21,7 @@ impl ModuleDef for Package {
 		module.add("concat")?;
 		module.add("endsWith")?;
 		module.add("join")?;
-		module.add("length")?;
+		module.add("len")?;
 		module.add("lowercase")?;
 		module.add("repeat")?;
 		module.add("replace")?;
@@ -41,7 +41,7 @@ impl ModuleDef for Package {
 		module.set("concat", Func::from(|v: Any| run("string::concat", v.0)))?;
 		module.set("endsWith", Func::from(|v: Any| run("string::endsWith", v.0)))?;
 		module.set("join", Func::from(|v: Any| run("string::join", v.0)))?;
-		module.set("length", Func::from(|v: Any| run("string::length", v.0)))?;
+		module.set("len", Func::from(|v: Any| run("string::len", v.0)))?;
 		module.set("lowercase", Func::from(|v: Any| run("string::lowercase", v.0)))?;
 		module.set("repeat", Func::from(|v: Any| run("string::repeat", v.0)))?;
 		module.set("replace", Func::from(|v: Any| run("string::replace", v.0)))?;
@@ -58,7 +58,7 @@ impl ModuleDef for Package {
 		default.set("concat", Func::from(|v: Any| run("string::concat", v.0)))?;
 		default.set("endsWith", Func::from(|v: Any| run("string::endsWith", v.0)))?;
 		default.set("join", Func::from(|v: Any| run("string::join", v.0)))?;
-		default.set("length", Func::from(|v: Any| run("string::length", v.0)))?;
+		default.set("len", Func::from(|v: Any| run("string::len", v.0)))?;
 		default.set("lowercase", Func::from(|v: Any| run("string::lowercase", v.0)))?;
 		default.set("repeat", Func::from(|v: Any| run("string::repeat", v.0)))?;
 		default.set("replace", Func::from(|v: Any| run("string::replace", v.0)))?;
