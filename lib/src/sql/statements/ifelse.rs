@@ -4,15 +4,14 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
-use crate::sql::fmt::{fmt_separated_by, Fmt};
+use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::value::{value, Value};
 use derive::Store;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::Display;
+use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct IfelseStatement {
@@ -52,19 +51,46 @@ impl IfelseStatement {
 
 impl Display for IfelseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		Display::fmt(
+		let mut f = Pretty::from(f);
+		write!(
+			f,
+			"{}",
 			&Fmt::new(
 				self.exprs.iter().map(|args| {
-					Fmt::new(args, |(cond, then), f| write!(f, "IF {cond} THEN {then}"))
+					Fmt::new(args, |(cond, then), f| {
+						if is_pretty() {
+							write!(f, "IF {cond} THEN")?;
+							let indent = pretty_indent();
+							write!(f, "{then}")?;
+							drop(indent);
+						} else {
+							write!(f, "IF {cond} THEN {then}")?;
+						}
+						Ok(())
+					})
 				}),
-				fmt_separated_by(" ELSE "),
+				if is_pretty() {
+					fmt_separated_by("ELSE")
+				} else {
+					fmt_separated_by(" ELSE ")
+				},
 			),
-			f,
 		)?;
 		if let Some(ref v) = self.close {
-			write!(f, " ELSE {v}")?
+			if is_pretty() {
+				write!(f, "ELSE")?;
+				let indent = pretty_indent();
+				write!(f, "{v}")?;
+				drop(indent);
+			} else {
+				write!(f, " ELSE {v}")?;
+			}
 		}
-		f.write_str(" END")?;
+		if is_pretty() {
+			f.write_str("END")?;
+		} else {
+			f.write_str(" END")?;
+		}
 		Ok(())
 	}
 }
