@@ -322,7 +322,7 @@ impl Datastore {
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::for_kv();
-	///     let val = Value::Future(Box::new(Future(Value::True)));
+	///     let val = Value::Future(Box::new(Future::from(Value::True)));
 	///     let res = ds.compute(val, &ses, None, false).await?;
 	///     Ok(())
 	/// }
