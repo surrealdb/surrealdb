@@ -50,9 +50,7 @@ impl Deref for Statements {
 impl fmt::Display for Statements {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		Display::fmt(
-			&Fmt::pretty_new_line_separated(
-				self.0.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};"))),
-			),
+			&Fmt::one_line_separated(self.0.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};")))),
 			f,
 		)
 	}

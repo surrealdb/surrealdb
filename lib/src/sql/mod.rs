@@ -3,6 +3,7 @@
 pub(crate) mod algorithm;
 pub(crate) mod array;
 pub(crate) mod base;
+pub(crate) mod block;
 pub(crate) mod comment;
 pub(crate) mod common;
 pub(crate) mod cond;
@@ -70,6 +71,7 @@ pub use self::parser::*;
 pub use self::algorithm::Algorithm;
 pub use self::array::Array;
 pub use self::base::Base;
+pub use self::block::Block;
 pub use self::cond::Cond;
 pub use self::data::Data;
 pub use self::datetime::Datetime;

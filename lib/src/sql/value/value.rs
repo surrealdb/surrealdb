@@ -5,6 +5,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
+use crate::sql::block::{block, Block};
 use crate::sql::common::commas;
 use crate::sql::constant::{constant, Constant};
 use crate::sql::datetime::{datetime, Datetime};
@@ -116,6 +117,7 @@ pub enum Value {
 	Thing(Thing),
 	Model(Model),
 	Regex(Regex),
+	Block(Box<Block>),
 	Range(Box<Range>),
 	Edges(Box<Edges>),
 	Future(Box<Future>),
@@ -236,6 +238,12 @@ impl From<Duration> for Value {
 impl From<Constant> for Value {
 	fn from(v: Constant) -> Self {
 		Value::Constant(v)
+	}
+}
+
+impl From<Block> for Value {
+	fn from(v: Block) -> Self {
+		Value::Block(Box::new(v))
 	}
 }
 
@@ -1314,6 +1322,7 @@ impl fmt::Display for Value {
 			Value::Thing(v) => write!(f, "{v}"),
 			Value::Model(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
+			Value::Block(v) => write!(f, "{v}"),
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Edges(v) => write!(f, "{v}"),
 			Value::Future(v) => write!(f, "{v}"),
@@ -1328,9 +1337,10 @@ impl fmt::Display for Value {
 impl Value {
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
-			Value::Array(v) => v.iter().any(|v| v.writeable()),
+			Value::Block(v) => v.writeable(),
+			Value::Array(v) => v.iter().any(Value::writeable),
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
-			Value::Function(v) => v.args().iter().any(|v| v.writeable()),
+			Value::Function(v) => v.args().iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.l.writeable() || v.r.writeable(),
 			_ => false,
@@ -1352,6 +1362,7 @@ impl Value {
 			Value::True => Ok(Value::True),
 			Value::False => Ok(Value::False),
 			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Block(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Range(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Param(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Idiom(v) => v.compute(ctx, opt, txn, doc).await,
@@ -1392,13 +1403,14 @@ impl Serialize for Value {
 				Value::Thing(v) => s.serialize_newtype_variant("Value", 15, "Thing", v),
 				Value::Model(v) => s.serialize_newtype_variant("Value", 16, "Model", v),
 				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
-				Value::Range(v) => s.serialize_newtype_variant("Value", 18, "Range", v),
-				Value::Edges(v) => s.serialize_newtype_variant("Value", 19, "Edges", v),
-				Value::Future(v) => s.serialize_newtype_variant("Value", 20, "Future", v),
-				Value::Constant(v) => s.serialize_newtype_variant("Value", 21, "Constant", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 22, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 23, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 24, "Expression", v),
+				Value::Block(v) => s.serialize_newtype_variant("Value", 18, "Block", v),
+				Value::Range(v) => s.serialize_newtype_variant("Value", 19, "Range", v),
+				Value::Edges(v) => s.serialize_newtype_variant("Value", 20, "Edges", v),
+				Value::Future(v) => s.serialize_newtype_variant("Value", 21, "Future", v),
+				Value::Constant(v) => s.serialize_newtype_variant("Value", 22, "Constant", v),
+				Value::Function(v) => s.serialize_newtype_variant("Value", 23, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant("Value", 24, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant("Value", 25, "Expression", v),
 			}
 		} else {
 			match self {
@@ -1498,6 +1510,7 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(number, Value::from),
 			map(object, Value::from),
 			map(array, Value::from),
+			map(block, Value::from),
 			map(param, Value::from),
 			map(regex, Value::from),
 			map(model, Value::from),
@@ -1530,6 +1543,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(number, Value::from),
 			map(object, Value::from),
 			map(array, Value::from),
+			map(block, Value::from),
 			map(param, Value::from),
 			map(regex, Value::from),
 			map(model, Value::from),
@@ -1548,6 +1562,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 		map(function, Value::from),
 		map(constant, Value::from),
 		map(future, Value::from),
+		map(block, Value::from),
 		map(param, Value::from),
 		map(model, Value::from),
 		map(edges, Value::from),
