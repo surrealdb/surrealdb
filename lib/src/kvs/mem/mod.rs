@@ -3,7 +3,10 @@
 use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use log::Level::Trace;
 use std::ops::Range;
+
+const LOG: &str = "surrealdb::kvs::mem";
 
 pub struct Datastore {
 	db: echodb::Db<Key, Val>,
@@ -45,6 +48,7 @@ impl Transaction {
 	}
 	/// Cancel a transaction
 	pub fn cancel(&mut self) -> Result<(), Error> {
+		trace!(target: LOG, "cancel");
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -58,6 +62,7 @@ impl Transaction {
 	}
 	/// Commit a transaction
 	pub fn commit(&mut self) -> Result<(), Error> {
+		trace!(target: LOG, "commit");
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -83,7 +88,9 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.tx.exi(key.into())?;
+		let key = key.into();
+		trace!(target: LOG, "exi {:?}", key);
+		let res = self.tx.exi(key)?;
 		// Return result
 		Ok(res)
 	}
@@ -97,7 +104,11 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let res = self.tx.get(key.into())?;
+		let key = key.into();
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "get {}", String::from_utf8_lossy(&key));
+		}
+		let res = self.tx.get(key)?;
 		// Return result
 		Ok(res)
 	}
@@ -116,7 +127,12 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.tx.set(key.into(), val.into())?;
+		let key = key.into();
+		let val = val.into();
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "set {}=>{}", String::from_utf8_lossy(&key), val.len());
+		}
+		self.tx.set(key, val)?;
 		// Return result
 		Ok(())
 	}
@@ -135,7 +151,12 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.tx.put(key.into(), val.into())?;
+		let key = key.into();
+		let val = val.into();
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "put {}=>{:?}", String::from_utf8_lossy(&key), val.len());
+		}
+		self.tx.put(key, val)?;
 		// Return result
 		Ok(())
 	}
@@ -154,7 +175,12 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.tx.putc(key.into(), val.into(), chk.map(Into::into))?;
+		let key = key.into();
+		let val = val.into();
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "putc <{}> => {}", String::from_utf8_lossy(&key), val.len());
+		}
+		self.tx.putc(key, val, chk.map(Into::into))?;
 		// Return result
 		Ok(())
 	}
@@ -172,7 +198,11 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		self.tx.del(key.into())?;
+		let key = key.into();
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "del <{}>", String::from_utf8_lossy(&key));
+		}
+		self.tx.del(key)?;
 		// Return result
 		Ok(())
 	}
@@ -191,7 +221,11 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		self.tx.delc(key.into(), chk.map(Into::into))?;
+		let key = key.into();
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "delc {}", String::from_utf8_lossy(&key));
+		}
+		self.tx.delc(key, chk.map(Into::into))?;
 		// Return result
 		Ok(())
 	}
@@ -204,11 +238,22 @@ impl Transaction {
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
+		let start = rng.start.into();
+		let end = rng.end.into();
 		// Convert the range to bytes
+		if log_enabled!(Trace) {
+			trace!(
+				target: LOG,
+				"scan {}-{}",
+				String::from_utf8_lossy(&start),
+				String::from_utf8_lossy(&end)
+			);
+		}
 		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
+			start,
+			end,
 		};
+
 		// Scan the keys
 		let res = self.tx.scan(rng, limit)?;
 		// Return result
