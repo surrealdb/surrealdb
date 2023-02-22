@@ -11,6 +11,8 @@ mod indxdb;
 mod mem;
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb;
+#[cfg(feature = "kv-sled")]
+mod sled;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 

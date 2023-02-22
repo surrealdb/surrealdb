@@ -260,6 +260,28 @@ pub struct IndxDb;
 #[derive(Debug)]
 pub struct TiKv;
 
+/// Sled database
+///
+/// # Examples
+///
+/// Instantiating a Sled instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::Sled;
+///
+/// let db = Surreal::new::<Sled>(("sled.db")).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "kv-sled")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-sled")))]
+#[derive(Debug)]
+pub struct Sled;
+
 /// FoundationDB database
 ///
 /// # Examples

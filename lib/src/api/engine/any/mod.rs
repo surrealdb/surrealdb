@@ -94,6 +94,7 @@ use crate::api::opt::Endpoint;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-tikv",
+	feature = "kv-sled",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
@@ -157,6 +158,7 @@ where
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-tikv",
+	feature = "kv-sled",
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
@@ -166,6 +168,7 @@ where
 	doc(cfg(any(
 		feature = "kv-mem",
 		feature = "kv-tikv",
+		feature = "kv-sled",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
@@ -186,6 +189,7 @@ where
 	any(
 		feature = "kv-mem",
 		feature = "kv-tikv",
+		feature = "kv-sled",
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
@@ -198,6 +202,7 @@ where
 		any(
 			feature = "kv-mem",
 			feature = "kv-tikv",
+			feature = "kv-sled",
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-indxdb",
@@ -285,6 +290,9 @@ impl Surreal<Any> {
 ///
 /// // Instantiate a TiKV-backed instance
 /// let db = connect("tikv://localhost:2379").await?;
+///
+/// // Instantiate an Sled-backed instance
+/// let db = connect("sled://temp.db").await?;
 ///
 /// // Instantiate a FoundationDB-backed instance
 /// let db = connect("fdb://fdb.cluster").await?;

@@ -139,6 +139,21 @@ mod tikv {
 	include!("api/backup.rs");
 }
 
+#[cfg(feature = "kv-sled")]
+mod sled {
+	use super::*;
+	use surrealdb::engine::local::Db;
+	use surrealdb::engine::local::Sled;
+
+	async fn new_db() -> Surreal<Db> {
+		let path = format!("/tmp/{}.db", Ulid::new());
+		Surreal::new::<Sled>(path.as_str()).await.unwrap()
+	}
+
+	include!("api/mod.rs");
+	include!("api/backup.rs");
+}
+
 #[cfg(feature = "kv-fdb")]
 mod fdb {
 	use super::*;

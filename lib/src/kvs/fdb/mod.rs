@@ -78,7 +78,7 @@ impl Transaction {
 	}
 	/// We use lock=true to enable the tikv's own pessimistic tx (https://docs.pingcap.com/tidb/v4.0/pessimistic-transaction)
 	/// for tikv kvs.
-	/// FDB's standard transaction(snapshot=false) behaves like a tikv perssimistic tx
+	/// FDB's standard transaction(snapshot=false) behaves like a tikv pessimistic tx
 	/// by automatically retrying on conflict at the fdb client layer.
 	/// So in fdb kvs we assume that lock=true is basically a request to
 	/// use the standard fdb tx to make transactions Serializable.
