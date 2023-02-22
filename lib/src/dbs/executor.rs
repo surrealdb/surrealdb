@@ -13,15 +13,23 @@ use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
+use crate::sql::Statement::Live;
+use channel::{Receiver, Sender};
 use futures::lock::Mutex;
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::mpsc::channel;
+use std::sync::{Arc, RwLock};
 use tracing::instrument;
 use trice::Instant;
+use uuid::Uuid;
+
+type LiveQueryID = Uuid;
 
 pub(crate) struct Executor<'a> {
 	err: bool,
 	kvs: &'a Datastore,
 	txn: Option<Transaction>,
+	live_queries: RwLock<BTreeMap<LiveQueryID, Sender<Response>>>,
 }
 
 impl<'a> Executor<'a> {
@@ -30,6 +38,7 @@ impl<'a> Executor<'a> {
 			kvs,
 			txn: None,
 			err: false,
+			live_queries: RwLock::new(BTreeMap::new()),
 		}
 	}
 
@@ -134,11 +143,15 @@ impl<'a> Executor<'a> {
 		mut ctx: Context<'_>,
 		mut opt: Options,
 		qry: Query,
-	) -> Result<Vec<Response>, Error> {
+	) -> Result<(Vec<Response>, Option<Receiver<Response>>), Error> {
+		let lqs = &self.live_queries;
+		trace!(target: LOG, "Have access to these LQs: {lqs:?}");
 		// Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
+		// Initialise live query callback channel
+		let mut receiver: Option<Receiver<Response>> = Option::None;
 		// Process all statements in query
 		for stm in qry.iter() {
 			// Log the statement
@@ -299,7 +312,27 @@ impl<'a> Executor<'a> {
 								// Finalise transaction
 								match &res {
 									Ok(_) => match stm.writeable() {
-										true => self.commit(loc).await,
+										true => {
+											match stm {
+												Live(live_statement) => {
+													// We now create an async channel to send updates to
+													// when operations are performed that affect the LQ
+													let lqid: LiveQueryID =
+														live_statement.id.0.clone();
+													let (sender, recvr): (
+														Sender<Response>,
+														Receiver<Response>,
+													) = channel::unbounded();
+													receiver = Some(recvr);
+													self.live_queries
+														.write()
+														.unwrap()
+														.insert(lqid, sender);
+												}
+												_ => {}
+											}
+											self.commit(loc).await
+										}
 										false => self.cancel(loc).await,
 									},
 									Err(_) => self.cancel(loc).await,
@@ -344,6 +377,6 @@ impl<'a> Executor<'a> {
 			}
 		}
 		// Return responses
-		Ok(out)
+		Ok((out, receiver))
 	}
 }

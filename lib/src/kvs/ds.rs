@@ -272,7 +272,10 @@ impl Datastore {
 		// Set strict config
 		opt.strict = strict;
 		// Process all statements
-		exe.execute(ctx, opt, ast).await
+		match exe.execute(ctx, opt, ast).await {
+			Ok((vec, _)) => Ok(vec),
+			Err(e) => Err(e),
+		}
 	}
 
 	/// Execute a pre-parsed SQL query
@@ -320,7 +323,11 @@ impl Datastore {
 		// Set strict config
 		opt.strict = strict;
 		// Process all statements
-		exe.execute(ctx, opt, ast).await
+		match exe.execute(ctx, opt, ast).await {
+			Ok((vec, _)) => Ok(vec),
+			Err(e) => Err(e),
+			_ => panic!("Unhandled conversion from execute in process"),
+		}
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed

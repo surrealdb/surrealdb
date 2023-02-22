@@ -31,9 +31,16 @@ use tracing::instrument;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 
-type WebSockets = RwLock<HashMap<Uuid, Sender<Message>>>;
+type TransactionID = Uuid;
+type WebSocketID = Uuid;
 
-static WEBSOCKETS: Lazy<WebSockets> = Lazy::new(WebSockets::default);
+pub struct WebSockets {
+	channel: Sender<Message>,
+	staged_messages: RwLock<BTreeMap<TransactionID, Vec<Value>>>,
+	ready_messages: RwLock<BTreeMap<TransactionID, Vec<Value>>>,
+}
+
+static WEBSOCKETS: Lazy<RwLock<BTreeMap<WebSocketID, WebSockets>>> = Lazy::new(RwLock::default);
 
 #[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
@@ -161,7 +168,12 @@ impl Rpc {
 		// Log that the WebSocket has connected
 		trace!(target: LOG, "WebSocket {} connected", id);
 		// Store this WebSocket in the list of WebSockets
-		WEBSOCKETS.write().await.insert(id, chn);
+		let ws = WebSockets {
+			channel: chn,
+			staged_messages: RwLock::new(BTreeMap::new()),
+			ready_messages: RwLock::new(BTreeMap::new()),
+		};
+		WEBSOCKETS.write().await.insert(id, ws);
 	}
 
 	async fn disconnected(rpc: Arc<RwLock<Rpc>>) {

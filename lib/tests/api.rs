@@ -1,5 +1,7 @@
 #![allow(unused_imports, dead_code)]
 
+// use fern::colors::Color;
+// use fern::colors::ColoredLevelConfig;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
@@ -69,6 +71,7 @@ mod ws {
 
 	include!("api/mod.rs");
 	include!("api/auth.rs");
+	include!("api/live.rs");
 }
 
 #[cfg(feature = "protocol-http")]
