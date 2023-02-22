@@ -65,7 +65,7 @@ impl Block {
 					// Check if the variable is a protected variable
 					let val = match PROTECTED_PARAM_NAMES.contains(&v.name.as_str()) {
 						// The variable isn't protected and can be stored
-						false => v.compute(&ctx, opt, txn, None).await,
+						false => v.compute(&ctx, opt, txn, doc).await,
 						// The user tried to set a protected variable
 						true => {
 							return Err(Error::InvalidParam {
