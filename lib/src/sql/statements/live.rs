@@ -85,7 +85,7 @@ impl fmt::Display for LiveStatement {
 pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 	let (i, _) = tag_no_case("LIVE SELECT")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, expr) = fields(i)?;
+	let (i, expr) = alt((map(tag_no_case("DIFF"), |_| Fields::default()), fields))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FROM")(i)?;
 	let (i, _) = shouldbespace(i)?;
