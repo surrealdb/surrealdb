@@ -119,20 +119,34 @@ impl Display for Block {
 			}
 			(l, _) => {
 				f.write_char('{')?;
-				if is_pretty() && l > 1 {
+				if l > 1 {
 					f.write_char('\n')?;
+				} else if !is_pretty() {
+					f.write_char(' ')?;
 				}
 				let indent = pretty_indent();
-				write!(
-					f,
-					"{}",
-					&Fmt::two_line_separated(
-						self.0.iter().map(|args| Fmt::new(args, |v, f| write!(f, "{};", v))),
-					)
-				)?;
+				if is_pretty() {
+					write!(
+						f,
+						"{}",
+						&Fmt::two_line_separated(
+							self.0.iter().map(|args| Fmt::new(args, |v, f| write!(f, "{};", v))),
+						)
+					)?;
+				} else {
+					write!(
+						f,
+						"{}",
+						&Fmt::one_line_separated(
+							self.0.iter().map(|args| Fmt::new(args, |v, f| write!(f, "{};", v))),
+						)
+					)?;
+				}
 				drop(indent);
-				if is_pretty() && l > 1 {
+				if l > 1 {
 					f.write_char('\n')?;
+				} else if !is_pretty() {
+					f.write_char(' ')?;
 				}
 				f.write_char('}')
 			}
@@ -240,17 +254,11 @@ mod tests {
 
 	#[test]
 	fn block_ifelse() {
-		let sql = "{
-	RETURN IF true THEN
-		50
-	ELSE
-		40
-	END;
-}";
+		let sql = "{ RETURN IF true THEN 50 ELSE 40 END; }";
 		let res = block(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(sql, format!("{:#}", out))
+		assert_eq!(sql, format!("{}", out))
 	}
 
 	#[test]
