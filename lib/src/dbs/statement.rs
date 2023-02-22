@@ -11,6 +11,7 @@ use crate::sql::start::Start;
 use crate::sql::statements::create::CreateStatement;
 use crate::sql::statements::delete::DeleteStatement;
 use crate::sql::statements::insert::InsertStatement;
+use crate::sql::statements::live::LiveStatement;
 use crate::sql::statements::relate::RelateStatement;
 use crate::sql::statements::select::SelectStatement;
 use crate::sql::statements::update::UpdateStatement;
@@ -18,12 +19,19 @@ use std::fmt;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Statement<'a> {
+	Live(&'a LiveStatement),
 	Select(&'a SelectStatement),
 	Create(&'a CreateStatement),
 	Update(&'a UpdateStatement),
 	Relate(&'a RelateStatement),
 	Delete(&'a DeleteStatement),
 	Insert(&'a InsertStatement),
+}
+
+impl<'a> From<&'a LiveStatement> for Statement<'a> {
+	fn from(v: &'a LiveStatement) -> Self {
+		Statement::Live(v)
+	}
 }
 
 impl<'a> From<&'a SelectStatement> for Statement<'a> {
@@ -65,6 +73,7 @@ impl<'a> From<&'a InsertStatement> for Statement<'a> {
 impl<'a> fmt::Display for Statement<'a> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
+			Statement::Live(v) => write!(f, "{v}"),
 			Statement::Select(v) => write!(f, "{v}"),
 			Statement::Create(v) => write!(f, "{v}"),
 			Statement::Update(v) => write!(f, "{v}"),
@@ -91,6 +100,7 @@ impl<'a> Statement<'a> {
 	pub fn expr(&self) -> Option<&Fields> {
 		match self {
 			Statement::Select(v) => Some(&v.expr),
+			Statement::Live(v) => Some(&v.expr),
 			_ => None,
 		}
 	}
@@ -109,6 +119,7 @@ impl<'a> Statement<'a> {
 	#[inline]
 	pub fn conds(&self) -> Option<&Cond> {
 		match self {
+			Statement::Live(v) => v.cond.as_ref(),
 			Statement::Select(v) => v.cond.as_ref(),
 			Statement::Update(v) => v.cond.as_ref(),
 			Statement::Delete(v) => v.cond.as_ref(),
@@ -186,6 +197,7 @@ impl<'a> Statement<'a> {
 			Statement::Relate(v) => v.parallel,
 			Statement::Delete(v) => v.parallel,
 			Statement::Insert(v) => v.parallel,
+			_ => false,
 		}
 	}
 }

@@ -37,6 +37,7 @@ impl<'a> Document<'a> {
 			Statement::Relate(_) => doc.relate(ctx, opt, txn, stm).await,
 			Statement::Delete(_) => doc.delete(ctx, opt, txn, stm).await,
 			Statement::Insert(_) => doc.insert(ctx, opt, txn, stm).await,
+			_ => unreachable!(),
 		};
 		// Send back the result
 		let _ = chn.send(res).await;

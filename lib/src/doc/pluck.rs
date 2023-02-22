@@ -31,6 +31,10 @@ impl<'a> Document<'a> {
 				Output::Fields(v) => v.compute(ctx, opt, txn, Some(&self.current), false).await,
 			},
 			None => match stm {
+				Statement::Live(s) => match s.expr.len() {
+					0 => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
+					_ => s.expr.compute(ctx, opt, txn, Some(&self.current), false).await,
+				},
 				Statement::Select(s) => {
 					s.expr.compute(ctx, opt, txn, Some(&self.current), s.group.is_some()).await
 				}
