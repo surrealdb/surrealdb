@@ -119,6 +119,7 @@ features = [
 [dev-dependencies]
 time = { version = "0.3.17", features = ["serde"] }
 tokio = { version = "1.25.0", features = ["macros", "rt", "rt-multi-thread"] }
+tempdir = "0.3.7"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
