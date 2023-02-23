@@ -3,7 +3,7 @@
 use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
-use log::Level::Trace;
+use std::fmt::Debug;
 use std::ops::Range;
 
 const LOG: &str = "surrealdb::kvs::mem";
@@ -81,42 +81,38 @@ impl Transaction {
 	/// Check if a key exists
 	pub fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let key = key.into();
 		trace!(target: LOG, "exi {:?}", key);
-		let res = self.tx.exi(key)?;
+		let res = self.tx.exi(key.into())?;
 		// Return result
 		Ok(res)
 	}
 	/// Fetch a key from the database
 	pub fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let key = key.into();
-		if log_enabled!(Trace) {
-			trace!(target: LOG, "get {}", String::from_utf8_lossy(&key));
-		}
-		let res = self.tx.get(key)?;
+		trace!(target: LOG, "get {:?}", key);
+		let res = self.tx.get(key.into())?;
 		// Return result
 		Ok(res)
 	}
 	/// Insert or update a key in the database
 	pub fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.ok {
@@ -127,20 +123,16 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		let key = key.into();
-		let val = val.into();
-		if log_enabled!(Trace) {
-			trace!(target: LOG, "set {}=>{}", String::from_utf8_lossy(&key), val.len());
-		}
-		self.tx.set(key, val)?;
+		trace!(target: LOG, "set {:?} => {:?}", key, val);
+		self.tx.set(key.into(), val.into())?;
 		// Return result
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
 	pub fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.ok {
@@ -151,20 +143,16 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		let key = key.into();
-		let val = val.into();
-		if log_enabled!(Trace) {
-			trace!(target: LOG, "put {}=>{:?}", String::from_utf8_lossy(&key), val.len());
-		}
-		self.tx.put(key, val)?;
+		trace!(target: LOG, "put {:?} => {:?}", key, val);
+		self.tx.put(key.into(), val.into())?;
 		// Return result
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
 	pub fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.ok {
@@ -175,19 +163,15 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		let key = key.into();
-		let val = val.into();
-		if log_enabled!(Trace) {
-			trace!(target: LOG, "putc <{}> => {}", String::from_utf8_lossy(&key), val.len());
-		}
-		self.tx.putc(key, val, chk.map(Into::into))?;
+		trace!(target: LOG, "putc {:?} => {:?}", key, val);
+		self.tx.putc(key.into(), val.into(), chk.map(Into::into))?;
 		// Return result
 		Ok(())
 	}
 	/// Delete a key
 	pub fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.ok {
@@ -198,19 +182,16 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let key = key.into();
-		if log_enabled!(Trace) {
-			trace!(target: LOG, "del <{}>", String::from_utf8_lossy(&key));
-		}
-		self.tx.del(key)?;
+		trace!(target: LOG, "del {:?}", key);
+		self.tx.del(key.into())?;
 		// Return result
 		Ok(())
 	}
 	/// Delete a key
 	pub fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.ok {
@@ -221,37 +202,27 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		let key = key.into();
-		if log_enabled!(Trace) {
-			trace!(target: LOG, "delc {}", String::from_utf8_lossy(&key));
-		}
-		self.tx.delc(key, chk.map(Into::into))?;
+		trace!(target: LOG, "delc {:?} => {:?}", key, chk);
+		self.tx.delc(key.into(), chk.map(Into::into))?;
 		// Return result
 		Ok(())
 	}
 	/// Retrieve a range of keys from the databases
 	pub fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
-		let start = rng.start.into();
-		let end = rng.end.into();
 		// Convert the range to bytes
-		if log_enabled!(Trace) {
-			trace!(
-				target: LOG,
-				"scan {}-{}",
-				String::from_utf8_lossy(&start),
-				String::from_utf8_lossy(&end)
-			);
-		}
+		let start = rng.start;
+		let end = rng.end;
+		trace!(target: LOG, "scan {:?}-{:?}", start, end);
 		let rng: Range<Key> = Range {
-			start,
-			end,
+			start: start.into(),
+			end: end.into(),
 		};
 
 		// Scan the keys

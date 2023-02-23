@@ -25,6 +25,7 @@ use sql::statements::DefineScopeStatement;
 use sql::statements::DefineTableStatement;
 use sql::statements::DefineTokenStatement;
 use sql::statements::LiveStatement;
+use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -158,7 +159,7 @@ impl Transaction {
 	/// Delete a key from the datastore.
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		#![allow(unused_variables)]
 		match self {
@@ -194,7 +195,7 @@ impl Transaction {
 	/// Check if a key exists in the datastore.
 	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		#![allow(unused_variables)]
 		match self {
@@ -230,7 +231,7 @@ impl Transaction {
 	/// Fetch a key from the datastore.
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		#![allow(unused_variables)]
 		match self {
@@ -266,8 +267,8 @@ impl Transaction {
 	/// Insert or update a key in the datastore.
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		#![allow(unused_variables)]
 		match self {
@@ -303,8 +304,8 @@ impl Transaction {
 	/// Insert a key if it doesn't exist in the datastore.
 	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		#![allow(unused_variables)]
 		match self {
@@ -342,7 +343,7 @@ impl Transaction {
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
-		K: Into<Key>,
+		K: Into<Key> + Debug,
 	{
 		#![allow(unused_variables)]
 		match self {
@@ -378,8 +379,8 @@ impl Transaction {
 	/// Update a key in the datastore if the current value matches a condition.
 	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		#![allow(unused_variables)]
 		match self {
@@ -415,8 +416,8 @@ impl Transaction {
 	/// Delete a key from the datastore if the current value matches a condition.
 	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
-		K: Into<Key>,
-		V: Into<Val>,
+		K: Into<Key> + Debug,
+		V: Into<Val> + Debug,
 	{
 		#![allow(unused_variables)]
 		match self {
