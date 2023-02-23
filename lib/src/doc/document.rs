@@ -7,6 +7,7 @@ use crate::sql::statements::define::DefineEventStatement;
 use crate::sql::statements::define::DefineFieldStatement;
 use crate::sql::statements::define::DefineIndexStatement;
 use crate::sql::statements::define::DefineTableStatement;
+use crate::sql::statements::live::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::borrow::Cow;
@@ -121,5 +122,16 @@ impl<'a> Document<'a> {
 		let id = self.id.as_ref().unwrap();
 		// Get the index definitions
 		txn.clone().lock().await.all_ix(opt.ns(), opt.db(), &id.tb).await
+	}
+	// Get the lives for this document
+	pub async fn lv(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Arc<[LiveStatement]>, Error> {
+		// Get the record id
+		let id = self.id.as_ref().unwrap();
+		// Get the table definition
+		txn.clone().lock().await.all_lv(opt.ns(), opt.db(), &id.tb).await
 	}
 }
