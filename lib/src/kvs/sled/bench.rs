@@ -11,7 +11,7 @@ mod tests {
 	const VAL: Val = Val::new();
 
 	fn get_randomized_map(random: u16) -> BTreeMap<Key, Val> {
-		let mut map = BTreeMap::<Key, Val>::new();
+		let mut map = BTreeMap::new();
 		if random == 0 {
 			map.insert(KEY, VAL);
 		}
@@ -67,14 +67,9 @@ mod tests {
 		for _ in 0..N {
 			let map = get_none_randomized_map(rnd);
 			for _ in 0..M {
-				match &map {
-					None => {
-						assert!(true)
-					}
-					Some(map) => {
-						// We consume the map to avoid any optimisation
-						assert!(map.is_empty() || map.contains_key(&KEY))
-					}
+				if let Some(map) = &map {
+					// We consume the map to avoid any optimisation
+					assert!(map.is_empty() || map.contains_key(&KEY))
 				}
 			}
 		}
@@ -85,14 +80,9 @@ mod tests {
 		for _ in 0..N {
 			let map = get_some_randomized_map(rnd);
 			for _ in 0..M {
-				match &map {
-					None => {
-						assert!(true)
-					}
-					Some(map) => {
-						// We consume the map to avoid any optimisation
-						assert!(map.is_empty() || map.contains_key(&KEY))
-					}
+				if let Some(map) = &map {
+					// We consume the map to avoid any optimisation
+					assert!(map.is_empty() || map.contains_key(&KEY))
 				}
 			}
 		}
@@ -112,7 +102,7 @@ mod tests {
 	}
 
 	fn get_randomized_set(random: u16) -> HashSet<Key> {
-		let mut set = HashSet::<Key>::new();
+		let mut set = HashSet::new();
 		if random == 0 {
 			set.insert(KEY);
 		}
@@ -156,9 +146,8 @@ mod tests {
 		for _ in 0..N {
 			let set = get_none_randomized_set(rnd);
 			for _ in 0..M {
-				match &set {
-					None => assert!(true),
-					Some(set) => assert!(set.is_empty() || set.contains(&KEY)),
+				if let Some(set) = &set {
+					assert!(set.is_empty() || set.contains(&KEY));
 				}
 			}
 		}
@@ -169,9 +158,8 @@ mod tests {
 		for _ in 0..N {
 			let set = get_some_randomized_set(rnd);
 			for _ in 0..M {
-				match &set {
-					None => assert!(true),
-					Some(set) => assert!(set.is_empty() || set.contains(&KEY)),
+				if let Some(set) = &set {
+					assert!(set.is_empty() || set.contains(&KEY));
 				}
 			}
 		}

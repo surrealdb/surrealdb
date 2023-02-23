@@ -269,11 +269,24 @@ pub struct TiKv;
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
 /// use surrealdb::engine::local::Sled;
 ///
 /// let db = Surreal::new::<Sled>(("sled.db")).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Instantiating a Sled strict instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::Sled;
+///
+/// let db = Surreal::new::<Sled>(("sled.db", Strict)).await?;
 /// # Ok(())
 /// # }
 /// ```

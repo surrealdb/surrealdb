@@ -43,7 +43,7 @@ where
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
-		let url = format!("fdb://{}", self.0.as_ref().display());
+		let url = format!("sled://{}", self.0.as_ref().display());
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: true,
