@@ -130,13 +130,8 @@ fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Err
 	// Check if we should prettify
 	match pretty {
 		// Don't prettify the response
-		false => Ok(value.to_string()),
+		false => Ok(format!("{}", value)),
 		// Yes prettify the response
-		true => {
-			// Pretty the JSON response
-			let res = serde_json::to_string_pretty(&value)?;
-			// Everything processed OK
-			Ok(res)
-		}
+		true => Ok(format!("{:#}", value)),
 	}
 }
