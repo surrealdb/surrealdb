@@ -3,6 +3,7 @@
 use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
+use log::Level::Trace;
 use std::fmt::Debug;
 use std::ops::Range;
 
@@ -48,13 +49,13 @@ impl Transaction {
 	}
 	/// Cancel a transaction
 	pub fn cancel(&mut self) -> Result<(), Error> {
-		trace!(target: LOG, "cancel");
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
 		// Mark this transaction as done
 		self.ok = true;
+		trace!(target: LOG, "Cancel");
 		// Cancel this transaction
 		self.tx.cancel()?;
 		// Continue
@@ -62,7 +63,6 @@ impl Transaction {
 	}
 	/// Commit a transaction
 	pub fn commit(&mut self) -> Result<(), Error> {
-		trace!(target: LOG, "commit");
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -73,7 +73,8 @@ impl Transaction {
 		}
 		// Mark this transaction as done
 		self.ok = true;
-		// Cancel this transaction
+		trace!(target: LOG, "Commit");
+		// Commit this transaction
 		self.tx.commit()?;
 		// Continue
 		Ok(())
@@ -87,8 +88,10 @@ impl Transaction {
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "Exi {:?}", key);
+		}
 		// Check the key
-		trace!(target: LOG, "exi {:?}", key);
 		let res = self.tx.exi(key.into())?;
 		// Return result
 		Ok(res)
@@ -102,8 +105,10 @@ impl Transaction {
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "Get {:?}", key);
+		}
 		// Get the key
-		trace!(target: LOG, "get {:?}", key);
 		let res = self.tx.get(key.into())?;
 		// Return result
 		Ok(res)
@@ -122,8 +127,10 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "Set {:?} => {:?}", key, val);
+		}
 		// Set the key
-		trace!(target: LOG, "set {:?} => {:?}", key, val);
 		self.tx.set(key.into(), val.into())?;
 		// Return result
 		Ok(())
@@ -142,8 +149,10 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "Put {:?} => {:?}", key, val);
+		}
 		// Set the key
-		trace!(target: LOG, "put {:?} => {:?}", key, val);
 		self.tx.put(key.into(), val.into())?;
 		// Return result
 		Ok(())
@@ -162,8 +171,10 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "Putc {:?} => {:?}", key, val);
+		}
 		// Set the key
-		trace!(target: LOG, "putc {:?} => {:?}", key, val);
 		self.tx.putc(key.into(), val.into(), chk.map(Into::into))?;
 		// Return result
 		Ok(())
@@ -181,8 +192,10 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "Del {:?}", key);
+		}
 		// Remove the key
-		trace!(target: LOG, "del {:?}", key);
 		self.tx.del(key.into())?;
 		// Return result
 		Ok(())
@@ -202,7 +215,9 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		trace!(target: LOG, "delc {:?} => {:?}", key, chk);
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "Delc {:?} => {:?}", key, chk);
+		}
 		self.tx.delc(key.into(), chk.map(Into::into))?;
 		// Return result
 		Ok(())
@@ -219,7 +234,9 @@ impl Transaction {
 		// Convert the range to bytes
 		let start = rng.start;
 		let end = rng.end;
-		trace!(target: LOG, "scan {:?}-{:?}", start, end);
+		if log_enabled!(Trace) {
+			trace!(target: LOG, "Scan {:?} - {:?}", start, end);
+		}
 		let rng: Range<Key> = Range {
 			start: start.into(),
 			end: end.into(),
