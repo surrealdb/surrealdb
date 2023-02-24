@@ -326,7 +326,6 @@ impl Datastore {
 		match exe.execute(ctx, opt, ast).await {
 			Ok((vec, _)) => Ok(vec),
 			Err(e) => Err(e),
-			_ => panic!("Unhandled conversion from execute in process"),
 		}
 	}
 

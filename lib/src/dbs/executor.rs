@@ -17,7 +17,6 @@ use crate::sql::Statement::Live;
 use channel::{Receiver, Sender};
 use futures::lock::Mutex;
 use std::collections::BTreeMap;
-use std::sync::mpsc::channel;
 use std::sync::{Arc, RwLock};
 use tracing::instrument;
 use trice::Instant;
@@ -317,8 +316,7 @@ impl<'a> Executor<'a> {
 												Live(live_statement) => {
 													// We now create an async channel to send updates to
 													// when operations are performed that affect the LQ
-													let lqid: LiveQueryID =
-														live_statement.id.0.clone();
+													let lqid = live_statement.id.0.clone();
 													let (sender, recvr): (
 														Sender<Response>,
 														Receiver<Response>,

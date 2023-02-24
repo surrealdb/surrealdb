@@ -721,3 +721,18 @@ impl Rpc {
 		Ok(res)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use warp::ws::WebSocket;
+	use crate::net::rpc::Rpc;
+	use surrealdb::dbs::Session;
+
+	#[test]
+	fn connecting_registers_websocket() {
+		let session = Session::default();
+		let rpc = Rpc::new(session);
+		let ws = WebSocket{}
+		RPC::serve()
+	}
+}
