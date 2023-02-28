@@ -20,6 +20,7 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let _ = self.id.as_ref().unwrap();
 		// Loop through all index statements
+		txn.clone().lock().await.
 		for lv in self.lv(opt, txn).await?.iter() {
 			// Create a new statement
 			let lq = Statement::from(lv);
@@ -28,15 +29,20 @@ impl<'a> Document<'a> {
 			if self.check(ctx, opt, txn, &lq).await.is_err() {
 				continue;
 			}
+			let lq_opt = get_context_from_disk();
+			if self.allow(ctx, lq_opt, txn, &lq).await.is_err() {
+				// Not allowed to view this document
+			}
 			// Check what type of data change this is
 			if stm.is_delete() {
 				// Send a DELETE notification to the WebSocket
 			} else if self.is_new() {
 				// Process the CREATE notification to send
-				let _ = self.pluck(ctx, opt, txn, &lq).await?; // TODO the value based on the LQ. Diff vs fields
+				let _ = self.pluck(ctx, lq_opt, txn, &lq).await?; // TODO the value based on the LQ. Diff vs fields
+				// 1. Queue CREATE notification
 			} else {
 				// Process the CREATE notification to send
-				let _ = self.pluck(ctx, opt, txn, &lq).await?;
+				let _ = self.pluck(ctx, lq_opt, txn, &lq).await?;
 			};
 		}
 		// Carry on

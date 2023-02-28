@@ -26,6 +26,7 @@ mod update;
 mod use_ns;
 mod version;
 
+mod livestream;
 #[cfg(test)]
 mod tests;
 
@@ -946,6 +947,13 @@ where
 		Live {
 			router: self.router.extract(),
 			table_name: table_name.into(),
+		}
+	}
+
+	#[doc(hidden)] // Not supported yet
+	pub fn live_stream(&self) -> LiveStream<C> {
+		LiveStream {
+			router: self.router.extract(),
 		}
 	}
 

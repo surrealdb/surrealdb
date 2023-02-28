@@ -125,6 +125,14 @@ impl Rpc {
 				}
 			}
 		});
+		// Handle inbound diff patch from live queries
+		let mut diff_stream = DB.get()?.diff_patch_stream.clone();
+		tokio::task::spawn(async move {
+			while let response_vec = diff_stream.next().await {
+				println!("Received diff update response vec {response_vec:?}")
+				// TODO filter for cluster or this connected WS instance
+			}
+		});
 		// Get messages from the client
 		while let Some(msg) = wrx.next().await {
 			match msg {

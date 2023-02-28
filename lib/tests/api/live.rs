@@ -3,8 +3,6 @@
 
 #[tokio::test]
 async fn open_live_query() {
-	// init(4);
-
 	let unique = Ulid::new().to_string();
 	let table_name = format!("OpenLiveQueryTable{unique}");
 	let person1_id = format!("{table_name}:person1");
@@ -18,6 +16,7 @@ async fn open_live_query() {
 	let update_res = db
 		.query(format!("UPDATE {table_name} SET name='another person 1' WHERE id={person1_id}"))
 		.await;
+	let recv = db.get_live_stream();
 
 	println!("Create response was {create_res:?} and live query response was {lq_res:?}");
 	println!("Update response was {update_res:?}");

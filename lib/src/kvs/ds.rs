@@ -11,7 +11,7 @@ use crate::kvs::LOG;
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
-use channel::Sender;
+use channel::{Receiver, Sender};
 use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
@@ -21,6 +21,7 @@ use tracing::instrument;
 #[allow(dead_code)]
 pub struct Datastore {
 	pub(super) inner: Inner,
+	pub diff_patch_stream: Arc<Receiver<Vec<Response>>>,
 }
 
 #[allow(clippy::large_enum_variant)]
