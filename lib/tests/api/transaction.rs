@@ -15,6 +15,7 @@ fn test_log(msg: &str) {
 }
 
 // The first transaction increments value by 1.
+// This transaction uses sleep to be sure it runs longer than transaction2.
 async fn transaction1(db: String, barrier: Arc<Barrier>) -> Result<(), Error> {
 	test_log("1 start");
 	let client = new_db().await;
@@ -28,9 +29,9 @@ async fn transaction1(db: String, barrier: Arc<Barrier>) -> Result<(), Error> {
 			r#"
 			BEGIN TRANSACTION;
 				LET $value = (SELECT value FROM foo:bar);
-				SELECT * FROM sleep("500ms");
 				SELECT * FROM crypto::scrypt::generate('slow');
 				UPDATE foo:bar SET value1 = value, value = value + 1;
+				SELECT * FROM sleep("500ms");
 			COMMIT TRANSACTION;
 	"#,
 		)
@@ -47,7 +48,8 @@ async fn transaction2(db: String, barrier: Arc<Barrier>) -> Result<(), Error> {
 	test_log("2 barrier");
 	barrier.wait();
 	test_log("2 sleep");
-	sleep(Duration::from_millis(100));
+	// Sleep 200ms to be sure transaction1 has started
+	sleep(Duration::from_millis(200));
 	test_log("2 execute");
 	client.query("UPDATE foo:bar SET value2 = value, value = value + 2").await?;
 	test_log("2 ends");
@@ -87,9 +89,13 @@ async fn verify_transaction_isolation() {
 	// A value of 3 show that the transaction isolation is not respected:
 	// client1 has incremented by 1 the value set by the client2's transaction (or the opposite).
 	let mut response = client.query("SELECT value,value1,value2 FROM foo:bar").await.unwrap();
-	assert_ne!(response.take::<Option<i32>>("value").unwrap(), Some(3));
-	// Transaction1 should have set value1 to the the initial value (0).
-	assert_eq!(response.take::<Option<i32>>("value1").unwrap(), Some(0));
-	// Transaction2 should have set value2 to the the initial value (0).
-	assert_eq!(response.take::<Option<i32>>("value2").unwrap(), Some(0));
+	assert_eq!(response.take::<Option<i32>>("value").unwrap(), Some(3));
+	let value1 = response.take::<Option<i32>>("value1").unwrap();
+	let value2 = response.take::<Option<i32>>("value2").unwrap();
+	// One transaction should have an initial value of 0, the other an initial value of 2.
+	match value1 {
+		Some(0) => assert_eq!(value2, Some(1)),
+		Some(2) => assert_eq!(value2, Some(0)),
+		_ => assert!(false, "Unexpected value for value1 {:?}", value1),
+	}
 }
