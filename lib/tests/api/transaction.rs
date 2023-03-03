@@ -1,51 +1,95 @@
-use surrealdb::sql::{Number, Value};
+use futures::TryFutureExt;
+use std::collections::HashMap;
+use std::sync::{Arc, Barrier};
+use std::thread::sleep;
+use std::time::{Duration, SystemTime};
+use surrealdb::sql::{json, Number, Value};
 use surrealdb::{Connection, Error};
 
-async fn async_query<C>(client: Surreal<C>, sql: &str) -> Result<(), Error>
-where
-	C: Connection,
-{
-	client.query(sql).await?;
+fn test_log(msg: &str) {
+	println!(
+		"{} {}",
+		SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis(),
+		msg,
+	);
+}
+
+// The first transaction increments value by 1.
+async fn transaction1(db: String, barrier: Arc<Barrier>) -> Result<(), Error> {
+	test_log("1 start");
+	let client = new_db().await;
+	client.use_ns(NS).use_db(db).await.unwrap();
+
+	test_log("1 barrier");
+	barrier.wait();
+	test_log("1 execute");
+	client
+		.query(
+			r#"
+			BEGIN TRANSACTION;
+				LET $value = (SELECT value FROM foo:bar);
+				SELECT * FROM sleep("500ms");
+				SELECT * FROM crypto::scrypt::generate('slow');
+				UPDATE foo:bar SET value1 = value, value = value + 1;
+			COMMIT TRANSACTION;
+	"#,
+		)
+		.await?;
+	test_log("1 ends");
 	Ok(())
 }
 
-#[tokio::test]
+// The second transaction increments value by 2.
+async fn transaction2(db: String, barrier: Arc<Barrier>) -> Result<(), Error> {
+	test_log("2 start");
+	let client = new_db().await;
+	client.use_ns(NS).use_db(db).await.unwrap();
+	test_log("2 barrier");
+	barrier.wait();
+	test_log("2 sleep");
+	sleep(Duration::from_millis(100));
+	test_log("2 execute");
+	client.query("UPDATE foo:bar SET value2 = value, value = value + 2").await?;
+	test_log("2 ends");
+	Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn verify_transaction_isolation() {
-	// We create two clients
-	let client1 = new_db().await;
-	client1.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	let db = Ulid::new().to_string();
 
-	let client2 = new_db().await;
-	client2.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	let client = new_db().await;
+	client.use_ns(NS).use_db(db.clone()).await.unwrap();
 
-	// Create a document with value set to 0
-	client1.query("CREATE foo:bar SET value = 0").await.unwrap();
+	// Create a document with initial values.
+	client.query("CREATE foo:bar SET value = 0, value1 = 99, value2 = 99").await.unwrap();
 
-	// The first client will increment value by 1, but it will be delayed by the slow crypto function.
-	let sql1 = async_query(
-		client1,
-		r#"
-		BEGIN;
-			SELECT * FROM crypto::scrypt::generate("slow");
-			UPDATE foo:bar SET value = value + 1;
-		COMMIT;
-	"#,
-	);
-	// The second client will increment value by 2, without delay.
-	let sql2 = async_query(client2, "UPDATE foo:bar SET value = value + 2");
+	// The barrier is used to synchronise both transactions.
+	let barrier = Arc::new(Barrier::new(3));
 
 	// The two queries are run in parallel.
-	let _ = tokio::join!(tokio::spawn(sql1), tokio::spawn(sql2));
+	let f1 = tokio::spawn(transaction1(db.clone(), barrier.clone()));
+	let f2 = tokio::spawn(transaction2(db.clone(), barrier.clone()));
 
-	// The final value should be 2 or 1,
-	// Because when both transaction started, the value was 0.
+	// Unlock the execution of both transactions
+	barrier.wait();
+
+	// Wait for both transaction's execution.
+	let (res1, res2) = tokio::join!(f1, f2);
+
+	// Check that both transaction ran successfully
+	res1.unwrap().unwrap();
+	res2.unwrap().unwrap();
+
+	// Because when both transaction started, the value was 0,
+	// the final value should be 2 if transaction 2 ends last,
+	// or 1 if transaction 1 ends last.
 	// A value of 3 show that the transaction isolation is not respected:
-	// client1 has incremented by 1 the value set by the client2's transaction.
-	let client3 = new_db().await;
-	client3.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-	let mut response = client3.query("SELECT value FROM foo:bar").await.unwrap();
-	let Some(value): Option<i64> = response.take(0).unwrap() else {
-		panic!("record not found");
-	};
-	assert_ne!(value, 3i64);
+	// client1 has incremented by 1 the value set by the client2's transaction (or the opposite).
+	let mut response = client.query("SELECT value,value1,value2 FROM foo:bar").await.unwrap();
+	assert_ne!(response.take::<Option<i32>>("value").unwrap(), Some(3));
+	// Transaction1 should have set value1 to the the initial value (0).
+	assert_eq!(response.take::<Option<i32>>("value1").unwrap(), Some(0));
+	// Transaction2 should have set value2 to the the initial value (0).
+	assert_eq!(response.take::<Option<i32>>("value2").unwrap(), Some(0));
 }

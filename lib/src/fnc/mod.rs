@@ -19,6 +19,7 @@ pub mod parse;
 pub mod rand;
 pub mod script;
 pub mod session;
+pub mod sleep;
 pub mod string;
 pub mod time;
 pub mod r#type;
@@ -176,6 +177,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"session::sc" => session::sc(ctx),
 		"session::sd" => session::sd(ctx),
 		"session::token" => session::token(ctx),
+		//
+		"sleep" => sleep::sleep,
 		//
 		"string::concat" => string::concat,
 		"string::endsWith" => string::ends_with,
