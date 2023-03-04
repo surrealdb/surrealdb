@@ -202,6 +202,8 @@ impl Rpc {
 			// Unsupported message type
 			_ => return res::failure(None, Failure::INTERNAL_ERROR).send(out, chn).await,
 		};
+		// Log the received request
+		trace!(target: LOG, "RPC Received: {}", req);
 		// Fetch the 'id' argument
 		let id = match req.pick(&*ID) {
 			v if v.is_none() => None,
