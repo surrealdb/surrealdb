@@ -308,6 +308,24 @@ mod tests {
 	}
 
 	#[test]
+	fn date_time_timezone_utc_nanoseconds() {
+		let sql = "2012-04-23T18:25:43.5110000Z";
+		let res = datetime_raw(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("'2012-04-23T18:25:43.511Z'", format!("{}", out));
+	}
+
+	#[test]
+	fn date_time_timezone_utc_sub_nanoseconds() {
+		let sql = "2012-04-23T18:25:43.0000511Z";
+		let res = datetime_raw(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
+	}
+
+	#[test]
 	fn date_time_illegal_date() {
 		// Hey! There's not a 31st of November!
 		let sql = "2022-11-31T12:00:00.000Z";
