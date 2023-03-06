@@ -39,7 +39,7 @@ where
 	debug!("2 barrier");
 	barrier.wait();
 	debug!("2 sleep");
-	// Sleep 200ms to be sure transaction1 has started
+	// Sleep 200ms to be sure transaction1 has started.
 	sleep(Duration::from_millis(200));
 	debug!("2 execute");
 	client.query("UPDATE foo:bar SET value2=value,value=value+2").await?;
@@ -62,13 +62,13 @@ async fn verify_transaction_isolation() {
 	let f1 = tokio::spawn(transaction_isolation_1(client.clone(), barrier.clone()));
 	let f2 = tokio::spawn(transaction_isolation_2(client.clone(), barrier.clone()));
 
-	// Unlock the execution of both transactions
+	// Unlock the execution of both transactions.
 	barrier.wait();
 
 	// Wait for both transaction's execution.
 	let (res1, res2) = tokio::join!(f1, f2);
 
-	// Check that both transaction ran successfully
+	// Check that both transaction ran successfully.
 	res1.unwrap().unwrap();
 	res2.unwrap().unwrap();
 
@@ -80,9 +80,11 @@ async fn verify_transaction_isolation() {
 	let value1 = response.take::<Option<i32>>("value1").unwrap();
 	let value2 = response.take::<Option<i32>>("value2").unwrap();
 	match value1 {
-		// If transaction1 has an initial value of 0, then transaction2 should have an initial value of 1
+		// If transaction1 has an initial value of 0,
+		// then transaction2 should have an initial value of 1.
 		Some(0) => assert_eq!(value2, Some(1)),
-		// If transaction1 has an initial value of 2, then transaction2 should have an initial value of 0
+		// If transaction1 has an initial value of 2,
+		// then transaction2 should have an initial value of 0.
 		Some(2) => assert_eq!(value2, Some(0)),
 		_ => assert!(false, "Unexpected value for value1 {:?}", value1),
 	}
@@ -139,7 +141,7 @@ async fn verify_repeatable_read() {
 	let client = new_db().await;
 	client.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
-	// Create a document with initial values.
+	// Create a document with an initial value.
 	client.query("CREATE row:42 SET value=1").await.unwrap();
 
 	// The barrier is used to synchronise both transactions.
@@ -149,7 +151,7 @@ async fn verify_repeatable_read() {
 	let f1 = tokio::spawn(transaction_repeatable_read_1(client.clone(), barrier.clone()));
 	let f2 = tokio::spawn(transaction_repeatable_read_2(client.clone(), barrier.clone()));
 
-	// Unlock the execution of both transactions
+	// Unlock the execution of both transactions.
 	barrier.wait();
 
 	// Wait for both transaction's execution.
@@ -169,7 +171,6 @@ async fn verify_repeatable_read() {
 		.query("SELECT first.value AS first, second.value AS second FROM row:43")
 		.await
 		.unwrap();
-	debug!("{:?}", response);
 	assert_eq!(response.take::<Option<i32>>("first").unwrap(), Some(1));
 	assert_eq!(response.take::<Option<i32>>("second").unwrap(), Some(1));
 }
