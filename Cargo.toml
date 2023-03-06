@@ -15,7 +15,9 @@ scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 
 [workspace]
-members = ["lib", "lib/examples/actix"]
+members = [
+    "lib"
+]
 
 [profile.release]
 lto = true
@@ -64,3 +66,7 @@ assets = [
 ]
 extended-description = "A scalable, distributed, collaborative, document-graph database, for the realtime web."
 license-file = ["LICENSE", "4"]
+
+[[bin]]
+name = "surreal"
+path = "src/main.rs"
