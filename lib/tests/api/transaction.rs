@@ -22,9 +22,8 @@ where
 			r#"
 			BEGIN;
 				LET $value = (SELECT value FROM foo:bar);
-				SELECT * FROM crypto::scrypt::generate('slow');
-				UPDATE foo:bar SET value1=value,value=value+1;
 				SELECT * FROM sleep("500ms");
+				UPDATE foo:bar SET value1=value,value=value+1;
 			COMMIT;"#,
 		)
 		.await?;
