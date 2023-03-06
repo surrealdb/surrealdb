@@ -24,18 +24,19 @@ async fn transaction1(db: String, barrier: Arc<Barrier>) -> Result<(), Error> {
 	test_log("1 barrier");
 	barrier.wait();
 	test_log("1 execute");
-	client
+	let res = client
 		.query(
 			r#"
-			BEGIN TRANSACTION;
+			BEGIN;
 				LET $value = (SELECT value FROM foo:bar);
 				SELECT * FROM crypto::scrypt::generate('slow');
-				UPDATE foo:bar SET value1 = value, value = value + 1;
+				UPDATE foo:bar SET value1=value,value=value+1;
 				SELECT * FROM sleep("500ms");
-			COMMIT TRANSACTION;
+			COMMIT;
 	"#,
 		)
 		.await?;
+	println!("{:?}", res);
 	test_log("1 ends");
 	Ok(())
 }
@@ -51,7 +52,8 @@ async fn transaction2(db: String, barrier: Arc<Barrier>) -> Result<(), Error> {
 	// Sleep 200ms to be sure transaction1 has started
 	sleep(Duration::from_millis(200));
 	test_log("2 execute");
-	client.query("UPDATE foo:bar SET value2 = value, value = value + 2").await?;
+	let res = client.query("UPDATE foo:bar SET value2=value,value=value+2").await?;
+	println!("{:?}", res);
 	test_log("2 ends");
 	Ok(())
 }
@@ -60,11 +62,14 @@ async fn transaction2(db: String, barrier: Arc<Barrier>) -> Result<(), Error> {
 async fn verify_transaction_isolation() {
 	let db = Ulid::new().to_string();
 
+	// The test is using three concurrent connection, therefore
+	// this test makes only sense when successive call to new_db
+	// returns a client to the same single DB instance.
 	let client = new_db().await;
 	client.use_ns(NS).use_db(db.clone()).await.unwrap();
 
 	// Create a document with initial values.
-	client.query("CREATE foo:bar SET value = 0, value1 = 99, value2 = 99").await.unwrap();
+	client.query("CREATE foo:bar SET value=0,value1=99,value2=99").await.unwrap();
 
 	// The barrier is used to synchronise both transactions.
 	let barrier = Arc::new(Barrier::new(3));
