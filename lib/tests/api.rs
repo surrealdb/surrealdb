@@ -88,7 +88,6 @@ mod http {
 	include!("api/mod.rs");
 	include!("api/auth.rs");
 	include!("api/backup.rs");
-	include!("api/transaction.rs");
 }
 
 #[cfg(feature = "kv-mem")]
@@ -174,4 +173,24 @@ mod any {
 	include!("api/mod.rs");
 	include!("api/auth.rs");
 	include!("api/backup.rs");
+}
+
+#[cfg(feature = "kv-remote")]
+mod remote {
+	use super::*;
+	use surrealdb::engine::any::Any;
+
+	async fn new_db() -> Surreal<Any> {
+		let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER,
+			password: ROOT_PASS,
+		})
+		.await
+		.unwrap();
+		db
+	}
+
+	include!("api/mod.rs");
+	include!("api/transaction.rs");
 }
