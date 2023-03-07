@@ -62,6 +62,7 @@ async fn transaction_isolation_2(db: String, barrier: Arc<Barrier>) -> Result<()
 }
 
 /// This test checks if the repeatable read isolation level is being properly enforced
+// https://github.com/surrealdb/surrealdb/issues/1620
 #[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
 async fn verify_transaction_isolation() {
 	let db = Ulid::new().to_string();
@@ -79,11 +80,18 @@ async fn verify_transaction_isolation() {
 	let f2 = tokio::spawn(transaction_isolation_2(db.clone(), barrier.clone()));
 
 	// Unlock the execution of both transactions.
+	let time = SystemTime::now();
 	barrier.wait();
 
 	// Wait for both transaction's execution.
 	let (res1, res2) = tokio::join!(f1, f2);
 
+	if time.elapsed().unwrap().as_secs() > 6 {
+		panic!(
+			"The test should not take more than 6 seconds.\
+		It probably means that the two transactions has not been run in parallel."
+		)
+	}
 	// Check that both transaction ran successfully.
 	res1.unwrap().unwrap();
 	res2.unwrap().unwrap();

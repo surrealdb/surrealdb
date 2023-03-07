@@ -174,5 +174,4 @@ mod any {
 	include!("api/mod.rs");
 	include!("api/auth.rs");
 	include!("api/backup.rs");
-	include!("api/transaction.rs");
 }
