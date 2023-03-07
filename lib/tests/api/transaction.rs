@@ -21,9 +21,12 @@ where
 		.query(
 			r#"
 			BEGIN;
-				LET $value = (SELECT value FROM foo:bar);
-				SELECT * FROM sleep("500ms");
-				UPDATE foo:bar SET value1=value,value=value+1;
+				SELECT * FROM sleep("2s"); 
+				/* 00:02 before txn2's commit */
+				UPDATE foo:bar SET value1=(SELECT value FROM foo:bar); 
+				SELECT * FROM sleep("2s");
+				/* 00:04 after tnx2 commit; */
+				UPDATE foo:bar SET value2=(SELECT value FROM foo:bar);
 			COMMIT;"#,
 		)
 		.await?;
@@ -38,11 +41,19 @@ where
 {
 	debug!("2 barrier");
 	barrier.wait();
-	debug!("2 sleep");
-	// Sleep 200ms to be sure transaction1 has started.
-	sleep(Duration::from_millis(200));
 	debug!("2 execute");
-	client.query("UPDATE foo:bar SET value2=value,value=value+2").await?;
+	client
+		.query(
+			r#"
+			BEGIN;
+				SELECT * FROM sleep("1s");
+				/* 00:01 before txn1 check the value */
+				UPDATE foo:bar SET value=1;
+				SELECT * FROM sleep("2s");
+			/* 00:03 before txn1 check the value the second time */
+			COMMIT;"#,
+		)
+		.await?;
 	debug!("2 ends");
 	Ok(())
 }
@@ -53,7 +64,7 @@ async fn verify_transaction_isolation() {
 	client.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 
 	// Create a document with initial values.
-	client.query("CREATE foo:bar SET value=0,value1=99,value2=99").await.unwrap();
+	client.query("CREATE foo:bar SET value=0").await.unwrap();
 
 	// The barrier is used to synchronise both transactions.
 	let barrier = Arc::new(Barrier::new(3));
@@ -72,22 +83,16 @@ async fn verify_transaction_isolation() {
 	res1.unwrap().unwrap();
 	res2.unwrap().unwrap();
 
-	let mut response = client.query("SELECT value,value1,value2 FROM foo:bar").await.unwrap();
+	let mut response = client
+		.query("SELECT value,value1.value AS value1,value2.value AS value2 FROM foo:bar")
+		.await
+		.unwrap();
 
-	// Value should be 3, as it has been incremented by 1 by transaction1, and by 2 by transaction2.
-	assert_eq!(response.take::<Option<i32>>("value").unwrap(), Some(3));
-
-	let value1 = response.take::<Option<i32>>("value1").unwrap();
-	let value2 = response.take::<Option<i32>>("value2").unwrap();
-	match value1 {
-		// If transaction1 has an initial value of 0,
-		// then transaction2 should have an initial value of 1.
-		Some(0) => assert_eq!(value2, Some(1)),
-		// If transaction1 has an initial value of 2,
-		// then transaction2 should have an initial value of 0.
-		Some(2) => assert_eq!(value2, Some(0)),
-		_ => assert!(false, "Unexpected value for value1 {:?}", value1),
-	}
+	// `value` should be 1, set by txn2.
+	assert_eq!(response.take::<Option<i32>>("value").unwrap(), Some(1));
+	// `value1` and `value2` should be 0, set by tnx1.
+	assert_eq!(response.take::<Option<i32>>("value1").unwrap(), Some(0));
+	assert_eq!(response.take::<Option<i32>>("value2").unwrap(), Some(0));
 }
 
 // The first transaction increments value by 1.
