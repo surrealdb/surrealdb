@@ -19,7 +19,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let db = matches.value_of("db").unwrap();
 	// Connect to the database engine
 	let client = connect(endpoint).await?;
-	// Sign in to the server if the specified dabatabase engine supports it
+	// Sign in to the server if the specified database engine supports it
 	let root = Root {
 		username,
 		password,
