@@ -227,11 +227,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 }
 
 /// Attempts to run any asynchronous function.
-pub async fn asynchronous(
-	_ctx: &Context<'_>,
-	name: &str,
-	args: Vec<Value>,
-) -> Result<Value, Error> {
+pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
 	// Wrappers return a function as opposed to a value so that the dispatch! method can always
 	// perform a function call.
 	#[cfg(not(target_arch = "wasm32"))]
@@ -260,11 +256,11 @@ pub async fn asynchronous(
 		"crypto::scrypt::compare" => (cpu_intensive) crypto::scrypt::cmp.await,
 		"crypto::scrypt::generate" => (cpu_intensive) crypto::scrypt::gen.await,
 		//
-		"http::head" => http::head.await,
-		"http::get" => http::get.await,
-		"http::put" => http::put.await,
-		"http::post" =>  http::post.await,
-		"http::patch" => http::patch.await,
-		"http::delete" => http::delete.await,
+		"http::head" => http::head(ctx).await,
+		"http::get" => http::get(ctx).await,
+		"http::put" => http::put(ctx).await,
+		"http::post" =>  http::post(ctx).await,
+		"http::patch" => http::patch(ctx).await,
+		"http::delete" => http::delete(ctx).await,
 	)
 }

@@ -107,6 +107,12 @@ impl<'a> Context<'a> {
 		self.deadline
 	}
 
+	/// Get the timeout for this operation, if any. This is useful for
+	/// checking if a long job should be started or not.
+	pub fn timeout(&self) -> Option<Duration> {
+		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
+	}
+
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
 	pub fn done(&self) -> Option<Reason> {
