@@ -17,7 +17,10 @@ use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::SocketAddr::V4;
 use std::sync::Arc;
+use std::time::Duration;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
 use surrealdb::dbs::Session;
@@ -54,6 +57,16 @@ pub struct Rpc {
 	format: Output,
 	uuid: Uuid,
 	vars: BTreeMap<String, Value>,
+}
+
+pub struct MembershipInfo {
+	node_id: Uuid, // Unique identifier that is session-persistent (i.e. restarting gives new node ID)
+	address: std::net::SocketAddr, // The broadcast address used to tell other cluster members how to connect to it
+}
+
+pub struct ClusterConfiguration {
+	heartbeat: std::time::Duration, // The rate at which to update the membership records for self
+	timeout: std::time::Duration, // The polling rate to determine removing nodes from the membership record
 }
 
 impl Rpc {
@@ -118,6 +131,20 @@ impl Rpc {
 				}
 			}
 		});
+		// Handle cluster membership for service discovery, including removing dead nodes
+		let node_info = MembershipInfo {
+			node_id: Uuid::new_v4(),
+			address: V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1234)),
+		};
+		let cluster_info = ClusterConfiguration {
+			heartbeat: Duration::new(1, 0), // Every second
+			timeout: Duration::new(10, 0), // Every 10s. Eyeballing
+		};
+		let members : Arc<BTreeMap<Uuid, MembershipInfo>> = Arc::new(BTreeMap::new()); // NodeID <> Membership mapping
+		tokio::task::spawn(async move {
+			let mut local_members = members.clone();
+			local_members.insert(node_info.node_id, node_info);
+		})
 		// Get messages from the client
 		while let Some(msg) = wrx.next().await {
 			match msg {
