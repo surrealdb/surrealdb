@@ -235,7 +235,7 @@ impl Rpc {
 			},
 			// Switch to a specific namespace and database
 			"use" => match params.needs_two() {
-				Ok((Value::Strand(ns), Value::Strand(db))) => rpc.write().await.yuse(ns, db).await,
+				Ok((ns, db)) => rpc.write().await.yuse(ns, db).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Signup to a specific authentication scope
@@ -367,9 +367,13 @@ impl Rpc {
 		Ok(Value::None)
 	}
 
-	async fn yuse(&mut self, ns: Strand, db: Strand) -> Result<Value, Error> {
-		self.session.ns = Some(ns.0);
-		self.session.db = Some(db.0);
+	async fn yuse(&mut self, ns: Value, db: Value) -> Result<Value, Error> {
+		if let Value::Strand(ns) = ns {
+			self.session.ns = Some(ns.0);
+		}
+		if let Value::Strand(db) = db {
+			self.session.db = Some(db.0);
+		}
 		Ok(Value::None)
 	}
 
