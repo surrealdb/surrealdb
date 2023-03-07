@@ -1,3 +1,4 @@
+use dmp::new;
 use futures::TryFutureExt;
 use log::debug;
 use std::collections::HashMap;
@@ -10,10 +11,9 @@ use test_log::test;
 
 // The first transaction increments value by 1.
 // This transaction uses sleep to be sure it runs longer than transaction2.
-async fn transaction_isolation_1<C>(client: Surreal<C>, barrier: Arc<Barrier>) -> Result<(), Error>
-where
-	C: Connection,
-{
+async fn transaction_isolation_1(db: String, barrier: Arc<Barrier>) -> Result<(), Error> {
+	let client = new_db().await;
+	client.use_ns(NS).use_db(db.clone()).await.unwrap();
 	debug!("1 barrier");
 	barrier.wait();
 	debug!("1 execute");
@@ -21,24 +21,26 @@ where
 		.query(
 			r#"
 			BEGIN;
+				/* 00:00 read the initial value */
+				CREATE rec:1 SET value=(SELECT value FROM rec:0); 
 				SELECT * FROM sleep("2s"); 
 				/* 00:02 before txn2's commit */
-				UPDATE foo:bar SET value1=(SELECT value FROM foo:bar); 
+				CREATE rec:2 SET value=(SELECT value FROM rec:0); 
 				SELECT * FROM sleep("2s");
-				/* 00:04 after tnx2 commit; */
-				UPDATE foo:bar SET value2=(SELECT value FROM foo:bar);
+				/* 00:04 after tnx2's commit; */
+				CREATE rec:3 SET value=(SELECT value FROM rec:0);
 			COMMIT;"#,
 		)
-		.await?;
+		.await?
+		.check()?;
 	debug!("1 ends");
 	Ok(())
 }
 
 // The second transaction increments value by 2.
-async fn transaction_isolation_2<C>(client: Surreal<C>, barrier: Arc<Barrier>) -> Result<(), Error>
-where
-	C: Connection,
-{
+async fn transaction_isolation_2(db: String, barrier: Arc<Barrier>) -> Result<(), Error> {
+	let client = new_db().await;
+	client.use_ns(NS).use_db(db.clone()).await.unwrap();
 	debug!("2 barrier");
 	barrier.wait();
 	debug!("2 execute");
@@ -48,30 +50,33 @@ where
 			BEGIN;
 				SELECT * FROM sleep("1s");
 				/* 00:01 before txn1 check the value */
-				UPDATE foo:bar SET value=1;
+				UPDATE rec:0 SET value=1;
 				SELECT * FROM sleep("2s");
 			/* 00:03 before txn1 check the value the second time */
 			COMMIT;"#,
 		)
-		.await?;
+		.await?
+		.check()?;
 	debug!("2 ends");
 	Ok(())
 }
 
+/// This test checks if the repeatable read isolation level is being properly enforced
 #[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
 async fn verify_transaction_isolation() {
+	let db = Ulid::new().to_string();
 	let client = new_db().await;
-	client.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	client.use_ns(NS).use_db(db.clone()).await.unwrap();
 
 	// Create a document with initial values.
-	client.query("CREATE foo:bar SET value=0").await.unwrap();
+	client.query("CREATE rec:0 SET value=0").await.unwrap().check().unwrap();
 
 	// The barrier is used to synchronise both transactions.
 	let barrier = Arc::new(Barrier::new(3));
 
 	// The two queries are run in parallel.
-	let f1 = tokio::spawn(transaction_isolation_1(client.clone(), barrier.clone()));
-	let f2 = tokio::spawn(transaction_isolation_2(client.clone(), barrier.clone()));
+	let f1 = tokio::spawn(transaction_isolation_1(db.clone(), barrier.clone()));
+	let f2 = tokio::spawn(transaction_isolation_2(db.clone(), barrier.clone()));
 
 	// Unlock the execution of both transactions.
 	barrier.wait();
@@ -83,99 +88,27 @@ async fn verify_transaction_isolation() {
 	res1.unwrap().unwrap();
 	res2.unwrap().unwrap();
 
-	let mut response = client
-		.query("SELECT value,value1.value AS value1,value2.value AS value2 FROM foo:bar")
-		.await
-		.unwrap();
+	// `rec:0.value` should be 1, set by txn2.
+	assert_eq!(get_value(&client, "value", "rec:0").await, Some(1));
 
-	// `value` should be 1, set by txn2.
-	assert_eq!(response.take::<Option<i32>>("value").unwrap(), Some(1));
-	// `value1` and `value2` should be 0, set by tnx1.
-	assert_eq!(response.take::<Option<i32>>("value1").unwrap(), Some(0));
-	assert_eq!(response.take::<Option<i32>>("value2").unwrap(), Some(0));
+	// `rec:1.value should be 0, the initial value of rec:0.value
+	assert_eq!(get_value(&client, "value.value", "rec:1").await, Some(0));
+
+	// `rec:2.value should be 0, the initial value of rec:0.value
+	assert_eq!(get_value(&client, "value.value", "rec:2").await, Some(0));
+
+	// `rec:3.value should be 0, the initial value of rec:0.value
+	assert_eq!(get_value(&client, "value.value", "rec:3").await, Some(0));
 }
 
-// The first transaction increments value by 1.
-// This transaction uses sleep to be sure it runs longer than transaction2.
-async fn transaction_repeatable_read_1<C>(
-	client: Surreal<C>,
-	barrier: Arc<Barrier>,
-) -> Result<(), Error>
-where
-	C: Connection,
-{
-	debug!("1 barrier");
-	barrier.wait();
-	debug!("1 execute");
+/// Helper extracting a value with a SELECT query
+async fn get_value<C: Connection>(client: &Surreal<C>, proj: &str, record: &str) -> Option<i32> {
 	client
-		.query(
-			r#"
-			BEGIN;
-				LET $f = SELECT value FROM row:42;
-				SELECT * FROM sleep("500ms");
-				LET $s = SELECT value from row:42;
-				CREATE row:43 SET first = $f, second = $s;
-			COMMIT;"#,
-		)
-		.await?;
-	debug!("1 ends");
-	Ok(())
-}
-
-// The second transaction increments value by 2.
-async fn transaction_repeatable_read_2<C>(
-	client: Surreal<C>,
-	barrier: Arc<Barrier>,
-) -> Result<(), Error>
-where
-	C: Connection,
-{
-	debug!("2 barrier");
-	barrier.wait();
-	debug!("2 sleep");
-	// Sleep 200ms to be sure transaction1 has started
-	sleep(Duration::from_millis(200));
-	debug!("2 execute");
-	client.query("UPDATE row:42 SET value=99").await?;
-	debug!("2 ends");
-	Ok(())
-}
-
-#[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
-async fn verify_repeatable_read() {
-	let client = new_db().await;
-	client.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-
-	// Create a document with an initial value.
-	client.query("CREATE row:42 SET value=1").await.unwrap();
-
-	// The barrier is used to synchronise both transactions.
-	let barrier = Arc::new(Barrier::new(3));
-
-	// The two queries are run in parallel.
-	let f1 = tokio::spawn(transaction_repeatable_read_1(client.clone(), barrier.clone()));
-	let f2 = tokio::spawn(transaction_repeatable_read_2(client.clone(), barrier.clone()));
-
-	// Unlock the execution of both transactions.
-	barrier.wait();
-
-	// Wait for both transaction's execution.
-	let (res1, res2) = tokio::join!(f1, f2);
-
-	// Check that both transaction ran successfully
-	res1.unwrap().unwrap();
-	res2.unwrap().unwrap();
-
-	// row42:Value should be 99. It has been set by the second transaction.
-	let mut response = client.query("SELECT value FROM row:42").await.unwrap();
-	assert_eq!(response.take::<Option<i32>>("value").unwrap(), Some(99));
-
-	// First and second should be 1 (the initial value).
-	// The snapshot has been read before transaction2 has been committed.
-	let mut response = client
-		.query("SELECT first.value AS first, second.value AS second FROM row:43")
+		.query(format!("SELECT {} AS value FROM {}", proj, record))
 		.await
-		.unwrap();
-	assert_eq!(response.take::<Option<i32>>("first").unwrap(), Some(1));
-	assert_eq!(response.take::<Option<i32>>("second").unwrap(), Some(1));
+		.unwrap()
+		.check()
+		.unwrap()
+		.take::<Option<i32>>("value")
+		.unwrap()
 }

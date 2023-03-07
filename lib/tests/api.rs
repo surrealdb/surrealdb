@@ -66,7 +66,6 @@ mod ws {
 
 	include!("api/mod.rs");
 	include!("api/auth.rs");
-	include!("api/transaction.rs");
 }
 
 #[cfg(feature = "protocol-http")]
@@ -110,7 +109,6 @@ mod mem {
 
 	include!("api/mod.rs");
 	include!("api/backup.rs");
-	include!("api/transaction.rs");
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -126,7 +124,6 @@ mod file {
 
 	include!("api/mod.rs");
 	include!("api/backup.rs");
-	include!("api/transaction.rs");
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -156,7 +153,6 @@ mod fdb {
 
 	include!("api/mod.rs");
 	include!("api/backup.rs");
-	include!("api/transaction.rs");
 }
 
 #[cfg(feature = "protocol-http")]

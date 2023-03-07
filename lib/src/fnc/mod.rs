@@ -27,13 +27,18 @@ pub mod util;
 
 /// Attempts to run any function.
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
-	if name.starts_with("http")
-		|| (name.starts_with("crypto") && (name.ends_with("compare") || name.ends_with("generate")))
-	{
+	if is_asynchronous(name) {
 		asynchronous(ctx, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
+}
+
+/// Tells if the function is asynchronous
+fn is_asynchronous(name: &str) -> bool {
+	name.eq("sleep")
+		|| name.starts_with("http")
+		|| (name.starts_with("crypto") && (name.ends_with("compare") || name.ends_with("generate")))
 }
 
 /// Each function is specified by its name (a string literal) followed by its path. The path
