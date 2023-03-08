@@ -1,6 +1,7 @@
 #[cfg(any(feature = "kv-tikv", feature = "kv-rocksdb", feature = "kv-fdb"))]
 pub(crate) mod transaction {
 	use crate::dbs::{Response, Session};
+	use crate::kvs::ds::Inner;
 	use crate::kvs::Datastore;
 	use crate::sql::json;
 	use log::debug;
@@ -55,7 +56,6 @@ pub(crate) mod transaction {
 	struct TestClient {
 		ds_path: String,
 		ds: Datastore,
-		db: String,
 		ses: Session,
 	}
 
@@ -64,19 +64,31 @@ pub(crate) mod transaction {
 			let ds = Datastore::new(&ds_path).await.unwrap();
 			let ses = Session::for_kv().with_ns("test").with_db(&db);
 			Self {
-				db,
 				ds_path,
 				ds,
 				ses,
 			}
 		}
 
-		async fn clone(&self) -> Self {
-			Self::new(self.db.clone(), self.ds_path.clone()).await
-		}
-
 		async fn execute(&self, txt: &str) -> Vec<Response> {
 			self.ds.execute(txt, &self.ses, None, false).await.unwrap()
+		}
+
+		async fn clone(&self) -> Self {
+			let ds = match &self.ds.inner {
+				#[cfg(feature = "kv-rocksdb")]
+				Inner::RocksDB(ds) => Datastore::from_inner(Inner::RocksDB(ds.clone())),
+				#[cfg(feature = "kv-tikv")]
+				Inner::TiKV(_) => Datastore::new(&self.ds_path).await.unwrap(),
+				#[cfg(feature = "kv-fdb")]
+				Inner::FDB(_) => todo!(),
+				_ => panic!("Datastore not supported"),
+			};
+			Self {
+				ds_path: self.ds_path.clone(),
+				ds,
+				ses: self.ses.clone(),
+			}
 		}
 	}
 
@@ -92,8 +104,7 @@ pub(crate) mod transaction {
 		let client = TestClient::new(db, ds_path.to_string()).await;
 
 		// Create a document with initial values.
-		let res = client.execute("CREATE rec:0 SET value=0").await;
-		debug!("{:?}", res);
+		client.execute("CREATE rec:0 SET value=0").await;
 
 		// The barrier is used to synchronise both transactions.
 		let barrier = Arc::new(Barrier::new(3));

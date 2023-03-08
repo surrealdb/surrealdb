@@ -374,3 +374,17 @@ impl Datastore {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+pub(super) mod test {
+	use crate::kvs::ds::Inner;
+	use crate::kvs::Datastore;
+
+	impl Datastore {
+		pub(in crate::kvs) fn from_inner(inner: Inner) -> Self {
+			Self {
+				inner,
+			}
+		}
+	}
+}
