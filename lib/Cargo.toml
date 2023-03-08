@@ -95,7 +95,7 @@ thiserror = "1.0.38"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
 tokio-stream = { version = "0.1.11", optional = true }
 tokio-util = { version = "0.7.6", optional = true, features = ["compat"] }
-trice = "0.2.0"
+trice = "0.3.0"
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
 

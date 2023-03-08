@@ -3,32 +3,41 @@ use crate::err::Error;
 use crate::sql::value::Value;
 
 #[cfg(not(feature = "http"))]
-pub async fn head((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
+pub async fn head(_: &Context<'_>, (_, _): (Value, Option<Value>)) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn get((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
+pub async fn get(_: &Context<'_>, (_, _): (Value, Option<Value>)) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn put((_, _, _): (Value, Option<Value>, Option<Value>)) -> Result<Value, Error> {
+pub async fn put(
+	_: &Context<'_>,
+	(_, _, _): (Value, Option<Value>, Option<Value>),
+) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn post((_, _, _): (Value, Option<Value>, Option<Value>)) -> Result<Value, Error> {
+pub async fn post(
+	_: &Context<'_>,
+	(_, _, _): (Value, Option<Value>, Option<Value>),
+) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn patch((_, _, _): (Value, Option<Value>, Option<Value>)) -> Result<Value, Error> {
+pub async fn patch(
+	_: &Context<'_>,
+	(_, _, _): (Value, Option<Value>, Option<Value>),
+) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn delete((_, _): (Value, Option<Value>)) -> Result<Value, Error> {
+pub async fn delete(_: &Context<'_>, (_, _): (Value, Option<Value>)) -> Result<Value, Error> {
 	Err(Error::HttpDisabled)
 }
 
