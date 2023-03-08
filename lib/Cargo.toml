@@ -38,7 +38,6 @@ native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/nativ
 rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls"]
 # Private features
 kv-fdb = ["foundationdb"]
-kv-remote = []
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]

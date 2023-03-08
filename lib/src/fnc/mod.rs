@@ -183,8 +183,6 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"session::sd" => session::sd(ctx),
 		"session::token" => session::token(ctx),
 		//
-		"sleep" => sleep::sleep,
-		//
 		"string::concat" => string::concat,
 		"string::endsWith" => string::ends_with,
 		"string::join" => string::join,
@@ -270,5 +268,7 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		"http::post" =>  http::post(ctx).await,
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
+		//
+		"sleep" => sleep::sleep.await,
 	)
 }

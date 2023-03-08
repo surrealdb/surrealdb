@@ -5,6 +5,8 @@ mod indxdb;
 mod kv;
 mod mem;
 mod rocksdb;
+#[cfg(test)]
+mod tests;
 mod tikv;
 mod tx;
 
