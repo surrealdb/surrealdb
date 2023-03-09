@@ -243,6 +243,7 @@ async fn export(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 				.into());
 			}
 		};
+	dbg!(&file);
 	let mut response = request
 		.send()
 		.await?
@@ -490,6 +491,7 @@ async fn router(
 		Method::Export => {
 			let path = base_url.join(Method::Export.as_str())?;
 			let file = param.file.expect("file to export into");
+			dbg!(&file);
 			let request = client
 				.get(path)
 				.headers(headers.clone())

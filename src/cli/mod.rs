@@ -361,7 +361,7 @@ pub fn init() -> ExitCode {
 					.index(1)
 					.required(true)
 					.validator(file_valid)
-					.help("Path to the sql file to export"),
+					.help("Path to the sql file to export. Use dash - to write into stdout."),
 			)
 			.arg(
 				Arg::new("ns")
