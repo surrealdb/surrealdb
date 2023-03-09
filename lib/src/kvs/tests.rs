@@ -81,7 +81,7 @@ pub(crate) mod transaction {
 				#[cfg(feature = "kv-tikv")]
 				Inner::TiKV(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				#[cfg(feature = "kv-fdb")]
-				Inner::FDB(_) => todo!(),
+				Inner::FDB(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				_ => panic!("Datastore not supported"),
 			};
 			Self {
