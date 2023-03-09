@@ -42,10 +42,10 @@ pub(crate) mod transaction {
 			.execute(
 				r#"
 			BEGIN;
-				SELECT * FROM sleep("1s");
+				SLEEP 1s;
 				/* 00:01 before txn1 check the value */
 				UPDATE rec:0 SET value=1;
-				SELECT * FROM sleep("2s");
+				SLEEP 2s;
 				/* 00:03 before txn1 check the value the second time */
 			COMMIT;"#,
 			)

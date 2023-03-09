@@ -15,6 +15,7 @@ pub(crate) mod relate;
 pub(crate) mod remove;
 pub(crate) mod select;
 pub(crate) mod set;
+pub(crate) mod sleep;
 pub(crate) mod update;
 pub(crate) mod yuse;
 

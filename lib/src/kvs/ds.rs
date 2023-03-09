@@ -376,6 +376,7 @@ impl Datastore {
 }
 
 #[cfg(test)]
+#[cfg(feature = "kv-rocksdb")]
 pub(super) mod test {
 	use crate::kvs::ds::Inner;
 	use crate::kvs::Datastore;

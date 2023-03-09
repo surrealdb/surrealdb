@@ -133,7 +133,7 @@ impl DefineNamespaceStatement {
 	}
 }
 
-impl fmt::Display for DefineNamespaceStatement {
+impl Display for DefineNamespaceStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE NAMESPACE {}", self.name)
 	}
@@ -1124,7 +1124,7 @@ impl DefineIndexStatement {
 	}
 }
 
-impl fmt::Display for DefineIndexStatement {
+impl Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE INDEX {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
 		if self.uniq {
