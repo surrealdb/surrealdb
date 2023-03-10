@@ -5,10 +5,11 @@ mod indxdb;
 mod kv;
 mod mem;
 mod rocksdb;
-#[cfg(test)]
-mod tests;
 mod tikv;
 mod tx;
+
+#[cfg(test)]
+mod tests;
 
 pub use self::ds::*;
 pub use self::kv::*;

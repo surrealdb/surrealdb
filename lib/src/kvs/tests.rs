@@ -20,10 +20,10 @@ pub(crate) mod transaction {
 				r#"
 			BEGIN;
 				/* 00:00 read the initial value */
-				CREATE rec:1 SET value=(SELECT value FROM rec:0); 
-				SELECT * FROM sleep("2s"); 
+				CREATE rec:1 SET value=(SELECT value FROM rec:0);
+				SELECT * FROM sleep("2s");
 				/* 00:02 before txn2's commit */
-				CREATE rec:2 SET value=(SELECT value FROM rec:0); 
+				CREATE rec:2 SET value=(SELECT value FROM rec:0);
 				SELECT * FROM sleep("2s");
 				/* 00:04 after tnx2's commit; */
 				CREATE rec:3 SET value=(SELECT value FROM rec:0);
