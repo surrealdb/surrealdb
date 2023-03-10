@@ -269,6 +269,6 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
 		//
-		"sleep" => sleep::sleep.await,
+		"sleep" => sleep::sleep(ctx).await,
 	)
 }
