@@ -20,7 +20,7 @@ pub struct SleepStatement {
 impl SleepStatement {
 	pub(crate) async fn compute(
 		&self,
-		_ctx: &Context<'_>,
+		ctx: &Context<'_>,
 		opt: &Options,
 		_txn: &Transaction,
 		_doc: Option<&Value>,
@@ -29,8 +29,13 @@ impl SleepStatement {
 		opt.needs(Level::Kv)?;
 		// Allowed to run?
 		opt.check(Level::Kv)?;
-		// Process the statement
-		tokio::time::sleep(self.duration.0).await;
+		// Calculate the sleep duration
+		let dur = match (ctx.timeout(), self.duration.0) {
+			(Some(t), d) if t < d => t,
+			(_, d) => d,
+		};
+		// Sleep for the specified time
+		tokio::time::sleep(dur).await;
 		// Ok all good
 		Ok(Value::None)
 	}
