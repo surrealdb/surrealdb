@@ -116,10 +116,10 @@ features = [
 
 [dev-dependencies]
 env_logger = "0.10.0"
+temp-dir = "0.1.11"
 test-log = "0.2.11"
 time = { version = "0.3.17", features = ["serde"] }
 tokio = { version = "1.25.0", features = ["macros", "rt", "rt-multi-thread"] }
-temp-dir = "0.1.11"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
