@@ -227,6 +227,7 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 		function_parse,
 		function_rand,
 		function_session,
+		function_sleep,
 		function_string,
 		function_time,
 		function_type,
@@ -369,6 +370,10 @@ fn function_meta(i: &str) -> IResult<&str, &str> {
 
 fn function_not(i: &str) -> IResult<&str, &str> {
 	tag("not")(i)
+}
+
+fn function_sleep(i: &str) -> IResult<&str, &str> {
+	tag("sleep")(i)
 }
 
 fn function_parse(i: &str) -> IResult<&str, &str> {

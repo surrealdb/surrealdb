@@ -19,6 +19,7 @@ pub mod parse;
 pub mod rand;
 pub mod script;
 pub mod session;
+pub mod sleep;
 pub mod string;
 pub mod time;
 pub mod r#type;
@@ -26,13 +27,18 @@ pub mod util;
 
 /// Attempts to run any function.
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
-	if name.starts_with("http")
-		|| (name.starts_with("crypto") && (name.ends_with("compare") || name.ends_with("generate")))
-	{
+	if is_asynchronous(name) {
 		asynchronous(ctx, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
+}
+
+/// Tells if the function is asynchronous
+fn is_asynchronous(name: &str) -> bool {
+	name.eq("sleep")
+		|| name.starts_with("http")
+		|| (name.starts_with("crypto") && (name.ends_with("compare") || name.ends_with("generate")))
 }
 
 /// Each function is specified by its name (a string literal) followed by its path. The path
@@ -262,5 +268,7 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		"http::post" =>  http::post(ctx).await,
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
+		//
+		"sleep" => sleep::sleep(ctx).await,
 	)
 }

@@ -394,3 +394,27 @@ impl Transaction {
 		return Ok(res);
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use crate::kvs::tests::transaction::verify_transaction_isolation;
+	use std::env;
+	use test_log::test;
+
+	/// This environment variable can be used to set the location of `fdb.cluster` file.
+	/// Eg. for MacOS: `/usr/local/etc/foundationdb/fdb.cluster`
+	const ENV_FDB_PATH: &str = "TEST_FDB_PATH";
+
+	/// The default FDB_PATH is the usual path for Linux.
+	/// https://apple.github.io/foundationdb/administration.html
+	const DEFAULT_FDB_PATH: &str = "/etc/foundationdb/fdb.cluster";
+
+	#[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
+	async fn fdb_transaction() {
+		verify_transaction_isolation(&format!(
+			"fdb:{}",
+			env::var(ENV_FDB_PATH).unwrap_or_else(|_| DEFAULT_FDB_PATH.to_string())
+		))
+		.await;
+	}
+}
