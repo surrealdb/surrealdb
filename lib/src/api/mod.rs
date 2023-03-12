@@ -7,6 +7,7 @@ pub mod opt;
 
 mod conn;
 
+pub use conn::ExportFileType;
 pub use method::query::Response;
 
 use crate::api::conn::DbResponse;

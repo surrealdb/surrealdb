@@ -110,6 +110,13 @@ pub enum DbResponse {
 	Other(Value),
 }
 
+/// The different types the database can export to
+#[derive(Debug)]
+pub enum ExportFileType {
+	Normal(PathBuf),
+	Stdout,
+}
+
 /// Holds the parameters given to the caller
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections

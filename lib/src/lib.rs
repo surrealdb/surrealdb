@@ -143,6 +143,13 @@ pub use api::Result;
 pub use api::Surreal;
 
 #[doc(hidden)]
+/// Different types used by the CLI
+pub mod cli {
+	#[doc(inline)]
+	pub use super::api::ExportFileType;
+}
+
+#[doc(hidden)]
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
 	pub use channel::bounded as new;
