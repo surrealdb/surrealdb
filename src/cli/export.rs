@@ -1,6 +1,5 @@
 use crate::cli::LOG;
 use crate::err::Error;
-use surrealdb::cli::ExportFileType;
 use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
@@ -11,11 +10,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Set the default logging level
 	crate::cli::log::init(1);
 	// Try to parse the file argument
-	let file = match matches.value_of("file").unwrap() {
-		"-" => ExportFileType::Stdout,
-		file => ExportFileType::Normal(file.into()),
-	};
-	dbg!(&file);
+	let file = matches.value_of("file").unwrap();
 	// Parse all other cli arguments
 	let username = matches.value_of("user").unwrap();
 	let password = matches.value_of("pass").unwrap();
@@ -41,7 +36,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Use the specified namespace / database
 	client.use_ns(ns).use_db(db).await?;
 	// Export the data from the database
-	client.export("/tmp/file.data").await?;
+	client.export(file).await?;
 	info!(target: LOG, "The SQL file was exported successfully");
 	// Everything OK
 	Ok(())
