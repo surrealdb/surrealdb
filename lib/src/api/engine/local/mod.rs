@@ -64,6 +64,8 @@ use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
 #[cfg(not(target_arch = "wasm32"))]
+use tokio::io::AsyncWrite;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
 const LOG: &str = "surrealdb::api::engine::local";
@@ -459,7 +461,7 @@ async fn router(
 				error!(target: LOG, "{error}");
 			}
 			let path = param.file.expect("file to export into");
-			let mut file = match OpenOptions::new()
+			let file = match OpenOptions::new()
 				.write(true)
 				.create(true)
 				.truncate(true)
@@ -475,7 +477,11 @@ async fn router(
 					.into());
 				}
 			};
-			if let Err(error) = io::copy(&mut reader, &mut file).await {
+			let mut writer: Box<dyn AsyncWrite + Unpin + Send> = match path.to_str().unwrap() {
+				"-" => Box::new(io::stdout()),
+				_ => Box::new(file),
+			};
+			if let Err(error) = io::copy(&mut reader, &mut writer).await {
 				return Err(Error::FileRead {
 					path,
 					error,
