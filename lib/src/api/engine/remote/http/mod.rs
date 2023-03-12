@@ -50,6 +50,8 @@ use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
 #[cfg(not(target_arch = "wasm32"))]
+use tokio::io::AsyncWrite;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
@@ -232,17 +234,6 @@ async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn export(request: RequestBuilder, path: PathBuf) -> Result<Value> {
-	let mut file =
-		match OpenOptions::new().write(true).create(true).truncate(true).open(&path).await {
-			Ok(path) => path,
-			Err(error) => {
-				return Err(Error::FileOpen {
-					path,
-					error,
-				}
-				.into());
-			}
-		};
 	let mut response = request
 		.send()
 		.await?
@@ -251,7 +242,30 @@ async fn export(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 		.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
 		.into_async_read()
 		.compat();
-	if let Err(error) = io::copy(&mut response, &mut file).await {
+	let mut writer: Box<dyn AsyncWrite + Unpin + Send> = match path.to_str().unwrap() {
+		"-" => Box::new(io::stdout()),
+		_ => {
+			let file = match OpenOptions::new()
+				.write(true)
+				.create(true)
+				.truncate(true)
+				.open(&path)
+				.await
+			{
+				Ok(path) => path,
+				Err(error) => {
+					return Err(Error::FileOpen {
+						path,
+						error,
+					}
+					.into());
+				}
+			};
+			Box::new(file)
+		}
+	};
+
+	if let Err(error) = io::copy(&mut response, &mut writer).await {
 		return Err(Error::FileRead {
 			path,
 			error,
