@@ -7,8 +7,11 @@ use surrealdb::Error as SurrealError;
 
 #[tokio::main]
 pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
-	// Set the default logging level
-	crate::cli::log::init(1);
+	let disable_logging = matches.is_present("disable_logging");
+	if !disable_logging {
+		// Set the default logging level
+		crate::cli::log::init(1);
+	}
 	// Try to parse the file argument
 	let file = matches.value_of("file").unwrap();
 	// Parse all other cli arguments
