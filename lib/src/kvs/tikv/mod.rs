@@ -32,41 +32,25 @@ impl Datastore {
 	}
 	/// Start a new transaction
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
-		match lock {
-			false => {
-				// Set the behaviour when dropping an unfinished transaction
-				let mut opt = TransactionOptions::new_optimistic().drop_check(CheckLevel::Warn);
-				// Set this transaction as read only if possible
-				if !write {
-					opt = opt.read_only();
-				}
-				// Create a new optimistic transaction
-				match self.db.begin_with_options(opt).await {
-					Ok(tx) => Ok(Transaction {
-						ok: false,
-						rw: write,
-						tx,
-					}),
-					Err(e) => Err(Error::Tx(e.to_string())),
-				}
-			}
-			true => {
-				// Set the behaviour when dropping an unfinished transaction
-				let mut opt = TransactionOptions::new_pessimistic().drop_check(CheckLevel::Warn);
-				// Set this transaction as read only if possible
-				if !write {
-					opt = opt.read_only();
-				}
-				// Create a new pessimistic transaction
-				match self.db.begin_with_options(opt).await {
-					Ok(tx) => Ok(Transaction {
-						ok: false,
-						rw: write,
-						tx,
-					}),
-					Err(e) => Err(Error::Tx(e.to_string())),
-				}
-			}
+		let mut opt = if lock {
+			TransactionOptions::new_pessimistic()
+		} else {
+			TransactionOptions::new_optimistic()
+		};
+		// Set the behaviour when dropping an unfinished transaction
+		opt = opt.drop_check(CheckLevel::Warn);
+		// Set this transaction as read only if possible
+		if !write {
+			opt = opt.read_only();
+		}
+		// Create a new optimistic transaction
+		match self.db.begin_with_options(opt).await {
+			Ok(tx) => Ok(Transaction {
+				ok: false,
+				rw: write,
+				tx,
+			}),
+			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}
 }
