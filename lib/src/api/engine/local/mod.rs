@@ -461,25 +461,27 @@ async fn router(
 				error!(target: LOG, "{error}");
 			}
 			let path = param.file.expect("file to export into");
-			let file = match OpenOptions::new()
-				.write(true)
-				.create(true)
-				.truncate(true)
-				.open(&path)
-				.await
-			{
-				Ok(path) => path,
-				Err(error) => {
-					return Err(Error::FileOpen {
-						path,
-						error,
-					}
-					.into());
-				}
-			};
 			let mut writer: Box<dyn AsyncWrite + Unpin + Send> = match path.to_str().unwrap() {
 				"-" => Box::new(io::stdout()),
-				_ => Box::new(file),
+				_ => {
+					let file = match OpenOptions::new()
+						.write(true)
+						.create(true)
+						.truncate(true)
+						.open(&path)
+						.await
+					{
+						Ok(path) => path,
+						Err(error) => {
+							return Err(Error::FileOpen {
+								path,
+								error,
+							}
+							.into());
+						}
+					};
+					Box::new(file)
+				}
 			};
 			if let Err(error) = io::copy(&mut reader, &mut writer).await {
 				return Err(Error::FileRead {
