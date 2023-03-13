@@ -42,8 +42,8 @@ async fn remove_statement_table() -> Result<(), Error> {
 #[tokio::test]
 async fn remove_statement_analyzer() -> Result<(), Error> {
 	let sql = "
-		DEFINE ANALYSER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
-		REMOVE ANALYSER english;
+		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
+		REMOVE ANALYZER english;
 		INFO FOR DB;
 	";
 	let dbs = Datastore::new("memory").await?;

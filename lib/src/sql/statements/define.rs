@@ -49,7 +49,7 @@ pub enum DefineStatement {
 	Event(DefineEventStatement),
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
-	Analyser(DefineAnalyserStatement),
+	Analyzer(DefineAnalyzerStatement),
 }
 
 impl DefineStatement {
@@ -71,7 +71,7 @@ impl DefineStatement {
 			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Analyser(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -89,7 +89,7 @@ impl Display for DefineStatement {
 			Self::Event(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
-			Self::Analyser(v) => Display::fmt(v, f),
+			Self::Analyzer(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -106,7 +106,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 		map(event, DefineStatement::Event),
 		map(field, DefineStatement::Field),
 		map(index, DefineStatement::Index),
-		map(analyser, DefineStatement::Analyser),
+		map(analyzer, DefineStatement::Analyzer),
 	))(i)
 }
 
@@ -1168,13 +1168,13 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-pub struct DefineAnalyserStatement {
+pub struct DefineAnalyzerStatement {
 	pub name: Ident,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 }
 
-impl DefineAnalyserStatement {
+impl DefineAnalyzerStatement {
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -1202,9 +1202,9 @@ impl DefineAnalyserStatement {
 	}
 }
 
-impl Display for DefineAnalyserStatement {
+impl Display for DefineAnalyzerStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ANALYSER {}", self.name)?;
+		write!(f, "DEFINE ANALYZER {}", self.name)?;
 		if let Some(tokenizers) = &self.tokenizers {
 			let tokens: Vec<String> = tokenizers.iter().map(|f| f.to_string()).collect();
 			write!(f, " TOKENIZERS {}", tokens.join(","))?;
@@ -1217,10 +1217,10 @@ impl Display for DefineAnalyserStatement {
 	}
 }
 
-fn analyser(i: &str) -> IResult<&str, DefineAnalyserStatement> {
+fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	let (i, _) = tag_no_case("DEFINE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ANALYSER")(i)?;
+	let (i, _) = tag_no_case("ANALYZER")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = ident(i)?;
 	let (i, _) = shouldbespace(i)?;
@@ -1229,7 +1229,7 @@ fn analyser(i: &str) -> IResult<&str, DefineAnalyserStatement> {
 	let (i, filters) = opt(filters)(i)?;
 	Ok((
 		i,
-		DefineAnalyserStatement {
+		DefineAnalyzerStatement {
 			name,
 			tokenizers,
 			filters,

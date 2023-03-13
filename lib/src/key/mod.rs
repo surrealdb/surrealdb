@@ -33,7 +33,7 @@
 ///
 /// Index           /*{ns}*{db}*{tb}¤{ix}{fd}{id}
 ///
-pub mod az; // Stores a DEFINE ANALYSER config definition
+pub mod az; // Stores a DEFINE ANALYZER config definition
 pub mod database; // Stores the key prefix for all keys under a database
 pub mod db; // Stores a DEFINE DATABASE config definition
 pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition

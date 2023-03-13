@@ -14,7 +14,7 @@ use crate::sql::thing::Thing;
 use crate::sql::Value;
 use channel::Sender;
 use sql::permission::Permissions;
-use sql::statements::DefineAnalyserStatement;
+use sql::statements::DefineAnalyzerStatement;
 use sql::statements::DefineDatabaseStatement;
 use sql::statements::DefineEventStatement;
 use sql::statements::DefineFieldStatement;
@@ -1002,12 +1002,12 @@ impl Transaction {
 			}
 		}
 	}
-	/// Retrieve all analyser definitions for a specific database.
+	/// Retrieve all analyzer definitions for a specific database.
 	pub async fn all_az(
 		&mut self,
 		ns: &str,
 		db: &str,
-	) -> Result<Arc<[DefineAnalyserStatement]>, Error> {
+	) -> Result<Arc<[DefineAnalyzerStatement]>, Error> {
 		let key = crate::key::az::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -1115,13 +1115,13 @@ impl Transaction {
 		let val = self.get(key).await?.ok_or(Error::TbNotFound)?;
 		Ok(val.into())
 	}
-	/// Retrieve a specific analyser definition.
+	/// Retrieve a specific analyzer definition.
 	pub async fn get_az(
 		&mut self,
 		ns: &str,
 		db: &str,
 		az: &str,
-	) -> Result<DefineAnalyserStatement, Error> {
+	) -> Result<DefineAnalyzerStatement, Error> {
 		let key = crate::key::az::new(ns, db, az);
 		let val = self.get(key).await?.ok_or(Error::AzNotFound)?;
 		Ok(val.into())
@@ -1440,12 +1440,12 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 			}
 		}
-		// Output ANALYSERS
+		// Output ANALYZERS
 		{
 			let azs = self.all_az(ns, db).await?;
 			if !azs.is_empty() {
 				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- ANALYSERS")).await?;
+				chn.send(bytes!("-- ANALYZERS")).await?;
 				chn.send(bytes!("-- ------------------------------")).await?;
 				chn.send(bytes!("")).await?;
 				for az in azs.iter() {

@@ -899,8 +899,8 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 #[tokio::test]
 async fn define_statement_analyzer() -> Result<(), Error> {
 	let sql = "
-		DEFINE ANALYSER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
-		DEFINE ANALYSER autocomplete FILTERS lowercase,edgengram(2,10);
+		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
+		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
 		INFO FOR DB;
 	";
 	let dbs = Datastore::new("memory").await?;
@@ -919,8 +919,8 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			az: {
-				autocomplete: 'DEFINE ANALYSER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
-				english: 'DEFINE ANALYSER english TOKENIZERS SPACE,CASE FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
+				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
+				english: 'DEFINE ANALYZER english TOKENIZERS SPACE,CASE FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
 			},
 			dl: {},
 			dt: {},

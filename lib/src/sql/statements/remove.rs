@@ -31,7 +31,7 @@ pub enum RemoveStatement {
 	Event(RemoveEventStatement),
 	Field(RemoveFieldStatement),
 	Index(RemoveIndexStatement),
-	Analyser(RemoveAnalyserStatement),
+	Analyzer(RemoveAnalyzerStatement),
 }
 
 impl RemoveStatement {
@@ -53,7 +53,7 @@ impl RemoveStatement {
 			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Analyser(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -71,7 +71,7 @@ impl Display for RemoveStatement {
 			Self::Event(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
-			Self::Analyser(v) => Display::fmt(v, f),
+			Self::Analyzer(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -88,7 +88,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 		map(event, RemoveStatement::Event),
 		map(field, RemoveStatement::Field),
 		map(index, RemoveStatement::Index),
-		map(analyser, RemoveStatement::Analyser),
+		map(analyzer, RemoveStatement::Analyzer),
 	))(i)
 }
 
@@ -741,11 +741,11 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-pub struct RemoveAnalyserStatement {
+pub struct RemoveAnalyzerStatement {
 	pub name: Ident,
 }
 
-impl RemoveAnalyserStatement {
+impl RemoveAnalyzerStatement {
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -764,27 +764,27 @@ impl RemoveAnalyserStatement {
 		// Delete the definition
 		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
 		run.del(key).await?;
-		// TODO Check that the analyser is not used in any schema
+		// TODO Check that the analyzer is not used in any schema
 		// Ok all good
 		Ok(Value::None)
 	}
 }
 
-impl Display for RemoveAnalyserStatement {
+impl Display for RemoveAnalyzerStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE ANALYSER {}", self.name)
+		write!(f, "REMOVE ANALYZER {}", self.name)
 	}
 }
 
-fn analyser(i: &str) -> IResult<&str, RemoveAnalyserStatement> {
+fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
 	let (i, _) = tag_no_case("REMOVE")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ANALYSER")(i)?;
+	let (i, _) = tag_no_case("ANALYZER")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, name) = ident(i)?;
 	Ok((
 		i,
-		RemoveAnalyserStatement {
+		RemoveAnalyzerStatement {
 			name,
 		},
 	))
