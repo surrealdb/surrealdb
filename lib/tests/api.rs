@@ -153,6 +153,20 @@ mod fdb {
 	include!("api/backup.rs");
 }
 
+#[cfg(feature = "kv-redis")]
+mod redis {
+	use super::*;
+	use surrealdb::engine::local::Db;
+	use surrealdb::engine::local::Redis;
+
+	async fn new_db() -> Surreal<Db> {
+		Surreal::new::<Redis>("127.0.0.1:6379").await.unwrap()
+	}
+
+	include!("api/mod.rs");
+	include!("api/backup.rs");
+}
+
 #[cfg(feature = "protocol-http")]
 mod any {
 	use super::*;

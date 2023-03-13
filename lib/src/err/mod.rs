@@ -365,6 +365,15 @@ impl From<rocksdb::Error> for Error {
 	}
 }
 
+#[cfg(feature = "kv-redis")]
+impl From<fred::error::RedisError> for Error {
+	fn from(e: fred::error::RedisError) -> Error {
+		match e {
+			_ => Error::Tx(e.to_string()),
+		}
+	}
+}
+
 impl From<channel::RecvError> for Error {
 	fn from(e: channel::RecvError) -> Error {
 		Error::Channel(e.to_string())

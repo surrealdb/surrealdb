@@ -97,6 +97,7 @@ use crate::api::opt::Endpoint;
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
+	feature = "kv-redis",
 ))]
 use crate::api::opt::Strict;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -160,6 +161,7 @@ where
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
+	feature = "kv-redis",
 ))]
 #[cfg_attr(
 	docsrs,
@@ -169,6 +171,7 @@ where
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
+		feature = "kv-redis",
 	)))
 )]
 impl<T> IntoEndpoint for (T, Strict)
@@ -189,6 +192,7 @@ where
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
+		feature = "kv-redis",
 	),
 	feature = "rustls",
 ))]
@@ -201,6 +205,7 @@ where
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-indxdb",
+			feature = "kv-redis",
 		),
 		feature = "rustls",
 	)))

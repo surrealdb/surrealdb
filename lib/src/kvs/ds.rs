@@ -33,6 +33,8 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
 	FDB(super::fdb::Datastore),
+	#[cfg(feature = "kv-redis")]
+	Redis(super::redis::Datastore),
 }
 
 impl Datastore {
@@ -144,6 +146,17 @@ impl Datastore {
 				info!(target: LOG, "Connected to kvs store at {}", path);
 				v
 			}
+			#[cfg(feature = "kv-redis")]
+			s if s.starts_with("redis:") => {
+				info!(target: LOG, "Connecting to kvs store at {}", path);
+				let s = s.trim_start_matches("redis://");
+				let s = s.trim_start_matches("redis:");
+				let v = super::redis::Datastore::new(s).await.map(|v| Datastore {
+					inner: Inner::Redis(v),
+				});
+				info!(target: LOG, "Connected to kvs store at {}", path);
+				v
+			}
 			// The datastore path is not valid
 			_ => {
 				info!(target: LOG, "Unable to load the specified datastore {}", path);
@@ -206,6 +219,14 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
 					inner: super::tx::Inner::FDB(tx),
+					cache: super::cache::Cache::default(),
+				})
+			}
+			#[cfg(feature = "kv-redis")]
+			Inner::Redis(v) => {
+				let tx = v.transaction(write, lock).await?;
+				Ok(Transaction {
+					inner: super::tx::Inner::Redis(tx),
 					cache: super::cache::Cache::default(),
 				})
 			}

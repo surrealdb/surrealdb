@@ -9,6 +9,8 @@ mod fdb;
 mod indxdb;
 #[cfg(feature = "kv-mem")]
 mod mem;
+#[cfg(feature = "kv-redis")]
+mod redis;
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb;
 #[cfg(feature = "kv-tikv")]

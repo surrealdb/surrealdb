@@ -296,6 +296,42 @@ pub struct TiKv;
 #[derive(Debug)]
 pub struct FDb;
 
+/// Redis database
+///
+/// # Examples
+///
+/// Instantiating a Redis-backed instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::Redis;
+///
+/// let db = Surreal::new::<Redis>("localhost:6379").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Instantiating a Redis-backed strict instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::Redis;
+///
+/// let db = Surreal::new::<Redis>(("localhost:6379", Strict)).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "kv-redis")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-redis")))]
+#[derive(Debug)]
+pub struct Redis;
+
 /// An embedded database
 ///
 /// Authentication methods (`signup`, `signin`, `authentication` and `invalidate`) are not availabe

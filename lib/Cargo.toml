@@ -24,6 +24,7 @@ kv-mem = ["dep:echodb"]
 kv-indxdb = ["dep:indxdb"]
 kv-rocksdb = ["dep:rocksdb"]
 kv-tikv = ["dep:tikv"]
+kv-redis = ["dep:fred"]
 kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb"]
 kv-fdb-5_2 = ["foundationdb/fdb-5_2", "kv-fdb"]
 kv-fdb-6_0 = ["foundationdb/fdb-6_0", "kv-fdb"]
@@ -34,8 +35,8 @@ kv-fdb-7_0 = ["foundationdb/fdb-7_0", "kv-fdb"]
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
-native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
-rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls"]
+native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls", "fred?/enable-native-tls"]
+rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls", "fred?/enable-rustls"]
 # Private features
 kv-fdb = ["foundationdb"]
 
@@ -43,7 +44,7 @@ kv-fdb = ["foundationdb"]
 rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "protocol-ws", "protocol-http",
-    "kv-mem", "kv-indxdb", "kv-rocksdb", "kv-tikv", "kv-fdb",
+    "kv-mem", "kv-indxdb", "kv-rocksdb", "kv-tikv", "kv-fdb", "kv-redis",
     "rustls", "native-tls",
     "http", "scripting"
 ]
@@ -98,6 +99,7 @@ tokio-util = { version = "0.7.6", optional = true, features = ["compat"] }
 trice = "0.3.0"
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
+fred = { version = "6.0.0-beta.2", optional = true }
 
 [dependencies.js]
 optional = true

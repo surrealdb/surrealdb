@@ -1,4 +1,4 @@
-#[cfg(any(feature = "kv-tikv", feature = "kv-rocksdb", feature = "kv-fdb"))]
+#[cfg(any(feature = "kv-tikv", feature = "kv-rocksdb", feature = "kv-fdb", feature = "kv-redis"))]
 pub(crate) mod transaction {
 	use crate::dbs::{Response, Session};
 	use crate::kvs::ds::Inner;
@@ -84,6 +84,8 @@ pub(crate) mod transaction {
 				Inner::TiKV(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				#[cfg(feature = "kv-fdb")]
 				Inner::FDB(_) => Datastore::new(&self.ds_path).await.unwrap(),
+				#[cfg(feature = "kv-redis")]
+				Inner::Redis(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				_ => panic!("Datastore not supported"),
 			};
 			Self {

@@ -98,6 +98,14 @@ impl Connection for Any {
 					}
 				}
 
+				#[cfg(feature = "kv-redis")]
+				"redis" => {
+					engine::local::wasm::router(address, conn_tx, route_rx);
+					if let Err(error) = conn_rx.into_recv_async().await? {
+						return Err(error);
+					}
+				}
+
 				#[cfg(feature = "protocol-http")]
 				"http" | "https" => {
 					features.insert(ExtraFeatures::Auth);
