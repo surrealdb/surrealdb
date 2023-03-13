@@ -5,10 +5,11 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, base_or_scope, Base};
-use crate::sql::comment::shouldbespace;
+use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
+use crate::sql::filter::{filters, Filter};
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
 use crate::sql::ident::{ident, Ident};
@@ -18,6 +19,7 @@ use crate::sql::kind::{kind, Kind};
 use crate::sql::permission::{permissions, Permissions};
 use crate::sql::statements::UpdateStatement;
 use crate::sql::strand::strand_raw;
+use crate::sql::tokenizer::{tokenizers, Tokenizer};
 use crate::sql::value::{value, values, Value, Values};
 use crate::sql::view::{view, View};
 use argon2::password_hash::{PasswordHasher, SaltString};
@@ -47,6 +49,7 @@ pub enum DefineStatement {
 	Event(DefineEventStatement),
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
+	Analyser(DefineAnalyserStatement),
 }
 
 impl DefineStatement {
@@ -68,11 +71,12 @@ impl DefineStatement {
 			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Analyser(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
 
-impl fmt::Display for DefineStatement {
+impl Display for DefineStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Namespace(v) => Display::fmt(v, f),
@@ -85,6 +89,7 @@ impl fmt::Display for DefineStatement {
 			Self::Event(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
+			Self::Analyser(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -101,6 +106,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 		map(event, DefineStatement::Event),
 		map(field, DefineStatement::Field),
 		map(index, DefineStatement::Index),
+		map(analyser, DefineStatement::Analyser),
 	))(i)
 }
 
@@ -187,7 +193,7 @@ impl DefineDatabaseStatement {
 	}
 }
 
-impl fmt::Display for DefineDatabaseStatement {
+impl Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE DATABASE {}", self.name)
 	}
@@ -266,7 +272,7 @@ impl DefineLoginStatement {
 	}
 }
 
-impl fmt::Display for DefineLoginStatement {
+impl Display for DefineLoginStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, escape_str(&self.hash))
 	}
@@ -407,7 +413,7 @@ impl DefineTokenStatement {
 	}
 }
 
-impl fmt::Display for DefineTokenStatement {
+impl Display for DefineTokenStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
@@ -488,7 +494,7 @@ impl DefineScopeStatement {
 	}
 }
 
-impl fmt::Display for DefineScopeStatement {
+impl Display for DefineScopeStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE SCOPE {}", self.name)?;
 		if let Some(ref v) = self.session {
@@ -607,7 +613,7 @@ impl DefineParamStatement {
 	}
 }
 
-impl fmt::Display for DefineParamStatement {
+impl Display for DefineParamStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE PARAM ${} VALUE {}", self.name, self.value)
 	}
@@ -706,7 +712,7 @@ impl DefineTableStatement {
 	}
 }
 
-impl fmt::Display for DefineTableStatement {
+impl Display for DefineTableStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE TABLE {}", self.name)?;
 		if self.drop {
@@ -859,7 +865,7 @@ impl DefineEventStatement {
 	}
 }
 
-impl fmt::Display for DefineEventStatement {
+impl Display for DefineEventStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
@@ -944,7 +950,7 @@ impl DefineFieldStatement {
 	}
 }
 
-impl fmt::Display for DefineFieldStatement {
+impl Display for DefineFieldStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE FIELD {} ON {}", self.name, self.what)?;
 		if self.flex {
@@ -1157,6 +1163,76 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 			what,
 			cols,
 			uniq: uniq.is_some(),
+		},
+	))
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub struct DefineAnalyserStatement {
+	pub name: Ident,
+	pub tokenizers: Option<Vec<Tokenizer>>,
+	pub filters: Option<Vec<Filter>>,
+}
+
+impl DefineAnalyserStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Process the statement
+		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.set(key, self).await?;
+		// Release the transaction
+		drop(run);
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl Display for DefineAnalyserStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE ANALYSER {}", self.name)?;
+		if let Some(tokenizers) = &self.tokenizers {
+			let tokens: Vec<String> = tokenizers.iter().map(|f| f.to_string()).collect();
+			write!(f, " TOKENIZERS {}", tokens.join(","))?;
+		}
+		if let Some(filters) = &self.filters {
+			let tokens: Vec<String> = filters.iter().map(|f| f.to_string()).collect();
+			write!(f, " FILTERS {}", tokens.join(","))?;
+		}
+		Ok(())
+	}
+}
+
+fn analyser(i: &str) -> IResult<&str, DefineAnalyserStatement> {
+	let (i, _) = tag_no_case("DEFINE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ANALYSER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, tokenizers) = opt(tokenizers)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, filters) = opt(filters)(i)?;
+	Ok((
+		i,
+		DefineAnalyserStatement {
+			name,
+			tokenizers,
+			filters,
 		},
 	))
 }

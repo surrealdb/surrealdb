@@ -210,6 +210,10 @@ pub enum Error {
 	#[error("The table does not exist")]
 	TbNotFound,
 
+	/// The requested analyser does not exist
+	#[error("The analyser does not exist")]
+	AzNotFound,
+
 	/// Unable to perform the realtime query
 	#[error("Unable to perform the realtime query")]
 	RealtimeDisabled,

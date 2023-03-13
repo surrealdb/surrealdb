@@ -18,6 +18,8 @@
 /// Scope           /*{ns}*{db}±{sc}
 /// ST              /*{ns}*{db}±{sc}!st{tk}
 ///
+/// AZ              /*{ns}*{db}!az{az}
+///
 /// Table           /*{ns}*{db}*{tb}
 /// EV              /*{ns}*{db}*{tb}!ev{ev}
 /// FD              /*{ns}*{db}*{tb}!fd{fd}
@@ -31,6 +33,7 @@
 ///
 /// Index           /*{ns}*{db}*{tb}¤{ix}{fd}{id}
 ///
+pub mod az; // Stores a DEFINE ANALYSER config definition
 pub mod database; // Stores the key prefix for all keys under a database
 pub mod db; // Stores a DEFINE DATABASE config definition
 pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition

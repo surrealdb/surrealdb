@@ -1,4 +1,4 @@
-use crate::sql::comment::mightbespace;
+use crate::sql::common::{closeparenthese, openparenthese};
 use crate::sql::dir::{dir, Dir};
 use crate::sql::error::IResult;
 use crate::sql::table::{table, tables, Tables};
@@ -45,11 +45,9 @@ fn simple(i: &str) -> IResult<&str, Tables> {
 }
 
 fn custom(i: &str) -> IResult<&str, Tables> {
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openparenthese(i)?;
 	let (i, w) = alt((any, tables))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparenthese(i)?;
 	Ok((i, w))
 }
 

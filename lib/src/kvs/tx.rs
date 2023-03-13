@@ -14,6 +14,7 @@ use crate::sql::thing::Thing;
 use crate::sql::Value;
 use channel::Sender;
 use sql::permission::Permissions;
+use sql::statements::DefineAnalyserStatement;
 use sql::statements::DefineDatabaseStatement;
 use sql::statements::DefineEventStatement;
 use sql::statements::DefineFieldStatement;
@@ -1001,6 +1002,28 @@ impl Transaction {
 			}
 		}
 	}
+	/// Retrieve all analyser definitions for a specific database.
+	pub async fn all_az(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineAnalyserStatement]>, Error> {
+		let key = crate::key::az::prefix(ns, db);
+		match self.cache.exi(&key) {
+			true => match self.cache.get(&key) {
+				Some(Entry::Azs(v)) => Ok(v),
+				_ => unreachable!(),
+			},
+			_ => {
+				let beg = crate::key::az::prefix(ns, db);
+				let end = crate::key::az::suffix(ns, db);
+				let val = self.getr(beg..end, u32::MAX).await?;
+				let val = val.convert().into();
+				self.cache.set(key, Entry::Azs(Arc::clone(&val)));
+				Ok(val)
+			}
+		}
+	}
 	/// Retrieve a specific namespace definition.
 	pub async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
 		let key = crate::key::ns::new(ns);
@@ -1090,6 +1113,17 @@ impl Transaction {
 	) -> Result<DefineTableStatement, Error> {
 		let key = crate::key::tb::new(ns, db, tb);
 		let val = self.get(key).await?.ok_or(Error::TbNotFound)?;
+		Ok(val.into())
+	}
+	/// Retrieve a specific analyser definition.
+	pub async fn get_az(
+		&mut self,
+		ns: &str,
+		db: &str,
+		az: &str,
+	) -> Result<DefineAnalyserStatement, Error> {
+		let key = crate::key::az::new(ns, db, az);
+		let val = self.get(key).await?.ok_or(Error::AzNotFound)?;
 		Ok(val.into())
 	}
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
@@ -1402,6 +1436,20 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 				for pa in pas.iter() {
 					chn.send(bytes!(format!("{pa};"))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
+		// Output ANALYSERS
+		{
+			let azs = self.all_az(ns, db).await?;
+			if !azs.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- ANALYSERS")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for az in azs.iter() {
+					chn.send(bytes!(format!("{az};"))).await?;
 				}
 				chn.send(bytes!("")).await?;
 			}

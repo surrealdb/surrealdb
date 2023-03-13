@@ -4,7 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
-use crate::sql::common::commas;
+use crate::sql::common::{closechevron, closeparenthese, commas, openchevron, openparenthese};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::script::{script as func, Script};
@@ -167,22 +167,18 @@ pub fn function(i: &str) -> IResult<&str, Function> {
 
 fn normal(i: &str) -> IResult<&str, Function> {
 	let (i, s) = function_names(i)?;
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openparenthese(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparenthese(i)?;
 	Ok((i, Function::Normal(s.to_string(), a)))
 }
 
 fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = alt((tag("fn::script"), tag("fn"), tag("function")))(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag("(")(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openparenthese(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag(")")(i)?;
+	let (i, _) = closeparenthese(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('{')(i)?;
 	let (i, v) = func(i)?;
@@ -191,9 +187,9 @@ fn script(i: &str) -> IResult<&str, Function> {
 }
 
 fn cast(i: &str) -> IResult<&str, Function> {
-	let (i, _) = char('<')(i)?;
+	let (i, _) = openchevron(i)?;
 	let (i, s) = function_casts(i)?;
-	let (i, _) = char('>')(i)?;
+	let (i, _) = closechevron(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = single(i)?;
 	Ok((i, Function::Cast(s.to_string(), v)))

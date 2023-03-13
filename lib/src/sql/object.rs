@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
-use crate::sql::common::{commas, val_char};
+use crate::sql::common::{closebraces, commas, openbraces, val_char};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_key;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
@@ -183,13 +183,11 @@ impl Serialize for Object {
 }
 
 pub fn object(i: &str) -> IResult<&str, Object> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbraces(i)?;
 	let (i, v) = separated_list0(commas, item)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
+	let (i, _) = closebraces(i)?;
 	Ok((i, Object(v.into_iter().collect())))
 }
 

@@ -1,4 +1,5 @@
 use crate::kvs::kv::Key;
+use crate::sql::statements::DefineAnalyserStatement;
 use crate::sql::statements::DefineDatabaseStatement;
 use crate::sql::statements::DefineEventStatement;
 use crate::sql::statements::DefineFieldStatement;
@@ -32,6 +33,7 @@ pub enum Entry {
 	Fds(Arc<[DefineFieldStatement]>),
 	Ixs(Arc<[DefineIndexStatement]>),
 	Fts(Arc<[DefineTableStatement]>),
+	Azs(Arc<[DefineAnalyserStatement]>),
 	Lvs(Arc<[LiveStatement]>),
 }
 

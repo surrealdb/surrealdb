@@ -4,10 +4,10 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::block::{block, Block};
 use crate::sql::comment::mightbespace;
+use crate::sql::common::{closechevron, openchevron};
 use crate::sql::error::IResult;
 use crate::sql::value::Value;
 use nom::bytes::complete::tag;
-use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -45,9 +45,9 @@ impl fmt::Display for Future {
 }
 
 pub fn future(i: &str) -> IResult<&str, Future> {
-	let (i, _) = char('<')(i)?;
+	let (i, _) = openchevron(i)?;
 	let (i, _) = tag("future")(i)?;
-	let (i, _) = char('>')(i)?;
+	let (i, _) = closechevron(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = block(i)?;
 	Ok((i, Future(v)))

@@ -1,11 +1,10 @@
 use crate::sql::comment::mightbespace;
-use crate::sql::common::commas;
+use crate::sql::common::{closeparenthese, commas, openparenthese};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::table::{table, Table};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use nom::character::complete::char;
 use nom::combinator::map;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
@@ -75,16 +74,16 @@ pub fn kind(i: &str) -> IResult<&str, Kind> {
 fn record(i: &str) -> IResult<&str, Vec<Table>> {
 	let (i, _) = tag("record")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('(')(i)?;
+	let (i, _) = openparenthese(i)?;
 	let (i, v) = separated_list1(commas, table)(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparenthese(i)?;
 	Ok((i, v))
 }
 
 fn geometry(i: &str) -> IResult<&str, Vec<String>> {
 	let (i, _) = tag("geometry")(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('(')(i)?;
+	let (i, _) = openparenthese(i)?;
 	let (i, v) = separated_list1(
 		commas,
 		map(
@@ -101,6 +100,6 @@ fn geometry(i: &str) -> IResult<&str, Vec<String>> {
 			String::from,
 		),
 	)(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparenthese(i)?;
 	Ok((i, v))
 }

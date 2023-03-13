@@ -31,6 +31,7 @@ pub enum RemoveStatement {
 	Event(RemoveEventStatement),
 	Field(RemoveFieldStatement),
 	Index(RemoveIndexStatement),
+	Analyser(RemoveAnalyserStatement),
 }
 
 impl RemoveStatement {
@@ -52,6 +53,7 @@ impl RemoveStatement {
 			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Analyser(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -69,6 +71,7 @@ impl Display for RemoveStatement {
 			Self::Event(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
+			Self::Analyser(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -85,6 +88,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 		map(event, RemoveStatement::Event),
 		map(field, RemoveStatement::Field),
 		map(index, RemoveStatement::Index),
+		map(analyser, RemoveStatement::Analyser),
 	))(i)
 }
 
@@ -124,8 +128,8 @@ impl RemoveNamespaceStatement {
 	}
 }
 
-impl fmt::Display for RemoveNamespaceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveNamespaceStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE NAMESPACE {}", self.name)
 	}
 }
@@ -180,8 +184,8 @@ impl RemoveDatabaseStatement {
 	}
 }
 
-impl fmt::Display for RemoveDatabaseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveDatabaseStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE DATABASE {}", self.name)
 	}
 }
@@ -254,8 +258,8 @@ impl RemoveLoginStatement {
 	}
 }
 
-impl fmt::Display for RemoveLoginStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveLoginStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE LOGIN {} ON {}", self.name, self.base)
 	}
 }
@@ -348,8 +352,8 @@ impl RemoveTokenStatement {
 	}
 }
 
-impl fmt::Display for RemoveTokenStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveTokenStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE TOKEN {} ON {}", self.name, self.base)
 	}
 }
@@ -409,8 +413,8 @@ impl RemoveScopeStatement {
 	}
 }
 
-impl fmt::Display for RemoveScopeStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveScopeStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE SCOPE {}", self.name)
 	}
 }
@@ -462,8 +466,8 @@ impl RemoveParamStatement {
 	}
 }
 
-impl fmt::Display for RemoveParamStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveParamStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE PARAM {}", self.name)
 	}
 }
@@ -519,8 +523,8 @@ impl RemoveTableStatement {
 	}
 }
 
-impl fmt::Display for RemoveTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveTableStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE TABLE {}", self.name)
 	}
 }
@@ -576,8 +580,8 @@ impl RemoveEventStatement {
 	}
 }
 
-impl fmt::Display for RemoveEventStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveEventStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE EVENT {} ON {}", self.name, self.what)
 	}
 }
@@ -639,8 +643,8 @@ impl RemoveFieldStatement {
 	}
 }
 
-impl fmt::Display for RemoveFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveFieldStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE FIELD {} ON {}", self.name, self.what)
 	}
 }
@@ -706,8 +710,8 @@ impl RemoveIndexStatement {
 	}
 }
 
-impl fmt::Display for RemoveIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveIndexStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE INDEX {} ON {}", self.name, self.what)
 	}
 }
@@ -728,6 +732,60 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 		RemoveIndexStatement {
 			name,
 			what,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub struct RemoveAnalyserStatement {
+	pub name: Ident,
+}
+
+impl RemoveAnalyserStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// TODO Check that the analyser is not used in any schema
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl Display for RemoveAnalyserStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "REMOVE ANALYSER {}", self.name)
+	}
+}
+
+fn analyser(i: &str) -> IResult<&str, RemoveAnalyserStatement> {
+	let (i, _) = tag_no_case("REMOVE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ANALYSER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	Ok((
+		i,
+		RemoveAnalyserStatement {
+			name,
 		},
 	))
 }
