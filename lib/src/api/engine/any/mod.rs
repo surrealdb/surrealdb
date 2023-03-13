@@ -293,6 +293,9 @@ impl Surreal<Any> {
 ///
 /// // Instantiate a FoundationDB-backed instance
 /// let db = connect("fdb://fdb.cluster").await?;
+///
+/// // Instantiate a Redis-backed instance
+/// let db = connect("redis://localhost:6379").await?;
 /// # Ok(())
 /// # }
 /// ```
