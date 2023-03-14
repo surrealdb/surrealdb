@@ -7,6 +7,7 @@ use fred::pool::RedisPool;
 use fred::prelude::*;
 use fred::types::{ConnectHandle, PerformanceConfig, Scanner};
 use futures::StreamExt;
+use std::collections::BTreeMap;
 use std::ops::Range;
 
 pub struct Datastore {
@@ -259,14 +260,6 @@ impl Transaction {
 	where
 		K: Into<Key>,
 	{
-		// Check to see if transaction is closed
-		if self.ok {
-			return Err(Error::TxFinished);
-		}
-
-		let beg = rng.start.into();
-		let end = rng.end.into();
-
 		fn longest_common_prefix<'a>(a: &'a [u8], b: &'a [u8]) -> &'a [u8] {
 			if a.is_empty() || b.is_empty() {
 				return &[];
@@ -284,47 +277,76 @@ impl Transaction {
 			&a[..=index]
 		}
 
-		let target = longest_common_prefix(&beg, &end);
-
-		if target.is_empty() {
-			return Ok(vec![]);
+		// Check to see if transaction is closed
+		if self.ok {
+			return Err(Error::TxFinished);
 		}
 
-		let mut buf = Vec::with_capacity(target.len() + 1);
-		for c in target.iter() {
-			if *c == b'*' {
-				buf.push(b'\\');
-			}
-			buf.push(*c);
+		let beg = rng.start.into();
+		let end = rng.end.into();
+		let mut kv: BTreeMap<Key, Val> = BTreeMap::new();
+
+		let res: Option<Val> = self.client.get(beg.as_slice()).await?;
+		if let Some(val) = res {
+			kv.insert(beg.to_vec(), val);
 		}
-		buf.push(b'*');
-		let pattern = String::from_utf8(buf).map_err(|e| Error::Tx(e.to_string()))?;
 
-		let mut buffer: Vec<(Key, Val)> = Vec::with_capacity(limit as usize);
-		let mut scan_stream = self.client.scan(pattern, Some(limit), None);
+		let lcp = longest_common_prefix(&beg, &end);
 
-		let beg = beg.as_slice();
-		let end = end.as_slice();
+		// a fast path to break if we have a common prefix, that means we can still search for the subset
+		// but if we don't have a common prefix, the pattern will still compile to search everything
+		// this of course degenerates into a full linear scan and will be painfully slow...since
+		// SCAN will fully-iterate through any strings that the matches the pattern anyway...
+		if !lcp.is_empty() {
+			let pattern = {
+				// base case: there is no glob character
+				// and we will always have to add a globstar in the end to search prefix
+				let mut buf = Vec::with_capacity(lcp.len() + 1);
+				// escape redis glob pattern characters by prepending a backslash before it
+				for c in lcp.iter() {
+					if let b'*' | b'?' | b'[' | b']' | b'-' | b'^' = *c {
+						buf.push(b'\\')
+					};
 
-		'scan: while let Some(Ok(mut page)) = scan_stream.next().await {
-			if let Some(keys) = page.take_results() {
-				let client = page.create_client();
+					buf.push(*c);
+				}
+				buf.push(b'*');
 
-				for key in keys.into_iter().filter(|key| {
-					let key = key.as_bytes();
-					key >= beg && key < end
-				}) {
-					let value: Val = client.get(&key).await?;
-					buffer.push((key.as_bytes().into(), value));
-					// we're full now, just quit the loop
-					if buffer.len() == buffer.capacity() {
-						break 'scan;
+				// fred expect the scan function to accept the first parameter string as anything that is string,
+				// while we can't be sure about whether Key (an alias of Vec<u8>) is going to be
+				// UTF-8 compliant or not, it's better not to assume it is and unintentionally
+				// modified the whole pattern
+				unsafe { String::from_utf8_unchecked(buf) }
+			};
+
+			// notice the so-called 'count' is just an optional hint
+			let mut cursor = self.client.scan(pattern, Some(limit), None);
+
+			let beg = beg.as_slice();
+			let end = end.as_slice();
+
+			'scan: while let Some(Ok(mut page)) = cursor.next().await {
+				if let Some(keys) = page.take_results() {
+					let client = page.create_client();
+
+					for key in keys.into_iter().filter(|key| {
+						let key = key.as_bytes();
+						key >= beg && key < end
+					}) {
+						let value: Val = client.get(&key).await?;
+						kv.insert(key.as_bytes().to_vec(), value);
+						// we're full now, just quit the loop
+						if kv.len() == limit as usize {
+							break 'scan;
+						}
 					}
 				}
+				let _ = page.next();
 			}
-			let _ = page.next();
 		}
 
-		Ok(buffer)
+		// at this point the scan is either invalid (due to missing a common prefix) or complete,
+		// we can just consume into a KV pair iterator, and return as is
+		Ok(kv.into_iter().collect())
 	}
 }
