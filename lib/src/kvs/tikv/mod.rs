@@ -32,6 +32,7 @@ impl Datastore {
 	}
 	/// Start a new transaction
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+		// Set whether this should be an optimistic or pessimistic transaction
 		let mut opt = if lock {
 			TransactionOptions::new_pessimistic()
 		} else {
@@ -43,7 +44,7 @@ impl Datastore {
 		if !write {
 			opt = opt.read_only();
 		}
-		// Create a new optimistic transaction
+		// Create a new distributed transaction
 		match self.db.begin_with_options(opt).await {
 			Ok(tx) => Ok(Transaction {
 				ok: false,
