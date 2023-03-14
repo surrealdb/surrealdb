@@ -292,6 +292,8 @@ impl Transaction {
 
 		let beg = rng.start.into();
 		let end = rng.end.into();
+
+		// maybe replace it as a trie?
 		let mut kv: BTreeMap<Key, Val> = BTreeMap::new();
 
 		let res: Option<Val> = self.client.get(beg.as_slice()).await?;
@@ -333,7 +335,7 @@ impl Transaction {
 			let beg = beg.as_slice();
 			let end = end.as_slice();
 
-			'scan: while let Some(Ok(mut page)) = cursor.next().await {
+			while let Some(Ok(mut page)) = cursor.next().await {
 				if let Some(keys) = page.take_results() {
 					let client = page.create_client();
 
@@ -343,10 +345,6 @@ impl Transaction {
 					}) {
 						let value: Val = client.get(&key).await?;
 						kv.insert(key.as_bytes().to_vec(), value);
-						// we're full now, just quit the loop
-						if kv.len() == limit as usize {
-							break 'scan;
-						}
 					}
 				}
 				let _ = page.next();
@@ -355,6 +353,6 @@ impl Transaction {
 
 		// at this point the scan is either invalid (due to missing a common prefix) or complete,
 		// we can just consume into a KV pair iterator, and return as is
-		Ok(kv.into_iter().collect())
+		Ok(kv.into_iter().take(limit as usize).collect())
 	}
 }
