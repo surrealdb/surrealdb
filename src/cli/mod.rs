@@ -69,7 +69,9 @@ fn path_valid(v: &str) -> Result<(), String> {
 fn conn_valid(v: &str) -> Result<(), String> {
 	let scheme = split_endpoint(v).0;
 	match scheme {
-		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "file" | "tikv" | "redis" => Ok(()),
+		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "file" | "tikv" | "redis" => {
+			Ok(())
+		}
 		_ => Err(String::from(
 			"\
 			Provide a valid database connection string\

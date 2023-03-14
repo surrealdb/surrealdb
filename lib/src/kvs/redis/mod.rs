@@ -26,7 +26,7 @@ pub struct Transaction {
 impl Datastore {
 	/// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		let config = match RedisConfig::from_url(path) {
+		let config = match RedisConfig::from_url(format!("redis://{path}").as_str()) {
 			Ok(x) => x,
 			Err(e) => return Err(Error::Ds(e.to_string())),
 		};
@@ -93,7 +93,8 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.client.exists(key.into().as_slice()).await?;
+		let key = key.into();
+		let res = self.client.exists(key.as_slice()).await?;
 		// Return result
 		Ok(res)
 	}
@@ -106,8 +107,10 @@ impl Transaction {
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
+
 		// Get the key
-		let res = self.client.get(key.into().as_slice()).await?;
+		let key = key.into();
+		let res = self.client.get(key.as_slice()).await?;
 		// Return result
 		Ok(res)
 	}
@@ -125,8 +128,11 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
+
 		// Set the key
-		self.client.set(key.into().as_slice(), val.into().as_slice(), None, None, false).await?;
+		let key = key.into();
+		let val = val.into();
+		self.client.set(key.as_slice(), val.as_slice(), None, None, false).await?;
 		// Return result
 		Ok(())
 	}
@@ -144,10 +150,12 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
-		// Set the key
+
+		let key = key.into();
+		let val = val.into();
 		let ret: Option<()> = self
 			.client
-			.set(key.into().as_slice(), val.into().as_slice(), None, Some(SetOptions::NX), false)
+			.set(key.as_slice(), val.as_slice(), None, Some(SetOptions::NX), false)
 			.await?;
 
 		/*  Null reply: (nil) if the SET operation was not performed because the user specified the NX or XX option but the condition was not met.
