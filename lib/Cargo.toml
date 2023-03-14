@@ -98,7 +98,7 @@ thiserror = "1.0.38"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
 tokio-stream = { version = "0.1.11", optional = true }
 tokio-util = { version = "0.7.6", optional = true, features = ["compat"] }
-trice = "0.2.0"
+trice = "0.3.0"
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
 
@@ -119,6 +119,9 @@ features = [
 
 [dev-dependencies]
 actix-web = { version = "4.3.0", features = ["macros"] }
+env_logger = "0.10.0"
+temp-dir = "0.1.11"
+test-log = "0.2.11"
 time = { version = "0.3.17", features = ["serde"] }
 tokio = { version = "1.25.0", features = ["macros", "rt", "rt-multi-thread"] }
 

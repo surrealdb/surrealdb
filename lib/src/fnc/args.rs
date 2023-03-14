@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::sql::value::Value;
-use crate::sql::{Number, Strand};
+use crate::sql::{Duration, Number, Strand};
 
 /// Implemented by types that are commonly used, in a certain way, as arguments.
 pub trait FromArg: Sized {
@@ -30,6 +30,12 @@ impl FromArg for Strand {
 impl FromArg for Number {
 	fn from_arg(arg: Value) -> Result<Self, Error> {
 		Ok(arg.as_number())
+	}
+}
+
+impl FromArg for Duration {
+	fn from_arg(arg: Value) -> Result<Self, Error> {
+		Ok(arg.as_duration())
 	}
 }
 

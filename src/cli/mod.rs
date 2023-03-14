@@ -2,6 +2,7 @@ mod backup;
 mod config;
 mod export;
 mod import;
+mod isready;
 mod log;
 mod sql;
 mod start;
@@ -467,6 +468,22 @@ pub fn init() -> ExitCode {
 			),
 	);
 
+	let setup = setup.subcommand(
+		Command::new("isready")
+			.display_order(7)
+			.about("Check if the SurrealDB server is ready to accept connections")
+			.arg(
+				Arg::new("conn")
+					.short('c')
+					.long("conn")
+					.alias("host")
+					.forbid_empty_values(true)
+					.validator(conn_valid)
+					.default_value("http://localhost:8000")
+					.help("Remote database server url to connect to"),
+			),
+	);
+
 	let matches = setup.get_matches();
 
 	let output = match matches.subcommand() {
@@ -476,6 +493,7 @@ pub fn init() -> ExitCode {
 		Some(("import", m)) => import::init(m),
 		Some(("export", m)) => export::init(m),
 		Some(("version", m)) => version::init(m),
+		Some(("isready", m)) => isready::init(m),
 		_ => Ok(()),
 	};
 

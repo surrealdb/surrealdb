@@ -1,3 +1,4 @@
+///
 /// KV              /
 /// NS              /!ns{ns}
 ///
@@ -9,8 +10,8 @@
 /// Database        /*{ns}*{db}
 /// DL              /*{ns}*{db}!dl{us}
 /// DT              /*{ns}*{db}!dt{tk}
-/// SC              /*{ns}*{db}!sc{sc}
 /// PA              /*{ns}*{db}!pa{pa}
+/// SC              /*{ns}*{db}!sc{sc}
 /// TB              /*{ns}*{db}!tb{tb}
 /// LQ              /*{ns}*{db}!lq{lq}
 ///
@@ -18,9 +19,9 @@
 /// ST              /*{ns}*{db}±{sc}!st{tk}
 ///
 /// Table           /*{ns}*{db}*{tb}
-/// FT              /*{ns}*{db}*{tb}!ft{ft}
-/// FD              /*{ns}*{db}*{tb}!fd{fd}
 /// EV              /*{ns}*{db}*{tb}!ev{ev}
+/// FD              /*{ns}*{db}*{tb}!fd{fd}
+/// FT              /*{ns}*{db}*{tb}!ft{ft}
 /// IX              /*{ns}*{db}*{tb}!ix{ix}
 /// LV              /*{ns}*{db}*{tb}!lv{lv}
 ///

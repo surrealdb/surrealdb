@@ -8,6 +8,9 @@ mod rocksdb;
 mod tikv;
 mod tx;
 
+#[cfg(test)]
+mod tests;
+
 pub use self::ds::*;
 pub use self::kv::*;
 pub use self::tx::*;

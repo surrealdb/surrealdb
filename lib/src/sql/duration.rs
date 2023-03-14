@@ -19,6 +19,7 @@ static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
 static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
 static SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
 static SECONDS_PER_MINUTE: u64 = 60;
+static NANOSECONDS_PER_MILLISECOND: u32 = 1000000;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Duration(pub time::Duration);
@@ -103,12 +104,10 @@ impl fmt::Display for Duration {
 		// Split up the duration
 		let secs = self.0.as_secs();
 		let nano = self.0.subsec_nanos();
-
 		// Ensure no empty output
 		if secs == 0 && nano == 0 {
 			return write!(f, "0ns");
 		}
-
 		// Calculate the total years
 		let year = secs / SECONDS_PER_YEAR;
 		let secs = secs % SECONDS_PER_YEAR;
@@ -121,9 +120,12 @@ impl fmt::Display for Duration {
 		// Calculate the total hours
 		let hour = secs / SECONDS_PER_HOUR;
 		let secs = secs % SECONDS_PER_HOUR;
-		// Calculate the total mins
+		// Calculate the total minutes
 		let mins = secs / SECONDS_PER_MINUTE;
 		let secs = secs % SECONDS_PER_MINUTE;
+		// Calculate the total millseconds
+		let msec = nano / NANOSECONDS_PER_MILLISECOND;
+		let nano = nano % NANOSECONDS_PER_MILLISECOND;
 		// Write the different parts
 		if year > 0 {
 			write!(f, "{year}y")?;
@@ -142,6 +144,9 @@ impl fmt::Display for Duration {
 		}
 		if secs > 0 {
 			write!(f, "{secs}s")?;
+		}
+		if msec > 0 {
+			write!(f, "{msec}ms")?;
 		}
 		if nano > 0 {
 			write!(f, "{nano}ns")?;
@@ -359,5 +364,15 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("1d12h30m", format!("{}", out));
 		assert_eq!(out.0, Duration::new(131_400, 0));
+	}
+
+	#[test]
+	fn duration_milliseconds() {
+		let sql = "500ms";
+		let res = duration(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("500ms", format!("{}", out));
+		assert_eq!(out.0, Duration::new(0, 500000000));
 	}
 }
