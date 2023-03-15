@@ -1,3 +1,6 @@
+use super::Transaction;
+
+
 /// The authentication level for a datastore execution context.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub enum Level {
@@ -68,6 +71,26 @@ impl Auth {
 			Auth::Db(_, _) => matches!(level, Level::No | Level::Sc | Level::Db),
 			Auth::Ns(_) => matches!(level, Level::No | Level::Sc | Level::Db | Level::Ns),
 			Auth::Kv => true,
+		}
+	}
+	/// Checks whether the current user is allowed to write to the datastore
+	pub(crate) async fn writeable(&self, user: &str, txn: &Transaction) -> bool {
+		match self {
+			Auth::Db(ns, db) => {
+				let run = txn.clone();
+				let mut run = run.lock().await;
+				let dl = run.get_dl(ns, db, user).await;
+				
+				!dl.unwrap().read
+			},
+			Auth::Ns(ns) => {
+				let run = txn.clone();
+				let mut run = run.lock().await;
+				let nl = run.get_nl(ns, user).await;
+				
+				!nl.unwrap().read
+			},
+			_ => true,
 		}
 	}
 }

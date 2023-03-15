@@ -28,6 +28,7 @@ use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
 use nom::combinator::{map, opt};
 use nom::multi::many0;
+use nom::sequence::preceded;
 use nom::sequence::tuple;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
@@ -125,6 +126,8 @@ impl DefineNamespaceStatement {
 		opt.needs(Level::Kv)?;
 		// Allowed to run?
 		opt.check(Level::Kv)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Process the statement
 		let key = crate::key::ns::new(&self.name);
 		txn.clone().lock().await.set(key, self).await?;
@@ -174,6 +177,8 @@ impl DefineDatabaseStatement {
 		opt.needs(Level::Ns)?;
 		// Allowed to run?
 		opt.check(Level::Ns)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -217,6 +222,7 @@ pub struct DefineLoginStatement {
 	pub base: Base,
 	pub hash: String,
 	pub code: String,
+	pub read: bool,
 }
 
 impl DefineLoginStatement {
@@ -233,6 +239,8 @@ impl DefineLoginStatement {
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
+				// Has write access?
+				opt.writeable(txn).await?;
 				// Clone transaction
 				let run = txn.clone();
 				// Claim transaction
@@ -249,6 +257,8 @@ impl DefineLoginStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
+				// Has write access?
+				opt.writeable(txn).await?;
 				// Clone transaction
 				let run = txn.clone();
 				// Claim transaction
@@ -268,7 +278,13 @@ impl DefineLoginStatement {
 
 impl fmt::Display for DefineLoginStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, escape_str(&self.hash))
+		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, escape_str(&self.hash))?;
+
+		if self.read {
+			f.write_str(" READONLY")?
+		}
+
+		Ok(())
 	}
 }
 
@@ -283,6 +299,8 @@ fn login(i: &str) -> IResult<&str, DefineLoginStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, base) = base(i)?;
 	let (i, opts) = login_opts(i)?;
+	let (i, read) = opt(preceded(shouldbespace, tag_no_case("READONLY")))(i)?;
+
 	Ok((
 		i,
 		DefineLoginStatement {
@@ -299,7 +317,9 @@ fn login(i: &str) -> IResult<&str, DefineLoginStatement> {
 					.hash_password(v.as_ref(), SaltString::generate(&mut OsRng).as_ref())
 					.unwrap()
 					.to_string(),
+				
 			},
+			read: read.is_some()
 		},
 	))
 }
@@ -356,6 +376,8 @@ impl DefineTokenStatement {
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
+				// Has write access?
+				opt.writeable(txn).await?;
 				// Clone transaction
 				let run = txn.clone();
 				// Claim transaction
@@ -372,6 +394,8 @@ impl DefineTokenStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
+				// Has write access?
+				opt.writeable(txn).await?;
 				// Clone transaction
 				let run = txn.clone();
 				// Claim transaction
@@ -389,6 +413,8 @@ impl DefineTokenStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
+				// Has write access?
+				opt.writeable(txn).await?;
 				// Clone transaction
 				let run = txn.clone();
 				// Claim transaction
@@ -474,6 +500,8 @@ impl DefineScopeStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -593,6 +621,8 @@ impl DefineParamStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -658,6 +688,8 @@ impl DefineTableStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -841,6 +873,8 @@ impl DefineEventStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -926,6 +960,8 @@ impl DefineFieldStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -1086,6 +1122,8 @@ impl DefineIndexStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction

@@ -26,6 +26,8 @@ pub struct Session {
 	pub tk: Option<Value>,
 	/// The current scope authentication data
 	pub sd: Option<Value>,
+	/// The current authentication username
+	pub us: Option<String>,
 }
 
 impl Session {
@@ -115,6 +117,7 @@ impl Session {
 			"sc".to_string() => self.sc.to_owned().into(),
 			"sd".to_string() => self.sd.to_owned().into(),
 			"tk".to_string() => self.tk.to_owned().into(),
+			"us".to_string() => self.us.to_owned().into(),
 		});
 		ctx.add_value(key, val);
 		// Output context

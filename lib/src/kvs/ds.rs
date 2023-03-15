@@ -256,6 +256,8 @@ impl Datastore {
 		// Set current NS and DB
 		opt.ns = sess.ns();
 		opt.db = sess.db();
+		// Set the current user
+		opt.user = sess.us.clone();
 		// Set strict config
 		opt.strict = strict;
 		// Process all statements

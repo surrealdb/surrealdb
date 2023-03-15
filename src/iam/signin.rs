@@ -202,7 +202,7 @@ pub async fn db(
 						exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
 						ns: Some(ns.to_owned()),
 						db: Some(db.to_owned()),
-						id: Some(user),
+						id: Some(user.to_owned()),
 						..Claims::default()
 					};
 					// Create the authentication token
@@ -211,6 +211,7 @@ pub async fn db(
 					session.tk = Some(val.into());
 					session.ns = Some(ns.to_owned());
 					session.db = Some(db.to_owned());
+					session.us = Some(user.to_owned());
 					session.au = Arc::new(Auth::Db(ns, db));
 					// Check the authentication token
 					match enc {
@@ -256,7 +257,7 @@ pub async fn ns(
 						nbf: Some(Utc::now().timestamp()),
 						exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
 						ns: Some(ns.to_owned()),
-						id: Some(user),
+						id: Some(user.to_owned()),
 						..Claims::default()
 					};
 					// Create the authentication token
@@ -264,6 +265,7 @@ pub async fn ns(
 					// Set the authentication on the session
 					session.tk = Some(val.into());
 					session.ns = Some(ns.to_owned());
+					session.us = Some(user.to_owned());
 					session.au = Arc::new(Auth::Ns(ns));
 					// Check the authentication token
 					match enc {
@@ -293,6 +295,7 @@ pub async fn su(
 	if let Some(root) = &opts.pass {
 		if user == opts.user && &pass == root {
 			session.au = Arc::new(Auth::Kv);
+			session.us = Some(user);
 			return Ok(None);
 		}
 	}

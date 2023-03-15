@@ -4,6 +4,8 @@ use crate::dbs::Level;
 use crate::err::Error;
 use std::sync::Arc;
 
+use super::Transaction;
+
 /// An Options is passed around when processing a set of query
 /// statements. An Options contains specific information for how
 /// to process each particular statement, including the record
@@ -19,6 +21,8 @@ pub struct Options {
 	pub db: Option<Arc<str>>,
 	// Connection authentication data
 	pub auth: Arc<Auth>,
+	// The username used in the current session
+	pub user: Option<String>,
 	// Approximately how large is the current call stack?
 	dive: u8,
 	// Whether live queries are allowed?
@@ -53,6 +57,7 @@ impl Options {
 		Options {
 			ns: None,
 			db: None,
+			user: None,
 			dive: 0,
 			live: false,
 			perms: true,
@@ -88,6 +93,7 @@ impl Options {
 				auth: self.auth.clone(),
 				ns: self.ns.clone(),
 				db: self.db.clone(),
+				user: self.user.clone(),
 				dive,
 				..*self
 			})
@@ -102,6 +108,7 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			user: self.user.clone(),
 			force: v,
 			..*self
 		}
@@ -113,6 +120,7 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			user: self.user.clone(),
 			perms: v,
 			..*self
 		}
@@ -124,6 +132,7 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			user: self.user.clone(),
 			fields: v,
 			..*self
 		}
@@ -135,6 +144,7 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			user: self.user.clone(),
 			events: v,
 			..*self
 		}
@@ -146,6 +156,7 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			user: self.user.clone(),
 			tables: v,
 			..*self
 		}
@@ -157,6 +168,7 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			user: self.user.clone(),
 			indexes: v,
 			..*self
 		}
@@ -168,6 +180,7 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			user: self.user.clone(),
 			fields: !v,
 			events: !v,
 			tables: !v,
@@ -181,6 +194,7 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			user: self.user.clone(),
 			strict: v,
 			..*self
 		}
@@ -192,6 +206,7 @@ impl Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
+			user: self.user.clone(),
 			futures: v,
 			..*self
 		}
@@ -208,6 +223,14 @@ impl Options {
 	/// Check whether the authentication permissions are ok
 	pub fn check(&self, level: Level) -> Result<(), Error> {
 		if !self.auth.check(level) {
+			return Err(Error::QueryPermissions);
+		}
+		Ok(())
+	}
+
+	/// Check whether the authentication permissions have write access
+	pub async fn writeable(&self, txn: &Transaction) -> Result<(), Error> {
+		if self.user.is_some() && !self.auth.writeable(self.user.as_ref().unwrap(), txn).await {
 			return Err(Error::QueryPermissions);
 		}
 		Ok(())

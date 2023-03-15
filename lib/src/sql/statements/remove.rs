@@ -109,6 +109,8 @@ impl RemoveNamespaceStatement {
 		opt.needs(Level::Kv)?;
 		// Allowed to run?
 		opt.check(Level::Kv)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -165,6 +167,8 @@ impl RemoveDatabaseStatement {
 		opt.needs(Level::Ns)?;
 		// Allowed to run?
 		opt.check(Level::Ns)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -224,6 +228,8 @@ impl RemoveLoginStatement {
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
+				// Has write access?
+				opt.writeable(txn).await?;
 				// Clone transaction
 				let run = txn.clone();
 				// Claim transaction
@@ -239,6 +245,8 @@ impl RemoveLoginStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
+				// Has write access?
+				opt.writeable(txn).await?;
 				// Clone transaction
 				let run = txn.clone();
 				// Claim transaction
@@ -303,6 +311,8 @@ impl RemoveTokenStatement {
 				opt.needs(Level::Ns)?;
 				// Allowed to run?
 				opt.check(Level::Kv)?;
+				// Has write access?
+				opt.writeable(txn).await?;
 				// Clone transaction
 				let run = txn.clone();
 				// Claim transaction
@@ -318,6 +328,8 @@ impl RemoveTokenStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Ns)?;
+				// Has write access?
+				opt.writeable(txn).await?;
 				// Clone transaction
 				let run = txn.clone();
 				// Claim transaction
@@ -333,6 +345,8 @@ impl RemoveTokenStatement {
 				opt.needs(Level::Db)?;
 				// Allowed to run?
 				opt.check(Level::Db)?;
+				// Has write access?
+				opt.writeable(txn).await?;
 				// Clone transaction
 				let run = txn.clone();
 				// Claim transaction
@@ -394,6 +408,8 @@ impl RemoveScopeStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -450,6 +466,8 @@ impl RemoveParamStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -504,6 +522,8 @@ impl RemoveTableStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -561,6 +581,8 @@ impl RemoveEventStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -624,6 +646,8 @@ impl RemoveFieldStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction
@@ -687,6 +711,8 @@ impl RemoveIndexStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::Db)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Clone transaction
 		let run = txn.clone();
 		// Claim transaction

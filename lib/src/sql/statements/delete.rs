@@ -53,6 +53,8 @@ impl DeleteStatement {
 		opt.needs(Level::Db)?;
 		// Allowed to run?
 		opt.check(Level::No)?;
+		// Has write access?
+		opt.writeable(txn).await?;
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored
