@@ -316,7 +316,6 @@ impl Transaction {
 mod tests {
 	use crate::kvs::tests::transaction::verify_transaction_isolation;
 	use temp_dir::TempDir;
-	use test_log::test;
 
 	// https://github.com/surrealdb/surrealdb/issues/76
 	#[tokio::test]
@@ -330,7 +329,7 @@ mod tests {
 		}
 	}
 
-	#[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
+	#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 	async fn rocksdb_transaction() {
 		let p = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		verify_transaction_isolation(&format!("file:{}", p)).await;

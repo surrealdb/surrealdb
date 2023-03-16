@@ -11,6 +11,7 @@ use crate::sql::statements::live::LiveStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use std::borrow::Cow;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 pub(crate) struct Document<'a> {
@@ -18,6 +19,12 @@ pub(crate) struct Document<'a> {
 	pub(super) extras: Workable,
 	pub(super) current: Cow<'a, Value>,
 	pub(super) initial: Cow<'a, Value>,
+}
+
+impl<'a> Debug for Document<'a> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "Document - id: <{:?}>", self.id)
+	}
 }
 
 impl<'a> From<&Document<'a>> for Vec<u8> {
