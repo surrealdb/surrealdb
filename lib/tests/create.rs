@@ -4,9 +4,8 @@ use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
-use test_log::test;
 
-#[test(tokio::test)]
+#[tokio::test]
 async fn create_with_id() -> Result<(), Error> {
 	let sql = "
 		CREATE person:test SET name = 'Tester';

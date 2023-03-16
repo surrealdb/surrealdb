@@ -29,6 +29,8 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
+const LOG: &str = "surrealdb::txn";
+
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
 pub struct Transaction {
@@ -58,6 +60,8 @@ impl Transaction {
 	/// calls to functions on this transaction will result
 	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Closed");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -92,6 +96,8 @@ impl Transaction {
 	///
 	/// This reverses all changes made within the transaction.
 	pub async fn cancel(&mut self) -> Result<(), Error> {
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Cancel");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -126,6 +132,8 @@ impl Transaction {
 	///
 	/// This attempts to commit all changes made within the transaction.
 	pub async fn commit(&mut self) -> Result<(), Error> {
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Commit");
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -157,11 +165,13 @@ impl Transaction {
 		}
 	}
 	/// Delete a key from the datastore.
+	#[allow(unused_variables)]
 	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		#![allow(unused_variables)]
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Del {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -193,11 +203,13 @@ impl Transaction {
 		}
 	}
 	/// Check if a key exists in the datastore.
+	#[allow(unused_variables)]
 	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		#![allow(unused_variables)]
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Exi {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -229,11 +241,13 @@ impl Transaction {
 		}
 	}
 	/// Fetch a key from the datastore.
+	#[allow(unused_variables)]
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		#![allow(unused_variables)]
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Get {:?}", key);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -265,12 +279,14 @@ impl Transaction {
 		}
 	}
 	/// Insert or update a key in the datastore.
+	#[allow(unused_variables)]
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#![allow(unused_variables)]
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Set {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -302,12 +318,14 @@ impl Transaction {
 		}
 	}
 	/// Insert a key if it doesn't exist in the datastore.
+	#[allow(unused_variables)]
 	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#![allow(unused_variables)]
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Put {:?} => {:?}", key, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -341,11 +359,13 @@ impl Transaction {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
+	#[allow(unused_variables)]
 	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
-		#![allow(unused_variables)]
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Scan {:?} - {:?}", rng.start, rng.end);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -377,12 +397,14 @@ impl Transaction {
 		}
 	}
 	/// Update a key in the datastore if the current value matches a condition.
+	#[allow(unused_variables)]
 	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#![allow(unused_variables)]
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Putc {:?} if {:?} => {:?}", key, chk, val);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -414,12 +436,14 @@ impl Transaction {
 		}
 	}
 	/// Delete a key from the datastore if the current value matches a condition.
+	#[allow(unused_variables)]
 	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
 	where
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#![allow(unused_variables)]
+		#[cfg(debug_assertions)]
+		trace!(target: LOG, "Delc {:?} if {:?}", key, chk);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {

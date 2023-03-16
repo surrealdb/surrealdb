@@ -26,6 +26,11 @@ pub fn init(verbosity: usize) {
 	});
 
 	logger = match verbosity {
+		4 => logger.level_for("surrealdb::txn", log::LevelFilter::Trace),
+		_ => logger.level_for("surrealdb::txn", log::LevelFilter::Error),
+	};
+
+	logger = match verbosity {
 		0 => logger.level_for("surrealdb", log::LevelFilter::Warn),
 		1 => logger.level_for("surrealdb", log::LevelFilter::Info),
 		2 => logger.level_for("surrealdb", log::LevelFilter::Debug),
