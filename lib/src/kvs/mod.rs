@@ -4,6 +4,7 @@ mod fdb;
 mod indxdb;
 mod kv;
 mod mem;
+mod postgres;
 mod rocksdb;
 mod tikv;
 mod tx;

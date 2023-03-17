@@ -33,6 +33,8 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
 	FDB(super::fdb::Datastore),
+	#[cfg(feature = "kv-postgres")]
+	Postgres(super::postgres::Datastore),
 }
 
 impl Datastore {
@@ -144,6 +146,18 @@ impl Datastore {
 				info!(target: LOG, "Connected to kvs store at {}", path);
 				v
 			}
+			// Parse and initiate a FoundationDB database
+			#[cfg(feature = "kv-postgres")]
+			s if s.starts_with("postgres:") => {
+				info!(target: LOG, "Connecting to kvs store at {}", path);
+				let s = s.trim_start_matches("postgres://");
+				let s = s.trim_start_matches("postgres:");
+				let v = super::postgres::Datastore::new(s).await.map(|v| Datastore {
+					inner: Inner::Postgres(v),
+				});
+				info!(target: LOG, "Connected to kvs store at {}", path);
+				v
+			}
 			// The datastore path is not valid
 			_ => {
 				info!(target: LOG, "Unable to load the specified datastore {}", path);
@@ -206,6 +220,14 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
 					inner: super::tx::Inner::FDB(tx),
+					cache: super::cache::Cache::default(),
+				})
+			}
+			#[cfg(feature = "kv-postgres")]
+			Inner::Postgres(v) => {
+				let tx = v.transaction(write, lock).await?;
+				Ok(Transaction {
+					inner: super::tx::Inner::Postgres(tx),
 					cache: super::cache::Cache::default(),
 				})
 			}

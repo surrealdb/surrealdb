@@ -153,6 +153,20 @@ mod fdb {
 	include!("api/backup.rs");
 }
 
+#[cfg(feature = "kv-postgres")]
+mod postgres {
+	use super::*;
+	use surrealdb::engine::local::Db;
+	use surrealdb::engine::local::Postgres;
+
+	async fn new_db() -> Surreal<Db> {
+		Surreal::new::<Postgres>("localhost:5432/postgres?user=postgres&password=surrealdb").await.unwrap()
+	}
+
+	include!("api/mod.rs");
+	include!("api/backup.rs");
+}
+
 #[cfg(feature = "protocol-http")]
 mod any {
 	use super::*;

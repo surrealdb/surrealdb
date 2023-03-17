@@ -101,6 +101,13 @@ impl Connection for Any {
 					conn_rx.into_recv_async().await??
 				}
 
+				#[cfg(feature = "kv-postgres")]
+				"postgres" => {
+					features.insert(ExtraFeatures::Backup);
+					engine::local::native::router(address, conn_tx, route_rx);
+					conn_rx.into_recv_async().await??
+				}
+
 				#[cfg(feature = "protocol-http")]
 				"http" | "https" => {
 					features.insert(ExtraFeatures::Auth);
