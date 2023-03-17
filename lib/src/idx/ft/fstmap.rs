@@ -7,6 +7,17 @@ pub(super) struct FstMap {
 	bytes: Vec<u8>,
 }
 
+impl Default for FstMap {
+	fn default() -> Self {
+		let bytes = FstMap::builder().into_inner().unwrap();
+		let map = Map::default();
+		Self {
+			map,
+			bytes,
+		}
+	}
+}
+
 impl FstMap {
 	pub(super) fn size(&self) -> usize {
 		self.bytes.len()
@@ -69,5 +80,18 @@ impl<'de> Deserialize<'de> for FstMap {
 			map,
 			bytes,
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::idx::ft::fstmap::FstMap;
+
+	#[test]
+	fn test_fstmap_serde() {
+		let map = FstMap::default();
+		// Check serialization / deserialization
+		let buf = serde_json::to_vec(&map).unwrap();
+		let _: FstMap = serde_json::from_slice(&buf).unwrap();
 	}
 }

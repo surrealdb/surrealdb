@@ -9,6 +9,7 @@ mod tests {
 	use crate::idx::ft::doclength::{DocLength, DocLengths};
 	use crate::idx::ft::termfreq::TermFrequencies;
 	use crate::idx::ft::terms::{TermFrequency, Terms};
+	use crate::idx::kvsim::KVSimulator;
 	use crate::sql::error::IResult;
 	use nom::bytes::complete::take_while;
 	use nom::character::complete::multispace0;
@@ -19,18 +20,19 @@ mod tests {
 	struct FtIndex {
 		tf: TermFrequencies,
 		dl: DocLengths,
-		terms: Terms,
 	}
 
 	impl FtIndex {
-		fn add_document(&mut self, doc_id: &DocId, field_content: &str) {
+		fn add_document(&mut self, kv: &mut KVSimulator, doc_id: &DocId, field_content: &str) {
 			let (doc_length, terms) = Self::extract_sorted_terms_with_frequencies(field_content);
 
 			self.dl.set_doc_length(doc_id, doc_length);
-			let terms = self.terms.resolve_terms(terms);
+			let mut t = Terms::new(kv);
+			let terms = t.resolve_terms(kv, terms);
 			for (term_id, term_freq) in terms {
 				self.tf.update_posting(term_id, doc_id, term_freq);
 			}
+			t.finish(kv);
 		}
 
 		fn extract_sorted_terms_with_frequencies(
@@ -75,6 +77,7 @@ mod tests {
 	#[test]
 	fn test_ft_index() {
 		let mut fti = FtIndex::default();
-		fti.add_document(&DocId::from(0), "Hello world!");
+		let mut kv = KVSimulator::default();
+		fti.add_document(&mut kv, &DocId::from(0), "Hello world!");
 	}
 }
