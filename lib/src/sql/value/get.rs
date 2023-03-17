@@ -110,7 +110,7 @@ impl Value {
 							// This is a graph traversal expression
 							Part::Graph(g) => {
 								let stm = SelectStatement {
-									expr: Fields(vec![Field::All]),
+									expr: Fields(vec![Field::All], false),
 									what: Values(vec![Value::from(Edges {
 										from: val,
 										dir: g.dir.clone(),
@@ -141,7 +141,7 @@ impl Value {
 							// This is a remote field expression
 							_ => {
 								let stm = SelectStatement {
-									expr: Fields(vec![Field::All]),
+									expr: Fields(vec![Field::All], false),
 									what: Values(vec![Value::from(val)]),
 									..SelectStatement::default()
 								};

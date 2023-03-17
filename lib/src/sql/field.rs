@@ -4,6 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
+use crate::sql::ending::field as ending;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::{idiom, Idiom};
@@ -17,7 +18,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-pub struct Fields(pub Vec<Field>);
+pub struct Fields(pub Vec<Field>, pub bool);
 
 impl Fields {
 	pub fn all(&self) -> bool {
@@ -26,12 +27,11 @@ impl Fields {
 	pub fn other(&self) -> impl Iterator<Item = &Field> {
 		self.0.iter().filter(|v| !matches!(v, Field::All))
 	}
-	pub fn single(&self) -> Option<Idiom> {
-		match self.0.len() {
-			1 => match self.0.first() {
+	pub fn single(&self) -> Option<&Field> {
+		match (self.0.len(), self.1) {
+			(1, true) => match self.0.first() {
 				Some(Field::All) => None,
-				Some(Field::Alone(e)) => Some(e.to_idiom()),
-				Some(Field::Alias(_, i)) => Some(i.to_owned()),
+				Some(v) => Some(v),
 				_ => None,
 			},
 			_ => None,
@@ -56,7 +56,10 @@ impl IntoIterator for Fields {
 
 impl Display for Fields {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&Fmt::comma_separated(&self.0), f)
+		match self.single() {
+			Some(v) => write!(f, "VALUE {}", &v),
+			None => Display::fmt(&Fmt::comma_separated(&self.0), f),
+		}
 	}
 }
 
@@ -90,7 +93,11 @@ impl Fields {
 							// If arguments, then pass the first value through
 							_ => f.args()[0].compute(ctx, opt, txn, Some(doc)).await?,
 						};
-						out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+						// Check if this is a single VALUE field expression
+						match self.single().is_some() {
+							false => out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?,
+							true => out = x,
+						}
 					}
 					// This expression is a multi-output graph traversal
 					Value::Idiom(v) if v.is_multi_yield() => {
@@ -126,7 +133,11 @@ impl Fields {
 					// This expression is a normal field expression
 					_ => {
 						let x = v.compute(ctx, opt, txn, Some(doc)).await?;
-						out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+						// Check if this is a single VALUE field expression
+						match self.single().is_some() {
+							false => out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?,
+							true => out = x,
+						}
 					}
 				},
 				Field::Alias(v, i) => match v {
@@ -138,7 +149,11 @@ impl Fields {
 							// If arguments, then pass the first value through
 							_ => f.args()[0].compute(ctx, opt, txn, Some(doc)).await?,
 						};
-						out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
+						// Check if this is a single VALUE field expression
+						match self.single().is_some() {
+							false => out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?,
+							true => out = x,
+						}
 					}
 					// This expression is a multi-output graph traversal
 					Value::Idiom(v) if v.is_multi_yield() => {
@@ -175,9 +190,14 @@ impl Fields {
 							}
 						}
 					}
+					// This expression is a normal field expression
 					_ => {
 						let x = v.compute(ctx, opt, txn, Some(doc)).await?;
-						out.set(ctx, opt, txn, i, x).await?;
+						// Check if this is a single VALUE field expression
+						match self.single().is_some() {
+							false => out.set(ctx, opt, txn, i, x).await?,
+							true => out = x,
+						}
 					}
 				},
 			}
@@ -187,8 +207,20 @@ impl Fields {
 }
 
 pub fn fields(i: &str) -> IResult<&str, Fields> {
+	alt((field_one, field_many))(i)
+}
+
+fn field_one(i: &str) -> IResult<&str, Fields> {
+	let (i, _) = tag_no_case("VALUE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, f) = alt((alias, alone))(i)?;
+	let (i, _) = ending(i)?;
+	Ok((i, Fields(vec![f], true)))
+}
+
+fn field_many(i: &str) -> IResult<&str, Fields> {
 	let (i, v) = separated_list1(commas, field)(i)?;
-	Ok((i, Fields(v)))
+	Ok((i, Fields(v, false)))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -252,12 +284,39 @@ mod tests {
 	}
 
 	#[test]
-	fn field_single() {
+	fn field_one() {
 		let sql = "field";
 		let res = fields(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("field", format!("{}", out));
+	}
+
+	#[test]
+	fn field_value() {
+		let sql = "VALUE field";
+		let res = fields(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("VALUE field", format!("{}", out));
+	}
+
+	#[test]
+	fn field_alias() {
+		let sql = "field AS one";
+		let res = fields(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("field AS one", format!("{}", out));
+	}
+
+	#[test]
+	fn field_value_alias() {
+		let sql = "VALUE field AS one";
+		let res = fields(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("VALUE field AS one", format!("{}", out));
 	}
 
 	#[test]
@@ -276,5 +335,12 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("field AS one, other.field AS two", format!("{}", out));
+	}
+
+	#[test]
+	fn field_value_only_one() {
+		let sql = "VALUE field, other.field";
+		let res = fields(sql);
+		assert!(res.is_ok());
 	}
 }

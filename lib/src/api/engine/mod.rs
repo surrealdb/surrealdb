@@ -116,7 +116,7 @@ fn select_statement(params: &mut [Value]) -> (bool, SelectStatement) {
 		one,
 		SelectStatement {
 			what,
-			expr: Fields(vec![Field::All]),
+			expr: Fields(vec![Field::All], false),
 			..Default::default()
 		},
 	)
