@@ -366,8 +366,8 @@ impl From<rocksdb::Error> for Error {
 }
 
 #[cfg(feature = "kv-postgres")]
-impl From<sqlx::Error> for Error {
-	fn from(e: sqlx::Error) -> Error {
+impl From<sea_orm::error::DbErr> for Error {
+	fn from(e: sea_orm::error::DbErr) -> Error {
 		Error::Tx(e.to_string())
 	}
 }

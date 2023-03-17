@@ -4,16 +4,32 @@ use crate::err::Error;
 use crate::kvs::Key;
 use crate::kvs::Val;
 use futures::lock::Mutex;
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::{Acquire, Executor, Pool};
+use sea_orm::prelude::*;
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{
+	AccessMode, ActiveValue, Condition, ConnectOptions, Database, DatabaseConnection,
+	DatabaseTransaction, IsolationLevel, QueryOrder, QuerySelect, TransactionTrait,
+};
 use std::ops::Range;
 use std::pin::Pin;
-use std::str::FromStr;
 use std::sync::Arc;
+
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[sea_orm(table_name = "db")]
+pub struct Model {
+	#[sea_orm(primary_key, indexed)]
+	pub key: Key,
+	pub value: Val,
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
 
 #[derive(Clone)]
 pub struct Datastore {
-	pool: Pin<Arc<Pool<sqlx::Postgres>>>,
+	db: Pin<Arc<DatabaseConnection>>,
 }
 
 pub struct Transaction {
@@ -21,21 +37,20 @@ pub struct Transaction {
 	ok: bool,
 	// Is the transaction read+write?
 	rw: bool,
-	tx: Arc<Mutex<Option<sqlx::Transaction<'static, sqlx::Postgres>>>>,
+	tx: Arc<Mutex<Option<DatabaseTransaction>>>,
 }
 
 impl Datastore {
 	/// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		let option = PgConnectOptions::from_str(format!("postgres://{}", &path).as_str())?;
-
-		let res = PgPoolOptions::new()
-			.max_connections(100)
-			.connect_with(option)
-			.await;
-		match res {
-			Ok(pool) => Ok(Datastore {
-				pool: Arc::pin(pool),
+		let mut opt = ConnectOptions::new(format!("postgres://{}", &path));
+		opt.max_connections(100)
+			.min_connections(5)
+			.sqlx_logging(true)
+			.sqlx_logging_level(log::LevelFilter::Trace);
+		match Database::connect(opt).await {
+			Ok(db) => Ok(Datastore {
+				db: Arc::pin(db),
 			}),
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
@@ -43,16 +58,23 @@ impl Datastore {
 	/// Start a new transaction
 	pub async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Create a new distributed transaction
-		match self.pool.begin().await {
-			Ok(mut tx) => {
-				tx.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ").await?;
-
-				Ok(Transaction {
-					ok: false,
-					rw: write,
-					tx: Arc::new(Mutex::new(Some(tx))),
-				})
-			},
+		match self
+			.db
+			.begin_with_config(
+				Some(IsolationLevel::RepeatableRead),
+				Some(if write {
+					AccessMode::ReadWrite
+				} else {
+					AccessMode::ReadOnly
+				}),
+			)
+			.await
+		{
+			Ok(tx) => Ok(Transaction {
+				ok: false,
+				rw: write,
+				tx: Arc::new(Mutex::new(Some(tx))),
+			}),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}
@@ -112,15 +134,10 @@ impl Transaction {
 		}
 
 		let key = key.into();
-		trace!("exi: {:?}", key);
 		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap().acquire().await?;
+		let tx = tx.as_mut().unwrap();
 
-		// Return result
-
-		let query = sqlx::query("SELECT 1 FROM db WHERE key = $1").bind(key);
-
-		Ok(query.fetch_optional(tx).await?.is_some())
+		Ok(Entity::find_by_id(key).one(tx).await?.is_some())
 	}
 	/// Fetch a key from the database
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
@@ -132,15 +149,11 @@ impl Transaction {
 			return Err(Error::TxFinished);
 		}
 		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap().acquire().await?;
+		let tx = tx.as_mut().unwrap();
 
 		// Get the key
 		let key = key.into();
-		trace!("get: {:?}", key);
-		Ok(sqlx::query_scalar("SELECT value FROM db where key = $1")
-			.bind(key)
-			.fetch_optional(tx)
-			.await?)
+		Ok(Entity::find_by_id(key).one(tx).await?.map(|x| x.value))
 	}
 	/// Insert or update a key in the database
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
@@ -158,18 +171,20 @@ impl Transaction {
 		}
 
 		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap().acquire().await?;
+		let tx = tx.as_mut().unwrap();
 
 		// Set the key
 		let key = key.into();
 		let val = val.into();
-		trace!("set: {:?} {:?}", key, val);
 
-		sqlx::query("INSERT INTO db VALUES($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2")
-			.bind(key)
-			.bind(val)
-			.execute(tx)
-			.await?;
+		Entity::insert(ActiveModel {
+			key: ActiveValue::set(key),
+			value: ActiveValue::set(val),
+		})
+		.on_conflict(OnConflict::column(Column::Key).update_column(Column::Value).to_owned())
+		.exec(tx)
+		.await?;
+
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
@@ -187,14 +202,19 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap().acquire().await?;
+		let tx = tx.as_mut().unwrap();
 
 		// Set the key
 		let key = key.into();
 		let val = val.into();
-		trace!("put: {:?} {:?}", key, val);
 
-		sqlx::query("INSERT INTO db VALUES($1, $2)").bind(key).bind(val).execute(tx).await?;
+		Entity::insert(ActiveModel {
+			key: ActiveValue::set(key),
+			value: ActiveValue::set(val),
+		})
+		.exec(tx)
+		.await?;
+
 		// Return result
 		Ok(())
 	}
@@ -213,8 +233,8 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap().acquire().await?;
-		// todo!();
+		let tx = tx.as_mut().unwrap();
+
 		// Get the key
 		let key = key.into();
 		// Get the val
@@ -222,31 +242,23 @@ impl Transaction {
 		// Get the check
 		let chk = chk.map(Into::into);
 
-		trace!("putc: {:?} {:?} {:?}", key, val, chk);
-
-		let ok = {
-			let tx = tx.acquire().await?;
-			match chk {
-				Some(chk) => sqlx::query("SELECT 1 FROM db WHERE key = $1 AND value = $2")
-					.bind(key.to_vec())
-					.bind(chk)
-					.fetch_optional(tx)
-					.await?
-					.is_some(),
-				None => sqlx::query("SELECT 1 FROM db WHERE key = $1")
-					.bind(key.to_vec())
-					.fetch_optional(tx)
-					.await?
-					.is_none(),
+		let mut select = Entity::find_by_id(key.to_vec());
+		let ok = match chk {
+			Some(chk) => {
+				select = select.filter(Column::Value.eq(chk));
+				select.one(tx).await?.is_some()
 			}
+			None => select.one(tx).await?.is_none(),
 		};
 
 		if ok {
-			sqlx::query("INSERT INTO db VALUES($1, $2) ON CONFLICT DO UPDATE SET value = $2")
-				.bind(key)
-				.bind(val)
-				.execute(tx)
-				.await?;
+			Entity::insert(ActiveModel {
+				key: ActiveValue::set(key),
+				value: ActiveValue::set(val),
+			})
+			.on_conflict(OnConflict::column(Column::Key).update_column(Column::Value).to_owned())
+			.exec(tx)
+			.await?;
 			Ok(())
 		} else {
 			Err(Error::TxConditionNotMet)
@@ -267,14 +279,11 @@ impl Transaction {
 		}
 
 		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap().acquire().await?;
+		let tx = tx.as_mut().unwrap();
 
 		// Delete the key
 		let key = key.into();
-		trace!("del: {:?}", key);
-
-		sqlx::query("DELETE FROM db WHERE key = $1").bind(key).execute(tx).await?;
-		// Return result
+		Entity::delete_by_id(key).exec(tx).await?;
 		Ok(())
 	}
 	/// Delete a key
@@ -293,34 +302,24 @@ impl Transaction {
 		}
 
 		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap().acquire().await?;
+		let tx = tx.as_mut().unwrap();
 
 		// Get the key
 		let key = key.into();
 		// Get the check
 		let chk = chk.map(Into::into);
 
-		trace!("delc: {:?} {:?}", key, chk);
-
-		let ok = {
-			let tx = tx.acquire().await?;
-			match chk {
-				Some(chk) => sqlx::query("SELECT 1 FROM db WHERE key = $1 AND value = $2")
-					.bind(key.to_vec())
-					.bind(chk)
-					.fetch_optional(tx)
-					.await?
-					.is_some(),
-				None => sqlx::query("SELECT 1 FROM db WHERE key = $1")
-					.bind(key.to_vec())
-					.fetch_optional(tx)
-					.await?
-					.is_none(),
+		let mut select = Entity::find_by_id(key.to_vec());
+		let ok = match chk {
+			Some(chk) => {
+				select = select.filter(Column::Value.eq(chk));
+				select.one(tx).await?.is_some()
 			}
+			None => select.one(tx).await?.is_none(),
 		};
 
 		if ok {
-			sqlx::query("DELETE FROM db WHERE key = $1").bind(key).execute(tx).await?;
+			Entity::delete_by_id(key).exec(tx).await?;
 			Ok(())
 		} else {
 			Err(Error::TxConditionNotMet)
@@ -338,21 +337,22 @@ impl Transaction {
 		// Convert the range to bytes
 
 		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap().acquire().await?;
+		let tx = tx.as_mut().unwrap();
 
 		let start = rng.start.into();
 		let end = rng.end.into();
 
-		trace!("scan: {:?} {:?} {:?}", start, end, limit);
-
-		Ok(sqlx::query_as(
-			r#"SELECT key, value FROM db WHERE key = $1 OR (key >= $1 AND key < $2) ORDER BY key LIMIT $3"#,
-		)
-		.bind(start)
-		.bind(end)
-		.bind(limit as i64)
-		.fetch_all(tx)
-		.await?)
+		Ok(Entity::find()
+			.filter(Condition::any().add(Column::Key.eq(start.to_vec())).add(
+				Condition::all().add(Column::Key.gte(start)).add(Column::Key.lt(end.to_vec())),
+			))
+			.order_by_asc(Column::Key)
+			.limit(Some(limit as u64))
+			.all(tx)
+			.await?
+			.into_iter()
+			.map(|x| (x.key, x.value))
+			.collect())
 	}
 }
 
@@ -363,6 +363,9 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
 	async fn postgres_transaction() {
-		verify_transaction_isolation("postgres://localhost:5432/postgres?user=postgres&password=surrealdb").await;
+		verify_transaction_isolation(
+			"postgres://localhost:5432/postgres?user=postgres&password=surrealdb",
+		)
+		.await;
 	}
 }
