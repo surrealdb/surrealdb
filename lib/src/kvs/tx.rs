@@ -50,6 +50,8 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Transaction),
 	#[cfg(feature = "kv-fdb")]
 	FDB(super::fdb::Transaction),
+	#[cfg(feature = "kv-postgres")]
+	Postgres(super::postgres::Transaction),
 }
 
 impl Transaction {
@@ -88,6 +90,11 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.closed(),
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.closed(),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -124,6 +131,11 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.cancel().await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.cancel().await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -158,6 +170,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
+				..
+			} => v.commit().await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.commit().await,
 			#[allow(unreachable_patterns)]
@@ -198,6 +215,11 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.del(key).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.del(key).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -236,6 +258,11 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.exi(key).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.exi(key).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -272,6 +299,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
+				..
+			} => v.get(key).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.get(key).await,
 			#[allow(unreachable_patterns)]
@@ -313,6 +345,11 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.set(key, val).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.set(key, val).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -350,6 +387,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
+				..
+			} => v.put(key, val).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.put(key, val).await,
 			#[allow(unreachable_patterns)]
@@ -392,6 +434,11 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.scan(rng, limit).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -431,6 +478,11 @@ impl Transaction {
 				inner: Inner::FDB(v),
 				..
 			} => v.putc(key, val, chk).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
+				..
+			} => v.putc(key, val, chk).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -468,6 +520,11 @@ impl Transaction {
 			#[cfg(feature = "kv-fdb")]
 			Transaction {
 				inner: Inner::FDB(v),
+				..
+			} => v.delc(key, chk).await,
+			#[cfg(feature = "kv-postgres")]
+			Transaction {
+				inner: Inner::Postgres(v),
 				..
 			} => v.delc(key, chk).await,
 			#[allow(unreachable_patterns)]
