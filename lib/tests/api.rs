@@ -160,7 +160,9 @@ mod postgres {
 	use surrealdb::engine::local::Postgres;
 
 	async fn new_db() -> Surreal<Db> {
-		Surreal::new::<Postgres>("localhost:5432/postgres?user=postgres&password=surrealdb").await.unwrap()
+		Surreal::new::<Postgres>("localhost:5432/postgres?user=postgres&password=surrealdb")
+			.await
+			.unwrap()
 	}
 
 	include!("api/mod.rs");
