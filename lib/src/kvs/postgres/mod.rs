@@ -8,7 +8,7 @@ use sea_orm::prelude::*;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
 	AccessMode, ActiveValue, Condition, ConnectOptions, Database, DatabaseConnection,
-	DatabaseTransaction, IsolationLevel, QueryOrder, QuerySelect, TransactionTrait,
+	DatabaseTransaction, IsolationLevel, QueryOrder, QuerySelect, Schema, TransactionTrait,
 };
 use std::ops::Range;
 use std::sync::Arc;
@@ -16,8 +16,9 @@ use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "db")]
 pub struct Model {
-	#[sea_orm(primary_key, indexed)]
+	#[sea_orm(primary_key, indexed, auto_increment = false)]
 	pub key: Key,
+	#[sea_orm(nullable = false)]
 	pub value: Val,
 }
 
@@ -48,12 +49,29 @@ impl Datastore {
 			.sqlx_logging(true)
 			.sqlx_logging_level(log::LevelFilter::Trace);
 		match Database::connect(opt).await {
-			Ok(db) => Ok(Datastore {
-				db,
-			}),
+			Ok(db) => {
+				Self::ensure_table_and_indices_exists(&db).await?;
+
+				Ok(Datastore {
+					db,
+				})
+			}
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
+
+	async fn ensure_table_and_indices_exists(db: &DatabaseConnection) -> Result<(), DbErr> {
+		let backend = db.get_database_backend();
+		let schema = Schema::new(backend);
+		db.execute(backend.build(schema.create_table_from_entity(Entity).if_not_exists())).await?;
+
+		for mut index in schema.create_index_from_entity(Entity) {
+			let index = index.if_not_exists();
+			db.execute(backend.build(index)).await?;
+		}
+		Ok(())
+	}
+
 	/// Start a new transaction
 	pub async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
 		// Create a new distributed transaction
