@@ -202,13 +202,13 @@ fn cast(i: &str) -> IResult<&str, Function> {
 fn function_casts(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("bool"),
-		tag("int"),
-		tag("float"),
-		tag("string"),
-		tag("number"),
-		tag("decimal"),
 		tag("datetime"),
+		tag("decimal"),
 		tag("duration"),
+		tag("float"),
+		tag("int"),
+		tag("number"),
+		tag("string"),
 	))(i)
 }
 
