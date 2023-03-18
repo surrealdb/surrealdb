@@ -33,6 +33,6 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
 	async fn mysql_transaction() {
-		verify_transaction_isolation("mysql://localhost:3306").await;
+		verify_transaction_isolation("mysql://root:surrealdb@localhost:3306/surrealdb").await;
 	}
 }
