@@ -14,7 +14,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
-#[sea_orm(table_name = "db")]
+#[sea_orm(table_name = "kvstore")]
 pub struct Model {
 	#[sea_orm(primary_key, indexed, auto_increment = false)]
 	pub key: Key,
