@@ -153,6 +153,20 @@ mod fdb {
 	include!("api/backup.rs");
 }
 
+#[cfg(feature = "kv-sqlite")]
+mod sqlite {
+	use super::*;
+	use surrealdb::engine::local::Db;
+	use surrealdb::engine::local::Sqlite;
+
+	async fn new_db() -> Surreal<Db> {
+		Surreal::new::<Sqlite>("test.db?mode=rwc&cache=shared").await.unwrap()
+	}
+
+	include!("api/mod.rs");
+	include!("api/backup.rs");
+}
+
 #[cfg(feature = "protocol-http")]
 mod any {
 	use super::*;

@@ -97,6 +97,7 @@ use crate::api::opt::Endpoint;
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
+	features = "kv-sqlite",
 ))]
 use crate::api::opt::Strict;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -160,6 +161,7 @@ where
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
+	features = "kv-sqlite",
 ))]
 #[cfg_attr(
 	docsrs,
@@ -169,6 +171,7 @@ where
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
+		features = "kv-sqlite",
 	)))
 )]
 impl<T> IntoEndpoint for (T, Strict)
@@ -189,6 +192,7 @@ where
 		feature = "kv-rocksdb",
 		feature = "kv-fdb",
 		feature = "kv-indxdb",
+		features = "kv-sqlite",
 	),
 	feature = "rustls",
 ))]
@@ -201,6 +205,7 @@ where
 			feature = "kv-rocksdb",
 			feature = "kv-fdb",
 			feature = "kv-indxdb",
+			features = "kv-sqlite",
 		),
 		feature = "rustls",
 	)))
@@ -288,6 +293,9 @@ impl Surreal<Any> {
 ///
 /// // Instantiate a FoundationDB-backed instance
 /// let db = connect("fdb://fdb.cluster").await?;
+///
+/// // Instantiate a Sqlite-backed instance
+/// let db = connect("sqlite://sqlite.db?cache=shared&mode=rwc").await?;
 /// # Ok(())
 /// # }
 /// ```

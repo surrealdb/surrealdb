@@ -5,6 +5,8 @@ mod indxdb;
 mod kv;
 mod mem;
 mod rocksdb;
+mod seaorm;
+mod sqlite;
 mod tikv;
 mod tx;
 

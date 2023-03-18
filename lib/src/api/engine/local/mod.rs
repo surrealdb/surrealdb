@@ -296,6 +296,42 @@ pub struct TiKv;
 #[derive(Debug)]
 pub struct FDb;
 
+/// Sqlite database
+///
+/// # Examples
+///
+/// Instantiating a Sqlite-backed instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::Sqlite;
+///
+/// let db = Surreal::new::<Sqlite>("postgres.cluster").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Instantiating a Postgres-backed strict instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::Sqlite;
+///
+/// let db = Surreal::new::<Sqlite>(("postgres.cluster", Strict)).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "kv-sqlite")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-sqlite")))]
+#[derive(Debug)]
+pub struct Sqlite;
+
 /// An embedded database
 ///
 /// Authentication methods (`signup`, `signin`, `authentication` and `invalidate`) are not availabe
