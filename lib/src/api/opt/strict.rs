@@ -6,6 +6,7 @@
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
 	feature = "kv-sqlite",
+	feature = "kv-mysql",
 ))]
 #[derive(Debug)]
 pub struct Strict;

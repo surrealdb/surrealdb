@@ -4,6 +4,7 @@ mod fdb;
 mod indxdb;
 mod kv;
 mod mem;
+mod mysql;
 mod rocksdb;
 mod seaorm;
 mod sqlite;

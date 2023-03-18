@@ -35,6 +35,8 @@ pub(super) enum Inner {
 	FDB(super::fdb::Datastore),
 	#[cfg(feature = "kv-sqlite")]
 	Sqlite(super::seaorm::Datastore),
+	#[cfg(feature = "kv-mysql")]
+	Mysql(super::seaorm::Datastore),
 }
 
 impl Datastore {
@@ -156,6 +158,16 @@ impl Datastore {
 				info!(target: LOG, "Connected to kvs store at {}", path);
 				v
 			}
+			// Parse and initiate a Mysql database
+			#[cfg(feature = "kv-mysql")]
+			s if s.starts_with("mysql:") || s.starts_with("mariadb:") => {
+				info!(target: LOG, "Connecting to kvs store at {}", path);
+				let v = super::mysql::Datastore::new(s).await.map(|v| Datastore {
+					inner: Inner::Mysql(v),
+				});
+				info!(target: LOG, "Connected to kvs store at {}", path);
+				v
+			}
 			// The datastore path is not valid
 			_ => {
 				info!(target: LOG, "Unable to load the specified datastore {}", path);
@@ -226,6 +238,14 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
 					inner: super::tx::Inner::Sqlite(tx),
+					cache: super::cache::Cache::default(),
+				})
+			}
+			#[cfg(feature = "kv-mysql")]
+			Inner::Mysql(v) => {
+				let tx = v.transaction(write, lock).await?;
+				Ok(Transaction {
+					inner: super::tx::Inner::Mysql(tx),
 					cache: super::cache::Cache::default(),
 				})
 			}

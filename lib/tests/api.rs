@@ -167,6 +167,20 @@ mod sqlite {
 	include!("api/backup.rs");
 }
 
+#[cfg(feature = "kv-mysql")]
+mod mysql {
+	use super::*;
+	use surrealdb::engine::local::Db;
+	use surrealdb::engine::local::Mysql;
+
+	async fn new_db() -> Surreal<Db> {
+		Surreal::new::<Mysql>("localhost:3306").await.unwrap()
+	}
+
+	include!("api/mod.rs");
+	include!("api/backup.rs");
+}
+
 #[cfg(feature = "protocol-http")]
 mod any {
 	use super::*;

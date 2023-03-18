@@ -52,6 +52,8 @@ pub(super) enum Inner {
 	FDB(super::fdb::Transaction),
 	#[cfg(feature = "kv-sqlite")]
 	Sqlite(super::seaorm::Transaction),
+	#[cfg(feature = "kv-mysql")]
+	Mysql(super::seaorm::Transaction),
 }
 
 impl Transaction {
@@ -95,6 +97,11 @@ impl Transaction {
 				inner: Inner::Sqlite(v),
 				..
 			} => v.closed(),
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
+				..
+			} => v.closed(),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -136,6 +143,11 @@ impl Transaction {
 				inner: Inner::Sqlite(v),
 				..
 			} => v.cancel().await,
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
+				..
+			} => v.cancel().await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -175,6 +187,11 @@ impl Transaction {
 			#[cfg(feature = "kv-sqlite")]
 			Transaction {
 				inner: Inner::Sqlite(v),
+				..
+			} => v.commit().await,
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
 				..
 			} => v.commit().await,
 			#[allow(unreachable_patterns)]
@@ -220,6 +237,11 @@ impl Transaction {
 				inner: Inner::Sqlite(v),
 				..
 			} => v.del(key).await,
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
+				..
+			} => v.del(key).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -263,6 +285,11 @@ impl Transaction {
 				inner: Inner::Sqlite(v),
 				..
 			} => v.exi(key).await,
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
+				..
+			} => v.exi(key).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -304,6 +331,11 @@ impl Transaction {
 			#[cfg(feature = "kv-sqlite")]
 			Transaction {
 				inner: Inner::Sqlite(v),
+				..
+			} => v.get(key).await,
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
 				..
 			} => v.get(key).await,
 			#[allow(unreachable_patterns)]
@@ -350,6 +382,11 @@ impl Transaction {
 				inner: Inner::Sqlite(v),
 				..
 			} => v.set(key, val).await,
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
+				..
+			} => v.set(key, val).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -392,6 +429,11 @@ impl Transaction {
 			#[cfg(feature = "kv-sqlite")]
 			Transaction {
 				inner: Inner::Sqlite(v),
+				..
+			} => v.put(key, val).await,
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
 				..
 			} => v.put(key, val).await,
 			#[allow(unreachable_patterns)]
@@ -439,6 +481,11 @@ impl Transaction {
 				inner: Inner::Sqlite(v),
 				..
 			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
+				..
+			} => v.scan(rng, limit).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -483,6 +530,11 @@ impl Transaction {
 				inner: Inner::Sqlite(v),
 				..
 			} => v.putc(key, val, chk).await,
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
+				..
+			} => v.putc(key, val, chk).await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -525,6 +577,11 @@ impl Transaction {
 			#[cfg(feature = "kv-sqlite")]
 			Transaction {
 				inner: Inner::Sqlite(v),
+				..
+			} => v.delc(key, chk).await,
+			#[cfg(feature = "kv-mysql")]
+			Transaction {
+				inner: Inner::Mysql(v),
 				..
 			} => v.delc(key, chk).await,
 			#[allow(unreachable_patterns)]

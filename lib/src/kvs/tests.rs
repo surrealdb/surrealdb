@@ -1,4 +1,10 @@
-#[cfg(any(feature = "kv-tikv", feature = "kv-rocksdb", feature = "kv-fdb", feature = "kv-sqlite",))]
+#[cfg(any(
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-fdb",
+	feature = "kv-sqlite",
+	feature = "kv-mysql",
+))]
 pub(crate) mod transaction {
 	use crate::dbs::{Response, Session};
 	use crate::kvs::ds::Inner;
@@ -86,6 +92,8 @@ pub(crate) mod transaction {
 				Inner::FDB(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				#[cfg(feature = "kv-sqlite")]
 				Inner::Sqlite(_) => Datastore::new(&self.ds_path).await.unwrap(),
+				#[cfg(feature = "kv-mysql")]
+				Inner::Mysql(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				_ => panic!("Datastore not supported"),
 			};
 			Self {

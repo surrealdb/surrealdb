@@ -332,6 +332,42 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct Sqlite;
 
+/// Mysql database
+///
+/// # Examples
+///
+/// Instantiating a Mysql-backed instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::Mysql;
+///
+/// let db = Surreal::new::<Mysql>("localhost:3306").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Instantiating a Mysql-backed strict instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::Mysql;
+///
+/// let db = Surreal::new::<Mysql>(("localhost:3306", Strict)).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "kv-mysql")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-mysql")))]
+#[derive(Debug)]
+pub struct Mysql;
+
 /// An embedded database
 ///
 /// Authentication methods (`signup`, `signin`, `authentication` and `invalidate`) are not availabe
