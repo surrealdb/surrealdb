@@ -348,11 +348,9 @@ impl Transaction {
 			))
 			.order_by_asc(Column::Key)
 			.limit(Some(limit as u64))
+			.into_tuple()
 			.all(tx)
-			.await?
-			.into_iter()
-			.map(|x| (x.key, x.value))
-			.collect())
+			.await?)
 	}
 }
 
