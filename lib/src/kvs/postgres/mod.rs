@@ -182,7 +182,7 @@ impl Transaction {
 			value: ActiveValue::set(val),
 		})
 		.on_conflict(OnConflict::column(Column::Key).update_column(Column::Value).to_owned())
-		.exec(tx)
+		.exec_without_returning(tx)
 		.await?;
 
 		Ok(())
@@ -212,7 +212,7 @@ impl Transaction {
 			key: ActiveValue::set(key),
 			value: ActiveValue::set(val),
 		})
-		.exec(tx)
+		.exec_without_returning(tx)
 		.await?;
 
 		// Return result
@@ -254,7 +254,7 @@ impl Transaction {
 				value: ActiveValue::set(val),
 			})
 			.on_conflict(OnConflict::column(Column::Key).update_column(Column::Value).to_owned())
-			.exec(tx)
+			.exec_without_returning(tx)
 			.await?;
 			Ok(())
 		} else {
