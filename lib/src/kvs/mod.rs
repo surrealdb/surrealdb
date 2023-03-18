@@ -8,6 +8,7 @@ mod postgres;
 mod rocksdb;
 mod tikv;
 mod tx;
+mod seaorm;
 
 #[cfg(test)]
 mod tests;
