@@ -11,7 +11,6 @@ use sea_orm::{
 	DatabaseTransaction, IsolationLevel, QueryOrder, QuerySelect, TransactionTrait,
 };
 use std::ops::Range;
-use std::pin::Pin;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -29,7 +28,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 #[derive(Clone)]
 pub struct Datastore {
-	db: Pin<Arc<DatabaseConnection>>,
+	db: DatabaseConnection,
 }
 
 pub struct Transaction {
@@ -50,7 +49,7 @@ impl Datastore {
 			.sqlx_logging_level(log::LevelFilter::Trace);
 		match Database::connect(opt).await {
 			Ok(db) => Ok(Datastore {
-				db: Arc::pin(db),
+				db,
 			}),
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
