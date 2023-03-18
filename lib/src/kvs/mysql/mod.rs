@@ -10,18 +10,17 @@ impl Datastore {
 	pub async fn new(path: &str) -> Result<super::seaorm::Datastore, Error> {
 		let db = super::seaorm::Datastore::new(path).await?;
 
-		// Unfortunately I have to do this
+		// HACK: workaround to blob key limit in MySQL and derivatives
 		db.db.execute_unprepared(r#"
-			create table kvstore
+			CREATE TABLE IF NOT EXISTS kvstore
 			(
-				`key` longblob not null,
-				value longblob not null,
-				constraint kvstore_pk
-					primary key (`key`(3072))
+				`key` LONGBLOB NOT NULL,
+				value LONGBLOB NOT NULL,
+				CONSTRAINT kvstore_pk
+					PRIMARY KEY(`key`(3072)),
+				INDEX idx_key (`key`(3072) ASC)
 			);
 		"#).await?;
-
-		db.ensure_indices_exists().await?;
 
 		Ok(db)
 	}
