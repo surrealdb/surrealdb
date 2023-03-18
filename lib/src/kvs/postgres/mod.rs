@@ -137,7 +137,7 @@ impl Transaction {
 		let tx = self.tx.lock().await;
 		let tx = tx.as_ref().unwrap();
 
-		Ok(Entity::find_by_id(key).one(tx).await?.is_some())
+		Ok(Entity::find_by_id(key).count(tx).await? > 0)
 	}
 	/// Fetch a key from the database
 	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
@@ -242,13 +242,10 @@ impl Transaction {
 		// Get the check
 		let chk = chk.map(Into::into);
 
-		let mut select = Entity::find_by_id(key.to_vec());
+		let select = Entity::find_by_id(key.to_vec());
 		let ok = match chk {
-			Some(chk) => {
-				select = select.filter(Column::Value.eq(chk));
-				select.one(tx).await?.is_some()
-			}
-			None => select.one(tx).await?.is_none(),
+			Some(chk) => select.filter(Column::Value.eq(chk)).count(tx).await? > 1,
+			None => select.count(tx).await? < 1,
 		};
 
 		if ok {
@@ -309,13 +306,10 @@ impl Transaction {
 		// Get the check
 		let chk = chk.map(Into::into);
 
-		let mut select = Entity::find_by_id(key.to_vec());
+		let select = Entity::find_by_id(key.to_vec());
 		let ok = match chk {
-			Some(chk) => {
-				select = select.filter(Column::Value.eq(chk));
-				select.one(tx).await?.is_some()
-			}
-			None => select.one(tx).await?.is_none(),
+			Some(chk) => select.filter(Column::Value.eq(chk)).count(tx).await? > 1,
+			None => select.count(tx).await? < 1,
 		};
 
 		if ok {
