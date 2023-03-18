@@ -12,7 +12,7 @@ impl IntoEndpoint<MySql> for &str {
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
-		let url = format!("mysql:{self}");
+		let url = format!("mysql://{self}");
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
@@ -26,7 +26,7 @@ impl IntoEndpoint<MySql> for SocketAddr {
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
-		let url = format!("mysql:{self}");
+		let url = format!("mysql://{self}");
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
@@ -40,7 +40,7 @@ impl IntoEndpoint<MySql> for String {
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
-		let url = format!("mysql:{self}");
+		let url = format!("mysql://{self}");
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
