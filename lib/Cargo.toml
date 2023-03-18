@@ -24,7 +24,7 @@ kv-mem = ["dep:echodb"]
 kv-indxdb = ["dep:indxdb"]
 kv-rocksdb = ["dep:rocksdb"]
 kv-tikv = ["dep:tikv"]
-kv-postgres = ["dep:sea-orm", "sea-orm?/sqlx-postgres"]
+kv-postgres = ["sea-orm", "sea-orm?/sqlx-postgres"]
 kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb"]
 kv-fdb-5_2 = ["foundationdb/fdb-5_2", "kv-fdb"]
 kv-fdb-6_0 = ["foundationdb/fdb-6_0", "kv-fdb"]
@@ -37,6 +37,8 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls", "sea-orm?/runtime-tokio-native-tls"]
 rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls", "sea-orm?/runtime-tokio-rustls"]
+sea-orm = ["dep:sea-orm"]
+
 # Private features
 kv-fdb = ["foundationdb"]
 

@@ -51,7 +51,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-fdb")]
 	FDB(super::fdb::Transaction),
 	#[cfg(feature = "kv-postgres")]
-	Postgres(super::postgres::Transaction),
+	Postgres(super::seaorm::Transaction),
 }
 
 impl Transaction {
