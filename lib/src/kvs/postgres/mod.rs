@@ -153,7 +153,7 @@ impl Transaction {
 
 		// Get the key
 		let key = key.into();
-		Ok(Entity::find_by_id(key).one(tx).await?.map(|x| x.value))
+		Ok(Entity::find_by_id(key).select_only().column(Column::Value).into_tuple().one(tx).await?)
 	}
 	/// Insert or update a key in the database
 	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
