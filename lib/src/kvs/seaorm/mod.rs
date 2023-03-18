@@ -53,25 +53,26 @@ impl Datastore {
 		opt.max_connections(100).min_connections(5);
 
 		match Database::connect(opt).await {
-			Ok(db) => {
-				Self::ensure_table_and_indices_exists(&db).await?;
-
-				Ok(Datastore {
-					db,
-				})
-			}
+			Ok(db) => Ok(Datastore {
+				db,
+			}),
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
 
-	async fn ensure_table_and_indices_exists(db: &DatabaseConnection) -> Result<(), DbErr> {
-		let backend = db.get_database_backend();
+	pub(crate) async fn ensure_table_exists(self) -> Result<(), DbErr> {
+		let backend = self.db.get_database_backend();
 		let schema = Schema::new(backend);
-		db.execute(backend.build(schema.create_table_from_entity(Entity).if_not_exists())).await?;
+		self.db.execute(backend.build(schema.create_table_from_entity(Entity).if_not_exists())).await?;
+		Ok(())
+	}
 
+	pub(crate) async fn ensure_indices_exists(self) -> Result<(), DbErr> {
+		let backend = self.db.get_database_backend();
+		let schema = Schema::new(backend);
 		for mut index in schema.create_index_from_entity(Entity) {
 			let index = index.if_not_exists();
-			db.execute(backend.build(index)).await?;
+			self.db.execute(backend.build(index)).await?;
 		}
 		Ok(())
 	}
