@@ -134,8 +134,8 @@ impl Transaction {
 		}
 
 		let key = key.into();
-		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap();
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
 
 		Ok(Entity::find_by_id(key).one(tx).await?.is_some())
 	}
@@ -148,8 +148,8 @@ impl Transaction {
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
-		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap();
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
 
 		// Get the key
 		let key = key.into();
@@ -170,8 +170,8 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 
-		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap();
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
 
 		// Set the key
 		let key = key.into();
@@ -201,8 +201,8 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
-		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap();
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
 
 		// Set the key
 		let key = key.into();
@@ -232,8 +232,8 @@ impl Transaction {
 		if !self.rw {
 			return Err(Error::TxReadonly);
 		}
-		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap();
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
 
 		// Get the key
 		let key = key.into();
@@ -278,8 +278,8 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 
-		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap();
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
 
 		// Delete the key
 		let key = key.into();
@@ -301,8 +301,8 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 
-		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap();
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
 
 		// Get the key
 		let key = key.into();
@@ -336,8 +336,8 @@ impl Transaction {
 		}
 		// Convert the range to bytes
 
-		let mut tx = self.tx.lock().await;
-		let tx = tx.as_mut().unwrap();
+		let tx = self.tx.lock().await;
+		let tx = tx.as_ref().unwrap();
 
 		let start = rng.start.into();
 		let end = rng.end.into();
