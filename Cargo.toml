@@ -6,7 +6,7 @@ version = "1.0.0-beta.8"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
-default = ["storage-mem", "storage-rocksdb", "scripting", "http"]
+default = ["storage-mem", "storage-sqlite", "http"]
 storage-mem = ["surrealdb/kv-mem"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
 storage-tikv = ["surrealdb/kv-tikv"]
