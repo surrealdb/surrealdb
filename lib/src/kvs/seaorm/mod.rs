@@ -60,6 +60,7 @@ impl Datastore {
 		}
 	}
 
+	#[allow(dead_code)]
 	pub(crate) async fn ensure_table_exists(&self) -> Result<(), DbErr> {
 		let backend = self.db.get_database_backend();
 		let schema = Schema::new(backend);
@@ -67,6 +68,7 @@ impl Datastore {
 		Ok(())
 	}
 
+	#[allow(dead_code)]
 	pub(crate) async fn ensure_indices_exists(&self) -> Result<(), DbErr> {
 		let backend = self.db.get_database_backend();
 		let schema = Schema::new(backend);
