@@ -293,7 +293,6 @@ impl Surreal<Any> {
 ///
 /// // Instantiate a FoundationDB-backed instance
 /// let db = connect("fdb://fdb.cluster").await?;
-/// # Ok(()
 ///
 /// // Instantiate a Postgres-backed instance
 /// let db = connect("postgres://postgres.cluster").await?;
