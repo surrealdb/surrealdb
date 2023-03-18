@@ -302,7 +302,7 @@ impl Surreal<Any> {
 /// // Instantiate a Sqlite-backed instance
 /// let db = connect("sqlite://sqlite.db?cache=shared&mode=rwc").await?;
 ///
-/// // Instantiate a Mysql-backed instance
+/// // Instantiate a MySql-backed instance
 /// let db = connect("mysql://localhost:3306").await?;
 ///
 /// # Ok(())

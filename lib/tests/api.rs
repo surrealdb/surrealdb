@@ -171,10 +171,10 @@ mod sqlite {
 mod mysql {
 	use super::*;
 	use surrealdb::engine::local::Db;
-	use surrealdb::engine::local::Mysql;
+	use surrealdb::engine::local::MySql;
 
 	async fn new_db() -> Surreal<Db> {
-		Surreal::new::<Mysql>("localhost:3306").await.unwrap()
+		Surreal::new::<MySql>("root:surrealdb@localhost:3306/surrealdb").await.unwrap()
 	}
 
 	include!("api/mod.rs");

@@ -36,7 +36,7 @@ pub(super) enum Inner {
 	#[cfg(feature = "kv-sqlite")]
 	Sqlite(super::seaorm::Datastore),
 	#[cfg(feature = "kv-mysql")]
-	Mysql(super::seaorm::Datastore),
+	MySql(super::seaorm::Datastore),
 }
 
 impl Datastore {
@@ -158,12 +158,12 @@ impl Datastore {
 				info!(target: LOG, "Connected to kvs store at {}", path);
 				v
 			}
-			// Parse and initiate a Mysql database
+			// Parse and initiate a MySql database
 			#[cfg(feature = "kv-mysql")]
 			s if s.starts_with("mysql:") || s.starts_with("mariadb:") => {
 				info!(target: LOG, "Connecting to kvs store at {}", path);
 				let v = super::mysql::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::Mysql(v),
+					inner: Inner::MySql(v),
 				});
 				info!(target: LOG, "Connected to kvs store at {}", path);
 				v
@@ -242,10 +242,10 @@ impl Datastore {
 				})
 			}
 			#[cfg(feature = "kv-mysql")]
-			Inner::Mysql(v) => {
+			Inner::MySql(v) => {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
-					inner: super::tx::Inner::Mysql(tx),
+					inner: super::tx::Inner::MySql(tx),
 					cache: super::cache::Cache::default(),
 				})
 			}

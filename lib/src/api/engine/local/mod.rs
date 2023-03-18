@@ -332,41 +332,41 @@ pub struct FDb;
 #[derive(Debug)]
 pub struct Sqlite;
 
-/// Mysql database
+/// MySql database
 ///
 /// # Examples
 ///
-/// Instantiating a Mysql-backed instance
+/// Instantiating a MySql-backed instance
 ///
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::Mysql;
+/// use surrealdb::engine::local::MySql;
 ///
-/// let db = Surreal::new::<Mysql>("localhost:3306").await?;
+/// let db = Surreal::new::<MySql>("localhost:3306").await?;
 /// # Ok(())
 /// # }
 /// ```
 ///
-/// Instantiating a Mysql-backed strict instance
+/// Instantiating a MySql-backed strict instance
 ///
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> surrealdb::Result<()> {
 /// use surrealdb::opt::Strict;
 /// use surrealdb::Surreal;
-/// use surrealdb::engine::local::Mysql;
+/// use surrealdb::engine::local::MySql;
 ///
-/// let db = Surreal::new::<Mysql>(("localhost:3306", Strict)).await?;
+/// let db = Surreal::new::<MySql>(("localhost:3306", Strict)).await?;
 /// # Ok(())
 /// # }
 /// ```
 #[cfg(feature = "kv-mysql")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-mysql")))]
 #[derive(Debug)]
-pub struct Mysql;
+pub struct MySql;
 
 /// An embedded database
 ///

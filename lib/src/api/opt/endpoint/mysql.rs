@@ -4,11 +4,11 @@ use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
 use crate::api::opt::Strict;
 use crate::api::Result;
-use crate::engine::local::Mysql;
+use crate::engine::local::MySql;
 use std::net::SocketAddr;
 use url::Url;
 
-impl IntoEndpoint<Mysql> for &str {
+impl IntoEndpoint<MySql> for &str {
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
@@ -22,7 +22,7 @@ impl IntoEndpoint<Mysql> for &str {
 	}
 }
 
-impl IntoEndpoint<Mysql> for SocketAddr {
+impl IntoEndpoint<MySql> for SocketAddr {
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
@@ -36,7 +36,7 @@ impl IntoEndpoint<Mysql> for SocketAddr {
 	}
 }
 
-impl IntoEndpoint<Mysql> for String {
+impl IntoEndpoint<MySql> for String {
 	type Client = Db;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
@@ -50,9 +50,9 @@ impl IntoEndpoint<Mysql> for String {
 	}
 }
 
-impl<T> IntoEndpoint<Mysql> for (T, Strict)
+impl<T> IntoEndpoint<MySql> for (T, Strict)
 where
-	T: IntoEndpoint<Mysql>,
+	T: IntoEndpoint<MySql>,
 {
 	type Client = Db;
 

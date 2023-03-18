@@ -93,7 +93,7 @@ pub(crate) mod transaction {
 				#[cfg(feature = "kv-sqlite")]
 				Inner::Sqlite(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				#[cfg(feature = "kv-mysql")]
-				Inner::Mysql(_) => Datastore::new(&self.ds_path).await.unwrap(),
+				Inner::MySql(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				_ => panic!("Datastore not supported"),
 			};
 			Self {
