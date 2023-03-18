@@ -1,14 +1,13 @@
 #![cfg(feature = "kv-mysql")]
 
 use crate::err::Error;
-use sea_orm::ConnectionTrait;
 
 pub(crate) struct Datastore;
 
 impl Datastore {
 	/// Open a new database
 	pub async fn new(path: &str) -> Result<super::seaorm::Datastore, Error> {
-		super::seaorm::Datastore::new(path)
+		super::seaorm::Datastore::new(path).await
 	}
 }
 
