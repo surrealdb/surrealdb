@@ -10,6 +10,8 @@ impl Datastore {
 	pub async fn new(path: &str) -> Result<super::seaorm::Datastore, Error> {
 		let db = super::seaorm::Datastore::new(path).await?;
 		db.db.execute_unprepared("PRAGMA journal_mode=WAL").await?;
+		db.ensure_table_exists().await?;
+		db.ensure_indices_exists().await?;
 		Ok(db)
 	}
 }
