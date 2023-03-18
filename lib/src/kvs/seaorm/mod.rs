@@ -29,7 +29,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 #[derive(Clone)]
 pub struct Datastore {
-	db: DatabaseConnection,
+	pub(crate) db: DatabaseConnection,
 }
 
 pub struct Transaction {
@@ -45,6 +45,7 @@ impl Datastore {
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
 		let mut opt = ConnectOptions::new(path.to_string());
 		opt.max_connections(100).min_connections(5);
+
 		match Database::connect(opt).await {
 			Ok(db) => {
 				Self::ensure_table_and_indices_exists(&db).await?;

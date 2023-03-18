@@ -150,7 +150,7 @@ impl Datastore {
 			#[cfg(feature = "kv-postgres")]
 			s if s.starts_with("postgres:") => {
 				info!(target: LOG, "Connecting to kvs store at {}", path);
-				let v = super::seaorm::Datastore::new(s).await.map(|v| Datastore {
+				let v = super::postgres::Datastore::new(s).await.map(|v| Datastore {
 					inner: Inner::Postgres(v),
 				});
 				info!(target: LOG, "Connected to kvs store at {}", path);
