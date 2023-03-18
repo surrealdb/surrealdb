@@ -5,6 +5,7 @@ use crate::kvs::Key;
 use crate::kvs::Val;
 use futures::lock::Mutex;
 use sea_orm::prelude::*;
+use sea_orm::sea_query::BlobSize;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
 	AccessMode, ActiveValue, Condition, ConnectOptions, Database, DatabaseConnection,
@@ -16,9 +17,14 @@ use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "kvstore")]
 pub struct Model {
-	#[sea_orm(primary_key, indexed, auto_increment = false)]
+	#[sea_orm(
+		primary_key,
+		indexed,
+		auto_increment = false,
+		column_type = "Binary(BlobSize::Long)"
+	)]
 	pub key: Key,
-	#[sea_orm(nullable = false)]
+	#[sea_orm(nullable = false, column_type = "Binary(BlobSize::Long)")]
 	pub value: Val,
 }
 
