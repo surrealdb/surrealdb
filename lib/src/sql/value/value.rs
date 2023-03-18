@@ -96,8 +96,9 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 	Ok((i, Values(v)))
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Deserialize, Store, Hash)]
 pub enum Value {
+	#[default]
 	None,
 	Null,
 	False,
@@ -132,12 +133,6 @@ impl Eq for Value {}
 impl Ord for Value {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.partial_cmp(other).unwrap_or(Ordering::Equal)
-	}
-}
-
-impl Default for Value {
-	fn default() -> Value {
-		Value::None
 	}
 }
 
