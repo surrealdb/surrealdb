@@ -441,7 +441,7 @@ impl Transaction {
 				// This is not semantically correct, thus being a hack, but hey at least it passed
 				// the unit tests, so who cares?
 				v.set(key, val).await
-			},
+			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}

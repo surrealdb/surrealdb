@@ -1,7 +1,7 @@
 #![cfg(feature = "kv-mysql")]
 
-use sea_orm::ConnectionTrait;
 use crate::err::Error;
+use sea_orm::ConnectionTrait;
 
 pub(crate) struct Datastore;
 
@@ -11,7 +11,9 @@ impl Datastore {
 		let db = super::seaorm::Datastore::new(path).await?;
 
 		// HACK: workaround to blob key limit in MySQL and derivatives
-		db.db.execute_unprepared(r#"
+		db.db
+			.execute_unprepared(
+				r#"
 			CREATE TABLE IF NOT EXISTS kvstore
 			(
 				`key` LONGBLOB NOT NULL,
@@ -20,7 +22,9 @@ impl Datastore {
 					PRIMARY KEY(`key`(3072)),
 				INDEX idx_key (`key`(3072) ASC)
 			);
-		"#).await?;
+		"#,
+			)
+			.await?;
 
 		Ok(db)
 	}
