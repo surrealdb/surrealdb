@@ -57,6 +57,8 @@ fn path_valid(v: &str) -> Result<(), String> {
 		v if v.starts_with("rocksdb:") => Ok(()),
 		v if v.starts_with("tikv:") => Ok(()),
 		v if v.starts_with("fdb:") => Ok(()),
+		v if v.starts_with("sqlite:") => Ok(()),
+		v if v.starts_with("mysql:") || v.starts_with("mariadb:") => Ok(()),
 		_ => Err(String::from(
 			"\
 			Provide a valid database path parameter\
@@ -68,7 +70,8 @@ fn path_valid(v: &str) -> Result<(), String> {
 fn conn_valid(v: &str) -> Result<(), String> {
 	let scheme = split_endpoint(v).0;
 	match scheme {
-		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "file" | "tikv" => Ok(()),
+		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "file" | "tikv"
+		| "sqlite" | "mysql" | "mariadb" => Ok(()),
 		_ => Err(String::from(
 			"\
 			Provide a valid database connection string\

@@ -7,6 +7,8 @@ pub mod any;
 	feature = "kv-rocksdb",
 	feature = "kv-fdb",
 	feature = "kv-indxdb",
+	feature = "kv-sqlite",
+	feature = "kv-mysql",
 ))]
 pub mod local;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]

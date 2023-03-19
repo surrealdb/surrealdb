@@ -296,6 +296,78 @@ pub struct TiKv;
 #[derive(Debug)]
 pub struct FDb;
 
+/// Sqlite database
+///
+/// # Examples
+///
+/// Instantiating a Sqlite-backed instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::Sqlite;
+///
+/// let db = Surreal::new::<Sqlite>("postgres.cluster").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Instantiating a Postgres-backed strict instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::Sqlite;
+///
+/// let db = Surreal::new::<Sqlite>(("postgres.cluster", Strict)).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "kv-sqlite")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-sqlite")))]
+#[derive(Debug)]
+pub struct Sqlite;
+
+/// MySql database
+///
+/// # Examples
+///
+/// Instantiating a MySql-backed instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::MySql;
+///
+/// let db = Surreal::new::<MySql>("localhost:3306").await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Instantiating a MySql-backed strict instance
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// use surrealdb::opt::Strict;
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::local::MySql;
+///
+/// let db = Surreal::new::<MySql>(("localhost:3306", Strict)).await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "kv-mysql")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-mysql")))]
+#[derive(Debug)]
+pub struct MySql;
+
 /// An embedded database
 ///
 /// Authentication methods (`signup`, `signin`, `authentication` and `invalidate`) are not availabe

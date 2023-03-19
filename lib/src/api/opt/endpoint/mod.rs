@@ -9,8 +9,12 @@ mod fdb;
 mod indxdb;
 #[cfg(feature = "kv-mem")]
 mod mem;
+#[cfg(feature = "kv-mysql")]
+mod mysql;
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb;
+#[cfg(feature = "kv-sqlite")]
+mod sqlite;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 

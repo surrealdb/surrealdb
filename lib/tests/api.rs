@@ -153,6 +153,41 @@ mod fdb {
 	include!("api/backup.rs");
 }
 
+#[cfg(feature = "kv-sqlite")]
+mod sqlite {
+	use super::*;
+	use surrealdb::engine::local::Db;
+	use surrealdb::engine::local::Sqlite;
+
+	async fn new_db() -> Surreal<Db> {
+		Surreal::new::<Sqlite>("test.db?mode=rwc&cache=shared").await.unwrap()
+	}
+
+	include!("api/mod.rs");
+	include!("api/backup.rs");
+}
+
+#[cfg(feature = "kv-mysql")]
+mod mysql {
+	use super::*;
+	use std::env;
+	use surrealdb::engine::local::Db;
+	use surrealdb::engine::local::MySql;
+
+	const ENV_CONN_STR: &str = "TEST_MYSQL_CONN_STR";
+
+	const DEFAULT_CONN_STR: &str = "root:surrealdb@localhost:3306/surrealdb";
+
+	async fn new_db() -> Surreal<Db> {
+		let conn_str = env::var(ENV_CONN_STR).unwrap_or_else(|_| DEFAULT_CONN_STR.to_string());
+
+		Surreal::new::<MySql>(conn_str).await.unwrap()
+	}
+
+	include!("api/mod.rs");
+	include!("api/backup.rs");
+}
+
 #[cfg(feature = "protocol-http")]
 mod any {
 	use super::*;

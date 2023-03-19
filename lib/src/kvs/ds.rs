@@ -33,6 +33,10 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
 	FDB(super::fdb::Datastore),
+	#[cfg(feature = "kv-sqlite")]
+	Sqlite(super::seaorm::Datastore),
+	#[cfg(feature = "kv-mysql")]
+	MySql(super::seaorm::Datastore),
 }
 
 impl Datastore {
@@ -144,6 +148,26 @@ impl Datastore {
 				info!(target: LOG, "Connected to kvs store at {}", path);
 				v
 			}
+			// Parse and initiate a Sqlite database
+			#[cfg(feature = "kv-sqlite")]
+			s if s.starts_with("sqlite:") => {
+				info!(target: LOG, "Connecting to kvs store at {}", path);
+				let v = super::sqlite::Datastore::new(s).await.map(|v| Datastore {
+					inner: Inner::Sqlite(v),
+				});
+				info!(target: LOG, "Connected to kvs store at {}", path);
+				v
+			}
+			// Parse and initiate a MySql database
+			#[cfg(feature = "kv-mysql")]
+			s if s.starts_with("mysql:") || s.starts_with("mariadb:") => {
+				info!(target: LOG, "Connecting to kvs store at {}", path);
+				let v = super::mysql::Datastore::new(s).await.map(|v| Datastore {
+					inner: Inner::MySql(v),
+				});
+				info!(target: LOG, "Connected to kvs store at {}", path);
+				v
+			}
 			// The datastore path is not valid
 			_ => {
 				info!(target: LOG, "Unable to load the specified datastore {}", path);
@@ -206,6 +230,22 @@ impl Datastore {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
 					inner: super::tx::Inner::FDB(tx),
+					cache: super::cache::Cache::default(),
+				})
+			}
+			#[cfg(feature = "kv-sqlite")]
+			Inner::Sqlite(v) => {
+				let tx = v.transaction(write, lock).await?;
+				Ok(Transaction {
+					inner: super::tx::Inner::Sqlite(tx),
+					cache: super::cache::Cache::default(),
+				})
+			}
+			#[cfg(feature = "kv-mysql")]
+			Inner::MySql(v) => {
+				let tx = v.transaction(write, lock).await?;
+				Ok(Transaction {
+					inner: super::tx::Inner::MySql(tx),
 					cache: super::cache::Cache::default(),
 				})
 			}
