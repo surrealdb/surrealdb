@@ -17,13 +17,19 @@ impl Datastore {
 #[cfg(test)]
 mod tests {
 	use crate::kvs::tests::transaction::verify_transaction_isolation;
+	use std::env;
 	use test_log::test;
+
+	const ENV_CONN_STR: &str = "TEST_POSTGRES_CONN_STR";
+
+	const DEFAULT_CONN_STR: &str = "localhost:5432/postgres?user=postgres&password=surrealdb";
 
 	#[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
 	async fn postgres_transaction() {
-		verify_transaction_isolation(
-			"postgres://localhost:5432/postgres?user=postgres&password=surrealdb",
-		)
+		verify_transaction_isolation(&format!(
+			"postgres://{}",
+			env::var(ENV_CONN_STR).unwrap_or_else(|_| DEFAULT_CONN_STR.to_string())
+		))
 		.await;
 	}
 }
