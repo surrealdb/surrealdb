@@ -159,10 +159,18 @@ mod postgres {
 	use surrealdb::engine::local::Db;
 	use surrealdb::engine::local::Postgres;
 
+	use std::env;
+
+	const ENV_CONN_STR: &str = "TEST_POSTGRES_CONN_STR";
+
+	const DEFAULT_CONN_STR: &str = "localhost:5432/postgres?user=postgres&password=surrealdb";
+
 	async fn new_db() -> Surreal<Db> {
-		Surreal::new::<Postgres>("localhost:5432/postgres?user=postgres&password=surrealdb")
-			.await
-			.unwrap()
+		Surreal::new::<Postgres>(
+			env::var(ENV_CONN_STR).unwrap_or_else(|_| DEFAULT_CONN_STR.to_string()),
+		)
+		.await
+		.unwrap()
 	}
 
 	include!("api/mod.rs");
