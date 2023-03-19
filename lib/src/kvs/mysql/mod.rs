@@ -33,10 +33,19 @@ impl Datastore {
 #[cfg(test)]
 mod tests {
 	use crate::kvs::tests::transaction::verify_transaction_isolation;
+	use std::env;
 	use test_log::test;
+
+	const ENV_CONN_STR: &str = "TEST_MYSQL_CONN_STR";
+
+	const DEFAULT_CONN_STR: &str = "root:surrealdb@localhost:3306/surrealdb";
 
 	#[test(tokio::test(flavor = "multi_thread", worker_threads = 3))]
 	async fn mysql_transaction() {
-		verify_transaction_isolation("mysql://root:surrealdb@localhost:3306/surrealdb").await;
+		verify_transaction_isolation(&format!(
+			"mysql://{}",
+			env::var(ENV_CONN_STR).unwrap_or_else(|_| DEFAULT_CONN_STR.to_string())
+		))
+		.await;
 	}
 }
