@@ -15,7 +15,7 @@ scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
 
 [workspace]
-members = ["lib", "lib/examples/actix"]
+members = ["lib", "lib/examples/actix", "lib/examples/axum"]
 
 [profile.release]
 lto = true
