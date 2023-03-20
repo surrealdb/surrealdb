@@ -268,7 +268,7 @@ impl Transaction {
 
 		let select = Entity::find_by_id(key.to_vec());
 		let ok = match chk {
-			Some(chk) => select.filter(Column::Value.eq(chk)).count(tx).await? > 1,
+			Some(chk) => select.filter(Column::Value.eq(chk)).count(tx).await? > 0,
 			None => select.count(tx).await? < 1,
 		};
 
@@ -332,7 +332,7 @@ impl Transaction {
 
 		let select = Entity::find_by_id(key.to_vec());
 		let ok = match chk {
-			Some(chk) => select.filter(Column::Value.eq(chk)).count(tx).await? > 1,
+			Some(chk) => select.filter(Column::Value.eq(chk)).count(tx).await? > 0,
 			None => select.count(tx).await? < 1,
 		};
 
