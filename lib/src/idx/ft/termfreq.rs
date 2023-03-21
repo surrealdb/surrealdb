@@ -1,5 +1,5 @@
 use crate::idx::docids::DocId;
-use crate::idx::ft::fstmap::FstMap;
+use crate::idx::fstmap::FstMap;
 use crate::idx::ft::terms::{TermFrequency, TermId};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -48,12 +48,9 @@ impl TermFrequenciesPartitions {
 }
 
 impl TermFrequencyPartition {
-	fn new(doc_id: &DocId, term_freq: TermFrequency) -> Self {
-		let mut builder = FstMap::builder();
-		builder.insert(doc_id.to_vec(), term_freq).unwrap();
-		let _doc_freq = FstMap::try_from(builder).unwrap();
+	fn new(_doc_id: &DocId, _term_freq: TermFrequency) -> Self {
 		Self {
-			_doc_freq,
+			_doc_freq: Default::default(),
 		}
 	}
 }

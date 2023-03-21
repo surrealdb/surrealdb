@@ -40,26 +40,29 @@ impl KVSimulator {
 		sleep(Duration::from_nanos((bytes as u64) * self.network_transport_per_byte_ns));
 	}
 
-	pub(super) fn get<V: DeserializeOwned>(&mut self, key: &[u8]) -> Option<V> {
+	pub(super) fn get<V: DeserializeOwned>(&mut self, key: &[u8]) -> Option<(usize, V)> {
 		sleep(self.network_latency);
 		if let Some(vec) = self.kv.get(key) {
 			self.get_count += 1;
 			let bytes = key.len() + vec.len();
 			self.bytes_read += bytes;
 			self.network_transport(bytes);
-			return Some(serde_json::from_slice(vec).unwrap());
+			Some((vec.len(), serde_json::from_slice(vec).unwrap()))
+		} else {
+			None
 		}
-		None
 	}
 
-	pub(super) fn set<V: Serialize>(&mut self, key: Vec<u8>, value: &V) {
+	pub(super) fn set<V: Serialize>(&mut self, key: Vec<u8>, value: &V) -> usize {
 		sleep(self.network_latency);
 		let val = serde_json::to_vec(value).unwrap();
 		self.set_count += 1;
 		let bytes = key.len() + val.len();
 		self.bytes_write += bytes;
 		self.network_transport(bytes);
+		let size = val.len();
 		self.kv.insert(key, val);
+		size
 	}
 
 	pub(super) fn print_stats(&self) {

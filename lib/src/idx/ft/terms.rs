@@ -1,8 +1,7 @@
-use crate::idx::ft::fstmap::FstMap;
+use crate::idx::fstmap::FstMap;
 use crate::idx::kvsim::KVSimulator;
 use crate::idx::partition::{PartitionMap, _MAX_PARTITION_SIZE};
-use fst::Streamer;
-use radix_trie::{Trie, TrieCommon};
+use radix_trie::Trie;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -24,7 +23,7 @@ pub(super) struct Terms {
 
 impl Terms {
 	pub(super) fn new(kv: &mut KVSimulator) -> Terms {
-		let mut map = kv.get(&TERMS_MAP_KEY).map_or_else(|| Terms::default(), |m| m);
+		let mut map = kv.get(&TERMS_MAP_KEY).map_or_else(|| Terms::default(), |(_, m)| m);
 		map.map.remap();
 		map
 	}
@@ -68,7 +67,7 @@ impl Terms {
 		}
 
 		// Rebuild every updated partitions
-		self.partitions.values_mut().filter(|p| p.updated).for_each(|p| p.rebuild());
+		// partitions.values_mut().filter(|p| p.updated).for_each(|p| p.rebuild());
 
 		// We check the status of the partition and see if some of them should be split.
 		// TODO
@@ -96,7 +95,7 @@ impl Terms {
 
 	fn check_terms_partition(&mut self, kv: &mut KVSimulator, part_id: u32) {
 		if !self.partitions.contains_key(&part_id) {
-			if let Some(p) = kv.get::<TermsPartition>(&part_id.to_be_bytes()) {
+			if let Some((_, p)) = kv.get::<TermsPartition>(&part_id.to_be_bytes()) {
 				self.partitions.insert(part_id, p);
 			}
 		}
@@ -124,48 +123,6 @@ impl TermsPartition {
 
 	fn _is_full(&self) -> bool {
 		self.terms.size() >= _MAX_PARTITION_SIZE
-	}
-
-	/// Rebuild the FST by merging the previously existing terms with the additional terms
-	fn rebuild(&mut self) {
-		let mut existing_terms = self.terms.stream();
-		let mut new_terms = self.additions.iter();
-		let mut current_existing = existing_terms.next();
-		let mut current_new = new_terms.next();
-
-		let mut builder = FstMap::builder();
-		// We use a double iterator because the map as to be filled with sorted terms
-		loop {
-			match current_new {
-				None => break,
-				Some((new_term_vec, new_term_id)) => match current_existing {
-					None => break,
-					Some((existing_term_vec, existing_term_id)) => {
-						if new_term_vec.as_slice().ge(existing_term_vec) {
-							builder.insert(existing_term_vec, existing_term_id).unwrap();
-							current_existing = existing_terms.next();
-						} else {
-							builder.insert(new_term_vec, *new_term_id).unwrap();
-							current_new = new_terms.next();
-						}
-					}
-				},
-			};
-		}
-
-		// Insert any existing term left over
-		while let Some((term_vec, term_id)) = current_existing {
-			builder.insert(term_vec, term_id).unwrap();
-			current_existing = existing_terms.next();
-		}
-		// Insert any new term left over
-		while let Some((new_term_vec, new_term_id)) = current_new {
-			builder.insert(new_term_vec, *new_term_id).unwrap();
-			current_new = new_terms.next();
-		}
-
-		self.terms = FstMap::try_from(builder).unwrap();
-		self.additions = Trie::default();
 	}
 }
 
@@ -203,7 +160,7 @@ mod tests {
 		}
 		assert_eq!(tp.additions.len(), 1000);
 		assert_eq!(tp.terms.len(), 0);
-		tp.rebuild();
+		// tp.rebuild();
 		assert_eq!(tp.additions.len(), 0);
 		assert_eq!(tp.terms.len(), 1000);
 		println!("{}: {} {}", key_length, tp.terms.size(), tp.terms.size() / key_length);

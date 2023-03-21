@@ -1,5 +1,4 @@
 mod doclength;
-mod fstmap;
 mod termfreq;
 mod terms;
 

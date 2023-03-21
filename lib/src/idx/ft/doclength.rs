@@ -1,5 +1,5 @@
 use crate::idx::docids::DocId;
-use fst::Map;
+use crate::idx::fstmap::FstMap;
 use roaring::RoaringTreemap;
 
 pub(super) type DocLength = u64;
@@ -8,7 +8,7 @@ pub(super) type DocLength = u64;
 pub(super) struct DocLengths(Vec<DocLengthPartition>);
 
 struct DocLengthPartition {
-	docs: Map<Vec<u8>>,
+	docs: FstMap,
 }
 
 impl DocLengths {
