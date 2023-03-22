@@ -1,7 +1,9 @@
+use fst::map::Stream;
 use fst::{Map, MapBuilder, Streamer};
 use radix_trie::{Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
 
+#[derive(Debug)]
 pub(super) struct FstMap {
 	map: Map<Vec<u8>>,
 	bytes: Vec<u8>,
@@ -9,20 +11,17 @@ pub(super) struct FstMap {
 	deletions: Trie<Vec<u8>, bool>,
 }
 
-impl Default for FstMap {
-	fn default() -> Self {
-		let bytes = MapBuilder::memory().into_inner().unwrap();
-		let map = Map::new(bytes.clone()).unwrap();
-		Self {
-			map,
-			bytes,
-			additions: Default::default(),
-			deletions: Default::default(),
-		}
-	}
-}
-
 impl FstMap {
+	pub(super) fn new() -> Result<Self, fst::Error> {
+		Self::try_from(MapBuilder::memory())
+	}
+
+	pub(super) fn with_key_value(key: Vec<u8>, value: u64) -> Result<Self, fst::Error> {
+		let mut builder = MapBuilder::memory();
+		builder.insert(key, value).unwrap();
+		Self::try_from(builder)
+	}
+
 	pub(super) fn size(&self) -> usize {
 		self.bytes.len()
 	}
@@ -42,6 +41,11 @@ impl FstMap {
 	pub(super) fn _remove(&mut self, key: Vec<u8>) {
 		self.additions.remove(&key);
 		self.deletions.insert(key, true);
+	}
+
+	pub(super) fn stream(&mut self) -> Stream<'_> {
+		self.rebuild();
+		self.map.stream()
 	}
 
 	/// Rebuilt the FST by incorporating the changes (additions and deletions)
@@ -151,7 +155,7 @@ mod tests {
 
 	#[test]
 	fn test_fst_map_serde() {
-		let map = FstMap::default();
+		let map = FstMap::new().unwrap();
 		// Check serialization / deserialization
 		let buf = serde_json::to_vec(&map).unwrap();
 		let _: FstMap = serde_json::from_slice(&buf).unwrap();

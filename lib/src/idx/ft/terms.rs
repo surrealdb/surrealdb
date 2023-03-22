@@ -56,7 +56,7 @@ impl Terms {
 			} else {
 				// Or we create a new partition
 				let new_partition_id = self.map.new_partition_id(term_str);
-				self.partitions.insert(new_partition_id, TermsPartition::default());
+				self.partitions.insert(new_partition_id, TermsPartition::new());
 				self.updated = true;
 				new_partition_id
 			};
@@ -102,7 +102,7 @@ impl Terms {
 	}
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct TermsPartition {
 	terms: FstMap,
 	#[serde(skip)]
@@ -112,6 +112,14 @@ struct TermsPartition {
 }
 
 impl TermsPartition {
+	fn new() -> Self {
+		Self {
+			terms: FstMap::new().unwrap(),
+			additions: Default::default(),
+			updated: false,
+		}
+	}
+
 	fn get_term_id(&self, term: &str) -> Option<TermId> {
 		self.terms.get(term)
 	}
@@ -152,7 +160,7 @@ mod tests {
 
 	fn create_terms_partition(key_length: usize) -> TermsPartition {
 		let set = unique_terms(key_length, 1000);
-		let mut tp = TermsPartition::default();
+		let mut tp = TermsPartition::new();
 		let mut i = 0;
 		for key in &set {
 			tp.add_term_id(key, i);

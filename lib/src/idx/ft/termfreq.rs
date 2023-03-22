@@ -50,7 +50,7 @@ impl TermFrequenciesPartitions {
 impl TermFrequencyPartition {
 	fn new(_doc_id: &DocId, _term_freq: TermFrequency) -> Self {
 		Self {
-			_doc_freq: Default::default(),
+			_doc_freq: FstMap::new().unwrap(),
 		}
 	}
 }
