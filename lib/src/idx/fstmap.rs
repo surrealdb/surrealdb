@@ -1,5 +1,5 @@
-use fst::map::Stream;
-use fst::{Map, MapBuilder, Streamer};
+use fst::map::Keys;
+use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
 
@@ -43,9 +43,20 @@ impl FstMap {
 		self.deletions.insert(key, true);
 	}
 
-	pub(super) fn stream(&mut self) -> Stream<'_> {
-		self.rebuild();
-		self.map.stream()
+	pub(super) fn key_stream(&self) -> Keys {
+		self.map.keys().into_stream()
+	}
+
+	pub(super) fn get_nth(&self, idx: usize) -> Option<Vec<u8>> {
+		let mut stream = self.key_stream();
+		let mut pos = 0;
+		while let Some(k) = stream.next() {
+			if pos == idx {
+				return Some(k.to_vec());
+			}
+			pos += 1;
+		}
+		None
 	}
 
 	/// Rebuilt the FST by incorporating the changes (additions and deletions)
