@@ -107,6 +107,7 @@ impl Rpc {
 		tokio::task::spawn(async move {
 			// Wait for the next message to send
 			while let Some(res) = rcv.next().await {
+				trace!("Attempt to send {:?}", res);
 				// Send the message to the client
 				if let Err(err) = wtx.send(res).await {
 					// Output the WebSocket error to the logs
