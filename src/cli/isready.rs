@@ -3,8 +3,10 @@ use surrealdb::engine::any::connect;
 
 #[tokio::main]
 pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
-	// Set the default logging level
-	crate::cli::log::init(0);
+	// Initialize o11y
+	crate::o11y::builder().with_log_level(
+		matches.get_one::<String>("log").unwrap()
+	).init();
 	// Parse all other cli arguments
 	let endpoint = matches.value_of("conn").unwrap();
 	// Connect to the database engine

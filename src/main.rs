@@ -24,6 +24,7 @@ mod err;
 mod iam;
 mod net;
 mod rpc;
+mod o11y;
 
 use std::process::ExitCode;
 

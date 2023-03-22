@@ -14,6 +14,7 @@ use crate::sql::Value;
 use channel::Sender;
 use futures::lock::Mutex;
 use std::sync::Arc;
+use tracing::instrument;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -166,6 +167,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[instrument(skip(self))]
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		match &self.inner {
@@ -230,6 +232,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[instrument(skip(self, sess))]
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -279,6 +282,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[instrument(skip(self, sess))]
 	pub async fn process(
 		&self,
 		ast: Query,
@@ -327,6 +331,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[instrument(skip(self, sess))]
 	pub async fn compute(
 		&self,
 		val: Value,
@@ -365,6 +370,7 @@ impl Datastore {
 	}
 
 	/// Performs a full database export as SQL
+	#[instrument(skip(self, chn))]
 	pub async fn export(&self, ns: String, db: String, chn: Sender<Vec<u8>>) -> Result<(), Error> {
 		// Start a new transaction
 		let mut txn = self.transaction(false, false).await?;

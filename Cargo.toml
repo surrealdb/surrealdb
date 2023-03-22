@@ -50,6 +50,14 @@ tokio = { version = "1.26.0", features = ["macros", "signal"] }
 urlencoding = "2.1.2"
 warp = { version = "0.3.3", features = ["compression", "tls", "websocket"] }
 
+opentelemetry = { version = "0.18", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "*", features = ["grpc-tonic"] }
+
+tracing = "0.1"
+tracing-futures = "0.2.5"
+tracing-opentelemetry = "0.18.0"
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"
 maintainer = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"

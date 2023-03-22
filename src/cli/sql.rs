@@ -12,8 +12,9 @@ use surrealdb::Response;
 
 #[tokio::main]
 pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
-	// Set the default logging level
-	crate::cli::log::init(0);
+	// Initialize o11y
+	crate::o11y::builder().with_log_level("warn").init();
+
 	// Parse all other cli arguments
 	let username = matches.value_of("user").unwrap();
 	let password = matches.value_of("pass").unwrap();
