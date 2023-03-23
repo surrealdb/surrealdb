@@ -11,9 +11,7 @@ const TYPE: &str = "application/octet-stream";
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Initialize o11y
-	crate::o11y::builder().with_log_level(
-		matches.get_one::<String>("log").unwrap()
-	).init();
+	crate::o11y::builder().with_log_level("error").init();
 
 	// Try to parse the specified source file
 	let from = matches.value_of("from").unwrap();

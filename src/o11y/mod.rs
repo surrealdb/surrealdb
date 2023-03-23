@@ -1,8 +1,6 @@
 pub mod filters;
 pub mod tracers;
 
-use std::env;
-
 use tracing::Level;
 use tracing_subscriber::prelude::*;
 
@@ -22,10 +20,11 @@ impl Builder {
     pub fn with_log_level(self, log_level: &str) -> Self {
         self.with_log_filter(
             match log_level {
+                "error" => {
+                    Level::ERROR.to_string()
+                },
                 "warn" | "info" | "debug" | "trace" => {
-                    let level: Level = log_level.parse().unwrap();
-
-                    format!("error,surreal={},surrealdb={},surrealdb::txn={}", level, level, level)
+                    format!("error,surreal={},surrealdb={}", log_level, log_level)
                 },
                 "full" => {
                     Level::TRACE.to_string()
@@ -45,11 +44,11 @@ impl Builder {
         let tracing_registry = tracing_subscriber::registry()
             // Create the fmt subscriber for printing the tracing Events as logs to the stdout
             .with(
-                tracing_subscriber::fmt::layer().with_filter(filters::fmt(self.log_filter))
+                tracing_subscriber::fmt::layer().with_writer(std::io::stderr).with_filter(filters::fmt(self.log_filter))
             );
         
         // Init the tracing_registry with the selected tracer. If no tracer is provided, init without one
-        match env::var(TRACING_TRACER_VAR).unwrap_or_default().trim().to_ascii_lowercase().as_str() {
+        match std::env::var(TRACING_TRACER_VAR).unwrap_or_default().trim().to_ascii_lowercase().as_str() {
             // If no tracer is selected, init with the fmt subscriber only
             "noop" | "" => {
                 tracing_registry.init();
