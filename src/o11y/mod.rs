@@ -72,3 +72,52 @@ impl Builder {
 		};
 	}
 }
+
+
+#[cfg(test)]
+mod tests {
+	use opentelemetry::{global::{shutdown_tracer_provider, tracer as global_tracer}, trace::{Tracer, Span, SpanKind}};
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn test_otlp_tracer() {
+		println!("Starting server setup...");
+		let (addr, mut req_rx) = super::tracers::tests::mock_otlp_server().await;
+	
+		{
+			let otlp_endpoint = format!("http://{}", addr);
+			temp_env::with_vars(vec![
+				("SURREAL_TRACING_TRACER", Some("otlp")),
+				("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str()))
+			], || {
+				super::builder().init();
+
+				println!("Sending span...");
+				let tracer = global_tracer("global tracer");
+				let mut span = tracer
+					.span_builder("test-surreal-span")
+					.with_kind(SpanKind::Server)
+					.start(&tracer);
+				span.add_event("test-surreal-event", vec![]);
+				span.end();
+
+				shutdown_tracer_provider();
+			})
+		}
+	
+		println!("Waiting for request...");
+		let req = req_rx.recv().await.expect("missing export request");
+		let first_span = req
+			.resource_spans
+			.first()
+			.unwrap()
+			.instrumentation_library_spans
+			.first()
+			.unwrap()
+			.spans
+			.first()
+			.unwrap();
+		assert_eq!("test-surreal-span", first_span.name);
+		let first_event = first_span.events.first().unwrap();
+		assert_eq!("test-surreal-event", first_event.name);
+	}
+}

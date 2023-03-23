@@ -3771,6 +3771,7 @@ dependencies = [
  "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",
+ "opentelemetry-proto",
  "rand 0.8.5",
  "reqwest",
  "rmp-serde",
@@ -3779,8 +3780,11 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "surrealdb",
+ "temp-env",
  "thiserror",
  "tokio",
+ "tokio-stream",
+ "tonic",
  "tracing",
  "tracing-futures",
  "tracing-opentelemetry",
@@ -3904,6 +3908,15 @@ name = "temp-dir"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af547b166dd1ea4b472165569fc456cfb6818116f854690b0ff205e636523dab"
+
+[[package]]
+name = "temp-env"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ee95b343d943e5a0d2221fb73029e8040f3c91d6d06afec86c664682a361681"
+dependencies = [
+ "parking_lot 0.12.1",
+]
 
 [[package]]
 name = "tempfile"

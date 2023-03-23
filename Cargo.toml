@@ -58,6 +58,14 @@ tracing-futures = "0.2.5"
 tracing-opentelemetry = "0.18.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 
+[dev-dependencies]
+# tests
+tonic = { version = "0.8.3"}
+opentelemetry-proto = {version = "0.1.0", features = ["gen-tonic", "traces", "build-server"]}
+tokio-stream = { version = "0.1", features = ["net"]}
+temp-env = "0.3.3"
+
+
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"
 maintainer = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
