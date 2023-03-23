@@ -23,8 +23,8 @@ mod env;
 mod err;
 mod iam;
 mod net;
-mod rpc;
 mod o11y;
+mod rpc;
 
 use std::process::ExitCode;
 
