@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install stable toolchain
         id: toolchain
@@ -53,7 +53,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
