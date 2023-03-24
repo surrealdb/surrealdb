@@ -65,7 +65,6 @@ opentelemetry-proto = {version = "0.1.0", features = ["gen-tonic", "traces", "bu
 tokio-stream = { version = "0.1", features = ["net"]}
 temp-env = "0.3.3"
 
-
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"
 maintainer = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
