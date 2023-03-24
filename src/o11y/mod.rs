@@ -1,14 +1,12 @@
-pub mod filters;
-pub mod tracers;
+mod logger;
+mod tracers;
 
-use tracing::Level;
-use tracing_subscriber::prelude::*;
-
-const TRACING_TRACER_VAR: &str = "SURREAL_TRACING_TRACER";
+use tracing::{Dispatch, Subscriber};
+use tracing_subscriber::{layer::Layer, prelude::*, util::SubscriberInitExt, Registry};
 
 #[derive(Default, Debug, Clone)]
 pub struct Builder {
-	log_filter: String,
+	log_level: String,
 }
 
 pub fn builder() -> Builder {
@@ -16,94 +14,58 @@ pub fn builder() -> Builder {
 }
 
 impl Builder {
-	/// Translates the given log_level into a log_filter
-	pub fn with_log_level(self, log_level: &str) -> Self {
-		self.with_log_filter(match log_level {
-			"error" => Level::ERROR.to_string(),
-			"warn" | "info" | "debug" | "trace" => {
-				format!("error,surreal={},surrealdb={}", log_level, log_level)
-			}
-			"full" => Level::TRACE.to_string(),
-			_ => unreachable!(),
-		})
-	}
-
-	pub fn with_log_filter(mut self, filter: String) -> Self {
-		self.log_filter = filter;
+	pub fn with_log_level(mut self, log_level: &str) -> Self {
+		self.log_level = log_level.to_string();
 		self
 	}
 
-	/// Setup the global tracing with the fmt subscriber (logs) and the chosen tracer subscriber
-	pub fn init(self) {
-		let tracing_registry = tracing_subscriber::registry()
-			// Create the fmt subscriber for printing the tracing Events as logs to the stdout
-			.with(
-				tracing_subscriber::fmt::layer()
-					.with_writer(std::io::stderr)
-					.with_filter(filters::fmt(self.log_filter)),
-			);
+	/// Build a dispatcher with the fmt subscriber (logs) and the chosen tracer subscriber
+	pub fn build(self) -> Box<dyn Subscriber + Send + Sync + 'static> {
+		Box::new(
+			tracing_subscriber::registry().with(logger::new(self.log_level)).with(tracers::new()),
+		)
+	}
 
-		// Init the tracing_registry with the selected tracer. If no tracer is provided, init without one
-		match std::env::var(TRACING_TRACER_VAR)
-			.unwrap_or_default()
-			.trim()
-			.to_ascii_lowercase()
-			.as_str()
-		{
-			// If no tracer is selected, init with the fmt subscriber only
-			"noop" | "" => {
-				tracing_registry.init();
-				debug!("No tracer defined");
-			}
-			// Init the registry with the OTLP tracer
-			"otlp" => {
-				tracing_registry
-					.with(
-						tracing_opentelemetry::layer()
-							.with_tracer(tracers::oltp().unwrap())
-							.with_filter(filters::otlp()),
-					)
-					.init();
-				debug!("OTLP tracer setup");
-			}
-			tracer => {
-				panic!("unsupported tracer {}", tracer);
-			}
-		};
+	/// Build a dispatcher and set it as global
+	pub fn init(self) {
+		self.build().init()
 	}
 }
 
-
 #[cfg(test)]
 mod tests {
-	use opentelemetry::{global::{shutdown_tracer_provider, tracer as global_tracer}, trace::{Tracer, Span, SpanKind}};
+	use opentelemetry::global::shutdown_tracer_provider;
+	use tracing::{span, Level};
+	use tracing_subscriber::util::SubscriberInitExt;
 
 	#[tokio::test(flavor = "multi_thread")]
 	async fn test_otlp_tracer() {
-		println!("Starting server setup...");
+		println!("Starting mock otlp server...");
 		let (addr, mut req_rx) = super::tracers::tests::mock_otlp_server().await;
-	
+
 		{
 			let otlp_endpoint = format!("http://{}", addr);
-			temp_env::with_vars(vec![
-				("SURREAL_TRACING_TRACER", Some("otlp")),
-				("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str()))
-			], || {
-				super::builder().init();
+			temp_env::with_vars(
+				vec![
+					("SURREAL_TRACING_TRACER", Some("otlp")),
+					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
+				],
+				|| {
+					let _enter = super::builder().build().set_default();
 
-				println!("Sending span...");
-				let tracer = global_tracer("global tracer");
-				let mut span = tracer
-					.span_builder("test-surreal-span")
-					.with_kind(SpanKind::Server)
-					.start(&tracer);
-				span.add_event("test-surreal-event", vec![]);
-				span.end();
+					println!("Sending span...");
 
-				shutdown_tracer_provider();
-			})
+					{
+						let span = span!(Level::INFO, "test-surreal-span");
+						let _enter = span.enter();
+						info!("test-surreal-event");
+					}
+
+					shutdown_tracer_provider();
+				},
+			)
 		}
-	
+
 		println!("Waiting for request...");
 		let req = req_rx.recv().await.expect("missing export request");
 		let first_span = req
@@ -119,5 +81,61 @@ mod tests {
 		assert_eq!("test-surreal-span", first_span.name);
 		let first_event = first_span.events.first().unwrap();
 		assert_eq!("test-surreal-event", first_event.name);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn test_tracing_filter() {
+		println!("Starting mock otlp server...");
+		let (addr, mut req_rx) = super::tracers::tests::mock_otlp_server().await;
+
+		{
+			let otlp_endpoint = format!("http://{}", addr);
+			temp_env::with_vars(
+				vec![
+					("SURREAL_TRACING_TRACER", Some("otlp")),
+					("SURREAL_TRACING_FILTER", Some("debug")),
+					("OTEL_EXPORTER_OTLP_ENDPOINT", Some(otlp_endpoint.as_str())),
+				],
+				|| {
+					let _enter = super::builder().build().set_default();
+
+					println!("Sending spans...");
+
+					{
+						let span = span!(Level::DEBUG, "debug");
+						let _enter = span.enter();
+						debug!("debug");
+						trace!("trace");
+					}
+
+					{
+						let span = span!(Level::TRACE, "trace");
+						let _enter = span.enter();
+						debug!("debug");
+						trace!("trace");
+					}
+
+					shutdown_tracer_provider();
+				},
+			)
+		}
+
+		println!("Waiting for request...");
+		let req = req_rx.recv().await.expect("missing export request");
+		let spans = &req
+			.resource_spans
+			.first()
+			.unwrap()
+			.instrumentation_library_spans
+			.first()
+			.unwrap()
+			.spans;
+
+		assert_eq!(1, spans.len());
+		assert_eq!("debug", spans.first().unwrap().name);
+
+		let events = &spans.first().unwrap().events;
+		assert_eq!(1, events.len());
+		assert_eq!("debug", events.first().unwrap().name);
 	}
 }

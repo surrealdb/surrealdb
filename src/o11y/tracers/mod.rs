@@ -1,16 +1,31 @@
-use opentelemetry::sdk::{trace::Tracer, Resource};
-use opentelemetry::trace::TraceError;
-use opentelemetry::KeyValue;
-use opentelemetry_otlp::WithExportConfig;
+use tracing::Subscriber;
+use tracing_subscriber::Layer;
 
-pub fn oltp() -> Result<Tracer, TraceError> {
-	let resource = Resource::new(vec![KeyValue::new("service.name", "surrealdb")]);
+pub mod otlp;
 
-	opentelemetry_otlp::new_pipeline()
-		.tracing()
-		.with_exporter(opentelemetry_otlp::new_exporter().tonic().with_env())
-		.with_trace_config(opentelemetry::sdk::trace::config().with_resource(resource))
-		.install_batch(opentelemetry::runtime::Tokio)
+const TRACING_TRACER_VAR: &str = "SURREAL_TRACING_TRACER";
+
+// Returns a tracer based on the value of the TRACING_TRACER_VAR env var
+pub fn new<S>() -> Option<Box<dyn Layer<S> + Send + Sync>>
+where
+	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
+{
+	match std::env::var(TRACING_TRACER_VAR).unwrap_or_default().trim().to_ascii_lowercase().as_str()
+	{
+		// If no tracer is selected, init with the fmt subscriber only
+		"noop" | "" => {
+			debug!("No tracer selected");
+			None
+		}
+		// Init the registry with the OTLP tracer
+		"otlp" => {
+			debug!("Setup the OTLP tracer");
+			Some(otlp::new())
+		}
+		tracer => {
+			panic!("unsupported tracer {}", tracer);
+		}
+	}
 }
 
 #[cfg(test)]
@@ -24,6 +39,7 @@ pub mod tests {
 	use tokio::sync::mpsc;
 	use tokio_stream::wrappers::TcpListenerStream;
 
+	/// Server that mocks a TraceService and receives traces
 	struct MockServer {
 		tx: Mutex<mpsc::Sender<ExportTraceServiceRequest>>,
 	}
