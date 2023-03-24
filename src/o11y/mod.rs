@@ -1,8 +1,8 @@
 mod logger;
 mod tracers;
 
-use tracing::{Dispatch, Subscriber};
-use tracing_subscriber::{layer::Layer, prelude::*, util::SubscriberInitExt, Registry};
+use tracing::Subscriber;
+use tracing_subscriber::{prelude::*, util::SubscriberInitExt};
 
 #[derive(Default, Debug, Clone)]
 pub struct Builder {
