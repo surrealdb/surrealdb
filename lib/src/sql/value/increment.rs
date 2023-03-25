@@ -45,7 +45,7 @@ mod tests {
 	use crate::sql::test::Parse;
 
 	#[tokio::test]
-	async fn inc_none() {
+	async fn increment_none() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("other");
 		let mut val = Value::parse("{ test: 100 }");
@@ -55,7 +55,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn inc_number() {
+	async fn increment_number() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: 100 }");
@@ -65,7 +65,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn inc_array_number() {
+	async fn increment_array_number() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test[1]");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
@@ -75,7 +75,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn inc_array_value() {
+	async fn increment_array_value() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
@@ -85,7 +85,7 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn inc_array_array() {
+	async fn increment_array_array() {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
