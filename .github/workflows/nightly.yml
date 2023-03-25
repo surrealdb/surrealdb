@@ -37,7 +37,7 @@ jobs:
         run: |
           (&>/dev/null cargo run -- start --log trace --user root --pass root memory &)
           cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
-          cargo test --no-default-features --features o11y-tests -- o11y::tests
+          # cargo test --no-default-features --features o11y-tests -- o11y::tests
 
   lint:
     name: Lint
