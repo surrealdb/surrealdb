@@ -35,7 +35,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
 
       - name: Run cargo test
-        run: cargo test --workspace
+        run: |
+          cargo test --workspace
+          cargo test --no-default-features --features o11y-tests -- o11y::tests
 
   lint:
     name: Lint

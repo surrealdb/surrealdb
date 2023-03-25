@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+          sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
         id: toolchain
@@ -41,6 +41,7 @@ jobs:
         run: |
           (&>/dev/null cargo run -- start --log trace --user root --pass root memory &)
           cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
+          cargo test --no-default-features --features o11y-tests -- o11y::tests
 
   lint:
     name: Lint
@@ -53,7 +54,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+          sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable

@@ -13,6 +13,7 @@ storage-tikv = ["surrealdb/kv-tikv"]
 storage-fdb = ["surrealdb/kv-fdb-6_3"]
 scripting = ["surrealdb/scripting"]
 http = ["surrealdb/http"]
+o11y-tests = ["tonic", "opentelemetry-proto", "tokio-stream", "temp-env"]
 
 [workspace]
 members = ["lib", "lib/examples/actix", "lib/examples/axum"]
@@ -58,12 +59,11 @@ tracing-futures = "0.2.5"
 tracing-opentelemetry = "0.18.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 
-[dev-dependencies]
-# tests
-tonic = { version = "0.8.3"}
-opentelemetry-proto = {version = "0.1.0", features = ["gen-tonic", "traces", "build-server"]}
-tokio-stream = { version = "0.1", features = ["net"]}
-temp-env = "0.3.3"
+# o11y tests
+tonic = { version = "0.8.3", optional = true }
+opentelemetry-proto = {version = "0.1.0", features = ["gen-tonic", "traces", "build-server"], optional = true }
+tokio-stream = { version = "0.1", features = ["net"], optional = true }
+temp-env = { version = "0.3.3", optional = true }
 
 [package.metadata.deb]
 maintainer-scripts = "pkg/deb/"
