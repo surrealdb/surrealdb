@@ -36,6 +36,7 @@ pub mod db; // Stores a DEFINE DATABASE config definition
 pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition
 pub mod dt; // Stores a DEFINE LOGIN ON DATABASE config definition
 pub mod ev; // Stores a DEFINE EVENT config definition
+pub mod fc; // Stores a DEFINE FUNCTION config definition
 pub mod fd; // Stores a DEFINE FIELD config definition
 pub mod ft; // Stores a DEFINE TABLE AS config definition
 pub mod graph; // Stores a graph edge pointer

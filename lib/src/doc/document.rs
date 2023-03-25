@@ -70,7 +70,9 @@ impl<'a> Document<'a> {
 		// Return the table or attempt to define it
 		match tb {
 			// The table doesn't exist
-			Err(Error::TbNotFound) => match opt.auth.check(Level::Db) {
+			Err(Error::TbNotFound {
+				value: _,
+			}) => match opt.auth.check(Level::Db) {
 				// We can create the table automatically
 				true => {
 					run.add_and_cache_ns(opt.ns(), opt.strict).await?;

@@ -964,12 +964,8 @@ impl Value {
 			Value::Idiom(v) => v.simplify(),
 			Value::Strand(v) => v.0.to_string().into(),
 			Value::Datetime(v) => v.0.to_string().into(),
-			Value::Future(_) => "fn::future".to_string().into(),
-			Value::Function(v) => match v.as_ref() {
-				Function::Script(_, _) => "fn::script".to_string().into(),
-				Function::Normal(f, _) => f.to_string().into(),
-				Function::Cast(_, v) => v.to_idiom(),
-			},
+			Value::Future(_) => "future".to_string().into(),
+			Value::Function(v) => v.to_idiom(),
 			_ => self.to_string().into(),
 		}
 	}

@@ -64,6 +64,11 @@ pub fn ident(i: &str) -> IResult<&str, Ident> {
 	Ok((i, Ident::from(v)))
 }
 
+pub fn plain(i: &str) -> IResult<&str, Ident> {
+	let (i, v) = ident_default(i)?;
+	Ok((i, Ident::from(v)))
+}
+
 pub fn ident_raw(i: &str) -> IResult<&str, String> {
 	let (i, v) = alt((ident_default, ident_backtick, ident_brackets))(i)?;
 	Ok((i, v))
