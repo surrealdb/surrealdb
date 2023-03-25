@@ -79,7 +79,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
-		let res = Value::parse("{ test: [100, 200, 300] }");
+		let res = Value::parse("{ test: [100, 200, 300, 200] }");
 		val.increment(&ctx, &opt, &txn, &idi, Value::from(200)).await.unwrap();
 		assert_eq!(res, val);
 	}
@@ -89,7 +89,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test");
 		let mut val = Value::parse("{ test: [100, 200, 300] }");
-		let res = Value::parse("{ test: [100, 200, 300, 400, 500] }");
+		let res = Value::parse("{ test: [100, 200, 300, 100, 300, 400, 500] }");
 		val.increment(&ctx, &opt, &txn, &idi, Value::parse("[100, 300, 400, 500]")).await.unwrap();
 		assert_eq!(res, val);
 	}

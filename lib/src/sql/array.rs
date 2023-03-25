@@ -175,21 +175,15 @@ impl Serialize for Array {
 impl ops::Add<Value> for Array {
 	type Output = Self;
 	fn add(mut self, other: Value) -> Self {
-		if !self.0.iter().any(|x| *x == other) {
-			self.0.push(other)
-		}
+		self.0.push(other);
 		self
 	}
 }
 
 impl ops::Add for Array {
 	type Output = Self;
-	fn add(mut self, other: Self) -> Self {
-		for v in other.0 {
-			if !self.0.iter().any(|x| *x == v) {
-				self.0.push(v)
-			}
-		}
+	fn add(mut self, mut other: Self) -> Self {
+		self.0.append(&mut other.0);
 		self
 	}
 }

@@ -152,34 +152,7 @@ async fn subquery_ifelse() -> Result<(), Error> {
 	let val = Value::parse(
 		"{
 			sport: [
-				'basketball'
-			]
-		}",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
-			count: 1,
-			id: person:test,
-			sport: [
-				'basketball'
-			]
-		}",
-	);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse(
-		"{
-			sport: [
 				'basketball',
-				'football'
 			]
 		}",
 	);
@@ -196,7 +169,6 @@ async fn subquery_ifelse() -> Result<(), Error> {
 			id: person:test,
 			sport: [
 				'basketball',
-				'football'
 			]
 		}",
 	);
@@ -207,7 +179,36 @@ async fn subquery_ifelse() -> Result<(), Error> {
 		"{
 			sport: [
 				'basketball',
-				'football'
+				'football',
+			]
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			count: 1,
+			id: person:test,
+			sport: [
+				'basketball',
+				'football',
+			]
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			sport: [
+				'basketball',
+				'football',
+				'football',
 			]
 		}",
 	);
