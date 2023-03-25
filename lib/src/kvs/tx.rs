@@ -30,6 +30,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
+#[cfg(debug_assertions)]
 const LOG: &str = "surrealdb::txn";
 
 /// A set of undoable updates and requests against a dataset.
