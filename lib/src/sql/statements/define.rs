@@ -389,7 +389,7 @@ fn login(i: &str) -> IResult<&str, DefineLoginStatement> {
 			hash: match opts {
 				DefineLoginOption::Passhash(v) => v,
 				DefineLoginOption::Password(v) => Argon2::default()
-					.hash_password(v.as_ref(), SaltString::generate(&mut OsRng).as_ref())
+					.hash_password(v.as_ref(), &SaltString::generate(&mut OsRng))
 					.unwrap()
 					.to_string(),
 			},
