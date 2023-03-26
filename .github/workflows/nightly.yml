@@ -23,21 +23,10 @@ jobs:
         id: toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
-
       - name: Run cargo test
         run: |
           (&>/dev/null cargo run -- start --log trace --user root --pass root memory &)
           cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
-          # cargo test --no-default-features --features o11y-tests -- o11y::tests
 
   lint:
     name: Lint
@@ -58,16 +47,6 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
-
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
 
       - name: Run cargo check
         run: cargo check --workspace

@@ -28,7 +28,6 @@ where
 	}
 }
 
-#[cfg(feature = "o11y-tests")]
 #[cfg(test)]
 pub mod tests {
 	use futures::StreamExt;

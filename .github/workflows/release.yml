@@ -18,28 +18,15 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
-          sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
           sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
         id: toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
-
       - name: Run cargo test
         run: |
           cargo test --workspace
-          cargo test --no-default-features --features o11y-tests -- o11y::tests
 
   lint:
     name: Lint
@@ -59,16 +46,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
 
       - name: Run cargo check
         run: cargo check --workspace

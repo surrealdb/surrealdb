@@ -32,7 +32,6 @@ impl Builder {
 	}
 }
 
-#[cfg(feature = "o11y-tests")]
 #[cfg(test)]
 mod tests {
 	use opentelemetry::global::shutdown_tracer_provider;

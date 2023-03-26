@@ -14,50 +14,22 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@v3
 
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
-          sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
           sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
         id: toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # - uses: actions/cache@v3
-      #   with:
-      #     path: |
-      #       ~/.cargo/bin/
-      #       ~/.cargo/registry/index/
-      #       ~/.cargo/registry/cache/
-      #       ~/.cargo/git/db/
-      #       target/
-      #     key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
-      #     restore-keys: |
-      #       ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
-      #       ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
-      #       ${{ runner.os }}-cargo-
-
       - name: Run cargo test
         run: |
           (&>/dev/null cargo run -- start --log trace --user root --pass root memory &)
           cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
-          cargo test --no-default-features --features o11y-tests -- o11y::tests
-          cat /var/log/syslog
-
-      - name: debug
-        if: always()
-        run: |
-          cat /var/log/syslog
-          dpkg -l
-          uname -a
-          go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
-          free -g
 
   lint:
     name: Lint
@@ -78,16 +50,6 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
-
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
 
       - name: Run cargo check
         run: cargo check --workspace
