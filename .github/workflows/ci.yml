@@ -37,7 +37,10 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
+          key: |
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-cargo-
 
       - name: Run cargo test
         run: |
