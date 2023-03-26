@@ -762,7 +762,7 @@ impl Value {
 	/// Check if this Value is a Thing of a specific type
 	pub fn is_type_record(&self, types: &[Table]) -> bool {
 		match self {
-			Value::Thing(v) => types.iter().any(|tb| tb.0 == v.tb),
+			Value::Thing(v) => types.is_empty() || types.iter().any(|tb| tb.0 == v.tb),
 			_ => false,
 		}
 	}
