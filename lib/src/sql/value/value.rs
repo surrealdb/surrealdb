@@ -1331,7 +1331,7 @@ impl Value {
 	/// Compare this Value to another Value lexicographically
 	pub fn lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexical_sort::lexical_cmp(a, b)),
+			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
@@ -1339,7 +1339,7 @@ impl Value {
 	/// Compare this Value to another Value using natrual numerical comparison
 	pub fn natural_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexical_sort::natural_cmp(a, b)),
+			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
@@ -1347,7 +1347,7 @@ impl Value {
 	/// Compare this Value to another Value lexicographically and using natrual numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexical_sort::natural_lexical_cmp(a, b)),
+			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}

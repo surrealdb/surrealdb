@@ -266,12 +266,6 @@ dependencies = [
 
 [[package]]
 name = "any_ascii"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70033777eb8b5124a81a1889416543dddef2de240019b674c81285a2635a7e1e"
-
-[[package]]
-name = "any_ascii"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea50b14b7a4b9343f8c627a7a53c52076482bd4bdad0a24fd3ec533ed616cc2c"
@@ -2050,12 +2044,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
-name = "lexical-sort"
-version = "0.3.1"
+name = "lexicmp"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c09e4591611e231daf4d4c685a66cb0410cc1e502027a20ae55f2bb9e997207a"
+checksum = "7378d131ddf24063b32cbd7e91668d183140c4b3906270635a4d633d1068ea5d"
 dependencies = [
- "any_ascii 0.1.7",
+ "any_ascii",
 ]
 
 [[package]]
@@ -3615,7 +3609,7 @@ name = "surrealdb"
 version = "1.0.0-beta.8"
 dependencies = [
  "addr",
- "any_ascii 0.3.2",
+ "any_ascii",
  "argon2",
  "async-channel",
  "async-executor",
@@ -3634,7 +3628,7 @@ dependencies = [
  "geo",
  "indexmap",
  "indxdb",
- "lexical-sort",
+ "lexicmp",
  "log",
  "md-5",
  "nanoid",
