@@ -53,6 +53,7 @@ jobs:
           dpkg -l
           uname -a
           go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
+          free -g
 
   lint:
     name: Lint
