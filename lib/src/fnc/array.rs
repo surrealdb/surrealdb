@@ -9,6 +9,26 @@ use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
 
+pub fn add((array, value): (Value, Value)) -> Result<Value, Error> {
+	match (array, value) {
+		(Value::Array(mut arr), Value::Array(other)) => {
+			for v in other.0 {
+				if !arr.0.iter().any(|x| *x == v) {
+					arr.0.push(v)
+				}
+			}
+			Ok(arr.into())
+		}
+		(Value::Array(mut arr), value) => {
+			if !arr.0.iter().any(|x| *x == value) {
+				arr.0.push(value)
+			}
+			Ok(arr.into())
+		}
+		_ => Ok(Value::None),
+	}
+}
+
 pub fn all((arg,): (Value,)) -> Result<Value, Error> {
 	match arg {
 		Value::Array(v) => Ok(v.iter().all(Value::is_truthy).into()),

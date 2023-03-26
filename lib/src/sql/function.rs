@@ -303,6 +303,7 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 fn function_array(i: &str) -> IResult<&str, &str> {
 	alt((
 		alt((
+			tag("array::add"),
 			tag("array::all"),
 			tag("array::any"),
 			tag("array::append"),

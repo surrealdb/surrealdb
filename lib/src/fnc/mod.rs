@@ -66,6 +66,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 	dispatch!(
 		name,
 		args,
+		"array::add" => array::add,
 		"array::all" => array::all,
 		"array::any" => array::any,
 		"array::append" => array::append,
