@@ -12,7 +12,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest-4-cores
     steps:
 
       - name: Checkout sources
@@ -45,6 +45,14 @@ jobs:
           (cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb)
           (cargo test --no-default-features --features o11y-tests -- o11y::tests)
           cat /var/log/syslog
+
+      - name: debug
+        if: always()
+        run: |
+          cat /var/log/syslog
+          dpkg -l
+          uname -a
+          go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
 
   lint:
     name: Lint
