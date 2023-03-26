@@ -27,13 +27,13 @@ impl Value {
 		match path.first() {
 			// Get the current path part
 			Some(p) => match self {
-				// Current path part is an object
+				// Current path part is a future
 				Value::Future(v) => {
 					// Check how many path parts are remaining
 					match path.len() {
 						// No further embedded fields, so just return this
 						0 => Ok(Value::Future(v.clone())),
-						//
+						// Process the future and fetch the embedded field
 						_ => v.compute(ctx, opt, txn, None).await?.get(ctx, opt, txn, path).await,
 					}
 				}
