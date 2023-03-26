@@ -9,7 +9,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout sources
@@ -21,16 +21,14 @@ jobs:
           sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
-        id: toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo test
-        run: |
-          cargo test --workspace
+        run: cargo test --workspace
 
   lint:
     name: Lint
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout sources
@@ -42,7 +40,6 @@ jobs:
           sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
-        id: toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -71,11 +68,11 @@ jobs:
             file: surreal-${{ github.ref_name }}.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-latest
             file: surreal-${{ github.ref_name }}.linux-amd64
             opts: --features storage-tikv
           - arch: aarch64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-latest
             file: surreal-${{ github.ref_name }}.linux-arm64
             opts: --features storage-tikv
           - arch: x86_64-pc-windows-msvc
@@ -210,7 +207,7 @@ jobs:
   deploy:
     name: Deploy
     needs: [package]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout sources
@@ -252,7 +249,7 @@ jobs:
   docker:
     name: Docker
     needs: [build]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout sources

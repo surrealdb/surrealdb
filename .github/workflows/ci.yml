@@ -23,7 +23,6 @@ jobs:
           sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
-        id: toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo test
@@ -33,7 +32,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout sources
@@ -46,7 +45,6 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
-        id: toolchain
         with:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
