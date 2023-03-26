@@ -151,7 +151,7 @@ impl Fields {
 						};
 						// Check if this is a single VALUE field expression
 						match self.single().is_some() {
-							false => out.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?,
+							false => out.set(ctx, opt, txn, i, x).await?,
 							true => out = x,
 						}
 					}
