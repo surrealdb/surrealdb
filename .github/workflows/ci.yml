@@ -21,6 +21,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
+          sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
+          sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
           sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
@@ -40,8 +42,9 @@ jobs:
       - name: Run cargo test
         run: |
           (&>/dev/null cargo run -- start --log trace --user root --pass root memory &)
-          cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
-          # cargo test --no-default-features --features o11y-tests -- o11y::tests
+          (cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb)
+          (cargo test --no-default-features --features o11y-tests -- o11y::tests)
+          cat /var/log/syslog
 
   lint:
     name: Lint

@@ -18,6 +18,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
+          sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
+          sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
           sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
@@ -37,7 +39,7 @@ jobs:
       - name: Run cargo test
         run: |
           cargo test --workspace
-          # cargo test --no-default-features --features o11y-tests -- o11y::tests
+          cargo test --no-default-features --features o11y-tests -- o11y::tests
 
   lint:
     name: Lint
