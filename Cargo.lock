@@ -271,6 +271,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70033777eb8b5124a81a1889416543dddef2de240019b674c81285a2635a7e1e"
 
 [[package]]
+name = "any_ascii"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea50b14b7a4b9343f8c627a7a53c52076482bd4bdad0a24fd3ec533ed616cc2c"
+
+[[package]]
 name = "anyhow"
 version = "1.0.70"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1055,12 +1061,6 @@ dependencies = [
  "rustc_version",
  "syn 1.0.109",
 ]
-
-[[package]]
-name = "deunicode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c1bba4f227a4a53d12b653f50ca7bf10c9119ae2aba56aff9e0338b5c98f36a"
 
 [[package]]
 name = "digest"
@@ -2050,7 +2050,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c09e4591611e231daf4d4c685a66cb0410cc1e502027a20ae55f2bb9e997207a"
 dependencies = [
- "any_ascii",
+ "any_ascii 0.1.7",
 ]
 
 [[package]]
@@ -3620,6 +3620,7 @@ name = "surrealdb"
 version = "1.0.0-beta.8"
 dependencies = [
  "addr",
+ "any_ascii 0.3.2",
  "argon2",
  "async-channel",
  "async-executor",
@@ -3627,7 +3628,6 @@ dependencies = [
  "bcrypt",
  "bigdecimal",
  "chrono",
- "deunicode",
  "dmp",
  "echodb",
  "env_logger 0.10.0",
