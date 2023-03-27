@@ -13,6 +13,7 @@ use crate::sql::Query;
 use crate::sql::Value;
 use channel::Sender;
 use futures::lock::Mutex;
+use std::fmt;
 use std::sync::Arc;
 use tracing::instrument;
 
@@ -34,6 +35,23 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
 	FDB(super::fdb::Datastore),
+}
+
+impl fmt::Display for Inner {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			#[cfg(feature = "kv-mem")]
+			Inner::Mem(_) => write!(f, "memory"),
+			#[cfg(feature = "kv-rocksdb")]
+			Inner::RocksDB(_) => write!(f, "rocksdb"),
+			#[cfg(feature = "kv-indxdb")]
+			Inner::IndxDB(_) => write!(f, "indexdb"),
+			#[cfg(feature = "kv-tikv")]
+			Inner::TiKV(_) => write!(f, "tikv"),
+			#[cfg(feature = "kv-fdb")]
+			Inner::FDB(_) => write!(f, "fdb"),
+		}
+	}
 }
 
 impl Datastore {
@@ -167,7 +185,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip(self))]
+	#[instrument(skip(self),fields(datastore_type = tracing::field::display(&self.inner)))]
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		match &self.inner {
