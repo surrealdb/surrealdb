@@ -361,7 +361,7 @@ impl Rpc {
 		match out.as_str() {
 			"json" | "application/json" => self.format = Output::Json,
 			"cbor" | "application/cbor" => self.format = Output::Cbor,
-			"msgpack" | "application/msgpack" => self.format = Output::Pack,
+			"pack" | "application/pack" => self.format = Output::Pack,
 			_ => return Err(Error::InvalidType),
 		};
 		Ok(Value::None)

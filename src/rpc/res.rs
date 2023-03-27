@@ -9,7 +9,7 @@ use warp::ws::Message;
 pub enum Output {
 	Json, // JSON
 	Cbor, // CBOR
-	Pack, // MsgPack
+	Pack, // MessagePack
 	Full, // Full type serialization
 }
 
