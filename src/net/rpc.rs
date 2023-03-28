@@ -368,6 +368,7 @@ impl Rpc {
 		Ok(Value::None)
 	}
 
+	#[instrument(skip_all, name = "rpc use")]
 	async fn yuse(&mut self, ns: Value, db: Value) -> Result<Value, Error> {
 		if let Value::Strand(ns) = ns {
 			self.session.ns = Some(ns.0);
@@ -409,6 +410,7 @@ impl Rpc {
 	// Methods for identification
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc info")]
 	async fn info(&self) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
@@ -428,6 +430,7 @@ impl Rpc {
 	// Methods for setting variables
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc set")]
 	async fn set(&mut self, key: Strand, val: Value) -> Result<Value, Error> {
 		match val {
 			// Remove the variable if undefined
@@ -438,6 +441,7 @@ impl Rpc {
 		Ok(Value::Null)
 	}
 
+	#[instrument(skip_all, name = "rpc unset")]
 	async fn unset(&mut self, key: Strand) -> Result<Value, Error> {
 		self.vars.remove(&key.0);
 		Ok(Value::Null)

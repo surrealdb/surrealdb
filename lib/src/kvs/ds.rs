@@ -185,7 +185,6 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip(self),fields(datastore_type = tracing::field::display(&self.inner)))]
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		match &self.inner {
@@ -250,7 +249,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip(self, sess))]
+	#[instrument(skip_all)]
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -300,7 +299,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip(self, sess))]
+	#[instrument(skip_all)]
 	pub async fn process(
 		&self,
 		ast: Query,
@@ -349,7 +348,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(skip(self, sess))]
+	#[instrument(skip_all)]
 	pub async fn compute(
 		&self,
 		val: Value,
