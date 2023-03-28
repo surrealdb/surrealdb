@@ -37,9 +37,9 @@ pub(super) enum Inner {
 	FDB(super::fdb::Datastore),
 }
 
-impl fmt::Display for Inner {
+impl fmt::Display for Datastore {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
+		match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
