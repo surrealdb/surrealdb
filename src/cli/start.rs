@@ -8,15 +8,13 @@ use crate::net;
 
 #[tokio::main]
 pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
-	// Initialize o11y
+	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level(matches.get_one::<String>("log").unwrap()).init();
-
 	// Check if a banner should be outputted
 	if !matches.is_present("no-banner") {
 		// Output SurrealDB logo
 		println!("{LOGO}");
 	}
-
 	// Setup the cli options
 	config::init(matches);
 	// Initiate environment
