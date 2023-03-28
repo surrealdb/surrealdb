@@ -111,7 +111,7 @@ impl Array {
 	}
 
 	pub fn as_numbers(self) -> Vec<Number> {
-		self.0.into_iter().map(|v| v.as_number()).collect()
+		self.0.into_iter().filter(|v| v.is_number()).map(|v| v.as_number()).collect()
 	}
 
 	pub fn as_strands(self) -> Vec<Strand> {
