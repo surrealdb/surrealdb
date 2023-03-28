@@ -777,7 +777,7 @@ impl Value {
 	pub fn as_int(self) -> i64 {
 		match self {
 			Value::True => 1,
-			Value::Strand(v) => v.parse::<i64>().unwrap_or(0),
+			Value::Strand(v) => Number::from(v.as_str()).as_int(),
 			Value::Number(v) => v.as_int(),
 			Value::Duration(v) => v.as_secs() as i64,
 			Value::Datetime(v) => v.timestamp(),
