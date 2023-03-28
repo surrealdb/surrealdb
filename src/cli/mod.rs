@@ -12,6 +12,8 @@ pub use config::CF;
 use crate::cnf::LOGO;
 use clap::{Arg, Command};
 use std::process::ExitCode;
+use tracing::Level;
+use tracing_subscriber::EnvFilter;
 
 pub const LOG: &str = "surrealdb::cli";
 
@@ -119,6 +121,26 @@ fn key_valid(v: &str) -> Result<(), String> {
 	}
 }
 
+fn log_valid(v: &str) -> Result<String, String> {
+	match v {
+		// Check if we should show all log levels
+		"full" => Ok(Level::TRACE.to_string()),
+		// Otherwise, let's only show errors
+		"error" => Ok(Level::ERROR.to_string()),
+		// Specify the log level for each code area
+		"warn" | "info" | "debug" | "trace" => {
+			Ok(format!("error,surreal={v},surrealdb={v},surrealdb::txn=error"))
+		}
+		// Let's try to parse the custom log level
+		_ => match EnvFilter::builder().parse(v) {
+			// The custom log level parsed successfully
+			Ok(_) => Ok(v.to_owned()),
+			// There was an error parsing the custom log level
+			Err(_) => Err(String::from("Error parsing logging configuration")),
+		},
+	}
+}
+
 pub fn init() -> ExitCode {
 	let setup = Command::new("SurrealDB command-line interface and server")
 		.about(INFO)
@@ -133,7 +155,7 @@ pub fn init() -> ExitCode {
 			.arg(
 				Arg::new("path")
 					.index(1)
-					.env("SURREAL_DB_PATH")
+					.env("SURREAL_PATH")
 					.required(false)
 					.validator(path_valid)
 					.default_value("memory")
@@ -247,8 +269,8 @@ pub fn init() -> ExitCode {
 					.takes_value(true)
 					.default_value("info")
 					.forbid_empty_values(true)
-					.help("The logging level for the database server. For more control, use SURREAL_LOG_FILTER")
-					.value_parser(["warn", "info", "debug", "trace", "full"]),
+					.value_parser(log_valid)
+					.help("The logging level for the database server. One of error, warn, info, debug, trace, full."),
 			)
 			.arg(
 				Arg::new("no-banner")

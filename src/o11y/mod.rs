@@ -14,18 +14,17 @@ pub fn builder() -> Builder {
 }
 
 impl Builder {
+	/// Set the log level on the builder
 	pub fn with_log_level(mut self, log_level: &str) -> Self {
 		self.log_level = log_level.to_string();
 		self
 	}
-
 	/// Build a dispatcher with the fmt subscriber (logs) and the chosen tracer subscriber
 	pub fn build(self) -> Box<dyn Subscriber + Send + Sync + 'static> {
 		Box::new(
 			tracing_subscriber::registry().with(logger::new(self.log_level)).with(tracers::new()),
 		)
 	}
-
 	/// Build a dispatcher and set it as global
 	pub fn init(self) {
 		self.build().init()
