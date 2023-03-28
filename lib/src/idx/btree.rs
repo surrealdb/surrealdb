@@ -34,6 +34,20 @@ impl Node {
 			Node::Leaf(_, keys) => keys,
 		}
 	}
+
+	fn keys_mut(&mut self) -> &mut FstMap {
+		match self {
+			Node::Internal(_, keys, _) => keys,
+			Node::Leaf(_, keys) => keys,
+		}
+	}
+}
+
+struct SplitResult {
+	parent_node: Node,
+	left_node: Node,
+	right_node: Node,
+	median_key: Key,
 }
 
 impl BTree {
@@ -84,7 +98,7 @@ impl BTree {
 			if root.is_full(self.order * 2) {
 				let new_root = self.new_internal_node(FstMap::new().unwrap(), vec![*root_id]);
 				self.root = Some(new_root.id());
-				let new_root = self.split_child(kv, new_root, 0, root.node).node;
+				let new_root = self.split_child(kv, new_root, 0, root.node).parent_node;
 				self.insert_non_full(kv, new_root, key, value);
 			} else {
 				self.insert_non_full(kv, root.node, key, value);
@@ -111,16 +125,20 @@ impl BTree {
 					}
 					idx += 1;
 				}
+				if idx >= children.len() {
+					self.debug(kv);
+					panic!("");
+				}
 				let child_node = StoredNode::read(kv, &children[idx]);
 				let child_node = if child_node.is_full(self.order * 2) {
-					let child_node = self.split_child(kv, node, idx, child_node.node).node;
-					// TODO get_nth could be calculated by split_child to avoid another iteration
-					if key.gt(&node.keys().get_nth(idx).unwrap()) {
-						idx += 1;
-					};
-					child_node
+					let split_result = self.split_child(kv, node, idx, child_node.node);
+					if key.gt(&split_result.median_key) {
+						split_result.right_node
+					} else {
+						split_result.left_node
+					}
 				} else {
-					node
+					child_node.node
 				};
 				self.insert_non_full(kv, child_node, key, value);
 			}
@@ -129,91 +147,61 @@ impl BTree {
 
 	fn split_child(
 		&mut self,
-		_kv: &mut KVSimulator,
-		_node: Node,
-		_idx: usize,
-		_child_node: Node,
-	) -> StoredNode {
-		todo!()
+		kv: &mut KVSimulator,
+		parent_node: Node,
+		idx: usize,
+		child_node: Node,
+	) -> SplitResult {
+		let (left_node, right_node, median_key, median_value) = match child_node {
+			Node::Internal(node_id, keys, left_children) => {
+				self.split_internal_node(node_id, keys, left_children)
+			}
+			Node::Leaf(node_id, keys) => self.split_leaf_node(node_id, keys),
+		};
+		let parent_node = match parent_node {
+			Node::Internal(node_id, mut keys, mut children) => {
+				keys.insert(median_key.clone(), median_value);
+				children.insert(idx, right_node.id());
+				Self::update_internal_node(node_id, keys, children)
+			}
+			Node::Leaf(node_id, mut keys) => {
+				keys.insert(median_key.clone(), median_value);
+				Self::update_leaf_node(node_id, keys)
+			}
+		};
+		// Save the mutated split child with half the (lower) keys
+		let left_node = StoredNode::write(kv, left_node).node;
+		// Save the new child with half the (upper) keys
+		let right_node = StoredNode::write(kv, right_node).node;
+		// Save the parent node
+		let parent_node = StoredNode::write(kv, parent_node).node;
+		SplitResult {
+			parent_node,
+			left_node,
+			right_node,
+			median_key,
+		}
 	}
 
-	// fn split_internal_node(
-	// 	&mut self,
-	// 	kv: &mut KVSimulator,
-	// 	node_id: NodeId,
-	// 	mut keys: FstMap,
-	// 	mut children: Vec<NodeId>,
-	// ) -> StoredNode {
-	// 	let key_idx = keys.len() / 2;
-	//
-	// 	// Do the split by mutating the pre-existing node
-	// 	let right_children = children.split_off(children.len() / 2);
-	//
-	// 	// Extract the higher keys
-	// 	let left_key = children.last().map(|(k, _)| k.to_vec()).unwrap();
-	// 	let right_key = right_children.last().map(|(k, _)| k.to_vec()).unwrap();
-	//
-	// 	// Create the new child node containing the extracted half (upper) keys
-	// 	let right_node = self.new_internal_node(right_children);
-	//
-	// 	// Create the children for the new parent node
-	// 	let parent_children = vec![(left_key, node_id), (right_key, right_node.id())];
-	//
-	// 	// Save the mutated split child with half the (lower) keys
-	// 	StoredNode::write(kv, Self::update_internal_node(node_id, children));
-	// 	// Save the new child with half the (upper) keys
-	// 	StoredNode::write(kv, right_node);
-	// 	// Save the new parent
-	// 	StoredNode::write(kv, self.new_internal_node(parent_children))
-	// }
-	//
-	// fn split_leaf_node(
-	// 	&mut self,
-	// 	kv: &mut KVSimulator,
-	// 	node_id: NodeId,
-	// 	mut keys: FstMap,
-	// ) -> StoredNode {
-	// 	// Define the position of the middle key
-	// 	let node_len = keys.len();
-	// 	let middle_key_nth = node_len / 2;
-	// 	let mut stream = keys.stream();
-	//
-	// 	// Extract the left (lower) keys
-	// 	let (left_key, left_map) = Self::map_extraction_loop(&mut stream, 0, middle_key_nth);
-	//
-	// 	// Extract the right (upper) keys
-	// 	let (right_key, right_map) =
-	// 		Self::map_extraction_loop(&mut stream, middle_key_nth, node_len);
-	//
-	// 	let right_node = self.new_leaf_node(right_map);
-	//
-	// 	// Create the children for the new parent node
-	// 	let parent_children = vec![node_id, right_key];
-	//
-	// 	// Save the mutated split child with half the (lower) keys
-	// 	StoredNode::write(kv, Self::update_leaf_node(node_id, left_map));
-	// 	// Save the new child with half the (upper) keys
-	// 	StoredNode::write(kv, right_node);
-	// 	// Save the new parent
-	// 	StoredNode::write(kv, self.new_internal_node(parent_children))
-	// }
+	fn split_internal_node(
+		&mut self,
+		node_id: NodeId,
+		keys: FstMap,
+		mut left_children: Vec<NodeId>,
+	) -> (Node, Node, Vec<u8>, u64) {
+		let (n, left_keys, median_key, median_value, right_keys) = keys.split_keys();
+		let right_children = left_children.split_off(n);
+		let left_node = Self::update_internal_node(node_id, left_keys, left_children);
+		let right_node = self.new_internal_node(right_keys, right_children);
+		(left_node, right_node, median_key, median_value)
+	}
 
-	// fn map_extraction_loop(stream: &mut Stream, lower: usize, upper: usize) -> (Key, FstMap) {
-	// 	let mut builder = MapBuilder::memory();
-	// 	let last = upper - 1;
-	// 	for i in lower..upper {
-	// 		if let Some((key, value)) = stream.next() {
-	// 			builder.insert(key, value).unwrap();
-	// 			if i == last {
-	// 				// This is the last key
-	// 				return (key.to_vec(), FstMap::try_from(builder).unwrap());
-	// 			}
-	// 		} else {
-	// 			panic!("");
-	// 		}
-	// 	}
-	// 	panic!("")
-	// }
+	fn split_leaf_node(&mut self, node_id: NodeId, keys: FstMap) -> (Node, Node, Vec<u8>, u64) {
+		let (_, left_keys, median_key, median_value, right_keys) = keys.split_keys();
+		let left_node = Self::update_leaf_node(node_id, left_keys);
+		let right_node = self.new_leaf_node(right_keys);
+		(left_node, right_node, median_key, median_value)
+	}
 
 	fn new_node_id(&mut self) -> NodeId {
 		let new_node_id = self.next_node_id;
@@ -236,6 +224,26 @@ impl BTree {
 	fn update_leaf_node(id: NodeId, keys: FstMap) -> Node {
 		Node::Leaf(id, keys)
 	}
+
+	pub(super) fn debug(&self, kv: &mut KVSimulator) {
+		if let Some(root_id) = &self.root {
+			self.recursive_debug(kv, 0, root_id);
+		}
+	}
+
+	fn recursive_debug(&self, kv: &mut KVSimulator, depth: usize, node_id: &NodeId) {
+		match StoredNode::read(kv, node_id).node {
+			Node::Internal(node_id, keys, children) => {
+				println!("{} -> INTERNAL({}) => {{{}}}", depth, node_id, keys);
+				for children_id in children {
+					self.recursive_debug(kv, depth + 1, &children_id);
+				}
+			}
+			Node::Leaf(node_id, keys) => {
+				println!("{} -> LEAF({}) => {{{}}}", depth, node_id, keys);
+			}
+		}
+	}
 }
 
 struct StoredNode {
@@ -253,13 +261,8 @@ impl StoredNode {
 	}
 
 	fn write(kv: &mut KVSimulator, mut node: Node) -> Self {
-		let node_id = match &mut node {
-			Node::Internal(id, _, _) => *id,
-			Node::Leaf(id, keys) => {
-				keys.rebuild();
-				*id
-			}
-		};
+		node.keys_mut().rebuild();
+		let node_id = node.id();
 		let size = kv.set(node_id.to_be_bytes().to_vec(), &node);
 		println!("Save {} - size: {}", node_id, size);
 		Self {

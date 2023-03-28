@@ -2,6 +2,7 @@ use fst::map::Keys;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub(super) struct FstMap {
@@ -43,20 +44,27 @@ impl FstMap {
 		self.deletions.insert(key, true);
 	}
 
-	pub(super) fn key_stream(&self) -> Keys {
-		self.map.keys().into_stream()
+	pub(super) fn split_keys(&self) -> (usize, FstMap, Vec<u8>, u64, FstMap) {
+		let mut n = self.map.len() / 2;
+		let mut s = self.map.stream();
+		let mut left = MapBuilder::memory();
+		while n > 0 {
+			if let Some((key, value)) = s.next() {
+				left.insert(key, value).unwrap();
+			}
+			n -= 1;
+		}
+		let Some((median_key, median_value)) = s.next() else {panic!()};
+		let median_key = median_key.to_vec();
+		let mut right = MapBuilder::memory();
+		while let Some((key, value)) = s.next() {
+			right.insert(key, value).unwrap();
+		}
+		(n, Self::try_from(left).unwrap(), median_key, median_value, Self::try_from(right).unwrap())
 	}
 
-	pub(super) fn get_nth(&self, idx: usize) -> Option<Vec<u8>> {
-		let mut stream = self.key_stream();
-		let mut pos = 0;
-		while let Some(k) = stream.next() {
-			if pos == idx {
-				return Some(k.to_vec());
-			}
-			pos += 1;
-		}
-		None
+	pub(super) fn key_stream(&self) -> Keys {
+		self.map.keys().into_stream()
 	}
 
 	/// Rebuilt the FST by incorporating the changes (additions and deletions)
@@ -157,6 +165,16 @@ impl<'de> Deserialize<'de> for FstMap {
 	{
 		let buf: Vec<u8> = Deserialize::deserialize(deserializer)?;
 		Self::try_from(buf).map_err(|e| de::Error::custom(e.to_string()))
+	}
+}
+
+impl Display for FstMap {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let mut s = self.map.stream();
+		while let Some((key, value)) = s.next() {
+			write!(f, "{:?}=>{}", key, value)?;
+		}
+		Ok(())
 	}
 }
 
