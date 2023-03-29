@@ -17,7 +17,10 @@ impl FstMap {
 		Self::try_from(MapBuilder::memory())
 	}
 
-	pub(super) fn with_key_value(key: Vec<u8>, value: u64) -> Result<Self, fst::Error> {
+	pub(super) fn with_key_value<K>(key: K, value: u64) -> Result<Self, fst::Error>
+	where
+		K: AsRef<[u8]>,
+	{
 		let mut builder = MapBuilder::memory();
 		builder.insert(key, value).unwrap();
 		Self::try_from(builder)
@@ -31,23 +34,33 @@ impl FstMap {
 		self.map.len()
 	}
 
-	pub(super) fn get<K: AsRef<[u8]>>(&self, key: K) -> Option<u64> {
+	pub(super) fn get<K>(&self, key: K) -> Option<u64>
+	where
+		K: AsRef<[u8]>,
+	{
 		self.map.get(key)
 	}
 
-	pub(super) fn insert(&mut self, key: Vec<u8>, value: u64) {
-		self.additions.insert(key, value);
+	pub(super) fn insert<K>(&mut self, key: K, value: u64)
+	where
+		K: AsRef<[u8]>,
+	{
+		self.additions.insert(key.as_ref().to_vec(), value);
 	}
 
-	pub(super) fn _remove(&mut self, key: Vec<u8>) {
-		self.additions.remove(&key);
-		self.deletions.insert(key, true);
+	pub(super) fn _remove<K>(&mut self, key: K)
+	where
+		K: AsRef<[u8]>,
+	{
+		self.additions.remove(key.as_ref());
+		self.deletions.insert(key.as_ref().to_vec(), true);
 	}
 
 	pub(super) fn split_keys(&self) -> (usize, FstMap, Vec<u8>, u64, FstMap) {
-		let mut n = self.map.len() / 2;
+		let median_idx = self.map.len() / 2;
 		let mut s = self.map.stream();
 		let mut left = MapBuilder::memory();
+		let mut n = median_idx;
 		while n > 0 {
 			if let Some((key, value)) = s.next() {
 				left.insert(key, value).unwrap();
@@ -60,7 +73,13 @@ impl FstMap {
 		while let Some((key, value)) = s.next() {
 			right.insert(key, value).unwrap();
 		}
-		(n, Self::try_from(left).unwrap(), median_key, median_value, Self::try_from(right).unwrap())
+		(
+			median_idx,
+			Self::try_from(left).unwrap(),
+			median_key,
+			median_value,
+			Self::try_from(right).unwrap(),
+		)
 	}
 
 	pub(super) fn key_stream(&self) -> Keys {
@@ -171,8 +190,15 @@ impl<'de> Deserialize<'de> for FstMap {
 impl Display for FstMap {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let mut s = self.map.stream();
+		let mut start = true;
 		while let Some((key, value)) = s.next() {
-			write!(f, "{:?}=>{}", key, value)?;
+			let key = String::from_utf8_lossy(key);
+			if start {
+				start = false;
+			} else {
+				f.write_str(", ")?;
+			}
+			write!(f, "{}=>{}", key, value)?;
 		}
 		Ok(())
 	}

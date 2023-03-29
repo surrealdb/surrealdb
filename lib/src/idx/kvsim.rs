@@ -5,7 +5,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 pub(super) struct KVSimulator {
-	network_latency: Duration,
+	network_latency: Option<Duration>,
 	network_transport_per_byte_ns: u64,
 	kv: HashMap<Vec<u8>, Vec<u8>>,
 	bytes_write: usize,
@@ -19,14 +19,17 @@ pub(super) const DEFAULT_NETWORK_TRANSPORT_PER_BYTE: usize = 10;
 
 impl Default for KVSimulator {
 	fn default() -> Self {
-		Self::new(DEFAULT_NETWORK_LATENCY, DEFAULT_NETWORK_TRANSPORT_PER_BYTE)
+		Self::new(Some(DEFAULT_NETWORK_LATENCY), DEFAULT_NETWORK_TRANSPORT_PER_BYTE)
 	}
 }
 
 impl KVSimulator {
-	fn new(network_latency_ms: usize, network_transport_per_byte_ns: usize) -> Self {
+	pub(super) fn new(
+		network_latency_ms: Option<usize>,
+		network_transport_per_byte_ns: usize,
+	) -> Self {
 		Self {
-			network_latency: Duration::from_micros(network_latency_ms as u64),
+			network_latency: network_latency_ms.map(|t| Duration::from_micros(t as u64)),
 			network_transport_per_byte_ns: network_transport_per_byte_ns as u64,
 			kv: Default::default(),
 			bytes_write: 0,
@@ -37,11 +40,19 @@ impl KVSimulator {
 	}
 
 	fn network_transport(&self, bytes: usize) {
-		sleep(Duration::from_nanos((bytes as u64) * self.network_transport_per_byte_ns));
+		if self.network_transport_per_byte_ns > 0 {
+			sleep(Duration::from_nanos((bytes as u64) * self.network_transport_per_byte_ns));
+		}
+	}
+
+	fn network_latency(&self) {
+		if let Some(d) = self.network_latency {
+			sleep(d);
+		}
 	}
 
 	pub(super) fn get<V: DeserializeOwned>(&mut self, key: &[u8]) -> Option<(usize, V)> {
-		sleep(self.network_latency);
+		self.network_latency();
 		if let Some(vec) = self.kv.get(key) {
 			self.get_count += 1;
 			let bytes = key.len() + vec.len();
@@ -54,7 +65,7 @@ impl KVSimulator {
 	}
 
 	pub(super) fn set<V: Serialize>(&mut self, key: Vec<u8>, value: &V) -> usize {
-		sleep(self.network_latency);
+		self.network_latency();
 		let val = serde_json::to_vec(value).unwrap();
 		self.set_count += 1;
 		let bytes = key.len() + val.len();
