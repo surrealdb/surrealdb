@@ -1,4 +1,4 @@
-#![allow(clippy::derive_hash_xor_eq)]
+#![allow(clippy::derived_hash_with_manual_eq)]
 
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;

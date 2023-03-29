@@ -5,13 +5,17 @@ use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
+use crate::sql::common::val_char;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
+use crate::sql::idiom::Idiom;
 use crate::sql::script::{script as func, Script};
 use crate::sql::value::{single, value, Value};
+use async_recursion::async_recursion;
 use futures::future::try_join_all;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
+use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
 use nom::multi::separated_list0;
 use serde::{Deserialize, Serialize};
@@ -22,6 +26,7 @@ use std::fmt;
 pub enum Function {
 	Cast(String, Value),
 	Normal(String, Vec<Value>),
+	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
 }
 
@@ -37,6 +42,7 @@ impl Function {
 	pub fn name(&self) -> &str {
 		match self {
 			Self::Normal(n, _) => n.as_str(),
+			Self::Custom(n, _) => n.as_str(),
 			_ => unreachable!(),
 		}
 	}
@@ -44,7 +50,17 @@ impl Function {
 	pub fn args(&self) -> &[Value] {
 		match self {
 			Self::Normal(_, a) => a,
+			Self::Custom(_, a) => a,
 			_ => &[],
+		}
+	}
+	/// Convert function call to a field name
+	pub fn to_idiom(&self) -> Idiom {
+		match self {
+			Self::Script(_, _) => "function".to_string().into(),
+			Self::Normal(f, _) => f.to_owned().into(),
+			Self::Custom(f, _) => format!("fn::{f}").into(),
+			Self::Cast(_, v) => v.to_idiom(),
 		}
 	}
 	/// Convert this function to an aggregate
@@ -104,12 +120,14 @@ impl Function {
 }
 
 impl Function {
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		doc: Option<&Value>,
+		doc: Option<&'async_recursion Value>,
 	) -> Result<Value, Error> {
 		// Prevent long function chains
 		let opt = &opt.dive(1)?;
@@ -128,6 +146,44 @@ impl Function {
 				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
 				// Run the normal function
 				fnc::run(ctx, s, a).await
+			}
+			Self::Custom(s, x) => {
+				// Get the function definition
+				let val = {
+					// Clone transaction
+					let run = txn.clone();
+					// Claim transaction
+					let mut run = run.lock().await;
+					// Get the function definition
+					run.get_fc(opt.ns(), opt.db(), s).await?
+				};
+				// Check the function arguments
+				if x.len() != val.args.len() {
+					return Err(Error::InvalidArguments {
+						name: format!("fn::{}", val.name),
+						message: match val.args.len() {
+							1 => String::from("The function expects 1 argument."),
+							l => format!("The function expects {l} arguments."),
+						},
+					});
+				}
+				// Compute the function arguments
+				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+				// Duplicate context
+				let mut ctx = Context::new(ctx);
+				// Process the function arguments
+				for (val, (name, kind)) in a.into_iter().zip(val.args) {
+					ctx.add_value(
+						name.to_raw(),
+						match val {
+							Value::None => val,
+							Value::Null => val,
+							_ => val.convert_to(&kind),
+						},
+					);
+				}
+				// Run the custom function
+				val.block.compute(&ctx, opt, txn, doc).await
 			}
 			#[allow(unused_variables)]
 			Self::Script(s, x) => {
@@ -152,17 +208,16 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Cast(ref s, ref e) => write!(f, "<{s}> {e}"),
-			Self::Script(ref s, ref e) => {
-				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e))
-			}
-			Self::Normal(ref s, ref e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
+			Self::Cast(s, e) => write!(f, "<{s}> {e}"),
+			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
+			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
+			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
 		}
 	}
 }
 
 pub fn function(i: &str) -> IResult<&str, Function> {
-	alt((normal, script, cast))(i)
+	alt((normal, custom, script, cast))(i)
 }
 
 fn normal(i: &str) -> IResult<&str, Function> {
@@ -173,6 +228,17 @@ fn normal(i: &str) -> IResult<&str, Function> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(')')(i)?;
 	Ok((i, Function::Normal(s.to_string(), a)))
+}
+
+fn custom(i: &str) -> IResult<&str, Function> {
+	let (i, _) = tag("fn::")(i)?;
+	let (i, s) = take_while1(val_char)(i)?;
+	let (i, _) = char('(')(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, a) = separated_list0(commas, value)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char(')')(i)?;
+	Ok((i, Function::Custom(s.to_string(), a)))
 }
 
 fn script(i: &str) -> IResult<&str, Function> {
@@ -202,13 +268,13 @@ fn cast(i: &str) -> IResult<&str, Function> {
 fn function_casts(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("bool"),
-		tag("int"),
-		tag("float"),
-		tag("string"),
-		tag("number"),
-		tag("decimal"),
 		tag("datetime"),
+		tag("decimal"),
 		tag("duration"),
+		tag("float"),
+		tag("int"),
+		tag("number"),
+		tag("string"),
 	))(i)
 }
 
@@ -236,24 +302,35 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 
 fn function_array(i: &str) -> IResult<&str, &str> {
 	alt((
-		tag("array::all"),
-		tag("array::any"),
-		tag("array::combine"),
-		tag("array::complement"),
-		tag("array::concat"),
-		tag("array::difference"),
-		tag("array::distinct"),
-		tag("array::flatten"),
-		tag("array::group"),
-		tag("array::insert"),
-		tag("array::intersect"),
-		tag("array::len"),
-		tag("array::max"),
-		tag("array::min"),
-		tag("array::sort::asc"),
-		tag("array::sort::desc"),
-		tag("array::sort"),
-		tag("array::union"),
+		alt((
+			tag("array::add"),
+			tag("array::all"),
+			tag("array::any"),
+			tag("array::append"),
+			tag("array::combine"),
+			tag("array::complement"),
+			tag("array::concat"),
+			tag("array::difference"),
+			tag("array::distinct"),
+			tag("array::flatten"),
+			tag("array::group"),
+			tag("array::insert"),
+		)),
+		alt((
+			tag("array::intersect"),
+			tag("array::len"),
+			tag("array::max"),
+			tag("array::min"),
+			tag("array::pop"),
+			tag("array::prepend"),
+			tag("array::push"),
+			tag("array::remove"),
+			tag("array::reverse"),
+			tag("array::sort::asc"),
+			tag("array::sort::desc"),
+			tag("array::sort"),
+			tag("array::union"),
+		)),
 	))(i)
 }
 

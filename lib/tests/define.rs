@@ -58,6 +58,40 @@ async fn define_statement_database() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn define_statement_function() -> Result<(), Error> {
+	let sql = "
+		DEFINE FUNCTION fn::test($first: string, $last: string) {
+			RETURN $first + $last;
+		};
+		INFO FOR DB;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			dl: {},
+			dt: {},
+			fc: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; }' },
+			pa: {},
+			sc: {},
+			pa: {},
+			sc: {},
+			tb: {},
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn define_statement_table_drop() -> Result<(), Error> {
 	let sql = "
 		DEFINE TABLE test DROP;
@@ -76,8 +110,7 @@ async fn define_statement_table_drop() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
-			pa: {},
-			sc: {},
+			fc: {},
 			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test DROP SCHEMALESS' },
@@ -107,6 +140,7 @@ async fn define_statement_table_schemaless() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			fc: {},
 			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMALESS' },
@@ -140,6 +174,7 @@ async fn define_statement_table_schemafull() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			fc: {},
 			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },
@@ -169,6 +204,7 @@ async fn define_statement_table_schemaful() -> Result<(), Error> {
 		"{
 			dl: {},
 			dt: {},
+			fc: {},
 			pa: {},
 			sc: {},
 			tb: { test: 'DEFINE TABLE test SCHEMAFULL' },

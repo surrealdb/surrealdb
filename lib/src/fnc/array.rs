@@ -9,6 +9,26 @@ use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
 
+pub fn add((array, value): (Value, Value)) -> Result<Value, Error> {
+	match (array, value) {
+		(Value::Array(mut arr), Value::Array(other)) => {
+			for v in other.0 {
+				if !arr.0.iter().any(|x| *x == v) {
+					arr.0.push(v)
+				}
+			}
+			Ok(arr.into())
+		}
+		(Value::Array(mut arr), value) => {
+			if !arr.0.iter().any(|x| *x == value) {
+				arr.0.push(value)
+			}
+			Ok(arr.into())
+		}
+		_ => Ok(Value::None),
+	}
+}
+
 pub fn all((arg,): (Value,)) -> Result<Value, Error> {
 	match arg {
 		Value::Array(v) => Ok(v.iter().all(Value::is_truthy).into()),
@@ -20,6 +40,16 @@ pub fn any((arg,): (Value,)) -> Result<Value, Error> {
 	match arg {
 		Value::Array(v) => Ok(v.iter().any(Value::is_truthy).into()),
 		_ => Ok(Value::False),
+	}
+}
+
+pub fn append((array, value): (Value, Value)) -> Result<Value, Error> {
+	match array {
+		Value::Array(mut v) => {
+			v.push(value);
+			Ok(v.into())
+		}
+		_ => Ok(Value::None),
 	}
 }
 
@@ -86,6 +116,7 @@ pub fn insert((array, value, index): (Value, Value, Option<Value>)) -> Result<Va
 			}
 			// Insert the value into the array
 			v.insert(i as usize, value);
+			// Return the array
 			Ok(v.into())
 		}
 		(Value::Array(mut v), None) => {
@@ -120,6 +151,65 @@ pub fn max((arg,): (Value,)) -> Result<Value, Error> {
 pub fn min((arg,): (Value,)) -> Result<Value, Error> {
 	match arg {
 		Value::Array(v) => Ok(v.into_iter().min().unwrap_or(Value::None)),
+		_ => Ok(Value::None),
+	}
+}
+
+pub fn pop((arg,): (Value,)) -> Result<Value, Error> {
+	match arg {
+		Value::Array(mut v) => Ok(v.pop().into()),
+		_ => Ok(Value::None),
+	}
+}
+
+pub fn prepend((array, value): (Value, Value)) -> Result<Value, Error> {
+	match array {
+		Value::Array(mut v) => {
+			v.insert(0, value);
+			Ok(v.into())
+		}
+		_ => Ok(Value::None),
+	}
+}
+
+pub fn push((array, value): (Value, Value)) -> Result<Value, Error> {
+	match array {
+		Value::Array(mut v) => {
+			v.push(value);
+			Ok(v.into())
+		}
+		_ => Ok(Value::None),
+	}
+}
+
+pub fn remove((array, index): (Value, Value)) -> Result<Value, Error> {
+	match (array, index) {
+		(Value::Array(mut v), Value::Number(i)) => {
+			let mut i = i.as_int();
+			// Negative index means start from the back
+			if i < 0 {
+				i += v.len() as i64;
+			}
+			// Invalid index so return array unaltered
+			if i > v.len() as i64 || i < 0 {
+				return Ok(v.into());
+			}
+			// Remove the value from the array
+			v.remove(i as usize);
+			// Return the array
+			Ok(v.into())
+		}
+		(Value::Array(v), _) => Ok(v.into()),
+		(_, _) => Ok(Value::None),
+	}
+}
+
+pub fn reverse((arg,): (Value,)) -> Result<Value, Error> {
+	match arg {
+		Value::Array(mut v) => {
+			v.reverse();
+			Ok(v.into())
+		}
 		_ => Ok(Value::None),
 	}
 }

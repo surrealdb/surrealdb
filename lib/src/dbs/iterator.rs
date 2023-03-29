@@ -241,10 +241,7 @@ impl Iterator {
 						if let Field::Alias(v, i) = field {
 							match v {
 								Value::Function(f) if f.is_aggregate() => {
-									let x = vals
-										.all()
-										.get(ctx, opt, txn, v.to_idiom().as_ref())
-										.await?;
+									let x = vals.all().get(ctx, opt, txn, i).await?;
 									let x = f.aggregate(x).compute(ctx, opt, txn, None).await?;
 									obj.set(ctx, opt, txn, i, x).await?;
 								}

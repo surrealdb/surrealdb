@@ -96,8 +96,9 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 	Ok((i, Values(v)))
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Deserialize, Store, Hash)]
 pub enum Value {
+	#[default]
 	None,
 	Null,
 	False,
@@ -132,12 +133,6 @@ impl Eq for Value {}
 impl Ord for Value {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.partial_cmp(other).unwrap_or(Ordering::Equal)
-	}
-}
-
-impl Default for Value {
-	fn default() -> Value {
-		Value::None
 	}
 }
 
@@ -592,6 +587,7 @@ impl Value {
 	// Initial record value
 	// -----------------------------------
 
+	/// Create an empty Object Value
 	pub fn base() -> Self {
 		Value::Object(Object::default())
 	}
@@ -600,10 +596,12 @@ impl Value {
 	// Builtin types
 	// -----------------------------------
 
+	/// Convert this Value to a Result
 	pub fn ok(self) -> Result<Value, Error> {
 		Ok(self)
 	}
 
+	/// Convert this Value to an Option
 	pub fn output(self) -> Option<Value> {
 		match self {
 			Value::None => None,
@@ -615,22 +613,27 @@ impl Value {
 	// Simple value detection
 	// -----------------------------------
 
+	/// Check if this Value is NONE or NULL
 	pub fn is_none_or_null(&self) -> bool {
 		matches!(self, Value::None | Value::Null)
 	}
 
+	/// Check if this Value is NONE
 	pub fn is_none(&self) -> bool {
 		matches!(self, Value::None)
 	}
 
+	/// Check if this Value is NULL
 	pub fn is_null(&self) -> bool {
 		matches!(self, Value::Null)
 	}
 
+	/// Check if this Value not NONE or NULL
 	pub fn is_some(&self) -> bool {
 		!self.is_none() && !self.is_null()
 	}
 
+	/// Check if this Value is TRUE or 'true'
 	pub fn is_true(&self) -> bool {
 		match self {
 			Value::True => true,
@@ -639,6 +642,7 @@ impl Value {
 		}
 	}
 
+	/// Check if this Value is FALSE or 'false'
 	pub fn is_false(&self) -> bool {
 		match self {
 			Value::False => true,
@@ -647,6 +651,7 @@ impl Value {
 		}
 	}
 
+	/// Check if this Value is truthy
 	pub fn is_truthy(&self) -> bool {
 		match self {
 			Value::True => true,
@@ -664,85 +669,105 @@ impl Value {
 		}
 	}
 
+	/// Check if this Value is a UUID
 	pub fn is_uuid(&self) -> bool {
 		matches!(self, Value::Uuid(_))
 	}
 
+	/// Check if this Value is a Thing
 	pub fn is_thing(&self) -> bool {
 		matches!(self, Value::Thing(_))
 	}
 
+	/// Check if this Value is a Model
 	pub fn is_model(&self) -> bool {
 		matches!(self, Value::Model(_))
 	}
 
+	/// Check if this Value is a Range
 	pub fn is_range(&self) -> bool {
 		matches!(self, Value::Range(_))
 	}
 
+	/// Check if this Value is a Table
 	pub fn is_table(&self) -> bool {
 		matches!(self, Value::Table(_))
 	}
 
+	/// Check if this Value is a Strand
 	pub fn is_strand(&self) -> bool {
 		matches!(self, Value::Strand(_))
 	}
 
+	/// Check if this Value is an Array
 	pub fn is_array(&self) -> bool {
 		matches!(self, Value::Array(_))
 	}
 
+	/// Check if this Value is an Object
 	pub fn is_object(&self) -> bool {
 		matches!(self, Value::Object(_))
 	}
 
+	/// Check if this Value is a Number
 	pub fn is_number(&self) -> bool {
 		matches!(self, Value::Number(_))
 	}
 
+	/// Check if this Value is an int Number
 	pub fn is_int(&self) -> bool {
 		matches!(self, Value::Number(Number::Int(_)))
 	}
 
+	/// Check if this Value is a float Number
 	pub fn is_float(&self) -> bool {
 		matches!(self, Value::Number(Number::Float(_)))
 	}
 
+	/// Check if this Value is a decimal Number
 	pub fn is_decimal(&self) -> bool {
 		matches!(self, Value::Number(Number::Decimal(_)))
 	}
 
+	/// Check if this Value is a Number and is an integer
 	pub fn is_integer(&self) -> bool {
 		matches!(self, Value::Number(v) if v.is_integer())
 	}
 
+	/// Check if this Value is a Number and is positive
 	pub fn is_positive(&self) -> bool {
 		matches!(self, Value::Number(v) if v.is_positive())
 	}
 
+	/// Check if this Value is a Number and is negative
 	pub fn is_negative(&self) -> bool {
 		matches!(self, Value::Number(v) if v.is_negative())
 	}
 
+	/// Check if this Value is a Number and is zero or positive
 	pub fn is_zero_or_positive(&self) -> bool {
 		matches!(self, Value::Number(v) if v.is_zero_or_positive())
 	}
 
+	/// Check if this Value is a Number and is zero or negative
 	pub fn is_zero_or_negative(&self) -> bool {
 		matches!(self, Value::Number(v) if v.is_zero_or_negative())
 	}
 
+	/// Check if this Value is a Datetime
 	pub fn is_datetime(&self) -> bool {
 		matches!(self, Value::Datetime(_))
 	}
 
+	/// Check if this Value is a Thing of a specific type
 	pub fn is_type_record(&self, types: &[Table]) -> bool {
 		match self {
-			Value::Thing(v) => types.iter().any(|tb| tb.0 == v.tb),
+			Value::Thing(v) => types.is_empty() || types.iter().any(|tb| tb.0 == v.tb),
 			_ => false,
 		}
 	}
 
+	/// Check if this Value is a Geometry of a specific type
 	pub fn is_type_geometry(&self, types: &[String]) -> bool {
 		match self {
 			Value::Geometry(Geometry::Point(_)) => {
@@ -774,6 +799,7 @@ impl Value {
 	// Simple conversion of value
 	// -----------------------------------
 
+	/// Convert this Value into an i64
 	pub fn as_int(self) -> i64 {
 		match self {
 			Value::True => 1,
@@ -785,6 +811,7 @@ impl Value {
 		}
 	}
 
+	/// Convert this Value into a f64
 	pub fn as_float(self) -> f64 {
 		match self {
 			Value::True => 1.0,
@@ -796,6 +823,7 @@ impl Value {
 		}
 	}
 
+	/// Convert this Value into a BigDecimal
 	pub fn as_decimal(self) -> BigDecimal {
 		match self {
 			Value::True => BigDecimal::from(1),
@@ -807,6 +835,7 @@ impl Value {
 		}
 	}
 
+	/// Convert this Value into a Number
 	pub fn as_number(self) -> Number {
 		match self {
 			Value::True => Number::from(1),
@@ -818,6 +847,7 @@ impl Value {
 		}
 	}
 
+	/// Convert this Value into a Strand
 	pub fn as_strand(self) -> Strand {
 		match self {
 			Value::Strand(v) => v,
@@ -827,6 +857,7 @@ impl Value {
 		}
 	}
 
+	/// Convert this Value into a Datetime
 	pub fn as_datetime(self) -> Datetime {
 		match self {
 			Value::Strand(v) => Datetime::from(v.as_str()),
@@ -835,6 +866,7 @@ impl Value {
 		}
 	}
 
+	/// Convert this Value into a Duration
 	pub fn as_duration(self) -> Duration {
 		match self {
 			Value::Strand(v) => Duration::from(v.as_str()),
@@ -843,6 +875,7 @@ impl Value {
 		}
 	}
 
+	/// Convert this Value into a String
 	pub fn as_string(self) -> String {
 		match self {
 			Value::Strand(v) => v.0,
@@ -852,6 +885,7 @@ impl Value {
 		}
 	}
 
+	/// Convert this Value into a usize
 	pub fn as_usize(self) -> usize {
 		match self {
 			Value::Number(v) => v.as_usize(),
@@ -859,6 +893,7 @@ impl Value {
 		}
 	}
 
+	/// Converts this Value into an unquoted String
 	pub fn as_raw_string(self) -> String {
 		match self {
 			Value::Strand(v) => v.0,
@@ -872,6 +907,7 @@ impl Value {
 	// Expensive conversion of value
 	// -----------------------------------
 
+	/// Convert this Value into a Number
 	pub fn to_number(&self) -> Number {
 		match self {
 			Value::True => Number::from(1),
@@ -883,6 +919,7 @@ impl Value {
 		}
 	}
 
+	/// Converts this Value into a Strand
 	pub fn to_strand(&self) -> Strand {
 		match self {
 			Value::Strand(v) => v.clone(),
@@ -892,6 +929,7 @@ impl Value {
 		}
 	}
 
+	/// Converts this Value into a Datetime
 	pub fn to_datetime(&self) -> Datetime {
 		match self {
 			Value::Strand(v) => Datetime::from(v.as_str()),
@@ -900,6 +938,7 @@ impl Value {
 		}
 	}
 
+	/// Converts this Value into a Duration
 	pub fn to_duration(&self) -> Duration {
 		match self {
 			Value::Strand(v) => Duration::from(v.as_str()),
@@ -908,6 +947,7 @@ impl Value {
 		}
 	}
 
+	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
 			Value::Strand(v) => v.0.to_owned(),
@@ -917,22 +957,20 @@ impl Value {
 		}
 	}
 
+	/// Converts this Value into a field name
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
 			Value::Param(v) => v.simplify(),
 			Value::Idiom(v) => v.simplify(),
 			Value::Strand(v) => v.0.to_string().into(),
 			Value::Datetime(v) => v.0.to_string().into(),
-			Value::Future(_) => "fn::future".to_string().into(),
-			Value::Function(v) => match v.as_ref() {
-				Function::Script(_, _) => "fn::script".to_string().into(),
-				Function::Normal(f, _) => f.to_string().into(),
-				Function::Cast(_, v) => v.to_idiom(),
-			},
+			Value::Future(_) => "future".to_string().into(),
+			Value::Function(v) => v.to_idiom(),
 			_ => self.to_string().into(),
 		}
 	}
 
+	/// Try to convert this Value into a set of JSONPatch operations
 	pub fn to_operations(&self) -> Result<Vec<Operation>, Error> {
 		match self {
 			Value::Array(v) => v
@@ -1054,15 +1092,19 @@ impl Value {
 	/// Fetch the record id if there is one
 	pub fn record(self) -> Option<Thing> {
 		match self {
+			// This is an object so look for the id field
 			Value::Object(mut v) => match v.remove("id") {
 				Some(Value::Thing(v)) => Some(v),
 				_ => None,
 			},
+			// This is an array so take the first item
 			Value::Array(mut v) => match v.len() {
 				1 => v.remove(0).record(),
 				_ => None,
 			},
+			// This is a record id already
 			Value::Thing(v) => Some(v),
+			// There is no valid record id
 			_ => None,
 		}
 	}
@@ -1071,7 +1113,7 @@ impl Value {
 	// JSON Path conversion
 	// -----------------------------------
 
-	/// Converts this value to a JSONPatch path
+	/// Converts this Value into a JSONPatch path
 	pub(crate) fn jsonpath(&self) -> Idiom {
 		self.to_strand()
 			.as_str()
@@ -1110,6 +1152,7 @@ impl Value {
 	// Value operations
 	// -----------------------------------
 
+	/// Check if this Value is equal to another Value
 	pub fn equal(&self, other: &Value) -> bool {
 		match self {
 			Value::None => other.is_none(),
@@ -1183,6 +1226,7 @@ impl Value {
 		}
 	}
 
+	/// Check if all Values in an Array are equal to another Value
 	pub fn all_equal(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().all(|v| v.equal(other)),
@@ -1190,6 +1234,7 @@ impl Value {
 		}
 	}
 
+	/// Check if any Values in an Array are equal to another Value
 	pub fn any_equal(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
@@ -1197,6 +1242,7 @@ impl Value {
 		}
 	}
 
+	/// Fuzzy check if this Value is equal to another Value
 	pub fn fuzzy(&self, other: &Value) -> bool {
 		match self {
 			Value::Strand(v) => match other {
@@ -1207,6 +1253,7 @@ impl Value {
 		}
 	}
 
+	/// Fuzzy check if all Values in an Array are equal to another Value
 	pub fn all_fuzzy(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().all(|v| v.fuzzy(other)),
@@ -1214,6 +1261,7 @@ impl Value {
 		}
 	}
 
+	/// Fuzzy check if any Values in an Array are equal to another Value
 	pub fn any_fuzzy(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.fuzzy(other)),
@@ -1221,6 +1269,7 @@ impl Value {
 		}
 	}
 
+	/// Check if this Value contains another Value
 	pub fn contains(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
@@ -1240,6 +1289,7 @@ impl Value {
 		}
 	}
 
+	/// Check if all Values in an Array contain another Value
 	pub fn contains_all(&self, other: &Value) -> bool {
 		match other {
 			Value::Array(v) => v.iter().all(|v| match self {
@@ -1251,6 +1301,7 @@ impl Value {
 		}
 	}
 
+	/// Check if any Values in an Array contain another Value
 	pub fn contains_any(&self, other: &Value) -> bool {
 		match other {
 			Value::Array(v) => v.iter().any(|v| match self {
@@ -1262,6 +1313,7 @@ impl Value {
 		}
 	}
 
+	/// Check if this Value intersects another Value
 	pub fn intersects(&self, other: &Value) -> bool {
 		match self {
 			Value::Geometry(v) => match other {
@@ -1276,23 +1328,26 @@ impl Value {
 	// Sorting operations
 	// -----------------------------------
 
+	/// Compare this Value to another Value lexicographically
 	pub fn lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexical_sort::lexical_cmp(a, b)),
+			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
 
+	/// Compare this Value to another Value using natrual numerical comparison
 	pub fn natural_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexical_sort::natural_cmp(a, b)),
+			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
 
+	/// Compare this Value to another Value lexicographically and using natrual numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexical_sort::natural_lexical_cmp(a, b)),
+			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}

@@ -1,12 +1,11 @@
 use crate::err::Error;
 use rustyline::error::ReadlineError;
-use rustyline::Editor;
+use rustyline::DefaultEditor;
 use serde_json::Value;
 use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
 use surrealdb::sql;
-use surrealdb::sql::statements::SetStatement;
 use surrealdb::sql::Statement;
 use surrealdb::Error as SurrealError;
 use surrealdb::Response;
@@ -40,7 +39,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 		}
 	}
 	// Create a new terminal REPL
-	let mut rl = Editor::<()>::new().unwrap();
+	let mut rl = DefaultEditor::new().unwrap();
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
 	// Configure the prompt
@@ -67,7 +66,9 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 					continue;
 				}
 				// Add the entry to the history
-				rl.add_history_entry(line.as_str());
+				if let Err(e) = rl.add_history_entry(line.as_str()) {
+					eprintln!("{e}");
+				}
 				// Complete the request
 				match sql::parse(&line) {
 					Ok(query) => {
@@ -81,12 +82,9 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 										db = Some(database.clone());
 									}
 								}
-								Statement::Set(SetStatement {
-									name,
-									what,
-								}) => {
-									if let Err(error) = client.set(name, what).await {
-										eprintln!("{error}");
+								Statement::Set(stmt) => {
+									if let Err(e) = client.set(&stmt.name, &stmt.what).await {
+										eprintln!("{e}");
 									}
 								}
 								_ => {}
@@ -99,7 +97,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 							Err(e) => eprintln!("{e}"),
 						}
 					}
-					Err(error) => eprintln!("{error}"),
+					Err(e) => eprintln!("{e}"),
 				}
 			}
 			// The user types CTRL-C
@@ -111,8 +109,8 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				break;
 			}
 			// There was en error
-			Err(err) => {
-				eprintln!("Error: {err:?}");
+			Err(e) => {
+				eprintln!("Error: {e:?}");
 				break;
 			}
 		}

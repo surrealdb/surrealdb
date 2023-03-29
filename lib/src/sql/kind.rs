@@ -7,7 +7,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::combinator::map;
-use nom::multi::separated_list1;
+use nom::multi::{separated_list0, separated_list1};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
@@ -76,7 +76,7 @@ fn record(i: &str) -> IResult<&str, Vec<Table>> {
 	let (i, _) = tag("record")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
-	let (i, v) = separated_list1(commas, table)(i)?;
+	let (i, v) = separated_list0(commas, table)(i)?;
 	let (i, _) = char(')')(i)?;
 	Ok((i, v))
 }

@@ -1,4 +1,4 @@
-use deunicode::deunicode;
+use ascii::any_ascii as ascii;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -9,7 +9,7 @@ pub fn slug<S: AsRef<str>>(s: S) -> String {
 	// Get a reference
 	let s = s.as_ref();
 	// Convert unicode to ascii
-	let mut s = deunicode(s);
+	let mut s = ascii(s);
 	// Convert string to lowercase
 	s.make_ascii_lowercase();
 	// Replace any non-simple characters
