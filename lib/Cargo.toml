@@ -55,6 +55,7 @@ argon2 = "0.4.1"
 async-recursion = "1.0.2"
 bcrypt = "0.14.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
+bincode = "1.3.3"
 channel = { version = "1.8.0", package = "async-channel" }
 chrono = { version = "0.4.23", features = ["serde"] }
 derive = { version = "0.5.0", package = "surrealdb-derive" }
@@ -62,6 +63,7 @@ deunicode = "1.3.3"
 dmp = "0.1.2"
 echodb = { version = "0.3.0", optional = true }
 executor = { version = "1.5.0", package = "async-executor" }
+flate2 = "1.0.25"
 flume = "0.10.14"
 fst = "0.4.7"
 futures = "0.3.26"

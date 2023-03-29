@@ -1,5 +1,5 @@
+use crate::idx::bkeys::FstKeys;
 use crate::idx::docids::DocId;
-use crate::idx::fstmap::FstMap;
 use crate::idx::ft::terms::{TermFrequency, TermId};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -10,7 +10,7 @@ pub(super) struct TermFrequencies {
 }
 
 struct TermFrequencyPartition {
-	_doc_freq: FstMap,
+	_doc_freq: FstKeys,
 }
 
 impl TermFrequencies {
@@ -50,7 +50,7 @@ impl TermFrequenciesPartitions {
 impl TermFrequencyPartition {
 	fn new(_doc_id: &DocId, _term_freq: TermFrequency) -> Self {
 		Self {
-			_doc_freq: FstMap::new().unwrap(),
+			_doc_freq: FstKeys::default(),
 		}
 	}
 }

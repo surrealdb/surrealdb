@@ -58,7 +58,7 @@ impl KVSimulator {
 			let bytes = key.len() + vec.len();
 			self.bytes_read += bytes;
 			self.network_transport(bytes);
-			Some((vec.len(), serde_json::from_slice(vec).unwrap()))
+			Some((vec.len(), bincode::deserialize(vec.as_slice()).unwrap()))
 		} else {
 			None
 		}
@@ -66,7 +66,7 @@ impl KVSimulator {
 
 	pub(super) fn set<V: Serialize>(&mut self, key: Vec<u8>, value: &V) -> usize {
 		self.network_latency();
-		let val = serde_json::to_vec(value).unwrap();
+		let val = bincode::serialize(value).unwrap();
 		self.set_count += 1;
 		let bytes = key.len() + val.len();
 		self.bytes_write += bytes;

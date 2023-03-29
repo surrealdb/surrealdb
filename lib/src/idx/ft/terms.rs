@@ -1,6 +1,6 @@
-use crate::idx::fstmap::FstMap;
+use crate::idx::bkeys::{BKeys, FstKeys};
 use crate::idx::kvsim::KVSimulator;
-use crate::idx::partition::{PartitionMap, _MAX_PARTITION_SIZE};
+use crate::idx::partition::PartitionMap;
 use radix_trie::Trie;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -104,7 +104,7 @@ impl Terms {
 
 #[derive(Serialize, Deserialize)]
 struct TermsPartition {
-	terms: FstMap,
+	terms: FstKeys,
 	#[serde(skip)]
 	additions: Trie<Vec<u8>, u64>,
 	#[serde(skip)]
@@ -114,7 +114,7 @@ struct TermsPartition {
 impl TermsPartition {
 	fn new() -> Self {
 		Self {
-			terms: FstMap::new().unwrap(),
+			terms: FstKeys::default(),
 			additions: Default::default(),
 			updated: false,
 		}
@@ -128,17 +128,12 @@ impl TermsPartition {
 		self.additions.insert(term.as_bytes().to_vec(), term_id);
 		self.updated = true;
 	}
-
-	fn _is_full(&self) -> bool {
-		self.terms.size() >= _MAX_PARTITION_SIZE
-	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::terms::{TermFrequency, Terms, TermsPartition};
+	use crate::idx::ft::terms::{TermFrequency, Terms};
 	use crate::idx::kvsim::KVSimulator;
-	use radix_trie::TrieCommon;
 	use rand::{thread_rng, Rng};
 	use std::collections::HashSet;
 
@@ -156,36 +151,6 @@ mod tests {
 			set.insert(random_term(key_length));
 		}
 		set
-	}
-
-	fn create_terms_partition(key_length: usize) -> TermsPartition {
-		let set = unique_terms(key_length, 1000);
-		let mut tp = TermsPartition::new();
-		let mut i = 0;
-		for key in &set {
-			tp.add_term_id(key, i);
-			i += 1;
-		}
-		assert_eq!(tp.additions.len(), 1000);
-		assert_eq!(tp.terms.len(), 0);
-		// tp.rebuild();
-		assert_eq!(tp.additions.len(), 0);
-		assert_eq!(tp.terms.len(), 1000);
-		println!("{}: {} {}", key_length, tp.terms.size(), tp.terms.size() / key_length);
-		tp
-	}
-
-	#[test]
-	fn compute_term_partition_size_ratio() {
-		let tp1 = create_terms_partition(4);
-		let tp2 = create_terms_partition(8);
-		let tp3 = create_terms_partition(20);
-		let tp4 = create_terms_partition(50);
-		let tp5 = create_terms_partition(100);
-		assert!(tp2.terms.size() > tp1.terms.size());
-		assert!(tp3.terms.size() > tp2.terms.size());
-		assert!(tp4.terms.size() > tp3.terms.size());
-		assert!(tp5.terms.size() > tp4.terms.size());
 	}
 
 	#[test]
