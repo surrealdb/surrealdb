@@ -1,9 +1,8 @@
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
-use std::io::{BufReader, Read, Write};
+use std::io;
 
 pub(super) trait BKeys: Display + Sized {
 	fn with_key_val<K>(key: K, value: u64) -> Self
@@ -240,11 +239,14 @@ impl Serialize for TrieKeys {
 	where
 		S: serde::Serializer,
 	{
-		let uncompressed_data = bincode::serialize(&self.keys).unwrap();
-		let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-		encoder.write_all(&uncompressed_data).unwrap();
-		let compressed_data = encoder.finish().unwrap();
-		serializer.serialize_bytes(&compressed_data)
+		let uncompressed = bincode::serialize(&self.keys).unwrap();
+		let mut reader = uncompressed.as_slice();
+		let mut compressed: Vec<u8> = Vec::new();
+		{
+			let mut wtr = snap::write::FrameEncoder::new(&mut compressed);
+			io::copy(&mut reader, &mut wtr).expect("I/O operation failed");
+		}
+		serializer.serialize_bytes(&compressed)
 	}
 }
 
@@ -254,11 +256,13 @@ impl<'de> Deserialize<'de> for TrieKeys {
 		D: serde::Deserializer<'de>,
 	{
 		let compressed: Vec<u8> = Deserialize::deserialize(deserializer)?;
-		let decoder = GzDecoder::new(compressed.as_slice());
-		let mut buf_reader = BufReader::new(decoder);
-		let mut decompressed_data = Vec::new();
-		buf_reader.read_to_end(&mut decompressed_data).unwrap();
-		let keys: Trie<Vec<u8>, u64> = bincode::deserialize(&decompressed_data).unwrap();
+		let reader = compressed.as_slice();
+		let mut uncompressed: Vec<u8> = Vec::new();
+		{
+			let mut rdr = snap::read::FrameDecoder::new(reader);
+			io::copy(&mut rdr, &mut uncompressed).expect("I/O operation failed");
+		}
+		let keys: Trie<Vec<u8>, u64> = bincode::deserialize(&uncompressed).unwrap();
 		Ok(Self {
 			keys,
 		})

@@ -3499,6 +3499,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
 
 [[package]]
+name = "snap"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e9f0ab6ef7eb7353d9119c170a436d1bf248eea575ac42d19d12f4e34130831"
+
+[[package]]
 name = "socket2"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3611,7 +3617,6 @@ dependencies = [
  "dmp",
  "echodb",
  "env_logger 0.10.0",
- "flate2",
  "flume",
  "foundationdb",
  "fst",
@@ -3645,6 +3650,7 @@ dependencies = [
  "serde_json",
  "sha-1",
  "sha2",
+ "snap",
  "storekey",
  "surrealdb-derive",
  "temp-dir",
