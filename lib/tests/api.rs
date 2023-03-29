@@ -69,7 +69,6 @@ mod ws {
 }
 
 #[cfg(feature = "protocol-http")]
-#[ignore]
 mod http {
 	use super::*;
 	use surrealdb::engine::remote::http::Client;
@@ -155,7 +154,6 @@ mod fdb {
 }
 
 #[cfg(feature = "protocol-http")]
-#[ignore]
 mod any {
 	use super::*;
 	use surrealdb::engine::any::Any;
