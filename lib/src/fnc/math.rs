@@ -64,10 +64,14 @@ pub fn max((array,): (Value,)) -> Result<Value, Error> {
 
 pub fn mean((array,): (Value,)) -> Result<Value, Error> {
 	Ok(match array {
-		Value::Array(v) => match v.is_empty() {
-			true => Value::None,
-			false => v.as_numbers().mean().into(),
-		},
+		Value::Array(v) => {
+			let numbers = v.as_numbers();
+			if numbers.is_empty() {
+				Value::None
+			} else {
+				numbers.mean().into()
+			}
+		}
 		_ => Value::None,
 	})
 }
