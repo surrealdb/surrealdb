@@ -10,6 +10,8 @@ use std::io::copy;
 const TYPE: &str = "application/octet-stream";
 
 pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+	// Initialize opentelemetry and logging
+	crate::o11y::builder().with_log_level("error").init();
 	// Try to parse the specified source file
 	let from = matches.value_of("from").unwrap();
 	// Try to parse the specified output file

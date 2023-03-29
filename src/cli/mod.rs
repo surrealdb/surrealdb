@@ -3,7 +3,6 @@ mod config;
 mod export;
 mod import;
 mod isready;
-mod log;
 mod sql;
 mod start;
 mod version;
@@ -13,6 +12,8 @@ pub use config::CF;
 use crate::cnf::LOGO;
 use clap::{Arg, Command};
 use std::process::ExitCode;
+use tracing::Level;
+use tracing_subscriber::EnvFilter;
 
 pub const LOG: &str = "surrealdb::cli";
 
@@ -120,6 +121,26 @@ fn key_valid(v: &str) -> Result<(), String> {
 	}
 }
 
+fn log_valid(v: &str) -> Result<String, String> {
+	match v {
+		// Check if we should show all log levels
+		"full" => Ok(Level::TRACE.to_string()),
+		// Otherwise, let's only show errors
+		"error" => Ok(Level::ERROR.to_string()),
+		// Specify the log level for each code area
+		"warn" | "info" | "debug" | "trace" => {
+			Ok(format!("error,surreal={v},surrealdb={v},surrealdb::txn=error"))
+		}
+		// Let's try to parse the custom log level
+		_ => match EnvFilter::builder().parse(v) {
+			// The custom log level parsed successfully
+			Ok(_) => Ok(v.to_owned()),
+			// There was an error parsing the custom log level
+			Err(_) => Err(String::from("Error parsing logging configuration")),
+		},
+	}
+}
+
 pub fn init() -> ExitCode {
 	let setup = Command::new("SurrealDB command-line interface and server")
 		.about(INFO)
@@ -134,7 +155,7 @@ pub fn init() -> ExitCode {
 			.arg(
 				Arg::new("path")
 					.index(1)
-					.env("DB_PATH")
+					.env("SURREAL_PATH")
 					.required(false)
 					.validator(path_valid)
 					.default_value("memory")
@@ -143,7 +164,7 @@ pub fn init() -> ExitCode {
 			.arg(
 				Arg::new("user")
 					.short('u')
-					.env("USER")
+					.env("SURREAL_USER")
 					.long("user")
 					.forbid_empty_values(true)
 					.default_value("root")
@@ -152,7 +173,7 @@ pub fn init() -> ExitCode {
 			.arg(
 				Arg::new("pass")
 					.short('p')
-					.env("PASS")
+					.env("SURREAL_PASS")
 					.long("pass")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -160,7 +181,7 @@ pub fn init() -> ExitCode {
 			)
 			.arg(
 				Arg::new("addr")
-					.env("ADDR")
+					.env("SURREAL_ADDR")
 					.long("addr")
 					.number_of_values(1)
 					.forbid_empty_values(true)
@@ -171,7 +192,7 @@ pub fn init() -> ExitCode {
 			.arg(
 				Arg::new("bind")
 					.short('b')
-					.env("BIND")
+					.env("SURREAL_BIND")
 					.long("bind")
 					.forbid_empty_values(true)
 					.default_value("0.0.0.0:8000")
@@ -180,7 +201,7 @@ pub fn init() -> ExitCode {
 			.arg(
 				Arg::new("key")
 					.short('k')
-					.env("KEY")
+					.env("SURREAL_KEY")
 					.long("key")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -189,7 +210,7 @@ pub fn init() -> ExitCode {
 			)
 			.arg(
 				Arg::new("kvs-ca")
-					.env("KVS_CA")
+					.env("SURREAL_KVS_CA")
 					.long("kvs-ca")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -197,7 +218,7 @@ pub fn init() -> ExitCode {
 			)
 			.arg(
 				Arg::new("kvs-crt")
-					.env("KVS_CRT")
+					.env("SURREAL_KVS_CRT")
 					.long("kvs-crt")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -207,7 +228,7 @@ pub fn init() -> ExitCode {
 			)
 			.arg(
 				Arg::new("kvs-key")
-					.env("KVS_KEY")
+					.env("SURREAL_KVS_KEY")
 					.long("kvs-key")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -217,7 +238,7 @@ pub fn init() -> ExitCode {
 			)
 			.arg(
 				Arg::new("web-crt")
-					.env("WEB_CRT")
+					.env("SURREAL_WEB_CRT")
 					.long("web-crt")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -225,7 +246,7 @@ pub fn init() -> ExitCode {
 			)
 			.arg(
 				Arg::new("web-key")
-					.env("WEB_KEY")
+					.env("SURREAL_WEB_KEY")
 					.long("web-key")
 					.takes_value(true)
 					.forbid_empty_values(true)
@@ -234,7 +255,7 @@ pub fn init() -> ExitCode {
 			.arg(
 				Arg::new("strict")
 					.short('s')
-					.env("STRICT")
+					.env("SURREAL_STRICT")
 					.long("strict")
 					.required(false)
 					.takes_value(false)
@@ -243,17 +264,17 @@ pub fn init() -> ExitCode {
 			.arg(
 				Arg::new("log")
 					.short('l')
-					.env("LOG")
+					.env("SURREAL_LOG")
 					.long("log")
 					.takes_value(true)
 					.default_value("info")
 					.forbid_empty_values(true)
-					.help("The logging level for the database server")
-					.value_parser(["warn", "info", "debug", "trace", "full"]),
+					.value_parser(log_valid)
+					.help("The logging level for the database server. One of error, warn, info, debug, trace, full."),
 			)
 			.arg(
 				Arg::new("no-banner")
-					.env("NO_BANNER")
+					.env("SURREAL_NO_BANNER")
 					.long("no-banner")
 					.required(false)
 					.takes_value(false)

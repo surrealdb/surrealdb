@@ -13,7 +13,9 @@ use crate::sql::Query;
 use crate::sql::Value;
 use channel::Sender;
 use futures::lock::Mutex;
+use std::fmt;
 use std::sync::Arc;
+use tracing::instrument;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -33,6 +35,23 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Datastore),
 	#[cfg(feature = "kv-fdb")]
 	FDB(super::fdb::Datastore),
+}
+
+impl fmt::Display for Datastore {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &self.inner {
+			#[cfg(feature = "kv-mem")]
+			Inner::Mem(_) => write!(f, "memory"),
+			#[cfg(feature = "kv-rocksdb")]
+			Inner::RocksDB(_) => write!(f, "rocksdb"),
+			#[cfg(feature = "kv-indxdb")]
+			Inner::IndxDB(_) => write!(f, "indexdb"),
+			#[cfg(feature = "kv-tikv")]
+			Inner::TiKV(_) => write!(f, "tikv"),
+			#[cfg(feature = "kv-fdb")]
+			Inner::FDB(_) => write!(f, "fdb"),
+		}
+	}
 }
 
 impl Datastore {
@@ -230,6 +249,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[instrument(skip_all)]
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -279,6 +299,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[instrument(skip_all)]
 	pub async fn process(
 		&self,
 		ast: Query,
@@ -327,6 +348,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[instrument(skip_all)]
 	pub async fn compute(
 		&self,
 		val: Value,
@@ -365,6 +387,7 @@ impl Datastore {
 	}
 
 	/// Performs a full database export as SQL
+	#[instrument(skip(self, chn))]
 	pub async fn export(&self, ns: String, db: String, chn: Sender<Vec<u8>>) -> Result<(), Error> {
 		// Start a new transaction
 		let mut txn = self.transaction(false, false).await?;

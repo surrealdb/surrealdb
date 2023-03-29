@@ -26,6 +26,7 @@ use sql::statements::DefineScopeStatement;
 use sql::statements::DefineTableStatement;
 use sql::statements::DefineTokenStatement;
 use sql::statements::LiveStatement;
+use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
@@ -52,6 +53,23 @@ pub(super) enum Inner {
 	TiKV(super::tikv::Transaction),
 	#[cfg(feature = "kv-fdb")]
 	FDB(super::fdb::Transaction),
+}
+
+impl fmt::Display for Transaction {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &self.inner {
+			#[cfg(feature = "kv-mem")]
+			Inner::Mem(_) => write!(f, "memory"),
+			#[cfg(feature = "kv-rocksdb")]
+			Inner::RocksDB(_) => write!(f, "rocksdb"),
+			#[cfg(feature = "kv-indxdb")]
+			Inner::IndxDB(_) => write!(f, "indexdb"),
+			#[cfg(feature = "kv-tikv")]
+			Inner::TiKV(_) => write!(f, "tikv"),
+			#[cfg(feature = "kv-fdb")]
+			Inner::FDB(_) => write!(f, "fdb"),
+		}
+	}
 }
 
 impl Transaction {
