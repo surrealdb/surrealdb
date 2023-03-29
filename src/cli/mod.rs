@@ -11,6 +11,7 @@ pub use config::CF;
 
 use crate::cnf::LOGO;
 use clap::{Arg, Command};
+use std::net::SocketAddr;
 use std::process::ExitCode;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
@@ -43,11 +44,14 @@ fn split_endpoint(v: &str) -> (&str, &str) {
 fn file_valid(v: &str) -> Result<(), String> {
 	match v {
 		v if !v.is_empty() => Ok(()),
-		_ => Err(String::from(
-			"\
-			Provide a valid path to a SQL file\
-		",
-		)),
+		_ => Err(String::from("Provide a valid path to a SQL file")),
+	}
+}
+
+fn bind_valid(v: &str) -> Result<(), String> {
+	match v.parse::<SocketAddr>() {
+		Ok(_) => Ok(()),
+		_ => Err(String::from("Provide a valid network bind parameter")),
 	}
 }
 
@@ -58,11 +62,7 @@ fn path_valid(v: &str) -> Result<(), String> {
 		v if v.starts_with("rocksdb:") => Ok(()),
 		v if v.starts_with("tikv:") => Ok(()),
 		v if v.starts_with("fdb:") => Ok(()),
-		_ => Err(String::from(
-			"\
-			Provide a valid database path parameter\
-		",
-		)),
+		_ => Err(String::from("Provide a valid database path parameter")),
 	}
 }
 
@@ -70,11 +70,7 @@ fn conn_valid(v: &str) -> Result<(), String> {
 	let scheme = split_endpoint(v).0;
 	match scheme {
 		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "file" | "tikv" => Ok(()),
-		_ => Err(String::from(
-			"\
-			Provide a valid database connection string\
-		",
-		)),
+		_ => Err(String::from("Provide a valid database connection string")),
 	}
 }
 
@@ -83,12 +79,7 @@ fn from_valid(v: &str) -> Result<(), String> {
 		v if v.ends_with(".db") => Ok(()),
 		v if v.starts_with("http://") => Ok(()),
 		v if v.starts_with("https://") => Ok(()),
-		_ => Err(String::from(
-			"\
-			Provide a valid database connection string, \
-			or specify the path to a database file\
-		",
-		)),
+		_ => Err(String::from("Provide a valid database connection string, or the path to a file")),
 	}
 }
 
@@ -97,12 +88,7 @@ fn into_valid(v: &str) -> Result<(), String> {
 		v if v.ends_with(".db") => Ok(()),
 		v if v.starts_with("http://") => Ok(()),
 		v if v.starts_with("https://") => Ok(()),
-		_ => Err(String::from(
-			"\
-			Provide a valid database connection string, \
-			or specify the path to a database file\
-		",
-		)),
+		_ => Err(String::from("Provide a valid database connection string, or the path to a file")),
 	}
 }
 
@@ -111,18 +97,14 @@ fn key_valid(v: &str) -> Result<(), String> {
 		16 => Ok(()),
 		24 => Ok(()),
 		32 => Ok(()),
-		_ => Err(String::from(
-			"\
-			For AES-128 encryption use a 16 bit key, \
-			for AES-192 encryption use a 24 bit key, \
-			and for AES-256 encryption use a 32 bit key\
-		",
-		)),
+		_ => Err(String::from("Ensure your database encryption key is 16, 24, or 32 bits long")),
 	}
 }
 
 fn log_valid(v: &str) -> Result<String, String> {
 	match v {
+		// Don't show any logs at all
+		"none" => Ok("none".to_string()),
 		// Check if we should show all log levels
 		"full" => Ok(Level::TRACE.to_string()),
 		// Otherwise, let's only show errors
@@ -136,7 +118,7 @@ fn log_valid(v: &str) -> Result<String, String> {
 			// The custom log level parsed successfully
 			Ok(_) => Ok(v.to_owned()),
 			// There was an error parsing the custom log level
-			Err(_) => Err(String::from("Error parsing logging configuration")),
+			Err(_) => Err(String::from("Provide a valid log filter configuration string")),
 		},
 	}
 }
@@ -194,6 +176,7 @@ pub fn init() -> ExitCode {
 					.short('b')
 					.env("SURREAL_BIND")
 					.long("bind")
+					.validator(bind_valid)
 					.forbid_empty_values(true)
 					.default_value("0.0.0.0:8000")
 					.help("The hostname or ip address to listen for connections on"),
