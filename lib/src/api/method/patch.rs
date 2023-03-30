@@ -14,6 +14,7 @@ use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::result::Result as StdResult;
 
 /// A patch future
 #[derive(Debug)]
@@ -21,7 +22,7 @@ pub struct Patch<'r, C: Connection, R> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) range: Option<Range<Id>>,
-	pub(super) patches: Vec<Value>,
+	pub(super) patches: Vec<StdResult<Value, crate::err::Error>>,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -51,7 +52,11 @@ where
 				Some(range) => resource.with_range(range)?,
 				None => resource.into(),
 			};
-			let patches = Value::Array(Array(self.patches));
+			let mut patches = Vec::with_capacity(self.patches.len());
+			for result in self.patches {
+				patches.push(result?);
+			}
+			let patches = Value::Array(Array(patches));
 			let mut conn = Client::new(Method::Patch);
 			conn.execute(self.router?, Param::new(vec![param, patches])).await
 		})

@@ -21,6 +21,8 @@ use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
+
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Array(pub Vec<Value>);
 
@@ -163,9 +165,9 @@ impl Serialize for Array {
 		S: serde::Serializer,
 	{
 		if is_internal_serialization() {
-			serializer.serialize_newtype_struct("Array", &self.0)
+			serializer.serialize_newtype_struct(TOKEN, &self.0)
 		} else {
-			serializer.serialize_some(&self.0)
+			serializer.serialize_some(&self.to_string())
 		}
 	}
 }

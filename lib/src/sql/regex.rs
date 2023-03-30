@@ -1,4 +1,5 @@
 use crate::sql::error::IResult;
+use crate::sql::serde::is_internal_serialization;
 use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
 use nom::character::complete::anychar;
@@ -8,8 +9,10 @@ use std::fmt;
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-pub struct Regex(String);
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
+
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
+pub struct Regex(pub(super) String);
 
 impl From<&str> for Regex {
 	fn from(r: &str) -> Self {
@@ -33,6 +36,19 @@ impl fmt::Display for Regex {
 impl Regex {
 	pub fn regex(&self) -> Option<regex::Regex> {
 		regex::Regex::new(&self.0).ok()
+	}
+}
+
+impl Serialize for Regex {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		if is_internal_serialization() {
+			serializer.serialize_newtype_struct(TOKEN, &self.0)
+		} else {
+			serializer.serialize_none()
+		}
 	}
 }
 

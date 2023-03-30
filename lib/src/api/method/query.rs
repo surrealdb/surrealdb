@@ -3,10 +3,10 @@ use crate::api::conn::Param;
 use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt;
-use crate::api::opt::from_json;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::sql;
+use crate::sql::to_value;
 use crate::sql::Array;
 use crate::sql::Object;
 use crate::sql::Statement;
@@ -16,7 +16,6 @@ use crate::sql::Value;
 use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::future::Future;
@@ -106,18 +105,24 @@ where
 	/// ```
 	pub fn bind(mut self, bindings: impl Serialize) -> Self {
 		if let Ok(current) = &mut self.bindings {
-			let mut bindings = from_json(json!(bindings));
-			if let Value::Array(Array(array)) = &mut bindings {
-				if let [Value::Strand(Strand(key)), value] = &mut array[..] {
-					let mut map = BTreeMap::new();
-					map.insert(mem::take(key), mem::take(value));
-					bindings = map.into();
+			match to_value(bindings) {
+				Ok(mut bindings) => {
+					if let Value::Array(Array(array)) = &mut bindings {
+						if let [Value::Strand(Strand(key)), value] = &mut array[..] {
+							let mut map = BTreeMap::new();
+							map.insert(mem::take(key), mem::take(value));
+							bindings = map.into();
+						}
+					}
+					match &mut bindings {
+						Value::Object(Object(map)) => current.append(map),
+						_ => {
+							self.bindings = Err(Error::InvalidBindings(bindings).into());
+						}
+					}
 				}
-			}
-			match &mut bindings {
-				Value::Object(Object(map)) => current.append(map),
-				_ => {
-					self.bindings = Err(Error::InvalidBindings(bindings).into());
+				Err(error) => {
+					self.bindings = Err(error.into());
 				}
 			}
 		}
@@ -394,14 +399,15 @@ mod tests {
 		let summary = Summary {
 			title: "Lorem Ipsum".to_owned(),
 		};
+		let value = to_value(summary.clone()).unwrap();
 
-		let mut response = Response(to_map(vec![Ok(vec![from_json(json!(summary.clone()))])]));
+		let mut response = Response(to_map(vec![Ok(vec![value.clone()])]));
 		let Some(title): Option<String> = response.take("title").unwrap() else {
             panic!("title not found");
         };
 		assert_eq!(title, summary.title);
 
-		let mut response = Response(to_map(vec![Ok(vec![from_json(json!(summary.clone()))])]));
+		let mut response = Response(to_map(vec![Ok(vec![value])]));
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![summary.title]);
 
@@ -409,8 +415,9 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 			body: "Lorem Ipsum Lorem Ipsum".to_owned(),
 		};
+		let value = to_value(article.clone()).unwrap();
 
-		let mut response = Response(to_map(vec![Ok(vec![from_json(json!(article.clone()))])]));
+		let mut response = Response(to_map(vec![Ok(vec![value.clone()])]));
 		let Some(title): Option<String> = response.take("title").unwrap() else {
             panic!("title not found");
         };
@@ -420,7 +427,7 @@ mod tests {
         };
 		assert_eq!(body, article.body);
 
-		let mut response = Response(to_map(vec![Ok(vec![from_json(json!(article.clone()))])]));
+		let mut response = Response(to_map(vec![Ok(vec![value])]));
 		let vec: Vec<String> = response.take("title").unwrap();
 		assert_eq!(vec, vec![article.title]);
 	}
