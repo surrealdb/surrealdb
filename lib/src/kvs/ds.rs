@@ -39,6 +39,7 @@ pub(super) enum Inner {
 
 impl fmt::Display for Datastore {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		#![allow(unused_variables)]
 		match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(_) => write!(f, "memory"),
@@ -50,6 +51,8 @@ impl fmt::Display for Datastore {
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
 			Inner::FDB(_) => write!(f, "fdb"),
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
 		}
 	}
 }
