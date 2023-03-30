@@ -14,6 +14,7 @@ use crate::sql::value::{value, Value};
 use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
+use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter, Write};
@@ -167,7 +168,11 @@ impl Serialize for Array {
 		if is_internal_serialization() {
 			serializer.serialize_newtype_struct(TOKEN, &self.0)
 		} else {
-			serializer.serialize_some(&self.to_string())
+			let mut arr = serializer.serialize_seq(Some(self.len()))?;
+			for v in &self.0 {
+				arr.serialize_element(v)?;
+			}
+			arr.end()
 		}
 	}
 }

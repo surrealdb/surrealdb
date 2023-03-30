@@ -175,7 +175,7 @@ impl Serialize for Object {
 			serializer.serialize_newtype_struct(TOKEN, &self.0)
 		} else {
 			let mut map = serializer.serialize_map(Some(self.len()))?;
-			for (ref k, ref v) in &self.0 {
+			for (k, v) in &self.0 {
 				map.serialize_key(k)?;
 				map.serialize_value(v)?;
 			}
