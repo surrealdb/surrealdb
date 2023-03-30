@@ -62,6 +62,8 @@ pub async fn init() -> Result<(), Error> {
 	let net = net.with(head::cors());
 	// Log all requests to the console
 	let net = net.with(log::write());
+	// Trace requests
+	let net = net.with(warp::trace::request());
 
 	// Get local copy of options
 	let opt = CF.get().unwrap();

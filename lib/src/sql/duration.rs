@@ -21,6 +21,8 @@ static SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
 static SECONDS_PER_MINUTE: u64 = 60;
 static NANOSECONDS_PER_MILLISECOND: u32 = 1000000;
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Duration(pub time::Duration);
 
@@ -161,7 +163,7 @@ impl Serialize for Duration {
 		S: serde::Serializer,
 	{
 		if is_internal_serialization() {
-			serializer.serialize_newtype_struct("Duration", &self.0)
+			serializer.serialize_newtype_struct(TOKEN, &self.0)
 		} else {
 			serializer.serialize_some(&self.to_string())
 		}

@@ -6,18 +6,22 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use nom::Err;
 use std::str;
+use tracing::instrument;
 
 /// Parses a SurrealQL [`Query`]
+#[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Query, Error> {
 	parse_impl(input, query)
 }
 
 /// Parses a SurrealQL [`Thing`]
+#[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn thing(input: &str) -> Result<Thing, Error> {
 	parse_impl(input, super::thing::thing)
 }
 
 /// Parses a SurrealQL [`Value`]
+#[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn json(input: &str) -> Result<Value, Error> {
 	parse_impl(input, super::value::json)
 }

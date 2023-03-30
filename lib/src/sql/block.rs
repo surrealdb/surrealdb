@@ -7,6 +7,7 @@ use crate::sql::comment::{comment, mightbespace};
 use crate::sql::common::colons;
 use crate::sql::error::IResult;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
+use crate::sql::serde::is_internal_serialization;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
@@ -28,7 +29,9 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Block(pub Vec<Entry>);
 
 impl Deref for Block {
@@ -150,6 +153,19 @@ impl Display for Block {
 				}
 				f.write_char('}')
 			}
+		}
+	}
+}
+
+impl Serialize for Block {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		if is_internal_serialization() {
+			serializer.serialize_newtype_struct(TOKEN, &self.0)
+		} else {
+			serializer.serialize_none()
 		}
 	}
 }

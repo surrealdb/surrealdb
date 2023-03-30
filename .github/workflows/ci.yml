@@ -12,27 +12,36 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo test
         run: |
-          (&>/dev/null cargo run -- start --log trace --user root --pass root memory &)
+          (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
           cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
 
   lint:
     name: Lint
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
