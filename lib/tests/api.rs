@@ -11,8 +11,11 @@ use surrealdb::opt::auth::Namespace;
 use surrealdb::opt::auth::Root;
 use surrealdb::opt::auth::Scope;
 use surrealdb::opt::PatchOp;
+use surrealdb::sql::serde::serialize_internal;
 use surrealdb::sql::statements::BeginStatement;
 use surrealdb::sql::statements::CommitStatement;
+use surrealdb::sql::thing;
+use surrealdb::sql::Thing;
 use surrealdb::Surreal;
 use ulid::Ulid;
 
@@ -27,7 +30,7 @@ struct Record<'a> {
 
 #[derive(Debug, Deserialize)]
 struct RecordId {
-	id: String,
+	id: Thing,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,7 +40,7 @@ struct RecordName {
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
 struct RecordBuf {
-	id: String,
+	id: Thing,
 	name: String,
 }
 

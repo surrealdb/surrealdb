@@ -17,13 +17,14 @@ use crate::api::engine::select_statement;
 use crate::api::engine::update_statement;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
-use crate::api::opt::from_json;
 use crate::api::opt::from_value;
 use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::opt::IntoEndpoint;
+use crate::sql;
+use crate::sql::to_value;
 use crate::sql::Array;
 use crate::sql::Strand;
 use crate::sql::Value;
@@ -102,6 +103,7 @@ impl Surreal<Client> {
 	}
 }
 
+#[derive(Debug)]
 enum Auth {
 	Basic {
 		user: String,
@@ -153,17 +155,9 @@ async fn submit_auth(request: RequestBuilder) -> Result<Value> {
 	let response = request.send().await?.error_for_status()?;
 	let text = response.text().await?;
 	info!(target: LOG, "Response {text}");
-	let response: AuthResponse = match serde_json::from_str(&text) {
-		Ok(response) => response,
-		Err(error) => {
-			return Err(Error::FromJsonString {
-				string: text,
-				error: error.to_string(),
-			}
-			.into());
-		}
-	};
-	Ok(response.token.filter(|token| token != "NONE").into())
+	let value = sql::json(&text)?;
+	let response: AuthResponse = from_value(value)?;
+	Ok(response.token.into())
 }
 
 async fn query(request: RequestBuilder) -> Result<QueryResponse> {
@@ -171,22 +165,14 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	let response = request.send().await?.error_for_status()?;
 	let text = response.text().await?;
 	info!(target: LOG, "Response {text}");
-	let responses: Vec<HttpQueryResponse> = match serde_json::from_str(&text) {
-		Ok(vec) => vec,
-		Err(error) => {
-			return Err(Error::FromJsonString {
-				string: text,
-				error: error.to_string(),
-			}
-			.into());
-		}
-	};
+	let value = sql::json(&text)?;
+	let responses: Vec<HttpQueryResponse> = from_value(value)?;
 	let mut map = IndexMap::<usize, QueryResult>::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		match response.status {
 			Status::Ok => {
 				if let Some(value) = response.result {
-					match from_json(value) {
+					match to_value(value)? {
 						Value::Array(Array(array)) => map.insert(index, Ok(array)),
 						Value::None | Value::Null => map.insert(index, Ok(vec![])),
 						value => map.insert(index, Ok(vec![value])),
@@ -350,16 +336,7 @@ async fn router(
 		Method::Signin => {
 			let path = base_url.join(Method::Signin.as_str())?;
 			let credentials = match &mut params[..] {
-				[credentials] => match serde_json::to_string(credentials) {
-					Ok(json) => json,
-					Err(error) => {
-						return Err(Error::ToJsonString {
-							value: mem::take(credentials),
-							error: error.to_string(),
-						}
-						.into());
-					}
-				},
+				[credentials] => credentials.to_string(),
 				_ => unreachable!(),
 			};
 			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);
@@ -385,16 +362,7 @@ async fn router(
 		Method::Signup => {
 			let path = base_url.join(Method::Signup.as_str())?;
 			let credentials = match &mut params[..] {
-				[credentials] => match serde_json::to_string(credentials) {
-					Ok(json) => json,
-					Err(error) => {
-						return Err(Error::ToJsonString {
-							value: mem::take(credentials),
-							error: error.to_string(),
-						}
-						.into());
-					}
-				},
+				[credentials] => credentials.to_string(),
 				_ => unreachable!(),
 			};
 			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);

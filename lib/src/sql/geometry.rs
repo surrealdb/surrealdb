@@ -24,6 +24,8 @@ use std::cmp::Ordering;
 use std::iter::{once, FromIterator};
 use std::{fmt, hash};
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
+
 const SINGLE: char = '\'';
 const DOUBLE: char = '\"';
 
@@ -471,15 +473,13 @@ impl Serialize for Geometry {
 	{
 		if is_internal_serialization() {
 			match self {
-				Self::Point(v) => s.serialize_newtype_variant("Geometry", 0, "Point", v),
-				Self::Line(v) => s.serialize_newtype_variant("Geometry", 1, "Line", v),
-				Self::Polygon(v) => s.serialize_newtype_variant("Geometry", 2, "Polygon", v),
-				Self::MultiPoint(v) => s.serialize_newtype_variant("Geometry", 3, "MultiPoint", v),
-				Self::MultiLine(v) => s.serialize_newtype_variant("Geometry", 4, "MultiLine", v),
-				Self::MultiPolygon(v) => {
-					s.serialize_newtype_variant("Geometry", 5, "MultiPolygon", v)
-				}
-				Self::Collection(v) => s.serialize_newtype_variant("Geometry", 6, "Collection", v),
+				Self::Point(v) => s.serialize_newtype_variant(TOKEN, 0, "Point", v),
+				Self::Line(v) => s.serialize_newtype_variant(TOKEN, 1, "Line", v),
+				Self::Polygon(v) => s.serialize_newtype_variant(TOKEN, 2, "Polygon", v),
+				Self::MultiPoint(v) => s.serialize_newtype_variant(TOKEN, 3, "MultiPoint", v),
+				Self::MultiLine(v) => s.serialize_newtype_variant(TOKEN, 4, "MultiLine", v),
+				Self::MultiPolygon(v) => s.serialize_newtype_variant(TOKEN, 5, "MultiPolygon", v),
+				Self::Collection(v) => s.serialize_newtype_variant(TOKEN, 6, "Collection", v),
 			}
 		} else {
 			match self {

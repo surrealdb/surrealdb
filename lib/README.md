@@ -44,6 +44,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::borrow::Cow;
 use surrealdb::sql;
+use surrealdb::sql::Thing;
 use surrealdb::Surreal;
 use surrealdb::engine::remote::ws::Ws;
 use surrealdb::opt::auth::Root;
@@ -57,7 +58,7 @@ struct Name {
 #[derive(Serialize, Deserialize)]
 struct Person {
     #[serde(skip_serializing)]
-    id: Option<String>,
+    id: Option<Thing>,
     title: Cow<'static, str>,
     name: Name,
     marketing: bool,
@@ -107,7 +108,7 @@ async fn main() -> surrealdb::Result<()> {
         })
         .await?;
 
-    assert_eq!(jaime.id.unwrap(), "person:jaime");
+    assert_eq!(jaime.id.unwrap().to_string(), "person:jaime");
 
     // Update a person record with a specific ID
     jaime = db

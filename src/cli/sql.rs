@@ -1,12 +1,12 @@
 use crate::err::Error;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
-use serde_json::Value;
 use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
 use surrealdb::sql;
 use surrealdb::sql::Statement;
+use surrealdb::sql::Value;
 use surrealdb::Error as SurrealError;
 use surrealdb::Response;
 
@@ -122,14 +122,33 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 }
 
 fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
-	// Catch any errors
-	let values: Vec<Value> = res?.take(0)?;
-	let value = Value::Array(values);
-	// Check if we should prettify
-	match pretty {
-		// Don't prettify the response
-		false => Ok(format!("{}", value)),
-		// Yes prettify the response
-		true => Ok(format!("{:#}", value)),
+	use surrealdb::error::Api;
+	use surrealdb::Error;
+	// Extract `Value` from the response
+	let value = match res?.take::<Option<Value>>(0) {
+		Ok(value) => value.unwrap_or_default(),
+		Err(Error::Api(Api::FromValue {
+			value,
+			..
+		})) => value,
+		Err(Error::Api(Api::LossyTake(mut res))) => match res.take::<Vec<Value>>(0) {
+			Ok(mut value) => value.pop().unwrap_or_default(),
+			Err(Error::Api(Api::FromValue {
+				value,
+				..
+			})) => value,
+			Err(error) => return Err(error.into()),
+		},
+		Err(error) => return Err(error.into()),
+	};
+	if !value.is_none_or_null() {
+		// Check if we should prettify
+		return Ok(match pretty {
+			// Don't prettify the response
+			false => value.to_string(),
+			// Yes prettify the response
+			true => format!("{value:#}"),
+		});
 	}
+	Ok(String::new())
 }

@@ -91,7 +91,7 @@ impl Connection for Db {
 		Box::pin(async move {
 			let response = rx.into_recv_async().await?;
 			match response? {
-				DbResponse::Other(value) => from_value(value),
+				DbResponse::Other(value) => from_value(value).map_err(Into::into),
 				DbResponse::Query(..) => unreachable!(),
 			}
 		})

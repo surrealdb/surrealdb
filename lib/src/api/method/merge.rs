@@ -1,15 +1,14 @@
 use crate::api::conn::Method;
 use crate::api::conn::Param;
 use crate::api::conn::Router;
-use crate::api::opt::from_json;
 use crate::api::opt::Range;
 use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
+use crate::sql::to_value;
 use crate::sql::Id;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use serde_json::json;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -36,8 +35,8 @@ where
 			Some(range) => resource.with_range(range)?,
 			None => resource.into(),
 		};
-		let content = json!(self.content);
-		let param = Param::new(vec![param, from_json(content)]);
+		let content = to_value(self.content)?;
+		let param = Param::new(vec![param, content]);
 		Ok((self.router?, Method::Merge, param))
 	}
 }
