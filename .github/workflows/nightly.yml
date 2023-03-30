@@ -67,6 +67,7 @@ jobs:
     name: Build ${{ matrix.arch }}
     needs: [test, lint]
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64-apple-darwin
