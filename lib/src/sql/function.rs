@@ -287,7 +287,7 @@ fn custom(i: &str) -> IResult<&str, Function> {
 }
 
 fn script(i: &str) -> IResult<&str, Function> {
-	let (i, _) = alt((tag("fn::script"), tag("fn"), tag("function")))(i)?;
+	let (i, _) = tag("function")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("(")(i)?;
 	let (i, _) = mightbespace(i)?;
