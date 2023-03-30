@@ -408,13 +408,6 @@ pub fn init() -> ExitCode {
 					.forbid_empty_values(true)
 					.default_value("root")
 					.help("Database authentication password to use when connecting"),
-			)
-			.arg(
-				Arg::new("disable_logging")
-					.long("disable-logging")
-					.required(false)
-					.takes_value(false)
-					.help("Disable all logging. Useful when exporting to stdout."),
 			),
 	);
 
