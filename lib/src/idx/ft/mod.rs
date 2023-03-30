@@ -1,19 +1,20 @@
+mod docids;
 mod doclength;
 mod termfreq;
 mod terms;
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::docids::DocId;
+	use crate::idx::ft::docids::DocId;
 	use crate::idx::ft::doclength::{DocLength, DocLengths};
-	use crate::idx::ft::termfreq::TermFrequencies;
-	use crate::idx::ft::terms::{TermFrequency, Terms};
+	use crate::idx::ft::termfreq::{TermFrequencies, TermFrequency};
+	use crate::idx::ft::terms::Terms;
 	use crate::idx::kvsim::KVSimulator;
 	use crate::sql::error::IResult;
 	use nom::bytes::complete::take_while;
 	use nom::character::complete::multispace0;
-	use std::collections::btree_map::Entry as BEntry;
-	use std::collections::BTreeMap;
+	use std::collections::hash_map::Entry;
+	use std::collections::HashMap;
 
 	#[derive(Default)]
 	struct FtIndex {
@@ -22,23 +23,25 @@ mod tests {
 	}
 
 	impl FtIndex {
-		fn add_document(&mut self, kv: &mut KVSimulator, doc_id: &DocId, field_content: &str) {
-			let (doc_length, terms) = Self::extract_sorted_terms_with_frequencies(field_content);
+		fn add_document(&mut self, kv: &mut KVSimulator, doc_id: DocId, field_content: &str) {
+			let (doc_length, terms_and_frequencies) =
+				Self::extract_sorted_terms_with_frequencies(field_content);
 
 			self.dl.set_doc_length(doc_id, doc_length);
-			let mut t = Terms::new(kv);
-			let terms = t.resolve_terms(kv, terms);
+			let terms_key = "T".into();
+			let mut t: Terms = kv.get(&terms_key).unwrap_or(Terms::default());
+			let terms = t.resolve_terms(kv, terms_and_frequencies);
 			for (term_id, term_freq) in terms {
 				self.tf.update_posting(term_id, doc_id, term_freq);
 			}
-			t.finish(kv);
+			t.finish(kv, terms_key);
 		}
 
 		fn extract_sorted_terms_with_frequencies(
 			input: &str,
-		) -> (DocLength, Vec<(&str, TermFrequency)>) {
+		) -> (DocLength, HashMap<&str, TermFrequency>) {
 			let mut doc_length = 0;
-			let mut terms = BTreeMap::new();
+			let mut terms = HashMap::new();
 			let mut rest = input;
 			loop {
 				// Skip whitespace
@@ -54,18 +57,17 @@ mod tests {
 				if !input.is_empty() {
 					doc_length += 1;
 					match terms.entry(token) {
-						BEntry::Vacant(e) => {
+						Entry::Vacant(e) => {
 							e.insert(1);
 						}
-						BEntry::Occupied(mut e) => {
+						Entry::Occupied(mut e) => {
 							e.insert(*e.get() + 1);
 						}
 					}
 				}
 				rest = remaining_input;
 			}
-			let res = terms.into_iter().collect();
-			(doc_length, res)
+			(doc_length, terms)
 		}
 
 		fn tokenize(i: &str) -> IResult<&str, &str> {
@@ -77,6 +79,6 @@ mod tests {
 	fn test_ft_index() {
 		let mut fti = FtIndex::default();
 		let mut kv = KVSimulator::default();
-		fti.add_document(&mut kv, &DocId::from(0), "Hello world!");
+		fti.add_document(&mut kv, 0, "Hello world!");
 	}
 }

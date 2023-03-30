@@ -1,3 +1,5 @@
+use crate::idx::btree::Payload;
+use crate::kvs::Key;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
@@ -5,40 +7,27 @@ use std::fmt::{Display, Formatter};
 use std::io;
 
 pub(super) trait BKeys: Display + Sized {
-	fn with_key_val<K>(key: K, value: u64) -> Self
-	where
-		K: AsRef<[u8]>;
+	fn with_key_val(key: Key, payload: Payload) -> Self;
 	fn len(&self) -> usize;
-	fn get<K>(&self, key: K) -> Option<u64>
-	where
-		K: AsRef<[u8]>;
-	fn insert<K>(&mut self, key: K, value: u64)
-	where
-		K: AsRef<[u8]>;
-	fn _remove<K>(&mut self, key: K)
-	where
-		K: AsRef<[u8]>;
-	fn split_keys(&self) -> (usize, Self, Vec<u8>, u64, Self);
-	fn get_child_idx<K>(&self, searched_key: &K) -> usize
-	where
-		K: AsRef<[u8]>;
+	fn get(&self, key: &Key) -> Option<Payload>;
+	fn insert(&mut self, key: Key, payload: Payload);
+	fn _remove(&mut self, key: Key);
+	fn split_keys(&self) -> (usize, Self, Key, Payload, Self);
+	fn get_child_idx(&self, searched_key: &Key) -> usize;
 	fn compile(&mut self) {}
 }
 
 #[derive(Debug)]
 pub(super) struct FstKeys {
 	map: Map<Vec<u8>>,
-	additions: Trie<Vec<u8>, u64>,
-	deletions: Trie<Vec<u8>, bool>,
+	additions: Trie<Key, Payload>,
+	deletions: Trie<Key, bool>,
 }
 
 impl BKeys for FstKeys {
-	fn with_key_val<K>(key: K, value: u64) -> Self
-	where
-		K: AsRef<[u8]>,
-	{
+	fn with_key_val(key: Key, payload: Payload) -> Self {
 		let mut builder = MapBuilder::memory();
-		builder.insert(key, value).unwrap();
+		builder.insert(key, payload).unwrap();
 		Self::from(builder)
 	}
 
@@ -46,29 +35,20 @@ impl BKeys for FstKeys {
 		self.map.len()
 	}
 
-	fn get<K>(&self, key: K) -> Option<u64>
-	where
-		K: AsRef<[u8]>,
-	{
+	fn get(&self, key: &Key) -> Option<Payload> {
 		self.map.get(key)
 	}
 
-	fn insert<K>(&mut self, key: K, value: u64)
-	where
-		K: AsRef<[u8]>,
-	{
-		self.additions.insert(key.as_ref().to_vec(), value);
+	fn insert(&mut self, key: Key, payload: Payload) {
+		self.additions.insert(key, payload);
 	}
 
-	fn _remove<K>(&mut self, key: K)
-	where
-		K: AsRef<[u8]>,
-	{
-		self.additions.remove(key.as_ref());
-		self.deletions.insert(key.as_ref().to_vec(), true);
+	fn _remove(&mut self, key: Key) {
+		self.additions.remove(&key);
+		self.deletions.insert(key, true);
 	}
 
-	fn split_keys(&self) -> (usize, FstKeys, Vec<u8>, u64, FstKeys) {
+	fn split_keys(&self) -> (usize, FstKeys, Key, Payload, FstKeys) {
 		let median_idx = self.map.len() / 2;
 		let mut s = self.map.stream();
 		let mut left = MapBuilder::memory();
@@ -81,7 +61,7 @@ impl BKeys for FstKeys {
 		}
 		let (median_key, median_value) = s
 			.next()
-			.map_or_else(|| panic!("The median key/value should exist"), |(k, v)| (k.to_vec(), v));
+			.map_or_else(|| panic!("The median key/value should exist"), |(k, v)| (k.into(), v));
 		let mut right = MapBuilder::memory();
 		while let Some((key, value)) = s.next() {
 			right.insert(key, value).unwrap();
@@ -95,11 +75,8 @@ impl BKeys for FstKeys {
 		)
 	}
 
-	fn get_child_idx<K>(&self, searched_key: &K) -> usize
-	where
-		K: AsRef<[u8]>,
-	{
-		let searched_key = searched_key.as_ref();
+	fn get_child_idx(&self, searched_key: &Key) -> usize {
+		let searched_key = searched_key.as_slice();
 		let mut stream = self.map.keys().into_stream();
 		let mut child_idx = 0;
 		while let Some(key) = stream.next() {
@@ -286,14 +263,11 @@ impl Display for TrieKeys {
 }
 
 impl BKeys for TrieKeys {
-	fn with_key_val<K>(key: K, val: u64) -> Self
-	where
-		K: AsRef<[u8]>,
-	{
+	fn with_key_val(key: Key, payload: Payload) -> Self {
 		let mut trie_keys = Self {
 			keys: Trie::default(),
 		};
-		trie_keys.insert(key, val);
+		trie_keys.insert(key, payload);
 		trie_keys
 	}
 
@@ -301,28 +275,19 @@ impl BKeys for TrieKeys {
 		self.keys.len()
 	}
 
-	fn get<K>(&self, key: K) -> Option<u64>
-	where
-		K: AsRef<[u8]>,
-	{
-		self.keys.get(key.as_ref()).copied()
+	fn get(&self, key: &Key) -> Option<Payload> {
+		self.keys.get(key).copied()
 	}
 
-	fn insert<K>(&mut self, key: K, val: u64)
-	where
-		K: AsRef<[u8]>,
-	{
-		self.keys.insert(key.as_ref().to_vec(), val);
+	fn insert(&mut self, key: Key, payload: Payload) {
+		self.keys.insert(key, payload);
 	}
 
-	fn _remove<K>(&mut self, key: K)
-	where
-		K: AsRef<[u8]>,
-	{
-		self.keys.remove(key.as_ref());
+	fn _remove(&mut self, key: Key) {
+		self.keys.remove(&key);
 	}
 
-	fn split_keys(&self) -> (usize, Self, Vec<u8>, u64, Self) {
+	fn split_keys(&self) -> (usize, Self, Key, Payload, Self) {
 		let median_idx = self.keys.len() / 2;
 		let mut s = self.keys.iter();
 		let mut left = Trie::default();
@@ -333,9 +298,10 @@ impl BKeys for TrieKeys {
 			}
 			n -= 1;
 		}
-		let (median_key, median_value) = s
-			.next()
-			.map_or_else(|| panic!("The median key/value should exist"), |(k, v)| (k.to_vec(), *v));
+		let (median_key, median_value) = s.next().map_or_else(
+			|| panic!("The median key/value should exist"),
+			|(k, v)| (k.to_vec().into(), *v),
+		);
 		let mut right = Trie::default();
 		while let Some((key, val)) = s.next() {
 			right.insert(key.clone(), *val);
@@ -343,14 +309,10 @@ impl BKeys for TrieKeys {
 		(median_idx, Self::from(left), median_key, median_value, Self::from(right))
 	}
 
-	fn get_child_idx<K>(&self, searched_key: &K) -> usize
-	where
-		K: AsRef<[u8]>,
-	{
-		let searched_key = searched_key.as_ref();
+	fn get_child_idx(&self, searched_key: &Key) -> usize {
 		let mut child_idx = 0;
 		for key in self.keys.keys() {
-			if searched_key.le(key.as_slice()) {
+			if searched_key.le(key) {
 				break;
 			}
 			child_idx += 1;
@@ -380,7 +342,7 @@ mod tests {
 
 	#[test]
 	fn test_trie_keys_serde() {
-		let keys = TrieKeys::with_key_val("1", 1);
+		let keys = TrieKeys::with_key_val("1".as_bytes().to_vec(), 1);
 		let buf = bincode::serialize(&keys).unwrap();
 		let _: TrieKeys = bincode::deserialize(&buf).unwrap();
 	}

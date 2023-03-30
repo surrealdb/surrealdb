@@ -1,13 +1,14 @@
 use crate::idx::bkeys::BKeys;
 use crate::idx::kvsim::KVSimulator;
+use crate::kvs::Key;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Formatter};
 
 pub(super) type NodeId = u64;
-pub(super) type Key = String;
-pub(super) type Val = u64;
+pub(super) type Payload = u64;
 
+#[derive(Serialize, Deserialize)]
 pub(super) struct BTree {
 	order: usize,
 	root: Option<NodeId>,
@@ -102,7 +103,7 @@ impl BTree {
 		kv: &mut KVSimulator,
 		node_id: &NodeId,
 		searched_key: &Key,
-	) -> Option<Val>
+	) -> Option<Payload>
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
@@ -118,22 +119,22 @@ impl BTree {
 		}
 	}
 
-	pub(super) fn insert<BK>(&mut self, kv: &mut KVSimulator, key: Key, value: Val)
+	pub(super) fn insert<BK>(&mut self, kv: &mut KVSimulator, key: Key, payload: Payload)
 	where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
 		if let Some(root_id) = &self.root {
-			let root = StoredNode::<BK>::read(kv, root_id);
+			let root = StoredNode::read(kv, root_id);
 			if root.is_full(self.order * 2) {
 				let new_root = self.new_internal_node(BK::default(), vec![*root_id]);
 				self.root = Some(new_root.id());
 				let new_root = self.split_child(kv, new_root, 0, root.node).parent_node;
-				self.insert_non_full(kv, new_root, key, value);
+				self.insert_non_full(kv, new_root, key, payload);
 			} else {
-				self.insert_non_full(kv, root.node, key, value);
+				self.insert_non_full(kv, root.node, key, payload);
 			}
 		} else {
-			let new_root = self.new_leaf_node(BK::with_key_val(key, value));
+			let new_root = self.new_leaf_node(BK::with_key_val(key, payload));
 			self.root = Some(new_root.id());
 			StoredNode::write(kv, new_root);
 		}
@@ -144,20 +145,20 @@ impl BTree {
 		kv: &mut KVSimulator,
 		mut node: Node<BK>,
 		key: Key,
-		value: Val,
+		payload: Payload,
 	) where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		match &mut node {
 			Node::Leaf(_, keys) => {
-				keys.insert(key, value);
+				keys.insert(key, payload);
 				StoredNode::write(kv, node);
 			}
 			Node::Internal(_, keys, children) => {
 				let child_idx = keys.get_child_idx(&key);
 				let child_node = StoredNode::read(kv, &children[child_idx]);
 				let child_node = if child_node.is_full(self.order * 2) {
-					let split_result = self.split_child(kv, node, child_idx, child_node.node);
+					let split_result = self.split_child::<BK>(kv, node, child_idx, child_node.node);
 					if key.gt(&split_result.median_key) {
 						split_result.right_node
 					} else {
@@ -166,7 +167,7 @@ impl BTree {
 				} else {
 					child_node.node
 				};
-				self.insert_non_full(kv, child_node, key, value);
+				self.insert_non_full(kv, child_node, key, payload);
 			}
 		}
 	}
@@ -183,7 +184,7 @@ impl BTree {
 	{
 		let (left_node, right_node, median_key, median_value) = match child_node {
 			Node::Internal(node_id, keys, children) => {
-				self.split_internal_node(node_id, keys, children)
+				self.split_internal_node::<BK>(node_id, keys, children)
 			}
 			Node::Leaf(node_id, keys) => self.split_leaf_node(node_id, keys),
 		};
@@ -212,34 +213,36 @@ impl BTree {
 		}
 	}
 
-	fn split_internal_node<M>(
+	fn split_internal_node<BK>(
 		&mut self,
 		node_id: NodeId,
-		keys: M,
+		keys: BK,
 		mut left_children: Vec<NodeId>,
-	) -> (Node<M>, Node<M>, Key, Val)
+	) -> (Node<BK>, Node<BK>, Key, Payload)
 	where
-		M: BKeys,
+		BK: BKeys,
 	{
 		let (median_idx, left_keys, median_key, median_value, right_keys) = keys.split_keys();
 		debug!(
 			"split_internal_node {} - left: {} - right: {} - median_idx: {}",
 			node_id, left_keys, right_keys, median_idx
 		);
-		let median_key = String::from_utf8(median_key).unwrap();
 		let right_children = left_children.split_off(median_idx + 1);
 		let left_node = Self::update_internal_node(node_id, left_keys, left_children);
 		let right_node = self.new_internal_node(right_keys, right_children);
 		(left_node, right_node, median_key, median_value)
 	}
 
-	fn split_leaf_node<M>(&mut self, node_id: NodeId, keys: M) -> (Node<M>, Node<M>, Key, Val)
+	fn split_leaf_node<BK>(
+		&mut self,
+		node_id: NodeId,
+		keys: BK,
+	) -> (Node<BK>, Node<BK>, Key, Payload)
 	where
-		M: BKeys,
+		BK: BKeys,
 	{
 		let (_, left_keys, median_key, median_value, right_keys) = keys.split_keys();
 		debug!("split_leaf_node {} - left: {} - right: {}", node_id, left_keys, right_keys);
-		let median_key = String::from_utf8(median_key).unwrap();
 		let left_node = Self::update_leaf_node(node_id, left_keys);
 		let right_node = self.new_leaf_node(right_keys);
 		(left_node, right_node, median_key, median_value)
@@ -303,11 +306,11 @@ impl BTree {
 	}
 }
 
-struct StoredNode<M>
+struct StoredNode<BK>
 where
-	M: BKeys,
+	BK: BKeys,
 {
-	node: Node<M>,
+	node: Node<BK>,
 	size: usize,
 }
 
@@ -316,7 +319,7 @@ where
 	BK: BKeys + Serialize + DeserializeOwned,
 {
 	fn read(kv: &mut KVSimulator, node_id: &NodeId) -> Self {
-		let (size, node) = kv.get(&node_id.to_be_bytes().to_vec()).unwrap();
+		let (size, node) = kv.get_with_size(&node_id.to_be_bytes().to_vec()).unwrap();
 		Self {
 			size,
 			node,
@@ -342,12 +345,39 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::btree::{BTree, Key, Val};
+	use crate::idx::btree::{BTree, Node, Payload};
 	use crate::idx::kvsim::KVSimulator;
+	use crate::kvs::Key;
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use serde::de::DeserializeOwned;
 	use serde::Serialize;
+
+	#[test]
+	fn test_btree_serde() {
+		let tree = BTree::new(75);
+		let buf = bincode::serialize(&tree).unwrap();
+		let tree: BTree = bincode::deserialize(&buf).unwrap();
+		assert_eq!(tree.order, 75);
+		assert_eq!(tree.next_node_id, 0);
+		assert_eq!(tree.root, None);
+	}
+
+	#[test]
+	fn test_node_serde_internal() {
+		let node = Node::Internal(1, FstKeys::default(), vec![]);
+		let buf = bincode::serialize(&node).unwrap();
+		let node: Node<FstKeys> = bincode::deserialize(&buf).unwrap();
+		assert_eq!(node.id(), 1);
+	}
+
+	#[test]
+	fn test_node_serde_leaf() {
+		let node = Node::Leaf(2, TrieKeys::default());
+		let buf = bincode::serialize(&node).unwrap();
+		let node: Node<TrieKeys> = bincode::deserialize(&buf).unwrap();
+		assert_eq!(node.id(), 2);
+	}
 
 	fn insertions_test<F, BK>(
 		kv: &mut KVSimulator,
@@ -355,14 +385,14 @@ mod tests {
 		samples_size: usize,
 		sample_provider: F,
 	) where
-		F: Fn(usize) -> (Key, Val),
+		F: Fn(usize) -> (Key, Payload),
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
 		// Insert the samples
 		for i in 0..samples_size {
-			let (key, val) = sample_provider(i);
-			debug!("Insert {}=>{}", key, val);
-			t.insert::<BK>(kv, key, val);
+			let (key, payload) = sample_provider(i);
+			debug!("Insert {}=>{}", String::from_utf8_lossy(&key), payload);
+			t.insert::<BK>(kv, key, payload);
 		}
 		// Lookup and check the samples
 		for i in 0..samples_size {
@@ -371,8 +401,8 @@ mod tests {
 		}
 	}
 
-	fn get_key_value(idx: usize) -> (Key, Val) {
-		(format!("{}", idx), (idx * 10) as u64)
+	fn get_key_value(idx: usize) -> (Key, Payload) {
+		(format!("{}", idx).into(), (idx * 10) as u64)
 	}
 
 	#[test]

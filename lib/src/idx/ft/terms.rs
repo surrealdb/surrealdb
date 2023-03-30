@@ -1,141 +1,74 @@
-use crate::idx::bkeys::{BKeys, FstKeys};
+use crate::idx::bkeys::FstKeys;
+use crate::idx::btree::BTree;
+use crate::idx::ft::termfreq::TermFrequency;
 use crate::idx::kvsim::KVSimulator;
-use crate::idx::partition::PartitionMap;
-use radix_trie::Trie;
+use crate::kvs::Key;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub(super) type TermId = u64;
-pub(super) type TermFrequency = u64;
 
-const TERMS_MAP_KEY: Vec<u8> = vec![];
+const TERMS_BTREE_ORDER: usize = 100;
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub(super) struct Terms {
-	map: PartitionMap,
-	next_term_id: u64,
-	#[serde(skip)]
-	// In memory partitions
-	partitions: HashMap<u32, TermsPartition>,
+	btree: BTree,
+	next_term_id: TermId,
 	#[serde(skip)]
 	updated: bool,
 }
 
-impl Terms {
-	pub(super) fn new(kv: &mut KVSimulator) -> Terms {
-		let mut map = kv.get(&TERMS_MAP_KEY).map_or_else(|| Terms::default(), |(_, m)| m);
-		map.map.remap();
-		map
-	}
-
-	pub(super) fn finish(mut self, kv: &mut KVSimulator) {
-		for (part_id, partition) in &mut self.partitions {
-			if partition.updated {
-				kv.set(part_id.to_be_bytes().to_vec(), partition);
-			}
+impl Default for Terms {
+	fn default() -> Self {
+		Self {
+			btree: BTree::new(TERMS_BTREE_ORDER),
+			next_term_id: 0,
+			updated: false,
 		}
-		if self.updated {
-			// If so, we can write the new version of the map
-			kv.set(TERMS_MAP_KEY, &self);
+	}
+}
+
+impl Terms {
+	fn resolve_term(&mut self, kv: &mut KVSimulator, term: &str) -> TermId {
+		let term = term.into();
+		if let Some(term_id) = self.btree.search::<FstKeys>(kv, &term) {
+			term_id
+		} else {
+			let term_id = self.next_term_id;
+			self.btree.insert::<FstKeys>(kv, term, term_id);
+			self.next_term_id += 1;
+			self.updated = true;
+			term_id
 		}
 	}
 
 	pub(super) fn resolve_terms(
 		&mut self,
 		kv: &mut KVSimulator,
-		terms: Vec<(&str, TermFrequency)>,
-	) -> Vec<(TermId, TermFrequency)> {
-		// This vector stores the resolved terms
-		let mut resolved_terms = Vec::with_capacity(terms.len());
-
-		// We iterate over every term and dispatch them to the partitions
-		for (term_str, term_freq) in terms {
-			// Either finding an existing partition
-			let part_id = if let Some(part_id) = self.map.find_partition_id(term_str) {
-				part_id
-			} else {
-				// Or we create a new partition
-				let new_partition_id = self.map.new_partition_id(term_str);
-				self.partitions.insert(new_partition_id, TermsPartition::new());
-				self.updated = true;
-				new_partition_id
-			};
-			// Add the term to the chosen partition
-			self.check_terms_partition(kv, part_id);
-			let term_id = self.resolve_term(part_id, term_str);
-			resolved_terms.push((term_id, term_freq));
+		terms_frequencies: HashMap<&str, TermFrequency>,
+	) -> HashMap<TermId, TermFrequency> {
+		let mut res = HashMap::with_capacity(terms_frequencies.len());
+		for (term, freq) in terms_frequencies {
+			res.insert(self.resolve_term(kv, term), freq);
 		}
-
-		// Rebuild every updated partitions
-		// partitions.values_mut().filter(|p| p.updated).for_each(|p| p.rebuild());
-
-		// We check the status of the partition and see if some of them should be split.
-		// TODO
-
-		// And return the result
-		resolved_terms
+		res
 	}
 
-	fn resolve_term(&mut self, part_id: u32, term_str: &str) -> u64 {
-		let p = self
-			.partitions
-			.get_mut(&part_id)
-			.unwrap_or_else(|| panic!("Index is corrupted. Terms Partition is missing."));
-		if let Some(term_id) = p.get_term_id(term_str) {
-			term_id
-		} else {
-			self.updated = true;
-			let new_term_id = self.next_term_id;
-			p.add_term_id(term_str, new_term_id);
-			self.map.extends_partition_bounds(part_id, term_str);
-			self.next_term_id += 1;
-			new_term_id
+	pub(super) fn finish(self, kv: &mut KVSimulator, key: Key) {
+		if self.updated {
+			kv.set(key, &self);
 		}
-	}
-
-	fn check_terms_partition(&mut self, kv: &mut KVSimulator, part_id: u32) {
-		if !self.partitions.contains_key(&part_id) {
-			if let Some((_, p)) = kv.get::<TermsPartition>(&part_id.to_be_bytes()) {
-				self.partitions.insert(part_id, p);
-			}
-		}
-	}
-}
-
-#[derive(Serialize, Deserialize)]
-struct TermsPartition {
-	terms: FstKeys,
-	#[serde(skip)]
-	additions: Trie<Vec<u8>, u64>,
-	#[serde(skip)]
-	updated: bool,
-}
-
-impl TermsPartition {
-	fn new() -> Self {
-		Self {
-			terms: FstKeys::default(),
-			additions: Default::default(),
-			updated: false,
-		}
-	}
-
-	fn get_term_id(&self, term: &str) -> Option<TermId> {
-		self.terms.get(term)
-	}
-
-	fn add_term_id(&mut self, term: &str, term_id: TermId) {
-		self.additions.insert(term.as_bytes().to_vec(), term_id);
-		self.updated = true;
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::terms::{TermFrequency, Terms};
+	use crate::idx::ft::termfreq::TermFrequency;
+	use crate::idx::ft::terms::Terms;
 	use crate::idx::kvsim::KVSimulator;
+	use crate::kvs::Key;
 	use rand::{thread_rng, Rng};
-	use std::collections::HashSet;
+	use std::collections::{HashMap, HashSet};
 
 	fn random_term(key_length: usize) -> String {
 		thread_rng()
@@ -156,30 +89,33 @@ mod tests {
 	#[test]
 	fn test_resolve_terms() {
 		let mut kv = KVSimulator::default();
+		let terms_key: Key = "T".into();
+		let terms = Terms::default();
+		kv.set(terms_key.clone(), &terms);
 
 		// Resolve a first term
-		let mut terms = Terms::new(&mut kv);
-		let res = terms.resolve_terms(&mut kv, vec![("C", 103)]);
-		terms.finish(&mut kv);
-		assert_eq!(res, vec![(0, 103)], "C");
+		let mut terms: Terms = kv.get(&terms_key).unwrap();
+		let res = terms.resolve_terms(&mut kv, HashMap::from([("C", 103)]));
+		terms.finish(&mut kv, terms_key.clone());
+		assert_eq!(res, HashMap::from([(0, 103)]));
 
 		// Resolve a second term
-		let mut terms = Terms::new(&mut kv);
-		let res = terms.resolve_terms(&mut kv, vec![("D", 104)]);
-		terms.finish(&mut kv);
-		assert_eq!(res, vec![(1, 104)], "D");
+		let mut terms: Terms = kv.get(&terms_key).unwrap();
+		let res = terms.resolve_terms(&mut kv, HashMap::from([("D", 104)]));
+		terms.finish(&mut kv, terms_key.clone());
+		assert_eq!(res, HashMap::from([(1, 104)]));
 
 		// Resolve two existing terms with new frequencies
-		let mut terms = Terms::new(&mut kv);
-		let res = terms.resolve_terms(&mut kv, vec![("C", 105), ("D", 106)]);
-		terms.finish(&mut kv);
-		assert_eq!(res, vec![(0, 105), (1, 106)], "C + D");
+		let mut terms: Terms = kv.get(&terms_key).unwrap();
+		let res = terms.resolve_terms(&mut kv, HashMap::from([("C", 113), ("D", 114)]));
+		terms.finish(&mut kv, terms_key.clone());
+		assert_eq!(res, HashMap::from([(0, 113), (1, 114)]));
 
 		// Resolve one existing terms and two new terms
-		let mut terms = Terms::new(&mut kv);
-		let res = terms.resolve_terms(&mut kv, vec![("A", 101), ("C", 107), ("E", 105)]);
-		terms.finish(&mut kv);
-		assert_eq!(res, vec![(2, 101), (0, 107), (3, 105)], "A + C + D");
+		let mut terms: Terms = kv.get(&terms_key).unwrap();
+		let res = terms.resolve_terms(&mut kv, HashMap::from([("A", 101), ("C", 123), ("E", 105)]));
+		terms.finish(&mut kv, terms_key.clone());
+		assert_eq!(res, HashMap::from([(3, 101), (0, 123), (2, 105)]));
 
 		kv.print_stats();
 	}
@@ -196,30 +132,32 @@ mod tests {
 
 	#[test]
 	fn test_resolve_100_docs_with_50_words_one_by_one() {
+		let terms_key: Key = "T".into();
 		let mut kv = KVSimulator::default();
 		for _ in 0..100 {
-			let mut terms = Terms::new(&mut kv);
+			let mut terms: Terms = kv.get(&terms_key).unwrap_or_else(|| Terms::default());
 			let terms_string = random_term_freq_vec(50);
-			let terms_str: Vec<(&str, TermFrequency)> =
+			let terms_str: HashMap<&str, TermFrequency> =
 				terms_string.iter().map(|(t, f)| (t.as_str(), *f)).collect();
 			terms.resolve_terms(&mut kv, terms_str);
-			terms.finish(&mut kv);
+			terms.finish(&mut kv, terms_key.clone());
 		}
 		kv.print_stats();
 	}
 
 	#[test]
 	fn test_resolve_100_docs_with_50_words_batch_of_10() {
+		let terms_key: Key = "T".into();
 		let mut kv = KVSimulator::default();
 		for _ in 0..10 {
-			let mut terms = Terms::new(&mut kv);
+			let mut terms: Terms = kv.get(&terms_key).unwrap_or_else(|| Terms::default());
 			for _ in 0..10 {
 				let terms_string = random_term_freq_vec(50);
-				let terms_str: Vec<(&str, TermFrequency)> =
+				let terms_str: HashMap<&str, TermFrequency> =
 					terms_string.iter().map(|(t, f)| (t.as_str(), *f)).collect();
 				terms.resolve_terms(&mut kv, terms_str);
 			}
-			terms.finish(&mut kv);
+			terms.finish(&mut kv, terms_key.clone());
 		}
 		kv.print_stats();
 	}

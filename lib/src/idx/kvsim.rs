@@ -1,3 +1,4 @@
+use crate::kvs::{Key, Val};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -7,7 +8,7 @@ use std::time::Duration;
 pub(super) struct KVSimulator {
 	network_latency: Option<Duration>,
 	network_transport_per_byte_ns: u64,
-	kv: HashMap<Vec<u8>, Vec<u8>>,
+	kv: HashMap<Key, Val>,
 	bytes_write: usize,
 	bytes_read: usize,
 	get_count: usize,
@@ -51,20 +52,27 @@ impl KVSimulator {
 		}
 	}
 
-	pub(super) fn get<V: DeserializeOwned>(&mut self, key: &[u8]) -> Option<(usize, V)> {
+	pub(super) fn get_with_size<V: DeserializeOwned>(&mut self, key: &Key) -> Option<(usize, V)> {
 		self.network_latency();
-		if let Some(vec) = self.kv.get(key) {
+		if let Some(val) = self.kv.get(key) {
 			self.get_count += 1;
-			let bytes = key.len() + vec.len();
+			let bytes = key.len() + val.len();
 			self.bytes_read += bytes;
 			self.network_transport(bytes);
-			Some((vec.len(), bincode::deserialize(vec.as_slice()).unwrap()))
+			Some((
+				val.len(),
+				bincode::deserialize(val).unwrap_or_else(|e| panic!("Corrupted Index: {:?}", e)),
+			))
 		} else {
 			None
 		}
 	}
 
-	pub(super) fn set<V: Serialize>(&mut self, key: Vec<u8>, value: &V) -> usize {
+	pub(super) fn get<V: DeserializeOwned>(&mut self, key: &Key) -> Option<V> {
+		self.get_with_size(key).map(|(_, value)| value)
+	}
+
+	pub(super) fn set<V: Serialize>(&mut self, key: Key, value: &V) -> usize {
 		self.network_latency();
 		let val = bincode::serialize(value).unwrap();
 		self.set_count += 1;
@@ -81,5 +89,44 @@ impl KVSimulator {
 		println!("set count: {}", self.set_count);
 		println!("bytes read: {}", self.bytes_read);
 		println!("bytes write: {}", self.bytes_write);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
+	use crate::idx::kvsim::KVSimulator;
+	use crate::kvs::Key;
+
+	#[test]
+	fn test_kv_sim_string() {
+		let mut kv = KVSimulator::default();
+		let k: Key = "Foo".to_string().into();
+		let v = "Bar".to_string();
+		kv.set(k.clone(), &v);
+		assert_eq!(kv.get_with_size(&k), Some((11, v)));
+	}
+
+	#[test]
+	fn test_kv_sim_trie() {
+		let mut kv = KVSimulator::default();
+		let k: Key = "Foo".to_string().into();
+		let mut keys = TrieKeys::default();
+		keys.insert(k.clone(), 9);
+		kv.set(k.clone(), &keys);
+		let (_, keys) = kv.get_with_size::<TrieKeys>(&k).unwrap();
+		assert_eq!(keys.get(&k), Some(9));
+	}
+
+	#[test]
+	fn test_kv_sim_fst() {
+		let mut kv = KVSimulator::default();
+		let k: Key = "Foo".to_string().into();
+		let mut keys = FstKeys::default();
+		keys.insert(k.clone(), 9);
+		keys.compile();
+		kv.set(k.clone(), &keys);
+		let (_, keys) = kv.get_with_size::<FstKeys>(&k).unwrap();
+		assert_eq!(keys.get(&k), Some(9));
 	}
 }

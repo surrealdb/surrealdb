@@ -1,8 +1,10 @@
 use crate::idx::bkeys::FstKeys;
-use crate::idx::docids::DocId;
-use crate::idx::ft::terms::{TermFrequency, TermId};
+use crate::idx::ft::docids::DocId;
+use crate::idx::ft::terms::TermId;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+
+pub(super) type TermFrequency = u32;
 
 #[derive(Default)]
 pub(super) struct TermFrequencies {
@@ -17,7 +19,7 @@ impl TermFrequencies {
 	pub(super) fn update_posting(
 		&mut self,
 		term_id: TermId,
-		doc_id: &DocId,
+		doc_id: DocId,
 		term_freq: TermFrequency,
 	) {
 		match self.terms.entry(term_id) {
@@ -30,7 +32,7 @@ impl TermFrequencies {
 		};
 	}
 
-	fn _update_term_frequency(&self, _doc_id: &DocId, _term_freq: TermFrequency) {
+	fn _update_term_frequency(&self, _doc_id: DocId, _term_freq: TermFrequency) {
 		todo!()
 	}
 }
@@ -38,17 +40,17 @@ impl TermFrequencies {
 struct TermFrequenciesPartitions(Vec<TermFrequencyPartition>);
 
 impl TermFrequenciesPartitions {
-	fn new(doc_id: &DocId, term_freq: TermFrequency) -> Self {
+	fn new(doc_id: DocId, term_freq: TermFrequency) -> Self {
 		TermFrequenciesPartitions(vec![TermFrequencyPartition::new(doc_id, term_freq)])
 	}
 
-	fn update_term_frequency(&self, _doc_id: &DocId, _term_freq: TermFrequency) {
+	fn update_term_frequency(&self, _doc_id: DocId, _term_freq: TermFrequency) {
 		todo!()
 	}
 }
 
 impl TermFrequencyPartition {
-	fn new(_doc_id: &DocId, _term_freq: TermFrequency) -> Self {
+	fn new(_doc_id: DocId, _term_freq: TermFrequency) -> Self {
 		Self {
 			_doc_freq: FstKeys::default(),
 		}
