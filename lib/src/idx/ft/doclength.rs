@@ -37,7 +37,7 @@ impl DocLengths {
 		}
 	}
 
-	pub(super) fn get_docs_length(&self, kv: &mut KVSimulator, doc_id: DocId) -> Option<DocLength> {
+	pub(super) fn get_doc_length(&self, kv: &mut KVSimulator, doc_id: DocId) -> Option<DocLength> {
 		self.state.btree.search::<TrieKeys>(kv, &doc_id.to_be_bytes().to_vec())
 	}
 
@@ -76,7 +76,7 @@ mod tests {
 		// Check empty state
 		let l = DocLengths::new(&mut kv, 0, BTREE_ORDER);
 		assert_eq!(l.count(&mut kv), 0);
-		let dl = l.get_docs_length(&mut kv, 99);
+		let dl = l.get_doc_length(&mut kv, 99);
 		l.finish(&mut kv);
 		assert_eq!(dl, None);
 
@@ -84,7 +84,7 @@ mod tests {
 		let mut l = DocLengths::new(&mut kv, 0, BTREE_ORDER);
 		l.set_doc_length(&mut kv, 99, 199);
 		assert_eq!(l.count(&mut kv), 1);
-		let dl = l.get_docs_length(&mut kv, 99);
+		let dl = l.get_doc_length(&mut kv, 99);
 		l.finish(&mut kv);
 		assert_eq!(dl, Some(199));
 
@@ -92,7 +92,7 @@ mod tests {
 		let mut l = DocLengths::new(&mut kv, 0, BTREE_ORDER);
 		l.set_doc_length(&mut kv, 99, 299);
 		assert_eq!(l.count(&mut kv), 1);
-		let dl = l.get_docs_length(&mut kv, 99);
+		let dl = l.get_doc_length(&mut kv, 99);
 		l.finish(&mut kv);
 		assert_eq!(dl, Some(299));
 	}

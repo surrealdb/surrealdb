@@ -40,6 +40,18 @@ impl Terms {
 		}
 	}
 
+	pub(super) fn resolve_terms(
+		&mut self,
+		kv: &mut KVSimulator,
+		terms_frequencies: HashMap<&str, TermFrequency>,
+	) -> HashMap<TermId, TermFrequency> {
+		let mut res = HashMap::with_capacity(terms_frequencies.len());
+		for (term, freq) in terms_frequencies {
+			res.insert(self.resolve_term(kv, term), freq);
+		}
+		res
+	}
+
 	fn resolve_term(&mut self, kv: &mut KVSimulator, term: &str) -> TermId {
 		let term = term.into();
 		if let Some(term_id) = self.state.btree.search::<FstKeys>(kv, &term) {
@@ -53,16 +65,8 @@ impl Terms {
 		}
 	}
 
-	pub(super) fn resolve_terms(
-		&mut self,
-		kv: &mut KVSimulator,
-		terms_frequencies: HashMap<&str, TermFrequency>,
-	) -> HashMap<TermId, TermFrequency> {
-		let mut res = HashMap::with_capacity(terms_frequencies.len());
-		for (term, freq) in terms_frequencies {
-			res.insert(self.resolve_term(kv, term), freq);
-		}
-		res
+	pub(super) fn find_term(&self, kv: &mut KVSimulator, term: &str) -> Option<TermId> {
+		self.state.btree.search::<FstKeys>(kv, &term.into())
 	}
 
 	pub(super) fn count(&self, kv: &mut KVSimulator) -> usize {

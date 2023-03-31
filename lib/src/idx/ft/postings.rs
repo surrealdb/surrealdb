@@ -18,16 +18,13 @@ struct PostingKey {
 	doc_id: DocId,
 }
 
-impl PostingKey {
-	fn new(index_id: IndexId, term_id: TermId, doc_id: DocId) -> Self {
-		Self {
-			domain: POSTING_DOMAIN,
-			index_id,
-			term_id,
-			doc_id,
-		}
-	}
+#[derive(Serialize, Deserialize, Key)]
+struct PostingPrefixKey {
+	domain: u8,
+	index_id: u64,
+	term_id: TermId,
 }
+
 pub(super) struct Postings {
 	index_id: IndexId,
 	state_key: Key,
@@ -66,9 +63,41 @@ impl Postings {
 		doc_id: DocId,
 		term_freq: TermFrequency,
 	) {
-		let key = PostingKey::new(self.index_id, term_id, doc_id);
+		let key = self.posting_key(term_id, doc_id);
 		self.state.btree.insert::<TrieKeys>(kv, key.into(), term_freq);
 		self.updated = true;
+	}
+
+	fn posting_key(&self, term_id: TermId, doc_id: DocId) -> PostingKey {
+		PostingKey {
+			domain: POSTING_DOMAIN,
+			index_id: self.index_id,
+			term_id,
+			doc_id,
+		}
+	}
+
+	pub(super) fn get_postings(
+		&self,
+		kv: &mut KVSimulator,
+		term_id: TermId,
+	) -> Vec<(DocId, TermFrequency)> {
+		let prefix_key = self.posting_prefix_key(term_id).into();
+		let key_payload_vec = self.state.btree.search_by_prefix::<TrieKeys>(kv, &prefix_key);
+		let mut res = Vec::with_capacity(key_payload_vec.len());
+		for (key, payload) in key_payload_vec {
+			let posting_key: PostingKey = key.into();
+			res.push((posting_key.doc_id, payload));
+		}
+		res
+	}
+
+	fn posting_prefix_key(&self, term_id: TermId) -> PostingPrefixKey {
+		PostingPrefixKey {
+			domain: POSTING_DOMAIN,
+			index_id: self.index_id,
+			term_id,
+		}
 	}
 
 	pub(super) fn count(&self, kv: &mut KVSimulator) -> usize {

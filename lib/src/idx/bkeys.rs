@@ -1,7 +1,7 @@
 use crate::idx::btree::Payload;
 use crate::kvs::Key;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
-use radix_trie::{Trie, TrieCommon};
+use radix_trie::{SubTrie, Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::io;
@@ -10,6 +10,7 @@ pub(super) trait BKeys: Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Self;
 	fn len(&self) -> usize;
 	fn get(&self, key: &Key) -> Option<Payload>;
+	fn collect_with_prefix(&self, prefix_key: &Key, res: &mut Vec<(Key, Payload)>);
 	fn insert(&mut self, key: Key, payload: Payload);
 	fn _remove(&mut self, key: Key);
 	fn split_keys(&self) -> (usize, Self, Key, Payload, Self);
@@ -37,6 +38,10 @@ impl BKeys for FstKeys {
 
 	fn get(&self, key: &Key) -> Option<Payload> {
 		self.map.get(key)
+	}
+
+	fn collect_with_prefix(&self, _prefix_key: &Key, _res: &mut Vec<(Key, Payload)>) {
+		panic!("Not supported!")
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
@@ -208,7 +213,7 @@ impl Display for FstKeys {
 
 #[derive(Debug, Default)]
 pub(super) struct TrieKeys {
-	keys: Trie<Vec<u8>, u64>,
+	keys: Trie<Key, Payload>,
 }
 
 impl Serialize for TrieKeys {
@@ -279,6 +284,12 @@ impl BKeys for TrieKeys {
 		self.keys.get(key).copied()
 	}
 
+	fn collect_with_prefix(&self, prefix: &Key, res: &mut Vec<(Key, Payload)>) {
+		if let Some(node) = self.keys.get_raw_descendant(prefix) {
+			TrieKeys::collect_with_prefix_recursive(node, prefix, res);
+		}
+	}
+
 	fn insert(&mut self, key: Key, payload: Payload) {
 		self.keys.insert(key, payload);
 	}
@@ -321,6 +332,24 @@ impl BKeys for TrieKeys {
 	}
 }
 
+impl TrieKeys {
+	fn collect_with_prefix_recursive(
+		node: SubTrie<Key, Payload>,
+		prefix: &Key,
+		res: &mut Vec<(Key, Payload)>,
+	) {
+		if let Some(value) = node.value() {
+			if let Some(key) = node.key() {
+				res.push((key.clone(), *value));
+			}
+		}
+
+		for children in node.children() {
+			Self::collect_with_prefix_recursive(children, prefix, res);
+		}
+	}
+}
+
 impl From<Trie<Vec<u8>, u64>> for TrieKeys {
 	fn from(keys: Trie<Vec<u8>, u64>) -> Self {
 		Self {
@@ -345,5 +374,39 @@ mod tests {
 		let keys = TrieKeys::with_key_val("1".as_bytes().to_vec(), 1);
 		let buf = bincode::serialize(&keys).unwrap();
 		let _: TrieKeys = bincode::deserialize(&buf).unwrap();
+	}
+
+	#[test]
+	fn test_tries_keys_collect_with_prefix() {
+		let mut keys = TrieKeys::default();
+		keys.insert("apple".into(), 1);
+		keys.insert("application".into(), 2);
+		keys.insert("applicative".into(), 3);
+		keys.insert("banana".into(), 4);
+		keys.insert("blueberry".into(), 5);
+
+		{
+			let mut res = vec![];
+			keys.collect_with_prefix(&"appli".into(), &mut res);
+			assert_eq!(res, vec![("application".into(), 2), ("applicative".into(), 3)]);
+		}
+
+		{
+			let mut res = vec![];
+			keys.collect_with_prefix(&"blue".into(), &mut res);
+			assert_eq!(res, vec![("blueberry".into(), 5)]);
+		}
+
+		{
+			let mut res = vec![];
+			keys.collect_with_prefix(&"apple".into(), &mut res);
+			assert_eq!(res, vec![("apple".into(), 1)]);
+		}
+
+		{
+			let mut res = vec![];
+			keys.collect_with_prefix(&"zz".into(), &mut res);
+			assert_eq!(res, vec![]);
+		}
 	}
 }

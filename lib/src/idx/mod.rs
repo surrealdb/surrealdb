@@ -17,6 +17,7 @@ struct StateKey {
 type Domain = u8;
 
 const DOC_IDS_DOMAIN: u8 = 0x10;
+const DOC_KEYS_DOMAIN: u8 = 0x11;
 const TERMS_DOMAIN: u8 = 0x20;
 const DOC_LENGTHS_DOMAIN: u8 = 0x30;
 const POSTING_DOMAIN: u8 = 0x40;

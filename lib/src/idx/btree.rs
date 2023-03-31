@@ -106,6 +106,45 @@ impl BTree {
 		}
 	}
 
+	pub(super) fn search_by_prefix<BK>(
+		&self,
+		kv: &mut KVSimulator,
+		prefix_key: &Key,
+	) -> Vec<(Key, Payload)>
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		if let Some(root_id) = &self.root {
+			let mut res = Vec::new();
+			self.recursive_search_by_prefix::<BK>(kv, *root_id, prefix_key, &mut res);
+			res
+		} else {
+			vec![]
+		}
+	}
+
+	fn recursive_search_by_prefix<BK>(
+		&self,
+		kv: &mut KVSimulator,
+		node_id: NodeId,
+		prefix_key: &Key,
+		res: &mut Vec<(Key, Payload)>,
+	) where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		let previous_size = res.len();
+		let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
+		// If we previously found keys, and this node does not add additional keys, we can skip
+		if previous_size > 0 && res.len() == previous_size {
+			return;
+		}
+		node.keys().collect_with_prefix(prefix_key, res);
+		if let Node::Internal(keys, children) = node {
+			let child_idx = keys.get_child_idx(prefix_key);
+			self.recursive_search_by_prefix::<BK>(kv, children[child_idx], prefix_key, res);
+		}
+	}
+
 	pub(super) fn insert<BK>(&mut self, kv: &mut KVSimulator, key: Key, payload: Payload)
 	where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
