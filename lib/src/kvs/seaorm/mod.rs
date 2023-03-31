@@ -64,7 +64,9 @@ impl Datastore {
 	pub(crate) async fn ensure_table_exists(&self) -> Result<(), DbErr> {
 		let backend = self.db.get_database_backend();
 		let schema = Schema::new(backend);
-		self.db.execute(backend.build(schema.create_table_from_entity(Entity).if_not_exists())).await?;
+		self.db
+			.execute(backend.build(schema.create_table_from_entity(Entity).if_not_exists()))
+			.await?;
 		Ok(())
 	}
 

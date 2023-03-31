@@ -6,9 +6,9 @@ mod kv;
 mod mem;
 mod postgres;
 mod rocksdb;
+mod seaorm;
 mod tikv;
 mod tx;
-mod seaorm;
 
 #[cfg(test)]
 mod tests;
