@@ -220,7 +220,7 @@ async fn delete_all(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Specify the request statement
-	let sql = "DELETE type::table($table)";
+	let sql = "DELETE type::table($table) RETURN BEFORE";
 	// Specify the request variables
 	let vars = map! {
 		String::from("table") => Value::from(table),
@@ -451,7 +451,7 @@ async fn delete_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Specify the request statement
-	let sql = "DELETE type::thing($table, $id)";
+	let sql = "DELETE type::thing($table, $id) RETURN BEFORE";
 	// Parse the Record ID as a SurrealQL value
 	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,

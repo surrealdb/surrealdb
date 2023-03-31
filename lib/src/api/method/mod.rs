@@ -869,6 +869,9 @@ where
 	/// # Examples
 	///
 	/// ```no_run
+	/// # #[derive(serde::Deserialize)]
+	/// # struct Person;
+	/// #
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -877,10 +880,10 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Delete all records from a table
-	/// db.delete("person").await?;
+	/// let people: Vec<Person> = db.delete("person").await?;
 	///
 	/// // Delete a specific record from a table
-	/// db.delete(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
+	/// let person: Option<Person> = db.delete(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
 	/// #
 	/// # Ok(())
 	/// # }

@@ -459,10 +459,10 @@ async fn router(
 		}
 		Method::Delete => {
 			let path = base_url.join(SQL_PATH)?;
-			let statement = delete_statement(&mut params);
+			let (one, statement) = delete_statement(&mut params);
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
-			let value = take(true, request).await?;
+			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Query => {

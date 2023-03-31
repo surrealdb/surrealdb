@@ -32,9 +32,9 @@ pub async fn update(id: Path<String>, person: Json<Person>) -> Result<Json<Perso
 }
 
 #[delete("/person/{id}")]
-pub async fn delete(id: Path<String>) -> Result<Json<()>, Error> {
-	DB.delete((PERSON, &*id)).await?;
-	Ok(Json(()))
+pub async fn delete(id: Path<String>) -> Result<Json<Option<Person>>, Error> {
+	let person = DB.delete((PERSON, &*id)).await?;
+	Ok(Json(person))
 }
 
 #[get("/people")]
