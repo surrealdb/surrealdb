@@ -28,7 +28,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo test
-        run: cargo test --workspace
+        run: |
+          (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
+          cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
 
   lint:
     name: Lint
@@ -46,6 +48,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
       - name: Run cargo check
@@ -56,6 +59,9 @@ jobs:
 
       - name: Run cargo clippy
         run: cargo clippy -- -W warnings
+
+      - name: Run WebAssembly check
+        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb
 
   build:
     name: Build ${{ matrix.arch }}
