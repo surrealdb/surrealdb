@@ -4,5 +4,5 @@ sign-commit = false
 tag-message = ""
 tag-prefix = ""
 publish = false
-push = true
+push = false
 tag = true
