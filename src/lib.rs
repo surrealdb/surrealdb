@@ -11,10 +11,16 @@ pub fn store(input: TokenStream) -> TokenStream {
 	// Generate the output
 	let output = quote! {
 
+		impl #name {
+			pub fn to_vec(&self) -> Vec<u8> {
+				self.into()
+			}
+		}
+
 		impl From<#name> for Vec<u8> {
 			fn from(v: #name) -> Vec<u8> {
 				crate::sql::serde::serialize_internal(|| {
-					msgpack::to_vec(&v).unwrap_or_default()
+					bung::to_vec_compact(&v).unwrap_or_default()
 				})
 			}
 		}
@@ -22,20 +28,20 @@ pub fn store(input: TokenStream) -> TokenStream {
 		impl From<&#name> for Vec<u8> {
 			fn from(v: &#name) -> Vec<u8> {
 				crate::sql::serde::serialize_internal(|| {
-					msgpack::to_vec(&v).unwrap_or_default()
+					bung::to_vec_compact(&v).unwrap_or_default()
 				})
 			}
 		}
 
 		impl From<Vec<u8>> for #name {
 			fn from(v: Vec<u8>) -> Self {
-				msgpack::from_slice::<Self>(&v).unwrap()
+				bung::from_slice::<Self>(&v).unwrap()
 			}
 		}
 
 		impl From<&Vec<u8>> for #name {
 			fn from(v: &Vec<u8>) -> Self {
-				msgpack::from_slice::<Self>(&v).unwrap()
+				bung::from_slice::<Self>(&v).unwrap()
 			}
 		}
 
