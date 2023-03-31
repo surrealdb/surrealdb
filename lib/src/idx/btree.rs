@@ -304,6 +304,31 @@ impl BTree {
 			}
 		}
 	}
+
+	pub(super) fn count<BK>(&self, kv: &mut KVSimulator) -> usize
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		if let Some(root_id) = &self.root {
+			self.recursive_count::<BK>(kv, root_id)
+		} else {
+			0
+		}
+	}
+
+	fn recursive_count<BK>(&self, kv: &mut KVSimulator, node_id: &NodeId) -> usize
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		let node = StoredNode::<BK>::read(kv, node_id).node;
+		let mut size = node.keys().len();
+		if let Node::Internal(_, _, children) = node {
+			for child_id in &children {
+				size += self.recursive_count::<BK>(kv, child_id);
+			}
+		};
+		size
+	}
 }
 
 struct StoredNode<BK>
@@ -410,6 +435,7 @@ mod tests {
 		let mut kv = KVSimulator::new(None, 0);
 		let mut t = BTree::new(75);
 		insertions_test::<_, FstKeys>(&mut kv, &mut t, 100, get_key_value);
+		assert_eq!(t.count::<FstKeys>(&mut kv), 100);
 		t.debug::<FstKeys>(&mut kv);
 		kv.print_stats();
 	}
@@ -419,6 +445,7 @@ mod tests {
 		let mut kv = KVSimulator::new(None, 0);
 		let mut t = BTree::new(75);
 		insertions_test::<_, TrieKeys>(&mut kv, &mut t, 100, get_key_value);
+		assert_eq!(t.count::<TrieKeys>(&mut kv), 100);
 		t.debug::<TrieKeys>(&mut kv);
 		kv.print_stats();
 	}
@@ -431,6 +458,7 @@ mod tests {
 		let mut rng = thread_rng();
 		samples.shuffle(&mut rng);
 		insertions_test::<_, FstKeys>(&mut kv, &mut t, 100, |i| get_key_value(samples[i]));
+		assert_eq!(t.count::<FstKeys>(&mut kv), 100);
 		t.debug::<FstKeys>(&mut kv);
 		kv.print_stats();
 	}
@@ -443,6 +471,7 @@ mod tests {
 		let mut rng = thread_rng();
 		samples.shuffle(&mut rng);
 		insertions_test::<_, TrieKeys>(&mut kv, &mut t, 100, |i| get_key_value(samples[i]));
+		assert_eq!(t.count::<FstKeys>(&mut kv), 100);
 		t.debug::<TrieKeys>(&mut kv);
 		kv.print_stats();
 	}
@@ -452,6 +481,7 @@ mod tests {
 		let mut kv = KVSimulator::new(None, 0);
 		let mut t = BTree::new(500);
 		insertions_test::<_, FstKeys>(&mut kv, &mut t, 10000, get_key_value);
+		assert_eq!(t.count::<FstKeys>(&mut kv), 10000);
 		kv.print_stats();
 	}
 
@@ -460,6 +490,7 @@ mod tests {
 		let mut kv = KVSimulator::new(None, 0);
 		let mut t = BTree::new(500);
 		insertions_test::<_, TrieKeys>(&mut kv, &mut t, 10000, get_key_value);
+		assert_eq!(t.count::<FstKeys>(&mut kv), 10000);
 		kv.print_stats();
 	}
 }

@@ -5,7 +5,7 @@ mod terms;
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::docids::DocId;
+	use crate::idx::ft::docids::DocIds;
 	use crate::idx::ft::doclength::{DocLength, DocLengths};
 	use crate::idx::ft::termfreq::{TermFrequencies, TermFrequency};
 	use crate::idx::ft::terms::Terms;
@@ -23,18 +23,27 @@ mod tests {
 	}
 
 	impl FtIndex {
-		fn add_document(&mut self, kv: &mut KVSimulator, doc_id: DocId, field_content: &str) {
+		fn add_document(&mut self, kv: &mut KVSimulator, doc_key: &str, field_content: &str) {
+			// Resolve the doc_id
+			let mut d = DocIds::new(kv, "D".into(), 100);
+			let doc_id = d.resolve_doc_id(kv, doc_key);
+
+			// Extract the doc_lengths, terms en frequencies
+			let mut t: Terms = Terms::new(kv, "T".into(), 100);
 			let (doc_length, terms_and_frequencies) =
 				Self::extract_sorted_terms_with_frequencies(field_content);
 
 			self.dl.set_doc_length(doc_id, doc_length);
-			let terms_key = "T".into();
-			let mut t: Terms = kv.get(&terms_key).unwrap_or(Terms::default());
+
+			// Update the terms
 			let terms = t.resolve_terms(kv, terms_and_frequencies);
 			for (term_id, term_freq) in terms {
 				self.tf.update_posting(term_id, doc_id, term_freq);
 			}
-			t.finish(kv, terms_key);
+
+			// Update the states
+			d.finish(kv);
+			t.finish(kv);
 		}
 
 		fn extract_sorted_terms_with_frequencies(
@@ -79,6 +88,6 @@ mod tests {
 	fn test_ft_index() {
 		let mut fti = FtIndex::default();
 		let mut kv = KVSimulator::default();
-		fti.add_document(&mut kv, 0, "Hello world!");
+		fti.add_document(&mut kv, "Foo", "Hello world!");
 	}
 }
