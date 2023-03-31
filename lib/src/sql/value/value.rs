@@ -113,6 +113,7 @@ pub enum Value {
 	Array(Array),
 	Object(Object),
 	Geometry(Geometry),
+	Bytes(Vec<u8>),
 	// ---
 	Param(Param),
 	Idiom(Idiom),
@@ -1399,6 +1400,7 @@ impl fmt::Display for Value {
 			Value::Function(v) => write!(f, "{v}"),
 			Value::Subquery(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
+			Value::Bytes(_) => write!(f, "<bytes>"),
 		}
 	}
 }
@@ -1466,20 +1468,21 @@ impl Serialize for Value {
 				Value::Array(v) => s.serialize_newtype_variant(TOKEN, 9, "Array", v),
 				Value::Object(v) => s.serialize_newtype_variant(TOKEN, 10, "Object", v),
 				Value::Geometry(v) => s.serialize_newtype_variant(TOKEN, 11, "Geometry", v),
-				Value::Param(v) => s.serialize_newtype_variant(TOKEN, 12, "Param", v),
-				Value::Idiom(v) => s.serialize_newtype_variant(TOKEN, 13, "Idiom", v),
-				Value::Table(v) => s.serialize_newtype_variant(TOKEN, 14, "Table", v),
-				Value::Thing(v) => s.serialize_newtype_variant(TOKEN, 15, "Thing", v),
-				Value::Model(v) => s.serialize_newtype_variant(TOKEN, 16, "Model", v),
-				Value::Regex(v) => s.serialize_newtype_variant(TOKEN, 17, "Regex", v),
-				Value::Block(v) => s.serialize_newtype_variant(TOKEN, 18, "Block", v),
-				Value::Range(v) => s.serialize_newtype_variant(TOKEN, 19, "Range", v),
-				Value::Edges(v) => s.serialize_newtype_variant(TOKEN, 20, "Edges", v),
-				Value::Future(v) => s.serialize_newtype_variant(TOKEN, 21, "Future", v),
-				Value::Constant(v) => s.serialize_newtype_variant(TOKEN, 22, "Constant", v),
-				Value::Function(v) => s.serialize_newtype_variant(TOKEN, 23, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant(TOKEN, 24, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant(TOKEN, 25, "Expression", v),
+				Value::Bytes(v) => s.serialize_newtype_variant(TOKEN, 12, "Bytes", v),
+				Value::Param(v) => s.serialize_newtype_variant(TOKEN, 13, "Param", v),
+				Value::Idiom(v) => s.serialize_newtype_variant(TOKEN, 14, "Idiom", v),
+				Value::Table(v) => s.serialize_newtype_variant(TOKEN, 15, "Table", v),
+				Value::Thing(v) => s.serialize_newtype_variant(TOKEN, 16, "Thing", v),
+				Value::Model(v) => s.serialize_newtype_variant(TOKEN, 17, "Model", v),
+				Value::Regex(v) => s.serialize_newtype_variant(TOKEN, 18, "Regex", v),
+				Value::Block(v) => s.serialize_newtype_variant(TOKEN, 19, "Block", v),
+				Value::Range(v) => s.serialize_newtype_variant(TOKEN, 20, "Range", v),
+				Value::Edges(v) => s.serialize_newtype_variant(TOKEN, 21, "Edges", v),
+				Value::Future(v) => s.serialize_newtype_variant(TOKEN, 22, "Future", v),
+				Value::Constant(v) => s.serialize_newtype_variant(TOKEN, 23, "Constant", v),
+				Value::Function(v) => s.serialize_newtype_variant(TOKEN, 24, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant(TOKEN, 25, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant(TOKEN, 26, "Expression", v),
 			}
 		} else {
 			match self {
