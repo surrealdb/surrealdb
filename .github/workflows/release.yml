@@ -13,7 +13,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -27,7 +27,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -63,15 +63,15 @@ jobs:
             file: surreal-${{ github.ref_name }}.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-20.04-16-cores
             file: surreal-${{ github.ref_name }}.linux-amd64
             opts: --features storage-tikv
           - arch: aarch64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-20.04-16-cores
             file: surreal-${{ github.ref_name }}.linux-arm64
             opts: --features storage-tikv
           - arch: x86_64-pc-windows-msvc
-            os: windows-latest
+            os: windows-latest-16-cores
             file: surreal-${{ github.ref_name }}.windows-amd64
             opts:
     runs-on: ${{ matrix.os }}
@@ -202,7 +202,7 @@ jobs:
   deploy:
     name: Deploy
     needs: [package]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -244,7 +244,7 @@ jobs:
   docker:
     name: Docker
     needs: [build]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
