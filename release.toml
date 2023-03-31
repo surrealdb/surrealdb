@@ -3,6 +3,6 @@ shared-version = true
 sign-commit = false
 tag-message = ""
 tag-prefix = ""
-publish = true
+publish = false
 push = true
 tag = true
