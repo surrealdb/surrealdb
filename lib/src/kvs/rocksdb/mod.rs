@@ -1,20 +1,22 @@
-#![cfg(feature = "kv-rocksdb")]
-
-use crate::err::Error;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::{
+	err::Error,
+	kvs::{DatastoreFacade, DatastoreMetadata, Key, TransactionFacade, Val},
+};
+use async_trait_fn::async_trait;
 use futures::lock::Mutex;
 use rocksdb::{OptimisticTransactionDB, OptimisticTransactionOptions, ReadOptions, WriteOptions};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 
+pub struct RocksDbDatastoreMetadata;
+
 #[derive(Clone)]
-pub struct Datastore {
+pub struct RocksDbDatastore {
 	db: Pin<Arc<OptimisticTransactionDB>>,
 }
 
-pub struct Transaction {
+pub struct RocksDbTransaction {
 	// Is the transaction complete?
 	ok: bool,
 	// Is the transaction read+write?
@@ -28,15 +30,43 @@ pub struct Transaction {
 	_db: Pin<Arc<OptimisticTransactionDB>>,
 }
 
-impl Datastore {
+#[async_trait]
+impl DatastoreMetadata for RocksDbDatastoreMetadata {
 	/// Open a new database
-	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		Ok(Datastore {
+	async fn new(&self, path: &str) -> Result<Box<dyn DatastoreFacade + Send + Sync>, Error> {
+		Ok(Box::new(RocksDbDatastore {
 			db: Arc::pin(OptimisticTransactionDB::open_default(path)?),
-		})
+		}))
 	}
+
+	fn name(&self) -> &'static str {
+		"RocksDB"
+	}
+
+	fn scheme(&self) -> &'static [&'static str] {
+		&["rocksdb", "file"]
+	}
+
+	fn trim_connection_string(&self, url: &str) -> String {
+		(if url.starts_with("rocksdb:") {
+			url.trim_start_matches("rocksdb://").trim_start_matches("rocksdb:")
+		} else if url.starts_with("file:") {
+			url.trim_start_matches("file://").trim_start_matches("file:")
+		} else {
+			unreachable!()
+		})
+		.to_string()
+	}
+}
+
+#[async_trait]
+impl DatastoreFacade for RocksDbDatastore {
 	/// Start a new transaction
-	pub async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+	async fn transaction(
+		&self,
+		write: bool,
+		_: bool,
+	) -> Result<Box<dyn TransactionFacade + Send + Sync>, Error> {
 		// Activate the snapshot options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);
@@ -57,23 +87,24 @@ impl Datastore {
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&tx.snapshot());
 		// Return the transaction
-		Ok(Transaction {
+		Ok(Box::new(RocksDbTransaction {
 			ok: false,
 			rw: write,
 			tx: Arc::new(Mutex::new(Some(tx))),
 			ro,
 			_db: self.db.clone(),
-		})
+		}))
 	}
 }
 
-impl Transaction {
+#[async_trait]
+impl TransactionFacade for RocksDbTransaction {
 	/// Check if closed
-	pub fn closed(&self) -> bool {
+	fn closed(&self) -> bool {
 		self.ok
 	}
 	/// Cancel a transaction
-	pub async fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -89,7 +120,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Commit a transaction
-	pub async fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -109,39 +140,29 @@ impl Transaction {
 		Ok(())
 	}
 	/// Check if a key exists
-	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
-	where
-		K: Into<Key>,
-	{
+	async fn exi(&mut self, key: Key) -> Result<bool, Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
 		// Check the key
-		let res = self.tx.lock().await.as_ref().unwrap().get_opt(key.into(), &self.ro)?.is_some();
+		let res = self.tx.lock().await.as_ref().unwrap().get_opt(key, &self.ro)?.is_some();
 		// Return result
 		Ok(res)
 	}
 	/// Fetch a key from the database
-	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
-	where
-		K: Into<Key>,
-	{
+	async fn get(&mut self, key: Key) -> Result<Option<Val>, Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
 		}
 		// Get the key
-		let res = self.tx.lock().await.as_ref().unwrap().get_opt(key.into(), &self.ro)?;
+		let res = self.tx.lock().await.as_ref().unwrap().get_opt(key, &self.ro)?;
 		// Return result
 		Ok(res)
 	}
 	/// Insert or update a key in the database
-	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn set(&mut self, key: Key, val: Val) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -151,16 +172,12 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Set the key
-		self.tx.lock().await.as_ref().unwrap().put(key.into(), val.into())?;
+		self.tx.lock().await.as_ref().unwrap().put(key, val)?;
 		// Return result
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn put(&mut self, key: Key, val: Val) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -173,8 +190,8 @@ impl Transaction {
 		let tx = self.tx.lock().await;
 		let tx = tx.as_ref().unwrap();
 		// Get the arguments
-		let key = key.into();
-		let val = val.into();
+		let key = key;
+		let val = val;
 		// Set the key if empty
 		match tx.get_opt(&key, &self.ro)? {
 			None => tx.put(key, val)?,
@@ -184,11 +201,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -200,10 +213,6 @@ impl Transaction {
 		// Get the transaction
 		let tx = self.tx.lock().await;
 		let tx = tx.as_ref().unwrap();
-		// Get the arguments
-		let key = key.into();
-		let val = val.into();
-		let chk = chk.map(Into::into);
 		// Set the key if valid
 		match (tx.get_opt(&key, &self.ro)?, chk) {
 			(Some(v), Some(w)) if v == w => tx.put(key, val)?,
@@ -214,10 +223,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Delete a key
-	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: Into<Key>,
-	{
+	async fn del(&mut self, key: Key) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -227,16 +233,12 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		// Remove the key
-		self.tx.lock().await.as_ref().unwrap().delete(key.into())?;
+		self.tx.lock().await.as_ref().unwrap().delete(key)?;
 		// Return result
 		Ok(())
 	}
 	/// Delete a key
-	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -249,8 +251,6 @@ impl Transaction {
 		let tx = self.tx.lock().await;
 		let tx = tx.as_ref().unwrap();
 		// Get the arguments
-		let key = key.into();
-		let chk = chk.map(Into::into);
 		// Delete the key if valid
 		match (tx.get_opt(&key, &self.ro)?, chk) {
 			(Some(v), Some(w)) if v == w => tx.delete(key)?,
@@ -261,10 +261,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Retrieve a range of keys from the databases
-	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: Into<Key>,
-	{
+	async fn scan(&mut self, rng: Range<Key>, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -272,11 +269,6 @@ impl Transaction {
 		// Get the transaction
 		let tx = self.tx.lock().await;
 		let tx = tx.as_ref().unwrap();
-		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.into(),
-			end: rng.end.into(),
-		};
 		// Create result set
 		let mut res = vec![];
 		// Set the key range

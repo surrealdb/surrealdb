@@ -18,12 +18,12 @@ resolver = "2"
 [features]
 # Public features
 default = ["protocol-ws", "rustls"]
-protocol-http = ["dep:reqwest", "dep:tokio-util"]
-protocol-ws = ["dep:tokio-tungstenite", "dep:tokio-stream", "tokio/time"]
-kv-mem = ["dep:echodb"]
-kv-indxdb = ["dep:indxdb"]
-kv-rocksdb = ["dep:rocksdb"]
-kv-tikv = ["dep:tikv"]
+protocol-http = ["dep:reqwest", "dep:tokio-util", "has-remote"]
+protocol-ws = ["dep:tokio-tungstenite", "dep:tokio-stream", "tokio/time", "has-remote"]
+kv-mem = ["dep:echodb", "has-local"]
+kv-indxdb = ["dep:indxdb", "has-local"]
+kv-rocksdb = ["dep:rocksdb", "has-local"]
+kv-tikv = ["dep:tikv", "has-local"]
 kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb"]
 kv-fdb-5_2 = ["foundationdb/fdb-5_2", "kv-fdb"]
 kv-fdb-6_0 = ["foundationdb/fdb-6_0", "kv-fdb"]
@@ -34,10 +34,13 @@ kv-fdb-7_0 = ["foundationdb/fdb-7_0", "kv-fdb"]
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
-native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
-rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls"]
+native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls", "has-tls"]
+rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls", "has-tls"]
 # Private features
-kv-fdb = ["foundationdb"]
+kv-fdb = ["foundationdb", "has-local"]
+has-local = []
+has-remote = []
+has-tls = []
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -54,6 +57,7 @@ addr = { version = "0.15.6", default-features = false, features = ["std"] }
 argon2 = "0.5.0"
 ascii = { version = "0.3.2", package = "any_ascii" }
 async-recursion = "1.0.4"
+async-trait-fn = "0.1.68"
 bcrypt = "0.14.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
 channel = { version = "1.8.0", package = "async-channel" }
@@ -74,6 +78,7 @@ js = { version = "0.1.7", package = "rquickjs", features = ["array-buffer", "bin
 lexicmp = "0.1.0"
 log = "0.4.17"
 md-5 = "0.10.5"
+moka = { version = "0.10.1", features = ["future"] }
 msgpack = { version = "1.1.1", package = "rmp-serde" }
 nanoid = "0.4.0"
 native-tls = { version = "0.2.11", optional = true }

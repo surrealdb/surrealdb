@@ -50,48 +50,13 @@ impl Connection for Any {
 			let mut features = HashSet::new();
 
 			match address.endpoint.scheme() {
-				#[cfg(feature = "kv-fdb")]
-				"fdb" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
-				}
-
-				#[cfg(feature = "kv-indxdb")]
-				"indxdb" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
-				}
-
-				#[cfg(feature = "kv-mem")]
-				"mem" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
-				}
-
-				#[cfg(feature = "kv-rocksdb")]
-				"rocksdb" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
-				}
-
-				#[cfg(feature = "kv-rocksdb")]
-				"file" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
-				}
-
-				#[cfg(feature = "kv-tikv")]
-				"tikv" => {
+				#[cfg(feature = "has-local")]
+				scheme
+					if crate::kvs::AVAILABLE_DATASTORE_METADATA
+						.iter()
+						.flat_map(|x| x.scheme())
+						.any(|&x| x == scheme) =>
+				{
 					engine::local::wasm::router(address, conn_tx, route_rx);
 					if let Err(error) = conn_rx.into_recv_async().await? {
 						return Err(error);

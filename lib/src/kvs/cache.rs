@@ -11,7 +11,7 @@ use crate::sql::statements::DefineScopeStatement;
 use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::DefineTokenStatement;
 use crate::sql::statements::LiveStatement;
-use std::collections::HashMap;
+use async_trait_fn::async_trait;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -39,24 +39,45 @@ pub enum Entry {
 	Tbs(Arc<[DefineTableStatement]>),
 }
 
-#[derive(Default)]
-pub struct Cache(pub HashMap<Key, Entry>);
-
-impl Cache {
+pub trait SyncCache {
 	// Check if key exists
-	pub fn exi(&mut self, key: &Key) -> bool {
-		self.0.contains_key(key)
-	}
+	fn exi(&mut self, key: &Key) -> bool;
 	// Set a key in the cache
-	pub fn set(&mut self, key: Key, val: Entry) {
-		self.0.insert(key, val);
-	}
+	fn set(&mut self, key: Key, val: Entry);
 	// Get a key from the cache
-	pub fn get(&mut self, key: &Key) -> Option<Entry> {
-		self.0.get(key).cloned()
-	}
+	fn get(&mut self, key: &Key) -> Option<Entry>;
 	// Delete a key from the cache
-	pub fn del(&mut self, key: &Key) -> Option<Entry> {
-		self.0.remove(key)
+	fn del(&mut self, key: &Key) -> Option<Entry>;
+}
+
+#[async_trait]
+pub trait Cache: Send {
+	// Check if key exists
+	async fn exi(&mut self, key: &Key) -> bool;
+	// Set a key in the cache
+	async fn set(&mut self, key: Key, val: Entry);
+	// Get a key from the cache
+	async fn get(&mut self, key: &Key) -> Option<Entry>;
+	// Delete a key from the cache
+	async fn del(&mut self, key: &Key) -> Option<Entry>;
+}
+
+#[async_trait]
+impl<T: SyncCache + Send> Cache for T {
+	async fn exi(&mut self, key: &Key) -> bool {
+		(self as &mut T).exi(key)
+	}
+	async fn set(&mut self, key: Key, val: Entry) {
+		(self as &mut T).set(key, val)
+	}
+	async fn get(&mut self, key: &Key) -> Option<Entry> {
+		(self as &mut T).get(key)
+	}
+	async fn del(&mut self, key: &Key) -> Option<Entry> {
+		(self as &mut T).del(key)
 	}
 }
+
+pub mod btreemap;
+pub mod hashmap;
+pub mod moka;

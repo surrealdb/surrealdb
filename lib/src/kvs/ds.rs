@@ -7,54 +7,21 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
-use crate::kvs::LOG;
+use crate::kvs::cache::moka::MokaCache;
+use crate::kvs::DatastoreFacade;
+use crate::kvs::{AVAILABLE_DATASTORE_METADATA, LOG};
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
 use channel::Sender;
 use futures::lock::Mutex;
-use std::fmt;
 use std::sync::Arc;
-use tracing::instrument;
+use tracing::{error, info, instrument};
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 pub struct Datastore {
-	pub(super) inner: Inner,
-}
-
-#[allow(clippy::large_enum_variant)]
-pub(super) enum Inner {
-	#[cfg(feature = "kv-mem")]
-	Mem(super::mem::Datastore),
-	#[cfg(feature = "kv-rocksdb")]
-	RocksDB(super::rocksdb::Datastore),
-	#[cfg(feature = "kv-indxdb")]
-	IndxDB(super::indxdb::Datastore),
-	#[cfg(feature = "kv-tikv")]
-	TiKV(super::tikv::Datastore),
-	#[cfg(feature = "kv-fdb")]
-	FDB(super::fdb::Datastore),
-}
-
-impl fmt::Display for Datastore {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		#![allow(unused_variables)]
-		match &self.inner {
-			#[cfg(feature = "kv-mem")]
-			Inner::Mem(_) => write!(f, "memory"),
-			#[cfg(feature = "kv-rocksdb")]
-			Inner::RocksDB(_) => write!(f, "rocksdb"),
-			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(_) => write!(f, "indexdb"),
-			#[cfg(feature = "kv-tikv")]
-			Inner::TiKV(_) => write!(f, "tikv"),
-			#[cfg(feature = "kv-fdb")]
-			Inner::FDB(_) => write!(f, "fdb"),
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
-	}
+	pub(super) inner: Box<dyn DatastoreFacade + Send + Sync>,
 }
 
 impl Datastore {
@@ -96,82 +63,19 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		match path {
-			#[cfg(feature = "kv-mem")]
-			"memory" => {
-				info!(target: LOG, "Starting kvs store in {}", path);
-				let v = super::mem::Datastore::new().await.map(|v| Datastore {
-					inner: Inner::Mem(v),
+		for ds in AVAILABLE_DATASTORE_METADATA {
+			if ds.connection_string_match_prefix(path) {
+				info!(target: LOG, path = path, "Starting kvs store");
+				let inner = ds.new(path).await?;
+				info!(target: LOG, path = path, "Started kvs store");
+				return Ok(Datastore {
+					inner,
 				});
-				info!(target: LOG, "Started kvs store in {}", path);
-				v
-			}
-			// Parse and initiate an File database
-			#[cfg(feature = "kv-rocksdb")]
-			s if s.starts_with("file:") => {
-				info!(target: LOG, "Starting kvs store at {}", path);
-				let s = s.trim_start_matches("file://");
-				let s = s.trim_start_matches("file:");
-				let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::RocksDB(v),
-				});
-				info!(target: LOG, "Started kvs store at {}", path);
-				v
-			}
-			// Parse and initiate an RocksDB database
-			#[cfg(feature = "kv-rocksdb")]
-			s if s.starts_with("rocksdb:") => {
-				info!(target: LOG, "Starting kvs store at {}", path);
-				let s = s.trim_start_matches("rocksdb://");
-				let s = s.trim_start_matches("rocksdb:");
-				let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::RocksDB(v),
-				});
-				info!(target: LOG, "Started kvs store at {}", path);
-				v
-			}
-			// Parse and initiate an IndxDB database
-			#[cfg(feature = "kv-indxdb")]
-			s if s.starts_with("indxdb:") => {
-				info!(target: LOG, "Starting kvs store at {}", path);
-				let s = s.trim_start_matches("indxdb://");
-				let s = s.trim_start_matches("indxdb:");
-				let v = super::indxdb::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::IndxDB(v),
-				});
-				info!(target: LOG, "Started kvs store at {}", path);
-				v
-			}
-			// Parse and initiate a TiKV database
-			#[cfg(feature = "kv-tikv")]
-			s if s.starts_with("tikv:") => {
-				info!(target: LOG, "Connecting to kvs store at {}", path);
-				let s = s.trim_start_matches("tikv://");
-				let s = s.trim_start_matches("tikv:");
-				let v = super::tikv::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::TiKV(v),
-				});
-				info!(target: LOG, "Connected to kvs store at {}", path);
-				v
-			}
-			// Parse and initiate a FoundationDB database
-			#[cfg(feature = "kv-fdb")]
-			s if s.starts_with("fdb:") => {
-				info!(target: LOG, "Connecting to kvs store at {}", path);
-				let s = s.trim_start_matches("fdb://");
-				let s = s.trim_start_matches("fdb:");
-				let v = super::fdb::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::FDB(v),
-				});
-				info!(target: LOG, "Connected to kvs store at {}", path);
-				v
-			}
-			// The datastore path is not valid
-			_ => {
-				info!(target: LOG, "Unable to load the specified datastore {}", path);
-				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		}
+
+		error!(target: LOG, path = path, "Unable to load the specified datastore");
+		Err(Error::Ds("Unable to load the specified datastore".into()))
 	}
 
 	/// Create a new transaction on this datastore
@@ -190,50 +94,12 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
-		match &self.inner {
-			#[cfg(feature = "kv-mem")]
-			Inner::Mem(v) => {
-				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::Mem(tx),
-					cache: super::cache::Cache::default(),
-				})
-			}
-			#[cfg(feature = "kv-rocksdb")]
-			Inner::RocksDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::RocksDB(tx),
-					cache: super::cache::Cache::default(),
-				})
-			}
-			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::IndxDB(tx),
-					cache: super::cache::Cache::default(),
-				})
-			}
-			#[cfg(feature = "kv-tikv")]
-			Inner::TiKV(v) => {
-				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::TiKV(tx),
-					cache: super::cache::Cache::default(),
-				})
-			}
-			#[cfg(feature = "kv-fdb")]
-			Inner::FDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::FDB(tx),
-					cache: super::cache::Cache::default(),
-				})
-			}
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		let cache = Box::new(MokaCache::new());
+		let tx = self.inner.transaction(write, lock).await?;
+		Ok(Transaction {
+			inner: tx,
+			cache,
+		})
 	}
 
 	/// Parse and execute an SQL query

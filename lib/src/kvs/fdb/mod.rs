@@ -1,10 +1,9 @@
-#![cfg(feature = "kv-fdb")]
-
 use futures::TryStreamExt;
 
-use crate::err::Error;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::{
+	err::Error,
+	kvs::{DatastoreFacade, DatastoreMetadata, Key, TransactionFacade, Val},
+};
 use std::ops::Range;
 use std::sync::Arc;
 // We use it to work-around the fact that foundationdb-rs' Transaction
@@ -15,19 +14,22 @@ use std::sync::Arc;
 // self or the fdb-rs Transaction it contains.
 //
 // We use mutex from the futures crate instead of the std's due to https://rust-lang.github.io/wg-async/vision/submitted_stories/status_quo/alan_thinks_he_needs_async_locks.html.
+use async_trait_fn::async_trait;
 use futures::lock::Mutex;
 use once_cell::sync::Lazy;
+
+pub struct FoundationDbDatastoreMetadata;
 
 // In case you're curious why FDB store doesn't work as you've expected,
 // run a few queries via surrealdb-sql or via the REST API, and
 // run the following command to what have been saved to FDB:
 //   fdbcli --exec 'getrangekeys \x00 \xff'
-pub struct Datastore {
+pub struct FoundationDbDatastore {
 	db: foundationdb::Database,
 	_fdbnet: Arc<foundationdb::api::NetworkAutoStop>,
 }
 
-pub struct Transaction {
+pub struct FoundationDbTransaction {
 	// Is the transaction complete?
 	ok: bool,
 	// Is the transaction read+write?
@@ -37,45 +39,62 @@ pub struct Transaction {
 	tx: Arc<Mutex<Option<foundationdb::Transaction>>>,
 }
 
-impl Datastore {
+#[async_trait]
+impl DatastoreMetadata for FoundationDbDatastoreMetadata {
 	/// Open a new database
 	///
 	/// path must be an empty string or a local file path to a FDB cluster file.
 	/// An empty string results in using the default cluster file placed
 	/// at a system-dependent location defined by FDB.
 	/// See https://apple.github.io/foundationdb/administration.html#default-cluster-file for more information on that.
-	pub async fn new(path: &str) -> Result<Datastore, Error> {
+	async fn new(&self, path: &str) -> Result<Box<dyn DatastoreFacade + Send + Sync>, Error> {
 		static FDBNET: Lazy<Arc<foundationdb::api::NetworkAutoStop>> =
 			Lazy::new(|| Arc::new(unsafe { foundationdb::boot() }));
 		let _fdbnet = (*FDBNET).clone();
 
 		match foundationdb::Database::from_path(path) {
-			Ok(db) => Ok(Datastore {
+			Ok(db) => Ok(Box::new(FoundationDbDatastore {
 				db,
 				_fdbnet,
-			}),
+			})),
 			Err(e) => Err(Error::Ds(e.to_string())),
 		}
 	}
+
+	fn name(&self) -> &'static str {
+		"FoundationDB"
+	}
+
+	fn scheme(&self) -> &'static [&'static str] {
+		&["fdb"]
+	}
+
+	fn trim_connection_string(&self, url: &str) -> String {
+		url.trim_start_matches("fdb://").trim_start_matches("fdb:").to_string()
+	}
+}
+
+#[async_trait]
+impl DatastoreFacade for FoundationDbDatastore {
 	/// Start a new transaction
-	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
+	async fn transaction(
+		&self,
+		write: bool,
+		lock: bool,
+	) -> Result<Box<dyn TransactionFacade + Send + Sync>, Error> {
 		match self.db.create_trx() {
-			Ok(tx) => Ok(Transaction {
+			Ok(tx) => Ok(Box::new(FoundationDbTransaction {
 				ok: false,
 				rw: write,
 				lock,
 				tx: Arc::new(Mutex::new(Some(tx))),
-			}),
+			})),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}
 }
 
-impl Transaction {
-	/// Check if closed
-	pub fn closed(&self) -> bool {
-		self.ok
-	}
+impl FoundationDbTransaction {
 	/// We use lock=true to enable the tikv's own pessimistic tx (https://docs.pingcap.com/tidb/v4.0/pessimistic-transaction)
 	/// for tikv kvs.
 	/// FDB's standard transaction(snapshot=false) behaves like a tikv perssimistic tx
@@ -87,8 +106,16 @@ impl Transaction {
 	fn snapshot(&self) -> bool {
 		!self.rw && !self.lock
 	}
+}
+
+#[async_trait]
+impl TransactionFacade for FoundationDbTransaction {
+	/// Check if closed
+	fn closed(&self) -> bool {
+		self.ok
+	}
 	/// Cancel a transaction
-	pub async fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -114,7 +141,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Commit a transaction
-	pub async fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -146,10 +173,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Check if a key exists
-	pub async fn exi<K>(&mut self, key: K) -> Result<bool, Error>
-	where
-		K: Into<Key>,
-	{
+	async fn exi(&mut self, key: Key) -> Result<bool, Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -170,10 +194,7 @@ impl Transaction {
 			.map_err(|e| Error::Tx(format!("Unable to get kv from FDB: {}", e)))
 	}
 	/// Fetch a key from the database
-	pub async fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
-	where
-		K: Into<Key>,
-	{
+	async fn get(&mut self, key: Key) -> Result<Option<Val>, Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -196,11 +217,7 @@ impl Transaction {
 		res
 	}
 	/// Insert or update a key in the database
-	pub async fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn set(&mut self, key: Key, val: Val) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -230,11 +247,7 @@ impl Transaction {
 	/// Suppose you've sent a query like `CREATE author:john SET ...` with
 	/// the namespace `test` and the database `test`-
 	/// You'll see SurrealDB sets a value to the key `/*test\x00*test\x00*author\x00*\x00\x00\x00\x01john\x00`.
-	pub async fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn put(&mut self, key: Key, val: Val) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -244,7 +257,7 @@ impl Transaction {
 			return Err(Error::TxReadonly);
 		}
 		let key: Vec<u8> = key.into();
-		if self.exi(key.clone().as_slice()).await? {
+		if self.exi(key.clone()).await? {
 			return Err(Error::TxKeyAlreadyExists);
 		}
 		// Set the key
@@ -258,11 +271,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -299,10 +308,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Delete a key
-	pub async fn del<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: Into<Key>,
-	{
+	async fn del(&mut self, key: Key) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -321,11 +327,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Delete a key
-	pub async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -351,10 +353,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Retrieve a range of keys from the databases
-	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: Into<Key>,
-	{
+	async fn scan(&mut self, rng: Range<Key>, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);

@@ -66,36 +66,13 @@ impl Connection for Any {
 			let mut features = HashSet::new();
 
 			match address.endpoint.scheme() {
-				#[cfg(feature = "kv-fdb")]
-				"fdb" => {
-					features.insert(ExtraFeatures::Backup);
-					engine::local::native::router(address, conn_tx, route_rx);
-					conn_rx.into_recv_async().await??
-				}
-
-				#[cfg(feature = "kv-mem")]
-				"mem" => {
-					features.insert(ExtraFeatures::Backup);
-					engine::local::native::router(address, conn_tx, route_rx);
-					conn_rx.into_recv_async().await??
-				}
-
-				#[cfg(feature = "kv-rocksdb")]
-				"rocksdb" => {
-					features.insert(ExtraFeatures::Backup);
-					engine::local::native::router(address, conn_tx, route_rx);
-					conn_rx.into_recv_async().await??
-				}
-
-				#[cfg(feature = "kv-rocksdb")]
-				"file" => {
-					features.insert(ExtraFeatures::Backup);
-					engine::local::native::router(address, conn_tx, route_rx);
-					conn_rx.into_recv_async().await??
-				}
-
-				#[cfg(feature = "kv-tikv")]
-				"tikv" => {
+				#[cfg(feature = "has-local")]
+				scheme
+					if crate::kvs::AVAILABLE_DATASTORE_METADATA
+						.iter()
+						.flat_map(|x| x.scheme())
+						.any(|&x| x == scheme) =>
+				{
 					features.insert(ExtraFeatures::Backup);
 					engine::local::native::router(address, conn_tx, route_rx);
 					conn_rx.into_recv_async().await??
