@@ -245,6 +245,7 @@ mod tests {
 	use super::*;
 	use crate::sql::dir::Dir;
 	use crate::sql::expression::Expression;
+	use crate::sql::field::Fields;
 	use crate::sql::graph::Graph;
 	use crate::sql::number::Number;
 	use crate::sql::param::Param;
@@ -410,15 +411,27 @@ mod tests {
 				Part::from("friend"),
 				Part::Graph(Graph {
 					dir: Dir::Out,
+					expr: Fields::all(),
 					what: Table::from("like").into(),
 					cond: None,
 					alias: None,
+					split: None,
+					group: None,
+					order: None,
+					limit: None,
+					start: None,
 				}),
 				Part::Graph(Graph {
 					dir: Dir::Out,
+					expr: Fields::all(),
 					what: Table::from("person").into(),
 					cond: None,
 					alias: None,
+					split: None,
+					group: None,
+					order: None,
+					limit: None,
+					start: None,
 				}),
 			])
 		);

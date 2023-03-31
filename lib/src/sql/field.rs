@@ -21,12 +21,18 @@ use std::ops::Deref;
 pub struct Fields(pub Vec<Field>, pub bool);
 
 impl Fields {
-	pub fn all(&self) -> bool {
+	pub fn all() -> Self {
+		Self(vec![Field::All], false)
+	}
+	/// Check to see if this field is a * projection
+	pub fn is_all(&self) -> bool {
 		self.0.iter().any(|v| matches!(v, Field::All))
 	}
+	/// Get all fields which are not an * projection
 	pub fn other(&self) -> impl Iterator<Item = &Field> {
 		self.0.iter().filter(|v| !matches!(v, Field::All))
 	}
+	/// Check to see if this field is a single VALUE clause
 	pub fn single(&self) -> Option<&Field> {
 		match (self.0.len(), self.1) {
 			(1, true) => match self.0.first() {
@@ -77,7 +83,7 @@ impl Fields {
 		//
 		let doc = doc.unwrap_or(&Value::None);
 		// Process the desired output
-		let mut out = match self.all() {
+		let mut out = match self.is_all() {
 			true => doc.compute(ctx, opt, txn, Some(doc)).await?,
 			false => Value::base(),
 		};
