@@ -1,6 +1,7 @@
 use crate::sql::comment::shouldbespace;
 use crate::sql::ending::ident as ending;
 use crate::sql::error::IResult;
+use crate::sql::fmt::Fmt;
 use crate::sql::graph::{self, Graph};
 use crate::sql::ident::{self, Ident};
 use crate::sql::idiom::Idiom;
@@ -26,6 +27,7 @@ pub enum Part {
 	Where(Value),
 	Graph(Graph),
 	Value(Value),
+	Method(String, Vec<Value>),
 }
 
 impl From<i32> for Part {
@@ -106,6 +108,7 @@ impl fmt::Display for Part {
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "{v}"),
+			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
 		}
 	}
 }
