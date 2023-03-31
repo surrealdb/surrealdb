@@ -4,7 +4,6 @@ on:
   schedule:
     - cron: '0 0 * * *'
 
-# Setting the shell option, it will run 'bash --noprofile --norc -eo pipefail {0}'
 defaults:
   run:
     shell: bash
@@ -13,16 +12,11 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Checkout sources
         uses: actions/checkout@v3
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -34,16 +28,11 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Checkout sources
         uses: actions/checkout@v3
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -79,11 +68,11 @@ jobs:
             file: surreal-nightly.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04
             file: surreal-nightly.linux-amd64
             opts: --features storage-tikv
           - arch: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04
             file: surreal-nightly.linux-arm64
             opts: --features storage-tikv
           - arch: x86_64-pc-windows-msvc
@@ -105,7 +94,6 @@ jobs:
         run: |
           vcpkg integrate install
           vcpkg install openssl:x64-windows-static
-          choco install protoc
 
       - name: Install dependencies
         if: contains(matrix.arch, 'apple') && endsWith(matrix.arch, '-darwin')
@@ -117,16 +105,8 @@ jobs:
         run: |
           sudo apt-get -y update
           sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
-          sudo apt-get -y install g++-aarch64-linux-gnu g++-10-aarch64-linux-gnu gcc-aarch64-linux-gnu gcc-10-aarch64-linux-gnu
+          sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
           sudo apt-get -y install protobuf-compiler
-
-          # TODO(sgirones): Work around for the gprc-sys build error
-          # grpc-rs crate depends on a version of grpc-sys that depends on a version of absl that is not compatible with gcc >= 11.
-          set -x
-          sudo ln -fs gcc-10 /usr/bin/gcc
-          sudo ln -fs g++-10 /usr/bin/g++
-          sudo ln -fs aarch64-linux-gnu-gcc-10 /usr/bin/aarch64-linux-gnu-gcc
-          sudo ln -fs aarch64-linux-gnu-g++-10 /usr/bin/aarch64-linux-gnu-g++
 
       - name: Install FoundationDB
         if: contains(matrix.arch, 'linux') && startsWith(matrix.arch, 'x86_64')
@@ -227,7 +207,7 @@ jobs:
   deploy:
     name: Deploy
     needs: [package]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Checkout sources
@@ -254,7 +234,7 @@ jobs:
   docker:
     name: Docker
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
 
       - name: Checkout sources
