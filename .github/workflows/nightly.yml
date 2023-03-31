@@ -1,6 +1,7 @@
 name: Nightly release
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 0 * * *'
 
