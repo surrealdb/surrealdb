@@ -1,6 +1,7 @@
 use crate::idx::bkeys::TrieKeys;
 use crate::idx::btree::BTree;
 use crate::idx::kvsim::KVSimulator;
+use crate::idx::{IndexId, StateKey, DOC_IDS_DOMAIN};
 use crate::kvs::Key;
 use serde::{Deserialize, Serialize};
 
@@ -8,29 +9,30 @@ pub(super) type DocId = u64;
 
 pub(super) struct DocIds {
 	state_key: Key,
-	state: DocIdsState,
+	state: State,
 	updated: bool,
 }
 
 #[derive(Serialize, Deserialize)]
-struct DocIdsState {
+struct State {
 	btree: BTree,
 	next_doc_id: DocId,
 }
 
-impl DocIdsState {
-	fn new(btree_order: usize) -> Self {
+impl State {
+	fn new(index_id: IndexId, btree_order: usize) -> Self {
 		Self {
-			btree: BTree::new(btree_order),
+			btree: BTree::new(DOC_IDS_DOMAIN, index_id, btree_order),
 			next_doc_id: 0,
 		}
 	}
 }
 
 impl DocIds {
-	pub(super) fn new(kv: &mut KVSimulator, state_key: Key, btree_order: usize) -> Self {
+	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, default_btree_order: usize) -> Self {
+		let state_key = StateKey::new(DOC_IDS_DOMAIN, index_id).into();
 		Self {
-			state: kv.get(&state_key).unwrap_or_else(|| DocIdsState::new(btree_order)),
+			state: kv.get(&state_key).unwrap_or_else(|| State::new(index_id, default_btree_order)),
 			updated: false,
 			state_key,
 		}
@@ -72,28 +74,28 @@ mod tests {
 		let mut kv = KVSimulator::default();
 
 		// Resolve a first doc key
-		let mut d = DocIds::new(&mut kv, "D".into(), BTREE_ORDER);
+		let mut d = DocIds::new(&mut kv, 0, BTREE_ORDER);
 		let doc_id = d.resolve_doc_id(&mut kv, "Foo");
 		assert_eq!(d.count(&mut kv), 1);
 		d.finish(&mut kv);
 		assert_eq!(doc_id, 0);
 
 		// Resolve the same doc key
-		let mut d = DocIds::new(&mut kv, "D".into(), BTREE_ORDER);
+		let mut d = DocIds::new(&mut kv, 0, BTREE_ORDER);
 		let doc_id = d.resolve_doc_id(&mut kv, "Foo");
 		assert_eq!(d.count(&mut kv), 1);
 		d.finish(&mut kv);
 		assert_eq!(doc_id, 0);
 
 		// Resolve another single doc key
-		let mut d = DocIds::new(&mut kv, "D".into(), BTREE_ORDER);
+		let mut d = DocIds::new(&mut kv, 0, BTREE_ORDER);
 		let doc_id = d.resolve_doc_id(&mut kv, "Bar");
 		assert_eq!(d.count(&mut kv), 2);
 		d.finish(&mut kv);
 		assert_eq!(doc_id, 1);
 
 		// Resolve another two existing doc keys and two new doc keys (interlaced)
-		let mut d = DocIds::new(&mut kv, "D".into(), BTREE_ORDER);
+		let mut d = DocIds::new(&mut kv, 0, BTREE_ORDER);
 		assert_eq!(d.resolve_doc_id(&mut kv, "Foo"), 0);
 		assert_eq!(d.resolve_doc_id(&mut kv, "Hello"), 2);
 		assert_eq!(d.resolve_doc_id(&mut kv, "Bar"), 1);
@@ -101,7 +103,7 @@ mod tests {
 		assert_eq!(d.count(&mut kv), 4);
 		d.finish(&mut kv);
 
-		let mut d = DocIds::new(&mut kv, "D".into(), BTREE_ORDER);
+		let mut d = DocIds::new(&mut kv, 0, BTREE_ORDER);
 		assert_eq!(d.resolve_doc_id(&mut kv, "Foo"), 0);
 		assert_eq!(d.resolve_doc_id(&mut kv, "Bar"), 1);
 		assert_eq!(d.resolve_doc_id(&mut kv, "Hello"), 2);

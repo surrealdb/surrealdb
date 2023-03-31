@@ -1,7 +1,8 @@
 use crate::idx::bkeys::FstKeys;
 use crate::idx::btree::BTree;
-use crate::idx::ft::termfreq::TermFrequency;
+use crate::idx::ft::postings::TermFrequency;
 use crate::idx::kvsim::KVSimulator;
+use crate::idx::{IndexId, StateKey, TERMS_DOMAIN};
 use crate::kvs::Key;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -10,29 +11,30 @@ pub(super) type TermId = u64;
 
 pub(super) struct Terms {
 	state_key: Key,
-	state: TermsState,
+	state: State,
 	updated: bool,
 }
 
 #[derive(Serialize, Deserialize)]
-struct TermsState {
+struct State {
 	btree: BTree,
 	next_term_id: TermId,
 }
 
-impl TermsState {
-	fn new(btree_order: usize) -> Self {
+impl State {
+	fn new(index_id: IndexId, btree_order: usize) -> Self {
 		Self {
-			btree: BTree::new(btree_order),
+			btree: BTree::new(TERMS_DOMAIN, index_id, btree_order),
 			next_term_id: 0,
 		}
 	}
 }
 
 impl Terms {
-	pub(super) fn new(kv: &mut KVSimulator, state_key: Key, btree_order: usize) -> Self {
+	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, default_btree_order: usize) -> Self {
+		let state_key = StateKey::new(TERMS_DOMAIN, index_id).into();
 		Self {
-			state: kv.get(&state_key).unwrap_or_else(|| TermsState::new(btree_order)),
+			state: kv.get(&state_key).unwrap_or_else(|| State::new(index_id, default_btree_order)),
 			updated: false,
 			state_key,
 		}
@@ -76,7 +78,7 @@ impl Terms {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::termfreq::TermFrequency;
+	use crate::idx::ft::postings::TermFrequency;
 	use crate::idx::ft::terms::Terms;
 	use crate::idx::kvsim::KVSimulator;
 	use rand::{thread_rng, Rng};
@@ -103,31 +105,31 @@ mod tests {
 		const BTREE_ORDER: usize = 75;
 
 		let mut kv = KVSimulator::default();
-		Terms::new(&mut kv, "T".into(), BTREE_ORDER).finish(&mut kv);
+		Terms::new(&mut kv, 0, BTREE_ORDER).finish(&mut kv);
 
 		// Resolve a first term
-		let mut t = Terms::new(&mut kv, "T".into(), BTREE_ORDER);
+		let mut t = Terms::new(&mut kv, 0, BTREE_ORDER);
 		let res = t.resolve_terms(&mut kv, HashMap::from([("C", 103)]));
 		assert_eq!(t.count(&mut kv), 1);
 		t.finish(&mut kv);
 		assert_eq!(res, HashMap::from([(0, 103)]));
 
 		// Resolve a second term
-		let mut t = Terms::new(&mut kv, "T".into(), BTREE_ORDER);
+		let mut t = Terms::new(&mut kv, 0, BTREE_ORDER);
 		let res = t.resolve_terms(&mut kv, HashMap::from([("D", 104)]));
 		assert_eq!(t.count(&mut kv), 2);
 		t.finish(&mut kv);
 		assert_eq!(res, HashMap::from([(1, 104)]));
 
 		// Resolve two existing terms with new frequencies
-		let mut t = Terms::new(&mut kv, "T".into(), BTREE_ORDER);
+		let mut t = Terms::new(&mut kv, 0, BTREE_ORDER);
 		let res = t.resolve_terms(&mut kv, HashMap::from([("C", 113), ("D", 114)]));
 		assert_eq!(t.count(&mut kv), 2);
 		t.finish(&mut kv);
 		assert_eq!(res, HashMap::from([(0, 113), (1, 114)]));
 
 		// Resolve one existing terms and two new terms
-		let mut t = Terms::new(&mut kv, "T".into(), BTREE_ORDER);
+		let mut t = Terms::new(&mut kv, 0, BTREE_ORDER);
 		let res = t.resolve_terms(&mut kv, HashMap::from([("A", 101), ("C", 123), ("E", 105)]));
 		assert_eq!(t.count(&mut kv), 4);
 		t.finish(&mut kv);
@@ -153,7 +155,7 @@ mod tests {
 	fn test_resolve_100_docs_with_50_words_one_by_one() {
 		let mut kv = KVSimulator::default();
 		for _ in 0..100 {
-			let mut t = Terms::new(&mut kv, "T".into(), 100);
+			let mut t = Terms::new(&mut kv, 0, 100);
 			let terms_string = random_term_freq_vec(50);
 			let terms_str: HashMap<&str, TermFrequency> =
 				terms_string.iter().map(|(t, f)| (t.as_str(), *f)).collect();
@@ -167,7 +169,7 @@ mod tests {
 	fn test_resolve_100_docs_with_50_words_batch_of_10() {
 		let mut kv = KVSimulator::default();
 		for _ in 0..10 {
-			let mut t = Terms::new(&mut kv, "T".into(), 100);
+			let mut t = Terms::new(&mut kv, 0, 100);
 			for _ in 0..10 {
 				let terms_string = random_term_freq_vec(50);
 				let terms_str: HashMap<&str, TermFrequency> =
