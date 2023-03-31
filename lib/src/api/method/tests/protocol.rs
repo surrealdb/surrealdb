@@ -34,7 +34,7 @@ impl IntoEndpoint<Test> for () {
 		Ok(Endpoint {
 			endpoint: Url::parse("test://")?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}

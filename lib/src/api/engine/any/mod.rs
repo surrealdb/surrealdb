@@ -91,15 +91,9 @@ mod wasm;
 use crate::api::conn::Method;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-indxdb",
-))]
+#[cfg(feature = "has-local")]
 use crate::api::opt::Strict;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
+#[cfg(feature = "has-tls")]
 use crate::api::opt::Tls;
 use crate::api::Connect;
 use crate::api::Result;
@@ -122,7 +116,7 @@ impl IntoEndpoint for &str {
 		Ok(Endpoint {
 			endpoint: Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -154,23 +148,8 @@ where
 	}
 }
 
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-indxdb",
-))]
-#[cfg_attr(
-	docsrs,
-	doc(cfg(any(
-		feature = "kv-mem",
-		feature = "kv-tikv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-indxdb",
-	)))
-)]
+#[cfg(feature = "has-local")]
+#[cfg_attr(docsrs, doc(cfg(feature = "has-local",)))]
 impl<T> IntoEndpoint for (T, Strict)
 where
 	T: Into<String>,
@@ -182,29 +161,8 @@ where
 	}
 }
 
-#[cfg(all(
-	any(
-		feature = "kv-mem",
-		feature = "kv-tikv",
-		feature = "kv-rocksdb",
-		feature = "kv-fdb",
-		feature = "kv-indxdb",
-	),
-	feature = "rustls",
-))]
-#[cfg_attr(
-	docsrs,
-	doc(cfg(all(
-		any(
-			feature = "kv-mem",
-			feature = "kv-tikv",
-			feature = "kv-rocksdb",
-			feature = "kv-fdb",
-			feature = "kv-indxdb",
-		),
-		feature = "rustls",
-	)))
-)]
+#[cfg(all(feature = "has-local", feature = "rustls"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "has-local", feature = "rustls"))))]
 impl<T> IntoEndpoint for (T, rustls::ClientConfig, Strict)
 where
 	T: Into<String>,

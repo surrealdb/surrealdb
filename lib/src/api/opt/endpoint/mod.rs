@@ -25,7 +25,7 @@ pub struct Endpoint {
 	pub(crate) endpoint: Url,
 	#[allow(dead_code)] // used by the embedded database
 	pub(crate) strict: bool,
-	#[cfg(any(feature = "native-tls", feature = "rustls"))]
+	#[cfg(feature = "has-tls")]
 	pub(crate) tls_config: Option<super::Tls>,
 }
 

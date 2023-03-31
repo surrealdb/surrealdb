@@ -1,15 +1,9 @@
 //! Different embedded and remote database engines
 
 pub mod any;
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-tikv",
-	feature = "kv-rocksdb",
-	feature = "kv-fdb",
-	feature = "kv-indxdb",
-))]
+#[cfg(feature = "has-local")]
 pub mod local;
-#[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
+#[cfg(feature = "has-remote")]
 pub mod remote;
 
 use crate::sql::statements::CreateStatement;

@@ -16,7 +16,7 @@ impl IntoEndpoint<FDb> for &str {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -30,7 +30,7 @@ impl IntoEndpoint<FDb> for &Path {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -47,7 +47,7 @@ where
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: true,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}

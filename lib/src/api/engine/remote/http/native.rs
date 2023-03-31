@@ -8,8 +8,6 @@ use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::opt::from_value;
 use crate::api::opt::Endpoint;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-use crate::api::opt::Tls;
 use crate::api::ExtraFeatures;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
@@ -51,14 +49,17 @@ impl Connection for Client {
 			#[allow(unused_mut)]
 			let mut builder = ClientBuilder::new().default_headers(headers);
 
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
-			if let Some(tls) = address.tls_config {
-				builder = match tls {
-					#[cfg(feature = "native-tls")]
-					Tls::Native(config) => builder.use_preconfigured_tls(config),
-					#[cfg(feature = "rustls")]
-					Tls::Rust(config) => builder.use_preconfigured_tls(config),
-				};
+			#[cfg(feature = "has-tls")]
+			{
+				use crate::api::opt::Tls;
+				if let Some(tls) = address.tls_config {
+					builder = match tls {
+						#[cfg(feature = "native-tls")]
+						Tls::Native(config) => builder.use_preconfigured_tls(config),
+						#[cfg(feature = "rustls")]
+						Tls::Rust(config) => builder.use_preconfigured_tls(config),
+					};
+				}
 			}
 
 			let client = builder.build()?;
