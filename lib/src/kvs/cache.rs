@@ -3,6 +3,7 @@ use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
 use crate::sql::statements::DefineEventStatement;
 use crate::sql::statements::DefineFieldStatement;
+use crate::sql::statements::DefineFunctionStatement;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::statements::DefineLoginStatement;
 use crate::sql::statements::DefineNamespaceStatement;
@@ -16,25 +17,28 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub enum Entry {
-	Ns(Arc<DefineNamespaceStatement>),
+	// Single definitions
 	Db(Arc<DefineDatabaseStatement>),
+	Ns(Arc<DefineNamespaceStatement>),
 	Tb(Arc<DefineTableStatement>),
-	Nss(Arc<[DefineNamespaceStatement]>),
-	Nls(Arc<[DefineLoginStatement]>),
-	Nts(Arc<[DefineTokenStatement]>),
+	// Multi definitions
+	Azs(Arc<[DefineAnalyzerStatement]>),
 	Dbs(Arc<[DefineDatabaseStatement]>),
 	Dls(Arc<[DefineLoginStatement]>),
 	Dts(Arc<[DefineTokenStatement]>),
+	Evs(Arc<[DefineEventStatement]>),
+	Fcs(Arc<[DefineFunctionStatement]>),
+	Fds(Arc<[DefineFieldStatement]>),
+	Fts(Arc<[DefineTableStatement]>),
+	Ixs(Arc<[DefineIndexStatement]>),
+	Lvs(Arc<[LiveStatement]>),
+	Nls(Arc<[DefineLoginStatement]>),
+	Nss(Arc<[DefineNamespaceStatement]>),
+	Nts(Arc<[DefineTokenStatement]>),
+	Pas(Arc<[DefineParamStatement]>),
 	Scs(Arc<[DefineScopeStatement]>),
 	Sts(Arc<[DefineTokenStatement]>),
-	Pas(Arc<[DefineParamStatement]>),
 	Tbs(Arc<[DefineTableStatement]>),
-	Evs(Arc<[DefineEventStatement]>),
-	Fds(Arc<[DefineFieldStatement]>),
-	Ixs(Arc<[DefineIndexStatement]>),
-	Fts(Arc<[DefineTableStatement]>),
-	Azs(Arc<[DefineAnalyzerStatement]>),
-	Lvs(Arc<[LiveStatement]>),
 }
 
 #[derive(Default)]

@@ -1,20 +1,19 @@
 use crate::err::Error;
 use rustyline::error::ReadlineError;
-use rustyline::Editor;
-use serde_json::Value;
+use rustyline::DefaultEditor;
 use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
 use surrealdb::sql;
-use surrealdb::sql::statements::SetStatement;
 use surrealdb::sql::Statement;
+use surrealdb::sql::Value;
 use surrealdb::Error as SurrealError;
 use surrealdb::Response;
 
 #[tokio::main]
 pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
-	// Set the default logging level
-	crate::cli::log::init(0);
+	// Initialize opentelemetry and logging
+	crate::o11y::builder().with_log_level("warn").init();
 	// Parse all other cli arguments
 	let username = matches.value_of("user").unwrap();
 	let password = matches.value_of("pass").unwrap();
@@ -40,7 +39,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 		}
 	}
 	// Create a new terminal REPL
-	let mut rl = Editor::<()>::new().unwrap();
+	let mut rl = DefaultEditor::new().unwrap();
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
 	// Configure the prompt
@@ -67,7 +66,9 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 					continue;
 				}
 				// Add the entry to the history
-				rl.add_history_entry(line.as_str());
+				if let Err(e) = rl.add_history_entry(line.as_str()) {
+					eprintln!("{e}");
+				}
 				// Complete the request
 				match sql::parse(&line) {
 					Ok(query) => {
@@ -81,12 +82,9 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 										db = Some(database.clone());
 									}
 								}
-								Statement::Set(SetStatement {
-									name,
-									what,
-								}) => {
-									if let Err(error) = client.set(name, what).await {
-										eprintln!("{error}");
+								Statement::Set(stmt) => {
+									if let Err(e) = client.set(&stmt.name, &stmt.what).await {
+										eprintln!("{e}");
 									}
 								}
 								_ => {}
@@ -99,7 +97,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 							Err(e) => eprintln!("{e}"),
 						}
 					}
-					Err(error) => eprintln!("{error}"),
+					Err(e) => eprintln!("{e}"),
 				}
 			}
 			// The user types CTRL-C
@@ -111,8 +109,8 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				break;
 			}
 			// There was en error
-			Err(err) => {
-				eprintln!("Error: {err:?}");
+			Err(e) => {
+				eprintln!("Error: {e:?}");
 				break;
 			}
 		}
@@ -124,14 +122,33 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 }
 
 fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
-	// Catch any errors
-	let values: Vec<Value> = res?.take(0)?;
-	let value = Value::Array(values);
-	// Check if we should prettify
-	match pretty {
-		// Don't prettify the response
-		false => Ok(format!("{}", value)),
-		// Yes prettify the response
-		true => Ok(format!("{:#}", value)),
+	use surrealdb::error::Api;
+	use surrealdb::Error;
+	// Extract `Value` from the response
+	let value = match res?.take::<Option<Value>>(0) {
+		Ok(value) => value.unwrap_or_default(),
+		Err(Error::Api(Api::FromValue {
+			value,
+			..
+		})) => value,
+		Err(Error::Api(Api::LossyTake(mut res))) => match res.take::<Vec<Value>>(0) {
+			Ok(mut value) => value.pop().unwrap_or_default(),
+			Err(Error::Api(Api::FromValue {
+				value,
+				..
+			})) => value,
+			Err(error) => return Err(error.into()),
+		},
+		Err(error) => return Err(error.into()),
+	};
+	if !value.is_none_or_null() {
+		// Check if we should prettify
+		return Ok(match pretty {
+			// Don't prettify the response
+			false => value.to_string(),
+			// Yes prettify the response
+			true => format!("{value:#}"),
+		});
 	}
+	Ok(String::new())
 }

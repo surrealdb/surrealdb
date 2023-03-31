@@ -28,6 +28,7 @@ async fn define_global_param() -> Result<(), Error> {
 			az: {},
 			dl: {},
 			dt: {},
+			fc: {},
 			pa: { test: 'DEFINE PARAM $test VALUE 12345' },
 			sc: {},
 			tb: {},

@@ -6,12 +6,15 @@ use crate::sql::block::{block, Block};
 use crate::sql::comment::mightbespace;
 use crate::sql::common::{closechevron, openchevron};
 use crate::sql::error::IResult;
+use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
 use nom::bytes::complete::tag;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Future";
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Future(pub Block);
 
 impl From<Value> for Future {
@@ -41,6 +44,19 @@ impl Future {
 impl fmt::Display for Future {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "<future> {}", self.0)
+	}
+}
+
+impl Serialize for Future {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		if is_internal_serialization() {
+			serializer.serialize_newtype_struct(TOKEN, &self.0)
+		} else {
+			serializer.serialize_none()
+		}
 	}
 }
 

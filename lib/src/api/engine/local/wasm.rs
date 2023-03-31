@@ -92,7 +92,7 @@ impl Connection for Db {
 			let response = rx.into_recv_async().await?;
 			trace!(target: LOG, "Response {response:?}");
 			match response? {
-				DbResponse::Other(value) => from_value(value),
+				DbResponse::Other(value) => from_value(value).map_err(Into::into),
 				DbResponse::Query(..) => unreachable!(),
 			}
 		})

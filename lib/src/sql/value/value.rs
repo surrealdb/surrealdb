@@ -57,6 +57,8 @@ use std::str::FromStr;
 
 static MATCHER: Lazy<SkimMatcherV2> = Lazy::new(|| SkimMatcherV2::default().ignore_case());
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct Values(pub Vec<Value>);
 
@@ -96,8 +98,9 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 	Ok((i, Values(v)))
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Deserialize, Store, Hash)]
 pub enum Value {
+	#[default]
 	None,
 	Null,
 	False,
@@ -132,12 +135,6 @@ impl Eq for Value {}
 impl Ord for Value {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.partial_cmp(other).unwrap_or(Ordering::Equal)
-	}
-}
-
-impl Default for Value {
-	fn default() -> Value {
-		Value::None
 	}
 }
 
@@ -767,7 +764,7 @@ impl Value {
 	/// Check if this Value is a Thing of a specific type
 	pub fn is_type_record(&self, types: &[Table]) -> bool {
 		match self {
-			Value::Thing(v) => types.iter().any(|tb| tb.0 == v.tb),
+			Value::Thing(v) => types.is_empty() || types.iter().any(|tb| tb.0 == v.tb),
 			_ => false,
 		}
 	}
@@ -808,7 +805,7 @@ impl Value {
 	pub fn as_int(self) -> i64 {
 		match self {
 			Value::True => 1,
-			Value::Strand(v) => v.parse::<i64>().unwrap_or(0),
+			Value::Strand(v) => Number::from(v.as_str()).as_int(),
 			Value::Number(v) => v.as_int(),
 			Value::Duration(v) => v.as_secs() as i64,
 			Value::Datetime(v) => v.timestamp(),
@@ -969,12 +966,8 @@ impl Value {
 			Value::Idiom(v) => v.simplify(),
 			Value::Strand(v) => v.0.to_string().into(),
 			Value::Datetime(v) => v.0.to_string().into(),
-			Value::Future(_) => "fn::future".to_string().into(),
-			Value::Function(v) => match v.as_ref() {
-				Function::Script(_, _) => "fn::script".to_string().into(),
-				Function::Normal(f, _) => f.to_string().into(),
-				Function::Cast(_, v) => v.to_idiom(),
-			},
+			Value::Future(_) => "future".to_string().into(),
+			Value::Function(v) => v.to_idiom(),
 			_ => self.to_string().into(),
 		}
 	}
@@ -1340,7 +1333,7 @@ impl Value {
 	/// Compare this Value to another Value lexicographically
 	pub fn lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexical_sort::lexical_cmp(a, b)),
+			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
@@ -1348,7 +1341,7 @@ impl Value {
 	/// Compare this Value to another Value using natrual numerical comparison
 	pub fn natural_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexical_sort::natural_cmp(a, b)),
+			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
@@ -1356,7 +1349,7 @@ impl Value {
 	/// Compare this Value to another Value lexicographically and using natrual numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexical_sort::natural_lexical_cmp(a, b)),
+			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
@@ -1455,32 +1448,32 @@ impl Serialize for Value {
 	{
 		if is_internal_serialization() {
 			match self {
-				Value::None => s.serialize_unit_variant("Value", 0, "None"),
-				Value::Null => s.serialize_unit_variant("Value", 1, "Null"),
-				Value::False => s.serialize_unit_variant("Value", 2, "False"),
-				Value::True => s.serialize_unit_variant("Value", 3, "True"),
-				Value::Number(v) => s.serialize_newtype_variant("Value", 4, "Number", v),
-				Value::Strand(v) => s.serialize_newtype_variant("Value", 5, "Strand", v),
-				Value::Duration(v) => s.serialize_newtype_variant("Value", 6, "Duration", v),
-				Value::Datetime(v) => s.serialize_newtype_variant("Value", 7, "Datetime", v),
-				Value::Uuid(v) => s.serialize_newtype_variant("Value", 8, "Uuid", v),
-				Value::Array(v) => s.serialize_newtype_variant("Value", 9, "Array", v),
-				Value::Object(v) => s.serialize_newtype_variant("Value", 10, "Object", v),
-				Value::Geometry(v) => s.serialize_newtype_variant("Value", 11, "Geometry", v),
-				Value::Param(v) => s.serialize_newtype_variant("Value", 12, "Param", v),
-				Value::Idiom(v) => s.serialize_newtype_variant("Value", 13, "Idiom", v),
-				Value::Table(v) => s.serialize_newtype_variant("Value", 14, "Table", v),
-				Value::Thing(v) => s.serialize_newtype_variant("Value", 15, "Thing", v),
-				Value::Model(v) => s.serialize_newtype_variant("Value", 16, "Model", v),
-				Value::Regex(v) => s.serialize_newtype_variant("Value", 17, "Regex", v),
-				Value::Block(v) => s.serialize_newtype_variant("Value", 18, "Block", v),
-				Value::Range(v) => s.serialize_newtype_variant("Value", 19, "Range", v),
-				Value::Edges(v) => s.serialize_newtype_variant("Value", 20, "Edges", v),
-				Value::Future(v) => s.serialize_newtype_variant("Value", 21, "Future", v),
-				Value::Constant(v) => s.serialize_newtype_variant("Value", 22, "Constant", v),
-				Value::Function(v) => s.serialize_newtype_variant("Value", 23, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant("Value", 24, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant("Value", 25, "Expression", v),
+				Value::None => s.serialize_unit_variant(TOKEN, 0, "None"),
+				Value::Null => s.serialize_unit_variant(TOKEN, 1, "Null"),
+				Value::False => s.serialize_unit_variant(TOKEN, 2, "False"),
+				Value::True => s.serialize_unit_variant(TOKEN, 3, "True"),
+				Value::Number(v) => s.serialize_newtype_variant(TOKEN, 4, "Number", v),
+				Value::Strand(v) => s.serialize_newtype_variant(TOKEN, 5, "Strand", v),
+				Value::Duration(v) => s.serialize_newtype_variant(TOKEN, 6, "Duration", v),
+				Value::Datetime(v) => s.serialize_newtype_variant(TOKEN, 7, "Datetime", v),
+				Value::Uuid(v) => s.serialize_newtype_variant(TOKEN, 8, "Uuid", v),
+				Value::Array(v) => s.serialize_newtype_variant(TOKEN, 9, "Array", v),
+				Value::Object(v) => s.serialize_newtype_variant(TOKEN, 10, "Object", v),
+				Value::Geometry(v) => s.serialize_newtype_variant(TOKEN, 11, "Geometry", v),
+				Value::Param(v) => s.serialize_newtype_variant(TOKEN, 12, "Param", v),
+				Value::Idiom(v) => s.serialize_newtype_variant(TOKEN, 13, "Idiom", v),
+				Value::Table(v) => s.serialize_newtype_variant(TOKEN, 14, "Table", v),
+				Value::Thing(v) => s.serialize_newtype_variant(TOKEN, 15, "Thing", v),
+				Value::Model(v) => s.serialize_newtype_variant(TOKEN, 16, "Model", v),
+				Value::Regex(v) => s.serialize_newtype_variant(TOKEN, 17, "Regex", v),
+				Value::Block(v) => s.serialize_newtype_variant(TOKEN, 18, "Block", v),
+				Value::Range(v) => s.serialize_newtype_variant(TOKEN, 19, "Range", v),
+				Value::Edges(v) => s.serialize_newtype_variant(TOKEN, 20, "Edges", v),
+				Value::Future(v) => s.serialize_newtype_variant(TOKEN, 21, "Future", v),
+				Value::Constant(v) => s.serialize_newtype_variant(TOKEN, 22, "Constant", v),
+				Value::Function(v) => s.serialize_newtype_variant(TOKEN, 23, "Function", v),
+				Value::Subquery(v) => s.serialize_newtype_variant(TOKEN, 24, "Subquery", v),
+				Value::Expression(v) => s.serialize_newtype_variant(TOKEN, 25, "Expression", v),
 			}
 		} else {
 			match self {

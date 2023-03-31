@@ -132,3 +132,5 @@ pub use self::value::Value;
 pub use self::value::Values;
 pub use self::version::Version;
 pub use self::view::View;
+
+pub(crate) use self::value::serde::to_value;

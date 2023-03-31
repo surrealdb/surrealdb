@@ -24,17 +24,7 @@ pub fn comment(i: &str) -> IResult<&str, ()> {
 	Ok((i, ()))
 }
 
-fn blank(i: &str) -> IResult<&str, ()> {
-	let (i, _) = multispace0(i)?;
-	Ok((i, ()))
-}
-
-fn space(i: &str) -> IResult<&str, ()> {
-	let (i, _) = multispace1(i)?;
-	Ok((i, ()))
-}
-
-fn block(i: &str) -> IResult<&str, ()> {
+pub fn block(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
 	let (i, _) = char('/')(i)?;
 	let (i, _) = char('*')(i)?;
@@ -45,7 +35,7 @@ fn block(i: &str) -> IResult<&str, ()> {
 	Ok((i, ()))
 }
 
-fn slash(i: &str) -> IResult<&str, ()> {
+pub fn slash(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
 	let (i, _) = char('/')(i)?;
 	let (i, _) = char('/')(i)?;
@@ -53,7 +43,7 @@ fn slash(i: &str) -> IResult<&str, ()> {
 	Ok((i, ()))
 }
 
-fn dash(i: &str) -> IResult<&str, ()> {
+pub fn dash(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
 	let (i, _) = char('-')(i)?;
 	let (i, _) = char('-')(i)?;
@@ -61,9 +51,19 @@ fn dash(i: &str) -> IResult<&str, ()> {
 	Ok((i, ()))
 }
 
-fn hash(i: &str) -> IResult<&str, ()> {
+pub fn hash(i: &str) -> IResult<&str, ()> {
 	let (i, _) = multispace0(i)?;
 	let (i, _) = char('#')(i)?;
 	let (i, _) = not_line_ending(i)?;
+	Ok((i, ()))
+}
+
+fn blank(i: &str) -> IResult<&str, ()> {
+	let (i, _) = multispace0(i)?;
+	Ok((i, ()))
+}
+
+fn space(i: &str) -> IResult<&str, ()> {
+	let (i, _) = multispace1(i)?;
 	Ok((i, ()))
 }
