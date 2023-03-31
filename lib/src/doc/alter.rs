@@ -56,6 +56,9 @@ impl<'a> Document<'a> {
 							Operator::Dec => {
 								self.current.to_mut().decrement(ctx, opt, txn, &x.0, v).await?
 							}
+							Operator::Ext => {
+								self.current.to_mut().extend(ctx, opt, txn, &x.0, v).await?
+							}
 							_ => unreachable!(),
 						}
 					}

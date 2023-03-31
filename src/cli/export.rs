@@ -7,8 +7,8 @@ use surrealdb::Error as SurrealError;
 
 #[tokio::main]
 pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
-	// Set the default logging level
-	crate::cli::log::init(1);
+	// Initialize opentelemetry and logging
+	crate::o11y::builder().with_log_level("error").init();
 	// Try to parse the file argument
 	let file = matches.value_of("file").unwrap();
 	// Parse all other cli arguments

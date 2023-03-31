@@ -28,6 +28,7 @@ use crate::sql::statements::sleep::{sleep, SleepStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::statements::yuse::{yuse, UseStatement};
 use crate::sql::value::Value;
+use derive::Store;
 use nom::branch::alt;
 use nom::combinator::map;
 use nom::multi::many0;
@@ -38,7 +39,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::time::Duration;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct Statements(pub Vec<Statement>);
 
 impl Deref for Statements {
@@ -63,7 +64,7 @@ pub fn statements(i: &str) -> IResult<&str, Statements> {
 	Ok((i, Statements(v)))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub enum Statement {
 	Begin(BeginStatement),
 	Cancel(CancelStatement),

@@ -12,6 +12,8 @@ use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store, Hash)]
 pub enum Constant {
 	MathE,
@@ -101,25 +103,25 @@ impl Serialize for Constant {
 	{
 		if is_internal_serialization() {
 			match self {
-				Self::MathE => s.serialize_unit_variant("Constant", 0, "MathE"),
-				Self::MathFrac1Pi => s.serialize_unit_variant("Constant", 1, "MathFrac1Pi"),
-				Self::MathFrac1Sqrt2 => s.serialize_unit_variant("Constant", 2, "MathFrac1Sqrt2"),
-				Self::MathFrac2Pi => s.serialize_unit_variant("Constant", 3, "MathFrac2Pi"),
-				Self::MathFrac2SqrtPi => s.serialize_unit_variant("Constant", 4, "MathFrac2SqrtPi"),
-				Self::MathFracPi2 => s.serialize_unit_variant("Constant", 5, "MathFracPi2"),
-				Self::MathFracPi3 => s.serialize_unit_variant("Constant", 6, "MathFracPi3"),
-				Self::MathFracPi4 => s.serialize_unit_variant("Constant", 7, "MathFracPi4"),
-				Self::MathFracPi6 => s.serialize_unit_variant("Constant", 8, "MathFracPi6"),
-				Self::MathFracPi8 => s.serialize_unit_variant("Constant", 9, "MathFracPi8"),
-				Self::MathLn10 => s.serialize_unit_variant("Constant", 10, "MathLn10"),
-				Self::MathLn2 => s.serialize_unit_variant("Constant", 11, "MathLn2"),
-				Self::MathLog102 => s.serialize_unit_variant("Constant", 12, "MathLog102"),
-				Self::MathLog10E => s.serialize_unit_variant("Constant", 13, "MathLog10E"),
-				Self::MathLog210 => s.serialize_unit_variant("Constant", 14, "MathLog210"),
-				Self::MathLog2E => s.serialize_unit_variant("Constant", 15, "MathLog2E"),
-				Self::MathPi => s.serialize_unit_variant("Constant", 16, "MathPi"),
-				Self::MathSqrt2 => s.serialize_unit_variant("Constant", 17, "MathSqrt2"),
-				Self::MathTau => s.serialize_unit_variant("Constant", 18, "MathTau"),
+				Self::MathE => s.serialize_unit_variant(TOKEN, 0, "MathE"),
+				Self::MathFrac1Pi => s.serialize_unit_variant(TOKEN, 1, "MathFrac1Pi"),
+				Self::MathFrac1Sqrt2 => s.serialize_unit_variant(TOKEN, 2, "MathFrac1Sqrt2"),
+				Self::MathFrac2Pi => s.serialize_unit_variant(TOKEN, 3, "MathFrac2Pi"),
+				Self::MathFrac2SqrtPi => s.serialize_unit_variant(TOKEN, 4, "MathFrac2SqrtPi"),
+				Self::MathFracPi2 => s.serialize_unit_variant(TOKEN, 5, "MathFracPi2"),
+				Self::MathFracPi3 => s.serialize_unit_variant(TOKEN, 6, "MathFracPi3"),
+				Self::MathFracPi4 => s.serialize_unit_variant(TOKEN, 7, "MathFracPi4"),
+				Self::MathFracPi6 => s.serialize_unit_variant(TOKEN, 8, "MathFracPi6"),
+				Self::MathFracPi8 => s.serialize_unit_variant(TOKEN, 9, "MathFracPi8"),
+				Self::MathLn10 => s.serialize_unit_variant(TOKEN, 10, "MathLn10"),
+				Self::MathLn2 => s.serialize_unit_variant(TOKEN, 11, "MathLn2"),
+				Self::MathLog102 => s.serialize_unit_variant(TOKEN, 12, "MathLog102"),
+				Self::MathLog10E => s.serialize_unit_variant(TOKEN, 13, "MathLog10E"),
+				Self::MathLog210 => s.serialize_unit_variant(TOKEN, 14, "MathLog210"),
+				Self::MathLog2E => s.serialize_unit_variant(TOKEN, 15, "MathLog2E"),
+				Self::MathPi => s.serialize_unit_variant(TOKEN, 16, "MathPi"),
+				Self::MathSqrt2 => s.serialize_unit_variant(TOKEN, 17, "MathSqrt2"),
+				Self::MathTau => s.serialize_unit_variant(TOKEN, 18, "MathTau"),
 			}
 		} else {
 			match self {

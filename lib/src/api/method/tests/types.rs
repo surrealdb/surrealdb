@@ -10,28 +10,10 @@ pub struct User {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Credentials {
-	Database {
-		ns: String,
-		db: String,
-		user: String,
-		pass: String,
-	},
-	Namespace {
-		ns: String,
-		user: String,
-		pass: String,
-	},
-	Root {
-		user: String,
-		pass: String,
-	},
-	Scope {
-		ns: String,
-		db: String,
-		sc: String,
-	},
+#[serde(deny_unknown_fields)]
+pub struct Root {
+	user: String,
+	pass: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -20,6 +20,8 @@ impl<'a> Document<'a> {
 		self.alter(ctx, opt, txn, stm).await?;
 		// Merge fields data
 		self.field(ctx, opt, txn, stm).await?;
+		// Reset fields data
+		self.reset(ctx, opt, txn, stm).await?;
 		// Clean fields data
 		self.clean(ctx, opt, txn, stm).await?;
 		// Check if allowed

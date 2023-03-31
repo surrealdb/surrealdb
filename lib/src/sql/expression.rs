@@ -5,12 +5,16 @@ use crate::err::Error;
 use crate::fnc;
 use crate::sql::error::IResult;
 use crate::sql::operator::{operator, Operator};
+use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::{single, value, Value};
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Expression";
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Expression {
 	pub l: Value,
 	pub o: Operator,
@@ -132,6 +136,23 @@ impl Expression {
 impl fmt::Display for Expression {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{} {} {}", self.l, self.o, self.r)
+	}
+}
+
+impl Serialize for Expression {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		if is_internal_serialization() {
+			let mut val = serializer.serialize_struct(TOKEN, 3)?;
+			val.serialize_field("l", &self.l)?;
+			val.serialize_field("o", &self.o)?;
+			val.serialize_field("r", &self.r)?;
+			val.end()
+		} else {
+			serializer.serialize_none()
+		}
 	}
 }
 

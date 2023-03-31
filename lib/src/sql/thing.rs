@@ -18,7 +18,9 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store, Hash)]
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Deserialize, Store, Hash)]
 pub struct Thing {
 	pub tb: String,
 	pub id: Id,
@@ -79,7 +81,7 @@ impl Serialize for Thing {
 		S: serde::Serializer,
 	{
 		if is_internal_serialization() {
-			let mut val = serializer.serialize_struct("Thing", 2)?;
+			let mut val = serializer.serialize_struct(TOKEN, 2)?;
 			val.serialize_field("tb", &self.tb)?;
 			val.serialize_field("id", &self.id)?;
 			val.end()

@@ -7,6 +7,7 @@ use crate::sql::idiom;
 use crate::sql::idiom::Idiom;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
+use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
 use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,9 @@ use std::fmt;
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Param(pub Idiom);
 
 impl From<Idiom> for Param {
@@ -93,6 +96,19 @@ impl Param {
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "${}", &self.0)
+	}
+}
+
+impl Serialize for Param {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		if is_internal_serialization() {
+			serializer.serialize_newtype_struct(TOKEN, &self.0)
+		} else {
+			serializer.serialize_none()
+		}
 	}
 }
 

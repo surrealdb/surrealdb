@@ -51,28 +51,31 @@ targets = []
 
 [dependencies]
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
-argon2 = "0.4.1"
-async-recursion = "1.0.2"
+argon2 = "0.5.0"
+ascii = { version = "0.3.2", package = "any_ascii" }
+async-recursion = "1.0.4"
 bcrypt = "0.14.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
 bincode = "1.3.3"
 channel = { version = "1.8.0", package = "async-channel" }
-chrono = { version = "0.4.23", features = ["serde"] }
+chrono = { version = "0.4.24", features = ["serde"] }
 derive = { version = "0.5.0", package = "surrealdb-derive" }
-deunicode = "1.3.3"
-dmp = "0.1.2"
-echodb = { version = "0.3.0", optional = true }
+dmp = "0.1.3"
+echodb = { version = "0.4.0", optional = true }
 executor = { version = "1.5.0", package = "async-executor" }
 flume = "0.10.14"
 fst = "0.4.7"
 futures = "0.3.26"
 futures-concurrency = "7.1.0"
 foundationdb = { version = "0.7.0", default-features = false, features = ["embedded-fdb-include"], optional = true }
+futures = "0.3.27"
+futures-concurrency = "7.1.0"
 fuzzy-matcher = "0.3.7"
-geo = { version = "0.23.1", features = ["use-serde"] }
-indexmap = { version = "1.9.2", features = ["serde"] }
-indxdb = { version = "0.2.0", optional = true }
-lexical-sort = "0.3.1"
+geo = { version = "0.24.1", features = ["use-serde"] }
+indexmap = { version = "1.9.3", features = ["serde"] }
+indxdb = { version = "0.3.0", optional = true }
+js = { version = "0.1.7", package = "rquickjs", features = ["array-buffer", "bindgen", "classes", "futures", "loader", "macro", "parallel", "properties"], optional = true }
+lexicmp = "0.1.0"
 log = "0.4.17"
 md-5 = "0.10.5"
 msgpack = { version = "1.1.1", package = "rmp-serde" }
@@ -82,10 +85,14 @@ nom = { version = "7.1.3", features = ["alloc"] }
 once_cell = "1.17.0"
 pbkdf2 = "0.11.0"
 radix_trie = { version = "0.2.1", features = ["serde"] }
+once_cell = "1.17.1"
+pbkdf2 = { version = "0.12.1", features = ["simple"] }
 rand = "0.8.5"
 regex = "1.7.1"
 reqwest = { version = "0.11.14", default-features = false, features = ["json", "stream"], optional = true }
 roaring = { version = "0.10.1", features = ["serde"] }
+regex = "1.7.3"
+reqwest = { version = "0.11.15", default-features = false, features = ["json", "stream"], optional = true }
 rocksdb = { version = "0.20.1", optional = true }
 rustls = { version = "0.20.8", optional = true }
 snap = "1.1.0"
@@ -93,46 +100,36 @@ scrypt = "0.10.0"
 semver = { version = "1.0.16", features = ["serde"] }
 serde = { version = "1.0.152", features = ["derive"] }
 serde_json = "1.0.93"
+scrypt = "0.11.0"
+semver = { version = "1.0.17", features = ["serde"] }
+serde = { version = "1.0.158", features = ["derive"] }
+serde_json = "1.0.94"
 sha-1 = "0.10.1"
 sha2 = "0.10.6"
-storekey = "0.4.0"
-thiserror = "1.0.38"
+storekey = "0.4.1"
+thiserror = "1.0.40"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
-tokio-stream = { version = "0.1.11", optional = true }
-tokio-util = { version = "0.7.6", optional = true, features = ["compat"] }
-trice = "0.3.0"
+tokio-stream = { version = "0.1.12", optional = true }
+tokio-util = { version = "0.7.7", optional = true, features = ["compat"] }
+tracing = "0.1.37"
+trice = "0.3.1"
 ulid = { version = "1.0.0", features = ["serde"] }
 url = "2.3.1"
-
-[dependencies.js]
-optional = true
-version = "0.1.7"
-package = "rquickjs"
-features = [
-    "array-buffer",
-    "bindgen",
-    "classes",
-    "futures",
-    "loader",
-    "macro",
-    "parallel",
-    "properties",
-]
 
 [dev-dependencies]
 env_logger = "0.10.0"
 temp-dir = "0.1.11"
-time = { version = "0.3.17", features = ["serde"] }
-tokio = { version = "1.25.0", features = ["macros", "rt", "rt-multi-thread"] }
+time = { version = "0.3.20", features = ["serde"] }
+tokio = { version = "1.26.0", features = ["macros", "rt", "rt-multi-thread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 pharos = "0.5.3"
-tokio = { version = "1.25.0", default-features = false, features = ["rt"] }
+tokio = { version = "1.26.0", default-features = false, features = ["rt"] }
 uuid = { version = "1.3.0", features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures = "0.4.34"
 ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1.25.0", default-features = false, features = ["io-util", "fs", "rt-multi-thread"] }
+tokio = { version = "1.26.0", default-features = false, features = ["io-util", "io-std", "fs", "rt-multi-thread"] }
 tokio-tungstenite = { version = "0.18.0", optional = true }
 uuid = { version = "1.3.0", features = ["serde", "v4", "v7"] }

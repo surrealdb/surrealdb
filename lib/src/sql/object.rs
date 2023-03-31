@@ -26,6 +26,8 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
+
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Object(pub BTreeMap<String, Value>);
 
@@ -170,10 +172,10 @@ impl Serialize for Object {
 		S: serde::Serializer,
 	{
 		if is_internal_serialization() {
-			serializer.serialize_newtype_struct("Object", &self.0)
+			serializer.serialize_newtype_struct(TOKEN, &self.0)
 		} else {
 			let mut map = serializer.serialize_map(Some(self.len()))?;
-			for (ref k, ref v) in &self.0 {
+			for (k, v) in &self.0 {
 				map.serialize_key(k)?;
 				map.serialize_value(v)?;
 			}

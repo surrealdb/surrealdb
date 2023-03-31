@@ -19,6 +19,8 @@ use std::iter::Sum;
 use std::ops;
 use std::str::FromStr;
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
+
 #[derive(Clone, Debug, Deserialize)]
 pub enum Number {
 	Int(i64),
@@ -175,9 +177,9 @@ impl Serialize for Number {
 	{
 		if is_internal_serialization() {
 			match self {
-				Number::Int(v) => s.serialize_newtype_variant("Number", 0, "Int", v),
-				Number::Float(v) => s.serialize_newtype_variant("Number", 1, "Float", v),
-				Number::Decimal(v) => s.serialize_newtype_variant("Number", 2, "Decimal", v),
+				Number::Int(v) => s.serialize_newtype_variant(TOKEN, 0, "Int", v),
+				Number::Float(v) => s.serialize_newtype_variant(TOKEN, 1, "Float", v),
+				Number::Decimal(v) => s.serialize_newtype_variant(TOKEN, 2, "Decimal", v),
 			}
 		} else {
 			match self {

@@ -4,6 +4,11 @@ on:
   - pull_request
   - push
 
+# Setting the shell option, it will run 'bash --noprofile --norc -eo pipefail {0}'
+defaults:
+  run:
+    shell: bash
+
 jobs:
 
   build-static:

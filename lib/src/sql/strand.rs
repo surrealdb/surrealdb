@@ -15,6 +15,8 @@ use std::ops;
 use std::ops::Deref;
 use std::str;
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
+
 const SINGLE: char = '\'';
 const SINGLE_ESC: &str = r#"\'"#;
 
@@ -78,7 +80,7 @@ impl Serialize for Strand {
 		S: serde::Serializer,
 	{
 		if is_internal_serialization() {
-			serializer.serialize_newtype_struct("Strand", &self.0)
+			serializer.serialize_newtype_struct(TOKEN, &self.0)
 		} else {
 			serializer.serialize_some(&self.0)
 		}

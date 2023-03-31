@@ -1,7 +1,7 @@
 use crate::err::Error;
 use crate::sql::geometry::Geometry;
 use crate::sql::value::Value;
-use geo::algorithm::bearing::Bearing;
+use geo::algorithm::bearing::HaversineBearing;
 use geo::algorithm::centroid::Centroid;
 use geo::algorithm::chamberlain_duquette_area::ChamberlainDuquetteArea;
 use geo::algorithm::haversine_distance::HaversineDistance;
@@ -28,7 +28,7 @@ pub fn area((arg,): (Value,)) -> Result<Value, Error> {
 pub fn bearing(points: (Value, Value)) -> Result<Value, Error> {
 	Ok(match points {
 		(Value::Geometry(Geometry::Point(v)), Value::Geometry(Geometry::Point(w))) => {
-			v.bearing(w).into()
+			v.haversine_bearing(w).into()
 		}
 		_ => Value::None,
 	})

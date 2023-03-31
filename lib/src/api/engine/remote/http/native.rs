@@ -19,8 +19,6 @@ use futures::StreamExt;
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
 use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
-use reqwest::header::ACCEPT;
 use reqwest::ClientBuilder;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
@@ -45,8 +43,7 @@ impl Connection for Client {
 		capacity: usize,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
-			let mut headers = HeaderMap::new();
-			headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+			let headers = super::default_headers();
 
 			#[allow(unused_mut)]
 			let mut builder = ClientBuilder::new().default_headers(headers);
@@ -116,7 +113,7 @@ impl Connection for Client {
 			let response = rx.into_recv_async().await?;
 			trace!(target: LOG, "Response {response:?}");
 			match response? {
-				DbResponse::Other(value) => from_value(value),
+				DbResponse::Other(value) => from_value(value).map_err(Into::into),
 				DbResponse::Query(..) => unreachable!(),
 			}
 		})
