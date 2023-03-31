@@ -1075,6 +1075,10 @@ impl Value {
 			Kind::String => self.make_strand(),
 			Kind::Datetime => self.make_datetime(),
 			Kind::Duration => self.make_duration(),
+			Kind::Bytes => match self {
+				Value::Bytes(_) => self,
+				_ => Value::None,
+			},
 			Kind::Array => match self {
 				Value::Array(_) => self,
 				_ => Value::None,
