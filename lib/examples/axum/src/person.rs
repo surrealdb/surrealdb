@@ -39,9 +39,9 @@ pub async fn update(
 	Ok(Json(person))
 }
 
-pub async fn delete(db: Db, id: Path<String>) -> Result<Json<()>, Error> {
-	db.delete((PERSON, &*id)).await?;
-	Ok(Json(()))
+pub async fn delete(db: Db, id: Path<String>) -> Result<Json<Option<Person>>, Error> {
+	let person = db.delete((PERSON, &*id)).await?;
+	Ok(Json(person))
 }
 
 pub async fn list(db: Db) -> Result<Json<Vec<Person>>, Error> {
