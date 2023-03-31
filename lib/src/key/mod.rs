@@ -21,7 +21,7 @@
 /// Table           /*{ns}*{db}*{tb}
 /// EV              /*{ns}*{db}*{tb}!ev{ev}
 /// FD              /*{ns}*{db}*{tb}!fd{fd}
-/// FT              /*{ns}*{db}*{tb}!ft{ft}
+/// FT              /*{ns}*{db}*{tb}!ft{ft} // view
 /// IX              /*{ns}*{db}*{tb}!ix{ix}
 /// LV              /*{ns}*{db}*{tb}!lv{lv}
 ///

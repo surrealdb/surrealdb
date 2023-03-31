@@ -23,10 +23,10 @@ impl<'a> Document<'a> {
 		txn.clone().lock().await.
 		for lv in self.lv(opt, txn).await?.iter() {
 			// Create a new statement
-			let lq = Statement::from(lv);
+			let stm = Statement::from(lv);
+			// Check LIVE SELECT where condition // TODO important for perms
 			// TODO check auth tokens/scope here
-			// Check LIVE SELECT where condition
-			if self.check(ctx, opt, txn, &lq).await.is_err() {
+			if self.check(ctx, opt, txn, &stm).await.is_err() {
 				continue;
 			}
 			let lq_opt = get_context_from_disk();
