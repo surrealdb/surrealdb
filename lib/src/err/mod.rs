@@ -1,5 +1,5 @@
 use crate::sql::idiom::Idiom;
-use msgpack::encode::Error as SerdeError;
+use bung::encode::Error as SerdeError;
 use serde::Serialize;
 use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;

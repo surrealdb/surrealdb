@@ -64,7 +64,7 @@ async fn handler(
 				Some("application/cbor") => Ok(output::cbor(&Success::new(v))),
 				Some("application/pack") => Ok(output::pack(&Success::new(v))),
 				// Internal serialization
-				Some("application/cork") => Ok(output::cork(&Success::new(v))),
+				Some("application/bung") => Ok(output::full(&Success::new(v))),
 				// Text serialization
 				Some("text/plain") => Ok(output::text(v.unwrap_or_default())),
 				// Return nothing

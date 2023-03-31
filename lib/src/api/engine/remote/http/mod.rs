@@ -104,7 +104,7 @@ impl Surreal<Client> {
 
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static("application/cork"));
+	headers.insert(ACCEPT, HeaderValue::from_static("application/bung"));
 	headers
 }
 
@@ -168,7 +168,7 @@ async fn submit_auth(request: RequestBuilder) -> Result<Value> {
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 	let response: AuthResponse =
-		msgpack::from_slice(&bytes).map_err(|error| Error::ResponseFromBinary {
+		bung::from_slice(&bytes).map_err(|error| Error::ResponseFromBinary {
 			binary: bytes.to_vec(),
 			error,
 		})?;
@@ -180,7 +180,7 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 	let responses: Vec<HttpQueryResponse> =
-		msgpack::from_slice(&bytes).map_err(|error| Error::ResponseFromBinary {
+		bung::from_slice(&bytes).map_err(|error| Error::ResponseFromBinary {
 			binary: bytes.to_vec(),
 			error,
 		})?;
