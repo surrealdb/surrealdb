@@ -18,8 +18,6 @@ use futures::StreamExt;
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
 use reqwest::header::HeaderMap;
-use reqwest::header::HeaderValue;
-use reqwest::header::ACCEPT;
 use reqwest::ClientBuilder;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
@@ -122,8 +120,7 @@ impl Connection for Client {
 }
 
 async fn client(base_url: &Url) -> Result<reqwest::Client> {
-	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+	let headers = super::default_headers();
 	let builder = ClientBuilder::new().default_headers(headers);
 	let client = builder.build()?;
 	let health = base_url.join(Method::Health.as_str())?;
