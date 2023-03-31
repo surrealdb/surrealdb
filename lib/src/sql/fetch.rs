@@ -2,7 +2,7 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
-use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::idiom::{plain as idiom, Idiom};
 use nom::bytes::complete::tag_no_case;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};

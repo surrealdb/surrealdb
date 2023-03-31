@@ -3,7 +3,7 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::dir::{dir, Dir};
 use crate::sql::error::IResult;
-use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::idiom::{plain as idiom, Idiom};
 use crate::sql::table::{table, tables, Tables};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;

@@ -14,11 +14,11 @@ use crate::sql::edges::{edges, Edges};
 use crate::sql::error::IResult;
 use crate::sql::expression::{expression, Expression};
 use crate::sql::fmt::{Fmt, Pretty};
-use crate::sql::function::{function, Function};
+use crate::sql::function::{self, function, Function};
 use crate::sql::future::{future, Future};
 use crate::sql::geometry::{geometry, Geometry};
 use crate::sql::id::Id;
-use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::idiom::{self, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
 use crate::sql::number::{number, Number};
@@ -277,6 +277,12 @@ impl From<Subquery> for Value {
 impl From<Expression> for Value {
 	fn from(v: Expression) -> Self {
 		Value::Expression(Box::new(v))
+	}
+}
+
+impl From<Box<Edges>> for Value {
+	fn from(v: Box<Edges>) -> Self {
+		Value::Edges(v)
 	}
 }
 
@@ -962,8 +968,8 @@ impl Value {
 	/// Converts this Value into a field name
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
-			Value::Param(v) => v.simplify(),
 			Value::Idiom(v) => v.simplify(),
+			Value::Param(v) => v.to_raw().into(),
 			Value::Strand(v) => v.0.to_string().into(),
 			Value::Datetime(v) => v.0.to_string().into(),
 			Value::Future(_) => "future".to_string().into(),
@@ -1545,14 +1551,12 @@ impl ops::Div for Value {
 	}
 }
 
+/// Parse any `Value` including binary expressions
 pub fn value(i: &str) -> IResult<&str, Value> {
-	alt((double, single))(i)
+	alt((map(expression, Value::from), single))(i)
 }
 
-pub fn double(i: &str) -> IResult<&str, Value> {
-	map(expression, Value::from)(i)
-}
-
+/// Parse any `Value` excluding binary expressions
 pub fn single(i: &str) -> IResult<&str, Value> {
 	alt((
 		alt((
@@ -1562,41 +1566,9 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 			map(tag_no_case("false"), |_| Value::False),
 		)),
 		alt((
-			map(subquery, Value::from),
+			map(idiom::multi, Value::from),
 			map(function, Value::from),
-			map(constant, Value::from),
-			map(datetime, Value::from),
-			map(duration, Value::from),
-			map(geometry, Value::from),
-			map(future, Value::from),
-			map(unique, Value::from),
-			map(number, Value::from),
-			map(object, Value::from),
-			map(array, Value::from),
-			map(block, Value::from),
-			map(param, Value::from),
-			map(regex, Value::from),
-			map(model, Value::from),
-			map(idiom, Value::from),
-			map(range, Value::from),
-			map(thing, Value::from),
-			map(strand, Value::from),
-		)),
-	))(i)
-}
-
-pub fn select(i: &str) -> IResult<&str, Value> {
-	alt((
-		alt((
-			map(tag_no_case("NONE"), |_| Value::None),
-			map(tag_no_case("NULL"), |_| Value::Null),
-			map(tag_no_case("true"), |_| Value::True),
-			map(tag_no_case("false"), |_| Value::False),
-		)),
-		alt((
-			map(expression, Value::from),
 			map(subquery, Value::from),
-			map(function, Value::from),
 			map(constant, Value::from),
 			map(datetime, Value::from),
 			map(duration, Value::from),
@@ -1613,17 +1585,75 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(edges, Value::from),
 			map(range, Value::from),
 			map(thing, Value::from),
-			map(table, Value::from),
 			map(strand, Value::from),
+			map(idiom::path, Value::from),
 		)),
 	))(i)
 }
 
+pub fn select(i: &str) -> IResult<&str, Value> {
+	alt((
+		alt((
+			map(expression, Value::from),
+			map(tag_no_case("NONE"), |_| Value::None),
+			map(tag_no_case("NULL"), |_| Value::Null),
+			map(tag_no_case("true"), |_| Value::True),
+			map(tag_no_case("false"), |_| Value::False),
+		)),
+		alt((
+			map(idiom::multi, Value::from),
+			map(function, Value::from),
+			map(subquery, Value::from),
+			map(constant, Value::from),
+			map(datetime, Value::from),
+			map(duration, Value::from),
+			map(geometry, Value::from),
+			map(future, Value::from),
+			map(unique, Value::from),
+			map(number, Value::from),
+			map(strand, Value::from),
+			map(object, Value::from),
+			map(array, Value::from),
+			map(block, Value::from),
+			map(param, Value::from),
+			map(regex, Value::from),
+			map(model, Value::from),
+			map(edges, Value::from),
+			map(range, Value::from),
+			map(thing, Value::from),
+			map(table, Value::from),
+		)),
+	))(i)
+}
+
+/// Used as the starting part of a complex Idiom
+pub fn start(i: &str) -> IResult<&str, Value> {
+	alt((
+		map(function::normal, Value::from),
+		map(function::custom, Value::from),
+		map(subquery, Value::from),
+		map(constant, Value::from),
+		map(datetime, Value::from),
+		map(duration, Value::from),
+		map(unique, Value::from),
+		map(number, Value::from),
+		map(strand, Value::from),
+		map(object, Value::from),
+		map(array, Value::from),
+		map(param, Value::from),
+		map(edges, Value::from),
+		map(thing, Value::from),
+	))(i)
+}
+
+/// Used in CREATE, UPDATE, and DELETE clauses
 pub fn what(i: &str) -> IResult<&str, Value> {
 	alt((
-		map(subquery, Value::from),
 		map(function, Value::from),
+		map(subquery, Value::from),
 		map(constant, Value::from),
+		map(datetime, Value::from),
+		map(duration, Value::from),
 		map(future, Value::from),
 		map(block, Value::from),
 		map(param, Value::from),
@@ -1635,6 +1665,7 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 	))(i)
 }
 
+/// Used to parse any simple JSON-like value
 pub fn json(i: &str) -> IResult<&str, Value> {
 	alt((
 		map(tag_no_case("NULL"), |_| Value::Null),

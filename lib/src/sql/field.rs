@@ -7,7 +7,7 @@ use crate::sql::common::commas;
 use crate::sql::ending::field as ending;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
-use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::idiom::{plain as idiom, Idiom};
 use crate::sql::part::Part;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
