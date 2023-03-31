@@ -71,7 +71,6 @@ mod ws {
 	include!("api/auth.rs");
 }
 
-/*
 #[cfg(feature = "protocol-http")]
 mod http {
 	use super::*;
@@ -93,7 +92,6 @@ mod http {
 	include!("api/auth.rs");
 	include!("api/backup.rs");
 }
-*/
 
 #[cfg(feature = "kv-mem")]
 mod mem {
@@ -158,7 +156,6 @@ mod fdb {
 	include!("api/backup.rs");
 }
 
-/*
 #[cfg(feature = "protocol-http")]
 mod any {
 	use super::*;
@@ -179,4 +176,3 @@ mod any {
 	include!("api/auth.rs");
 	include!("api/backup.rs");
 }
-*/
