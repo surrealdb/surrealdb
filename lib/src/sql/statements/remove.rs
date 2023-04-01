@@ -100,6 +100,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveNamespaceStatement {
 	pub name: Ident,
 }
@@ -156,6 +157,7 @@ fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveDatabaseStatement {
 	pub name: Ident,
 }
@@ -212,6 +214,7 @@ fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveFunctionStatement {
 	pub name: Ident,
 }
@@ -273,6 +276,7 @@ fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -352,6 +356,7 @@ fn login(i: &str) -> IResult<&str, RemoveLoginStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -446,6 +451,7 @@ fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveScopeStatement {
 	pub name: Ident,
 }
@@ -502,6 +508,7 @@ fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveParamStatement {
 	pub name: Ident,
 }
@@ -556,6 +563,7 @@ fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveTableStatement {
 	pub name: Ident,
 }
@@ -612,6 +620,7 @@ fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -675,6 +684,7 @@ fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -738,6 +748,7 @@ fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
