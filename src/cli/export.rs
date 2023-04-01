@@ -12,6 +12,7 @@ use surrealdb::Error as SurrealError;
 #[derive(Args, Debug)]
 pub struct ExportCommandArguments {
 	#[arg(help = "Path to the sql file to export. Use dash - to write into stdout.")]
+	#[arg(default_value = "-")]
 	#[arg(index = 1)]
 	file: String,
 
