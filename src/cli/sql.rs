@@ -1,4 +1,5 @@
 use crate::err::Error;
+use clap::Args;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use surrealdb::engine::any::connect;
@@ -9,25 +10,48 @@ use surrealdb::sql::Statement;
 use surrealdb::sql::Value;
 use surrealdb::Error as SurrealError;
 use surrealdb::Response;
+use crate::cli::abstraction::{AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments};
 
-#[tokio::main]
-pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+#[derive(Args, Debug)]
+pub struct SqlCommandArguments {
+	#[command(flatten)]
+	conn: DatabaseConnectionArguments,
+	#[command(flatten)]
+	auth: AuthArguments,
+	#[command(flatten)]
+	sel: DatabaseSelectionArguments,
+	#[arg(help = "Whether database responses should be pretty printed")]
+	#[arg(long = "pretty")]
+	#[arg(default_value_t = false)]
+	pretty: bool,
+}
+
+pub async fn init(
+	SqlCommandArguments {
+		auth: AuthArguments {
+			username,
+			password,
+		},
+		conn: DatabaseConnectionArguments {
+			connection_url: endpoint,
+		},
+		sel: DatabaseSelectionArguments {
+			namespace: mut ns,
+			database: mut db,
+		},
+		pretty,
+		..
+	}: SqlCommandArguments,
+) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("warn").init();
-	// Parse all other cli arguments
-	let username = matches.value_of("user").unwrap();
-	let password = matches.value_of("pass").unwrap();
-	let endpoint = matches.value_of("conn").unwrap();
-	let mut ns = matches.value_of("ns").map(str::to_string);
-	let mut db = matches.value_of("db").map(str::to_string);
-	// If we should pretty-print responses
-	let pretty = matches.is_present("pretty");
+
 	// Connect to the database engine
 	let client = connect(endpoint).await?;
 	// Sign in to the server if the specified database engine supports it
 	let root = Root {
-		username,
-		password,
+		username: &username,
+		password: &password,
 	};
 	if let Err(error) = client.signin(root).await {
 		match error {
@@ -47,13 +71,11 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Loop over each command-line input
 	loop {
 		// Use namespace / database if specified
-		if let (Some(namespace), Some(database)) = (&ns, &db) {
-			match client.use_ns(namespace).use_db(database).await {
-				Ok(()) => {
-					prompt = format!("{namespace}/{database}> ");
-				}
-				Err(error) => eprintln!("{error}"),
+		match client.use_ns(&ns).use_db(&db).await {
+			Ok(()) => {
+				prompt = format!("{ns}/{db}> ");
 			}
+			Err(error) => eprintln!("{error}"),
 		}
 		// Prompt the user to input SQL
 		let readline = rl.readline(&prompt);
@@ -76,10 +98,10 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 							match statement {
 								Statement::Use(stmt) => {
 									if let Some(namespace) = &stmt.ns {
-										ns = Some(namespace.clone());
+										ns = namespace.clone();
 									}
 									if let Some(database) = &stmt.db {
-										db = Some(database.clone());
+										db = database.clone();
 									}
 								}
 								Statement::Set(stmt) => {

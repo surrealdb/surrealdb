@@ -1,28 +1,51 @@
 use crate::cli::LOG;
 use crate::err::Error;
+use clap::Args;
 use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
 use surrealdb::Error as SurrealError;
+use crate::cli::abstraction::{AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments};
 
-#[tokio::main]
-pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+#[derive(Args, Debug)]
+pub struct ExportCommandArguments {
+	#[arg(help = "Path to the sql file to export. Use dash - to write into stdout.")]
+	#[arg(index = 1)]
+	file: String,
+
+	#[command(flatten)]
+	conn: DatabaseConnectionArguments,
+	#[command(flatten)]
+	auth: AuthArguments,
+	#[command(flatten)]
+	sel: DatabaseSelectionArguments,
+}
+
+pub async fn init(
+	ExportCommandArguments {
+		file,
+		conn: DatabaseConnectionArguments {
+			connection_url: endpoint,
+		},
+		auth: AuthArguments {
+			username,
+			password,
+		},
+		sel: DatabaseSelectionArguments {
+			namespace: ns,
+			database: db,
+		},
+	}: ExportCommandArguments,
+) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("error").init();
-	// Try to parse the file argument
-	let file = matches.value_of("file").unwrap();
-	// Parse all other cli arguments
-	let username = matches.value_of("user").unwrap();
-	let password = matches.value_of("pass").unwrap();
-	let endpoint = matches.value_of("conn").unwrap();
-	let ns = matches.value_of("ns").unwrap();
-	let db = matches.value_of("db").unwrap();
+
 	// Connect to the database engine
 	let client = connect(endpoint).await?;
 	// Sign in to the server if the specified database engine supports it
 	let root = Root {
-		username,
-		password,
+		username: &username,
+		password: &password,
 	};
 	if let Err(error) = client.signin(root).await {
 		match error {
