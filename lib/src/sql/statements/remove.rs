@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
@@ -797,4 +798,18 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 			what,
 		},
 	))
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn check_remove_serialize() {
+		let stm = RemoveStatement::Namespace(RemoveNamespaceStatement {
+			name: Ident::from("test"),
+		});
+		assert_eq!(22, stm.to_vec().len());
+	}
 }

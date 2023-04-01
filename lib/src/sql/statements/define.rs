@@ -41,6 +41,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
@@ -1252,4 +1253,18 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 			uniq: uniq.is_some(),
 		},
 	))
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn check_define_serialize() {
+		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
+			name: Ident::from("test"),
+		});
+		assert_eq!(22, stm.to_vec().len());
+	}
 }
