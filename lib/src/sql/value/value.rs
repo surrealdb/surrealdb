@@ -99,7 +99,7 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Deserialize, Store, Hash)]
-#[format(Compact)]
+#[format(NamedCompact)]
 pub enum Value {
 	#[default]
 	None,
