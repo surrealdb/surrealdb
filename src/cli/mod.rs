@@ -7,10 +7,11 @@ mod sql;
 mod start;
 mod version;
 
+use clap::builder::NonEmptyStringValueParser;
 pub use config::CF;
 
 use crate::cnf::LOGO;
-use clap::{Arg, Command};
+use clap::{Arg, ArgAction, Command};
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use tracing::Level;
@@ -139,7 +140,7 @@ pub fn init() -> ExitCode {
 					.index(1)
 					.env("SURREAL_PATH")
 					.required(false)
-					.validator(path_valid)
+					.value_parser(path_valid)
 					.default_value("memory")
 					.help("Database path used for storing data"),
 			)
@@ -148,7 +149,7 @@ pub fn init() -> ExitCode {
 					.short('u')
 					.env("SURREAL_USER")
 					.long("user")
-					.forbid_empty_values(true)
+					.value_parser(NonEmptyStringValueParser::new())
 					.default_value("root")
 					.help("The master username for the database"),
 			)
@@ -157,17 +158,17 @@ pub fn init() -> ExitCode {
 					.short('p')
 					.env("SURREAL_PASS")
 					.long("pass")
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help("The master password for the database"),
 			)
 			.arg(
 				Arg::new("addr")
 					.env("SURREAL_ADDR")
 					.long("addr")
-					.number_of_values(1)
-					.forbid_empty_values(true)
-					.multiple_occurrences(true)
+					.num_args(1)
+					.value_parser(NonEmptyStringValueParser::new())
+					.action(ArgAction::Append)
 					.default_value("127.0.0.1/32")
 					.help("The allowed networks for master authentication"),
 			)
@@ -176,8 +177,8 @@ pub fn init() -> ExitCode {
 					.short('b')
 					.env("SURREAL_BIND")
 					.long("bind")
-					.validator(bind_valid)
-					.forbid_empty_values(true)
+					.value_parser(bind_valid)
+					.value_parser(NonEmptyStringValueParser::new())
 					.default_value("0.0.0.0:8000")
 					.help("The hostname or ip address to listen for connections on"),
 			)
@@ -186,25 +187,25 @@ pub fn init() -> ExitCode {
 					.short('k')
 					.env("SURREAL_KEY")
 					.long("key")
-					.takes_value(true)
-					.forbid_empty_values(true)
-					.validator(key_valid)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
+					.value_parser(key_valid)
 					.help("Encryption key to use for on-disk encryption"),
 			)
 			.arg(
 				Arg::new("kvs-ca")
 					.env("SURREAL_KVS_CA")
 					.long("kvs-ca")
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help("Path to the CA file used when connecting to the remote KV store"),
 			)
 			.arg(
 				Arg::new("kvs-crt")
 					.env("SURREAL_KVS_CRT")
 					.long("kvs-crt")
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help(
 						"Path to the certificate file used when connecting to the remote KV store",
 					),
@@ -213,8 +214,8 @@ pub fn init() -> ExitCode {
 				Arg::new("kvs-key")
 					.env("SURREAL_KVS_KEY")
 					.long("kvs-key")
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help(
 						"Path to the private key file used when connecting to the remote KV store",
 					),
@@ -223,16 +224,16 @@ pub fn init() -> ExitCode {
 				Arg::new("web-crt")
 					.env("SURREAL_WEB_CRT")
 					.long("web-crt")
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help("Path to the certificate file for encrypted client connections"),
 			)
 			.arg(
 				Arg::new("web-key")
 					.env("SURREAL_WEB_KEY")
 					.long("web-key")
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help("Path to the private key file for encrypted client connections"),
 			)
 			.arg(
@@ -241,7 +242,7 @@ pub fn init() -> ExitCode {
 					.env("SURREAL_STRICT")
 					.long("strict")
 					.required(false)
-					.takes_value(false)
+					.action(ArgAction::SetFalse)
 					.help("Whether strict mode is enabled on this database instance"),
 			)
 			.arg(
@@ -249,9 +250,9 @@ pub fn init() -> ExitCode {
 					.short('l')
 					.env("SURREAL_LOG")
 					.long("log")
-					.takes_value(true)
+					.action(ArgAction::Set)
 					.default_value("info")
-					.forbid_empty_values(true)
+					.value_parser(NonEmptyStringValueParser::new())
 					.value_parser(log_valid)
 					.help("The logging level for the database server. One of error, warn, info, debug, trace, full."),
 			)
@@ -260,7 +261,7 @@ pub fn init() -> ExitCode {
 					.env("SURREAL_NO_BANNER")
 					.long("no-banner")
 					.required(false)
-					.takes_value(false)
+					.action(ArgAction::SetFalse)
 					.help("Whether to hide the startup banner"),
 			),
 	);
@@ -273,21 +274,21 @@ pub fn init() -> ExitCode {
 				Arg::new("from")
 					.index(1)
 					.required(true)
-					.validator(from_valid)
+					.value_parser(from_valid)
 					.help("Path to the remote database or file from which to export"),
 			)
 			.arg(
 				Arg::new("into")
 					.index(2)
 					.required(true)
-					.validator(into_valid)
+					.value_parser(into_valid)
 					.help("Path to the remote database or file into which to import"),
 			)
 			.arg(
 				Arg::new("user")
 					.short('u')
 					.long("user")
-					.forbid_empty_values(true)
+					.value_parser(NonEmptyStringValueParser::new())
 					.default_value("root")
 					.help("Database authentication username to use when connecting"),
 			)
@@ -295,7 +296,7 @@ pub fn init() -> ExitCode {
 				Arg::new("pass")
 					.short('p')
 					.long("pass")
-					.forbid_empty_values(true)
+					.value_parser(NonEmptyStringValueParser::new())
 					.default_value("root")
 					.help("Database authentication password to use when connecting"),
 			),
@@ -309,23 +310,23 @@ pub fn init() -> ExitCode {
 				Arg::new("file")
 					.index(1)
 					.required(true)
-					.validator(file_valid)
+					.value_parser(file_valid)
 					.help("Path to the sql file to import"),
 			)
 			.arg(
 				Arg::new("ns")
 					.long("ns")
 					.required(true)
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help("The namespace to import the data into"),
 			)
 			.arg(
 				Arg::new("db")
 					.long("db")
 					.required(true)
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help("The database to import the data into"),
 			)
 			.arg(
@@ -333,8 +334,8 @@ pub fn init() -> ExitCode {
 					.short('c')
 					.long("conn")
 					.alias("host")
-					.forbid_empty_values(true)
-					.validator(conn_valid)
+					.value_parser(NonEmptyStringValueParser::new())
+					.value_parser(conn_valid)
 					.default_value("https://cloud.surrealdb.com")
 					.help("Remote database server url to connect to"),
 			)
@@ -342,7 +343,7 @@ pub fn init() -> ExitCode {
 				Arg::new("user")
 					.short('u')
 					.long("user")
-					.forbid_empty_values(true)
+					.value_parser(NonEmptyStringValueParser::new())
 					.default_value("root")
 					.help("Database authentication username to use when connecting"),
 			)
@@ -350,7 +351,7 @@ pub fn init() -> ExitCode {
 				Arg::new("pass")
 					.short('p')
 					.long("pass")
-					.forbid_empty_values(true)
+					.value_parser(NonEmptyStringValueParser::new())
 					.default_value("root")
 					.help("Database authentication password to use when connecting"),
 			),
@@ -364,23 +365,23 @@ pub fn init() -> ExitCode {
 				Arg::new("file")
 					.index(1)
 					.required(true)
-					.validator(file_valid)
+					.value_parser(file_valid)
 					.help("Path to the sql file to export. Use dash - to write into stdout."),
 			)
 			.arg(
 				Arg::new("ns")
 					.long("ns")
 					.required(true)
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help("The namespace to export the data from"),
 			)
 			.arg(
 				Arg::new("db")
 					.long("db")
 					.required(true)
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help("The database to export the data from"),
 			)
 			.arg(
@@ -388,8 +389,8 @@ pub fn init() -> ExitCode {
 					.short('c')
 					.long("conn")
 					.alias("host")
-					.forbid_empty_values(true)
-					.validator(conn_valid)
+					.value_parser(NonEmptyStringValueParser::new())
+					.value_parser(conn_valid)
 					.default_value("https://cloud.surrealdb.com")
 					.help("Remote database server url to connect to"),
 			)
@@ -397,7 +398,7 @@ pub fn init() -> ExitCode {
 				Arg::new("user")
 					.short('u')
 					.long("user")
-					.forbid_empty_values(true)
+					.value_parser(NonEmptyStringValueParser::new())
 					.default_value("root")
 					.help("Database authentication username to use when connecting"),
 			)
@@ -405,7 +406,7 @@ pub fn init() -> ExitCode {
 				Arg::new("pass")
 					.short('p')
 					.long("pass")
-					.forbid_empty_values(true)
+					.value_parser(NonEmptyStringValueParser::new())
 					.default_value("root")
 					.help("Database authentication password to use when connecting"),
 			),
@@ -425,16 +426,16 @@ pub fn init() -> ExitCode {
 				Arg::new("ns")
 					.long("ns")
 					.required(false)
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help("The namespace to export the data from"),
 			)
 			.arg(
 				Arg::new("db")
 					.long("db")
 					.required(false)
-					.takes_value(true)
-					.forbid_empty_values(true)
+					.action(ArgAction::Set)
+					.value_parser(NonEmptyStringValueParser::new())
 					.help("The database to export the data from"),
 			)
 			.arg(
@@ -442,8 +443,8 @@ pub fn init() -> ExitCode {
 					.short('c')
 					.long("conn")
 					.alias("host")
-					.forbid_empty_values(true)
-					.validator(conn_valid)
+					.value_parser(NonEmptyStringValueParser::new())
+					.value_parser(conn_valid)
 					.default_value("wss://cloud.surrealdb.com")
 					.help("Remote database server url to connect to"),
 			)
@@ -451,7 +452,7 @@ pub fn init() -> ExitCode {
 				Arg::new("user")
 					.short('u')
 					.long("user")
-					.forbid_empty_values(true)
+					.value_parser(NonEmptyStringValueParser::new())
 					.default_value("root")
 					.help("Database authentication username to use when connecting"),
 			)
@@ -459,7 +460,7 @@ pub fn init() -> ExitCode {
 				Arg::new("pass")
 					.short('p')
 					.long("pass")
-					.forbid_empty_values(true)
+					.value_parser(NonEmptyStringValueParser::new())
 					.default_value("root")
 					.help("Database authentication password to use when connecting"),
 			)
@@ -467,7 +468,7 @@ pub fn init() -> ExitCode {
 				Arg::new("pretty")
 					.long("pretty")
 					.required(false)
-					.takes_value(false)
+					.action(ArgAction::SetFalse)
 					.help("Whether database responses should be pretty printed"),
 			),
 	);
@@ -481,8 +482,8 @@ pub fn init() -> ExitCode {
 					.short('c')
 					.long("conn")
 					.alias("host")
-					.forbid_empty_values(true)
-					.validator(conn_valid)
+					.value_parser(NonEmptyStringValueParser::new())
+					.value_parser(conn_valid)
 					.default_value("http://localhost:8000")
 					.help("Remote database server url to connect to"),
 			),

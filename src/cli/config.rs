@@ -16,18 +16,18 @@ pub struct Config {
 
 pub fn init(matches: &clap::ArgMatches) {
 	// Parse the server binding address
-	let bind = matches.value_of("bind").unwrap().parse::<SocketAddr>().unwrap();
+	let bind = matches.get_one::<&str>("bind").unwrap().parse::<SocketAddr>().unwrap();
 	// Parse the database endpoint path
-	let path = matches.value_of("path").unwrap().to_owned();
+	let path = matches.get_one::<String>("path").unwrap().to_owned();
 	// Parse the root username for authentication
-	let user = matches.value_of("user").unwrap().to_owned();
+	let user = matches.get_one::<String>("user").unwrap().to_owned();
 	// Parse the root password for authentication
-	let pass = matches.value_of("pass").map(|v| v.to_owned());
+	let pass = matches.get_one::<String>("pass").map(|v| v.to_owned());
 	// Parse any TLS server security options
-	let crt = matches.value_of("web-crt").map(|v| v.to_owned());
-	let key = matches.value_of("web-key").map(|v| v.to_owned());
+	let crt = matches.get_one::<String>("web-crt").map(|v| v.to_owned());
+	let key = matches.get_one::<String>("web-key").map(|v| v.to_owned());
 	// Check if database strict mode is enabled
-	let strict = matches.is_present("strict");
+	let strict = matches.contains_id("strict");
 	// Store the new config object
 	let _ = CF.set(Config {
 		strict,

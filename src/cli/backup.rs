@@ -13,9 +13,9 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("error").init();
 	// Try to parse the specified source file
-	let from = matches.value_of("from").unwrap();
+	let from = matches.get_one::<&str>("from").unwrap();
 	// Try to parse the specified output file
-	let into = matches.value_of("into").unwrap();
+	let into = matches.get_one::<&str>("into").unwrap();
 	// Process the source->destination response
 	if from.ends_with(".db") && into.ends_with(".db") {
 		backup_file_to_file(matches, from, into)
@@ -41,9 +41,9 @@ fn backup_file_to_file(_: &clap::ArgMatches, from: &str, into: &str) -> Result<(
 
 fn backup_http_to_file(matches: &clap::ArgMatches, from: &str, into: &str) -> Result<(), Error> {
 	// Parse the specified username
-	let user = matches.value_of("user").unwrap();
+	let user = matches.get_one::<&str>("user").unwrap();
 	// Parse the specified password
-	let pass = matches.value_of("pass").unwrap();
+	let pass = matches.get_one::<&str>("pass").unwrap();
 	// Set the correct source URL
 	let from = format!("{from}/sync");
 	// Try to open the source http
@@ -64,9 +64,9 @@ fn backup_http_to_file(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 
 fn backup_file_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Result<(), Error> {
 	// Parse the specified username
-	let user = matches.value_of("user").unwrap();
+	let user = matches.get_one::<&str>("user").unwrap();
 	// Parse the specified password
-	let pass = matches.value_of("pass").unwrap();
+	let pass = matches.get_one::<&str>("pass").unwrap();
 	// Try to open the source file
 	let from = OpenOptions::new().read(true).open(from)?;
 	// Set the correct output URL
@@ -86,9 +86,9 @@ fn backup_file_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Re
 
 fn backup_http_to_http(matches: &clap::ArgMatches, from: &str, into: &str) -> Result<(), Error> {
 	// Parse the specified username
-	let user = matches.value_of("user").unwrap();
+	let user = matches.get_one::<&str>("user").unwrap();
 	// Parse the specified password
-	let pass = matches.value_of("pass").unwrap();
+	let pass = matches.get_one::<&str>("pass").unwrap();
 	// Set the correct source URL
 	let from = format!("{from}/sync");
 	// Set the correct output URL

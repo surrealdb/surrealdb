@@ -15,13 +15,13 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("warn").init();
 	// Parse all other cli arguments
-	let username = matches.value_of("user").unwrap();
-	let password = matches.value_of("pass").unwrap();
-	let endpoint = matches.value_of("conn").unwrap();
-	let mut ns = matches.value_of("ns").map(str::to_string);
-	let mut db = matches.value_of("db").map(str::to_string);
+	let username = matches.get_one::<String>("user").unwrap();
+	let password = matches.get_one::<String>("pass").unwrap();
+	let endpoint = matches.get_one::<String>("conn").unwrap();
+	let mut ns = matches.get_one::<&str>("ns").map(|s| s.to_string());
+	let mut db = matches.get_one::<&str>("db").map(|s| s.to_string());
 	// If we should pretty-print responses
-	let pretty = matches.is_present("pretty");
+	let pretty = matches.contains_id("pretty");
 	// Connect to the database engine
 	let client = connect(endpoint).await?;
 	// Sign in to the server if the specified database engine supports it
@@ -76,10 +76,10 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 							match statement {
 								Statement::Use(stmt) => {
 									if let Some(namespace) = &stmt.ns {
-										ns = Some(namespace.clone());
+										ns = Some(namespace.to_string());
 									}
 									if let Some(database) = &stmt.db {
-										db = Some(database.clone());
+										db = Some(database.to_string());
 									}
 								}
 								Statement::Set(stmt) => {
@@ -90,7 +90,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 								_ => {}
 							}
 						}
-						let res = client.query(query).await;
+						let res = client.query(query.clone()).await;
 						// Get the request response
 						match process(pretty, res) {
 							Ok(v) => println!("{v}"),

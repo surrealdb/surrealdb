@@ -10,13 +10,13 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("error").init();
 	// Try to parse the file argument
-	let file = matches.value_of("file").unwrap();
+	let file = matches.get_one::<String>("file").unwrap();
 	// Parse all other cli arguments
-	let username = matches.value_of("user").unwrap();
-	let password = matches.value_of("pass").unwrap();
-	let endpoint = matches.value_of("conn").unwrap();
-	let ns = matches.value_of("ns").unwrap();
-	let db = matches.value_of("db").unwrap();
+	let username = matches.get_one::<String>("user").unwrap();
+	let password = matches.get_one::<String>("pass").unwrap();
+	let endpoint = matches.get_one::<String>("conn").unwrap();
+	let ns = matches.get_one::<String>("ns").unwrap();
+	let db = matches.get_one::<String>("db").unwrap();
 	// Connect to the database engine
 	let client = connect(endpoint).await?;
 	// Sign in to the server if the specified database engine supports it
