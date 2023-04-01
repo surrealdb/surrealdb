@@ -1001,11 +1001,11 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
-	pub flex: bool,
 	pub kind: Option<Kind>,
 	pub value: Option<Value>,
 	pub assert: Option<Value>,
 	pub permissions: Permissions,
+	pub flex: bool,
 }
 
 impl DefineFieldStatement {
