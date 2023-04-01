@@ -64,6 +64,8 @@ use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
 #[cfg(not(target_arch = "wasm32"))]
+use tokio::io::AsyncWrite;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
 const LOG: &str = "surrealdb::api::engine::local";
@@ -422,10 +424,10 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Method::Delete => {
-			let statement = delete_statement(&mut params);
+			let (one, statement) = delete_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Delete(statement)]));
 			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
-			let value = take(true, response).await?;
+			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Query => {
@@ -459,23 +461,29 @@ async fn router(
 				error!(target: LOG, "{error}");
 			}
 			let path = param.file.expect("file to export into");
-			let mut file = match OpenOptions::new()
-				.write(true)
-				.create(true)
-				.truncate(true)
-				.open(&path)
-				.await
-			{
-				Ok(path) => path,
-				Err(error) => {
-					return Err(Error::FileOpen {
-						path,
-						error,
-					}
-					.into());
+			let mut writer: Box<dyn AsyncWrite + Unpin + Send> = match path.to_str().unwrap() {
+				"-" => Box::new(io::stdout()),
+				_ => {
+					let file = match OpenOptions::new()
+						.write(true)
+						.create(true)
+						.truncate(true)
+						.open(&path)
+						.await
+					{
+						Ok(path) => path,
+						Err(error) => {
+							return Err(Error::FileOpen {
+								path,
+								error,
+							}
+							.into());
+						}
+					};
+					Box::new(file)
 				}
 			};
-			if let Err(error) = io::copy(&mut reader, &mut file).await {
+			if let Err(error) = io::copy(&mut reader, &mut writer).await {
 				return Err(Error::FileRead {
 					path,
 					error,

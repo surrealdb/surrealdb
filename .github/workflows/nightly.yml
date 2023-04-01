@@ -1,14 +1,19 @@
 name: Nightly release
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 0 * * *'
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -17,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -29,7 +34,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -38,7 +43,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -62,26 +67,27 @@ jobs:
     name: Build ${{ matrix.arch }}
     needs: [test, lint]
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64-apple-darwin
-            os: macos-11
+            os: macos-12
             file: surreal-nightly.darwin-amd64
             opts: --features storage-tikv
           - arch: aarch64-apple-darwin
-            os: macos-11
+            os: macos-12
             file: surreal-nightly.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04-16-cores
             file: surreal-nightly.linux-amd64
             opts: --features storage-tikv
           - arch: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-20.04-16-cores
             file: surreal-nightly.linux-arm64
             opts: --features storage-tikv
           - arch: x86_64-pc-windows-msvc
-            os: windows-latest
+            os: windows-latest-16-cores
             file: surreal-nightly.windows-amd64
             opts:
     runs-on: ${{ matrix.os }}
@@ -99,6 +105,7 @@ jobs:
         run: |
           vcpkg integrate install
           vcpkg install openssl:x64-windows-static
+          choco install protoc
 
       - name: Install dependencies
         if: contains(matrix.arch, 'apple') && endsWith(matrix.arch, '-darwin')
@@ -111,7 +118,7 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
           sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
-          sudo apt-get -y install protobuf-compiler
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install FoundationDB
         if: contains(matrix.arch, 'linux') && startsWith(matrix.arch, 'x86_64')
@@ -126,7 +133,7 @@ jobs:
           targets: ${{ matrix.arch }}
 
       - name: Output package versions
-        run: go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
+        run: set -x; go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
 
       - name: Run cargo build
         run: cargo build ${{ matrix.opts }} --release --locked --target ${{ matrix.arch }}
@@ -176,7 +183,7 @@ jobs:
   package:
     name: Package macOS
     needs: [build]
-    runs-on: macos-11
+    runs-on: macos-12
     steps:
 
       - name: Download amd64 binary
@@ -212,7 +219,7 @@ jobs:
   deploy:
     name: Deploy
     needs: [package]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -239,7 +246,7 @@ jobs:
   docker:
     name: Docker
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources

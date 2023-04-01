@@ -422,7 +422,7 @@ impl Response {
 				trace!(target: LOG, "Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => msgpack::from_slice(&binary).map(Some).map_err(|error| {
+			Message::Binary(binary) => bung::from_slice(&binary).map(Some).map_err(|error| {
 				Error::ResponseFromBinary {
 					binary,
 					error,

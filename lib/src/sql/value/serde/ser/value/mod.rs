@@ -13,6 +13,7 @@ use crate::sql::Block;
 use crate::sql::Datetime;
 use crate::sql::Duration;
 use crate::sql::Future;
+use crate::sql::Ident;
 use crate::sql::Idiom;
 use crate::sql::Param;
 use crate::sql::Regex;
@@ -222,7 +223,7 @@ impl ser::Serializer for Serializer {
 				Ok(Value::Idiom(Idiom(value.serialize(ser::part::vec::Serializer.wrap())?)))
 			}
 			sql::param::TOKEN => {
-				Ok(Value::Param(Param(Idiom(value.serialize(ser::part::vec::Serializer.wrap())?))))
+				Ok(Value::Param(Param(Ident(value.serialize(ser::string::Serializer.wrap())?))))
 			}
 			sql::array::TOKEN => Ok(Value::Array(Array(value.serialize(vec::Serializer.wrap())?))),
 			sql::object::TOKEN => {

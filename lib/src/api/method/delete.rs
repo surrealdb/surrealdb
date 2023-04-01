@@ -6,6 +6,7 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::sql::Id;
+use serde::de::DeserializeOwned;
 use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
@@ -24,7 +25,10 @@ impl<'r, Client, R> Delete<'r, Client, R>
 where
 	Client: Connection,
 {
-	async fn execute(self) -> Result<()> {
+	async fn execute<T>(self) -> Result<T>
+	where
+		T: DeserializeOwned,
+	{
 		let resource = self.resource?;
 		let param = match self.range {
 			Some(range) => resource.with_range(range)?,
@@ -35,11 +39,12 @@ where
 	}
 }
 
-impl<'r, Client> IntoFuture for Delete<'r, Client, Option<()>>
+impl<'r, Client, R> IntoFuture for Delete<'r, Client, Option<R>>
 where
 	Client: Connection,
+	R: DeserializeOwned + Send + Sync + 'r,
 {
-	type Output = Result<()>;
+	type Output = Result<R>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	fn into_future(self) -> Self::IntoFuture {
@@ -47,11 +52,12 @@ where
 	}
 }
 
-impl<'r, Client> IntoFuture for Delete<'r, Client, Vec<()>>
+impl<'r, Client, R> IntoFuture for Delete<'r, Client, Vec<R>>
 where
 	Client: Connection,
+	R: DeserializeOwned + Send + Sync + 'r,
 {
-	type Output = Result<()>;
+	type Output = Result<Vec<R>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	fn into_future(self) -> Self::IntoFuture {
@@ -59,7 +65,7 @@ where
 	}
 }
 
-impl<C> Delete<'_, C, Vec<()>>
+impl<C, R> Delete<'_, C, Vec<R>>
 where
 	C: Connection,
 {

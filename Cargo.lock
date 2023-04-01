@@ -711,6 +711,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d261e256854913907f67ed06efbc3338dfe6179796deefc1ff763fc1aee5535"
 
 [[package]]
+name = "bung"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da8bcf29331f126c3b4f20a6698909d58004290723aac75e3eafab41ae3c2953"
+dependencies = [
+ "byteorder",
+ "rmp",
+ "serde",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3765,10 +3776,11 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "surreal"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "argon2",
  "base64 0.21.0",
+ "bung",
  "bytes",
  "chrono",
  "clap",
@@ -3805,7 +3817,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "addr",
  "any_ascii",
@@ -3815,6 +3827,7 @@ dependencies = [
  "async-recursion",
  "bcrypt",
  "bigdecimal",
+ "bung",
  "chrono",
  "dmp",
  "echodb",
@@ -3839,7 +3852,6 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "reqwest",
- "rmp-serde",
  "rocksdb",
  "rquickjs",
  "rustls",
@@ -3870,9 +3882,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-derive"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "552bb4f9eb49f493b14d79d989ea9ecb53ee8cee0aad529e289faca72fb78b14"
+checksum = "dfb39273220b1d4cd0936abb8d1e9ec0eb673e17044169cb4604345576b1e0ef"
 dependencies = [
  "quote",
  "syn 1.0.109",

@@ -231,6 +231,7 @@ fn into_json(value: Value) -> serde_json::Result<JsonValue> {
 		Value::Array(arr) => Ok(JsonValue::Array(Array::try_from(arr)?.0)),
 		Value::Object(obj) => Ok(JsonValue::Object(Object::try_from(obj)?.0)),
 		Value::Geometry(geometry) => serde_json::to_value(geometry),
+		Value::Bytes(bytes) => serde_json::to_value(bytes),
 		Value::Param(param) => serde_json::to_value(param),
 		Value::Idiom(idiom) => serde_json::to_value(idiom),
 		Value::Table(table) => serde_json::to_value(table),

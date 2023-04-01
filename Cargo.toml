@@ -2,7 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [features]
@@ -27,6 +27,7 @@ codegen-units = 1
 [dependencies]
 argon2 = "0.5.0"
 base64 = "0.21.0"
+bung = "0.1.0"
 bytes = "1.4.0"
 chrono = { version = "0.4.24", features = ["serde"] }
 clap = { version = "3.2.23", features = ["env"] }

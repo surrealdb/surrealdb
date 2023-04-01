@@ -97,6 +97,29 @@ impl Value {
 						try_join_all(futs).await.map(Into::into)
 					}
 				},
+				// Current path part is an edges
+				Value::Edges(v) => {
+					// Clone the thing
+					let val = v.clone();
+					// Check how many path parts are remaining
+					match path.len() {
+						// No remote embedded fields, so just return this
+						0 => Ok(Value::Edges(val)),
+						// Remote embedded field, so fetch the thing
+						_ => {
+							let stm = SelectStatement {
+								expr: Fields(vec![Field::All], false),
+								what: Values(vec![Value::from(val)]),
+								..SelectStatement::default()
+							};
+							stm.compute(ctx, opt, txn, None)
+								.await?
+								.first()
+								.get(ctx, opt, txn, path)
+								.await
+						}
+					}
+				}
 				// Current path part is a thing
 				Value::Thing(v) => {
 					// Clone the thing
