@@ -1,14 +1,24 @@
 use proc_macro::TokenStream;
+use quote::format_ident;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
-#[proc_macro_derive(Store)]
+#[proc_macro_derive(Store, attributes(format))]
 pub fn store(input: TokenStream) -> TokenStream {
 	// Parse the token stream
 	let input = parse_macro_input!(input as DeriveInput);
 	// Fetch the struct name
 	let name = &input.ident;
-	// Generate the output
+	// Fetch the macro options
+	let conf = input.attrs.iter().find(|a| a.path.is_ident("format")).map(|a| a.tokens.to_string());
+	// Fetch the output format
+	let func = match conf {
+		Some(v) if v.as_str() == "(NamedCompact)" => format_ident!("to_vec_named_compact"),
+		Some(v) if v.as_str() == "(Compact)" => format_ident!("to_vec_compact"),
+		Some(v) if v.as_str() == "(Named)" => format_ident!("to_vec_named"),
+		_ => format_ident!("to_vec"),
+	};
+	//
 	let output = quote! {
 
 		impl #name {
@@ -17,31 +27,29 @@ pub fn store(input: TokenStream) -> TokenStream {
 			}
 		}
 
+		impl From<Vec<u8>> for #name {
+			fn from(v: Vec<u8>) -> Self {
+				Self::from(&v)
+			}
+		}
+
+		impl From<&Vec<u8>> for #name {
+			fn from(v: &Vec<u8>) -> Self {
+				bung::from_slice::<Self>(v).unwrap()
+			}
+		}
+
 		impl From<#name> for Vec<u8> {
 			fn from(v: #name) -> Vec<u8> {
-				crate::sql::serde::serialize_internal(|| {
-					bung::to_vec_compact(&v).unwrap_or_default()
-				})
+				Self::from(&v)
 			}
 		}
 
 		impl From<&#name> for Vec<u8> {
 			fn from(v: &#name) -> Vec<u8> {
 				crate::sql::serde::serialize_internal(|| {
-					bung::to_vec_compact(&v).unwrap_or_default()
+					bung::#func(v).unwrap_or_default()
 				})
-			}
-		}
-
-		impl From<Vec<u8>> for #name {
-			fn from(v: Vec<u8>) -> Self {
-				bung::from_slice::<Self>(&v).unwrap()
-			}
-		}
-
-		impl From<&Vec<u8>> for #name {
-			fn from(v: &Vec<u8>) -> Self {
-				bung::from_slice::<Self>(&v).unwrap()
 			}
 		}
 
