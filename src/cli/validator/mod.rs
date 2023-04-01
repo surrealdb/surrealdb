@@ -36,6 +36,7 @@ pub(crate) fn into_valid(v: &str) -> Result<String, String> {
 		v if v.ends_with(".db") => Ok(v.to_string()),
 		v if v.starts_with("http://") => Ok(v.to_string()),
 		v if v.starts_with("https://") => Ok(v.to_string()),
+		"-" => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database connection string, or the path to a file")),
 	}
 }
