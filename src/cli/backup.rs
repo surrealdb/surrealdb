@@ -19,6 +19,7 @@ pub struct BackupCommandArguments {
 	#[arg(value_parser = super::validator::into_valid)]
 	from: String,
 	#[arg(help = "Path to the remote database or file into which to import")]
+	#[arg(default_value = "-")]
 	#[arg(value_parser = super::validator::into_valid)]
 	into: String,
 	#[command(flatten)]
