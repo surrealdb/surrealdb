@@ -1,3 +1,6 @@
+use crate::cli::abstraction::{
+	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
+};
 use crate::err::Error;
 use clap::Args;
 use rustyline::error::ReadlineError;
@@ -10,7 +13,6 @@ use surrealdb::sql::Statement;
 use surrealdb::sql::Value;
 use surrealdb::Error as SurrealError;
 use surrealdb::Response;
-use crate::cli::abstraction::{AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments};
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {

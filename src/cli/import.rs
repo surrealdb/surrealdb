@@ -1,3 +1,6 @@
+use crate::cli::abstraction::{
+	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
+};
 use crate::cli::LOG;
 use crate::err::Error;
 use clap::Args;
@@ -5,7 +8,6 @@ use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
 use surrealdb::Error as SurrealError;
-use crate::cli::abstraction::{AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments};
 
 #[derive(Args, Debug)]
 pub struct ImportCommandArguments {

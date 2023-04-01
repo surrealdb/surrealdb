@@ -1,3 +1,4 @@
+pub(crate) mod abstraction;
 mod backup;
 mod config;
 mod export;
@@ -7,7 +8,6 @@ mod sql;
 mod start;
 pub(crate) mod validator;
 mod version;
-pub(crate) mod abstraction;
 
 pub use config::CF;
 
