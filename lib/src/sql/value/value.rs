@@ -1618,7 +1618,6 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
-			map(strand, Value::from),
 			map(object, Value::from),
 			map(array, Value::from),
 			map(block, Value::from),
@@ -1629,6 +1628,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(range, Value::from),
 			map(thing, Value::from),
 			map(table, Value::from),
+			map(strand, Value::from),
 		)),
 	))(i)
 }
