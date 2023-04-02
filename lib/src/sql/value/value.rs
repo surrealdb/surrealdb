@@ -6,6 +6,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
+use crate::sql::bytes::Bytes;
 use crate::sql::common::commas;
 use crate::sql::constant::{constant, Constant};
 use crate::sql::datetime::{datetime, Datetime};
@@ -114,7 +115,7 @@ pub enum Value {
 	Array(Array),
 	Object(Object),
 	Geometry(Geometry),
-	Bytes(Vec<u8>),
+	Bytes(Bytes),
 	// ---
 	Param(Param),
 	Idiom(Idiom),
