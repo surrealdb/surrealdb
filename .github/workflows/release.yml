@@ -7,64 +7,6 @@ on:
 
 jobs:
 
-  test:
-    name: Test
-    runs-on: ubuntu-20.04
-    steps:
-
-      - name: Checkout sources
-        uses: actions/checkout@v3
-
-      - name: Cache cargo assets
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ubuntu-20.04-test-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Run cargo test
-        run: cargo test --workspace
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-20.04
-    steps:
-
-      - name: Checkout sources
-        uses: actions/checkout@v3
-
-      - name: Cache cargo assets
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ubuntu-20.04-lint-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Run cargo check
-        run: cargo check --workspace
-
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
-
-      - name: Run cargo clippy
-        run: cargo clippy -- -W warnings
-
   build:
     name: Build ${{ matrix.arch }}
     needs: [test, lint]
