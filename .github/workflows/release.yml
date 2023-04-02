@@ -9,7 +9,6 @@ jobs:
 
   build:
     name: Build ${{ matrix.arch }}
-    needs: [test, lint]
     strategy:
       matrix:
         include:
@@ -191,12 +190,6 @@ jobs:
             **/*.tgz
             **/*.exe
 
-      - name: Set version
-        shell: bash
-        run: |
-          echo ${{ github.ref_name }} > latest.txt
-          aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/
-
       - name: Distribute binaries
         shell: bash
         run: |
@@ -255,4 +248,4 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: surrealdb/surrealdb:latest,surrealdb/surrealdb:${{ env.VERSION }}
+          tags: surrealdb/surrealdb:${{ env.VERSION }}
