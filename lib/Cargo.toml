@@ -68,7 +68,7 @@ futures = "0.3.24"
 futures-concurrency = "7.0.0"
 foundationdb = { version = "0.7.0", default-features = false, features = ["embedded-fdb-include"], optional = true }
 fuzzy-matcher = "0.3.7"
-geo = { version = "0.23.0", features = ["use-serde"] }
+geo = { version = "0.23.1", features = ["use-serde"] }
 indexmap = { version = "1.9.2", features = ["serde"] }
 indxdb = { version = "0.2.0", optional = true }
 lexical-sort = "0.3.1"
