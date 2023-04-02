@@ -1864,13 +1864,13 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		assert_eq!(1, Value::None.to_vec().len());
-		assert_eq!(1, Value::Null.to_vec().len());
-		assert_eq!(1, Value::True.to_vec().len());
-		assert_eq!(1, Value::False.to_vec().len());
-		assert_eq!(7, Value::from("test").to_vec().len());
-		assert_eq!(17, Value::parse("{ hello: 'world' }").to_vec().len());
-		assert_eq!(24, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
+		assert_eq!(5, Value::None.to_vec().len());
+		assert_eq!(5, Value::Null.to_vec().len());
+		assert_eq!(5, Value::True.to_vec().len());
+		assert_eq!(6, Value::False.to_vec().len());
+		assert_eq!(13, Value::from("test").to_vec().len());
+		assert_eq!(29, Value::parse("{ hello: 'world' }").to_vec().len());
+		assert_eq!(43, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
 	}
 
 	#[test]
