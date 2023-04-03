@@ -18,6 +18,7 @@ resolver = "2"
 [features]
 # Public features
 default = ["protocol-ws", "rustls"]
+deployment-cluster=["protocol-ws", "kv-tikv"]
 protocol-http = ["dep:reqwest", "dep:tokio-util"]
 protocol-ws = ["dep:tokio-tungstenite", "dep:tokio-stream", "tokio/time"]
 kv-mem = ["dep:echodb"]
