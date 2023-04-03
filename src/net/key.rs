@@ -151,9 +151,12 @@ async fn select_all(
 	// Execute the query and return the result
 	match db.execute(sql.as_str(), &session, Some(vars), opt.strict).await {
 		Ok(ref res) => match output.as_ref() {
-			"application/json" => Ok(output::json(res)),
-			"application/cbor" => Ok(output::cbor(res)),
-			"application/msgpack" => Ok(output::pack(&res)),
+			// Simple serialization
+			"application/json" => Ok(output::json(&res)),
+			"application/cbor" => Ok(output::cbor(&res)),
+			"application/pack" => Ok(output::pack(&res)),
+			// Internal serialization
+			"application/bung" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
@@ -189,9 +192,12 @@ async fn create_all(
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
 				Ok(res) => match output.as_ref() {
+					// Simple serialization
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
-					"application/msgpack" => Ok(output::pack(&res)),
+					"application/pack" => Ok(output::pack(&res)),
+					// Internal serialization
+					"application/bung" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
@@ -214,7 +220,7 @@ async fn delete_all(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Specify the request statement
-	let sql = "DELETE type::table($table)";
+	let sql = "DELETE type::table($table) RETURN BEFORE";
 	// Specify the request variables
 	let vars = map! {
 		String::from("table") => Value::from(table),
@@ -223,9 +229,12 @@ async fn delete_all(
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars), opt.strict).await {
 		Ok(res) => match output.as_ref() {
+			// Simple serialization
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
-			"application/msgpack" => Ok(output::pack(&res)),
+			"application/pack" => Ok(output::pack(&res)),
+			// Internal serialization
+			"application/bung" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
@@ -263,9 +272,12 @@ async fn select_one(
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars), opt.strict).await {
 		Ok(res) => match output.as_ref() {
+			// Simple serialization
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
-			"application/msgpack" => Ok(output::pack(&res)),
+			"application/pack" => Ok(output::pack(&res)),
+			// Internal serialization
+			"application/bung" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},
@@ -308,9 +320,12 @@ async fn create_one(
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
 				Ok(res) => match output.as_ref() {
+					// Simple serialization
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
-					"application/msgpack" => Ok(output::pack(&res)),
+					"application/pack" => Ok(output::pack(&res)),
+					// Internal serialization
+					"application/bung" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
@@ -356,9 +371,12 @@ async fn update_one(
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
 				Ok(res) => match output.as_ref() {
+					// Simple serialization
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
-					"application/msgpack" => Ok(output::pack(&res)),
+					"application/pack" => Ok(output::pack(&res)),
+					// Internal serialization
+					"application/bung" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
@@ -404,9 +422,12 @@ async fn modify_one(
 			// Execute the query and return the result
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
 				Ok(res) => match output.as_ref() {
+					// Simple serialization
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
-					"application/msgpack" => Ok(output::pack(&res)),
+					"application/pack" => Ok(output::pack(&res)),
+					// Internal serialization
+					"application/bung" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),
 				},
@@ -430,7 +451,7 @@ async fn delete_one(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Specify the request statement
-	let sql = "DELETE type::thing($table, $id)";
+	let sql = "DELETE type::thing($table, $id) RETURN BEFORE";
 	// Parse the Record ID as a SurrealQL value
 	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
@@ -445,9 +466,12 @@ async fn delete_one(
 	// Execute the query and return the result
 	match db.execute(sql, &session, Some(vars), opt.strict).await {
 		Ok(res) => match output.as_ref() {
+			// Simple serialization
 			"application/json" => Ok(output::json(&res)),
 			"application/cbor" => Ok(output::cbor(&res)),
-			"application/msgpack" => Ok(output::pack(&res)),
+			"application/pack" => Ok(output::pack(&res)),
+			// Internal serialization
+			"application/bung" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},

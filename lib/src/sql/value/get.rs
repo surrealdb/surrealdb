@@ -27,13 +27,13 @@ impl Value {
 		match path.first() {
 			// Get the current path part
 			Some(p) => match self {
-				// Current path part is an object
+				// Current path part is a future
 				Value::Future(v) => {
 					// Check how many path parts are remaining
 					match path.len() {
 						// No further embedded fields, so just return this
 						0 => Ok(Value::Future(v.clone())),
-						//
+						// Process the future and fetch the embedded field
 						_ => v.compute(ctx, opt, txn, None).await?.get(ctx, opt, txn, path).await,
 					}
 				}
@@ -97,6 +97,29 @@ impl Value {
 						try_join_all(futs).await.map(Into::into)
 					}
 				},
+				// Current path part is an edges
+				Value::Edges(v) => {
+					// Clone the thing
+					let val = v.clone();
+					// Check how many path parts are remaining
+					match path.len() {
+						// No remote embedded fields, so just return this
+						0 => Ok(Value::Edges(val)),
+						// Remote embedded field, so fetch the thing
+						_ => {
+							let stm = SelectStatement {
+								expr: Fields(vec![Field::All], false),
+								what: Values(vec![Value::from(val)]),
+								..SelectStatement::default()
+							};
+							stm.compute(ctx, opt, txn, None)
+								.await?
+								.first()
+								.get(ctx, opt, txn, path)
+								.await
+						}
+					}
+				}
 				// Current path part is a thing
 				Value::Thing(v) => {
 					// Clone the thing
@@ -110,7 +133,7 @@ impl Value {
 							// This is a graph traversal expression
 							Part::Graph(g) => {
 								let stm = SelectStatement {
-									expr: Fields(vec![Field::All]),
+									expr: Fields(vec![Field::All], false),
 									what: Values(vec![Value::from(Edges {
 										from: val,
 										dir: g.dir.clone(),
@@ -141,7 +164,7 @@ impl Value {
 							// This is a remote field expression
 							_ => {
 								let stm = SelectStatement {
-									expr: Fields(vec![Field::All]),
+									expr: Fields(vec![Field::All], false),
 									what: Values(vec![Value::from(val)]),
 									..SelectStatement::default()
 								};

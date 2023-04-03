@@ -149,9 +149,9 @@ async fn api() {
 	let _: Option<User> = DB.update((USER, "john")).patch(PatchOp::remove("/name")).await.unwrap();
 
 	// delete
-	let _: () = DB.delete(USER).await.unwrap();
-	let _: () = DB.delete((USER, "john")).await.unwrap();
-	let _: () = DB.delete(USER).range("jane".."john").await.unwrap();
+	let _: Vec<User> = DB.delete(USER).await.unwrap();
+	let _: Option<User> = DB.delete((USER, "john")).await.unwrap();
+	let _: Vec<User> = DB.delete(USER).range("jane".."john").await.unwrap();
 
 	// export
 	let _: () = DB.export("backup.sql").await.unwrap();

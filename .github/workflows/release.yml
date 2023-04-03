@@ -5,33 +5,50 @@ on:
     tags:
       - "v*.*.*"
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
         uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run cargo test
-        run: cargo test --workspace
+        run: |
+          (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
+          cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
 
   lint:
     name: Lint
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
         uses: actions/checkout@v3
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
       - name: Run cargo check
@@ -43,30 +60,34 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy -- -W warnings
 
+      - name: Run WebAssembly check
+        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb
+
   build:
     name: Build ${{ matrix.arch }}
     needs: [test, lint]
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x86_64-apple-darwin
-            os: macos-11
+            os: macos-12
             file: surreal-${{ github.ref_name }}.darwin-amd64
             opts: --features storage-tikv
           - arch: aarch64-apple-darwin
-            os: macos-11
+            os: macos-12
             file: surreal-${{ github.ref_name }}.darwin-arm64
             opts: --features storage-tikv
           - arch: x86_64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-20.04-16-cores
             file: surreal-${{ github.ref_name }}.linux-amd64
             opts: --features storage-tikv
           - arch: aarch64-unknown-linux-gnu
-            os: ubuntu-20.04
+            os: ubuntu-20.04-16-cores
             file: surreal-${{ github.ref_name }}.linux-arm64
             opts: --features storage-tikv
           - arch: x86_64-pc-windows-msvc
-            os: windows-latest
+            os: windows-latest-16-cores
             file: surreal-${{ github.ref_name }}.windows-amd64
             opts:
     runs-on: ${{ matrix.os }}
@@ -84,6 +105,7 @@ jobs:
         run: |
           vcpkg integrate install
           vcpkg install openssl:x64-windows-static
+          choco install protoc
 
       - name: Install dependencies
         if: contains(matrix.arch, 'apple') && endsWith(matrix.arch, '-darwin')
@@ -96,7 +118,7 @@ jobs:
           sudo apt-get -y update
           sudo apt-get -y install musl-tools qemu-user libc6-dev-arm64-cross
           sudo apt-get -y install g++-aarch64-linux-gnu gcc-aarch64-linux-gnu
-          sudo apt-get -y install protobuf-compiler
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Install FoundationDB
         if: contains(matrix.arch, 'linux') && startsWith(matrix.arch, 'x86_64')
@@ -111,7 +133,7 @@ jobs:
           targets: ${{ matrix.arch }}
 
       - name: Output package versions
-        run: go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
+        run: set -x; go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
 
       - name: Run cargo build
         run: cargo build ${{ matrix.opts }} --release --locked --target ${{ matrix.arch }}
@@ -161,7 +183,7 @@ jobs:
   package:
     name: Package macOS
     needs: [build]
-    runs-on: macos-11
+    runs-on: macos-12
     steps:
 
       - name: Download amd64 binary
@@ -197,7 +219,7 @@ jobs:
   deploy:
     name: Deploy
     needs: [package]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -239,7 +261,7 @@ jobs:
   docker:
     name: Docker
     needs: [build]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.04-16-cores
     steps:
 
       - name: Checkout sources
@@ -278,7 +300,7 @@ jobs:
         shell: bash
         run: |
           VERSION=${{ github.ref_name }}
-          echo "VERSION=${VERSION:1}" >> $GITHUB_ENV
+          echo "VERSION=${VERSION:1}" | tr + - >> $GITHUB_ENV
 
       - name: Build and Push
         uses: docker/build-push-action@v3

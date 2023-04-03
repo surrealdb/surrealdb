@@ -158,7 +158,7 @@ impl Connection for Any {
 		Box::pin(async move {
 			let response = receiver.into_recv_async().await?;
 			match response? {
-				DbResponse::Other(value) => from_value(value),
+				DbResponse::Other(value) => from_value(value).map_err(Into::into),
 				DbResponse::Query(..) => unreachable!(),
 			}
 		})

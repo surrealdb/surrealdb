@@ -4,14 +4,16 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::base::{base, base_or_scope, Base};
-use crate::sql::comment::shouldbespace;
+use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
+use crate::sql::ident;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
+use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
 use nom::combinator::{map, opt};
@@ -20,9 +22,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
+	Function(RemoveFunctionStatement),
 	Login(RemoveLoginStatement),
 	Token(RemoveTokenStatement),
 	Scope(RemoveScopeStatement),
@@ -44,6 +48,7 @@ impl RemoveStatement {
 		match self {
 			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
@@ -61,6 +66,7 @@ impl Display for RemoveStatement {
 		match self {
 			Self::Namespace(v) => Display::fmt(v, f),
 			Self::Database(v) => Display::fmt(v, f),
+			Self::Function(v) => Display::fmt(v, f),
 			Self::Login(v) => Display::fmt(v, f),
 			Self::Token(v) => Display::fmt(v, f),
 			Self::Scope(v) => Display::fmt(v, f),
@@ -77,6 +83,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 	alt((
 		map(namespace, RemoveStatement::Namespace),
 		map(database, RemoveStatement::Database),
+		map(function, RemoveStatement::Function),
 		map(login, RemoveStatement::Login),
 		map(token, RemoveStatement::Token),
 		map(scope, RemoveStatement::Scope),
@@ -93,6 +100,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveNamespaceStatement {
 	pub name: Ident,
 }
@@ -149,6 +157,7 @@ fn namespace(i: &str) -> IResult<&str, RemoveNamespaceStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveDatabaseStatement {
 	pub name: Ident,
 }
@@ -205,6 +214,69 @@ fn database(i: &str) -> IResult<&str, RemoveDatabaseStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
+pub struct RemoveFunctionStatement {
+	pub name: Ident,
+}
+
+impl RemoveFunctionStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::fc::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl fmt::Display for RemoveFunctionStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "REMOVE FUNCTION fn::{}", self.name)
+	}
+}
+
+fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
+	let (i, _) = tag_no_case("REMOVE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("FUNCTION")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag("fn::")(i)?;
+	let (i, name) = ident::plain(i)?;
+	let (i, _) = opt(|i| {
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = char('(')(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = char(')')(i)?;
+		Ok((i, ()))
+	})(i)?;
+	Ok((
+		i,
+		RemoveFunctionStatement {
+			name,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -284,6 +356,7 @@ fn login(i: &str) -> IResult<&str, RemoveLoginStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -378,6 +451,7 @@ fn token(i: &str) -> IResult<&str, RemoveTokenStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveScopeStatement {
 	pub name: Ident,
 }
@@ -434,6 +508,7 @@ fn scope(i: &str) -> IResult<&str, RemoveScopeStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveParamStatement {
 	pub name: Ident,
 }
@@ -488,6 +563,7 @@ fn param(i: &str) -> IResult<&str, RemoveParamStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveTableStatement {
 	pub name: Ident,
 }
@@ -544,6 +620,7 @@ fn table(i: &str) -> IResult<&str, RemoveTableStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -607,6 +684,7 @@ fn event(i: &str) -> IResult<&str, RemoveEventStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -670,6 +748,7 @@ fn field(i: &str) -> IResult<&str, RemoveFieldStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct RemoveIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -730,4 +809,18 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 			what,
 		},
 	))
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn check_remove_serialize() {
+		let stm = RemoveStatement::Namespace(RemoveNamespaceStatement {
+			name: Ident::from("test"),
+		});
+		assert_eq!(22, stm.to_vec().len());
+	}
 }

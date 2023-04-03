@@ -9,19 +9,14 @@ pub struct Operation {
 	pub value: Value,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Op {
 	None,
+	#[default]
 	Add,
 	Remove,
 	Replace,
 	Change,
-}
-
-impl Default for Op {
-	fn default() -> Op {
-		Op::Add
-	}
 }
 
 impl From<&Value> for Op {

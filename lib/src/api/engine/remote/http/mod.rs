@@ -17,7 +17,6 @@ use crate::api::engine::select_statement;
 use crate::api::engine::update_statement;
 use crate::api::err::Error;
 use crate::api::method::query::QueryResult;
-use crate::api::opt::from_json;
 use crate::api::opt::from_value;
 use crate::api::Connect;
 use crate::api::Response as QueryResponse;
@@ -32,7 +31,6 @@ use futures::TryStreamExt;
 use indexmap::IndexMap;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
-#[cfg(not(target_arch = "wasm32"))]
 use reqwest::header::ACCEPT;
 #[cfg(not(target_arch = "wasm32"))]
 use reqwest::header::CONTENT_TYPE;
@@ -49,6 +47,8 @@ use tokio::fs::OpenOptions;
 use tokio::io;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::io::AsyncWrite;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
@@ -102,6 +102,13 @@ impl Surreal<Client> {
 	}
 }
 
+pub(crate) fn default_headers() -> HeaderMap {
+	let mut headers = HeaderMap::new();
+	headers.insert(ACCEPT, HeaderValue::from_static("application/bung"));
+	headers
+}
+
+#[derive(Debug)]
 enum Auth {
 	Basic {
 		user: String,
@@ -132,10 +139,14 @@ impl Authenticate for RequestBuilder {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct HttpQueryResponse {
+	time: String,
 	status: Status,
-	result: Option<serde_json::Value>,
-	detail: Option<String>,
+	#[serde(default)]
+	result: Value,
+	#[serde(default)]
+	detail: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -145,58 +156,46 @@ struct Root {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct AuthResponse {
+	code: u16,
+	details: String,
+	#[serde(default)]
 	token: Option<String>,
 }
 
 async fn submit_auth(request: RequestBuilder) -> Result<Value> {
 	let response = request.send().await?.error_for_status()?;
-	let text = response.text().await?;
-	info!(target: LOG, "Response {text}");
-	let response: AuthResponse = match serde_json::from_str(&text) {
-		Ok(response) => response,
-		Err(error) => {
-			return Err(Error::FromJsonString {
-				string: text,
-				error: error.to_string(),
-			}
-			.into());
-		}
-	};
-	Ok(response.token.filter(|token| token != "NONE").into())
+	let bytes = response.bytes().await?;
+	let response: AuthResponse =
+		bung::from_slice(&bytes).map_err(|error| Error::ResponseFromBinary {
+			binary: bytes.to_vec(),
+			error,
+		})?;
+	Ok(response.token.into())
 }
 
 async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	info!(target: LOG, "{request:?}");
 	let response = request.send().await?.error_for_status()?;
-	let text = response.text().await?;
-	info!(target: LOG, "Response {text}");
-	let responses: Vec<HttpQueryResponse> = match serde_json::from_str(&text) {
-		Ok(vec) => vec,
-		Err(error) => {
-			return Err(Error::FromJsonString {
-				string: text,
-				error: error.to_string(),
-			}
-			.into());
-		}
-	};
+	let bytes = response.bytes().await?;
+	let responses: Vec<HttpQueryResponse> =
+		bung::from_slice(&bytes).map_err(|error| Error::ResponseFromBinary {
+			binary: bytes.to_vec(),
+			error,
+		})?;
 	let mut map = IndexMap::<usize, QueryResult>::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		match response.status {
 			Status::Ok => {
-				if let Some(value) = response.result {
-					match from_json(value) {
-						Value::Array(Array(array)) => map.insert(index, Ok(array)),
-						Value::None | Value::Null => map.insert(index, Ok(vec![])),
-						value => map.insert(index, Ok(vec![value])),
-					};
-				}
+				match response.result {
+					Value::Array(Array(array)) => map.insert(index, Ok(array)),
+					Value::None | Value::Null => map.insert(index, Ok(vec![])),
+					value => map.insert(index, Ok(vec![value])),
+				};
 			}
 			Status::Err => {
-				if let Some(error) = response.detail {
-					map.insert(index, Err(Error::Query(error).into()));
-				}
+				map.insert(index, Err(Error::Query(response.detail).into()));
 			}
 		}
 	}
@@ -232,17 +231,6 @@ async fn take(one: bool, request: RequestBuilder) -> Result<Value> {
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn export(request: RequestBuilder, path: PathBuf) -> Result<Value> {
-	let mut file =
-		match OpenOptions::new().write(true).create(true).truncate(true).open(&path).await {
-			Ok(path) => path,
-			Err(error) => {
-				return Err(Error::FileOpen {
-					path,
-					error,
-				}
-				.into());
-			}
-		};
 	let mut response = request
 		.send()
 		.await?
@@ -251,7 +239,30 @@ async fn export(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 		.map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
 		.into_async_read()
 		.compat();
-	if let Err(error) = io::copy(&mut response, &mut file).await {
+	let mut writer: Box<dyn AsyncWrite + Unpin + Send> = match path.to_str().unwrap() {
+		"-" => Box::new(io::stdout()),
+		_ => {
+			let file = match OpenOptions::new()
+				.write(true)
+				.create(true)
+				.truncate(true)
+				.open(&path)
+				.await
+			{
+				Ok(path) => path,
+				Err(error) => {
+					return Err(Error::FileOpen {
+						path,
+						error,
+					}
+					.into());
+				}
+			};
+			Box::new(file)
+		}
+	};
+
+	if let Err(error) = io::copy(&mut response, &mut writer).await {
 		return Err(Error::FileRead {
 			path,
 			error,
@@ -281,10 +292,15 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<Value> {
 		}
 		.into());
 	}
-	// ideally we should pass `file` directly into the body
-	// but currently that results in
-	// "HTTP status client error (405 Method Not Allowed) for url"
-	request.body(contents).send().await?.error_for_status()?;
+	request
+		.header(ACCEPT, "application/octet-stream")
+		// ideally we should pass `file` directly into the body
+		// but currently that results in
+		// "HTTP status client error (405 Method Not Allowed) for url"
+		.body(contents)
+		.send()
+		.await?
+		.error_for_status()?;
 	Ok(Value::None)
 }
 
@@ -350,16 +366,7 @@ async fn router(
 		Method::Signin => {
 			let path = base_url.join(Method::Signin.as_str())?;
 			let credentials = match &mut params[..] {
-				[credentials] => match serde_json::to_string(credentials) {
-					Ok(json) => json,
-					Err(error) => {
-						return Err(Error::ToJsonString {
-							value: mem::take(credentials),
-							error: error.to_string(),
-						}
-						.into());
-					}
-				},
+				[credentials] => credentials.to_string(),
 				_ => unreachable!(),
 			};
 			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);
@@ -385,16 +392,7 @@ async fn router(
 		Method::Signup => {
 			let path = base_url.join(Method::Signup.as_str())?;
 			let credentials = match &mut params[..] {
-				[credentials] => match serde_json::to_string(credentials) {
-					Ok(json) => json,
-					Err(error) => {
-						return Err(Error::ToJsonString {
-							value: mem::take(credentials),
-							error: error.to_string(),
-						}
-						.into());
-					}
-				},
+				[credentials] => credentials.to_string(),
 				_ => unreachable!(),
 			};
 			let request = client.post(path).headers(headers.clone()).auth(auth).body(credentials);
@@ -461,10 +459,10 @@ async fn router(
 		}
 		Method::Delete => {
 			let path = base_url.join(SQL_PATH)?;
-			let statement = delete_statement(&mut params);
+			let (one, statement) = delete_statement(&mut params);
 			let request =
 				client.post(path).headers(headers.clone()).auth(auth).body(statement.to_string());
-			let value = take(true, request).await?;
+			let value = take(one, request).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Query => {

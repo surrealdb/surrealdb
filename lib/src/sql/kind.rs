@@ -7,7 +7,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::combinator::map;
-use nom::multi::separated_list1;
+use nom::multi::{separated_list0, separated_list1};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
@@ -16,6 +16,7 @@ pub enum Kind {
 	Any,
 	Array,
 	Bool,
+	Bytes,
 	Datetime,
 	Decimal,
 	Duration,
@@ -40,6 +41,7 @@ impl Display for Kind {
 			Kind::Any => f.write_str("any"),
 			Kind::Array => f.write_str("array"),
 			Kind::Bool => f.write_str("bool"),
+			Kind::Bytes => f.write_str("bytes"),
 			Kind::Datetime => f.write_str("datetime"),
 			Kind::Decimal => f.write_str("decimal"),
 			Kind::Duration => f.write_str("duration"),
@@ -59,6 +61,7 @@ pub fn kind(i: &str) -> IResult<&str, Kind> {
 		map(tag("any"), |_| Kind::Any),
 		map(tag("array"), |_| Kind::Array),
 		map(tag("bool"), |_| Kind::Bool),
+		map(tag("bytes"), |_| Kind::Bytes),
 		map(tag("datetime"), |_| Kind::Datetime),
 		map(tag("decimal"), |_| Kind::Decimal),
 		map(tag("duration"), |_| Kind::Duration),
@@ -76,7 +79,7 @@ fn record(i: &str) -> IResult<&str, Vec<Table>> {
 	let (i, _) = tag("record")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
-	let (i, v) = separated_list1(commas, table)(i)?;
+	let (i, v) = separated_list0(commas, table)(i)?;
 	let (i, _) = char(')')(i)?;
 	Ok((i, v))
 }

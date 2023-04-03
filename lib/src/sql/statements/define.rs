@@ -5,12 +5,15 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::algorithm::{algorithm, Algorithm};
 use crate::sql::base::{base, base_or_scope, Base};
-use crate::sql::comment::shouldbespace;
+use crate::sql::block::{block, Block};
+use crate::sql::comment::{mightbespace, shouldbespace};
+use crate::sql::common::commas;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
+use crate::sql::ident;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::{Idiom, Idioms};
@@ -24,10 +27,12 @@ use argon2::password_hash::{PasswordHasher, SaltString};
 use argon2::Argon2;
 use derive::Store;
 use nom::branch::alt;
+use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
 use nom::combinator::{map, opt};
 use nom::multi::many0;
+use nom::multi::separated_list0;
 use nom::sequence::tuple;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
@@ -36,9 +41,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
+	Function(DefineFunctionStatement),
 	Login(DefineLoginStatement),
 	Token(DefineTokenStatement),
 	Scope(DefineScopeStatement),
@@ -60,6 +67,7 @@ impl DefineStatement {
 		match self {
 			Self::Namespace(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Database(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Function(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Login(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Token(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Scope(ref v) => v.compute(ctx, opt, txn, doc).await,
@@ -77,6 +85,7 @@ impl fmt::Display for DefineStatement {
 		match self {
 			Self::Namespace(v) => Display::fmt(v, f),
 			Self::Database(v) => Display::fmt(v, f),
+			Self::Function(v) => Display::fmt(v, f),
 			Self::Login(v) => Display::fmt(v, f),
 			Self::Token(v) => Display::fmt(v, f),
 			Self::Scope(v) => Display::fmt(v, f),
@@ -93,6 +102,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 	alt((
 		map(namespace, DefineStatement::Namespace),
 		map(database, DefineStatement::Database),
+		map(function, DefineStatement::Function),
 		map(login, DefineStatement::Login),
 		map(token, DefineStatement::Token),
 		map(scope, DefineStatement::Scope),
@@ -109,6 +119,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineNamespaceStatement {
 	pub name: Ident,
 }
@@ -158,6 +169,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineDatabaseStatement {
 	pub name: Ident,
 }
@@ -212,6 +224,92 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
+pub struct DefineFunctionStatement {
+	pub name: Ident,
+	pub args: Vec<(Ident, Kind)>,
+	pub block: Block,
+}
+
+impl DefineFunctionStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Process the statement
+		let key = crate::key::fc::new(opt.ns(), opt.db(), &self.name);
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.set(key, self).await?;
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl fmt::Display for DefineFunctionStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE FUNCTION fn::{}(", self.name)?;
+		for (i, (name, kind)) in self.args.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			write!(f, "${name}: {kind}")?;
+		}
+		f.write_str(") ")?;
+		Display::fmt(&self.block, f)
+	}
+}
+
+fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
+	let (i, _) = tag_no_case("DEFINE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("FUNCTION")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag("fn::")(i)?;
+	let (i, name) = ident::plain(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('(')(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, args) = separated_list0(commas, |i| {
+		let (i, _) = char('$')(i)?;
+		let (i, name) = ident(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = char(':')(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, kind) = kind(i)?;
+		Ok((i, (name, kind)))
+	})(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char(')')(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, block) = block(i)?;
+	Ok((
+		i,
+		DefineFunctionStatement {
+			name,
+			args,
+			block,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -296,7 +394,7 @@ fn login(i: &str) -> IResult<&str, DefineLoginStatement> {
 			hash: match opts {
 				DefineLoginOption::Passhash(v) => v,
 				DefineLoginOption::Password(v) => Argon2::default()
-					.hash_password(v.as_ref(), SaltString::generate(&mut OsRng).as_ref())
+					.hash_password(v.as_ref(), &SaltString::generate(&mut OsRng))
 					.unwrap()
 					.to_string(),
 			},
@@ -335,6 +433,7 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -454,6 +553,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineScopeStatement {
 	pub name: Ident,
 	pub code: String,
@@ -576,6 +676,7 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineParamStatement {
 	pub name: Ident,
 	pub value: Value,
@@ -638,6 +739,7 @@ fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineTableStatement {
 	pub name: Ident,
 	pub drop: bool,
@@ -822,6 +924,7 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -904,6 +1007,7 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -1067,6 +1171,7 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -1159,4 +1264,18 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 			uniq: uniq.is_some(),
 		},
 	))
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn check_define_serialize() {
+		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
+			name: Ident::from("test"),
+		});
+		assert_eq!(22, stm.to_vec().len());
+	}
 }

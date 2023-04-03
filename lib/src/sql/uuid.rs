@@ -13,6 +13,8 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
+
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Uuid(pub uuid::Uuid);
 
@@ -86,7 +88,7 @@ impl Serialize for Uuid {
 		S: serde::Serializer,
 	{
 		if is_internal_serialization() {
-			serializer.serialize_newtype_struct("Uuid", &self.0)
+			serializer.serialize_newtype_struct(TOKEN, &self.0)
 		} else {
 			serializer.serialize_some(&self.0)
 		}

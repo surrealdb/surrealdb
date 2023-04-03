@@ -39,23 +39,21 @@ pub use self::yuse::UseStatement;
 
 pub use self::define::DefineDatabaseStatement;
 pub use self::define::DefineEventStatement;
-pub use self::define::DefineFieldOption;
 pub use self::define::DefineFieldStatement;
+pub use self::define::DefineFunctionStatement;
 pub use self::define::DefineIndexStatement;
-pub use self::define::DefineLoginOption;
 pub use self::define::DefineLoginStatement;
 pub use self::define::DefineNamespaceStatement;
 pub use self::define::DefineParamStatement;
-pub use self::define::DefineScopeOption;
 pub use self::define::DefineScopeStatement;
 pub use self::define::DefineStatement;
-pub use self::define::DefineTableOption;
 pub use self::define::DefineTableStatement;
 pub use self::define::DefineTokenStatement;
 
 pub use self::remove::RemoveDatabaseStatement;
 pub use self::remove::RemoveEventStatement;
 pub use self::remove::RemoveFieldStatement;
+pub use self::remove::RemoveFunctionStatement;
 pub use self::remove::RemoveIndexStatement;
 pub use self::remove::RemoveLoginStatement;
 pub use self::remove::RemoveNamespaceStatement;

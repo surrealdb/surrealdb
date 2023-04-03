@@ -1,6 +1,7 @@
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
 use serde::Serialize;
+use surrealdb::sql::serde::serialize_internal;
 
 pub enum Output {
 	None,
@@ -9,6 +10,7 @@ pub enum Output {
 	Json(Vec<u8>), // JSON
 	Cbor(Vec<u8>), // CBOR
 	Pack(Vec<u8>), // MessagePack
+	Full(Vec<u8>), // Full type serialization
 }
 
 pub fn none() -> Output {
@@ -49,6 +51,16 @@ where
 	}
 }
 
+pub fn full<T>(val: &T) -> Output
+where
+	T: Serialize,
+{
+	match serialize_internal(|| bung::to_vec(val)) {
+		Ok(v) => Output::Full(v),
+		Err(_) => Output::Fail,
+	}
+}
+
 impl warp::Reply for Output {
 	fn into_response(self) -> warp::reply::Response {
 		match self {
@@ -72,7 +84,13 @@ impl warp::Reply for Output {
 			}
 			Output::Pack(v) => {
 				let mut res = warp::reply::Response::new(v.into());
-				let con = HeaderValue::from_static("application/msgpack");
+				let con = HeaderValue::from_static("application/pack");
+				res.headers_mut().insert(CONTENT_TYPE, con);
+				res
+			}
+			Output::Full(v) => {
+				let mut res = warp::reply::Response::new(v.into());
+				let con = HeaderValue::from_static("application/bung");
 				res.headers_mut().insert(CONTENT_TYPE, con);
 				res
 			}

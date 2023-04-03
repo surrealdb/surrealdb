@@ -24,6 +24,7 @@ pub enum Operator {
 	Pow, // **
 	Inc, // +=
 	Dec, // -=
+	Ext, // +?=
 	//
 	Equal,    // =
 	Exact,    // ==
@@ -93,6 +94,7 @@ impl fmt::Display for Operator {
 			Self::Pow => "**",
 			Self::Inc => "+=",
 			Self::Dec => "-=",
+			Self::Ext => "+?=",
 			Self::Equal => "=",
 			Self::Exact => "==",
 			Self::NotEqual => "!=",
@@ -127,6 +129,7 @@ pub fn assigner(i: &str) -> IResult<&str, Operator> {
 		map(char('='), |_| Operator::Equal),
 		map(tag("+="), |_| Operator::Inc),
 		map(tag("-="), |_| Operator::Dec),
+		map(tag("+?="), |_| Operator::Ext),
 	))(i)
 }
 

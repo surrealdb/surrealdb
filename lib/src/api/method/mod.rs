@@ -67,16 +67,15 @@ use crate::api::opt;
 use crate::api::opt::auth;
 use crate::api::opt::auth::Credentials;
 use crate::api::opt::auth::Jwt;
-use crate::api::opt::from_json;
 use crate::api::opt::IntoEndpoint;
 use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::ExtractRouter;
 use crate::api::Surreal;
+use crate::sql::to_value;
 use crate::sql::Uuid;
 use once_cell::sync::OnceCell;
 use serde::Serialize;
-use serde_json::json;
 use std::marker::PhantomData;
 use std::path::Path;
 
@@ -300,7 +299,7 @@ where
 		Set {
 			router: self.router.extract(),
 			key: key.into(),
-			value: Ok(from_json(json!(value))),
+			value: to_value(value).map_err(Into::into),
 		}
 	}
 
@@ -402,7 +401,7 @@ where
 	pub fn signup<R>(&self, credentials: impl Credentials<auth::Signup, R>) -> Signup<C, R> {
 		Signup {
 			router: self.router.extract(),
-			credentials: Ok(from_json(json!(credentials))),
+			credentials: to_value(credentials).map_err(Into::into),
 			response_type: PhantomData,
 		}
 	}
@@ -525,7 +524,7 @@ where
 	pub fn signin<R>(&self, credentials: impl Credentials<auth::Signin, R>) -> Signin<C, R> {
 		Signin {
 			router: self.router.extract(),
-			credentials: Ok(from_json(json!(credentials))),
+			credentials: to_value(credentials).map_err(Into::into),
 			response_type: PhantomData,
 		}
 	}
@@ -870,6 +869,9 @@ where
 	/// # Examples
 	///
 	/// ```no_run
+	/// # #[derive(serde::Deserialize)]
+	/// # struct Person;
+	/// #
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -878,10 +880,10 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Delete all records from a table
-	/// db.delete("person").await?;
+	/// let people: Vec<Person> = db.delete("person").await?;
 	///
 	/// // Delete a specific record from a table
-	/// db.delete(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
+	/// let person: Option<Person> = db.delete(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
 	/// #
 	/// # Ok(())
 	/// # }

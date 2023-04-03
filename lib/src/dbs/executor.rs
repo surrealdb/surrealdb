@@ -15,6 +15,7 @@ use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use futures::lock::Mutex;
 use std::sync::Arc;
+use tracing::instrument;
 use trice::Instant;
 
 pub(crate) struct Executor<'a> {
@@ -127,6 +128,7 @@ impl<'a> Executor<'a> {
 		opt.db = Some(db.into());
 	}
 
+	#[instrument(name = "executor", skip_all)]
 	pub async fn execute(
 		&mut self,
 		mut ctx: Context<'_>,

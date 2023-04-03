@@ -59,10 +59,15 @@ async fn handler(
 		Ok(Value::Object(vars)) => match crate::iam::signup::signup(&mut session, vars).await {
 			// Authentication was successful
 			Ok(v) => match output.as_deref() {
+				// Simple serialization
 				Some("application/json") => Ok(output::json(&Success::new(v))),
 				Some("application/cbor") => Ok(output::cbor(&Success::new(v))),
-				Some("application/msgpack") => Ok(output::pack(&Success::new(v))),
+				Some("application/pack") => Ok(output::pack(&Success::new(v))),
+				// Internal serialization
+				Some("application/bung") => Ok(output::full(&Success::new(v))),
+				// Text serialization
 				Some("text/plain") => Ok(output::text(v.unwrap_or_default())),
+				// Return nothing
 				None => Ok(output::none()),
 				// An incorrect content-type was requested
 				_ => Err(warp::reject::custom(Error::InvalidType)),

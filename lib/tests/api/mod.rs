@@ -49,7 +49,7 @@ async fn query_binds() {
     };
     assert_eq!(record.name, "John Doe");
 	let mut response = db.query("SELECT * FROM $record_id")
-        .bind(("record_id", "user:john"))
+        .bind(("record_id", thing("user:john").unwrap()))
         .await
         .unwrap();
     let Some(record): Option<RecordName> = response.take(0).unwrap() else {
@@ -122,7 +122,7 @@ async fn create_record_with_id_with_content() {
 		})
 		.await
 		.unwrap();
-	assert_eq!(record.id, format!("user:john"));
+	assert_eq!(record.id, thing("user:john").unwrap());
 }
 
 #[tokio::test]
@@ -146,7 +146,7 @@ async fn select_record_id() {
 	let Some(record): Option<RecordId> = db.select(record_id).await.unwrap() else {
         panic!("record not found");
     };
-    assert_eq!(record.id, "user:john");
+    assert_eq!(record.id, thing("user:john").unwrap());
 }
 
 #[tokio::test]
@@ -161,7 +161,7 @@ async fn select_record_ranges() {
 	let convert = |users: Vec<RecordId>| -> Vec<String> {
 		users
 			.into_iter()
-			.map(|user| user.id.split_once(':').unwrap().1.to_owned())
+			.map(|user| user.id.id.to_string())
 			.collect()
 	};
 	let users: Vec<RecordId> = db.select(table).range(..).await.unwrap();
@@ -228,19 +228,19 @@ async fn update_table_with_content() {
 		.unwrap();
     let expected = &[
         RecordBuf {
-            id: "user:amos".to_owned(),
+            id: thing("user:amos").unwrap(),
             name: "Doe".to_owned(),
         },
         RecordBuf {
-            id: "user:jane".to_owned(),
+            id: thing("user:jane").unwrap(),
             name: "Doe".to_owned(),
         },
         RecordBuf {
-            id: "user:john".to_owned(),
+            id: thing("user:john").unwrap(),
             name: "Doe".to_owned(),
         },
         RecordBuf {
-            id: "user:zoey".to_owned(),
+            id: thing("user:zoey").unwrap(),
             name: "Doe".to_owned(),
         },
     ];
@@ -278,11 +278,11 @@ async fn update_record_range_with_content() {
 		.unwrap();
     assert_eq!(users, &[
         RecordBuf {
-            id: "user:jane".to_owned(),
+            id: thing("user:jane").unwrap(),
             name: "Doe".to_owned(),
         },
         RecordBuf {
-            id: "user:john".to_owned(),
+            id: thing("user:john").unwrap(),
             name: "Doe".to_owned(),
         },
     ]);
@@ -292,19 +292,19 @@ async fn update_record_range_with_content() {
 		.unwrap();
     assert_eq!(users, &[
         RecordBuf {
-            id: "user:amos".to_owned(),
+            id: thing("user:amos").unwrap(),
             name: "Amos".to_owned(),
         },
         RecordBuf {
-            id: "user:jane".to_owned(),
+            id: thing("user:jane").unwrap(),
             name: "Doe".to_owned(),
         },
         RecordBuf {
-            id: "user:john".to_owned(),
+            id: thing("user:john").unwrap(),
             name: "Doe".to_owned(),
         },
         RecordBuf {
-            id: "user:zoey".to_owned(),
+            id: thing("user:zoey").unwrap(),
             name: "Zoey".to_owned(),
         },
     ]);
@@ -347,7 +347,7 @@ struct Name {
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
 struct Person {
     #[serde(skip_serializing)]
-    id: Option<String>,
+    id: Option<Thing>,
     title: Cow<'static, str>,
     name: Name,
     marketing: bool,
@@ -371,7 +371,7 @@ async fn merge_record_id() {
         })
         .await
         .unwrap();
-    assert_eq!(jaime.id.unwrap(), "person:jaime");
+    assert_eq!(jaime.id.unwrap(), thing("person:jaime").unwrap());
     jaime = db
         .update(record_id)
         .merge(json!({ "marketing": true }))
@@ -380,7 +380,7 @@ async fn merge_record_id() {
     assert!(jaime.marketing);
     jaime = db.select(record_id).await.unwrap();
     assert_eq!(jaime, Person {
-        id: Some("person:jaime".into()),
+        id: Some(thing("person:jaime").unwrap()),
         title: "Founder & COO".into(),
         name: Name {
             first: "Jaime".into(),
@@ -413,11 +413,11 @@ async fn patch_record_id() {
 	let value: Option<serde_json::Value> = db.select(("user", id)).await.unwrap();
 	assert_eq!(
 		value,
-		Some(json!({
-			"id": format!("user:{id}"),
+		Some(serialize_internal(|| json!({
+			"id": thing(&format!("user:{id}")).unwrap(),
 			"baz": "boo",
 			"hello": ["world"]
-		}))
+		})))
 	);
 }
 
@@ -431,7 +431,8 @@ async fn delete_table() {
 	let _: RecordId = db.create(table).await.unwrap();
     let users: Vec<RecordId> = db.select(table).await.unwrap();
     assert_eq!(users.len(), 3);
-	db.delete(table).await.unwrap();
+	let users: Vec<RecordId> = db.delete(table).await.unwrap();
+    assert_eq!(users.len(), 3);
     let users: Vec<RecordId> = db.select(table).await.unwrap();
     assert!(users.is_empty());
 }
@@ -443,7 +444,8 @@ async fn delete_record_id() {
     let record_id = ("user", "john");
 	let _: RecordId = db.create(record_id).await.unwrap();
     let _: RecordId = db.select(record_id).await.unwrap();
-	db.delete(record_id).await.unwrap();
+	let john: Option<RecordId> = db.delete(record_id).await.unwrap();
+    assert!(john.is_some());
     let john: Option<RecordId> = db.select(record_id).await.unwrap();
     assert!(john.is_none());
 }
@@ -464,18 +466,28 @@ async fn delete_record_range() {
         .await
         .unwrap();
     response.check().unwrap();
-	db.delete(table).range("jane".."zoey").await.unwrap();
+	let users: Vec<RecordBuf> = db.delete(table).range("jane".."zoey").await.unwrap();
+    assert_eq!(users, &[
+        RecordBuf {
+            id: thing("user:jane").unwrap(),
+            name: "Jane".to_owned(),
+        },
+        RecordBuf {
+            id: thing("user:john").unwrap(),
+            name: "John".to_owned(),
+        },
+    ]);
 	let users: Vec<RecordBuf> = db
 		.select(table)
 		.await
 		.unwrap();
     assert_eq!(users, &[
         RecordBuf {
-            id: "user:amos".to_owned(),
+            id: thing("user:amos").unwrap(),
             name: "Amos".to_owned(),
         },
         RecordBuf {
-            id: "user:zoey".to_owned(),
+            id: thing("user:zoey").unwrap(),
             name: "Zoey".to_owned(),
         },
     ]);

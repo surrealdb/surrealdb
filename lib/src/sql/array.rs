@@ -14,12 +14,15 @@ use crate::sql::value::{value, Value};
 use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
+use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops;
 use std::ops::Deref;
 use std::ops::DerefMut;
+
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
 pub struct Array(pub Vec<Value>);
@@ -163,9 +166,13 @@ impl Serialize for Array {
 		S: serde::Serializer,
 	{
 		if is_internal_serialization() {
-			serializer.serialize_newtype_struct("Array", &self.0)
+			serializer.serialize_newtype_struct(TOKEN, &self.0)
 		} else {
-			serializer.serialize_some(&self.0)
+			let mut arr = serializer.serialize_seq(Some(self.len()))?;
+			for v in &self.0 {
+				arr.serialize_element(v)?;
+			}
+			arr.end()
 		}
 	}
 }
@@ -175,21 +182,15 @@ impl Serialize for Array {
 impl ops::Add<Value> for Array {
 	type Output = Self;
 	fn add(mut self, other: Value) -> Self {
-		if !self.0.iter().any(|x| *x == other) {
-			self.0.push(other)
-		}
+		self.0.push(other);
 		self
 	}
 }
 
 impl ops::Add for Array {
 	type Output = Self;
-	fn add(mut self, other: Self) -> Self {
-		for v in other.0 {
-			if !self.0.iter().any(|x| *x == v) {
-				self.0.push(v)
-			}
-		}
+	fn add(mut self, mut other: Self) -> Self {
+		self.0.append(&mut other.0);
 		self
 	}
 }

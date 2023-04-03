@@ -16,11 +16,7 @@ pub struct Config {
 
 pub fn init(matches: &clap::ArgMatches) {
 	// Parse the server binding address
-	let bind = matches
-		.value_of("bind")
-		.unwrap()
-		.parse::<SocketAddr>()
-		.expect("Unable to parse socket address");
+	let bind = matches.value_of("bind").unwrap().parse::<SocketAddr>().unwrap();
 	// Parse the database endpoint path
 	let path = matches.value_of("path").unwrap().to_owned();
 	// Parse the root username for authentication

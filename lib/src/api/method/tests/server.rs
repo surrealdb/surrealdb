@@ -1,16 +1,15 @@
-use super::types::Credentials;
+use super::types::Root;
 use super::types::User;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Method;
 use crate::api::conn::Route;
-use crate::api::opt::from_json;
 use crate::api::opt::from_value;
 use crate::api::Response as QueryResponse;
+use crate::sql::to_value;
 use crate::sql::Array;
 use crate::sql::Value;
 use flume::Receiver;
 use futures::StreamExt;
-use serde_json::json;
 use std::mem;
 
 pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
@@ -30,12 +29,10 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					[] => Ok(DbResponse::Other(Value::None)),
 					_ => unreachable!(),
 				},
-				Method::Authenticate | Method::Kill | Method::Unset | Method::Delete => {
-					match &params[..] {
-						[_] => Ok(DbResponse::Other(Value::None)),
-						_ => unreachable!(),
-					}
-				}
+				Method::Authenticate | Method::Kill | Method::Unset => match &params[..] {
+					[_] => Ok(DbResponse::Other(Value::None)),
+					_ => unreachable!(),
+				},
 				Method::Live => match &params[..] {
 					[_] => Ok(DbResponse::Other(
 						"c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_owned().into(),
@@ -51,15 +48,12 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					_ => unreachable!(),
 				},
 				Method::Signup | Method::Signin => match &mut params[..] {
-					[credentials] => {
-						let credentials: Credentials = from_value(mem::take(credentials)).unwrap();
-						match credentials {
-							Credentials::Root {
-								..
-							} => Ok(DbResponse::Other(Value::None)),
-							_ => Ok(DbResponse::Other("jwt".to_owned().into())),
-						}
-					}
+					[credentials] => match from_value(mem::take(credentials)) {
+						Ok(Root {
+							..
+						}) => Ok(DbResponse::Other(Value::None)),
+						_ => Ok(DbResponse::Other("jwt".to_owned().into())),
+					},
 					_ => unreachable!(),
 				},
 				Method::Set => match &params[..] {
@@ -71,12 +65,12 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					_ => unreachable!(),
 				},
 				Method::Create => match &params[..] {
-					[_] => Ok(DbResponse::Other(from_json(json!(User::default())))),
+					[_] => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
 					[_, user] => Ok(DbResponse::Other(user.clone())),
 					_ => unreachable!(),
 				},
-				Method::Select => match &params[..] {
-					[Value::Thing(..)] => Ok(DbResponse::Other(from_json(json!(User::default())))),
+				Method::Select | Method::Delete => match &params[..] {
+					[Value::Thing(..)] => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
 					[Value::Table(..) | Value::Array(..) | Value::Range(..)] => {
 						Ok(DbResponse::Other(Value::Array(Array(Vec::new()))))
 					}
@@ -84,7 +78,7 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 				},
 				Method::Update | Method::Merge | Method::Patch => match &params[..] {
 					[Value::Thing(..)] | [Value::Thing(..), _] => {
-						Ok(DbResponse::Other(from_json(json!(User::default()))))
+						Ok(DbResponse::Other(to_value(User::default()).unwrap()))
 					}
 					[Value::Table(..) | Value::Array(..) | Value::Range(..)]
 					| [Value::Table(..) | Value::Array(..) | Value::Range(..), _] => {

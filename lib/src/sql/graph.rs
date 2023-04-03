@@ -3,7 +3,13 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::dir::{dir, Dir};
 use crate::sql::error::IResult;
-use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::field::Fields;
+use crate::sql::group::Groups;
+use crate::sql::idiom::{plain as idiom, Idiom};
+use crate::sql::limit::Limit;
+use crate::sql::order::Orders;
+use crate::sql::split::Splits;
+use crate::sql::start::Start;
 use crate::sql::table::{table, tables, Tables};
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
@@ -16,8 +22,14 @@ use std::fmt::{self, Display, Formatter, Write};
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Graph {
 	pub dir: Dir,
+	pub expr: Fields,
 	pub what: Tables,
 	pub cond: Option<Cond>,
+	pub split: Option<Splits>,
+	pub group: Option<Groups>,
+	pub order: Option<Orders>,
+	pub limit: Option<Limit>,
+	pub start: Option<Start>,
 	pub alias: Option<Idiom>,
 }
 
@@ -45,6 +57,21 @@ impl Display for Graph {
 			if let Some(ref v) = self.cond {
 				write!(f, " {v}")?
 			}
+			if let Some(ref v) = self.split {
+				write!(f, " {v}")?
+			}
+			if let Some(ref v) = self.group {
+				write!(f, " {v}")?
+			}
+			if let Some(ref v) = self.order {
+				write!(f, " {v}")?
+			}
+			if let Some(ref v) = self.limit {
+				write!(f, " {v}")?
+			}
+			if let Some(ref v) = self.start {
+				write!(f, " {v}")?
+			}
 			if let Some(ref v) = self.alias {
 				write!(f, " AS {v}")?
 			}
@@ -60,9 +87,15 @@ pub fn graph(i: &str) -> IResult<&str, Graph> {
 		i,
 		Graph {
 			dir,
+			expr: Fields::all(),
 			what,
 			cond,
 			alias,
+			split: None,
+			group: None,
+			order: None,
+			limit: None,
+			start: None,
 		},
 	))
 }

@@ -9,7 +9,7 @@ use warp::ws::Message;
 pub enum Output {
 	Json, // JSON
 	Cbor, // CBOR
-	Pack, // MsgPack
+	Pack, // MessagePack
 	Full, // Full type serialization
 }
 
@@ -49,7 +49,7 @@ impl<T: Serialize> Response<T> {
 				let _ = chn.send(res).await;
 			}
 			Output::Full => {
-				let res = serialize_internal(|| serde_pack::to_vec(&self).unwrap());
+				let res = serialize_internal(|| bung::to_vec(&self).unwrap());
 				let res = Message::binary(res);
 				let _ = chn.send(res).await;
 			}

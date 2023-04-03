@@ -7,7 +7,7 @@ use crate::sql::comment::shouldbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
-use crate::sql::idiom::{idiom, Idiom};
+use crate::sql::idiom::{plain as idiom, Idiom};
 use crate::sql::operator::{assigner, Operator};
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;

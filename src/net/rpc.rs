@@ -27,6 +27,7 @@ use surrealdb::sql::Strand;
 use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 use tokio::sync::RwLock;
+use tracing::instrument;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 
@@ -361,12 +362,13 @@ impl Rpc {
 		match out.as_str() {
 			"json" | "application/json" => self.format = Output::Json,
 			"cbor" | "application/cbor" => self.format = Output::Cbor,
-			"msgpack" | "application/msgpack" => self.format = Output::Pack,
+			"pack" | "application/pack" => self.format = Output::Pack,
 			_ => return Err(Error::InvalidType),
 		};
 		Ok(Value::None)
 	}
 
+	#[instrument(skip_all, name = "rpc use")]
 	async fn yuse(&mut self, ns: Value, db: Value) -> Result<Value, Error> {
 		if let Value::Strand(ns) = ns {
 			self.session.ns = Some(ns.0);
@@ -377,6 +379,7 @@ impl Rpc {
 		Ok(Value::None)
 	}
 
+	#[instrument(skip_all, name = "rpc signup")]
 	async fn signup(&mut self, vars: Object) -> Result<Value, Error> {
 		crate::iam::signup::signup(&mut self.session, vars)
 			.await
@@ -384,18 +387,20 @@ impl Rpc {
 			.map_err(Into::into)
 	}
 
+	#[instrument(skip_all, name = "rpc signin")]
 	async fn signin(&mut self, vars: Object) -> Result<Value, Error> {
 		crate::iam::signin::signin(&mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
 	}
-
+	#[instrument(skip_all, name = "rpc invalidate")]
 	async fn invalidate(&mut self) -> Result<Value, Error> {
 		crate::iam::clear::clear(&mut self.session).await?;
 		Ok(Value::None)
 	}
 
+	#[instrument(skip_all, name = "rpc auth")]
 	async fn authenticate(&mut self, token: Strand) -> Result<Value, Error> {
 		crate::iam::verify::token(&mut self.session, token.0).await?;
 		Ok(Value::None)
@@ -405,6 +410,7 @@ impl Rpc {
 	// Methods for identification
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc info")]
 	async fn info(&self) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
@@ -424,6 +430,7 @@ impl Rpc {
 	// Methods for setting variables
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc set")]
 	async fn set(&mut self, key: Strand, val: Value) -> Result<Value, Error> {
 		match val {
 			// Remove the variable if undefined
@@ -434,6 +441,7 @@ impl Rpc {
 		Ok(Value::Null)
 	}
 
+	#[instrument(skip_all, name = "rpc unset")]
 	async fn unset(&mut self, key: Strand) -> Result<Value, Error> {
 		self.vars.remove(&key.0);
 		Ok(Value::Null)
@@ -443,6 +451,7 @@ impl Rpc {
 	// Methods for live queries
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc kill")]
 	async fn kill(&self, id: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
@@ -463,6 +472,7 @@ impl Rpc {
 		Ok(res)
 	}
 
+	#[instrument(skip_all, name = "rpc live")]
 	async fn live(&self, tb: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
@@ -487,6 +497,7 @@ impl Rpc {
 	// Methods for selecting
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc select")]
 	async fn select(&self, what: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -516,6 +527,7 @@ impl Rpc {
 	// Methods for creating
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc create")]
 	async fn create(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -546,6 +558,7 @@ impl Rpc {
 	// Methods for updating
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc update")]
 	async fn update(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -576,6 +589,7 @@ impl Rpc {
 	// Methods for changing
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc change")]
 	async fn change(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -606,6 +620,7 @@ impl Rpc {
 	// Methods for modifying
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc modify")]
 	async fn modify(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -636,6 +651,7 @@ impl Rpc {
 	// Methods for deleting
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc delete")]
 	async fn delete(&self, what: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -644,7 +660,7 @@ impl Rpc {
 		// Get local copy of options
 		let opt = CF.get().unwrap();
 		// Specify the SQL query string
-		let sql = "DELETE $what";
+		let sql = "DELETE $what RETURN BEFORE";
 		// Specify the query parameters
 		let var = Some(map! {
 			String::from("what") => what.could_be_table(),
@@ -665,6 +681,7 @@ impl Rpc {
 	// Methods for querying
 	// ------------------------------
 
+	#[instrument(skip_all, name = "rpc query")]
 	async fn query(&self, sql: Strand) -> Result<impl Serialize, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
@@ -678,6 +695,7 @@ impl Rpc {
 		Ok(res)
 	}
 
+	#[instrument(skip_all, name = "rpc query_with")]
 	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<impl Serialize, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();

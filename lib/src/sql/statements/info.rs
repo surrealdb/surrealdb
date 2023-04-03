@@ -108,6 +108,12 @@ impl InfoStatement {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("dt".to_owned(), tmp.into());
+				// Process the functions
+				let mut tmp = Object::default();
+				for v in run.all_fc(opt.ns(), opt.db()).await?.iter() {
+					tmp.insert(v.name.to_string(), v.to_string().into());
+				}
+				res.insert("fc".to_owned(), tmp.into());
 				// Process the params
 				let mut tmp = Object::default();
 				for v in run.all_pa(opt.ns(), opt.db()).await?.iter() {

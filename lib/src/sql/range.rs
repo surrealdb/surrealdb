@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
+use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::character::complete::char;
@@ -12,12 +13,15 @@ use nom::combinator::map;
 use nom::combinator::opt;
 use nom::sequence::preceded;
 use nom::sequence::terminated;
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Hash)]
 pub struct Range {
 	pub tb: String,
 	pub beg: Bound<Id>,
@@ -119,6 +123,23 @@ impl fmt::Display for Range {
 			Bound::Included(id) => write!(f, "..={id}"),
 		}?;
 		Ok(())
+	}
+}
+
+impl Serialize for Range {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		if is_internal_serialization() {
+			let mut val = serializer.serialize_struct(TOKEN, 3)?;
+			val.serialize_field("tb", &self.tb)?;
+			val.serialize_field("beg", &self.beg)?;
+			val.serialize_field("end", &self.end)?;
+			val.end()
+		} else {
+			serializer.serialize_none()
+		}
 	}
 }
 

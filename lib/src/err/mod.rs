@@ -1,5 +1,5 @@
 use crate::sql::idiom::Idiom;
-use msgpack::encode::Error as SerdeError;
+use bung::encode::Error as SerdeError;
 use serde::Serialize;
 use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
@@ -171,44 +171,70 @@ pub enum Error {
 	},
 
 	/// The requested namespace does not exist
-	#[error("The namespace does not exist")]
-	NsNotFound,
+	#[error("The namespace '{value}' does not exist")]
+	NsNotFound {
+		value: String,
+	},
 
 	/// The requested namespace token does not exist
-	#[error("The namespace token does not exist")]
-	NtNotFound,
+	#[error("The namespace token '{value}' does not exist")]
+	NtNotFound {
+		value: String,
+	},
 
 	/// The requested namespace login does not exist
-	#[error("The namespace login does not exist")]
-	NlNotFound,
+	#[error("The namespace login '{value}' does not exist")]
+	NlNotFound {
+		value: String,
+	},
 
 	/// The requested database does not exist
-	#[error("The database does not exist")]
-	DbNotFound,
+	#[error("The database '{value}' does not exist")]
+	DbNotFound {
+		value: String,
+	},
 
 	/// The requested database token does not exist
-	#[error("The database token does not exist")]
-	DtNotFound,
+	#[error("The database token '{value}' does not exist")]
+	DtNotFound {
+		value: String,
+	},
 
 	/// The requested database login does not exist
-	#[error("The database login does not exist")]
-	DlNotFound,
+	#[error("The database login '{value}' does not exist")]
+	DlNotFound {
+		value: String,
+	},
+
+	/// The requested function does not exist
+	#[error("The function 'fn::{value}' does not exist")]
+	FcNotFound {
+		value: String,
+	},
 
 	/// The requested scope does not exist
-	#[error("The scope does not exist")]
-	ScNotFound,
+	#[error("The scope '{value}' does not exist")]
+	ScNotFound {
+		value: String,
+	},
 
 	/// The requested scope token does not exist
-	#[error("The scope token does not exist")]
-	StNotFound,
+	#[error("The scope token '{value}' does not exist")]
+	StNotFound {
+		value: String,
+	},
 
 	/// The requested param does not exist
-	#[error("The param does not exist")]
-	PaNotFound,
+	#[error("The param '${value}' does not exist")]
+	PaNotFound {
+		value: String,
+	},
 
 	/// The requested table does not exist
-	#[error("The table does not exist")]
-	TbNotFound,
+	#[error("The table '{value}' does not exist")]
+	TbNotFound {
+		value: String,
+	},
 
 	/// Unable to perform the realtime query
 	#[error("Unable to perform the realtime query")]

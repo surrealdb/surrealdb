@@ -6,6 +6,8 @@ use crate::api::conn::Router;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::engine;
 use crate::api::engine::any::Any;
+#[cfg(feature = "protocol-http")]
+use crate::api::engine::remote::http;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
 use crate::api::opt::Endpoint;
@@ -20,12 +22,6 @@ use crate::api::Result;
 use crate::api::Surreal;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
-#[cfg(feature = "protocol-http")]
-use reqwest::header::HeaderMap;
-#[cfg(feature = "protocol-http")]
-use reqwest::header::HeaderValue;
-#[cfg(feature = "protocol-http")]
-use reqwest::header::ACCEPT;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
 use serde::de::DeserializeOwned;
@@ -105,8 +101,7 @@ impl Connection for Any {
 				"http" | "https" => {
 					features.insert(ExtraFeatures::Auth);
 					features.insert(ExtraFeatures::Backup);
-					let mut headers = HeaderMap::new();
-					headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+					let headers = http::default_headers();
 					#[allow(unused_mut)]
 					let mut builder = ClientBuilder::new().default_headers(headers);
 					#[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -203,7 +198,7 @@ impl Connection for Any {
 		Box::pin(async move {
 			let response = receiver.into_recv_async().await?;
 			match response? {
-				DbResponse::Other(value) => from_value(value),
+				DbResponse::Other(value) => from_value(value).map_err(Into::into),
 				DbResponse::Query(..) => unreachable!(),
 			}
 		})

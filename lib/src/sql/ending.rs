@@ -24,7 +24,6 @@ pub fn number(i: &str) -> IResult<&str, ()> {
 		map(char('"'), |_| ()),
 		map(char('\''), |_| ()),
 		map(char(';'), |_| ()),
-		map(char('.'), |_| ()),
 		map(char(','), |_| ()),
 		map(tag(".."), |_| ()),
 		map(eof, |_| ()),
@@ -62,6 +61,15 @@ pub fn duration(i: &str) -> IResult<&str, ()> {
 		map(char(','), |_| ()),
 		map(char('.'), |_| ()),
 		map(char('-'), |_| ()),
+		map(eof, |_| ()),
+	)))(i)
+}
+
+pub fn field(i: &str) -> IResult<&str, ()> {
+	peek(alt((
+		map(preceded(shouldbespace, tag_no_case("FROM")), |_| ()),
+		map(preceded(comment, tag_no_case("FROM")), |_| ()),
+		map(char(';'), |_| ()),
 		map(eof, |_| ()),
 	)))(i)
 }

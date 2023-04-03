@@ -126,7 +126,7 @@ impl Connection for Client {
 		Box::pin(async move {
 			let response = rx.into_recv_async().await?;
 			match response? {
-				DbResponse::Other(value) => from_value(value),
+				DbResponse::Other(value) => from_value(value).map_err(Into::into),
 				DbResponse::Query(..) => unreachable!(),
 			}
 		})
@@ -405,7 +405,7 @@ impl Response {
 				trace!(target: LOG, "Received an unexpected text message; {text}");
 				Ok(None)
 			}
-			Message::Binary(binary) => msgpack::from_slice(&binary).map(Some).map_err(|error| {
+			Message::Binary(binary) => bung::from_slice(&binary).map(Some).map_err(|error| {
 				Error::ResponseFromBinary {
 					binary,
 					error,

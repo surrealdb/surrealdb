@@ -9,9 +9,10 @@ pub enum Level {
 }
 
 /// Specifies the current authentication for the datastore execution context.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd)]
 pub enum Auth {
 	/// Specifies that the user is not authenticated
+	#[default]
 	No,
 	/// Specifies that the user is authenticated with full root permissions
 	Kv,
@@ -21,12 +22,6 @@ pub enum Auth {
 	Db(String, String),
 	/// Specifies that the user is has full permissions for a particular Namespace, Database, and Scope
 	Sc(String, String, String),
-}
-
-impl Default for Auth {
-	fn default() -> Self {
-		Auth::No
-	}
 }
 
 impl Auth {

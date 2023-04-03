@@ -1,5 +1,7 @@
 pub use self::value::*;
 
+pub(super) mod serde;
+
 #[allow(clippy::module_inception)]
 mod value;
 
@@ -13,6 +15,7 @@ mod del;
 mod diff;
 mod each;
 mod every;
+mod extend;
 mod fetch;
 mod first;
 mod flatten;
