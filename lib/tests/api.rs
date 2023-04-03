@@ -51,6 +51,28 @@ struct AuthParams<'a> {
 }
 
 #[cfg(feature = "protocol-ws")]
+mod cluster {
+	use super::*;
+	use surrealdb::engine::remote::ws::Client;
+	use surrealdb::engine::remote::ws::Ws;
+
+	async fn new_db() -> Surreal<Client> {
+		let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER,
+			password: ROOT_PASS,
+		})
+		.await
+		.unwrap();
+		db
+	}
+
+	include!("api/mod.rs");
+	include!("api/auth.rs");
+	include!("api/cluster.rs");
+}
+
+#[cfg(feature = "protocol-ws")]
 mod ws {
 	use super::*;
 	use surrealdb::engine::remote::ws::Client;
@@ -69,6 +91,7 @@ mod ws {
 
 	include!("api/mod.rs");
 	include!("api/auth.rs");
+	include!("api/cluster.rs");
 }
 
 #[cfg(feature = "protocol-http")]
@@ -91,6 +114,7 @@ mod http {
 	include!("api/mod.rs");
 	include!("api/auth.rs");
 	include!("api/backup.rs");
+	include!("api/cluster.rs");
 }
 
 #[cfg(feature = "kv-mem")]
@@ -140,6 +164,7 @@ mod tikv {
 
 	include!("api/mod.rs");
 	include!("api/backup.rs");
+	include!("api/cluster.rs");
 }
 
 #[cfg(feature = "kv-fdb")]
@@ -154,6 +179,7 @@ mod fdb {
 
 	include!("api/mod.rs");
 	include!("api/backup.rs");
+	include!("api/cluster.rs");
 }
 
 #[cfg(feature = "protocol-http")]
@@ -175,4 +201,5 @@ mod any {
 	include!("api/mod.rs");
 	include!("api/auth.rs");
 	include!("api/backup.rs");
+	include!("api/cluster.rs");
 }
