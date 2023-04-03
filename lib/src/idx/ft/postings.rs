@@ -3,7 +3,7 @@ use crate::idx::btree::BTree;
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::kvsim::KVSimulator;
-use crate::idx::{IndexId, StateKey, POSTING_DOMAIN};
+use crate::idx::{BaseStateKey, Domain, IndexId, POSTING_DOMAIN};
 use crate::kvs::Key;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -12,16 +12,16 @@ pub(super) type TermFrequency = u64;
 
 #[derive(Serialize, Deserialize, Key)]
 struct PostingKey {
-	domain: u8,
-	index_id: u64,
+	domain: Domain,
+	index_id: IndexId,
 	term_id: TermId,
 	doc_id: DocId,
 }
 
 #[derive(Serialize, Deserialize, Key)]
 struct PostingPrefixKey {
-	domain: u8,
-	index_id: u64,
+	domain: Domain,
+	index_id: IndexId,
 	term_id: TermId,
 }
 
@@ -47,7 +47,7 @@ impl State {
 
 impl Postings {
 	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, default_btree_order: usize) -> Self {
-		let state_key = StateKey::new(POSTING_DOMAIN, index_id).into();
+		let state_key = BaseStateKey::new(POSTING_DOMAIN, index_id).into();
 		Self {
 			index_id,
 			state: kv.get(&state_key).unwrap_or_else(|| State::new(index_id, default_btree_order)),
@@ -77,6 +77,10 @@ impl Postings {
 		}
 	}
 
+	// TODO: This does not handle the case where one term is present in a loads of documents.
+	// We don't want this function to return a Vec of billions of documents
+	// We should rather use the visitor pattern
+	// (Stop words use case)
 	pub(super) fn get_postings(
 		&self,
 		kv: &mut KVSimulator,

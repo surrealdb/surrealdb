@@ -2,7 +2,7 @@ use crate::idx::bkeys::FstKeys;
 use crate::idx::btree::BTree;
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::kvsim::KVSimulator;
-use crate::idx::{IndexId, StateKey, TERMS_DOMAIN};
+use crate::idx::{BaseStateKey, IndexId, TERMS_DOMAIN};
 use crate::kvs::Key;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ impl State {
 
 impl Terms {
 	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, default_btree_order: usize) -> Self {
-		let state_key = StateKey::new(TERMS_DOMAIN, index_id).into();
+		let state_key = BaseStateKey::new(TERMS_DOMAIN, index_id).into();
 		Self {
 			state: kv.get(&state_key).unwrap_or_else(|| State::new(index_id, default_btree_order)),
 			updated: false,

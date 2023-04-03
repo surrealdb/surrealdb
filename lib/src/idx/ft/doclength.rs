@@ -2,7 +2,7 @@ use crate::idx::bkeys::TrieKeys;
 use crate::idx::btree::BTree;
 use crate::idx::ft::docids::DocId;
 use crate::idx::kvsim::KVSimulator;
-use crate::idx::{IndexId, StateKey, DOC_LENGTHS_DOMAIN};
+use crate::idx::{BaseStateKey, IndexId, DOC_LENGTHS_DOMAIN};
 use crate::kvs::Key;
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +29,7 @@ impl State {
 
 impl DocLengths {
 	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, default_btree_order: usize) -> Self {
-		let state_key = StateKey::new(DOC_LENGTHS_DOMAIN, index_id).into();
+		let state_key = BaseStateKey::new(DOC_LENGTHS_DOMAIN, index_id).into();
 		Self {
 			state: kv.get(&state_key).unwrap_or_else(|| State::new(index_id, default_btree_order)),
 			updated: false,
