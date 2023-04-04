@@ -108,6 +108,7 @@ url = "2.3.1"
 
 [dev-dependencies]
 env_logger = "0.10.0"
+test-log = "0.2.11"
 temp-dir = "0.1.11"
 time = { version = "0.3.20", features = ["serde"] }
 tokio = { version = "1.26.0", features = ["macros", "rt", "rt-multi-thread"] }

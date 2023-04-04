@@ -78,9 +78,9 @@ impl Postings {
 	}
 
 	// TODO: This does not handle the case where one term is present in a loads of documents.
+	// Eg.: (Stop words use case)
 	// We don't want this function to return a Vec of billions of documents
 	// We should rather use the visitor pattern
-	// (Stop words use case)
 	pub(super) fn get_postings(
 		&self,
 		kv: &mut KVSimulator,
@@ -88,6 +88,7 @@ impl Postings {
 	) -> Vec<(DocId, TermFrequency)> {
 		let prefix_key = self.posting_prefix_key(term_id).into();
 		let key_payload_vec = self.state.btree.search_by_prefix::<TrieKeys>(kv, &prefix_key);
+		println!("Key_payload_vec {:?}", key_payload_vec);
 		let mut res = Vec::with_capacity(key_payload_vec.len());
 		for (key, payload) in key_payload_vec {
 			let posting_key: PostingKey = key.into();

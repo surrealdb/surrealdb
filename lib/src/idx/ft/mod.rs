@@ -168,6 +168,7 @@ impl FtIndex {
 		if let Some(term_id) = t.find_term(kv, term) {
 			let p = Postings::new(kv, self.index_id, 100);
 			let postings = p.get_postings(kv, term_id);
+			println!("Postings term: {} {:?}", term, postings);
 			if !postings.is_empty() {
 				let term_doc_count = postings.len() as f32;
 				let l = DocLengths::new(kv, self.index_id, 100);

@@ -3,7 +3,7 @@ use crate::kvs::Key;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{SubTrie, Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter, Write};
 use std::io;
 
 pub(super) trait BKeys: Display + Sized {
@@ -13,9 +13,20 @@ pub(super) trait BKeys: Display + Sized {
 	fn collect_with_prefix(&self, prefix_key: &Key, res: &mut Vec<(Key, Payload)>);
 	fn insert(&mut self, key: Key, payload: Payload);
 	fn _remove(&mut self, key: Key);
-	fn split_keys(&self) -> (usize, Self, Key, Payload, Self);
+	fn split_keys(&self) -> SplitKeys<Self>;
 	fn get_child_idx(&self, searched_key: &Key) -> usize;
 	fn compile(&mut self) {}
+}
+
+pub(super) struct SplitKeys<BK>
+where
+	BK: BKeys,
+{
+	pub(super) left: BK,
+	pub(super) right: BK,
+	pub(super) median_idx: usize,
+	pub(super) median_key: Key,
+	pub(super) median_payload: Payload,
 }
 
 #[derive(Debug)]
@@ -53,31 +64,31 @@ impl BKeys for FstKeys {
 		self.deletions.insert(key, true);
 	}
 
-	fn split_keys(&self) -> (usize, FstKeys, Key, Payload, FstKeys) {
+	fn split_keys(&self) -> SplitKeys<Self> {
 		let median_idx = self.map.len() / 2;
 		let mut s = self.map.stream();
 		let mut left = MapBuilder::memory();
 		let mut n = median_idx;
 		while n > 0 {
-			if let Some((key, value)) = s.next() {
-				left.insert(key, value).unwrap();
+			if let Some((key, payload)) = s.next() {
+				left.insert(key, payload).unwrap();
 			}
 			n -= 1;
 		}
-		let (median_key, median_value) = s
+		let (median_key, median_payload) = s
 			.next()
 			.map_or_else(|| panic!("The median key/value should exist"), |(k, v)| (k.into(), v));
 		let mut right = MapBuilder::memory();
 		while let Some((key, value)) = s.next() {
 			right.insert(key, value).unwrap();
 		}
-		(
+		SplitKeys {
+			left: Self::try_from(left).unwrap(),
+			right: Self::try_from(right).unwrap(),
 			median_idx,
-			Self::try_from(left).unwrap(),
 			median_key,
-			median_value,
-			Self::try_from(right).unwrap(),
-		)
+			median_payload,
+		}
 	}
 
 	fn get_child_idx(&self, searched_key: &Key) -> usize {
@@ -211,9 +222,26 @@ impl Display for FstKeys {
 	}
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(super) struct TrieKeys {
 	keys: Trie<Key, Payload>,
+}
+
+impl Debug for TrieKeys {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let mut first = true;
+		f.write_char('[')?;
+		for (key, payload) in self.keys.iter() {
+			if first {
+				first = false;
+			} else {
+				f.write_char(',')?;
+			}
+			write!(f, "{}={}", String::from_utf8_lossy(key), payload)?;
+		}
+		f.write_char(']')?;
+		Ok(())
+	}
 }
 
 impl Serialize for TrieKeys {
@@ -298,18 +326,18 @@ impl BKeys for TrieKeys {
 		self.keys.remove(&key);
 	}
 
-	fn split_keys(&self) -> (usize, Self, Key, Payload, Self) {
+	fn split_keys(&self) -> SplitKeys<Self> {
 		let median_idx = self.keys.len() / 2;
 		let mut s = self.keys.iter();
 		let mut left = Trie::default();
 		let mut n = median_idx;
 		while n > 0 {
-			if let Some((key, val)) = s.next() {
-				left.insert(key.clone(), *val);
+			if let Some((key, payload)) = s.next() {
+				left.insert(key.clone(), *payload);
 			}
 			n -= 1;
 		}
-		let (median_key, median_value) = s.next().map_or_else(
+		let (median_key, median_payload) = s.next().map_or_else(
 			|| panic!("The median key/value should exist"),
 			|(k, v)| (k.to_vec().into(), *v),
 		);
@@ -317,7 +345,13 @@ impl BKeys for TrieKeys {
 		while let Some((key, val)) = s.next() {
 			right.insert(key.clone(), *val);
 		}
-		(median_idx, Self::from(left), median_key, median_value, Self::from(right))
+		SplitKeys {
+			left: Self::from(left),
+			right: Self::from(right),
+			median_idx,
+			median_key,
+			median_payload,
+		}
 	}
 
 	fn get_child_idx(&self, searched_key: &Key) -> usize {
@@ -339,8 +373,10 @@ impl TrieKeys {
 		res: &mut Vec<(Key, Payload)>,
 	) {
 		if let Some(value) = node.value() {
-			if let Some(key) = node.key() {
-				res.push((key.clone(), *value));
+			if let Some(node_key) = node.key() {
+				if node_key.starts_with(prefix) {
+					res.push((node_key.clone(), *value));
+				}
 			}
 		}
 
@@ -361,40 +397,96 @@ impl From<Trie<Vec<u8>, u64>> for TrieKeys {
 #[cfg(test)]
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
+	use crate::kvs::Key;
 
 	#[test]
 	fn test_fst_keys_serde() {
-		let keys = FstKeys::default();
+		let key: Key = "a".as_bytes().into();
+		let keys = FstKeys::with_key_val(key.clone(), 130);
 		let buf = bincode::serialize(&keys).unwrap();
-		let _: FstKeys = bincode::deserialize(&buf).unwrap();
+		let keys: FstKeys = bincode::deserialize(&buf).unwrap();
+		assert_eq!(keys.get(&key), Some(130));
 	}
 
 	#[test]
 	fn test_trie_keys_serde() {
-		let keys = TrieKeys::with_key_val("1".as_bytes().to_vec(), 1);
+		let key: Key = "a".as_bytes().into();
+		let keys = TrieKeys::with_key_val(key.clone(), 130);
 		let buf = bincode::serialize(&keys).unwrap();
-		let _: TrieKeys = bincode::deserialize(&buf).unwrap();
+		let keys: TrieKeys = bincode::deserialize(&buf).unwrap();
+		assert_eq!(keys.get(&key), Some(130));
+	}
+
+	fn test_keys_additions<BK: BKeys>(mut keys: BK) {
+		let terms = [
+			"the", "quick", "brown", "fox", "jumped", "over", "the", "lazy", "dog", "the", "fast",
+			"fox", "jumped", "over", "the", "lazy", "dog",
+		];
+		let mut i = 1;
+		for term in terms {
+			let key: Key = term.into();
+			keys.insert(key.clone(), i);
+			keys.compile();
+			assert_eq!(keys.get(&key), Some(i));
+			i += 1;
+		}
+	}
+
+	#[test]
+	fn test_fst_keys_additions() {
+		test_keys_additions(FstKeys::default())
+	}
+
+	#[test]
+	fn test_trie_keys_additions() {
+		test_keys_additions(TrieKeys::default())
 	}
 
 	#[test]
 	fn test_tries_keys_collect_with_prefix() {
 		let mut keys = TrieKeys::default();
 		keys.insert("apple".into(), 1);
-		keys.insert("application".into(), 2);
-		keys.insert("applicative".into(), 3);
-		keys.insert("banana".into(), 4);
-		keys.insert("blueberry".into(), 5);
+		keys.insert("applicant".into(), 2);
+		keys.insert("application".into(), 3);
+		keys.insert("applicative".into(), 4);
+		keys.insert("banana".into(), 5);
+		keys.insert("blueberry".into(), 6);
+		keys.insert("the".into(), 7);
+		keys.insert("these".into(), 11);
+		keys.insert("theses".into(), 12);
+		keys.insert("their".into(), 8);
+		keys.insert("theirs".into(), 9);
+		keys.insert("there".into(), 10);
 
 		{
 			let mut res = vec![];
 			keys.collect_with_prefix(&"appli".into(), &mut res);
-			assert_eq!(res, vec![("application".into(), 2), ("applicative".into(), 3)]);
+			assert_eq!(
+				res,
+				vec![("applicant".into(), 2), ("application".into(), 3), ("applicative".into(), 4)]
+			);
+		}
+
+		{
+			let mut res = vec![];
+			keys.collect_with_prefix(&"the".into(), &mut res);
+			assert_eq!(
+				res,
+				vec![
+					("the".into(), 7),
+					("their".into(), 8),
+					("theirs".into(), 9),
+					("there".into(), 10),
+					("these".into(), 11),
+					("theses".into(), 12)
+				]
+			);
 		}
 
 		{
 			let mut res = vec![];
 			keys.collect_with_prefix(&"blue".into(), &mut res);
-			assert_eq!(res, vec![("blueberry".into(), 5)]);
+			assert_eq!(res, vec![("blueberry".into(), 6)]);
 		}
 
 		{
@@ -408,5 +500,35 @@ mod tests {
 			keys.collect_with_prefix(&"zz".into(), &mut res);
 			assert_eq!(res, vec![]);
 		}
+	}
+
+	fn test_keys_split<BK: BKeys>(mut keys: BK) {
+		keys.insert("a".into(), 1);
+		keys.insert("b".into(), 2);
+		keys.insert("c".into(), 3);
+		keys.insert("d".into(), 4);
+		keys.insert("e".into(), 5);
+		keys.compile();
+		let r = keys.split_keys();
+		assert_eq!(r.median_payload, 3);
+		let c: Key = "c".into();
+		assert_eq!(r.median_key, c);
+		assert_eq!(r.median_idx, 2);
+		assert_eq!(r.left.len(), 2);
+		assert_eq!(r.left.get(&"a".into()), Some(1));
+		assert_eq!(r.left.get(&"b".into()), Some(2));
+		assert_eq!(r.right.len(), 2);
+		assert_eq!(r.right.get(&"d".into()), Some(4));
+		assert_eq!(r.right.get(&"e".into()), Some(5));
+	}
+
+	#[test]
+	fn test_fst_keys_split() {
+		test_keys_split(FstKeys::default());
+	}
+
+	#[test]
+	fn test_trie_keys_split() {
+		test_keys_split(TrieKeys::default());
 	}
 }
