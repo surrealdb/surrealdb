@@ -10,7 +10,7 @@ setup:
 
 .PHONY: docs
 docs:
-	cargo doc --open --no-deps --package surrealdb --features rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-indxdb,kv-rocksdb,kv-tikv,http,scripting
+	cargo doc --open --no-deps --package surrealdb --features rustls,native-tls,protocol-ws,protocol-http,storage-mem,storage-indxdb,storage-rocksdb,storage-tikv,http,scripting
 
 .PHONY: test
 test:
@@ -23,12 +23,16 @@ check:
 	cargo clippy -- -W warnings
 
 .PHONY: clean
-clean:
-	cargo clean
+clean: cargo clean
 
 .PHONY: serve
 serve:
 	cargo run -- start --log trace --user root --pass root memory
+
+.PHONY: cluster
+cluster:
+	cargo run --features storage-tikv -- start --log trace --user root --pass root tikv://localhost:2379 &\
+	cargo run --features storage-tikv -- start --log trace --user root --pass root -b 0.0.0.0:8001 tikv://localhost:2379
 
 .PHONY: sql
 sql:

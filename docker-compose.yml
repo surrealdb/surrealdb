@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+
+  pd0:
+    container_name: surrealdb-pd0
+    image: pingcap/pd:v6.1.0
+    ports:
+      - "2379:2379"
+    volumes:
+      - ./logs:/logs
+    command:
+      - --name=pd0
+      # client urls to listen to, the IP address of the current host
+      - --client-urls=http://0.0.0.0:2379
+      # addresses to listen to by PD
+      - --peer-urls=http://0.0.0.0:2380
+      # advertise-client-urls are the addresses clients use to connect to PDs
+      - --advertise-client-urls=http://0.0.0.0:2379,http://surrealdb-pd0:2379
+      # advertise-peer-urls is the address for other PD nodes to connect to
+      - --advertise-peer-urls=http://surrealdb-pd0:2380
+      # pd cluster addresses tied with name and advertise-peer-urls
+      - --initial-cluster=pd0=http://surrealdb-pd0:2380
+    restart: on-failure
+
+  tikv0:
+    container_name: surrealdb-tikv0
+    image: pingcap/tikv:v6.1.0
+    volumes:
+      - ./logs:/logs
+    command:
+      - --addr=0.0.0.0:20160
+      # address advertised to clients connecting to PD, for routing
+      - --advertise-addr=localhost:20160
+      - --pd=surrealdb-pd0:2379
+    depends_on:
+      - "pd0"
+    restart: on-failure
+

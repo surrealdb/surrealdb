@@ -19,8 +19,6 @@ async fn nodes_register() {
 			.await
 			.unwrap();
 	}
-	let file = format!("{db_name}.sql");
-	db.export(&file).await.unwrap();
-	db.import(&file).await.unwrap();
-	remove_file(file).await.unwrap();
+	let results: Vec<RecordBuf> = db2.select("user").await.unwrap();
+	assert_eq!(results.len(), 10);
 }
