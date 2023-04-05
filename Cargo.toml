@@ -31,7 +31,7 @@ base64 = "0.21.0"
 bung = "0.1.0"
 bytes = "1.4.0"
 chrono = { version = "0.4.24", features = ["serde"] }
-clap = { version = "4.2.1", features = ["env", "derive"] }
+clap = { version = "4.2.1", features = ["env", "derive", "wrap_help", "unicode"] }
 clap_complete = "4.2.0"
 fern = { version = "0.6.2", features = ["colored"] }
 futures = "0.3.27"
