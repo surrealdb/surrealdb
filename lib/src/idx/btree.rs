@@ -1,4 +1,4 @@
-use crate::idx::bkeys::BKeys;
+use crate::idx::bkeys::{BKeys, KeyVisitor};
 use crate::idx::kvsim::KVSimulator;
 use crate::idx::{Domain, IndexId};
 use crate::kvs::Key;
@@ -116,43 +116,47 @@ impl BTree {
 		}
 	}
 
-	pub(super) fn search_by_prefix<BK>(
+	pub(super) fn search_by_prefix<BK, V>(
 		&self,
 		kv: &mut KVSimulator,
 		prefix_key: &Key,
-	) -> Vec<(Key, Payload)>
-	where
+		visitor: &mut V,
+	) where
 		BK: BKeys + Serialize + DeserializeOwned,
+		V: KeyVisitor,
 	{
 		if let Some(root_id) = &self.root {
-			let mut res = Vec::new();
-			self.recursive_search_by_prefix::<BK>(kv, *root_id, prefix_key, &mut res);
-			res
-		} else {
-			vec![]
+			self.recursive_search_by_prefix::<BK, V>(kv, *root_id, prefix_key, visitor);
 		}
 	}
 
-	fn recursive_search_by_prefix<BK>(
+	fn recursive_search_by_prefix<BK, V>(
 		&self,
 		kv: &mut KVSimulator,
 		node_id: NodeId,
 		prefix_key: &Key,
-		res: &mut Vec<(Key, Payload)>,
-	) where
+		visitor: &mut V,
+	) -> bool
+	where
 		BK: BKeys + Serialize + DeserializeOwned,
+		V: KeyVisitor,
 	{
-		let previous_size = res.len();
 		let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
 		// If we previously found keys, and this node does not add additional keys, we can skip
-		if previous_size > 0 && res.len() == previous_size {
-			return;
-		}
-		node.keys().collect_with_prefix(prefix_key, res);
+		let mut found = node.keys().collect_with_prefix(prefix_key, visitor);
 		if let Node::Internal(keys, children) = node {
 			let child_idx = keys.get_child_idx(prefix_key);
-			self.recursive_search_by_prefix::<BK>(kv, children[child_idx], prefix_key, res);
+			for i in child_idx..children.len() {
+				if !self.recursive_search_by_prefix::<BK, V>(kv, children[i], prefix_key, visitor) {
+					break;
+				} else {
+					if !found {
+						found = true;
+					}
+				}
+			}
 		}
+		found
 	}
 
 	pub(super) fn insert<BK>(&mut self, kv: &mut KVSimulator, key: Key, payload: Payload)
@@ -402,6 +406,7 @@ mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::btree::{BTree, Node, Payload, Statistics};
 	use crate::idx::kvsim::KVSimulator;
+	use crate::idx::tests::HashVisitor;
 	use crate::kvs::Key;
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
@@ -628,5 +633,40 @@ mod tests {
 				total_size: 232,
 			}
 		);
+	}
+
+	#[test]
+	fn test_btree_trie_keys_search_by_prefix() {
+		let mut kv = KVSimulator::new(None, 0);
+		let mut t = BTree::new(1u8, 2u64, 45);
+		for (key, payload) in vec![
+			("aaaa", 0),
+			("bb1", 21),
+			("bb2", 22),
+			("bb3", 23),
+			("bb4", 24),
+			("dddd", 0),
+			("eeee", 0),
+			("ffff", 0),
+			("gggg", 0),
+			("hhhh", 0),
+		] {
+			t.insert::<TrieKeys>(&mut kv, key.into(), payload);
+		}
+		// For this test to be relevant, we expect the BTree to match the following statistics:
+		let s = t.statistics::<TrieKeys>(&mut kv);
+		assert_eq!(s.max_depth, 2);
+		assert_eq!(s.nodes_count, 4);
+		t.debug::<_, TrieKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
+
+		// We should find all the keys prefixed with "bb"
+		let mut visitor = HashVisitor::default();
+		t.search_by_prefix::<TrieKeys, _>(&mut kv, &"bb".into(), &mut visitor);
+		visitor.check(vec![
+			("bb1".into(), 21),
+			("bb2".into(), 22),
+			("bb3".into(), 23),
+			("bb4".into(), 24),
+		]);
 	}
 }

@@ -3,9 +3,9 @@ mod doclength;
 mod postings;
 mod terms;
 
-use crate::idx::ft::docids::DocIds;
+use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::doclength::{DocLength, DocLengths};
-use crate::idx::ft::postings::{Postings, TermFrequency};
+use crate::idx::ft::postings::{Postings, PostingsVisitor, TermFrequency};
 use crate::idx::ft::terms::Terms;
 use crate::idx::kvsim::KVSimulator;
 use crate::idx::{BaseStateKey, IndexId, INDEX_DOMAIN};
@@ -21,11 +21,15 @@ struct FtIndex {
 	state_key: Key,
 	state: State,
 	index_id: IndexId,
-	average_doc_length: f32,
 	bm25: Bm25Params,
 	btree_default_order: usize,
 }
 
+trait HitVisitor {
+	fn visit(&mut self, doc_key: String, score: Score);
+}
+
+#[derive(Clone)]
 struct Bm25Params {
 	k1: f32,
 	b: f32,
@@ -52,24 +56,12 @@ impl FtIndex {
 	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, btree_default_order: usize) -> Self {
 		let state_key = BaseStateKey::new(INDEX_DOMAIN, index_id).into();
 		let state = kv.get(&state_key).unwrap_or_default();
-		let mut index = Self {
+		Self {
 			state,
 			state_key,
 			index_id,
-			average_doc_length: 0.0,
 			bm25: Bm25Params::default(),
 			btree_default_order,
-		};
-		index.update_average_doc_length();
-		index
-	}
-
-	fn update_average_doc_length(&mut self) {
-		self.average_doc_length = if self.state.doc_count == 0 || self.state.total_docs_lengths == 0
-		{
-			0.0
-		} else {
-			self.state.total_docs_lengths as f32 / self.state.doc_count as f32
 		}
 	}
 
@@ -106,7 +98,6 @@ impl FtIndex {
 		// Update the index state
 		self.state.total_docs_lengths += doc_length as u128;
 		self.state.doc_count += 1;
-		self.update_average_doc_length();
 
 		// Set the terms postings
 		let terms = t.resolve_terms(kv, terms_and_frequencies);
@@ -160,13 +151,97 @@ impl FtIndex {
 		take_while(|c| c != ' ' && c != '\n' && c != '\t')(i)
 	}
 
+	fn search<V>(&self, kv: &mut KVSimulator, term: &str, visitor: &mut V)
+	where
+		V: HitVisitor,
+	{
+		let t = self.terms(kv);
+		if let Some(term_id) = t.find_term(kv, term) {
+			let p = self.postings(kv);
+			let term_doc_count = p.get_doc_count(kv, term_id);
+			let doc_lengths = self.doc_lengths(kv);
+			let doc_ids = self.doc_ids(kv);
+			if term_doc_count > 0 {
+				let mut scorer = Scorer::new(
+					visitor,
+					kv,
+					doc_lengths,
+					doc_ids,
+					self.state.total_docs_lengths,
+					self.state.doc_count,
+					term_doc_count,
+					self.bm25.clone(),
+				);
+				p.collect_postings(kv, term_id, &mut scorer);
+			}
+		}
+	}
+}
+
+struct Scorer<'a, V>
+where
+	V: HitVisitor,
+{
+	visitor: &'a mut V,
+	kv: &'a mut KVSimulator,
+	doc_lengths: DocLengths,
+	doc_ids: DocIds,
+	average_doc_length: f32,
+	doc_count: f32,
+	term_doc_count: f32,
+	bm25: Bm25Params,
+}
+
+impl<'a, V> PostingsVisitor for Scorer<'a, V>
+where
+	V: HitVisitor,
+{
+	fn visit(&mut self, doc_id: DocId, term_frequency: TermFrequency) {
+		if let Some(doc_key) = self.doc_ids.get_doc_key(&mut self.kv, doc_id) {
+			let doc_length = self.doc_lengths.get_doc_length(&mut self.kv, doc_id).unwrap_or(0);
+			let bm25_score = self.compute_bm25_score(
+				term_frequency as f32,
+				self.term_doc_count,
+				doc_length as f32,
+			);
+			self.visitor.visit(doc_key, bm25_score);
+		}
+	}
+}
+
+impl<'a, V> Scorer<'a, V>
+where
+	V: HitVisitor,
+{
+	fn new(
+		visitor: &'a mut V,
+		kv: &'a mut KVSimulator,
+		doc_lengths: DocLengths,
+		doc_ids: DocIds,
+		total_docs_length: u128,
+		doc_count: u64,
+		term_doc_count: u64,
+		bm25: Bm25Params,
+	) -> Self {
+		Self {
+			visitor,
+			kv,
+			doc_lengths,
+			doc_ids,
+			average_doc_length: (total_docs_length as f32) / (doc_count as f32),
+			doc_count: doc_count as f32,
+			term_doc_count: term_doc_count as f32,
+			bm25,
+		}
+	}
+
 	// https://en.wikipedia.org/wiki/Okapi_BM25
 	// Including the lower-bounding term frequency normalization (2011 CIKM)
 	fn compute_bm25_score(&self, term_freq: f32, term_doc_count: f32, doc_length: f32) -> f32 {
 		// (n(qi) + 0.5)
 		let denominator = term_doc_count + 0.5;
 		// (N - n(qi) + 0.5)
-		let numerator = (self.state.doc_count as f32) - term_doc_count + 0.5;
+		let numerator = self.doc_count - term_doc_count + 0.5;
 		let idf = (numerator / denominator).ln();
 		if idf.is_nan() || idf <= 0.0 {
 			return 0.0;
@@ -179,40 +254,13 @@ impl FtIndex {
 		// numerator / (k1 * denominator + 1)
 		numerator / (self.bm25.k1 * denominator + 1.0)
 	}
-
-	fn search(&self, kv: &mut KVSimulator, term: &str) -> Vec<(String, Score)> {
-		let mut res = Vec::new();
-		let t = self.terms(kv);
-		if let Some(term_id) = t.find_term(kv, term) {
-			let p = self.postings(kv);
-			let postings = p.get_postings(kv, term_id);
-			t.debug(kv);
-			p.debug(kv);
-			if !postings.is_empty() {
-				let term_doc_count = postings.len() as f32;
-				let l = self.doc_lengths(kv);
-				let d = self.doc_ids(kv);
-				for (doc_id, term_freq) in postings {
-					if let Some(doc_key) = d.get_doc_key(kv, doc_id) {
-						let doc_length = l.get_doc_length(kv, doc_id).unwrap_or(0);
-						let bm25_score = self.compute_bm25_score(
-							term_freq as f32,
-							term_doc_count,
-							doc_length as f32,
-						);
-						res.push((doc_key, bm25_score));
-					}
-				}
-			}
-		}
-		res
-	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::FtIndex;
+	use crate::idx::ft::{FtIndex, HitVisitor, Score};
 	use crate::idx::kvsim::KVSimulator;
+	use std::collections::HashMap;
 	use test_log::test;
 
 	#[test]
@@ -224,30 +272,42 @@ mod tests {
 			// Add one document
 			let mut fti = FtIndex::new(&mut kv, 0, default_btree_order);
 			fti.add_document(&mut kv, "doc1", "hello the world");
-			assert_eq!(fti.average_doc_length, 3.0);
 		}
 
 		{
 			// Add two documents
 			let mut fti = FtIndex::new(&mut kv, 0, default_btree_order);
 			fti.add_document(&mut kv, "doc2", "a yellow hello");
-			assert_eq!(fti.average_doc_length, 3.0);
 			fti.add_document(&mut kv, "doc3", "foo bar");
-			assert_eq!(fti.average_doc_length, 2.6666667);
 		}
 
 		{
 			// Search & score
 			let fti = FtIndex::new(&mut kv, 0, default_btree_order);
-			assert_eq!(
-				fti.search(&mut kv, "hello"),
-				vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]
-			);
-			assert_eq!(fti.search(&mut kv, "world"), vec![("doc1".to_string(), 0.4859746)]);
-			assert_eq!(fti.search(&mut kv, "yellow"), vec![("doc2".to_string(), 0.4859746)]);
-			assert_eq!(fti.search(&mut kv, "foo"), vec![("doc3".to_string(), 0.56902087)]);
-			assert_eq!(fti.search(&mut kv, "bar"), vec![("doc3".to_string(), 0.56902087)]);
-			assert_eq!(fti.search(&mut kv, "dummy"), Vec::<(String, f32)>::new());
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "hello", &mut visitor);
+			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "world", &mut visitor);
+			visitor.check(vec![("doc1".to_string(), 0.4859746)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "yellow", &mut visitor);
+			visitor.check(vec![("doc2".to_string(), 0.4859746)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "foo", &mut visitor);
+			visitor.check(vec![("doc3".to_string(), 0.56902087)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "bar", &mut visitor);
+			visitor.check(vec![("doc3".to_string(), 0.56902087)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "dummy", &mut visitor);
+			visitor.check(Vec::<(String, f32)>::new());
 		}
 	}
 
@@ -265,42 +325,71 @@ mod tests {
 
 		{
 			let fti = FtIndex::new(&mut kv, 0, default_btree_order);
-			assert_eq!(
-				fti.search(&mut kv, "the"),
-				vec![
-					("doc1".to_string(), 0.0),
-					("doc2".to_string(), 0.0),
-					("doc3".to_string(), 0.0),
-					("doc4".to_string(), 0.0)
-				]
-			);
-			assert_eq!(
-				fti.search(&mut kv, "dog"),
-				vec![
-					("doc1".to_string(), 0.0),
-					("doc2".to_string(), 0.0),
-					("doc3".to_string(), 0.0)
-				]
-			);
-			assert_eq!(
-				fti.search(&mut kv, "fox"),
-				vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0),]
-			);
-			assert_eq!(
-				fti.search(&mut kv, "over"),
-				vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0),]
-			);
-			assert_eq!(
-				fti.search(&mut kv, "lazy"),
-				vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0),]
-			);
-			assert_eq!(
-				fti.search(&mut kv, "jumped"),
-				vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]
-			);
-			assert_eq!(fti.search(&mut kv, "nothing"), vec![("doc3".to_string(), 0.87105393)]);
-			assert_eq!(fti.search(&mut kv, "animals"), vec![("doc4".to_string(), 0.92279965)]);
-			assert_eq!(fti.search(&mut kv, "dummy"), Vec::<(String, f32)>::new());
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "the", &mut visitor);
+			visitor.check(vec![
+				("doc1".to_string(), 0.0),
+				("doc2".to_string(), 0.0),
+				("doc3".to_string(), 0.0),
+				("doc4".to_string(), 0.0),
+			]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "dog", &mut visitor);
+			visitor.check(vec![
+				("doc1".to_string(), 0.0),
+				("doc2".to_string(), 0.0),
+				("doc3".to_string(), 0.0),
+			]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "fox", &mut visitor);
+			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "over", &mut visitor);
+			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "lazy", &mut visitor);
+			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "jumped", &mut visitor);
+			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "nothing", &mut visitor);
+			visitor.check(vec![("doc3".to_string(), 0.87105393)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "animals", &mut visitor);
+			visitor.check(vec![("doc4".to_string(), 0.92279965)]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut kv, "dummy", &mut visitor);
+			visitor.check(Vec::<(String, f32)>::new());
+		}
+	}
+
+	#[derive(Default)]
+	pub(super) struct HashHitVisitor {
+		map: HashMap<String, Score>,
+	}
+
+	impl HitVisitor for HashHitVisitor {
+		fn visit(&mut self, doc_key: String, score: Score) {
+			self.map.insert(doc_key, score);
+		}
+	}
+
+	impl HashHitVisitor {
+		pub(super) fn check(&self, res: Vec<(String, Score)>) {
+			assert_eq!(res.len(), self.map.len());
+			for (k, p) in res {
+				assert_eq!(self.map.get(&k), Some(&p));
+			}
 		}
 	}
 }

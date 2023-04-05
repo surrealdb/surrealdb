@@ -31,3 +31,31 @@ impl BaseStateKey {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use crate::idx::bkeys::KeyVisitor;
+	use crate::idx::btree::Payload;
+	use crate::kvs::Key;
+	use std::collections::HashMap;
+
+	#[derive(Default)]
+	pub(super) struct HashVisitor {
+		map: HashMap<Key, Payload>,
+	}
+
+	impl KeyVisitor for HashVisitor {
+		fn visit(&mut self, key: Key, payload: Payload) {
+			self.map.insert(key, payload);
+		}
+	}
+
+	impl HashVisitor {
+		pub(super) fn check(&self, res: Vec<(Key, Payload)>) {
+			assert_eq!(res.len(), self.map.len());
+			for (k, p) in res {
+				assert_eq!(self.map.get(&k), Some(&p));
+			}
+		}
+	}
+}

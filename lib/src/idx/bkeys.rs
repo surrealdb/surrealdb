@@ -6,11 +6,17 @@ use serde::{de, ser, Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::io;
 
+pub(super) trait KeyVisitor {
+	fn visit(&mut self, key: Key, payload: Payload);
+}
+
 pub(super) trait BKeys: Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Self;
 	fn len(&self) -> usize;
 	fn get(&self, key: &Key) -> Option<Payload>;
-	fn collect_with_prefix(&self, prefix_key: &Key, res: &mut Vec<(Key, Payload)>);
+	fn collect_with_prefix<V>(&self, prefix_key: &Key, visitor: &mut V) -> bool
+	where
+		V: KeyVisitor;
 	fn insert(&mut self, key: Key, payload: Payload);
 	fn _remove(&mut self, key: Key);
 	fn split_keys(&self) -> SplitKeys<Self>;
@@ -53,7 +59,10 @@ impl BKeys for FstKeys {
 		self.map.get(key)
 	}
 
-	fn collect_with_prefix(&self, _prefix_key: &Key, _res: &mut Vec<(Key, Payload)>) {
+	fn collect_with_prefix<V>(&self, _prefix_key: &Key, _visitor: &mut V) -> bool
+	where
+		V: KeyVisitor,
+	{
 		panic!("Not supported!")
 	}
 
@@ -315,9 +324,14 @@ impl BKeys for TrieKeys {
 		self.keys.get(key).copied()
 	}
 
-	fn collect_with_prefix(&self, prefix: &Key, res: &mut Vec<(Key, Payload)>) {
+	fn collect_with_prefix<V>(&self, prefix: &Key, visitor: &mut V) -> bool
+	where
+		V: KeyVisitor,
+	{
 		if let Some(node) = self.keys.get_raw_descendant(prefix) {
-			TrieKeys::collect_with_prefix_recursive(node, prefix, res);
+			TrieKeys::collect_with_prefix_recursive(node, prefix, visitor)
+		} else {
+			false
 		}
 	}
 
@@ -386,22 +400,34 @@ impl BKeys for TrieKeys {
 }
 
 impl TrieKeys {
-	fn collect_with_prefix_recursive(
+	fn collect_with_prefix_recursive<V>(
 		node: SubTrie<Key, Payload>,
 		prefix: &Key,
-		res: &mut Vec<(Key, Payload)>,
-	) {
+		visitor: &mut V,
+	) -> bool
+	where
+		V: KeyVisitor,
+	{
+		let mut found = false;
 		if let Some(value) = node.value() {
 			if let Some(node_key) = node.key() {
 				if node_key.starts_with(prefix) {
-					res.push((node_key.clone(), *value));
+					if !found {
+						found = true;
+					}
+					visitor.visit(node_key.clone(), *value);
 				}
 			}
 		}
 
 		for children in node.children() {
-			Self::collect_with_prefix_recursive(children, prefix, res);
+			if Self::collect_with_prefix_recursive(children, prefix, visitor) {
+				if !found {
+					found = true;
+				}
+			}
 		}
+		found
 	}
 }
 
@@ -416,6 +442,7 @@ impl From<Trie<Vec<u8>, u64>> for TrieKeys {
 #[cfg(test)]
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
+	use crate::idx::tests::HashVisitor;
 	use crate::kvs::Key;
 
 	#[test]
@@ -478,46 +505,44 @@ mod tests {
 		keys.insert("there".into(), 10);
 
 		{
-			let mut res = vec![];
-			keys.collect_with_prefix(&"appli".into(), &mut res);
-			assert_eq!(
-				res,
-				vec![("applicant".into(), 2), ("application".into(), 3), ("applicative".into(), 4)]
-			);
+			let mut visitor = HashVisitor::default();
+			keys.collect_with_prefix(&"appli".into(), &mut visitor);
+			visitor.check(vec![
+				("applicant".into(), 2),
+				("application".into(), 3),
+				("applicative".into(), 4),
+			]);
 		}
 
 		{
-			let mut res = vec![];
-			keys.collect_with_prefix(&"the".into(), &mut res);
-			assert_eq!(
-				res,
-				vec![
-					("the".into(), 7),
-					("their".into(), 8),
-					("theirs".into(), 9),
-					("there".into(), 10),
-					("these".into(), 11),
-					("theses".into(), 12)
-				]
-			);
+			let mut visitor = HashVisitor::default();
+			keys.collect_with_prefix(&"the".into(), &mut visitor);
+			visitor.check(vec![
+				("the".into(), 7),
+				("their".into(), 8),
+				("theirs".into(), 9),
+				("there".into(), 10),
+				("these".into(), 11),
+				("theses".into(), 12),
+			]);
 		}
 
 		{
-			let mut res = vec![];
-			keys.collect_with_prefix(&"blue".into(), &mut res);
-			assert_eq!(res, vec![("blueberry".into(), 6)]);
+			let mut visitor = HashVisitor::default();
+			keys.collect_with_prefix(&"blue".into(), &mut visitor);
+			visitor.check(vec![("blueberry".into(), 6)]);
 		}
 
 		{
-			let mut res = vec![];
-			keys.collect_with_prefix(&"apple".into(), &mut res);
-			assert_eq!(res, vec![("apple".into(), 1)]);
+			let mut visitor = HashVisitor::default();
+			keys.collect_with_prefix(&"apple".into(), &mut visitor);
+			visitor.check(vec![("apple".into(), 1)]);
 		}
 
 		{
-			let mut res = vec![];
-			keys.collect_with_prefix(&"zz".into(), &mut res);
-			assert_eq!(res, vec![]);
+			let mut visitor = HashVisitor::default();
+			keys.collect_with_prefix(&"zz".into(), &mut visitor);
+			visitor.check(vec![]);
 		}
 	}
 

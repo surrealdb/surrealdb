@@ -1,5 +1,5 @@
-use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::{BTree, Statistics};
+use crate::idx::bkeys::{KeyVisitor, TrieKeys};
+use crate::idx::btree::{BTree, Payload, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::kvsim::KVSimulator;
@@ -45,6 +45,10 @@ impl State {
 	}
 }
 
+pub(super) trait PostingsVisitor {
+	fn visit(&mut self, doc_id: DocId, term_frequency: TermFrequency);
+}
+
 impl Postings {
 	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, default_btree_order: usize) -> Self {
 		let state_key = BaseStateKey::new(POSTING_DOMAIN, index_id).into();
@@ -77,23 +81,22 @@ impl Postings {
 		}
 	}
 
-	// TODO: This does not handle the case where one term is present in a large collection of documents.
-	// Eg.: (Stop words use case)
-	// We don't want this function to return a Vec of billions of documents
-	// We should rather use the visitor pattern
-	pub(super) fn get_postings(
-		&self,
-		kv: &mut KVSimulator,
-		term_id: TermId,
-	) -> Vec<(DocId, TermFrequency)> {
+	pub(super) fn get_doc_count(&self, kv: &mut KVSimulator, term_id: TermId) -> u64 {
 		let prefix_key = self.posting_prefix_key(term_id).into();
-		let key_payload_vec = self.state.btree.search_by_prefix::<TrieKeys>(kv, &prefix_key);
-		let mut res = Vec::with_capacity(key_payload_vec.len());
-		for (key, payload) in key_payload_vec {
-			let posting_key: PostingKey = key.into();
-			res.push((posting_key.doc_id, payload));
-		}
-		res
+		let mut counter = PostingsDocCount::default();
+		self.state.btree.search_by_prefix::<TrieKeys, _>(kv, &prefix_key, &mut counter);
+		counter.doc_count
+	}
+
+	pub(super) fn collect_postings<V>(&self, kv: &mut KVSimulator, term_id: TermId, visitor: &mut V)
+	where
+		V: PostingsVisitor,
+	{
+		let prefix_key = self.posting_prefix_key(term_id).into();
+		let mut key_visitor = PostingsAdapter {
+			visitor,
+		};
+		self.state.btree.search_by_prefix::<TrieKeys, _>(kv, &prefix_key, &mut key_visitor);
 	}
 
 	fn posting_prefix_key(&self, term_id: TermId) -> PostingPrefixKey {
@@ -121,6 +124,34 @@ impl Postings {
 		if self.updated {
 			kv.set(self.state_key, &self.state);
 		}
+	}
+}
+
+struct PostingsAdapter<'a, V>
+where
+	V: PostingsVisitor,
+{
+	visitor: &'a mut V,
+}
+
+impl<'a, V> KeyVisitor for PostingsAdapter<'a, V>
+where
+	V: PostingsVisitor,
+{
+	fn visit(&mut self, key: Key, payload: Payload) {
+		let posting_key: PostingKey = key.into();
+		self.visitor.visit(posting_key.doc_id, payload);
+	}
+}
+
+#[derive(Default)]
+struct PostingsDocCount {
+	doc_count: u64,
+}
+
+impl KeyVisitor for PostingsDocCount {
+	fn visit(&mut self, _key: Key, _payload: Payload) {
+		self.doc_count += 1;
 	}
 }
 
