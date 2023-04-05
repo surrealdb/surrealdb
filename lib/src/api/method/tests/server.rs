@@ -29,12 +29,10 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					[] => Ok(DbResponse::Other(Value::None)),
 					_ => unreachable!(),
 				},
-				Method::Authenticate | Method::Kill | Method::Unset | Method::Delete => {
-					match &params[..] {
-						[_] => Ok(DbResponse::Other(Value::None)),
-						_ => unreachable!(),
-					}
-				}
+				Method::Authenticate | Method::Kill | Method::Unset => match &params[..] {
+					[_] => Ok(DbResponse::Other(Value::None)),
+					_ => unreachable!(),
+				},
 				Method::Live => match &params[..] {
 					[_] => Ok(DbResponse::Other(
 						"c6c0e36c-e2cf-42cb-b2d5-75415249b261".to_owned().into(),
@@ -71,7 +69,7 @@ pub(super) fn mock(route_rx: Receiver<Option<Route>>) {
 					[_, user] => Ok(DbResponse::Other(user.clone())),
 					_ => unreachable!(),
 				},
-				Method::Select => match &params[..] {
+				Method::Select | Method::Delete => match &params[..] {
 					[Value::Thing(..)] => Ok(DbResponse::Other(to_value(User::default()).unwrap())),
 					[Value::Table(..) | Value::Array(..) | Value::Range(..)] => {
 						Ok(DbResponse::Other(Value::Array(Array(Vec::new()))))

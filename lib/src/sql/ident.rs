@@ -24,14 +24,14 @@ const BACKTICK_ESC: &str = r#"\`"#;
 pub struct Ident(pub String);
 
 impl From<String> for Ident {
-	fn from(s: String) -> Self {
-		Self(s)
+	fn from(v: String) -> Self {
+		Self(v)
 	}
 }
 
 impl From<&str> for Ident {
-	fn from(i: &str) -> Self {
-		Self::from(String::from(i))
+	fn from(v: &str) -> Self {
+		Self::from(String::from(v))
 	}
 }
 

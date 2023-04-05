@@ -90,7 +90,7 @@ impl Serialize for Uuid {
 		if is_internal_serialization() {
 			serializer.serialize_newtype_struct(TOKEN, &self.0)
 		} else {
-			serializer.serialize_some(&self.to_string())
+			serializer.serialize_some(&self.0)
 		}
 	}
 }

@@ -163,14 +163,14 @@ iwr https://windows.surrealdb.com -useb | iex
 Docker can be used to manage and run SurrealDB database instances without the need to install any command-line tools. The SurrealDB docker container contains the full command-line tools for importing and exporting data from a running server, or for running a server itself.
 
 ```bash
-docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start
+docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start
 ```
 
-Update the image to the latest version:
+For just getting started with a development server running in memory, you can pass the container a basic initialization to set the user and password as root and enable logging.
 
 ```bash
-docker pull surrealdb/surrealdb:latest
-```
+docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:latest start --log trace --user root --pass root memory
+``` 
 
 <h2><img height="20" src="https://github.com/surrealdb/surrealdb/blob/main/img/gettingstarted.svg?raw=true">&nbsp;&nbsp;Getting started</h2>
 

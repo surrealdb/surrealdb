@@ -40,9 +40,13 @@ async fn handler(
 			// Execute the sql query in the database
 			match db.execute(sql, &session, None, opt.strict).await {
 				Ok(res) => match output.as_ref() {
+					// Simple serialization
 					"application/json" => Ok(output::json(&res)),
 					"application/cbor" => Ok(output::cbor(&res)),
-					"application/msgpack" => Ok(output::pack(&res)),
+					"application/pack" => Ok(output::pack(&res)),
+					// Internal serialization
+					"application/bung" => Ok(output::full(&res)),
+					// Return nothing
 					"application/octet-stream" => Ok(output::none()),
 					// An incorrect content-type was requested
 					_ => Err(warp::reject::custom(Error::InvalidType)),

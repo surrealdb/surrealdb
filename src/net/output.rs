@@ -10,7 +10,7 @@ pub enum Output {
 	Json(Vec<u8>), // JSON
 	Cbor(Vec<u8>), // CBOR
 	Pack(Vec<u8>), // MessagePack
-	Cork(Vec<u8>), // Full type serialization
+	Full(Vec<u8>), // Full type serialization
 }
 
 pub fn none() -> Output {
@@ -51,12 +51,12 @@ where
 	}
 }
 
-pub fn cork<T>(val: &T) -> Output
+pub fn full<T>(val: &T) -> Output
 where
 	T: Serialize,
 {
-	match serialize_internal(|| serde_pack::to_vec(val)) {
-		Ok(v) => Output::Cork(v),
+	match serialize_internal(|| bung::to_vec(val)) {
+		Ok(v) => Output::Full(v),
 		Err(_) => Output::Fail,
 	}
 }
@@ -88,9 +88,9 @@ impl warp::Reply for Output {
 				res.headers_mut().insert(CONTENT_TYPE, con);
 				res
 			}
-			Output::Cork(v) => {
+			Output::Full(v) => {
 				let mut res = warp::reply::Response::new(v.into());
-				let con = HeaderValue::from_static("application/cork");
+				let con = HeaderValue::from_static("application/bung");
 				res.headers_mut().insert(CONTENT_TYPE, con);
 				res
 			}

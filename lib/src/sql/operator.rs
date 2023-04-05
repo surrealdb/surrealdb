@@ -94,7 +94,7 @@ impl fmt::Display for Operator {
 			Self::Pow => "**",
 			Self::Inc => "+=",
 			Self::Dec => "-=",
-			Self::Ext => "+=?",
+			Self::Ext => "+?=",
 			Self::Equal => "=",
 			Self::Exact => "==",
 			Self::NotEqual => "!=",

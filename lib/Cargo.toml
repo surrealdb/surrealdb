@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9+20230402"
 rust-version = "1.65.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -12,7 +12,7 @@ homepage = "https://github.com/surrealdb/surrealdb"
 documentation = "https://docs.rs/surrealdb/"
 keywords = ["database", "embedded-database", "key-value", "key-value-store", "kv-store"]
 categories = ["database-implementations", "data-structures", "embedded"]
-license = "Apache-2.0"
+license-file = "../LICENSE"
 resolver = "2"
 
 [features]
@@ -24,7 +24,6 @@ kv-mem = ["dep:echodb"]
 kv-indxdb = ["dep:indxdb"]
 kv-rocksdb = ["dep:rocksdb"]
 kv-tikv = ["dep:tikv"]
-kv-postgres = ["sea-orm", "sea-orm?/sqlx-postgres"]
 kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb"]
 kv-fdb-5_2 = ["foundationdb/fdb-5_2", "kv-fdb"]
 kv-fdb-6_0 = ["foundationdb/fdb-6_0", "kv-fdb"]
@@ -35,10 +34,8 @@ kv-fdb-7_0 = ["foundationdb/fdb-7_0", "kv-fdb"]
 kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
-native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls", "sea-orm?/runtime-tokio-native-tls"]
-rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls", "sea-orm?/runtime-tokio-rustls"]
-sea-orm = ["dep:sea-orm"]
-
+native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
+rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls"]
 # Private features
 kv-fdb = ["foundationdb"]
 
@@ -46,7 +43,7 @@ kv-fdb = ["foundationdb"]
 rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "protocol-ws", "protocol-http",
-    "kv-mem", "kv-indxdb", "kv-rocksdb", "kv-tikv", "kv-fdb", "kv-postgres",
+    "kv-mem", "kv-indxdb", "kv-rocksdb",
     "rustls", "native-tls",
     "http", "scripting"
 ]
@@ -59,9 +56,10 @@ ascii = { version = "0.3.2", package = "any_ascii" }
 async-recursion = "1.0.4"
 bcrypt = "0.14.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
+bung = "0.1.0"
 channel = { version = "1.8.0", package = "async-channel" }
 chrono = { version = "0.4.24", features = ["serde"] }
-derive = { version = "0.5.0", package = "surrealdb-derive" }
+derive = { version = "0.7.0", package = "surrealdb-derive" }
 dmp = "0.1.3"
 echodb = { version = "0.4.0", optional = true }
 executor = { version = "1.5.0", package = "async-executor" }
@@ -77,7 +75,6 @@ js = { version = "0.1.7", package = "rquickjs", features = ["array-buffer", "bin
 lexicmp = "0.1.0"
 log = "0.4.17"
 md-5 = "0.10.5"
-msgpack = { version = "1.1.1", package = "rmp-serde" }
 nanoid = "0.4.0"
 native-tls = { version = "0.2.11", optional = true }
 nom = { version = "7.1.3", features = ["alloc"] }
@@ -89,7 +86,6 @@ reqwest = { version = "0.11.15", default-features = false, features = ["json", "
 rocksdb = { version = "0.20.1", optional = true }
 rustls = { version = "0.20.8", optional = true }
 scrypt = "0.11.0"
-sea-orm = { version = "0.11.1", optional = true, features = ["runtime-tokio", "macros", "debug-print"] }
 semver = { version = "1.0.17", features = ["serde"] }
 serde = { version = "1.0.158", features = ["derive"] }
 serde_json = "1.0.94"
@@ -108,7 +104,6 @@ url = "2.3.1"
 [dev-dependencies]
 env_logger = "0.10.0"
 temp-dir = "0.1.11"
-test-log = "0.2.11"
 time = { version = "0.3.20", features = ["serde"] }
 tokio = { version = "1.26.0", features = ["macros", "rt", "rt-multi-thread"] }
 
@@ -120,6 +115,6 @@ wasm-bindgen-futures = "0.4.34"
 ws_stream_wasm = "0.7.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1.26.0", default-features = false, features = ["io-util", "fs", "rt-multi-thread"] }
+tokio = { version = "1.26.0", default-features = false, features = ["io-util", "io-std", "fs", "rt-multi-thread"] }
 tokio-tungstenite = { version = "0.18.0", optional = true }
 uuid = { version = "1.3.0", features = ["serde", "v4", "v7"] }

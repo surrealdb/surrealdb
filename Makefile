@@ -10,7 +10,7 @@ setup:
 
 .PHONY: docs
 docs:
-	cargo doc --open --no-deps --package surrealdb --features rustls,protocol-ws,protocol-http,kv-mem,kv-indxdb,kv-rocksdb,kv-tikv,http,scripting
+	cargo doc --open --no-deps --package surrealdb --features rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-indxdb,kv-rocksdb,kv-tikv,http,scripting
 
 .PHONY: test
 test:
