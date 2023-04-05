@@ -31,12 +31,13 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
-#[cfg(debug_assertions)]
+// #[cfg(debug_assertions)]
 const LOG: &str = "surrealdb::txn";
 
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
 pub struct Transaction {
+	pub(super) id: String,
 	pub(super) inner: Inner,
 	pub(super) cache: Cache,
 }
@@ -87,8 +88,8 @@ impl Transaction {
 	/// calls to functions on this transaction will result
 	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Closed");
+		// #[cfg(debug_assertions)]
+		trace!(target: LOG, "Closed transaction {:?}", self.id);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -124,8 +125,8 @@ impl Transaction {
 	///
 	/// This reverses all changes made within the transaction.
 	pub async fn cancel(&mut self) -> Result<(), Error> {
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Cancel");
+		// #[cfg(debug_assertions)]
+		trace!(target: LOG, "Cancelled transaction {:?}", self.id);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -161,8 +162,8 @@ impl Transaction {
 	///
 	/// This attempts to commit all changes made within the transaction.
 	pub async fn commit(&mut self) -> Result<(), Error> {
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Commit");
+		// #[cfg(debug_assertions)]
+		trace!(target: LOG, "Committed transaction {:?}", self.id);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -200,8 +201,8 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Del {:?}", key);
+		// #[cfg(debug_assertions)]
+		trace!(target: LOG, "Del {:?} transaction {:?}", key, self.id);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -239,8 +240,8 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Exi {:?}", key);
+		// #[cfg(debug_assertions)]
+		trace!(target: LOG, "Exi {:?} transaction {:?}", key, self.id);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -278,8 +279,8 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Get {:?}", key);
+		// #[cfg(debug_assertions)]
+		trace!(target: LOG, "Get {:?} for transaction {:?}", key, self.id);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -318,8 +319,8 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Set {:?} => {:?}", key, val);
+		// #[cfg(debug_assertions)]
+		trace!(target: LOG, "Set {:?} => {:?} for transaction {:?}", key, val, self.id);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -358,8 +359,8 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Put {:?} => {:?}", key, val);
+		// #[cfg(debug_assertions)]
+		trace!(target: LOG, "Put {:?} => {:?} for transaction {:?}", key, val, self.id);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -399,8 +400,8 @@ impl Transaction {
 	where
 		K: Into<Key> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Scan {:?} - {:?}", rng.start, rng.end);
+		// #[cfg(debug_assertions)]
+		trace!(target: LOG, "Scan {:?} - {:?} for transaction {:?}", rng.start, rng.end, self.id);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -439,8 +440,15 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Putc {:?} if {:?} => {:?}", key, chk, val);
+		// #[cfg(debug_assertions)]
+		trace!(
+			target: LOG,
+			"Putc {:?} if {:?} => {:?} for transaction {:?}",
+			key,
+			chk,
+			val,
+			self.id
+		);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -479,8 +487,8 @@ impl Transaction {
 		K: Into<Key> + Debug,
 		V: Into<Val> + Debug,
 	{
-		#[cfg(debug_assertions)]
-		trace!(target: LOG, "Delc {:?} if {:?}", key, chk);
+		// #[cfg(debug_assertions)]
+		trace!(target: LOG, "Delc {:?} if {:?} for transaction {:?}", key, chk, self.id);
 		match self {
 			#[cfg(feature = "kv-mem")]
 			Transaction {
@@ -731,6 +739,7 @@ impl Transaction {
 
 	/// Retrieve all namespace definitions in a datastore.
 	pub async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
+		trace!("all_ns for transaction {:?}", self.id);
 		let key = crate::key::ns::prefix();
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -750,6 +759,7 @@ impl Transaction {
 
 	/// Retrieve all namespace login definitions for a specific namespace.
 	pub async fn all_nl(&mut self, ns: &str) -> Result<Arc<[DefineLoginStatement]>, Error> {
+		trace!("all_nl for transaction {:?}", self.id);
 		let key = crate::key::nl::prefix(ns);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -769,6 +779,7 @@ impl Transaction {
 
 	/// Retrieve all namespace token definitions for a specific namespace.
 	pub async fn all_nt(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
+		trace!("all_nt for transaction {:?}", self.id);
 		let key = crate::key::nt::prefix(ns);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -788,6 +799,7 @@ impl Transaction {
 
 	/// Retrieve all database definitions for a specific namespace.
 	pub async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
+		trace!("all_db for transaction {:?}", self.id);
 		let key = crate::key::db::prefix(ns);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -811,6 +823,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineLoginStatement]>, Error> {
+		trace!("all_dl for transaction {:?}", self.id);
 		let key = crate::key::dl::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -834,6 +847,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineTokenStatement]>, Error> {
+		trace!("all_dt for transaction {:?}", self.id);
 		let key = crate::key::dt::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -857,6 +871,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineFunctionStatement]>, Error> {
+		trace!("all_fc for transaction {:?}", self.id);
 		let key = crate::key::fc::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -880,6 +895,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineScopeStatement]>, Error> {
+		trace!("all_sc for transaction {:?}", self.id);
 		let key = crate::key::sc::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -904,6 +920,7 @@ impl Transaction {
 		db: &str,
 		sc: &str,
 	) -> Result<Arc<[DefineTokenStatement]>, Error> {
+		trace!("all_st for transaction {:?}", self.id);
 		let key = crate::key::st::prefix(ns, db, sc);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -927,6 +944,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineParamStatement]>, Error> {
+		trace!("all_pa for transaction {:?}", self.id);
 		let key = crate::key::pa::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -950,6 +968,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
+		trace!("all_tb for transaction {:?}", self.id);
 		let key = crate::key::tb::prefix(ns, db);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -974,6 +993,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
+		trace!("all_ev for transaction {:?}", self.id);
 		let key = crate::key::ev::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -998,6 +1018,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
+		trace!("all_fd for transaction {:?}", self.id);
 		let key = crate::key::fd::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -1022,6 +1043,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
+		trace!("all_ix for transaction {:?}", self.id);
 		let key = crate::key::ix::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -1046,6 +1068,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
+		trace!("all_ft for transaction {:?}", self.id);
 		let key = crate::key::ft::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -1070,6 +1093,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
+		trace!("all_lv for transaction {:?}", self.id);
 		let key = crate::key::lv::prefix(ns, db, tb);
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -1089,6 +1113,7 @@ impl Transaction {
 
 	/// Retrieve a specific namespace definition.
 	pub async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
+		trace!("get_ns for transaction {:?}", self.id);
 		let key = crate::key::ns::new(ns);
 		let val = self.get(key).await?.ok_or(Error::NsNotFound {
 			value: ns.to_owned(),
@@ -1098,6 +1123,7 @@ impl Transaction {
 
 	/// Retrieve a specific namespace login definition.
 	pub async fn get_nl(&mut self, ns: &str, nl: &str) -> Result<DefineLoginStatement, Error> {
+		trace!("get_nl for transaction {:?}", self.id);
 		let key = crate::key::nl::new(ns, nl);
 		let val = self.get(key).await?.ok_or(Error::NlNotFound {
 			value: nl.to_owned(),
@@ -1107,6 +1133,7 @@ impl Transaction {
 
 	/// Retrieve a specific namespace token definition.
 	pub async fn get_nt(&mut self, ns: &str, nt: &str) -> Result<DefineTokenStatement, Error> {
+		trace!("get_nt for transaction {:?}", self.id);
 		let key = crate::key::nt::new(ns, nt);
 		let val = self.get(key).await?.ok_or(Error::NtNotFound {
 			value: nt.to_owned(),
@@ -1116,6 +1143,7 @@ impl Transaction {
 
 	/// Retrieve a specific database definition.
 	pub async fn get_db(&mut self, ns: &str, db: &str) -> Result<DefineDatabaseStatement, Error> {
+		trace!("get_db for transaction {:?}", self.id);
 		let key = crate::key::db::new(ns, db);
 		let val = self.get(key).await?.ok_or(Error::DbNotFound {
 			value: db.to_owned(),
@@ -1130,6 +1158,7 @@ impl Transaction {
 		db: &str,
 		dl: &str,
 	) -> Result<DefineLoginStatement, Error> {
+		trace!("get_dl for transaction {:?}", self.id);
 		let key = crate::key::dl::new(ns, db, dl);
 		let val = self.get(key).await?.ok_or(Error::DlNotFound {
 			value: dl.to_owned(),
@@ -1144,6 +1173,7 @@ impl Transaction {
 		db: &str,
 		dt: &str,
 	) -> Result<DefineTokenStatement, Error> {
+		trace!("get_dt for transaction {:?}", self.id);
 		let key = crate::key::dt::new(ns, db, dt);
 		let val = self.get(key).await?.ok_or(Error::DtNotFound {
 			value: dt.to_owned(),
@@ -1158,6 +1188,7 @@ impl Transaction {
 		db: &str,
 		sc: &str,
 	) -> Result<DefineScopeStatement, Error> {
+		trace!("get_sc for transaction {:?}", self.id);
 		let key = crate::key::sc::new(ns, db, sc);
 		let val = self.get(key).await?.ok_or(Error::ScNotFound {
 			value: sc.to_owned(),
@@ -1173,6 +1204,7 @@ impl Transaction {
 		sc: &str,
 		st: &str,
 	) -> Result<DefineTokenStatement, Error> {
+		trace!("get_st for transaction {:?}", self.id);
 		let key = crate::key::st::new(ns, db, sc, st);
 		let val = self.get(key).await?.ok_or(Error::StNotFound {
 			value: st.to_owned(),
@@ -1187,6 +1219,7 @@ impl Transaction {
 		db: &str,
 		fc: &str,
 	) -> Result<DefineFunctionStatement, Error> {
+		trace!("get_fc for transaction {:?}", self.id);
 		let key = crate::key::fc::new(ns, db, fc);
 		let val = self.get(key).await?.ok_or(Error::FcNotFound {
 			value: fc.to_owned(),
@@ -1201,6 +1234,7 @@ impl Transaction {
 		db: &str,
 		pa: &str,
 	) -> Result<DefineParamStatement, Error> {
+		trace!("get_pa for transaction {:?}", self.id);
 		let key = crate::key::pa::new(ns, db, pa);
 		let val = self.get(key).await?.ok_or(Error::PaNotFound {
 			value: pa.to_owned(),
@@ -1215,6 +1249,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<DefineTableStatement, Error> {
+		trace!("get_tb for transaction {:?}", self.id);
 		let key = crate::key::tb::new(ns, db, tb);
 		let val = self.get(key).await?.ok_or(Error::TbNotFound {
 			value: tb.to_owned(),
@@ -1228,6 +1263,7 @@ impl Transaction {
 		ns: &str,
 		strict: bool,
 	) -> Result<DefineNamespaceStatement, Error> {
+		trace!("add_ns for transaction {:?}", self.id);
 		match self.get_ns(ns).await {
 			Err(Error::NsNotFound {
 				value,
@@ -1256,6 +1292,7 @@ impl Transaction {
 		db: &str,
 		strict: bool,
 	) -> Result<DefineDatabaseStatement, Error> {
+		trace!("add_db for transaction {:?}", self.id);
 		match self.get_db(ns, db).await {
 			Err(Error::DbNotFound {
 				value,
@@ -1285,6 +1322,7 @@ impl Transaction {
 		sc: &str,
 		strict: bool,
 	) -> Result<DefineScopeStatement, Error> {
+		trace!("add_sc for transaction {:?}", self.id);
 		match self.get_sc(ns, db, sc).await {
 			Err(Error::ScNotFound {
 				value,
@@ -1315,6 +1353,7 @@ impl Transaction {
 		tb: &str,
 		strict: bool,
 	) -> Result<DefineTableStatement, Error> {
+		trace!("add_tb for transaction {:?}", self.id);
 		match self.get_tb(ns, db, tb).await {
 			Err(Error::TbNotFound {
 				value,
@@ -1343,6 +1382,7 @@ impl Transaction {
 		&mut self,
 		ns: &str,
 	) -> Result<Arc<DefineNamespaceStatement>, Error> {
+		trace!("get_and_cache_ns for transaction {:?}", self.id);
 		let key = crate::key::ns::new(ns).encode()?;
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -1366,6 +1406,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
+		trace!("get_and_cache_db for transaction {:?}", self.id);
 		let key = crate::key::db::new(ns, db).encode()?;
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -1390,6 +1431,7 @@ impl Transaction {
 		db: &str,
 		tb: &str,
 	) -> Result<Arc<DefineTableStatement>, Error> {
+		trace!("get_and_cache_tb for transaction {:?}", self.id);
 		let key = crate::key::tb::new(ns, db, tb).encode()?;
 		match self.cache.exi(&key) {
 			true => match self.cache.get(&key) {
@@ -1413,6 +1455,7 @@ impl Transaction {
 		ns: &str,
 		strict: bool,
 	) -> Result<Arc<DefineNamespaceStatement>, Error> {
+		trace!("add_ns for transaction {:?}", self.id);
 		match self.get_and_cache_ns(ns).await {
 			Err(Error::NsNotFound {
 				value,
@@ -1441,6 +1484,7 @@ impl Transaction {
 		db: &str,
 		strict: bool,
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
+		trace!("add_and_cache_db for transaction {:?}", self.id);
 		match self.get_and_cache_db(ns, db).await {
 			Err(Error::DbNotFound {
 				value,
@@ -1470,6 +1514,7 @@ impl Transaction {
 		tb: &str,
 		strict: bool,
 	) -> Result<Arc<DefineTableStatement>, Error> {
+		trace!("add_and_cache_tb for transaction {:?}", self.id);
 		match self.get_and_cache_tb(ns, db, tb).await {
 			Err(Error::TbNotFound {
 				value,
@@ -1501,6 +1546,7 @@ impl Transaction {
 		tb: &str,
 		strict: bool,
 	) -> Result<(), Error> {
+		trace!("check_ns_db_tb for transaction {:?}", self.id);
 		match strict {
 			// Strict mode is disabled
 			false => Ok(()),
@@ -1520,6 +1566,7 @@ impl Transaction {
 
 	/// Writes the full database contents as binary SQL.
 	pub async fn export(&mut self, ns: &str, db: &str, chn: Sender<Vec<u8>>) -> Result<(), Error> {
+		trace!("export for transaction {:?}", self.id);
 		// Output OPTIONS
 		{
 			chn.send(bytes!("-- ------------------------------")).await?;

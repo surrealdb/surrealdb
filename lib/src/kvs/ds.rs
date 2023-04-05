@@ -16,6 +16,7 @@ use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
 use tracing::instrument;
+use uuid::Uuid;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -195,6 +196,7 @@ impl Datastore {
 			Inner::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
+					id: Uuid::new_v4().to_string(),
 					inner: super::tx::Inner::Mem(tx),
 					cache: super::cache::Cache::default(),
 				})
@@ -203,6 +205,7 @@ impl Datastore {
 			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
+					id: Uuid::new_v4().to_string(),
 					inner: super::tx::Inner::RocksDB(tx),
 					cache: super::cache::Cache::default(),
 				})
@@ -211,14 +214,17 @@ impl Datastore {
 			Inner::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
+					id: Uuid::new_v4().to_string(),
 					inner: super::tx::Inner::IndxDB(tx),
 					cache: super::cache::Cache::default(),
 				})
 			}
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(v) => {
+				trace!("Started a TiKV transaction");
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
+					id: Uuid::new_v4().to_string(),
 					inner: super::tx::Inner::TiKV(tx),
 					cache: super::cache::Cache::default(),
 				})
@@ -227,6 +233,7 @@ impl Datastore {
 			Inner::FDB(v) => {
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
+					id: Uuid::new_v4().to_string(),
 					inner: super::tx::Inner::FDB(tx),
 					cache: super::cache::Cache::default(),
 				})
@@ -359,6 +366,7 @@ impl Datastore {
 		vars: Variables,
 		strict: bool,
 	) -> Result<Value, Error> {
+		trace!("Starting transaction for val {val:?}");
 		// Start a new transaction
 		let txn = self.transaction(val.writeable(), false).await?;
 		//
@@ -378,8 +386,10 @@ impl Datastore {
 		opt.db = sess.db();
 		// Set strict config
 		opt.strict = strict;
+		trace!("Computing val {val:?}");
 		// Compute the value
 		let res = val.compute(&ctx, &opt, &txn, None).await?;
+		trace!("Finished computing val {val:?}, now committing={:?}", val.writeable());
 		// Store any data
 		match val.writeable() {
 			true => txn.lock().await.commit().await?,
