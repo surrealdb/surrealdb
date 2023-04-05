@@ -6,6 +6,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
+use crate::sql::bytes::Bytes;
 use crate::sql::common::commas;
 use crate::sql::constant::{constant, Constant};
 use crate::sql::datetime::{datetime, Datetime};
@@ -99,6 +100,7 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Deserialize, Store, Hash)]
+#[format(Named)]
 pub enum Value {
 	#[default]
 	None,
@@ -113,7 +115,7 @@ pub enum Value {
 	Array(Array),
 	Object(Object),
 	Geometry(Geometry),
-	Bytes(Vec<u8>),
+	Bytes(Bytes),
 	// ---
 	Param(Param),
 	Idiom(Idiom),
@@ -1618,7 +1620,6 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(future, Value::from),
 			map(unique, Value::from),
 			map(number, Value::from),
-			map(strand, Value::from),
 			map(object, Value::from),
 			map(array, Value::from),
 			map(block, Value::from),
@@ -1629,6 +1630,7 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(range, Value::from),
 			map(thing, Value::from),
 			map(table, Value::from),
+			map(strand, Value::from),
 		)),
 	))(i)
 }
@@ -1862,13 +1864,13 @@ mod tests {
 
 	#[test]
 	fn check_serialize() {
-		assert_eq!(1, Value::None.to_vec().len());
-		assert_eq!(1, Value::Null.to_vec().len());
-		assert_eq!(1, Value::True.to_vec().len());
-		assert_eq!(1, Value::False.to_vec().len());
-		assert_eq!(7, Value::from("test").to_vec().len());
-		assert_eq!(17, Value::parse("{ hello: 'world' }").to_vec().len());
-		assert_eq!(24, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
+		assert_eq!(5, Value::None.to_vec().len());
+		assert_eq!(5, Value::Null.to_vec().len());
+		assert_eq!(5, Value::True.to_vec().len());
+		assert_eq!(6, Value::False.to_vec().len());
+		assert_eq!(13, Value::from("test").to_vec().len());
+		assert_eq!(29, Value::parse("{ hello: 'world' }").to_vec().len());
+		assert_eq!(43, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
 	}
 
 	#[test]

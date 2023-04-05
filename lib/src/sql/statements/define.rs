@@ -41,6 +41,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
@@ -118,6 +119,7 @@ pub fn define(i: &str) -> IResult<&str, DefineStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineNamespaceStatement {
 	pub name: Ident,
 }
@@ -167,6 +169,7 @@ fn namespace(i: &str) -> IResult<&str, DefineNamespaceStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineDatabaseStatement {
 	pub name: Ident,
 }
@@ -221,6 +224,7 @@ fn database(i: &str) -> IResult<&str, DefineDatabaseStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineFunctionStatement {
 	pub name: Ident,
 	pub args: Vec<(Ident, Kind)>,
@@ -305,6 +309,7 @@ fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineLoginStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -428,6 +433,7 @@ fn login_hash(i: &str) -> IResult<&str, DefineLoginOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineTokenStatement {
 	pub name: Ident,
 	pub base: Base,
@@ -547,6 +553,7 @@ fn token(i: &str) -> IResult<&str, DefineTokenStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineScopeStatement {
 	pub name: Ident,
 	pub code: String,
@@ -669,6 +676,7 @@ fn scope_signin(i: &str) -> IResult<&str, DefineScopeOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineParamStatement {
 	pub name: Ident,
 	pub value: Value,
@@ -731,6 +739,7 @@ fn param(i: &str) -> IResult<&str, DefineParamStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineTableStatement {
 	pub name: Ident,
 	pub drop: bool,
@@ -915,6 +924,7 @@ fn table_permissions(i: &str) -> IResult<&str, DefineTableOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineEventStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -997,6 +1007,7 @@ fn event(i: &str) -> IResult<&str, DefineEventStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineFieldStatement {
 	pub name: Idiom,
 	pub what: Ident,
@@ -1160,6 +1171,7 @@ fn field_permissions(i: &str) -> IResult<&str, DefineFieldOption> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+#[format(Named)]
 pub struct DefineIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
@@ -1252,4 +1264,18 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 			uniq: uniq.is_some(),
 		},
 	))
+}
+
+#[cfg(test)]
+mod tests {
+
+	use super::*;
+
+	#[test]
+	fn check_define_serialize() {
+		let stm = DefineStatement::Namespace(DefineNamespaceStatement {
+			name: Ident::from("test"),
+		});
+		assert_eq!(22, stm.to_vec().len());
+	}
 }
