@@ -1,5 +1,5 @@
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::BTree;
+use crate::idx::btree::{BTree, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::kvsim::KVSimulator;
 use crate::idx::{BaseStateKey, IndexId, DOC_LENGTHS_DOMAIN};
@@ -51,8 +51,8 @@ impl DocLengths {
 		self.updated = true;
 	}
 
-	pub(super) fn count(&self, kv: &mut KVSimulator) -> usize {
-		self.state.btree.count::<TrieKeys>(kv)
+	pub(super) fn statistics(&self, kv: &mut KVSimulator) -> Statistics {
+		self.state.btree.statistics::<TrieKeys>(kv)
 	}
 
 	pub(super) fn finish(self, kv: &mut KVSimulator) {
@@ -75,7 +75,7 @@ mod tests {
 
 		// Check empty state
 		let l = DocLengths::new(&mut kv, 0, BTREE_ORDER);
-		assert_eq!(l.count(&mut kv), 0);
+		assert_eq!(l.statistics(&mut kv).keys_count, 0);
 		let dl = l.get_doc_length(&mut kv, 99);
 		l.finish(&mut kv);
 		assert_eq!(dl, None);
@@ -83,7 +83,7 @@ mod tests {
 		// Set a doc length
 		let mut l = DocLengths::new(&mut kv, 0, BTREE_ORDER);
 		l.set_doc_length(&mut kv, 99, 199);
-		assert_eq!(l.count(&mut kv), 1);
+		assert_eq!(l.statistics(&mut kv).keys_count, 1);
 		let dl = l.get_doc_length(&mut kv, 99);
 		l.finish(&mut kv);
 		assert_eq!(dl, Some(199));
@@ -91,7 +91,7 @@ mod tests {
 		// Update doc length
 		let mut l = DocLengths::new(&mut kv, 0, BTREE_ORDER);
 		l.set_doc_length(&mut kv, 99, 299);
-		assert_eq!(l.count(&mut kv), 1);
+		assert_eq!(l.statistics(&mut kv).keys_count, 1);
 		let dl = l.get_doc_length(&mut kv, 99);
 		l.finish(&mut kv);
 		assert_eq!(dl, Some(299));

@@ -23,6 +23,7 @@ struct FtIndex {
 	index_id: IndexId,
 	average_doc_length: f32,
 	bm25: Bm25Params,
+	btree_default_order: usize,
 }
 
 struct Bm25Params {
@@ -48,15 +49,16 @@ struct State {
 type Score = f32;
 
 impl FtIndex {
-	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId) -> Self {
+	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, btree_default_order: usize) -> Self {
 		let state_key = BaseStateKey::new(INDEX_DOMAIN, index_id).into();
-		let state = kv.get(&state_key).unwrap_or_else(State::default);
+		let state = kv.get(&state_key).unwrap_or_default();
 		let mut index = Self {
 			state,
 			state_key,
 			index_id,
 			average_doc_length: 0.0,
 			bm25: Bm25Params::default(),
+			btree_default_order,
 		};
 		index.update_average_doc_length();
 		index
@@ -71,18 +73,34 @@ impl FtIndex {
 		}
 	}
 
+	fn doc_ids(&self, kv: &mut KVSimulator) -> DocIds {
+		DocIds::new(kv, self.index_id, self.btree_default_order)
+	}
+
+	fn terms(&self, kv: &mut KVSimulator) -> Terms {
+		Terms::new(kv, self.index_id, self.btree_default_order)
+	}
+
+	fn doc_lengths(&self, kv: &mut KVSimulator) -> DocLengths {
+		DocLengths::new(kv, self.index_id, self.btree_default_order)
+	}
+
+	fn postings(&self, kv: &mut KVSimulator) -> Postings {
+		Postings::new(kv, self.index_id, self.btree_default_order)
+	}
+
 	fn add_document(&mut self, kv: &mut KVSimulator, doc_key: &str, field_content: &str) {
 		// Resolve the doc_id
-		let mut d = DocIds::new(kv, self.index_id, 100);
+		let mut d = self.doc_ids(kv);
 		let doc_id = d.resolve_doc_id(kv, doc_key);
 
 		// Extract the doc_lengths, terms en frequencies
-		let mut t: Terms = Terms::new(kv, self.index_id, 100);
+		let mut t = self.terms(kv);
 		let (doc_length, terms_and_frequencies) =
 			Self::extract_sorted_terms_with_frequencies(field_content);
 
 		// Set the doc length
-		let mut l = DocLengths::new(kv, self.index_id, 100);
+		let mut l = self.doc_lengths(kv);
 		l.set_doc_length(kv, doc_id, doc_length);
 
 		// Update the index state
@@ -92,7 +110,7 @@ impl FtIndex {
 
 		// Set the terms postings
 		let terms = t.resolve_terms(kv, terms_and_frequencies);
-		let mut p = Postings::new(kv, self.index_id, 100);
+		let mut p = self.postings(kv);
 		for (term_id, term_freq) in terms {
 			p.update_posting(kv, term_id, doc_id, term_freq);
 		}
@@ -164,15 +182,16 @@ impl FtIndex {
 
 	fn search(&self, kv: &mut KVSimulator, term: &str) -> Vec<(String, Score)> {
 		let mut res = Vec::new();
-		let t: Terms = Terms::new(kv, 0, 100);
+		let t = self.terms(kv);
 		if let Some(term_id) = t.find_term(kv, term) {
-			let p = Postings::new(kv, self.index_id, 100);
+			let p = self.postings(kv);
 			let postings = p.get_postings(kv, term_id);
-			println!("Postings term: {} {:?}", term, postings);
+			t.debug(kv);
+			p.debug(kv);
 			if !postings.is_empty() {
 				let term_doc_count = postings.len() as f32;
-				let l = DocLengths::new(kv, self.index_id, 100);
-				let d = DocIds::new(kv, self.index_id, 100);
+				let l = self.doc_lengths(kv);
+				let d = self.doc_ids(kv);
 				for (doc_id, term_freq) in postings {
 					if let Some(doc_key) = d.get_doc_key(kv, doc_id) {
 						let doc_length = l.get_doc_length(kv, doc_id).unwrap_or(0);
@@ -194,21 +213,23 @@ impl FtIndex {
 mod tests {
 	use crate::idx::ft::FtIndex;
 	use crate::idx::kvsim::KVSimulator;
+	use test_log::test;
 
 	#[test]
 	fn test_ft_index() {
 		let mut kv = KVSimulator::default();
+		let default_btree_order = 200;
 
 		{
 			// Add one document
-			let mut fti = FtIndex::new(&mut kv, 0);
+			let mut fti = FtIndex::new(&mut kv, 0, default_btree_order);
 			fti.add_document(&mut kv, "doc1", "hello the world");
 			assert_eq!(fti.average_doc_length, 3.0);
 		}
 
 		{
 			// Add two documents
-			let mut fti = FtIndex::new(&mut kv, 0);
+			let mut fti = FtIndex::new(&mut kv, 0, default_btree_order);
 			fti.add_document(&mut kv, "doc2", "a yellow hello");
 			assert_eq!(fti.average_doc_length, 3.0);
 			fti.add_document(&mut kv, "doc3", "foo bar");
@@ -217,7 +238,7 @@ mod tests {
 
 		{
 			// Search & score
-			let fti = FtIndex::new(&mut kv, 0);
+			let fti = FtIndex::new(&mut kv, 0, default_btree_order);
 			assert_eq!(
 				fti.search(&mut kv, "hello"),
 				vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]
@@ -233,8 +254,9 @@ mod tests {
 	#[test]
 	fn test_ft_index_bm_25() {
 		let mut kv = KVSimulator::default();
+		let default_btree_order = 75;
 		{
-			let mut fti = FtIndex::new(&mut kv, 0);
+			let mut fti = FtIndex::new(&mut kv, 0, default_btree_order);
 			fti.add_document(&mut kv, "doc1", "the quick brown fox jumped over the lazy dog");
 			fti.add_document(&mut kv, "doc2", "the fast fox jumped over the lazy dog");
 			fti.add_document(&mut kv, "doc3", "the dog sat there and did nothing");
@@ -242,7 +264,7 @@ mod tests {
 		}
 
 		{
-			let fti = FtIndex::new(&mut kv, 0);
+			let fti = FtIndex::new(&mut kv, 0, default_btree_order);
 			assert_eq!(
 				fti.search(&mut kv, "the"),
 				vec![
@@ -259,6 +281,18 @@ mod tests {
 					("doc2".to_string(), 0.0),
 					("doc3".to_string(), 0.0)
 				]
+			);
+			assert_eq!(
+				fti.search(&mut kv, "fox"),
+				vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0),]
+			);
+			assert_eq!(
+				fti.search(&mut kv, "over"),
+				vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0),]
+			);
+			assert_eq!(
+				fti.search(&mut kv, "lazy"),
+				vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0),]
 			);
 			assert_eq!(
 				fti.search(&mut kv, "jumped"),

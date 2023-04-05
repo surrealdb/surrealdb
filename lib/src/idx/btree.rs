@@ -5,6 +5,7 @@ use crate::kvs::Key;
 use derive::Key;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::fmt::Debug;
 
 pub(super) type NodeId = u64;
@@ -24,6 +25,14 @@ pub(super) struct BTree {
 	order: usize,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct Statistics {
+	pub(super) keys_count: usize,
+	pub(super) max_depth: usize,
+	pub(super) nodes_count: usize,
+	pub(super) total_size: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,7 +86,7 @@ impl BTree {
 
 	pub(super) fn search<BK>(&self, kv: &mut KVSimulator, searched_key: &Key) -> Option<u64>
 	where
-		BK: BKeys + Serialize + DeserializeOwned + Debug,
+		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		if let Some(root_id) = &self.root {
 			self.recursive_search::<BK>(kv, *root_id, searched_key)
@@ -93,7 +102,7 @@ impl BTree {
 		searched_key: &Key,
 	) -> Option<Payload>
 	where
-		BK: BKeys + Serialize + DeserializeOwned + Debug,
+		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
 		if let Some(value) = node.keys().get(searched_key) {
@@ -113,7 +122,7 @@ impl BTree {
 		prefix_key: &Key,
 	) -> Vec<(Key, Payload)>
 	where
-		BK: BKeys + Serialize + DeserializeOwned + Debug,
+		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		if let Some(root_id) = &self.root {
 			let mut res = Vec::new();
@@ -131,7 +140,7 @@ impl BTree {
 		prefix_key: &Key,
 		res: &mut Vec<(Key, Payload)>,
 	) where
-		BK: BKeys + Serialize + DeserializeOwned + Debug,
+		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		let previous_size = res.len();
 		let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
@@ -148,10 +157,10 @@ impl BTree {
 
 	pub(super) fn insert<BK>(&mut self, kv: &mut KVSimulator, key: Key, payload: Payload)
 	where
-		BK: BKeys + Serialize + DeserializeOwned + Default + Debug,
+		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
 		if let Some(root_id) = self.root {
-			let root = StoredNode::read(kv, self.new_node_key(root_id));
+			let root = StoredNode::<BK>::read(kv, self.new_node_key(root_id));
 			if root.is_full(self.order * 2) {
 				let new_root_id = self.new_node_id();
 				let new_root_key = self.new_node_key(new_root_id);
@@ -167,7 +176,7 @@ impl BTree {
 			let new_root_id = self.new_node_id();
 			let new_root_node = Node::Leaf(BK::with_key_val(key, payload));
 			self.root = Some(new_root_id);
-			StoredNode::write(kv, self.new_node_key(new_root_id).into(), new_root_node);
+			StoredNode::<BK>::write(kv, self.new_node_key(new_root_id).into(), new_root_node);
 		}
 	}
 
@@ -178,18 +187,22 @@ impl BTree {
 		key: Key,
 		payload: Payload,
 	) where
-		BK: BKeys + Serialize + DeserializeOwned + Debug,
+		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		match &mut node.node {
 			Node::Leaf(keys) => {
-				debug!("Insert Node::Leaf {}=>{}", String::from_utf8_lossy(&key), payload,);
 				keys.insert(key, payload);
-				StoredNode::write(kv, node.key, node.node);
+				StoredNode::<BK>::write(kv, node.key, node.node);
 			}
 			Node::Internal(keys, children) => {
+				if keys.get(&key).is_some() {
+					keys.insert(key, payload);
+					StoredNode::<BK>::write(kv, node.key, node.node);
+					return;
+				}
 				let child_idx = keys.get_child_idx(&key);
 				let child_key = self.new_node_key(children[child_idx]);
-				let child_node = StoredNode::read(kv, child_key);
+				let child_node = StoredNode::<BK>::read(kv, child_key);
 				let child_node = if child_node.is_full(self.order * 2) {
 					let split_result =
 						self.split_child::<BK>(kv, node.key, node.node, child_idx, child_node);
@@ -215,7 +228,7 @@ impl BTree {
 		child_node: StoredNode<BK>,
 	) -> SplitResult<BK>
 	where
-		BK: BKeys + Serialize + DeserializeOwned + Debug,
+		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		let (left_node, right_node, median_key, median_payload) = match child_node.node {
 			Node::Internal(keys, children) => self.split_internal_node::<BK>(keys, children),
@@ -287,51 +300,62 @@ impl BTree {
 		}
 	}
 
-	pub(super) fn debug<BK>(&self, kv: &mut KVSimulator)
+	pub(super) fn debug<F, BK>(&self, kv: &mut KVSimulator, to_string: F)
 	where
-		BK: BKeys + Serialize + DeserializeOwned + Debug,
+		F: Fn(Key) -> String,
+		BK: BKeys + Serialize + DeserializeOwned,
 	{
-		if let Some(root_id) = &self.root {
-			self.recursive_debug::<BK>(kv, 0, *root_id);
+		let mut node_queue = VecDeque::new();
+		if let Some(node_id) = self.root {
+			node_queue.push_front((node_id, 0));
 		}
-	}
-
-	fn recursive_debug<BK>(&self, kv: &mut KVSimulator, depth: usize, node_id: NodeId)
-	where
-		BK: BKeys + Serialize + DeserializeOwned + Debug,
-	{
-		let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
-		if let Node::Internal(_, children) = node {
-			let depth = depth + 1;
-			for child_id in &children {
-				self.recursive_debug::<BK>(kv, depth, *child_id);
+		while let Some((node_id, depth)) = node_queue.pop_front() {
+			let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
+			debug!("Node: {} - depth: {} -  keys: ", node_id, depth);
+			node.keys().debug(|k| to_string(k));
+			if let Node::Internal(_, children) = node {
+				debug!("children: {:?}", children);
+				let depth = depth + 1;
+				for child_id in &children {
+					node_queue.push_front((*child_id, depth));
+				}
 			}
 		}
 	}
 
-	pub(super) fn count<BK>(&self, kv: &mut KVSimulator) -> usize
+	pub(super) fn statistics<BK>(&self, kv: &mut KVSimulator) -> Statistics
 	where
-		BK: BKeys + Serialize + DeserializeOwned + Debug,
+		BK: BKeys + Serialize + DeserializeOwned,
 	{
+		let mut stats = Statistics::default();
 		if let Some(root_id) = &self.root {
-			self.recursive_count::<BK>(kv, *root_id)
-		} else {
-			0
+			self.recursive_stats::<BK>(kv, 1, *root_id, &mut stats);
 		}
+		stats
 	}
 
-	fn recursive_count<BK>(&self, kv: &mut KVSimulator, node_id: NodeId) -> usize
-	where
-		BK: BKeys + Serialize + DeserializeOwned + Debug,
+	fn recursive_stats<BK>(
+		&self,
+		kv: &mut KVSimulator,
+		mut depth: usize,
+		node_id: NodeId,
+		stats: &mut Statistics,
+	) where
+		BK: BKeys + Serialize + DeserializeOwned,
 	{
-		let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
-		let mut size = node.keys().len();
-		if let Node::Internal(_, children) = node {
+		let stored = StoredNode::<BK>::read(kv, self.new_node_key(node_id));
+		stats.keys_count += stored.node.keys().len();
+		if depth > stats.max_depth {
+			stats.max_depth = depth;
+		}
+		stats.nodes_count += 1;
+		stats.total_size += stored.size;
+		if let Node::Internal(_, children) = stored.node {
+			depth += 1;
 			for child_id in &children {
-				size += self.recursive_count::<BK>(kv, *child_id);
+				self.recursive_stats::<BK>(kv, depth, *child_id, stats);
 			}
 		};
-		size
 	}
 }
 
@@ -346,12 +370,11 @@ where
 
 impl<BK> StoredNode<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned + Debug,
+	BK: BKeys + Serialize + DeserializeOwned,
 {
 	fn read(kv: &mut KVSimulator, node_key: NodeKey) -> Self {
 		let key = node_key.into();
 		let (size, node): (_, Node<BK>) = kv.get_with_size(&key).unwrap();
-		debug!("read {:?} - size: {} - Keys: {:?}", key, size, node.keys());
 		Self {
 			key,
 			size,
@@ -362,7 +385,6 @@ where
 	fn write(kv: &mut KVSimulator, key: Key, mut node: Node<BK>) -> Self {
 		node.keys_mut().compile();
 		let size = kv.set(key.clone(), &node);
-		debug!("Write {:?} - size: {} - keys: {:?}", key, size, node.keys());
 		Self {
 			key,
 			size,
@@ -378,15 +400,13 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::btree::{BTree, Node, Payload};
+	use crate::idx::btree::{BTree, Node, Payload, Statistics};
 	use crate::idx::kvsim::KVSimulator;
 	use crate::kvs::Key;
-	use radix_trie::{Trie, TrieCommon};
 	use rand::prelude::SliceRandom;
 	use rand::thread_rng;
 	use serde::de::DeserializeOwned;
 	use serde::Serialize;
-	use std::fmt::Debug;
 	use test_log::test;
 
 	#[test]
@@ -422,38 +442,15 @@ mod tests {
 		sample_provider: F,
 	) where
 		F: Fn(usize) -> (Key, Payload),
-		BK: BKeys + Serialize + DeserializeOwned + Default + Debug,
+		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
-		// This map stores the keys and the last inserted payload.
-		// (the same key may be inserted several time with different payloads).
-		let mut samples_map: Trie<Key, Payload> = Trie::new();
-
-		// Insert the samples
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
-			samples_map.insert(key.clone(), payload);
-			debug!("Insert {}=>{}", String::from_utf8_lossy(&key), payload);
+			// Insert the sample
 			t.insert::<BK>(kv, key.clone(), payload);
-			debug!("Check immediate {}=>{}", String::from_utf8_lossy(&key), payload);
-			assert_eq!(
-				t.search::<BK>(kv, &key),
-				Some(payload),
-				"Immediate Lookup key {}",
-				String::from_utf8_lossy(&key)
-			);
+			// Check we can find it
+			assert_eq!(t.search::<BK>(kv, &key), Some(payload));
 		}
-		// Lookup and check the samples
-		for (key, payload) in samples_map.iter() {
-			debug!("Check late {}=>{}", String::from_utf8_lossy(key), payload);
-			assert_eq!(
-				t.search::<BK>(kv, key),
-				Some(*payload),
-				"Late Lookup key {}",
-				String::from_utf8_lossy(key)
-			);
-		}
-
-		assert_eq!(t.count::<TrieKeys>(kv), samples_map.len());
 	}
 
 	fn get_key_value(idx: usize) -> (Key, Payload) {
@@ -465,8 +462,16 @@ mod tests {
 		let mut kv = KVSimulator::new(None, 0);
 		let mut t = BTree::new(1u8, 2u64, 75);
 		insertions_test::<_, FstKeys>(&mut kv, &mut t, 100, get_key_value);
-		assert_eq!(t.count::<FstKeys>(&mut kv), 100);
-		t.debug::<FstKeys>(&mut kv);
+		assert_eq!(
+			t.statistics::<FstKeys>(&mut kv),
+			Statistics {
+				keys_count: 100,
+				max_depth: 3,
+				nodes_count: 10,
+				total_size: 1042,
+			}
+		);
+		t.debug::<_, FstKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
 		kv.print_stats();
 	}
 
@@ -475,8 +480,16 @@ mod tests {
 		let mut kv = KVSimulator::new(None, 0);
 		let mut t = BTree::new(1u8, 2u64, 75);
 		insertions_test::<_, TrieKeys>(&mut kv, &mut t, 100, get_key_value);
-		assert_eq!(t.count::<TrieKeys>(&mut kv), 100);
-		t.debug::<TrieKeys>(&mut kv);
+		assert_eq!(
+			t.statistics::<TrieKeys>(&mut kv),
+			Statistics {
+				keys_count: 100,
+				max_depth: 3,
+				nodes_count: 16,
+				total_size: 1615,
+			}
+		);
+		t.debug::<_, TrieKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
 		kv.print_stats();
 	}
 
@@ -488,8 +501,9 @@ mod tests {
 		let mut rng = thread_rng();
 		samples.shuffle(&mut rng);
 		insertions_test::<_, FstKeys>(&mut kv, &mut t, 100, |i| get_key_value(samples[i]));
-		assert_eq!(t.count::<FstKeys>(&mut kv), 100);
-		t.debug::<FstKeys>(&mut kv);
+		let s = t.statistics::<FstKeys>(&mut kv);
+		assert_eq!(s.keys_count, 100);
+		t.debug::<_, FstKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
 		kv.print_stats();
 	}
 
@@ -501,8 +515,9 @@ mod tests {
 		let mut rng = thread_rng();
 		samples.shuffle(&mut rng);
 		insertions_test::<_, TrieKeys>(&mut kv, &mut t, 100, |i| get_key_value(samples[i]));
-		assert_eq!(t.count::<TrieKeys>(&mut kv), 100);
-		t.debug::<TrieKeys>(&mut kv);
+		let s = t.statistics::<TrieKeys>(&mut kv);
+		assert_eq!(s.keys_count, 100);
+		t.debug::<_, TrieKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
 		kv.print_stats();
 	}
 
@@ -511,7 +526,15 @@ mod tests {
 		let mut kv = KVSimulator::new(None, 0);
 		let mut t = BTree::new(1u8, 2u64, 500);
 		insertions_test::<_, FstKeys>(&mut kv, &mut t, 10000, get_key_value);
-		assert_eq!(t.count::<FstKeys>(&mut kv), 10000);
+		assert_eq!(
+			t.statistics::<FstKeys>(&mut kv),
+			Statistics {
+				keys_count: 10000,
+				max_depth: 3,
+				nodes_count: 100,
+				total_size: 54548,
+			}
+		);
 		kv.print_stats();
 	}
 
@@ -520,22 +543,90 @@ mod tests {
 		let mut kv = KVSimulator::new(None, 0);
 		let mut t = BTree::new(1u8, 2u64, 500);
 		insertions_test::<_, TrieKeys>(&mut kv, &mut t, 10000, get_key_value);
-		assert_eq!(t.count::<TrieKeys>(&mut kv), 10000);
+		assert_eq!(
+			t.statistics::<TrieKeys>(&mut kv),
+			Statistics {
+				keys_count: 10000,
+				max_depth: 3,
+				nodes_count: 135,
+				total_size: 74107,
+			}
+		);
 		kv.print_stats();
 	}
 
-	#[test]
-	fn test_btree_trie_keys_read_world_insertions() {
-		let terms = [
-			"the", "quick", "brown", "fox", "jumped", "over", "the", "lazy", "dog", "the", "fast",
-			"fox", "jumped", "over", "the", "lazy", "dog", "the", "dog", "sat", "there", "and",
-			"did", "nothing", "the", "other", "animals", "sat", "there", "watching",
-		];
+	const REAL_WORLD_TERMS: [&str; 30] = [
+		"the", "quick", "brown", "fox", "jumped", "over", "the", "lazy", "dog", "the", "fast",
+		"fox", "jumped", "over", "the", "lazy", "dog", "the", "dog", "sat", "there", "and", "did",
+		"nothing", "the", "other", "animals", "sat", "there", "watching",
+	];
+
+	fn test_btree_read_world_insertions<BK>(default_btree_order: usize) -> Statistics
+	where
+		BK: BKeys + Serialize + DeserializeOwned + Default,
+	{
 		let mut kv = KVSimulator::new(None, 0);
-		let mut t = BTree::new(1u8, 2u64, 70);
-		insertions_test::<_, TrieKeys>(&mut kv, &mut t, terms.len(), |i| {
-			(terms[i].as_bytes().to_vec(), i as Payload)
+		let mut t = BTree::new(1u8, 2u64, default_btree_order);
+		insertions_test::<_, BK>(&mut kv, &mut t, REAL_WORLD_TERMS.len(), |i| {
+			(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
 		});
 		kv.print_stats();
+		t.statistics::<BK>(&mut kv)
+	}
+
+	#[test]
+	fn test_btree_fst_keys_read_world_insertions_small_order() {
+		let s = test_btree_read_world_insertions::<FstKeys>(70);
+		assert_eq!(
+			s,
+			Statistics {
+				keys_count: 17,
+				max_depth: 2,
+				nodes_count: 3,
+				total_size: 317,
+			}
+		);
+	}
+
+	#[test]
+	fn test_btree_fst_keys_read_world_insertions_large_order() {
+		let s = test_btree_read_world_insertions::<FstKeys>(1000);
+		assert_eq!(
+			s,
+			Statistics {
+				keys_count: 17,
+				max_depth: 1,
+				nodes_count: 1,
+				total_size: 192,
+			}
+		);
+	}
+
+	#[test]
+	fn test_btree_trie_keys_read_world_insertions_small_order() {
+		let s = test_btree_read_world_insertions::<TrieKeys>(70);
+		assert_eq!(
+			s,
+			Statistics {
+				keys_count: 17,
+				max_depth: 2,
+				nodes_count: 3,
+				total_size: 346,
+			}
+		);
+	}
+
+	#[test]
+	fn test_btree_trie_keys_read_world_insertions_large_order() {
+		let s = test_btree_read_world_insertions::<TrieKeys>(1000);
+		assert_eq!(
+			s,
+			Statistics {
+				keys_count: 17,
+				max_depth: 1,
+				nodes_count: 1,
+				total_size: 232,
+			}
+		);
 	}
 }

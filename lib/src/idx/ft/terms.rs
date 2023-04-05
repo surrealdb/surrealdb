@@ -1,5 +1,5 @@
 use crate::idx::bkeys::FstKeys;
-use crate::idx::btree::BTree;
+use crate::idx::btree::{BTree, Statistics};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::kvsim::KVSimulator;
 use crate::idx::{BaseStateKey, IndexId, TERMS_DOMAIN};
@@ -69,8 +69,14 @@ impl Terms {
 		self.state.btree.search::<FstKeys>(kv, &term.into())
 	}
 
-	pub(super) fn count(&self, kv: &mut KVSimulator) -> usize {
-		self.state.btree.count::<FstKeys>(kv)
+	pub(super) fn statistics(&self, kv: &mut KVSimulator) -> Statistics {
+		self.state.btree.statistics::<FstKeys>(kv)
+	}
+
+	pub(super) fn debug(&self, kv: &mut KVSimulator) {
+		let state_key: BaseStateKey = self.state_key.clone().into();
+		debug!("TERMS {:?}", state_key);
+		self.state.btree.debug::<_, FstKeys>(kv, |k| String::from_utf8(k).unwrap());
 	}
 
 	pub(super) fn finish(self, kv: &mut KVSimulator) {
@@ -114,28 +120,28 @@ mod tests {
 		// Resolve a first term
 		let mut t = Terms::new(&mut kv, 0, BTREE_ORDER);
 		let res = t.resolve_terms(&mut kv, HashMap::from([("C", 103)]));
-		assert_eq!(t.count(&mut kv), 1);
+		assert_eq!(t.statistics(&mut kv).keys_count, 1);
 		t.finish(&mut kv);
 		assert_eq!(res, HashMap::from([(0, 103)]));
 
 		// Resolve a second term
 		let mut t = Terms::new(&mut kv, 0, BTREE_ORDER);
 		let res = t.resolve_terms(&mut kv, HashMap::from([("D", 104)]));
-		assert_eq!(t.count(&mut kv), 2);
+		assert_eq!(t.statistics(&mut kv).keys_count, 2);
 		t.finish(&mut kv);
 		assert_eq!(res, HashMap::from([(1, 104)]));
 
 		// Resolve two existing terms with new frequencies
 		let mut t = Terms::new(&mut kv, 0, BTREE_ORDER);
 		let res = t.resolve_terms(&mut kv, HashMap::from([("C", 113), ("D", 114)]));
-		assert_eq!(t.count(&mut kv), 2);
+		assert_eq!(t.statistics(&mut kv).keys_count, 2);
 		t.finish(&mut kv);
 		assert_eq!(res, HashMap::from([(0, 113), (1, 114)]));
 
 		// Resolve one existing terms and two new terms
 		let mut t = Terms::new(&mut kv, 0, BTREE_ORDER);
 		let res = t.resolve_terms(&mut kv, HashMap::from([("A", 101), ("C", 123), ("E", 105)]));
-		assert_eq!(t.count(&mut kv), 4);
+		assert_eq!(t.statistics(&mut kv).keys_count, 4);
 		t.finish(&mut kv);
 		assert!(
 			res.eq(&HashMap::from([(3, 101), (0, 123), (2, 105)]))

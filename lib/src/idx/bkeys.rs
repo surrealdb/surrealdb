@@ -3,7 +3,7 @@ use crate::kvs::Key;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{SubTrie, Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
-use std::fmt::{Debug, Display, Formatter, Write};
+use std::fmt::{Display, Formatter};
 use std::io;
 
 pub(super) trait BKeys: Display + Sized {
@@ -16,6 +16,9 @@ pub(super) trait BKeys: Display + Sized {
 	fn split_keys(&self) -> SplitKeys<Self>;
 	fn get_child_idx(&self, searched_key: &Key) -> usize;
 	fn compile(&mut self) {}
+	fn debug<F>(&self, to_string: F)
+	where
+		F: Fn(Key) -> String;
 }
 
 pub(super) struct SplitKeys<BK>
@@ -29,7 +32,6 @@ where
 	pub(super) median_payload: Payload,
 }
 
-#[derive(Debug)]
 pub(super) struct FstKeys {
 	map: Map<Vec<u8>>,
 	additions: Trie<Key, Payload>,
@@ -157,6 +159,24 @@ impl BKeys for FstKeys {
 		self.additions = Default::default();
 		self.deletions = Default::default();
 	}
+
+	fn debug<F>(&self, to_string: F)
+	where
+		F: Fn(Key) -> String,
+	{
+		let mut s = String::new();
+		let mut iter = self.map.stream();
+		let mut start = true;
+		while let Some((k, p)) = iter.next() {
+			if !start {
+				s.push(',');
+			} else {
+				start = false;
+			}
+			s.push_str(&format!("{}={}", to_string(k.to_vec()).as_str(), p));
+		}
+		debug!("FSTKeys[{}]", s);
+	}
 }
 
 impl Default for FstKeys {
@@ -190,7 +210,7 @@ impl Serialize for FstKeys {
 		if !self.deletions.is_empty() || !self.additions.is_empty() {
 			Err(ser::Error::custom("bkeys.compile() should be called prior serializing"))
 		} else {
-			serializer.serialize_bytes(&self.map.as_fst().as_bytes())
+			serializer.serialize_bytes(self.map.as_fst().as_bytes())
 		}
 	}
 }
@@ -225,23 +245,6 @@ impl Display for FstKeys {
 #[derive(Default)]
 pub(super) struct TrieKeys {
 	keys: Trie<Key, Payload>,
-}
-
-impl Debug for TrieKeys {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		let mut first = true;
-		f.write_char('[')?;
-		for (key, payload) in self.keys.iter() {
-			if first {
-				first = false;
-			} else {
-				f.write_char(',')?;
-			}
-			write!(f, "{}={}", String::from_utf8_lossy(key), payload)?;
-		}
-		f.write_char(']')?;
-		Ok(())
-	}
 }
 
 impl Serialize for TrieKeys {
@@ -337,12 +340,11 @@ impl BKeys for TrieKeys {
 			}
 			n -= 1;
 		}
-		let (median_key, median_payload) = s.next().map_or_else(
-			|| panic!("The median key/value should exist"),
-			|(k, v)| (k.to_vec().into(), *v),
-		);
+		let (median_key, median_payload) = s
+			.next()
+			.map_or_else(|| panic!("The median key/value should exist"), |(k, v)| (k.clone(), *v));
 		let mut right = Trie::default();
-		while let Some((key, val)) = s.next() {
+		for (key, val) in s {
 			right.insert(key.clone(), *val);
 		}
 		SplitKeys {
@@ -363,6 +365,23 @@ impl BKeys for TrieKeys {
 			child_idx += 1;
 		}
 		child_idx
+	}
+
+	fn debug<F>(&self, to_string: F)
+	where
+		F: Fn(Key) -> String,
+	{
+		let mut s = String::new();
+		let mut start = true;
+		for (k, p) in self.keys.iter() {
+			if !start {
+				s.push(',');
+			} else {
+				start = false;
+			}
+			s.push_str(&format!("{}={}", to_string(k.to_vec()).as_str(), p));
+		}
+		debug!("TrieKeys[{}]", s);
 	}
 }
 

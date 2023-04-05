@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 type IndexId = u64;
 
-#[derive(Serialize, Deserialize, Key)]
+#[derive(Debug, Serialize, Deserialize, Key)]
 struct BaseStateKey {
 	domain: Domain,
 	index_id: IndexId,

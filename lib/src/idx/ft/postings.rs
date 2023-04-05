@@ -1,5 +1,5 @@
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::BTree;
+use crate::idx::btree::{BTree, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::kvsim::KVSimulator;
@@ -77,7 +77,7 @@ impl Postings {
 		}
 	}
 
-	// TODO: This does not handle the case where one term is present in a loads of documents.
+	// TODO: This does not handle the case where one term is present in a large collection of documents.
 	// Eg.: (Stop words use case)
 	// We don't want this function to return a Vec of billions of documents
 	// We should rather use the visitor pattern
@@ -88,7 +88,6 @@ impl Postings {
 	) -> Vec<(DocId, TermFrequency)> {
 		let prefix_key = self.posting_prefix_key(term_id).into();
 		let key_payload_vec = self.state.btree.search_by_prefix::<TrieKeys>(kv, &prefix_key);
-		println!("Key_payload_vec {:?}", key_payload_vec);
 		let mut res = Vec::with_capacity(key_payload_vec.len());
 		for (key, payload) in key_payload_vec {
 			let posting_key: PostingKey = key.into();
@@ -105,8 +104,17 @@ impl Postings {
 		}
 	}
 
-	pub(super) fn count(&self, kv: &mut KVSimulator) -> usize {
-		self.state.btree.count::<TrieKeys>(kv)
+	pub(super) fn statistics(&self, kv: &mut KVSimulator) -> Statistics {
+		self.state.btree.statistics::<TrieKeys>(kv)
+	}
+
+	pub(super) fn debug(&self, kv: &mut KVSimulator) {
+		let state_key: BaseStateKey = self.state_key.clone().into();
+		debug!("POSTINGS {:?}", state_key);
+		self.state.btree.debug::<_, TrieKeys>(kv, |k| {
+			let k: PostingKey = k.into();
+			format!("({}-{})", k.term_id, k.doc_id)
+		});
 	}
 
 	pub(super) fn finish(self, kv: &mut KVSimulator) {
@@ -120,18 +128,20 @@ impl Postings {
 mod tests {
 	use crate::idx::ft::postings::Postings;
 	use crate::idx::kvsim::KVSimulator;
+	use test_log::test;
 
 	#[test]
-	fn test_doc_lengths() {
+	fn test_postings() {
 		const DEFAULT_BTREE_ORDER: usize = 75;
 
 		let mut kv = KVSimulator::default();
 
 		// Check empty state
 		let mut p = Postings::new(&mut kv, 0, DEFAULT_BTREE_ORDER);
-		assert_eq!(p.count(&mut kv), 0);
+		assert_eq!(p.statistics(&mut kv).keys_count, 0);
 		p.update_posting(&mut kv, 1, 2, 3);
-		assert_eq!(p.count(&mut kv), 1);
+		assert_eq!(p.statistics(&mut kv).keys_count, 1);
+		p.debug(&mut kv);
 		p.finish(&mut kv);
 	}
 }
