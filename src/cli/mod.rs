@@ -59,7 +59,7 @@ enum Commands {
 	Version,
 	#[command(about = "Start an SQL REPL in your terminal with pipe support")]
 	Sql(SqlCommandArguments),
-	#[command(about = "Check if the SurrealDB server is ready to accept connections")]
+	#[command(about = "Check if the SurrealDB server is ready to accept connections", visible_alias = "isready")]
 	IsReady(IsReadyCommandArguments),
 }
 
