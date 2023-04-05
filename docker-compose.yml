@@ -28,6 +28,9 @@ services:
     image: pingcap/tikv:v6.1.0
     volumes:
       - ./logs:/logs
+    ports:
+      # This is required because the PD nodes route traffic by giving the tikv node addresses
+      - "20160:20160"
     command:
       - --addr=0.0.0.0:20160
       # address advertised to clients connecting to PD, for routing
