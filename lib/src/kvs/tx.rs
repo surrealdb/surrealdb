@@ -1237,20 +1237,6 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 			}
 		}
-		// Output SCOPES
-		{
-			let scs = self.all_sc(ns, db).await?;
-			if !scs.is_empty() {
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("-- SCOPES")).await?;
-				chn.send(bytes!("-- ------------------------------")).await?;
-				chn.send(bytes!("")).await?;
-				for sc in scs.iter() {
-					chn.send(bytes!(format!("{sc};"))).await?;
-				}
-				chn.send(bytes!("")).await?;
-			}
-		}
 		// Output PARAMS
 		{
 			let pas = self.all_pa(ns, db).await?;
@@ -1261,6 +1247,31 @@ impl Transaction {
 				chn.send(bytes!("")).await?;
 				for pa in pas.iter() {
 					chn.send(bytes!(format!("{pa};"))).await?;
+				}
+				chn.send(bytes!("")).await?;
+			}
+		}
+		// Output SCOPES
+		{
+			let scs = self.all_sc(ns, db).await?;
+			if !scs.is_empty() {
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("-- SCOPES")).await?;
+				chn.send(bytes!("-- ------------------------------")).await?;
+				chn.send(bytes!("")).await?;
+				for sc in scs.iter() {
+					// Output SCOPE
+					chn.send(bytes!(format!("{sc};"))).await?;
+					// Output TOKENS
+					{
+						let sts = self.all_st(ns, db, &sc.name).await?;
+						if !sts.is_empty() {
+							for st in sts.iter() {
+								chn.send(bytes!(format!("{st};"))).await?;
+							}
+							chn.send(bytes!("")).await?;
+						}
+					}
 				}
 				chn.send(bytes!("")).await?;
 			}

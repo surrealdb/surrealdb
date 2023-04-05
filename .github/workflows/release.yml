@@ -300,7 +300,7 @@ jobs:
         shell: bash
         run: |
           VERSION=${{ github.ref_name }}
-          echo "VERSION=${VERSION:1}" >> $GITHUB_ENV
+          echo "VERSION=${VERSION:1}" | tr + - >> $GITHUB_ENV
 
       - name: Build and Push
         uses: docker/build-push-action@v3
