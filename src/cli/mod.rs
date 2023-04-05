@@ -4,6 +4,7 @@ mod config;
 mod export;
 mod import;
 mod isready;
+mod shell_completion;
 mod sql;
 mod start;
 pub(crate) mod validator;
@@ -11,6 +12,7 @@ mod version;
 
 pub use config::CF;
 
+use crate::cli::shell_completion::ShellCompletionArguments;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
@@ -37,7 +39,7 @@ We would love it if you could star the repository (https://github.com/surrealdb/
 ";
 
 #[derive(Parser, Debug)]
-#[command(name = "SurrealDB command-line interface and server")]
+#[command(name = "SurrealDB command-line interface and server", bin_name = "surreal")]
 #[command(about = INFO, before_help = LOGO)]
 #[command(disable_version_flag = true, arg_required_else_help = true)]
 struct Cli {
@@ -59,8 +61,13 @@ enum Commands {
 	Version,
 	#[command(about = "Start an SQL REPL in your terminal with pipe support")]
 	Sql(SqlCommandArguments),
-	#[command(about = "Check if the SurrealDB server is ready to accept connections", visible_alias = "isready")]
+	#[command(
+		about = "Check if the SurrealDB server is ready to accept connections",
+		visible_alias = "isready"
+	)]
 	IsReady(IsReadyCommandArguments),
+	#[command(about = "Generate shell completion script", visible_alias = "shell")]
+	ShellCompletion(ShellCompletionArguments),
 }
 
 #[tokio::main]
@@ -74,6 +81,7 @@ pub async fn init() -> ExitCode {
 		Commands::Version => version::init(),
 		Commands::Sql(args) => sql::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
+		Commands::ShellCompletion(args) => shell_completion::init(args).await,
 	};
 	if let Err(e) = output {
 		error!(target: LOG, "{}", e);

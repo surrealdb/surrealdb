@@ -49,6 +49,9 @@ pub enum Error {
 
 	#[error("There was an error with the remote request: {0}")]
 	Remote(#[from] ReqwestError),
+
+	#[error("Internal Server Error: {0}")]
+	Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl warp::reject::Reject for Error {}
@@ -80,5 +83,11 @@ impl From<JWTError> for Error {
 impl From<surrealdb::error::Db> for Error {
 	fn from(error: surrealdb::error::Db) -> Error {
 		Error::Db(error.into())
+	}
+}
+
+impl From<&str> for Error {
+	fn from(error: &str) -> Error {
+		Error::Internal(error.to_string().into())
 	}
 }
