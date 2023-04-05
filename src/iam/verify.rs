@@ -113,6 +113,7 @@ pub async fn basic(session: &mut Session, auth: String) -> Result<(), Error> {
 				return Ok(());
 			}
 		}
+		debug!(target: LOG, "Authenticated user {user:?} and pass {pass:?} is not root {opts:?}");
 		// Check if this is NS authentication
 		if let Some(ns) = &session.ns {
 			// Create a new readonly transaction
@@ -324,8 +325,15 @@ pub async fn token(session: &mut Session, auth: String) -> Result<(), Error> {
 			trace!(target: LOG, "Authenticating to namespace `{}` with login `{}`", ns, id);
 			// Create a new readonly transaction
 			let mut tx = kvs.transaction(false, false).await?;
+			trace!(
+				target: LOG,
+				"Successfully opened tx for auth to namespace `{}` with login `{}`",
+				ns,
+				id
+			);
 			// Get the namespace login
 			let de = tx.get_nl(&ns, &id).await?;
+			trace!(target: LOG, "Managed to read definition");
 			let cf = config(Algorithm::Hs512, de.code)?;
 			// Verify the token
 			decode::<Claims>(auth, &cf.0, &cf.1)?;

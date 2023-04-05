@@ -104,6 +104,7 @@ async fn signin_scope() {
 	})
 	.await
 	.unwrap();
+	println!("Test signing in as db={database:?}, scope={scope:?}, email={email:?}, pass={pass:?}");
 	db.signin(Scope {
 		namespace: NS,
 		database: &database,

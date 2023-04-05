@@ -34,6 +34,10 @@ cluster:
 	cargo run --features storage-tikv -- start --log trace --user root --pass root tikv://localhost:2379 &\
 	cargo run --features storage-tikv -- start --log trace --user root --pass root -b 0.0.0.0:8001 tikv://localhost:2379
 
+.PHONE: cluster-tikv
+cluster-tikv:
+	docker-compose up -d
+
 .PHONY: sql
 sql:
 	cargo run -- sql --conn ws://0.0.0.0:8000 --user root --pass root --ns test --db test --pretty

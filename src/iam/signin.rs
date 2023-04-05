@@ -12,12 +12,14 @@ use surrealdb::dbs::Auth;
 use surrealdb::dbs::Session;
 use surrealdb::sql::Object;
 use surrealdb::sql::Value;
+use warp::trace;
 
 pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String>, Error> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
 	let db = vars.get("DB").or_else(|| vars.get("db"));
 	let sc = vars.get("SC").or_else(|| vars.get("sc"));
+	trace!("Signin vars: {:?}", vars);
 	// Check if the parameters exist
 	match (ns, db, sc) {
 		(Some(ns), Some(db), Some(sc)) => {
@@ -154,22 +156,37 @@ pub async fn sc(
 									// The auth token was created successfully
 									Ok(tk) => Ok(Some(tk)),
 									// There was an error creating the token
-									_ => Err(Error::InvalidAuth),
+									_ => {
+										trace!("Error creating auth token");
+										Err(Error::InvalidAuth)
+									}
 								}
 							}
 							// No record was returned
-							_ => Err(Error::InvalidAuth),
+							_ => {
+								trace!("No record returned");
+								Err(Error::InvalidAuth)
+							}
 						},
 						// The signin query failed
-						_ => Err(Error::InvalidAuth),
+						Err(e) => {
+							trace!("Signin query failed {e:?}");
+							Err(Error::InvalidAuth)
+						}
 					}
 				}
 				// This scope does not allow signin
-				_ => Err(Error::InvalidAuth),
+				_ => {
+					trace!("The scope does not allow signin");
+					Err(Error::InvalidAuth)
+				}
 			}
 		}
 		// The scope does not exists
-		_ => Err(Error::InvalidAuth),
+		_ => {
+			trace!("The scope does not exists");
+			Err(Error::InvalidAuth)
+		}
 	}
 }
 
