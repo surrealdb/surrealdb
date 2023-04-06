@@ -185,5 +185,5 @@ Join our growing community around the world, for help, ideas, and discussions re
 - Follow us on [Twitter](https://twitter.com/surrealdb)
 - Connect with us on [LinkedIn](https://www.linkedin.com/company/surrealdb/)
 - Join our [Dev community](https://dev.to/surrealdb)
-- Chat live with us on [Discord](https://discord.gg/GSeTUeA)
+- Chat live with us on [Discord](https://discord.gg/surrealdb)
 - Questions tagged #surrealdb on [StackOverflow](https://stackoverflow.com/questions/tagged/surrealdb)
