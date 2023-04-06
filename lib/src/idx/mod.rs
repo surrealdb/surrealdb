@@ -36,6 +36,7 @@ impl BaseStateKey {
 mod tests {
 	use crate::idx::bkeys::KeyVisitor;
 	use crate::idx::btree::Payload;
+	use crate::idx::kvsim::KVSimulator;
 	use crate::kvs::Key;
 	use std::collections::HashMap;
 
@@ -45,14 +46,17 @@ mod tests {
 	}
 
 	impl KeyVisitor for HashVisitor {
-		fn visit(&mut self, key: Key, payload: Payload) {
+		fn visit(&mut self, _kv: &mut KVSimulator, key: Key, payload: Payload) {
 			self.map.insert(key, payload);
 		}
 	}
 
 	impl HashVisitor {
-		pub(super) fn check(&self, res: Vec<(Key, Payload)>) {
-			assert_eq!(res.len(), self.map.len());
+		pub(super) fn check_len(&self, len: usize, info: &str) {
+			assert_eq!(self.map.len(), len, "len issue: {}", info);
+		}
+		pub(super) fn check(&self, res: Vec<(Key, Payload)>, info: &str) {
+			self.check_len(res.len(), info);
 			for (k, p) in res {
 				assert_eq!(self.map.get(&k), Some(&p));
 			}

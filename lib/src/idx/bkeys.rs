@@ -1,4 +1,5 @@
 use crate::idx::btree::Payload;
+use crate::idx::kvsim::KVSimulator;
 use crate::kvs::Key;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
 use radix_trie::{SubTrie, Trie, TrieCommon};
@@ -7,14 +8,19 @@ use std::fmt::{Display, Formatter};
 use std::io;
 
 pub(super) trait KeyVisitor {
-	fn visit(&mut self, key: Key, payload: Payload);
+	fn visit(&mut self, kv: &mut KVSimulator, key: Key, payload: Payload);
 }
 
 pub(super) trait BKeys: Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Self;
 	fn len(&self) -> usize;
 	fn get(&self, key: &Key) -> Option<Payload>;
-	fn collect_with_prefix<V>(&self, prefix_key: &Key, visitor: &mut V) -> bool
+	fn collect_with_prefix<V>(
+		&self,
+		kv: &mut KVSimulator,
+		prefix_key: &Key,
+		visitor: &mut V,
+	) -> bool
 	where
 		V: KeyVisitor;
 	fn insert(&mut self, key: Key, payload: Payload);
@@ -59,7 +65,12 @@ impl BKeys for FstKeys {
 		self.map.get(key)
 	}
 
-	fn collect_with_prefix<V>(&self, _prefix_key: &Key, _visitor: &mut V) -> bool
+	fn collect_with_prefix<V>(
+		&self,
+		_kv: &mut KVSimulator,
+		_prefix_key: &Key,
+		_visitor: &mut V,
+	) -> bool
 	where
 		V: KeyVisitor,
 	{
@@ -324,12 +335,12 @@ impl BKeys for TrieKeys {
 		self.keys.get(key).copied()
 	}
 
-	fn collect_with_prefix<V>(&self, prefix: &Key, visitor: &mut V) -> bool
+	fn collect_with_prefix<V>(&self, kv: &mut KVSimulator, prefix: &Key, visitor: &mut V) -> bool
 	where
 		V: KeyVisitor,
 	{
 		if let Some(node) = self.keys.get_raw_descendant(prefix) {
-			TrieKeys::collect_with_prefix_recursive(node, prefix, visitor)
+			TrieKeys::collect_with_prefix_recursive(kv, node, prefix, visitor)
 		} else {
 			false
 		}
@@ -401,6 +412,7 @@ impl BKeys for TrieKeys {
 
 impl TrieKeys {
 	fn collect_with_prefix_recursive<V>(
+		kv: &mut KVSimulator,
 		node: SubTrie<Key, Payload>,
 		prefix: &Key,
 		visitor: &mut V,
@@ -415,13 +427,13 @@ impl TrieKeys {
 					if !found {
 						found = true;
 					}
-					visitor.visit(node_key.clone(), *value);
+					visitor.visit(kv, node_key.clone(), *value);
 				}
 			}
 		}
 
 		for children in node.children() {
-			if Self::collect_with_prefix_recursive(children, prefix, visitor) {
+			if Self::collect_with_prefix_recursive(kv, children, prefix, visitor) {
 				if !found {
 					found = true;
 				}
@@ -442,6 +454,7 @@ impl From<Trie<Vec<u8>, u64>> for TrieKeys {
 #[cfg(test)]
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
+	use crate::idx::kvsim::KVSimulator;
 	use crate::idx::tests::HashVisitor;
 	use crate::kvs::Key;
 
@@ -490,6 +503,7 @@ mod tests {
 
 	#[test]
 	fn test_tries_keys_collect_with_prefix() {
+		let mut kv = KVSimulator::default();
 		let mut keys = TrieKeys::default();
 		keys.insert("apple".into(), 1);
 		keys.insert("applicant".into(), 2);
@@ -506,43 +520,45 @@ mod tests {
 
 		{
 			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&"appli".into(), &mut visitor);
-			visitor.check(vec![
-				("applicant".into(), 2),
-				("application".into(), 3),
-				("applicative".into(), 4),
-			]);
+			keys.collect_with_prefix(&mut kv, &"appli".into(), &mut visitor);
+			visitor.check(
+				vec![("applicant".into(), 2), ("application".into(), 3), ("applicative".into(), 4)],
+				"appli",
+			);
 		}
 
 		{
 			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&"the".into(), &mut visitor);
-			visitor.check(vec![
-				("the".into(), 7),
-				("their".into(), 8),
-				("theirs".into(), 9),
-				("there".into(), 10),
-				("these".into(), 11),
-				("theses".into(), 12),
-			]);
+			keys.collect_with_prefix(&mut kv, &"the".into(), &mut visitor);
+			visitor.check(
+				vec![
+					("the".into(), 7),
+					("their".into(), 8),
+					("theirs".into(), 9),
+					("there".into(), 10),
+					("these".into(), 11),
+					("theses".into(), 12),
+				],
+				"the",
+			);
 		}
 
 		{
 			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&"blue".into(), &mut visitor);
-			visitor.check(vec![("blueberry".into(), 6)]);
+			keys.collect_with_prefix(&mut kv, &"blue".into(), &mut visitor);
+			visitor.check(vec![("blueberry".into(), 6)], "blue");
 		}
 
 		{
 			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&"apple".into(), &mut visitor);
-			visitor.check(vec![("apple".into(), 1)]);
+			keys.collect_with_prefix(&mut kv, &"apple".into(), &mut visitor);
+			visitor.check(vec![("apple".into(), 1)], "apple");
 		}
 
 		{
 			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&"zz".into(), &mut visitor);
-			visitor.check(vec![]);
+			keys.collect_with_prefix(&mut kv, &"zz".into(), &mut visitor);
+			visitor.check(vec![], "zz");
 		}
 	}
 

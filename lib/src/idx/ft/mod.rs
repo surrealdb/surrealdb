@@ -26,7 +26,7 @@ struct FtIndex {
 }
 
 trait HitVisitor {
-	fn visit(&mut self, doc_key: String, score: Score);
+	fn visit(&mut self, kv: &mut KVSimulator, doc_key: String, score: Score);
 }
 
 #[derive(Clone)]
@@ -155,16 +155,15 @@ impl FtIndex {
 	where
 		V: HitVisitor,
 	{
-		let t = self.terms(kv);
-		if let Some(term_id) = t.find_term(kv, term) {
-			let p = self.postings(kv);
-			let term_doc_count = p.get_doc_count(kv, term_id);
+		let terms = self.terms(kv);
+		if let Some(term_id) = terms.find_term(kv, term) {
+			let postings = self.postings(kv);
+			let term_doc_count = postings.get_doc_count(kv, term_id);
 			let doc_lengths = self.doc_lengths(kv);
 			let doc_ids = self.doc_ids(kv);
 			if term_doc_count > 0 {
-				let mut scorer = Scorer::new(
+				let mut scorer = BM25Scorer::new(
 					visitor,
-					kv,
 					doc_lengths,
 					doc_ids,
 					self.state.total_docs_lengths,
@@ -172,18 +171,19 @@ impl FtIndex {
 					term_doc_count,
 					self.bm25.clone(),
 				);
-				p.collect_postings(kv, term_id, &mut scorer);
+				postings.collect_postings(kv, term_id, &mut scorer);
+				terms.debug(kv);
+				postings.debug(kv);
 			}
 		}
 	}
 }
 
-struct Scorer<'a, V>
+struct BM25Scorer<'a, V>
 where
 	V: HitVisitor,
 {
 	visitor: &'a mut V,
-	kv: &'a mut KVSimulator,
 	doc_lengths: DocLengths,
 	doc_ids: DocIds,
 	average_doc_length: f32,
@@ -192,30 +192,29 @@ where
 	bm25: Bm25Params,
 }
 
-impl<'a, V> PostingsVisitor for Scorer<'a, V>
+impl<'a, V> PostingsVisitor for BM25Scorer<'a, V>
 where
 	V: HitVisitor,
 {
-	fn visit(&mut self, doc_id: DocId, term_frequency: TermFrequency) {
-		if let Some(doc_key) = self.doc_ids.get_doc_key(&mut self.kv, doc_id) {
-			let doc_length = self.doc_lengths.get_doc_length(&mut self.kv, doc_id).unwrap_or(0);
+	fn visit(&mut self, kv: &mut KVSimulator, doc_id: DocId, term_frequency: TermFrequency) {
+		if let Some(doc_key) = self.doc_ids.get_doc_key(kv, doc_id) {
+			let doc_length = self.doc_lengths.get_doc_length(kv, doc_id).unwrap_or(0);
 			let bm25_score = self.compute_bm25_score(
 				term_frequency as f32,
 				self.term_doc_count,
 				doc_length as f32,
 			);
-			self.visitor.visit(doc_key, bm25_score);
+			self.visitor.visit(kv, doc_key, bm25_score);
 		}
 	}
 }
 
-impl<'a, V> Scorer<'a, V>
+impl<'a, V> BM25Scorer<'a, V>
 where
 	V: HitVisitor,
 {
 	fn new(
 		visitor: &'a mut V,
-		kv: &'a mut KVSimulator,
 		doc_lengths: DocLengths,
 		doc_ids: DocIds,
 		total_docs_length: u128,
@@ -225,7 +224,6 @@ where
 	) -> Self {
 		Self {
 			visitor,
-			kv,
 			doc_lengths,
 			doc_ids,
 			average_doc_length: (total_docs_length as f32) / (doc_count as f32),
@@ -313,63 +311,68 @@ mod tests {
 
 	#[test]
 	fn test_ft_index_bm_25() {
-		let mut kv = KVSimulator::default();
-		let default_btree_order = 75;
-		{
-			let mut fti = FtIndex::new(&mut kv, 0, default_btree_order);
-			fti.add_document(&mut kv, "doc1", "the quick brown fox jumped over the lazy dog");
-			fti.add_document(&mut kv, "doc2", "the fast fox jumped over the lazy dog");
-			fti.add_document(&mut kv, "doc3", "the dog sat there and did nothing");
-			fti.add_document(&mut kv, "doc4", "the other animals sat there watching");
-		}
+		// The function `extract_sorted_terms_with_frequencies` is non-deterministic.
+		// the inner structures (BTrees) are built with the same terms and frequencies,
+		// but the insertion order is different, ending up in different BTree structures.
+		// Therefore it makes sense to do multiple runs.
+		for _ in 0..10 {
+			let mut kv = KVSimulator::default();
+			let default_btree_order = 75;
+			{
+				let mut fti = FtIndex::new(&mut kv, 0, default_btree_order);
+				fti.add_document(&mut kv, "doc1", "the quick brown fox jumped over the lazy dog");
+				fti.add_document(&mut kv, "doc2", "the fast fox jumped over the lazy dog");
+				fti.add_document(&mut kv, "doc3", "the dog sat there and did nothing");
+				fti.add_document(&mut kv, "doc4", "the other animals sat there watching");
+			}
+			{
+				let fti = FtIndex::new(&mut kv, 0, default_btree_order);
 
-		{
-			let fti = FtIndex::new(&mut kv, 0, default_btree_order);
+				let mut visitor = HashHitVisitor::default();
+				fti.search(&mut kv, "the", &mut visitor);
+				visitor.check(vec![
+					("doc1".to_string(), 0.0),
+					("doc2".to_string(), 0.0),
+					("doc3".to_string(), 0.0),
+					("doc4".to_string(), 0.0),
+				]);
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "the", &mut visitor);
-			visitor.check(vec![
-				("doc1".to_string(), 0.0),
-				("doc2".to_string(), 0.0),
-				("doc3".to_string(), 0.0),
-				("doc4".to_string(), 0.0),
-			]);
+				let mut visitor = HashHitVisitor::default();
+				fti.search(&mut kv, "dog", &mut visitor);
+				visitor.check(vec![
+					("doc1".to_string(), 0.0),
+					("doc2".to_string(), 0.0),
+					("doc3".to_string(), 0.0),
+				]);
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "dog", &mut visitor);
-			visitor.check(vec![
-				("doc1".to_string(), 0.0),
-				("doc2".to_string(), 0.0),
-				("doc3".to_string(), 0.0),
-			]);
+				let mut visitor = HashHitVisitor::default();
+				fti.search(&mut kv, "fox", &mut visitor);
+				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "fox", &mut visitor);
-			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+				let mut visitor = HashHitVisitor::default();
+				fti.search(&mut kv, "over", &mut visitor);
+				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "over", &mut visitor);
-			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+				let mut visitor = HashHitVisitor::default();
+				fti.search(&mut kv, "lazy", &mut visitor);
+				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "lazy", &mut visitor);
-			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+				let mut visitor = HashHitVisitor::default();
+				fti.search(&mut kv, "jumped", &mut visitor);
+				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "jumped", &mut visitor);
-			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+				let mut visitor = HashHitVisitor::default();
+				fti.search(&mut kv, "nothing", &mut visitor);
+				visitor.check(vec![("doc3".to_string(), 0.87105393)]);
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "nothing", &mut visitor);
-			visitor.check(vec![("doc3".to_string(), 0.87105393)]);
+				let mut visitor = HashHitVisitor::default();
+				fti.search(&mut kv, "animals", &mut visitor);
+				visitor.check(vec![("doc4".to_string(), 0.92279965)]);
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "animals", &mut visitor);
-			visitor.check(vec![("doc4".to_string(), 0.92279965)]);
-
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "dummy", &mut visitor);
-			visitor.check(Vec::<(String, f32)>::new());
+				let mut visitor = HashHitVisitor::default();
+				fti.search(&mut kv, "dummy", &mut visitor);
+				visitor.check(Vec::<(String, f32)>::new());
+			}
 		}
 	}
 
@@ -379,7 +382,7 @@ mod tests {
 	}
 
 	impl HitVisitor for HashHitVisitor {
-		fn visit(&mut self, doc_key: String, score: Score) {
+		fn visit(&mut self, _kv: &mut KVSimulator, doc_key: String, score: Score) {
 			self.map.insert(doc_key, score);
 		}
 	}

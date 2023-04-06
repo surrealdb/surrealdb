@@ -142,21 +142,29 @@ impl BTree {
 		V: KeyVisitor,
 	{
 		let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
-		// If we previously found keys, and this node does not add additional keys, we can skip
-		let mut found = node.keys().collect_with_prefix(prefix_key, visitor);
+		let mut matches_found = node.keys().collect_with_prefix(kv, prefix_key, visitor);
 		if let Node::Internal(keys, children) = node {
+			let mut child_matches_found = false;
 			let child_idx = keys.get_child_idx(prefix_key);
 			for i in child_idx..children.len() {
 				if !self.recursive_search_by_prefix::<BK, V>(kv, children[i], prefix_key, visitor) {
-					break;
+					if child_matches_found {
+						// If we have found matches in previous (lower) child nodes,
+						// but we don't find matches anymore, there is no chance we can find new matches
+						// in upper child nodes, therefore we can stop the traversal.
+						break;
+					}
 				} else {
-					if !found {
-						found = true;
+					if !matches_found {
+						matches_found = true;
+					}
+					if !child_matches_found {
+						child_matches_found = true;
 					}
 				}
 			}
 		}
-		found
+		matches_found
 	}
 
 	pub(super) fn insert<BK>(&mut self, kv: &mut KVSimulator, key: Key, payload: Payload)
@@ -408,7 +416,7 @@ mod tests {
 	use crate::idx::kvsim::KVSimulator;
 	use crate::idx::tests::HashVisitor;
 	use crate::kvs::Key;
-	use rand::prelude::SliceRandom;
+	use rand::prelude::{SliceRandom, ThreadRng};
 	use rand::thread_rng;
 	use serde::de::DeserializeOwned;
 	use serde::Serialize;
@@ -635,38 +643,127 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn test_btree_trie_keys_search_by_prefix() {
+	fn test_btree_search_by_prefix(
+		order: usize,
+		shuffle: bool,
+		mut samples: Vec<(&str, Payload)>,
+	) -> (KVSimulator, BTree, Statistics) {
 		let mut kv = KVSimulator::new(None, 0);
-		let mut t = BTree::new(1u8, 2u64, 45);
-		for (key, payload) in vec![
-			("aaaa", 0),
-			("bb1", 21),
-			("bb2", 22),
-			("bb3", 23),
-			("bb4", 24),
-			("dddd", 0),
-			("eeee", 0),
-			("ffff", 0),
-			("gggg", 0),
-			("hhhh", 0),
-		] {
+		let mut t = BTree::new(1u8, 2u64, order);
+		let samples_len = samples.len();
+		if shuffle {
+			samples.shuffle(&mut ThreadRng::default());
+		}
+		for (key, payload) in samples {
 			t.insert::<TrieKeys>(&mut kv, key.into(), payload);
 		}
-		// For this test to be relevant, we expect the BTree to match the following statistics:
 		let s = t.statistics::<TrieKeys>(&mut kv);
-		assert_eq!(s.max_depth, 2);
-		assert_eq!(s.nodes_count, 4);
-		t.debug::<_, TrieKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
+		assert_eq!(s.keys_count, samples_len);
+		(kv, t, s)
+	}
 
-		// We should find all the keys prefixed with "bb"
-		let mut visitor = HashVisitor::default();
-		t.search_by_prefix::<TrieKeys, _>(&mut kv, &"bb".into(), &mut visitor);
-		visitor.check(vec![
-			("bb1".into(), 21),
-			("bb2".into(), 22),
-			("bb3".into(), 23),
-			("bb4".into(), 24),
-		]);
+	#[test]
+	fn test_btree_trie_keys_search_by_prefix() {
+		for _ in 0..50 {
+			let samples = vec![
+				("aaaa", 0),
+				("bb1", 21),
+				("bb2", 22),
+				("bb3", 23),
+				("bb4", 24),
+				("dddd", 0),
+				("eeee", 0),
+				("ffff", 0),
+				("gggg", 0),
+				("hhhh", 0),
+			];
+			let (mut kv, t, s) = test_btree_search_by_prefix(45, true, samples);
+
+			// For this test to be relevant, we expect the BTree to match the following properties:
+			assert!(s.max_depth > 1, "Tree depth should be > 1");
+			assert!(s.nodes_count > 2, "The number of node should be > 2");
+
+			t.debug::<_, TrieKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
+
+			// We should find all the keys prefixed with "bb"
+			let mut visitor = HashVisitor::default();
+			t.search_by_prefix::<TrieKeys, _>(&mut kv, &"bb".into(), &mut visitor);
+			visitor.check(
+				vec![
+					("bb1".into(), 21),
+					("bb2".into(), 22),
+					("bb3".into(), 23),
+					("bb4".into(), 24),
+				],
+				"bb",
+			);
+		}
+	}
+
+	#[test]
+	fn test_btree_trie_keys_real_world_search_by_prefix() {
+		// We do multiples tests to run the test over many different possible forms of Tree.
+		// The samples are shuffled, therefore the insertion order is different on each test,
+		// ending up in slightly different variants of the BTrees.
+		for _ in 0..50 {
+			// This samples simulate postings. Pair of terms and document ids.
+			let samples = vec![
+				("the-1", 0),
+				("quick-1", 0),
+				("brown-1", 0),
+				("fox-1", 0),
+				("jumped-1", 0),
+				("over-1", 0),
+				("lazy-1", 0),
+				("dog-1", 0),
+				("the-2", 0),
+				("fast-2", 0),
+				("fox-2", 0),
+				("jumped-2", 0),
+				("over-2", 0),
+				("lazy-2", 0),
+				("dog-2", 0),
+				("the-3", 0),
+				("dog-3", 0),
+				("sat-3", 0),
+				("there-3", 0),
+				("and-3", 0),
+				("did-3", 0),
+				("nothing-3", 0),
+				("the-4", 0),
+				("other-4", 0),
+				("animals-4", 0),
+				("sat-4", 0),
+				("there-4", 0),
+				("watching-4", 0),
+			];
+
+			let (mut kv, t, s) = test_btree_search_by_prefix(75, true, samples);
+
+			// For this test to be relevant, we expect the BTree to match the following properties:
+			assert!(s.max_depth > 1, "Tree depth should be > 1");
+			assert!(s.nodes_count > 2, "The number of node should be > 2");
+
+			t.debug::<_, TrieKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
+
+			for (prefix, count) in vec![
+				("the", 6),
+				("there", 2),
+				("dog", 3),
+				("jumped", 2),
+				("lazy", 2),
+				("fox", 2),
+				("over", 2),
+				("sat", 2),
+				("other", 1),
+				("nothing", 1),
+				("animals", 1),
+				("watching", 1),
+			] {
+				let mut visitor = HashVisitor::default();
+				t.search_by_prefix::<TrieKeys, _>(&mut kv, &prefix.into(), &mut visitor);
+				visitor.check_len(count, prefix);
+			}
+		}
 	}
 }

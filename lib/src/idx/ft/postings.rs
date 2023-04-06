@@ -46,7 +46,7 @@ impl State {
 }
 
 pub(super) trait PostingsVisitor {
-	fn visit(&mut self, doc_id: DocId, term_frequency: TermFrequency);
+	fn visit(&mut self, kv: &mut KVSimulator, doc_id: DocId, term_frequency: TermFrequency);
 }
 
 impl Postings {
@@ -138,9 +138,9 @@ impl<'a, V> KeyVisitor for PostingsAdapter<'a, V>
 where
 	V: PostingsVisitor,
 {
-	fn visit(&mut self, key: Key, payload: Payload) {
+	fn visit(&mut self, kv: &mut KVSimulator, key: Key, payload: Payload) {
 		let posting_key: PostingKey = key.into();
-		self.visitor.visit(posting_key.doc_id, payload);
+		self.visitor.visit(kv, posting_key.doc_id, payload);
 	}
 }
 
@@ -150,7 +150,7 @@ struct PostingsDocCount {
 }
 
 impl KeyVisitor for PostingsDocCount {
-	fn visit(&mut self, _key: Key, _payload: Payload) {
+	fn visit(&mut self, _kv: &mut KVSimulator, _key: Key, _payload: Payload) {
 		self.doc_count += 1;
 	}
 }
