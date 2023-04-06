@@ -431,7 +431,8 @@ async fn delete_table() {
 	let _: RecordId = db.create(table).await.unwrap();
     let users: Vec<RecordId> = db.select(table).await.unwrap();
     assert_eq!(users.len(), 3);
-	db.delete(table).await.unwrap();
+	let users: Vec<RecordId> = db.delete(table).await.unwrap();
+    assert_eq!(users.len(), 3);
     let users: Vec<RecordId> = db.select(table).await.unwrap();
     assert!(users.is_empty());
 }
@@ -443,7 +444,8 @@ async fn delete_record_id() {
     let record_id = ("user", "john");
 	let _: RecordId = db.create(record_id).await.unwrap();
     let _: RecordId = db.select(record_id).await.unwrap();
-	db.delete(record_id).await.unwrap();
+	let john: Option<RecordId> = db.delete(record_id).await.unwrap();
+    assert!(john.is_some());
     let john: Option<RecordId> = db.select(record_id).await.unwrap();
     assert!(john.is_none());
 }
@@ -464,7 +466,17 @@ async fn delete_record_range() {
         .await
         .unwrap();
     response.check().unwrap();
-	db.delete(table).range("jane".."zoey").await.unwrap();
+	let users: Vec<RecordBuf> = db.delete(table).range("jane".."zoey").await.unwrap();
+    assert_eq!(users, &[
+        RecordBuf {
+            id: thing("user:jane").unwrap(),
+            name: "Jane".to_owned(),
+        },
+        RecordBuf {
+            id: thing("user:john").unwrap(),
+            name: "John".to_owned(),
+        },
+    ]);
 	let users: Vec<RecordBuf> = db
 		.select(table)
 		.await

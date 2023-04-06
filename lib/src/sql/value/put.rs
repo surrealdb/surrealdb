@@ -9,14 +9,6 @@ impl Value {
 			Some(p) => match self {
 				// Current path part is an object
 				Value::Object(v) => match p {
-					Part::Thing(t) => match v.get_mut(t.to_raw().as_str()) {
-						Some(v) if v.is_some() => v.put(path.next(), val),
-						_ => {
-							let mut obj = Value::base();
-							obj.put(path.next(), val);
-							v.insert(t.to_raw(), obj);
-						}
-					},
 					Part::Graph(g) => match v.get_mut(g.to_raw().as_str()) {
 						Some(v) if v.is_some() => v.put(path.next(), val),
 						_ => {

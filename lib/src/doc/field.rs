@@ -4,6 +4,7 @@ use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::sql::data::Data;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 
@@ -27,10 +28,22 @@ impl<'a> Document<'a> {
 			for (k, mut val) in self.current.walk(&fd.name).into_iter() {
 				// Get the initial value
 				let old = self.initial.pick(&k);
+				// Get the input value
+				let inp = match stm.data() {
+					Some(Data::MergeExpression(v)) => v.pick(&k),
+					Some(Data::ContentExpression(v)) => v.pick(&k),
+					Some(Data::ReplaceExpression(v)) => v.pick(&k),
+					Some(Data::SetExpression(v)) => match v.iter().find(|f| f.0.eq(&k)) {
+						Some((_, _, v)) => v.to_owned(),
+						_ => Value::None,
+					},
+					_ => Value::None,
+				};
 				// Check for a VALUE clause
 				if let Some(expr) = &fd.value {
 					// Configure the context
 					let mut ctx = Context::new(ctx);
+					ctx.add_value("input".into(), &inp);
 					ctx.add_value("value".into(), &val);
 					ctx.add_value("after".into(), &val);
 					ctx.add_value("before".into(), &old);
@@ -49,6 +62,7 @@ impl<'a> Document<'a> {
 				if let Some(expr) = &fd.assert {
 					// Configure the context
 					let mut ctx = Context::new(ctx);
+					ctx.add_value("input".into(), &inp);
 					ctx.add_value("value".into(), &val);
 					ctx.add_value("after".into(), &val);
 					ctx.add_value("before".into(), &old);
@@ -81,6 +95,7 @@ impl<'a> Document<'a> {
 							let opt = &opt.perms(false);
 							// Configure the context
 							let mut ctx = Context::new(ctx);
+							ctx.add_value("input".into(), &inp);
 							ctx.add_value("value".into(), &val);
 							ctx.add_value("after".into(), &val);
 							ctx.add_value("before".into(), &old);

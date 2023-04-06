@@ -2,7 +2,7 @@
 name = "surrealdb"
 publish = true
 edition = "2021"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9+20230402"
 rust-version = "1.65.0"
 readme = "CARGO.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -12,7 +12,7 @@ homepage = "https://github.com/surrealdb/surrealdb"
 documentation = "https://docs.rs/surrealdb/"
 keywords = ["database", "embedded-database", "key-value", "key-value-store", "kv-store"]
 categories = ["database-implementations", "data-structures", "embedded"]
-license = "Apache-2.0"
+license-file = "../LICENSE"
 resolver = "2"
 
 [features]
@@ -43,7 +43,7 @@ kv-fdb = ["foundationdb"]
 rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "protocol-ws", "protocol-http",
-    "kv-mem", "kv-indxdb", "kv-rocksdb", "kv-tikv", "kv-fdb",
+    "kv-mem", "kv-indxdb", "kv-rocksdb",
     "rustls", "native-tls",
     "http", "scripting"
 ]
@@ -56,9 +56,10 @@ ascii = { version = "0.3.2", package = "any_ascii" }
 async-recursion = "1.0.4"
 bcrypt = "0.14.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
+bung = "0.1.0"
 channel = { version = "1.8.0", package = "async-channel" }
 chrono = { version = "0.4.24", features = ["serde"] }
-derive = { version = "0.5.0", package = "surrealdb-derive" }
+derive = { version = "0.7.0", package = "surrealdb-derive" }
 dmp = "0.1.3"
 echodb = { version = "0.4.0", optional = true }
 executor = { version = "1.5.0", package = "async-executor" }
@@ -74,7 +75,6 @@ js = { version = "0.1.7", package = "rquickjs", features = ["array-buffer", "bin
 lexicmp = "0.1.0"
 log = "0.4.17"
 md-5 = "0.10.5"
-msgpack = { version = "1.1.1", package = "rmp-serde" }
 nanoid = "0.4.0"
 native-tls = { version = "0.2.11", optional = true }
 nom = { version = "7.1.3", features = ["alloc"] }

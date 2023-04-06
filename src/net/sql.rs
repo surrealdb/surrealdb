@@ -58,7 +58,7 @@ async fn handler(
 			"application/cbor" => Ok(output::cbor(&res)),
 			"application/pack" => Ok(output::pack(&res)),
 			// Internal serialization
-			"application/cork" => Ok(output::cork(&res)),
+			"application/bung" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
 			_ => Err(warp::reject::custom(Error::InvalidType)),
 		},

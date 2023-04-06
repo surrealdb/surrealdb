@@ -1,4 +1,10 @@
 use crate::err::Error;
+use crate::sql::field::Fields;
+use crate::sql::group::Groups;
+use crate::sql::limit::Limit;
+use crate::sql::order::Orders;
+use crate::sql::split::Splits;
+use crate::sql::start::Start;
 use crate::sql::value::serde::ser;
 use crate::sql::Cond;
 use crate::sql::Dir;
@@ -39,8 +45,14 @@ impl ser::Serializer for Serializer {
 #[derive(Default)]
 pub(super) struct SerializeGraph {
 	dir: Option<Dir>,
+	expr: Option<Fields>,
 	what: Option<Tables>,
 	cond: Option<Cond>,
+	split: Option<Splits>,
+	group: Option<Groups>,
+	order: Option<Orders>,
+	limit: Option<Limit>,
+	start: Option<Start>,
 	alias: Option<Idiom>,
 }
 
@@ -56,11 +68,29 @@ impl serde::ser::SerializeStruct for SerializeGraph {
 			"dir" => {
 				self.dir = Some(value.serialize(ser::dir::Serializer.wrap())?);
 			}
+			"expr" => {
+				self.expr = Some(value.serialize(ser::fields::Serializer.wrap())?);
+			}
 			"what" => {
 				self.what = Some(Tables(value.serialize(ser::table::vec::Serializer.wrap())?));
 			}
 			"cond" => {
 				self.cond = value.serialize(ser::cond::opt::Serializer.wrap())?;
+			}
+			"split" => {
+				self.split = value.serialize(ser::split::vec::opt::Serializer.wrap())?.map(Splits);
+			}
+			"group" => {
+				self.group = value.serialize(ser::group::vec::opt::Serializer.wrap())?.map(Groups);
+			}
+			"order" => {
+				self.order = value.serialize(ser::order::vec::opt::Serializer.wrap())?.map(Orders);
+			}
+			"limit" => {
+				self.limit = value.serialize(ser::limit::opt::Serializer.wrap())?;
+			}
+			"start" => {
+				self.start = value.serialize(ser::start::opt::Serializer.wrap())?;
 			}
 			"alias" => {
 				self.alias = value.serialize(ser::part::vec::opt::Serializer.wrap())?.map(Idiom);
@@ -73,11 +103,17 @@ impl serde::ser::SerializeStruct for SerializeGraph {
 	}
 
 	fn end(self) -> Result<Self::Ok, Error> {
-		match (self.dir, self.what) {
-			(Some(dir), Some(what)) => Ok(Graph {
+		match (self.dir, self.expr, self.what) {
+			(Some(dir), Some(expr), Some(what)) => Ok(Graph {
 				dir,
+				expr,
 				what,
 				cond: self.cond,
+				split: self.split,
+				group: self.group,
+				order: self.order,
+				limit: self.limit,
+				start: self.start,
 				alias: self.alias,
 			}),
 			_ => Err(Error::custom("`Graph` missing required field(s)")),

@@ -123,11 +123,14 @@ fn select_statement(params: &mut [Value]) -> (bool, SelectStatement) {
 }
 
 #[allow(dead_code)] // used by the the embedded database and `http`
-fn delete_statement(params: &mut [Value]) -> DeleteStatement {
-	let (_, what, _) = split_params(params);
-	DeleteStatement {
-		what,
-		output: Some(Output::None),
-		..Default::default()
-	}
+fn delete_statement(params: &mut [Value]) -> (bool, DeleteStatement) {
+	let (one, what, _) = split_params(params);
+	(
+		one,
+		DeleteStatement {
+			what,
+			output: Some(Output::Before),
+			..Default::default()
+		},
+	)
 }

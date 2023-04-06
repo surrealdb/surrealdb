@@ -424,10 +424,10 @@ async fn router(
 			Ok(DbResponse::Other(value))
 		}
 		Method::Delete => {
-			let statement = delete_statement(&mut params);
+			let (one, statement) = delete_statement(&mut params);
 			let query = Query(Statements(vec![Statement::Delete(statement)]));
 			let response = kvs.process(query, &*session, Some(vars.clone()), strict).await?;
-			let value = take(true, response).await?;
+			let value = take(one, response).await?;
 			Ok(DbResponse::Other(value))
 		}
 		Method::Query => {
