@@ -4,9 +4,12 @@ use crate::sql::escape::escape_ident;
 use nom::branch::alt;
 use nom::bytes::complete::escaped_transform;
 use nom::bytes::complete::is_not;
+use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
+use nom::combinator::recognize;
 use nom::combinator::value;
+use nom::multi::separated_list1;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -65,7 +68,12 @@ pub fn ident(i: &str) -> IResult<&str, Ident> {
 }
 
 pub fn plain(i: &str) -> IResult<&str, Ident> {
-	let (i, v) = ident_default(i)?;
+	let (i, v) = take_while1(val_char)(i)?;
+	Ok((i, Ident::from(v)))
+}
+
+pub fn multi(i: &str) -> IResult<&str, Ident> {
+	let (i, v) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
 	Ok((i, Ident::from(v)))
 }
 

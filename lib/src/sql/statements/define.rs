@@ -277,7 +277,7 @@ fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 	let (i, _) = tag_no_case("FUNCTION")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag("fn::")(i)?;
-	let (i, name) = ident::plain(i)?;
+	let (i, name) = ident::multi(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
