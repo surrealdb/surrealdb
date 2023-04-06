@@ -18,7 +18,9 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
+use nom::combinator::recognize;
 use nom::multi::separated_list0;
+use nom::multi::separated_list1;
 use serde::ser::SerializeTupleVariant;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -265,7 +267,7 @@ pub fn function(i: &str) -> IResult<&str, Function> {
 	alt((normal, custom, script, cast))(i)
 }
 
-fn normal(i: &str) -> IResult<&str, Function> {
+pub fn normal(i: &str) -> IResult<&str, Function> {
 	let (i, s) = function_names(i)?;
 	let (i, _) = openparenthese(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
@@ -273,9 +275,10 @@ fn normal(i: &str) -> IResult<&str, Function> {
 	Ok((i, Function::Normal(s.to_string(), a)))
 }
 
-fn custom(i: &str) -> IResult<&str, Function> {
+pub fn custom(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("fn::")(i)?;
-	let (i, s) = take_while1(val_char)(i)?;
+	let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
+	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;

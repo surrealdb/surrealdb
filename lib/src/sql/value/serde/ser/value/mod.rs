@@ -10,9 +10,11 @@ use crate::sql::serde::serialize_internal;
 use crate::sql::value::serde::ser;
 use crate::sql::value::Value;
 use crate::sql::Block;
+use crate::sql::Bytes;
 use crate::sql::Datetime;
 use crate::sql::Duration;
 use crate::sql::Future;
+use crate::sql::Ident;
 use crate::sql::Idiom;
 use crate::sql::Param;
 use crate::sql::Regex;
@@ -154,12 +156,8 @@ impl ser::Serializer for Serializer {
 		Ok(value.into())
 	}
 
-	fn serialize_bytes(self, values: &[u8]) -> Result<Self::Ok, Error> {
-		let mut vec = Vec::with_capacity(values.len());
-		for value in values {
-			vec.push(Value::from(*value));
-		}
-		Ok(vec.into())
+	fn serialize_bytes(self, value: &[u8]) -> Result<Self::Ok, Error> {
+		Ok(Value::Bytes(Bytes(value.to_owned())))
 	}
 
 	#[inline]
@@ -222,7 +220,7 @@ impl ser::Serializer for Serializer {
 				Ok(Value::Idiom(Idiom(value.serialize(ser::part::vec::Serializer.wrap())?)))
 			}
 			sql::param::TOKEN => {
-				Ok(Value::Param(Param(Idiom(value.serialize(ser::part::vec::Serializer.wrap())?))))
+				Ok(Value::Param(Param(Ident(value.serialize(ser::string::Serializer.wrap())?))))
 			}
 			sql::array::TOKEN => Ok(Value::Array(Array(value.serialize(vec::Serializer.wrap())?))),
 			sql::object::TOKEN => {
@@ -685,6 +683,15 @@ mod tests {
 		let geometry = Geometry::Collection(Vec::new());
 		let value = to_value(&geometry).unwrap();
 		let expected = Value::Geometry(geometry);
+		assert_eq!(value, expected);
+		assert_eq!(expected, to_value(&expected).unwrap());
+	}
+
+	#[test]
+	fn bytes() {
+		let bytes = Bytes("foobar".as_bytes().to_owned());
+		let value = to_value(&bytes).unwrap();
+		let expected = Value::Bytes(bytes);
 		assert_eq!(value, expected);
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}

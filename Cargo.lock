@@ -720,6 +720,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d261e256854913907f67ed06efbc3338dfe6179796deefc1ff763fc1aee5535"
 
 [[package]]
+name = "bung"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da8bcf29331f126c3b4f20a6698909d58004290723aac75e3eafab41ae3c2953"
+dependencies = [
+ "byteorder",
+ "rmp",
+ "serde",
+]
+
+[[package]]
 name = "bytemuck"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3811,10 +3822,11 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "surreal"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9"
 dependencies = [
  "argon2",
  "base64 0.21.0",
+ "bung",
  "bytes",
  "chrono",
  "clap",
@@ -3851,7 +3863,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "1.0.0-beta.8"
+version = "1.0.0-beta.9+20230402"
 dependencies = [
  "addr",
  "any_ascii",
@@ -3862,6 +3874,7 @@ dependencies = [
  "bcrypt",
  "bigdecimal",
  "bincode",
+ "bung",
  "chrono",
  "dmp",
  "echodb",
@@ -3922,9 +3935,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-derive"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "552bb4f9eb49f493b14d79d989ea9ecb53ee8cee0aad529e289faca72fb78b14"
+checksum = "0e0f2a75e22417f587cf23a5efa9f680f4002b8655b8481a01ee5e787f15d82b"
 dependencies = [
  "quote",
  "syn 1.0.109",

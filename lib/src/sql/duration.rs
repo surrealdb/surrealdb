@@ -173,28 +173,40 @@ impl Serialize for Duration {
 impl ops::Add for Duration {
 	type Output = Self;
 	fn add(self, other: Self) -> Self {
-		Duration::from(self.0 + other.0)
+		match self.0.checked_add(other.0) {
+			Some(v) => Duration::from(v),
+			None => Duration::from(time::Duration::MAX),
+		}
 	}
 }
 
 impl<'a, 'b> ops::Add<&'b Duration> for &'a Duration {
 	type Output = Duration;
 	fn add(self, other: &'b Duration) -> Duration {
-		Duration::from(self.0 + other.0)
+		match self.0.checked_add(other.0) {
+			Some(v) => Duration::from(v),
+			None => Duration::from(time::Duration::MAX),
+		}
 	}
 }
 
 impl ops::Sub for Duration {
 	type Output = Self;
 	fn sub(self, other: Self) -> Self {
-		Duration::from(self.0 - other.0)
+		match self.0.checked_sub(other.0) {
+			Some(v) => Duration::from(v),
+			None => Duration::default(),
+		}
 	}
 }
 
 impl<'a, 'b> ops::Sub<&'b Duration> for &'a Duration {
 	type Output = Duration;
 	fn sub(self, other: &'b Duration) -> Duration {
-		Duration::from(self.0 - other.0)
+		match self.0.checked_sub(other.0) {
+			Some(v) => Duration::from(v),
+			None => Duration::default(),
+		}
 	}
 }
 

@@ -98,7 +98,7 @@ pub enum Error {
 	#[error("Failed to deserialize a binary response: {error}")]
 	ResponseFromBinary {
 		binary: Vec<u8>,
-		error: msgpack::decode::Error,
+		error: bung::decode::Error,
 	},
 
 	/// Failed to serialize `sql::Value` to JSON string

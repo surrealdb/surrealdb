@@ -54,8 +54,8 @@ impl ser::Serializer for Serializer {
 			"Field" => Ok(Part::Field(Ident(value.serialize(ser::string::Serializer.wrap())?))),
 			"Index" => Ok(Part::Index(value.serialize(ser::number::Serializer.wrap())?)),
 			"Where" => Ok(Part::Where(value.serialize(ser::value::Serializer.wrap())?)),
-			"Thing" => Ok(Part::Thing(value.serialize(ser::thing::Serializer.wrap())?)),
 			"Graph" => Ok(Part::Graph(value.serialize(ser::graph::Serializer.wrap())?)),
+			"Value" => Ok(Part::Value(value.serialize(ser::value::Serializer.wrap())?)),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
 			}
@@ -114,15 +114,15 @@ mod tests {
 	}
 
 	#[test]
-	fn thing() {
-		let part = Part::Thing(sql::thing("foo:bar").unwrap());
+	fn graph() {
+		let part = Part::Graph(Default::default());
 		let serialized = serialize_internal(|| part.serialize(Serializer.wrap())).unwrap();
 		assert_eq!(part, serialized);
 	}
 
 	#[test]
-	fn graph() {
-		let part = Part::Graph(Default::default());
+	fn value() {
+		let part = Part::Value(sql::thing("foo:bar").unwrap().into());
 		let serialized = serialize_internal(|| part.serialize(Serializer.wrap())).unwrap();
 		assert_eq!(part, serialized);
 	}
