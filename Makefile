@@ -23,7 +23,8 @@ check:
 	cargo clippy -- -W warnings
 
 .PHONY: clean
-clean: cargo clean
+clean:
+	cargo clean
 
 .PHONY: serve
 serve:
@@ -31,8 +32,8 @@ serve:
 
 .PHONY: cluster
 cluster:
-	cargo run --features storage-tikv -- start --log trace --user root --pass root tikv://localhost:2379 &\
-	cargo run --features storage-tikv -- start --log trace --user root --pass root -b 0.0.0.0:8001 tikv://localhost:2379
+	SURREAL_TRACING_TRACER=otlp cargo run --features storage-tikv -- start --log trace --user root --pass root tikv://localhost:2379 &\
+	SURREAL_TRACING_TRACER=otlp cargo run --features storage-tikv -- start --log trace --user root --pass root -b 0.0.0.0:8001 tikv://localhost:2379
 
 .PHONE: cluster-tikv
 cluster-tikv:

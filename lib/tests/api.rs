@@ -71,25 +71,14 @@ mod ws {
 	include!("api/auth.rs");
 }
 
-#[cfg(feature = "protocol-ws")]
-mod cluster {
+#[cfg(feature = "protocol-http")]
+mod http {
 	use super::*;
-	use surrealdb::engine::remote::ws::Client;
-	use surrealdb::engine::remote::ws::Ws;
+	use surrealdb::engine::remote::http::Client;
+	use surrealdb::engine::remote::http::Http;
 
 	async fn new_db() -> Surreal<Client> {
-		let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
-		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
-		})
-		.await
-		.unwrap();
-		db
-	}
-
-	async fn new_db_replica() -> Surreal<Client> {
-		let db = Surreal::new::<Ws>("127.0.0.1:8001").await.unwrap();
+		let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER,
 			password: ROOT_PASS,
@@ -100,31 +89,9 @@ mod cluster {
 	}
 
 	include!("api/mod.rs");
-	// include!("api/auth.rs");
-	include!("api/cluster.rs");
+	include!("api/auth.rs");
+	include!("api/backup.rs");
 }
-
-// #[cfg(feature = "protocol-http")]
-// mod http {
-// 	use super::*;
-// 	use surrealdb::engine::remote::http::Client;
-// 	use surrealdb::engine::remote::http::Http;
-//
-// 	async fn new_db() -> Surreal<Client> {
-// 		let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
-// 		db.signin(Root {
-// 			username: ROOT_USER,
-// 			password: ROOT_PASS,
-// 		})
-// 		.await
-// 		.unwrap();
-// 		db
-// 	}
-//
-// 	include!("api/mod.rs");
-// 	include!("api/auth.rs");
-// 	include!("api/backup.rs");
-// }
 
 #[cfg(feature = "kv-mem")]
 mod mem {
@@ -189,23 +156,23 @@ mod fdb {
 	include!("api/backup.rs");
 }
 
-// #[cfg(feature = "protocol-http")]
-// mod any {
-// 	use super::*;
-// 	use surrealdb::engine::any::Any;
-//
-// 	async fn new_db() -> Surreal<Any> {
-// 		let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
-// 		db.signin(Root {
-// 			username: ROOT_USER,
-// 			password: ROOT_PASS,
-// 		})
-// 		.await
-// 		.unwrap();
-// 		db
-// 	}
-//
-// 	include!("api/mod.rs");
-// 	include!("api/auth.rs");
-// 	include!("api/backup.rs");
-// }
+#[cfg(feature = "protocol-http")]
+mod any {
+	use super::*;
+	use surrealdb::engine::any::Any;
+
+	async fn new_db() -> Surreal<Any> {
+		let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER,
+			password: ROOT_PASS,
+		})
+		.await
+		.unwrap();
+		db
+	}
+
+	include!("api/mod.rs");
+	include!("api/auth.rs");
+	include!("api/backup.rs");
+}

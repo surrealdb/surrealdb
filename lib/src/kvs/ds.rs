@@ -189,6 +189,7 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
+	#[instrument(skip_all, name = "rpc use")]
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
 		match &self.inner {
@@ -221,10 +222,11 @@ impl Datastore {
 			}
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(v) => {
-				trace!("Started a TiKV transaction");
+				let txid = Uuid::new_v4().to_string();
+				trace!("Started a TiKV transaction with txid {txid:?}");
 				let tx = v.transaction(write, lock).await?;
 				Ok(Transaction {
-					id: Uuid::new_v4().to_string(),
+					id: txid,
 					inner: super::tx::Inner::TiKV(tx),
 					cache: super::cache::Cache::default(),
 				})

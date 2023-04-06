@@ -10,9 +10,6 @@ rustflags = [
 	"-C", "target-feature=+crt-static"
 ]
 
-[profile.dev]
-debug_assertions = true
-
 [target.x86_64-pc-windows-msvc]
 rustflags = [
 	"--cfg", "uuid_unstable",
