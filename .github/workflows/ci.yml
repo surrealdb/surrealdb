@@ -31,8 +31,9 @@ jobs:
 
       - name: Run cargo test
         run: |
-          (&>/dev/null cargo run --no-default-features -F storage-mem -- start --log trace --user root --pass root memory &)
-          cargo test --workspace --features protocol-ws,protocol-http,kv-rocksdb
+          cargo build --locked --no-default-features --features storage-mem
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo test --locked --workspace --features protocol-ws,protocol-http,kv-rocksdb
 
   lint:
     name: Lint
