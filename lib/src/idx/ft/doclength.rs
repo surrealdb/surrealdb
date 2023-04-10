@@ -1,99 +1,98 @@
+use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
 use crate::idx::btree::{BTree, Statistics};
 use crate::idx::ft::docids::DocId;
-use crate::idx::kvsim::KVSimulator;
 use crate::idx::{BaseStateKey, IndexId, DOC_LENGTHS_DOMAIN};
-use crate::kvs::Key;
-use serde::{Deserialize, Serialize};
+use crate::kvs::{Key, Transaction, Val};
 
 pub(super) type DocLength = u64;
 
 pub(super) struct DocLengths {
 	state_key: Key,
-	state: State,
-	updated: bool,
-}
-
-#[derive(Serialize, Deserialize)]
-struct State {
 	btree: BTree,
 }
 
-impl State {
-	fn new(index_id: IndexId, btree_order: usize) -> Self {
-		Self {
-			btree: BTree::new(DOC_LENGTHS_DOMAIN, index_id, btree_order),
-		}
-	}
-}
-
 impl DocLengths {
-	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, default_btree_order: usize) -> Self {
-		let state_key = BaseStateKey::new(DOC_LENGTHS_DOMAIN, index_id).into();
-		Self {
-			state: kv.get(&state_key).unwrap_or_else(|| State::new(index_id, default_btree_order)),
-			updated: false,
+	pub(super) async fn new(
+		tx: &mut Transaction,
+		index_id: IndexId,
+		default_btree_order: usize,
+	) -> Result<Self, Error> {
+		let state_key: Key = BaseStateKey::new(DOC_LENGTHS_DOMAIN, index_id).into();
+		let btree: BTree = if let Some(val) = tx.get(state_key.clone()).await? {
+			BTree::try_from(val)?
+		} else {
+			BTree::new(DOC_LENGTHS_DOMAIN, index_id, default_btree_order)
+		};
+		Ok(Self {
 			state_key,
-		}
+			btree,
+		})
 	}
 
-	pub(super) fn get_doc_length(&self, kv: &mut KVSimulator, doc_id: DocId) -> Option<DocLength> {
-		self.state.btree.search::<TrieKeys>(kv, &doc_id.to_be_bytes().to_vec())
+	pub(super) async fn get_doc_length(
+		&self,
+		tx: &mut Transaction,
+		doc_id: DocId,
+	) -> Result<Option<DocLength>, Error> {
+		self.btree.search::<TrieKeys>(tx, &doc_id.to_be_bytes().to_vec()).await
 	}
 
-	pub(super) fn set_doc_length(
+	pub(super) async fn set_doc_length(
 		&mut self,
-		kv: &mut KVSimulator,
+		tx: &mut Transaction,
 		doc_id: DocId,
 		doc_length: DocLength,
-	) {
-		self.state.btree.insert::<TrieKeys>(kv, doc_id.to_be_bytes().to_vec(), doc_length);
-		self.updated = true;
+	) -> Result<(), Error> {
+		self.btree.insert::<TrieKeys>(tx, doc_id.to_be_bytes().to_vec(), doc_length).await
 	}
 
-	pub(super) fn statistics(&self, kv: &mut KVSimulator) -> Statistics {
-		self.state.btree.statistics::<TrieKeys>(kv)
+	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+		self.btree.statistics::<TrieKeys>(tx).await
 	}
 
-	pub(super) fn finish(self, kv: &mut KVSimulator) {
-		if self.updated {
-			kv.set(self.state_key, &self.state);
+	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
+		if self.btree.is_updated() {
+			let val: Val = self.btree.try_into()?;
+			tx.set(self.state_key, val).await?;
 		}
+		Ok(())
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::doclength::DocLengths;
-	use crate::idx::kvsim::KVSimulator;
+	use crate::kvs::Datastore;
 
-	#[test]
-	fn test_doc_lengths() {
+	#[tokio::test]
+	async fn test_doc_lengths() {
 		const BTREE_ORDER: usize = 75;
 
-		let mut kv = KVSimulator::default();
+		let ds = Datastore::new("memory").await.unwrap();
 
 		// Check empty state
-		let l = DocLengths::new(&mut kv, 0, BTREE_ORDER);
-		assert_eq!(l.statistics(&mut kv).keys_count, 0);
-		let dl = l.get_doc_length(&mut kv, 99);
-		l.finish(&mut kv);
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		let l = DocLengths::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 0);
+		let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
+		l.finish(&mut tx).await.unwrap();
 		assert_eq!(dl, None);
 
 		// Set a doc length
-		let mut l = DocLengths::new(&mut kv, 0, BTREE_ORDER);
-		l.set_doc_length(&mut kv, 99, 199);
-		assert_eq!(l.statistics(&mut kv).keys_count, 1);
-		let dl = l.get_doc_length(&mut kv, 99);
-		l.finish(&mut kv);
+		let mut l = DocLengths::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		l.set_doc_length(&mut tx, 99, 199).await.unwrap();
+		assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 1);
+		let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
+		l.finish(&mut tx).await.unwrap();
 		assert_eq!(dl, Some(199));
 
 		// Update doc length
-		let mut l = DocLengths::new(&mut kv, 0, BTREE_ORDER);
-		l.set_doc_length(&mut kv, 99, 299);
-		assert_eq!(l.statistics(&mut kv).keys_count, 1);
-		let dl = l.get_doc_length(&mut kv, 99);
-		l.finish(&mut kv);
+		let mut l = DocLengths::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		l.set_doc_length(&mut tx, 99, 299).await.unwrap();
+		assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 1);
+		let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
+		l.finish(&mut tx).await.unwrap();
 		assert_eq!(dl, Some(299));
 	}
 }

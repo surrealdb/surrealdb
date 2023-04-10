@@ -1,7 +1,7 @@
+use crate::err::Error;
 use crate::idx::bkeys::{BKeys, KeyVisitor};
-use crate::idx::kvsim::KVSimulator;
 use crate::idx::{Domain, IndexId};
-use crate::kvs::Key;
+use crate::kvs::{Key, Transaction, Val};
 use derive::Key;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -11,20 +11,38 @@ use std::fmt::Debug;
 pub(super) type NodeId = u64;
 pub(super) type Payload = u64;
 
-#[derive(Serialize, Deserialize, Key)]
+#[derive(Serialize, Deserialize, Key, Clone)]
 struct NodeKey {
 	domain: Domain,
 	index_id: IndexId,
 	node_id: NodeId,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub(super) struct BTree {
 	domain: Domain,
 	index_id: IndexId,
 	order: usize,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
+	#[serde(skip)]
+	updated: bool,
+}
+
+impl TryFrom<Val> for BTree {
+	type Error = bincode::Error;
+
+	fn try_from(val: Val) -> Result<BTree, Self::Error> {
+		bincode::deserialize(val.as_slice())
+	}
+}
+
+impl TryInto<Val> for BTree {
+	type Error = bincode::Error;
+
+	fn try_into(self) -> Result<Val, Self::Error> {
+		bincode::serialize(&self)
+	}
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -63,6 +81,28 @@ where
 	}
 }
 
+impl<BK> TryFrom<Vec<u8>> for Node<BK>
+where
+	BK: BKeys + DeserializeOwned,
+{
+	type Error = bincode::Error;
+
+	fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+		bincode::deserialize(value.as_slice())
+	}
+}
+
+impl<BK> TryInto<Vec<u8>> for &Node<BK>
+where
+	BK: BKeys + Serialize,
+{
+	type Error = bincode::Error;
+
+	fn try_into(self) -> Result<Vec<u8>, Self::Error> {
+		bincode::serialize(self)
+	}
+}
+
 struct SplitResult<BK>
 where
 	BK: BKeys,
@@ -74,171 +114,167 @@ where
 }
 
 impl BTree {
-	pub fn new(domain: Domain, index_id: IndexId, order: usize) -> Self {
+	pub(super) fn new(domain: Domain, index_id: IndexId, order: usize) -> Self {
 		Self {
 			domain,
 			index_id,
 			order,
 			root: None,
+			updated: false,
 			next_node_id: 0,
 		}
 	}
 
-	pub(super) fn search<BK>(&self, kv: &mut KVSimulator, searched_key: &Key) -> Option<u64>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
-		if let Some(root_id) = &self.root {
-			self.recursive_search::<BK>(kv, *root_id, searched_key)
-		} else {
-			None
-		}
-	}
-
-	fn recursive_search<BK>(
+	pub(super) async fn search<BK>(
 		&self,
-		kv: &mut KVSimulator,
-		node_id: NodeId,
+		tx: &mut Transaction,
 		searched_key: &Key,
-	) -> Option<Payload>
+	) -> Result<Option<Payload>, Error>
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
-		let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
-		if let Some(value) = node.keys().get(searched_key) {
-			return Some(value);
+		let mut node_queue = VecDeque::new();
+		if let Some(node_id) = self.root {
+			node_queue.push_front(node_id);
 		}
-		if let Node::Internal(keys, children) = node {
-			let child_idx = keys.get_child_idx(searched_key);
-			self.recursive_search::<BK>(kv, children[child_idx], searched_key)
-		} else {
-			None
+		while let Some(node_id) = node_queue.pop_front() {
+			let node = StoredNode::<BK>::read(tx, self.new_node_key(node_id)).await?.node;
+			if let Some(value) = node.keys().get(searched_key) {
+				return Ok(Some(value));
+			}
+			if let Node::Internal(keys, children) = node {
+				let child_idx = keys.get_child_idx(searched_key);
+				node_queue.push_front(children[child_idx]);
+			}
 		}
+		Ok(None)
 	}
 
-	pub(super) fn search_by_prefix<BK, V>(
+	pub(super) async fn search_by_prefix<BK, V>(
 		&self,
-		kv: &mut KVSimulator,
+		tx: &mut Transaction,
 		prefix_key: &Key,
 		visitor: &mut V,
-	) where
-		BK: BKeys + Serialize + DeserializeOwned,
-		V: KeyVisitor,
-	{
-		if let Some(root_id) = &self.root {
-			self.recursive_search_by_prefix::<BK, V>(kv, *root_id, prefix_key, visitor);
-		}
-	}
-
-	fn recursive_search_by_prefix<BK, V>(
-		&self,
-		kv: &mut KVSimulator,
-		node_id: NodeId,
-		prefix_key: &Key,
-		visitor: &mut V,
-	) -> bool
+	) -> Result<(), Error>
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
-		V: KeyVisitor,
+		V: KeyVisitor + Send,
 	{
-		let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
-		let mut matches_found = node.keys().collect_with_prefix(kv, prefix_key, visitor);
-		if let Node::Internal(keys, children) = node {
-			let mut child_matches_found = false;
-			let child_idx = keys.get_child_idx(prefix_key);
-			for i in child_idx..children.len() {
-				if !self.recursive_search_by_prefix::<BK, V>(kv, children[i], prefix_key, visitor) {
-					if child_matches_found {
-						// If we have found matches in previous (lower) child nodes,
-						// but we don't find matches anymore, there is no chance we can find new matches
-						// in upper child nodes, therefore we can stop the traversal.
-						break;
-					}
-				} else {
-					if !matches_found {
-						matches_found = true;
-					}
-					if !child_matches_found {
-						child_matches_found = true;
-					}
+		let mut node_queue = VecDeque::new();
+		if let Some(node_id) = self.root {
+			node_queue.push_front(node_id);
+		}
+		let mut matches_found = false;
+		while let Some(node_id) = node_queue.pop_front() {
+			let node = StoredNode::<BK>::read(tx, self.new_node_key(node_id)).await?.node;
+			if node.keys().collect_with_prefix(tx, prefix_key, visitor).await? {
+				matches_found = true;
+			} else {
+				if matches_found {
+					// If we have found matches in previous (lower) nodes,
+					// but we don't find matches anymore, there is no chance we can find new matches
+					// in upper child nodes, therefore we can stop the traversal.
+					break;
+				}
+			}
+			if let Node::Internal(keys, children) = node {
+				let child_idx = keys.get_child_idx(prefix_key);
+				for i in child_idx..children.len() {
+					node_queue.push_front(children[i]);
 				}
 			}
 		}
-		matches_found
+		Ok(())
 	}
 
-	pub(super) fn insert<BK>(&mut self, kv: &mut KVSimulator, key: Key, payload: Payload)
+	pub(super) async fn insert<BK>(
+		&mut self,
+		tx: &mut Transaction,
+		key: Key,
+		payload: Payload,
+	) -> Result<(), Error>
 	where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
 		if let Some(root_id) = self.root {
-			let root = StoredNode::<BK>::read(kv, self.new_node_key(root_id));
+			let root = StoredNode::<BK>::read(tx, self.new_node_key(root_id)).await?;
 			if root.is_full(self.order * 2) {
 				let new_root_id = self.new_node_id();
 				let new_root_key = self.new_node_key(new_root_id);
 				let new_root_node = Node::Internal(BK::default(), vec![root_id]);
 				self.root = Some(new_root_id);
-				let new_root =
-					self.split_child(kv, new_root_key.into(), new_root_node, 0, root).parent_node;
-				self.insert_non_full(kv, new_root, key, payload);
+				let new_root = self
+					.split_child(tx, new_root_key.into(), new_root_node, 0, root)
+					.await?
+					.parent_node;
+				self.insert_non_full(tx, new_root, key, payload).await?;
 			} else {
-				self.insert_non_full(kv, root, key, payload);
+				self.insert_non_full(tx, root, key, payload).await?;
 			}
 		} else {
 			let new_root_id = self.new_node_id();
-			let new_root_node = Node::Leaf(BK::with_key_val(key, payload));
+			let new_root_node = Node::Leaf(BK::with_key_val(key, payload)?);
 			self.root = Some(new_root_id);
-			StoredNode::<BK>::write(kv, self.new_node_key(new_root_id).into(), new_root_node);
+			StoredNode::<BK>::write(tx, self.new_node_key(new_root_id), new_root_node).await?;
 		}
+		self.updated = true;
+		Ok(())
 	}
 
-	fn insert_non_full<BK>(
+	async fn insert_non_full<BK>(
 		&mut self,
-		kv: &mut KVSimulator,
-		mut node: StoredNode<BK>,
+		tx: &mut Transaction,
+		node: StoredNode<BK>,
 		key: Key,
 		payload: Payload,
-	) where
+	) -> Result<(), Error>
+	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
-		match &mut node.node {
-			Node::Leaf(keys) => {
-				keys.insert(key, payload);
-				StoredNode::<BK>::write(kv, node.key, node.node);
-			}
-			Node::Internal(keys, children) => {
-				if keys.get(&key).is_some() {
+		let mut next_node = Some(node);
+		while let Some(mut node) = next_node.take() {
+			let key: Key = key.clone();
+			match &mut node.node {
+				Node::Leaf(keys) => {
 					keys.insert(key, payload);
-					StoredNode::<BK>::write(kv, node.key, node.node);
-					return;
+					StoredNode::<BK>::write(tx, node.key, node.node).await?;
 				}
-				let child_idx = keys.get_child_idx(&key);
-				let child_key = self.new_node_key(children[child_idx]);
-				let child_node = StoredNode::<BK>::read(kv, child_key);
-				let child_node = if child_node.is_full(self.order * 2) {
-					let split_result =
-						self.split_child::<BK>(kv, node.key, node.node, child_idx, child_node);
-					if key.gt(&split_result.median_key) {
-						split_result.right_node
-					} else {
-						split_result.left_node
+				Node::Internal(keys, children) => {
+					if keys.get(&key).is_some() {
+						keys.insert(key, payload);
+						StoredNode::<BK>::write(tx, node.key, node.node).await?;
+						return Ok(());
 					}
-				} else {
-					child_node
-				};
-				self.insert_non_full(kv, child_node, key, payload);
+					let child_idx = keys.get_child_idx(&key);
+					let child_key = self.new_node_key(children[child_idx]);
+					let child_node = StoredNode::<BK>::read(tx, child_key).await?;
+					let child_node = if child_node.is_full(self.order * 2) {
+						let split_result = self
+							.split_child::<BK>(tx, node.key, node.node, child_idx, child_node)
+							.await?;
+						if key.gt(&split_result.median_key) {
+							split_result.right_node
+						} else {
+							split_result.left_node
+						}
+					} else {
+						child_node
+					};
+					next_node.replace(child_node);
+				}
 			}
 		}
+		Ok(())
 	}
 
-	fn split_child<BK>(
+	async fn split_child<BK>(
 		&mut self,
-		kv: &mut KVSimulator,
-		parent_key: Key,
+		tx: &mut Transaction,
+		parent_key: NodeKey,
 		parent_node: Node<BK>,
 		idx: usize,
 		child_node: StoredNode<BK>,
-	) -> SplitResult<BK>
+	) -> Result<SplitResult<BK>, Error>
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
@@ -259,18 +295,19 @@ impl BTree {
 			}
 		};
 		// Save the mutated split child with half the (lower) keys
-		let left_node = StoredNode::<BK>::write(kv, child_node.key, left_node);
+		let left_node = StoredNode::<BK>::write(tx, child_node.key, left_node).await?;
 		// Save the new child with half the (upper) keys
 		let right_node =
-			StoredNode::<BK>::write(kv, self.new_node_key(right_node_id).into(), right_node);
+			StoredNode::<BK>::write(tx, self.new_node_key(right_node_id).into(), right_node)
+				.await?;
 		// Save the parent node
-		let parent_node = StoredNode::<BK>::write(kv, parent_key, parent_node);
-		SplitResult {
+		let parent_node = StoredNode::<BK>::write(tx, parent_key, parent_node).await?;
+		Ok(SplitResult {
 			parent_node,
 			left_node,
 			right_node,
 			median_key,
-		}
+		})
 	}
 
 	fn split_internal_node<BK>(
@@ -312,9 +349,9 @@ impl BTree {
 		}
 	}
 
-	pub(super) fn debug<F, BK>(&self, kv: &mut KVSimulator, to_string: F)
+	pub(super) async fn debug<F, BK>(&self, tx: &mut Transaction, to_string: F) -> Result<(), Error>
 	where
-		F: Fn(Key) -> String,
+		F: Fn(Key) -> Result<String, Error>,
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		let mut node_queue = VecDeque::new();
@@ -322,9 +359,9 @@ impl BTree {
 			node_queue.push_front((node_id, 0));
 		}
 		while let Some((node_id, depth)) = node_queue.pop_front() {
-			let node = StoredNode::<BK>::read(kv, self.new_node_key(node_id)).node;
+			let node = StoredNode::<BK>::read(tx, self.new_node_key(node_id)).await?.node;
 			debug!("Node: {} - depth: {} -  keys: ", node_id, depth);
-			node.keys().debug(|k| to_string(k));
+			node.keys().debug(|k| to_string(k))?;
 			if let Node::Internal(_, children) = node {
 				debug!("children: {:?}", children);
 				let depth = depth + 1;
@@ -333,41 +370,38 @@ impl BTree {
 				}
 			}
 		}
+		Ok(())
 	}
 
-	pub(super) fn statistics<BK>(&self, kv: &mut KVSimulator) -> Statistics
+	pub(super) async fn statistics<BK>(&self, tx: &mut Transaction) -> Result<Statistics, Error>
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		let mut stats = Statistics::default();
-		if let Some(root_id) = &self.root {
-			self.recursive_stats::<BK>(kv, 1, *root_id, &mut stats);
+		let mut node_queue = VecDeque::new();
+		if let Some(node_id) = self.root {
+			node_queue.push_front((node_id, 0));
 		}
-		stats
+		while let Some((node_id, depth)) = node_queue.pop_front() {
+			let stored = StoredNode::<BK>::read(tx, self.new_node_key(node_id)).await?;
+			stats.keys_count += stored.node.keys().len();
+			if depth > stats.max_depth {
+				stats.max_depth = depth;
+			}
+			stats.nodes_count += 1;
+			stats.total_size += stored.size;
+			if let Node::Internal(_, children) = stored.node {
+				let depth = depth + 1;
+				for child_id in &children {
+					node_queue.push_front((*child_id, depth));
+				}
+			};
+		}
+		Ok(stats)
 	}
 
-	fn recursive_stats<BK>(
-		&self,
-		kv: &mut KVSimulator,
-		mut depth: usize,
-		node_id: NodeId,
-		stats: &mut Statistics,
-	) where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
-		let stored = StoredNode::<BK>::read(kv, self.new_node_key(node_id));
-		stats.keys_count += stored.node.keys().len();
-		if depth > stats.max_depth {
-			stats.max_depth = depth;
-		}
-		stats.nodes_count += 1;
-		stats.total_size += stored.size;
-		if let Node::Internal(_, children) = stored.node {
-			depth += 1;
-			for child_id in &children {
-				self.recursive_stats::<BK>(kv, depth, *child_id, stats);
-			}
-		};
+	pub(super) fn is_updated(&self) -> bool {
+		self.updated
 	}
 }
 
@@ -375,7 +409,7 @@ struct StoredNode<BK>
 where
 	BK: BKeys,
 {
-	key: Key,
+	key: NodeKey,
 	node: Node<BK>,
 	size: usize,
 }
@@ -384,24 +418,34 @@ impl<BK> StoredNode<BK>
 where
 	BK: BKeys + Serialize + DeserializeOwned,
 {
-	fn read(kv: &mut KVSimulator, node_key: NodeKey) -> Self {
-		let key = node_key.into();
-		let (size, node): (_, Node<BK>) = kv.get_with_size(&key).unwrap();
-		Self {
-			key,
-			size,
-			node,
+	async fn read(tx: &mut Transaction, node_key: NodeKey) -> Result<Self, Error> {
+		let key: Key = node_key.clone().into();
+		if let Some(val) = tx.get(key).await? {
+			Ok(Self {
+				key: node_key,
+				size: val.len(),
+				node: Node::try_from(val)?,
+			})
+		} else {
+			Err(Error::CorruptedIndex(None))
 		}
 	}
 
-	fn write(kv: &mut KVSimulator, key: Key, mut node: Node<BK>) -> Self {
+	async fn write(
+		tx: &mut Transaction,
+		node_key: NodeKey,
+		mut node: Node<BK>,
+	) -> Result<Self, Error> {
 		node.keys_mut().compile();
-		let size = kv.set(key.clone(), &node);
-		Self {
-			key,
+		let val: Val = (&node).try_into()?;
+		let key: Key = node_key.clone().into();
+		let size = val.len();
+		tx.set(key, val).await?;
+		Ok(Self {
+			key: node_key,
 			size,
 			node,
-		}
+		})
 	}
 
 	fn is_full(&self, full_size: usize) -> bool {
@@ -413,9 +457,8 @@ where
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::btree::{BTree, Node, Payload, Statistics};
-	use crate::idx::kvsim::KVSimulator;
 	use crate::idx::tests::HashVisitor;
-	use crate::kvs::Key;
+	use crate::kvs::{Datastore, Key, Transaction};
 	use rand::prelude::{SliceRandom, ThreadRng};
 	use rand::thread_rng;
 	use serde::de::DeserializeOwned;
@@ -423,15 +466,15 @@ mod tests {
 	use test_log::test;
 
 	#[test]
-	fn test_btree_serde() {
-		let tree = BTree::new(1u8, 2u64, 75);
-		let buf = bincode::serialize(&tree).unwrap();
-		let tree: BTree = bincode::deserialize(&buf).unwrap();
-		assert_eq!(tree.order, 75);
-		assert_eq!(tree.domain, 1);
-		assert_eq!(tree.index_id, 2);
-		assert_eq!(tree.next_node_id, 0);
-		assert_eq!(tree.root, None);
+	fn test_btree_state_serde() {
+		let t = BTree::new(1u8, 2u64, 75);
+		let buf = bincode::serialize(&t).unwrap();
+		let t: BTree = bincode::deserialize(&buf).unwrap();
+		assert_eq!(t.domain, 1);
+		assert_eq!(t.index_id, 2);
+		assert_eq!(t.order, 75);
+		assert_eq!(t.root, None);
+		assert_eq!(t.next_node_id, 0);
 	}
 
 	#[test]
@@ -448,8 +491,8 @@ mod tests {
 		let _: Node<TrieKeys> = bincode::deserialize(&buf).unwrap();
 	}
 
-	fn insertions_test<F, BK>(
-		kv: &mut KVSimulator,
+	async fn insertions_test<F, BK>(
+		tx: &mut Transaction,
 		t: &mut BTree,
 		samples_size: usize,
 		sample_provider: F,
@@ -460,9 +503,9 @@ mod tests {
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
 			// Insert the sample
-			t.insert::<BK>(kv, key.clone(), payload);
+			t.insert::<BK>(tx, key.clone(), payload).await.unwrap();
 			// Check we can find it
-			assert_eq!(t.search::<BK>(kv, &key), Some(payload));
+			assert_eq!(t.search::<BK>(tx, &key).await.unwrap(), Some(payload));
 		}
 	}
 
@@ -470,13 +513,16 @@ mod tests {
 		(format!("{}", idx).into(), (idx * 10) as u64)
 	}
 
-	#[test]
-	fn test_btree_fst_small_order_sequential_insertions() {
-		let mut kv = KVSimulator::new(None, 0);
+	#[test(tokio::test)]
+	async fn test_btree_fst_small_order_sequential_insertions() {
 		let mut t = BTree::new(1u8, 2u64, 75);
-		insertions_test::<_, FstKeys>(&mut kv, &mut t, 100, get_key_value);
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		insertions_test::<_, FstKeys>(&mut tx, &mut t, 100, get_key_value).await;
+		tx.commit().await.unwrap();
+		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics::<FstKeys>(&mut kv),
+			t.statistics::<FstKeys>(&mut tx).await.unwrap(),
 			Statistics {
 				keys_count: 100,
 				max_depth: 3,
@@ -484,17 +530,19 @@ mod tests {
 				total_size: 1042,
 			}
 		);
-		t.debug::<_, FstKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
-		kv.print_stats();
+		t.debug::<_, FstKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 	}
 
-	#[test]
-	fn test_btree_trie_small_order_sequential_insertions() {
-		let mut kv = KVSimulator::new(None, 0);
+	#[test(tokio::test)]
+	async fn test_btree_trie_small_order_sequential_insertions() {
 		let mut t = BTree::new(1u8, 2u64, 75);
-		insertions_test::<_, TrieKeys>(&mut kv, &mut t, 100, get_key_value);
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		insertions_test::<_, TrieKeys>(&mut tx, &mut t, 100, get_key_value).await;
+		tx.commit().await.unwrap();
+		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics::<TrieKeys>(&mut kv),
+			t.statistics::<TrieKeys>(&mut tx).await.unwrap(),
 			Statistics {
 				keys_count: 100,
 				max_depth: 3,
@@ -502,45 +550,49 @@ mod tests {
 				total_size: 1615,
 			}
 		);
-		t.debug::<_, TrieKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
-		kv.print_stats();
+		t.debug::<_, TrieKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 	}
 
-	#[test]
-	fn test_btree_fst_small_order_random_insertions() {
-		let mut kv = KVSimulator::new(None, 0);
+	#[test(tokio::test)]
+	async fn test_btree_fst_small_order_random_insertions() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = BTree::new(1u8, 2u64, 75);
 		let mut samples: Vec<usize> = (0..100).collect();
 		let mut rng = thread_rng();
 		samples.shuffle(&mut rng);
-		insertions_test::<_, FstKeys>(&mut kv, &mut t, 100, |i| get_key_value(samples[i]));
-		let s = t.statistics::<FstKeys>(&mut kv);
+		insertions_test::<_, FstKeys>(&mut tx, &mut t, 100, |i| get_key_value(samples[i])).await;
+		tx.commit().await.unwrap();
+		let mut tx = ds.transaction(false, false).await.unwrap();
+		let s = t.statistics::<FstKeys>(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 100);
-		t.debug::<_, FstKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
-		kv.print_stats();
+		t.debug::<_, FstKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 	}
 
-	#[test]
-	fn test_btree_trie_small_order_random_insertions() {
-		let mut kv = KVSimulator::new(None, 0);
+	#[test(tokio::test)]
+	async fn test_btree_trie_small_order_random_insertions() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = BTree::new(1u8, 2u64, 75);
 		let mut samples: Vec<usize> = (0..100).collect();
 		let mut rng = thread_rng();
 		samples.shuffle(&mut rng);
-		insertions_test::<_, TrieKeys>(&mut kv, &mut t, 100, |i| get_key_value(samples[i]));
-		let s = t.statistics::<TrieKeys>(&mut kv);
+		insertions_test::<_, TrieKeys>(&mut tx, &mut t, 100, |i| get_key_value(samples[i])).await;
+		let mut tx = ds.transaction(false, false).await.unwrap();
+		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 100);
-		t.debug::<_, TrieKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
-		kv.print_stats();
+		t.debug::<_, TrieKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 	}
 
-	#[test]
-	fn test_btree_fst_keys_large_order_sequential_insertions() {
-		let mut kv = KVSimulator::new(None, 0);
+	#[test(tokio::test)]
+	async fn test_btree_fst_keys_large_order_sequential_insertions() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = BTree::new(1u8, 2u64, 500);
-		insertions_test::<_, FstKeys>(&mut kv, &mut t, 10000, get_key_value);
+		insertions_test::<_, FstKeys>(&mut tx, &mut t, 10000, get_key_value).await;
+		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics::<FstKeys>(&mut kv),
+			t.statistics::<FstKeys>(&mut tx).await.unwrap(),
 			Statistics {
 				keys_count: 10000,
 				max_depth: 3,
@@ -548,16 +600,17 @@ mod tests {
 				total_size: 54548,
 			}
 		);
-		kv.print_stats();
 	}
 
-	#[test]
-	fn test_btree_trie_keys_large_order_sequential_insertions() {
-		let mut kv = KVSimulator::new(None, 0);
+	#[test(tokio::test)]
+	async fn test_btree_trie_keys_large_order_sequential_insertions() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = BTree::new(1u8, 2u64, 500);
-		insertions_test::<_, TrieKeys>(&mut kv, &mut t, 10000, get_key_value);
+		insertions_test::<_, TrieKeys>(&mut tx, &mut t, 10000, get_key_value).await;
+		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
-			t.statistics::<TrieKeys>(&mut kv),
+			t.statistics::<TrieKeys>(&mut tx).await.unwrap(),
 			Statistics {
 				keys_count: 10000,
 				max_depth: 3,
@@ -565,7 +618,6 @@ mod tests {
 				total_size: 74107,
 			}
 		);
-		kv.print_stats();
 	}
 
 	const REAL_WORLD_TERMS: [&str; 30] = [
@@ -574,22 +626,24 @@ mod tests {
 		"nothing", "the", "other", "animals", "sat", "there", "watching",
 	];
 
-	fn test_btree_read_world_insertions<BK>(default_btree_order: usize) -> Statistics
+	async fn test_btree_read_world_insertions<BK>(default_btree_order: usize) -> Statistics
 	where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
-		let mut kv = KVSimulator::new(None, 0);
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = BTree::new(1u8, 2u64, default_btree_order);
-		insertions_test::<_, BK>(&mut kv, &mut t, REAL_WORLD_TERMS.len(), |i| {
+		insertions_test::<_, BK>(&mut tx, &mut t, REAL_WORLD_TERMS.len(), |i| {
 			(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
-		});
-		kv.print_stats();
-		t.statistics::<BK>(&mut kv)
+		})
+		.await;
+		let mut tx = ds.transaction(false, false).await.unwrap();
+		t.statistics::<BK>(&mut tx).await.unwrap()
 	}
 
-	#[test]
-	fn test_btree_fst_keys_read_world_insertions_small_order() {
-		let s = test_btree_read_world_insertions::<FstKeys>(70);
+	#[test(tokio::test)]
+	async fn test_btree_fst_keys_read_world_insertions_small_order() {
+		let s = test_btree_read_world_insertions::<FstKeys>(70).await;
 		assert_eq!(
 			s,
 			Statistics {
@@ -601,9 +655,9 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn test_btree_fst_keys_read_world_insertions_large_order() {
-		let s = test_btree_read_world_insertions::<FstKeys>(1000);
+	#[test(tokio::test)]
+	async fn test_btree_fst_keys_read_world_insertions_large_order() {
+		let s = test_btree_read_world_insertions::<FstKeys>(1000).await;
 		assert_eq!(
 			s,
 			Statistics {
@@ -615,9 +669,9 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn test_btree_trie_keys_read_world_insertions_small_order() {
-		let s = test_btree_read_world_insertions::<TrieKeys>(70);
+	#[test(tokio::test)]
+	async fn test_btree_trie_keys_read_world_insertions_small_order() {
+		let s = test_btree_read_world_insertions::<TrieKeys>(70).await;
 		assert_eq!(
 			s,
 			Statistics {
@@ -629,9 +683,9 @@ mod tests {
 		);
 	}
 
-	#[test]
-	fn test_btree_trie_keys_read_world_insertions_large_order() {
-		let s = test_btree_read_world_insertions::<TrieKeys>(1000);
+	#[test(tokio::test)]
+	async fn test_btree_trie_keys_read_world_insertions_large_order() {
+		let s = test_btree_read_world_insertions::<TrieKeys>(1000).await;
 		assert_eq!(
 			s,
 			Statistics {
@@ -643,27 +697,30 @@ mod tests {
 		);
 	}
 
-	fn test_btree_search_by_prefix(
+	async fn test_btree_search_by_prefix(
+		ds: &Datastore,
 		order: usize,
 		shuffle: bool,
 		mut samples: Vec<(&str, Payload)>,
-	) -> (KVSimulator, BTree, Statistics) {
-		let mut kv = KVSimulator::new(None, 0);
+	) -> (BTree, Statistics) {
+		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = BTree::new(1u8, 2u64, order);
 		let samples_len = samples.len();
 		if shuffle {
 			samples.shuffle(&mut ThreadRng::default());
 		}
 		for (key, payload) in samples {
-			t.insert::<TrieKeys>(&mut kv, key.into(), payload);
+			t.insert::<TrieKeys>(&mut tx, key.into(), payload).await.unwrap();
 		}
-		let s = t.statistics::<TrieKeys>(&mut kv);
+		tx.commit().await.unwrap();
+		let mut tx = ds.transaction(false, false).await.unwrap();
+		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, samples_len);
-		(kv, t, s)
+		(t, s)
 	}
 
-	#[test]
-	fn test_btree_trie_keys_search_by_prefix() {
+	#[test(tokio::test)]
+	async fn test_btree_trie_keys_search_by_prefix() {
 		for _ in 0..50 {
 			let samples = vec![
 				("aaaa", 0),
@@ -677,17 +734,19 @@ mod tests {
 				("gggg", 0),
 				("hhhh", 0),
 			];
-			let (mut kv, t, s) = test_btree_search_by_prefix(45, true, samples);
+			let ds = Datastore::new("memory").await.unwrap();
+			let (t, s) = test_btree_search_by_prefix(&ds, 45, true, samples).await;
 
 			// For this test to be relevant, we expect the BTree to match the following properties:
 			assert!(s.max_depth > 1, "Tree depth should be > 1");
 			assert!(s.nodes_count > 2, "The number of node should be > 2");
 
-			t.debug::<_, TrieKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
+			let mut tx = ds.transaction(false, false).await.unwrap();
+			t.debug::<_, TrieKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 
 			// We should find all the keys prefixed with "bb"
 			let mut visitor = HashVisitor::default();
-			t.search_by_prefix::<TrieKeys, _>(&mut kv, &"bb".into(), &mut visitor);
+			t.search_by_prefix::<TrieKeys, _>(&mut tx, &"bb".into(), &mut visitor).await.unwrap();
 			visitor.check(
 				vec![
 					("bb1".into(), 21),
@@ -700,8 +759,8 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn test_btree_trie_keys_real_world_search_by_prefix() {
+	#[test(tokio::test)]
+	async fn test_btree_trie_keys_real_world_search_by_prefix() {
 		// We do multiples tests to run the test over many different possible forms of Tree.
 		// The samples are shuffled, therefore the insertion order is different on each test,
 		// ending up in slightly different variants of the BTrees.
@@ -738,13 +797,15 @@ mod tests {
 				("watching-4", 0),
 			];
 
-			let (mut kv, t, s) = test_btree_search_by_prefix(75, true, samples);
+			let ds = Datastore::new("memory").await.unwrap();
+			let (t, s) = test_btree_search_by_prefix(&ds, 75, true, samples).await;
 
 			// For this test to be relevant, we expect the BTree to match the following properties:
 			assert!(s.max_depth > 1, "Tree depth should be > 1");
 			assert!(s.nodes_count > 2, "The number of node should be > 2");
 
-			t.debug::<_, TrieKeys>(&mut kv, |k| String::from_utf8(k).unwrap());
+			let mut tx = ds.transaction(false, false).await.unwrap();
+			t.debug::<_, TrieKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 
 			for (prefix, count) in vec![
 				("the", 6),
@@ -761,7 +822,9 @@ mod tests {
 				("watching", 1),
 			] {
 				let mut visitor = HashVisitor::default();
-				t.search_by_prefix::<TrieKeys, _>(&mut kv, &prefix.into(), &mut visitor);
+				t.search_by_prefix::<TrieKeys, _>(&mut tx, &prefix.into(), &mut visitor)
+					.await
+					.unwrap();
 				visitor.check_len(count, prefix);
 			}
 		}

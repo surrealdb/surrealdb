@@ -105,6 +105,8 @@ mod tests {
 		let v = "Bar".to_string();
 		kv.set(k.clone(), &v);
 		assert_eq!(kv.get_with_size(&k), Some((11, v)));
+		assert_eq!(kv.get(&k), Some(11));
+		kv.print_stats();
 	}
 
 	#[test]

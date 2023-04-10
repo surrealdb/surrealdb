@@ -1,6 +1,9 @@
 use crate::sql::idiom::Idiom;
+use bincode::Error as BincodeError;
 use bung::encode::Error as SerdeError;
+use fst::Error as FstError;
 use serde::Serialize;
+use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
 use thiserror::Error;
@@ -350,6 +353,22 @@ pub enum Error {
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
 	Decode(#[from] DecodeError),
+
+	/// Represents an error when decoding a key-value entry
+	#[error("Index is corrupted")]
+	CorruptedIndex(Option<String>),
+
+	/// Represents an underlying error with Bincode serializing / deserializing
+	#[error("Bincode error: {0}")]
+	Bincode(#[from] BincodeError),
+
+	/// Represents an underlying error with FST
+	#[error("FstError error: {0}")]
+	FstError(#[from] FstError),
+
+	/// Represents an underlying error while reading UTF8 characters
+	#[error("Utf8 error: {0}")]
+	Utf8Error(#[from] FromUtf8Error),
 }
 
 impl From<Error> for String {

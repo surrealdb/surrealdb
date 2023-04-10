@@ -34,10 +34,11 @@ impl BaseStateKey {
 
 #[cfg(test)]
 mod tests {
+	use crate::err::Error;
 	use crate::idx::bkeys::KeyVisitor;
 	use crate::idx::btree::Payload;
-	use crate::idx::kvsim::KVSimulator;
-	use crate::kvs::Key;
+	use crate::kvs::{Key, Transaction};
+	use async_trait::async_trait;
 	use std::collections::HashMap;
 
 	#[derive(Default)]
@@ -45,9 +46,16 @@ mod tests {
 		map: HashMap<Key, Payload>,
 	}
 
+	#[async_trait]
 	impl KeyVisitor for HashVisitor {
-		fn visit(&mut self, _kv: &mut KVSimulator, key: Key, payload: Payload) {
+		async fn visit(
+			&mut self,
+			_tx: &mut Transaction,
+			key: Key,
+			payload: Payload,
+		) -> Result<(), Error> {
 			self.map.insert(key, payload);
+			Ok(())
 		}
 	}
 

@@ -3,14 +3,15 @@ mod doclength;
 mod postings;
 mod terms;
 
+use crate::err::Error;
 use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::doclength::{DocLength, DocLengths};
 use crate::idx::ft::postings::{Postings, PostingsVisitor, TermFrequency};
 use crate::idx::ft::terms::Terms;
-use crate::idx::kvsim::KVSimulator;
 use crate::idx::{BaseStateKey, IndexId, INDEX_DOMAIN};
-use crate::kvs::Key;
+use crate::kvs::{Key, Transaction};
 use crate::sql::error::IResult;
+use async_trait::async_trait;
 use nom::bytes::complete::take_while;
 use nom::character::complete::multispace0;
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,7 @@ struct FtIndex {
 }
 
 trait HitVisitor {
-	fn visit(&mut self, kv: &mut KVSimulator, doc_key: String, score: Score);
+	fn visit(&mut self, tx: &mut Transaction, doc_key: String, score: Score);
 }
 
 #[derive(Clone)]
@@ -53,65 +54,79 @@ struct State {
 type Score = f32;
 
 impl FtIndex {
-	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, btree_default_order: usize) -> Self {
-		let state_key = BaseStateKey::new(INDEX_DOMAIN, index_id).into();
-		let state = kv.get(&state_key).unwrap_or_default();
-		Self {
+	pub(super) async fn new(
+		tx: &mut Transaction,
+		index_id: IndexId,
+		btree_default_order: usize,
+	) -> Result<Self, Error> {
+		let state_key: Key = BaseStateKey::new(INDEX_DOMAIN, index_id).into();
+		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
+			bincode::deserialize(&val)?
+		} else {
+			State::default()
+		};
+		Ok(Self {
 			state,
 			state_key,
 			index_id,
 			bm25: Bm25Params::default(),
 			btree_default_order,
-		}
+		})
 	}
 
-	fn doc_ids(&self, kv: &mut KVSimulator) -> DocIds {
-		DocIds::new(kv, self.index_id, self.btree_default_order)
+	async fn doc_ids(&self, tx: &mut Transaction) -> Result<DocIds, Error> {
+		DocIds::new(tx, self.index_id, self.btree_default_order).await
 	}
 
-	fn terms(&self, kv: &mut KVSimulator) -> Terms {
-		Terms::new(kv, self.index_id, self.btree_default_order)
+	async fn terms(&self, tx: &mut Transaction) -> Result<Terms, Error> {
+		Terms::new(tx, self.index_id, self.btree_default_order).await
 	}
 
-	fn doc_lengths(&self, kv: &mut KVSimulator) -> DocLengths {
-		DocLengths::new(kv, self.index_id, self.btree_default_order)
+	async fn doc_lengths(&self, tx: &mut Transaction) -> Result<DocLengths, Error> {
+		DocLengths::new(tx, self.index_id, self.btree_default_order).await
 	}
 
-	fn postings(&self, kv: &mut KVSimulator) -> Postings {
-		Postings::new(kv, self.index_id, self.btree_default_order)
+	async fn postings(&self, tx: &mut Transaction) -> Result<Postings, Error> {
+		Postings::new(tx, self.index_id, self.btree_default_order).await
 	}
 
-	fn add_document(&mut self, kv: &mut KVSimulator, doc_key: &str, field_content: &str) {
+	async fn add_document(
+		&mut self,
+		tx: &mut Transaction,
+		doc_key: &str,
+		field_content: &str,
+	) -> Result<(), Error> {
 		// Resolve the doc_id
-		let mut d = self.doc_ids(kv);
-		let doc_id = d.resolve_doc_id(kv, doc_key);
+		let mut d = self.doc_ids(tx).await?;
+		let doc_id = d.resolve_doc_id(tx, doc_key).await?;
 
 		// Extract the doc_lengths, terms en frequencies
-		let mut t = self.terms(kv);
+		let mut t = self.terms(tx).await?;
 		let (doc_length, terms_and_frequencies) =
 			Self::extract_sorted_terms_with_frequencies(field_content);
 
 		// Set the doc length
-		let mut l = self.doc_lengths(kv);
-		l.set_doc_length(kv, doc_id, doc_length);
+		let mut l = self.doc_lengths(tx).await?;
+		l.set_doc_length(tx, doc_id, doc_length).await?;
 
 		// Update the index state
 		self.state.total_docs_lengths += doc_length as u128;
 		self.state.doc_count += 1;
 
 		// Set the terms postings
-		let terms = t.resolve_terms(kv, terms_and_frequencies);
-		let mut p = self.postings(kv);
+		let terms = t.resolve_terms(tx, terms_and_frequencies).await?;
+		let mut p = self.postings(tx).await?;
 		for (term_id, term_freq) in terms {
-			p.update_posting(kv, term_id, doc_id, term_freq);
+			p.update_posting(tx, term_id, doc_id, term_freq).await?;
 		}
 
 		// Update the states
-		kv.set(self.state_key.clone(), &self.state);
-		d.finish(kv);
-		l.finish(kv);
-		p.finish(kv);
-		t.finish(kv);
+		tx.set(self.state_key.clone(), bincode::serialize(&self.state)?).await?;
+		d.finish(tx).await?;
+		l.finish(tx).await?;
+		p.finish(tx).await?;
+		t.finish(tx).await?;
+		Ok(())
 	}
 
 	fn extract_sorted_terms_with_frequencies(
@@ -151,16 +166,21 @@ impl FtIndex {
 		take_while(|c| c != ' ' && c != '\n' && c != '\t')(i)
 	}
 
-	fn search<V>(&self, kv: &mut KVSimulator, term: &str, visitor: &mut V)
+	async fn search<V>(
+		&self,
+		tx: &mut Transaction,
+		term: &str,
+		visitor: &mut V,
+	) -> Result<(), Error>
 	where
-		V: HitVisitor,
+		V: HitVisitor + Send,
 	{
-		let terms = self.terms(kv);
-		if let Some(term_id) = terms.find_term(kv, term) {
-			let postings = self.postings(kv);
-			let term_doc_count = postings.get_doc_count(kv, term_id);
-			let doc_lengths = self.doc_lengths(kv);
-			let doc_ids = self.doc_ids(kv);
+		let terms = self.terms(tx).await?;
+		if let Some(term_id) = terms.find_term(tx, term).await? {
+			let postings = self.postings(tx).await?;
+			let term_doc_count = postings.get_doc_count(tx, term_id).await?;
+			let doc_lengths = self.doc_lengths(tx).await?;
+			let doc_ids = self.doc_ids(tx).await?;
 			if term_doc_count > 0 {
 				let mut scorer = BM25Scorer::new(
 					visitor,
@@ -171,11 +191,13 @@ impl FtIndex {
 					term_doc_count,
 					self.bm25.clone(),
 				);
-				postings.collect_postings(kv, term_id, &mut scorer);
-				terms.debug(kv);
-				postings.debug(kv);
+				postings.collect_postings(tx, term_id, &mut scorer).await?;
+				// TODO Remove the following two debug lines
+				terms.debug(tx).await?;
+				postings.debug(tx).await?;
 			}
 		}
+		Ok(())
 	}
 }
 
@@ -192,20 +214,27 @@ where
 	bm25: Bm25Params,
 }
 
+#[async_trait]
 impl<'a, V> PostingsVisitor for BM25Scorer<'a, V>
 where
-	V: HitVisitor,
+	V: HitVisitor + Send,
 {
-	fn visit(&mut self, kv: &mut KVSimulator, doc_id: DocId, term_frequency: TermFrequency) {
-		if let Some(doc_key) = self.doc_ids.get_doc_key(kv, doc_id) {
-			let doc_length = self.doc_lengths.get_doc_length(kv, doc_id).unwrap_or(0);
+	async fn visit(
+		&mut self,
+		tx: &mut Transaction,
+		doc_id: DocId,
+		term_frequency: TermFrequency,
+	) -> Result<(), Error> {
+		if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
+			let doc_length = self.doc_lengths.get_doc_length(tx, doc_id).await?.unwrap_or(0);
 			let bm25_score = self.compute_bm25_score(
 				term_frequency as f32,
 				self.term_doc_count,
 				doc_length as f32,
 			);
-			self.visitor.visit(kv, doc_key, bm25_score);
+			self.visitor.visit(tx, doc_key, bm25_score);
 		}
+		Ok(())
 	}
 }
 
@@ -257,79 +286,97 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::{FtIndex, HitVisitor, Score};
-	use crate::idx::kvsim::KVSimulator;
+	use crate::kvs::{Datastore, Transaction};
 	use std::collections::HashMap;
 	use test_log::test;
 
-	#[test]
-	fn test_ft_index() {
-		let mut kv = KVSimulator::default();
+	#[test(tokio::test)]
+	async fn test_ft_index() {
+		let ds = Datastore::new("memory").await.unwrap();
+
 		let default_btree_order = 200;
 
 		{
 			// Add one document
-			let mut fti = FtIndex::new(&mut kv, 0, default_btree_order);
-			fti.add_document(&mut kv, "doc1", "hello the world");
+			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut fti = FtIndex::new(&mut tx, 0, default_btree_order).await.unwrap();
+			fti.add_document(&mut tx, "doc1", "hello the world").await.unwrap();
+			tx.commit().await.unwrap();
 		}
 
 		{
 			// Add two documents
-			let mut fti = FtIndex::new(&mut kv, 0, default_btree_order);
-			fti.add_document(&mut kv, "doc2", "a yellow hello");
-			fti.add_document(&mut kv, "doc3", "foo bar");
+			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut fti = FtIndex::new(&mut tx, 0, default_btree_order).await.unwrap();
+			fti.add_document(&mut tx, "doc2", "a yellow hello").await.unwrap();
+			fti.add_document(&mut tx, "doc3", "foo bar").await.unwrap();
+			tx.commit().await.unwrap();
 		}
 
 		{
 			// Search & score
-			let fti = FtIndex::new(&mut kv, 0, default_btree_order);
+			let mut tx = ds.transaction(true, false).await.unwrap();
+			let fti = FtIndex::new(&mut tx, 0, default_btree_order).await.unwrap();
 
 			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "hello", &mut visitor);
+			fti.search(&mut tx, "hello", &mut visitor).await.unwrap();
 			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
 
 			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "world", &mut visitor);
+			fti.search(&mut tx, "world", &mut visitor).await.unwrap();
 			visitor.check(vec![("doc1".to_string(), 0.4859746)]);
 
 			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "yellow", &mut visitor);
+			fti.search(&mut tx, "yellow", &mut visitor).await.unwrap();
 			visitor.check(vec![("doc2".to_string(), 0.4859746)]);
 
 			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "foo", &mut visitor);
+			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
 			visitor.check(vec![("doc3".to_string(), 0.56902087)]);
 
 			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "bar", &mut visitor);
+			fti.search(&mut tx, "bar", &mut visitor).await.unwrap();
 			visitor.check(vec![("doc3".to_string(), 0.56902087)]);
 
 			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut kv, "dummy", &mut visitor);
+			fti.search(&mut tx, "dummy", &mut visitor).await.unwrap();
 			visitor.check(Vec::<(String, f32)>::new());
 		}
 	}
 
-	#[test]
-	fn test_ft_index_bm_25() {
+	#[test(tokio::test)]
+	async fn test_ft_index_bm_25() {
 		// The function `extract_sorted_terms_with_frequencies` is non-deterministic.
 		// the inner structures (BTrees) are built with the same terms and frequencies,
 		// but the insertion order is different, ending up in different BTree structures.
 		// Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
-			let mut kv = KVSimulator::default();
+			let ds = Datastore::new("memory").await.unwrap();
+
 			let default_btree_order = 75;
 			{
-				let mut fti = FtIndex::new(&mut kv, 0, default_btree_order);
-				fti.add_document(&mut kv, "doc1", "the quick brown fox jumped over the lazy dog");
-				fti.add_document(&mut kv, "doc2", "the fast fox jumped over the lazy dog");
-				fti.add_document(&mut kv, "doc3", "the dog sat there and did nothing");
-				fti.add_document(&mut kv, "doc4", "the other animals sat there watching");
+				let mut tx = ds.transaction(true, false).await.unwrap();
+				let mut fti = FtIndex::new(&mut tx, 0, default_btree_order).await.unwrap();
+				fti.add_document(&mut tx, "doc1", "the quick brown fox jumped over the lazy dog")
+					.await
+					.unwrap();
+				fti.add_document(&mut tx, "doc2", "the fast fox jumped over the lazy dog")
+					.await
+					.unwrap();
+				fti.add_document(&mut tx, "doc3", "the dog sat there and did nothing")
+					.await
+					.unwrap();
+				fti.add_document(&mut tx, "doc4", "the other animals sat there watching")
+					.await
+					.unwrap();
+				tx.commit().await.unwrap();
 			}
 			{
-				let fti = FtIndex::new(&mut kv, 0, default_btree_order);
+				let mut tx = ds.transaction(true, false).await.unwrap();
+				let fti = FtIndex::new(&mut tx, 0, default_btree_order).await.unwrap();
 
 				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut kv, "the", &mut visitor);
+				fti.search(&mut tx, "the", &mut visitor).await.unwrap();
 				visitor.check(vec![
 					("doc1".to_string(), 0.0),
 					("doc2".to_string(), 0.0),
@@ -338,7 +385,7 @@ mod tests {
 				]);
 
 				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut kv, "dog", &mut visitor);
+				fti.search(&mut tx, "dog", &mut visitor).await.unwrap();
 				visitor.check(vec![
 					("doc1".to_string(), 0.0),
 					("doc2".to_string(), 0.0),
@@ -346,31 +393,31 @@ mod tests {
 				]);
 
 				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut kv, "fox", &mut visitor);
+				fti.search(&mut tx, "fox", &mut visitor).await.unwrap();
 				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
 
 				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut kv, "over", &mut visitor);
+				fti.search(&mut tx, "over", &mut visitor).await.unwrap();
 				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
 
 				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut kv, "lazy", &mut visitor);
+				fti.search(&mut tx, "lazy", &mut visitor).await.unwrap();
 				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
 
 				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut kv, "jumped", &mut visitor);
+				fti.search(&mut tx, "jumped", &mut visitor).await.unwrap();
 				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
 
 				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut kv, "nothing", &mut visitor);
+				fti.search(&mut tx, "nothing", &mut visitor).await.unwrap();
 				visitor.check(vec![("doc3".to_string(), 0.87105393)]);
 
 				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut kv, "animals", &mut visitor);
+				fti.search(&mut tx, "animals", &mut visitor).await.unwrap();
 				visitor.check(vec![("doc4".to_string(), 0.92279965)]);
 
 				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut kv, "dummy", &mut visitor);
+				fti.search(&mut tx, "dummy", &mut visitor).await.unwrap();
 				visitor.check(Vec::<(String, f32)>::new());
 			}
 		}
@@ -382,14 +429,14 @@ mod tests {
 	}
 
 	impl HitVisitor for HashHitVisitor {
-		fn visit(&mut self, _kv: &mut KVSimulator, doc_key: String, score: Score) {
+		fn visit(&mut self, _tx: &mut Transaction, doc_key: String, score: Score) {
 			self.map.insert(doc_key, score);
 		}
 	}
 
 	impl HashHitVisitor {
 		pub(super) fn check(&self, res: Vec<(String, Score)>) {
-			assert_eq!(res.len(), self.map.len());
+			assert_eq!(res.len(), self.map.len(), "{:?}", self.map);
 			for (k, p) in res {
 				assert_eq!(self.map.get(&k), Some(&p));
 			}

@@ -53,6 +53,7 @@ targets = []
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
 argon2 = "0.5.0"
 ascii = { version = "0.3.2", package = "any_ascii" }
+async-trait = "0.1.68"
 async-recursion = "1.0.4"
 bcrypt = "0.14.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }

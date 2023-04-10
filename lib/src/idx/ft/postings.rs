@@ -1,10 +1,11 @@
+use crate::err::Error;
 use crate::idx::bkeys::{KeyVisitor, TrieKeys};
 use crate::idx::btree::{BTree, Payload, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::idx::kvsim::KVSimulator;
 use crate::idx::{BaseStateKey, Domain, IndexId, POSTING_DOMAIN};
-use crate::kvs::Key;
+use crate::kvs::{Key, Transaction, Val};
+use async_trait::async_trait;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -28,48 +29,47 @@ struct PostingPrefixKey {
 pub(super) struct Postings {
 	index_id: IndexId,
 	state_key: Key,
-	state: State,
-	updated: bool,
-}
-
-#[derive(Serialize, Deserialize)]
-struct State {
 	btree: BTree,
 }
 
-impl State {
-	fn new(index_id: IndexId, btree_order: usize) -> Self {
-		Self {
-			btree: BTree::new(POSTING_DOMAIN, index_id, btree_order),
-		}
-	}
-}
-
+#[async_trait]
 pub(super) trait PostingsVisitor {
-	fn visit(&mut self, kv: &mut KVSimulator, doc_id: DocId, term_frequency: TermFrequency);
+	async fn visit(
+		&mut self,
+		tx: &mut Transaction,
+		doc_id: DocId,
+		term_frequency: TermFrequency,
+	) -> Result<(), Error>;
 }
 
 impl Postings {
-	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, default_btree_order: usize) -> Self {
-		let state_key = BaseStateKey::new(POSTING_DOMAIN, index_id).into();
-		Self {
+	pub(super) async fn new(
+		tx: &mut Transaction,
+		index_id: IndexId,
+		default_btree_order: usize,
+	) -> Result<Self, Error> {
+		let state_key: Key = BaseStateKey::new(POSTING_DOMAIN, index_id).into();
+		let btree = if let Some(val) = tx.get(state_key.clone()).await? {
+			BTree::try_from(val)?
+		} else {
+			BTree::new(POSTING_DOMAIN, index_id, default_btree_order)
+		};
+		Ok(Self {
 			index_id,
-			state: kv.get(&state_key).unwrap_or_else(|| State::new(index_id, default_btree_order)),
-			updated: false,
+			btree,
 			state_key,
-		}
+		})
 	}
 
-	pub(super) fn update_posting(
+	pub(super) async fn update_posting(
 		&mut self,
-		kv: &mut KVSimulator,
+		tx: &mut Transaction,
 		term_id: TermId,
 		doc_id: DocId,
 		term_freq: TermFrequency,
-	) {
+	) -> Result<(), Error> {
 		let key = self.posting_key(term_id, doc_id);
-		self.state.btree.insert::<TrieKeys>(kv, key.into(), term_freq);
-		self.updated = true;
+		self.btree.insert::<TrieKeys>(tx, key.into(), term_freq).await
 	}
 
 	fn posting_key(&self, term_id: TermId, doc_id: DocId) -> PostingKey {
@@ -81,22 +81,31 @@ impl Postings {
 		}
 	}
 
-	pub(super) fn get_doc_count(&self, kv: &mut KVSimulator, term_id: TermId) -> u64 {
+	pub(super) async fn get_doc_count(
+		&self,
+		tx: &mut Transaction,
+		term_id: TermId,
+	) -> Result<u64, Error> {
 		let prefix_key = self.posting_prefix_key(term_id).into();
 		let mut counter = PostingsDocCount::default();
-		self.state.btree.search_by_prefix::<TrieKeys, _>(kv, &prefix_key, &mut counter);
-		counter.doc_count
+		self.btree.search_by_prefix::<TrieKeys, _>(tx, &prefix_key, &mut counter).await?;
+		Ok(counter.doc_count)
 	}
 
-	pub(super) fn collect_postings<V>(&self, kv: &mut KVSimulator, term_id: TermId, visitor: &mut V)
+	pub(super) async fn collect_postings<V>(
+		&self,
+		tx: &mut Transaction,
+		term_id: TermId,
+		visitor: &mut V,
+	) -> Result<(), Error>
 	where
-		V: PostingsVisitor,
+		V: PostingsVisitor + Send,
 	{
 		let prefix_key = self.posting_prefix_key(term_id).into();
 		let mut key_visitor = PostingsAdapter {
 			visitor,
 		};
-		self.state.btree.search_by_prefix::<TrieKeys, _>(kv, &prefix_key, &mut key_visitor);
+		self.btree.search_by_prefix::<TrieKeys, _>(tx, &prefix_key, &mut key_visitor).await
 	}
 
 	fn posting_prefix_key(&self, term_id: TermId) -> PostingPrefixKey {
@@ -107,23 +116,26 @@ impl Postings {
 		}
 	}
 
-	pub(super) fn statistics(&self, kv: &mut KVSimulator) -> Statistics {
-		self.state.btree.statistics::<TrieKeys>(kv)
+	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+		self.btree.statistics::<TrieKeys>(tx).await
 	}
 
-	pub(super) fn debug(&self, kv: &mut KVSimulator) {
-		let state_key: BaseStateKey = self.state_key.clone().into();
-		debug!("POSTINGS {:?}", state_key);
-		self.state.btree.debug::<_, TrieKeys>(kv, |k| {
-			let k: PostingKey = k.into();
-			format!("({}-{})", k.term_id, k.doc_id)
-		});
+	pub(super) async fn debug(&self, tx: &mut Transaction) -> Result<(), Error> {
+		debug!("POSTINGS {}", self.index_id);
+		self.btree
+			.debug::<_, TrieKeys>(tx, |k| {
+				let k: PostingKey = k.into();
+				Ok(format!("({}-{})", k.term_id, k.doc_id))
+			})
+			.await
 	}
 
-	pub(super) fn finish(self, kv: &mut KVSimulator) {
-		if self.updated {
-			kv.set(self.state_key, &self.state);
+	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
+		if self.btree.is_updated() {
+			let val: Val = self.btree.try_into()?;
+			tx.set(self.state_key, val).await?;
 		}
+		Ok(())
 	}
 }
 
@@ -134,13 +146,19 @@ where
 	visitor: &'a mut V,
 }
 
+#[async_trait]
 impl<'a, V> KeyVisitor for PostingsAdapter<'a, V>
 where
-	V: PostingsVisitor,
+	V: PostingsVisitor + Send,
 {
-	fn visit(&mut self, kv: &mut KVSimulator, key: Key, payload: Payload) {
+	async fn visit(
+		&mut self,
+		tx: &mut Transaction,
+		key: Key,
+		payload: Payload,
+	) -> Result<(), Error> {
 		let posting_key: PostingKey = key.into();
-		self.visitor.visit(kv, posting_key.doc_id, payload);
+		self.visitor.visit(tx, posting_key.doc_id, payload).await
 	}
 }
 
@@ -149,30 +167,42 @@ struct PostingsDocCount {
 	doc_count: u64,
 }
 
+#[async_trait]
 impl KeyVisitor for PostingsDocCount {
-	fn visit(&mut self, _kv: &mut KVSimulator, _key: Key, _payload: Payload) {
+	async fn visit(
+		&mut self,
+		_tx: &mut Transaction,
+		_key: Key,
+		_payload: Payload,
+	) -> Result<(), Error> {
 		self.doc_count += 1;
+		Ok(())
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::postings::Postings;
-	use crate::idx::kvsim::KVSimulator;
+	use crate::kvs::Datastore;
 	use test_log::test;
 
-	#[test]
-	fn test_postings() {
+	#[test(tokio::test)]
+	async fn test_postings() {
 		const DEFAULT_BTREE_ORDER: usize = 75;
 
-		let mut kv = KVSimulator::default();
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
 
 		// Check empty state
-		let mut p = Postings::new(&mut kv, 0, DEFAULT_BTREE_ORDER);
-		assert_eq!(p.statistics(&mut kv).keys_count, 0);
-		p.update_posting(&mut kv, 1, 2, 3);
-		assert_eq!(p.statistics(&mut kv).keys_count, 1);
-		p.debug(&mut kv);
-		p.finish(&mut kv);
+		let mut p = Postings::new(&mut tx, 0, DEFAULT_BTREE_ORDER).await.unwrap();
+
+		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
+
+		p.update_posting(&mut tx, 1, 2, 3).await.unwrap();
+
+		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 1);
+		p.debug(&mut tx).await.unwrap();
+		p.finish(&mut tx).await.unwrap();
+		tx.commit().await.unwrap();
 	}
 }

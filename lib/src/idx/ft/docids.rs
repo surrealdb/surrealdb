@@ -1,9 +1,10 @@
+use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
 use crate::idx::btree::{BTree, Statistics};
-use crate::idx::kvsim::KVSimulator;
 use crate::idx::{BaseStateKey, Domain, IndexId, DOC_IDS_DOMAIN, DOC_KEYS_DOMAIN};
-use crate::kvs::Key;
+use crate::kvs::{Key, Transaction, Val};
 use derive::Key;
+use nom::AsBytes;
 use serde::{Deserialize, Serialize};
 
 pub(super) type DocId = u64;
@@ -37,109 +38,161 @@ impl State {
 	}
 }
 
+impl TryFrom<Val> for State {
+	type Error = bincode::Error;
+
+	fn try_from(val: Val) -> Result<State, Self::Error> {
+		bincode::deserialize(val.as_slice())
+	}
+}
+
+impl TryInto<Val> for State {
+	type Error = bincode::Error;
+
+	fn try_into(self) -> Result<Val, Self::Error> {
+		bincode::serialize(&self)
+	}
+}
+
 impl DocIds {
-	pub(super) fn new(kv: &mut KVSimulator, index_id: IndexId, default_btree_order: usize) -> Self {
-		let state_key = BaseStateKey::new(DOC_IDS_DOMAIN, index_id).into();
-		Self {
-			state: kv.get(&state_key).unwrap_or_else(|| State::new(index_id, default_btree_order)),
-			updated: false,
+	pub(super) async fn new(
+		tx: &mut Transaction,
+		index_id: IndexId,
+		default_btree_order: usize,
+	) -> Result<Self, Error> {
+		let state_key: Key = BaseStateKey::new(DOC_IDS_DOMAIN, index_id).into();
+		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
+			State::try_from(val)?
+		} else {
+			State::new(index_id, default_btree_order)
+		};
+		Ok(Self {
 			state_key,
+			state,
+			updated: false,
 			index_id,
-		}
+		})
 	}
 
-	pub(super) fn resolve_doc_id(&mut self, kv: &mut KVSimulator, key: &str) -> DocId {
+	pub(super) async fn resolve_doc_id(
+		&mut self,
+		tx: &mut Transaction,
+		key: &str,
+	) -> Result<DocId, Error> {
 		let key = key.into();
-		if let Some(doc_id) = self.state.btree.search::<TrieKeys>(kv, &key) {
-			doc_id
+		if let Some(doc_id) = self.state.btree.search::<TrieKeys>(tx, &key).await? {
+			Ok(doc_id)
 		} else {
 			let doc_id = self.state.next_doc_id;
-			let doc_key = DocKey {
+			let doc_key: Key = DocKey {
 				domain: DOC_KEYS_DOMAIN,
 				index_id: self.index_id,
 				doc_id,
-			};
-			kv.set(doc_key.into(), &key);
-			self.state.btree.insert::<TrieKeys>(kv, key, doc_id);
+			}
+			.into();
+			tx.set(doc_key, key.as_bytes().to_vec()).await?;
+			self.state.btree.insert::<TrieKeys>(tx, key, doc_id).await?;
 			self.state.next_doc_id += 1;
 			self.updated = true;
-			doc_id
+			Ok(doc_id)
 		}
 	}
 
-	pub(super) fn get_doc_key(&self, kv: &mut KVSimulator, doc_id: DocId) -> Option<String> {
-		let doc_key = DocKey {
+	pub(super) async fn get_doc_key(
+		&self,
+		tx: &mut Transaction,
+		doc_id: DocId,
+	) -> Result<Option<String>, Error> {
+		let doc_key: Key = DocKey {
 			domain: DOC_KEYS_DOMAIN,
 			index_id: self.index_id,
 			doc_id,
-		};
-		kv.get::<Key>(&doc_key.into()).map(|v| String::from_utf8(v).unwrap())
-	}
-
-	pub(super) fn statistics(&self, kv: &mut KVSimulator) -> Statistics {
-		self.state.btree.statistics::<TrieKeys>(kv)
-	}
-
-	pub(super) fn finish(self, kv: &mut KVSimulator) {
-		if self.updated {
-			kv.set(self.state_key, &self.state);
 		}
+		.into();
+		if let Some(val) = tx.get(doc_key).await? {
+			Ok(Some(String::from_utf8(val)?))
+		} else {
+			Ok(None)
+		}
+	}
+
+	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+		Ok(self.state.btree.statistics::<TrieKeys>(tx).await?)
+	}
+
+	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
+		if self.updated || self.state.btree.is_updated() {
+			let val: Val = self.state.try_into()?;
+			tx.set(self.state_key, val).await?;
+		}
+		Ok(())
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::docids::DocIds;
-	use crate::idx::kvsim::KVSimulator;
+	use crate::kvs::Datastore;
 
-	#[test]
-	fn test_resolve_doc_id() {
+	#[tokio::test]
+	async fn test_resolve_doc_id() {
 		const BTREE_ORDER: usize = 75;
 
-		let mut kv = KVSimulator::default();
+		let ds = Datastore::new("memory").await.unwrap();
 
 		// Resolve a first doc key
-		let mut d = DocIds::new(&mut kv, 0, BTREE_ORDER);
-		let doc_id = d.resolve_doc_id(&mut kv, "Foo");
-		assert_eq!(d.statistics(&mut kv).keys_count, 1);
-		assert_eq!(d.get_doc_key(&mut kv, 0), Some("Foo".to_string()));
-		d.finish(&mut kv);
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut d = DocIds::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		let doc_id = d.resolve_doc_id(&mut tx, "Foo").await.unwrap();
+		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
+		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".to_string()));
+		d.finish(&mut tx).await.unwrap();
+		tx.commit().await.unwrap();
 		assert_eq!(doc_id, 0);
 
 		// Resolve the same doc key
-		let mut d = DocIds::new(&mut kv, 0, BTREE_ORDER);
-		let doc_id = d.resolve_doc_id(&mut kv, "Foo");
-		assert_eq!(d.statistics(&mut kv).keys_count, 1);
-		assert_eq!(d.get_doc_key(&mut kv, 0), Some("Foo".to_string()));
-		d.finish(&mut kv);
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut d = DocIds::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		let doc_id = d.resolve_doc_id(&mut tx, "Foo").await.unwrap();
+		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
+		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".to_string()));
+		d.finish(&mut tx).await.unwrap();
+		tx.commit().await.unwrap();
 		assert_eq!(doc_id, 0);
 
 		// Resolve another single doc key
-		let mut d = DocIds::new(&mut kv, 0, BTREE_ORDER);
-		let doc_id = d.resolve_doc_id(&mut kv, "Bar");
-		assert_eq!(d.statistics(&mut kv).keys_count, 2);
-		assert_eq!(d.get_doc_key(&mut kv, 1), Some("Bar".to_string()));
-		d.finish(&mut kv);
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut d = DocIds::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		let doc_id = d.resolve_doc_id(&mut tx, "Bar").await.unwrap();
+		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 2);
+		assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".to_string()));
+		d.finish(&mut tx).await.unwrap();
+		tx.commit().await.unwrap();
 		assert_eq!(doc_id, 1);
 
 		// Resolve another two existing doc keys and two new doc keys (interlaced)
-		let mut d = DocIds::new(&mut kv, 0, BTREE_ORDER);
-		assert_eq!(d.resolve_doc_id(&mut kv, "Foo"), 0);
-		assert_eq!(d.resolve_doc_id(&mut kv, "Hello"), 2);
-		assert_eq!(d.resolve_doc_id(&mut kv, "Bar"), 1);
-		assert_eq!(d.resolve_doc_id(&mut kv, "World"), 3);
-		assert_eq!(d.statistics(&mut kv).keys_count, 4);
-		d.finish(&mut kv);
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut d = DocIds::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), 0);
+		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), 2);
+		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), 1);
+		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), 3);
+		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
+		d.finish(&mut tx).await.unwrap();
+		tx.commit().await.unwrap();
 
-		let mut d = DocIds::new(&mut kv, 0, BTREE_ORDER);
-		assert_eq!(d.resolve_doc_id(&mut kv, "Foo"), 0);
-		assert_eq!(d.resolve_doc_id(&mut kv, "Bar"), 1);
-		assert_eq!(d.resolve_doc_id(&mut kv, "Hello"), 2);
-		assert_eq!(d.resolve_doc_id(&mut kv, "World"), 3);
-		assert_eq!(d.get_doc_key(&mut kv, 0), Some("Foo".to_string()));
-		assert_eq!(d.get_doc_key(&mut kv, 1), Some("Bar".to_string()));
-		assert_eq!(d.get_doc_key(&mut kv, 2), Some("Hello".to_string()));
-		assert_eq!(d.get_doc_key(&mut kv, 3), Some("World".to_string()));
-		assert_eq!(d.statistics(&mut kv).keys_count, 4);
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut d = DocIds::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), 0);
+		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), 1);
+		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), 2);
+		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), 3);
+		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".to_string()));
+		assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".to_string()));
+		assert_eq!(d.get_doc_key(&mut tx, 2).await.unwrap(), Some("Hello".to_string()));
+		assert_eq!(d.get_doc_key(&mut tx, 3).await.unwrap(), Some("World".to_string()));
+		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
+		d.finish(&mut tx).await.unwrap();
+		tx.commit().await.unwrap();
 	}
 }

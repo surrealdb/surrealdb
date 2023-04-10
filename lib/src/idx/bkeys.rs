@@ -1,36 +1,45 @@
+use crate::err::Error;
 use crate::idx::btree::Payload;
-use crate::idx::kvsim::KVSimulator;
-use crate::kvs::Key;
+use crate::kvs::{Key, Transaction};
+use async_trait::async_trait;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
-use radix_trie::{SubTrie, Trie, TrieCommon};
+use radix_trie::{Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::io;
 
+#[async_trait]
 pub(super) trait KeyVisitor {
-	fn visit(&mut self, kv: &mut KVSimulator, key: Key, payload: Payload);
+	async fn visit(
+		&mut self,
+		tx: &mut Transaction,
+		key: Key,
+		payload: Payload,
+	) -> Result<(), Error>;
 }
 
+#[async_trait]
 pub(super) trait BKeys: Display + Sized {
-	fn with_key_val(key: Key, payload: Payload) -> Self;
+	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
 	fn len(&self) -> usize;
 	fn get(&self, key: &Key) -> Option<Payload>;
-	fn collect_with_prefix<V>(
+	async fn collect_with_prefix<V>(
 		&self,
-		kv: &mut KVSimulator,
+		tx: &mut Transaction,
 		prefix_key: &Key,
 		visitor: &mut V,
-	) -> bool
+	) -> Result<bool, Error>
 	where
-		V: KeyVisitor;
+		V: KeyVisitor + Send;
 	fn insert(&mut self, key: Key, payload: Payload);
 	fn _remove(&mut self, key: Key);
 	fn split_keys(&self) -> SplitKeys<Self>;
 	fn get_child_idx(&self, searched_key: &Key) -> usize;
 	fn compile(&mut self) {}
-	fn debug<F>(&self, to_string: F)
+	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
-		F: Fn(Key) -> String;
+		F: Fn(Key) -> Result<String, Error>;
 }
 
 pub(super) struct SplitKeys<BK>
@@ -44,17 +53,19 @@ where
 	pub(super) median_payload: Payload,
 }
 
+#[derive(Default)]
 pub(super) struct FstKeys {
 	map: Map<Vec<u8>>,
 	additions: Trie<Key, Payload>,
 	deletions: Trie<Key, bool>,
 }
 
+#[async_trait]
 impl BKeys for FstKeys {
-	fn with_key_val(key: Key, payload: Payload) -> Self {
+	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error> {
 		let mut builder = MapBuilder::memory();
 		builder.insert(key, payload).unwrap();
-		Self::from(builder)
+		Ok(Self::try_from(builder)?)
 	}
 
 	fn len(&self) -> usize {
@@ -65,12 +76,12 @@ impl BKeys for FstKeys {
 		self.map.get(key)
 	}
 
-	fn collect_with_prefix<V>(
+	async fn collect_with_prefix<V>(
 		&self,
-		_kv: &mut KVSimulator,
+		_tx: &mut Transaction,
 		_prefix_key: &Key,
 		_visitor: &mut V,
-	) -> bool
+	) -> Result<bool, Error>
 	where
 		V: KeyVisitor,
 	{
@@ -180,9 +191,9 @@ impl BKeys for FstKeys {
 		self.deletions = Default::default();
 	}
 
-	fn debug<F>(&self, to_string: F)
+	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
-		F: Fn(Key) -> String,
+		F: Fn(Key) -> Result<String, Error>,
 	{
 		let mut s = String::new();
 		let mut iter = self.map.stream();
@@ -193,32 +204,29 @@ impl BKeys for FstKeys {
 			} else {
 				start = false;
 			}
-			s.push_str(&format!("{}={}", to_string(k.to_vec()).as_str(), p));
+			s.push_str(&format!("{}={}", to_string(k.to_vec())?.as_str(), p));
 		}
 		debug!("FSTKeys[{}]", s);
+		Ok(())
 	}
 }
 
-impl Default for FstKeys {
-	fn default() -> Self {
-		Self::try_from(MapBuilder::memory()).unwrap()
+impl TryFrom<MapBuilder<Vec<u8>>> for FstKeys {
+	type Error = fst::Error;
+	fn try_from(builder: MapBuilder<Vec<u8>>) -> Result<Self, Self::Error> {
+		Self::try_from(builder.into_inner()?)
 	}
 }
 
-impl From<MapBuilder<Vec<u8>>> for FstKeys {
-	fn from(builder: MapBuilder<Vec<u8>>) -> Self {
-		Self::from(builder.into_inner().unwrap())
-	}
-}
-
-impl From<Vec<u8>> for FstKeys {
-	fn from(bytes: Vec<u8>) -> Self {
-		let map = Map::new(bytes).unwrap();
-		Self {
+impl TryFrom<Vec<u8>> for FstKeys {
+	type Error = fst::Error;
+	fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+		let map = Map::new(bytes)?;
+		Ok(Self {
 			map,
 			additions: Default::default(),
 			deletions: Default::default(),
-		}
+		})
 	}
 }
 
@@ -318,13 +326,14 @@ impl Display for TrieKeys {
 	}
 }
 
+#[async_trait]
 impl BKeys for TrieKeys {
-	fn with_key_val(key: Key, payload: Payload) -> Self {
+	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error> {
 		let mut trie_keys = Self {
 			keys: Trie::default(),
 		};
 		trie_keys.insert(key, payload);
-		trie_keys
+		Ok(trie_keys)
 	}
 
 	fn len(&self) -> usize {
@@ -335,15 +344,34 @@ impl BKeys for TrieKeys {
 		self.keys.get(key).copied()
 	}
 
-	fn collect_with_prefix<V>(&self, kv: &mut KVSimulator, prefix: &Key, visitor: &mut V) -> bool
+	async fn collect_with_prefix<V>(
+		&self,
+		tx: &mut Transaction,
+		prefix: &Key,
+		visitor: &mut V,
+	) -> Result<bool, Error>
 	where
-		V: KeyVisitor,
+		V: KeyVisitor + Send,
 	{
+		let mut node_queue = VecDeque::new();
 		if let Some(node) = self.keys.get_raw_descendant(prefix) {
-			TrieKeys::collect_with_prefix_recursive(kv, node, prefix, visitor)
-		} else {
-			false
+			node_queue.push_front(node);
 		}
+		let mut found = false;
+		while let Some(node) = node_queue.pop_front() {
+			if let Some(value) = node.value() {
+				if let Some(node_key) = node.key() {
+					if node_key.starts_with(prefix) {
+						found = true;
+						visitor.visit(tx, node_key.clone(), *value).await?;
+					}
+				}
+			}
+			for children in node.children() {
+				node_queue.push_front(children);
+			}
+		}
+		Ok(found)
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
@@ -392,9 +420,9 @@ impl BKeys for TrieKeys {
 		child_idx
 	}
 
-	fn debug<F>(&self, to_string: F)
+	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
-		F: Fn(Key) -> String,
+		F: Fn(Key) -> Result<String, Error>,
 	{
 		let mut s = String::new();
 		let mut start = true;
@@ -404,42 +432,10 @@ impl BKeys for TrieKeys {
 			} else {
 				start = false;
 			}
-			s.push_str(&format!("{}={}", to_string(k.to_vec()).as_str(), p));
+			s.push_str(&format!("{}={}", to_string(k.to_vec())?.as_str(), p));
 		}
 		debug!("TrieKeys[{}]", s);
-	}
-}
-
-impl TrieKeys {
-	fn collect_with_prefix_recursive<V>(
-		kv: &mut KVSimulator,
-		node: SubTrie<Key, Payload>,
-		prefix: &Key,
-		visitor: &mut V,
-	) -> bool
-	where
-		V: KeyVisitor,
-	{
-		let mut found = false;
-		if let Some(value) = node.value() {
-			if let Some(node_key) = node.key() {
-				if node_key.starts_with(prefix) {
-					if !found {
-						found = true;
-					}
-					visitor.visit(kv, node_key.clone(), *value);
-				}
-			}
-		}
-
-		for children in node.children() {
-			if Self::collect_with_prefix_recursive(kv, children, prefix, visitor) {
-				if !found {
-					found = true;
-				}
-			}
-		}
-		found
+		Ok(())
 	}
 }
 
@@ -454,9 +450,8 @@ impl From<Trie<Vec<u8>, u64>> for TrieKeys {
 #[cfg(test)]
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::kvsim::KVSimulator;
 	use crate::idx::tests::HashVisitor;
-	use crate::kvs::Key;
+	use crate::kvs::{Datastore, Key};
 
 	#[test]
 	fn test_fst_keys_serde() {
@@ -501,9 +496,11 @@ mod tests {
 		test_keys_additions(TrieKeys::default())
 	}
 
-	#[test]
-	fn test_tries_keys_collect_with_prefix() {
-		let mut kv = KVSimulator::default();
+	#[tokio::test]
+	async fn test_tries_keys_collect_with_prefix() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut tx = ds.transaction(true, false).await.unwrap();
+
 		let mut keys = TrieKeys::default();
 		keys.insert("apple".into(), 1);
 		keys.insert("applicant".into(), 2);
@@ -520,7 +517,7 @@ mod tests {
 
 		{
 			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&mut kv, &"appli".into(), &mut visitor);
+			keys.collect_with_prefix(&mut tx, &"appli".into(), &mut visitor).await.unwrap();
 			visitor.check(
 				vec![("applicant".into(), 2), ("application".into(), 3), ("applicative".into(), 4)],
 				"appli",
@@ -529,7 +526,7 @@ mod tests {
 
 		{
 			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&mut kv, &"the".into(), &mut visitor);
+			keys.collect_with_prefix(&mut tx, &"the".into(), &mut visitor).await.unwrap();
 			visitor.check(
 				vec![
 					("the".into(), 7),
@@ -545,19 +542,19 @@ mod tests {
 
 		{
 			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&mut kv, &"blue".into(), &mut visitor);
+			keys.collect_with_prefix(&mut tx, &"blue".into(), &mut visitor).await.unwrap();
 			visitor.check(vec![("blueberry".into(), 6)], "blue");
 		}
 
 		{
 			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&mut kv, &"apple".into(), &mut visitor);
+			keys.collect_with_prefix(&mut tx, &"apple".into(), &mut visitor).await.unwrap();
 			visitor.check(vec![("apple".into(), 1)], "apple");
 		}
 
 		{
 			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&mut kv, &"zz".into(), &mut visitor);
+			keys.collect_with_prefix(&mut tx, &"zz".into(), &mut visitor).await.unwrap();
 			visitor.check(vec![], "zz");
 		}
 	}
