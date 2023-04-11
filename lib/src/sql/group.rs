@@ -32,7 +32,11 @@ impl IntoIterator for Groups {
 
 impl Display for Groups {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "GROUP BY {}", Fmt::comma_separated(&self.0))
+		if self.0.is_empty() {
+			write!(f, "GROUP ALL")
+		} else {
+			write!(f, "GROUP BY {}", Fmt::comma_separated(&self.0))
+		}
 	}
 }
 
@@ -113,5 +117,13 @@ mod tests {
 			Groups(vec![Group(Idiom::parse("field")), Group(Idiom::parse("other.field"))])
 		);
 		assert_eq!("GROUP BY field, other.field", format!("{}", out));
+	}
+
+	#[test]
+	fn group_statement_all() {
+		let sql = "GROUP ALL";
+		let out = group(sql).unwrap().1;
+		assert_eq!(out, Groups(Vec::new()));
+		assert_eq!(sql, out.to_string());
 	}
 }
