@@ -3,7 +3,10 @@ mod btree;
 mod ft;
 mod kvsim;
 
+use crate::err::Error;
+use crate::kvs::Val;
 use derive::Key;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 type IndexId = u64;
@@ -29,6 +32,20 @@ impl BaseStateKey {
 			domain,
 			index_id,
 		}
+	}
+}
+
+/// This trait provides `bincode` based default implementations for serialization/deserialization
+trait SerdeState
+where
+	Self: Sized + Serialize + DeserializeOwned,
+{
+	fn try_to_val(&self) -> Result<Val, Error> {
+		Ok(bincode::serialize(self)?)
+	}
+
+	fn try_from_val(val: Val) -> Result<Self, Error> {
+		Ok(bincode::deserialize(&val)?)
 	}
 }
 

@@ -456,7 +456,7 @@ mod tests {
 	#[test]
 	fn test_fst_keys_serde() {
 		let key: Key = "a".as_bytes().into();
-		let keys = FstKeys::with_key_val(key.clone(), 130);
+		let keys = FstKeys::with_key_val(key.clone(), 130).unwrap();
 		let buf = bincode::serialize(&keys).unwrap();
 		let keys: FstKeys = bincode::deserialize(&buf).unwrap();
 		assert_eq!(keys.get(&key), Some(130));
@@ -465,7 +465,7 @@ mod tests {
 	#[test]
 	fn test_trie_keys_serde() {
 		let key: Key = "a".as_bytes().into();
-		let keys = TrieKeys::with_key_val(key.clone(), 130);
+		let keys = TrieKeys::with_key_val(key.clone(), 130).unwrap();
 		let buf = bincode::serialize(&keys).unwrap();
 		let keys: TrieKeys = bincode::deserialize(&buf).unwrap();
 		assert_eq!(keys.get(&key), Some(130));

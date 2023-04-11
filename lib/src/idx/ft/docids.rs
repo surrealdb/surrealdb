@@ -1,8 +1,8 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
 use crate::idx::btree::{BTree, Statistics};
-use crate::idx::{BaseStateKey, Domain, IndexId, DOC_IDS_DOMAIN, DOC_KEYS_DOMAIN};
-use crate::kvs::{Key, Transaction, Val};
+use crate::idx::{BaseStateKey, Domain, IndexId, SerdeState, DOC_IDS_DOMAIN, DOC_KEYS_DOMAIN};
+use crate::kvs::{Key, Transaction};
 use derive::Key;
 use nom::AsBytes;
 use serde::{Deserialize, Serialize};
@@ -38,21 +38,7 @@ impl State {
 	}
 }
 
-impl TryFrom<Val> for State {
-	type Error = bincode::Error;
-
-	fn try_from(val: Val) -> Result<State, Self::Error> {
-		bincode::deserialize(val.as_slice())
-	}
-}
-
-impl TryInto<Val> for State {
-	type Error = bincode::Error;
-
-	fn try_into(self) -> Result<Val, Self::Error> {
-		bincode::serialize(&self)
-	}
-}
+impl SerdeState for State {}
 
 impl DocIds {
 	pub(super) async fn new(
@@ -62,7 +48,7 @@ impl DocIds {
 	) -> Result<Self, Error> {
 		let state_key: Key = BaseStateKey::new(DOC_IDS_DOMAIN, index_id).into();
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
-			State::try_from(val)?
+			State::try_from_val(val)?
 		} else {
 			State::new(index_id, default_btree_order)
 		};
@@ -117,13 +103,12 @@ impl DocIds {
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
-		Ok(self.state.btree.statistics::<TrieKeys>(tx).await?)
+		self.state.btree.statistics::<TrieKeys>(tx).await
 	}
 
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
 		if self.updated || self.state.btree.is_updated() {
-			let val: Val = self.state.try_into()?;
-			tx.set(self.state_key, val).await?;
+			tx.set(self.state_key, self.state.try_to_val()?).await?;
 		}
 		Ok(())
 	}

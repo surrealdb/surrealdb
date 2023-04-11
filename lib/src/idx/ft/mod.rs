@@ -8,7 +8,7 @@ use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::doclength::{DocLength, DocLengths};
 use crate::idx::ft::postings::{Postings, PostingsVisitor, TermFrequency};
 use crate::idx::ft::terms::Terms;
-use crate::idx::{BaseStateKey, IndexId, INDEX_DOMAIN};
+use crate::idx::{btree, BaseStateKey, IndexId, SerdeState, INDEX_DOMAIN};
 use crate::kvs::{Key, Transaction};
 use crate::sql::error::IResult;
 use async_trait::async_trait;
@@ -45,11 +45,20 @@ impl Default for Bm25Params {
 	}
 }
 
+pub(super) struct Statistics {
+	doc_ids: btree::Statistics,
+	terms: btree::Statistics,
+	doc_lengths: btree::Statistics,
+	postings: btree::Statistics,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct State {
 	total_docs_lengths: u128,
 	doc_count: u64,
 }
+
+impl SerdeState for State {}
 
 type Score = f32;
 
@@ -61,7 +70,7 @@ impl FtIndex {
 	) -> Result<Self, Error> {
 		let state_key: Key = BaseStateKey::new(INDEX_DOMAIN, index_id).into();
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
-			bincode::deserialize(&val)?
+			State::try_from_val(val)?
 		} else {
 			State::default()
 		};
@@ -121,7 +130,7 @@ impl FtIndex {
 		}
 
 		// Update the states
-		tx.set(self.state_key.clone(), bincode::serialize(&self.state)?).await?;
+		tx.set(self.state_key.clone(), self.state.try_to_val()?).await?;
 		d.finish(tx).await?;
 		l.finish(tx).await?;
 		p.finish(tx).await?;
@@ -166,7 +175,7 @@ impl FtIndex {
 		take_while(|c| c != ' ' && c != '\n' && c != '\t')(i)
 	}
 
-	async fn search<V>(
+	pub(super) async fn search<V>(
 		&self,
 		tx: &mut Transaction,
 		term: &str,
@@ -198,6 +207,16 @@ impl FtIndex {
 			}
 		}
 		Ok(())
+	}
+
+	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
+		// TODO do parallel execution
+		Ok(Statistics {
+			doc_ids: self.doc_ids(tx).await?.statistics(tx).await?,
+			terms: self.terms(tx).await?.statistics(tx).await?,
+			doc_lengths: self.doc_lengths(tx).await?.statistics(tx).await?,
+			postings: self.postings(tx).await?.statistics(tx).await?,
+		})
 	}
 }
 
@@ -314,10 +333,17 @@ mod tests {
 		}
 
 		{
-			// Search & score
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let fti = FtIndex::new(&mut tx, 0, default_btree_order).await.unwrap();
 
+			// Check the statistics
+			let statistics = fti.statistics(&mut tx).await.unwrap();
+			assert_eq!(statistics.terms.keys_count, 7);
+			assert_eq!(statistics.postings.keys_count, 8);
+			assert_eq!(statistics.doc_ids.keys_count, 3);
+			assert_eq!(statistics.doc_lengths.keys_count, 3);
+
+			// Search & score
 			let mut visitor = HashHitVisitor::default();
 			fti.search(&mut tx, "hello", &mut visitor).await.unwrap();
 			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
@@ -371,9 +397,16 @@ mod tests {
 					.unwrap();
 				tx.commit().await.unwrap();
 			}
+
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
 				let fti = FtIndex::new(&mut tx, 0, default_btree_order).await.unwrap();
+
+				let statistics = fti.statistics(&mut tx).await.unwrap();
+				assert_eq!(statistics.terms.keys_count, 17);
+				assert_eq!(statistics.postings.keys_count, 28);
+				assert_eq!(statistics.doc_ids.keys_count, 4);
+				assert_eq!(statistics.doc_lengths.keys_count, 4);
 
 				let mut visitor = HashHitVisitor::default();
 				fti.search(&mut tx, "the", &mut visitor).await.unwrap();

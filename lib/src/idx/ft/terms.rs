@@ -2,8 +2,8 @@ use crate::err::Error;
 use crate::idx::bkeys::FstKeys;
 use crate::idx::btree::{BTree, Statistics};
 use crate::idx::ft::postings::TermFrequency;
-use crate::idx::{BaseStateKey, IndexId, TERMS_DOMAIN};
-use crate::kvs::{Key, Transaction, Val};
+use crate::idx::{BaseStateKey, IndexId, SerdeState, TERMS_DOMAIN};
+use crate::kvs::{Key, Transaction};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -30,21 +30,7 @@ impl State {
 	}
 }
 
-impl TryFrom<Val> for State {
-	type Error = bincode::Error;
-
-	fn try_from(val: Val) -> Result<State, Self::Error> {
-		bincode::deserialize(val.as_slice())
-	}
-}
-
-impl TryInto<Val> for State {
-	type Error = bincode::Error;
-
-	fn try_into(self) -> Result<Val, Self::Error> {
-		bincode::serialize(&self)
-	}
-}
+impl SerdeState for State {}
 
 impl Terms {
 	pub(super) async fn new(
@@ -54,7 +40,7 @@ impl Terms {
 	) -> Result<Self, Error> {
 		let state_key: Key = BaseStateKey::new(TERMS_DOMAIN, index_id).into();
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
-			State::try_from(val)?
+			State::try_from_val(val)?
 		} else {
 			State::new(index_id, default_btree_order)
 		};
@@ -109,9 +95,8 @@ impl Terms {
 	}
 
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
-		if self.updated {
-			let val: Vec<u8> = self.state.try_into()?;
-			tx.set(self.state_key, val).await?;
+		if self.updated || self.state.btree.is_updated() {
+			tx.set(self.state_key, self.state.try_to_val()?).await?;
 		}
 		Ok(())
 	}

@@ -2,8 +2,8 @@ use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
 use crate::idx::btree::{BTree, Statistics};
 use crate::idx::ft::docids::DocId;
-use crate::idx::{BaseStateKey, IndexId, DOC_LENGTHS_DOMAIN};
-use crate::kvs::{Key, Transaction, Val};
+use crate::idx::{BaseStateKey, IndexId, SerdeState, DOC_LENGTHS_DOMAIN};
+use crate::kvs::{Key, Transaction};
 
 pub(super) type DocLength = u64;
 
@@ -20,7 +20,7 @@ impl DocLengths {
 	) -> Result<Self, Error> {
 		let state_key: Key = BaseStateKey::new(DOC_LENGTHS_DOMAIN, index_id).into();
 		let btree: BTree = if let Some(val) = tx.get(state_key.clone()).await? {
-			BTree::try_from(val)?
+			BTree::try_from_val(val)?
 		} else {
 			BTree::new(DOC_LENGTHS_DOMAIN, index_id, default_btree_order)
 		};
@@ -53,8 +53,7 @@ impl DocLengths {
 
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
 		if self.btree.is_updated() {
-			let val: Val = self.btree.try_into()?;
-			tx.set(self.state_key, val).await?;
+			tx.set(self.state_key, self.btree.try_to_val()?).await?;
 		}
 		Ok(())
 	}

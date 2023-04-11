@@ -3,8 +3,8 @@ use crate::idx::bkeys::{KeyVisitor, TrieKeys};
 use crate::idx::btree::{BTree, Payload, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::idx::{BaseStateKey, Domain, IndexId, POSTING_DOMAIN};
-use crate::kvs::{Key, Transaction, Val};
+use crate::idx::{BaseStateKey, Domain, IndexId, SerdeState, POSTING_DOMAIN};
+use crate::kvs::{Key, Transaction};
 use async_trait::async_trait;
 use derive::Key;
 use serde::{Deserialize, Serialize};
@@ -50,7 +50,7 @@ impl Postings {
 	) -> Result<Self, Error> {
 		let state_key: Key = BaseStateKey::new(POSTING_DOMAIN, index_id).into();
 		let btree = if let Some(val) = tx.get(state_key.clone()).await? {
-			BTree::try_from(val)?
+			BTree::try_from_val(val)?
 		} else {
 			BTree::new(POSTING_DOMAIN, index_id, default_btree_order)
 		};
@@ -132,8 +132,7 @@ impl Postings {
 
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
 		if self.btree.is_updated() {
-			let val: Val = self.btree.try_into()?;
-			tx.set(self.state_key, val).await?;
+			tx.set(self.state_key, self.btree.try_to_val()?).await?;
 		}
 		Ok(())
 	}
