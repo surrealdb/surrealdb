@@ -5,6 +5,7 @@ use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
 use crate::sql::array::Array;
+use crate::sql::index::Index;
 
 impl<'a> Document<'a> {
 	pub async fn index(
@@ -48,8 +49,8 @@ impl<'a> Document<'a> {
 			let mut run = run.lock().await;
 			// Update the index entries
 			if opt.force || o != n {
-				match ix.uniq {
-					true => {
+				match ix.index {
+					Index::Uniq => {
 						// Delete the old index data
 						if self.initial.is_some() {
 							#[rustfmt::skip]
@@ -72,7 +73,7 @@ impl<'a> Document<'a> {
 							}
 						}
 					}
-					false => {
+					Index::Idx => {
 						// Delete the old index data
 						if self.initial.is_some() {
 							#[rustfmt::skip]
@@ -94,6 +95,9 @@ impl<'a> Document<'a> {
 								});
 							}
 						}
+					}
+					_ => {
+						// TODO
 					}
 				};
 			}
