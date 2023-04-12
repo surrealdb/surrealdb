@@ -4,7 +4,7 @@ use crate::api::engine::remote::ws::Wss;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use crate::api::opt::IntoEndpoint;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
+#[cfg(feature = "has-tls")]
 use crate::api::opt::Tls;
 use crate::api::Result;
 use std::net::SocketAddr;
@@ -18,7 +18,7 @@ impl IntoEndpoint<Ws> for &str {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -32,7 +32,7 @@ impl IntoEndpoint<Ws> for SocketAddr {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -46,7 +46,7 @@ impl IntoEndpoint<Ws> for String {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -60,7 +60,7 @@ impl IntoEndpoint<Wss> for &str {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -74,7 +74,7 @@ impl IntoEndpoint<Wss> for SocketAddr {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -88,7 +88,7 @@ impl IntoEndpoint<Wss> for String {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}

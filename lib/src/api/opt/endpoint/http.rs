@@ -3,7 +3,7 @@ use crate::api::engine::remote::http::Http;
 use crate::api::engine::remote::http::Https;
 use crate::api::err::Error;
 use crate::api::opt::IntoEndpoint;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
+#[cfg(feature = "has-tls")]
 use crate::api::opt::Tls;
 use crate::api::Endpoint;
 use crate::api::Result;
@@ -18,7 +18,7 @@ impl IntoEndpoint<Http> for &str {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -32,7 +32,7 @@ impl IntoEndpoint<Http> for SocketAddr {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -46,7 +46,7 @@ impl IntoEndpoint<Http> for String {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -60,7 +60,7 @@ impl IntoEndpoint<Https> for &str {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -74,7 +74,7 @@ impl IntoEndpoint<Https> for SocketAddr {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}
@@ -88,7 +88,7 @@ impl IntoEndpoint<Https> for String {
 		Ok(Endpoint {
 			endpoint: Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?,
 			strict: false,
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			tls_config: None,
 		})
 	}

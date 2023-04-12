@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::key::thing;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
+use crate::kvs::TransactionFacade;
 use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
@@ -26,7 +27,6 @@ use sql::statements::DefineScopeStatement;
 use sql::statements::DefineTableStatement;
 use sql::statements::DefineTokenStatement;
 use sql::statements::LiveStatement;
-use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
@@ -37,42 +37,8 @@ const LOG: &str = "surrealdb::txn";
 /// A set of undoable updates and requests against a dataset.
 #[allow(dead_code)]
 pub struct Transaction {
-	pub(super) inner: Inner,
-	pub(super) cache: Cache,
-}
-
-#[allow(clippy::large_enum_variant)]
-pub(super) enum Inner {
-	#[cfg(feature = "kv-mem")]
-	Mem(super::mem::Transaction),
-	#[cfg(feature = "kv-rocksdb")]
-	RocksDB(super::rocksdb::Transaction),
-	#[cfg(feature = "kv-indxdb")]
-	IndxDB(super::indxdb::Transaction),
-	#[cfg(feature = "kv-tikv")]
-	TiKV(super::tikv::Transaction),
-	#[cfg(feature = "kv-fdb")]
-	FDB(super::fdb::Transaction),
-}
-
-impl fmt::Display for Transaction {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		#![allow(unused_variables)]
-		match &self.inner {
-			#[cfg(feature = "kv-mem")]
-			Inner::Mem(_) => write!(f, "memory"),
-			#[cfg(feature = "kv-rocksdb")]
-			Inner::RocksDB(_) => write!(f, "rocksdb"),
-			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(_) => write!(f, "indexdb"),
-			#[cfg(feature = "kv-tikv")]
-			Inner::TiKV(_) => write!(f, "tikv"),
-			#[cfg(feature = "kv-fdb")]
-			Inner::FDB(_) => write!(f, "fdb"),
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
-	}
+	pub(super) inner: Box<dyn TransactionFacade + Send + Sync>,
+	pub(super) cache: Box<dyn Cache + Send + Sync>,
 }
 
 impl Transaction {
@@ -89,35 +55,7 @@ impl Transaction {
 	pub async fn closed(&self) -> bool {
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Closed");
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.closed(),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.closed(),
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.closed(),
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.closed(),
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.closed(),
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner.closed()
 	}
 
 	/// Cancel a transaction.
@@ -126,35 +64,7 @@ impl Transaction {
 	pub async fn cancel(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Cancel");
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.cancel(),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.cancel().await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.cancel().await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.cancel().await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.cancel().await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner.cancel().await
 	}
 
 	/// Commit a transaction.
@@ -163,35 +73,7 @@ impl Transaction {
 	pub async fn commit(&mut self) -> Result<(), Error> {
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Commit");
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.commit(),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.commit().await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.commit().await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.commit().await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.commit().await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner.commit().await
 	}
 
 	/// Delete a key from the datastore.
@@ -202,35 +84,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Del {:?}", key);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.del(key),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.del(key).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.del(key).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.del(key).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.del(key).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner.del(key.into()).await
 	}
 
 	/// Check if a key exists in the datastore.
@@ -241,35 +95,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Exi {:?}", key);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.exi(key),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.exi(key).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.exi(key).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.exi(key).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.exi(key).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner.exi(key.into()).await
 	}
 
 	/// Fetch a key from the datastore.
@@ -280,35 +106,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Get {:?}", key);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.get(key),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.get(key).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.get(key).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.get(key).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.get(key).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner.get(key.into()).await
 	}
 
 	/// Insert or update a key in the datastore.
@@ -320,35 +118,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Set {:?} => {:?}", key, val);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.set(key, val),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.set(key, val).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.set(key, val).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.set(key, val).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.set(key, val).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner.set(key.into(), val.into()).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -360,35 +130,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Put {:?} => {:?}", key, val);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.put(key, val),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.put(key, val).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.put(key, val).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.put(key, val).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.put(key, val).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner.put(key.into(), val.into()).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -401,35 +143,15 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Scan {:?} - {:?}", rng.start, rng.end);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.scan(rng, limit),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.scan(rng, limit).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner
+			.scan(
+				Range {
+					start: rng.start.into(),
+					end: rng.end.into(),
+				},
+				limit,
+			)
+			.await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -441,35 +163,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Putc {:?} if {:?} => {:?}", key, chk, val);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.putc(key, val, chk),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.putc(key, val, chk).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner.putc(key.into(), val.into(), chk.map(Into::into)).await
 	}
 
 	/// Delete a key from the datastore if the current value matches a condition.
@@ -481,35 +175,7 @@ impl Transaction {
 	{
 		#[cfg(debug_assertions)]
 		trace!(target: LOG, "Delc {:?} if {:?}", key, chk);
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Transaction {
-				inner: Inner::Mem(v),
-				..
-			} => v.delc(key, chk),
-			#[cfg(feature = "kv-rocksdb")]
-			Transaction {
-				inner: Inner::RocksDB(v),
-				..
-			} => v.delc(key, chk).await,
-			#[cfg(feature = "kv-indxdb")]
-			Transaction {
-				inner: Inner::IndxDB(v),
-				..
-			} => v.delc(key, chk).await,
-			#[cfg(feature = "kv-tikv")]
-			Transaction {
-				inner: Inner::TiKV(v),
-				..
-			} => v.delc(key, chk).await,
-			#[cfg(feature = "kv-fdb")]
-			Transaction {
-				inner: Inner::FDB(v),
-				..
-			} => v.delc(key, chk).await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.inner.delc(key.into(), chk.map(Into::into)).await
 	}
 
 	// --------------------------------------------------
@@ -725,15 +391,15 @@ impl Transaction {
 		K: Into<Key>,
 	{
 		let key: Key = key.into();
-		self.cache.del(&key);
+		self.cache.del(&key).await;
 		Ok(())
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
 	pub async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
 		let key = crate::key::ns::prefix();
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Nss(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -742,7 +408,7 @@ impl Transaction {
 				let end = crate::key::ns::suffix();
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Nss(Arc::clone(&val)));
+				self.cache.set(key, Entry::Nss(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -751,8 +417,8 @@ impl Transaction {
 	/// Retrieve all namespace login definitions for a specific namespace.
 	pub async fn all_nl(&mut self, ns: &str) -> Result<Arc<[DefineLoginStatement]>, Error> {
 		let key = crate::key::nl::prefix(ns);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Nls(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -761,7 +427,7 @@ impl Transaction {
 				let end = crate::key::nl::suffix(ns);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Nls(Arc::clone(&val)));
+				self.cache.set(key, Entry::Nls(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -770,8 +436,8 @@ impl Transaction {
 	/// Retrieve all namespace token definitions for a specific namespace.
 	pub async fn all_nt(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::nt::prefix(ns);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Nts(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -780,7 +446,7 @@ impl Transaction {
 				let end = crate::key::nt::suffix(ns);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Nts(Arc::clone(&val)));
+				self.cache.set(key, Entry::Nts(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -789,8 +455,8 @@ impl Transaction {
 	/// Retrieve all database definitions for a specific namespace.
 	pub async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
 		let key = crate::key::db::prefix(ns);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Dbs(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -799,7 +465,7 @@ impl Transaction {
 				let end = crate::key::db::suffix(ns);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Dbs(Arc::clone(&val)));
+				self.cache.set(key, Entry::Dbs(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -812,8 +478,8 @@ impl Transaction {
 		db: &str,
 	) -> Result<Arc<[DefineLoginStatement]>, Error> {
 		let key = crate::key::dl::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Dls(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -822,7 +488,7 @@ impl Transaction {
 				let end = crate::key::dl::suffix(ns, db);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Dls(Arc::clone(&val)));
+				self.cache.set(key, Entry::Dls(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -835,8 +501,8 @@ impl Transaction {
 		db: &str,
 	) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::dt::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Dts(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -845,7 +511,7 @@ impl Transaction {
 				let end = crate::key::dt::suffix(ns, db);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Dts(Arc::clone(&val)));
+				self.cache.set(key, Entry::Dts(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -858,8 +524,8 @@ impl Transaction {
 		db: &str,
 	) -> Result<Arc<[DefineFunctionStatement]>, Error> {
 		let key = crate::key::fc::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Fcs(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -868,7 +534,7 @@ impl Transaction {
 				let end = crate::key::fc::suffix(ns, db);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Fcs(Arc::clone(&val)));
+				self.cache.set(key, Entry::Fcs(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -881,8 +547,8 @@ impl Transaction {
 		db: &str,
 	) -> Result<Arc<[DefineScopeStatement]>, Error> {
 		let key = crate::key::sc::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Scs(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -891,7 +557,7 @@ impl Transaction {
 				let end = crate::key::sc::suffix(ns, db);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Scs(Arc::clone(&val)));
+				self.cache.set(key, Entry::Scs(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -905,8 +571,8 @@ impl Transaction {
 		sc: &str,
 	) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::st::prefix(ns, db, sc);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Sts(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -915,7 +581,7 @@ impl Transaction {
 				let end = crate::key::st::suffix(ns, db, sc);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Sts(Arc::clone(&val)));
+				self.cache.set(key, Entry::Sts(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -928,8 +594,8 @@ impl Transaction {
 		db: &str,
 	) -> Result<Arc<[DefineParamStatement]>, Error> {
 		let key = crate::key::pa::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Pas(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -938,7 +604,7 @@ impl Transaction {
 				let end = crate::key::pa::suffix(ns, db);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Pas(Arc::clone(&val)));
+				self.cache.set(key, Entry::Pas(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -951,8 +617,8 @@ impl Transaction {
 		db: &str,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		let key = crate::key::tb::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Tbs(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -961,7 +627,7 @@ impl Transaction {
 				let end = crate::key::tb::suffix(ns, db);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Tbs(Arc::clone(&val)));
+				self.cache.set(key, Entry::Tbs(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -975,8 +641,8 @@ impl Transaction {
 		tb: &str,
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		let key = crate::key::ev::prefix(ns, db, tb);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Evs(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -985,7 +651,7 @@ impl Transaction {
 				let end = crate::key::ev::suffix(ns, db, tb);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Evs(Arc::clone(&val)));
+				self.cache.set(key, Entry::Evs(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -999,8 +665,8 @@ impl Transaction {
 		tb: &str,
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		let key = crate::key::fd::prefix(ns, db, tb);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Fds(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -1009,7 +675,7 @@ impl Transaction {
 				let end = crate::key::fd::suffix(ns, db, tb);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Fds(Arc::clone(&val)));
+				self.cache.set(key, Entry::Fds(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -1023,8 +689,8 @@ impl Transaction {
 		tb: &str,
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		let key = crate::key::ix::prefix(ns, db, tb);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Ixs(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -1033,7 +699,7 @@ impl Transaction {
 				let end = crate::key::ix::suffix(ns, db, tb);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Ixs(Arc::clone(&val)));
+				self.cache.set(key, Entry::Ixs(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -1047,8 +713,8 @@ impl Transaction {
 		tb: &str,
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		let key = crate::key::ft::prefix(ns, db, tb);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Fts(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -1057,7 +723,7 @@ impl Transaction {
 				let end = crate::key::ft::suffix(ns, db, tb);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Fts(Arc::clone(&val)));
+				self.cache.set(key, Entry::Fts(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -1071,8 +737,8 @@ impl Transaction {
 		tb: &str,
 	) -> Result<Arc<[LiveStatement]>, Error> {
 		let key = crate::key::lv::prefix(ns, db, tb);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Lvs(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -1081,7 +747,7 @@ impl Transaction {
 				let end = crate::key::lv::suffix(ns, db, tb);
 				let val = self.getr(beg..end, u32::MAX).await?;
 				let val = val.convert().into();
-				self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
+				self.cache.set(key, Entry::Lvs(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -1344,8 +1010,8 @@ impl Transaction {
 		ns: &str,
 	) -> Result<Arc<DefineNamespaceStatement>, Error> {
 		let key = crate::key::ns::new(ns).encode()?;
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Ns(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -1354,7 +1020,7 @@ impl Transaction {
 					value: ns.to_owned(),
 				})?;
 				let val: Arc<DefineNamespaceStatement> = Arc::new(val.into());
-				self.cache.set(key, Entry::Ns(Arc::clone(&val)));
+				self.cache.set(key, Entry::Ns(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -1367,8 +1033,8 @@ impl Transaction {
 		db: &str,
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
 		let key = crate::key::db::new(ns, db).encode()?;
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Db(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -1377,7 +1043,7 @@ impl Transaction {
 					value: db.to_owned(),
 				})?;
 				let val: Arc<DefineDatabaseStatement> = Arc::new(val.into());
-				self.cache.set(key, Entry::Db(Arc::clone(&val)));
+				self.cache.set(key, Entry::Db(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}
@@ -1391,8 +1057,8 @@ impl Transaction {
 		tb: &str,
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		let key = crate::key::tb::new(ns, db, tb).encode()?;
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
+		match self.cache.exi(&key).await {
+			true => match self.cache.get(&key).await {
 				Some(Entry::Tb(v)) => Ok(v),
 				_ => unreachable!(),
 			},
@@ -1401,7 +1067,7 @@ impl Transaction {
 					value: tb.to_owned(),
 				})?;
 				let val: Arc<DefineTableStatement> = Arc::new(val.into());
-				self.cache.set(key, Entry::Tb(Arc::clone(&val)));
+				self.cache.set(key, Entry::Tb(Arc::clone(&val))).await;
 				Ok(val)
 			}
 		}

@@ -11,9 +11,6 @@ use crate::api::engine::remote::http;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
 use crate::api::opt::Endpoint;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-#[cfg(feature = "protocol-http")]
-use crate::api::opt::Tls;
 use crate::api::DbResponse;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
@@ -33,8 +30,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 #[cfg(feature = "protocol-ws")]
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-#[cfg(feature = "protocol-ws")]
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
+#[cfg(all(feature = "protocol-ws", feature = "has-tls"))]
 use tokio_tungstenite::Connector;
 
 impl crate::api::Connection for Any {}
@@ -62,36 +58,13 @@ impl Connection for Any {
 			let mut features = HashSet::new();
 
 			match address.endpoint.scheme() {
-				#[cfg(feature = "kv-fdb")]
-				"fdb" => {
-					features.insert(ExtraFeatures::Backup);
-					engine::local::native::router(address, conn_tx, route_rx);
-					conn_rx.into_recv_async().await??
-				}
-
-				#[cfg(feature = "kv-mem")]
-				"mem" => {
-					features.insert(ExtraFeatures::Backup);
-					engine::local::native::router(address, conn_tx, route_rx);
-					conn_rx.into_recv_async().await??
-				}
-
-				#[cfg(feature = "kv-rocksdb")]
-				"rocksdb" => {
-					features.insert(ExtraFeatures::Backup);
-					engine::local::native::router(address, conn_tx, route_rx);
-					conn_rx.into_recv_async().await??
-				}
-
-				#[cfg(feature = "kv-rocksdb")]
-				"file" => {
-					features.insert(ExtraFeatures::Backup);
-					engine::local::native::router(address, conn_tx, route_rx);
-					conn_rx.into_recv_async().await??
-				}
-
-				#[cfg(feature = "kv-tikv")]
-				"tikv" => {
+				#[cfg(feature = "has-local")]
+				scheme
+					if crate::kvs::AVAILABLE_DATASTORE_METADATA
+						.iter()
+						.flat_map(|x| x.scheme())
+						.any(|&x| x == scheme) =>
+				{
 					features.insert(ExtraFeatures::Backup);
 					engine::local::native::router(address, conn_tx, route_rx);
 					conn_rx.into_recv_async().await??
@@ -104,14 +77,17 @@ impl Connection for Any {
 					let headers = http::default_headers();
 					#[allow(unused_mut)]
 					let mut builder = ClientBuilder::new().default_headers(headers);
-					#[cfg(any(feature = "native-tls", feature = "rustls"))]
-					if let Some(tls) = address.tls_config {
-						builder = match tls {
-							#[cfg(feature = "native-tls")]
-							Tls::Native(config) => builder.use_preconfigured_tls(config),
-							#[cfg(feature = "rustls")]
-							Tls::Rust(config) => builder.use_preconfigured_tls(config),
-						};
+					#[cfg(feature = "has-tls")]
+					{
+						use crate::api::opt::Tls;
+						if let Some(tls) = address.tls_config {
+							builder = match tls {
+								#[cfg(feature = "native-tls")]
+								Tls::Native(config) => builder.use_preconfigured_tls(config),
+								#[cfg(feature = "rustls")]
+								Tls::Rust(config) => builder.use_preconfigured_tls(config),
+							};
+						}
 					}
 					let client = builder.build()?;
 					let base_url = address.endpoint;
@@ -126,9 +102,9 @@ impl Connection for Any {
 				"ws" | "wss" => {
 					features.insert(ExtraFeatures::Auth);
 					let url = address.endpoint.join(engine::remote::ws::PATH)?;
-					#[cfg(any(feature = "native-tls", feature = "rustls"))]
+					#[cfg(feature = "has-tls")]
 					let maybe_connector = address.tls_config.map(Connector::from);
-					#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
+					#[cfg(not(feature = "has-tls"))]
 					let maybe_connector = None;
 					let config = WebSocketConfig {
 						max_send_queue: match capacity {

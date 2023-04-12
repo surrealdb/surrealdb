@@ -13,7 +13,7 @@ use crate::api::engine::remote::ws::PING_METHOD;
 use crate::api::err::Error;
 use crate::api::opt::from_value;
 use crate::api::opt::Endpoint;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
+#[cfg(feature = "has-tls")]
 use crate::api::opt::Tls;
 use crate::api::ExtraFeatures;
 use crate::api::Response as QueryResponse;
@@ -64,7 +64,7 @@ pub(crate) enum Either {
 	Ping,
 }
 
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
+#[cfg(feature = "has-tls")]
 impl From<Tls> for Connector {
 	fn from(tls: Tls) -> Self {
 		match tls {
@@ -81,11 +81,11 @@ pub(crate) async fn connect(
 	config: Option<WebSocketConfig>,
 	#[allow(unused_variables)] maybe_connector: Option<Connector>,
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-	#[cfg(any(feature = "native-tls", feature = "rustls"))]
+	#[cfg(feature = "has-tls")]
 	let (socket, _) =
 		tokio_tungstenite::connect_async_tls_with_config(url, config, maybe_connector).await?;
 
-	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
+	#[cfg(not(feature = "has-tls"))]
 	let (socket, _) = tokio_tungstenite::connect_async_with_config(url, config).await?;
 
 	Ok(socket)
@@ -107,9 +107,9 @@ impl Connection for Client {
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
 			let url = address.endpoint.join(PATH)?;
-			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			#[cfg(feature = "has-tls")]
 			let maybe_connector = address.tls_config.map(Connector::from);
-			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
+			#[cfg(not(feature = "has-tls"))]
 			let maybe_connector = None;
 
 			let config = WebSocketConfig {

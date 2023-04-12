@@ -1,15 +1,17 @@
-#![cfg(feature = "kv-mem")]
-
-use crate::err::Error;
-use crate::kvs::Key;
-use crate::kvs::Val;
+use crate::{
+	err::Error,
+	kvs::{DatastoreFacade, DatastoreMetadata, Key, TransactionFacade, Val},
+};
+use async_trait_fn::async_trait;
 use std::ops::Range;
 
-pub struct Datastore {
+pub struct MemoryDatastoreMetadata;
+
+pub struct MemoryDatastore {
 	db: echodb::Db<Key, Val>,
 }
 
-pub struct Transaction {
+pub struct MemoryTransaction {
 	/// Is the transaction complete?
 	ok: bool,
 	/// Is the transaction read+write?
@@ -18,33 +20,59 @@ pub struct Transaction {
 	tx: echodb::Tx<Key, Val>,
 }
 
-impl Datastore {
+#[async_trait]
+impl DatastoreMetadata for MemoryDatastoreMetadata {
 	/// Open a new database
-	pub async fn new() -> Result<Datastore, Error> {
-		Ok(Datastore {
+	async fn new(&self, _: &str) -> Result<Box<dyn DatastoreFacade + Send + Sync>, Error> {
+		Ok(Box::new(MemoryDatastore {
 			db: echodb::db::new(),
-		})
+		}))
 	}
+
+	fn name(&self) -> &'static str {
+		"In-Memory"
+	}
+
+	fn scheme(&self) -> &'static [&'static str] {
+		&["mem"]
+	}
+
+	fn connection_string_match_prefix(&self, url: &str) -> bool {
+		url == "memory"
+	}
+
+	fn trim_connection_string(&self, url: &str) -> String {
+		url.to_string()
+	}
+}
+
+#[async_trait]
+impl DatastoreFacade for MemoryDatastore {
 	/// Start a new transaction
-	pub async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+	async fn transaction(
+		&self,
+		write: bool,
+		_: bool,
+	) -> Result<Box<dyn TransactionFacade + Send + Sync>, Error> {
 		match self.db.begin(write).await {
-			Ok(tx) => Ok(Transaction {
+			Ok(tx) => Ok(Box::new(MemoryTransaction {
 				ok: false,
 				rw: write,
 				tx,
-			}),
+			})),
 			Err(e) => Err(Error::Tx(e.to_string())),
 		}
 	}
 }
 
-impl Transaction {
+#[async_trait]
+impl TransactionFacade for MemoryTransaction {
 	/// Check if closed
-	pub fn closed(&self) -> bool {
+	fn closed(&self) -> bool {
 		self.ok
 	}
 	/// Cancel a transaction
-	pub fn cancel(&mut self) -> Result<(), Error> {
+	async fn cancel(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -57,7 +85,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Commit a transaction
-	pub fn commit(&mut self) -> Result<(), Error> {
+	async fn commit(&mut self) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -74,10 +102,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Check if a key exists
-	pub fn exi<K>(&mut self, key: K) -> Result<bool, Error>
-	where
-		K: Into<Key>,
-	{
+	async fn exi(&mut self, key: Key) -> Result<bool, Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -88,10 +113,7 @@ impl Transaction {
 		Ok(res)
 	}
 	/// Fetch a key from the database
-	pub fn get<K>(&mut self, key: K) -> Result<Option<Val>, Error>
-	where
-		K: Into<Key>,
-	{
+	async fn get(&mut self, key: Key) -> Result<Option<Val>, Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -102,11 +124,7 @@ impl Transaction {
 		Ok(res)
 	}
 	/// Insert or update a key in the database
-	pub fn set<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn set(&mut self, key: Key, val: Val) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -121,11 +139,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub fn put<K, V>(&mut self, key: K, val: V) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn put(&mut self, key: Key, val: Val) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -140,11 +154,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Insert a key if it doesn't exist in the database
-	pub fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -159,10 +169,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Delete a key
-	pub fn del<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: Into<Key>,
-	{
+	async fn del(&mut self, key: Key) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -177,11 +184,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Delete a key
-	pub fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
-	where
-		K: Into<Key>,
-		V: Into<Val>,
-	{
+	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<(), Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -196,10 +199,7 @@ impl Transaction {
 		Ok(())
 	}
 	/// Retrieve a range of keys from the databases
-	pub fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
-	where
-		K: Into<Key>,
-	{
+	async fn scan(&mut self, rng: Range<Key>, limit: u32) -> Result<Vec<(Key, Val)>, Error> {
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);

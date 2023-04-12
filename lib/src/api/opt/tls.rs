@@ -1,6 +1,6 @@
 /// TLS Configuration
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "native-tls", feature = "rustls"))))]
+#[cfg(feature = "has-tls")]
+#[cfg_attr(docsrs, doc(cfg(feature = "has-tls")))]
 #[derive(Debug)]
 pub enum Tls {
 	/// Native TLS configuration
