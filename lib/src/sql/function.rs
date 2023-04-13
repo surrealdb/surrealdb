@@ -86,6 +86,10 @@ impl Function {
 			_ => unreachable!(),
 		}
 	}
+	/// Check if this function is a custom function
+	pub fn is_custom(&self) -> bool {
+		matches!(self, Self::Custom(_, _))
+	}
 	/// Check if this function is a rolling function
 	pub fn is_rolling(&self) -> bool {
 		match self {

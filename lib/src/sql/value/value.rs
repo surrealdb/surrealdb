@@ -1417,7 +1417,7 @@ impl Value {
 			Value::Block(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
-			Value::Function(v) => v.args().iter().any(Value::writeable),
+			Value::Function(v) => v.is_custom() || v.args().iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.l.writeable() || v.r.writeable(),
 			_ => false,
