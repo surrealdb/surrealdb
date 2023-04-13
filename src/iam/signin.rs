@@ -103,9 +103,11 @@ pub async fn sc(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Create a new readonly transaction
-	let mut tx = kvs.transaction(false, false).await?;
+	let mut tx = kvs.transaction(false, true).await?;
 	// Check if the supplied NS Login exists
-	match tx.get_sc(&ns, &db, &sc).await {
+	let temp_val = tx.get_sc(&ns, &db, &sc).await;
+	tx.commit();
+	match temp_val {
 		Ok(sv) => {
 			match sv.signin {
 				// This scope allows signin
@@ -115,7 +117,7 @@ pub async fn sc(
 					// Setup the query session
 					let sess = Session::for_db(&ns, &db);
 					// Compute the value with the params
-					match kvs.compute(val, &sess, vars, opt.strict).await {
+					match kvs.compute(val.clone(), &sess, vars, opt.strict).await {
 						// The signin value succeeded
 						Ok(val) => match val.record() {
 							// There is a record returned
@@ -170,7 +172,7 @@ pub async fn sc(
 						},
 						// The signin query failed
 						Err(e) => {
-							trace!("Signin query failed {e:?}");
+							panic!("Signin query failed {e:?} but also {val:?}");
 							Err(Error::InvalidAuth)
 						}
 					}
@@ -200,7 +202,7 @@ pub async fn db(
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Create a new readonly transaction
-	let mut tx = kvs.transaction(false, false).await?;
+	let mut tx = kvs.transaction(false, true).await?;
 	// Check if the supplied DB Login exists
 	match tx.get_dl(&ns, &db, &user).await {
 		Ok(dl) => {
@@ -255,7 +257,7 @@ pub async fn ns(
 	// Get a database reference
 	let kvs = DB.get().unwrap();
 	// Create a new readonly transaction
-	let mut tx = kvs.transaction(false, false).await?;
+	let mut tx = kvs.transaction(false, true).await?;
 	// Check if the supplied NS Login exists
 	match tx.get_nl(&ns, &user).await {
 		Ok(nl) => {

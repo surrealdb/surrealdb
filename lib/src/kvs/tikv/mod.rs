@@ -63,6 +63,7 @@ impl Transaction {
 	}
 	/// Cancel a transaction
 	pub async fn cancel(&mut self) -> Result<(), Error> {
+		trace!("Cancelling transaction");
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);
@@ -76,6 +77,7 @@ impl Transaction {
 	}
 	/// Commit a transaction
 	pub async fn commit(&mut self) -> Result<(), Error> {
+		trace!("Committing transasction");
 		// Check to see if transaction is closed
 		if self.ok {
 			return Err(Error::TxFinished);

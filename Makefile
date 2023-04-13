@@ -14,7 +14,7 @@ docs:
 
 .PHONY: test
 test:
-	cargo test --workspace
+	SURREAL_TRACING_TRACER=otlp cargo test -j 1 --workspace -- --test-threads=1
 
 .PHONY: check
 check:
@@ -32,8 +32,8 @@ serve:
 
 .PHONY: cluster
 cluster:
-	SURREAL_TRACING_TRACER=otlp cargo run --features storage-tikv -- start --log trace --user root --pass root tikv://localhost:2379 &\
-	SURREAL_TRACING_TRACER=otlp cargo run --features storage-tikv -- start --log trace --user root --pass root -b 0.0.0.0:8001 tikv://localhost:2379
+	RUST_BACKTRACE=full SURREAL_TRACING_TRACER=otlp cargo run --features storage-tikv -- start --log trace --user root --pass root tikv://localhost:2379 &\
+	RUST_BACKTRACE=full SURREAL_TRACING_TRACER=otlp cargo run --features storage-tikv -- start --log trace --user root --pass root -b 0.0.0.0:8001 tikv://localhost:2379
 
 .PHONE: cluster-tikv
 cluster-tikv:
