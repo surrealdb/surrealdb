@@ -12,15 +12,20 @@ services:
       - ./logs:/logs
     command:
       - --name=pd0
-      - --client-urls=http://192.168.100.2:2379
-      - --peer-urls=http://192.168.100.2:2380
-      - --advertise-client-urls=http://127.0.0.1:2379
-      - --advertise-peer-urls=http://127.0.0.1:2380
-      - --initial-cluster=pd0=http://127.0.0.1:2380
+      # client urls to listen to, the IP address of the current host
+      - --client-urls=http://173.21.0.2:2379
+      # addresses to listen to by PD
+      - --peer-urls=http://173.21.0.2:2380
+      # advertise-client-urls are the addresses clients use to connect to PDs
+      - --advertise-client-urls=http://173.21.0.2:2379
+      # advertise-peer-urls is the address for other PD nodes to connect to
+      - --advertise-peer-urls=http://173.21.0.2:2380
+      # pd cluster addresses tied with name and advertise-peer-urls
+      - --initial-cluster=pd0=http://173.21.0.2:2380
     restart: on-failure
     networks:
       surrealdb:
-        ipv4_address: 192.168.100.2
+        ipv4_address: 173.21.0.2
 
   tikv0:
     container_name: surrealdb-tikv0
@@ -28,17 +33,19 @@ services:
     volumes:
       - ./logs:/logs
     ports:
+      # This is required because the PD nodes route traffic by giving the tikv node addresses
       - "20160:20160"
     command:
-      - --addr=192.168.100.3:20160
-      - --advertise-addr=192.168.100.3:20160
-      - --pd=192.168.100.2:2379
+      - --addr=173.21.0.3:20160
+      # address advertised to clients connecting to PD, for routing
+      - --advertise-addr=173.21.0.3:20160
+      - --pd=173.21.0.2:2379
     depends_on:
       - "pd0"
     restart: on-failure
     networks:
       surrealdb:
-        ipv4_address: 192.168.100.3
+        ipv4_address: 173.21.0.3
 
 networks:
   surrealdb:
@@ -46,4 +53,4 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 192.168.100.0/24
+        - subnet: 173.21.0.0/16
