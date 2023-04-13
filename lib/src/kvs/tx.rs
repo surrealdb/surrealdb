@@ -881,20 +881,20 @@ impl Transaction {
 		db: &str,
 	) -> Result<Arc<[DefineScopeStatement]>, Error> {
 		let key = crate::key::sc::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Scs(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::sc::prefix(ns, db);
-				let end = crate::key::sc::suffix(ns, db);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Scs(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Scs(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::sc::prefix(ns, db);
+			let end = crate::key::sc::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Scs(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all scope token definitions for a scope.
@@ -905,20 +905,20 @@ impl Transaction {
 		sc: &str,
 	) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::st::prefix(ns, db, sc);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Sts(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::st::prefix(ns, db, sc);
-				let end = crate::key::st::suffix(ns, db, sc);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Sts(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if Entry::Sts(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::st::prefix(ns, db, sc);
+			let end = crate::key::st::suffix(ns, db, sc);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Sts(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all scope definitions for a specific database.

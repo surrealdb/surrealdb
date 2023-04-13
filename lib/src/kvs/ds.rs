@@ -190,50 +190,40 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
-		match &self.inner {
+		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::Mem(tx),
-					cache: super::cache::Cache::default(),
-				})
+				super::tx::Inner::Mem(tx)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::RocksDB(tx),
-					cache: super::cache::Cache::default(),
-				})
+				super::tx::Inner::RocksDB(tx)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::IndxDB(tx),
-					cache: super::cache::Cache::default(),
-				})
+				super::tx::Inner::IndxDB(tx)
 			}
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::TiKV(tx),
-					cache: super::cache::Cache::default(),
-				})
+				super::tx::Inner::TiKV(tx)
 			}
 			#[cfg(feature = "kv-fdb")]
 			Inner::FDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::FDB(tx),
-					cache: super::cache::Cache::default(),
-				})
+				super::tx::Inner::FDB(tx)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
-		}
+		};
+
+		Ok(Transaction {
+			inner,
+			cache: super::cache::Cache::default(),
+		})
 	}
 
 	/// Parse and execute an SQL query
