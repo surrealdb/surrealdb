@@ -85,6 +85,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 								Statement::Set(stmt) => {
 									if let Err(e) = client.set(&stmt.name, &stmt.what).await {
 										eprintln!("{e}");
+										eprintln!();
 									}
 								}
 								_ => {}
@@ -93,11 +94,23 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 						let res = client.query(query).await;
 						// Get the request response
 						match process(pretty, res) {
-							Ok(v) => println!("{v}"),
-							Err(e) => eprintln!("{e}"),
+							Ok(v) => {
+								let output = v.to_string();
+								println!("{output}");
+								if !output.is_empty() {
+									println!();
+								}
+							}
+							Err(e) => {
+								eprintln!("{e}");
+								eprintln!();
+							}
 						}
 					}
-					Err(e) => eprintln!("{e}"),
+					Err(e) => {
+						eprintln!("{e}");
+						eprintln!();
+					}
 				}
 			}
 			// The user types CTRL-C
