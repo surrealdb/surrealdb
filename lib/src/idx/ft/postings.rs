@@ -1,35 +1,19 @@
 use crate::err::Error;
 use crate::idx::bkeys::{KeyVisitor, TrieKeys};
-use crate::idx::btree::{BTree, Payload, Statistics};
+use crate::idx::btree::{BTree, KeyProvider, NodeId, Payload, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
-use crate::idx::{BaseStateKey, Domain, IndexId, SerdeState, POSTING_DOMAIN};
+use crate::idx::{btree, IndexKeyBase, SerdeState};
+use crate::key::bf::Bf;
 use crate::kvs::{Key, Transaction};
 use async_trait::async_trait;
-use derive::Key;
-use serde::{Deserialize, Serialize};
 
 pub(super) type TermFrequency = u64;
 
-#[derive(Serialize, Deserialize, Key)]
-struct PostingKey {
-	domain: Domain,
-	index_id: IndexId,
-	term_id: TermId,
-	doc_id: DocId,
-}
-
-#[derive(Serialize, Deserialize, Key)]
-struct PostingPrefixKey {
-	domain: Domain,
-	index_id: IndexId,
-	term_id: TermId,
-}
-
 pub(super) struct Postings {
-	index_id: IndexId,
 	state_key: Key,
-	btree: BTree,
+	index_key_base: IndexKeyBase,
+	btree: BTree<PostingsKeyProvider>,
 }
 
 #[async_trait]
@@ -45,19 +29,22 @@ pub(super) trait PostingsVisitor {
 impl Postings {
 	pub(super) async fn new(
 		tx: &mut Transaction,
-		index_id: IndexId,
+		index_key_base: IndexKeyBase,
 		default_btree_order: usize,
 	) -> Result<Self, Error> {
-		let state_key: Key = BaseStateKey::new(POSTING_DOMAIN, index_id).into();
-		let btree = if let Some(val) = tx.get(state_key.clone()).await? {
-			BTree::try_from_val(val)?
+		let keys = PostingsKeyProvider {
+			index_key_base: index_key_base.clone(),
+		};
+		let state_key: Key = keys.get_state_key();
+		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
+			btree::State::try_from_val(val)?
 		} else {
-			BTree::new(POSTING_DOMAIN, index_id, default_btree_order)
+			btree::State::new(default_btree_order)
 		};
 		Ok(Self {
-			index_id,
-			btree,
 			state_key,
+			index_key_base,
+			btree: BTree::new(keys, state),
 		})
 	}
 
@@ -68,17 +55,8 @@ impl Postings {
 		doc_id: DocId,
 		term_freq: TermFrequency,
 	) -> Result<(), Error> {
-		let key = self.posting_key(term_id, doc_id);
-		self.btree.insert::<TrieKeys>(tx, key.into(), term_freq).await
-	}
-
-	fn posting_key(&self, term_id: TermId, doc_id: DocId) -> PostingKey {
-		PostingKey {
-			domain: POSTING_DOMAIN,
-			index_id: self.index_id,
-			term_id,
-			doc_id,
-		}
+		let key = self.index_key_base.new_bf_key(term_id, doc_id);
+		self.btree.insert::<TrieKeys>(tx, key, term_freq).await
 	}
 
 	pub(super) async fn get_doc_count(
@@ -86,7 +64,7 @@ impl Postings {
 		tx: &mut Transaction,
 		term_id: TermId,
 	) -> Result<u64, Error> {
-		let prefix_key = self.posting_prefix_key(term_id).into();
+		let prefix_key = self.index_key_base.new_bf_prefix_key(term_id);
 		let mut counter = PostingsDocCount::default();
 		self.btree.search_by_prefix::<TrieKeys, _>(tx, &prefix_key, &mut counter).await?;
 		Ok(counter.doc_count)
@@ -101,19 +79,11 @@ impl Postings {
 	where
 		V: PostingsVisitor + Send,
 	{
-		let prefix_key = self.posting_prefix_key(term_id).into();
+		let prefix_key = self.index_key_base.new_bf_prefix_key(term_id);
 		let mut key_visitor = PostingsAdapter {
 			visitor,
 		};
 		self.btree.search_by_prefix::<TrieKeys, _>(tx, &prefix_key, &mut key_visitor).await
-	}
-
-	fn posting_prefix_key(&self, term_id: TermId) -> PostingPrefixKey {
-		PostingPrefixKey {
-			domain: POSTING_DOMAIN,
-			index_id: self.index_id,
-			term_id,
-		}
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
@@ -121,10 +91,10 @@ impl Postings {
 	}
 
 	pub(super) async fn debug(&self, tx: &mut Transaction) -> Result<(), Error> {
-		debug!("POSTINGS {}", self.index_id);
+		debug!("POSTINGS {:?}", self.index_key_base);
 		self.btree
 			.debug::<_, TrieKeys>(tx, |k| {
-				let k: PostingKey = k.into();
+				let k: Bf = k.into();
 				Ok(format!("({}-{})", k.term_id, k.doc_id))
 			})
 			.await
@@ -132,9 +102,22 @@ impl Postings {
 
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
 		if self.btree.is_updated() {
-			tx.set(self.state_key, self.btree.try_to_val()?).await?;
+			tx.set(self.state_key, self.btree.get_state().try_to_val()?).await?;
 		}
 		Ok(())
+	}
+}
+
+struct PostingsKeyProvider {
+	index_key_base: IndexKeyBase,
+}
+
+impl KeyProvider for PostingsKeyProvider {
+	fn get_node_key(&self, node_id: NodeId) -> Key {
+		self.index_key_base.new_bp_key(Some(node_id))
+	}
+	fn get_state_key(&self) -> Key {
+		self.index_key_base.new_bp_key(None)
 	}
 }
 
@@ -156,7 +139,7 @@ where
 		key: Key,
 		payload: Payload,
 	) -> Result<(), Error> {
-		let posting_key: PostingKey = key.into();
+		let posting_key: Bf = key.into();
 		self.visitor.visit(tx, posting_key.doc_id, payload).await
 	}
 }
@@ -182,6 +165,7 @@ impl KeyVisitor for PostingsDocCount {
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::postings::Postings;
+	use crate::idx::IndexKeyBase;
 	use crate::kvs::Datastore;
 	use test_log::test;
 
@@ -193,7 +177,8 @@ mod tests {
 		let mut tx = ds.transaction(true, false).await.unwrap();
 
 		// Check empty state
-		let mut p = Postings::new(&mut tx, 0, DEFAULT_BTREE_ORDER).await.unwrap();
+		let mut p =
+			Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER).await.unwrap();
 
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
 

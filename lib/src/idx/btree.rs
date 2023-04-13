@@ -1,8 +1,7 @@
 use crate::err::Error;
 use crate::idx::bkeys::{BKeys, KeyVisitor};
-use crate::idx::{Domain, IndexId, SerdeState};
+use crate::idx::SerdeState;
 use crate::kvs::{Key, Transaction};
-use derive::Key;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -10,28 +9,43 @@ use std::fmt::Debug;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-pub(super) type NodeId = u64;
+pub(crate) type NodeId = u64;
 pub(super) type Payload = u64;
 
-#[derive(Serialize, Deserialize, Key, Clone)]
-struct NodeKey {
-	domain: Domain,
-	index_id: IndexId,
-	node_id: NodeId,
+pub(super) trait KeyProvider {
+	fn get_node_key(&self, node_id: NodeId) -> Key;
+	fn get_state_key(&self) -> Key {
+		panic!("Not supported")
+	}
 }
 
-#[derive(Default, Serialize, Deserialize)]
-pub(super) struct BTree {
-	domain: Domain,
-	index_id: IndexId,
-	order: usize,
-	root: Option<NodeId>,
-	next_node_id: NodeId,
-	#[serde(skip)]
+pub(super) struct BTree<K>
+where
+	K: KeyProvider,
+{
+	keys: K,
+	state: State,
 	updated: bool,
 }
 
-impl SerdeState for BTree {}
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct State {
+	order: usize,
+	root: Option<NodeId>,
+	next_node_id: NodeId,
+}
+
+impl SerdeState for State {}
+
+impl State {
+	pub(super) fn new(order: usize) -> Self {
+		Self {
+			order,
+			root: None,
+			next_node_id: 0,
+		}
+	}
+}
 
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct Statistics {
@@ -81,15 +95,15 @@ where
 	median_key: Key,
 }
 
-impl BTree {
-	pub(super) fn new(domain: Domain, index_id: IndexId, order: usize) -> Self {
+impl<K> BTree<K>
+where
+	K: KeyProvider,
+{
+	pub(super) fn new(keys: K, state: State) -> Self {
 		Self {
-			domain,
-			index_id,
-			order,
-			root: None,
+			keys,
+			state,
 			updated: false,
-			next_node_id: 0,
 		}
 	}
 
@@ -102,11 +116,11 @@ impl BTree {
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		let mut node_queue = VecDeque::new();
-		if let Some(node_id) = self.root {
+		if let Some(node_id) = self.state.root {
 			node_queue.push_front(node_id);
 		}
 		while let Some(node_id) = node_queue.pop_front() {
-			let node = StoredNode::<BK>::read(tx, self.new_node_key(node_id)).await?.node;
+			let node = StoredNode::<BK>::read(tx, self.keys.get_node_key(node_id)).await?.node;
 			if let Some(value) = node.keys().get(searched_key) {
 				return Ok(Some(value));
 			}
@@ -129,11 +143,11 @@ impl BTree {
 		V: KeyVisitor + Send,
 	{
 		let mut node_queue = VecDeque::new();
-		if let Some(node_id) = self.root {
+		if let Some(node_id) = self.state.root {
 			node_queue.push_front((node_id, Arc::new(AtomicBool::new(false))));
 		}
 		while let Some((node_id, matches_found)) = node_queue.pop_front() {
-			let node = StoredNode::<BK>::read(tx, self.new_node_key(node_id)).await?.node;
+			let node = StoredNode::<BK>::read(tx, self.keys.get_node_key(node_id)).await?.node;
 			if node.keys().collect_with_prefix(tx, prefix_key, visitor).await? {
 				matches_found.fetch_and(true, Ordering::Relaxed);
 			} else if matches_found.load(Ordering::Relaxed) {
@@ -162,13 +176,13 @@ impl BTree {
 	where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
-		if let Some(root_id) = self.root {
-			let root = StoredNode::<BK>::read(tx, self.new_node_key(root_id)).await?;
-			if root.is_full(self.order * 2) {
+		if let Some(root_id) = self.state.root {
+			let root = StoredNode::<BK>::read(tx, self.keys.get_node_key(root_id)).await?;
+			if root.is_full(self.state.order * 2) {
 				let new_root_id = self.new_node_id();
-				let new_root_key = self.new_node_key(new_root_id);
+				let new_root_key = self.keys.get_node_key(new_root_id);
 				let new_root_node = Node::Internal(BK::default(), vec![root_id]);
-				self.root = Some(new_root_id);
+				self.state.root = Some(new_root_id);
 				let new_root =
 					self.split_child(tx, new_root_key, new_root_node, 0, root).await?.parent_node;
 				self.insert_non_full(tx, new_root, key, payload).await?;
@@ -178,8 +192,8 @@ impl BTree {
 		} else {
 			let new_root_id = self.new_node_id();
 			let new_root_node = Node::Leaf(BK::with_key_val(key, payload)?);
-			self.root = Some(new_root_id);
-			StoredNode::<BK>::write(tx, self.new_node_key(new_root_id), new_root_node).await?;
+			self.state.root = Some(new_root_id);
+			StoredNode::<BK>::write(tx, self.keys.get_node_key(new_root_id), new_root_node).await?;
 		}
 		self.updated = true;
 		Ok(())
@@ -210,9 +224,9 @@ impl BTree {
 						return Ok(());
 					}
 					let child_idx = keys.get_child_idx(&key);
-					let child_key = self.new_node_key(children[child_idx]);
+					let child_key = self.keys.get_node_key(children[child_idx]);
 					let child_node = StoredNode::<BK>::read(tx, child_key).await?;
-					let child_node = if child_node.is_full(self.order * 2) {
+					let child_node = if child_node.is_full(self.state.order * 2) {
 						let split_result = self
 							.split_child::<BK>(tx, node.key, node.node, child_idx, child_node)
 							.await?;
@@ -234,7 +248,7 @@ impl BTree {
 	async fn split_child<BK>(
 		&mut self,
 		tx: &mut Transaction,
-		parent_key: NodeKey,
+		parent_key: Key,
 		parent_node: Node<BK>,
 		idx: usize,
 		child_node: StoredNode<BK>,
@@ -262,7 +276,7 @@ impl BTree {
 		let left_node = StoredNode::<BK>::write(tx, child_node.key, left_node).await?;
 		// Save the new child with half the (upper) keys
 		let right_node =
-			StoredNode::<BK>::write(tx, self.new_node_key(right_node_id), right_node).await?;
+			StoredNode::<BK>::write(tx, self.keys.get_node_key(right_node_id), right_node).await?;
 		// Save the parent node
 		let parent_node = StoredNode::<BK>::write(tx, parent_key, parent_node).await?;
 		Ok(SplitResult {
@@ -299,17 +313,9 @@ impl BTree {
 	}
 
 	fn new_node_id(&mut self) -> NodeId {
-		let new_node_id = self.next_node_id;
-		self.next_node_id += 1;
+		let new_node_id = self.state.next_node_id;
+		self.state.next_node_id += 1;
 		new_node_id
-	}
-
-	fn new_node_key(&self, node_id: NodeId) -> NodeKey {
-		NodeKey {
-			domain: self.domain,
-			index_id: self.index_id,
-			node_id,
-		}
 	}
 
 	pub(super) async fn debug<F, BK>(&self, tx: &mut Transaction, to_string: F) -> Result<(), Error>
@@ -318,11 +324,11 @@ impl BTree {
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		let mut node_queue = VecDeque::new();
-		if let Some(node_id) = self.root {
+		if let Some(node_id) = self.state.root {
 			node_queue.push_front((node_id, 0));
 		}
 		while let Some((node_id, depth)) = node_queue.pop_front() {
-			let node = StoredNode::<BK>::read(tx, self.new_node_key(node_id)).await?.node;
+			let node = StoredNode::<BK>::read(tx, self.keys.get_node_key(node_id)).await?.node;
 			debug!("Node: {} - depth: {} -  keys: ", node_id, depth);
 			node.keys().debug(|k| to_string(k))?;
 			if let Node::Internal(_, children) = node {
@@ -342,11 +348,11 @@ impl BTree {
 	{
 		let mut stats = Statistics::default();
 		let mut node_queue = VecDeque::new();
-		if let Some(node_id) = self.root {
+		if let Some(node_id) = self.state.root {
 			node_queue.push_front((node_id, 1));
 		}
 		while let Some((node_id, depth)) = node_queue.pop_front() {
-			let stored = StoredNode::<BK>::read(tx, self.new_node_key(node_id)).await?;
+			let stored = StoredNode::<BK>::read(tx, self.keys.get_node_key(node_id)).await?;
 			stats.keys_count += stored.node.keys().len();
 			if depth > stats.max_depth {
 				stats.max_depth = depth;
@@ -363,6 +369,10 @@ impl BTree {
 		Ok(stats)
 	}
 
+	pub(super) fn get_state(&self) -> &State {
+		&self.state
+	}
+
 	pub(super) fn is_updated(&self) -> bool {
 		self.updated
 	}
@@ -372,7 +382,7 @@ struct StoredNode<BK>
 where
 	BK: BKeys,
 {
-	key: NodeKey,
+	key: Key,
 	node: Node<BK>,
 	size: usize,
 }
@@ -381,11 +391,10 @@ impl<BK> StoredNode<BK>
 where
 	BK: BKeys + Serialize + DeserializeOwned,
 {
-	async fn read(tx: &mut Transaction, node_key: NodeKey) -> Result<Self, Error> {
-		let key: Key = node_key.clone().into();
-		if let Some(val) = tx.get(key).await? {
+	async fn read(tx: &mut Transaction, key: Key) -> Result<Self, Error> {
+		if let Some(val) = tx.get(key.clone()).await? {
 			Ok(Self {
-				key: node_key,
+				key,
 				size: val.len(),
 				node: Node::try_from_val(val)?,
 			})
@@ -394,18 +403,13 @@ where
 		}
 	}
 
-	async fn write(
-		tx: &mut Transaction,
-		node_key: NodeKey,
-		mut node: Node<BK>,
-	) -> Result<Self, Error> {
+	async fn write(tx: &mut Transaction, key: Key, mut node: Node<BK>) -> Result<Self, Error> {
 		node.keys_mut().compile();
 		let val = node.try_to_val()?;
-		let key: Key = node_key.clone().into();
 		let size = val.len();
-		tx.set(key, val).await?;
+		tx.set(key.clone(), val).await?;
 		Ok(Self {
-			key: node_key,
+			key,
 			size,
 			node,
 		})
@@ -419,7 +423,7 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::btree::{BTree, Node, Payload, Statistics};
+	use crate::idx::btree::{BTree, KeyProvider, Node, NodeId, Payload, State, Statistics};
 	use crate::idx::tests::HashVisitor;
 	use crate::idx::SerdeState;
 	use crate::kvs::{Datastore, Key, Transaction};
@@ -429,16 +433,25 @@ mod tests {
 	use serde::Serialize;
 	use test_log::test;
 
+	struct TestKeyProvider {}
+
+	impl KeyProvider for TestKeyProvider {
+		fn get_node_key(&self, node_id: NodeId) -> Key {
+			node_id.to_be_bytes().to_vec()
+		}
+		fn get_state_key(&self) -> Key {
+			"".into()
+		}
+	}
+
 	#[test]
 	fn test_btree_state_serde() {
-		let t = BTree::new(1u8, 2u64, 75);
-		let val = t.try_to_val().unwrap();
-		let t: BTree = BTree::try_from_val(val).unwrap();
-		assert_eq!(t.domain, 1);
-		assert_eq!(t.index_id, 2);
-		assert_eq!(t.order, 75);
-		assert_eq!(t.root, None);
-		assert_eq!(t.next_node_id, 0);
+		let s = State::new(75);
+		let val = s.try_to_val().unwrap();
+		let s: State = State::try_from_val(val).unwrap();
+		assert_eq!(s.order, 75);
+		assert_eq!(s.root, None);
+		assert_eq!(s.next_node_id, 0);
 	}
 
 	#[test]
@@ -455,14 +468,15 @@ mod tests {
 		let _: Node<TrieKeys> = Node::try_from_val(val).unwrap();
 	}
 
-	async fn insertions_test<F, BK>(
+	async fn insertions_test<F, BK, K>(
 		tx: &mut Transaction,
-		t: &mut BTree,
+		t: &mut BTree<K>,
 		samples_size: usize,
 		sample_provider: F,
 	) where
 		F: Fn(usize) -> (Key, Payload),
 		BK: BKeys + Serialize + DeserializeOwned + Default,
+		K: KeyProvider,
 	{
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
@@ -474,15 +488,15 @@ mod tests {
 	}
 
 	fn get_key_value(idx: usize) -> (Key, Payload) {
-		(format!("{}", idx).into(), (idx * 10) as u64)
+		(format!("{}", idx).into(), (idx * 10) as Payload)
 	}
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_small_order_sequential_insertions() {
-		let mut t = BTree::new(1u8, 2u64, 75);
+		let mut t = BTree::new(TestKeyProvider {}, State::new(75));
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		insertions_test::<_, FstKeys>(&mut tx, &mut t, 100, get_key_value).await;
+		insertions_test::<_, FstKeys, _>(&mut tx, &mut t, 100, get_key_value).await;
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
@@ -499,10 +513,10 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_small_order_sequential_insertions() {
-		let mut t = BTree::new(1u8, 2u64, 75);
+		let mut t = BTree::new(TestKeyProvider {}, State::new(75));
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		insertions_test::<_, TrieKeys>(&mut tx, &mut t, 100, get_key_value).await;
+		insertions_test::<_, TrieKeys, _>(&mut tx, &mut t, 100, get_key_value).await;
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
@@ -521,11 +535,11 @@ mod tests {
 	async fn test_btree_fst_small_order_random_insertions() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(1u8, 2u64, 75);
+		let mut t = BTree::new(TestKeyProvider {}, State::new(75));
 		let mut samples: Vec<usize> = (0..100).collect();
 		let mut rng = thread_rng();
 		samples.shuffle(&mut rng);
-		insertions_test::<_, FstKeys>(&mut tx, &mut t, 100, |i| get_key_value(samples[i])).await;
+		insertions_test::<_, FstKeys, _>(&mut tx, &mut t, 100, |i| get_key_value(samples[i])).await;
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		let s = t.statistics::<FstKeys>(&mut tx).await.unwrap();
@@ -537,11 +551,12 @@ mod tests {
 	async fn test_btree_trie_small_order_random_insertions() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(1u8, 2u64, 75);
+		let mut t = BTree::new(TestKeyProvider {}, State::new(75));
 		let mut samples: Vec<usize> = (0..100).collect();
 		let mut rng = thread_rng();
 		samples.shuffle(&mut rng);
-		insertions_test::<_, TrieKeys>(&mut tx, &mut t, 100, |i| get_key_value(samples[i])).await;
+		insertions_test::<_, TrieKeys, _>(&mut tx, &mut t, 100, |i| get_key_value(samples[i]))
+			.await;
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
@@ -553,8 +568,8 @@ mod tests {
 	async fn test_btree_fst_keys_large_order_sequential_insertions() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(1u8, 2u64, 500);
-		insertions_test::<_, FstKeys>(&mut tx, &mut t, 10000, get_key_value).await;
+		let mut t = BTree::new(TestKeyProvider {}, State::new(500));
+		insertions_test::<_, FstKeys, _>(&mut tx, &mut t, 10000, get_key_value).await;
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
@@ -572,8 +587,8 @@ mod tests {
 	async fn test_btree_trie_keys_large_order_sequential_insertions() {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(1u8, 2u64, 500);
-		insertions_test::<_, TrieKeys>(&mut tx, &mut t, 10000, get_key_value).await;
+		let mut t = BTree::new(TestKeyProvider {}, State::new(500));
+		insertions_test::<_, TrieKeys, _>(&mut tx, &mut t, 10000, get_key_value).await;
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		assert_eq!(
@@ -599,8 +614,8 @@ mod tests {
 	{
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(1u8, 2u64, default_btree_order);
-		insertions_test::<_, BK>(&mut tx, &mut t, REAL_WORLD_TERMS.len(), |i| {
+		let mut t = BTree::new(TestKeyProvider {}, State::new(default_btree_order));
+		insertions_test::<_, BK, _>(&mut tx, &mut t, REAL_WORLD_TERMS.len(), |i| {
 			(REAL_WORLD_TERMS[i].as_bytes().to_vec(), i as Payload)
 		})
 		.await;
@@ -670,9 +685,9 @@ mod tests {
 		order: usize,
 		shuffle: bool,
 		mut samples: Vec<(&str, Payload)>,
-	) -> (BTree, Statistics) {
+	) -> (BTree<TestKeyProvider>, Statistics) {
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let mut t = BTree::new(1u8, 2u64, order);
+		let mut t = BTree::new(TestKeyProvider {}, State::new(order));
 		let samples_len = samples.len();
 		if shuffle {
 			samples.shuffle(&mut ThreadRng::default());

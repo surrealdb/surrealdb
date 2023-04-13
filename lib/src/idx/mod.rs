@@ -1,37 +1,64 @@
 mod bkeys;
-mod btree;
-mod ft;
+pub(crate) mod btree;
+pub(crate) mod ft;
 mod kvsim;
 
 use crate::err::Error;
-use crate::kvs::Val;
-use derive::Key;
+use crate::idx::btree::NodeId;
+use crate::idx::ft::docids::DocId;
+use crate::idx::ft::terms::TermId;
+use crate::key::bd::Bd;
+use crate::key::bf::{Bf, BfPrefix};
+use crate::key::bi::Bi;
+use crate::key::bl::Bl;
+use crate::key::bp::Bp;
+use crate::key::bs::Bs;
+use crate::key::bt::Bt;
+use crate::kvs::{Key, Val};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-type IndexId = u64;
-
-#[derive(Debug, Serialize, Deserialize, Key)]
-struct BaseStateKey {
-	domain: Domain,
-	index_id: IndexId,
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+struct IndexKeyBase {
+	ns: String,
+	db: String,
+	tb: String,
+	ix: String,
 }
 
-type Domain = u8;
+impl IndexKeyBase {
+	fn new_bd_key(&self, node_id: Option<NodeId>) -> Key {
+		Bd::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), node_id).into()
+	}
 
-const INDEX_DOMAIN: u8 = 0x00;
-const DOC_IDS_DOMAIN: u8 = 0x10;
-const DOC_KEYS_DOMAIN: u8 = 0x11;
-const TERMS_DOMAIN: u8 = 0x20;
-const DOC_LENGTHS_DOMAIN: u8 = 0x30;
-const POSTING_DOMAIN: u8 = 0x40;
+	fn new_bi_key(&self, doc_id: DocId) -> Key {
+		Bi::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), doc_id).into()
+	}
 
-impl BaseStateKey {
-	fn new(domain: u8, index_id: u64) -> Self {
-		Self {
-			domain,
-			index_id,
-		}
+	fn new_bl_key(&self, node_id: Option<NodeId>) -> Key {
+		Bl::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), node_id).into()
+	}
+
+	fn new_bp_key(&self, node_id: Option<NodeId>) -> Key {
+		Bp::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), node_id).into()
+	}
+
+	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Key {
+		Bf::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), term_id, doc_id)
+			.into()
+	}
+
+	fn new_bf_prefix_key(&self, term_id: TermId) -> Key {
+		BfPrefix::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), term_id)
+			.into()
+	}
+
+	fn new_bt_key(&self, node_id: Option<NodeId>) -> Key {
+		Bt::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), node_id).into()
+	}
+
+	fn new_bs_key(&self) -> Key {
+		Bs::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone()).into()
 	}
 }
 

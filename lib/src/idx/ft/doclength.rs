@@ -1,32 +1,35 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::{BTree, Statistics};
+use crate::idx::btree::{BTree, KeyProvider, NodeId, Statistics};
 use crate::idx::ft::docids::DocId;
-use crate::idx::{BaseStateKey, IndexId, SerdeState, DOC_LENGTHS_DOMAIN};
+use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 
 pub(super) type DocLength = u64;
 
 pub(super) struct DocLengths {
 	state_key: Key,
-	btree: BTree,
+	btree: BTree<DocLengthsKeyProvider>,
 }
 
 impl DocLengths {
 	pub(super) async fn new(
 		tx: &mut Transaction,
-		index_id: IndexId,
+		index_key_base: IndexKeyBase,
 		default_btree_order: usize,
 	) -> Result<Self, Error> {
-		let state_key: Key = BaseStateKey::new(DOC_LENGTHS_DOMAIN, index_id).into();
-		let btree: BTree = if let Some(val) = tx.get(state_key.clone()).await? {
-			BTree::try_from_val(val)?
+		let keys = DocLengthsKeyProvider {
+			index_key_base,
+		};
+		let state_key: Key = keys.get_state_key();
+		let state: btree::State = if let Some(val) = tx.get(state_key.clone()).await? {
+			btree::State::try_from_val(val)?
 		} else {
-			BTree::new(DOC_LENGTHS_DOMAIN, index_id, default_btree_order)
+			btree::State::new(default_btree_order)
 		};
 		Ok(Self {
 			state_key,
-			btree,
+			btree: BTree::new(keys, state),
 		})
 	}
 
@@ -53,15 +56,30 @@ impl DocLengths {
 
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
 		if self.btree.is_updated() {
-			tx.set(self.state_key, self.btree.try_to_val()?).await?;
+			tx.set(self.state_key, self.btree.get_state().try_to_val()?).await?;
 		}
 		Ok(())
+	}
+}
+
+struct DocLengthsKeyProvider {
+	index_key_base: IndexKeyBase,
+}
+
+impl KeyProvider for DocLengthsKeyProvider {
+	fn get_node_key(&self, node_id: NodeId) -> Key {
+		self.index_key_base.new_bl_key(Some(node_id))
+	}
+
+	fn get_state_key(&self) -> Key {
+		self.index_key_base.new_bl_key(None)
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use crate::idx::ft::doclength::DocLengths;
+	use crate::idx::IndexKeyBase;
 	use crate::kvs::Datastore;
 
 	#[tokio::test]
@@ -72,14 +90,14 @@ mod tests {
 
 		// Check empty state
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		let l = DocLengths::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		let l = DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER).await.unwrap();
 		assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 0);
 		let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
 		l.finish(&mut tx).await.unwrap();
 		assert_eq!(dl, None);
 
 		// Set a doc length
-		let mut l = DocLengths::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		let mut l = DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER).await.unwrap();
 		l.set_doc_length(&mut tx, 99, 199).await.unwrap();
 		assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 1);
 		let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
@@ -87,7 +105,7 @@ mod tests {
 		assert_eq!(dl, Some(199));
 
 		// Update doc length
-		let mut l = DocLengths::new(&mut tx, 0, BTREE_ORDER).await.unwrap();
+		let mut l = DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER).await.unwrap();
 		l.set_doc_length(&mut tx, 99, 299).await.unwrap();
 		assert_eq!(l.statistics(&mut tx).await.unwrap().keys_count, 1);
 		let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
