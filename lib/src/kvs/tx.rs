@@ -906,7 +906,7 @@ impl Transaction {
 	) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::st::prefix(ns, db, sc);
 		Ok(if let Some(e) = self.cache.get(&key) {
-			if Entry::Sts(v) = e {
+			if let Entry::Sts(v) = e {
 				v
 			} else {
 				unreachable!();
