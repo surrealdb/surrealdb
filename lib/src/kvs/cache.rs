@@ -43,10 +43,6 @@ pub enum Entry {
 pub struct Cache(pub HashMap<Key, Entry>);
 
 impl Cache {
-	/// Check if key exists
-	pub fn exi(&mut self, key: &Key) -> bool {
-		self.0.contains_key(key)
-	}
 	/// Set a key in the cache
 	pub fn set(&mut self, key: Key, val: Entry) {
 		self.0.insert(key, val);
