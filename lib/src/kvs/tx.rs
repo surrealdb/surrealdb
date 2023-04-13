@@ -731,7 +731,7 @@ impl Transaction {
 
 	/// Retrieve all namespace definitions in a datastore.
 	pub async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
-		let key = crate::key::ns::prefix();\
+		let key = crate::key::ns::prefix();
 		Ok(if let Some(e) = self.cache.get(&key) {
 			if let Entry::Nss(v) = e {
 				v
