@@ -85,6 +85,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 								Statement::Set(stmt) => {
 									if let Err(e) = client.set(&stmt.name, &stmt.what).await {
 										eprintln!("{e}");
+										eprintln!();
 									}
 								}
 								_ => {}
@@ -93,11 +94,20 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 						let res = client.query(query).await;
 						// Get the request response
 						match process(pretty, res) {
-							Ok(v) => println!("{v}"),
-							Err(e) => eprintln!("{e}"),
+							Ok(v) => {
+								println!("{v}");
+								println!();
+							}
+							Err(e) => {
+								eprintln!("{e}");
+								eprintln!();
+							}
 						}
 					}
-					Err(e) => eprintln!("{e}"),
+					Err(e) => {
+						eprintln!("{e}");
+						eprintln!();
+					}
 				}
 			}
 			// The user types CTRL-C
@@ -141,14 +151,11 @@ fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Err
 		},
 		Err(error) => return Err(error.into()),
 	};
-	if !value.is_none_or_null() {
-		// Check if we should prettify
-		return Ok(match pretty {
-			// Don't prettify the response
-			false => value.to_string(),
-			// Yes prettify the response
-			true => format!("{value:#}"),
-		});
-	}
-	Ok(String::new())
+	// Check if we should prettify
+	Ok(match pretty {
+		// Don't prettify the response
+		false => value.to_string(),
+		// Yes prettify the response
+		true => format!("{value:#}"),
+	})
 }
