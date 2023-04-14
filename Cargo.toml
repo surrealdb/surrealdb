@@ -33,9 +33,9 @@ bytes = "1.4.0"
 chrono = { version = "0.4.24", features = ["serde"] }
 clap = { version = "3.2.23", features = ["env"] }
 fern = { version = "0.6.2", features = ["colored"] }
-futures = "0.3.27"
+futures = "0.3.28"
 http = "0.2.9"
-hyper = "0.14.25"
+hyper = "0.14.26"
 jsonwebtoken = "8.3.0"
 log = "0.4.17"
 once_cell = "1.17.1"
@@ -44,10 +44,10 @@ opentelemetry-otlp = "0.11.0"
 rand = "0.8.5"
 reqwest = { version = "0.11.16", features = ["blocking"] }
 rustyline = "11.0.0"
-serde = { version = "1.0.159", features = ["derive"] }
+serde = { version = "1.0.160", features = ["derive"] }
 serde_cbor = "0.11.2"
 serde_pack = { version = "1.1.1", package = "rmp-serde" }
-serde_json = "1.0.95"
+serde_json = "1.0.96"
 surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
 thiserror = "1.0.40"
 tokio = { version = "1.27.0", features = ["macros", "signal"] }
