@@ -399,7 +399,7 @@ where
 				node: Node::try_from_val(val)?,
 			})
 		} else {
-			Err(Error::CorruptedIndex(None))
+			Err(Error::CorruptedIndex)
 		}
 	}
 

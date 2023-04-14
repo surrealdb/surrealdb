@@ -356,7 +356,7 @@ pub enum Error {
 
 	/// Represents an error when decoding a key-value entry
 	#[error("Index is corrupted")]
-	CorruptedIndex(Option<String>),
+	CorruptedIndex,
 
 	/// Represents an underlying error with Bincode serializing / deserializing
 	#[error("Bincode error: {0}")]
@@ -369,6 +369,12 @@ pub enum Error {
 	/// Represents an underlying error while reading UTF8 characters
 	#[error("Utf8 error: {0}")]
 	Utf8Error(#[from] FromUtf8Error),
+
+	/// The feature has not yet being implemented
+	#[error("Feature not yet implemented: {feature}")]
+	FeatureNotYetImplemented {
+		feature: &'static str,
+	},
 }
 
 impl From<Error> for String {
