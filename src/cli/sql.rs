@@ -95,11 +95,8 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 						// Get the request response
 						match process(pretty, res) {
 							Ok(v) => {
-								let output = v.to_string();
-								println!("{output}");
-								if !output.is_empty() {
-									println!();
-								}
+								println!("{v}");
+								println!();
 							}
 							Err(e) => {
 								eprintln!("{e}");
@@ -154,14 +151,11 @@ fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Err
 		},
 		Err(error) => return Err(error.into()),
 	};
-	if !value.is_none_or_null() {
-		// Check if we should prettify
-		return Ok(match pretty {
-			// Don't prettify the response
-			false => value.to_string(),
-			// Yes prettify the response
-			true => format!("{value:#}"),
-		});
-	}
-	Ok(String::new())
+	// Check if we should prettify
+	Ok(match pretty {
+		// Don't prettify the response
+		false => value.to_string(),
+		// Yes prettify the response
+		true => format!("{value:#}"),
+	})
 }
