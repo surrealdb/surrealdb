@@ -56,7 +56,7 @@ tracing-futures = "0.2.5"
 tracing-opentelemetry = "0.18.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 urlencoding = "2.1.2"
-warp = { version = "0.3.3", features = ["compression", "tls", "websocket"] }
+warp = { version = "0.3.4", features = ["compression", "tls", "websocket"] }
 
 [dev-dependencies]
 tonic = "0.8.3"
