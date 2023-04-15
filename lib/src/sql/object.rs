@@ -206,7 +206,7 @@ fn item(i: &str) -> IResult<&str, (String, Value)> {
 	Ok((i, (String::from(k), v)))
 }
 
-fn key(i: &str) -> IResult<&str, &str> {
+pub(crate) fn key(i: &str) -> IResult<&str, &str> {
 	alt((key_none, key_single, key_double))(i)
 }
 

@@ -225,9 +225,9 @@ mod tests {
 				std::hint::black_box(de(std::hint::black_box(&json)));
 				std::hint::black_box(de(std::hint::black_box(&json_pretty)));
 			}
-			time.elapsed().as_millis() as u32 / (2 * ITERATIONS)
+			time.elapsed().as_secs_f32() / (2 * ITERATIONS) as f32
 		};
 
-		println!("sql::json took {:?}ms/iter", benchmark(|s| crate::sql::json(s).unwrap()));
+		println!("sql::json took {:.10}s/iter", benchmark(|s| crate::sql::json(s).unwrap()));
 	}
 }
