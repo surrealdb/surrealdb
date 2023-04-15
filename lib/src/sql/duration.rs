@@ -3,7 +3,7 @@ use crate::sql::datetime::Datetime;
 use crate::sql::ending::duration as ending;
 use crate::sql::error::IResult;
 use crate::sql::serde::is_internal_serialization;
-use crate::sql::value::Value;
+use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::multi::many1;
@@ -32,24 +32,33 @@ impl From<time::Duration> for Duration {
 	}
 }
 
-impl From<String> for Duration {
-	fn from(s: String) -> Self {
-		s.as_str().into()
-	}
-}
-
-impl From<&str> for Duration {
-	fn from(s: &str) -> Self {
-		match duration(s) {
-			Ok((_, v)) => v,
-			Err(_) => Self::default(),
-		}
-	}
-}
-
 impl From<Duration> for time::Duration {
 	fn from(s: Duration) -> Self {
 		s.0
+	}
+}
+
+impl TryFrom<String> for Duration {
+	type Error = ();
+	fn try_from(v: String) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<Strand> for Duration {
+	type Error = ();
+	fn try_from(v: Strand) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<&str> for Duration {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match duration(v) {
+			Ok((_, v)) => Ok(v),
+			_ => Err(()),
+		}
 	}
 }
 
@@ -65,39 +74,73 @@ impl Duration {
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}
+	/// Get the total number of nanoseconds
+	pub fn nanos(&self) -> u128 {
+		self.0.as_nanos()
+	}
+	/// Get the total number of microseconds
+	pub fn micros(&self) -> u128 {
+		self.0.as_micros()
+	}
+	/// Get the total number of milliseconds
+	pub fn millis(&self) -> u128 {
+		self.0.as_millis()
+	}
 	/// Get the total number of seconds
-	pub fn secs(&self) -> Value {
-		self.0.as_secs().into()
+	pub fn secs(&self) -> u64 {
+		self.0.as_secs()
 	}
 	/// Get the total number of minutes
-	pub fn mins(&self) -> Value {
-		let secs = self.0.as_secs();
-		let mins = secs / SECONDS_PER_MINUTE;
-		mins.into()
+	pub fn mins(&self) -> u64 {
+		self.0.as_secs() / SECONDS_PER_MINUTE
 	}
 	/// Get the total number of hours
-	pub fn hours(&self) -> Value {
-		let secs = self.0.as_secs();
-		let hours = secs / SECONDS_PER_HOUR;
-		hours.into()
+	pub fn hours(&self) -> u64 {
+		self.0.as_secs() / SECONDS_PER_HOUR
 	}
 	/// Get the total number of dats
-	pub fn days(&self) -> Value {
-		let secs = self.0.as_secs();
-		let days = secs / SECONDS_PER_DAY;
-		days.into()
+	pub fn days(&self) -> u64 {
+		self.0.as_secs() / SECONDS_PER_DAY
 	}
 	/// Get the total number of months
-	pub fn weeks(&self) -> Value {
-		let secs = self.0.as_secs();
-		let weeks = secs / SECONDS_PER_WEEK;
-		weeks.into()
+	pub fn weeks(&self) -> u64 {
+		self.0.as_secs() / SECONDS_PER_WEEK
 	}
 	/// Get the total number of years
-	pub fn years(&self) -> Value {
-		let secs = self.0.as_secs();
-		let years = secs / SECONDS_PER_YEAR;
-		years.into()
+	pub fn years(&self) -> u64 {
+		self.0.as_secs() / SECONDS_PER_YEAR
+	}
+	/// Create a duration from nanoseconds
+	pub fn from_nanos(nanos: u64) -> Duration {
+		time::Duration::from_nanos(nanos).into()
+	}
+	/// Create a duration from microseconds
+	pub fn from_micros(micros: u64) -> Duration {
+		time::Duration::from_micros(micros).into()
+	}
+	/// Create a duration from milliseconds
+	pub fn from_millis(millis: u64) -> Duration {
+		time::Duration::from_millis(millis).into()
+	}
+	/// Create a duration from seconds
+	pub fn from_secs(secs: u64) -> Duration {
+		time::Duration::from_secs(secs).into()
+	}
+	/// Create a duration from minutes
+	pub fn from_mins(mins: u64) -> Duration {
+		time::Duration::from_secs(mins * SECONDS_PER_MINUTE).into()
+	}
+	/// Create a duration from hours
+	pub fn from_hours(hours: u64) -> Duration {
+		time::Duration::from_secs(hours * SECONDS_PER_HOUR).into()
+	}
+	/// Create a duration from days
+	pub fn from_days(days: u64) -> Duration {
+		time::Duration::from_secs(days * SECONDS_PER_DAY).into()
+	}
+	/// Create a duration from weeks
+	pub fn from_weeks(days: u64) -> Duration {
+		time::Duration::from_secs(days * SECONDS_PER_WEEK).into()
 	}
 }
 
