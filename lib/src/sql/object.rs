@@ -144,20 +144,22 @@ impl Display for Object {
 		} else {
 			f.write_str("{ ")?;
 		}
-		let indent = pretty_indent();
-		write!(
-			f,
-			"{}",
-			Fmt::pretty_comma_separated(
-				self.0.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
-					f,
-					"{}: {}",
-					escape_key(k),
-					v
-				))),
-			)
-		)?;
-		drop(indent);
+		if !self.is_empty() {
+			let indent = pretty_indent();
+			write!(
+				f,
+				"{}",
+				Fmt::pretty_comma_separated(
+					self.0.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
+						f,
+						"{}: {}",
+						escape_key(k),
+						v
+					))),
+				)
+			)?;
+			drop(indent);
+		}
 		if is_pretty() {
 			f.write_char('}')
 		} else {
