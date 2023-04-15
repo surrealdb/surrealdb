@@ -3,6 +3,7 @@ use crate::sql::duration::Duration;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
 use crate::sql::serde::is_internal_serialization;
+use crate::sql::strand::Strand;
 use chrono::{DateTime, FixedOffset, Offset, SecondsFormat, TimeZone, Utc};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use nom::branch::alt;
@@ -34,11 +35,32 @@ impl From<DateTime<Utc>> for Datetime {
 	}
 }
 
-impl From<&str> for Datetime {
-	fn from(s: &str) -> Self {
-		match datetime_all_raw(s) {
-			Ok((_, v)) => v,
-			Err(_) => Self::default(),
+impl From<Datetime> for DateTime<Utc> {
+	fn from(x: Datetime) -> Self {
+		x.0
+	}
+}
+
+impl TryFrom<String> for Datetime {
+	type Error = ();
+	fn try_from(v: String) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<Strand> for Datetime {
+	type Error = ();
+	fn try_from(v: Strand) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<&str> for Datetime {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match datetime_all_raw(v) {
+			Ok((_, v)) => Ok(v),
+			_ => Err(()),
 		}
 	}
 }
@@ -47,12 +69,6 @@ impl Deref for Datetime {
 	type Target = DateTime<Utc>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
-	}
-}
-
-impl From<Datetime> for DateTime<Utc> {
-	fn from(x: Datetime) -> Self {
-		x.0
 	}
 }
 
@@ -262,7 +278,19 @@ fn sign(i: &str) -> IResult<&str, i32> {
 #[cfg(test)]
 mod tests {
 
+	// use chrono::Date;
+
 	use super::*;
+
+	#[test]
+	fn date_zone() {
+		let sql = "2020-01-01T00:00:00Z";
+		let res = datetime_all_raw(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("'2020-01-01T00:00:00Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2020-01-01T00:00:00Z").unwrap());
+	}
 
 	#[test]
 	fn date_time() {
@@ -271,6 +299,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43Z").unwrap());
 	}
 
 	#[test]
@@ -280,6 +309,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43.563100Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.563100Z").unwrap());
 	}
 
 	#[test]
@@ -289,6 +319,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
 	}
 
 	#[test]
@@ -298,6 +329,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-24T02:25:43.511Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-24T02:25:43.511Z").unwrap());
 	}
 
 	#[test]
@@ -307,6 +339,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-24T02:55:43.511Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-24T02:55:43.511Z").unwrap());
 	}
 
 	#[test]
@@ -316,6 +349,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43.511Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.511Z").unwrap());
 	}
 
 	#[test]
@@ -325,6 +359,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("'2012-04-23T18:25:43.000051100Z'", format!("{}", out));
+		assert_eq!(out, Datetime::try_from("2012-04-23T18:25:43.000051100Z").unwrap());
 	}
 
 	#[test]

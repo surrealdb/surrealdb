@@ -30,7 +30,6 @@ impl ser::Serializer for Serializer {
 	) -> Result<Self::Ok, Error> {
 		match variant {
 			"Any" => Ok(Kind::Any),
-			"Array" => Ok(Kind::Array),
 			"Bool" => Ok(Kind::Bool),
 			"Bytes" => Ok(Kind::Bytes),
 			"Datetime" => Ok(Kind::Datetime),
@@ -40,7 +39,9 @@ impl ser::Serializer for Serializer {
 			"Int" => Ok(Kind::Int),
 			"Number" => Ok(Kind::Number),
 			"Object" => Ok(Kind::Object),
+			"Point" => Ok(Kind::Point),
 			"String" => Ok(Kind::String),
+			"Uuid" => Ok(Kind::Uuid),
 			variant => Err(Error::custom(format!("unexpected unit variant `{name}::{variant}`"))),
 		}
 	}
@@ -59,6 +60,10 @@ impl ser::Serializer for Serializer {
 		match variant {
 			"Record" => Ok(Kind::Record(value.serialize(ser::table::vec::Serializer.wrap())?)),
 			"Geometry" => Ok(Kind::Geometry(value.serialize(ser::string::vec::Serializer.wrap())?)),
+			"Option" => todo!(),
+			"Either" => todo!(),
+			"Set" => todo!(),
+			"Array" => todo!(),
 			variant => {
 				Err(Error::custom(format!("unexpected newtype variant `{name}::{variant}`")))
 			}
@@ -75,13 +80,6 @@ mod tests {
 	#[test]
 	fn any() {
 		let kind = Kind::Any;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
-		assert_eq!(kind, serialized);
-	}
-
-	#[test]
-	fn array() {
-		let kind = Kind::Array;
 		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
 		assert_eq!(kind, serialized);
 	}
@@ -150,8 +148,22 @@ mod tests {
 	}
 
 	#[test]
+	fn point() {
+		let kind = Kind::Point;
+		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		assert_eq!(kind, serialized);
+	}
+
+	#[test]
 	fn string() {
 		let kind = Kind::String;
+		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		assert_eq!(kind, serialized);
+	}
+
+	#[test]
+	fn uuid() {
+		let kind = Kind::Uuid;
 		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
 		assert_eq!(kind, serialized);
 	}

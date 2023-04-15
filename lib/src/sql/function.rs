@@ -185,14 +185,7 @@ impl Function {
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(val.args) {
-					ctx.add_value(
-						name.to_raw(),
-						match val {
-							Value::None => val,
-							Value::Null => val,
-							_ => val.convert_to(&kind),
-						},
-					);
+					ctx.add_value(name.to_raw(), val.convert_to(&kind)?);
 				}
 				// Run the custom function
 				val.block.compute(&ctx, opt, txn, doc).await
@@ -319,7 +312,9 @@ fn cast(i: &str) -> IResult<&str, Function> {
 			tag("float"),
 			tag("int"),
 			tag("number"),
+			tag("point"),
 			tag("string"),
+			tag("uuid"),
 		)),
 		char('>'),
 	)(i)?;
@@ -399,7 +394,30 @@ fn function_crypto(i: &str) -> IResult<&str, &str> {
 }
 
 fn function_duration(i: &str) -> IResult<&str, &str> {
-	alt((tag("days"), tag("hours"), tag("mins"), tag("secs"), tag("weeks"), tag("years")))(i)
+	alt((
+		tag("days"),
+		tag("hours"),
+		tag("micros"),
+		tag("millis"),
+		tag("mins"),
+		tag("nanos"),
+		tag("secs"),
+		tag("weeks"),
+		tag("years"),
+		preceded(
+			tag("from"),
+			alt((
+				tag("days"),
+				tag("hours"),
+				tag("micros"),
+				tag("millis"),
+				tag("mins"),
+				tag("nanos"),
+				tag("secs"),
+				tag("weeks"),
+			)),
+		),
+	))(i)
 }
 
 fn function_geo(i: &str) -> IResult<&str, &str> {
@@ -557,6 +575,7 @@ fn function_time(i: &str) -> IResult<&str, &str> {
 		tag("week"),
 		tag("yday"),
 		tag("year"),
+		preceded(tag("from"), alt((tag("micros"), tag("millis"), tag("secs"), tag("unix")))),
 	))(i)
 }
 
@@ -570,7 +589,6 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 		tag("int"),
 		tag("number"),
 		tag("point"),
-		tag("regex"),
 		tag("string"),
 		tag("table"),
 		tag("thing"),

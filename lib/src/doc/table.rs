@@ -8,6 +8,7 @@ use crate::sql::data::Data;
 use crate::sql::expression::Expression;
 use crate::sql::field::{Field, Fields};
 use crate::sql::idiom::Idiom;
+use crate::sql::number::Number;
 use crate::sql::operator::Operator;
 use crate::sql::part::Part;
 use crate::sql::statement::Statement as Query;
@@ -399,9 +400,21 @@ impl<'a> Document<'a> {
 					Expression {
 						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
 							Expression {
-								l: Value::Idiom(key),
+								l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
+									Box::new(Expression {
+										l: Value::Idiom(key),
+										o: Operator::Nco,
+										r: Value::Number(Number::Int(0)),
+									}),
+								)))),
 								o: Operator::Mul,
-								r: Value::Idiom(key_c.clone()),
+								r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(
+									Box::new(Expression {
+										l: Value::Idiom(key_c.clone()),
+										o: Operator::Nco,
+										r: Value::Number(Number::Int(0)),
+									}),
+								)))),
 							},
 						))))),
 						o: match act {
@@ -415,7 +428,13 @@ impl<'a> Document<'a> {
 				o: Operator::Div,
 				r: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
 					Expression {
-						l: Value::Idiom(key_c.clone()),
+						l: Value::Subquery(Box::new(Subquery::Value(Value::Expression(Box::new(
+							Expression {
+								l: Value::Idiom(key_c.clone()),
+								o: Operator::Nco,
+								r: Value::Number(Number::Int(0)),
+							},
+						))))),
 						o: match act {
 							Action::Delete => Operator::Sub,
 							Action::Update => Operator::Add,

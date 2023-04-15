@@ -99,7 +99,7 @@ impl ser::Serializer for Serializer {
 	fn serialize_i128(self, value: i128) -> Result<Self::Ok, Error> {
 		match BigDecimal::from_i128(value) {
 			Some(decimal) => Ok(decimal.into()),
-			None => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
+			None => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
 		}
 	}
 
@@ -126,7 +126,7 @@ impl ser::Serializer for Serializer {
 	fn serialize_u128(self, value: u128) -> Result<Self::Ok, Error> {
 		match BigDecimal::from_u128(value) {
 			Some(decimal) => Ok(decimal.into()),
-			None => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
+			None => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
 		}
 	}
 
