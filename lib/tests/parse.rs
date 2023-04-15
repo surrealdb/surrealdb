@@ -1,4 +1,4 @@
-use surrealdb::sql::json;
+use surrealdb::sql::raw_value;
 use surrealdb::sql::thing;
 use surrealdb::sql::Thing;
 use surrealdb::sql::Value;
@@ -9,7 +9,7 @@ pub trait Parse<T> {
 
 impl Parse<Value> for Value {
 	fn parse(val: &str) -> Value {
-		json(val).unwrap()
+		raw_value(val).unwrap()
 	}
 }
 
