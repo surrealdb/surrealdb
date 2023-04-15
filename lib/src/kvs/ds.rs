@@ -220,6 +220,7 @@ impl Datastore {
 			_ => unreachable!(),
 		};
 
+		#[allow(unreachable_code)]
 		Ok(Transaction {
 			inner,
 			cache: super::cache::Cache::default(),
