@@ -105,6 +105,8 @@ fn locate<'a>(input: &str, tried: &'a str) -> (&'a str, usize, usize) {
 mod tests {
 
 	use super::*;
+	use serde::Serialize;
+	use std::{collections::HashMap, time::Instant};
 
 	#[test]
 	fn no_ending() {
@@ -173,5 +175,59 @@ mod tests {
 		let enc: Vec<u8> = Vec::from(&tmp);
 		let dec: Query = Query::from(enc);
 		assert_eq!(tmp, dec);
+	}
+
+	#[test]
+	#[cfg_attr(debug_assertions, ignore)]
+	fn json_benchmark() {
+		// From the top level of the repository,
+		// cargo test sql::parser::tests::json_benchmark --package surrealdb --lib --release -- --nocapture --exact
+
+		#[derive(Clone, Serialize)]
+		struct Data {
+			boolean: bool,
+			integer: i32,
+			decimal: f32,
+			string: String,
+			inner: Option<Box<Self>>,
+			inners: Vec<Self>,
+			inner_map: HashMap<String, Self>,
+		}
+
+		let inner = Data {
+			boolean: true,
+			integer: -1,
+			decimal: 0.5,
+			string: "foo".to_owned(),
+			inner: None,
+			inners: Vec::new(),
+			inner_map: HashMap::new(),
+		};
+		let inners = vec![inner.clone(); 10];
+
+		let data = Data {
+			boolean: false,
+			integer: 42,
+			decimal: 9000.0,
+			string: "SurrealDB".to_owned(),
+			inner_map: inners.iter().enumerate().map(|(i, d)| (i.to_string(), d.clone())).collect(),
+			inners,
+			inner: Some(Box::new(inner)),
+		};
+
+		let json = serde_json::to_string(&data).unwrap();
+		let json_pretty = serde_json::to_string_pretty(&data).unwrap();
+
+		let benchmark = |de: fn(&str) -> Value| {
+			let time = Instant::now();
+			const ITERATIONS: u32 = 32;
+			for _ in 0..ITERATIONS {
+				std::hint::black_box(de(std::hint::black_box(&json)));
+				std::hint::black_box(de(std::hint::black_box(&json_pretty)));
+			}
+			time.elapsed().as_millis() as u32 / (2 * ITERATIONS)
+		};
+
+		println!("sql::json took {:?}ms/iter", benchmark(|s| crate::sql::json(s).unwrap()));
 	}
 }
