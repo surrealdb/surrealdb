@@ -45,6 +45,7 @@ impl<'a> Document<'a> {
 						fd if fd.is_id() => continue,
 						fd if fd.is_in() => continue,
 						fd if fd.is_out() => continue,
+						fd if fd.is_meta() => continue,
 						fd => self.current.to_mut().del(ctx, opt, txn, fd).await?,
 					}
 				}

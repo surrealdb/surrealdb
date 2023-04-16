@@ -7,7 +7,7 @@ use crate::sql::error::IResult;
 use crate::sql::fmt::{fmt_separated_by, Fmt};
 use crate::sql::part::Next;
 use crate::sql::part::{all, field, first, graph, index, last, part, value, Part};
-use crate::sql::paths::{ID, IN, OUT};
+use crate::sql::paths::{ID, IN, META, OUT};
 use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
 use md5::Digest;
@@ -107,6 +107,10 @@ impl Idiom {
 	/// Check if this expression is an 'out' field
 	pub(crate) fn is_out(&self) -> bool {
 		self.0.len() == 1 && self.0[0].eq(&OUT[0])
+	}
+	/// Check if this expression is an 'out' field
+	pub(crate) fn is_meta(&self) -> bool {
+		self.0.len() == 1 && self.0[0].eq(&META[0])
 	}
 	/// Check if this is an expression with multiple yields
 	pub(crate) fn is_multi_yield(&self) -> bool {
