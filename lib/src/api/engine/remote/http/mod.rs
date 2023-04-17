@@ -179,11 +179,32 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	info!(target: LOG, "{request:?}");
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
-	let responses: Vec<HttpQueryResponse> =
-		bung::from_slice(&bytes).map_err(|error| Error::ResponseFromBinary {
-			binary: bytes.to_vec(),
-			error,
-		})?;
+	let responses = match bung::from_slice::<Vec<HttpQueryResponse>>(&bytes) {
+		Ok(responses) => responses,
+		Err(_) => {
+			let vec =
+				bung::from_slice::<Vec<(String, Status, String)>>(&bytes).map_err(|error| {
+					Error::ResponseFromBinary {
+						binary: bytes.to_vec(),
+						error,
+					}
+				})?;
+			let mut responses = Vec::with_capacity(vec.len());
+			for (time, status, data) in vec {
+				let (result, detail) = match status {
+					Status::Ok => (Value::from(data), String::new()),
+					Status::Err => (Value::None, data),
+				};
+				responses.push(HttpQueryResponse {
+					time,
+					status,
+					result,
+					detail,
+				});
+			}
+			responses
+		}
+	};
 	let mut map = IndexMap::<usize, QueryResult>::with_capacity(responses.len());
 	for (index, response) in responses.into_iter().enumerate() {
 		match response.status {

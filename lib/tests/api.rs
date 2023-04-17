@@ -5,6 +5,8 @@ mod api_integration {
 	use serde_json::json;
 	use std::borrow::Cow;
 	use std::ops::Bound;
+	use surrealdb::error::Api as ApiError;
+	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Database;
 	use surrealdb::opt::auth::Jwt;
 	use surrealdb::opt::auth::Namespace;
@@ -16,6 +18,7 @@ mod api_integration {
 	use surrealdb::sql::statements::CommitStatement;
 	use surrealdb::sql::thing;
 	use surrealdb::sql::Thing;
+	use surrealdb::Error;
 	use surrealdb::Surreal;
 	use ulid::Ulid;
 
