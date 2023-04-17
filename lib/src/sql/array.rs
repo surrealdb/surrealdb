@@ -393,17 +393,12 @@ impl Uniq<Array> for Array {
 pub fn array(i: &str) -> IResult<&str, Array> {
 	let (i, _) = char('[')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list0(commas, item)(i)?;
+	let (i, v) = separated_list0(commas, value)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(']')(i)?;
 	Ok((i, Array(v)))
-}
-
-fn item(i: &str) -> IResult<&str, Value> {
-	let (i, v) = value(i)?;
-	Ok((i, v))
 }
 
 #[cfg(test)]
