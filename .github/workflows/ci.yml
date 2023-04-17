@@ -14,32 +14,30 @@ defaults:
 
 jobs:
 
-  test:
-    name: Test
+  format:
+    name: Check format
     runs-on: ubuntu-20.04
     steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
       - name: Checkout sources
         uses: actions/checkout@v3
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
+
+  check:
+    name: Check workspace
+    runs-on: ubuntu-20.04-16-cores
+    steps:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run cargo test
-        run: |
-          cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
-          cargo test --locked --workspace --features protocol-ws,protocol-http,kv-rocksdb
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-20.04
-    steps:
-
       - name: Checkout sources
         uses: actions/checkout@v3
 
@@ -47,21 +45,156 @@ jobs:
         run: |
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Run cargo check
+        run: cargo check --locked --workspace
+
+  check-wasm:
+    name: Check Wasm
+    runs-on: ubuntu-20.04
+    steps:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-          components: rustfmt, clippy
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
 
       - name: Run cargo check
-        run: cargo check --workspace
+        run: cargo check --locked --package surrealdb --features protocol-ws,protocol-http,kv-mem,kv-indxdb --target wasm32-unknown-unknown
 
-      - name: Run cargo fmt
-        run: cargo fmt --all -- --check
+  clippy:
+    name: Check clippy
+    runs-on: ubuntu-20.04-16-cores
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Run cargo clippy
-        run: cargo clippy -- -W warnings
+        run: cargo clippy --no-deps -- -W warnings
 
-      - name: Run WebAssembly check
-        run: cargo check --features kv-mem,kv-indxdb,protocol-ws,protocol-http --target wasm32-unknown-unknown --package surrealdb
+  test:
+    name: Test workspace
+    runs-on: ubuntu-20.04-16-cores
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Run cargo test
+        run: cargo test --locked --no-default-features --features storage-mem --workspace -- --skip api_integration
+
+  ws-engine:
+    name: WebSocket engine
+    runs-on: ubuntu-20.04-16-cores
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Run cargo test
+        run: |
+          cargo build --locked --no-default-features --features storage-mem
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo test --locked --package surrealdb --no-default-features --features protocol-ws --test api api_integration::ws
+
+  http-engine:
+    name: HTTP engine
+    runs-on: ubuntu-20.04-16-cores
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Run cargo test
+        run: |
+          cargo build --locked --no-default-features --features storage-mem
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::http
+
+  mem-engine:
+    name: Memory engine
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Run cargo test
+        run: cargo test --locked --package surrealdb --no-default-features --features kv-mem --test api api_integration::mem
+
+  file-engine:
+    name: File engine
+    runs-on: ubuntu-20.04-16-cores
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Run cargo test
+        run: cargo test --locked --package surrealdb --no-default-features --features kv-rocksdb --test api api_integration::file
+
+  any-engine:
+    name: Any engine
+    runs-on: ubuntu-20.04-16-cores
+    steps:
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Run cargo test
+        run: |
+          cargo build --locked --no-default-features --features storage-mem
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::any
