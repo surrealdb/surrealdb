@@ -24,7 +24,7 @@ pub enum Error {
 	#[error("There was an error processing a remote WS request")]
 	Ws(String),
 
-	/// There specified scheme does not match any supported protocol or storage engine
+	/// The specified scheme does not match any supported protocol or storage engine
 	#[error("Unsupported protocol or storage engine, `{0}`")]
 	Scheme(String),
 
