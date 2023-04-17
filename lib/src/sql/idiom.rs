@@ -215,13 +215,7 @@ pub fn multi(i: &str) -> IResult<&str, Idiom> {
 			Ok((i, Idiom::from(v)))
 		},
 		|i| {
-			let (i, p) = first(i)?;
-			let (i, mut v) = many1(part)(i)?;
-			v.insert(0, p);
-			Ok((i, Idiom::from(v)))
-		},
-		|i| {
-			let (i, p) = value(i)?;
+			let (i, p) = alt((first, value))(i)?;
 			let (i, mut v) = many1(part)(i)?;
 			v.insert(0, p);
 			Ok((i, Idiom::from(v)))
