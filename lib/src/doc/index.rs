@@ -4,6 +4,9 @@ use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
+// use crate::idx::ft::FtIndex;
+use crate::idx::ft::FtIndex;
+use crate::idx::IndexKeyBase;
 use crate::sql::array::Array;
 use crate::sql::index::Index;
 use crate::sql::scoring::Scoring;
@@ -59,7 +62,11 @@ impl<'a> Document<'a> {
 						sc,
 						hl,
 					} => match sc {
-						Scoring::Bm(k1, b) => ic.index_best_matching_search(az, k1, b, *hl).await?,
+						Scoring::Bm {
+							k1,
+							b,
+							order,
+						} => ic.index_best_matching_search(az, k1, b, order, *hl).await?,
 						Scoring::Vs => ic.index_vector_search(az, *hl).await?,
 					},
 				};
@@ -92,7 +99,9 @@ struct IndexOperation<'a> {
 	run: MutexGuard<'a, kvs::Transaction>,
 	opt: &'a Options,
 	ix: &'a DefineIndexStatement,
+	/// The old value (if existing)
 	o: Option<Array>,
+	/// The new value (if existing)
 	n: Option<Array>,
 	rid: &'a Thing,
 }
@@ -179,11 +188,19 @@ impl<'a> IndexOperation<'a> {
 		_az: &Ident,
 		_k1: &Number,
 		_b: &Number,
+		order: &Number,
 		_hl: bool,
 	) -> Result<(), Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "BM25 indexing",
-		})
+		let ikb = IndexKeyBase::new(self.opt, self.ix);
+		let mut ft = FtIndex::new(&mut self.run, ikb, order.to_usize()).await?;
+		// TODO: Support of different type of record ids
+		let doc_key = self.rid.to_string();
+		if let Some(n) = &self.n {
+			// TODO: Apply the analyzer
+			ft.index_document(&mut self.run, &doc_key, &n.to_string()).await
+		} else {
+			ft.remove_document(&mut self.run, &doc_key).await
+		}
 	}
 
 	async fn index_vector_search(&mut self, _az: &Ident, _hl: bool) -> Result<(), Error> {

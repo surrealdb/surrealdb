@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-struct FtIndex {
+pub(crate) struct FtIndex {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	state: State,
@@ -26,7 +26,7 @@ struct FtIndex {
 	btree_default_order: usize,
 }
 
-trait HitVisitor {
+pub(crate) trait HitVisitor {
 	fn visit(&mut self, tx: &mut Transaction, doc_key: String, score: Score);
 }
 
@@ -63,7 +63,7 @@ impl SerdeState for State {}
 type Score = f32;
 
 impl FtIndex {
-	pub(super) async fn new(
+	pub(crate) async fn new(
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
 		btree_default_order: usize,
@@ -99,7 +99,17 @@ impl FtIndex {
 		Postings::new(tx, self.index_key_base.clone(), self.btree_default_order).await
 	}
 
-	async fn add_document(
+	pub(crate) async fn remove_document(
+		&mut self,
+		_tx: &mut Transaction,
+		_doc_key: &str,
+	) -> Result<(), Error> {
+		Err(Error::FeatureNotYetImplemented {
+			feature: "FT - Remove document",
+		})
+	}
+
+	pub(crate) async fn index_document(
 		&mut self,
 		tx: &mut Transaction,
 		doc_key: &str,
@@ -321,7 +331,7 @@ mod tests {
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
 				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.add_document(&mut tx, "doc1", "hello the world").await.unwrap();
+			fti.index_document(&mut tx, "doc1", "hello the world").await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -330,8 +340,8 @@ mod tests {
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
 				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.add_document(&mut tx, "doc2", "a yellow hello").await.unwrap();
-			fti.add_document(&mut tx, "doc3", "foo bar").await.unwrap();
+			fti.index_document(&mut tx, "doc2", "a yellow hello").await.unwrap();
+			fti.index_document(&mut tx, "doc3", "foo bar").await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -389,16 +399,16 @@ mod tests {
 				let mut fti = FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order)
 					.await
 					.unwrap();
-				fti.add_document(&mut tx, "doc1", "the quick brown fox jumped over the lazy dog")
+				fti.index_document(&mut tx, "doc1", "the quick brown fox jumped over the lazy dog")
 					.await
 					.unwrap();
-				fti.add_document(&mut tx, "doc2", "the fast fox jumped over the lazy dog")
+				fti.index_document(&mut tx, "doc2", "the fast fox jumped over the lazy dog")
 					.await
 					.unwrap();
-				fti.add_document(&mut tx, "doc3", "the dog sat there and did nothing")
+				fti.index_document(&mut tx, "doc3", "the dog sat there and did nothing")
 					.await
 					.unwrap();
-				fti.add_document(&mut tx, "doc4", "the other animals sat there watching")
+				fti.index_document(&mut tx, "doc4", "the other animals sat there watching")
 					.await
 					.unwrap();
 				tx.commit().await.unwrap();

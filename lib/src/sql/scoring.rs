@@ -10,20 +10,32 @@ use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Scoring {
-	Bm(Number, Number), // BestMatching25
-	Vs,                 // VectorSearch
+	Bm {
+		k1: Number,
+		b: Number,
+		order: Number,
+	}, // BestMatching25
+	Vs, // VectorSearch
 }
 
 impl Default for Scoring {
 	fn default() -> Self {
-		Self::Bm(Number::Float(1.2), Number::Float(0.75))
+		Self::Bm {
+			k1: Number::Float(1.2),
+			b: Number::Float(0.75),
+			order: Number::Int(10000),
+		}
 	}
 }
 
 impl fmt::Display for Scoring {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Bm(k1, b) => write!(f, "BM25({},{})", k1, b),
+			Self::Bm {
+				k1,
+				b,
+				order,
+			} => write!(f, "BM25({},{},{})", k1, b, order),
 			Self::Vs => f.write_str("VS"),
 		}
 	}
@@ -36,7 +48,16 @@ pub fn scoring(i: &str) -> IResult<&str, Scoring> {
 		let (i, k1) = number(i)?;
 		let (i, _) = commas(i)?;
 		let (i, b) = number(i)?;
+		let (i, _) = commas(i)?;
+		let (i, order) = number(i)?;
 		let (i, _) = closeparenthese(i)?;
-		Ok((i, Scoring::Bm(k1, b)))
+		Ok((
+			i,
+			Scoring::Bm {
+				k1,
+				b,
+				order,
+			},
+		))
 	}))(i)
 }

@@ -1403,11 +1403,15 @@ mod tests {
 				index: Index::Search {
 					az: Ident("my_analyzer".to_string()),
 					hl: true,
-					sc: Scoring::Bm(Number::Float(1.2), Number::Float(0.75)),
+					sc: Scoring::Bm {
+						k1: Number::Float(1.2),
+						b: Number::Float(0.75),
+						order: Number::Int(10000)
+					},
 				},
 			}
 		);
-		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer BM25(1.2,0.75) HIGHLIGHTS");
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer BM25(1.2,0.75,10000) HIGHLIGHTS");
 	}
 
 	#[test]

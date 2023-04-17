@@ -318,6 +318,52 @@ where
 		new_node_id
 	}
 
+	pub(super) async fn delete<BK>(
+		&mut self,
+		tx: &mut Transaction,
+		deleted_key: &Key,
+	) -> Result<Option<Payload>, Error>
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		let mut node_queue = VecDeque::new();
+		if let Some(node_id) = self.state.root {
+			node_queue.push_front(node_id);
+		}
+		while let Some(node_id) = node_queue.pop_front() {
+			let stored_node = StoredNode::<BK>::read(tx, self.keys.get_node_key(node_id)).await?;
+			let mut node = stored_node.node;
+			let payload = node.keys_mut().remove(deleted_key);
+			if let Some(payload) = payload {
+				// match node.node {
+				// 	Node::Internal(_, _) => {}
+				// 	Node::Leaf(keys) => {}
+				// }
+				// TODO - Not done yet, we tree would become unbalanced
+				StoredNode::<BK>::write(tx, stored_node.key, node).await?;
+				self.updated = true;
+				return Ok(Some(payload));
+			}
+			if let Node::Internal(keys, children) = node {
+				let child_idx = keys.get_child_idx(deleted_key);
+				node_queue.push_front(children[child_idx]);
+			}
+		}
+		Ok(None)
+	}
+
+	async fn _tree_delete<BK>(
+		&mut self,
+		_tx: &mut Transaction,
+		_key: Key,
+		_node: StoredNode<BK>,
+	) -> Result<Option<Payload>, Error>
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		todo!()
+	}
+
 	pub(super) async fn debug<F, BK>(&self, tx: &mut Transaction, to_string: F) -> Result<(), Error>
 	where
 		F: Fn(Key) -> Result<String, Error>,

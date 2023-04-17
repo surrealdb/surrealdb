@@ -3,6 +3,7 @@ pub(crate) mod btree;
 pub(crate) mod ft;
 mod kvsim;
 
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::btree::NodeId;
 use crate::idx::ft::docids::DocId;
@@ -15,11 +16,12 @@ use crate::key::bp::Bp;
 use crate::key::bs::Bs;
 use crate::key::bt::Bt;
 use crate::kvs::{Key, Val};
+use crate::sql::statements::DefineIndexStatement;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
-struct IndexKeyBase {
+pub(crate) struct IndexKeyBase {
 	ns: String,
 	db: String,
 	tb: String,
@@ -27,6 +29,15 @@ struct IndexKeyBase {
 }
 
 impl IndexKeyBase {
+	pub(crate) fn new(opt: &Options, ix: &DefineIndexStatement) -> Self {
+		Self {
+			ns: opt.ns().to_string(),
+			db: opt.db().to_string(),
+			tb: ix.what.to_string(),
+			ix: ix.name.to_string(),
+		}
+	}
+
 	fn new_bd_key(&self, node_id: Option<NodeId>) -> Key {
 		Bd::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), node_id).into()
 	}

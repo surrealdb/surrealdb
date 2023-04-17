@@ -33,7 +33,7 @@ pub(super) trait BKeys: Display + Sized {
 	where
 		V: KeyVisitor + Send;
 	fn insert(&mut self, key: Key, payload: Payload);
-	fn _remove(&mut self, key: Key);
+	fn remove(&mut self, key: &Key) -> Option<Payload>;
 	fn split_keys(&self) -> SplitKeys<Self>;
 	fn get_child_idx(&self, searched_key: &Key) -> usize;
 	fn compile(&mut self) {}
@@ -73,7 +73,19 @@ impl BKeys for FstKeys {
 	}
 
 	fn get(&self, key: &Key) -> Option<Payload> {
-		self.map.get(key)
+		if let Some(payload) = self.additions.get(key) {
+			Some(*payload)
+		} else {
+			if let Some(payload) = self.map.get(key) {
+				if self.deletions.get(key).is_some() {
+					None
+				} else {
+					Some(payload)
+				}
+			} else {
+				None
+			}
+		}
 	}
 
 	async fn collect_with_prefix<V>(
@@ -89,12 +101,16 @@ impl BKeys for FstKeys {
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
+		self.deletions.remove(&key);
 		self.additions.insert(key, payload);
 	}
 
-	fn _remove(&mut self, key: Key) {
-		self.additions.remove(&key);
-		self.deletions.insert(key, true);
+	fn remove(&mut self, key: &Key) -> Option<Payload> {
+		self.get(key).map(|payload| {
+			self.additions.remove(key);
+			self.deletions.insert(key.clone(), true);
+			payload
+		})
 	}
 
 	fn split_keys(&self) -> SplitKeys<Self> {
@@ -378,8 +394,8 @@ impl BKeys for TrieKeys {
 		self.keys.insert(key, payload);
 	}
 
-	fn _remove(&mut self, key: Key) {
-		self.keys.remove(&key);
+	fn remove(&mut self, key: &Key) -> Option<Payload> {
+		self.keys.remove(key)
 	}
 
 	fn split_keys(&self) -> SplitKeys<Self> {
@@ -494,6 +510,26 @@ mod tests {
 	#[test]
 	fn test_trie_keys_additions() {
 		test_keys_additions(TrieKeys::default())
+	}
+
+	fn test_keys_deletions<BK: BKeys>(mut keys: BK) {
+		assert_eq!(keys.remove(&"dummy".into()), None);
+		keys.insert("foo".into(), 1);
+		keys.insert("bar".into(), 2);
+		assert_eq!(keys.remove(&"bar".into()), Some(2));
+		assert_eq!(keys.remove(&"bar".into()), None);
+		assert_eq!(keys.remove(&"foo".into()), Some(1));
+		assert_eq!(keys.remove(&"foo".into()), None);
+	}
+
+	#[test]
+	fn test_fst_keys_deletions() {
+		test_keys_deletions(FstKeys::default())
+	}
+
+	#[test]
+	fn test_trie_keys_deletions() {
+		test_keys_deletions(TrieKeys::default())
 	}
 
 	#[tokio::test]
