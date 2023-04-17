@@ -103,10 +103,9 @@ pub async fn sc(
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 	// Create a new readonly transaction
-	let mut tx = kvs.transaction(false, true).await?;
+	let mut tx = kvs.transaction(false, false).await?;
 	// Check if the supplied NS Login exists
 	let temp_val = tx.get_sc(&ns, &db, &sc).await;
-	tx.commit();
 	match temp_val {
 		Ok(sv) => {
 			match sv.signin {
