@@ -25,6 +25,12 @@ impl Display for Query {
 	}
 }
 
+impl Query {
+	pub(crate) fn into_iter(self) -> std::vec::IntoIter<Statement> {
+		self.0.into_iter()
+	}
+}
+
 pub fn query(i: &str) -> IResult<&str, Query> {
 	let (i, v) = all_consuming(statements)(i)?;
 	Ok((i, Query(v)))

@@ -58,6 +58,12 @@ impl fmt::Display for Statements {
 	}
 }
 
+impl Statements {
+	pub(crate) fn into_iter(self) -> std::vec::IntoIter<Statement> {
+		self.0.into_iter()
+	}
+}
+
 pub fn statements(i: &str) -> IResult<&str, Statements> {
 	let (i, v) = separated_list1(colons, statement)(i)?;
 	let (i, _) = many0(alt((colons, comment)))(i)?;
