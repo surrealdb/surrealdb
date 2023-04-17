@@ -20,17 +20,16 @@ pub fn thing(input: &str) -> Result<Thing, Error> {
 	parse_impl(input, super::thing::thing)
 }
 
+/// Parses a SurrealQL [`Value`].
+#[instrument(name = "parser", skip_all, fields(length = input.len()))]
+pub fn value(input: &str) -> Result<Value, Error> {
+	parse_impl(input, super::value::value)
+}
+
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn json(input: &str) -> Result<Value, Error> {
 	parse_impl(input, super::value::json)
-}
-
-/// Parses a SurrealQL [`Value`] for testing purposes.
-#[doc(hidden)]
-#[allow(unused)]
-pub fn raw_value(input: &str) -> Result<Value, Error> {
-	parse_impl(input, super::value::value)
 }
 
 fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Result<O, Error> {

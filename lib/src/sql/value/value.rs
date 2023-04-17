@@ -24,7 +24,7 @@ use crate::sql::idiom::{self, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
 use crate::sql::number::{number, Number};
-use crate::sql::object::{object, Object};
+use crate::sql::object::{key, object, Object};
 use crate::sql::operation::Operation;
 use crate::sql::param::{param, Param};
 use crate::sql::part::Part;
@@ -1679,53 +1679,46 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 
 /// Used to parse any simple JSON-like value
 pub fn json(i: &str) -> IResult<&str, Value> {
-	pub fn json_object(i: &str) -> IResult<&str, Object> {
+	// Use a specific parser for JSON objects
+	pub fn object(i: &str) -> IResult<&str, Object> {
 		let (i, _) = char('{')(i)?;
 		let (i, _) = mightbespace(i)?;
-		let (i, v) = separated_list0(commas, json_object_item)(i)?;
+		let (i, v) = separated_list0(commas, |i| {
+			let (i, k) = key(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = char(':')(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, v) = json(i)?;
+			Ok((i, (String::from(k), v)))
+		})(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = opt(char(','))(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = char('}')(i)?;
 		Ok((i, Object(v.into_iter().collect())))
 	}
-
-	fn json_object_item(i: &str) -> IResult<&str, (String, Value)> {
-		let (i, k) = crate::sql::object::key(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char(':')(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, v) = json(i)?;
-		Ok((i, (String::from(k), v)))
-	}
-
-	pub fn json_array(i: &str) -> IResult<&str, Array> {
+	// Use a specific parser for JSON arrays
+	pub fn array(i: &str) -> IResult<&str, Array> {
 		let (i, _) = char('[')(i)?;
 		let (i, _) = mightbespace(i)?;
-		let (i, v) = separated_list0(commas, json_array_item)(i)?;
+		let (i, v) = separated_list0(commas, json)(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = opt(char(','))(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = char(']')(i)?;
 		Ok((i, Array(v)))
 	}
-
-	fn json_array_item(i: &str) -> IResult<&str, Value> {
-		let (i, v) = json(i)?;
-		Ok((i, v))
-	}
-
+	// Parse any simple JSON-like value
 	alt((
 		map(tag_no_case("null".as_bytes()), |_| Value::Null),
 		map(tag_no_case("true".as_bytes()), |_| Value::True),
 		map(tag_no_case("false".as_bytes()), |_| Value::False),
 		map(datetime, Value::from),
-		map(duration, Value::from),
 		map(geometry, Value::from),
 		map(unique, Value::from),
 		map(number, Value::from),
-		map(json_object, Value::from),
-		map(json_array, Value::from),
+		map(object, Value::from),
+		map(array, Value::from),
 		map(thing, Value::from),
 		map(strand, Value::from),
 	))(i)

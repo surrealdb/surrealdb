@@ -189,7 +189,14 @@ impl Serialize for Object {
 pub fn object(i: &str) -> IResult<&str, Object> {
 	let (i, _) = char('{')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list0(commas, item)(i)?;
+	let (i, v) = separated_list0(commas, |i| {
+		let (i, k) = key(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = char(':')(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, v) = value(i)?;
+		Ok((i, (String::from(k), v)))
+	})(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -197,16 +204,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	Ok((i, Object(v.into_iter().collect())))
 }
 
-fn item(i: &str) -> IResult<&str, (String, Value)> {
-	let (i, k) = key(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(':')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = value(i)?;
-	Ok((i, (String::from(k), v)))
-}
-
-pub(crate) fn key(i: &str) -> IResult<&str, &str> {
+pub fn key(i: &str) -> IResult<&str, &str> {
 	alt((key_none, key_single, key_double))(i)
 }
 

@@ -193,7 +193,7 @@ impl Rpc {
 				// This won't panic due to the check above
 				let val = m.to_str().unwrap();
 				// Parse the SurrealQL object
-				match surrealdb::sql::json(val) {
+				match surrealdb::sql::value(val) {
 					// The SurrealQL message parsed ok
 					Ok(v) => v,
 					// The SurrealQL message failed to parse
