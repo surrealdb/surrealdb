@@ -2,11 +2,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::exe::try_join_all_buffered;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
-use futures::future::try_join_all;
 
 impl Value {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
@@ -49,7 +49,7 @@ impl Value {
 					Part::All => {
 						let path = path.next();
 						let futs = v.iter_mut().map(|v| v.set(ctx, opt, txn, path, val.clone()));
-						try_join_all(futs).await?;
+						try_join_all_buffered(futs).await?;
 						Ok(())
 					}
 					Part::First => match v.first_mut() {
@@ -75,7 +75,7 @@ impl Value {
 					}
 					_ => {
 						let futs = v.iter_mut().map(|v| v.set(ctx, opt, txn, path, val.clone()));
-						try_join_all(futs).await?;
+						try_join_all_buffered(futs).await?;
 						Ok(())
 					}
 				},

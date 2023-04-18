@@ -80,6 +80,7 @@ native-tls = { version = "0.2.11", optional = true }
 nom = { version = "7.1.3", features = ["alloc"] }
 once_cell = "1.17.1"
 pbkdf2 = { version = "0.12.1", features = ["simple"] }
+pin-project-lite = "0.2.9"
 rand = "0.8.5"
 regex = "1.7.3"
 reqwest = { version = "0.11.16", default-features = false, features = ["json", "stream"], optional = true }
