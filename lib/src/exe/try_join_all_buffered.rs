@@ -31,14 +31,16 @@ where
 	I: IntoIterator,
 	I::Item: TryFuture,
 {
-	let mut input = iter.into_iter();
-	let mut active = FuturesOrdered::new();
-
 	#[cfg(target_arch = "wasm32")]
 	const LIMIT: usize = 1;
 
 	#[cfg(not(target_arch = "wasm32"))]
 	const LIMIT: usize = crate::cnf::MAX_CONCURRENT_TASKS;
+
+	let mut input = iter.into_iter();
+	let (lo, hi) = input.size_hint();
+	let initial_capacity = hi.unwrap_or(lo);
+	let mut active = FuturesOrdered::new();
 
 	while active.len() < LIMIT {
 		if let Some(next) = input.next() {
@@ -51,7 +53,7 @@ where
 	TryJoinAllBuffered {
 		input,
 		active,
-		output: Vec::new(),
+		output: Vec::with_capacity(initial_capacity),
 	}
 }
 
@@ -75,5 +77,80 @@ where
 				None => break mem::take(this.output),
 			}
 		}))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::try_join_all_buffered;
+	use futures::ready;
+	use pin_project_lite::pin_project;
+	use rand::{thread_rng, Rng};
+	use std::{
+		future::Future,
+		task::Poll,
+		time::{Duration, Instant},
+	};
+	use tokio::time::{sleep, Sleep};
+
+	pin_project! {
+		struct BenchFuture {
+			#[pin]
+			sleep: Sleep,
+		}
+	}
+
+	impl Future for BenchFuture {
+		type Output = Result<usize, &'static str>;
+
+		fn poll(
+			self: std::pin::Pin<&mut Self>,
+			cx: &mut std::task::Context<'_>,
+		) -> std::task::Poll<Self::Output> {
+			let me = self.project();
+			ready!(me.sleep.poll(cx));
+			Poll::Ready(if true {
+				Ok(42)
+			} else {
+				Err("no good")
+			})
+		}
+	}
+
+	/// Returns average # of seconds.
+	async fn benchmark_try_join_all<F: Future<Output = Result<Vec<usize>, &'static str>>>(
+		try_join_all: fn(Vec<BenchFuture>) -> F,
+		count: usize,
+	) -> f32 {
+		let mut rng = thread_rng();
+		let mut total = Duration::ZERO;
+		let samples = (250 / count.max(1)).max(10);
+		for _ in 0..samples {
+			let futures = Vec::from_iter((0..count).map(|_| BenchFuture {
+				sleep: sleep(Duration::from_millis(rng.gen_range(0..5))),
+			}));
+			let start = Instant::now();
+			// unwrap_or_else avoids needing a Debug impl on the future.
+			try_join_all(futures).await.unwrap();
+			total += start.elapsed();
+		}
+		total.as_secs_f32() / samples as f32
+	}
+
+	#[tokio::test]
+	async fn comparison() {
+		for i in (0..10).chain((20..100).step_by(20)).chain((500..10000).step_by(500)) {
+			let unbuffered = benchmark_try_join_all(futures::future::try_join_all, i).await;
+			let buffered = benchmark_try_join_all(try_join_all_buffered, i).await;
+			//println!("with {i} futures, unbuffered took {unbuffered:.5}s and buffered took {buffered:.5}s");'
+			println!(
+				"with {i:<4} futs, buf. exe. takes {buffered:.4}s = {:>5.1}% the time",
+				100.0 * buffered / unbuffered
+			);
+
+			if i > 7000 {
+				assert!(buffered < unbuffered, "buf: {buffered:.5}s unbuf: {unbuffered:.5}s");
+			}
+		}
 	}
 }
