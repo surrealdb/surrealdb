@@ -109,15 +109,16 @@ async fn concurrency() -> Result<(), Error> {
 		}
 	}
 
+	// Diagnostics.
 	/*
-		for i in 1..=100 {
-			println!("{i} futures => {}", test_limit(i).await?);
-		}
+	for i in (1..=80).step_by(8) {
+		println!("{i} futures => {}", test_limit(i).await?);
+	}
 	*/
 
 	assert!(test_limit(3).await?);
 
-	/// Too slow to *parse* query in debug mode.
+	// Too slow to *parse* query in debug mode.
 	#[cfg(not(debug_assertions))]
 	assert!(!test_limit(64 /* surrealdb::cnf::MAX_CONCURRENT_TASKS */ + 1).await?);
 

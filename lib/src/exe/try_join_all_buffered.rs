@@ -24,6 +24,8 @@ pin_project! {
 
 /// Creates a future which represents either an in-order collection of the
 /// results of the futures given or a (fail-fast) error.
+///
+/// Only a limited number of futures are driven at a time.
 pub fn try_join_all_buffered<I>(iter: I) -> TryJoinAllBuffered<I::Item, I::IntoIter>
 where
 	I: IntoIterator,
@@ -32,7 +34,7 @@ where
 	let mut input = iter.into_iter();
 	let mut active = FuturesOrdered::new();
 
-	while active.len() < crate::cnf::MAX_CONCURRENT_TASKS / 2 {
+	while active.len() < crate::cnf::MAX_CONCURRENT_TASKS {
 		if let Some(next) = input.next() {
 			active.push_back(TryFutureExt::into_future(next));
 		} else {
