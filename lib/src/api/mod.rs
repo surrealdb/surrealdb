@@ -38,6 +38,7 @@ pub trait Connection: conn::Connection {}
 
 /// The future returned when creating a new SurrealDB instance
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Connect<'r, C: Connection, Response> {
 	router: Option<&'r OnceCell<Arc<Router<C>>>>,
 	address: Result<Endpoint>,
@@ -76,7 +77,6 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	#[must_use]
 	pub const fn with_capacity(mut self, capacity: usize) -> Self {
 		self.capacity = capacity;
 		self
