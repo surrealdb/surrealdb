@@ -34,7 +34,13 @@ where
 	let mut input = iter.into_iter();
 	let mut active = FuturesOrdered::new();
 
-	while active.len() < crate::cnf::MAX_CONCURRENT_TASKS {
+	#[cfg(target_arch = "wasm32")]
+	const LIMIT: usize = 1;
+
+	#[cfg(not(target_arch = "wasm32"))]
+	const LIMIT: usize = crate::cnf::MAX_CONCURRENT_TASKS;
+
+	while active.len() < LIMIT {
 		if let Some(next) = input.next() {
 			active.push_back(TryFutureExt::into_future(next));
 		} else {
