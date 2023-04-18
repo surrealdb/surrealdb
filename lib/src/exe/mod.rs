@@ -1,19 +1,27 @@
-#![cfg(not(target_arch = "wasm32"))]
+pub use try_join_all_buffered::try_join_all_buffered;
 
-use executor::{Executor, Task};
-use once_cell::sync::Lazy;
-use std::future::Future;
-use std::panic::catch_unwind;
+mod try_join_all_buffered;
 
-pub fn spawn<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static) -> Task<T> {
-	static GLOBAL: Lazy<Executor<'_>> = Lazy::new(|| {
-		std::thread::spawn(|| {
-			catch_unwind(|| {
-				futures::executor::block_on(GLOBAL.run(futures::future::pending::<()>()))
-			})
-			.ok();
+#[cfg(not(target_arch = "wasm32"))]
+pub use spawn::spawn;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod spawn {
+	use executor::{Executor, Task};
+	use once_cell::sync::Lazy;
+	use std::future::Future;
+	use std::panic::catch_unwind;
+
+	pub fn spawn<T: Send + 'static>(future: impl Future<Output = T> + Send + 'static) -> Task<T> {
+		static GLOBAL: Lazy<Executor<'_>> = Lazy::new(|| {
+			std::thread::spawn(|| {
+				catch_unwind(|| {
+					futures::executor::block_on(GLOBAL.run(futures::future::pending::<()>()))
+				})
+				.ok();
+			});
+			Executor::new()
 		});
-		Executor::new()
-	});
-	GLOBAL.spawn(future)
+		GLOBAL.spawn(future)
+	}
 }
