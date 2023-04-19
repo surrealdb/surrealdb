@@ -16,7 +16,7 @@ docs:
 
 .PHONY: test
 test:
-	cargo test --workspace $(DEV_FEATURES)
+	cargo test --workspace
 
 .PHONY: check
 check:
