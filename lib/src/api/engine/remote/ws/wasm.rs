@@ -11,10 +11,8 @@ use crate::api::engine::remote::ws::Response;
 use crate::api::engine::remote::ws::PING_INTERVAL;
 use crate::api::engine::remote::ws::PING_METHOD;
 use crate::api::err::Error;
-use crate::api::opt::from_value;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
-use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
@@ -30,7 +28,6 @@ use once_cell::sync::OnceCell;
 use pharos::Channel;
 use pharos::Observable;
 use pharos::ObserveConfig;
-use serde::de::DeserializeOwned;
 use std::collections::hash_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -114,35 +111,6 @@ impl Connection for Client {
 			};
 			router.sender.send_async(Some(route)).await?;
 			Ok(receiver)
-		})
-	}
-
-	fn recv<R>(
-		&mut self,
-		rx: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + '_>>
-	where
-		R: DeserializeOwned,
-	{
-		Box::pin(async move {
-			let response = rx.into_recv_async().await?;
-			match response? {
-				DbResponse::Other(value) => from_value(value).map_err(Into::into),
-				DbResponse::Query(..) => unreachable!(),
-			}
-		})
-	}
-
-	fn recv_query(
-		&mut self,
-		rx: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<QueryResponse>> + Send + Sync + '_>> {
-		Box::pin(async move {
-			let response = rx.into_recv_async().await?;
-			match response? {
-				DbResponse::Query(results) => Ok(results),
-				DbResponse::Other(..) => unreachable!(),
-			}
 		})
 	}
 }
