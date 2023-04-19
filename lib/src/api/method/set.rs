@@ -10,6 +10,7 @@ use std::pin::Pin;
 
 /// A set future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Set<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) key: String,

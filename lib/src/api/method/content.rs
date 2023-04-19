@@ -18,6 +18,7 @@ use std::pin::Pin;
 ///
 /// Content inserts or replaces the contents of a record entirely
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Content<'r, C: Connection, D, R> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) method: Method,
