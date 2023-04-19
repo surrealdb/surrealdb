@@ -25,6 +25,7 @@ where
 {
 	keys: K,
 	state: State,
+	node_full_size: usize,
 	updated: bool,
 }
 
@@ -81,6 +82,30 @@ where
 			Node::Leaf(keys) => keys,
 		}
 	}
+
+	fn append(&mut self, key: Key, payload: Payload, node: Node<BK>) -> Result<(), Error> {
+		match self {
+			Node::Internal(keys, children) => {
+				if let Node::Internal(append_keys, mut append_children) = node {
+					keys.insert(key, payload);
+					keys.append(append_keys);
+					children.append(&mut append_children);
+					Ok(())
+				} else {
+					Err(Error::CorruptedIndex)
+				}
+			}
+			Node::Leaf(keys) => {
+				if let Node::Leaf(append_keys) = node {
+					keys.insert(key, payload);
+					keys.append(append_keys);
+					Ok(())
+				} else {
+					Err(Error::CorruptedIndex)
+				}
+			}
+		}
+	}
 }
 
 impl<BK> SerdeState for Node<BK> where BK: BKeys + Serialize + DeserializeOwned {}
@@ -102,6 +127,7 @@ where
 	pub(super) fn new(keys: K, state: State) -> Self {
 		Self {
 			keys,
+			node_full_size: state.order * 2,
 			state,
 			updated: false,
 		}
@@ -115,16 +141,27 @@ where
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
+		Ok(self.locate_key_in_node::<BK>(tx, searched_key).await?.map(|(_, payload)| payload))
+	}
+
+	async fn locate_key_in_node<BK>(
+		&self,
+		tx: &mut Transaction,
+		searched_key: &Key,
+	) -> Result<Option<(StoredNode<BK>, Payload)>, Error>
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
 		let mut node_queue = VecDeque::new();
 		if let Some(node_id) = self.state.root {
 			node_queue.push_front(node_id);
 		}
 		while let Some(node_id) = node_queue.pop_front() {
-			let node = StoredNode::<BK>::read(tx, self.keys.get_node_key(node_id)).await?.node;
-			if let Some(value) = node.keys().get(searched_key) {
-				return Ok(Some(value));
+			let stored_node = StoredNode::<BK>::read(tx, self.keys.get_node_key(node_id)).await?;
+			if let Some(payload) = stored_node.node.keys().get(searched_key) {
+				return Ok(Some((stored_node, payload)));
 			}
-			if let Node::Internal(keys, children) = node {
+			if let Node::Internal(keys, children) = stored_node.node {
 				let child_idx = keys.get_child_idx(searched_key);
 				node_queue.push_front(children[child_idx]);
 			}
@@ -178,7 +215,7 @@ where
 	{
 		if let Some(root_id) = self.state.root {
 			let root = StoredNode::<BK>::read(tx, self.keys.get_node_key(root_id)).await?;
-			if root.is_full(self.state.order * 2) {
+			if root.size < self.state.order * 2 {
 				let new_root_id = self.new_node_id();
 				let new_root_key = self.keys.get_node_key(new_root_id);
 				let new_root_node = Node::Internal(BK::default(), vec![root_id]);
@@ -226,7 +263,7 @@ where
 					let child_idx = keys.get_child_idx(&key);
 					let child_key = self.keys.get_node_key(children[child_idx]);
 					let child_node = StoredNode::<BK>::read(tx, child_key).await?;
-					let child_node = if child_node.is_full(self.state.order * 2) {
+					let child_node = if child_node.size >= self.node_full_size {
 						let split_result = self
 							.split_child::<BK>(tx, node.key, node.node, child_idx, child_node)
 							.await?;
@@ -321,47 +358,82 @@ where
 	pub(super) async fn delete<BK>(
 		&mut self,
 		tx: &mut Transaction,
-		deleted_key: &Key,
+		key_to_delete: Key,
 	) -> Result<Option<Payload>, Error>
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
-		let mut node_queue = VecDeque::new();
-		if let Some(node_id) = self.state.root {
-			node_queue.push_front(node_id);
-		}
-		while let Some(node_id) = node_queue.pop_front() {
-			let stored_node = StoredNode::<BK>::read(tx, self.keys.get_node_key(node_id)).await?;
-			let mut node = stored_node.node;
-			let payload = node.keys_mut().remove(deleted_key);
-			if let Some(payload) = payload {
-				// match node.node {
-				// 	Node::Internal(_, _) => {}
-				// 	Node::Leaf(keys) => {}
-				// }
-				// TODO - Not done yet, we tree would become unbalanced
-				StoredNode::<BK>::write(tx, stored_node.key, node).await?;
-				self.updated = true;
-				return Ok(Some(payload));
+		if let Some((stored_node, deleted_payload)) =
+			self.locate_key_in_node(tx, &key_to_delete).await?
+		{
+			let mut next_node = Some((key_to_delete, deleted_payload, stored_node));
+			while let Some((key_to_delete, payload_to_delete, stored_node)) = next_node.take() {
+				let mut node: Node<BK> = stored_node.node;
+				match &mut node {
+					Node::Internal(keys, children) => {
+						let left_idx = keys.get_child_idx(&key_to_delete);
+						let left_id = children[left_idx];
+						let mut left_node =
+							StoredNode::<BK>::read(tx, self.keys.get_node_key(left_id)).await?;
+						if left_node.size() >= self.state.order {
+							// CLRS: 2a
+							if let Some((key_prim, payload_prim)) =
+								left_node.node.keys().get_last_key()
+							{
+								keys.remove(&key_to_delete);
+								keys.insert(key_prim.clone(), payload_prim);
+								let stored_node =
+									StoredNode::write(tx, stored_node.key, node).await?;
+								next_node.replace((key_prim, payload_prim, stored_node));
+							}
+						} else {
+							let right_idx = left_idx + 1;
+							let right_id = children[right_idx];
+							let right_node =
+								StoredNode::<BK>::read(tx, self.keys.get_node_key(right_id))
+									.await?;
+							if right_node.size >= self.state.order {
+								// CLRS: 2b
+								if let Some((key_prim, payload_prim)) =
+									left_node.node.keys().get_first_key()
+								{
+									keys.remove(&key_to_delete);
+									keys.insert(key_prim.clone(), payload_prim);
+									let stored_node =
+										StoredNode::write(tx, stored_node.key, node).await?;
+									next_node.replace((key_prim, payload_prim, stored_node));
+									self.updated = true;
+								}
+							} else {
+								// CLRS: 2c
+								// Merge children
+								left_node.node.append(
+									key_to_delete.clone(),
+									deleted_payload,
+									right_node.node,
+								)?;
+								let left_node =
+									StoredNode::<BK>::write(tx, left_node.key, left_node.node)
+										.await?;
+								keys.remove(&key_to_delete);
+								children.remove(right_idx);
+								StoredNode::<BK>::write(tx, stored_node.key, node).await?;
+								next_node = Some((key_to_delete, payload_to_delete, left_node));
+								self.updated = true;
+							}
+						}
+					}
+					Node::Leaf(keys) => {
+						keys.remove(&key_to_delete);
+						StoredNode::<BK>::write(tx, stored_node.key, node).await?;
+						self.updated = true;
+					}
+				}
 			}
-			if let Node::Internal(keys, children) = node {
-				let child_idx = keys.get_child_idx(deleted_key);
-				node_queue.push_front(children[child_idx]);
-			}
+			Ok(Some(deleted_payload))
+		} else {
+			Ok(None)
 		}
-		Ok(None)
-	}
-
-	async fn _tree_delete<BK>(
-		&mut self,
-		_tx: &mut Transaction,
-		_key: Key,
-		_node: StoredNode<BK>,
-	) -> Result<Option<Payload>, Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-	{
-		todo!()
 	}
 
 	pub(super) async fn debug<F, BK>(&self, tx: &mut Transaction, to_string: F) -> Result<(), Error>
@@ -455,14 +527,14 @@ where
 		let size = val.len();
 		tx.set(key.clone(), val).await?;
 		Ok(Self {
+			node,
 			key,
 			size,
-			node,
 		})
 	}
 
-	fn is_full(&self, full_size: usize) -> bool {
-		self.size >= full_size
+	fn size(&self) -> usize {
+		self.size
 	}
 }
 

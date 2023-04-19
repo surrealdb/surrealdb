@@ -33,9 +33,12 @@ pub(super) trait BKeys: Display + Sized {
 	where
 		V: KeyVisitor + Send;
 	fn insert(&mut self, key: Key, payload: Payload);
+	fn append(&mut self, keys: Self);
 	fn remove(&mut self, key: &Key) -> Option<Payload>;
 	fn split_keys(&self) -> SplitKeys<Self>;
 	fn get_child_idx(&self, searched_key: &Key) -> usize;
+	fn get_first_key(&self) -> Option<(Key, Payload)>;
+	fn get_last_key(&self) -> Option<(Key, Payload)>;
 	fn compile(&mut self) {}
 	fn debug<F>(&self, to_string: F) -> Result<(), Error>
 	where
@@ -105,6 +108,14 @@ impl BKeys for FstKeys {
 		self.additions.insert(key, payload);
 	}
 
+	fn append(&mut self, mut keys: Self) {
+		keys.compile();
+		let mut s = keys.map.stream();
+		while let Some((key, payload)) = s.next() {
+			self.insert(key.to_vec(), payload);
+		}
+	}
+
 	fn remove(&mut self, key: &Key) -> Option<Payload> {
 		self.get(key).map(|payload| {
 			self.additions.remove(key);
@@ -142,15 +153,28 @@ impl BKeys for FstKeys {
 
 	fn get_child_idx(&self, searched_key: &Key) -> usize {
 		let searched_key = searched_key.as_slice();
-		let mut stream = self.map.keys().into_stream();
+		let mut s = self.map.keys().into_stream();
 		let mut child_idx = 0;
-		while let Some(key) = stream.next() {
+		while let Some(key) = s.next() {
 			if searched_key.le(key) {
 				break;
 			}
 			child_idx += 1;
 		}
 		child_idx
+	}
+
+	fn get_first_key(&self) -> Option<(Key, Payload)> {
+		self.map.stream().next().map(|(k, p)| (k.to_vec(), p))
+	}
+
+	fn get_last_key(&self) -> Option<(Key, Payload)> {
+		let mut last = None;
+		let mut s = self.map.stream();
+		while let Some((k, p)) = s.next() {
+			last = Some((k.to_vec(), p));
+		}
+		last
 	}
 
 	/// Rebuilt the FST by incorporating the changes (additions and deletions)
@@ -394,6 +418,12 @@ impl BKeys for TrieKeys {
 		self.keys.insert(key, payload);
 	}
 
+	fn append(&mut self, keys: Self) {
+		for (k, p) in keys.keys.iter() {
+			self.insert(k.clone(), *p);
+		}
+	}
+
 	fn remove(&mut self, key: &Key) -> Option<Payload> {
 		self.keys.remove(key)
 	}
@@ -434,6 +464,14 @@ impl BKeys for TrieKeys {
 			child_idx += 1;
 		}
 		child_idx
+	}
+
+	fn get_first_key(&self) -> Option<(Key, Payload)> {
+		self.keys.iter().next().map(|(k, p)| (k.clone(), *p))
+	}
+
+	fn get_last_key(&self) -> Option<(Key, Payload)> {
+		self.keys.iter().last().map(|(k, p)| (k.clone(), *p))
 	}
 
 	fn debug<F>(&self, to_string: F) -> Result<(), Error>

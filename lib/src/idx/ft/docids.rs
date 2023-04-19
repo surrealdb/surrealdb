@@ -82,7 +82,7 @@ impl DocIds {
 		doc_key: &str,
 	) -> Result<Option<DocId>, Error> {
 		let doc_key: Key = doc_key.into();
-		if let Some(doc_id) = self.btree.delete::<TrieKeys>(tx, &doc_key).await? {
+		if let Some(doc_id) = self.btree.delete::<TrieKeys>(tx, doc_key).await? {
 			tx.del(self.index_key_base.new_bi_key(doc_id)).await?;
 			if let Some(available_ids) = &mut self.available_ids {
 				available_ids.insert(doc_id);
