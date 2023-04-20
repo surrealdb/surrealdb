@@ -49,18 +49,20 @@ impl Deref for Statements {
 	}
 }
 
-impl fmt::Display for Statements {
+impl IntoIterator for Statements {
+	type Item = Statement;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
+
+impl Display for Statements {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		Display::fmt(
 			&Fmt::one_line_separated(self.0.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};")))),
 			f,
 		)
-	}
-}
-
-impl Statements {
-	pub(crate) fn into_iter(self) -> std::vec::IntoIter<Statement> {
-		self.0.into_iter()
 	}
 }
 

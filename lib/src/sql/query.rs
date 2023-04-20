@@ -19,15 +19,17 @@ impl Deref for Query {
 	}
 }
 
-impl Display for Query {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(Pretty::from(f), "{}", &self.0)
+impl IntoIterator for Query {
+	type Item = Statement;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
 	}
 }
 
-impl Query {
-	pub(crate) fn into_iter(self) -> std::vec::IntoIter<Statement> {
-		self.0.into_iter()
+impl Display for Query {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(Pretty::from(f), "{}", &self.0)
 	}
 }
 

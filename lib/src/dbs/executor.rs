@@ -142,9 +142,8 @@ impl<'a> Executor<'a> {
 			}
 			// Get the statement start time
 			let now = Instant::now();
-			// Store whether this statement's output
-			// should override all previous output.
-			let is_output = matches!(stm, Statement::Output(_));
+			// Check if this is a RETURN statement
+			let clr = matches!(stm, Statement::Output(_));
 			// Process a single statement
 			let res = match stm {
 				// Specify runtime options
@@ -153,8 +152,9 @@ impl<'a> Executor<'a> {
 					opt.needs(Level::Db)?;
 					// Allowed to run?
 					opt.check(Level::Db)?;
-					// Process the option
+					// Convert to uppercase
 					stm.name.0.make_ascii_uppercase();
+					// Process the option
 					opt = match stm.name.0.as_str() {
 						"FIELDS" => opt.fields(stm.what),
 						"EVENTS" => opt.events(stm.what),
@@ -235,13 +235,14 @@ impl<'a> Executor<'a> {
 								false => stm.compute(&ctx, &opt, &self.txn(), None).await,
 								// The user tried to set a protected variable
 								true => Err(Error::InvalidParam {
-									// Moving the name string is ok since the following error handling doesn't care about it.
+									// Move the parameter name, as we no longer need it
 									name: std::mem::take(&mut stm.name),
 								}),
 							};
 							// Check the statement
 							match res {
 								Ok(val) => {
+									// Check if writeable
 									let writeable = stm.writeable();
 									// Set the parameter
 									ctx.add_value(stm.name, val);
@@ -308,7 +309,6 @@ impl<'a> Executor<'a> {
 					}
 				},
 			};
-
 			// Produce the response
 			let res = Response {
 				// Get the statement end time
@@ -322,7 +322,7 @@ impl<'a> Executor<'a> {
 			};
 			// Output the response
 			if self.txn.is_some() {
-				if is_output {
+				if clr {
 					buf.clear();
 				}
 				buf.push(res);
