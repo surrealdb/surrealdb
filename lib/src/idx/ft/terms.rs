@@ -76,11 +76,6 @@ impl Terms {
 		self.btree.statistics::<FstKeys>(tx).await
 	}
 
-	pub(super) async fn debug(&self, tx: &mut Transaction) -> Result<(), Error> {
-		debug!("TERMS {:?}", self.state_key);
-		self.btree.debug::<_, FstKeys>(tx, |k| Ok(String::from_utf8(k)?)).await
-	}
-
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
 		if self.updated || self.btree.is_updated() {
 			let state = State {

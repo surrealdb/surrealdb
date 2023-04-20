@@ -211,9 +211,6 @@ impl FtIndex {
 					self.bm25.clone(),
 				);
 				postings.collect_postings(tx, term_id, &mut scorer).await?;
-				// TODO Remove the following two debug lines
-				terms.debug(tx).await?;
-				postings.debug(tx).await?;
 			}
 		}
 		Ok(())

@@ -25,13 +25,13 @@ where
 {
 	keys: K,
 	state: State,
-	node_full_size: usize,
+	full_size: usize,
 	updated: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct State {
-	order: usize,
+	minimum_degree: usize,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 }
@@ -39,9 +39,10 @@ pub(super) struct State {
 impl SerdeState for State {}
 
 impl State {
-	pub(super) fn new(order: usize) -> Self {
+	pub(super) fn new(minimum_degree: usize) -> Self {
+		assert!(minimum_degree >= 2, "Minimum degree should be >= 2");
 		Self {
-			order,
+			minimum_degree,
 			root: None,
 			next_node_id: 0,
 		}
@@ -127,7 +128,7 @@ where
 	pub(super) fn new(keys: K, state: State) -> Self {
 		Self {
 			keys,
-			node_full_size: state.order * 2,
+			full_size: state.minimum_degree * 2 - 1,
 			state,
 			updated: false,
 		}
@@ -215,7 +216,7 @@ where
 	{
 		if let Some(root_id) = self.state.root {
 			let root = StoredNode::<BK>::read(tx, self.keys.get_node_key(root_id)).await?;
-			if root.size < self.state.order * 2 {
+			if root.node.keys().len() == self.full_size {
 				let new_root_id = self.new_node_id();
 				let new_root_key = self.keys.get_node_key(new_root_id);
 				let new_root_node = Node::Internal(BK::default(), vec![root_id]);
@@ -263,7 +264,7 @@ where
 					let child_idx = keys.get_child_idx(&key);
 					let child_key = self.keys.get_node_key(children[child_idx]);
 					let child_node = StoredNode::<BK>::read(tx, child_key).await?;
-					let child_node = if child_node.size >= self.node_full_size {
+					let child_node = if child_node.node.keys().len() == self.full_size {
 						let split_result = self
 							.split_child::<BK>(tx, node.key, node.node, child_idx, child_node)
 							.await?;
@@ -375,8 +376,8 @@ where
 						let left_id = children[left_idx];
 						let mut left_node =
 							StoredNode::<BK>::read(tx, self.keys.get_node_key(left_id)).await?;
-						if left_node.size() >= self.state.order {
-							// CLRS: 2a
+						if left_node.node.keys().len() >= self.state.minimum_degree {
+							// CLRS: 2a -> left_node is named `y` in the book
 							if let Some((key_prim, payload_prim)) =
 								left_node.node.keys().get_last_key()
 							{
@@ -392,8 +393,8 @@ where
 							let right_node =
 								StoredNode::<BK>::read(tx, self.keys.get_node_key(right_id))
 									.await?;
-							if right_node.size >= self.state.order {
-								// CLRS: 2b
+							if right_node.node.keys().len() >= self.state.minimum_degree {
+								// CLRS: 2b -> right_node is name `z` in the book
 								if let Some((key_prim, payload_prim)) =
 									left_node.node.keys().get_first_key()
 								{
@@ -432,32 +433,38 @@ where
 			}
 			Ok(Some(deleted_payload))
 		} else {
-			Ok(None)
+			// CLRS 3
+			panic!("CLRS3")
 		}
 	}
 
-	pub(super) async fn debug<F, BK>(&self, tx: &mut Transaction, to_string: F) -> Result<(), Error>
+	/// This is for debugging
+	async fn inspect_nodes<BK, F>(
+		&self,
+		tx: &mut Transaction,
+		inspect_func: F,
+	) -> Result<usize, Error>
 	where
-		F: Fn(Key) -> Result<String, Error>,
+		F: Fn(usize, usize, NodeId, StoredNode<BK>),
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		let mut node_queue = VecDeque::new();
 		if let Some(node_id) = self.state.root {
-			node_queue.push_front((node_id, 0));
+			node_queue.push_front((node_id, 1));
 		}
+		let mut count = 0;
 		while let Some((node_id, depth)) = node_queue.pop_front() {
-			let node = StoredNode::<BK>::read(tx, self.keys.get_node_key(node_id)).await?.node;
-			debug!("Node: {} - depth: {} -  keys: ", node_id, depth);
-			node.keys().debug(|k| to_string(k))?;
-			if let Node::Internal(_, children) = node {
-				debug!("children: {:?}", children);
+			let stored_node = StoredNode::<BK>::read(tx, self.keys.get_node_key(node_id)).await?;
+			if let Node::Internal(_, children) = &stored_node.node {
 				let depth = depth + 1;
-				for child_id in &children {
-					node_queue.push_front((*child_id, depth));
+				for child_id in children {
+					node_queue.push_back((*child_id, depth));
 				}
 			}
+			inspect_func(count, depth, node_id, stored_node);
+			count += 1;
 		}
-		Ok(())
+		Ok(count)
 	}
 
 	pub(super) async fn statistics<BK>(&self, tx: &mut Transaction) -> Result<Statistics, Error>
@@ -528,13 +535,9 @@ where
 		tx.set(key.clone(), val).await?;
 		Ok(Self {
 			node,
-			key,
 			size,
+			key,
 		})
-	}
-
-	fn size(&self) -> usize {
-		self.size
 	}
 }
 
@@ -564,10 +567,10 @@ mod tests {
 
 	#[test]
 	fn test_btree_state_serde() {
-		let s = State::new(75);
+		let s = State::new(3);
 		let val = s.try_to_val().unwrap();
 		let s: State = State::try_from_val(val).unwrap();
-		assert_eq!(s.order, 75);
+		assert_eq!(s.minimum_degree, 3);
 		assert_eq!(s.root, None);
 		assert_eq!(s.next_node_id, 0);
 	}
@@ -626,7 +629,6 @@ mod tests {
 				total_size: 1042,
 			}
 		);
-		t.debug::<_, FstKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -646,7 +648,6 @@ mod tests {
 				total_size: 1615,
 			}
 		);
-		t.debug::<_, TrieKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -662,7 +663,6 @@ mod tests {
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		let s = t.statistics::<FstKeys>(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 100);
-		t.debug::<_, FstKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -679,7 +679,6 @@ mod tests {
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 100);
-		t.debug::<_, TrieKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 	}
 
 	#[test(tokio::test)]
@@ -744,7 +743,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_read_world_insertions_small_order() {
-		let s = test_btree_read_world_insertions::<FstKeys>(70).await;
+		let s = test_btree_read_world_insertions::<FstKeys>(3).await;
 		assert_eq!(
 			s,
 			Statistics {
@@ -758,7 +757,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_fst_keys_read_world_insertions_large_order() {
-		let s = test_btree_read_world_insertions::<FstKeys>(1000).await;
+		let s = test_btree_read_world_insertions::<FstKeys>(100).await;
 		assert_eq!(
 			s,
 			Statistics {
@@ -772,7 +771,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_read_world_insertions_small_order() {
-		let s = test_btree_read_world_insertions::<TrieKeys>(70).await;
+		let s = test_btree_read_world_insertions::<TrieKeys>(3).await;
 		assert_eq!(
 			s,
 			Statistics {
@@ -786,7 +785,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_read_world_insertions_large_order() {
-		let s = test_btree_read_world_insertions::<TrieKeys>(1000).await;
+		let s = test_btree_read_world_insertions::<TrieKeys>(100).await;
 		assert_eq!(
 			s,
 			Statistics {
@@ -836,14 +835,16 @@ mod tests {
 				("hhhh", 0),
 			];
 			let ds = Datastore::new("memory").await.unwrap();
-			let (t, s) = test_btree_search_by_prefix(&ds, 45, true, samples).await;
+			let (t, s) = test_btree_search_by_prefix(&ds, 3, true, samples).await;
 
 			// For this test to be relevant, we expect the BTree to match the following properties:
-			assert!(s.max_depth > 1, "Tree depth should be > 1");
-			assert!(s.nodes_count > 2, "The number of node should be > 2");
+			assert_eq!(s.max_depth, 2, "Tree depth should be 2");
+			assert!(
+				s.nodes_count > 2 && s.nodes_count < 5,
+				"The number of node should be between 3 and 4 inclusive"
+			);
 
 			let mut tx = ds.transaction(false, false).await.unwrap();
-			t.debug::<_, TrieKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 
 			// We should find all the keys prefixed with "bb"
 			let mut visitor = HashVisitor::default();
@@ -899,14 +900,16 @@ mod tests {
 			];
 
 			let ds = Datastore::new("memory").await.unwrap();
-			let (t, s) = test_btree_search_by_prefix(&ds, 75, true, samples).await;
+			let (t, s) = test_btree_search_by_prefix(&ds, 3, true, samples).await;
 
 			// For this test to be relevant, we expect the BTree to match the following properties:
-			assert!(s.max_depth > 1, "Tree depth should be > 1");
-			assert!(s.nodes_count > 2, "The number of node should be > 2");
+			assert_eq!(s.max_depth, 2, "Tree depth should be 2");
+			assert!(
+				s.nodes_count > 2 && s.nodes_count < 5,
+				"The number of node should be > 2 and < 5"
+			);
 
 			let mut tx = ds.transaction(false, false).await.unwrap();
-			t.debug::<_, TrieKeys>(&mut tx, |k| Ok(String::from_utf8(k)?)).await.unwrap();
 
 			for (prefix, count) in vec![
 				("the", 6),
@@ -928,6 +931,202 @@ mod tests {
 					.unwrap();
 				visitor.check_len(count, prefix);
 			}
+		}
+	}
+
+	// This is the examples from the chapter B-Trees in CLRS:
+	// https://en.wikipedia.org/wiki/Introduction_to_Algorithms
+	const CLRS_EXAMPLE: [(&str, Payload); 23] = [
+		("a", 1),
+		("c", 3),
+		("g", 7),
+		("j", 10),
+		("k", 11),
+		("m", 13),
+		("n", 14),
+		("o", 15),
+		("p", 16),
+		("t", 20),
+		("u", 21),
+		("x", 24),
+		("y", 25),
+		("z", 26),
+		("v", 22),
+		("d", 4),
+		("e", 5),
+		("r", 18),
+		("s", 19), // (a) Initial tree
+		("b", 2),  // (b) B inserted
+		("q", 17), // (c) Q inserted
+		("l", 12), // (d) L inserted
+		("f", 6),  // (e) F inserted
+	];
+
+	#[test(tokio::test)]
+	// This check node splitting. CLRS: Figure 18.7, page 498.
+	async fn clrs_insertion_test() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut t = BTree::new(TestKeyProvider {}, State::new(3));
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		for (key, payload) in CLRS_EXAMPLE {
+			t.insert::<TrieKeys>(&mut tx, key.into(), payload).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+
+		let mut tx = ds.transaction(false, false).await.unwrap();
+		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
+		assert_eq!(s.keys_count, 23);
+		assert_eq!(s.max_depth, 3);
+		assert_eq!(s.nodes_count, 10);
+
+		let nodes_count = t
+			.inspect_nodes::<TrieKeys, _>(&mut tx, |count, depth, node_id, node| match count {
+				0 => {
+					assert_eq!(depth, 1);
+					assert_eq!(node_id, 7);
+					check_is_internal_node(node.node, vec![("p", 16)], vec![1, 8]);
+				}
+				1 => {
+					assert_eq!(depth, 2);
+					assert_eq!(node_id, 1);
+					check_is_internal_node(
+						node.node,
+						vec![("c", 3), ("g", 7), ("m", 13)],
+						vec![0, 9, 2, 3],
+					);
+				}
+				2 => {
+					assert_eq!(depth, 2);
+					assert_eq!(node_id, 8);
+					check_is_internal_node(node.node, vec![("t", 20), ("x", 24)], vec![4, 6, 5]);
+				}
+				3 => {
+					assert_eq!(depth, 3);
+					assert_eq!(node_id, 0);
+					check_is_leaf_node(node.node, vec![("a", 1), ("b", 2)]);
+				}
+				4 => {
+					assert_eq!(depth, 3);
+					assert_eq!(node_id, 9);
+					check_is_leaf_node(node.node, vec![("d", 4), ("e", 5), ("f", 6)]);
+				}
+				5 => {
+					assert_eq!(depth, 3);
+					assert_eq!(node_id, 2);
+					check_is_leaf_node(node.node, vec![("j", 10), ("k", 11), ("l", 12)]);
+				}
+				6 => {
+					assert_eq!(depth, 3);
+					assert_eq!(node_id, 3);
+					check_is_leaf_node(node.node, vec![("n", 14), ("o", 15)]);
+				}
+				7 => {
+					assert_eq!(depth, 3);
+					assert_eq!(node_id, 4);
+					check_is_leaf_node(node.node, vec![("q", 17), ("r", 18), ("s", 19)]);
+				}
+				8 => {
+					assert_eq!(depth, 3);
+					assert_eq!(node_id, 6);
+					check_is_leaf_node(node.node, vec![("u", 21), ("v", 22)]);
+				}
+				9 => {
+					assert_eq!(depth, 3);
+					assert_eq!(node_id, 5);
+					check_is_leaf_node(node.node, vec![("y", 25), ("z", 26)]);
+				}
+				_ => assert!(false, "This node should not exist {}", count),
+			})
+			.await
+			.unwrap();
+		assert_eq!(nodes_count, 10);
+	}
+
+	#[test(tokio::test)]
+	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
+	async fn clrs_deletion_test() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut t = BTree::new(TestKeyProvider {}, State::new(3));
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		for (key, payload) in CLRS_EXAMPLE {
+			t.insert::<TrieKeys>(&mut tx, key.into(), payload).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		for (key, payload) in [("f", 6) /* ("m", 13) */] {
+			assert_eq!(t.delete::<TrieKeys>(&mut tx, key.into()).await.unwrap(), Some(payload));
+		}
+		tx.commit().await.unwrap();
+
+		let mut tx = ds.transaction(false, false).await.unwrap();
+		// let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
+		//assert_eq!(s.keys_count, 23);
+		//assert_eq!(s.max_depth, 3);
+		// assert_eq!(s.nodes_count, 10);
+
+		let nodes_count = t
+			.inspect_nodes::<TrieKeys, _>(&mut tx, |_count, depth, node_id, node| {
+				debug!("{} -> {}", depth, node_id);
+				node.node.keys().debug(|k| Ok(String::from_utf8(k)?)).unwrap();
+				// match count {
+				// 	0 => {
+				// 		assert_eq!(depth, 1);
+				// 		// assert_eq!(node_id, 44);
+				// 		node.node.keys().debug(|k| Ok(String::from_utf8(k)?)).unwrap();
+				// 		check_is_internal_node(node.node, vec![("p", 16)], vec![]);
+				// 	}
+				// 	2 => {
+				// 		assert_eq!(depth, 2);
+				// 		assert_eq!(node_id, 2);
+				// 		check_is_leaf_node(node.node, vec![("a", 1), ("b", 2)]);
+				// 	}
+				// 	_ => assert!(false, "This node should not exist {}", count),
+				// }
+			})
+			.await
+			.unwrap();
+		assert_eq!(nodes_count, 10);
+	}
+
+	fn check_is_internal_node<BK>(
+		node: Node<BK>,
+		expected_keys: Vec<(&str, i32)>,
+		expected_children: Vec<NodeId>,
+	) where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		if let Node::Internal(keys, children) = node {
+			check_keys(keys, expected_keys);
+			assert_eq!(children, expected_children, "The children are not matching");
+		} else {
+			assert!(false, "An internal node was expected, we got a leaf node");
+		}
+	}
+
+	fn check_is_leaf_node<BK>(node: Node<BK>, expected_keys: Vec<(&str, i32)>)
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		if let Node::Leaf(keys) = node {
+			check_keys(keys, expected_keys);
+		} else {
+			assert!(false, "An internal node was expected, we got a leaf node");
+		}
+	}
+
+	fn check_keys<BK>(keys: BK, expected_keys: Vec<(&str, i32)>)
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		assert_eq!(keys.len(), expected_keys.len(), "The number of keys does not match");
+		for (key, payload) in expected_keys {
+			assert_eq!(
+				keys.get(&key.into()),
+				Some(payload as Payload),
+				"The key {} does not match",
+				key
+			);
 		}
 	}
 }

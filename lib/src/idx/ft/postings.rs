@@ -90,16 +90,6 @@ impl Postings {
 		self.btree.statistics::<TrieKeys>(tx).await
 	}
 
-	pub(super) async fn debug(&self, tx: &mut Transaction) -> Result<(), Error> {
-		debug!("POSTINGS {:?}", self.index_key_base);
-		self.btree
-			.debug::<_, TrieKeys>(tx, |k| {
-				let k: Bf = k.into();
-				Ok(format!("({}-{})", k.term_id, k.doc_id))
-			})
-			.await
-	}
-
 	pub(super) async fn finish(self, tx: &mut Transaction) -> Result<(), Error> {
 		if self.btree.is_updated() {
 			tx.set(self.state_key, self.btree.get_state().try_to_val()?).await?;
@@ -185,7 +175,6 @@ mod tests {
 		p.update_posting(&mut tx, 1, 2, 3).await.unwrap();
 
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 1);
-		p.debug(&mut tx).await.unwrap();
 		p.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 	}
