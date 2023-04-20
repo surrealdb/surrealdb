@@ -30,8 +30,8 @@ impl<'a> Document<'a> {
 			return Ok(());
 		}
 		// Clone transaction
-		let run = txn.clone();
-		// Claim transaction
+		let run = txn.clone(); // TODO use this as reusable tx
+					   // Claim transaction
 		let mut run = run.lock().await;
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();

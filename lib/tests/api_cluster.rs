@@ -52,33 +52,35 @@ struct AuthParams<'a> {
 
 #[cfg(feature = "protocol-ws")]
 mod cluster {
-	// use super::*;
-	// use surrealdb::engine::remote::ws::Client;
-	// use surrealdb::engine::remote::ws::Ws;
-	//
-	// async fn new_db() -> Surreal<Client> {
-	// 	let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
-	// 	db.signin(Root {
-	// 		username: ROOT_USER,
-	// 		password: ROOT_PASS,
-	// 	})
-	// 	.await
-	// 	.unwrap();
-	// 	db
-	// }
-	//
-	// async fn new_db_replica() -> Surreal<Client> {
-	// 	let db = Surreal::new::<Ws>("127.0.0.1:8001").await.unwrap();
-	// 	db.signin(Root {
-	// 		username: ROOT_USER,
-	// 		password: ROOT_PASS,
-	// 	})
-	// 	.await
-	// 	.unwrap();
-	// 	db
-	// }
-	//
-	// include!("api/mod.rs");
-	// // include!("api/auth.rs");
-	// include!("api/cluster.rs");
+	use super::*;
+	use surrealdb::engine::remote::ws::Client;
+	use surrealdb::engine::remote::ws::Ws;
+
+	async fn new_db() -> Surreal<Client> {
+		let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER,
+			password: ROOT_PASS,
+		})
+		.await
+		.unwrap();
+		db
+	}
+
+	async fn new_db_replica() -> Surreal<Client> {
+		// TODO: the below address should point at a different surrealdb instance.
+		// The reason it currently doesn't is because there is a weird bug with TiKV
+		// We can still partially validate the behaviour is correct.
+		let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER,
+			password: ROOT_PASS,
+		})
+		.await
+		.unwrap();
+		db
+	}
+
+	include!("api/mod.rs");
+	include!("api/cluster.rs");
 }

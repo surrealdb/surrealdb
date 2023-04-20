@@ -3,6 +3,8 @@
 
 use tokio::fs::remove_file;
 
+struct InfoStruct {}
+
 #[tokio::test]
 async fn nodes_register() {
 	let db = new_db().await;
@@ -10,15 +12,7 @@ async fn nodes_register() {
 	let db_name = Ulid::new().to_string();
 	db.use_ns(NS).use_db(&db_name).await.unwrap();
 	db2.use_ns(NS).use_db(&db_name).await.unwrap();
-	for i in 0..10 {
-		let _: RecordId = db
-			.create("user")
-			.content(Record {
-				name: &format!("User {i}"),
-			})
-			.await
-			.unwrap();
-	}
-	let results: Vec<RecordBuf> = db2.select("user").await.unwrap();
-	assert_eq!(results.len(), 10);
+	let result: Option<Info> =
+		db.query("INFO FOR KV").await.unwrap().check().unwrap().take("").unwrap();
+	assert_eq!(result, "testing");
 }
