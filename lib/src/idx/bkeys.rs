@@ -36,6 +36,7 @@ pub(super) trait BKeys: Display + Sized {
 	fn append(&mut self, keys: Self);
 	fn remove(&mut self, key: &Key) -> Option<Payload>;
 	fn split_keys(&self) -> SplitKeys<Self>;
+	fn get_key(&self, idx: usize) -> Option<Key>;
 	fn get_child_idx(&self, searched_key: &Key) -> usize;
 	fn get_first_key(&self) -> Option<(Key, Payload)>;
 	fn get_last_key(&self) -> Option<(Key, Payload)>;
@@ -149,6 +150,17 @@ impl BKeys for FstKeys {
 			median_key,
 			median_payload,
 		}
+	}
+
+	fn get_key(&self, mut idx: usize) -> Option<Key> {
+		let mut s = self.map.keys().into_stream();
+		while let Some(key) = s.next() {
+			if idx == 0 {
+				return Some(key.to_vec());
+			}
+			idx -= 1;
+		}
+		None
 	}
 
 	fn get_child_idx(&self, searched_key: &Key) -> usize {
@@ -453,6 +465,16 @@ impl BKeys for TrieKeys {
 			median_key,
 			median_payload,
 		}
+	}
+
+	fn get_key(&self, mut idx: usize) -> Option<Key> {
+		for key in self.keys.keys() {
+			if idx == 0 {
+				return Some(key.clone());
+			}
+			idx -= 1;
+		}
+		None
 	}
 
 	fn get_child_idx(&self, searched_key: &Key) -> usize {
