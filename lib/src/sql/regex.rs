@@ -78,7 +78,7 @@ impl Debug for Regex {
 
 impl Display for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0, f)
+		write!(f, "/{}/", &self.0)
 	}
 }
 
