@@ -12,7 +12,6 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
 
@@ -23,7 +22,7 @@ pub struct Regex(pub(super) regex::Regex);
 
 impl PartialEq for Regex {
 	fn eq(&self, other: &Self) -> bool {
-		self.as_str().eq(other.as_str())
+		self.0.as_str().eq(other.0.as_str())
 	}
 }
 
@@ -31,7 +30,7 @@ impl Eq for Regex {}
 
 impl Ord for Regex {
 	fn cmp(&self, other: &Self) -> Ordering {
-		self.as_str().cmp(other.as_str())
+		self.0.as_str().cmp(other.0.as_str())
 	}
 }
 
@@ -43,7 +42,7 @@ impl PartialOrd for Regex {
 
 impl Hash for Regex {
 	fn hash<H: Hasher>(&self, state: &mut H) {
-		self.as_str().hash(state);
+		self.0.as_str().hash(state);
 	}
 }
 
@@ -55,16 +54,16 @@ impl FromStr for Regex {
 	}
 }
 
-impl Deref for Regex {
-	type Target = regex::Regex;
-	fn deref(&self) -> &Self::Target {
+impl Regex {
+	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/' delimiters.
+	pub fn regex(&self) -> &regex::Regex {
 		&self.0
 	}
 }
 
 impl Debug for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Debug::fmt(&self.0, f)
+		Display::fmt(self, f)
 	}
 }
 
@@ -80,7 +79,7 @@ impl Serialize for Regex {
 		S: Serializer,
 	{
 		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, self.as_str())
+			serializer.serialize_newtype_struct(TOKEN, self.0.as_str())
 		} else {
 			serializer.serialize_none()
 		}

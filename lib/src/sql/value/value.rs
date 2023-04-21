@@ -1179,13 +1179,13 @@ impl Value {
 			Value::False => other.is_false(),
 			Value::Thing(v) => match other {
 				Value::Thing(w) => v == w,
-				Value::Regex(w) => w.is_match(v.to_string().as_str()),
+				Value::Regex(w) => w.regex().is_match(v.to_string().as_str()),
 				_ => false,
 			},
 			Value::Regex(v) => match other {
 				Value::Regex(w) => v == w,
-				Value::Number(w) => v.is_match(w.to_string().as_str()),
-				Value::Strand(w) => v.is_match(w.as_str()),
+				Value::Number(w) => v.regex().is_match(w.to_string().as_str()),
+				Value::Strand(w) => v.regex().is_match(w.as_str()),
 				_ => false,
 			},
 			Value::Uuid(v) => match other {
@@ -1202,13 +1202,13 @@ impl Value {
 			},
 			Value::Strand(v) => match other {
 				Value::Strand(w) => v == w,
-				Value::Regex(w) => w.is_match(v.as_str()),
+				Value::Regex(w) => w.regex().is_match(v.as_str()),
 				_ => v == &other.to_strand(),
 			},
 			Value::Number(v) => match other {
 				Value::Number(w) => v == w,
 				Value::Strand(_) => v == &other.to_number(),
-				Value::Regex(w) => w.is_match(v.to_string().as_str()),
+				Value::Regex(w) => w.regex().is_match(v.to_string().as_str()),
 				_ => false,
 			},
 			Value::Geometry(v) => match other {
@@ -1871,7 +1871,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
 		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
-		assert_eq!(24, std::mem::size_of::<crate::sql::regex::Regex>());
+		assert_eq!(16, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::function::Function>>());
