@@ -20,6 +20,21 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Regex";
 #[derive(Clone)]
 pub struct Regex(pub(super) regex::Regex);
 
+impl Regex {
+	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/' delimiters.
+	pub fn regex(&self) -> &regex::Regex {
+		&self.0
+	}
+}
+
+impl FromStr for Regex {
+	type Err = <regex::Regex as FromStr>::Err;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		regex::Regex::new(&s.replace("\\/", "/")).map(Self)
+	}
+}
+
 impl PartialEq for Regex {
 	fn eq(&self, other: &Self) -> bool {
 		self.0.as_str().eq(other.0.as_str())
@@ -43,21 +58,6 @@ impl PartialOrd for Regex {
 impl Hash for Regex {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		self.0.as_str().hash(state);
-	}
-}
-
-impl FromStr for Regex {
-	type Err = <regex::Regex as FromStr>::Err;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		regex::Regex::new(&s.replace("\\/", "/")).map(Self)
-	}
-}
-
-impl Regex {
-	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/' delimiters.
-	pub fn regex(&self) -> &regex::Regex {
-		&self.0
 	}
 }
 
