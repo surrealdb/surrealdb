@@ -86,28 +86,28 @@ impl Serialize for Regex {
 	}
 }
 
-pub struct RegexVisitor;
-
-impl<'de> Visitor<'de> for RegexVisitor {
-	type Value = Regex;
-
-	fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-		formatter.write_str("a regex str")
-	}
-
-	fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-	where
-		E: de::Error,
-	{
-		Regex::from_str(value).map_err(|_| de::Error::custom("invalid regex"))
-	}
-}
-
 impl<'de> Deserialize<'de> for Regex {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: Deserializer<'de>,
 	{
+		struct RegexVisitor;
+
+		impl<'de> Visitor<'de> for RegexVisitor {
+			type Value = Regex;
+
+			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+				formatter.write_str("a regex str")
+			}
+
+			fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+			where
+				E: de::Error,
+			{
+				Regex::from_str(value).map_err(|_| de::Error::custom("invalid regex"))
+			}
+		}
+
 		deserializer.deserialize_str(RegexVisitor)
 	}
 }
@@ -116,7 +116,7 @@ pub fn regex(i: &str) -> IResult<&str, Regex> {
 	let (i, _) = char('/')(i)?;
 	let (i, v) = escaped(is_not("\\/"), '\\', anychar)(i)?;
 	let (i, _) = char('/')(i)?;
-	let regex = Regex::from_str(v).map_err(|_| nom::Err::Error(crate::sql::Error::Parser(v)))?;
+	let regex = v.parse().map_err(|_| nom::Err::Error(crate::sql::Error::Parser(v)))?;
 	Ok((i, regex))
 }
 
@@ -132,7 +132,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("/test/", format!("{}", out));
-		assert_eq!(out, Regex::from_str("test").unwrap());
+		assert_eq!(out, "test".parse().unwrap());
 	}
 
 	#[test]
@@ -142,6 +142,6 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!(r"/(?i)test/[a-z]+/\s\d\w{1}.*/", format!("{}", out));
-		assert_eq!(out, Regex::from_str(r"(?i)test/[a-z]+/\s\d\w{1}.*").unwrap());
+		assert_eq!(out, r"(?i)test/[a-z]+/\s\d\w{1}.*".parse().unwrap());
 	}
 }

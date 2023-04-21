@@ -211,9 +211,9 @@ impl ser::Serializer for Serializer {
 			sql::future::TOKEN => Ok(Value::Future(Box::new(Future(Block(
 				value.serialize(ser::block::entry::vec::Serializer.wrap())?,
 			))))),
-			sql::regex::TOKEN => Ok(Value::Regex(
-				Regex::from_str(&value.serialize(ser::string::Serializer.wrap())?).unwrap(),
-			)),
+			sql::regex::TOKEN => {
+				Ok(Value::Regex(value.serialize(ser::string::Serializer.wrap())?.parse().unwrap()))
+			}
 			sql::table::TOKEN => {
 				Ok(Value::Table(Table(value.serialize(ser::string::Serializer.wrap())?)))
 			}
@@ -745,7 +745,7 @@ mod tests {
 
 	#[test]
 	fn regex() {
-		let regex = Regex::from_str("abc").unwrap();
+		let regex = "abc".parse().unwrap();
 		let value = to_value(&regex).unwrap();
 		let expected = Value::Regex(regex);
 		assert_eq!(value, expected);
