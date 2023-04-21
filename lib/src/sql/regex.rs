@@ -55,14 +55,6 @@ impl FromStr for Regex {
 	}
 }
 
-/*
-impl From<&str> for Regex {
-	fn from(r: &str) -> Self {
-		Self(r.replace("\\/", "/"))
-	}
-}
-*/
-
 impl Deref for Regex {
 	type Target = regex::Regex;
 	fn deref(&self) -> &Self::Target {
