@@ -4,7 +4,7 @@ use crate::sql::number::Number;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::{Regex, Strand};
+use crate::sql::Strand;
 
 pub fn bool((arg,): (Value,)) -> Result<Value, Error> {
 	Ok(arg.is_truthy().into())

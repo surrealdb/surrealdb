@@ -17,7 +17,6 @@ use crate::sql::Future;
 use crate::sql::Ident;
 use crate::sql::Idiom;
 use crate::sql::Param;
-use crate::sql::Regex;
 use crate::sql::Strand;
 use crate::sql::Table;
 use crate::sql::Uuid;
@@ -36,7 +35,6 @@ use serde::ser::Serialize;
 use serde::ser::SerializeMap as _;
 use serde::ser::SerializeSeq as _;
 use std::fmt::Display;
-use std::str::FromStr;
 use storekey::encode::Error as EncodeError;
 use vec::SerializeValueVec;
 
@@ -564,7 +562,6 @@ mod tests {
 	use crate::sql::*;
 	use ::serde::Serialize;
 	use std::ops::Bound;
-	use std::str::FromStr;
 
 	#[test]
 	fn none() {
