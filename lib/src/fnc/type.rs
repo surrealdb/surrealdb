@@ -4,7 +4,8 @@ use crate::sql::number::Number;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::Strand;
+use crate::sql::{Regex, Strand};
+use std::str::FromStr;
 
 pub fn bool((arg,): (Value,)) -> Result<Value, Error> {
 	Ok(arg.is_truthy().into())
@@ -66,10 +67,10 @@ pub fn point((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 }
 
 pub fn regex((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Strand(v) => Ok(Value::Regex(v.as_str().into())),
-		_ => Ok(Value::None),
-	}
+	Ok(match arg {
+		Value::Strand(v) => Regex::from_str(v.as_str()).map(Value::Regex).unwrap_or(Value::None),
+		_ => Value::None,
+	})
 }
 
 pub fn string((arg,): (Strand,)) -> Result<Value, Error> {

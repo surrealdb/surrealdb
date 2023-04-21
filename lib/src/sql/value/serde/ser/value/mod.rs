@@ -36,6 +36,7 @@ use serde::ser::Serialize;
 use serde::ser::SerializeMap as _;
 use serde::ser::SerializeSeq as _;
 use std::fmt::Display;
+use std::str::FromStr;
 use storekey::encode::Error as EncodeError;
 use vec::SerializeValueVec;
 
@@ -210,9 +211,9 @@ impl ser::Serializer for Serializer {
 			sql::future::TOKEN => Ok(Value::Future(Box::new(Future(Block(
 				value.serialize(ser::block::entry::vec::Serializer.wrap())?,
 			))))),
-			sql::regex::TOKEN => {
-				Ok(Value::Regex(Regex(value.serialize(ser::string::Serializer.wrap())?)))
-			}
+			sql::regex::TOKEN => Ok(Value::Regex(
+				Regex::from_str(&value.serialize(ser::string::Serializer.wrap())?).unwrap(),
+			)),
 			sql::table::TOKEN => {
 				Ok(Value::Table(Table(value.serialize(ser::string::Serializer.wrap())?)))
 			}
@@ -563,6 +564,7 @@ mod tests {
 	use crate::sql::*;
 	use ::serde::Serialize;
 	use std::ops::Bound;
+	use std::str::FromStr;
 
 	#[test]
 	fn none() {
@@ -743,7 +745,7 @@ mod tests {
 
 	#[test]
 	fn regex() {
-		let regex = Regex::default();
+		let regex = Regex::from_str("abc").unwrap();
 		let value = to_value(&regex).unwrap();
 		let expected = Value::Regex(regex);
 		assert_eq!(value, expected);
