@@ -1337,6 +1337,16 @@ impl Value {
 		match self {
 			// Allow any number
 			Value::Number(v) => Ok(v),
+			// Attempt to convert a string value
+			Value::Strand(ref v) => match Number::from_str(v) {
+				// The string can be represented as a Float
+				Ok(v) => Ok(v),
+				// Ths string is not a float
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "number".into(),
+				}),
+			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,

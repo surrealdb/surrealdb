@@ -17,6 +17,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ops;
 use std::ops::Deref;
 use std::str;
+use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
@@ -38,6 +39,13 @@ impl From<DateTime<Utc>> for Datetime {
 impl From<Datetime> for DateTime<Utc> {
 	fn from(x: Datetime) -> Self {
 		x.0
+	}
+}
+
+impl FromStr for Datetime {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
 	}
 }
 

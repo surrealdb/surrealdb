@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
+use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
 
@@ -28,6 +29,13 @@ impl From<uuid::Uuid> for Uuid {
 impl From<Uuid> for uuid::Uuid {
 	fn from(s: Uuid) -> Self {
 		s.0
+	}
+}
+
+impl FromStr for Uuid {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
 	}
 }
 

@@ -126,6 +126,13 @@ impl From<BigDecimal> for Number {
 	}
 }
 
+impl FromStr for Number {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
 impl TryFrom<String> for Number {
 	type Error = ();
 	fn try_from(v: String) -> Result<Self, Self::Error> {

@@ -12,6 +12,7 @@ use std::fmt;
 use std::iter::Sum;
 use std::ops;
 use std::ops::Deref;
+use std::str::FromStr;
 use std::time;
 
 static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
@@ -35,6 +36,13 @@ impl From<time::Duration> for Duration {
 impl From<Duration> for time::Duration {
 	fn from(s: Duration) -> Self {
 		s.0
+	}
+}
+
+impl FromStr for Duration {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
 	}
 }
 
