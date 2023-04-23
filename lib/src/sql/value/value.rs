@@ -942,15 +942,6 @@ impl Value {
 	// Simple conversion of value
 	// -----------------------------------
 
-	/// Convert this Value into an i64
-	#[deprecated(since = "1.0.0-beta.9")]
-	pub fn as_int(self) -> i64 {
-		match self {
-			Value::Number(v) => v.as_int(),
-			_ => 0,
-		}
-	}
-
 	/// Convert this Value into a String
 	pub fn as_string(self) -> String {
 		match self {
