@@ -15,6 +15,7 @@ use crate::api::ExtraFeatures;
 use crate::api::Response;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::error::Db as DbError;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
@@ -50,69 +51,113 @@ impl Connection for Any {
 			let mut features = HashSet::new();
 
 			match address.endpoint.scheme() {
-				#[cfg(feature = "kv-fdb")]
 				"fdb" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
+					#[cfg(feature = "kv-fdb")]
+					{
+						engine::local::wasm::router(address, conn_tx, route_rx);
+						if let Err(error) = conn_rx.into_recv_async().await? {
+							return Err(error);
+						}
 					}
+
+					#[cfg(not(feature = "kv-fdb"))]
+					return Err(
+						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
+					);
 				}
 
-				#[cfg(feature = "kv-indxdb")]
 				"indxdb" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
+					#[cfg(feature = "kv-indxdb")]
+					{
+						engine::local::wasm::router(address, conn_tx, route_rx);
+						if let Err(error) = conn_rx.into_recv_async().await? {
+							return Err(error);
+						}
 					}
+
+					#[cfg(not(feature = "kv-indxdb"))]
+					return Err(
+						DbError::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
+					);
 				}
 
-				#[cfg(feature = "kv-mem")]
 				"mem" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
+					#[cfg(feature = "kv-mem")]
+					{
+						engine::local::wasm::router(address, conn_tx, route_rx);
+						if let Err(error) = conn_rx.into_recv_async().await? {
+							return Err(error);
+						}
 					}
+
+					#[cfg(not(feature = "kv-mem"))]
+					return Err(
+						DbError::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
+					);
 				}
 
-				#[cfg(feature = "kv-rocksdb")]
-				"rocksdb" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
+				"file" | "rocksdb" => {
+					#[cfg(feature = "kv-rocksdb")]
+					{
+						engine::local::wasm::router(address, conn_tx, route_rx);
+						if let Err(error) = conn_rx.into_recv_async().await? {
+							return Err(error);
+						}
 					}
+
+					#[cfg(not(feature = "kv-rocksdb"))]
+					return Err(DbError::Ds(
+						"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+					)
+					.into());
 				}
 
-				#[cfg(feature = "kv-rocksdb")]
-				"file" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
-					}
-				}
-
-				#[cfg(feature = "kv-tikv")]
 				"tikv" => {
-					engine::local::wasm::router(address, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
+					#[cfg(feature = "kv-tikv")]
+					{
+						engine::local::wasm::router(address, conn_tx, route_rx);
+						if let Err(error) = conn_rx.into_recv_async().await? {
+							return Err(error);
+						}
 					}
+
+					#[cfg(not(feature = "kv-tikv"))]
+					return Err(
+						DbError::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()).into()
+					);
 				}
 
-				#[cfg(feature = "protocol-http")]
 				"http" | "https" => {
-					features.insert(ExtraFeatures::Auth);
-					engine::remote::http::wasm::router(address, conn_tx, route_rx);
+					#[cfg(feature = "protocol-http")]
+					{
+						features.insert(ExtraFeatures::Auth);
+						engine::remote::http::wasm::router(address, conn_tx, route_rx);
+					}
+
+					#[cfg(not(feature = "protocol-http"))]
+					return Err(DbError::Ds(
+						"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
+					)
+					.into());
 				}
 
-				#[cfg(feature = "protocol-ws")]
 				"ws" | "wss" => {
-					features.insert(ExtraFeatures::Auth);
-					let mut address = address;
-					address.endpoint = address.endpoint.join(engine::remote::ws::PATH)?;
-					engine::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
-					if let Err(error) = conn_rx.into_recv_async().await? {
-						return Err(error);
+					#[cfg(feature = "protocol-ws")]
+					{
+						features.insert(ExtraFeatures::Auth);
+						let mut address = address;
+						address.endpoint = address.endpoint.join(engine::remote::ws::PATH)?;
+						engine::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);
+						if let Err(error) = conn_rx.into_recv_async().await? {
+							return Err(error);
+						}
 					}
+
+					#[cfg(not(feature = "protocol-ws"))]
+					return Err(DbError::Ds(
+						"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
+					)
+					.into());
 				}
 
 				scheme => {
