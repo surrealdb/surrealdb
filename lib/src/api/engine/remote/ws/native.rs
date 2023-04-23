@@ -323,10 +323,10 @@ pub(crate) fn router(
 									Ok(option) => {
 										if let Some(response) = option {
 											trace!(target: LOG, "{response:?}");
-											if let Some(id) = response.id {
-												if let Some((method, sender)) =
-													routes.remove(&id.as_int())
-												{
+											if let Some(Ok(id)) =
+												response.id.map(Value::convert_to_i64)
+											{
+												if let Some((method, sender)) = routes.remove(&id) {
 													let _res = sender
 														.into_send_async(DbResponse::from((
 															method,
