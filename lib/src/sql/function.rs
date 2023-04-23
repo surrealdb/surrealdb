@@ -152,7 +152,7 @@ impl Function {
 				// Compute the value to be cast
 				let a = x.compute(ctx, opt, txn, doc).await?;
 				// Run the cast function
-				a.convert_to(&k)
+				a.convert_to(k)
 			}
 			Self::Normal(s, x) => {
 				// Compute the function arguments
@@ -634,7 +634,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<int> 1.2345", format!("{}", out));
-		assert_eq!(out, Function::Cast(String::from("int"), 1.2345.into()));
+		assert_eq!(out, Function::Cast(Kind::Int, 1.2345.into()));
 	}
 
 	#[test]
@@ -644,7 +644,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<string> 1.2345", format!("{}", out));
-		assert_eq!(out, Function::Cast(String::from("string"), 1.2345.into()));
+		assert_eq!(out, Function::Cast(Kind::String, 1.2345.into()));
 	}
 
 	#[test]
