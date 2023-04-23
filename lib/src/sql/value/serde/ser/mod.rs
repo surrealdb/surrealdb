@@ -16,6 +16,7 @@ mod geometry;
 mod graph;
 mod group;
 mod id;
+mod kind;
 mod limit;
 mod model;
 mod number;
