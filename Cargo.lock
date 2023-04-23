@@ -3832,7 +3832,6 @@ dependencies = [
  "tikv-client",
  "time 0.3.20",
  "tokio",
- "tokio-stream",
  "tokio-tungstenite",
  "tokio-util",
  "tracing",
@@ -3841,6 +3840,7 @@ dependencies = [
  "url",
  "uuid",
  "wasm-bindgen-futures",
+ "wasmtimer",
  "ws_stream_wasm",
 ]
 
@@ -4703,6 +4703,19 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "wasmtimer"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f656cd8858a5164932d8a90f936700860976ec21eb00e0fe2aa8cab13f6b4cf"
+dependencies = [
+ "futures 0.3.28",
+ "js-sys",
+ "parking_lot 0.12.1",
+ "pin-utils",
+ "wasm-bindgen",
 ]
 
 [[package]]
