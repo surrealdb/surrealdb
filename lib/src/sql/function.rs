@@ -9,6 +9,7 @@ use crate::sql::common::val_char;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
+use crate::sql::kind::{kind, Kind};
 use crate::sql::script::{script as func, Script};
 use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::{single, value, Value};
@@ -32,7 +33,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Hash)]
 pub enum Function {
-	Cast(String, Value),
+	Cast(Kind, Value),
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
@@ -147,11 +148,11 @@ impl Function {
 		let opt = &opt.futures(true);
 		// Process the function type
 		match self {
-			Self::Cast(s, x) => {
+			Self::Cast(k, x) => {
 				// Compute the value to be cast
 				let a = x.compute(ctx, opt, txn, doc).await?;
 				// Run the cast function
-				fnc::cast::run(ctx, s, a)
+				a.convert_to(&k)
 			}
 			Self::Normal(s, x) => {
 				// Compute the function arguments
@@ -213,7 +214,7 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Cast(s, e) => write!(f, "<{s}> {e}"),
+			Self::Cast(k, e) => write!(f, "<{k}> {e}"),
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
@@ -302,25 +303,10 @@ fn script(i: &str) -> IResult<&str, Function> {
 }
 
 fn cast(i: &str) -> IResult<&str, Function> {
-	let (i, s) = delimited(
-		char('<'),
-		alt((
-			tag("bool"),
-			tag("datetime"),
-			tag("decimal"),
-			tag("duration"),
-			tag("float"),
-			tag("int"),
-			tag("number"),
-			tag("point"),
-			tag("string"),
-			tag("uuid"),
-		)),
-		char('>'),
-	)(i)?;
+	let (i, k) = delimited(char('<'), kind, char('>'))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = single(i)?;
-	Ok((i, Function::Cast(s.to_string(), v)))
+	Ok((i, Function::Cast(k, v)))
 }
 
 fn function_names(i: &str) -> IResult<&str, &str> {

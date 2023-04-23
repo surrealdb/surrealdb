@@ -4,7 +4,6 @@ use crate::sql::value::Value;
 
 pub mod args;
 pub mod array;
-pub mod cast;
 pub mod count;
 pub mod crypto;
 pub mod duration;
