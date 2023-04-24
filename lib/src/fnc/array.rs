@@ -214,6 +214,33 @@ pub fn reverse((arg,): (Value,)) -> Result<Value, Error> {
 	}
 }
 
+pub fn slice((arg, beg, lim): (Value, Option<isize>, Option<isize>)) -> Result<Value, Error> {
+	let array = if let Value::Array(array) = arg {
+		array
+	} else {
+		return Ok(Value::None);
+	};
+
+	let skip = match beg {
+		Some(v) if v < 0 => array.len().saturating_sub(v.unsigned_abs()),
+		Some(v) => v as usize,
+		None => 0,
+	};
+
+	let take = match lim {
+		Some(v) if v < 0 => array.len().saturating_sub(skip).saturating_sub(v.unsigned_abs()),
+		Some(v) => v as usize,
+		None => usize::MAX,
+	};
+
+	Ok(if skip > 0 || take < usize::MAX {
+		array.into_iter().skip(skip).take(take).collect::<Vec<_>>().into()
+	} else {
+		array
+	}
+	.into())
+}
+
 pub fn sort((array, order): (Value, Option<Value>)) -> Result<Value, Error> {
 	match array {
 		Value::Array(mut v) => match order {
@@ -277,5 +304,31 @@ pub mod sort {
 			}
 			v => Ok(v),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::slice;
+	use crate::sql::{Array, Value};
+
+	#[test]
+	fn array_slice() {
+		fn test(initial: &[u8], beg: Option<isize>, lim: Option<isize>, expected: &[u8]) {
+			let initial_values =
+				initial.iter().map(|n| Value::from(*n as i64)).collect::<Vec<_>>().into();
+			let expected_values: Array =
+				expected.iter().map(|n| Value::from(*n as i64)).collect::<Vec<_>>().into();
+			assert_eq!(slice((initial_values, beg, lim)).unwrap(), expected_values.into());
+		}
+
+		let array = &[b'a', b'b', b'c', b'd', b'e', b'f', b'g'];
+		test(array, None, None, array);
+		test(array, Some(2), None, &array[2..]);
+		test(array, Some(2), Some(3), &array[2..5]);
+		test(array, Some(2), Some(-1), &[b'c', b'd', b'e', b'f']);
+		test(array, Some(-2), None, &[b'f', b'g']);
+		test(array, Some(-4), Some(2), &[b'd', b'e']);
+		test(array, Some(-4), Some(-1), &[b'd', b'e', b'f']);
 	}
 }
