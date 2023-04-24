@@ -1,4 +1,5 @@
 use crate::sql::comment::mightbespace;
+use crate::sql::common::commas;
 use crate::sql::common::verbar;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
@@ -132,40 +133,43 @@ fn option(i: &str) -> IResult<&str, Kind> {
 
 fn record(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("record")(i)?;
-	let (i, v) = opt(|i| {
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char('<')(i)?;
-		let (i, v) = separated_list1(verbar, table)(i)?;
-		let (i, _) = char('>')(i)?;
-		Ok((i, v))
-	})(i)?;
+	let (i, v) = opt(alt((
+		|i| {
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = char('(')(i)?;
+			let (i, v) = separated_list1(commas, table)(i)?;
+			let (i, _) = char(')')(i)?;
+			Ok((i, v))
+		},
+		|i| {
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = char('<')(i)?;
+			let (i, v) = separated_list1(verbar, table)(i)?;
+			let (i, _) = char('>')(i)?;
+			Ok((i, v))
+		},
+	)))(i)?;
 	Ok((i, Kind::Record(v.unwrap_or_default())))
 }
 
 fn geometry(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("geometry")(i)?;
-	let (i, v) = opt(|i| {
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char('<')(i)?;
-		let (i, v) = separated_list1(
-			verbar,
-			map(
-				alt((
-					tag("feature"),
-					tag("point"),
-					tag("line"),
-					tag("polygon"),
-					tag("multipoint"),
-					tag("multiline"),
-					tag("multipolygon"),
-					tag("collection"),
-				)),
-				String::from,
-			),
-		)(i)?;
-		let (i, _) = char('>')(i)?;
-		Ok((i, v))
-	})(i)?;
+	let (i, v) = opt(alt((
+		|i| {
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = char('(')(i)?;
+			let (i, v) = separated_list1(commas, geo)(i)?;
+			let (i, _) = char(')')(i)?;
+			Ok((i, v))
+		},
+		|i| {
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = char('<')(i)?;
+			let (i, v) = separated_list1(verbar, geo)(i)?;
+			let (i, _) = char('>')(i)?;
+			Ok((i, v))
+		},
+	)))(i)?;
 	Ok((i, Kind::Geometry(v.unwrap_or_default())))
 }
 
@@ -219,6 +223,22 @@ fn set(i: &str) -> IResult<&str, Kind> {
 			None => Kind::Set(Box::new(Kind::Any), None),
 		},
 	))
+}
+
+fn geo(i: &str) -> IResult<&str, String> {
+	map(
+		alt((
+			tag("feature"),
+			tag("point"),
+			tag("line"),
+			tag("polygon"),
+			tag("multipoint"),
+			tag("multiline"),
+			tag("multipolygon"),
+			tag("collection"),
+		)),
+		String::from,
+	)(i)
 }
 
 #[cfg(test)]
