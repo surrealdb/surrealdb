@@ -1,8 +1,7 @@
 use crate::sql::comment::mightbespace;
-use crate::sql::common::commas;
 use crate::sql::common::verbar;
 use crate::sql::error::IResult;
-use crate::sql::fmt::{fmt_separated_by, Fmt};
+use crate::sql::fmt::Fmt;
 use crate::sql::table::{table, Table};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -10,7 +9,7 @@ use nom::character::complete::char;
 use nom::character::complete::u64;
 use nom::combinator::map;
 use nom::combinator::opt;
-use nom::multi::{separated_list0, separated_list1};
+use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
@@ -68,23 +67,23 @@ impl Display for Kind {
 			Kind::Option(k) => write!(f, "option<{}>", k),
 			Kind::Record(k) => match k {
 				k if k.is_empty() => write!(f, "record"),
-				k => write!(f, "record({})", Fmt::comma_separated(k)),
+				k => write!(f, "record<{}>", Fmt::verbar_separated(k)),
 			},
 			Kind::Geometry(k) => match k {
 				k if k.is_empty() => write!(f, "geometry"),
-				k => write!(f, "geometry({})", Fmt::comma_separated(k)),
+				k => write!(f, "geometry<{}>", Fmt::verbar_separated(k)),
 			},
 			Kind::Set(k, l) => match (k, l) {
 				(k, None) if k.is_any() => write!(f, "set"),
-				(k, None) => write!(f, "set[{k}]"),
-				(k, Some(l)) => write!(f, "set[{k}, {l}]"),
+				(k, None) => write!(f, "set<{k}>"),
+				(k, Some(l)) => write!(f, "set<{k}, {l}>"),
 			},
 			Kind::Array(k, l) => match (k, l) {
 				(k, None) if k.is_any() => write!(f, "array"),
-				(k, None) => write!(f, "array[{k}]"),
-				(k, Some(l)) => write!(f, "array[{k}, {l}]"),
+				(k, None) => write!(f, "array<{k}>"),
+				(k, Some(l)) => write!(f, "array<{k}, {l}>"),
 			},
-			Kind::Either(k) => Display::fmt(&Fmt::new(k, fmt_separated_by(" | ")), f),
+			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
 		}
 	}
 }
@@ -135,9 +134,9 @@ fn record(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("record")(i)?;
 	let (i, v) = opt(|i| {
 		let (i, _) = mightbespace(i)?;
-		let (i, _) = char('(')(i)?;
-		let (i, v) = separated_list0(commas, table)(i)?;
-		let (i, _) = char(')')(i)?;
+		let (i, _) = char('<')(i)?;
+		let (i, v) = separated_list1(verbar, table)(i)?;
+		let (i, _) = char('>')(i)?;
 		Ok((i, v))
 	})(i)?;
 	Ok((i, Kind::Record(v.unwrap_or_default())))
@@ -147,9 +146,9 @@ fn geometry(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("geometry")(i)?;
 	let (i, v) = opt(|i| {
 		let (i, _) = mightbespace(i)?;
-		let (i, _) = char('(')(i)?;
+		let (i, _) = char('<')(i)?;
 		let (i, v) = separated_list1(
-			commas,
+			verbar,
 			map(
 				alt((
 					tag("feature"),
@@ -164,7 +163,7 @@ fn geometry(i: &str) -> IResult<&str, Kind> {
 				String::from,
 			),
 		)(i)?;
-		let (i, _) = char(')')(i)?;
+		let (i, _) = char('>')(i)?;
 		Ok((i, v))
 	})(i)?;
 	Ok((i, Kind::Geometry(v.unwrap_or_default())))
@@ -173,7 +172,7 @@ fn geometry(i: &str) -> IResult<&str, Kind> {
 fn array(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("array")(i)?;
 	let (i, v) = opt(|i| {
-		let (i, _) = char('[')(i)?;
+		let (i, _) = char('<')(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, k) = kind(i)?;
 		let (i, _) = mightbespace(i)?;
@@ -184,7 +183,7 @@ fn array(i: &str) -> IResult<&str, Kind> {
 			let (i, _) = mightbespace(i)?;
 			Ok((i, l))
 		})(i)?;
-		let (i, _) = char(']')(i)?;
+		let (i, _) = char('>')(i)?;
 		Ok((i, (k, l)))
 	})(i)?;
 	Ok((
@@ -199,7 +198,7 @@ fn array(i: &str) -> IResult<&str, Kind> {
 fn set(i: &str) -> IResult<&str, Kind> {
 	let (i, _) = tag("set")(i)?;
 	let (i, v) = opt(|i| {
-		let (i, _) = char('[')(i)?;
+		let (i, _) = char('<')(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, k) = kind(i)?;
 		let (i, _) = mightbespace(i)?;
@@ -210,7 +209,7 @@ fn set(i: &str) -> IResult<&str, Kind> {
 			let (i, _) = mightbespace(i)?;
 			Ok((i, l))
 		})(i)?;
-		let (i, _) = char(']')(i)?;
+		let (i, _) = char('>')(i)?;
 		Ok((i, (k, l)))
 	})(i)?;
 	Ok((
@@ -370,21 +369,21 @@ mod tests {
 
 	#[test]
 	fn kind_record_one() {
-		let sql = "record(person)";
+		let sql = "record<person>";
 		let res = kind(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("record(person)", format!("{}", out));
+		assert_eq!("record<person>", format!("{}", out));
 		assert_eq!(out, Kind::Record(vec![Table::from("person")]));
 	}
 
 	#[test]
 	fn kind_record_many() {
-		let sql = "record(person, animal)";
+		let sql = "record<person | animal>";
 		let res = kind(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("record(person, animal)", format!("{}", out));
+		assert_eq!("record<person | animal>", format!("{}", out));
 		assert_eq!(out, Kind::Record(vec![Table::from("person"), Table::from("animal")]));
 	}
 
@@ -400,21 +399,21 @@ mod tests {
 
 	#[test]
 	fn kind_geometry_one() {
-		let sql = "geometry(point)";
+		let sql = "geometry<point>";
 		let res = kind(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("geometry(point)", format!("{}", out));
+		assert_eq!("geometry<point>", format!("{}", out));
 		assert_eq!(out, Kind::Geometry(vec![String::from("point")]));
 	}
 
 	#[test]
 	fn kind_geometry_many() {
-		let sql = "geometry(point, multipoint)";
+		let sql = "geometry<point | multipoint>";
 		let res = kind(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("geometry(point, multipoint)", format!("{}", out));
+		assert_eq!("geometry<point | multipoint>", format!("{}", out));
 		assert_eq!(out, Kind::Geometry(vec![String::from("point"), String::from("multipoint")]));
 	}
 
@@ -439,6 +438,36 @@ mod tests {
 	}
 
 	#[test]
+	fn kind_array_any() {
+		let sql = "array";
+		let res = kind(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("array", format!("{}", out));
+		assert_eq!(out, Kind::Array(Box::new(Kind::Any), None));
+	}
+
+	#[test]
+	fn kind_array_some() {
+		let sql = "array<float>";
+		let res = kind(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("array<float>", format!("{}", out));
+		assert_eq!(out, Kind::Array(Box::new(Kind::Float), None));
+	}
+
+	#[test]
+	fn kind_array_some_size() {
+		let sql = "array<float, 10>";
+		let res = kind(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("array<float, 10>", format!("{}", out));
+		assert_eq!(out, Kind::Array(Box::new(Kind::Float), Some(10)));
+	}
+
+	#[test]
 	fn kind_set_any() {
 		let sql = "set";
 		let res = kind(sql);
@@ -450,21 +479,21 @@ mod tests {
 
 	#[test]
 	fn kind_set_some() {
-		let sql = "set[float]";
+		let sql = "set<float>";
 		let res = kind(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("set[float]", format!("{}", out));
+		assert_eq!("set<float>", format!("{}", out));
 		assert_eq!(out, Kind::Set(Box::new(Kind::Float), None));
 	}
 
 	#[test]
 	fn kind_set_some_size() {
-		let sql = "set[float, 10]";
+		let sql = "set<float, 10>";
 		let res = kind(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("set[float, 10]", format!("{}", out));
+		assert_eq!("set<float, 10>", format!("{}", out));
 		assert_eq!(out, Kind::Set(Box::new(Kind::Float), Some(10)));
 	}
 }

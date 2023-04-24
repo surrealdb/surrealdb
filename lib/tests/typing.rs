@@ -13,10 +13,10 @@ async fn strict_typing_inline() -> Result<(), Error> {
 		UPDATE person:test SET enabled = <bool | int> NONE;
 		UPDATE person:test SET enabled = <bool | int> true;
 		UPDATE person:test SET name = <string> 'Tobie Morgan Hitchcock';
-		UPDATE person:test SET scores = <set[float]> [1,1,2,2,3,3,4,4,5,5];
-		UPDATE person:test SET scores = <array[float]> [1,1,2,2,3,3,4,4,5,5];
-		UPDATE person:test SET scores = <set[float, 5]> [1,1,2,2,3,3,4,4,5,5];
-		UPDATE person:test SET scores = <array[float, 5]> [1,1,2,2,3,3,4,4,5,5];
+		UPDATE person:test SET scores = <set<float>> [1,1,2,2,3,3,4,4,5,5];
+		UPDATE person:test SET scores = <array<float>> [1,1,2,2,3,3,4,4,5,5];
+		UPDATE person:test SET scores = <set<float, 5>> [1,1,2,2,3,3,4,4,5,5];
+		UPDATE person:test SET scores = <array<float, 5>> [1,1,2,2,3,3,4,4,5,5];
 	";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -136,7 +136,7 @@ async fn strict_typing_defined() -> Result<(), Error> {
 		DEFINE FIELD age ON person TYPE int;
 		DEFINE FIELD enabled ON person TYPE bool | int;
 		DEFINE FIELD name ON person TYPE string;
-		DEFINE FIELD scores ON person TYPE set[float, 5];
+		DEFINE FIELD scores ON person TYPE set<float, 5>;
 		UPDATE person:test SET age = NONE, enabled = NONE, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
 		UPDATE person:test SET age = '18', enabled = NONE, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
 		UPDATE person:test SET age = '18', enabled = true, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];

@@ -31,6 +31,11 @@ impl<I: IntoIterator<Item = T>, T: Display> Fmt<I, fn(I, &mut Formatter) -> fmt:
 		Self::new(into_iter, fmt_comma_separated)
 	}
 
+	/// Formats values with a verbar and a space separating them.
+	pub(crate) fn verbar_separated(into_iter: I) -> Self {
+		Self::new(into_iter, fmt_verbar_separated)
+	}
+
 	/// Formats values with a comma and a space separating them or, if pretty printing is in
 	/// effect, a comma, a newline, and indentation.
 	pub(crate) fn pretty_comma_separated(into_iter: I) -> Self {
@@ -55,6 +60,19 @@ fn fmt_comma_separated<T: Display, I: IntoIterator<Item = T>>(
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			f.write_str(", ")?;
+		}
+		Display::fmt(&v, f)?;
+	}
+	Ok(())
+}
+
+fn fmt_verbar_separated<T: Display, I: IntoIterator<Item = T>>(
+	into_iter: I,
+	f: &mut Formatter,
+) -> fmt::Result {
+	for (i, v) in into_iter.into_iter().enumerate() {
+		if i > 0 {
+			f.write_str(" | ")?;
 		}
 		Display::fmt(&v, f)?;
 	}
