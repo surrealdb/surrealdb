@@ -3,12 +3,14 @@ use std::sync::Arc;
 use trice::Instant;
 
 /// A 'static view into the cancellation status of a Context.
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct Cancellation {
 	deadline: Option<Instant>,
 	cancellations: Vec<Arc<AtomicBool>>,
 }
 
+#[allow(dead_code)]
 impl Cancellation {
 	pub fn new(deadline: Option<Instant>, cancellations: Vec<Arc<AtomicBool>>) -> Cancellation {
 		Self {

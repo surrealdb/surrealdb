@@ -22,6 +22,7 @@ impl<'a> From<&'a Value> for Cow<'a, Value> {
 	}
 }
 
+#[allow(dead_code)]
 pub struct Context<'a> {
 	// An optional parent context.
 	parent: Option<&'a Context<'a>>,
@@ -39,6 +40,7 @@ impl<'a> Default for Context<'a> {
 	}
 }
 
+#[allow(dead_code)]
 impl<'a> Context<'a> {
 	/// Create an empty background context.
 	pub fn background() -> Self {
