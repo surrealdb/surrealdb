@@ -1094,20 +1094,20 @@ impl Transaction {
 		db: &str,
 	) -> Result<Arc<[DefineAnalyzerStatement]>, Error> {
 		let key = crate::key::az::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Azs(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::az::prefix(ns, db);
-				let end = crate::key::az::suffix(ns, db);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Azs(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Azs(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::az::prefix(ns, db);
+			let end = crate::key::az::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Azs(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve a specific namespace definition.
