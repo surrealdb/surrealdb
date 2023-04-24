@@ -391,7 +391,16 @@ where
 								deleted_payload = Some(payload);
 							}
 							keys.remove(&key_to_delete);
-							node.write(tx).await?;
+							if keys.len() == 0 {
+								// The node is empty, we can delete the record
+								tx.del(node.key).await?;
+								// Check if this was the root node
+								if Some(node.id) == self.state.root {
+									self.state.root = None;
+								}
+							} else {
+								node.write(tx).await?;
+							}
 							self.updated = true;
 						}
 					}
@@ -490,6 +499,9 @@ where
 		// CLRS 3a
 		let child_idx = keys.get_child_idx(&key_to_delete);
 		let child_stored_node = self.load_node::<BK>(tx, children[child_idx]).await?;
+		// TODO: Remove once everything is stable
+		// debug!("** delete_traversal");
+		// child_stored_node.node.keys().debug(|k| Ok(String::from_utf8(k)?))?;
 		if child_stored_node.node.keys().len() < self.state.minimum_degree {
 			// right child (successor)
 			if child_idx < children.len() - 1 {
@@ -524,8 +536,9 @@ where
 
 			// left child (predecessor)
 			if child_idx > 0 {
-				let left_child_idx = children[child_idx - 1];
-				let left_child_stored_node = self.load_node::<BK>(tx, left_child_idx).await?;
+				let child_idx = child_idx - 1;
+				let left_child_id = children[child_idx];
+				let left_child_stored_node = self.load_node::<BK>(tx, left_child_id).await?;
 				if left_child_stored_node.node.keys().len() >= self.state.minimum_degree {
 					return Self::delete_adjust_predecessor(
 						tx,
@@ -569,6 +582,7 @@ where
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
+		debug!("** delete_adjust_successor - child_idx: {}", child_idx);
 		if let Some((ascending_key, ascending_payload)) =
 			right_child_stored_node.node.keys().get_first_key()
 		{
@@ -599,12 +613,19 @@ where
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
+		// TODO: Remove once everything is stable
+		// debug!("** delete_adjust_predecessor - child_idx: {}", child_idx);
+		// keys.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
+
 		if let Some((ascending_key, ascending_payload)) =
 			left_child_stored_node.node.keys().get_last_key()
 		{
+			debug!("** ascending_key {}", String::from_utf8_lossy(&ascending_key));
 			left_child_stored_node.node.keys_mut().remove(&ascending_key);
 			if let Some(descending_key) = keys.get_key(child_idx) {
+				debug!("** descending_key {}", String::from_utf8_lossy(&descending_key));
 				if let Some(descending_payload) = keys.remove(&descending_key) {
+					debug!("** descending_payload {}", descending_payload);
 					child_stored_node.node.keys_mut().insert(descending_key, descending_payload);
 					keys.insert(ascending_key, ascending_payload);
 					child_stored_node.write(tx).await?;
@@ -630,6 +651,10 @@ where
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
+		// TODO: Remove once everything is stable
+		// debug!("** merge_nodes - child_idx: {}", child_idx);
+		// keys.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
+
 		if let Some(descending_key) = keys.get_key(child_idx) {
 			if let Some(descending_payload) = keys.remove(&descending_key) {
 				children.remove(child_idx + 1);
@@ -765,6 +790,7 @@ mod tests {
 	use rand::thread_rng;
 	use serde::de::DeserializeOwned;
 	use serde::Serialize;
+	use std::collections::HashMap;
 	use test_log::test;
 
 	struct TestKeyProvider {}
@@ -1191,6 +1217,8 @@ mod tests {
 		assert_eq!(s.keys_count, 23);
 		assert_eq!(s.max_depth, 3);
 		assert_eq!(s.nodes_count, 10);
+		// There should be one record per node
+		assert_eq!(10, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 
 		let nodes_count = t
 			.inspect_nodes::<TrieKeys, _>(&mut tx, |count, depth, node_id, node| match count {
@@ -1278,6 +1306,8 @@ mod tests {
 		assert_eq!(s.keys_count, 18);
 		assert_eq!(s.max_depth, 2);
 		assert_eq!(s.nodes_count, 7);
+		// There should be one record per node
+		assert_eq!(7, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 
 		let nodes_count = t
 			.inspect_nodes::<TrieKeys, _>(&mut tx, |count, depth, node_id, node| {
@@ -1338,21 +1368,30 @@ mod tests {
 		let mut t = BTree::new(TestKeyProvider {}, State::new(3));
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut expected_keys = HashMap::new();
 		for (key, payload) in CLRS_EXAMPLE {
+			expected_keys.insert(key.to_string(), payload);
 			t.insert::<TrieKeys>(&mut tx, key.into(), payload).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
+		print_tree::<TrieKeys, _>(&mut tx, &t).await;
+
 		for (key, _) in CLRS_EXAMPLE {
+			debug!("------------------------");
 			debug!("Delete {}", key);
 			t.delete::<TrieKeys>(&mut tx, key.into()).await.unwrap();
-			t.inspect_nodes::<TrieKeys, _>(&mut tx, |_count, depth, node_id, node| {
-				debug!("{} -> {}", depth, node_id);
-				node.node.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
-			})
-			.await
-			.unwrap();
+			print_tree::<TrieKeys, _>(&mut tx, &t).await;
+
+			// Check that every expected keys are still found in the tree
+			expected_keys.remove(key);
+			for (key, payload) in &expected_keys {
+				assert_eq!(
+					t.search::<TrieKeys>(&mut tx, &key.as_str().into()).await.unwrap(),
+					Some(*payload)
+				)
+			}
 		}
 		tx.commit().await.unwrap();
 
@@ -1361,7 +1400,13 @@ mod tests {
 		assert_eq!(s.keys_count, 0);
 		assert_eq!(s.max_depth, 0);
 		assert_eq!(s.nodes_count, 0);
+		// There should not be any record in the database
+		assert_eq!(0, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 	}
+
+	/////////////
+	// HELPERS //
+	/////////////
 
 	fn check_is_internal_node<BK>(
 		node: Node<BK>,
@@ -1387,6 +1432,21 @@ mod tests {
 		} else {
 			assert!(false, "An internal node was expected, we got a leaf node");
 		}
+	}
+
+	async fn print_tree<BK, K>(tx: &mut Transaction, t: &BTree<K>)
+	where
+		K: KeyProvider,
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		debug!("----------------------------------");
+		t.inspect_nodes::<BK, _>(tx, |_count, depth, node_id, node| {
+			debug!("{} -> {}", depth, node_id);
+			node.node.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
+		})
+		.await
+		.unwrap();
+		debug!("----------------------------------");
 	}
 
 	fn check_keys<BK>(keys: BK, expected_keys: Vec<(&str, i32)>)
