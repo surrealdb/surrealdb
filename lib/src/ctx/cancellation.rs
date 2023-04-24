@@ -1,3 +1,5 @@
+#![cfg(feature = "scripting")]
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use trice::Instant;

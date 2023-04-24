@@ -14,7 +14,7 @@ use futures::future::try_join_all;
 impl Value {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub async fn fetch(
+	pub(crate) async fn fetch(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
