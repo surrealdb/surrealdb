@@ -12,6 +12,7 @@ use std::pin::Pin;
 
 /// An authentication future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Authenticate<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) token: Jwt,

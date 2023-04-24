@@ -17,6 +17,7 @@ use crate::api::ExtraFeatures;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::engine::remote::ws::IntervalStream;
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -39,11 +40,11 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
-use tokio::time;
-use tokio::time::MissedTickBehavior;
-use tokio_stream::wrappers::IntervalStream;
+use std::time::Duration;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
+use wasmtimer::tokio as time;
+use wasmtimer::tokio::MissedTickBehavior;
 use ws_stream_wasm::WsEvent;
 use ws_stream_wasm::WsMessage as Message;
 use ws_stream_wasm::WsMeta;
@@ -358,7 +359,7 @@ pub(crate) fn router(
 								Ok(events) => events,
 								Err(error) => {
 									trace!(target: LOG, "{error}");
-									time::sleep(time::Duration::from_secs(1)).await;
+									time::sleep(Duration::from_secs(1)).await;
 									continue 'reconnect;
 								}
 							}
@@ -366,7 +367,7 @@ pub(crate) fn router(
 						for (_, message) in &replay {
 							if let Err(error) = socket.send(message.clone()).await {
 								trace!(target: LOG, "{error}");
-								time::sleep(time::Duration::from_secs(1)).await;
+								time::sleep(Duration::from_secs(1)).await;
 								continue 'reconnect;
 							}
 						}
@@ -381,7 +382,7 @@ pub(crate) fn router(
 							trace!(target: LOG, "Request {payload}");
 							if let Err(error) = socket.send(Message::Binary(payload.into())).await {
 								trace!(target: LOG, "{error}");
-								time::sleep(time::Duration::from_secs(1)).await;
+								time::sleep(Duration::from_secs(1)).await;
 								continue 'reconnect;
 							}
 						}
@@ -390,7 +391,7 @@ pub(crate) fn router(
 					}
 					Err(error) => {
 						trace!(target: LOG, "Failed to reconnect; {error}");
-						time::sleep(time::Duration::from_secs(1)).await;
+						time::sleep(Duration::from_secs(1)).await;
 					}
 				}
 			}

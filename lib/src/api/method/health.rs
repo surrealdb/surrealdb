@@ -9,6 +9,7 @@ use std::pin::Pin;
 
 /// A health check future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Health<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 }

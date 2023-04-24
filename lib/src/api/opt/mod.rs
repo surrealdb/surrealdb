@@ -59,6 +59,7 @@ enum InnerOp<'a, T> {
 ///
 /// [JSON Patch]: https://jsonpatch.com/
 #[derive(Debug)]
+#[must_use]
 pub struct PatchOp(pub(crate) Result<Value, crate::err::Error>);
 
 impl PatchOp {
@@ -75,7 +76,6 @@ impl PatchOp {
 	/// PatchOp::add("/biscuits/1", json!({ "name": "Ginger Nut" }))
 	/// # ;
 	/// ```
-	#[must_use]
 	pub fn add<T>(path: &str, value: T) -> Self
 	where
 		T: Serialize,
@@ -104,7 +104,6 @@ impl PatchOp {
 	/// PatchOp::remove("/biscuits/0")
 	/// # ;
 	/// ```
-	#[must_use]
 	pub fn remove(path: &str) -> Self {
 		Self(to_value(UnitOp::Remove {
 			path,
@@ -122,7 +121,6 @@ impl PatchOp {
 	/// PatchOp::replace("/biscuits/0/name", "Chocolate Digestive")
 	/// # ;
 	/// ```
-	#[must_use]
 	pub fn replace<T>(path: &str, value: T) -> Self
 	where
 		T: Serialize,
@@ -134,7 +132,6 @@ impl PatchOp {
 	}
 
 	/// Changes a value
-	#[must_use]
 	pub fn change(path: &str, diff: Diff) -> Self {
 		Self(to_value(UnitOp::Change {
 			path,

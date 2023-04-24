@@ -66,10 +66,10 @@ pub fn point((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 }
 
 pub fn regex((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Strand(v) => Ok(Value::Regex(v.as_str().into())),
-		_ => Ok(Value::None),
-	}
+	Ok(match arg {
+		Value::Strand(v) => v.parse().map(Value::Regex).unwrap_or(Value::None),
+		_ => Value::None,
+	})
 }
 
 pub fn string((arg,): (Strand,)) -> Result<Value, Error> {

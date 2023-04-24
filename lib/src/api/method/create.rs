@@ -14,6 +14,7 @@ use std::pin::Pin;
 
 /// A record create future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Create<'r, C: Connection, R> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) resource: Result<Resource>,
