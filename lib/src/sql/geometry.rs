@@ -1,9 +1,7 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
 use crate::sql::comment::mightbespace;
-use crate::sql::common::{
-	closebraces, closebracket, closeparenthese, commas, openbraces, openbracket, openparenthese,
-};
+use crate::sql::common::{closebracket, closeparenthese, commas, openbracket, openparenthese};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::serde::is_internal_serialization;

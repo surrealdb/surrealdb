@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::val_char;
-use crate::sql::common::{closechevron, closeparenthese, commas, openchevron, openparenthese};
+use crate::sql::common::{closeparenthese, commas, openparenthese};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;

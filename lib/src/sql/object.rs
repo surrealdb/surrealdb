@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
-use crate::sql::common::{closebraces, commas, openbraces, val_char};
+use crate::sql::common::{commas, val_char};
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_key;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
