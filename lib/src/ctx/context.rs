@@ -1,10 +1,9 @@
-use crate::ctx::cancellation::Cancellation;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 use crate::sql::value::Value;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,8 +20,6 @@ impl<'a> From<&'a Value> for Cow<'a, Value> {
 		Cow::Borrowed(v)
 	}
 }
-
-#[allow(dead_code)]
 pub struct Context<'a> {
 	// An optional parent context.
 	parent: Option<&'a Context<'a>>,
@@ -40,7 +37,17 @@ impl<'a> Default for Context<'a> {
 	}
 }
 
-#[allow(dead_code)]
+impl<'a> Debug for Context<'a> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct("Context")
+			.field("parent", &self.parent)
+			.field("deadline", &self.deadline)
+			.field("cancelled", &self.cancelled)
+			.field("values", &self.values)
+			.finish()
+	}
+}
+
 impl<'a> Context<'a> {
 	/// Create an empty background context.
 	pub fn background() -> Self {
@@ -67,16 +74,6 @@ impl<'a> Context<'a> {
 	pub fn add_cancel(&mut self) -> Canceller {
 		let cancelled = self.cancelled.clone();
 		Canceller::new(cancelled)
-	}
-
-	/// Get a 'static view into the cancellation status.
-	pub fn cancellation(&self) -> Cancellation {
-		Cancellation::new(
-			self.deadline,
-			std::iter::successors(Some(self), |ctx| ctx.parent)
-				.map(|ctx| ctx.cancelled.clone())
-				.collect(),
-		)
 	}
 
 	/// Add a deadline to the context. If the current deadline is sooner than
@@ -151,15 +148,15 @@ impl<'a> Context<'a> {
 			},
 		}
 	}
-}
 
-impl<'a> fmt::Debug for Context<'a> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.debug_struct("Context")
-			.field("parent", &self.parent)
-			.field("deadline", &self.deadline)
-			.field("cancelled", &self.cancelled)
-			.field("values", &self.values)
-			.finish()
+	/// Get a 'static view into the cancellation status.
+	#[cfg(feature = "scripting")]
+	pub fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {
+		crate::ctx::cancellation::Cancellation::new(
+			self.deadline,
+			std::iter::successors(Some(self), |ctx| ctx.parent)
+				.map(|ctx| ctx.cancelled.clone())
+				.collect(),
+		)
 	}
 }
