@@ -4,7 +4,7 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
-	pub fn each(&self, path: &[Part]) -> Vec<Idiom> {
+	pub(crate) fn each(&self, path: &[Part]) -> Vec<Idiom> {
 		self._each(path, Idiom::default())
 	}
 	fn _each(&self, path: &[Part], prev: Idiom) -> Vec<Idiom> {

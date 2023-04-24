@@ -17,7 +17,7 @@ use async_recursion::async_recursion;
 impl Value {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub async fn get(
+	pub(crate) async fn get(
 		&self,
 		ctx: &Context<'_>,
 		opt: &Options,

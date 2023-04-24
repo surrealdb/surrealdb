@@ -101,12 +101,6 @@ impl<'a> Context<'a> {
 		self.values.insert(key, value.into());
 	}
 
-	/// Get the deadline for this operation, if any. This is useful for
-	/// checking if a long job should be started or not.
-	pub fn deadline(&self) -> Option<Instant> {
-		self.deadline
-	}
-
 	/// Get the timeout for this operation, if any. This is useful for
 	/// checking if a long job should be started or not.
 	pub fn timeout(&self) -> Option<Duration> {
@@ -132,11 +126,6 @@ impl<'a> Context<'a> {
 	}
 
 	/// Check if the context is not ok to continue.
-	pub fn is_err(&self) -> bool {
-		self.done().is_some()
-	}
-
-	/// Check if the context is not ok to continue.
 	pub fn is_done(&self) -> bool {
 		self.done().is_some()
 	}
@@ -144,20 +133,6 @@ impl<'a> Context<'a> {
 	/// Check if the context is not ok to continue, because it timed out.
 	pub fn is_timedout(&self) -> bool {
 		matches!(self.done(), Some(Reason::Timedout))
-	}
-
-	/// Check if the context is not ok to continue, because it was cancelled.
-	pub fn is_cancelled(&self) -> bool {
-		matches!(self.done(), Some(Reason::Canceled))
-	}
-
-	/// Check if the status of the context. This will return a Result, with an Ok
-	/// if the operation may proceed, and an Error if it should be stopped.
-	pub fn check(&self) -> Result<(), Reason> {
-		match self.done() {
-			Some(reason) => Err(reason),
-			None => Ok(()),
-		}
 	}
 
 	/// Get a value from the context. If no value is stored under the

@@ -615,14 +615,6 @@ impl Value {
 		Ok(self)
 	}
 
-	/// Convert this Value to an Option
-	pub fn output(self) -> Option<Value> {
-		match self {
-			Value::None => None,
-			_ => Some(self),
-		}
-	}
-
 	// -----------------------------------
 	// Simple value detection
 	// -----------------------------------
