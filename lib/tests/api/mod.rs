@@ -9,7 +9,16 @@ async fn connect() {
 #[tokio::test]
 async fn yuse() {
 	let db = new_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+    let item = Ulid::new().to_string();
+    let error = db.create::<Vec<()>>(item.as_str()).await.unwrap_err();
+    match error {
+        // Local engines return this error
+        Error::Db(DbError::NsEmpty) => {}
+        // Remote engines return this error
+        Error::Api(ApiError::Query(error)) if error.contains("Specify a namespace to use") => {}
+        error => panic!("{:?}", error),
+    }
+	db.use_ns(NS).use_db(item).await.unwrap();
 }
 
 #[tokio::test]

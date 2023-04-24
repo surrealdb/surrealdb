@@ -153,9 +153,11 @@ impl Display for Array {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		f.write_char('[')?;
-		let indent = pretty_indent();
-		write!(f, "{}", Fmt::pretty_comma_separated(self.as_slice()))?;
-		drop(indent);
+		if !self.is_empty() {
+			let indent = pretty_indent();
+			write!(f, "{}", Fmt::pretty_comma_separated(self.as_slice()))?;
+			drop(indent);
+		}
 		f.write_char(']')
 	}
 }
@@ -390,16 +392,11 @@ impl Uniq<Array> for Array {
 
 pub fn array(i: &str) -> IResult<&str, Array> {
 	let (i, _) = openbracket(i)?;
-	let (i, v) = separated_list0(commas, item)(i)?;
+	let (i, v) = separated_list0(commas, value)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = closebracket(i)?;
 	Ok((i, Array(v)))
-}
-
-fn item(i: &str) -> IResult<&str, Value> {
-	let (i, v) = value(i)?;
-	Ok((i, v))
 }
 
 #[cfg(test)]

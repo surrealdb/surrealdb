@@ -17,7 +17,6 @@ use crate::sql::Future;
 use crate::sql::Ident;
 use crate::sql::Idiom;
 use crate::sql::Param;
-use crate::sql::Regex;
 use crate::sql::Strand;
 use crate::sql::Table;
 use crate::sql::Uuid;
@@ -211,7 +210,7 @@ impl ser::Serializer for Serializer {
 				value.serialize(ser::block::entry::vec::Serializer.wrap())?,
 			))))),
 			sql::regex::TOKEN => {
-				Ok(Value::Regex(Regex(value.serialize(ser::string::Serializer.wrap())?)))
+				Ok(Value::Regex(value.serialize(ser::string::Serializer.wrap())?.parse().unwrap()))
 			}
 			sql::table::TOKEN => {
 				Ok(Value::Table(Table(value.serialize(ser::string::Serializer.wrap())?)))
@@ -743,7 +742,7 @@ mod tests {
 
 	#[test]
 	fn regex() {
-		let regex = Regex::default();
+		let regex = "abc".parse().unwrap();
 		let value = to_value(&regex).unwrap();
 		let expected = Value::Regex(regex);
 		assert_eq!(value, expected);

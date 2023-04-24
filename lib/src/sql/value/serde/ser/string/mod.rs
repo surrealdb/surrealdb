@@ -1,3 +1,5 @@
+pub(super) mod vec;
+
 use crate::err::Error;
 use crate::sql::value::serde::ser;
 use serde::ser::Impossible;

@@ -7,6 +7,7 @@ use crate::err::Error;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
 use crate::sql::bytes::Bytes;
+use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::constant::{constant, Constant};
 use crate::sql::datetime::{datetime, Datetime};
@@ -23,7 +24,7 @@ use crate::sql::idiom::{self, Idiom};
 use crate::sql::kind::Kind;
 use crate::sql::model::{model, Model};
 use crate::sql::number::{number, Number};
-use crate::sql::object::{object, Object};
+use crate::sql::object::{key, object, Object};
 use crate::sql::operation::Operation;
 use crate::sql::param::{param, Param};
 use crate::sql::part::Part;
@@ -44,7 +45,9 @@ use fuzzy_matcher::FuzzyMatcher;
 use geo::Point;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
-use nom::combinator::map;
+use nom::character::complete::char;
+use nom::combinator::{map, opt};
+use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -1176,22 +1179,13 @@ impl Value {
 			Value::False => other.is_false(),
 			Value::Thing(v) => match other {
 				Value::Thing(w) => v == w,
-				Value::Regex(w) => match w.regex() {
-					Some(ref r) => r.is_match(v.to_string().as_str()),
-					None => false,
-				},
+				Value::Regex(w) => w.regex().is_match(v.to_string().as_str()),
 				_ => false,
 			},
 			Value::Regex(v) => match other {
 				Value::Regex(w) => v == w,
-				Value::Number(w) => match v.regex() {
-					Some(ref r) => r.is_match(w.to_string().as_str()),
-					None => false,
-				},
-				Value::Strand(w) => match v.regex() {
-					Some(ref r) => r.is_match(w.as_str()),
-					None => false,
-				},
+				Value::Number(w) => v.regex().is_match(w.to_string().as_str()),
+				Value::Strand(w) => v.regex().is_match(w.as_str()),
 				_ => false,
 			},
 			Value::Uuid(v) => match other {
@@ -1208,19 +1202,13 @@ impl Value {
 			},
 			Value::Strand(v) => match other {
 				Value::Strand(w) => v == w,
-				Value::Regex(w) => match w.regex() {
-					Some(ref r) => r.is_match(v.as_str()),
-					None => false,
-				},
+				Value::Regex(w) => w.regex().is_match(v.as_str()),
 				_ => v == &other.to_strand(),
 			},
 			Value::Number(v) => match other {
 				Value::Number(w) => v == w,
 				Value::Strand(_) => v == &other.to_number(),
-				Value::Regex(w) => match w.regex() {
-					Some(ref r) => r.is_match(v.to_string().as_str()),
-					None => false,
-				},
+				Value::Regex(w) => w.regex().is_match(v.to_string().as_str()),
 				_ => false,
 			},
 			Value::Geometry(v) => match other {
@@ -1417,7 +1405,7 @@ impl Value {
 			Value::Block(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
-			Value::Function(v) => v.args().iter().any(Value::writeable),
+			Value::Function(v) => v.is_custom() || v.args().iter().any(Value::writeable),
 			Value::Subquery(v) => v.writeable(),
 			Value::Expression(v) => v.l.writeable() || v.r.writeable(),
 			_ => false,
@@ -1676,12 +1664,41 @@ pub fn what(i: &str) -> IResult<&str, Value> {
 
 /// Used to parse any simple JSON-like value
 pub fn json(i: &str) -> IResult<&str, Value> {
+	// Use a specific parser for JSON objects
+	pub fn object(i: &str) -> IResult<&str, Object> {
+		let (i, _) = char('{')(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, v) = separated_list0(commas, |i| {
+			let (i, k) = key(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, _) = char(':')(i)?;
+			let (i, _) = mightbespace(i)?;
+			let (i, v) = json(i)?;
+			Ok((i, (String::from(k), v)))
+		})(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = opt(char(','))(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = char('}')(i)?;
+		Ok((i, Object(v.into_iter().collect())))
+	}
+	// Use a specific parser for JSON arrays
+	pub fn array(i: &str) -> IResult<&str, Array> {
+		let (i, _) = char('[')(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, v) = separated_list0(commas, json)(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = opt(char(','))(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = char(']')(i)?;
+		Ok((i, Array(v)))
+	}
+	// Parse any simple JSON-like value
 	alt((
-		map(tag_no_case("NULL"), |_| Value::Null),
-		map(tag_no_case("true"), |_| Value::True),
-		map(tag_no_case("false"), |_| Value::False),
+		map(tag_no_case("null".as_bytes()), |_| Value::Null),
+		map(tag_no_case("true".as_bytes()), |_| Value::True),
+		map(tag_no_case("false".as_bytes()), |_| Value::False),
 		map(datetime, Value::from),
-		map(duration, Value::from),
 		map(geometry, Value::from),
 		map(unique, Value::from),
 		map(number, Value::from),
@@ -1854,7 +1871,7 @@ mod tests {
 		assert_eq!(24, std::mem::size_of::<crate::sql::table::Table>());
 		assert_eq!(56, std::mem::size_of::<crate::sql::thing::Thing>());
 		assert_eq!(48, std::mem::size_of::<crate::sql::model::Model>());
-		assert_eq!(24, std::mem::size_of::<crate::sql::regex::Regex>());
+		assert_eq!(16, std::mem::size_of::<crate::sql::regex::Regex>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::range::Range>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::edges::Edges>>());
 		assert_eq!(8, std::mem::size_of::<Box<crate::sql::function::Function>>());

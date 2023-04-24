@@ -191,7 +191,7 @@ pub fn remove((array, index): (Value, Value)) -> Result<Value, Error> {
 				i += v.len() as i64;
 			}
 			// Invalid index so return array unaltered
-			if i > v.len() as i64 || i < 0 {
+			if i >= v.len() as i64 || i < 0 {
 				return Ok(v.into());
 			}
 			// Remove the value from the array

@@ -45,19 +45,15 @@ pub enum Entry {
 pub struct Cache(pub HashMap<Key, Entry>);
 
 impl Cache {
-	// Check if key exists
-	pub fn exi(&mut self, key: &Key) -> bool {
-		self.0.contains_key(key)
-	}
-	// Set a key in the cache
+	/// Set a key in the cache
 	pub fn set(&mut self, key: Key, val: Entry) {
 		self.0.insert(key, val);
 	}
-	// Get a key from the cache
+	/// Get a key from the cache
 	pub fn get(&mut self, key: &Key) -> Option<Entry> {
 		self.0.get(key).cloned()
 	}
-	// Delete a key from the cache
+	/// Delete a key from the cache
 	pub fn del(&mut self, key: &Key) -> Option<Entry> {
 		self.0.remove(key)
 	}

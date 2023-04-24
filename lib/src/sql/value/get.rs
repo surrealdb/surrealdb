@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::exe::try_join_all_buffered;
 use crate::sql::edges::Edges;
 use crate::sql::field::{Field, Fields};
 use crate::sql::id::Id;
@@ -12,7 +13,6 @@ use crate::sql::statements::select::SelectStatement;
 use crate::sql::thing::Thing;
 use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
-use futures::future::try_join_all;
 
 impl Value {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
@@ -68,7 +68,7 @@ impl Value {
 					Part::All => {
 						let path = path.next();
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						try_join_all(futs).await.map(Into::into)
+						try_join_all_buffered(futs).await.map(Into::into)
 					}
 					Part::First => match v.first() {
 						Some(v) => v.get(ctx, opt, txn, path.next()).await,
@@ -94,7 +94,7 @@ impl Value {
 					}
 					_ => {
 						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
-						try_join_all(futs).await.map(Into::into)
+						try_join_all_buffered(futs).await.map(Into::into)
 					}
 				},
 				// Current path part is an edges
