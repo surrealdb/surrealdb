@@ -35,10 +35,10 @@ impl Value {
 						0 => Ok(Value::Future(v.clone())),
 						// Process the future and fetch the embedded field
 						_ => {
-							v.compute(ctx, &opt.futures(true), txn, None)
-								.await?
-								.get(ctx, opt, txn, path)
-								.await
+							// Ensure futures are run
+							let opt = &opt.futures(true);
+							// Fetch the embedded field
+							v.compute(ctx, opt, txn, None).await?.get(ctx, opt, txn, path).await
 						}
 					}
 				}
