@@ -1024,7 +1024,7 @@ impl Value {
 	// -----------------------------------
 
 	/// Try to convert this value to the specified `Kind`
-	pub fn convert_to(self, kind: &Kind) -> Result<Value, Error> {
+	pub(crate) fn convert_to(self, kind: &Kind) -> Result<Value, Error> {
 		// Attempt to convert to the desired type
 		let res = match kind {
 			Kind::Any => Ok(self),
@@ -1091,7 +1091,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to an `i64`
-	pub fn convert_to_i64(self) -> Result<i64, Error> {
+	pub(crate) fn convert_to_i64(self) -> Result<i64, Error> {
 		match self {
 			// Allow any int number
 			Value::Number(Number::Int(v)) => Ok(v),
@@ -1126,7 +1126,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to an `u64`
-	pub fn convert_to_u64(self) -> Result<u64, Error> {
+	pub(crate) fn convert_to_u64(self) -> Result<u64, Error> {
 		match self {
 			// Allow any int number
 			Value::Number(Number::Int(v)) => Ok(v as u64),
@@ -1161,7 +1161,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to an `f64`
-	pub fn convert_to_f64(self) -> Result<f64, Error> {
+	pub(crate) fn convert_to_f64(self) -> Result<f64, Error> {
 		match self {
 			// Allow any float number
 			Value::Number(Number::Float(v)) => Ok(v),
@@ -1196,7 +1196,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `bool`
-	pub fn convert_to_bool(self) -> Result<bool, Error> {
+	pub(crate) fn convert_to_bool(self) -> Result<bool, Error> {
 		match self {
 			// Allow any true value
 			Value::True => Ok(true),
@@ -1211,7 +1211,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to an integer `Number`
-	pub fn convert_to_int(self) -> Result<Number, Error> {
+	pub(crate) fn convert_to_int(self) -> Result<Number, Error> {
 		match self {
 			// Allow any int number
 			Value::Number(v) if v.is_int() => Ok(v),
@@ -1246,7 +1246,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a float `Number`
-	pub fn convert_to_float(self) -> Result<Number, Error> {
+	pub(crate) fn convert_to_float(self) -> Result<Number, Error> {
 		match self {
 			// Allow any float number
 			Value::Number(v) if v.is_float() => Ok(v),
@@ -1281,7 +1281,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a decimal `Number`
-	pub fn convert_to_decimal(self) -> Result<Number, Error> {
+	pub(crate) fn convert_to_decimal(self) -> Result<Number, Error> {
 		match self {
 			// Allow any decimal number
 			Value::Number(v) if v.is_decimal() => Ok(v),
@@ -1324,7 +1324,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `Number`
-	pub fn convert_to_number(self) -> Result<Number, Error> {
+	pub(crate) fn convert_to_number(self) -> Result<Number, Error> {
 		match self {
 			// Allow any number
 			Value::Number(v) => Ok(v),
@@ -1347,7 +1347,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `String`
-	pub fn convert_to_string(self) -> Result<String, Error> {
+	pub(crate) fn convert_to_string(self) -> Result<String, Error> {
 		match self {
 			// Bytes can't convert to strings
 			Value::Bytes(_) => Err(Error::ConvertTo {
@@ -1370,7 +1370,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `Strand`
-	pub fn convert_to_strand(self) -> Result<Strand, Error> {
+	pub(crate) fn convert_to_strand(self) -> Result<Strand, Error> {
 		match self {
 			// Bytes can't convert to strings
 			Value::Bytes(_) => Err(Error::ConvertTo {
@@ -1399,7 +1399,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `Uuid`
-	pub fn convert_to_uuid(self) -> Result<Uuid, Error> {
+	pub(crate) fn convert_to_uuid(self) -> Result<Uuid, Error> {
 		match self {
 			// Uuids are allowed
 			Value::Uuid(v) => Ok(v),
@@ -1422,7 +1422,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `Datetime`
-	pub fn convert_to_datetime(self) -> Result<Datetime, Error> {
+	pub(crate) fn convert_to_datetime(self) -> Result<Datetime, Error> {
 		match self {
 			// Datetimes are allowed
 			Value::Datetime(v) => Ok(v),
@@ -1445,7 +1445,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `Duration`
-	pub fn convert_to_duration(self) -> Result<Duration, Error> {
+	pub(crate) fn convert_to_duration(self) -> Result<Duration, Error> {
 		match self {
 			// Durations are allowed
 			Value::Duration(v) => Ok(v),
@@ -1468,7 +1468,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `Bytes`
-	pub fn convert_to_bytes(self) -> Result<Bytes, Error> {
+	pub(crate) fn convert_to_bytes(self) -> Result<Bytes, Error> {
 		match self {
 			// Bytes are allowed
 			Value::Bytes(v) => Ok(v),
@@ -1481,7 +1481,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to an `Object`
-	pub fn convert_to_object(self) -> Result<Object, Error> {
+	pub(crate) fn convert_to_object(self) -> Result<Object, Error> {
 		match self {
 			// Objects are allowed
 			Value::Object(v) => Ok(v),
@@ -1494,7 +1494,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to an `Array`
-	pub fn convert_to_array(self) -> Result<Array, Error> {
+	pub(crate) fn convert_to_array(self) -> Result<Array, Error> {
 		match self {
 			// Arrays are allowed
 			Value::Array(v) => Ok(v),
@@ -1507,7 +1507,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to an `Geometry` point
-	pub fn convert_to_point(self) -> Result<Geometry, Error> {
+	pub(crate) fn convert_to_point(self) -> Result<Geometry, Error> {
 		match self {
 			// Geometry points are allowed
 			Value::Geometry(Geometry::Point(v)) => Ok(v.into()),
@@ -1530,7 +1530,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Record or `Thing`
-	pub fn convert_to_record(self) -> Result<Thing, Error> {
+	pub(crate) fn convert_to_record(self) -> Result<Thing, Error> {
 		match self {
 			// Records are allowed
 			Value::Thing(v) => Ok(v),
@@ -1543,7 +1543,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to an `Geometry` type
-	pub fn convert_to_geometry(self) -> Result<Geometry, Error> {
+	pub(crate) fn convert_to_geometry(self) -> Result<Geometry, Error> {
 		match self {
 			// Geometries are allowed
 			Value::Geometry(v) => Ok(v),
@@ -1556,7 +1556,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Record of a certain type
-	pub fn convert_to_record_type(self, val: &[Table]) -> Result<Thing, Error> {
+	pub(crate) fn convert_to_record_type(self, val: &[Table]) -> Result<Thing, Error> {
 		match self {
 			// Records are allowed if correct type
 			Value::Thing(v) if self.is_record_type(val) => Ok(v),
@@ -1569,7 +1569,7 @@ impl Value {
 	}
 
 	/// Try to convert this value to a `Geometry` of a certain type
-	pub fn convert_to_geometry_type(self, val: &[String]) -> Result<Geometry, Error> {
+	pub(crate) fn convert_to_geometry_type(self, val: &[String]) -> Result<Geometry, Error> {
 		match self {
 			// Geometries are allowed if correct type
 			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),
@@ -1582,7 +1582,11 @@ impl Value {
 	}
 
 	/// Try to convert this value to ab `Array` of a certain type and optional length
-	pub fn convert_to_array_type(self, kind: &Kind, size: &Option<u64>) -> Result<Array, Error> {
+	pub(crate) fn convert_to_array_type(
+		self,
+		kind: &Kind,
+		size: &Option<u64>,
+	) -> Result<Array, Error> {
 		match size {
 			Some(l) => self
 				.convert_to_array()?
@@ -1602,7 +1606,11 @@ impl Value {
 	}
 
 	/// Try to convert this value to an `Array` of a certain type, unique values, and optional length
-	pub fn convert_to_set_type(self, kind: &Kind, size: &Option<u64>) -> Result<Array, Error> {
+	pub(crate) fn convert_to_set_type(
+		self,
+		kind: &Kind,
+		size: &Option<u64>,
+	) -> Result<Array, Error> {
 		match size {
 			Some(l) => self
 				.convert_to_array()?
