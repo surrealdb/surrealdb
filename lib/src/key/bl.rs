@@ -16,7 +16,6 @@ pub struct Bl {
 	_f: u8,
 	pub ix: String,
 	_g: u8,
-	_h: u8,
 	pub node_id: Option<NodeId>,
 }
 
@@ -31,11 +30,10 @@ impl Bl {
 			_c: 0x2a, // *
 			tb,
 			_d: 0x21, // !
-			_e: 0x69, // i
-			_f: 0x78, // x
+			_e: 0x62, // b
+			_f: 0x6c, // l
 			ix,
-			_g: 0x62, // b
-			_h: 0x6c, // l
+			_g: 0x2a, // *
 			node_id,
 		}
 	}

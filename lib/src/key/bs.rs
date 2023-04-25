@@ -14,8 +14,6 @@ pub struct Bs {
 	_e: u8,
 	_f: u8,
 	pub ix: String,
-	_g: u8,
-	_h: u8,
 }
 
 impl Bs {
@@ -29,11 +27,9 @@ impl Bs {
 			_c: 0x2a, // *
 			tb,
 			_d: 0x21, // !
-			_e: 0x69, // i
-			_f: 0x78, // x
+			_e: 0x62, // b
+			_f: 0x73, // s,
 			ix,
-			_g: 0x62, // b
-			_h: 0x73, // s
 		}
 	}
 }

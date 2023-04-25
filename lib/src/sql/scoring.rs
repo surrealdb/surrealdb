@@ -23,7 +23,7 @@ impl Default for Scoring {
 		Self::Bm {
 			k1: Number::Float(1.2),
 			b: Number::Float(0.75),
-			order: Number::Int(10000),
+			order: Number::Int(1000),
 		}
 	}
 }
@@ -60,4 +60,27 @@ pub fn scoring(i: &str) -> IResult<&str, Scoring> {
 			},
 		))
 	}))(i)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn scoring_bm_25() {
+		let sql = "BM25(1.0,0.6,100)";
+		let res = scoring(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("BM25(1.0,0.6,100)", format!("{}", out))
+	}
+
+	#[test]
+	fn scoring_vs() {
+		let sql = "VS";
+		let res = scoring(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("VS", format!("{}", out))
+	}
 }

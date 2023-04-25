@@ -17,7 +17,6 @@ pub struct Bf {
 	_f: u8,
 	pub ix: String,
 	_g: u8,
-	_h: u8,
 	pub term_id: TermId,
 	pub doc_id: DocId,
 }
@@ -40,11 +39,10 @@ impl Bf {
 			_c: 0x2a, // *
 			tb,
 			_d: 0x21, // !
-			_e: 0x69, // i
+			_e: 0x62, // b
 			_f: 0x78, // x
 			ix,
-			_g: 0x62, // b
-			_h: 0x66, // f
+			_g: 0x2a, // *
 			term_id,
 			doc_id,
 		}
@@ -65,7 +63,6 @@ pub struct BfPrefix {
 	_f: u8,
 	pub ix: String,
 	_g: u8,
-	_h: u8,
 	term_id: TermId,
 }
 
@@ -80,11 +77,10 @@ impl BfPrefix {
 			_c: 0x2a, // *
 			tb,
 			_d: 0x21, // !
-			_e: 0x69, // i
+			_e: 0x62, // b
 			_f: 0x78, // x
 			ix,
-			_g: 0x62, // b
-			_h: 0x66, // f
+			_g: 0x2a, // *
 			term_id,
 		}
 	}

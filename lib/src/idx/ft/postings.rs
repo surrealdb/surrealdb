@@ -154,14 +154,18 @@ impl KeyVisitor for PostingsDocCount {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::postings::Postings;
+	use crate::err::Error;
+	use crate::idx::ft::docids::DocId;
+	use crate::idx::ft::postings::{Postings, PostingsVisitor, TermFrequency};
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, Transaction};
+	use async_trait::async_trait;
+	use std::collections::HashMap;
 	use test_log::test;
 
 	#[test(tokio::test)]
 	async fn test_postings() {
-		const DEFAULT_BTREE_ORDER: usize = 75;
+		const DEFAULT_BTREE_ORDER: usize = 5;
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();
@@ -174,8 +178,46 @@ mod tests {
 
 		p.update_posting(&mut tx, 1, 2, 3).await.unwrap();
 
-		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 1);
 		p.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
+
+		let mut tx = ds.transaction(false, false).await.unwrap();
+		let p = Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER).await.unwrap();
+		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 1);
+
+		let mut v = TestPostingVisitor::default();
+		p.collect_postings(&mut tx, 1, &mut v).await.unwrap();
+		v.check_len(1, "Postings");
+		v.check(vec![(2, 3)], "Postings");
+	}
+
+	#[derive(Default)]
+	pub(super) struct TestPostingVisitor {
+		map: HashMap<DocId, TermFrequency>,
+	}
+
+	#[async_trait]
+	impl PostingsVisitor for TestPostingVisitor {
+		async fn visit(
+			&mut self,
+			_tx: &mut Transaction,
+			doc_id: DocId,
+			term_frequency: TermFrequency,
+		) -> Result<(), Error> {
+			assert_eq!(self.map.insert(doc_id, term_frequency), None);
+			Ok(())
+		}
+	}
+
+	impl TestPostingVisitor {
+		pub(super) fn check_len(&self, len: usize, info: &str) {
+			assert_eq!(self.map.len(), len, "len issue: {}", info);
+		}
+		pub(super) fn check(&self, res: Vec<(DocId, TermFrequency)>, info: &str) {
+			self.check_len(res.len(), info);
+			for (d, f) in res {
+				assert_eq!(self.map.get(&d), Some(&f));
+			}
+		}
 	}
 }

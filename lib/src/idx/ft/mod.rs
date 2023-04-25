@@ -321,7 +321,7 @@ mod tests {
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
 
-		let default_btree_order = 200;
+		let default_btree_order = 5;
 
 		{
 			// Add one document
@@ -390,7 +390,7 @@ mod tests {
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
 
-			let default_btree_order = 75;
+			let default_btree_order = 5;
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
 				let mut fti = FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order)
