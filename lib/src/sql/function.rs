@@ -358,6 +358,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("push"),
 			tag("remove"),
 			tag("reverse"),
+			tag("slice"),
 			tag("sort::asc"),
 			tag("sort::desc"),
 			tag("sort"),
