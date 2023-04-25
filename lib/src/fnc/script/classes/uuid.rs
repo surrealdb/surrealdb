@@ -33,7 +33,7 @@ pub mod uuid {
 		}
 		// Compare two Uuid instances
 		pub fn is(a: &Uuid, b: &Uuid, args: Rest<Value>) -> bool {
-			a.value == b.value
+			a.value.is_some() && b.value.is_some() && a.value == b.value
 		}
 		/// Convert the object to a string
 		pub fn toString(&self, args: Rest<Value>) -> String {
