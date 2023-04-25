@@ -269,10 +269,7 @@ fn duration_raw(i: &str) -> IResult<&str, Duration> {
 		"d" => v.checked_mul(SECONDS_PER_DAY).map(time::Duration::from_secs),
 		"w" => v.checked_mul(SECONDS_PER_WEEK).map(time::Duration::from_secs),
 		"y" => v.checked_mul(SECONDS_PER_YEAR).map(time::Duration::from_secs),
-		_ => {
-			debug_assert!(false, "shouldn't have parsed {u} as duration unit");
-			Some(time::Duration::ZERO)
-		}
+		_ => unreachable!("shouldn't have parsed {u} as duration unit"),
 	};
 
 	std_duration.map(|d| (i, Duration(d))).ok_or(nom::Err::Error(crate::sql::Error::Parser(i)))
