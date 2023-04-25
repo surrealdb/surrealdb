@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::value::Value;
 
 impl Value {
-	pub async fn merge(
+	pub(crate) async fn merge(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,

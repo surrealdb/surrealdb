@@ -32,7 +32,7 @@ mod tests {
 		let res = version(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, Version(Datetime::from("2020-01-01T00:00:00Z")));
+		assert_eq!(out, Version(Datetime::try_from("2020-01-01T00:00:00Z").unwrap()));
 		assert_eq!("VERSION '2020-01-01T00:00:00Z'", format!("{}", out));
 	}
 }

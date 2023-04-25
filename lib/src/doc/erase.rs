@@ -8,11 +8,11 @@ use crate::err::Error;
 impl<'a> Document<'a> {
 	pub async fn erase(
 		&mut self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
+		_ctx: &Context<'_>,
+		_opt: &Options,
+		_txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		self.current.to_mut().clear(ctx, opt, txn).await
+		self.current.to_mut().clear()
 	}
 }

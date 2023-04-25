@@ -84,8 +84,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 								}
 								Statement::Set(stmt) => {
 									if let Err(e) = client.set(&stmt.name, &stmt.what).await {
-										eprintln!("{e}");
-										eprintln!();
+										eprintln!("{e}\n");
 									}
 								}
 								_ => {}
@@ -95,18 +94,15 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 						// Get the request response
 						match process(pretty, res) {
 							Ok(v) => {
-								println!("{v}");
-								println!();
+								println!("{v}\n");
 							}
 							Err(e) => {
-								eprintln!("{e}");
-								eprintln!();
+								eprintln!("{e}\n");
 							}
 						}
 					}
 					Err(e) => {
-						eprintln!("{e}");
-						eprintln!();
+						eprintln!("{e}\n");
 					}
 				}
 			}
@@ -132,24 +128,19 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 }
 
 fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
-	use surrealdb::error::Api;
-	use surrealdb::Error;
-	// Extract `Value` from the response
-	let value = match res?.take::<Option<Value>>(0) {
-		Ok(value) => value.unwrap_or_default(),
-		Err(Error::Api(Api::FromValue {
-			value,
-			..
-		})) => value,
-		Err(Error::Api(Api::LossyTake(mut res))) => match res.take::<Vec<Value>>(0) {
-			Ok(mut value) => value.pop().unwrap_or_default(),
-			Err(Error::Api(Api::FromValue {
-				value,
-				..
-			})) => value,
-			Err(error) => return Err(error.into()),
-		},
-		Err(error) => return Err(error.into()),
+	// Check query response for an error
+	let mut response = res?;
+	// Get the number of statements the query contained
+	let num_statements = response.num_statements();
+	// Prepare a single value from the query response
+	let value = if num_statements > 1 {
+		let mut output = Vec::<Value>::with_capacity(num_statements);
+		for index in 0..num_statements {
+			output.push(response.take(index)?);
+		}
+		Value::from(output)
+	} else {
+		response.take(0)?
 	};
 	// Check if we should prettify
 	Ok(match pretty {

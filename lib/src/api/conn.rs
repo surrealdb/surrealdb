@@ -4,6 +4,7 @@ use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::opt::from_value;
 use crate::sql::Query;
 use crate::sql::Value;
 use flume::Receiver;
@@ -174,13 +175,30 @@ pub trait Connection: Sized + Send + Sync + 'static {
 		receiver: Receiver<Result<DbResponse>>,
 	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + '_>>
 	where
-		R: DeserializeOwned;
+		R: DeserializeOwned,
+	{
+		Box::pin(async move {
+			let response = receiver.into_recv_async().await?;
+			match response? {
+				DbResponse::Other(value) => from_value(value).map_err(Into::into),
+				DbResponse::Query(..) => unreachable!(),
+			}
+		})
+	}
 
 	/// Receive the response of the `query` method
 	fn recv_query(
 		&mut self,
 		receiver: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<Response>> + Send + Sync + '_>>;
+	) -> Pin<Box<dyn Future<Output = Result<Response>> + Send + Sync + '_>> {
+		Box::pin(async move {
+			let response = receiver.into_recv_async().await?;
+			match response? {
+				DbResponse::Query(results) => Ok(results),
+				DbResponse::Other(..) => unreachable!(),
+			}
+		})
+	}
 
 	/// Execute all methods except `query`
 	fn execute<'r, R>(

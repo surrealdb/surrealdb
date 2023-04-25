@@ -6,7 +6,7 @@ use crate::sql::operation::Op;
 use crate::sql::value::Value;
 
 impl Value {
-	pub async fn patch(
+	pub(crate) async fn patch(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,

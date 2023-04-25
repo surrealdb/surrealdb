@@ -44,7 +44,7 @@ mod tests {
 		let val = Lq::new(
 			"test".to_string(),
 			"test".to_string(),
-			"00000000-0000-0000-0000-000000000000".into(),
+			Uuid::default(),
 		);
 		let enc = Lq::encode(&val).unwrap();
 		let dec = Lq::decode(&enc).unwrap();
