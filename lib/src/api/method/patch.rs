@@ -27,6 +27,38 @@ pub struct Patch<'r, C: Connection, R> {
 	pub(super) response_type: PhantomData<R>,
 }
 
+impl<'r, Client, R> IntoFuture for Patch<'r, Client, R>
+where
+	Client: Connection,
+	R: DeserializeOwned,
+{
+	type Output = Result<R>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+
+	fn into_future(self) -> Self::IntoFuture {
+		let Patch {
+			router,
+			resource,
+			range,
+			patches,
+			..
+		} = self;
+		Box::pin(async move {
+			let param = match range {
+				Some(range) => resource?.with_range(range)?,
+				None => resource?.into(),
+			};
+			let mut vec = Vec::with_capacity(patches.len());
+			for result in patches {
+				vec.push(result?);
+			}
+			let patches = Value::Array(Array(vec));
+			let mut conn = Client::new(Method::Patch);
+			conn.execute(router?, Param::new(vec![param, patches])).await
+		})
+	}
+}
+
 impl<'r, C, R> Patch<'r, C, R>
 where
 	C: Connection,
@@ -35,31 +67,5 @@ where
 	pub fn patch(mut self, PatchOp(patch): PatchOp) -> Patch<'r, C, R> {
 		self.patches.push(patch);
 		self
-	}
-}
-
-impl<'r, Client, R> IntoFuture for Patch<'r, Client, R>
-where
-	Client: Connection,
-	R: DeserializeOwned + Send + Sync,
-{
-	type Output = Result<R>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
-
-	fn into_future(self) -> Self::IntoFuture {
-		Box::pin(async move {
-			let resource = self.resource?;
-			let param = match self.range {
-				Some(range) => resource.with_range(range)?,
-				None => resource.into(),
-			};
-			let mut patches = Vec::with_capacity(self.patches.len());
-			for result in self.patches {
-				patches.push(result?);
-			}
-			let patches = Value::Array(Array(patches));
-			let mut conn = Client::new(Method::Patch);
-			conn.execute(self.router?, Param::new(vec![param, patches])).await
-		})
 	}
 }

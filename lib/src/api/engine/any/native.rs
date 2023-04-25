@@ -9,7 +9,6 @@ use crate::api::engine::any::Any;
 #[cfg(feature = "protocol-http")]
 use crate::api::engine::remote::http;
 use crate::api::err::Error;
-use crate::api::opt::from_value;
 use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
@@ -17,7 +16,6 @@ use crate::api::opt::Tls;
 use crate::api::DbResponse;
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
-use crate::api::Response;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::error::Db as DbError;
@@ -25,7 +23,6 @@ use flume::Receiver;
 use once_cell::sync::OnceCell;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
-use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -224,35 +221,6 @@ impl Connection for Any {
 			};
 			router.sender.send_async(Some(route)).await?;
 			Ok(receiver)
-		})
-	}
-
-	fn recv<R>(
-		&mut self,
-		receiver: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + '_>>
-	where
-		R: DeserializeOwned,
-	{
-		Box::pin(async move {
-			let response = receiver.into_recv_async().await?;
-			match response? {
-				DbResponse::Other(value) => from_value(value).map_err(Into::into),
-				DbResponse::Query(..) => unreachable!(),
-			}
-		})
-	}
-
-	fn recv_query(
-		&mut self,
-		receiver: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<Response>> + Send + Sync + '_>> {
-		Box::pin(async move {
-			let response = receiver.into_recv_async().await?;
-			match response? {
-				DbResponse::Query(results) => Ok(results),
-				DbResponse::Other(..) => unreachable!(),
-			}
 		})
 	}
 }

@@ -70,6 +70,7 @@ use tokio::io::AsyncWrite;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
+#[cfg(not(target_arch = "wasm32"))]
 const LOG: &str = "surrealdb::api::engine::local";
 
 /// In-memory database

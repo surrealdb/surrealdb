@@ -21,68 +21,79 @@ pub struct Create<'r, C: Connection, R> {
 	pub(super) response_type: PhantomData<R>,
 }
 
-impl<'r, Client, R> Create<'r, Client, R>
-where
-	Client: Connection,
-{
-	async fn execute<T>(self) -> Result<T>
-	where
-		T: DeserializeOwned,
-	{
-		let mut conn = Client::new(Method::Create);
-		conn.execute(self.router?, Param::new(vec![self.resource?.into()])).await
-	}
+macro_rules! into_future {
+	() => {
+		fn into_future(self) -> Self::IntoFuture {
+			let Create {
+				router,
+				resource,
+				..
+			} = self;
+			Box::pin(async {
+				let mut conn = Client::new(Method::Create);
+				conn.execute(router?, Param::new(vec![resource?.into()])).await
+			})
+		}
+	};
 }
 
 impl<'r, Client, R> IntoFuture for Create<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned + Send + Sync + 'r,
+	R: DeserializeOwned,
 {
 	type Output = Result<R>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	fn into_future(self) -> Self::IntoFuture {
-		Box::pin(self.execute())
-	}
+	into_future! {}
 }
 
 impl<'r, Client, R> IntoFuture for Create<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned + Send + Sync + 'r,
+	R: DeserializeOwned,
 {
 	type Output = Result<R>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	fn into_future(self) -> Self::IntoFuture {
-		Box::pin(self.execute())
-	}
+	into_future! {}
 }
 
-macro_rules! create_methods {
-	($this:ty) => {
-		impl<'r, C, R> Create<'r, C, $this>
-		where
-			C: Connection,
-		{
-			/// Sets content of a record
-			pub fn content<D>(self, data: D) -> Content<'r, C, D, R>
-			where
-				D: Serialize,
-			{
-				Content {
-					router: self.router,
-					method: Method::Create,
-					resource: self.resource,
-					range: None,
-					content: data,
-					response_type: PhantomData,
-				}
-			}
+macro_rules! content {
+	($this:ident, $data:ident) => {
+		Content {
+			router: $this.router,
+			method: Method::Create,
+			resource: $this.resource,
+			range: None,
+			content: $data,
+			response_type: PhantomData,
 		}
 	};
 }
 
-create_methods!(Option<R>);
-create_methods!(Vec<R>);
+impl<'r, C, R> Create<'r, C, Option<R>>
+where
+	C: Connection,
+{
+	/// Sets content of a record
+	pub fn content<D>(self, data: D) -> Content<'r, C, D, R>
+	where
+		D: Serialize,
+	{
+		content!(self, data)
+	}
+}
+
+impl<'r, C, R> Create<'r, C, Vec<R>>
+where
+	C: Connection,
+{
+	/// Sets content of a record
+	pub fn content<D>(self, data: D) -> Content<'r, C, D, R>
+	where
+		D: Serialize,
+	{
+		content!(self, data)
+	}
+}

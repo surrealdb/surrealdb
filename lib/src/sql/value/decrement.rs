@@ -7,7 +7,7 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
-	pub async fn decrement(
+	pub(crate) async fn decrement(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,

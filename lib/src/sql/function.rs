@@ -9,6 +9,7 @@ use crate::sql::common::{closeparenthese, commas, openparenthese};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
+use crate::sql::kind::{kind, Kind};
 use crate::sql::script::{script as func, Script};
 use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::{single, value, Value};
@@ -32,7 +33,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Hash)]
 pub enum Function {
-	Cast(String, Value),
+	Cast(Kind, Value),
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
@@ -147,11 +148,11 @@ impl Function {
 		let opt = &opt.futures(true);
 		// Process the function type
 		match self {
-			Self::Cast(s, x) => {
+			Self::Cast(k, x) => {
 				// Compute the value to be cast
 				let a = x.compute(ctx, opt, txn, doc).await?;
 				// Run the cast function
-				fnc::cast::run(ctx, s, a)
+				a.convert_to(k)
 			}
 			Self::Normal(s, x) => {
 				// Compute the function arguments
@@ -185,14 +186,7 @@ impl Function {
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(val.args) {
-					ctx.add_value(
-						name.to_raw(),
-						match val {
-							Value::None => val,
-							Value::Null => val,
-							_ => val.convert_to(&kind),
-						},
-					);
+					ctx.add_value(name.to_raw(), val.convert_to(&kind)?);
 				}
 				// Run the custom function
 				val.block.compute(&ctx, opt, txn, doc).await
@@ -220,7 +214,7 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Cast(s, e) => write!(f, "<{s}> {e}"),
+			Self::Cast(k, e) => write!(f, "<{k}> {e}"),
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
@@ -306,23 +300,10 @@ fn script(i: &str) -> IResult<&str, Function> {
 }
 
 fn cast(i: &str) -> IResult<&str, Function> {
-	let (i, s) = delimited(
-		char('<'),
-		alt((
-			tag("bool"),
-			tag("datetime"),
-			tag("decimal"),
-			tag("duration"),
-			tag("float"),
-			tag("int"),
-			tag("number"),
-			tag("string"),
-		)),
-		char('>'),
-	)(i)?;
+	let (i, k) = delimited(char('<'), kind, char('>'))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = single(i)?;
-	Ok((i, Function::Cast(s.to_string(), v)))
+	Ok((i, Function::Cast(k, v)))
 }
 
 fn function_names(i: &str) -> IResult<&str, &str> {
@@ -396,7 +377,30 @@ fn function_crypto(i: &str) -> IResult<&str, &str> {
 }
 
 fn function_duration(i: &str) -> IResult<&str, &str> {
-	alt((tag("days"), tag("hours"), tag("mins"), tag("secs"), tag("weeks"), tag("years")))(i)
+	alt((
+		tag("days"),
+		tag("hours"),
+		tag("micros"),
+		tag("millis"),
+		tag("mins"),
+		tag("nanos"),
+		tag("secs"),
+		tag("weeks"),
+		tag("years"),
+		preceded(
+			tag("from"),
+			alt((
+				tag("days"),
+				tag("hours"),
+				tag("micros"),
+				tag("millis"),
+				tag("mins"),
+				tag("nanos"),
+				tag("secs"),
+				tag("weeks"),
+			)),
+		),
+	))(i)
 }
 
 fn function_geo(i: &str) -> IResult<&str, &str> {
@@ -554,6 +558,7 @@ fn function_time(i: &str) -> IResult<&str, &str> {
 		tag("week"),
 		tag("yday"),
 		tag("year"),
+		preceded(tag("from"), alt((tag("micros"), tag("millis"), tag("secs"), tag("unix")))),
 	))(i)
 }
 
@@ -567,7 +572,6 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 		tag("int"),
 		tag("number"),
 		tag("point"),
-		tag("regex"),
 		tag("string"),
 		tag("table"),
 		tag("thing"),
@@ -627,7 +631,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<int> 1.2345", format!("{}", out));
-		assert_eq!(out, Function::Cast(String::from("int"), 1.2345.into()));
+		assert_eq!(out, Function::Cast(Kind::Int, 1.2345.into()));
 	}
 
 	#[test]
@@ -637,7 +641,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<string> 1.2345", format!("{}", out));
-		assert_eq!(out, Function::Cast(String::from("string"), 1.2345.into()));
+		assert_eq!(out, Function::Cast(Kind::String, 1.2345.into()));
 	}
 
 	#[test]

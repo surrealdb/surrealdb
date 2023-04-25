@@ -7,6 +7,7 @@ use crate::sql::escape::escape_rid;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
 use crate::sql::serde::is_internal_serialization;
+use crate::sql::strand::Strand;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -17,6 +18,7 @@ use nom::sequence::delimited;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
@@ -44,6 +46,37 @@ impl From<(String, String)> for Thing {
 impl From<(&str, &str)> for Thing {
 	fn from((tb, id): (&str, &str)) -> Self {
 		Self::from((tb.to_owned(), Id::from(id)))
+	}
+}
+
+impl FromStr for Thing {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
+impl TryFrom<String> for Thing {
+	type Error = ();
+	fn try_from(v: String) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<Strand> for Thing {
+	type Error = ();
+	fn try_from(v: Strand) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<&str> for Thing {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match thing_raw(v) {
+			Ok((_, v)) => Ok(v),
+			_ => Err(()),
+		}
 	}
 }
 

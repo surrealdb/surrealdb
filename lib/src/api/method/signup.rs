@@ -24,19 +24,24 @@ pub struct Signup<'r, C: Connection, R> {
 impl<'r, Client, R> IntoFuture for Signup<'r, Client, R>
 where
 	Client: Connection,
-	R: DeserializeOwned + Send + Sync,
+	R: DeserializeOwned,
 {
 	type Output = Result<R>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	fn into_future(self) -> Self::IntoFuture {
+		let Signup {
+			router,
+			credentials,
+			..
+		} = self;
 		Box::pin(async move {
-			let router = self.router?;
+			let router = router?;
 			if !router.features.contains(&ExtraFeatures::Auth) {
 				return Err(Error::AuthNotSupported.into());
 			}
 			let mut conn = Client::new(Method::Signup);
-			conn.execute(router, Param::new(vec![self.credentials?])).await
+			conn.execute(router, Param::new(vec![credentials?])).await
 		})
 	}
 }

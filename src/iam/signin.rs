@@ -22,9 +22,9 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 	match (ns, db, sc) {
 		(Some(ns), Some(db), Some(sc)) => {
 			// Process the provided values
-			let ns = ns.to_strand().as_string();
-			let db = db.to_strand().as_string();
-			let sc = sc.to_strand().as_string();
+			let ns = ns.to_raw_string();
+			let db = db.to_raw_string();
+			let sc = sc.to_raw_string();
 			// Attempt to signin to specified scope
 			super::signin::sc(session, ns, db, sc, vars).await
 		}
@@ -37,10 +37,10 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let ns = ns.to_strand().as_string();
-					let db = db.to_strand().as_string();
-					let user = user.to_strand().as_string();
-					let pass = pass.to_strand().as_string();
+					let ns = ns.to_raw_string();
+					let db = db.to_raw_string();
+					let user = user.to_raw_string();
+					let pass = pass.to_raw_string();
 					// Attempt to signin to database
 					super::signin::db(session, ns, db, user, pass).await
 				}
@@ -57,9 +57,9 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let ns = ns.to_strand().as_string();
-					let user = user.to_strand().as_string();
-					let pass = pass.to_strand().as_string();
+					let ns = ns.to_raw_string();
+					let user = user.to_raw_string();
+					let pass = pass.to_raw_string();
 					// Attempt to signin to namespace
 					super::signin::ns(session, ns, user, pass).await
 				}
@@ -76,8 +76,8 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let user = user.to_strand().as_string();
-					let pass = pass.to_strand().as_string();
+					let user = user.to_raw_string();
+					let pass = pass.to_raw_string();
 					// Attempt to signin to namespace
 					super::signin::su(session, user, pass).await
 				}

@@ -25,6 +25,13 @@ pub fn commas(i: &str) -> IResult<&str, ()> {
 	Ok((i, ()))
 }
 
+pub fn verbar(i: &str) -> IResult<&str, ()> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('|')(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, ()))
+}
+
 pub fn commasorspace(i: &str) -> IResult<&str, ()> {
 	alt((commas, shouldbespace))(i)
 }
