@@ -39,6 +39,25 @@ impl<'a> Document<'a> {
 					},
 					_ => Value::None,
 				};
+				// Check for a TYPE clause
+				if let Some(kind) = &fd.kind {
+					if !val.is_none() {
+						val = val.convert_to(kind).map_err(|e| match e {
+							// There was a conversion error
+							Error::ConvertTo {
+								from,
+								..
+							} => Error::FieldCheck {
+								thing: rid.to_string(),
+								field: fd.name.clone(),
+								value: from.to_string(),
+								check: kind.to_string(),
+							},
+							// There was a different error
+							e => e,
+						})?;
+					}
+				}
 				// Check for a VALUE clause
 				if let Some(expr) = &fd.value {
 					// Configure the context
@@ -52,11 +71,20 @@ impl<'a> Document<'a> {
 				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
-					val = match val {
-						Value::None => val,
-						Value::Null => val,
-						_ => val.convert_to(kind),
-					}
+					val = val.convert_to(kind).map_err(|e| match e {
+						// There was a conversion error
+						Error::ConvertTo {
+							from,
+							..
+						} => Error::FieldCheck {
+							thing: rid.to_string(),
+							field: fd.name.clone(),
+							value: from.to_string(),
+							check: kind.to_string(),
+						},
+						// There was a different error
+						e => e,
+					})?;
 				}
 				// Check for a ASSERT clause
 				if let Some(expr) = &fd.assert {
@@ -70,8 +98,8 @@ impl<'a> Document<'a> {
 					if !expr.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 						return Err(Error::FieldValue {
 							thing: rid.to_string(),
-							value: val.to_string(),
 							field: fd.name.clone(),
+							value: val.to_string(),
 							check: expr.to_string(),
 						});
 					}
@@ -79,9 +107,7 @@ impl<'a> Document<'a> {
 				// Check for a PERMISSIONS clause
 				if opt.perms && opt.auth.perms() {
 					// Get the permission clause
-					let perms = if stm.is_delete() {
-						&fd.permissions.delete
-					} else if self.is_new() {
+					let perms = if self.is_new() {
 						&fd.permissions.create
 					} else {
 						&fd.permissions.update

@@ -13,7 +13,7 @@ use std::collections::HashSet;
 impl Value {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub async fn del(
+	pub(crate) async fn del(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,

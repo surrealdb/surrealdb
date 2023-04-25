@@ -404,7 +404,7 @@ async fn router(
 					});
 				} else {
 					*auth = Some(Auth::Bearer {
-						token: value.to_strand().as_string(),
+						token: value.to_raw_string(),
 					});
 				}
 			}

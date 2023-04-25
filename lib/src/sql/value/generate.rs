@@ -5,7 +5,7 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 
 impl Value {
-	pub fn generate(self, tb: &Table, retable: bool) -> Result<Thing, Error> {
+	pub(crate) fn generate(self, tb: &Table, retable: bool) -> Result<Thing, Error> {
 		match self {
 			// There is a floating point number for the id field
 			Value::Number(id) if id.is_float() => Ok(Thing {

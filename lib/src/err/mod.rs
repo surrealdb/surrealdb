@@ -1,8 +1,10 @@
 use crate::sql::idiom::Idiom;
+use crate::sql::value::Value;
 use bincode::Error as BincodeError;
 use bung::encode::Error as SerdeError;
 use fst::Error as FstError;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
@@ -44,10 +46,6 @@ pub enum Error {
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists")]
 	TxKeyAlreadyExists,
-
-	/// It's is not possible to convert between the two types
-	#[error("Cannot convert from '{0}' to '{1}'")]
-	TryFromError(String, &'static str),
 
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
@@ -319,6 +317,15 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The specified field did not conform to the field type check
+	#[error("Found {value} for field `{field}`, with record `{thing}`, but expected a {check}")]
+	FieldCheck {
+		thing: String,
+		value: String,
+		field: Idiom,
+		check: String,
+	},
+
 	/// The specified field did not conform to the field ASSERT clause
 	#[error("Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}")]
 	FieldValue {
@@ -333,6 +340,37 @@ pub enum Error {
 	IdInvalid {
 		value: String,
 	},
+
+	/// The requested function does not exist
+	#[error("Expected a {into} but failed to convert {from} into a {into}")]
+	ConvertTo {
+		from: Value,
+		into: Cow<'static, str>,
+	},
+
+	/// The requested function does not exist
+	#[error("Cannot perform addition with '{0}' and '{1}'")]
+	TryAdd(String, String),
+
+	/// The requested function does not exist
+	#[error("Cannot perform subtraction with '{0}' and '{1}'")]
+	TrySub(String, String),
+
+	/// The requested function does not exist
+	#[error("Cannot perform multiplication with '{0}' and '{1}'")]
+	TryMul(String, String),
+
+	/// The requested function does not exist
+	#[error("Cannot perform division with '{0}' and '{1}'")]
+	TryDiv(String, String),
+
+	/// The requested function does not exist
+	#[error("Cannot raise the value '{0}' with '{1}'")]
+	TryPow(String, String),
+
+	/// It's is not possible to convert between the two types
+	#[error("Cannot convert from '{0}' to '{1}'")]
+	TryFrom(String, &'static str),
 
 	/// There was an error processing a remote HTTP request
 	#[error("There was an error processing a remote HTTP request")]

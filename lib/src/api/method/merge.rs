@@ -25,38 +25,31 @@ pub struct Merge<'r, C: Connection, D, R> {
 	pub(super) response_type: PhantomData<R>,
 }
 
-impl<'r, C, D, R> Merge<'r, C, D, R>
-where
-	C: Connection,
-	D: Serialize,
-{
-	fn split(self) -> Result<(&'r Router<C>, Method, Param)> {
-		let resource = self.resource?;
-		let param = match self.range {
-			Some(range) => resource.with_range(range)?,
-			None => resource.into(),
-		};
-		let content = to_value(self.content)?;
-		let param = Param::new(vec![param, content]);
-		Ok((self.router?, Method::Merge, param))
-	}
-}
-
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, R>
 where
 	Client: Connection,
 	D: Serialize,
-	R: DeserializeOwned + Send + Sync,
+	R: DeserializeOwned,
 {
 	type Output = Result<R>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
 	fn into_future(self) -> Self::IntoFuture {
-		let result = self.split();
+		let Merge {
+			router,
+			resource,
+			range,
+			content,
+			..
+		} = self;
+		let content = to_value(content);
 		Box::pin(async move {
-			let (router, method, param) = result?;
-			let mut conn = Client::new(method);
-			conn.execute(router, param).await
+			let param = match range {
+				Some(range) => resource?.with_range(range)?,
+				None => resource?.into(),
+			};
+			let mut conn = Client::new(Method::Merge);
+			conn.execute(router?, Param::new(vec![param, content?])).await
 		})
 	}
 }

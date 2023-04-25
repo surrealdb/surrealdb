@@ -22,7 +22,7 @@ pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Re
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_strand().as_str());
+		req = req.header(k.as_str(), v.to_raw_string());
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {
@@ -47,7 +47,7 @@ pub async fn get(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Res
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_strand().as_str());
+		req = req.header(k.as_str(), v.to_raw_string());
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {
@@ -92,7 +92,7 @@ pub async fn put(
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_strand().as_str());
+		req = req.header(k.as_str(), v.to_raw_string());
 	}
 	// Submit the request body
 	if body.is_some() {
@@ -141,7 +141,7 @@ pub async fn post(
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_strand().as_str());
+		req = req.header(k.as_str(), v.to_raw_string());
 	}
 	// Submit the request body
 	if body.is_some() {
@@ -190,7 +190,7 @@ pub async fn patch(
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_strand().as_str());
+		req = req.header(k.as_str(), v.to_raw_string());
 	}
 	// Submit the request body
 	if body.is_some() {
@@ -238,7 +238,7 @@ pub async fn delete(
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_strand().as_str());
+		req = req.header(k.as_str(), v.to_raw_string());
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {

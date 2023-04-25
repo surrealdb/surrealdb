@@ -19,20 +19,24 @@ pub fn abs((arg,): (Number,)) -> Result<Value, Error> {
 	Ok(arg.abs().into())
 }
 
-pub fn bottom((array, c): (Value, i64)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().bottom(c).into(),
-		_ => Value::None,
-	})
+pub fn bottom((array, c): (Vec<Number>, i64)) -> Result<Value, Error> {
+	if c > 0 {
+		Ok(array.bottom(c).into())
+	} else {
+		Err(Error::InvalidArguments {
+			name: String::from("math::bottom"),
+			message: String::from("The second argument must be an integer greater than 0."),
+		})
+	}
 }
 
 pub fn ceil((arg,): (Number,)) -> Result<Value, Error> {
 	Ok(arg.ceil().into())
 }
 
-pub fn fixed((v, p): (Number, i64)) -> Result<Value, Error> {
+pub fn fixed((arg, p): (Number, i64)) -> Result<Value, Error> {
 	if p > 0 {
-		Ok(v.fixed(p as usize).into())
+		Ok(arg.fixed(p as usize).into())
 	} else {
 		Err(Error::InvalidArguments {
 			name: String::from("math::fixed"),
@@ -45,101 +49,65 @@ pub fn floor((arg,): (Number,)) -> Result<Value, Error> {
 	Ok(arg.floor().into())
 }
 
-pub fn interquartile((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().sorted().interquartile().into(),
-		_ => Value::None,
+pub fn interquartile((mut array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(array.sorted().interquartile().into())
+}
+
+pub fn max((array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(match array.into_iter().max() {
+		Some(v) => v.into(),
+		None => Value::None,
 	})
 }
 
-pub fn max((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => match v.as_numbers().into_iter().max() {
-			Some(v) => v.into(),
-			None => Value::None,
-		},
-		v => v,
+pub fn mean((array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(array.mean().into())
+}
+
+pub fn median((mut array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(match array.is_empty() {
+		true => Value::None,
+		false => array.sorted().median().into(),
 	})
 }
 
-pub fn mean((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => match v.is_empty() {
-			true => Value::None,
-			false => v.as_numbers().mean().into(),
-		},
-		_ => Value::None,
+pub fn midhinge((mut array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(array.sorted().midhinge().into())
+}
+
+pub fn min((array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(match array.into_iter().min() {
+		Some(v) => v.into(),
+		None => Value::None,
 	})
 }
 
-pub fn median((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => match v.is_empty() {
-			true => Value::None,
-			false => v.as_numbers().sorted().median().into(),
-		},
-		_ => Value::None,
-	})
+pub fn mode((array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(array.mode().into())
 }
 
-pub fn midhinge((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().sorted().midhinge().into(),
-		_ => Value::None,
-	})
+pub fn nearestrank((mut array, n): (Vec<Number>, Number)) -> Result<Value, Error> {
+	Ok(array.sorted().nearestrank(n).into())
 }
 
-pub fn min((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => match v.as_numbers().into_iter().min() {
-			Some(v) => v.into(),
-			None => Value::None,
-		},
-		v => v,
-	})
-}
-
-pub fn mode((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().mode().into(),
-		_ => Value::None,
-	})
-}
-
-pub fn nearestrank((array, n): (Value, Number)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().sorted().nearestrank(n).into(),
-		_ => Value::None,
-	})
-}
-
-pub fn percentile((array, n): (Value, Number)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().sorted().percentile(n).into(),
-		_ => Value::None,
-	})
+pub fn percentile((mut array, n): (Vec<Number>, Number)) -> Result<Value, Error> {
+	Ok(array.sorted().percentile(n).into())
 }
 
 pub fn pow((arg, pow): (Number, Number)) -> Result<Value, Error> {
 	Ok(arg.pow(pow).into())
 }
 
-pub fn product((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().into_iter().product::<Number>().into(),
-		_ => Value::None,
-	})
+pub fn product((array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(array.into_iter().product::<Number>().into())
 }
 
 pub fn round((arg,): (Number,)) -> Result<Value, Error> {
 	Ok(arg.round().into())
 }
 
-pub fn spread((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().spread().into(),
-		_ => Value::None,
-	})
+pub fn spread((array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(array.spread().into())
 }
 
 pub fn sqrt((arg,): (Number,)) -> Result<Value, Error> {
@@ -149,37 +117,29 @@ pub fn sqrt((arg,): (Number,)) -> Result<Value, Error> {
 	})
 }
 
-pub fn stddev((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().deviation(true).into(),
-		_ => Value::None,
-	})
+pub fn stddev((array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(array.deviation(true).into())
 }
 
-pub fn sum((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().into_iter().sum::<Number>().into(),
-		v => v.as_number().into(),
-	})
+pub fn sum((array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(array.into_iter().sum::<Number>().into())
 }
 
-pub fn top((array, c): (Value, i64)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().top(c).into(),
-		_ => Value::None,
-	})
+pub fn top((array, c): (Vec<Number>, i64)) -> Result<Value, Error> {
+	if c > 0 {
+		Ok(array.top(c).into())
+	} else {
+		Err(Error::InvalidArguments {
+			name: String::from("math::top"),
+			message: String::from("The second argument must be an integer greater than 0."),
+		})
+	}
 }
 
-pub fn trimean((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().sorted().trimean().into(),
-		_ => Value::None,
-	})
+pub fn trimean((mut array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(array.sorted().trimean().into())
 }
 
-pub fn variance((array,): (Value,)) -> Result<Value, Error> {
-	Ok(match array {
-		Value::Array(v) => v.as_numbers().variance(true).into(),
-		_ => Value::None,
-	})
+pub fn variance((array,): (Vec<Number>,)) -> Result<Value, Error> {
+	Ok(array.variance(true).into())
 }
