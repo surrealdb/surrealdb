@@ -22,48 +22,47 @@ pub struct Select<'r, C: Connection, R> {
 	pub(super) response_type: PhantomData<R>,
 }
 
-impl<'r, Client, R> Select<'r, Client, R>
-where
-	Client: Connection,
-{
-	async fn execute<T>(self) -> Result<T>
-	where
-		T: DeserializeOwned,
-	{
-		let resource = self.resource?;
-		let param = match self.range {
-			Some(range) => resource.with_range(range)?,
-			None => resource.into(),
-		};
-		let mut conn = Client::new(Method::Select);
-		conn.execute(self.router?, Param::new(vec![param])).await
-	}
+macro_rules! into_future {
+	() => {
+		fn into_future(self) -> Self::IntoFuture {
+			let Select {
+				router,
+				resource,
+				range,
+				..
+			} = self;
+			Box::pin(async move {
+				let param = match range {
+					Some(range) => resource?.with_range(range)?,
+					None => resource?.into(),
+				};
+				let mut conn = Client::new(Method::Select);
+				conn.execute(router?, Param::new(vec![param])).await
+			})
+		}
+	};
 }
 
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned + Send + Sync + 'r,
+	R: DeserializeOwned,
 {
 	type Output = Result<R>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	fn into_future(self) -> Self::IntoFuture {
-		Box::pin(self.execute())
-	}
+	into_future! {}
 }
 
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned + Send + Sync + 'r,
+	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	fn into_future(self) -> Self::IntoFuture {
-		Box::pin(self.execute())
-	}
+	into_future! {}
 }
 
 impl<C, R> Select<'_, C, Vec<R>>
