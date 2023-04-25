@@ -34,7 +34,12 @@ impl Value {
 						// No further embedded fields, so just return this
 						0 => Ok(Value::Future(v.clone())),
 						// Process the future and fetch the embedded field
-						_ => v.compute(ctx, opt, txn, None).await?.get(ctx, opt, txn, path).await,
+						_ => {
+							v.compute(ctx, &opt.futures(true), txn, None)
+								.await?
+								.get(ctx, opt, txn, path)
+								.await
+						}
 					}
 				}
 				// Current path part is an object
