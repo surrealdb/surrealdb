@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::sql::array::Array;
 use crate::sql::array::Combine;
 use crate::sql::array::Complement;
 use crate::sql::array::Concat;
@@ -9,273 +10,186 @@ use crate::sql::array::Union;
 use crate::sql::array::Uniq;
 use crate::sql::value::Value;
 
-pub fn add((array, value): (Value, Value)) -> Result<Value, Error> {
-	match (array, value) {
-		(Value::Array(mut arr), Value::Array(other)) => {
-			for v in other.0 {
-				if !arr.0.iter().any(|x| *x == v) {
-					arr.0.push(v)
+pub fn add((mut array, value): (Array, Value)) -> Result<Value, Error> {
+	match value {
+		Value::Array(value) => {
+			for v in value.0 {
+				if !array.0.iter().any(|x| *x == v) {
+					array.0.push(v)
 				}
 			}
-			Ok(arr.into())
+			Ok(array.into())
 		}
-		(Value::Array(mut arr), value) => {
-			if !arr.0.iter().any(|x| *x == value) {
-				arr.0.push(value)
+		value => {
+			if !array.0.iter().any(|x| *x == value) {
+				array.0.push(value)
 			}
-			Ok(arr.into())
+			Ok(array.into())
 		}
-		_ => Ok(Value::None),
 	}
 }
 
-pub fn all((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Array(v) => Ok(v.iter().all(Value::is_truthy).into()),
-		_ => Ok(Value::False),
-	}
+pub fn all((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.iter().all(Value::is_truthy).into())
 }
 
-pub fn any((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Array(v) => Ok(v.iter().any(Value::is_truthy).into()),
-		_ => Ok(Value::False),
-	}
+pub fn any((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.iter().any(Value::is_truthy).into())
 }
 
-pub fn append((array, value): (Value, Value)) -> Result<Value, Error> {
-	match array {
-		Value::Array(mut v) => {
-			v.push(value);
-			Ok(v.into())
-		}
-		_ => Ok(Value::None),
-	}
+pub fn append((mut array, value): (Array, Value)) -> Result<Value, Error> {
+	array.push(value);
+	Ok(array.into())
 }
 
-pub fn combine(arrays: (Value, Value)) -> Result<Value, Error> {
-	Ok(match arrays {
-		(Value::Array(v), Value::Array(w)) => v.combine(w).into(),
-		_ => Value::None,
-	})
+pub fn combine((array, other): (Array, Array)) -> Result<Value, Error> {
+	Ok(array.combine(other).into())
 }
 
-pub fn complement(arrays: (Value, Value)) -> Result<Value, Error> {
-	Ok(match arrays {
-		(Value::Array(v), Value::Array(w)) => v.complement(w).into(),
-		_ => Value::None,
-	})
+pub fn complement((array, other): (Array, Array)) -> Result<Value, Error> {
+	Ok(array.complement(other).into())
 }
 
-pub fn concat(arrays: (Value, Value)) -> Result<Value, Error> {
-	Ok(match arrays {
-		(Value::Array(v), Value::Array(w)) => v.concat(w).into(),
-		_ => Value::None,
-	})
+pub fn concat((array, other): (Array, Array)) -> Result<Value, Error> {
+	Ok(array.concat(other).into())
 }
 
-pub fn difference(arrays: (Value, Value)) -> Result<Value, Error> {
-	Ok(match arrays {
-		(Value::Array(v), Value::Array(w)) => v.difference(w).into(),
-		_ => Value::None,
-	})
+pub fn difference((array, other): (Array, Array)) -> Result<Value, Error> {
+	Ok(array.difference(other).into())
 }
 
-pub fn distinct((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Array(v) => Ok(v.uniq().into()),
-		_ => Ok(Value::None),
-	}
+pub fn distinct((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.uniq().into())
 }
 
-pub fn flatten((arg,): (Value,)) -> Result<Value, Error> {
-	Ok(match arg {
-		Value::Array(v) => v.flatten().into(),
-		_ => Value::None,
-	})
+pub fn flatten((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.flatten().into())
 }
 
-pub fn group((arg,): (Value,)) -> Result<Value, Error> {
-	Ok(match arg {
-		Value::Array(v) => v.flatten().uniq().into(),
-		_ => Value::None,
-	})
+pub fn group((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.flatten().uniq().into())
 }
 
-pub fn insert((array, value, index): (Value, Value, Option<Value>)) -> Result<Value, Error> {
-	match (array, index) {
-		(Value::Array(mut v), Some(Value::Number(i))) => {
-			let mut i = i.as_int();
+pub fn insert((mut array, value, index): (Array, Value, Option<i64>)) -> Result<Value, Error> {
+	match index {
+		Some(mut index) => {
 			// Negative index means start from the back
-			if i < 0 {
-				i += v.len() as i64;
+			if index < 0 {
+				index += array.len() as i64;
 			}
 			// Invalid index so return array unaltered
-			if i > v.len() as i64 || i < 0 {
-				return Ok(v.into());
+			if index > array.len() as i64 || index < 0 {
+				return Ok(array.into());
 			}
 			// Insert the value into the array
-			v.insert(i as usize, value);
+			array.insert(index as usize, value);
 			// Return the array
-			Ok(v.into())
+			Ok(array.into())
 		}
-		(Value::Array(mut v), None) => {
-			v.push(value);
-			Ok(v.into())
+		None => {
+			array.push(value);
+			Ok(array.into())
 		}
-		(_, _) => Ok(Value::None),
 	}
 }
 
-pub fn intersect(arrays: (Value, Value)) -> Result<Value, Error> {
-	Ok(match arrays {
-		(Value::Array(v), Value::Array(w)) => v.intersect(w).into(),
-		_ => Value::None,
-	})
+pub fn intersect((array, other): (Array, Array)) -> Result<Value, Error> {
+	Ok(array.intersect(other).into())
 }
 
-pub fn len((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Array(v) => Ok(v.len().into()),
-		_ => Ok(Value::None),
+pub fn len((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.len().into())
+}
+
+pub fn max((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.into_iter().max().unwrap_or_default())
+}
+
+pub fn min((array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.into_iter().min().unwrap_or_default())
+}
+
+pub fn pop((mut array,): (Array,)) -> Result<Value, Error> {
+	Ok(array.pop().into())
+}
+
+pub fn prepend((mut array, value): (Array, Value)) -> Result<Value, Error> {
+	array.insert(0, value);
+	Ok(array.into())
+}
+
+pub fn push((mut array, value): (Array, Value)) -> Result<Value, Error> {
+	array.push(value);
+	Ok(array.into())
+}
+
+pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value, Error> {
+	// Negative index means start from the back
+	if index < 0 {
+		index += array.len() as i64;
 	}
-}
-
-pub fn max((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Array(v) => Ok(v.into_iter().max().unwrap_or(Value::None)),
-		_ => Ok(Value::None),
+	// Invalid index so return array unaltered
+	if index >= array.len() as i64 || index < 0 {
+		return Ok(array.into());
 	}
+	// Remove the value from the array
+	array.remove(index as usize);
+	// Return the array
+	Ok(array.into())
 }
 
-pub fn min((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Array(v) => Ok(v.into_iter().min().unwrap_or(Value::None)),
-		_ => Ok(Value::None),
-	}
+pub fn reverse((mut array,): (Array,)) -> Result<Value, Error> {
+	array.reverse();
+	Ok(array.into())
 }
 
-pub fn pop((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Array(mut v) => Ok(v.pop().into()),
-		_ => Ok(Value::None),
-	}
-}
-
-pub fn prepend((array, value): (Value, Value)) -> Result<Value, Error> {
-	match array {
-		Value::Array(mut v) => {
-			v.insert(0, value);
-			Ok(v.into())
+pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> {
+	match order {
+		// If "asc", sort ascending
+		Some(Value::Strand(s)) if s.as_str() == "asc" => {
+			array.sort_unstable();
+			Ok(array.into())
 		}
-		_ => Ok(Value::None),
-	}
-}
-
-pub fn push((array, value): (Value, Value)) -> Result<Value, Error> {
-	match array {
-		Value::Array(mut v) => {
-			v.push(value);
-			Ok(v.into())
+		// If "desc", sort descending
+		Some(Value::Strand(s)) if s.as_str() == "desc" => {
+			array.sort_unstable_by(|a, b| b.cmp(a));
+			Ok(array.into())
 		}
-		_ => Ok(Value::None),
-	}
-}
-
-pub fn remove((array, index): (Value, Value)) -> Result<Value, Error> {
-	match (array, index) {
-		(Value::Array(mut v), Value::Number(i)) => {
-			let mut i = i.as_int();
-			// Negative index means start from the back
-			if i < 0 {
-				i += v.len() as i64;
-			}
-			// Invalid index so return array unaltered
-			if i >= v.len() as i64 || i < 0 {
-				return Ok(v.into());
-			}
-			// Remove the value from the array
-			v.remove(i as usize);
-			// Return the array
-			Ok(v.into())
+		// If true, sort ascending
+		Some(Value::True) => {
+			array.sort_unstable();
+			Ok(array.into())
 		}
-		(Value::Array(v), _) => Ok(v.into()),
-		(_, _) => Ok(Value::None),
-	}
-}
-
-pub fn reverse((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Array(mut v) => {
-			v.reverse();
-			Ok(v.into())
+		// If false, sort descending
+		Some(Value::False) => {
+			array.sort_unstable_by(|a, b| b.cmp(a));
+			Ok(array.into())
 		}
-		_ => Ok(Value::None),
+		// Sort ascending by default
+		_ => {
+			array.sort_unstable();
+			Ok(array.into())
+		}
 	}
 }
 
-pub fn sort((array, order): (Value, Option<Value>)) -> Result<Value, Error> {
-	match array {
-		Value::Array(mut v) => match order {
-			// If "asc", sort ascending
-			Some(Value::Strand(s)) if s.as_str() == "asc" => {
-				v.sort_unstable();
-				Ok(v.into())
-			}
-			// If "desc", sort descending
-			Some(Value::Strand(s)) if s.as_str() == "desc" => {
-				v.sort_unstable_by(|a, b| b.cmp(a));
-				Ok(v.into())
-			}
-			// If true, sort ascending
-			Some(Value::True) => {
-				v.sort_unstable();
-				Ok(v.into())
-			}
-			// If false, sort descending
-			Some(Value::False) => {
-				v.sort_unstable_by(|a, b| b.cmp(a));
-				Ok(v.into())
-			}
-			// Sort ascending by default
-			_ => {
-				v.sort_unstable();
-				Ok(v.into())
-			}
-		},
-		v => Ok(v),
-	}
-}
-
-pub fn union(arrays: (Value, Value)) -> Result<Value, Error> {
-	Ok(match arrays {
-		(Value::Array(v), Value::Array(w)) => v.union(w).into(),
-		_ => Value::None,
-	})
+pub fn union((array, other): (Array, Array)) -> Result<Value, Error> {
+	Ok(array.union(other).into())
 }
 
 pub mod sort {
 
 	use crate::err::Error;
+	use crate::sql::array::Array;
 	use crate::sql::value::Value;
 
-	pub fn asc((array,): (Value,)) -> Result<Value, Error> {
-		match array {
-			Value::Array(mut v) => {
-				v.sort_unstable();
-				Ok(v.into())
-			}
-			v => Ok(v),
-		}
+	pub fn asc((mut array,): (Array,)) -> Result<Value, Error> {
+		array.sort_unstable();
+		Ok(array.into())
 	}
 
-	pub fn desc((array,): (Value,)) -> Result<Value, Error> {
-		match array {
-			Value::Array(mut v) => {
-				v.sort_unstable_by(|a, b| b.cmp(a));
-				Ok(v.into())
-			}
-			v => Ok(v),
-		}
+	pub fn desc((mut array,): (Array,)) -> Result<Value, Error> {
+		array.sort_unstable_by(|a, b| b.cmp(a));
+		Ok(array.into())
 	}
 }

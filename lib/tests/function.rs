@@ -21,9 +21,11 @@ async fn function_array_all() -> Result<(), Error> {
 	let val = Value::True;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::False;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::False;
@@ -48,9 +50,11 @@ async fn function_array_any() -> Result<(), Error> {
 	let val = Value::False;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::False;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::any(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::True;
@@ -75,9 +79,11 @@ async fn function_array_combine() -> Result<(), Error> {
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::combine(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[ [1,2], [1,3], [2,2], [2,3] ]");
@@ -102,9 +108,11 @@ async fn function_array_complement() -> Result<(), Error> {
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::complement(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2]");
@@ -129,9 +137,11 @@ async fn function_array_concat() -> Result<(), Error> {
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4,3,4,5,6]");
@@ -156,10 +166,11 @@ async fn function_array_difference() -> Result<(), Error> {
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
-	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::difference(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,5,6]");
 	assert_eq!(tmp, val);
@@ -183,9 +194,11 @@ async fn function_array_distinct() -> Result<(), Error> {
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::distinct(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4]");
@@ -211,9 +224,11 @@ async fn function_array_flatten() -> Result<(), Error> {
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::flatten(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4]");
@@ -242,9 +257,11 @@ async fn function_array_group() -> Result<(), Error> {
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::group(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3,4,5,6]");
@@ -301,9 +318,11 @@ async fn function_array_intersect() -> Result<(), Error> {
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::intersect(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[3,4]");
@@ -328,9 +347,11 @@ async fn function_array_max() -> Result<(), Error> {
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::max(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("'text'");
@@ -355,9 +376,11 @@ async fn function_array_min() -> Result<(), Error> {
 	let val = Value::None;
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::min(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("1");
@@ -414,9 +437,11 @@ async fn function_array_union() -> Result<(), Error> {
 	let val = Value::parse("[]");
 	assert_eq!(tmp, val);
 	//
-	let tmp = res.remove(0).result?;
-	let val = Value::None;
-	assert_eq!(tmp, val);
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::union(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,6,3,4,5]");

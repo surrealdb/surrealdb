@@ -2,7 +2,7 @@ use crate::err::Error;
 use crate::sql::value::Value;
 
 impl Value {
-	pub async fn clear(&mut self) -> Result<(), Error> {
+	pub fn clear(&mut self) -> Result<(), Error> {
 		*self = Value::None;
 		Ok(())
 	}
@@ -18,7 +18,7 @@ mod tests {
 	async fn clear_value() {
 		let mut val = Value::parse("{ test: { other: null, something: 123 } }");
 		let res = Value::None;
-		val.clear().await.unwrap();
+		val.clear().unwrap();
 		assert_eq!(res, val);
 	}
 }

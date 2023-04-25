@@ -13,6 +13,6 @@ impl<'a> Document<'a> {
 		_txn: &Transaction,
 		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
-		self.current.to_mut().clear().await
+		self.current.to_mut().clear()
 	}
 }

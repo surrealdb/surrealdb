@@ -232,7 +232,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("[0]", format!("{}", out));
-		assert_eq!(out, Part::Index(Number::from("0")));
+		assert_eq!(out, Part::Index(Number::from(0)));
 	}
 
 	#[test]

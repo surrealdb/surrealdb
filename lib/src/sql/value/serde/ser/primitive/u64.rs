@@ -1,3 +1,5 @@
+pub use super::opt::u64 as opt;
+
 use crate::err::Error;
 use crate::sql::value::serde::ser;
 use serde::ser::Impossible;

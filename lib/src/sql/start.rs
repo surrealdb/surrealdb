@@ -4,6 +4,7 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
+use crate::sql::number::Number;
 use crate::sql::value::{value, Value};
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::opt;
@@ -23,10 +24,13 @@ impl Start {
 		doc: Option<&Value>,
 	) -> Result<usize, Error> {
 		match self.0.compute(ctx, opt, txn, doc).await {
-			Ok(v) if v.is_integer() && v.is_zero_or_positive() => Ok(v.as_usize()),
+			// This is a valid starting number
+			Ok(Value::Number(Number::Int(v))) if v >= 0 => Ok(v as usize),
+			// An invalid value was specified
 			Ok(v) => Err(Error::InvalidStart {
 				value: v.as_string(),
 			}),
+			// A different error occured
 			Err(e) => Err(e),
 		}
 	}
