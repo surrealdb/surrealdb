@@ -1533,7 +1533,7 @@ impl Value {
 	pub fn convert_to_record(self) -> Result<Thing, Error> {
 		match self {
 			// Records are allowed
-			Value::Thing(v) if self.is_record() => Ok(v),
+			Value::Thing(v) => Ok(v),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -1546,7 +1546,7 @@ impl Value {
 	pub fn convert_to_geometry(self) -> Result<Geometry, Error> {
 		match self {
 			// Geometries are allowed
-			Value::Geometry(v) if self.is_geometry() => Ok(v),
+			Value::Geometry(v) => Ok(v),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
