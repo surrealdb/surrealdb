@@ -36,77 +36,19 @@ impl Default for Number {
 	}
 }
 
-impl From<i8> for Number {
-	fn from(i: i8) -> Self {
-		Self::Int(i as i64)
-	}
+macro_rules! from_prim_ints {
+	($($int: ty),*) => {
+		$(
+			impl From<$int> for Number {
+				fn from(i: $int) -> Self {
+					Self::Int(i as i64)
+				}
+			}
+		)*
+	};
 }
 
-impl From<i16> for Number {
-	fn from(i: i16) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<i32> for Number {
-	fn from(i: i32) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<i64> for Number {
-	fn from(i: i64) -> Self {
-		Self::Int(i)
-	}
-}
-
-impl From<i128> for Number {
-	fn from(i: i128) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<isize> for Number {
-	fn from(i: isize) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<u8> for Number {
-	fn from(i: u8) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<u16> for Number {
-	fn from(i: u16) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<u32> for Number {
-	fn from(i: u32) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<u64> for Number {
-	fn from(i: u64) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<u128> for Number {
-	fn from(i: u128) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<usize> for Number {
-	fn from(i: usize) -> Self {
-		Self::Int(i as i64)
-	}
-}
+from_prim_ints!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 
 impl From<f32> for Number {
 	fn from(f: f32) -> Self {
@@ -165,245 +107,38 @@ impl TryFrom<&str> for Number {
 	}
 }
 
-impl TryFrom<Number> for i8 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_i8() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i8")),
-			},
-			Number::Float(v) => match v.to_i8() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i8")),
-			},
-			Number::Decimal(ref v) => match v.to_i8() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i8")),
-			},
-		}
-	}
+macro_rules! try_into_prim {
+	// TODO: switch to one argument per int once https://github.com/rust-lang/rust/issues/29599 is stable
+	($($int: ty => $to_int: ident),*) => {
+		$(
+			impl TryFrom<Number> for $int {
+				type Error = Error;
+				fn try_from(value: Number) -> Result<Self, Self::Error> {
+					match value {
+						Number::Int(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
+						},
+						Number::Float(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
+						},
+						Number::Decimal(ref v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
+						},
+					}
+				}
+			}
+		)*
+	};
 }
 
-impl TryFrom<Number> for i16 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_i16() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i16")),
-			},
-			Number::Float(v) => match v.to_i16() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i16")),
-			},
-			Number::Decimal(ref v) => match v.to_i16() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i16")),
-			},
-		}
-	}
-}
-
-impl TryFrom<Number> for i32 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_i32() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i32")),
-			},
-			Number::Float(v) => match v.to_i32() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i32")),
-			},
-			Number::Decimal(ref v) => match v.to_i32() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i32")),
-			},
-		}
-	}
-}
-
-impl TryFrom<Number> for i64 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_i64() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i64")),
-			},
-			Number::Float(v) => match v.to_i64() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i64")),
-			},
-			Number::Decimal(ref v) => match v.to_i64() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i64")),
-			},
-		}
-	}
-}
-
-impl TryFrom<Number> for i128 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_i128() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i128")),
-			},
-			Number::Float(v) => match v.to_i128() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i128")),
-			},
-			Number::Decimal(ref v) => match v.to_i128() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "i128")),
-			},
-		}
-	}
-}
-
-impl TryFrom<Number> for u8 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_u8() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u8")),
-			},
-			Number::Float(v) => match v.to_u8() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u8")),
-			},
-			Number::Decimal(ref v) => match v.to_u8() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u8")),
-			},
-		}
-	}
-}
-
-impl TryFrom<Number> for u16 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_u16() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u16")),
-			},
-			Number::Float(v) => match v.to_u16() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u16")),
-			},
-			Number::Decimal(ref v) => match v.to_u16() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u16")),
-			},
-		}
-	}
-}
-
-impl TryFrom<Number> for u32 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_u32() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u32")),
-			},
-			Number::Float(v) => match v.to_u32() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u32")),
-			},
-			Number::Decimal(ref v) => match v.to_u32() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u32")),
-			},
-		}
-	}
-}
-
-impl TryFrom<Number> for u64 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_u64() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u64")),
-			},
-			Number::Float(v) => match v.to_u64() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u64")),
-			},
-			Number::Decimal(ref v) => match v.to_u64() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u64")),
-			},
-		}
-	}
-}
-
-impl TryFrom<Number> for u128 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_u128() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u128")),
-			},
-			Number::Float(v) => match v.to_u128() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u128")),
-			},
-			Number::Decimal(ref v) => match v.to_u128() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "u128")),
-			},
-		}
-	}
-}
-
-impl TryFrom<Number> for f32 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_f32() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "f32")),
-			},
-			Number::Float(v) => match v.to_f32() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "f32")),
-			},
-			Number::Decimal(ref v) => match v.to_f32() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "f32")),
-			},
-		}
-	}
-}
-
-impl TryFrom<Number> for f64 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(v) => match v.to_f64() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "f64")),
-			},
-			Number::Float(v) => match v.to_f64() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "f64")),
-			},
-			Number::Decimal(ref v) => match v.to_f64() {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "f64")),
-			},
-		}
-	}
-}
+try_into_prim!(
+	i8 => to_i8, i16 => to_i16, i32 => to_i32, i64 => to_i64, i128 => to_i128,
+	u8 => to_u8, u16 => to_u16, u32 => to_u32, u64 => to_u64, u128 => to_u128,
+	f32 => to_f32, f64 => to_f64
+);
 
 impl TryFrom<Number> for BigDecimal {
 	type Error = Error;
@@ -496,7 +231,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v > &0,
 			Number::Float(v) => v > &0.0,
-			Number::Decimal(v) => v > &BigDecimal::from(0),
+			Number::Decimal(v) => v > &BigDecimal::default(),
 		}
 	}
 
@@ -504,7 +239,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v < &0,
 			Number::Float(v) => v < &0.0,
-			Number::Decimal(v) => v < &BigDecimal::from(0),
+			Number::Decimal(v) => v < &BigDecimal::default(),
 		}
 	}
 
@@ -512,7 +247,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v >= &0,
 			Number::Float(v) => v >= &0.0,
-			Number::Decimal(v) => v >= &BigDecimal::from(0),
+			Number::Decimal(v) => v >= &BigDecimal::default(),
 		}
 	}
 
@@ -520,7 +255,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v <= &0,
 			Number::Float(v) => v <= &0.0,
-			Number::Decimal(v) => v <= &BigDecimal::from(0),
+			Number::Decimal(v) => v <= &BigDecimal::default(),
 		}
 	}
 
