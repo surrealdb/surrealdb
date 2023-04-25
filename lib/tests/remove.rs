@@ -30,6 +30,7 @@ async fn remove_statement_table() -> Result<(), Error> {
 			az: {},
 			dl: {},
 			dt: {},
+			fc: {},
 			pa: {},
 			sc: {},
 			tb: {}
@@ -63,6 +64,7 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 			az: {},
 			dl: {},
 			dt: {},
+			fc: {},
 			pa: {},
 			sc: {},
 			tb: {}

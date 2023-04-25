@@ -76,6 +76,7 @@ async fn define_statement_function() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			az: {},
 			dl: {},
 			dt: {},
 			fc: { test: 'DEFINE FUNCTION fn::test($first: string, $last: string) { RETURN $first + $last; }' },
@@ -960,6 +961,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			},
 			dl: {},
 			dt: {},
+			fc: {},
 			pa: {},
 			sc: {},
 			tb: {}
