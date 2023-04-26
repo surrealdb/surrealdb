@@ -9,6 +9,7 @@ use std::pin::Pin;
 
 /// Stores the namespace to use
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct UseNs<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) ns: String,
@@ -16,6 +17,7 @@ pub struct UseNs<'r, C: Connection> {
 
 /// A use NS and DB future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct UseNsDb<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) ns: String,

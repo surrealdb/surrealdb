@@ -25,6 +25,7 @@ use std::pin::Pin;
 
 /// A query future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Query<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) query: Vec<Result<Vec<Statement>>>,
@@ -316,6 +317,10 @@ mod tests {
 	#[test]
 	fn take_from_an_empty_response() {
 		let mut response = Response(Default::default());
+		let value: Value = response.take(0).unwrap();
+		assert!(value.is_none());
+
+		let mut response = Response(Default::default());
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
@@ -333,6 +338,10 @@ mod tests {
 	#[test]
 	fn take_from_empty_records() {
 		let mut response = Response(to_map(vec![Ok(vec![])]));
+		let value: Value = response.take(0).unwrap();
+		assert_eq!(value, Value::Array(Default::default()));
+
+		let mut response = Response(to_map(vec![Ok(vec![])]));
 		let option: Option<String> = response.take(0).unwrap();
 		assert!(option.is_none());
 
@@ -346,6 +355,10 @@ mod tests {
 		let scalar = 265;
 
 		let mut response = Response(to_map(vec![Ok(vec![scalar.into()])]));
+		let value: Value = response.take(0).unwrap();
+		assert_eq!(value, vec![Value::from(scalar)].into());
+
+		let mut response = Response(to_map(vec![Ok(vec![scalar.into()])]));
 		let option: Option<_> = response.take(0).unwrap();
 		assert_eq!(option, Some(scalar));
 
@@ -354,6 +367,10 @@ mod tests {
 		assert_eq!(vec, vec![scalar]);
 
 		let scalar = true;
+
+		let mut response = Response(to_map(vec![Ok(vec![scalar.into()])]));
+		let value: Value = response.take(0).unwrap();
+		assert_eq!(value, vec![Value::from(scalar)].into());
 
 		let mut response = Response(to_map(vec![Ok(vec![scalar.into()])]));
 		let option: Option<_> = response.take(0).unwrap();
@@ -388,10 +405,8 @@ mod tests {
             panic!("query not found");
         };
 		assert_eq!(zero, 0);
-		let Some(one): Option<i32> = response.take(1).unwrap() else {
-            panic!("query not found");
-        };
-		assert_eq!(one, 1);
+		let one: Value = response.take(1).unwrap();
+		assert_eq!(one, vec![Value::from(1)].into());
 	}
 
 	#[test]
@@ -400,6 +415,10 @@ mod tests {
 			title: "Lorem Ipsum".to_owned(),
 		};
 		let value = to_value(summary.clone()).unwrap();
+
+		let mut response = Response(to_map(vec![Ok(vec![value.clone()])]));
+		let title: Value = response.take("title").unwrap();
+		assert_eq!(title, vec![Value::from(summary.title.as_str())].into());
 
 		let mut response = Response(to_map(vec![Ok(vec![value.clone()])]));
 		let Some(title): Option<String> = response.take("title").unwrap() else {
@@ -427,13 +446,21 @@ mod tests {
         };
 		assert_eq!(body, article.body);
 
-		let mut response = Response(to_map(vec![Ok(vec![value])]));
+		let mut response = Response(to_map(vec![Ok(vec![value.clone()])]));
 		let vec: Vec<String> = response.take("title").unwrap();
-		assert_eq!(vec, vec![article.title]);
+		assert_eq!(vec, vec![article.title.clone()]);
+
+		let mut response = Response(to_map(vec![Ok(vec![value])]));
+		let value: Value = response.take("title").unwrap();
+		assert_eq!(value, vec![Value::from(article.title)].into());
 	}
 
 	#[test]
 	fn take_partial_records() {
+		let mut response = Response(to_map(vec![Ok(vec![true.into(), false.into()])]));
+		let value: Value = response.take(0).unwrap();
+		assert_eq!(value, vec![Value::from(true), Value::from(false)].into());
+
 		let mut response = Response(to_map(vec![Ok(vec![true.into(), false.into()])]));
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![true, false]);
@@ -499,9 +526,7 @@ mod tests {
             panic!("statement not found");
         };
 		assert_eq!(value, 2);
-		let Some(value): Option<i32> = response.take(4).unwrap() else {
-            panic!("statement not found");
-        };
-		assert_eq!(value, 3);
+		let value: Value = response.take(4).unwrap();
+		assert_eq!(value, vec![Value::from(3)].into());
 	}
 }

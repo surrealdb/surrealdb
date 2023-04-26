@@ -9,6 +9,7 @@ use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
 use nom::combinator::map;
+use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -154,27 +155,30 @@ pub fn constant(i: &str) -> IResult<&str, Constant> {
 }
 
 fn constant_math(i: &str) -> IResult<&str, Constant> {
-	alt((
-		map(tag_no_case("math::E"), |_| Constant::MathE),
-		map(tag_no_case("math::FRAC_1_PI"), |_| Constant::MathFrac1Pi),
-		map(tag_no_case("math::FRAC_1_SQRT_2"), |_| Constant::MathFrac1Sqrt2),
-		map(tag_no_case("math::FRAC_2_PI"), |_| Constant::MathFrac2Pi),
-		map(tag_no_case("math::FRAC_2_SQRT_PI"), |_| Constant::MathFrac2SqrtPi),
-		map(tag_no_case("math::FRAC_PI_2"), |_| Constant::MathFracPi2),
-		map(tag_no_case("math::FRAC_PI_3"), |_| Constant::MathFracPi3),
-		map(tag_no_case("math::FRAC_PI_4"), |_| Constant::MathFracPi4),
-		map(tag_no_case("math::FRAC_PI_6"), |_| Constant::MathFracPi6),
-		map(tag_no_case("math::FRAC_PI_8"), |_| Constant::MathFracPi8),
-		map(tag_no_case("math::LN_10"), |_| Constant::MathLn10),
-		map(tag_no_case("math::LN_2"), |_| Constant::MathLn2),
-		map(tag_no_case("math::LOG10_2"), |_| Constant::MathLog102),
-		map(tag_no_case("math::LOG10_E"), |_| Constant::MathLog10E),
-		map(tag_no_case("math::LOG2_10"), |_| Constant::MathLog210),
-		map(tag_no_case("math::LOG2_E"), |_| Constant::MathLog2E),
-		map(tag_no_case("math::PI"), |_| Constant::MathPi),
-		map(tag_no_case("math::SQRT_2"), |_| Constant::MathSqrt2),
-		map(tag_no_case("math::TAU"), |_| Constant::MathTau),
-	))(i)
+	preceded(
+		tag_no_case("math::"),
+		alt((
+			map(tag_no_case("E"), |_| Constant::MathE),
+			map(tag_no_case("FRAC_1_PI"), |_| Constant::MathFrac1Pi),
+			map(tag_no_case("FRAC_1_SQRT_2"), |_| Constant::MathFrac1Sqrt2),
+			map(tag_no_case("FRAC_2_PI"), |_| Constant::MathFrac2Pi),
+			map(tag_no_case("FRAC_2_SQRT_PI"), |_| Constant::MathFrac2SqrtPi),
+			map(tag_no_case("FRAC_PI_2"), |_| Constant::MathFracPi2),
+			map(tag_no_case("FRAC_PI_3"), |_| Constant::MathFracPi3),
+			map(tag_no_case("FRAC_PI_4"), |_| Constant::MathFracPi4),
+			map(tag_no_case("FRAC_PI_6"), |_| Constant::MathFracPi6),
+			map(tag_no_case("FRAC_PI_8"), |_| Constant::MathFracPi8),
+			map(tag_no_case("LN_10"), |_| Constant::MathLn10),
+			map(tag_no_case("LN_2"), |_| Constant::MathLn2),
+			map(tag_no_case("LOG10_2"), |_| Constant::MathLog102),
+			map(tag_no_case("LOG10_E"), |_| Constant::MathLog10E),
+			map(tag_no_case("LOG2_10"), |_| Constant::MathLog210),
+			map(tag_no_case("LOG2_E"), |_| Constant::MathLog2E),
+			map(tag_no_case("PI"), |_| Constant::MathPi),
+			map(tag_no_case("SQRT_2"), |_| Constant::MathSqrt2),
+			map(tag_no_case("TAU"), |_| Constant::MathTau),
+		)),
+	)(i)
 }
 
 #[cfg(test)]

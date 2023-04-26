@@ -12,6 +12,7 @@ use std::pin::Pin;
 
 /// A database export future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Export<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) file: PathBuf,

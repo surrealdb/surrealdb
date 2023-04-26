@@ -1,8 +1,6 @@
 name: Nix
 
-on:
-  - pull_request
-  - push
+on: push
 
 # Setting the shell option, it will run 'bash --noprofile --norc -eo pipefail {0}'
 defaults:

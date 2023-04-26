@@ -671,7 +671,7 @@ impl hash::Hash for Geometry {
 }
 
 pub fn geometry(i: &str) -> IResult<&str, Geometry> {
-	alt((simple, point, line, polygon, multipoint, multiline, multipolygon, collection))(i)
+	alt((simple, normal))(i)
 }
 
 fn simple(i: &str) -> IResult<&str, Geometry> {
@@ -685,199 +685,140 @@ fn simple(i: &str) -> IResult<&str, Geometry> {
 	Ok((i, Geometry::Point((x, y).into())))
 }
 
-fn point(i: &str) -> IResult<&str, Geometry> {
+fn normal(i: &str) -> IResult<&str, Geometry> {
 	let (i, _) = char('{')(i)?;
 	let (i, _) = mightbespace(i)?;
+	let (i, v) = alt((point, line, polygon, multipoint, multiline, multipolygon, collection))(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = opt(char(','))(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('}')(i)?;
+	Ok((i, v))
+}
+
+fn point(i: &str) -> IResult<&str, Geometry> {
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, point_type)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, point_vals)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, point_vals)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, point_type)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn line(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, line_type)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, line_vals)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, line_vals)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, line_type)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn polygon(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, polygon_type)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, polygon_vals)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, polygon_vals)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, polygon_type)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn multipoint(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, multipoint_type)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, multipoint_vals)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, multipoint_vals)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, multipoint_type)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn multiline(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, multiline_type)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, multiline_vals)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, multiline_vals)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, multiline_type)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn multipolygon(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, multipolygon_type)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_vals, multipolygon_vals)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_vals, multipolygon_vals)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, multipolygon_type)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 
 fn collection(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, v) = alt((
 		|i| {
 			let (i, _) = preceded(key_type, collection_type)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, v) = preceded(key_geom, collection_vals)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, v) = preceded(key_geom, collection_vals)(i)?;
 			let (i, _) = commas(i)?;
 			let (i, _) = preceded(key_type, collection_type)(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = opt(char(','))(i)?;
-			let (i, _) = mightbespace(i)?;
 			Ok((i, v))
 		},
 	))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
 	Ok((i, v.into()))
 }
 

@@ -1,10 +1,7 @@
 use super::classes;
 use crate::sql::array::Array;
 use crate::sql::datetime::Datetime;
-use crate::sql::duration::Duration;
 use crate::sql::object::Object;
-use crate::sql::thing::Thing;
-use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use chrono::{TimeZone, Utc};
 use js::Ctx;
@@ -47,26 +44,29 @@ impl<'js> FromJs<'js> for Value {
 						stack: String::new(),
 					});
 				}
-				// Check to see if this object is a duration
-				if (v).instance_of::<classes::duration::duration::Duration>() {
-					let v = v.into_instance::<classes::duration::duration::Duration>().unwrap();
-					let v: &classes::duration::duration::Duration = v.as_ref();
-					let v = v.value.clone();
-					return Ok(Duration::from(v).into());
-				}
 				// Check to see if this object is a record
 				if (v).instance_of::<classes::record::record::Record>() {
 					let v = v.into_instance::<classes::record::record::Record>().unwrap();
 					let v: &classes::record::record::Record = v.as_ref();
-					let v = (v.tb.clone(), v.id.clone());
-					return Ok(Thing::from(v).into());
+					return Ok(v.value.clone().into());
+				}
+				// Check to see if this object is a duration
+				if (v).instance_of::<classes::duration::duration::Duration>() {
+					let v = v.into_instance::<classes::duration::duration::Duration>().unwrap();
+					let v: &classes::duration::duration::Duration = v.as_ref();
+					return match &v.value {
+						Some(v) => Ok(v.clone().into()),
+						None => Ok(Value::None),
+					};
 				}
 				// Check to see if this object is a uuid
 				if (v).instance_of::<classes::uuid::uuid::Uuid>() {
 					let v = v.into_instance::<classes::uuid::uuid::Uuid>().unwrap();
 					let v: &classes::uuid::uuid::Uuid = v.as_ref();
-					let v = v.value.clone();
-					return Ok(Uuid::from(v).into());
+					return match &v.value {
+						Some(v) => Ok(v.clone().into()),
+						None => Ok(Value::None),
+					};
 				}
 				// Check to see if this object is a date
 				let date: js::Object = ctx.globals().get("Date")?;

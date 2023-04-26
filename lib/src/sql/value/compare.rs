@@ -4,7 +4,7 @@ use crate::sql::value::Value;
 use std::cmp::Ordering;
 
 impl Value {
-	pub fn compare(
+	pub(crate) fn compare(
 		&self,
 		other: &Self,
 		path: &[Part],

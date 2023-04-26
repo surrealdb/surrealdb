@@ -1,3 +1,5 @@
+DEV_FEATURES := --no-default-features --features storage-mem,http,scripting
+
 .PHONY: default
 default:
 	@echo "Choose a Makefile target:"
@@ -28,7 +30,7 @@ clean:
 
 .PHONY: serve
 serve:
-	cargo run -- start --log trace --user root --pass root memory
+	cargo run $(DEV_FEATURES) -- start --log trace --user root --pass root memory
 
 .PHONY: cluster
 cluster:
@@ -41,7 +43,7 @@ cluster-tikv:
 
 .PHONY: sql
 sql:
-	cargo run -- sql --conn ws://0.0.0.0:8000 --user root --pass root --ns test --db test --pretty
+	cargo run $(DEV_FEATURES) -- sql --conn ws://0.0.0.0:8000 --user root --pass root --ns test --db test --pretty
 
 .PHONY: quick
 quick:

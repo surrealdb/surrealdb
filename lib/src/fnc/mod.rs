@@ -4,7 +4,6 @@ use crate::sql::value::Value;
 
 pub mod args;
 pub mod array;
-pub mod cast;
 pub mod count;
 pub mod crypto;
 pub mod duration;
@@ -25,20 +24,19 @@ pub mod time;
 pub mod r#type;
 pub mod util;
 
-/// Attempts to run any function.
+/// Attempts to run any function
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
-	if is_asynchronous(name) {
+	if name.eq("sleep")
+		|| name.starts_with("http")
+		|| name.starts_with("crypto::argon2")
+		|| name.starts_with("crypto::bcrypt")
+		|| name.starts_with("crypto::pbkdf2")
+		|| name.starts_with("crypto::scrypt")
+	{
 		asynchronous(ctx, name, args).await
 	} else {
 		synchronous(ctx, name, args)
 	}
-}
-
-/// Tells if the function is asynchronous
-fn is_asynchronous(name: &str) -> bool {
-	name.eq("sleep")
-		|| name.starts_with("http")
-		|| (name.starts_with("crypto") && (name.ends_with("compare") || name.ends_with("generate")))
 }
 
 /// Each function is specified by its name (a string literal) followed by its path. The path
@@ -87,6 +85,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::push" => array::push,
 		"array::remove" => array::remove,
 		"array::reverse" => array::reverse,
+		"array::slice" => array::slice,
 		"array::sort" => array::sort,
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
@@ -101,10 +100,21 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		//
 		"duration::days" => duration::days,
 		"duration::hours" => duration::hours,
+		"duration::micros" => duration::micros,
+		"duration::millis" => duration::millis,
 		"duration::mins" => duration::mins,
+		"duration::nanos" => duration::nanos,
 		"duration::secs" => duration::secs,
 		"duration::weeks" => duration::weeks,
 		"duration::years" => duration::years,
+		"duration::from::days" => duration::from::days,
+		"duration::from::hours" => duration::from::hours,
+		"duration::from::micros" => duration::from::micros,
+		"duration::from::millis" => duration::from::millis,
+		"duration::from::mins" => duration::from::mins,
+		"duration::from::nanos" => duration::from::nanos,
+		"duration::from::secs" => duration::from::secs,
+		"duration::from::weeks" => duration::from::weeks,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
@@ -223,6 +233,10 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"time::week" => time::week,
 		"time::yday" => time::yday,
 		"time::year" => time::year,
+		"time::from::micros" => time::from::micros,
+		"time::from::millis" => time::from::millis,
+		"time::from::secs" => time::from::secs,
+		"time::from::unix" => time::from::unix,
 		//
 		"type::bool" => r#type::bool,
 		"type::datetime" => r#type::datetime,
@@ -232,7 +246,6 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"type::int" => r#type::int,
 		"type::number" => r#type::number,
 		"type::point" => r#type::point,
-		"type::regex" => r#type::regex,
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,

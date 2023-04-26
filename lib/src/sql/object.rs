@@ -144,20 +144,22 @@ impl Display for Object {
 		} else {
 			f.write_str("{ ")?;
 		}
-		let indent = pretty_indent();
-		write!(
-			f,
-			"{}",
-			Fmt::pretty_comma_separated(
-				self.0.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
-					f,
-					"{}: {}",
-					escape_key(k),
-					v
-				))),
-			)
-		)?;
-		drop(indent);
+		if !self.is_empty() {
+			let indent = pretty_indent();
+			write!(
+				f,
+				"{}",
+				Fmt::pretty_comma_separated(
+					self.0.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
+						f,
+						"{}: {}",
+						escape_key(k),
+						v
+					))),
+				)
+			)?;
+			drop(indent);
+		}
 		if is_pretty() {
 			f.write_char('}')
 		} else {
@@ -187,7 +189,14 @@ impl Serialize for Object {
 pub fn object(i: &str) -> IResult<&str, Object> {
 	let (i, _) = char('{')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list0(commas, item)(i)?;
+	let (i, v) = separated_list0(commas, |i| {
+		let (i, k) = key(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, _) = char(':')(i)?;
+		let (i, _) = mightbespace(i)?;
+		let (i, v) = value(i)?;
+		Ok((i, (String::from(k), v)))
+	})(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = mightbespace(i)?;
@@ -195,16 +204,7 @@ pub fn object(i: &str) -> IResult<&str, Object> {
 	Ok((i, Object(v.into_iter().collect())))
 }
 
-fn item(i: &str) -> IResult<&str, (String, Value)> {
-	let (i, k) = key(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(':')(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, v) = value(i)?;
-	Ok((i, (String::from(k), v)))
-}
-
-fn key(i: &str) -> IResult<&str, &str> {
+pub fn key(i: &str) -> IResult<&str, &str> {
 	alt((key_none, key_single, key_double))(i)
 }
 

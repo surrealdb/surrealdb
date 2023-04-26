@@ -179,7 +179,7 @@ async fn create_all(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the request body as JSON
-	match surrealdb::sql::json(data) {
+	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "CREATE type::table($table) CONTENT $data";
@@ -260,7 +260,7 @@ async fn select_one(
 	// Specify the request statement
 	let sql = "SELECT * FROM type::thing($table, $id)";
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::json(&id) {
+	let rid = match surrealdb::sql::value(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
@@ -301,12 +301,12 @@ async fn create_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::json(&id) {
+	let rid = match surrealdb::sql::value(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
 	// Parse the request body as JSON
-	match surrealdb::sql::json(data) {
+	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "CREATE type::thing($table, $id) CONTENT $data";
@@ -352,12 +352,12 @@ async fn update_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::json(&id) {
+	let rid = match surrealdb::sql::value(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
 	// Parse the request body as JSON
-	match surrealdb::sql::json(data) {
+	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "UPDATE type::thing($table, $id) CONTENT $data";
@@ -403,12 +403,12 @@ async fn modify_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::json(&id) {
+	let rid = match surrealdb::sql::value(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
 	// Parse the request body as JSON
-	match surrealdb::sql::json(data) {
+	match surrealdb::sql::value(data) {
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "UPDATE type::thing($table, $id) MERGE $data";
@@ -453,7 +453,7 @@ async fn delete_one(
 	// Specify the request statement
 	let sql = "DELETE type::thing($table, $id) RETURN BEFORE";
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::json(&id) {
+	let rid = match surrealdb::sql::value(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};

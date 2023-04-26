@@ -741,80 +741,80 @@ impl Transaction {
 	pub async fn all_ns(&mut self) -> Result<Arc<[DefineNamespaceStatement]>, Error> {
 		trace!("all_ns for transaction {:?}", self.id);
 		let key = crate::key::ns::prefix();
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Nss(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::ns::prefix();
-				let end = crate::key::ns::suffix();
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Nss(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Nss(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::ns::prefix();
+			let end = crate::key::ns::suffix();
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Nss(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all namespace login definitions for a specific namespace.
 	pub async fn all_nl(&mut self, ns: &str) -> Result<Arc<[DefineLoginStatement]>, Error> {
 		trace!("all_nl for transaction {:?}", self.id);
 		let key = crate::key::nl::prefix(ns);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Nls(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::nl::prefix(ns);
-				let end = crate::key::nl::suffix(ns);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Nls(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Nls(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::nl::prefix(ns);
+			let end = crate::key::nl::suffix(ns);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Nls(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all namespace token definitions for a specific namespace.
 	pub async fn all_nt(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		trace!("all_nt for transaction {:?}", self.id);
 		let key = crate::key::nt::prefix(ns);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Nts(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::nt::prefix(ns);
-				let end = crate::key::nt::suffix(ns);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Nts(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Nts(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::nt::prefix(ns);
+			let end = crate::key::nt::suffix(ns);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Nts(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all database definitions for a specific namespace.
 	pub async fn all_db(&mut self, ns: &str) -> Result<Arc<[DefineDatabaseStatement]>, Error> {
 		trace!("all_db for transaction {:?}", self.id);
 		let key = crate::key::db::prefix(ns);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Dbs(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::db::prefix(ns);
-				let end = crate::key::db::suffix(ns);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Dbs(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Dbs(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::db::prefix(ns);
+			let end = crate::key::db::suffix(ns);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Dbs(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all database login definitions for a specific database.
@@ -825,20 +825,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineLoginStatement]>, Error> {
 		trace!("all_dl for transaction {:?}", self.id);
 		let key = crate::key::dl::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Dls(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::dl::prefix(ns, db);
-				let end = crate::key::dl::suffix(ns, db);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Dls(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Dls(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::dl::prefix(ns, db);
+			let end = crate::key::dl::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Dls(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all database token definitions for a specific database.
@@ -849,20 +849,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		trace!("all_dt for transaction {:?}", self.id);
 		let key = crate::key::dt::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Dts(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::dt::prefix(ns, db);
-				let end = crate::key::dt::suffix(ns, db);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Dts(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Dts(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::dt::prefix(ns, db);
+			let end = crate::key::dt::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Dts(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all function definitions for a specific database.
@@ -873,20 +873,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineFunctionStatement]>, Error> {
 		trace!("all_fc for transaction {:?}", self.id);
 		let key = crate::key::fc::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Fcs(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::fc::prefix(ns, db);
-				let end = crate::key::fc::suffix(ns, db);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Fcs(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Fcs(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::fc::prefix(ns, db);
+			let end = crate::key::fc::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Fcs(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all scope definitions for a specific database.
@@ -897,20 +897,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineScopeStatement]>, Error> {
 		trace!("all_sc for transaction {:?}", self.id);
 		let key = crate::key::sc::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Scs(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::sc::prefix(ns, db);
-				let end = crate::key::sc::suffix(ns, db);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Scs(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Scs(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::sc::prefix(ns, db);
+			let end = crate::key::sc::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Scs(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all scope token definitions for a scope.
@@ -922,20 +922,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		trace!("all_st for transaction {:?}", self.id);
 		let key = crate::key::st::prefix(ns, db, sc);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Sts(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::st::prefix(ns, db, sc);
-				let end = crate::key::st::suffix(ns, db, sc);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Sts(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Sts(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::st::prefix(ns, db, sc);
+			let end = crate::key::st::suffix(ns, db, sc);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Sts(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all scope definitions for a specific database.
@@ -946,20 +946,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineParamStatement]>, Error> {
 		trace!("all_pa for transaction {:?}", self.id);
 		let key = crate::key::pa::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Pas(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::pa::prefix(ns, db);
-				let end = crate::key::pa::suffix(ns, db);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Pas(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Pas(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::pa::prefix(ns, db);
+			let end = crate::key::pa::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Pas(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all table definitions for a specific database.
@@ -970,20 +970,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		trace!("all_tb for transaction {:?}", self.id);
 		let key = crate::key::tb::prefix(ns, db);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Tbs(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::tb::prefix(ns, db);
-				let end = crate::key::tb::suffix(ns, db);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Tbs(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Tbs(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::tb::prefix(ns, db);
+			let end = crate::key::tb::suffix(ns, db);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Tbs(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all event definitions for a specific table.
@@ -995,20 +995,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineEventStatement]>, Error> {
 		trace!("all_ev for transaction {:?}", self.id);
 		let key = crate::key::ev::prefix(ns, db, tb);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Evs(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::ev::prefix(ns, db, tb);
-				let end = crate::key::ev::suffix(ns, db, tb);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Evs(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Evs(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::ev::prefix(ns, db, tb);
+			let end = crate::key::ev::suffix(ns, db, tb);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Evs(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all field definitions for a specific table.
@@ -1020,20 +1020,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineFieldStatement]>, Error> {
 		trace!("all_fd for transaction {:?}", self.id);
 		let key = crate::key::fd::prefix(ns, db, tb);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Fds(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::fd::prefix(ns, db, tb);
-				let end = crate::key::fd::suffix(ns, db, tb);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Fds(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Fds(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::fd::prefix(ns, db, tb);
+			let end = crate::key::fd::suffix(ns, db, tb);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Fds(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all index definitions for a specific table.
@@ -1045,20 +1045,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineIndexStatement]>, Error> {
 		trace!("all_ix for transaction {:?}", self.id);
 		let key = crate::key::ix::prefix(ns, db, tb);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Ixs(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::ix::prefix(ns, db, tb);
-				let end = crate::key::ix::suffix(ns, db, tb);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Ixs(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Ixs(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::ix::prefix(ns, db, tb);
+			let end = crate::key::ix::suffix(ns, db, tb);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Ixs(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all view definitions for a specific table.
@@ -1070,20 +1070,20 @@ impl Transaction {
 	) -> Result<Arc<[DefineTableStatement]>, Error> {
 		trace!("all_ft for transaction {:?}", self.id);
 		let key = crate::key::ft::prefix(ns, db, tb);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Fts(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::ft::prefix(ns, db, tb);
-				let end = crate::key::ft::suffix(ns, db, tb);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Fts(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Fts(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::ft::prefix(ns, db, tb);
+			let end = crate::key::ft::suffix(ns, db, tb);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Fts(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve all live definitions for a specific table.
@@ -1095,20 +1095,20 @@ impl Transaction {
 	) -> Result<Arc<[LiveStatement]>, Error> {
 		trace!("all_lv for transaction {:?}", self.id);
 		let key = crate::key::lv::prefix(ns, db, tb);
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Lvs(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let beg = crate::key::lv::prefix(ns, db, tb);
-				let end = crate::key::lv::suffix(ns, db, tb);
-				let val = self.getr(beg..end, u32::MAX).await?;
-				let val = val.convert().into();
-				self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Lvs(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let beg = crate::key::lv::prefix(ns, db, tb);
+			let end = crate::key::lv::suffix(ns, db, tb);
+			let val = self.getr(beg..end, u32::MAX).await?;
+			let val = val.convert().into();
+			self.cache.set(key, Entry::Lvs(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve a specific namespace definition.
@@ -1384,20 +1384,20 @@ impl Transaction {
 	) -> Result<Arc<DefineNamespaceStatement>, Error> {
 		trace!("get_and_cache_ns for transaction {:?}", self.id);
 		let key = crate::key::ns::new(ns).encode()?;
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Ns(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let val = self.get(key.clone()).await?.ok_or(Error::NsNotFound {
-					value: ns.to_owned(),
-				})?;
-				let val: Arc<DefineNamespaceStatement> = Arc::new(val.into());
-				self.cache.set(key, Entry::Ns(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Ns(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::NsNotFound {
+				value: ns.to_owned(),
+			})?;
+			let val: Arc<DefineNamespaceStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Ns(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve and cache a specific database definition.
@@ -1408,20 +1408,20 @@ impl Transaction {
 	) -> Result<Arc<DefineDatabaseStatement>, Error> {
 		trace!("get_and_cache_db for transaction {:?}", self.id);
 		let key = crate::key::db::new(ns, db).encode()?;
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Db(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let val = self.get(key.clone()).await?.ok_or(Error::DbNotFound {
-					value: db.to_owned(),
-				})?;
-				let val: Arc<DefineDatabaseStatement> = Arc::new(val.into());
-				self.cache.set(key, Entry::Db(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Db(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::DbNotFound {
+				value: db.to_owned(),
+			})?;
+			let val: Arc<DefineDatabaseStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Db(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Retrieve and cache a specific table definition.
@@ -1433,20 +1433,20 @@ impl Transaction {
 	) -> Result<Arc<DefineTableStatement>, Error> {
 		trace!("get_and_cache_tb for transaction {:?}", self.id);
 		let key = crate::key::tb::new(ns, db, tb).encode()?;
-		match self.cache.exi(&key) {
-			true => match self.cache.get(&key) {
-				Some(Entry::Tb(v)) => Ok(v),
-				_ => unreachable!(),
-			},
-			_ => {
-				let val = self.get(key.clone()).await?.ok_or(Error::TbNotFound {
-					value: tb.to_owned(),
-				})?;
-				let val: Arc<DefineTableStatement> = Arc::new(val.into());
-				self.cache.set(key, Entry::Tb(Arc::clone(&val)));
-				Ok(val)
+		Ok(if let Some(e) = self.cache.get(&key) {
+			if let Entry::Tb(v) = e {
+				v
+			} else {
+				unreachable!();
 			}
-		}
+		} else {
+			let val = self.get(key.clone()).await?.ok_or(Error::TbNotFound {
+				value: tb.to_owned(),
+			})?;
+			let val: Arc<DefineTableStatement> = Arc::new(val.into());
+			self.cache.set(key, Entry::Tb(Arc::clone(&val)));
+			val
+		})
 	}
 
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.

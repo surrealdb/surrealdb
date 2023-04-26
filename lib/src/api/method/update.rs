@@ -19,6 +19,7 @@ use std::pin::Pin;
 
 /// An update future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Update<'r, C: Connection, R> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) resource: Result<Resource>,
@@ -26,48 +27,47 @@ pub struct Update<'r, C: Connection, R> {
 	pub(super) response_type: PhantomData<R>,
 }
 
-impl<'r, Client, R> Update<'r, Client, R>
-where
-	Client: Connection,
-{
-	async fn execute<T>(self) -> Result<T>
-	where
-		T: DeserializeOwned,
-	{
-		let resource = self.resource?;
-		let param = match self.range {
-			Some(range) => resource.with_range(range)?,
-			None => resource.into(),
-		};
-		let mut conn = Client::new(Method::Update);
-		conn.execute(self.router?, Param::new(vec![param])).await
-	}
+macro_rules! into_future {
+	() => {
+		fn into_future(self) -> Self::IntoFuture {
+			let Update {
+				router,
+				resource,
+				range,
+				..
+			} = self;
+			Box::pin(async move {
+				let param = match range {
+					Some(range) => resource?.with_range(range)?,
+					None => resource?.into(),
+				};
+				let mut conn = Client::new(Method::Update);
+				conn.execute(router?, Param::new(vec![param])).await
+			})
+		}
+	};
 }
 
 impl<'r, Client, R> IntoFuture for Update<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned + Send + Sync + 'r,
+	R: DeserializeOwned,
 {
 	type Output = Result<R>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	fn into_future(self) -> Self::IntoFuture {
-		Box::pin(self.execute())
-	}
+	into_future! {}
 }
 
 impl<'r, Client, R> IntoFuture for Update<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned + Send + Sync + 'r,
+	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	fn into_future(self) -> Self::IntoFuture {
-		Box::pin(self.execute())
-	}
+	into_future! {}
 }
 
 impl<C, R> Update<'_, C, Vec<R>>
@@ -81,55 +81,93 @@ where
 	}
 }
 
-macro_rules! update_methods {
-	($this:ty, $res:ty) => {
-		impl<'r, C, R> Update<'r, C, $this>
-		where
-			C: Connection,
-			R: DeserializeOwned + Send + Sync,
-		{
-			/// Replaces the current document / record data with the specified data
-			pub fn content<D>(self, data: D) -> Content<'r, C, D, $res>
-			where
-				D: Serialize,
-			{
-				Content {
-					router: self.router,
-					method: Method::Update,
-					resource: self.resource,
-					range: self.range,
-					content: data,
-					response_type: PhantomData,
-				}
-			}
-
-			/// Merges the current document / record data with the specified data
-			pub fn merge<D>(self, data: D) -> Merge<'r, C, D, $res>
-			where
-				D: Serialize,
-			{
-				Merge {
-					router: self.router,
-					resource: self.resource,
-					range: self.range,
-					content: data,
-					response_type: PhantomData,
-				}
-			}
-
-			/// Patches the current document / record data with the specified JSON Patch data
-			pub fn patch(self, PatchOp(patch): PatchOp) -> Patch<'r, C, $res> {
-				Patch {
-					router: self.router,
-					resource: self.resource,
-					range: self.range,
-					patches: vec![patch],
-					response_type: PhantomData,
-				}
-			}
+macro_rules! content {
+	($this:ident, $data:ident) => {
+		Content {
+			router: $this.router,
+			method: Method::Update,
+			resource: $this.resource,
+			range: $this.range,
+			content: $data,
+			response_type: PhantomData,
 		}
 	};
 }
 
-update_methods!(Option<R>, R);
-update_methods!(Vec<R>, Vec<R>);
+macro_rules! merge {
+	($this:ident, $data:ident) => {
+		Merge {
+			router: $this.router,
+			resource: $this.resource,
+			range: $this.range,
+			content: $data,
+			response_type: PhantomData,
+		}
+	};
+}
+
+macro_rules! patch {
+	($this:ident, $data:ident) => {
+		Patch {
+			router: $this.router,
+			resource: $this.resource,
+			range: $this.range,
+			patches: vec![$data],
+			response_type: PhantomData,
+		}
+	};
+}
+
+impl<'r, C, R> Update<'r, C, Option<R>>
+where
+	C: Connection,
+	R: DeserializeOwned,
+{
+	/// Replaces the current document / record data with the specified data
+	pub fn content<D>(self, data: D) -> Content<'r, C, D, R>
+	where
+		D: Serialize,
+	{
+		content!(self, data)
+	}
+
+	/// Merges the current document / record data with the specified data
+	pub fn merge<D>(self, data: D) -> Merge<'r, C, D, R>
+	where
+		D: Serialize,
+	{
+		merge!(self, data)
+	}
+
+	/// Patches the current document / record data with the specified JSON Patch data
+	pub fn patch(self, PatchOp(patch): PatchOp) -> Patch<'r, C, R> {
+		patch!(self, patch)
+	}
+}
+
+impl<'r, C, R> Update<'r, C, Vec<R>>
+where
+	C: Connection,
+	R: DeserializeOwned,
+{
+	/// Replaces the current document / record data with the specified data
+	pub fn content<D>(self, data: D) -> Content<'r, C, D, Vec<R>>
+	where
+		D: Serialize,
+	{
+		content!(self, data)
+	}
+
+	/// Merges the current document / record data with the specified data
+	pub fn merge<D>(self, data: D) -> Merge<'r, C, D, Vec<R>>
+	where
+		D: Serialize,
+	{
+		merge!(self, data)
+	}
+
+	/// Patches the current document / record data with the specified JSON Patch data
+	pub fn patch(self, PatchOp(patch): PatchOp) -> Patch<'r, C, Vec<R>> {
+		patch!(self, patch)
+	}
+}
