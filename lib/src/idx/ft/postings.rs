@@ -215,18 +215,33 @@ mod tests {
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
 
 		p.update_posting(&mut tx, 1, 2, 3).await.unwrap();
+		p.update_posting(&mut tx, 1, 4, 5).await.unwrap();
 
 		p.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx = ds.transaction(false, false).await.unwrap();
-		let p = Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER).await.unwrap();
-		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 1);
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut p =
+			Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER).await.unwrap();
+		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 2);
 
 		let mut v = TestPostingVisitor::default();
 		p.collect_postings(&mut tx, 1, &mut v).await.unwrap();
-		v.check_len(1, "Postings");
-		v.check(vec![(2, 3)], "Postings");
+		v.check_len(2, "Postings");
+		v.check(vec![(2, 3), (4, 5)], "Postings");
+
+		// Check removal of doc 2
+		assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), Some(3));
+		assert_eq!(p.count_postings(&mut tx, 1).await.unwrap(), 1);
+		// Again the same
+		assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), None);
+		assert_eq!(p.count_postings(&mut tx, 1).await.unwrap(), 1);
+		// Remove doc 4
+		assert_eq!(p.remove_posting(&mut tx, 1, 4).await.unwrap(), Some(5));
+		assert_eq!(p.count_postings(&mut tx, 1).await.unwrap(), 0);
+
+		// The underlying b-tree should be empty now
+		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
 	}
 
 	#[derive(Default)]

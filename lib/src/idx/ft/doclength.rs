@@ -92,7 +92,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_doc_lengths() {
-		const BTREE_ORDER: usize = 75;
+		const BTREE_ORDER: usize = 7;
 
 		let ds = Datastore::new("memory").await.unwrap();
 
@@ -119,5 +119,10 @@ mod tests {
 		let dl = l.get_doc_length(&mut tx, 99).await.unwrap();
 		l.finish(&mut tx).await.unwrap();
 		assert_eq!(dl, Some(299));
+
+		// Remove doc lengths
+		let mut l = DocLengths::new(&mut tx, IndexKeyBase::default(), BTREE_ORDER).await.unwrap();
+		assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), Some(299));
+		assert_eq!(l.remove_doc_length(&mut tx, 99).await.unwrap(), None);
 	}
 }

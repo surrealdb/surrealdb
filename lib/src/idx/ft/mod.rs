@@ -414,6 +414,26 @@ mod tests {
 			fti.search(&mut tx, "dummy", &mut visitor).await.unwrap();
 			visitor.check(Vec::<(String, f32)>::new());
 		}
+
+		{
+			// Remove documents
+			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut fti =
+				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
+			fti.remove_document(&mut tx, "doc1").await.unwrap();
+			fti.remove_document(&mut tx, "doc2").await.unwrap();
+			fti.remove_document(&mut tx, "doc3").await.unwrap();
+			tx.commit().await.unwrap();
+
+			let mut tx = ds.transaction(false, false).await.unwrap();
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut tx, "hello", &mut visitor).await.unwrap();
+			visitor.check(vec![]);
+
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
+			visitor.check(vec![]);
+		}
 	}
 
 	#[test(tokio::test)]

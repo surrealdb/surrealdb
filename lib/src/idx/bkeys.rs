@@ -229,8 +229,8 @@ impl BKeys for FstKeys {
 				&& self.additions.get(existing_key_vec).is_none()
 			{
 				builder.insert(existing_key_vec, value).unwrap();
-				current_existing = existing_keys.next();
 			}
+			current_existing = existing_keys.next();
 		}
 		// Insert any new term left over
 		while let Some((new_key_vec, value)) = current_new {

@@ -98,12 +98,12 @@ impl Terms {
 		&mut self,
 		tx: &mut Transaction,
 		term_id: TermId,
-	) -> Result<Option<TermId>, Error> {
+	) -> Result<(), Error> {
 		let term_id_key = self.index_key_base.new_bu_key(term_id);
 		if let Some(term_key) = tx.get(term_id_key.clone()).await? {
-			if self.btree.delete::<FstKeys>(tx, term_key).await? != Some(term_id) {
-				return Err(Error::CorruptedIndex);
-			}
+			debug!("Delete In {}", String::from_utf8(term_key.clone()).unwrap());
+			self.btree.delete::<FstKeys>(tx, term_key.clone()).await?;
+			debug!("Delete Out {}", String::from_utf8(term_key.clone()).unwrap());
 			tx.del(term_id_key).await?;
 			if let Some(available_ids) = &mut self.available_ids {
 				available_ids.insert(term_id);
@@ -113,10 +113,8 @@ impl Terms {
 				self.available_ids = Some(available_ids);
 			}
 			self.updated = true;
-			Ok(Some(term_id))
-		} else {
-			Ok(None)
 		}
+		Ok(())
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
@@ -195,7 +193,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_resolve_terms() {
-		const BTREE_ORDER: usize = 75;
+		const BTREE_ORDER: usize = 7;
 
 		let idx = IndexKeyBase::default();
 
@@ -248,6 +246,47 @@ mod tests {
 			res.eq(&HashMap::from([(3, 101), (0, 123), (2, 105)]))
 				|| res.eq(&HashMap::from([(2, 101), (0, 123), (3, 105)]))
 		);
+	}
+
+	#[tokio::test]
+	async fn test_deletion() {
+		const BTREE_ORDER: usize = 7;
+
+		let idx = IndexKeyBase::default();
+
+		let ds = Datastore::new("memory").await.unwrap();
+
+		let mut tx = ds.transaction(true, false).await.unwrap();
+		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
+
+		// Check removing an non-existing term id returns None
+		assert!(t.remove_term_id(&mut tx, 0).await.is_ok());
+
+		// Create few terms
+		t.resolve_term_ids(&mut tx, HashMap::from([("A", 101), ("C", 123), ("E", 105)]))
+			.await
+			.unwrap();
+
+		for term in ["A", "C", "E"] {
+			let term_id = t.get_term_id(&mut tx, term).await.unwrap();
+			if let Some(term_id) = term_id {
+				t.remove_term_id(&mut tx, term_id).await.unwrap();
+				assert_eq!(t.get_term_id(&mut tx, term).await.unwrap(), None);
+			} else {
+				assert!(false, "Term ID not found: {}", term);
+			}
+		}
+
+		// Check id recycling
+		let res =
+			t.resolve_term_ids(&mut tx, HashMap::from([("B", 102), ("D", 104)])).await.unwrap();
+		assert!(
+			res.eq(&HashMap::from([(0, 102), (1, 104)]))
+				|| res.eq(&HashMap::from([(0, 104), (1, 102)]))
+		);
+
+		t.finish(&mut tx).await.unwrap();
+		tx.commit().await.unwrap();
 	}
 
 	fn random_term_freq_vec(term_count: usize) -> Vec<(String, TermFrequency)> {

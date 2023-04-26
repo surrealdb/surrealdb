@@ -168,7 +168,7 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Transaction};
 
-	const BTREE_ORDER: usize = 75;
+	const BTREE_ORDER: usize = 7;
 
 	async fn get_doc_ids(ds: &Datastore) -> (Transaction, DocIds) {
 		let mut tx = ds.transaction(true, false).await.unwrap();
