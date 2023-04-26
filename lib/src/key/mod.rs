@@ -39,12 +39,14 @@
 /// BT              /*{ns}*{db}*{tb}¤{ix}{bt}{id}
 pub mod az; // Stores a DEFINE ANALYZER config definition
 pub mod bd; // Stores BTree nodes for doc ids
-pub mod bf; // Store Term/Doc frequency
-pub mod bi; // Store BTree nodes for doc ids
+pub mod bf; // Stores Term/Doc frequency
+pub mod bi; // Stores doc keys for doc_ids
+pub mod bk; // Stores the term list for doc_ids
 pub mod bl; // Stores BTree nodes for doc lengths
 pub mod bp; // Stores BTree nodes for postings
 pub mod bs; // Stores FullText index states
 pub mod bt; // Stores BTree nodes for terms
+pub mod bu; // Stores terms for term_ids
 pub mod database; // Stores the key prefix for all keys under a database
 pub mod db; // Stores a DEFINE DATABASE config definition
 pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition
@@ -69,4 +71,4 @@ pub mod scope; // Stores the key prefix for all keys under a scope
 pub mod st; // Stores a DEFINE TOKEN ON SCOPE config definition
 pub mod table; // Stores the key prefix for all keys under a table
 pub mod tb; // Stores a DEFINE TABLE config definition
-pub mod thing; // Stores a reference to a Doc key
+pub mod thing;

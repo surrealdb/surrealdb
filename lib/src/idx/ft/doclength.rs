@@ -1,6 +1,6 @@
 use crate::err::Error;
 use crate::idx::bkeys::TrieKeys;
-use crate::idx::btree::{BTree, KeyProvider, NodeId, Statistics};
+use crate::idx::btree::{BTree, KeyProvider, NodeId, Payload, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
@@ -48,6 +48,14 @@ impl DocLengths {
 		doc_length: DocLength,
 	) -> Result<(), Error> {
 		self.btree.insert::<TrieKeys>(tx, doc_id.to_be_bytes().to_vec(), doc_length).await
+	}
+
+	pub(super) async fn remove_doc_length(
+		&mut self,
+		tx: &mut Transaction,
+		doc_id: DocId,
+	) -> Result<Option<Payload>, Error> {
+		self.btree.delete::<TrieKeys>(tx, doc_id.to_be_bytes().to_vec()).await
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {

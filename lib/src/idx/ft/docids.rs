@@ -59,6 +59,8 @@ impl DocIds {
 		doc_id
 	}
 
+	/// Returns the doc_id for the given doc_key.
+	/// If the doc_id does not exists, a new one is created, and associated to the given key.
 	pub(super) async fn resolve_doc_id(
 		&mut self,
 		tx: &mut Transaction,

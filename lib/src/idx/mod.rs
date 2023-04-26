@@ -11,12 +11,15 @@ use crate::idx::ft::terms::TermId;
 use crate::key::bd::Bd;
 use crate::key::bf::{Bf, BfPrefix};
 use crate::key::bi::Bi;
+use crate::key::bk::Bk;
 use crate::key::bl::Bl;
 use crate::key::bp::Bp;
 use crate::key::bs::Bs;
 use crate::key::bt::Bt;
+use crate::key::bu::Bu;
 use crate::kvs::{Key, Val};
 use crate::sql::statements::DefineIndexStatement;
+use roaring::RoaringTreemap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +49,10 @@ impl IndexKeyBase {
 		Bi::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), doc_id).into()
 	}
 
+	fn new_bk_key(&self, doc_id: DocId) -> Key {
+		Bk::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), doc_id).into()
+	}
+
 	fn new_bl_key(&self, node_id: Option<NodeId>) -> Key {
 		Bl::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), node_id).into()
 	}
@@ -71,6 +78,10 @@ impl IndexKeyBase {
 	fn new_bs_key(&self) -> Key {
 		Bs::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone()).into()
 	}
+
+	fn new_bu_key(&self, term_id: TermId) -> Key {
+		Bu::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), term_id).into()
+	}
 }
 
 /// This trait provides `bincode` based default implementations for serialization/deserialization
@@ -86,6 +97,8 @@ where
 		Ok(bincode::deserialize(&val)?)
 	}
 }
+
+impl SerdeState for RoaringTreemap {}
 
 #[cfg(test)]
 mod tests {

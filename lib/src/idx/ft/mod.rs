@@ -14,6 +14,7 @@ use crate::sql::error::IResult;
 use async_trait::async_trait;
 use nom::bytes::complete::take_while;
 use nom::character::complete::multispace0;
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -101,12 +102,41 @@ impl FtIndex {
 
 	pub(crate) async fn remove_document(
 		&mut self,
-		_tx: &mut Transaction,
-		_doc_key: &str,
+		tx: &mut Transaction,
+		doc_key: &str,
 	) -> Result<(), Error> {
-		Err(Error::FeatureNotYetImplemented {
-			feature: "FT - Remove document",
-		})
+		// Extract and remove the doc_id (if any)
+		let mut d = self.doc_ids(tx).await?;
+		if let Some(doc_id) = d.remove_doc(tx, doc_key).await? {
+			self.state.doc_count -= 1;
+
+			// Remove the doc length
+			let mut l = self.doc_lengths(tx).await?;
+			if let Some(doc_lengths) = l.remove_doc_length(tx, doc_id).await? {
+				self.state.total_docs_lengths -= doc_lengths as u128;
+				l.finish(tx).await?;
+			}
+
+			// Get the term list
+			if let Some(term_list_vec) = tx.get(self.index_key_base.new_bk_key(doc_id)).await? {
+				let term_list = RoaringTreemap::try_from_val(term_list_vec)?;
+				// Remove the postings
+				let mut p = self.postings(tx).await?;
+				let mut t = self.terms(tx).await?;
+				for term_id in term_list {
+					p.remove_posting(tx, term_id, doc_id).await?;
+					// if the term is not present in any document in the index, we can remove it
+					if p.count_postings(tx, term_id).await? == 0 {
+						t.remove_term_id(tx, term_id).await?;
+					}
+				}
+				t.finish(tx).await?;
+				p.finish(tx).await?;
+			}
+
+			d.finish(tx).await?;
+		}
+		Ok(())
 	}
 
 	pub(crate) async fn index_document(
@@ -128,16 +158,21 @@ impl FtIndex {
 		let mut l = self.doc_lengths(tx).await?;
 		l.set_doc_length(tx, doc_id, doc_length).await?;
 
-		// Update the index state
-		self.state.total_docs_lengths += doc_length as u128;
-		self.state.doc_count += 1;
-
 		// Set the terms postings
-		let terms = t.resolve_terms(tx, terms_and_frequencies).await?;
+		let terms = t.resolve_term_ids(tx, terms_and_frequencies).await?;
+		let mut terms_ids = RoaringTreemap::default();
 		let mut p = self.postings(tx).await?;
 		for (term_id, term_freq) in terms {
 			p.update_posting(tx, term_id, doc_id, term_freq).await?;
+			terms_ids.insert(term_id);
 		}
+
+		// Stores the term list for this doc_id
+		tx.set(self.index_key_base.new_bk_key(doc_id), terms_ids.try_to_val()?).await?;
+
+		// Update the index state
+		self.state.total_docs_lengths += doc_length as u128;
+		self.state.doc_count += 1;
 
 		// Update the states
 		tx.set(self.state_key.clone(), self.state.try_to_val()?).await?;
@@ -195,7 +230,7 @@ impl FtIndex {
 		V: HitVisitor + Send,
 	{
 		let terms = self.terms(tx).await?;
-		if let Some(term_id) = terms.find_term(tx, term).await? {
+		if let Some(term_id) = terms.get_term_id(tx, term).await? {
 			let postings = self.postings(tx).await?;
 			let term_doc_count = postings.get_doc_count(tx, term_id).await?;
 			let doc_lengths = self.doc_lengths(tx).await?;

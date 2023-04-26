@@ -4,6 +4,7 @@ use crate::idx::btree::{BTree, KeyProvider, NodeId, Statistics};
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -11,7 +12,9 @@ pub(crate) type TermId = u64;
 
 pub(super) struct Terms {
 	state_key: Key,
+	index_key_base: IndexKeyBase,
 	btree: BTree<TermsKeyProvider>,
+	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
 	updated: bool,
 }
@@ -23,7 +26,7 @@ impl Terms {
 		default_btree_order: usize,
 	) -> Result<Self, Error> {
 		let keys = TermsKeyProvider {
-			index_key_base,
+			index_key_base: index_key_base.clone(),
 		};
 		let state_key: Key = keys.get_state_key();
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {
@@ -33,43 +36,87 @@ impl Terms {
 		};
 		Ok(Self {
 			state_key,
+			index_key_base,
 			btree: BTree::new(keys, state.btree),
+			available_ids: state.available_ids,
 			next_term_id: state.next_term_id,
 			updated: false,
 		})
 	}
 
-	pub(super) async fn resolve_terms(
+	fn get_next_term_id(&mut self) -> TermId {
+		// We check first if there is any available id
+		if let Some(available_ids) = &mut self.available_ids {
+			if let Some(available_id) = available_ids.iter().next() {
+				available_ids.remove(available_id);
+				if available_ids.is_empty() {
+					self.available_ids = None;
+				}
+				return available_id;
+			}
+		}
+		// If not, we use the sequence
+		let term_id = self.next_term_id;
+		self.next_term_id += 1;
+		term_id
+	}
+
+	pub(super) async fn resolve_term_ids(
 		&mut self,
 		tx: &mut Transaction,
 		terms_frequencies: HashMap<&str, TermFrequency>,
 	) -> Result<HashMap<TermId, TermFrequency>, Error> {
 		let mut res = HashMap::with_capacity(terms_frequencies.len());
 		for (term, freq) in terms_frequencies {
-			res.insert(self.resolve_term(tx, term).await?, freq);
+			res.insert(self.resolve_term_id(tx, term).await?, freq);
 		}
 		Ok(res)
 	}
 
-	async fn resolve_term(&mut self, tx: &mut Transaction, term: &str) -> Result<TermId, Error> {
-		let term = term.into();
-		if let Some(term_id) = self.btree.search::<FstKeys>(tx, &term).await? {
+	async fn resolve_term_id(&mut self, tx: &mut Transaction, term: &str) -> Result<TermId, Error> {
+		let term_key = term.into();
+		if let Some(term_id) = self.btree.search::<FstKeys>(tx, &term_key).await? {
 			Ok(term_id)
 		} else {
-			let term_id = self.next_term_id;
-			self.btree.insert::<FstKeys>(tx, term, term_id).await?;
-			self.next_term_id += 1;
+			let term_id = self.get_next_term_id();
+			tx.set(self.index_key_base.new_bu_key(term_id), term_key.clone()).await?;
+			self.btree.insert::<FstKeys>(tx, term_key, term_id).await?;
 			self.updated = true;
 			Ok(term_id)
 		}
 	}
 
-	pub(super) async fn find_term(
+	pub(super) async fn get_term_id(
 		&self,
 		tx: &mut Transaction,
 		term: &str,
 	) -> Result<Option<TermId>, Error> {
 		self.btree.search::<FstKeys>(tx, &term.into()).await
+	}
+
+	pub(super) async fn remove_term_id(
+		&mut self,
+		tx: &mut Transaction,
+		term_id: TermId,
+	) -> Result<Option<TermId>, Error> {
+		let term_id_key = self.index_key_base.new_bu_key(term_id);
+		if let Some(term_key) = tx.get(term_id_key.clone()).await? {
+			if self.btree.delete::<FstKeys>(tx, term_key).await? != Some(term_id) {
+				return Err(Error::CorruptedIndex);
+			}
+			tx.del(term_id_key).await?;
+			if let Some(available_ids) = &mut self.available_ids {
+				available_ids.insert(term_id);
+			} else {
+				let mut available_ids = RoaringTreemap::new();
+				available_ids.insert(term_id);
+				self.available_ids = Some(available_ids);
+			}
+			self.updated = true;
+			Ok(Some(term_id))
+		} else {
+			Ok(None)
+		}
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
@@ -80,6 +127,7 @@ impl Terms {
 		if self.updated || self.btree.is_updated() {
 			let state = State {
 				btree: self.btree.get_state().clone(),
+				available_ids: self.available_ids,
 				next_term_id: self.next_term_id,
 			};
 			tx.set(self.state_key, state.try_to_val()?).await?;
@@ -91,6 +139,7 @@ impl Terms {
 #[derive(Serialize, Deserialize)]
 struct State {
 	btree: btree::State,
+	available_ids: Option<RoaringTreemap>,
 	next_term_id: TermId,
 }
 
@@ -100,6 +149,7 @@ impl State {
 	fn new(default_btree_order: usize) -> Self {
 		Self {
 			btree: btree::State::new(default_btree_order),
+			available_ids: None,
 			next_term_id: 0,
 		}
 	}
@@ -159,7 +209,7 @@ mod tests {
 		// Resolve a first term
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		let res = t.resolve_terms(&mut tx, HashMap::from([("C", 103)])).await.unwrap();
+		let res = t.resolve_term_ids(&mut tx, HashMap::from([("C", 103)])).await.unwrap();
 		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 1);
 		t.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
@@ -168,7 +218,7 @@ mod tests {
 		// Resolve a second term
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		let res = t.resolve_terms(&mut tx, HashMap::from([("D", 104)])).await.unwrap();
+		let res = t.resolve_term_ids(&mut tx, HashMap::from([("D", 104)])).await.unwrap();
 		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
 		t.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
@@ -177,7 +227,8 @@ mod tests {
 		// Resolve two existing terms with new frequencies
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
-		let res = t.resolve_terms(&mut tx, HashMap::from([("C", 113), ("D", 114)])).await.unwrap();
+		let res =
+			t.resolve_term_ids(&mut tx, HashMap::from([("C", 113), ("D", 114)])).await.unwrap();
 		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 2);
 		t.finish(&mut tx).await.unwrap();
 		tx.commit().await.unwrap();
@@ -187,7 +238,7 @@ mod tests {
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		let mut t = Terms::new(&mut tx, idx.clone(), BTREE_ORDER).await.unwrap();
 		let res = t
-			.resolve_terms(&mut tx, HashMap::from([("A", 101), ("C", 123), ("E", 105)]))
+			.resolve_term_ids(&mut tx, HashMap::from([("A", 101), ("C", 123), ("E", 105)]))
 			.await
 			.unwrap();
 		assert_eq!(t.statistics(&mut tx).await.unwrap().keys_count, 4);
@@ -218,7 +269,7 @@ mod tests {
 			let terms_string = random_term_freq_vec(50);
 			let terms_str: HashMap<&str, TermFrequency> =
 				terms_string.iter().map(|(t, f)| (t.as_str(), *f)).collect();
-			t.resolve_terms(&mut tx, terms_str).await.unwrap();
+			t.resolve_term_ids(&mut tx, terms_str).await.unwrap();
 			t.finish(&mut tx).await.unwrap();
 			tx.commit().await.unwrap();
 		}
@@ -234,7 +285,7 @@ mod tests {
 				let terms_string = random_term_freq_vec(50);
 				let terms_str: HashMap<&str, TermFrequency> =
 					terms_string.iter().map(|(t, f)| (t.as_str(), *f)).collect();
-				t.resolve_terms(&mut tx, terms_str).await.unwrap();
+				t.resolve_term_ids(&mut tx, terms_str).await.unwrap();
 			}
 			t.finish(&mut tx).await.unwrap();
 			tx.commit().await.unwrap();

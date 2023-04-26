@@ -59,6 +59,16 @@ impl Postings {
 		self.btree.insert::<TrieKeys>(tx, key, term_freq).await
 	}
 
+	pub(super) async fn remove_posting(
+		&mut self,
+		tx: &mut Transaction,
+		term_id: TermId,
+		doc_id: DocId,
+	) -> Result<Option<TermFrequency>, Error> {
+		let key = self.index_key_base.new_bf_key(term_id, doc_id);
+		self.btree.delete::<TrieKeys>(tx, key).await
+	}
+
 	pub(super) async fn get_doc_count(
 		&self,
 		tx: &mut Transaction,
@@ -86,6 +96,16 @@ impl Postings {
 		self.btree.search_by_prefix::<TrieKeys, _>(tx, &prefix_key, &mut key_visitor).await
 	}
 
+	pub(super) async fn count_postings(
+		&self,
+		tx: &mut Transaction,
+		term_id: TermId,
+	) -> Result<usize, Error> {
+		let mut counter = PostingCounter::default();
+		self.collect_postings(tx, term_id, &mut counter).await?;
+		Ok(counter.count)
+	}
+
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
 		self.btree.statistics::<TrieKeys>(tx).await
 	}
@@ -94,6 +114,24 @@ impl Postings {
 		if self.btree.is_updated() {
 			tx.set(self.state_key, self.btree.get_state().try_to_val()?).await?;
 		}
+		Ok(())
+	}
+}
+
+#[derive(Default)]
+struct PostingCounter {
+	count: usize,
+}
+
+#[async_trait]
+impl PostingsVisitor for PostingCounter {
+	async fn visit(
+		&mut self,
+		_tx: &mut Transaction,
+		_doc_id: DocId,
+		_term_frequency: TermFrequency,
+	) -> Result<(), Error> {
+		self.count += 1;
 		Ok(())
 	}
 }
