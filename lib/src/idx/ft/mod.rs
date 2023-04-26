@@ -147,7 +147,8 @@ impl FtIndex {
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let mut d = self.doc_ids(tx).await?;
-		let doc_id = d.resolve_doc_id(tx, doc_key).await?;
+		let resolved = d.resolve_doc_id(tx, doc_key).await?;
+		let doc_id = *resolved.doc_id();
 
 		// Extract the doc_lengths, terms en frequencies
 		let mut t = self.terms(tx).await?;
@@ -156,7 +157,20 @@ impl FtIndex {
 
 		// Set the doc length
 		let mut l = self.doc_lengths(tx).await?;
+		if resolved.was_existing() {
+			if let Some(old_doc_length) = l.get_doc_length(tx, doc_id).await? {
+				self.state.total_docs_lengths -= old_doc_length as u128;
+			}
+		}
 		l.set_doc_length(tx, doc_id, doc_length).await?;
+
+		// Retrieve the existing terms for this document (if any)
+		let term_ids_key = self.index_key_base.new_bk_key(doc_id);
+		let mut old_term_ids = if let Some(val) = tx.get(term_ids_key.clone()).await? {
+			Some(RoaringTreemap::try_from_val(val)?)
+		} else {
+			None
+		};
 
 		// Set the terms postings
 		let terms = t.resolve_term_ids(tx, terms_and_frequencies).await?;
@@ -164,15 +178,31 @@ impl FtIndex {
 		let mut p = self.postings(tx).await?;
 		for (term_id, term_freq) in terms {
 			p.update_posting(tx, term_id, doc_id, term_freq).await?;
+			if let Some(old_term_ids) = &mut old_term_ids {
+				old_term_ids.remove(term_id);
+			}
 			terms_ids.insert(term_id);
 		}
 
+		// Remove any remaining postings
+		if let Some(old_term_ids) = old_term_ids {
+			for old_term_id in old_term_ids {
+				p.remove_posting(tx, old_term_id, doc_id).await?;
+				// if the term does not have anymore postings, we can remove the term
+				if p.count_postings(tx, old_term_id).await? == 0 {
+					t.remove_term_id(tx, old_term_id).await?;
+				}
+			}
+		}
+
 		// Stores the term list for this doc_id
-		tx.set(self.index_key_base.new_bk_key(doc_id), terms_ids.try_to_val()?).await?;
+		tx.set(term_ids_key, terms_ids.try_to_val()?).await?;
 
 		// Update the index state
 		self.state.total_docs_lengths += doc_length as u128;
-		self.state.doc_count += 1;
+		if !resolved.was_existing() {
+			self.state.doc_count += 1;
+		}
 
 		// Update the states
 		tx.set(self.state_key.clone(), self.state.try_to_val()?).await?;
@@ -413,6 +443,31 @@ mod tests {
 			let mut visitor = HashHitVisitor::default();
 			fti.search(&mut tx, "dummy", &mut visitor).await.unwrap();
 			visitor.check(Vec::<(String, f32)>::new());
+		}
+
+		{
+			// Reindex one document
+			let mut tx = ds.transaction(true, false).await.unwrap();
+			let mut fti =
+				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
+			fti.index_document(&mut tx, "doc3", "nobar foo").await.unwrap();
+			tx.commit().await.unwrap();
+
+			// We can still find 'foo'
+			let mut tx = ds.transaction(false, false).await.unwrap();
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
+			visitor.check(vec![("doc3".to_string(), 0.56902087)]);
+
+			// We can't anymore find 'bar'
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut tx, "bar", &mut visitor).await.unwrap();
+			visitor.check(vec![]);
+
+			// We can now find 'nobar'
+			let mut visitor = HashHitVisitor::default();
+			fti.search(&mut tx, "nobar", &mut visitor).await.unwrap();
+			visitor.check(vec![("doc3".to_string(), 0.56902087)]);
 		}
 
 		{

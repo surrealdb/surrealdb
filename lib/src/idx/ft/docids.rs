@@ -65,16 +65,16 @@ impl DocIds {
 		&mut self,
 		tx: &mut Transaction,
 		doc_key: &str,
-	) -> Result<DocId, Error> {
+	) -> Result<Resolved, Error> {
 		let doc_key: Vec<u8> = doc_key.into();
 		if let Some(doc_id) = self.btree.search::<TrieKeys>(tx, &doc_key).await? {
-			Ok(doc_id)
+			Ok(Resolved::Existing(doc_id))
 		} else {
 			let doc_id = self.get_next_doc_id();
 			tx.set(self.index_key_base.new_bi_key(doc_id), doc_key.clone()).await?;
 			self.btree.insert::<TrieKeys>(tx, doc_key, doc_id).await?;
 			self.updated = true;
-			Ok(doc_id)
+			Ok(Resolved::New(doc_id))
 		}
 	}
 
@@ -149,6 +149,28 @@ impl State {
 	}
 }
 
+#[derive(Debug, PartialEq)]
+pub(super) enum Resolved {
+	New(DocId),
+	Existing(DocId),
+}
+
+impl Resolved {
+	pub(super) fn doc_id(&self) -> &DocId {
+		match self {
+			Resolved::New(doc_id) => doc_id,
+			Resolved::Existing(doc_id) => doc_id,
+		}
+	}
+
+	pub(super) fn was_existing(&self) -> bool {
+		match self {
+			Resolved::New(_) => false,
+			Resolved::Existing(_) => true,
+		}
+	}
+}
+
 struct DocIdsKeyProvider {
 	index_key_base: IndexKeyBase,
 }
@@ -164,7 +186,7 @@ impl KeyProvider for DocIdsKeyProvider {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::docids::DocIds;
+	use crate::idx::ft::docids::{DocIds, Resolved};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Transaction};
 
@@ -191,7 +213,7 @@ mod tests {
 		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
 		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".to_string()));
 		finish(tx, d).await;
-		assert_eq!(doc_id, 0);
+		assert_eq!(doc_id, Resolved::New(0));
 
 		// Resolve the same doc key
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
@@ -199,7 +221,7 @@ mod tests {
 		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
 		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".to_string()));
 		finish(tx, d).await;
-		assert_eq!(doc_id, 0);
+		assert_eq!(doc_id, Resolved::Existing(0));
 
 		// Resolve another single doc key
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
@@ -207,22 +229,22 @@ mod tests {
 		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 2);
 		assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".to_string()));
 		finish(tx, d).await;
-		assert_eq!(doc_id, 1);
+		assert_eq!(doc_id, Resolved::New(1));
 
 		// Resolve another two existing doc keys and two new doc keys (interlaced)
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), 0);
-		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), 2);
-		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), 1);
-		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), 3);
+		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), Resolved::Existing(0));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), Resolved::New(2));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), Resolved::Existing(1));
+		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), Resolved::New(3));
 		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
 		finish(tx, d).await;
 
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), 0);
-		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), 1);
-		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), 2);
-		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), 3);
+		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), Resolved::Existing(0));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), Resolved::Existing(1));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), Resolved::Existing(2));
+		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), Resolved::Existing(3));
 		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".to_string()));
 		assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".to_string()));
 		assert_eq!(d.get_doc_key(&mut tx, 2).await.unwrap(), Some("Hello".to_string()));
@@ -237,8 +259,8 @@ mod tests {
 
 		// Create two docs
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), 0);
-		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), 1);
+		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), Resolved::New(0));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), Resolved::New(1));
 		finish(tx, d).await;
 
 		// Remove doc 1
@@ -254,7 +276,7 @@ mod tests {
 
 		// Insert a new doc - should take the available id 1
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), 0);
+		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), Resolved::New(0));
 		finish(tx, d).await;
 
 		// Remove doc 2
@@ -270,7 +292,7 @@ mod tests {
 
 		// Insert a new doc - should take the available id 2
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), 1);
+		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), Resolved::New(1));
 		finish(tx, d).await;
 	}
 }
