@@ -1,9 +1,9 @@
 use crate::api;
-use crate::api::method::query::Response;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Response;
 use crate::sql::Query;
 use crate::sql::Value;
 use flume::Receiver;
@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections
@@ -154,6 +155,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
+		live_stream: Arc<Receiver<Vec<Response>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>>
 	where
 		Self: api::Connection;

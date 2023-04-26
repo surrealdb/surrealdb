@@ -96,13 +96,17 @@ impl Datastore {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub async fn new(path: &str) -> Result<Datastore, Error> {
+	pub async fn new(
+		path: &str,
+		live_stream: Arc<Receiver<Vec<Response>>>,
+	) -> Result<Datastore, Error> {
 		match path {
 			#[cfg(feature = "kv-mem")]
 			"memory" => {
 				info!(target: LOG, "Starting kvs store in {}", path);
 				let v = super::mem::Datastore::new().await.map(|v| Datastore {
 					inner: Inner::Mem(v),
+					diff_patch_stream: live_stream,
 				});
 				info!(target: LOG, "Started kvs store in {}", path);
 				v

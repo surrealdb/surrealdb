@@ -11,7 +11,7 @@ use crate::api::ExtraFeatures;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Session;
+use crate::dbs::{Response, Session};
 use crate::kvs::Datastore;
 use flume::Receiver;
 use flume::Sender;
@@ -38,6 +38,7 @@ impl Connection for Db {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
+		live_stream: Arc<Receiver<Vec<Response>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
@@ -47,7 +48,7 @@ impl Connection for Db {
 
 			let (conn_tx, conn_rx) = flume::bounded(1);
 
-			router(address, conn_tx, route_rx);
+			router(address, conn_tx, route_rx, live_stream);
 
 			conn_rx.into_recv_async().await??;
 
@@ -115,6 +116,7 @@ pub(crate) fn router(
 	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Option<Route>>,
+	live_stream: Arc<async_channel::Receiver<Vec<Response>>>,
 ) {
 	tokio::spawn(async move {
 		let url = address.endpoint;
@@ -124,7 +126,7 @@ pub(crate) fn router(
 			_ => url.as_str(),
 		};
 
-		let kvs = match Datastore::new(path).await {
+		let kvs = match Datastore::new(path, live_stream).await {
 			Ok(kvs) => {
 				let _ = conn_tx.into_send_async(Ok(())).await;
 				kvs

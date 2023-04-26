@@ -9,10 +9,13 @@ mod conn;
 
 pub use method::query::Response;
 
+use crate::api;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
+use crate::key::db;
+use flume::{Receiver, Sender};
 use once_cell::sync::OnceCell;
 use semver::BuildMetadata;
 use semver::VersionReq;
@@ -44,6 +47,8 @@ pub struct Connect<'r, C: Connection, Response> {
 	capacity: usize,
 	client: PhantomData<C>,
 	response_type: PhantomData<Response>,
+	live_stream_receiver: Arc<Receiver<Vec<db::Response>>>,
+	live_stream_sender: Arc<Sender<Vec<db::Response>>>,
 }
 
 impl<C, R> Connect<'_, C, R>
@@ -92,7 +97,8 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let client = Client::connect(self.address?, self.capacity).await?;
+			let client =
+				Client::connect(self.address?, self.capacity, self.live_stream_receiver).await?;
 			client.check_server_version();
 			Ok(client)
 		})
@@ -110,8 +116,10 @@ where
 		Box::pin(async move {
 			match self.router {
 				Some(router) => {
-					let option =
-						Client::connect(self.address?, self.capacity).await?.router.into_inner();
+					let option = Client::connect(self.address?, self.capacity, live_stream)
+						.await?
+						.router
+						.into_inner();
 					match option {
 						Some(client) => {
 							let _res = router.set(client);

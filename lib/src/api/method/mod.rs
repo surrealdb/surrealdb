@@ -75,10 +75,13 @@ use crate::api::ExtractRouter;
 use crate::api::Surreal;
 use crate::sql::to_value;
 use crate::sql::Uuid;
+use crate::Response;
 use once_cell::sync::OnceCell;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 
 impl Method {
 	#[allow(dead_code)] // used by `ws` and `http`
@@ -229,12 +232,15 @@ where
 	/// # }
 	/// ```
 	pub fn new<P>(address: impl IntoEndpoint<P, Client = C>) -> Connect<'static, C, Self> {
+		let (sender, receiver): (Sender<Vec<Response>>, Receiver<Vec<Response>>) = channel();
 		Connect {
 			router: None,
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
 			response_type: PhantomData,
+			live_stream_receiver: Arc::new(receiver),
+			live_stream_sender: Arc::new(sender),
 		}
 	}
 
