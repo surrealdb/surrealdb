@@ -46,6 +46,71 @@ impl Resource {
 	}
 }
 
+impl From<Table> for Resource {
+	fn from(table: Table) -> Self {
+		Self::Table(table)
+	}
+}
+
+impl From<Thing> for Resource {
+	fn from(thing: Thing) -> Self {
+		Self::RecordId(thing)
+	}
+}
+
+impl From<Object> for Resource {
+	fn from(object: Object) -> Self {
+		Self::Object(object)
+	}
+}
+
+impl From<Array> for Resource {
+	fn from(array: Array) -> Self {
+		Self::Array(array)
+	}
+}
+
+impl From<Edges> for Resource {
+	fn from(edges: Edges) -> Self {
+		Self::Edges(edges)
+	}
+}
+
+impl From<&str> for Resource {
+	fn from(s: &str) -> Self {
+		match sql::thing(s) {
+			Ok(thing) => Self::RecordId(thing),
+			Err(_) => Self::Table(s.into()),
+		}
+	}
+}
+
+impl From<&String> for Resource {
+	fn from(s: &String) -> Self {
+		Self::from(s.as_str())
+	}
+}
+
+impl From<String> for Resource {
+	fn from(s: String) -> Self {
+		match sql::thing(s.as_str()) {
+			Ok(thing) => Self::RecordId(thing),
+			Err(_) => Self::Table(s.into()),
+		}
+	}
+}
+
+impl<T, I> From<(T, I)> for Resource
+where
+	T: Into<String>,
+	I: Into<Id>,
+{
+	fn from((table, id): (T, I)) -> Self {
+		let record_id = (table.into(), id.into());
+		Self::RecordId(record_id.into())
+	}
+}
+
 impl From<Resource> for Value {
 	fn from(resource: Resource) -> Self {
 		match resource {
@@ -62,6 +127,12 @@ impl From<Resource> for Value {
 pub trait IntoResource<Response>: Sized {
 	/// Converts an input into a database resource
 	fn into_resource(self) -> Result<Resource>;
+}
+
+impl IntoResource<Value> for Resource {
+	fn into_resource(self) -> Result<Resource> {
+		Ok(self)
+	}
 }
 
 impl<R> IntoResource<Option<R>> for Object {
