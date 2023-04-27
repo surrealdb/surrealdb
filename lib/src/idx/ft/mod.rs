@@ -28,7 +28,7 @@ pub(crate) struct FtIndex {
 }
 
 pub(crate) trait HitVisitor {
-	fn visit(&mut self, tx: &mut Transaction, doc_key: String, score: Score);
+	fn visit(&mut self, tx: &mut Transaction, doc_key: Key, score: Score);
 }
 
 #[derive(Clone)]
@@ -103,7 +103,7 @@ impl FtIndex {
 	pub(crate) async fn remove_document(
 		&mut self,
 		tx: &mut Transaction,
-		doc_key: &str,
+		doc_key: Key,
 	) -> Result<(), Error> {
 		// Extract and remove the doc_id (if any)
 		let mut d = self.doc_ids(tx).await?;
@@ -142,7 +142,7 @@ impl FtIndex {
 	pub(crate) async fn index_document(
 		&mut self,
 		tx: &mut Transaction,
-		doc_key: &str,
+		doc_key: Key,
 		field_content: &str,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
@@ -378,7 +378,7 @@ where
 mod tests {
 	use crate::idx::ft::{FtIndex, HitVisitor, Score};
 	use crate::idx::IndexKeyBase;
-	use crate::kvs::{Datastore, Transaction};
+	use crate::kvs::{Datastore, Key, Transaction};
 	use std::collections::HashMap;
 	use test_log::test;
 
@@ -393,7 +393,7 @@ mod tests {
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
 				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.index_document(&mut tx, "doc1", "hello the world").await.unwrap();
+			fti.index_document(&mut tx, "doc1".into(), "hello the world").await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -402,8 +402,8 @@ mod tests {
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
 				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.index_document(&mut tx, "doc2", "a yellow hello").await.unwrap();
-			fti.index_document(&mut tx, "doc3", "foo bar").await.unwrap();
+			fti.index_document(&mut tx, "doc2".into(), "a yellow hello").await.unwrap();
+			fti.index_document(&mut tx, "doc3".into(), "foo bar").await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -422,27 +422,27 @@ mod tests {
 			// Search & score
 			let mut visitor = HashHitVisitor::default();
 			fti.search(&mut tx, "hello", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+			visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
 
 			let mut visitor = HashHitVisitor::default();
 			fti.search(&mut tx, "world", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc1".to_string(), 0.4859746)]);
+			visitor.check(vec![("doc1".into(), 0.4859746)]);
 
 			let mut visitor = HashHitVisitor::default();
 			fti.search(&mut tx, "yellow", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc2".to_string(), 0.4859746)]);
+			visitor.check(vec![("doc2".into(), 0.4859746)]);
 
 			let mut visitor = HashHitVisitor::default();
 			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".to_string(), 0.56902087)]);
+			visitor.check(vec![("doc3".into(), 0.56902087)]);
 
 			let mut visitor = HashHitVisitor::default();
 			fti.search(&mut tx, "bar", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".to_string(), 0.56902087)]);
+			visitor.check(vec![("doc3".into(), 0.56902087)]);
 
 			let mut visitor = HashHitVisitor::default();
 			fti.search(&mut tx, "dummy", &mut visitor).await.unwrap();
-			visitor.check(Vec::<(String, f32)>::new());
+			visitor.check(Vec::<(Key, f32)>::new());
 		}
 
 		{
@@ -450,14 +450,14 @@ mod tests {
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
 				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.index_document(&mut tx, "doc3", "nobar foo").await.unwrap();
+			fti.index_document(&mut tx, "doc3".into(), "nobar foo").await.unwrap();
 			tx.commit().await.unwrap();
 
 			// We can still find 'foo'
 			let mut tx = ds.transaction(false, false).await.unwrap();
 			let mut visitor = HashHitVisitor::default();
 			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".to_string(), 0.56902087)]);
+			visitor.check(vec![("doc3".into(), 0.56902087)]);
 
 			// We can't anymore find 'bar'
 			let mut visitor = HashHitVisitor::default();
@@ -467,7 +467,7 @@ mod tests {
 			// We can now find 'nobar'
 			let mut visitor = HashHitVisitor::default();
 			fti.search(&mut tx, "nobar", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".to_string(), 0.56902087)]);
+			visitor.check(vec![("doc3".into(), 0.56902087)]);
 		}
 
 		{
@@ -475,9 +475,9 @@ mod tests {
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
 				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.remove_document(&mut tx, "doc1").await.unwrap();
-			fti.remove_document(&mut tx, "doc2").await.unwrap();
-			fti.remove_document(&mut tx, "doc3").await.unwrap();
+			fti.remove_document(&mut tx, "doc1".into()).await.unwrap();
+			fti.remove_document(&mut tx, "doc2".into()).await.unwrap();
+			fti.remove_document(&mut tx, "doc3".into()).await.unwrap();
 			tx.commit().await.unwrap();
 
 			let mut tx = ds.transaction(false, false).await.unwrap();
@@ -506,16 +506,20 @@ mod tests {
 				let mut fti = FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order)
 					.await
 					.unwrap();
-				fti.index_document(&mut tx, "doc1", "the quick brown fox jumped over the lazy dog")
+				fti.index_document(
+					&mut tx,
+					"doc1".into(),
+					"the quick brown fox jumped over the lazy dog",
+				)
+				.await
+				.unwrap();
+				fti.index_document(&mut tx, "doc2".into(), "the fast fox jumped over the lazy dog")
 					.await
 					.unwrap();
-				fti.index_document(&mut tx, "doc2", "the fast fox jumped over the lazy dog")
+				fti.index_document(&mut tx, "doc3".into(), "the dog sat there and did nothing")
 					.await
 					.unwrap();
-				fti.index_document(&mut tx, "doc3", "the dog sat there and did nothing")
-					.await
-					.unwrap();
-				fti.index_document(&mut tx, "doc4", "the other animals sat there watching")
+				fti.index_document(&mut tx, "doc4".into(), "the other animals sat there watching")
 					.await
 					.unwrap();
 				tx.commit().await.unwrap();
@@ -536,64 +540,64 @@ mod tests {
 				let mut visitor = HashHitVisitor::default();
 				fti.search(&mut tx, "the", &mut visitor).await.unwrap();
 				visitor.check(vec![
-					("doc1".to_string(), 0.0),
-					("doc2".to_string(), 0.0),
-					("doc3".to_string(), 0.0),
-					("doc4".to_string(), 0.0),
+					("doc1".into(), 0.0),
+					("doc2".into(), 0.0),
+					("doc3".into(), 0.0),
+					("doc4".into(), 0.0),
 				]);
 
 				let mut visitor = HashHitVisitor::default();
 				fti.search(&mut tx, "dog", &mut visitor).await.unwrap();
 				visitor.check(vec![
-					("doc1".to_string(), 0.0),
-					("doc2".to_string(), 0.0),
-					("doc3".to_string(), 0.0),
+					("doc1".into(), 0.0),
+					("doc2".into(), 0.0),
+					("doc3".into(), 0.0),
 				]);
 
 				let mut visitor = HashHitVisitor::default();
 				fti.search(&mut tx, "fox", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
 
 				let mut visitor = HashHitVisitor::default();
 				fti.search(&mut tx, "over", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
 
 				let mut visitor = HashHitVisitor::default();
 				fti.search(&mut tx, "lazy", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
 
 				let mut visitor = HashHitVisitor::default();
 				fti.search(&mut tx, "jumped", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".to_string(), 0.0), ("doc2".to_string(), 0.0)]);
+				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
 
 				let mut visitor = HashHitVisitor::default();
 				fti.search(&mut tx, "nothing", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc3".to_string(), 0.87105393)]);
+				visitor.check(vec![("doc3".into(), 0.87105393)]);
 
 				let mut visitor = HashHitVisitor::default();
 				fti.search(&mut tx, "animals", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc4".to_string(), 0.92279965)]);
+				visitor.check(vec![("doc4".into(), 0.92279965)]);
 
 				let mut visitor = HashHitVisitor::default();
 				fti.search(&mut tx, "dummy", &mut visitor).await.unwrap();
-				visitor.check(Vec::<(String, f32)>::new());
+				visitor.check(Vec::<(Key, f32)>::new());
 			}
 		}
 	}
 
 	#[derive(Default)]
 	pub(super) struct HashHitVisitor {
-		map: HashMap<String, Score>,
+		map: HashMap<Key, Score>,
 	}
 
 	impl HitVisitor for HashHitVisitor {
-		fn visit(&mut self, _tx: &mut Transaction, doc_key: String, score: Score) {
+		fn visit(&mut self, _tx: &mut Transaction, doc_key: Key, score: Score) {
 			self.map.insert(doc_key, score);
 		}
 	}
 
 	impl HashHitVisitor {
-		pub(super) fn check(&self, res: Vec<(String, Score)>) {
+		pub(super) fn check(&self, res: Vec<(Key, Score)>) {
 			assert_eq!(res.len(), self.map.len(), "{:?}", self.map);
 			for (k, p) in res {
 				assert_eq!(self.map.get(&k), Some(&p));

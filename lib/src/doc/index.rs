@@ -193,13 +193,12 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let mut ft = FtIndex::new(&mut self.run, ikb, order.to_usize()).await?;
-		// TODO: Support of different type of record ids
-		let doc_key = self.rid.to_string();
+		let doc_key = self.rid.into();
 		if let Some(n) = &self.n {
 			// TODO: Apply the analyzer
-			ft.index_document(&mut self.run, &doc_key, &n.to_string()).await
+			ft.index_document(&mut self.run, doc_key, &n.to_string()).await
 		} else {
-			ft.remove_document(&mut self.run, &doc_key).await
+			ft.remove_document(&mut self.run, doc_key).await
 		}
 	}
 

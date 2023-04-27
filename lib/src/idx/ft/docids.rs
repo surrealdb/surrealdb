@@ -64,9 +64,8 @@ impl DocIds {
 	pub(super) async fn resolve_doc_id(
 		&mut self,
 		tx: &mut Transaction,
-		doc_key: &str,
+		doc_key: Key,
 	) -> Result<Resolved, Error> {
-		let doc_key: Vec<u8> = doc_key.into();
 		if let Some(doc_id) = self.btree.search::<TrieKeys>(tx, &doc_key).await? {
 			Ok(Resolved::Existing(doc_id))
 		} else {
@@ -81,9 +80,8 @@ impl DocIds {
 	pub(super) async fn remove_doc(
 		&mut self,
 		tx: &mut Transaction,
-		doc_key: &str,
+		doc_key: Key,
 	) -> Result<Option<DocId>, Error> {
-		let doc_key: Key = doc_key.into();
 		if let Some(doc_id) = self.btree.delete::<TrieKeys>(tx, doc_key).await? {
 			tx.del(self.index_key_base.new_bi_key(doc_id)).await?;
 			if let Some(available_ids) = &mut self.available_ids {
@@ -104,10 +102,10 @@ impl DocIds {
 		&self,
 		tx: &mut Transaction,
 		doc_id: DocId,
-	) -> Result<Option<String>, Error> {
+	) -> Result<Option<Key>, Error> {
 		let doc_id_key = self.index_key_base.new_bi_key(doc_id);
 		if let Some(val) = tx.get(doc_id_key).await? {
-			Ok(Some(String::from_utf8(val)?))
+			Ok(Some(val))
 		} else {
 			Ok(None)
 		}
@@ -209,46 +207,46 @@ mod tests {
 
 		// Resolve a first doc key
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		let doc_id = d.resolve_doc_id(&mut tx, "Foo").await.unwrap();
+		let doc_id = d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap();
 		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
-		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".to_string()));
+		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
 		finish(tx, d).await;
 		assert_eq!(doc_id, Resolved::New(0));
 
 		// Resolve the same doc key
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		let doc_id = d.resolve_doc_id(&mut tx, "Foo").await.unwrap();
+		let doc_id = d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap();
 		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 1);
-		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".to_string()));
+		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
 		finish(tx, d).await;
 		assert_eq!(doc_id, Resolved::Existing(0));
 
 		// Resolve another single doc key
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		let doc_id = d.resolve_doc_id(&mut tx, "Bar").await.unwrap();
+		let doc_id = d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap();
 		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 2);
-		assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".to_string()));
+		assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".into()));
 		finish(tx, d).await;
 		assert_eq!(doc_id, Resolved::New(1));
 
 		// Resolve another two existing doc keys and two new doc keys (interlaced)
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), Resolved::Existing(0));
-		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), Resolved::New(2));
-		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), Resolved::Existing(1));
-		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), Resolved::New(3));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(), Resolved::Existing(0));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(), Resolved::New(2));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(), Resolved::Existing(1));
+		assert_eq!(d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(), Resolved::New(3));
 		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
 		finish(tx, d).await;
 
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), Resolved::Existing(0));
-		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), Resolved::Existing(1));
-		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), Resolved::Existing(2));
-		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), Resolved::Existing(3));
-		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".to_string()));
-		assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".to_string()));
-		assert_eq!(d.get_doc_key(&mut tx, 2).await.unwrap(), Some("Hello".to_string()));
-		assert_eq!(d.get_doc_key(&mut tx, 3).await.unwrap(), Some("World".to_string()));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(), Resolved::Existing(0));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(), Resolved::Existing(1));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(), Resolved::Existing(2));
+		assert_eq!(d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(), Resolved::Existing(3));
+		assert_eq!(d.get_doc_key(&mut tx, 0).await.unwrap(), Some("Foo".into()));
+		assert_eq!(d.get_doc_key(&mut tx, 1).await.unwrap(), Some("Bar".into()));
+		assert_eq!(d.get_doc_key(&mut tx, 2).await.unwrap(), Some("Hello".into()));
+		assert_eq!(d.get_doc_key(&mut tx, 3).await.unwrap(), Some("World".into()));
 		assert_eq!(d.statistics(&mut tx).await.unwrap().keys_count, 4);
 		finish(tx, d).await;
 	}
@@ -259,40 +257,40 @@ mod tests {
 
 		// Create two docs
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.resolve_doc_id(&mut tx, "Foo").await.unwrap(), Resolved::New(0));
-		assert_eq!(d.resolve_doc_id(&mut tx, "Bar").await.unwrap(), Resolved::New(1));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Foo".into()).await.unwrap(), Resolved::New(0));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Bar".into()).await.unwrap(), Resolved::New(1));
 		finish(tx, d).await;
 
 		// Remove doc 1
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.remove_doc(&mut tx, "Dummy").await.unwrap(), None);
-		assert_eq!(d.remove_doc(&mut tx, "Foo").await.unwrap(), Some(0));
+		assert_eq!(d.remove_doc(&mut tx, "Dummy".into()).await.unwrap(), None);
+		assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), Some(0));
 		finish(tx, d).await;
 
 		// Check 'Foo' has been removed
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.remove_doc(&mut tx, "Foo").await.unwrap(), None);
+		assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), None);
 		finish(tx, d).await;
 
 		// Insert a new doc - should take the available id 1
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.resolve_doc_id(&mut tx, "Hello").await.unwrap(), Resolved::New(0));
+		assert_eq!(d.resolve_doc_id(&mut tx, "Hello".into()).await.unwrap(), Resolved::New(0));
 		finish(tx, d).await;
 
 		// Remove doc 2
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.remove_doc(&mut tx, "Dummy").await.unwrap(), None);
-		assert_eq!(d.remove_doc(&mut tx, "Bar").await.unwrap(), Some(1));
+		assert_eq!(d.remove_doc(&mut tx, "Dummy".into()).await.unwrap(), None);
+		assert_eq!(d.remove_doc(&mut tx, "Bar".into()).await.unwrap(), Some(1));
 		finish(tx, d).await;
 
 		// Check 'Bar' has been removed
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.remove_doc(&mut tx, "Foo").await.unwrap(), None);
+		assert_eq!(d.remove_doc(&mut tx, "Foo".into()).await.unwrap(), None);
 		finish(tx, d).await;
 
 		// Insert a new doc - should take the available id 2
 		let (mut tx, mut d) = get_doc_ids(&ds).await;
-		assert_eq!(d.resolve_doc_id(&mut tx, "World").await.unwrap(), Resolved::New(1));
+		assert_eq!(d.resolve_doc_id(&mut tx, "World".into()).await.unwrap(), Resolved::New(1));
 		finish(tx, d).await;
 	}
 }
