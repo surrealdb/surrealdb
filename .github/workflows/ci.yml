@@ -105,6 +105,26 @@ jobs:
       - name: Run cargo test
         run: cargo test --locked --no-default-features --features storage-mem --workspace -- --skip api_integration
 
+    test:
+    name: Bench library
+    runs-on: ubuntu-20.04-16-cores
+    steps:
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+
+      - name: Run cargo bench
+        run: cargo bench --locked --package surrealdb --jobs 1 --features kv-mem
+
+
   ws-engine:
     name: WebSocket engine
     runs-on: ubuntu-20.04-16-cores
