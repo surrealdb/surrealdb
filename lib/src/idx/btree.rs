@@ -173,7 +173,7 @@ where
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
-		let mut next_node = self.state.root.clone();
+		let mut next_node = self.state.root;
 		while let Some(node_id) = next_node.take() {
 			let current = self.load_node::<BK>(tx, node_id).await?;
 			if let Some(payload) = current.node.keys().get(searched_key) {
@@ -507,8 +507,8 @@ where
 			if child_idx < children.len() - 1 {
 				let right_child_id = children[child_idx + 1];
 				let right_child_stored_node = self.load_node::<BK>(tx, right_child_id).await?;
-				if right_child_stored_node.node.keys().len() >= self.state.minimum_degree {
-					return Self::delete_adjust_successor(
+				return if right_child_stored_node.node.keys().len() >= self.state.minimum_degree {
+					Self::delete_adjust_successor(
 						tx,
 						keys,
 						child_idx,
@@ -517,10 +517,10 @@ where
 						child_stored_node,
 						right_child_stored_node,
 					)
-					.await;
+					.await
 				} else {
 					// CLRS 3b successor
-					return Self::merge_nodes(
+					Self::merge_nodes(
 						tx,
 						keys,
 						children,
@@ -530,8 +530,8 @@ where
 						child_stored_node,
 						right_child_stored_node,
 					)
-					.await;
-				}
+					.await
+				};
 			}
 
 			// left child (predecessor)
@@ -539,8 +539,8 @@ where
 				let child_idx = child_idx - 1;
 				let left_child_id = children[child_idx];
 				let left_child_stored_node = self.load_node::<BK>(tx, left_child_id).await?;
-				if left_child_stored_node.node.keys().len() >= self.state.minimum_degree {
-					return Self::delete_adjust_predecessor(
+				return if left_child_stored_node.node.keys().len() >= self.state.minimum_degree {
+					Self::delete_adjust_predecessor(
 						tx,
 						keys,
 						child_idx,
@@ -549,10 +549,10 @@ where
 						child_stored_node,
 						left_child_stored_node,
 					)
-					.await;
+					.await
 				} else {
 					// CLRS 3b predecessor
-					return Self::merge_nodes(
+					Self::merge_nodes(
 						tx,
 						keys,
 						children,
@@ -562,8 +562,8 @@ where
 						left_child_stored_node,
 						child_stored_node,
 					)
-					.await;
-				}
+					.await
+				};
 			}
 		}
 
@@ -598,7 +598,7 @@ where
 			}
 		}
 		// If we reach this point, something was wrong in the BTree
-		return Err(Error::CorruptedIndex);
+		Err(Error::CorruptedIndex)
 	}
 
 	async fn delete_adjust_predecessor<BK>(
@@ -635,7 +635,7 @@ where
 			}
 		}
 		// If we reach this point, something was wrong in the BTree
-		return Err(Error::CorruptedIndex);
+		Err(Error::CorruptedIndex)
 	}
 
 	async fn merge_nodes<BK>(
@@ -665,7 +665,7 @@ where
 			}
 		}
 		// If we reach this point, something was wrong in the BTree
-		return Err(Error::CorruptedIndex);
+		Err(Error::CorruptedIndex)
 	}
 
 	/// This is for debugging
@@ -1276,33 +1276,35 @@ mod tests {
 					assert_eq!(node_id, 5);
 					check_is_leaf_node(node.node, vec![("y", 25), ("z", 26)]);
 				}
-				_ => assert!(false, "This node should not exist {}", count),
+				_ => panic!("This node should not exist {}", count),
 			})
 			.await
 			.unwrap();
 		assert_eq!(nodes_count, 10);
 	}
 
-	#[test(tokio::test)]
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
-	async fn clrs_deletion_test() {
+	async fn test_btree_clrs_deletion_test<BK>()
+	where
+		BK: BKeys + Serialize + DeserializeOwned + Default,
+	{
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(TestKeyProvider {}, State::new(3));
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		for (key, payload) in CLRS_EXAMPLE {
-			t.insert::<TrieKeys>(&mut tx, key.into(), payload).await.unwrap();
+			t.insert::<BK>(&mut tx, key.into(), payload).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
 		for (key, payload) in [("f", 6), ("m", 13), ("g", 7), ("d", 4), ("b", 2)] {
 			debug!("Delete {}", key);
-			assert_eq!(t.delete::<TrieKeys>(&mut tx, key.into()).await.unwrap(), Some(payload));
+			assert_eq!(t.delete::<BK>(&mut tx, key.into()).await.unwrap(), Some(payload));
 		}
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
-		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
+		let s = t.statistics::<BK>(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 18);
 		assert_eq!(s.max_depth, 2);
 		assert_eq!(s.nodes_count, 7);
@@ -1310,7 +1312,7 @@ mod tests {
 		assert_eq!(7, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
 
 		let nodes_count = t
-			.inspect_nodes::<TrieKeys, _>(&mut tx, |count, depth, node_id, node| {
+			.inspect_nodes::<BK, _>(&mut tx, |count, depth, node_id, node| {
 				debug!("{} -> {}", depth, node_id);
 				node.node.debug(|k| Ok(String::from_utf8(k)?)).unwrap();
 				match count {
@@ -1353,7 +1355,7 @@ mod tests {
 						assert_eq!(node_id, 5);
 						check_is_leaf_node(node.node, vec![("y", 25), ("z", 26)]);
 					}
-					_ => assert!(false, "This node should not exist {}", count),
+					_ => panic!("This node should not exist {}", count),
 				}
 			})
 			.await
@@ -1362,8 +1364,20 @@ mod tests {
 	}
 
 	#[test(tokio::test)]
+	async fn test_btree_trie_keys_clrs_deletion_test() {
+		test_btree_clrs_deletion_test::<TrieKeys>().await
+	}
+
+	#[test(tokio::test)]
+	async fn test_btree_fst_keys_clrs_deletion_test() {
+		test_btree_clrs_deletion_test::<FstKeys>().await
+	}
+
 	// This check the possible deletion cases. CRLS, Figure 18.8, pages 500-501
-	async fn fill_and_empty() {
+	async fn test_btree_fill_and_empty<BK>()
+	where
+		BK: BKeys + Serialize + DeserializeOwned + Default,
+	{
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut t = BTree::new(TestKeyProvider {}, State::new(3));
 
@@ -1371,24 +1385,24 @@ mod tests {
 		let mut expected_keys = HashMap::new();
 		for (key, payload) in CLRS_EXAMPLE {
 			expected_keys.insert(key.to_string(), payload);
-			t.insert::<TrieKeys>(&mut tx, key.into(), payload).await.unwrap();
+			t.insert::<BK>(&mut tx, key.into(), payload).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(true, false).await.unwrap();
-		print_tree::<TrieKeys, _>(&mut tx, &t).await;
+		print_tree::<BK, _>(&mut tx, &t).await;
 
 		for (key, _) in CLRS_EXAMPLE {
 			debug!("------------------------");
 			debug!("Delete {}", key);
-			t.delete::<TrieKeys>(&mut tx, key.into()).await.unwrap();
-			print_tree::<TrieKeys, _>(&mut tx, &t).await;
+			t.delete::<BK>(&mut tx, key.into()).await.unwrap();
+			print_tree::<BK, _>(&mut tx, &t).await;
 
 			// Check that every expected keys are still found in the tree
 			expected_keys.remove(key);
 			for (key, payload) in &expected_keys {
 				assert_eq!(
-					t.search::<TrieKeys>(&mut tx, &key.as_str().into()).await.unwrap(),
+					t.search::<BK>(&mut tx, &key.as_str().into()).await.unwrap(),
 					Some(*payload)
 				)
 			}
@@ -1396,12 +1410,22 @@ mod tests {
 		tx.commit().await.unwrap();
 
 		let mut tx = ds.transaction(false, false).await.unwrap();
-		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
+		let s = t.statistics::<BK>(&mut tx).await.unwrap();
 		assert_eq!(s.keys_count, 0);
 		assert_eq!(s.max_depth, 0);
 		assert_eq!(s.nodes_count, 0);
 		// There should not be any record in the database
 		assert_eq!(0, tx.scan(vec![]..vec![0xf], 100).await.unwrap().len());
+	}
+
+	#[test(tokio::test)]
+	async fn test_btree_trie_keys_fill_and_empty() {
+		test_btree_fill_and_empty::<TrieKeys>().await
+	}
+
+	#[test(tokio::test)]
+	async fn test_btree_fst_keys_fill_and_empty() {
+		test_btree_fill_and_empty::<FstKeys>().await
 	}
 
 	/////////////
@@ -1419,7 +1443,7 @@ mod tests {
 			check_keys(keys, expected_keys);
 			assert_eq!(children, expected_children, "The children are not matching");
 		} else {
-			assert!(false, "An internal node was expected, we got a leaf node");
+			panic!("An internal node was expected, we got a leaf node");
 		}
 	}
 
@@ -1430,7 +1454,7 @@ mod tests {
 		if let Node::Leaf(keys) = node {
 			check_keys(keys, expected_keys);
 		} else {
-			assert!(false, "An internal node was expected, we got a leaf node");
+			panic!("An internal node was expected, we got a leaf node");
 		}
 	}
 

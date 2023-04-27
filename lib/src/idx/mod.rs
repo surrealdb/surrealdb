@@ -1,7 +1,6 @@
 mod bkeys;
 pub(crate) mod btree;
 pub(crate) mod ft;
-mod kvsim;
 
 use crate::dbs::Options;
 use crate::err::Error;

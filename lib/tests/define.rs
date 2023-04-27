@@ -964,18 +964,20 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 async fn define_statement_search_index() -> Result<(), Error> {
 	let sql = r#"
 		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
-		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
+		CREATE blog:3 SET title = 'This blog is going to be deleted';
 		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
 		DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75,100) HIGHLIGHTS;
+		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
+		DELETE blog:3;
 		INFO FOR TABLE blog;
 	"#;
 
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 7);
 	//
-	for _ in 0..4 {
+	for _ in 0..6 {
 		let tmp = res.remove(0).result;
 		assert!(tmp.is_ok());
 	}

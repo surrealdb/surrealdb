@@ -273,7 +273,7 @@ mod tests {
 				t.remove_term_id(&mut tx, term_id).await.unwrap();
 				assert_eq!(t.get_term_id(&mut tx, term).await.unwrap(), None);
 			} else {
-				assert!(false, "Term ID not found: {}", term);
+				panic!("Term ID not found: {}", term);
 			}
 		}
 

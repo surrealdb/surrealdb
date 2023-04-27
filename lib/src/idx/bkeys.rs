@@ -62,6 +62,7 @@ pub(super) struct FstKeys {
 	map: Map<Vec<u8>>,
 	additions: Trie<Key, Payload>,
 	deletions: Trie<Key, bool>,
+	len: usize,
 }
 
 #[async_trait]
@@ -73,22 +74,14 @@ impl BKeys for FstKeys {
 	}
 
 	fn len(&self) -> usize {
-		self.map.len()
+		self.len
 	}
 
 	fn get(&self, key: &Key) -> Option<Payload> {
 		if let Some(payload) = self.additions.get(key) {
 			Some(*payload)
 		} else {
-			if let Some(payload) = self.map.get(key) {
-				if self.deletions.get(key).is_some() {
-					None
-				} else {
-					Some(payload)
-				}
-			} else {
-				None
-			}
+			self.map.get(key).filter(|_| !self.deletions.get(key).is_some())
 		}
 	}
 
@@ -106,7 +99,12 @@ impl BKeys for FstKeys {
 
 	fn insert(&mut self, key: Key, payload: Payload) {
 		self.deletions.remove(&key);
-		self.additions.insert(key, payload);
+		let existing_key = self.map.get(&key).is_some();
+		if self.additions.insert(key, payload).is_none() {
+			if !existing_key {
+				self.len += 1;
+			}
+		}
 	}
 
 	fn append(&mut self, mut keys: Self) {
@@ -118,9 +116,17 @@ impl BKeys for FstKeys {
 	}
 
 	fn remove(&mut self, key: &Key) -> Option<Payload> {
+		if self.deletions.get(key).is_some() {
+			return None;
+		}
+		if let Some(payload) = self.additions.remove(key) {
+			self.len -= 1;
+			return Some(payload);
+		}
 		self.get(key).map(|payload| {
-			self.additions.remove(key);
-			self.deletions.insert(key.clone(), true);
+			if self.deletions.insert(key.clone(), true).is_none() {
+				self.len -= 1;
+			}
 			payload
 		})
 	}
@@ -274,8 +280,10 @@ impl TryFrom<Vec<u8>> for FstKeys {
 	type Error = fst::Error;
 	fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
 		let map = Map::new(bytes)?;
+		let len = map.len();
 		Ok(Self {
 			map,
+			len,
 			additions: Default::default(),
 			deletions: Default::default(),
 		})
@@ -528,6 +536,7 @@ mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
 	use crate::idx::tests::HashVisitor;
 	use crate::kvs::{Datastore, Key};
+	use std::collections::HashSet;
 
 	#[test]
 	fn test_fst_keys_serde() {
@@ -553,11 +562,15 @@ mod tests {
 			"fox", "jumped", "over", "the", "lazy", "dog",
 		];
 		let mut i = 1;
+		assert_eq!(keys.len(), 0);
+		let mut term_set = HashSet::new();
 		for term in terms {
+			term_set.insert(term.to_string());
 			let key: Key = term.into();
 			keys.insert(key.clone(), i);
 			keys.compile();
 			assert_eq!(keys.get(&key), Some(i));
+			assert_eq!(keys.len(), term_set.len());
 			i += 1;
 		}
 	}
@@ -574,12 +587,18 @@ mod tests {
 
 	fn test_keys_deletions<BK: BKeys>(mut keys: BK) {
 		assert_eq!(keys.remove(&"dummy".into()), None);
+		assert_eq!(keys.len(), 0);
 		keys.insert("foo".into(), 1);
 		keys.insert("bar".into(), 2);
+		assert_eq!(keys.len(), 2);
 		assert_eq!(keys.remove(&"bar".into()), Some(2));
+		assert_eq!(keys.len(), 1);
 		assert_eq!(keys.remove(&"bar".into()), None);
+		assert_eq!(keys.len(), 1);
 		assert_eq!(keys.remove(&"foo".into()), Some(1));
+		assert_eq!(keys.len(), 0);
 		assert_eq!(keys.remove(&"foo".into()), None);
+		assert_eq!(keys.len(), 0);
 	}
 
 	#[test]
