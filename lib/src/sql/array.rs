@@ -76,11 +76,7 @@ impl From<Array> for Vec<Value> {
 
 impl FromIterator<Value> for Array {
 	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
-		let mut a: Vec<Value> = vec![];
-		for v in iter {
-			a.push(v)
-		}
-		Array(a)
+		Array(iter.into_iter().collect())
 	}
 }
 
