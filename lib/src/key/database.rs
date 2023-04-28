@@ -15,8 +15,8 @@ pub fn new<'a>(ns: &'a str, db: &'a str) -> Database<'a> {
 }
 
 impl<'a> Database<'a> {
-	pub fn new(ns: &'a str, db: &'a str) -> Database<'a> {
-		Database {
+	pub fn new(ns: &'a str, db: &'a str) -> Self {
+		Self {
 			__: 0x2f, // /
 			_a: 0x2a, // *
 			ns,

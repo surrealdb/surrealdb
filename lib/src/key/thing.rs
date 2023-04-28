@@ -3,20 +3,20 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Thing {
+pub struct Thing<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: String,
+	pub db: &'a str,
 	_c: u8,
-	pub tb: String,
+	pub tb: &'a str,
 	_d: u8,
 	pub id: Id,
 }
 
-pub fn new(ns: &str, db: &str, tb: &str, id: &Id) -> Thing {
-	Thing::new(ns.to_string(), db.to_string(), tb.to_string(), id.to_owned())
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Thing<'a> {
+	Thing::new(ns, db, tb, id.to_owned())
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
@@ -31,9 +31,9 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	k
 }
 
-impl Thing {
-	pub fn new(ns: String, db: String, tb: String, id: Id) -> Thing {
-		Thing {
+impl<'a> Thing<'a> {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id) -> Self {
+		Self {
 			__: 0x2f, // /
 			_a: 0x2a, // *
 			ns,
@@ -54,9 +54,9 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Thing::new(
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
+			"test",
 			"test".into(),
 		);
 		let enc = Thing::encode(&val).unwrap();
@@ -69,7 +69,7 @@ mod tests {
 		//
 		let id1 = "['test']";
 		let (_, id1) = crate::sql::id::id(id1).expect("Failed to parse the ID");
-		let val = Thing::new("test".to_string(), "test".to_string(), "test".to_string(), id1);
+		let val = Thing::new("test", "test", "test", id1);
 		let enc = Thing::encode(&val).unwrap();
 		let dec = Thing::decode(&enc).unwrap();
 		assert_eq!(val, dec);
@@ -77,7 +77,7 @@ mod tests {
 		//
 		let id2 = "['f8e238f2-e734-47b8-9a16-476b291bd78a']";
 		let (_, id2) = crate::sql::id::id(id2).expect("Failed to parse the ID");
-		let val = Thing::new("test".to_string(), "test".to_string(), "test".to_string(), id2);
+		let val = Thing::new("test", "test", "test", id2);
 		let enc = Thing::encode(&val).unwrap();
 		let dec = Thing::decode(&enc).unwrap();
 		assert_eq!(val, dec);
