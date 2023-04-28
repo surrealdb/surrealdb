@@ -3710,8 +3710,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "storekey"
-version = "0.4.1"
-source = "git+https://github.com/finnbear/storekey.git?branch=optimization_zero_copy#50e2d96ce54f73e681686aceced73b3a6cc4838c"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43c42833834a5d23b344f71d87114e0cc9994766a5c42938f4b50e7b2aef85b2"
 dependencies = [
  "byteorder",
  "memchr",
@@ -3846,8 +3847,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-derive"
-version = "0.7.0"
-source = "git+https://github.com/finnbear/surrealdb-derive?branch=bugfix_generics#7a4db85450ed90ccbbb86690004f4f607f6e69bd"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f44db5c0ba9716670cb45585f475e46b2c2e64428736e03a4e4a83a628b8a21"
 dependencies = [
  "quote",
  "syn 1.0.109",
