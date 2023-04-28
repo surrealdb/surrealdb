@@ -20,7 +20,7 @@ pub async fn create(
 	db: Db,
 	id: Path<String>,
 	Json(person): Json<Person>,
-) -> Result<Json<Person>, Error> {
+) -> Result<Json<Option<Person>>, Error> {
 	let person = db.create((PERSON, &*id)).content(person).await?;
 	Ok(Json(person))
 }
@@ -34,7 +34,7 @@ pub async fn update(
 	db: Db,
 	id: Path<String>,
 	Json(person): Json<Person>,
-) -> Result<Json<Person>, Error> {
+) -> Result<Json<Option<Person>>, Error> {
 	let person = db.update((PERSON, &*id)).content(person).await?;
 	Ok(Json(person))
 }
