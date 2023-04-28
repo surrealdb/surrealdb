@@ -16,3 +16,7 @@ proc-macro = true
 [dependencies]
 syn = "1.0.96"
 quote = "1.0.18"
+
+[dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
+storekey = "0.4"
