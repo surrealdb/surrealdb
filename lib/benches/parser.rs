@@ -3,105 +3,55 @@
 extern crate test;
 use test::{black_box, Bencher};
 
-#[bench]
-fn select_simple(b: &mut Bencher) {
-	b.iter(|| {
-		black_box(surrealdb::sql::parse(black_box("SELECT * FROM person;"))).unwrap();
-	});
+macro_rules! parser {
+	($name: ident, $parser: path, $text: expr) => {
+		#[bench]
+		fn $name(b: &mut Bencher) {
+			let text = $text;
+			b.iter(|| {
+				black_box($parser(black_box(text))).unwrap();
+			});
+		}
+	};
 }
 
-#[bench]
-fn select_complex(b: &mut Bencher) {
-	b.iter(|| {
-		black_box(surrealdb::sql::parse(black_box(
-			"SELECT name, age, country FROM person WHERE hair = \"brown\" AND is_vegetarian;",
-		)))
-		.unwrap();
-	});
-}
+parser!(select_simple, surrealdb::sql::parse, "SELECT * FROM person;");
+parser!(
+	select_complex,
+	surrealdb::sql::parse,
+	"SELECT name, age, country FROM person WHERE hair = \"brown\" AND is_vegetarian;"
+);
+parser!(transaction, surrealdb::sql::parse, "BEGIN TRANSACTION; UPDATE person:finn SET squirrels = \"yes\"; SELECT * FROM person; COMMIT TRANSACTION;");
+parser!(datetime, surrealdb::sql::parse, "RETURN \"2022-07-03T07:18:52.841147+02:00\";");
 
-#[bench]
-fn transaction(b: &mut Bencher) {
-	b.iter(|| {
-		black_box(surrealdb::sql::parse(black_box("BEGIN TRANSACTION; UPDATE person:finn SET squirrels = \"yes\"; SELECT * FROM person; COMMIT TRANSACTION;"))).unwrap();
-	});
-}
+parser!(duration, surrealdb::sql::parse, "RETURN [100w, 5d, 20m, 2s];");
 
-#[bench]
-fn datetime(b: &mut Bencher) {
-	b.iter(|| {
-		black_box(surrealdb::sql::parse(black_box("RETURN \"2022-07-03T07:18:52.841147+02:00\";")))
-			.unwrap();
-	});
-}
+parser!(casting_deep, surrealdb::sql::parse, "RETURN <float><float><float><float><float>1.0;");
 
-#[bench]
-fn duration(b: &mut Bencher) {
-	b.iter(|| {
-		black_box(surrealdb::sql::parse(black_box("RETURN [100w, 5d, 20m, 2s];"))).unwrap();
-	});
-}
+parser!(
+	json_geo,
+	surrealdb::sql::parse,
+	"RETURN { type: \"Point\", coordinates: [-0.118092, 51.509865] };"
+);
 
-#[bench]
-fn casting_deep(b: &mut Bencher) {
-	b.iter(|| {
-		black_box(surrealdb::sql::parse(black_box(
-			"SELECT * FROM <float><float><float><float><float>1.0;",
-		)))
-		.unwrap();
-	});
-}
+parser!(json_number, surrealdb::sql::json, "1.2345");
 
-#[bench]
-fn json_geo(b: &mut Bencher) {
-	b.iter(|| {
-		black_box(surrealdb::sql::parse(black_box(
-			"RETURN { type: \"Point\", coordinates: [-0.118092, 51.509865] };",
-		)))
-		.unwrap();
-	});
-}
+parser!(
+	json_small_object,
+	surrealdb::sql::json,
+	"{\"key\": true, \"number\": 42.0, \"value\": null}"
+);
 
-#[bench]
-fn json_number(b: &mut Bencher) {
-	b.iter(|| {
-		black_box(surrealdb::sql::json(black_box("1.2345"))).unwrap();
-	});
-}
+parser!(json_small_array, surrealdb::sql::json, "[1, false, null, \"foo\"]");
 
-#[bench]
-fn json_small_object(b: &mut Bencher) {
-	b.iter(|| {
-		black_box(surrealdb::sql::json(black_box(
-			"{\"key\": true, \"number\": 42.0, \"value\": null}",
-		)))
-		.unwrap();
-	});
-}
+parser!(
+	json_large_array,
+	surrealdb::sql::json,
+	&format!("[{}]", (1..=100).map(|n| n.to_string()).collect::<Vec<_>>().join(", "))
+);
 
-#[bench]
-fn json_small_array(b: &mut Bencher) {
-	b.iter(|| {
-		black_box(surrealdb::sql::json(black_box("[1, false, null, \"foo\"]"))).unwrap();
-	});
-}
-
-#[bench]
-fn json_large_array(b: &mut Bencher) {
-	let large_array =
-		format!("[{}]", (1..=100).map(|n| n.to_string()).collect::<Vec<_>>().join(", "));
-	b.iter(|| {
-		black_box(surrealdb::sql::json(black_box(&large_array))).unwrap();
-	});
-}
-
-#[bench]
-fn json_large_object(b: &mut Bencher) {
-	let large_object = format!(
-		"{{{}}}",
-		(1..=100).map(|n| format!("\"{n}\": {n}")).collect::<Vec<_>>().join(", ")
-	);
-	b.iter(|| {
-		black_box(surrealdb::sql::json(black_box(&large_object))).unwrap();
-	});
-}
+parser!(
+	json_large_object,
+	surrealdb::sql::json,
+	&format!("{{{}}}", &(1..=100).map(|n| format!("\"{n}\": {n}")).collect::<Vec<_>>().join(", "))
+);
