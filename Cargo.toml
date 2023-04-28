@@ -14,9 +14,9 @@ license = "MIT"
 proc-macro = true
 
 [dependencies]
-syn = "1.0.96"
-quote = "1.0.18"
+syn = "1.0.109"
+quote = "1.0.26"
 
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }
-storekey = "0.4"
+storekey = "0.5.0"
