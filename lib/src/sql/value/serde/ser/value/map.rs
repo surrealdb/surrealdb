@@ -80,12 +80,11 @@ impl serde::ser::SerializeMap for SerializeValueMap {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn empty() {
 		let map: BTreeMap<String, Value> = Default::default();
-		let serialized = serialize_internal(|| map.serialize(Serializer.wrap())).unwrap();
+		let serialized = map.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(map, serialized);
 	}
 
@@ -94,7 +93,7 @@ mod tests {
 		let map = map! {
 			String::from("foo") => Value::from("bar"),
 		};
-		let serialized = serialize_internal(|| map.serialize(Serializer.wrap())).unwrap();
+		let serialized = map.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(map, serialized);
 	}
 }

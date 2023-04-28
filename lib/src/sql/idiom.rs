@@ -8,7 +8,6 @@ use crate::sql::fmt::{fmt_separated_by, Fmt};
 use crate::sql::part::Next;
 use crate::sql::part::{all, field, first, graph, index, last, part, value, Part};
 use crate::sql::paths::{ID, IN, META, OUT};
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
 use md5::Digest;
 use md5::Md5;
@@ -43,7 +42,8 @@ pub fn locals(i: &str) -> IResult<&str, Idioms> {
 	Ok((i, Idioms(v)))
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Idiom")]
 pub struct Idiom(pub Vec<Part>);
 
 impl Deref for Idiom {
@@ -165,19 +165,6 @@ impl Display for Idiom {
 			),
 			f,
 		)
-	}
-}
-
-impl Serialize for Idiom {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			serializer.serialize_none()
-		}
 	}
 }
 

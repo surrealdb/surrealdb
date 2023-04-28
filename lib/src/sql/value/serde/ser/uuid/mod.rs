@@ -28,21 +28,20 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn nil() {
 		let uuid = Uuid::nil();
-		let serialized = serialize_internal(|| uuid.serialize(Serializer.wrap())).unwrap();
+		let serialized = uuid.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(uuid, serialized);
 	}
 
 	#[test]
 	fn max() {
 		let uuid = Uuid::max();
-		let serialized = serialize_internal(|| uuid.serialize(Serializer.wrap())).unwrap();
+		let serialized = uuid.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(uuid, serialized);
 	}
 }

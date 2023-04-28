@@ -447,11 +447,11 @@ async fn patch_record_id() {
 	let value: Option<serde_json::Value> = db.select(("user", id)).await.unwrap();
 	assert_eq!(
 		value,
-		Some(serialize_internal(|| json!({
+		Some(json!({
 			"id": thing(&format!("user:{id}")).unwrap(),
 			"baz": "boo",
 			"hello": ["world"]
-		})))
+		}))
 	);
 }
 
@@ -566,5 +566,5 @@ async fn return_bool() {
     assert!(boolean);
 	let mut response = db.query("RETURN false").await.unwrap();
     let value: Value = response.take(0).unwrap();
-    assert_eq!(value, vec![Value::False].into());
+    assert_eq!(value, vec![Value::Bool(false)].into());
 }

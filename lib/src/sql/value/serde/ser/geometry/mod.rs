@@ -98,7 +98,6 @@ impl serde::ser::SerializeSeq for SerializeGeometryVec {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use geo::Coord;
 	use geo::Polygon;
 	use ser::Serializer as _;
@@ -107,14 +106,14 @@ mod tests {
 	#[test]
 	fn point() {
 		let geometry = Geometry::Point(Default::default());
-		let serialized = serialize_internal(|| geometry.serialize(Serializer.wrap())).unwrap();
+		let serialized = geometry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(geometry, serialized);
 	}
 
 	#[test]
 	fn line() {
 		let geometry = Geometry::Line(LineString(vec![Coord::default()]));
-		let serialized = serialize_internal(|| geometry.serialize(Serializer.wrap())).unwrap();
+		let serialized = geometry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(geometry, serialized);
 	}
 
@@ -122,35 +121,35 @@ mod tests {
 	fn polygon() {
 		let polygon = Polygon::new(LineString(Vec::new()), Vec::new());
 		let geometry = Geometry::Polygon(polygon);
-		let serialized = serialize_internal(|| geometry.serialize(Serializer.wrap())).unwrap();
+		let serialized = geometry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(geometry, serialized);
 	}
 
 	#[test]
 	fn multi_point() {
 		let geometry = Geometry::MultiPoint(vec![(0., 0.), (1., 2.)].into());
-		let serialized = serialize_internal(|| geometry.serialize(Serializer.wrap())).unwrap();
+		let serialized = geometry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(geometry, serialized);
 	}
 
 	#[test]
 	fn multi_line() {
 		let geometry = Geometry::MultiLine(MultiLineString::new(Vec::new()));
-		let serialized = serialize_internal(|| geometry.serialize(Serializer.wrap())).unwrap();
+		let serialized = geometry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(geometry, serialized);
 	}
 
 	#[test]
 	fn multi_polygon() {
 		let geometry = Geometry::MultiPolygon(MultiPolygon::new(Vec::new()));
-		let serialized = serialize_internal(|| geometry.serialize(Serializer.wrap())).unwrap();
+		let serialized = geometry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(geometry, serialized);
 	}
 
 	#[test]
 	fn collection() {
 		let geometry = Geometry::Collection(vec![Geometry::Point(Default::default())]);
-		let serialized = serialize_internal(|| geometry.serialize(Serializer.wrap())).unwrap();
+		let serialized = geometry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(geometry, serialized);
 	}
 }

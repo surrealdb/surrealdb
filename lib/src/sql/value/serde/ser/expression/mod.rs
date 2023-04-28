@@ -81,13 +81,12 @@ impl serde::ser::SerializeStruct for SerializeExpression {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use serde::Serialize;
 
 	#[test]
 	fn default() {
 		let expression = Expression::default();
-		let serialized = serialize_internal(|| expression.serialize(Serializer.wrap())).unwrap();
+		let serialized = expression.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(expression, serialized);
 	}
 
@@ -98,7 +97,7 @@ mod tests {
 			o: Operator::Equal,
 			r: "Bar".into(),
 		};
-		let serialized = serialize_internal(|| expression.serialize(Serializer.wrap())).unwrap();
+		let serialized = expression.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(expression, serialized);
 	}
 }

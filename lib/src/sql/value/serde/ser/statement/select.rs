@@ -135,13 +135,11 @@ impl serde::ser::SerializeStruct for SerializeSelectStatement {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn default() {
 		let stmt = SelectStatement::default();
-		let value: SelectStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -151,8 +149,7 @@ mod tests {
 			cond: Some(Default::default()),
 			..Default::default()
 		};
-		let value: SelectStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -162,8 +159,7 @@ mod tests {
 			split: Some(Default::default()),
 			..Default::default()
 		};
-		let value: SelectStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -173,8 +169,7 @@ mod tests {
 			group: Some(Default::default()),
 			..Default::default()
 		};
-		let value: SelectStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -184,8 +179,7 @@ mod tests {
 			order: Some(Default::default()),
 			..Default::default()
 		};
-		let value: SelectStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -195,8 +189,7 @@ mod tests {
 			limit: Some(Default::default()),
 			..Default::default()
 		};
-		let value: SelectStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -206,8 +199,7 @@ mod tests {
 			start: Some(Default::default()),
 			..Default::default()
 		};
-		let value: SelectStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -217,8 +209,7 @@ mod tests {
 			fetch: Some(Default::default()),
 			..Default::default()
 		};
-		let value: SelectStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -228,8 +219,7 @@ mod tests {
 			version: Some(Default::default()),
 			..Default::default()
 		};
-		let value: SelectStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -239,8 +229,7 @@ mod tests {
 			timeout: Some(Default::default()),
 			..Default::default()
 		};
-		let value: SelectStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SelectStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 }
