@@ -1,7 +1,7 @@
 // cargo expand --example key
 
+use serde::{Deserialize, Serialize};
 use surrealdb_derive::Key;
-use serde::{Serialize, Deserialize};
 
 mod err {
 	#[derive(Debug)]
@@ -20,13 +20,6 @@ mod err {
 	}
 }
 
-mod sql {
-	pub mod serde {
-		pub fn beg_internal_serialization() {}
-		pub fn end_internal_serialization() {}
-	}
-}
-
 #[derive(Serialize, Deserialize, Key)]
 pub struct NsOwned {
 	__: u8,
@@ -38,8 +31,7 @@ pub struct NsOwned {
 
 /// WIP: Support for borrowed keys.
 #[derive(Serialize, Deserialize, Key)]
-pub struct NsBorrowed<'a>
-{
+pub struct NsBorrowed<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,

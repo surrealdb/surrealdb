@@ -47,9 +47,7 @@ pub fn store(input: TokenStream) -> TokenStream {
 
 		impl From<&#name> for Vec<u8> {
 			fn from(v: &#name) -> Vec<u8> {
-				crate::sql::serde::serialize_internal(|| {
-					bung::#func(v).unwrap_or_default()
-				})
+				bung::#func(v).unwrap_or_default()
 			}
 		}
 
@@ -68,19 +66,21 @@ pub fn key(input: TokenStream) -> TokenStream {
 	let generics = input.generics;
 	let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 	assert!(generics.lifetimes().count() <= 1);
-	let (lifetime, from_owned) =
-		if let Some(lifetime_def) = generics.lifetimes().next() {
-			let lifetime = &lifetime_def.lifetime;
-			(quote! {#lifetime}, quote!{})
-		} else {
-			(quote! {}, quote!{
+	let (lifetime, from_owned) = if let Some(lifetime_def) = generics.lifetimes().next() {
+		let lifetime = &lifetime_def.lifetime;
+		(quote! {#lifetime}, quote! {})
+	} else {
+		(
+			quote! {},
+			quote! {
 				impl #impl_generics From<Vec<u8>> for #name #ty_generics #where_clause {
 					fn from(v: Vec<u8>) -> Self {
 						Self::decode(&v).unwrap()
 					}
 				}
-			})
-		};
+			},
+		)
+	};
 
 	// Generate the output
 	let output = quote! {
@@ -108,9 +108,7 @@ pub fn key(input: TokenStream) -> TokenStream {
 		impl #impl_generics #name #ty_generics #where_clause {
 
 			pub fn encode(&self) -> Result<Vec<u8>, crate::err::Error> {
-				crate::sql::serde::beg_internal_serialization();
 				let v = storekey::serialize(self);
-				crate::sql::serde::end_internal_serialization();
 				Ok(v?)
 			}
 
