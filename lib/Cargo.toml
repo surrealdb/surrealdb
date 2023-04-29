@@ -38,7 +38,7 @@ http = ["dep:reqwest"]
 native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
 rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
 # Private features
-kv-fdb = ["foundationdb"]
+kv-fdb = ["foundationdb", "tokio/time"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -68,7 +68,7 @@ echodb = { version = "0.4.0", optional = true }
 executor = { version = "1.5.1", package = "async-executor" }
 flume = "0.10.14"
 fst = "0.4.7"
-foundationdb = { version = "0.7.0", default-features = false, features = ["embedded-fdb-include"], optional = true }
+foundationdb = { version = "0.8.0", default-features = false, features = ["embedded-fdb-include"], optional = true }
 futures = "0.3.28"
 futures-concurrency = "7.2.0"
 fuzzy-matcher = "0.3.7"

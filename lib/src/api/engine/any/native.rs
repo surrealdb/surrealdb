@@ -18,6 +18,7 @@ use crate::api::DbResponse;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
+#[allow(unused_imports)]
 use crate::error::Db as DbError;
 use flume::Receiver;
 use once_cell::sync::OnceCell;
