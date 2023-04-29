@@ -384,7 +384,7 @@ fn function_duration(i: &str) -> IResult<&str, &str> {
 		tag("weeks"),
 		tag("years"),
 		preceded(
-			tag("from"),
+			tag("from::"),
 			alt((
 				tag("days"),
 				tag("hours"),
@@ -554,7 +554,7 @@ fn function_time(i: &str) -> IResult<&str, &str> {
 		tag("week"),
 		tag("yday"),
 		tag("year"),
-		preceded(tag("from"), alt((tag("micros"), tag("millis"), tag("secs"), tag("unix")))),
+		preceded(tag("from::"), alt((tag("micros"), tag("millis"), tag("secs"), tag("unix")))),
 	))(i)
 }
 
