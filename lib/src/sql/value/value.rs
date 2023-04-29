@@ -1098,7 +1098,7 @@ impl Value {
 	}
 
 	// -----------------------------------
-	// Simple conversion of value
+	// Simple conversion of values
 	// -----------------------------------
 
 	/// Treat a string as a table name
