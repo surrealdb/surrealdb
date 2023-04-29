@@ -27,6 +27,15 @@ pub struct Thing {
 	pub id: Id,
 }
 
+impl From<(&str, Id)> for Thing {
+	fn from((tb, id): (&str, Id)) -> Self {
+		Self {
+			tb: tb.to_owned(),
+			id,
+		}
+	}
+}
+
 impl From<(String, Id)> for Thing {
 	fn from((tb, id): (String, Id)) -> Self {
 		Self {
