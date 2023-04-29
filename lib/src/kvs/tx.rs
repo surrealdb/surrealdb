@@ -1701,7 +1701,7 @@ impl Transaction {
 								// Check if this is a graph edge
 								match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 									// This is a graph edge record
-									(Value::True, Value::Thing(l), Value::Thing(r)) => {
+									(Value::Bool(true), Value::Thing(l), Value::Thing(r)) => {
 										let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
 										chn.send(bytes!(sql)).await?;
 									}

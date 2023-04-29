@@ -73,19 +73,18 @@ impl serde::ser::SerializeTupleStruct for SerializeFields {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn default() {
 		let fields = Fields::default();
-		let serialized = serialize_internal(|| fields.serialize(Serializer.wrap())).unwrap();
+		let serialized = fields.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(fields, serialized);
 	}
 
 	#[test]
 	fn all() {
 		let fields = Fields(vec![Field::All], true);
-		let serialized = serialize_internal(|| fields.serialize(Serializer.wrap())).unwrap();
+		let serialized = fields.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(fields, serialized);
 	}
 }

@@ -14,7 +14,6 @@ mod api_integration {
 	use surrealdb::opt::auth::Scope;
 	use surrealdb::opt::PatchOp;
 	use surrealdb::opt::Resource;
-	use surrealdb::sql::serde::serialize_internal;
 	use surrealdb::sql::statements::BeginStatement;
 	use surrealdb::sql::statements::CommitStatement;
 	use surrealdb::sql::thing;

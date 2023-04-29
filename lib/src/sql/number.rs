@@ -2,7 +2,6 @@ use crate::err::Error;
 use crate::sql::ending::number as ending;
 use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::strand::Strand;
 use bigdecimal::num_traits::Pow;
 use bigdecimal::BigDecimal;
@@ -172,18 +171,10 @@ impl Serialize for Number {
 	where
 		S: serde::Serializer,
 	{
-		if is_internal_serialization() {
-			match self {
-				Number::Int(v) => s.serialize_newtype_variant(TOKEN, 0, "Int", v),
-				Number::Float(v) => s.serialize_newtype_variant(TOKEN, 1, "Float", v),
-				Number::Decimal(v) => s.serialize_newtype_variant(TOKEN, 2, "Decimal", v),
-			}
-		} else {
-			match self {
-				Number::Int(v) => s.serialize_i64(*v),
-				Number::Float(v) => s.serialize_f64(*v),
-				Number::Decimal(v) => s.serialize_some(v),
-			}
+		match self {
+			Number::Int(v) => s.serialize_newtype_variant(TOKEN, 0, "Int", v),
+			Number::Float(v) => s.serialize_newtype_variant(TOKEN, 1, "Float", v),
+			Number::Decimal(v) => s.serialize_newtype_variant(TOKEN, 2, "Decimal", v),
 		}
 	}
 }

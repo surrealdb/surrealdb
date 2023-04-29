@@ -2,7 +2,6 @@ use crate::sql::common::{take_digits, take_digits_range, take_u32_len};
 use crate::sql::duration::Duration;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::strand::Strand;
 use chrono::{DateTime, FixedOffset, Offset, SecondsFormat, TimeZone, Utc};
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
@@ -21,7 +20,8 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Datetime")]
 pub struct Datetime(pub DateTime<Utc>);
 
 impl Default for Datetime {
@@ -90,19 +90,6 @@ impl Datetime {
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&escape_str(&self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)), f)
-	}
-}
-
-impl Serialize for Datetime {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			serializer.serialize_some(&self.0)
-		}
 	}
 }
 

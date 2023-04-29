@@ -9,7 +9,6 @@ mod strict;
 mod tls;
 
 use crate::api::err::Error;
-use crate::sql::serde::serialize_internal;
 use crate::sql::to_value;
 use crate::sql::Thing;
 use crate::sql::Value;
@@ -336,8 +335,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 
 	match value {
 		Value::None | Value::Null => JsonValue::Null,
-		Value::False => false.into(),
-		Value::True => true.into(),
+		Value::Bool(boolean) => boolean.into(),
 		Value::Number(Number::Int(n)) => n.into(),
 		Value::Number(Number::Float(n)) => n.into(),
 		Value::Number(Number::Decimal(n)) => json!(n),
@@ -386,7 +384,7 @@ pub(crate) fn from_value<T>(value: Value) -> Result<T, Error>
 where
 	T: DeserializeOwned,
 {
-	let json = serialize_internal(|| into_json(value.clone(), false));
+	let json = into_json(value.clone(), false);
 	serde_json::from_value(json).map_err(|error| Error::FromValue {
 		value,
 		error: error.to_string(),

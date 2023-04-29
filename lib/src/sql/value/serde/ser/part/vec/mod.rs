@@ -62,19 +62,18 @@ impl serde::ser::SerializeSeq for SerializePartVec {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn empty() {
 		let vec: Vec<Part> = Vec::new();
-		let serialized = serialize_internal(|| vec.serialize(Serializer.wrap())).unwrap();
+		let serialized = vec.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(vec, serialized);
 	}
 
 	#[test]
 	fn vec() {
 		let vec = vec![Part::All];
-		let serialized = serialize_internal(|| vec.serialize(Serializer.wrap())).unwrap();
+		let serialized = vec.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(vec, serialized);
 	}
 }

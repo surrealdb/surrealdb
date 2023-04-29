@@ -23,7 +23,7 @@ impl<'a> Document<'a> {
 		self.current.to_mut().def(ctx, opt, txn, rid).await?;
 		// Ensure edge fields are reset
 		if self.initial.pick(&*EDGE).is_true() {
-			self.current.to_mut().put(&*EDGE, Value::True);
+			self.current.to_mut().put(&*EDGE, Value::Bool(true));
 			self.current.to_mut().put(&*IN, self.initial.pick(&*IN));
 			self.current.to_mut().put(&*OUT, self.initial.pick(&*OUT));
 		}

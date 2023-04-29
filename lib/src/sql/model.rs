@@ -3,7 +3,6 @@ use crate::sql::error::IResult;
 use crate::sql::escape::escape_ident;
 use crate::sql::id::Id;
 use crate::sql::ident::ident_raw;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::thing::Thing;
 use nom::branch::alt;
 use nom::character::complete::char;
@@ -83,26 +82,20 @@ impl Serialize for Model {
 	where
 		S: serde::Serializer,
 	{
-		if is_internal_serialization() {
-			match self {
-				Self::Count(tb, c) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 0, "Count", 2)?;
-					serializer.serialize_field(tb)?;
-					serializer.serialize_field(c)?;
-					serializer.end()
-				}
-				Self::Range(tb, b, e) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 1, "Range", 3)?;
-					serializer.serialize_field(tb)?;
-					serializer.serialize_field(b)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
+		match self {
+			Self::Count(tb, c) => {
+				let mut serializer = serializer.serialize_tuple_variant(TOKEN, 0, "Count", 2)?;
+				serializer.serialize_field(tb)?;
+				serializer.serialize_field(c)?;
+				serializer.end()
 			}
-		} else {
-			serializer.serialize_none()
+			Self::Range(tb, b, e) => {
+				let mut serializer = serializer.serialize_tuple_variant(TOKEN, 1, "Range", 3)?;
+				serializer.serialize_field(tb)?;
+				serializer.serialize_field(b)?;
+				serializer.serialize_field(e)?;
+				serializer.end()
+			}
 		}
 	}
 }

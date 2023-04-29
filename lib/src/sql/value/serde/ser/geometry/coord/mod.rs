@@ -88,12 +88,11 @@ impl serde::ser::SerializeStruct for SerializeCoord {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn default() {
 		let coord = Coord::default();
-		let serialized = serialize_internal(|| coord.serialize(Serializer.wrap())).unwrap();
+		let serialized = coord.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(coord, serialized);
 	}
 }
