@@ -1195,6 +1195,16 @@ impl Value {
 		match self {
 			// Allow any boolean value
 			Value::Bool(boolean) => Ok(boolean),
+			// Attempt to convert a string value
+			Value::Strand(ref v) => match v.parse::<bool>() {
+				// The string can be represented as a Float
+				Ok(v) => Ok(v),
+				// Ths string is not a float
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "bool".into(),
+				}),
+			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
