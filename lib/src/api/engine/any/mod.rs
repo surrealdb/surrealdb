@@ -140,6 +140,20 @@ impl IntoEndpoint for String {
 	}
 }
 
+#[cfg(feature = "native-tls")]
+#[cfg_attr(docsrs, doc(cfg(feature = "native-tls")))]
+impl<T> IntoEndpoint for (T, native_tls::TlsConnector)
+where
+	T: Into<String>,
+{
+	fn into_endpoint(self) -> Result<Endpoint> {
+		let (address, config) = self;
+		let mut address = address.into().into_endpoint()?;
+		address.tls_config = Some(Tls::Native(config));
+		Ok(address)
+	}
+}
+
 #[cfg(feature = "rustls")]
 #[cfg_attr(docsrs, doc(cfg(feature = "rustls")))]
 impl<T> IntoEndpoint for (T, rustls::ClientConfig)
