@@ -1006,6 +1006,57 @@ async fn function_duration_from_weeks() -> Result<(), Error> {
 // meta
 // --------------------------------------------------
 
+#[tokio::test]
+async fn function_parse_meta_id() -> Result<(), Error> {
+	let sql = r#"
+		RETURN meta::id("person:tobie");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("tobie");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_meta_table() -> Result<(), Error> {
+	let sql = r#"
+		RETURN meta::table("person:tobie");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("person");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_meta_tb() -> Result<(), Error> {
+	let sql = r#"
+		RETURN meta::tb("person:tobie");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("person");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
 // --------------------------------------------------
 // not
 // --------------------------------------------------
