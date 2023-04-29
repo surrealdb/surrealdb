@@ -268,4 +268,32 @@ mod tests {
 		assert_eq!("'te\"st\n\tand\u{08}some\u{05d9}'", format!("{}", out));
 		assert_eq!(out, Strand::from("te\"st\n\tand\u{08}some\u{05d9}"));
 	}
+
+	#[test]
+	fn strand_fuzz_escape() {
+		for n in (0..=char::MAX as u32).step_by(101) {
+			if let Some(c) = char::from_u32(n) {
+				let expected = format!("a{c}b");
+
+				let utf32 = format!("\"a\\u{{{n:x}}}b\"");
+				let (rest, s) = strand(&utf32).unwrap();
+				assert_eq!(rest, "");
+				assert_eq!(s.as_str(), &expected);
+
+				let mut utf16 = String::with_capacity(16);
+				utf16 += "\"a";
+				let mut buf = [0; 2];
+				for &mut n in c.encode_utf16(&mut buf) {
+					utf16 += &format!("\\u{n:04x}");
+				}
+				utf16 += "b\"";
+				let (rest, s) = strand(&utf16).unwrap();
+				assert_eq!(rest, "");
+				assert_eq!(s.as_str(), &expected);
+			}
+		}
+
+		// Unpaired surrogate.
+		assert!(strand("\"\\u{DBFF}\"").is_err());
+	}
 }
