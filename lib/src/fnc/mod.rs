@@ -178,6 +178,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"parse::url::query" => parse::url::query,
 		"parse::url::scheme" => parse::url::scheme,
 		//
+		"rand" => rand::rand,
 		"rand::bool" => rand::bool,
 		"rand::enum" => rand::r#enum,
 		"rand::float" => rand::float,
@@ -189,7 +190,6 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"rand::uuid::v4" => rand::uuid::v4,
 		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
-		"rand" => rand::rand,
 		//
 		"session::db" => session::db(ctx),
 		"session::id" => session::id(ctx),

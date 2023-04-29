@@ -1269,6 +1269,226 @@ async fn function_parse_url_scheme() -> Result<(), Error> {
 // rand
 // --------------------------------------------------
 
+#[tokio::test]
+async fn function_rand() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand();
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_float());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_bool() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::bool();
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_bool());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_enum() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::enum(["one", "two", "three"]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_strand());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_float() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::float();
+		RETURN rand::float(5, 10);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_float());
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_float());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_guid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::guid();
+		RETURN rand::guid(10);
+		RETURN rand::guid(10, 15);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_strand());
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_strand());
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_strand());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_int() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::int();
+		RETURN rand::int(5, 10);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_int());
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_int());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_string() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::string();
+		RETURN rand::string(10);
+		RETURN rand::string(10, 15);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_strand());
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_strand());
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_strand());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_time() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::time();
+		RETURN rand::time(1577836800, 1893456000);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_datetime());
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_datetime());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_ulid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::ulid();
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_strand());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::uuid();
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid_v4() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::uuid::v4();
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_rand_uuid_v7() -> Result<(), Error> {
+	let sql = r#"
+		RETURN rand::uuid::v7();
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_uuid());
+	//
+	Ok(())
+}
+
 // --------------------------------------------------
 // string
 // --------------------------------------------------
