@@ -39,6 +39,30 @@ pub enum Constant {
 }
 
 impl Constant {
+	pub(crate) fn as_f64(&self) -> f64 {
+		match self {
+			Self::MathE => std::f64::consts::E,
+			Self::MathFrac1Pi => std::f64::consts::FRAC_1_PI,
+			Self::MathFrac1Sqrt2 => std::f64::consts::FRAC_1_SQRT_2,
+			Self::MathFrac2Pi => std::f64::consts::FRAC_2_PI,
+			Self::MathFrac2SqrtPi => std::f64::consts::FRAC_2_SQRT_PI,
+			Self::MathFracPi2 => std::f64::consts::FRAC_PI_2,
+			Self::MathFracPi3 => std::f64::consts::FRAC_PI_3,
+			Self::MathFracPi4 => std::f64::consts::FRAC_PI_4,
+			Self::MathFracPi6 => std::f64::consts::FRAC_PI_6,
+			Self::MathFracPi8 => std::f64::consts::FRAC_PI_8,
+			Self::MathLn10 => std::f64::consts::LN_10,
+			Self::MathLn2 => std::f64::consts::LN_2,
+			Self::MathLog102 => std::f64::consts::LOG10_2,
+			Self::MathLog10E => std::f64::consts::LOG10_E,
+			Self::MathLog210 => std::f64::consts::LOG2_10,
+			Self::MathLog2E => std::f64::consts::LOG2_E,
+			Self::MathPi => std::f64::consts::PI,
+			Self::MathSqrt2 => std::f64::consts::SQRT_2,
+			Self::MathTau => std::f64::consts::TAU,
+		}
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -46,27 +70,7 @@ impl Constant {
 		_txn: &Transaction,
 		_doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		Ok(match self {
-			Self::MathE => std::f64::consts::E.into(),
-			Self::MathFrac1Pi => std::f64::consts::FRAC_1_PI.into(),
-			Self::MathFrac1Sqrt2 => std::f64::consts::FRAC_1_SQRT_2.into(),
-			Self::MathFrac2Pi => std::f64::consts::FRAC_2_PI.into(),
-			Self::MathFrac2SqrtPi => std::f64::consts::FRAC_2_SQRT_PI.into(),
-			Self::MathFracPi2 => std::f64::consts::FRAC_PI_2.into(),
-			Self::MathFracPi3 => std::f64::consts::FRAC_PI_3.into(),
-			Self::MathFracPi4 => std::f64::consts::FRAC_PI_4.into(),
-			Self::MathFracPi6 => std::f64::consts::FRAC_PI_6.into(),
-			Self::MathFracPi8 => std::f64::consts::FRAC_PI_8.into(),
-			Self::MathLn10 => std::f64::consts::LN_10.into(),
-			Self::MathLn2 => std::f64::consts::LN_2.into(),
-			Self::MathLog102 => std::f64::consts::LOG10_2.into(),
-			Self::MathLog10E => std::f64::consts::LOG10_E.into(),
-			Self::MathLog210 => std::f64::consts::LOG2_10.into(),
-			Self::MathLog2E => std::f64::consts::LOG2_E.into(),
-			Self::MathPi => std::f64::consts::PI.into(),
-			Self::MathSqrt2 => std::f64::consts::SQRT_2.into(),
-			Self::MathTau => std::f64::consts::TAU.into(),
-		})
+		Ok(self.as_f64().into())
 	}
 }
 
