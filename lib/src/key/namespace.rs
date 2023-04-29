@@ -8,7 +8,7 @@ pub struct Namespace<'a> {
 	pub ns: &'a str,
 }
 
-pub fn new<'a>(ns: &'a str) -> Namespace<'a> {
+pub fn new(ns: &str) -> Namespace<'_> {
 	Namespace::new(ns)
 }
 

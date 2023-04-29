@@ -334,7 +334,7 @@ impl Iterable {
 									// Parse the data from the store
 									let gra: crate::key::graph::Graph = (&k).into();
 									// Fetch the data from the store
-									let key = thing::new(opt.ns(), opt.db(), &gra.ft, &gra.fk);
+									let key = thing::new(opt.ns(), opt.db(), gra.ft, &gra.fk);
 									let val = txn.clone().lock().await.get(key).await?;
 									let rid = Thing::from((gra.ft, gra.fk));
 									// Parse the data from the store

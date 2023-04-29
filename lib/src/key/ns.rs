@@ -10,7 +10,7 @@ pub struct Ns<'a> {
 	pub ns: &'a str,
 }
 
-pub fn new<'a>(ns: &'a str) -> Ns<'a> {
+pub fn new(ns: &str) -> Ns<'_> {
 	Ns::new(ns)
 }
 
