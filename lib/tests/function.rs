@@ -10,6 +10,45 @@ use surrealdb::sql::Value;
 // --------------------------------------------------
 
 #[tokio::test]
+async fn function_array_add() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::add([], 3);
+		RETURN array::add(3, true);
+		RETURN array::add([1,2], 2);
+		RETURN array::add([1,2], 3);
+		RETURN array::add([1,2], [2,3]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 5);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[3]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_all() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::all([]);
@@ -62,6 +101,35 @@ async fn function_array_any() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_append() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::append([], 3);
+		RETURN array::append(3, true);
+		RETURN array::append([1,2], [2,3]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[3]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,[2,3]]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -336,6 +404,35 @@ async fn function_array_intersect() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_len() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::len([]);
+		RETURN array::len("some text");
+		RETURN array::len([1,2,"text",3,3,4]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::len(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(6);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_max() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::max([]);
@@ -394,6 +491,93 @@ async fn function_array_min() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_array_pop() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::pop([]);
+		RETURN array::pop("some text");
+		RETURN array::pop([1,2,"text",3,3,4]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::pop(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(4);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_prepend() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::prepend([], 3);
+		RETURN array::prepend(3, true);
+		RETURN array::prepend([1,2], [2,3]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[3]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::prepend(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[[2,3],1,2]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_push() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::push([], 3);
+		RETURN array::push(3, true);
+		RETURN array::push([1,2], [2,3]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[3]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::push(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,[2,3]]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_array_remove() -> Result<(), Error> {
 	let sql = r#"
 		RETURN array::remove([3], 0);
@@ -420,6 +604,191 @@ async fn function_array_remove() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("[1,2,3]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_reverse() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::reverse([]);
+		RETURN array::reverse(3);
+		RETURN array::reverse([1,2,"text",3,3,4]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::reverse(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[4,3,3,'text',2,1]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_slice() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::slice([]);
+		RETURN array::slice(3);
+		RETURN array::slice([1,2,"text",3,3,4]);
+		RETURN array::slice([1,2,"text",3,3,4], 1);
+		RETURN array::slice([1,2,"text",3,3,4], 3);
+		RETURN array::slice([1,2,"text",3,3,4], 3, -1);
+		RETURN array::slice([1,2,"text",3,3,4], -1);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 7);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::slice(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,'text',3,3,4]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[2,'text',3,3,4]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[3,3,4]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[3,3]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[4]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_sort() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::sort([]);
+		RETURN array::sort(3, false);
+		RETURN array::sort([4,2,"text",1,3,4]);
+		RETURN array::sort([4,2,"text",1,3,4], true);
+		RETURN array::sort([4,2,"text",1,3,4], false);
+		RETURN array::sort([4,2,"text",1,3,4], "asc");
+		RETURN array::sort([4,2,"text",1,3,4], "desc");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 7);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::sort(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3,4,4,'text']");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3,4,4,'text']");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("['text',4,4,3,2,1]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3,4,4,'text']");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("['text',4,4,3,2,1]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_sort_asc() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::sort::asc([]);
+		RETURN array::sort::asc(3);
+		RETURN array::sort::asc([4,2,"text",1,3,4]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::sort::asc(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1,2,3,4,4,'text']");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_array_sort_desc() -> Result<(), Error> {
+	let sql = r#"
+		RETURN array::sort::desc([]);
+		RETURN array::sort::desc(3);
+		RETURN array::sort::desc([4,2,"text",1,3,4]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function array::sort::desc(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("['text',4,4,3,2,1]");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
