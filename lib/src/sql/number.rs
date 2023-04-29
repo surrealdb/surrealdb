@@ -22,11 +22,13 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename = "$surrealdb::private::sql::Number")]
 pub enum Number {
 	Int(i64),
 	Float(f64),
 	Decimal(BigDecimal),
+	// Add new variants here
 }
 
 impl Default for Number {
@@ -162,19 +164,6 @@ impl Display for Number {
 			Number::Int(v) => Display::fmt(v, f),
 			Number::Float(v) => Display::fmt(v, f),
 			Number::Decimal(v) => Display::fmt(v, f),
-		}
-	}
-}
-
-impl Serialize for Number {
-	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		match self {
-			Number::Int(v) => s.serialize_newtype_variant(TOKEN, 0, "Int", v),
-			Number::Float(v) => s.serialize_newtype_variant(TOKEN, 1, "Float", v),
-			Number::Decimal(v) => s.serialize_newtype_variant(TOKEN, 2, "Decimal", v),
 		}
 	}
 }

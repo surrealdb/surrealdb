@@ -14,7 +14,8 @@ use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Constant")]
 pub enum Constant {
 	MathE,
 	MathFrac1Pi,
@@ -35,6 +36,7 @@ pub enum Constant {
 	MathPi,
 	MathSqrt2,
 	MathTau,
+	// Add new variants here
 }
 
 impl Constant {
@@ -96,36 +98,6 @@ impl fmt::Display for Constant {
 			Self::MathSqrt2 => "math::SQRT_2",
 			Self::MathTau => "math::TAU",
 		})
-	}
-}
-
-#[rustfmt::skip]
-impl Serialize for Constant {
-	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-        match self {
-            Self::MathE => s.serialize_unit_variant(TOKEN, 0, "MathE"),
-            Self::MathFrac1Pi => s.serialize_unit_variant(TOKEN, 1, "MathFrac1Pi"),
-            Self::MathFrac1Sqrt2 => s.serialize_unit_variant(TOKEN, 2, "MathFrac1Sqrt2"),
-            Self::MathFrac2Pi => s.serialize_unit_variant(TOKEN, 3, "MathFrac2Pi"),
-            Self::MathFrac2SqrtPi => s.serialize_unit_variant(TOKEN, 4, "MathFrac2SqrtPi"),
-            Self::MathFracPi2 => s.serialize_unit_variant(TOKEN, 5, "MathFracPi2"),
-            Self::MathFracPi3 => s.serialize_unit_variant(TOKEN, 6, "MathFracPi3"),
-            Self::MathFracPi4 => s.serialize_unit_variant(TOKEN, 7, "MathFracPi4"),
-            Self::MathFracPi6 => s.serialize_unit_variant(TOKEN, 8, "MathFracPi6"),
-            Self::MathFracPi8 => s.serialize_unit_variant(TOKEN, 9, "MathFracPi8"),
-            Self::MathLn10 => s.serialize_unit_variant(TOKEN, 10, "MathLn10"),
-            Self::MathLn2 => s.serialize_unit_variant(TOKEN, 11, "MathLn2"),
-            Self::MathLog102 => s.serialize_unit_variant(TOKEN, 12, "MathLog102"),
-            Self::MathLog10E => s.serialize_unit_variant(TOKEN, 13, "MathLog10E"),
-            Self::MathLog210 => s.serialize_unit_variant(TOKEN, 14, "MathLog210"),
-            Self::MathLog2E => s.serialize_unit_variant(TOKEN, 15, "MathLog2E"),
-            Self::MathPi => s.serialize_unit_variant(TOKEN, 16, "MathPi"),
-            Self::MathSqrt2 => s.serialize_unit_variant(TOKEN, 17, "MathSqrt2"),
-            Self::MathTau => s.serialize_unit_variant(TOKEN, 18, "MathTau"),
-        }
 	}
 }
 

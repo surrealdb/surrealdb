@@ -27,7 +27,8 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
 const SINGLE: char = '\'';
 const DOUBLE: char = '\"';
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "$surrealdb::private::sql::Geometry")]
 pub enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),
@@ -36,6 +37,7 @@ pub enum Geometry {
 	MultiLine(MultiLineString<f64>),
 	MultiPolygon(MultiPolygon<f64>),
 	Collection(Vec<Geometry>),
+	// Add new variants here
 }
 
 impl PartialOrd for Geometry {
@@ -460,23 +462,6 @@ impl fmt::Display for Geometry {
 					Fmt::comma_separated(v)
 				)
 			}
-		}
-	}
-}
-
-impl Serialize for Geometry {
-	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		match self {
-			Self::Point(v) => s.serialize_newtype_variant(TOKEN, 0, "Point", v),
-			Self::Line(v) => s.serialize_newtype_variant(TOKEN, 1, "Line", v),
-			Self::Polygon(v) => s.serialize_newtype_variant(TOKEN, 2, "Polygon", v),
-			Self::MultiPoint(v) => s.serialize_newtype_variant(TOKEN, 3, "MultiPoint", v),
-			Self::MultiLine(v) => s.serialize_newtype_variant(TOKEN, 4, "MultiLine", v),
-			Self::MultiPolygon(v) => s.serialize_newtype_variant(TOKEN, 5, "MultiPolygon", v),
-			Self::Collection(v) => s.serialize_newtype_variant(TOKEN, 6, "Collection", v),
 		}
 	}
 }

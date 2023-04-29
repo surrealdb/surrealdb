@@ -23,19 +23,20 @@ use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::sequence::delimited;
 use nom::sequence::preceded;
-use serde::ser::SerializeTupleVariant;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Function")]
 pub enum Function {
 	Cast(Kind, Value),
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
+	// Add new variants here
 }
 
 impl PartialOrd for Function {
@@ -217,40 +218,6 @@ impl fmt::Display for Function {
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
-		}
-	}
-}
-
-impl Serialize for Function {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		match self {
-			Self::Cast(s, e) => {
-				let mut serializer = serializer.serialize_tuple_variant(TOKEN, 0, "Cast", 2)?;
-				serializer.serialize_field(s)?;
-				serializer.serialize_field(e)?;
-				serializer.end()
-			}
-			Self::Normal(s, e) => {
-				let mut serializer = serializer.serialize_tuple_variant(TOKEN, 1, "Normal", 2)?;
-				serializer.serialize_field(s)?;
-				serializer.serialize_field(e)?;
-				serializer.end()
-			}
-			Self::Custom(s, e) => {
-				let mut serializer = serializer.serialize_tuple_variant(TOKEN, 2, "Custom", 2)?;
-				serializer.serialize_field(s)?;
-				serializer.serialize_field(e)?;
-				serializer.end()
-			}
-			Self::Script(s, e) => {
-				let mut serializer = serializer.serialize_tuple_variant(TOKEN, 3, "Script", 2)?;
-				serializer.serialize_field(s)?;
-				serializer.serialize_field(e)?;
-				serializer.end()
-			}
 		}
 	}
 }
