@@ -67,63 +67,62 @@ impl ser::Serializer for Serializer {
 mod tests {
 	use super::*;
 	use crate::sql;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn all() {
 		let part = Part::All;
-		let serialized = serialize_internal(|| part.serialize(Serializer.wrap())).unwrap();
+		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
 
 	#[test]
 	fn last() {
 		let part = Part::Last;
-		let serialized = serialize_internal(|| part.serialize(Serializer.wrap())).unwrap();
+		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
 
 	#[test]
 	fn first() {
 		let part = Part::First;
-		let serialized = serialize_internal(|| part.serialize(Serializer.wrap())).unwrap();
+		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
 
 	#[test]
 	fn field() {
 		let part = Part::Field(Default::default());
-		let serialized = serialize_internal(|| part.serialize(Serializer.wrap())).unwrap();
+		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
 
 	#[test]
 	fn index() {
 		let part = Part::Index(Default::default());
-		let serialized = serialize_internal(|| part.serialize(Serializer.wrap())).unwrap();
+		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
 
 	#[test]
 	fn r#where() {
 		let part = Part::Where(Default::default());
-		let serialized = serialize_internal(|| part.serialize(Serializer.wrap())).unwrap();
+		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
 
 	#[test]
 	fn graph() {
 		let part = Part::Graph(Default::default());
-		let serialized = serialize_internal(|| part.serialize(Serializer.wrap())).unwrap();
+		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
 
 	#[test]
 	fn value() {
 		let part = Part::Value(sql::thing("foo:bar").unwrap().into());
-		let serialized = serialize_internal(|| part.serialize(Serializer.wrap())).unwrap();
+		let serialized = part.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(part, serialized);
 	}
 }

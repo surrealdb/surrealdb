@@ -8,12 +8,10 @@ use crate::sql::error::IResult;
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::number::Number;
 use crate::sql::operation::Operation;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::{value, Value};
 use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
-use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter, Write};
@@ -23,7 +21,8 @@ use std::ops::DerefMut;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Array")]
 pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {
@@ -140,23 +139,6 @@ impl Display for Array {
 			drop(indent);
 		}
 		f.write_char(']')
-	}
-}
-
-impl Serialize for Array {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			let mut arr = serializer.serialize_seq(Some(self.len()))?;
-			for v in &self.0 {
-				arr.serialize_element(v)?;
-			}
-			arr.end()
-		}
 	}
 }
 

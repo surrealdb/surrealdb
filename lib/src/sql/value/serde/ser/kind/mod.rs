@@ -144,158 +144,157 @@ impl serde::ser::SerializeTupleVariant for SerializeKindTuple {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn any() {
 		let kind = Kind::Any;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn bool() {
 		let kind = Kind::Bool;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn bytes() {
 		let kind = Kind::Bytes;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn datetime() {
 		let kind = Kind::Datetime;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn decimal() {
 		let kind = Kind::Decimal;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn duration() {
 		let kind = Kind::Duration;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn float() {
 		let kind = Kind::Float;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn int() {
 		let kind = Kind::Int;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn number() {
 		let kind = Kind::Number;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn object() {
 		let kind = Kind::Object;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn point() {
 		let kind = Kind::Point;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn string() {
 		let kind = Kind::String;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn uuid() {
 		let kind = Kind::Uuid;
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn record() {
 		let kind = Kind::Record(Default::default());
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 
 		let kind = Kind::Record(vec![Default::default()]);
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn geometry() {
 		let kind = Kind::Geometry(Default::default());
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 
 		let kind = Kind::Geometry(vec![Default::default()]);
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn option() {
 		let kind = Kind::Option(Box::new(Default::default()));
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn either() {
 		let kind = Kind::Either(Default::default());
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 
 		let kind = Kind::Either(vec![Default::default()]);
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn set() {
 		let kind = Kind::Set(Box::new(Default::default()), None);
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 
 		let kind = Kind::Set(Box::new(Default::default()), Some(Default::default()));
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 
 	#[test]
 	fn array() {
 		let kind = Kind::Array(Box::new(Default::default()), None);
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 
 		let kind = Kind::Array(Box::new(Default::default()), Some(Default::default()));
-		let serialized = serialize_internal(|| kind.serialize(Serializer.wrap())).unwrap();
+		let serialized = kind.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(kind, serialized);
 	}
 }

@@ -13,11 +13,12 @@ mod api_integration {
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::auth::Scope;
 	use surrealdb::opt::PatchOp;
-	use surrealdb::sql::serde::serialize_internal;
+	use surrealdb::opt::Resource;
 	use surrealdb::sql::statements::BeginStatement;
 	use surrealdb::sql::statements::CommitStatement;
 	use surrealdb::sql::thing;
 	use surrealdb::sql::Thing;
+	use surrealdb::sql::Value;
 	use surrealdb::Error;
 	use surrealdb::Surreal;
 	use ulid::Ulid;

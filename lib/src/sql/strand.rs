@@ -1,7 +1,6 @@
 use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
-use crate::sql::serde::is_internal_serialization;
 use nom::branch::alt;
 use nom::bytes::complete::escaped_transform;
 use nom::bytes::complete::is_not;
@@ -25,7 +24,8 @@ const DOUBLE_ESC: &str = r#"\""#;
 
 const SURROGATES: [u32; 2] = [55296, 57343];
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Strand")]
 pub struct Strand(pub String);
 
 impl From<String> for Strand {
@@ -71,19 +71,6 @@ impl Strand {
 impl Display for Strand {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&escape_str(&self.0), f)
-	}
-}
-
-impl Serialize for Strand {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			serializer.serialize_some(&self.0)
-		}
 	}
 }
 

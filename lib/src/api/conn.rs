@@ -1,4 +1,5 @@
 use crate::api;
+use crate::api::err::Error;
 use crate::api::method::query::Response;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
@@ -170,17 +171,14 @@ pub trait Connection: Sized + Send + Sync + 'static {
 		Self: api::Connection;
 
 	/// Receive responses for all methods except `query`
-	fn recv<R>(
+	fn recv(
 		&mut self,
 		receiver: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + '_>>
-	where
-		R: DeserializeOwned,
-	{
+	) -> Pin<Box<dyn Future<Output = Result<Value>> + Send + Sync + '_>> {
 		Box::pin(async move {
 			let response = receiver.into_recv_async().await?;
 			match response? {
-				DbResponse::Other(value) => from_value(value).map_err(Into::into),
+				DbResponse::Other(value) => Ok(value),
 				DbResponse::Query(..) => unreachable!(),
 			}
 		})
@@ -208,6 +206,85 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + 'r>>
 	where
 		R: DeserializeOwned,
+		Self: api::Connection,
+	{
+		Box::pin(async move {
+			let rx = self.send(router, param).await?;
+			let value = self.recv(rx).await?;
+			from_value(value).map_err(Into::into)
+		})
+	}
+
+	/// Execute methods that return an optional single response
+	fn execute_opt<'r, R>(
+		&'r mut self,
+		router: &'r Router<Self>,
+		param: Param,
+	) -> Pin<Box<dyn Future<Output = Result<Option<R>>> + Send + Sync + 'r>>
+	where
+		R: DeserializeOwned,
+		Self: api::Connection,
+	{
+		Box::pin(async move {
+			let rx = self.send(router, param).await?;
+			match self.recv(rx).await? {
+				Value::None | Value::Null => Ok(None),
+				value => from_value(value).map_err(Into::into),
+			}
+		})
+	}
+
+	/// Execute methods that return multiple responses
+	fn execute_vec<'r, R>(
+		&'r mut self,
+		router: &'r Router<Self>,
+		param: Param,
+	) -> Pin<Box<dyn Future<Output = Result<Vec<R>>> + Send + Sync + 'r>>
+	where
+		R: DeserializeOwned,
+		Self: api::Connection,
+	{
+		Box::pin(async move {
+			let rx = self.send(router, param).await?;
+			let value = match self.recv(rx).await? {
+				Value::None | Value::Null => Value::Array(Default::default()),
+				Value::Array(array) => Value::Array(array),
+				value => vec![value].into(),
+			};
+			from_value(value).map_err(Into::into)
+		})
+	}
+
+	/// Execute methods that return nothing
+	fn execute_unit<'r>(
+		&'r mut self,
+		router: &'r Router<Self>,
+		param: Param,
+	) -> Pin<Box<dyn Future<Output = Result<()>> + Send + Sync + 'r>>
+	where
+		Self: api::Connection,
+	{
+		Box::pin(async move {
+			let rx = self.send(router, param).await?;
+			match self.recv(rx).await? {
+				Value::None | Value::Null => Ok(()),
+				Value::Array(array) if array.is_empty() => Ok(()),
+				value => Err(Error::FromValue {
+					value,
+					error: "expected the database to return nothing".to_owned(),
+				}
+				.into()),
+			}
+		})
+	}
+
+	/// Execute methods that return a raw value
+	fn execute_value<'r>(
+		&'r mut self,
+		router: &'r Router<Self>,
+		param: Param,
+	) -> Pin<Box<dyn Future<Output = Result<Value>> + Send + Sync + 'r>>
+	where
 		Self: api::Connection,
 	{
 		Box::pin(async move {

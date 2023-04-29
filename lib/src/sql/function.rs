@@ -11,7 +11,6 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::kind::{kind, Kind};
 use crate::sql::script::{script as func, Script};
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::{single, value, Value};
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
@@ -227,38 +226,31 @@ impl Serialize for Function {
 	where
 		S: serde::Serializer,
 	{
-		if is_internal_serialization() {
-			match self {
-				Self::Cast(s, e) => {
-					let mut serializer = serializer.serialize_tuple_variant(TOKEN, 0, "Cast", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-				Self::Normal(s, e) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 1, "Normal", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-				Self::Custom(s, e) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 2, "Custom", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-				Self::Script(s, e) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 3, "Script", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
+		match self {
+			Self::Cast(s, e) => {
+				let mut serializer = serializer.serialize_tuple_variant(TOKEN, 0, "Cast", 2)?;
+				serializer.serialize_field(s)?;
+				serializer.serialize_field(e)?;
+				serializer.end()
 			}
-		} else {
-			serializer.serialize_none()
+			Self::Normal(s, e) => {
+				let mut serializer = serializer.serialize_tuple_variant(TOKEN, 1, "Normal", 2)?;
+				serializer.serialize_field(s)?;
+				serializer.serialize_field(e)?;
+				serializer.end()
+			}
+			Self::Custom(s, e) => {
+				let mut serializer = serializer.serialize_tuple_variant(TOKEN, 2, "Custom", 2)?;
+				serializer.serialize_field(s)?;
+				serializer.serialize_field(e)?;
+				serializer.end()
+			}
+			Self::Script(s, e) => {
+				let mut serializer = serializer.serialize_tuple_variant(TOKEN, 3, "Script", 2)?;
+				serializer.serialize_field(s)?;
+				serializer.serialize_field(e)?;
+				serializer.end()
+			}
 		}
 	}
 }

@@ -22,8 +22,7 @@ impl<'js> IntoJs<'js> for &Value {
 		match self {
 			Value::Null => Null.into_js(ctx),
 			Value::None => Undefined.into_js(ctx),
-			Value::True => Ok(js::Value::new_bool(ctx, true)),
-			Value::False => Ok(js::Value::new_bool(ctx, false)),
+			Value::Bool(boolean) => Ok(js::Value::new_bool(ctx, *boolean)),
 			Value::Strand(v) => js::String::from_str(ctx, v)?.into_js(ctx),
 			Value::Number(Number::Int(v)) => Ok(js::Value::new_int(ctx, *v as i32)),
 			Value::Number(Number::Float(v)) => Ok(js::Value::new_float(ctx, *v)),

@@ -18,7 +18,7 @@ async fn function_array_all() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -28,7 +28,7 @@ async fn function_array_all() -> Result<(), Error> {
 	));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::False;
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -47,7 +47,7 @@ async fn function_array_any() -> Result<(), Error> {
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::False;
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
@@ -57,7 +57,7 @@ async fn function_array_any() -> Result<(), Error> {
 	));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -514,31 +514,31 @@ async fn function_not() -> Result<(), Error> {
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::False;
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::False;
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::False;
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::False;
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
