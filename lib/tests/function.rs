@@ -1363,6 +1363,159 @@ async fn function_duration_from_weeks() -> Result<(), Error> {
 // geo
 // --------------------------------------------------
 
+#[tokio::test]
+async fn function_parse_geo_area() -> Result<(), Error> {
+	let sql = r#"
+		RETURN geo::area({
+			type: 'Polygon',
+			coordinates: [[
+				[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+				[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+				[-0.38314819, 51.37692386]
+			]]
+		});
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(1029944667.4192368);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_geo_bearing() -> Result<(), Error> {
+	let sql = r#"
+		RETURN geo::bearing(
+			{
+				type: 'Point',
+				coordinates: [-0.136439, 51.509865]
+			},
+			{
+				type: 'Point',
+				coordinates: [ -73.971321, 40.776676]
+			}
+		);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(-71.63409590760736);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_geo_centroid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN geo::centroid({
+			type: 'Polygon',
+			coordinates: [[
+				[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+				[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+				[-0.38314819, 51.37692386]
+			]]
+		});
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			type: 'Point',
+			coordinates: [
+				-0.10231019499999999,
+				51.49576478
+			]
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_geo_distance() -> Result<(), Error> {
+	let sql = r#"
+		RETURN geo::distance(
+			{
+				type: 'Point',
+				coordinates: [-0.136439, 51.509865]
+			},
+			{
+				type: 'Point',
+				coordinates: [ -73.971321, 40.776676]
+			}
+		);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(5562851.11270021);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_geo_hash_encode() -> Result<(), Error> {
+	let sql = r#"
+		RETURN geo::hash::encode({
+			type: 'Point',
+			coordinates: [-0.136439, 51.509865]
+		});
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("gcpvhchdswz9");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_geo_hash_decode() -> Result<(), Error> {
+	let sql = r#"
+		RETURN geo::hash::decode('gcpvhchdswz9');
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			type: 'Point',
+			coordinates: [
+				-0.13643911108374596,
+				51.50986502878368
+			]
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
 // --------------------------------------------------
 // is
 // --------------------------------------------------
@@ -2784,7 +2937,7 @@ async fn function_type_number() -> Result<(), Error> {
 async fn function_type_point() -> Result<(), Error> {
 	let sql = r#"
 		RETURN type::point([1.345, 6.789]);
-		RETURN type::point([51.509865, -0.136439]);
+		RETURN type::point([-0.136439, 51.509865]);
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -2808,8 +2961,8 @@ async fn function_type_point() -> Result<(), Error> {
 		"{
 			type: 'Point',
 			coordinates: [
-				51.509865,
-				-0.136439
+				-0.136439,
+				51.509865
 			]
 		}",
 	);
