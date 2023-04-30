@@ -1810,6 +1810,625 @@ async fn function_parse_is_uuid() -> Result<(), Error> {
 // math
 // --------------------------------------------------
 
+#[tokio::test]
+async fn function_math_abs() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::abs(0);
+		RETURN math::abs(100);
+		RETURN math::abs(-100);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(100);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(100);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_bottom() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::bottom([1,2,3], 0);
+		RETURN math::bottom([1,2,3], 1);
+		RETURN math::bottom([1,2,3], 2);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function math::bottom(). The second argument must be an integer greater than 0."
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[1]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[2,1]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_ceil() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::ceil(101);
+		RETURN math::ceil(101.5);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(101);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(102);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_fixed() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::fixed(101, 0);
+		RETURN math::fixed(101, 2);
+		RETURN math::fixed(101.5, 2);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function math::fixed(). The second argument must be an integer greater than 0."
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(101);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(101.50);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_floor() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::floor(101);
+		RETURN math::floor(101.5);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(101);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(101);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_interquartile() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::interquartile([]);
+		RETURN math::interquartile([101, 213, 202]);
+		RETURN math::interquartile([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_nan());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(207.5);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(208.0);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_max() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::max([]);
+		RETURN math::max([101, 213, 202]);
+		RETURN math::max([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(213);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(213.5);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_mean() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::mean([]);
+		RETURN math::mean([101, 213, 202]);
+		RETURN math::mean([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_nan());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(172);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(172.5);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_median() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::median([]);
+		RETURN math::median([101, 213, 202]);
+		RETURN math::median([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(202);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(202.5);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_midhinge() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::midhinge([]);
+		RETURN math::midhinge([101, 213, 202]);
+		RETURN math::midhinge([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_nan());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(103.75);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(104.0);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_min() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::min([]);
+		RETURN math::min([101, 213, 202]);
+		RETURN math::min([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::None;
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(101);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(101.5);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_mode() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::mode([]);
+		RETURN math::mode([101, 213, 202]);
+		RETURN math::mode([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_nan());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(213);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(213.5);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_nearestrank() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::nearestrank([], 75);
+		RETURN math::nearestrank([101, 213, 202], 75);
+		RETURN math::nearestrank([101.5, 213.5, 202.5], 75);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_nan());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(213);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(213.5);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_percentile() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::percentile([], 99);
+		RETURN math::percentile([101, 213, 202], 99);
+		RETURN math::percentile([101.5, 213.5, 202.5], 99);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_nan());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(207.5);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(208.0);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_pow() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::pow(101, 3);
+		RETURN math::pow(101.5, 3);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(1030301);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(1045678.375);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_product() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::product([]);
+		RETURN math::product([101, 213, 202]);
+		RETURN math::product([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(1);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(4345626);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(4388225.625);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_round() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::round(101);
+		RETURN math::round(101.5);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(101);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(102);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_spread() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::spread([]);
+		RETURN math::spread([101, 213, 202]);
+		RETURN math::spread([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_nan());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(112);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(112.0);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_sqrt() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::sqrt(101);
+		RETURN math::sqrt(101.5);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(10.04987562112089);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("10.07472083980494220820325739456714210123675076934383520155548236146713380225253351613768233376490240");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_stddev() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::stddev([]);
+		RETURN math::stddev([101, 213, 202]);
+		RETURN math::stddev([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_nan());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("61.73329733620260786466504830446900810163706056134726969779498735043443723773086343343420617365104296");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("61.73329733620260786466504830446900810163706056134726969779498735043443723773086343343420617365104296");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_sum() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::sum([]);
+		RETURN math::sum([101, 213, 202]);
+		RETURN math::sum([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(516);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(517.5);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_top() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::top([1,2,3], 0);
+		RETURN math::top([1,2,3], 1);
+		RETURN math::top([1,2,3], 2);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function math::top(). The second argument must be an integer greater than 0."
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[3]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[2,3]");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_trimean() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::trimean([]);
+		RETURN math::trimean([101, 213, 202]);
+		RETURN math::trimean([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_nan());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(152.875);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(153.25);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_math_variance() -> Result<(), Error> {
+	let sql = r#"
+		RETURN math::variance([]);
+		RETURN math::variance([101, 213, 202]);
+		RETURN math::variance([101.5, 213.5, 202.5]);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	assert!(tmp.is_nan());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(3811);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(3811.0);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
 // --------------------------------------------------
 // meta
 // --------------------------------------------------

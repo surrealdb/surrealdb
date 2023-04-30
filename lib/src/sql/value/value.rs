@@ -873,6 +873,11 @@ impl Value {
 	}
 
 	/// Check if this Value is a Number and is an integer
+	pub fn is_nan(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_nan())
+	}
+
+	/// Check if this Value is a Number and is an integer
 	pub fn is_integer(&self) -> bool {
 		matches!(self, Value::Number(v) if v.is_integer())
 	}
