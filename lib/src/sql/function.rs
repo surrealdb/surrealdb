@@ -11,7 +11,6 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::kind::{kind, Kind};
 use crate::sql::script::{script as func, Script};
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::{single, value, Value};
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
@@ -24,19 +23,20 @@ use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::sequence::delimited;
 use nom::sequence::preceded;
-use serde::ser::SerializeTupleVariant;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Function")]
 pub enum Function {
 	Cast(Kind, Value),
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
+	// Add new variants here
 }
 
 impl PartialOrd for Function {
@@ -222,47 +222,6 @@ impl fmt::Display for Function {
 	}
 }
 
-impl Serialize for Function {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			match self {
-				Self::Cast(s, e) => {
-					let mut serializer = serializer.serialize_tuple_variant(TOKEN, 0, "Cast", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-				Self::Normal(s, e) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 1, "Normal", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-				Self::Custom(s, e) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 2, "Custom", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-				Self::Script(s, e) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 3, "Script", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-			}
-		} else {
-			serializer.serialize_none()
-		}
-	}
-}
-
 pub fn function(i: &str) -> IResult<&str, Function> {
 	alt((normal, custom, script, cast))(i)
 }
@@ -358,6 +317,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("push"),
 			tag("remove"),
 			tag("reverse"),
+			tag("slice"),
 			tag("sort::asc"),
 			tag("sort::desc"),
 			tag("sort"),
@@ -391,7 +351,7 @@ fn function_duration(i: &str) -> IResult<&str, &str> {
 		tag("weeks"),
 		tag("years"),
 		preceded(
-			tag("from"),
+			tag("from::"),
 			alt((
 				tag("days"),
 				tag("hours"),
@@ -561,7 +521,7 @@ fn function_time(i: &str) -> IResult<&str, &str> {
 		tag("week"),
 		tag("yday"),
 		tag("year"),
-		preceded(tag("from"), alt((tag("micros"), tag("millis"), tag("secs"), tag("unix")))),
+		preceded(tag("from::"), alt((tag("micros"), tag("millis"), tag("secs"), tag("unix")))),
 	))(i)
 }
 

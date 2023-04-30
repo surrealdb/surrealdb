@@ -119,34 +119,33 @@ impl serde::ser::SerializeTupleVariant for SerializeFunction {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use serde::Serialize;
 
 	#[test]
 	fn cast() {
 		let function = Function::Cast(Default::default(), Default::default());
-		let serialized = serialize_internal(|| function.serialize(Serializer.wrap())).unwrap();
+		let serialized = function.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(function, serialized);
 	}
 
 	#[test]
 	fn normal() {
 		let function = Function::Normal(Default::default(), vec![Default::default()]);
-		let serialized = serialize_internal(|| function.serialize(Serializer.wrap())).unwrap();
+		let serialized = function.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(function, serialized);
 	}
 
 	#[test]
 	fn custom() {
 		let function = Function::Custom(Default::default(), vec![Default::default()]);
-		let serialized = serialize_internal(|| function.serialize(Serializer.wrap())).unwrap();
+		let serialized = function.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(function, serialized);
 	}
 
 	#[test]
 	fn script() {
 		let function = Function::Script(Default::default(), vec![Default::default()]);
-		let serialized = serialize_internal(|| function.serialize(Serializer.wrap())).unwrap();
+		let serialized = function.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(function, serialized);
 	}
 }

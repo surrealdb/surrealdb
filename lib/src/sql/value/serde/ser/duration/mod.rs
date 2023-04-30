@@ -85,13 +85,12 @@ impl serde::ser::SerializeStruct for SerializeDuration {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use serde::Serialize;
 
 	#[test]
 	fn default() {
 		let duration = Duration::default();
-		let serialized = serialize_internal(|| duration.serialize(Serializer.wrap())).unwrap();
+		let serialized = duration.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(duration, serialized);
 	}
 }

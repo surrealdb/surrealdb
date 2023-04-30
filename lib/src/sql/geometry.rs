@@ -4,7 +4,6 @@ use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
-use crate::sql::serde::is_internal_serialization;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, Point, Polygon};
@@ -18,7 +17,6 @@ use nom::multi::separated_list1;
 use nom::number::complete::double;
 use nom::sequence::delimited;
 use nom::sequence::preceded;
-use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::iter::{once, FromIterator};
@@ -29,7 +27,8 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
 const SINGLE: char = '\'';
 const DOUBLE: char = '\"';
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "$surrealdb::private::sql::Geometry")]
 pub enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),
@@ -38,6 +37,7 @@ pub enum Geometry {
 	MultiLine(MultiLineString<f64>),
 	MultiPolygon(MultiPolygon<f64>),
 	Collection(Vec<Geometry>),
+	// Add new variants here
 }
 
 impl PartialOrd for Geometry {
@@ -461,143 +461,6 @@ impl fmt::Display for Geometry {
 					"{{ type: 'GeometryCollection', geometries: [{}] }}",
 					Fmt::comma_separated(v)
 				)
-			}
-		}
-	}
-}
-
-impl Serialize for Geometry {
-	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			match self {
-				Self::Point(v) => s.serialize_newtype_variant(TOKEN, 0, "Point", v),
-				Self::Line(v) => s.serialize_newtype_variant(TOKEN, 1, "Line", v),
-				Self::Polygon(v) => s.serialize_newtype_variant(TOKEN, 2, "Polygon", v),
-				Self::MultiPoint(v) => s.serialize_newtype_variant(TOKEN, 3, "MultiPoint", v),
-				Self::MultiLine(v) => s.serialize_newtype_variant(TOKEN, 4, "MultiLine", v),
-				Self::MultiPolygon(v) => s.serialize_newtype_variant(TOKEN, 5, "MultiPolygon", v),
-				Self::Collection(v) => s.serialize_newtype_variant(TOKEN, 6, "Collection", v),
-			}
-		} else {
-			match self {
-				Self::Point(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("Point")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(vec![v.x(), v.y()].as_slice())?;
-					map.end()
-				}
-				Self::Line(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("LineString")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(
-						v.points()
-							.map(|p| vec![p.x(), p.y()])
-							.collect::<Vec<Vec<f64>>>()
-							.as_slice(),
-					)?;
-					map.end()
-				}
-				Self::Polygon(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("Polygon")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(
-						vec![v
-							.exterior()
-							.points()
-							.map(|p| vec![p.x(), p.y()])
-							.collect::<Vec<Vec<f64>>>()]
-						.into_iter()
-						.chain(
-							v.interiors()
-								.iter()
-								.map(|i| {
-									i.points()
-										.map(|p| vec![p.x(), p.y()])
-										.collect::<Vec<Vec<f64>>>()
-								})
-								.collect::<Vec<Vec<Vec<f64>>>>(),
-						)
-						.collect::<Vec<Vec<Vec<f64>>>>()
-						.as_slice(),
-					)?;
-					map.end()
-				}
-				Self::MultiPoint(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("MultiPoint")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(
-						v.0.iter()
-							.map(|v| vec![v.x(), v.y()])
-							.collect::<Vec<Vec<f64>>>()
-							.as_slice(),
-					)?;
-					map.end()
-				}
-				Self::MultiLine(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("MultiLineString")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(
-						v.0.iter()
-							.map(|v| {
-								v.points().map(|v| vec![v.x(), v.y()]).collect::<Vec<Vec<f64>>>()
-							})
-							.collect::<Vec<Vec<Vec<f64>>>>()
-							.as_slice(),
-					)?;
-					map.end()
-				}
-				Self::MultiPolygon(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("MultiPolygon")?;
-					map.serialize_key("coordinates")?;
-					map.serialize_value(
-						v.0.iter()
-							.map(|v| {
-								vec![v
-									.exterior()
-									.points()
-									.map(|p| vec![p.x(), p.y()])
-									.collect::<Vec<Vec<f64>>>()]
-								.into_iter()
-								.chain(
-									v.interiors()
-										.iter()
-										.map(|i| {
-											i.points()
-												.map(|p| vec![p.x(), p.y()])
-												.collect::<Vec<Vec<f64>>>()
-										})
-										.collect::<Vec<Vec<Vec<f64>>>>(),
-								)
-								.collect::<Vec<Vec<Vec<f64>>>>()
-							})
-							.collect::<Vec<Vec<Vec<Vec<f64>>>>>()
-							.as_slice(),
-					)?;
-					map.end()
-				}
-				Self::Collection(v) => {
-					let mut map = s.serialize_map(Some(2))?;
-					map.serialize_key("type")?;
-					map.serialize_value("GeometryCollection")?;
-					map.serialize_key("geometries")?;
-					map.serialize_value(v)?;
-					map.end()
-				}
 			}
 		}
 	}

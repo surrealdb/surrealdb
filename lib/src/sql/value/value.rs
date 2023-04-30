@@ -31,7 +31,6 @@ use crate::sql::param::{param, Param};
 use crate::sql::part::Part;
 use crate::sql::range::{range, Range};
 use crate::sql::regex::{regex, Regex};
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::strand::{strand, Strand};
 use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
@@ -104,14 +103,14 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 	Ok((i, Values(v)))
 }
 
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Value")]
 #[format(Named)]
 pub enum Value {
 	#[default]
 	None,
 	Null,
-	False,
-	True,
+	Bool(bool),
 	Number(Number),
 	Strand(Strand),
 	Duration(Duration),
@@ -136,6 +135,7 @@ pub enum Value {
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
+	// Add new variants here
 }
 
 impl Eq for Value {}
@@ -149,10 +149,7 @@ impl Ord for Value {
 impl From<bool> for Value {
 	#[inline]
 	fn from(v: bool) -> Self {
-		match v {
-			true => Value::True,
-			false => Value::False,
-		}
+		Value::Bool(v)
 	}
 }
 
@@ -659,8 +656,7 @@ impl TryFrom<Value> for bool {
 	type Error = Error;
 	fn try_from(value: Value) -> Result<Self, Self::Error> {
 		match value {
-			Value::True => Ok(true),
-			Value::False => Ok(false),
+			Value::Bool(boolean) => Ok(boolean),
 			_ => Err(Error::TryFrom(value.to_string(), "bool")),
 		}
 	}
@@ -766,19 +762,18 @@ impl Value {
 
 	/// Check if this Value is TRUE or 'true'
 	pub fn is_true(&self) -> bool {
-		matches!(self, Value::True)
+		matches!(self, Value::Bool(true))
 	}
 
 	/// Check if this Value is FALSE or 'false'
 	pub fn is_false(&self) -> bool {
-		matches!(self, Value::False)
+		matches!(self, Value::Bool(false))
 	}
 
 	/// Check if this Value is truthy
 	pub fn is_truthy(&self) -> bool {
 		match self {
-			Value::True => true,
-			Value::False => false,
+			Value::Bool(boolean) => *boolean,
 			Value::Uuid(_) => true,
 			Value::Thing(_) => true,
 			Value::Geometry(_) => true,
@@ -875,6 +870,11 @@ impl Value {
 	/// Check if this Value is a decimal Number
 	pub fn is_decimal(&self) -> bool {
 		matches!(self, Value::Number(Number::Decimal(_)))
+	}
+
+	/// Check if this Value is a Number but is a NAN
+	pub fn is_nan(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_nan())
 	}
 
 	/// Check if this Value is a Number and is an integer
@@ -1198,10 +1198,18 @@ impl Value {
 	/// Try to convert this value to a `bool`
 	pub(crate) fn convert_to_bool(self) -> Result<bool, Error> {
 		match self {
-			// Allow any true value
-			Value::True => Ok(true),
-			// Allow any false value
-			Value::False => Ok(false),
+			// Allow any boolean value
+			Value::Bool(boolean) => Ok(boolean),
+			// Attempt to convert a string value
+			Value::Strand(ref v) => match v.parse::<bool>() {
+				// The string can be represented as a Float
+				Ok(v) => Ok(v),
+				// Ths string is not a float
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "bool".into(),
+				}),
+			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -1679,8 +1687,7 @@ impl Value {
 		match self {
 			Value::None => true,
 			Value::Null => true,
-			Value::False => true,
-			Value::True => true,
+			Value::Bool(_) => true,
 			Value::Uuid(_) => true,
 			Value::Number(_) => true,
 			Value::Strand(_) => true,
@@ -1703,8 +1710,7 @@ impl Value {
 		match self {
 			Value::None => other.is_none(),
 			Value::Null => other.is_null(),
-			Value::True => other.is_true(),
-			Value::False => other.is_false(),
+			Value::Bool(boolean) => *boolean,
 			Value::Uuid(v) => match other {
 				Value::Uuid(w) => v == w,
 				Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
@@ -1892,8 +1898,7 @@ impl fmt::Display for Value {
 		match self {
 			Value::None => write!(f, "NONE"),
 			Value::Null => write!(f, "NULL"),
-			Value::True => write!(f, "true"),
-			Value::False => write!(f, "false"),
+			Value::Bool(v) => write!(f, "{v}"),
 			Value::Number(v) => write!(f, "{v}"),
 			Value::Strand(v) => write!(f, "{v}"),
 			Value::Duration(v) => write!(f, "{v}"),
@@ -1944,10 +1949,6 @@ impl Value {
 		doc: Option<&'async_recursion Value>,
 	) -> Result<Value, Error> {
 		match self {
-			Value::None => Ok(Value::None),
-			Value::Null => Ok(Value::Null),
-			Value::True => Ok(Value::True),
-			Value::False => Ok(Value::False),
 			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Block(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Range(v) => v.compute(ctx, opt, txn, doc).await,
@@ -1961,63 +1962,6 @@ impl Value {
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
 			_ => Ok(self.to_owned()),
-		}
-	}
-}
-
-impl Serialize for Value {
-	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			match self {
-				Value::None => s.serialize_unit_variant(TOKEN, 0, "None"),
-				Value::Null => s.serialize_unit_variant(TOKEN, 1, "Null"),
-				Value::False => s.serialize_unit_variant(TOKEN, 2, "False"),
-				Value::True => s.serialize_unit_variant(TOKEN, 3, "True"),
-				Value::Number(v) => s.serialize_newtype_variant(TOKEN, 4, "Number", v),
-				Value::Strand(v) => s.serialize_newtype_variant(TOKEN, 5, "Strand", v),
-				Value::Duration(v) => s.serialize_newtype_variant(TOKEN, 6, "Duration", v),
-				Value::Datetime(v) => s.serialize_newtype_variant(TOKEN, 7, "Datetime", v),
-				Value::Uuid(v) => s.serialize_newtype_variant(TOKEN, 8, "Uuid", v),
-				Value::Array(v) => s.serialize_newtype_variant(TOKEN, 9, "Array", v),
-				Value::Object(v) => s.serialize_newtype_variant(TOKEN, 10, "Object", v),
-				Value::Geometry(v) => s.serialize_newtype_variant(TOKEN, 11, "Geometry", v),
-				Value::Bytes(v) => s.serialize_newtype_variant(TOKEN, 12, "Bytes", v),
-				Value::Param(v) => s.serialize_newtype_variant(TOKEN, 13, "Param", v),
-				Value::Idiom(v) => s.serialize_newtype_variant(TOKEN, 14, "Idiom", v),
-				Value::Table(v) => s.serialize_newtype_variant(TOKEN, 15, "Table", v),
-				Value::Thing(v) => s.serialize_newtype_variant(TOKEN, 16, "Thing", v),
-				Value::Model(v) => s.serialize_newtype_variant(TOKEN, 17, "Model", v),
-				Value::Regex(v) => s.serialize_newtype_variant(TOKEN, 18, "Regex", v),
-				Value::Block(v) => s.serialize_newtype_variant(TOKEN, 19, "Block", v),
-				Value::Range(v) => s.serialize_newtype_variant(TOKEN, 20, "Range", v),
-				Value::Edges(v) => s.serialize_newtype_variant(TOKEN, 21, "Edges", v),
-				Value::Future(v) => s.serialize_newtype_variant(TOKEN, 22, "Future", v),
-				Value::Constant(v) => s.serialize_newtype_variant(TOKEN, 23, "Constant", v),
-				Value::Function(v) => s.serialize_newtype_variant(TOKEN, 24, "Function", v),
-				Value::Subquery(v) => s.serialize_newtype_variant(TOKEN, 25, "Subquery", v),
-				Value::Expression(v) => s.serialize_newtype_variant(TOKEN, 26, "Expression", v),
-			}
-		} else {
-			match self {
-				Value::None => s.serialize_none(),
-				Value::Null => s.serialize_none(),
-				Value::True => s.serialize_bool(true),
-				Value::False => s.serialize_bool(false),
-				Value::Thing(v) => s.serialize_some(v),
-				Value::Uuid(v) => s.serialize_some(v),
-				Value::Array(v) => s.serialize_some(v),
-				Value::Object(v) => s.serialize_some(v),
-				Value::Number(v) => s.serialize_some(v),
-				Value::Strand(v) => s.serialize_some(v),
-				Value::Geometry(v) => s.serialize_some(v),
-				Value::Duration(v) => s.serialize_some(v),
-				Value::Datetime(v) => s.serialize_some(v),
-				Value::Constant(v) => s.serialize_some(v),
-				_ => s.serialize_none(),
-			}
 		}
 	}
 }
@@ -2131,8 +2075,8 @@ pub fn single(i: &str) -> IResult<&str, Value> {
 		alt((
 			map(tag_no_case("NONE"), |_| Value::None),
 			map(tag_no_case("NULL"), |_| Value::Null),
-			map(tag_no_case("true"), |_| Value::True),
-			map(tag_no_case("false"), |_| Value::False),
+			map(tag_no_case("true"), |_| Value::Bool(true)),
+			map(tag_no_case("false"), |_| Value::Bool(false)),
 		)),
 		alt((
 			map(idiom::multi, Value::from),
@@ -2166,8 +2110,8 @@ pub fn select(i: &str) -> IResult<&str, Value> {
 			map(expression, Value::from),
 			map(tag_no_case("NONE"), |_| Value::None),
 			map(tag_no_case("NULL"), |_| Value::Null),
-			map(tag_no_case("true"), |_| Value::True),
-			map(tag_no_case("false"), |_| Value::False),
+			map(tag_no_case("true"), |_| Value::Bool(true)),
+			map(tag_no_case("false"), |_| Value::Bool(false)),
 		)),
 		alt((
 			map(idiom::multi, Value::from),
@@ -2268,8 +2212,8 @@ pub fn json(i: &str) -> IResult<&str, Value> {
 	// Parse any simple JSON-like value
 	alt((
 		map(tag_no_case("null".as_bytes()), |_| Value::Null),
-		map(tag_no_case("true".as_bytes()), |_| Value::True),
-		map(tag_no_case("false".as_bytes()), |_| Value::False),
+		map(tag_no_case("true".as_bytes()), |_| Value::Bool(true)),
+		map(tag_no_case("false".as_bytes()), |_| Value::Bool(false)),
 		map(datetime, Value::from),
 		map(geometry, Value::from),
 		map(unique, Value::from),
@@ -2305,8 +2249,8 @@ mod tests {
 	#[test]
 	fn check_true() {
 		assert_eq!(false, Value::None.is_true());
-		assert_eq!(true, Value::True.is_true());
-		assert_eq!(false, Value::False.is_true());
+		assert_eq!(true, Value::Bool(true).is_true());
+		assert_eq!(false, Value::Bool(false).is_true());
 		assert_eq!(false, Value::from(1).is_true());
 		assert_eq!(false, Value::from("something").is_true());
 	}
@@ -2314,8 +2258,8 @@ mod tests {
 	#[test]
 	fn check_false() {
 		assert_eq!(false, Value::None.is_false());
-		assert_eq!(false, Value::True.is_false());
-		assert_eq!(true, Value::False.is_false());
+		assert_eq!(false, Value::Bool(true).is_false());
+		assert_eq!(true, Value::Bool(false).is_false());
 		assert_eq!(false, Value::from(1).is_false());
 		assert_eq!(false, Value::from("something").is_false());
 	}
@@ -2324,8 +2268,8 @@ mod tests {
 	fn convert_truthy() {
 		assert_eq!(false, Value::None.is_truthy());
 		assert_eq!(false, Value::Null.is_truthy());
-		assert_eq!(true, Value::True.is_truthy());
-		assert_eq!(false, Value::False.is_truthy());
+		assert_eq!(true, Value::Bool(true).is_truthy());
+		assert_eq!(false, Value::Bool(false).is_truthy());
 		assert_eq!(false, Value::from(0).is_truthy());
 		assert_eq!(true, Value::from(1).is_truthy());
 		assert_eq!(true, Value::from(-1).is_truthy());
@@ -2342,8 +2286,8 @@ mod tests {
 	fn convert_string() {
 		assert_eq!(String::from("NONE"), Value::None.as_string());
 		assert_eq!(String::from("NULL"), Value::Null.as_string());
-		assert_eq!(String::from("true"), Value::True.as_string());
-		assert_eq!(String::from("false"), Value::False.as_string());
+		assert_eq!(String::from("true"), Value::Bool(true).as_string());
+		assert_eq!(String::from("false"), Value::Bool(false).as_string());
 		assert_eq!(String::from("0"), Value::from(0).as_string());
 		assert_eq!(String::from("1"), Value::from(1).as_string());
 		assert_eq!(String::from("-1"), Value::from(-1).as_string());
@@ -2384,11 +2328,11 @@ mod tests {
 	fn check_serialize() {
 		assert_eq!(5, Value::None.to_vec().len());
 		assert_eq!(5, Value::Null.to_vec().len());
-		assert_eq!(5, Value::True.to_vec().len());
-		assert_eq!(6, Value::False.to_vec().len());
+		assert_eq!(7, Value::Bool(true).to_vec().len());
+		assert_eq!(7, Value::Bool(false).to_vec().len());
 		assert_eq!(13, Value::from("test").to_vec().len());
 		assert_eq!(29, Value::parse("{ hello: 'world' }").to_vec().len());
-		assert_eq!(43, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
+		assert_eq!(45, Value::parse("{ compact: true, schema: 0 }").to_vec().len());
 	}
 
 	#[test]

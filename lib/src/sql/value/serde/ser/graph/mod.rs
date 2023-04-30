@@ -124,13 +124,12 @@ impl serde::ser::SerializeStruct for SerializeGraph {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use serde::Serialize;
 
 	#[test]
 	fn default() {
 		let graph = Graph::default();
-		let serialized = serialize_internal(|| graph.serialize(Serializer.wrap())).unwrap();
+		let serialized = graph.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(graph, serialized);
 	}
 
@@ -140,7 +139,7 @@ mod tests {
 			cond: Some(Default::default()),
 			..Default::default()
 		};
-		let serialized = serialize_internal(|| graph.serialize(Serializer.wrap())).unwrap();
+		let serialized = graph.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(graph, serialized);
 	}
 
@@ -150,7 +149,7 @@ mod tests {
 			alias: Some(Default::default()),
 			..Default::default()
 		};
-		let serialized = serialize_internal(|| graph.serialize(Serializer.wrap())).unwrap();
+		let serialized = graph.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(graph, serialized);
 	}
 }

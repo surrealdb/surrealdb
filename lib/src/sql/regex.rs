@@ -1,5 +1,4 @@
 use crate::sql::error::IResult;
-use crate::sql::serde::is_internal_serialization;
 use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
 use nom::character::complete::anychar;
@@ -78,11 +77,7 @@ impl Serialize for Regex {
 	where
 		S: Serializer,
 	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, self.0.as_str())
-		} else {
-			serializer.serialize_none()
-		}
+		serializer.serialize_newtype_struct(TOKEN, self.0.as_str())
 	}
 }
 

@@ -2,22 +2,22 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Ft {
+pub struct Ft<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: String,
+	pub db: &'a str,
 	_c: u8,
-	pub tb: String,
+	pub tb: &'a str,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ft: String,
+	pub ft: &'a str,
 }
 
-pub fn new(ns: &str, db: &str, tb: &str, ft: &str) -> Ft {
-	Ft::new(ns.to_string(), db.to_string(), tb.to_string(), ft.to_string())
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ft: &'a str) -> Ft<'a> {
+	Ft::new(ns, db, tb, ft)
 }
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
@@ -32,9 +32,9 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	k
 }
 
-impl Ft {
-	pub fn new(ns: String, db: String, tb: String, ft: String) -> Ft {
-		Ft {
+impl<'a> Ft<'a> {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ft: &'a str) -> Self {
+		Self {
 			__: 0x2f, // /
 			_a: 0x2a, // *
 			ns,
@@ -57,10 +57,10 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Ft::new(
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
+			"test",
+			"test",
 		);
 		let enc = Ft::encode(&val).unwrap();
 		let dec = Ft::decode(&enc).unwrap();

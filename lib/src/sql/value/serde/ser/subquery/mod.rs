@@ -68,70 +68,69 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn value() {
 		let subquery = Subquery::Value(Default::default());
-		let serialized = serialize_internal(|| subquery.serialize(Serializer.wrap())).unwrap();
+		let serialized = subquery.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(subquery, serialized);
 	}
 
 	#[test]
 	fn ifelse() {
 		let subquery = Subquery::Ifelse(Default::default());
-		let serialized = serialize_internal(|| subquery.serialize(Serializer.wrap())).unwrap();
+		let serialized = subquery.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(subquery, serialized);
 	}
 
 	#[test]
 	fn output() {
 		let subquery = Subquery::Output(Default::default());
-		let serialized = serialize_internal(|| subquery.serialize(Serializer.wrap())).unwrap();
+		let serialized = subquery.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(subquery, serialized);
 	}
 
 	#[test]
 	fn select() {
 		let subquery = Subquery::Select(Default::default());
-		let serialized = serialize_internal(|| subquery.serialize(Serializer.wrap())).unwrap();
+		let serialized = subquery.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(subquery, serialized);
 	}
 
 	#[test]
 	fn create() {
 		let subquery = Subquery::Create(Default::default());
-		let serialized = serialize_internal(|| subquery.serialize(Serializer.wrap())).unwrap();
+		let serialized = subquery.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(subquery, serialized);
 	}
 
 	#[test]
 	fn update() {
 		let subquery = Subquery::Update(Default::default());
-		let serialized = serialize_internal(|| subquery.serialize(Serializer.wrap())).unwrap();
+		let serialized = subquery.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(subquery, serialized);
 	}
 
 	#[test]
 	fn delete() {
 		let subquery = Subquery::Delete(Default::default());
-		let serialized = serialize_internal(|| subquery.serialize(Serializer.wrap())).unwrap();
+		let serialized = subquery.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(subquery, serialized);
 	}
 
 	#[test]
 	fn relate() {
 		let subquery = Subquery::Relate(Default::default());
-		let serialized = serialize_internal(|| subquery.serialize(Serializer.wrap())).unwrap();
+		let serialized = subquery.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(subquery, serialized);
 	}
 
 	#[test]
 	fn insert() {
 		let subquery = Subquery::Insert(Default::default());
-		let serialized = serialize_internal(|| subquery.serialize(Serializer.wrap())).unwrap();
+		let serialized = subquery.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(subquery, serialized);
 	}
 }

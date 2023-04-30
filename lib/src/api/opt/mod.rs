@@ -9,13 +9,13 @@ mod strict;
 mod tls;
 
 use crate::api::err::Error;
-use crate::sql::serde::serialize_internal;
 use crate::sql::to_value;
 use crate::sql::Thing;
 use crate::sql::Value;
 use dmp::Diff;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde_json::json;
 use serde_json::Map;
 use serde_json::Value as JsonValue;
 
@@ -140,38 +140,162 @@ impl PatchOp {
 	}
 }
 
-fn into_json(value: Value) -> serde_json::Result<JsonValue> {
+impl From<Value> for serde_json::Value {
+	fn from(value: Value) -> Self {
+		into_json(value, true)
+	}
+}
+
+fn into_json(value: Value, simplify: bool) -> JsonValue {
 	use crate::sql;
 	use crate::sql::Number;
-	use serde_json::Error;
 
 	#[derive(Serialize)]
 	struct Array(Vec<JsonValue>);
 
-	impl TryFrom<sql::Array> for Array {
-		type Error = Error;
-
-		fn try_from(arr: sql::Array) -> Result<Self, Self::Error> {
+	impl From<(sql::Array, bool)> for Array {
+		fn from((arr, simplify): (sql::Array, bool)) -> Self {
 			let mut vec = Vec::with_capacity(arr.0.len());
 			for value in arr.0 {
-				vec.push(into_json(value)?);
+				vec.push(into_json(value, simplify));
 			}
-			Ok(Self(vec))
+			Self(vec)
 		}
 	}
 
 	#[derive(Serialize)]
 	struct Object(Map<String, JsonValue>);
 
-	impl TryFrom<sql::Object> for Object {
-		type Error = Error;
-
-		fn try_from(obj: sql::Object) -> Result<Self, Self::Error> {
+	impl From<(sql::Object, bool)> for Object {
+		fn from((obj, simplify): (sql::Object, bool)) -> Self {
 			let mut map = Map::with_capacity(obj.0.len());
 			for (key, value) in obj.0 {
-				map.insert(key.to_owned(), into_json(value)?);
+				map.insert(key.to_owned(), into_json(value, simplify));
 			}
-			Ok(Self(map))
+			Self(map)
+		}
+	}
+
+	#[derive(Serialize)]
+	enum CoordinatesType {
+		Point,
+		LineString,
+		Polygon,
+		MultiPoint,
+		MultiLineString,
+		MultiPolygon,
+	}
+
+	#[derive(Serialize)]
+	struct Coordinates {
+		#[serde(rename = "type")]
+		typ: CoordinatesType,
+		coordinates: JsonValue,
+	}
+
+	#[derive(Serialize)]
+	struct GeometryCollection;
+
+	#[derive(Serialize)]
+	struct Geometries {
+		#[serde(rename = "type")]
+		typ: GeometryCollection,
+		geometries: Vec<JsonValue>,
+	}
+
+	#[derive(Serialize)]
+	struct Geometry(JsonValue);
+
+	impl From<sql::Geometry> for Geometry {
+		fn from(geo: sql::Geometry) -> Self {
+			Self(match geo {
+				sql::Geometry::Point(v) => json!(Coordinates {
+					typ: CoordinatesType::Point,
+					coordinates: vec![json!(v.x()), json!(v.y())].into(),
+				}),
+				sql::Geometry::Line(v) => json!(Coordinates {
+					typ: CoordinatesType::LineString,
+					coordinates: v
+						.points()
+						.map(|p| vec![json!(p.x()), json!(p.y())].into())
+						.collect::<Vec<JsonValue>>()
+						.into(),
+				}),
+				sql::Geometry::Polygon(v) => json!(Coordinates {
+					typ: CoordinatesType::Polygon,
+					coordinates: vec![v
+						.exterior()
+						.points()
+						.map(|p| vec![json!(p.x()), json!(p.y())].into())
+						.collect::<Vec<JsonValue>>()]
+					.into_iter()
+					.chain(
+						v.interiors()
+							.iter()
+							.map(|i| {
+								i.points()
+									.map(|p| vec![json!(p.x()), json!(p.y())].into())
+									.collect::<Vec<JsonValue>>()
+							})
+							.collect::<Vec<Vec<JsonValue>>>(),
+					)
+					.collect::<Vec<Vec<JsonValue>>>()
+					.into(),
+				}),
+				sql::Geometry::MultiPoint(v) => json!(Coordinates {
+					typ: CoordinatesType::MultiPoint,
+					coordinates: v
+						.0
+						.iter()
+						.map(|v| vec![json!(v.x()), json!(v.y())].into())
+						.collect::<Vec<JsonValue>>()
+						.into()
+				}),
+				sql::Geometry::MultiLine(v) => json!(Coordinates {
+					typ: CoordinatesType::MultiLineString,
+					coordinates: v
+						.0
+						.iter()
+						.map(|v| {
+							v.points()
+								.map(|v| vec![json!(v.x()), json!(v.y())].into())
+								.collect::<Vec<JsonValue>>()
+						})
+						.collect::<Vec<Vec<JsonValue>>>()
+						.into()
+				}),
+				sql::Geometry::MultiPolygon(v) => json!(Coordinates {
+					typ: CoordinatesType::MultiPolygon,
+					coordinates: v
+						.0
+						.iter()
+						.map(|v| {
+							vec![v
+								.exterior()
+								.points()
+								.map(|p| vec![json!(p.x()), json!(p.y())].into())
+								.collect::<Vec<JsonValue>>()]
+							.into_iter()
+							.chain(
+								v.interiors()
+									.iter()
+									.map(|i| {
+										i.points()
+											.map(|p| vec![json!(p.x()), json!(p.y())].into())
+											.collect::<Vec<JsonValue>>()
+									})
+									.collect::<Vec<Vec<JsonValue>>>(),
+							)
+							.collect::<Vec<Vec<JsonValue>>>()
+						})
+						.collect::<Vec<Vec<Vec<JsonValue>>>>()
+						.into(),
+				}),
+				sql::Geometry::Collection(v) => json!(Geometries {
+					typ: GeometryCollection,
+					geometries: v.into_iter().map(Geometry::from).map(|x| x.0).collect(),
+				}),
+			})
 		}
 	}
 
@@ -183,17 +307,14 @@ fn into_json(value: Value) -> serde_json::Result<JsonValue> {
 		Object(Object),
 	}
 
-	impl TryFrom<sql::Id> for Id {
-		type Error = Error;
-
-		fn try_from(id: sql::Id) -> Result<Self, Self::Error> {
-			use sql::Id::*;
-			Ok(match id {
-				Number(n) => Id::Number(n),
-				String(s) => Id::String(s),
-				Array(arr) => Id::Array(arr.try_into()?),
-				Object(obj) => Id::Object(obj.try_into()?),
-			})
+	impl From<(sql::Id, bool)> for Id {
+		fn from((id, simplify): (sql::Id, bool)) -> Self {
+			match id {
+				sql::Id::Number(n) => Id::Number(n),
+				sql::Id::String(s) => Id::String(s),
+				sql::Id::Array(arr) => Id::Array((arr, simplify).into()),
+				sql::Id::Object(obj) => Id::Object((obj, simplify).into()),
+			}
 		}
 	}
 
@@ -203,46 +324,58 @@ fn into_json(value: Value) -> serde_json::Result<JsonValue> {
 		id: Id,
 	}
 
-	impl TryFrom<sql::Thing> for Thing {
-		type Error = Error;
-
-		fn try_from(thing: sql::Thing) -> Result<Self, Self::Error> {
-			Ok(Self {
+	impl From<(sql::Thing, bool)> for Thing {
+		fn from((thing, simplify): (sql::Thing, bool)) -> Self {
+			Self {
 				tb: thing.tb,
-				id: thing.id.try_into()?,
-			})
+				id: (thing.id, simplify).into(),
+			}
 		}
 	}
 
 	match value {
-		Value::None | Value::Null => Ok(JsonValue::Null),
-		Value::False => Ok(false.into()),
-		Value::True => Ok(true.into()),
-		Value::Number(Number::Int(n)) => Ok(n.into()),
-		Value::Number(Number::Float(n)) => Ok(n.into()),
-		Value::Number(Number::Decimal(n)) => serde_json::to_value(n),
-		Value::Strand(strand) => Ok(strand.0.into()),
-		Value::Duration(d) => serde_json::to_value(d),
-		Value::Datetime(d) => serde_json::to_value(d),
-		Value::Uuid(uuid) => serde_json::to_value(uuid),
-		Value::Array(arr) => Ok(JsonValue::Array(Array::try_from(arr)?.0)),
-		Value::Object(obj) => Ok(JsonValue::Object(Object::try_from(obj)?.0)),
-		Value::Geometry(geometry) => serde_json::to_value(geometry),
-		Value::Bytes(bytes) => serde_json::to_value(bytes),
-		Value::Param(param) => serde_json::to_value(param),
-		Value::Idiom(idiom) => serde_json::to_value(idiom),
-		Value::Table(table) => serde_json::to_value(table),
-		Value::Thing(thing) => serde_json::to_value(thing),
-		Value::Model(model) => serde_json::to_value(model),
-		Value::Regex(regex) => serde_json::to_value(regex),
-		Value::Block(block) => serde_json::to_value(block),
-		Value::Range(range) => serde_json::to_value(range),
-		Value::Edges(edges) => serde_json::to_value(edges),
-		Value::Future(future) => serde_json::to_value(future),
-		Value::Constant(constant) => serde_json::to_value(constant),
-		Value::Function(function) => serde_json::to_value(function),
-		Value::Subquery(subquery) => serde_json::to_value(subquery),
-		Value::Expression(expression) => serde_json::to_value(expression),
+		Value::None | Value::Null => JsonValue::Null,
+		Value::Bool(boolean) => boolean.into(),
+		Value::Number(Number::Int(n)) => n.into(),
+		Value::Number(Number::Float(n)) => n.into(),
+		Value::Number(Number::Decimal(n)) => json!(n),
+		Value::Strand(strand) => match simplify {
+			true => strand.0.into(),
+			false => json!(strand),
+		},
+		Value::Duration(d) => match simplify {
+			true => d.to_string().into(),
+			false => json!(d),
+		},
+		Value::Datetime(d) => json!(d),
+		Value::Uuid(uuid) => json!(uuid),
+		Value::Array(arr) => JsonValue::Array(Array::from((arr, simplify)).0),
+		Value::Object(obj) => JsonValue::Object(Object::from((obj, simplify)).0),
+		Value::Geometry(geo) => match simplify {
+			true => Geometry::from(geo).0,
+			false => json!(geo),
+		},
+		Value::Bytes(bytes) => json!(bytes),
+		Value::Param(param) => json!(param),
+		Value::Idiom(idiom) => json!(idiom),
+		Value::Table(table) => json!(table),
+		Value::Thing(thing) => match simplify {
+			true => thing.to_string().into(),
+			false => json!(thing),
+		},
+		Value::Model(model) => json!(model),
+		Value::Regex(regex) => json!(regex),
+		Value::Block(block) => json!(block),
+		Value::Range(range) => json!(range),
+		Value::Edges(edges) => json!(edges),
+		Value::Future(future) => json!(future),
+		Value::Constant(constant) => match simplify {
+			true => constant.as_f64().into(),
+			false => json!(constant),
+		},
+		Value::Function(function) => json!(function),
+		Value::Subquery(subquery) => json!(subquery),
+		Value::Expression(expression) => json!(expression),
 	}
 }
 
@@ -251,15 +384,7 @@ pub(crate) fn from_value<T>(value: Value) -> Result<T, Error>
 where
 	T: DeserializeOwned,
 {
-	let json = match serialize_internal(|| into_json(value.clone())) {
-		Ok(json) => json,
-		Err(error) => {
-			return Err(Error::FromValue {
-				value,
-				error: error.to_string(),
-			})
-		}
-	};
+	let json = into_json(value.clone(), false);
 	serde_json::from_value(json).map_err(|error| Error::FromValue {
 		value,
 		error: error.to_string(),

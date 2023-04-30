@@ -52,21 +52,33 @@ pub fn reverse((string,): (String,)) -> Result<Value, Error> {
 }
 
 pub fn slice((val, beg, lim): (String, Option<isize>, Option<isize>)) -> Result<Value, Error> {
-	let val = match beg {
-		Some(v) if v < 0 => {
-			val.chars().skip(val.len().saturating_sub(v.unsigned_abs())).collect::<String>()
+	// Only count the chars if we need to and only do it once.
+	let mut char_count = usize::MAX;
+	let mut count_chars = || {
+		if char_count == usize::MAX {
+			char_count = val.chars().count();
 		}
-		Some(v) => val.chars().skip(v as usize).collect::<String>(),
-		None => val,
+		char_count
 	};
-	let val = match lim {
-		Some(v) if v < 0 => {
-			val.chars().take(val.len().saturating_sub(v.unsigned_abs())).collect::<String>()
-		}
-		Some(v) => val.chars().take(v as usize).collect::<String>(),
-		None => val,
+
+	let skip = match beg {
+		Some(v) if v < 0 => count_chars().saturating_sub(v.unsigned_abs()),
+		Some(v) => v as usize,
+		None => 0,
 	};
-	Ok(val.into())
+
+	let take = match lim {
+		Some(v) if v < 0 => count_chars().saturating_sub(skip).saturating_sub(v.unsigned_abs()),
+		Some(v) => v as usize,
+		None => usize::MAX,
+	};
+
+	Ok(if skip > 0 || take < usize::MAX {
+		val.chars().skip(skip).take(take).collect::<String>()
+	} else {
+		val
+	}
+	.into())
 }
 
 pub fn slug((string,): (String,)) -> Result<Value, Error> {
@@ -91,4 +103,32 @@ pub fn uppercase((string,): (String,)) -> Result<Value, Error> {
 
 pub fn words((string,): (String,)) -> Result<Value, Error> {
 	Ok(string.split_whitespace().collect::<Vec<&str>>().into())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::slice;
+	use crate::sql::Value;
+
+	#[test]
+	fn string_slice() {
+		fn test(initial: &str, beg: Option<isize>, end: Option<isize>, expected: &str) {
+			assert_eq!(slice((initial.to_owned(), beg, end)).unwrap(), Value::from(expected));
+		}
+
+		let string = "abcdefg";
+		test(string, None, None, string);
+		test(string, Some(2), None, &string[2..]);
+		test(string, Some(2), Some(3), &string[2..5]);
+		test(string, Some(2), Some(-1), "cdef");
+		test(string, Some(-2), None, "fg");
+		test(string, Some(-4), Some(2), "de");
+		test(string, Some(-4), Some(-1), "def");
+
+		let string = "你好世界";
+		test(string, None, None, string);
+		test(string, Some(1), None, "好世界");
+		test(string, Some(-1), None, "界");
+		test(string, Some(-2), Some(1), "世");
+	}
 }
