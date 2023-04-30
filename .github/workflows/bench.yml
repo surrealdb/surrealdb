@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-20.04-16-cores
     steps:
       - uses: actions/checkout@v3
-      - uses: boa-dev/criterion-compare-action@update_comment
+      - uses: boa-dev/criterion-compare-action@v3 # @update_comment branch is broken?
         with:
           cwd: "lib"
           package: "surrealdb"
