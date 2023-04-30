@@ -2302,6 +2302,222 @@ async fn function_rand_uuid_v7() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
+async fn function_string_concat() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::concat();
+		RETURN string::concat("test");
+		RETURN string::concat("this", " ", "is", " ", "a", " ", "test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("test");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("this is a test");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_ends_with() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::endsWith("", "");
+		RETURN string::endsWith("", "test");
+		RETURN string::endsWith("this is a test", "test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_join() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::join("");
+		RETURN string::join("test");
+		RETURN string::join(" ", "this", "is", "a", "test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("this is a test");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_len() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::len("");
+		RETURN string::len("test");
+		RETURN string::len("test this string");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(4);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(16);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_lowercase() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::lowercase("");
+		RETURN string::lowercase("TeSt");
+		RETURN string::lowercase("THIS IS A TEST");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("test");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("this is a test");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_repeat() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::repeat("", 3);
+		RETURN string::repeat("test", 3);
+		RETURN string::repeat("test this", 3);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("testtesttest");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("test thistest thistest this");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_replace() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::replace("", "", "");
+		RETURN string::replace('this is a test', 'a test', 'awesome');
+		RETURN string::replace("this is an 😀 emoji test", "😀", "awesome 👍");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("this is awesome");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("this is an awesome 👍 emoji test");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_reverse() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::reverse("");
+		RETURN string::reverse("test");
+		RETURN string::reverse("test this string");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("tset");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("gnirts siht tset");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_slice() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::slice("the quick brown fox jumps over the lazy dog.");
@@ -2343,6 +2559,168 @@ async fn function_string_slice() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("''");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_slug() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::slug("");
+		RETURN string::slug("this is a test");
+		RETURN string::slug("blog - this is a test with 😀 emojis");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("this-is-a-test");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("blog-this-is-a-test-with-grinning-emojis");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_split() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::split("", "");
+		RETURN string::split("this, is, a, list", ", ");
+		RETURN string::split("this - is - another - test", " - ");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("['', '']");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("['this', 'is', 'a', 'list']");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("['this', 'is', 'another', 'test']");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_starts_with() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::startsWith("", "");
+		RETURN string::startsWith("", "test");
+		RETURN string::startsWith("test this string", "test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_trim() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::trim("");
+		RETURN string::trim("test");
+		RETURN string::trim("   this is a test with text   ");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("test");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("this is a test with text");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_uppercase() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::uppercase("");
+		RETURN string::uppercase("tEsT");
+		RETURN string::uppercase("this is a test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("TEST");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("THIS IS A TEST");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_string_words() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::words("");
+		RETURN string::words("test");
+		RETURN string::words("this is a test");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("[]");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("['test']");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("['this', 'is', 'a', 'test']");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
