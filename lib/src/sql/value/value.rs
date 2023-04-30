@@ -872,6 +872,11 @@ impl Value {
 		matches!(self, Value::Number(Number::Decimal(_)))
 	}
 
+	/// Check if this Value is a Number but is a NAN
+	pub fn is_nan(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_nan())
+	}
+
 	/// Check if this Value is a Number and is an integer
 	pub fn is_integer(&self) -> bool {
 		matches!(self, Value::Number(v) if v.is_integer())
@@ -1195,6 +1200,16 @@ impl Value {
 		match self {
 			// Allow any boolean value
 			Value::Bool(boolean) => Ok(boolean),
+			// Attempt to convert a string value
+			Value::Strand(ref v) => match v.parse::<bool>() {
+				// The string can be represented as a Float
+				Ok(v) => Ok(v),
+				// Ths string is not a float
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "bool".into(),
+				}),
+			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,

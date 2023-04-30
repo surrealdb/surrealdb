@@ -179,6 +179,10 @@ impl Number {
 	// Simple number detection
 	// -----------------------------------
 
+	pub fn is_nan(&self) -> bool {
+		matches!(self, Number::Float(v) if v.is_nan())
+	}
+
 	pub fn is_int(&self) -> bool {
 		matches!(self, Number::Int(_))
 	}
