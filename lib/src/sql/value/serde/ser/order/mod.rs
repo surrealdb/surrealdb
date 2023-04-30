@@ -94,13 +94,12 @@ impl serde::ser::SerializeStruct for SerializeOrder {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use serde::Serialize;
 
 	#[test]
 	fn default() {
 		let order = Order::default();
-		let serialized = serialize_internal(|| order.serialize(Serializer.wrap())).unwrap();
+		let serialized = order.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(order, serialized);
 	}
 }

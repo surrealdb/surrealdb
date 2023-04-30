@@ -118,28 +118,27 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn int() {
 		let number = Number::Int(Default::default());
-		let serialized = serialize_internal(|| number.serialize(Serializer.wrap())).unwrap();
+		let serialized = number.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(number, serialized);
 	}
 
 	#[test]
 	fn float() {
 		let number = Number::Float(Default::default());
-		let serialized = serialize_internal(|| number.serialize(Serializer.wrap())).unwrap();
+		let serialized = number.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(number, serialized);
 	}
 
 	#[test]
 	fn decimal() {
 		let number = Number::Decimal(Default::default());
-		let serialized = serialize_internal(|| number.serialize(Serializer.wrap())).unwrap();
+		let serialized = number.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(number, serialized);
 	}
 }

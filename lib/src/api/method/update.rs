@@ -10,6 +10,7 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::sql::Id;
+use crate::sql::Value;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::future::Future;
@@ -28,7 +29,7 @@ pub struct Update<'r, C: Connection, R> {
 }
 
 macro_rules! into_future {
-	() => {
+	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Update {
 				router,
@@ -42,10 +43,20 @@ macro_rules! into_future {
 					None => resource?.into(),
 				};
 				let mut conn = Client::new(Method::Update);
-				conn.execute(router?, Param::new(vec![param])).await
+				conn.$method(router?, Param::new(vec![param])).await
 			})
 		}
 	};
+}
+
+impl<'r, Client> IntoFuture for Update<'r, Client, Value>
+where
+	Client: Connection,
+{
+	type Output = Result<Value>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+
+	into_future! {execute_value}
 }
 
 impl<'r, Client, R> IntoFuture for Update<'r, Client, Option<R>>
@@ -53,10 +64,10 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<R>;
+	type Output = Result<Option<R>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	into_future! {}
+	into_future! {execute_opt}
 }
 
 impl<'r, Client, R> IntoFuture for Update<'r, Client, Vec<R>>
@@ -67,7 +78,18 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	into_future! {}
+	into_future! {execute_vec}
+}
+
+impl<C> Update<'_, C, Value>
+where
+	C: Connection,
+{
+	/// Restricts the records to update to those in the specified range
+	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
+		self.range = Some(bounds.into());
+		self
+	}
 }
 
 impl<C, R> Update<'_, C, Vec<R>>
@@ -81,44 +103,7 @@ where
 	}
 }
 
-macro_rules! content {
-	($this:ident, $data:ident) => {
-		Content {
-			router: $this.router,
-			method: Method::Update,
-			resource: $this.resource,
-			range: $this.range,
-			content: $data,
-			response_type: PhantomData,
-		}
-	};
-}
-
-macro_rules! merge {
-	($this:ident, $data:ident) => {
-		Merge {
-			router: $this.router,
-			resource: $this.resource,
-			range: $this.range,
-			content: $data,
-			response_type: PhantomData,
-		}
-	};
-}
-
-macro_rules! patch {
-	($this:ident, $data:ident) => {
-		Patch {
-			router: $this.router,
-			resource: $this.resource,
-			range: $this.range,
-			patches: vec![$data],
-			response_type: PhantomData,
-		}
-	};
-}
-
-impl<'r, C, R> Update<'r, C, Option<R>>
+impl<'r, C, R> Update<'r, C, R>
 where
 	C: Connection,
 	R: DeserializeOwned,
@@ -128,7 +113,14 @@ where
 	where
 		D: Serialize,
 	{
-		content!(self, data)
+		Content {
+			router: self.router,
+			method: Method::Update,
+			resource: self.resource,
+			range: self.range,
+			content: data,
+			response_type: PhantomData,
+		}
 	}
 
 	/// Merges the current document / record data with the specified data
@@ -136,38 +128,23 @@ where
 	where
 		D: Serialize,
 	{
-		merge!(self, data)
+		Merge {
+			router: self.router,
+			resource: self.resource,
+			range: self.range,
+			content: data,
+			response_type: PhantomData,
+		}
 	}
 
 	/// Patches the current document / record data with the specified JSON Patch data
 	pub fn patch(self, PatchOp(patch): PatchOp) -> Patch<'r, C, R> {
-		patch!(self, patch)
-	}
-}
-
-impl<'r, C, R> Update<'r, C, Vec<R>>
-where
-	C: Connection,
-	R: DeserializeOwned,
-{
-	/// Replaces the current document / record data with the specified data
-	pub fn content<D>(self, data: D) -> Content<'r, C, D, Vec<R>>
-	where
-		D: Serialize,
-	{
-		content!(self, data)
-	}
-
-	/// Merges the current document / record data with the specified data
-	pub fn merge<D>(self, data: D) -> Merge<'r, C, D, Vec<R>>
-	where
-		D: Serialize,
-	{
-		merge!(self, data)
-	}
-
-	/// Patches the current document / record data with the specified JSON Patch data
-	pub fn patch(self, PatchOp(patch): PatchOp) -> Patch<'r, C, Vec<R>> {
-		patch!(self, patch)
+		Patch {
+			router: self.router,
+			resource: self.resource,
+			range: self.range,
+			patches: vec![patch],
+			response_type: PhantomData,
+		}
 	}
 }

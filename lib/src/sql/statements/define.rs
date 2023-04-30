@@ -1035,7 +1035,8 @@ impl DefineFieldStatement {
 		// Claim transaction
 		let mut run = run.lock().await;
 		// Process the statement
-		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name.to_string());
+		let fd = self.name.to_string();
+		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.add_ns(opt.ns(), opt.strict).await?;
 		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
 		run.add_tb(opt.ns(), opt.db(), &self.what, opt.strict).await?;

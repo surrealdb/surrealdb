@@ -707,7 +707,8 @@ impl RemoveFieldStatement {
 		// Claim transaction
 		let mut run = run.lock().await;
 		// Delete the definition
-		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name.to_string());
+		let fd = self.name.to_string();
+		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.del(key).await?;
 		// Clear the cache
 		let key = crate::key::fd::prefix(opt.ns(), opt.db(), &self.what);

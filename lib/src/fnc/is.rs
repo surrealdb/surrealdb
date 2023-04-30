@@ -88,103 +88,103 @@ mod tests {
 	#[test]
 	fn alphanum() {
 		let value = super::alphanum((String::from("abc123"),)).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let value = super::alphanum((String::from("y%*"),)).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]
 	fn alpha() {
 		let value = super::alpha((String::from("abc"),)).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let value = super::alpha((String::from("1234"),)).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]
 	fn ascii() {
 		let value = super::ascii((String::from("abc"),)).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let value = super::ascii((String::from("中国"),)).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]
 	fn domain() {
 		let value = super::domain((String::from("食狮.中国"),)).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let value = super::domain((String::from("example-.com"),)).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]
 	fn email() {
 		let input = (String::from("user@[fd79:cdcb:38cc:9dd:f686:e06d:32f3:c123]"),);
 		let value = super::email(input).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let input = (String::from("john..doe@example.com"),);
 		let value = super::email(input).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]
 	fn hexadecimal() {
 		let value = super::hexadecimal((String::from("00FF00"),)).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let value = super::hexadecimal((String::from("SurrealDB"),)).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]
 	fn latitude() {
 		let value = super::latitude((String::from("-0.118092"),)).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let value = super::latitude((String::from("12345"),)).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]
 	fn longitude() {
 		let value = super::longitude((String::from("51.509865"),)).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let value = super::longitude((String::from("12345"),)).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]
 	fn numeric() {
 		let value = super::numeric((String::from("12345"),)).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let value = super::numeric((String::from("abcde"),)).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]
 	fn semver() {
 		let value = super::semver((String::from("1.0.0"),)).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let value = super::semver((String::from("1.0"),)).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 
 	#[test]
 	fn uuid() {
 		let input = (String::from("123e4567-e89b-12d3-a456-426614174000").into(),);
 		let value = super::uuid(input).unwrap();
-		assert_eq!(value, Value::True);
+		assert_eq!(value, Value::Bool(true));
 
 		let input = (String::from("foo-bar").into(),);
 		let value = super::uuid(input).unwrap();
-		assert_eq!(value, Value::False);
+		assert_eq!(value, Value::Bool(false));
 	}
 }

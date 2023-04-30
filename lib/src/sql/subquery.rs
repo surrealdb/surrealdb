@@ -5,7 +5,6 @@ use crate::err::Error;
 use crate::sql::comment::mightbespace;
 use crate::sql::ending::subquery as ending;
 use crate::sql::error::IResult;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
@@ -24,7 +23,8 @@ use std::fmt::{self, Display, Formatter};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Subquery")]
 pub enum Subquery {
 	Value(Value),
 	Ifelse(IfelseStatement),
@@ -35,6 +35,7 @@ pub enum Subquery {
 	Delete(DeleteStatement),
 	Relate(RelateStatement),
 	Insert(InsertStatement),
+	// Add new variants here
 }
 
 impl PartialOrd for Subquery {
@@ -221,29 +222,6 @@ impl Display for Subquery {
 			Self::Relate(v) => write!(f, "({v})"),
 			Self::Insert(v) => write!(f, "({v})"),
 			Self::Ifelse(v) => Display::fmt(v, f),
-		}
-	}
-}
-
-impl Serialize for Subquery {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			match self {
-				Self::Value(v) => serializer.serialize_newtype_variant(TOKEN, 0, "Value", v),
-				Self::Ifelse(v) => serializer.serialize_newtype_variant(TOKEN, 1, "Ifelse", v),
-				Self::Output(v) => serializer.serialize_newtype_variant(TOKEN, 2, "Output", v),
-				Self::Select(v) => serializer.serialize_newtype_variant(TOKEN, 3, "Select", v),
-				Self::Create(v) => serializer.serialize_newtype_variant(TOKEN, 4, "Create", v),
-				Self::Update(v) => serializer.serialize_newtype_variant(TOKEN, 5, "Update", v),
-				Self::Delete(v) => serializer.serialize_newtype_variant(TOKEN, 6, "Delete", v),
-				Self::Relate(v) => serializer.serialize_newtype_variant(TOKEN, 7, "Relate", v),
-				Self::Insert(v) => serializer.serialize_newtype_variant(TOKEN, 8, "Insert", v),
-			}
-		} else {
-			serializer.serialize_none()
 		}
 	}
 }

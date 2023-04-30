@@ -49,7 +49,7 @@
 //!     db.use_ns("namespace").use_db("database").await?;
 //!
 //!     // Create a new person with a random ID
-//!     let created: Person = db.create("person")
+//!     let created: Vec<Person> = db.create("person")
 //!         .content(Person {
 //!             title: "Founder & CEO".into(),
 //!             name: Name {
@@ -61,7 +61,7 @@
 //!         .await?;
 //!
 //!     // Create a new person with a specific ID
-//!     let created: Person = db.create(("person", "jaime"))
+//!     let created: Option<Person> = db.create(("person", "jaime"))
 //!         .content(Person {
 //!             title: "Founder & COO".into(),
 //!             name: Name {
@@ -73,7 +73,7 @@
 //!         .await?;
 //!
 //!     // Update a person record with a specific ID
-//!     let updated: Person = db.update(("person", "jaime"))
+//!     let updated: Option<Person> = db.update(("person", "jaime"))
 //!         .merge(json!({"marketing": true}))
 //!         .await?;
 //!

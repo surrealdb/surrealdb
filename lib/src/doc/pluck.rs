@@ -55,13 +55,13 @@ impl<'a> Document<'a> {
 		}?;
 		// Check if this record exists
 		if self.id.is_some() {
-			// Loop through all field statements
-			for fd in self.fd(opt, txn).await?.iter() {
-				// Loop over each field in document
-				for k in out.each(&fd.name).iter() {
-					// Check for a PERMISSIONS clause
-					if opt.perms && opt.auth.perms() {
-						// Process field permissions
+			// Should we run permissions checks?
+			if opt.perms && opt.auth.perms() {
+				// Loop through all field statements
+				for fd in self.fd(opt, txn).await?.iter() {
+					// Loop over each field in document
+					for k in out.each(&fd.name).iter() {
+						// Process the field permissions
 						match &fd.permissions.select {
 							Permission::Full => (),
 							Permission::None => out.del(ctx, opt, txn, k).await?,

@@ -23,39 +23,39 @@ async fn compare_empty() -> Result<(), Error> {
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::False;
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::False;
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::True;
+	let val = Value::Bool(true);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::False;
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())

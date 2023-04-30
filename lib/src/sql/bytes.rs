@@ -1,4 +1,3 @@
-use crate::sql::serde::is_internal_serialization;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -10,10 +9,6 @@ impl Serialize for Bytes {
 	where
 		S: serde::Serializer,
 	{
-		if is_internal_serialization() {
-			serializer.serialize_bytes(&self.0)
-		} else {
-			serializer.serialize_none()
-		}
+		serializer.serialize_bytes(&self.0)
 	}
 }
