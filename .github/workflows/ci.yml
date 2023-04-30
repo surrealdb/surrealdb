@@ -105,6 +105,20 @@ jobs:
       - name: Run cargo test
         run: cargo test --locked --no-default-features --features storage-mem --workspace -- --skip api_integration
 
+  bench:
+    name: Bench library
+    runs-on: ubuntu-20.04-16-cores
+    steps:
+      - uses: actions/checkout@v3
+      - uses: boa-dev/criterion-compare-action@v3
+        with:
+          cwd: "lib"
+          package: "surrealdb"
+          defaultFeatures: false
+          features: "kv-mem"
+          branchName: ${{ github.base_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   ws-engine:
     name: WebSocket engine
     runs-on: ubuntu-20.04-16-cores

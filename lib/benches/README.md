@@ -3,11 +3,10 @@
 This directory contains some micro-benchmarks that can help objectively
 establish the performance implications of a change.
 
-## Building
+## Manual usage
 
-The benchmarks use the unstable `test` feature and therefore require
-a `nightly` Rust compiler.
+Execute the following command at the top level of the repository:
 
 ```console
-cargo +nightly bench --package surrealdb --jobs 1 --features kv-mem
+cargo bench --package surrealdb --no-default-features --features kv-mem
 ```
