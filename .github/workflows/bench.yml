@@ -1,0 +1,21 @@
+on: [pull_request]
+name: Benchmark
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bench:
+    name: Bench library
+    runs-on: ubuntu-20.04-16-cores
+    steps:
+      - uses: actions/checkout@v3
+      - uses: boa-dev/criterion-compare-action@update_comment
+        with:
+          cwd: "lib"
+          package: "surrealdb"
+          defaultFeatures: false
+          features: "kv-mem"
+          branchName: ${{ github.base_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
