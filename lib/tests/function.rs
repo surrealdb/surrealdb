@@ -1367,6 +1367,292 @@ async fn function_duration_from_weeks() -> Result<(), Error> {
 // is
 // --------------------------------------------------
 
+#[tokio::test]
+async fn function_parse_is_alphanum() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::alphanum("abcdefg123");
+		RETURN is::alphanum("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_alpha() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::alpha("abcdefg");
+		RETURN is::alpha("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_ascii() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::ascii("abcdefg123");
+		RETURN is::ascii("this is a test 😀");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_datetime() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::datetime("2015-09-05 23:56:04", "%Y-%m-%d %H:%M:%S");
+		RETURN is::datetime("2012-06-22 23:56:04", "%T");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_domain() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::domain("surrealdb.com");
+		RETURN is::domain("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_email() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::email("info@surrealdb.com");
+		RETURN is::email("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_hexadecimal() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::hexadecimal("ff009e");
+		RETURN is::hexadecimal("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_latitude() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::latitude("51.509865");
+		RETURN is::latitude("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_longitude() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::longitude("-0.136439");
+		RETURN is::longitude("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_numeric() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::numeric("13136439");
+		RETURN is::numeric("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_semver() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::semver("1.0.0-rc.1");
+		RETURN is::semver("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_url() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::url("https://surrealdb.com/docs");
+		RETURN is::url("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_parse_is_uuid() -> Result<(), Error> {
+	let sql = r#"
+		RETURN is::uuid("e72bee20-f49b-11ec-b939-0242ac120002");
+		RETURN is::uuid("this is a test!");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
 // --------------------------------------------------
 // math
 // --------------------------------------------------
