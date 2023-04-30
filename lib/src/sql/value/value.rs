@@ -872,7 +872,7 @@ impl Value {
 		matches!(self, Value::Number(Number::Decimal(_)))
 	}
 
-	/// Check if this Value is a Number and is an integer
+	/// Check if this Value is a Number but is a NAN
 	pub fn is_nan(&self) -> bool {
 		matches!(self, Value::Number(v) if v.is_nan())
 	}
