@@ -1,14 +1,17 @@
 use crate::sql::comment::mightbespace;
 use crate::sql::error::{Error, IResult};
+use crate::sql::geometry::{DOUBLE, SINGLE};
+use crate::sql::number::integer;
 use crate::sql::Operator::Dec;
 use geo::Point;
 use nom::branch::alt;
+use nom::character::complete::i64;
 use nom::character::streaming::char;
 use nom::combinator::map;
 use nom::complete::tag;
 use nom::error::ParseError;
 use nom::number::complete::double;
-use nom::sequence::tuple;
+use nom::sequence::{delimited, tuple};
 use nom::Parser;
 use std::fmt;
 use std::fmt::Formatter;
@@ -72,6 +75,13 @@ impl CardinalDegree {
 	}
 }
 
+impl From<(f64, f64, f64, CardinalDirection)> for CardinalDegree {
+	fn from(value: (f64, f64, f64, CardinalDirection)) -> Self {
+		let (degrees, minutes, seconds, direction) = value;
+		CardinalDegree(direction, degrees + minutes / 60.0 + seconds / 3600.0)
+	}
+}
+
 impl fmt::Display for CardinalDegree {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		// todo: precision?
@@ -83,15 +93,15 @@ impl fmt::Display for CardinalDegree {
 /// https://en.wikipedia.org/wiki/Decimal_degrees
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DecimalDegrees {
-	vertical: CardinalDegree,
-	horizontal: CardinalDegree,
+	lat: CardinalDegree,
+	lng: CardinalDegree,
 }
 
 impl From<(CardinalDegree, CardinalDegree)> for DecimalDegrees {
 	fn from(value: (CardinalDegree, CardinalDegree)) -> Self {
 		DecimalDegrees {
-			vertical: value.0,
-			horizontal: value.1,
+			lat: value.0,
+			lng: value.1,
 		}
 	}
 }
@@ -100,16 +110,13 @@ impl Into<Point> for DecimalDegrees {
 	/// Converts the decimal degrees into a [`Point`] by taking into account
 	/// the direction of each degree.
 	fn into(self) -> Point {
-		Point::new(
-			self.horizontal.value() * self.horizontal.direction(),
-			self.vertical.value() * self.vertical.direction(),
-		)
+		Point::new(self.lng.value() * self.lng.direction(), self.lat.value() * self.lat.direction())
 	}
 }
 
 impl fmt::Display for DecimalDegrees {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		write!(f, "{} {}", self.vertical, self.horizontal)
+		write!(f, "{} {}", self.lat, self.lng)
 	}
 }
 
@@ -157,6 +164,39 @@ fn cardinal_degree<'i: 't, 't>(
 	))(i)
 }
 
+fn dms_components(i: &str) -> IResult<&str, (f64, f64, f64)> {
+	let (i, degrees) = degree(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, minutes) = double(i)?;
+	let (i, _) = char(SINGLE)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, seconds) = double(i)?;
+	let (i, _) = char(DOUBLE)(i)?;
+	Ok((i, (degrees, minutes, seconds)))
+}
+
+/// Parses a single [`CardinalDegree`] in DMS format. The following formats are supported.
+/// - 40°60'3600"N
+/// - 40.0°60.0'3600.0"N
+/// - 40° 60' 3600" N
+/// - N40°60'3600"
+/// - N 40° 60' 3600"
+fn dms_dir(
+	i: &str,
+	direction: fn(input: &str) -> IResult<&str, CardinalDirection>,
+) -> IResult<&str, CardinalDegree> {
+	alt((
+		map(
+			tuple((mightbespace, direction, mightbespace, dms_components)),
+			|(_, dir, _, (deg, min, sec))| (deg, min, sec, dir).into(),
+		),
+		map(
+			tuple((mightbespace, dms_components, mightbespace, direction)),
+			|(_, (deg, min, sec), _, dir)| (deg, min, sec, dir).into(),
+		),
+	))(i)
+}
+
 /// Parses a latitude or longitude represented in decimal degrees.
 /// The following formats are supported.
 ///
@@ -170,14 +210,22 @@ pub(crate) fn decimal_degree(i: &str) -> IResult<&str, DecimalDegrees> {
 	Ok((i, (vertical, horizontal).into()))
 }
 
+/// Parses a latitude or longitude represented in DMS format.
+pub(crate) fn dms(i: &str) -> IResult<&str, DecimalDegrees> {
+	let (i, vertical) = dms_dir(i, vertical_dir)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, horizontal) = dms_dir(i, horizontal_dir)?;
+	(Ok((i, (vertical, horizontal).into())))
+}
+
 #[cfg(test)]
 mod tests {
 	use crate::sql::latlng::*;
 
 	fn example_dd() -> DecimalDegrees {
 		DecimalDegrees {
-			vertical: CardinalDegree(CardinalDirection::North, 40.6892),
-			horizontal: CardinalDegree(CardinalDirection::West, 74.0445),
+			lat: CardinalDegree(CardinalDirection::North, 40.6892),
+			lng: CardinalDegree(CardinalDirection::West, 74.0445),
 		}
 	}
 
@@ -219,5 +267,18 @@ mod tests {
 		assert_eq!(decimal_degree("40.6892°N 74.0445°W").unwrap().1, dd);
 		assert_eq!(decimal_degree("N40.6892° W74.0445°").unwrap().1, dd);
 		assert_eq!(decimal_degree("N 40.6892° W 74.0445°").unwrap().1, dd);
+	}
+
+	#[test]
+	fn test_parse_dms() {
+		let dd = DecimalDegrees {
+			lat: CardinalDegree(CardinalDirection::North, 42.0),
+			lng: CardinalDegree(CardinalDirection::West, 81.0),
+		};
+		assert_eq!(dms(r#"40°60'3600"N 79°60'3600"W"#).unwrap().1, dd);
+		assert_eq!(dms(r#"40.0°60.0'3600.0"N 79.0°60.0'3600.0"W"#).unwrap().1, dd);
+		assert_eq!(dms(r#"40° 60' 3600" N 79° 60' 3600" W"#).unwrap().1, dd);
+		assert_eq!(dms(r#"N40°60'3600" W79°60'3600""#).unwrap().1, dd);
+		assert_eq!(dms(r#"N 40° 60' 3600" W 79° 60' 3600""#).unwrap().1, dd);
 	}
 }

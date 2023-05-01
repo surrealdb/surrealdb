@@ -4,7 +4,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
-use crate::sql::latlng::decimal_degree;
+use crate::sql::latlng::{decimal_degree, dms};
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, Point, Polygon};
@@ -26,8 +26,8 @@ use std::{fmt, hash};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Geometry";
 
-const SINGLE: char = '\'';
-const DOUBLE: char = '\"';
+pub(crate) const SINGLE: char = '\'';
+pub(crate) const DOUBLE: char = '\"';
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::sql::Geometry")]
@@ -562,7 +562,11 @@ fn normal(i: &str) -> IResult<&str, Geometry> {
 }
 
 fn latlng(i: &str) -> IResult<&str, Geometry> {
-	map(decimal_degree, |dd| Geometry::Point(dd.into())).parse(i)
+	alt((
+		map(decimal_degree, |dd| Geometry::Point(dd.into())),
+		map(dms, |dd| Geometry::Point(dd.into())),
+	))
+	.parse(i)
 }
 
 fn point(i: &str) -> IResult<&str, Geometry> {
@@ -914,5 +918,14 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("(-74.0445, 40.6892)", format!("{}", out));
+	}
+
+	#[test]
+	fn dms() {
+		let sql = r#"40°60'3600"N 79°60'3600"W"#;
+		let res = geometry(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("(-81, 42)", format!("{}", out));
 	}
 }
