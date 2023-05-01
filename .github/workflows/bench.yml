@@ -28,8 +28,14 @@ jobs:
       - name: Benchmark baseline
         run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline baseline
 
+      - name: Extract baseline
+        run: cp -r target/criterion /tmp/criterion
+
       - name: Checkout changes
         uses: actions/checkout@v3
+
+      - name: Replace baseline
+        run: cp -r /tmp/criterion target/criterion
 
       - name: Benchmark changes
         run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline changes
