@@ -25,15 +25,17 @@ jobs:
           ref: ${{ github.base_ref }}
 
       - name: Benchmark baseline
-        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem
+        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline baseline
 
       - name: Checkout PR sources
         uses: actions/checkout@v3
 
-      - name: Benchmark PR
-        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem
+      - name: Benchmark changes
+        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline changes
 
-      
+      - name: Compare results
+        run: critcmp baseline changes
+
 #      - name: Copy benchmark results to artifacts directory
 #        run: |
 #          mkdir -p artifacts
