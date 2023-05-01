@@ -2948,6 +2948,23 @@ async fn function_string_concat() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_string_contains() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::contains("abcdefg", "bcd");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_ends_with() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::endsWith("", "");

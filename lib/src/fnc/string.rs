@@ -6,6 +6,10 @@ pub fn concat(args: Vec<Value>) -> Result<Value, Error> {
 	Ok(args.into_iter().map(|x| x.as_string()).collect::<Vec<_>>().concat().into())
 }
 
+pub fn contains((val, check): (String, String)) -> Result<Value, Error> {
+	Ok(val.contains(&check).into())
+}
+
 pub fn ends_with((val, chr): (String, String)) -> Result<Value, Error> {
 	Ok(val.ends_with(&chr).into())
 }
@@ -108,7 +112,7 @@ pub fn words((string,): (String,)) -> Result<Value, Error> {
 #[cfg(test)]
 mod tests {
 	use super::slice;
-	use crate::sql::Value;
+	use crate::{sql::Value, fnc::string::contains};
 
 	#[test]
 	fn string_slice() {
@@ -130,5 +134,17 @@ mod tests {
 		test(string, Some(1), None, "好世界");
 		test(string, Some(-1), None, "界");
 		test(string, Some(-2), Some(1), "世");
+	}
+
+	#[test]
+	fn string_contains() {
+		fn test(base: &str, contained: &str, expected: bool) {
+			assert_eq!(contains((base.to_string(), contained.to_string())).unwrap(), Value::from(expected));
+		}
+
+		test("abcde", "bcd", true);
+		test("abcde", "cbcd", false);
+		test("好世界", "世", true);
+		test("好世界", "你好", false);
 	}
 }

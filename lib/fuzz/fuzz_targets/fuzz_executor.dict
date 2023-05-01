@@ -274,6 +274,7 @@
 # "sleep("
 "string"
 "string::concat("
+"string::contains("
 "string::endsWith("
 "string::join("
 "string::len("
