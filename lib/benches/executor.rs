@@ -27,7 +27,7 @@ macro_rules! query {
 }
 
 fn bench_executor(c: &mut Criterion) {
-	let mut c = c.benchmark_group("parser");
+	let mut c = c.benchmark_group("executor");
 	c.throughput(Throughput::Elements(1));
 	query!(c, create_delete_simple, "CREATE person:one; DELETE person:one;");
 	query!(c, select_simple_one, "CREATE person:tobie;", "SELECT * FROM person;");
