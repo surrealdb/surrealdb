@@ -20,12 +20,6 @@ jobs:
           sudo apt-get -qq -y install protobuf-compiler libprotobuf-dev
           cargo install --quiet critcmp
 
-      - name: Checkout changes
-        uses: actions/checkout@v3
-
-      - name: Benchmark changes
-        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline changes
-
       - name: Checkout baseline
         uses: actions/checkout@v3
         with:
@@ -33,6 +27,12 @@ jobs:
 
       - name: Benchmark baseline
         run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline baseline
+
+      - name: Checkout changes
+        uses: actions/checkout@v3
+
+      - name: Benchmark changes
+        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline changes
 
       - name: Compare results
         run: critcmp baseline changes | tee benchmark_results
