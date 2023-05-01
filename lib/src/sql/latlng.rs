@@ -148,16 +148,13 @@ fn degree(input: &str) -> IResult<&str, f64> {
 /// parsed the vertical direction, they shouldn't be able to parse the horizontal
 /// direction.
 fn cardinal_degree<'i: 't, 't>(
-	direction: impl Fn() -> Box<dyn Parser<&'i str, CardinalDirection, Error<&'i str>>>,
-) -> impl Parser<&'i str, CardinalDegree, Error<&'i str>> {
-	move |input: &'i str| {
-		alt((
-			map(tuple((direction(), mightbespace, degree)), |(dir, _, deg)| {
-				CardinalDegree(dir, deg)
-			}),
-			map(tuple((degree, direction())), |(deg, dir)| CardinalDegree(dir, deg)),
-		))(input)
-	}
+	i: &'i str,
+	direction: fn(input: &str) -> IResult<&str, CardinalDirection>,
+) -> IResult<&'i str, CardinalDegree, Error<&'i str>> {
+	alt((
+		map(tuple((direction, mightbespace, degree)), |(dir, _, deg)| CardinalDegree(dir, deg)),
+		map(tuple((degree, direction)), |(deg, dir)| CardinalDegree(dir, deg)),
+	))(i)
 }
 
 /// Parses a latitude or longitude represented in decimal degrees.
@@ -167,9 +164,9 @@ fn cardinal_degree<'i: 't, 't>(
 /// - N40.6892° W74.0445°
 /// - N 40.6892° W 74.0445°
 pub(crate) fn decimal_degree(i: &str) -> IResult<&str, DecimalDegrees> {
-	let (i, vertical) = cardinal_degree(|| Box::new(vertical_dir)).parse(i)?;
+	let (i, vertical) = cardinal_degree(i, vertical_dir)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, horizontal) = cardinal_degree(|| Box::new(horizontal_dir)).parse(i)?;
+	let (i, horizontal) = cardinal_degree(i, horizontal_dir)?;
 	Ok((i, (vertical, horizontal).into()))
 }
 
@@ -199,11 +196,11 @@ mod tests {
 	#[test]
 	fn test_parse_cardinal_degree() {
 		let parse_vertical = |input: &str, expect: &str| {
-			let (_, dd) = cardinal_degree(|| Box::new(vertical_dir)).parse(input).unwrap();
+			let (_, dd) = cardinal_degree(input, vertical_dir).unwrap();
 			assert_eq!(format!("{}", dd), expect);
 		};
 		let parse_horizontal = |input: &str, expect: &str| {
-			let (_, dd) = cardinal_degree(|| Box::new(horizontal_dir)).parse(input).unwrap();
+			let (_, dd) = cardinal_degree(input, horizontal_dir).unwrap();
 			assert_eq!(format!("{}", dd), expect);
 		};
 
