@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 
 macro_rules! parser {
 	($c: expr, $name: ident, $parser: path, $text: expr) => {
@@ -11,6 +11,8 @@ macro_rules! parser {
 }
 
 fn bench_parser(c: &mut Criterion) {
+	let mut c = c.benchmark_group("parser");
+	c.throughput(Throughput::Elements(1));
 	parser!(c, select_simple, surrealdb::sql::parse, "SELECT * FROM person;");
 	parser!(
 		c,
@@ -56,6 +58,7 @@ fn bench_parser(c: &mut Criterion) {
 			&(1..=100).map(|n| format!("'{n}': {n}")).collect::<Vec<_>>().join(", ")
 		)
 	);
+	c.finish();
 }
 
 criterion_group!(benches, bench_parser);
