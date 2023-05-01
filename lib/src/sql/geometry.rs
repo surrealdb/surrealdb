@@ -4,6 +4,7 @@ use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
+use crate::sql::latlng::decimal_degree;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, Point, Polygon};
@@ -11,12 +12,13 @@ use geo::{MultiLineString, MultiPoint, MultiPolygon};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::char;
-use nom::combinator::opt;
+use nom::combinator::{map, opt};
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use nom::number::complete::double;
 use nom::sequence::delimited;
 use nom::sequence::preceded;
+use nom::Parser;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::iter::{once, FromIterator};
@@ -534,7 +536,7 @@ impl hash::Hash for Geometry {
 }
 
 pub fn geometry(i: &str) -> IResult<&str, Geometry> {
-	alt((simple, normal))(i)
+	alt((simple, normal, latlng))(i)
 }
 
 fn simple(i: &str) -> IResult<&str, Geometry> {
@@ -557,6 +559,10 @@ fn normal(i: &str) -> IResult<&str, Geometry> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('}')(i)?;
 	Ok((i, v))
+}
+
+fn latlng(i: &str) -> IResult<&str, Geometry> {
+	map(decimal_degree, |dd| Geometry::Point(dd.into())).parse(i)
 }
 
 fn point(i: &str) -> IResult<&str, Geometry> {
@@ -899,5 +905,14 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("(51.509865, -0.118092)", format!("{}", out));
+	}
+
+	#[test]
+	fn decimal_degrees() {
+		let sql = "40.6892°N 74.0445°W";
+		let res = geometry(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("(-74.0445, 40.6892)", format!("{}", out));
 	}
 }
