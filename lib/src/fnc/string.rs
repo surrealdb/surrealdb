@@ -111,7 +111,7 @@ pub fn words((string,): (String,)) -> Result<Value, Error> {
 
 #[cfg(test)]
 mod tests {
-	use super::{slice, contains};
+	use super::{contains, slice};
 	use crate::sql::Value;
 
 	#[test]
@@ -139,9 +139,15 @@ mod tests {
 	#[test]
 	fn string_contains() {
 		fn test(base: &str, contained: &str, expected: bool) {
-			assert_eq!(contains((base.to_string(), contained.to_string())).unwrap(), Value::from(expected));
+			assert_eq!(
+				contains((base.to_string(), contained.to_string())).unwrap(),
+				Value::from(expected)
+			);
 		}
 
+		test("", "", true);
+		test("", "a", false);
+		test("a", "", true);
 		test("abcde", "bcd", true);
 		test("abcde", "cbcd", false);
 		test("好世界", "世", true);
