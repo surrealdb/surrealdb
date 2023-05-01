@@ -111,8 +111,8 @@ pub fn words((string,): (String,)) -> Result<Value, Error> {
 
 #[cfg(test)]
 mod tests {
-	use super::slice;
-	use crate::{sql::Value, fnc::string::contains};
+	use super::{slice, contains};
+	use crate::sql::Value;
 
 	#[test]
 	fn string_slice() {
