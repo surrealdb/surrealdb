@@ -22,7 +22,7 @@ jobs:
       - name: Checkout baseline sources
         uses: actions/checkout@v3
         with:
-          ref: github.base_ref
+          ref: ${{ github.base_ref }}
 
       - name: Benchmark baseline
         run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem
