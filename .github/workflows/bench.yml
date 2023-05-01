@@ -15,8 +15,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
+          sudo -qq apt-get -y update
+          sudo -qq apt-get -y install protobuf-compiler libprotobuf-dev
           cargo install --quiet critcmp
 
       - name: Checkout baseline sources
