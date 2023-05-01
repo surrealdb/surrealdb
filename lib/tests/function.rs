@@ -5,135 +5,69 @@ use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
 use surrealdb::sql::Value;
 
+macro_rules! function {
+	($name: ident, $function: expr, $($argument: expr => $result: expr),*) => {
+		#[tokio::test]
+		async fn $name() -> Result<(), Error> {
+			let sql = concat!($("RETURN ", $function, "(", $argument, ");\n"),*);
+			let dbs = Datastore::new("memory").await?;
+			let ses = Session::for_kv().with_ns("test").with_db("test");
+			let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+			assert_eq!(res.len(), 0usize $(.saturating_add({
+				let _ = $result;
+				1
+			}))*);
+
+			$(
+				let actual = res.remove(0).result;
+				let msg = concat!(" test case ", $function, "(", $argument, ") => ", $result);
+				match actual {
+					Ok(actual) => assert_eq!(actual, Value::parse($result), "{}", msg),
+					Err(err) => assert_eq!(err.to_string(), $result.to_owned(), "{}", msg)
+				}
+			)*
+			Ok(())
+		}
+	}
+}
+
 // --------------------------------------------------
 // array
 // --------------------------------------------------
 
-#[tokio::test]
-async fn function_array_add() -> Result<(), Error> {
-	let sql = r#"
-		RETURN array::add([], 3);
-		RETURN array::add(3, true);
-		RETURN array::add([1,2], 2);
-		RETURN array::add([1,2], 3);
-		RETURN array::add([1,2], [2,3]);
-	"#;
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[3]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[1,2]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[1,2,3]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[1,2,3]");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
+function!(
+	function_array_add,
+	"array::add",
+	"[], 3" => "[3]",
+	"3, true" => "Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array",
+	"[1,2], 2" => "[1,2]",
+	"[1,2], 3" => "[1,2,3]",
+	"[1,2], [2,3]" => "[1,2,3]"
+);
 
-#[tokio::test]
-async fn function_array_all() -> Result<(), Error> {
-	let sql = r#"
-		RETURN array::all([]);
-		RETURN array::all("some text");
-		RETURN array::all([1,2,"text",3,NONE,3,4]);
-	"#;
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 3);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::Bool(true);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
-	));
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::Bool(false);
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
+function!(
+	function_array_all,
+	"array::all",
+	"[]" => "true",
+	"'some text'" => "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array",
+	"[1,2,'text',3,NONE,3,4]" => "false"
+);
 
-#[tokio::test]
-async fn function_array_any() -> Result<(), Error> {
-	let sql = r#"
-		RETURN array::any([]);
-		RETURN array::any("some text");
-		RETURN array::any([1,2,"text",3,NONE,3,4]);
-	"#;
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 3);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::Bool(false);
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::any(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
-	));
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::Bool(true);
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
+function!(
+	function_array_any,
+	"array::any",
+	"[]" => "false",
+	"'some text'" => "Incorrect arguments for function array::any(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array",
+	"[1,2,'text',3,NONE,3,4]" => "true"
+);
 
-#[tokio::test]
-async fn function_array_append() -> Result<(), Error> {
-	let sql = r#"
-		RETURN array::append([], 3);
-		RETURN array::append(3, true);
-		RETURN array::append([1,2], [2,3]);
-	"#;
-	let dbs = Datastore::new("memory").await?;
-	let ses = Session::for_kv().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 3);
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[3]");
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
-	));
-	//
-	let tmp = res.remove(0).result?;
-	let val = Value::parse("[1,2,[2,3]]");
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
+function!(
+	function_array_append,
+	"array::append",
+	"[], 3" => "[3]",
+	"3, true" => "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array",
+	"[1,2], [2,3]" => "[1,2,[2,3]]"
+);
 
 #[tokio::test]
 async fn function_array_combine() -> Result<(), Error> {
