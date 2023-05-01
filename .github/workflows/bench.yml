@@ -17,7 +17,7 @@ jobs:
         run: |
           sudo apt-get -y update
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
-          cargo install critcmp
+          cargo install --quiet critcmp
 
       - name: Checkout baseline sources
         uses: actions/checkout@v3
@@ -25,13 +25,13 @@ jobs:
           ref: github.base_ref
 
       - name: Benchmark baseline
-        run: cargo bench --package surrealdb --no-default-features --features kv-mem
+        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem
 
       - name: Checkout PR sources
         uses: actions/checkout@v3
 
       - name: Benchmark PR
-        run: cargo bench --package surrealdb --no-default-features --features kv-mem
+        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem
 
       
 #      - name: Copy benchmark results to artifacts directory
