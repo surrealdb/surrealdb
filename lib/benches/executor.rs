@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use surrealdb::{dbs::Session, kvs::Datastore};
 
 macro_rules! query {
