@@ -815,7 +815,7 @@ impl Value {
 
 	/// Check if this Value is a boolean value
 	pub fn is_bool(&self) -> bool {
-		self.is_true() || self.is_false()
+		matches!(self, Value::Bool(_))
 	}
 
 	/// Check if this Value is TRUE or 'true'
