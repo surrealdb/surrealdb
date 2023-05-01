@@ -19,7 +19,13 @@ jobs:
           sudo apt-get -qq -y install protobuf-compiler libprotobuf-dev
           cargo install --quiet critcmp
 
-      - name: Checkout baseline sources
+      - name: Checkout changes
+        uses: actions/checkout@v3
+
+      - name: Benchmark changes
+        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline changes
+
+      - name: Checkout baseline
         uses: actions/checkout@v3
         with:
           ref: ${{ github.base_ref }}
@@ -27,23 +33,13 @@ jobs:
       - name: Benchmark baseline
         run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline baseline
 
-      - name: Checkout PR sources
-        uses: actions/checkout@v3
-
-      - name: Benchmark changes
-        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline changes
+      - name: Make artifacts directory
 
       - name: Compare results
-        run: critcmp baseline changes
+        run: critcmp baseline changes | tee benchmark_results
 
-#      - name: Copy benchmark results to artifacts directory
-#        run: |
-#          mkdir -p artifacts
-#          cat > artifacts/message.md <<EOF
-#          # Test Message
-          
-#      - name: Save PR message as artifact
-#        uses: actions/upload-artifact@v1
-#        with:
-#          name: pr_message
-#          path: artifacts
+      - name: Save results as artifact
+        uses: actions/upload-artifact@v1
+        with:
+          name: Benchmark Results
+          path: benchmark_results
