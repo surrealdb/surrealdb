@@ -1,5 +1,6 @@
-on: [pull_request]
 name: Benchmark
+
+on: [pull_request]
 
 defaults:
   run:

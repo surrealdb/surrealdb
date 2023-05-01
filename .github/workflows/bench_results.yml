@@ -1,0 +1,19 @@
+name: Benchmark Results
+
+on:
+  workflow_run:
+    workflows: ["Benchmark"]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  comment:
+    name: Comment
+
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: Benchmark Results
+          path: benchmark_results
