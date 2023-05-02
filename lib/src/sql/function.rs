@@ -271,6 +271,7 @@ fn cast(i: &str) -> IResult<&str, Function> {
 fn function_names(i: &str) -> IResult<&str, &str> {
 	recognize(alt((
 		preceded(tag("array::"), function_array),
+		preceded(tag("bytes::"), function_bytes),
 		preceded(tag("crypto::"), function_crypto),
 		preceded(tag("duration::"), function_duration),
 		preceded(tag("encoding::"), function_encoding),
@@ -325,6 +326,10 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 			tag("union"),
 		)),
 	))(i)
+}
+
+fn function_bytes(i: &str) -> IResult<&str, &str> {
+	alt((tag("len"),))(i)
 }
 
 fn function_crypto(i: &str) -> IResult<&str, &str> {

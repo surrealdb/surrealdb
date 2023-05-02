@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::ops::Deref;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
-pub struct Bytes(pub(super) Vec<u8>);
+pub struct Bytes(pub(crate) Vec<u8>);
 
 impl Deref for Bytes {
 	type Target = Vec<u8>;

@@ -8,9 +8,11 @@ pub mod base64 {
 	}
 
 	pub fn decode((arg,): (String,)) -> Result<Value, Error> {
-		Ok(Value::from(STANDARD_NO_PAD.decode(arg).map_err(|_| Error::InvalidArguments {
-			name: "encoding::base64::decode".to_owned(),
-			message: "invalid base64".to_owned(),
-		})?))
+		Ok(Value::from(Bytes(STANDARD_NO_PAD.decode(arg).map_err(|_| {
+			Error::InvalidArguments {
+				name: "encoding::base64::decode".to_owned(),
+				message: "invalid base64".to_owned(),
+			}
+		})?)))
 	}
 }

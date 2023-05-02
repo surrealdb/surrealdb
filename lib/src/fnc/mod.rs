@@ -4,6 +4,7 @@ use crate::sql::value::Value;
 
 pub mod args;
 pub mod array;
+pub mod bytes;
 pub mod count;
 pub mod crypto;
 pub mod duration;
@@ -91,6 +92,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
 		"array::sort::desc" => array::sort::desc,
+		//
+		"bytes::len" => bytes::len,
 		//
 		"count" => count::count,
 		//
