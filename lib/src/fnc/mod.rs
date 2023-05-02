@@ -23,6 +23,7 @@ pub mod string;
 pub mod time;
 pub mod r#type;
 pub mod util;
+pub mod vector;
 
 /// Attempts to run any function
 pub async fn run(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Value, Error> {
@@ -249,6 +250,11 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"type::string" => r#type::string,
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
+		//
+		"vector::cosine_similarity" => vector::cosine_similarity,
+		"vector::dot" => vector::dot,
+		"vector::euclidean_distance" => vector::euclidean_distance,
+		"vector::magnitude" => vector::magnitude,
 	)
 }
 

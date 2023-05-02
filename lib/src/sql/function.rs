@@ -284,6 +284,7 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 		preceded(tag("string::"), function_string),
 		preceded(tag("time::"), function_time),
 		preceded(tag("type::"), function_type),
+		preceded(tag("vector::"), function_vector),
 		tag("count"),
 		tag("not"),
 		tag("rand"),
@@ -539,6 +540,10 @@ fn function_type(i: &str) -> IResult<&str, &str> {
 		tag("table"),
 		tag("thing"),
 	))(i)
+}
+
+fn function_vector(i: &str) -> IResult<&str, &str> {
+	alt((tag("cosine_similarity"), tag("dot"), tag("euclidean_distance"), tag("magnitude")))(i)
 }
 
 #[cfg(test)]
