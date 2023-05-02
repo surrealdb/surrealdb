@@ -4,6 +4,7 @@ mod postings;
 pub(crate) mod terms;
 
 use crate::err::Error;
+use crate::error::Db::AnalyzerError;
 use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::doclength::{DocLength, DocLengths};
 use crate::idx::ft::postings::{Postings, PostingsVisitor, TermFrequency};
@@ -153,7 +154,7 @@ impl FtIndex {
 		// Extract the doc_lengths, terms en frequencies
 		let mut t = self.terms(tx).await?;
 		let (doc_length, terms_and_frequencies) =
-			Self::extract_sorted_terms_with_frequencies(field_content);
+			Self::extract_sorted_terms_with_frequencies(field_content)?;
 
 		// Set the doc length
 		let mut l = self.doc_lengths(tx).await?;
@@ -213,40 +214,39 @@ impl FtIndex {
 		Ok(())
 	}
 
+	// TODO: This is currently a place holder. It has to be replaced by the analyzer/token/filter logic.
 	fn extract_sorted_terms_with_frequencies(
 		input: &str,
-	) -> (DocLength, HashMap<&str, TermFrequency>) {
+	) -> Result<(DocLength, HashMap<&str, TermFrequency>), Error> {
 		let mut doc_length = 0;
 		let mut terms = HashMap::new();
 		let mut rest = input;
-		loop {
-			// Skip whitespace
-			let (remaining_input, _) =
-				multispace0::<_, ()>(rest).unwrap_or_else(|e| panic!("multispace0 {:?}", e));
-			if remaining_input.is_empty() {
-				break;
-			}
-			rest = remaining_input;
-
-			// Tokenize
-			let (remaining_input, token) = Self::tokenize(rest).unwrap();
-			if !input.is_empty() {
-				doc_length += 1;
-				match terms.entry(token) {
-					Entry::Vacant(e) => {
-						e.insert(1);
+		while !rest.is_empty() {
+			// Extract the next token
+			match Self::next_token(rest) {
+				Ok((remaining_input, token)) => {
+					if !input.is_empty() {
+						doc_length += 1;
+						match terms.entry(token) {
+							Entry::Vacant(e) => {
+								e.insert(1);
+							}
+							Entry::Occupied(mut e) => {
+								e.insert(*e.get() + 1);
+							}
+						}
 					}
-					Entry::Occupied(mut e) => {
-						e.insert(*e.get() + 1);
-					}
+					rest = remaining_input;
 				}
+				Err(e) => return Err(AnalyzerError(e.to_string())),
 			}
-			rest = remaining_input;
 		}
-		(doc_length, terms)
+		Ok((doc_length, terms))
 	}
 
-	fn tokenize(i: &str) -> IResult<&str, &str> {
+	/// Extracting the next token. The string is left trimmed first.
+	fn next_token(i: &str) -> IResult<&str, &str> {
+		let (i, _) = multispace0(i)?;
 		take_while(|c| c != ' ' && c != '\n' && c != '\t')(i)
 	}
 

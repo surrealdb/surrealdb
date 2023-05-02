@@ -396,6 +396,10 @@ pub enum Error {
 	#[error("Index is corrupted")]
 	CorruptedIndex,
 
+	/// Represents an error when analyzing a value
+	#[error("A string can't be analyzed: {0}")]
+	AnalyzerError(String),
+
 	/// Represents an underlying error with Bincode serializing / deserializing
 	#[error("Bincode error: {0}")]
 	Bincode(#[from] BincodeError),
