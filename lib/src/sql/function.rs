@@ -273,6 +273,7 @@ fn function_names(i: &str) -> IResult<&str, &str> {
 		preceded(tag("array::"), function_array),
 		preceded(tag("crypto::"), function_crypto),
 		preceded(tag("duration::"), function_duration),
+		preceded(tag("encoding::"), function_encoding),
 		preceded(tag("geo::"), function_geo),
 		preceded(tag("http::"), function_http),
 		preceded(tag("is::"), function_is),
@@ -364,6 +365,10 @@ fn function_duration(i: &str) -> IResult<&str, &str> {
 			)),
 		),
 	))(i)
+}
+
+fn function_encoding(i: &str) -> IResult<&str, &str> {
+	alt((preceded(tag("base64::"), alt((tag("decode"), tag("encode")))),))(i)
 }
 
 fn function_geo(i: &str) -> IResult<&str, &str> {

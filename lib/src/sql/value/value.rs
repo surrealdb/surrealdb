@@ -1480,6 +1480,8 @@ impl Value {
 		match self {
 			// Bytes are allowed
 			Value::Bytes(v) => Ok(v),
+			// Strings can be converted to bytes
+			Value::Strand(s) => Ok(Bytes(s.0.into_bytes())),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,

@@ -7,6 +7,7 @@ pub mod array;
 pub mod count;
 pub mod crypto;
 pub mod duration;
+pub mod encoding;
 pub mod geo;
 pub mod http;
 pub mod is;
@@ -115,6 +116,9 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"duration::from::nanos" => duration::from::nanos,
 		"duration::from::secs" => duration::from::secs,
 		"duration::from::weeks" => duration::from::weeks,
+		//
+		"encoding::base64::decode" => encoding::base64::decode,
+		"encoding::base64::encode" => encoding::base64::encode,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
