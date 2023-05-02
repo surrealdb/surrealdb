@@ -22,6 +22,7 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::key::db;
 use crate::opt::IntoEndpoint;
 use crate::sql::Array;
 use crate::sql::Strand;
@@ -41,6 +42,7 @@ use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
+use std::sync::mpsc::channel;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
@@ -92,12 +94,18 @@ impl Surreal<Client> {
 		&'static self,
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
+		let (sender, receiver): (
+			async_channel::Sender<Vec<db::Response>>,
+			async_channel::Receiver<Vec<db::Response>>,
+		) = channel();
 		Connect {
 			router: Some(&self.router),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
 			response_type: PhantomData,
+			live_stream_receiver: receiver,
+			live_stream_sender: sender,
 		}
 	}
 }

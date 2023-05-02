@@ -73,6 +73,9 @@ use crate::api::Connect;
 use crate::api::Connection;
 use crate::api::ExtractRouter;
 use crate::api::Surreal;
+use crate::db::Response;
+use crate::key::db;
+use crate::method::livestream::LiveStream;
 use crate::sql::to_value;
 use crate::sql::Uuid;
 use crate::Response;
@@ -80,7 +83,7 @@ use once_cell::sync::OnceCell;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::channel;
 use std::sync::Arc;
 
 impl Method {
@@ -232,7 +235,10 @@ where
 	/// # }
 	/// ```
 	pub fn new<P>(address: impl IntoEndpoint<P, Client = C>) -> Connect<'static, C, Self> {
-		let (sender, receiver): (Sender<Vec<Response>>, Receiver<Vec<Response>>) = channel();
+		let (sender, receiver): (
+			async_channel::Sender<Vec<db::Response>>,
+			async_channel::Receiver<Vec<db::Response>>,
+		) = channel();
 		Connect {
 			router: None,
 			address: address.into_endpoint(),
@@ -960,6 +966,7 @@ where
 	pub fn live_stream(&self) -> LiveStream<C> {
 		LiveStream {
 			router: self.router.extract(),
+			table_name: "".to_string(), // TODO this should be Thing
 		}
 	}
 

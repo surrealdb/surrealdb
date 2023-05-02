@@ -48,8 +48,8 @@ pub struct Connect<'r, C: Connection, Response> {
 	capacity: usize,
 	client: PhantomData<C>,
 	response_type: PhantomData<Response>,
-	live_stream_receiver: Arc<Receiver<Vec<db::Response>>>,
-	live_stream_sender: Arc<Sender<Vec<db::Response>>>,
+	live_stream_receiver: Arc<Receiver<Vec<Response>>>,
+	live_stream_sender: Arc<Sender<Vec<Response>>>,
 }
 
 impl<C, R> Connect<'_, C, R>
@@ -97,8 +97,8 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let client =
-				Client::connect(self.address?, self.capacity, self.live_stream_receiver).await?;
+			let lsr: Arc<Receiver<Vec<db::Response>>> = self.live_stream_receiver;
+			let client = Client::connect(self.address?, self.capacity, lsr).await?;
 			client.check_server_version();
 			Ok(client)
 		})
@@ -116,7 +116,8 @@ where
 		Box::pin(async move {
 			match self.router {
 				Some(router) => {
-					let option = Client::connect(self.address?, self.capacity, live_stream)
+					let lsr: Arc<Receiver<Vec<()>>> = self.live_stream_receiver; // This must be () because the IntoFuture is for a Connect<(), ()>
+					let option = Client::connect(self.address?, self.capacity, lsr)
 						.await?
 						.router
 						.into_inner();

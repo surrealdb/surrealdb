@@ -18,6 +18,7 @@ use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::engine::remote::ws::IntervalStream;
+use crate::key::db;
 use crate::sql::Strand;
 use crate::sql::Value;
 use flume::Receiver;
@@ -101,6 +102,7 @@ impl Connection for Client {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
+		live_stream: Arc<Receiver<Vec<db::Response>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
 			let url = address.endpoint.join(PATH)?;

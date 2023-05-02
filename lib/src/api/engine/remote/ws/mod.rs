@@ -13,6 +13,9 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::db::Response;
+use crate::dbs;
+use crate::key::db;
 use crate::opt::IntoEndpoint;
 use crate::sql::Array;
 use crate::sql::Value;
@@ -21,6 +24,7 @@ use serde::Deserialize;
 use std::marker::PhantomData;
 use std::mem;
 use std::pin::Pin;
+use std::sync::mpsc::channel;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
@@ -75,12 +79,18 @@ impl Surreal<Client> {
 		&'static self,
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
+		let (sender, receiver): (
+			async_channel::Sender<Vec<db::Response>>,
+			async_channel::Receiver<Vec<db::Response>>,
+		) = channel();
 		Connect {
 			router: Some(&self.router),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
 			response_type: PhantomData,
+			live_stream_sender: sender,
+			live_stream_receiver: receiver,
 		}
 	}
 }

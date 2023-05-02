@@ -11,6 +11,7 @@ use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::{Response, Session};
+use crate::key::db;
 use crate::kvs::Datastore;
 use flume::Receiver;
 use flume::Sender;
@@ -36,7 +37,7 @@ impl Connection for Db {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
-		live_stream: Arc<Receiver<Vec<Response>>>,
+		live_stream: Arc<Receiver<Vec<db::Response>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
