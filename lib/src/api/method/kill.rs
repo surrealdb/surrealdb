@@ -26,7 +26,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let mut conn = Client::new(Method::Kill);
-			conn.execute(self.router?, Param::new(vec![self.query_id.into()])).await
+			conn.execute_unit(self.router?, Param::new(vec![self.query_id.into()])).await
 		})
 	}
 }

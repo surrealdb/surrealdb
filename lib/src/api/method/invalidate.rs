@@ -30,7 +30,7 @@ where
 				return Err(Error::AuthNotSupported.into());
 			}
 			let mut conn = Client::new(Method::Invalidate);
-			conn.execute(router, Param::new(Vec::new())).await
+			conn.execute_unit(router, Param::new(Vec::new())).await
 		})
 	}
 }

@@ -14,7 +14,7 @@ pub struct Person {
 }
 
 #[post("/person/{id}")]
-pub async fn create(id: Path<String>, person: Json<Person>) -> Result<Json<Person>, Error> {
+pub async fn create(id: Path<String>, person: Json<Person>) -> Result<Json<Option<Person>>, Error> {
 	let person = DB.create((PERSON, &*id)).content(person).await?;
 	Ok(Json(person))
 }
@@ -26,7 +26,7 @@ pub async fn read(id: Path<String>) -> Result<Json<Option<Person>>, Error> {
 }
 
 #[put("/person/{id}")]
-pub async fn update(id: Path<String>, person: Json<Person>) -> Result<Json<Person>, Error> {
+pub async fn update(id: Path<String>, person: Json<Person>) -> Result<Json<Option<Person>>, Error> {
 	let person = DB.update((PERSON, &*id)).content(person).await?;
 	Ok(Json(person))
 }

@@ -39,28 +39,27 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn r#in() {
 		let dir = Dir::In;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn out() {
 		let dir = Dir::Out;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn both() {
 		let dir = Dir::Both;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 }

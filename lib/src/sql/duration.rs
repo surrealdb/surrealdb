@@ -2,7 +2,6 @@ use crate::sql::common::take_u64;
 use crate::sql::datetime::Datetime;
 use crate::sql::ending::duration as ending;
 use crate::sql::error::IResult;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -21,10 +20,12 @@ static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
 static SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
 static SECONDS_PER_MINUTE: u64 = 60;
 static NANOSECONDS_PER_MILLISECOND: u32 = 1000000;
+static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Duration")]
 pub struct Duration(pub time::Duration);
 
 impl From<time::Duration> for Duration {
@@ -179,6 +180,9 @@ impl fmt::Display for Duration {
 		// Calculate the total millseconds
 		let msec = nano / NANOSECONDS_PER_MILLISECOND;
 		let nano = nano % NANOSECONDS_PER_MILLISECOND;
+		// Calculate the total microseconds
+		let usec = nano / NANOSECONDS_PER_MICROSECOND;
+		let nano = nano % NANOSECONDS_PER_MICROSECOND;
 		// Write the different parts
 		if year > 0 {
 			write!(f, "{year}y")?;
@@ -201,23 +205,13 @@ impl fmt::Display for Duration {
 		if msec > 0 {
 			write!(f, "{msec}ms")?;
 		}
+		if usec > 0 {
+			write!(f, "{usec}µs")?;
+		}
 		if nano > 0 {
 			write!(f, "{nano}ns")?;
 		}
 		Ok(())
-	}
-}
-
-impl Serialize for Duration {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			serializer.serialize_some(&self.to_string())
-		}
 	}
 }
 

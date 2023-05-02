@@ -2,7 +2,6 @@ use crate::err::Error;
 use crate::sql::ending::number as ending;
 use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::strand::Strand;
 use bigdecimal::num_traits::Pow;
 use bigdecimal::BigDecimal;
@@ -23,11 +22,13 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename = "$surrealdb::private::sql::Number")]
 pub enum Number {
 	Int(i64),
 	Float(f64),
 	Decimal(BigDecimal),
+	// Add new variants here
 }
 
 impl Default for Number {
@@ -167,27 +168,6 @@ impl Display for Number {
 	}
 }
 
-impl Serialize for Number {
-	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			match self {
-				Number::Int(v) => s.serialize_newtype_variant(TOKEN, 0, "Int", v),
-				Number::Float(v) => s.serialize_newtype_variant(TOKEN, 1, "Float", v),
-				Number::Decimal(v) => s.serialize_newtype_variant(TOKEN, 2, "Decimal", v),
-			}
-		} else {
-			match self {
-				Number::Int(v) => s.serialize_i64(*v),
-				Number::Float(v) => s.serialize_f64(*v),
-				Number::Decimal(v) => s.serialize_some(v),
-			}
-		}
-	}
-}
-
 impl Number {
 	// -----------------------------------
 	// Constants
@@ -198,6 +178,10 @@ impl Number {
 	// -----------------------------------
 	// Simple number detection
 	// -----------------------------------
+
+	pub fn is_nan(&self) -> bool {
+		matches!(self, Number::Float(v) if v.is_nan())
+	}
 
 	pub fn is_int(&self) -> bool {
 		matches!(self, Number::Int(_))

@@ -72,259 +72,258 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn or() {
 		let dir = Operator::Or;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn and() {
 		let dir = Operator::And;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn tco() {
 		let dir = Operator::Tco;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn nco() {
 		let dir = Operator::Nco;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn add() {
 		let dir = Operator::Add;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn sub() {
 		let dir = Operator::Sub;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn mul() {
 		let dir = Operator::Mul;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn div() {
 		let dir = Operator::Div;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn pow() {
 		let dir = Operator::Pow;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn inc() {
 		let dir = Operator::Inc;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn dec() {
 		let dir = Operator::Dec;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn equal() {
 		let dir = Operator::Equal;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn exact() {
 		let dir = Operator::Exact;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn not_equal() {
 		let dir = Operator::NotEqual;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn all_equal() {
 		let dir = Operator::AllEqual;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn any_equal() {
 		let dir = Operator::AnyEqual;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn like() {
 		let dir = Operator::Like;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn not_like() {
 		let dir = Operator::NotLike;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn all_like() {
 		let dir = Operator::AllLike;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn any_like() {
 		let dir = Operator::AnyLike;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn less_than() {
 		let dir = Operator::LessThan;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn less_than_or_equal() {
 		let dir = Operator::LessThanOrEqual;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn more_than() {
 		let dir = Operator::MoreThan;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn more_than_or_equal() {
 		let dir = Operator::MoreThanOrEqual;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn contain() {
 		let dir = Operator::Contain;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn not_contain() {
 		let dir = Operator::NotContain;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn contain_all() {
 		let dir = Operator::ContainAll;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn contain_any() {
 		let dir = Operator::ContainAny;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn contain_none() {
 		let dir = Operator::ContainNone;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn inside() {
 		let dir = Operator::Inside;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn not_inside() {
 		let dir = Operator::NotInside;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn all_inside() {
 		let dir = Operator::AllInside;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn any_inside() {
 		let dir = Operator::AnyInside;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn none_inside() {
 		let dir = Operator::NoneInside;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn outside() {
 		let dir = Operator::Outside;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 
 	#[test]
 	fn intersects() {
 		let dir = Operator::Intersects;
-		let serialized = serialize_internal(|| dir.serialize(Serializer.wrap())).unwrap();
+		let serialized = dir.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dir, serialized);
 	}
 }

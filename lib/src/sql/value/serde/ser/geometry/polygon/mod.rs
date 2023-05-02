@@ -77,12 +77,11 @@ impl serde::ser::SerializeStruct for SerializePolygon {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn default() {
 		let polygon = Polygon::new(LineString(Vec::new()), Vec::new());
-		let serialized = serialize_internal(|| polygon.serialize(Serializer.wrap())).unwrap();
+		let serialized = polygon.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(polygon, serialized);
 	}
 }

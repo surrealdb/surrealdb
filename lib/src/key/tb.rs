@@ -2,20 +2,20 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Tb {
+pub struct Tb<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: String,
+	pub db: &'a str,
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub tb: String,
+	pub tb: &'a str,
 }
 
-pub fn new(ns: &str, db: &str, tb: &str) -> Tb {
-	Tb::new(ns.to_string(), db.to_string(), tb.to_string())
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Tb<'a> {
+	Tb::new(ns, db, tb)
 }
 
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
@@ -30,9 +30,9 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	k
 }
 
-impl Tb {
-	pub fn new(ns: String, db: String, tb: String) -> Tb {
-		Tb {
+impl<'a> Tb<'a> {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str) -> Self {
+		Self {
 			__: 0x2f, // /
 			_a: 0x2a, // *
 			ns,
@@ -53,9 +53,9 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Tb::new(
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
+			"test",
 		);
 		let enc = Tb::encode(&val).unwrap();
 		let dec = Tb::decode(&enc).unwrap();

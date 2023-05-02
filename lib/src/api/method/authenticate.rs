@@ -32,7 +32,7 @@ where
 				return Err(Error::AuthNotSupported.into());
 			}
 			let mut conn = Client::new(Method::Authenticate);
-			conn.execute(router, Param::new(vec![self.token.into()])).await
+			conn.execute_unit(router, Param::new(vec![self.token.into()])).await
 		})
 	}
 }
