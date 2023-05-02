@@ -81,7 +81,7 @@ impl BKeys for FstKeys {
 		if let Some(payload) = self.additions.get(key) {
 			Some(*payload)
 		} else {
-			self.map.get(key).filter(|_| !self.deletions.get(key).is_some())
+			self.map.get(key).filter(|_| self.deletions.get(key).is_none())
 		}
 	}
 
@@ -100,10 +100,8 @@ impl BKeys for FstKeys {
 	fn insert(&mut self, key: Key, payload: Payload) {
 		self.deletions.remove(&key);
 		let existing_key = self.map.get(&key).is_some();
-		if self.additions.insert(key, payload).is_none() {
-			if !existing_key {
-				self.len += 1;
-			}
+		if self.additions.insert(key, payload).is_none() && !existing_key {
+			self.len += 1;
 		}
 	}
 
