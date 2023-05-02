@@ -2950,15 +2950,85 @@ async fn function_string_concat() -> Result<(), Error> {
 #[tokio::test]
 async fn function_string_contains() -> Result<(), Error> {
 	let sql = r#"
+		RETURN string::contains("", "");
+		RETURN string::contains("a", "");
+		RETURN string::contains("abcdefg", "");
 		RETURN string::contains("abcdefg", "bcd");
+		RETURN string::contains("abcdefg", "abcd");
+		RETURN string::contains("abcdefg", "xxabcd");
+		RETURN string::contains("abcdefg", "hij");
+		RETURN string::contains("ประเทศไทย中华", "ประเ");
+		RETURN string::contains("ประเทศไทย中华", "ะเ");
+		RETURN string::contains("ประเทศไทย中华", "ไท华");
+		RETURN string::contains("1234567ah012345678901ah", "hah");
+		RETURN string::contains("00abc01234567890123456789abc", "bcabc");
+		RETURN string::contains("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaba");
+		RETURN string::contains("* \t", " ");
+		RETURN string::contains("* \t", "?");
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 1);
-	//
+	assert_eq!(res.len(), 15);
+	// 1
 	let tmp = res.remove(0).result?;
 	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	// 2
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	// 3
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	// 4
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	// 5
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	// 6
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	// 7
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	// 8
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	// 9
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	// 10
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	// 11
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	// 12
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	// 13
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
+	assert_eq!(tmp, val);
+	// 14
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(true);
+	assert_eq!(tmp, val);
+	// 15
+	let tmp = res.remove(0).result?;
+	let val = Value::Bool(false);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
