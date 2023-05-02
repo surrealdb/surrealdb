@@ -8,7 +8,6 @@ use crate::sql::error::IResult;
 use crate::sql::escape::escape_key;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::operation::{Op, Operation};
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::thing::Thing;
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
@@ -18,7 +17,6 @@ use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use nom::sequence::delimited;
-use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -28,7 +26,8 @@ use std::ops::DerefMut;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Object";
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Object")]
 pub struct Object(pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<String, Value>> for Object {
@@ -164,24 +163,6 @@ impl Display for Object {
 			f.write_char('}')
 		} else {
 			f.write_str(" }")
-		}
-	}
-}
-
-impl Serialize for Object {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			let mut map = serializer.serialize_map(Some(self.len()))?;
-			for (k, v) in &self.0 {
-				map.serialize_key(k)?;
-				map.serialize_value(v)?;
-			}
-			map.end()
 		}
 	}
 }

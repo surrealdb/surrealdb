@@ -1,7 +1,6 @@
 use http::header::{HeaderValue, CONTENT_TYPE};
 use http::StatusCode;
 use serde::Serialize;
-use surrealdb::sql::serde::serialize_internal;
 
 pub enum Output {
 	None,
@@ -55,7 +54,7 @@ pub fn full<T>(val: &T) -> Output
 where
 	T: Serialize,
 {
-	match serialize_internal(|| bung::to_vec(val)) {
+	match bung::to_vec(val) {
 		Ok(v) => Output::Full(v),
 		Err(_) => Output::Fail,
 	}

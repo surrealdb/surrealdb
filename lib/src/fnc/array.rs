@@ -177,12 +177,12 @@ pub fn sort((mut array, order): (Array, Option<Value>)) -> Result<Value, Error> 
 			Ok(array.into())
 		}
 		// If true, sort ascending
-		Some(Value::True) => {
+		Some(Value::Bool(true)) => {
 			array.sort_unstable();
 			Ok(array.into())
 		}
 		// If false, sort descending
-		Some(Value::False) => {
+		Some(Value::Bool(false)) => {
 			array.sort_unstable_by(|a, b| b.cmp(a));
 			Ok(array.into())
 		}

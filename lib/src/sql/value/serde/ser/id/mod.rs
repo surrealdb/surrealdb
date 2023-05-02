@@ -51,35 +51,34 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn number() {
 		let id = Id::Number(Default::default());
-		let serialized = serialize_internal(|| id.serialize(Serializer.wrap())).unwrap();
+		let serialized = id.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(id, serialized);
 	}
 
 	#[test]
 	fn string() {
 		let id = Id::String(Default::default());
-		let serialized = serialize_internal(|| id.serialize(Serializer.wrap())).unwrap();
+		let serialized = id.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(id, serialized);
 	}
 
 	#[test]
 	fn array() {
 		let id = Id::Array(Default::default());
-		let serialized = serialize_internal(|| id.serialize(Serializer.wrap())).unwrap();
+		let serialized = id.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(id, serialized);
 	}
 
 	#[test]
 	fn object() {
 		let id = Id::Object(Default::default());
-		let serialized = serialize_internal(|| id.serialize(Serializer.wrap())).unwrap();
+		let serialized = id.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(id, serialized);
 	}
 }

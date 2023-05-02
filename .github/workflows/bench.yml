@@ -1,0 +1,50 @@
+name: Benchmark
+
+on: [pull_request]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bench:
+    name: Bench library
+    runs-on: ubuntu-20.04-16-cores
+    steps:
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -qq -y update
+          sudo apt-get -qq -y install protobuf-compiler libprotobuf-dev
+          cargo install --quiet critcmp
+
+      - name: Checkout baseline
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.base_ref }}
+
+      - name: Benchmark baseline
+        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline baseline
+
+      - name: Extract baseline
+        run: cp -r target/criterion /tmp/criterion
+
+      - name: Checkout changes
+        uses: actions/checkout@v3
+
+      - name: Replace baseline
+        run: mkdir target && cp -r /tmp/criterion target/criterion
+
+      - name: Benchmark changes
+        run: cargo bench --quiet --package surrealdb --no-default-features --features kv-mem -- --save-baseline changes
+
+      - name: Compare results
+        run: critcmp baseline changes | tee benchmark_results
+
+      - name: Save results as artifact
+        uses: actions/upload-artifact@v1
+        with:
+          name: Benchmark Results
+          path: benchmark_results

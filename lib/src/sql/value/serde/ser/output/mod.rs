@@ -62,49 +62,48 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn none() {
 		let output = Output::None;
-		let serialized = serialize_internal(|| output.serialize(Serializer.wrap())).unwrap();
+		let serialized = output.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(output, serialized);
 	}
 
 	#[test]
 	fn null() {
 		let output = Output::Null;
-		let serialized = serialize_internal(|| output.serialize(Serializer.wrap())).unwrap();
+		let serialized = output.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(output, serialized);
 	}
 
 	#[test]
 	fn diff() {
 		let output = Output::Diff;
-		let serialized = serialize_internal(|| output.serialize(Serializer.wrap())).unwrap();
+		let serialized = output.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(output, serialized);
 	}
 
 	#[test]
 	fn after() {
 		let output = Output::After;
-		let serialized = serialize_internal(|| output.serialize(Serializer.wrap())).unwrap();
+		let serialized = output.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(output, serialized);
 	}
 
 	#[test]
 	fn before() {
 		let output = Output::Before;
-		let serialized = serialize_internal(|| output.serialize(Serializer.wrap())).unwrap();
+		let serialized = output.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(output, serialized);
 	}
 
 	#[test]
 	fn fields() {
 		let output = Output::Fields(Default::default());
-		let serialized = serialize_internal(|| output.serialize(Serializer.wrap())).unwrap();
+		let serialized = output.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(output, serialized);
 	}
 }

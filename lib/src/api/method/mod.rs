@@ -637,7 +637,7 @@ where
 	/// let person: Option<Person> = db.select(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
 	///
 	/// // You can skip an unnecessary option if you know the record already exists
-	/// let person: Person = db.select(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
+	/// let person: Option<Person> = db.select(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
 	/// #
 	/// # Ok(())
 	/// # }
@@ -681,10 +681,10 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Create a record with a random ID
-	/// let person: Person = db.create("person").await?;
+	/// let person: Vec<Person> = db.create("person").await?;
 	///
 	/// // Create a record with a specific ID
-	/// let record: Person = db.create(("person", "tobie"))
+	/// let record: Option<Person> = db.create(("person", "tobie"))
 	///     .content(User {
 	///         name: "Tobie",
 	///         settings: Settings {

@@ -32,7 +32,7 @@ where
 				return Err(Error::BackupsNotSupported.into());
 			}
 			let mut conn = Client::new(Method::Import);
-			conn.execute(router, Param::file(self.file)).await
+			conn.execute_unit(router, Param::file(self.file)).await
 		})
 	}
 }

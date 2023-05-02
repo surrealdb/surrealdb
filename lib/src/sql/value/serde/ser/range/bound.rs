@@ -59,27 +59,26 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 
 	#[test]
 	fn unbounded() {
 		let bound = Bound::Unbounded;
-		let serialized = serialize_internal(|| bound.serialize(Serializer.wrap())).unwrap();
+		let serialized = bound.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(bound, serialized);
 	}
 
 	#[test]
 	fn included() {
 		let bound = Bound::Included(Id::rand());
-		let serialized = serialize_internal(|| bound.serialize(Serializer.wrap())).unwrap();
+		let serialized = bound.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(bound, serialized);
 	}
 
 	#[test]
 	fn excluded() {
 		let bound = Bound::Excluded(Id::rand());
-		let serialized = serialize_internal(|| bound.serialize(Serializer.wrap())).unwrap();
+		let serialized = bound.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(bound, serialized);
 	}
 }

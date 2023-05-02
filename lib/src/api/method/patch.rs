@@ -27,36 +27,63 @@ pub struct Patch<'r, C: Connection, R> {
 	pub(super) response_type: PhantomData<R>,
 }
 
-impl<'r, Client, R> IntoFuture for Patch<'r, Client, R>
+macro_rules! into_future {
+	($method:ident) => {
+		fn into_future(self) -> Self::IntoFuture {
+			let Patch {
+				router,
+				resource,
+				range,
+				patches,
+				..
+			} = self;
+			Box::pin(async move {
+				let param = match range {
+					Some(range) => resource?.with_range(range)?,
+					None => resource?.into(),
+				};
+				let mut vec = Vec::with_capacity(patches.len());
+				for result in patches {
+					vec.push(result?);
+				}
+				let patches = Value::Array(Array(vec));
+				let mut conn = Client::new(Method::Patch);
+				conn.$method(router?, Param::new(vec![param, patches])).await
+			})
+		}
+	};
+}
+
+impl<'r, Client> IntoFuture for Patch<'r, Client, Value>
+where
+	Client: Connection,
+{
+	type Output = Result<Value>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+
+	into_future! {execute_value}
+}
+
+impl<'r, Client, R> IntoFuture for Patch<'r, Client, Option<R>>
 where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<R>;
+	type Output = Result<Option<R>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	fn into_future(self) -> Self::IntoFuture {
-		let Patch {
-			router,
-			resource,
-			range,
-			patches,
-			..
-		} = self;
-		Box::pin(async move {
-			let param = match range {
-				Some(range) => resource?.with_range(range)?,
-				None => resource?.into(),
-			};
-			let mut vec = Vec::with_capacity(patches.len());
-			for result in patches {
-				vec.push(result?);
-			}
-			let patches = Value::Array(Array(vec));
-			let mut conn = Client::new(Method::Patch);
-			conn.execute(router?, Param::new(vec![param, patches])).await
-		})
-	}
+	into_future! {execute_opt}
+}
+
+impl<'r, Client, R> IntoFuture for Patch<'r, Client, Vec<R>>
+where
+	Client: Connection,
+	R: DeserializeOwned,
+{
+	type Output = Result<Vec<R>>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+
+	into_future! {execute_vec}
 }
 
 impl<'r, C, R> Patch<'r, C, R>
