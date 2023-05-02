@@ -2975,6 +2975,32 @@ async fn function_string_ends_with() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_string_fuzzy_score() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::fuzzyScore("", "");
+		RETURN string::fuzzyScore("A", "B");
+		RETURN string::fuzzyScore("A", "A");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let zero = Value::from(0);
+	// empty strings should score 0
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, zero);
+	// different one character strings should score 0
+	let tmp = res.remove(0).result?;
+	assert_eq!(tmp, zero);
+	// equal strings should not score 0
+	let tmp = res.remove(0).result?;
+	assert_ne!(tmp, zero);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_join() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::join("");
