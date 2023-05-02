@@ -9,8 +9,6 @@ use crate::api::engine::any::Any;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use crate::api::DbResponse;
-#[allow(unused_imports)] // used by the `ws` and `http` protocols
-use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::error::Db as DbError;
@@ -143,7 +141,6 @@ impl Connection for Any {
 				"http" | "https" => {
 					#[cfg(feature = "protocol-http")]
 					{
-						features.insert(ExtraFeatures::Auth);
 						engine::remote::http::wasm::router(address, conn_tx, route_rx);
 					}
 
@@ -157,7 +154,6 @@ impl Connection for Any {
 				"ws" | "wss" => {
 					#[cfg(feature = "protocol-ws")]
 					{
-						features.insert(ExtraFeatures::Auth);
 						let mut address = address;
 						address.endpoint = address.endpoint.join(engine::remote::ws::PATH)?;
 						engine::remote::ws::wasm::router(address, capacity, conn_tx, route_rx);

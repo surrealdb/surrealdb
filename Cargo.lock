@@ -4348,6 +4348,7 @@ dependencies = [
  "geo",
  "indexmap",
  "indxdb",
+ "jsonwebtoken",
  "lexicmp",
  "log",
  "md-5",

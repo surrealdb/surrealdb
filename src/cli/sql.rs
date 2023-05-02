@@ -9,10 +9,9 @@ use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::connect;
-use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
 use surrealdb::sql::{self, Statement, Value};
-use surrealdb::{Error as SurrealError, Response};
+use surrealdb::Response;
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -52,22 +51,14 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("warn").init();
 
-	// Connect to the database engine
-	let client = connect(endpoint).await?;
-	// Sign in to the server if the specified database engine supports it
 	let root = Root {
 		username: &username,
 		password: &password,
 	};
-	if let Err(error) = client.signin(root).await {
-		match error {
-			// Authentication not supported by this engine, we can safely continue
-			SurrealError::Api(ApiError::AuthNotSupported) => {}
-			error => {
-				return Err(error.into());
-			}
-		}
-	}
+	// Connect to the database engine
+	let client = connect((endpoint, root)).await?;
+	// Sign in to the server
+	client.signin(root).await?;
 	// Create a new terminal REPL
 	let mut rl = Editor::new().unwrap();
 	// Set custom input validation
