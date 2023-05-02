@@ -1,9 +1,8 @@
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
-pub struct Bytes(pub(crate) Vec<u8>);
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct Bytes(#[serde(with = "serde_bytes")] pub(crate) Vec<u8>);
 
 impl Deref for Bytes {
 	type Target = Vec<u8>;
@@ -13,11 +12,16 @@ impl Deref for Bytes {
 	}
 }
 
-impl Serialize for Bytes {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		serializer.serialize_bytes(&self.0)
+#[cfg(test)]
+mod tests {
+	use crate::sql::{Bytes, Value};
+
+	#[test]
+	fn serialize() {
+		let val = Value::Bytes(Bytes(vec![1, 2, 3, 5]));
+		let serialized: Vec<u8> = val.into();
+		println!("{serialized:?}");
+		let deserialized = Value::from(serialized);
+		println!("{deserialized:?}");
 	}
 }
