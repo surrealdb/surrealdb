@@ -5,7 +5,7 @@ use crate::err::Error;
 use crate::sql::value::Value;
 
 impl Value {
-	pub async fn replace(
+	pub(crate) async fn replace(
 		&mut self,
 		_ctx: &Context<'_>,
 		_opt: &Options,

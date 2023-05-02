@@ -75,12 +75,11 @@ impl serde::ser::SerializeStruct for SerializeSetStatement {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn default() {
 		let stmt = SetStatement::default();
-		let value: SetStatement = serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: SetStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 }

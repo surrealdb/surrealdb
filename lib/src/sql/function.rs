@@ -9,8 +9,8 @@ use crate::sql::common::val_char;
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
+use crate::sql::kind::{kind, Kind};
 use crate::sql::script::{script as func, Script};
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::{single, value, Value};
 use async_recursion::async_recursion;
 use futures::future::try_join_all;
@@ -21,19 +21,22 @@ use nom::character::complete::char;
 use nom::combinator::recognize;
 use nom::multi::separated_list0;
 use nom::multi::separated_list1;
-use serde::ser::SerializeTupleVariant;
+use nom::sequence::delimited;
+use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Function")]
 pub enum Function {
-	Cast(String, Value),
+	Cast(Kind, Value),
 	Normal(String, Vec<Value>),
 	Custom(String, Vec<Value>),
 	Script(Script, Vec<Value>),
+	// Add new variants here
 }
 
 impl PartialOrd for Function {
@@ -145,11 +148,11 @@ impl Function {
 		let opt = &opt.futures(true);
 		// Process the function type
 		match self {
-			Self::Cast(s, x) => {
+			Self::Cast(k, x) => {
 				// Compute the value to be cast
 				let a = x.compute(ctx, opt, txn, doc).await?;
 				// Run the cast function
-				fnc::cast::run(ctx, s, a)
+				a.convert_to(k)
 			}
 			Self::Normal(s, x) => {
 				// Compute the function arguments
@@ -183,14 +186,7 @@ impl Function {
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in a.into_iter().zip(val.args) {
-					ctx.add_value(
-						name.to_raw(),
-						match val {
-							Value::None => val,
-							Value::Null => val,
-							_ => val.convert_to(&kind),
-						},
-					);
+					ctx.add_value(name.to_raw(), val.convert_to(&kind)?);
 				}
 				// Run the custom function
 				val.block.compute(&ctx, opt, txn, doc).await
@@ -218,51 +214,10 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Cast(s, e) => write!(f, "<{s}> {e}"),
+			Self::Cast(k, e) => write!(f, "<{k}> {e}"),
 			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
-		}
-	}
-}
-
-impl Serialize for Function {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			match self {
-				Self::Cast(s, e) => {
-					let mut serializer = serializer.serialize_tuple_variant(TOKEN, 0, "Cast", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-				Self::Normal(s, e) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 1, "Normal", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-				Self::Custom(s, e) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 2, "Custom", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-				Self::Script(s, e) => {
-					let mut serializer =
-						serializer.serialize_tuple_variant(TOKEN, 3, "Script", 2)?;
-					serializer.serialize_field(s)?;
-					serializer.serialize_field(e)?;
-					serializer.end()
-				}
-			}
-		} else {
-			serializer.serialize_none()
 		}
 	}
 }
@@ -284,7 +239,6 @@ pub fn normal(i: &str) -> IResult<&str, Function> {
 pub fn custom(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("fn::")(i)?;
 	let (i, s) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
@@ -295,7 +249,6 @@ pub fn custom(i: &str) -> IResult<&str, Function> {
 
 fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("function")(i)?;
-	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag("(")(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
@@ -309,15 +262,270 @@ fn script(i: &str) -> IResult<&str, Function> {
 }
 
 fn cast(i: &str) -> IResult<&str, Function> {
-	let (i, _) = char('<')(i)?;
-	let (i, s) = function_casts(i)?;
-	let (i, _) = char('>')(i)?;
+	let (i, k) = delimited(char('<'), kind, char('>'))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, v) = single(i)?;
-	Ok((i, Function::Cast(s.to_string(), v)))
+	Ok((i, Function::Cast(k, v)))
 }
 
-fn function_casts(i: &str) -> IResult<&str, &str> {
+fn function_names(i: &str) -> IResult<&str, &str> {
+	recognize(alt((
+		preceded(tag("array::"), function_array),
+		preceded(tag("crypto::"), function_crypto),
+		preceded(tag("duration::"), function_duration),
+		preceded(tag("geo::"), function_geo),
+		preceded(tag("http::"), function_http),
+		preceded(tag("is::"), function_is),
+		preceded(tag("math::"), function_math),
+		preceded(tag("meta::"), function_meta),
+		preceded(tag("parse::"), function_parse),
+		preceded(tag("rand::"), function_rand),
+		preceded(tag("session::"), function_session),
+		preceded(tag("string::"), function_string),
+		preceded(tag("time::"), function_time),
+		preceded(tag("type::"), function_type),
+		tag("count"),
+		tag("not"),
+		tag("rand"),
+		tag("sleep"),
+	)))(i)
+}
+
+fn function_array(i: &str) -> IResult<&str, &str> {
+	alt((
+		alt((
+			tag("add"),
+			tag("all"),
+			tag("any"),
+			tag("append"),
+			tag("combine"),
+			tag("complement"),
+			tag("concat"),
+			tag("difference"),
+			tag("distinct"),
+			tag("flatten"),
+			tag("group"),
+			tag("insert"),
+		)),
+		alt((
+			tag("intersect"),
+			tag("len"),
+			tag("max"),
+			tag("min"),
+			tag("pop"),
+			tag("prepend"),
+			tag("push"),
+			tag("remove"),
+			tag("reverse"),
+			tag("slice"),
+			tag("sort::asc"),
+			tag("sort::desc"),
+			tag("sort"),
+			tag("union"),
+		)),
+	))(i)
+}
+
+fn function_crypto(i: &str) -> IResult<&str, &str> {
+	alt((
+		preceded(tag("argon2::"), alt((tag("compare"), tag("generate")))),
+		preceded(tag("bcrypt::"), alt((tag("compare"), tag("generate")))),
+		preceded(tag("pbkdf2::"), alt((tag("compare"), tag("generate")))),
+		preceded(tag("scrypt::"), alt((tag("compare"), tag("generate")))),
+		tag("md5"),
+		tag("sha1"),
+		tag("sha256"),
+		tag("sha512"),
+	))(i)
+}
+
+fn function_duration(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("days"),
+		tag("hours"),
+		tag("micros"),
+		tag("millis"),
+		tag("mins"),
+		tag("nanos"),
+		tag("secs"),
+		tag("weeks"),
+		tag("years"),
+		preceded(
+			tag("from::"),
+			alt((
+				tag("days"),
+				tag("hours"),
+				tag("micros"),
+				tag("millis"),
+				tag("mins"),
+				tag("nanos"),
+				tag("secs"),
+				tag("weeks"),
+			)),
+		),
+	))(i)
+}
+
+fn function_geo(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("area"),
+		tag("bearing"),
+		tag("centroid"),
+		tag("distance"),
+		preceded(tag("hash::"), alt((tag("decode"), tag("encode")))),
+	))(i)
+}
+
+fn function_http(i: &str) -> IResult<&str, &str> {
+	alt((tag("head"), tag("get"), tag("put"), tag("post"), tag("patch"), tag("delete")))(i)
+}
+
+fn function_is(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("alphanum"),
+		tag("alpha"),
+		tag("ascii"),
+		tag("datetime"),
+		tag("domain"),
+		tag("email"),
+		tag("hexadecimal"),
+		tag("latitude"),
+		tag("longitude"),
+		tag("numeric"),
+		tag("semver"),
+		tag("url"),
+		tag("uuid"),
+	))(i)
+}
+
+fn function_math(i: &str) -> IResult<&str, &str> {
+	alt((
+		alt((
+			tag("abs"),
+			tag("bottom"),
+			tag("ceil"),
+			tag("fixed"),
+			tag("floor"),
+			tag("interquartile"),
+			tag("max"),
+			tag("mean"),
+			tag("median"),
+			tag("midhinge"),
+			tag("min"),
+			tag("mode"),
+		)),
+		alt((
+			tag("nearestrank"),
+			tag("percentile"),
+			tag("pow"),
+			tag("product"),
+			tag("round"),
+			tag("spread"),
+			tag("sqrt"),
+			tag("stddev"),
+			tag("sum"),
+			tag("top"),
+			tag("trimean"),
+			tag("variance"),
+		)),
+	))(i)
+}
+
+fn function_meta(i: &str) -> IResult<&str, &str> {
+	alt((tag("id"), tag("table"), tag("tb")))(i)
+}
+
+fn function_parse(i: &str) -> IResult<&str, &str> {
+	alt((
+		preceded(tag("email::"), alt((tag("host"), tag("user")))),
+		preceded(
+			tag("url::"),
+			alt((
+				tag("domain"),
+				tag("fragment"),
+				tag("host"),
+				tag("path"),
+				tag("port"),
+				tag("query"),
+				tag("scheme"),
+			)),
+		),
+	))(i)
+}
+
+fn function_rand(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("bool"),
+		tag("enum"),
+		tag("float"),
+		tag("guid"),
+		tag("int"),
+		tag("string"),
+		tag("time"),
+		tag("ulid"),
+		tag("uuid::v4"),
+		tag("uuid::v7"),
+		tag("uuid"),
+	))(i)
+}
+
+fn function_session(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("db"),
+		tag("id"),
+		tag("ip"),
+		tag("ns"),
+		tag("origin"),
+		tag("sc"),
+		tag("sd"),
+		tag("token"),
+	))(i)
+}
+
+fn function_string(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("concat"),
+		tag("endsWith"),
+		tag("join"),
+		tag("len"),
+		tag("lowercase"),
+		tag("repeat"),
+		tag("replace"),
+		tag("reverse"),
+		tag("slice"),
+		tag("slug"),
+		tag("split"),
+		tag("startsWith"),
+		tag("trim"),
+		tag("uppercase"),
+		tag("words"),
+	))(i)
+}
+
+fn function_time(i: &str) -> IResult<&str, &str> {
+	alt((
+		tag("day"),
+		tag("floor"),
+		tag("format"),
+		tag("group"),
+		tag("hour"),
+		tag("minute"),
+		tag("month"),
+		tag("nano"),
+		tag("now"),
+		tag("round"),
+		tag("second"),
+		tag("timezone"),
+		tag("unix"),
+		tag("wday"),
+		tag("week"),
+		tag("yday"),
+		tag("year"),
+		preceded(tag("from::"), alt((tag("micros"), tag("millis"), tag("secs"), tag("unix")))),
+	))(i)
+}
+
+fn function_type(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("bool"),
 		tag("datetime"),
@@ -326,285 +534,10 @@ fn function_casts(i: &str) -> IResult<&str, &str> {
 		tag("float"),
 		tag("int"),
 		tag("number"),
+		tag("point"),
 		tag("string"),
-	))(i)
-}
-
-fn function_names(i: &str) -> IResult<&str, &str> {
-	alt((
-		function_array,
-		function_count,
-		function_crypto,
-		function_duration,
-		function_geo,
-		function_http,
-		function_is,
-		function_math,
-		function_meta,
-		function_not,
-		function_parse,
-		function_rand,
-		function_session,
-		function_sleep,
-		function_string,
-		function_time,
-		function_type,
-	))(i)
-}
-
-fn function_array(i: &str) -> IResult<&str, &str> {
-	alt((
-		alt((
-			tag("array::add"),
-			tag("array::all"),
-			tag("array::any"),
-			tag("array::append"),
-			tag("array::combine"),
-			tag("array::complement"),
-			tag("array::concat"),
-			tag("array::difference"),
-			tag("array::distinct"),
-			tag("array::flatten"),
-			tag("array::group"),
-			tag("array::insert"),
-		)),
-		alt((
-			tag("array::intersect"),
-			tag("array::len"),
-			tag("array::max"),
-			tag("array::min"),
-			tag("array::pop"),
-			tag("array::prepend"),
-			tag("array::push"),
-			tag("array::remove"),
-			tag("array::reverse"),
-			tag("array::sort::asc"),
-			tag("array::sort::desc"),
-			tag("array::sort"),
-			tag("array::union"),
-		)),
-	))(i)
-}
-
-fn function_count(i: &str) -> IResult<&str, &str> {
-	tag("count")(i)
-}
-
-fn function_crypto(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("crypto::argon2::compare"),
-		tag("crypto::argon2::generate"),
-		tag("crypto::bcrypt::compare"),
-		tag("crypto::bcrypt::generate"),
-		tag("crypto::md5"),
-		tag("crypto::pbkdf2::compare"),
-		tag("crypto::pbkdf2::generate"),
-		tag("crypto::scrypt::compare"),
-		tag("crypto::scrypt::generate"),
-		tag("crypto::sha1"),
-		tag("crypto::sha256"),
-		tag("crypto::sha512"),
-	))(i)
-}
-
-fn function_duration(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("duration::days"),
-		tag("duration::hours"),
-		tag("duration::mins"),
-		tag("duration::secs"),
-		tag("duration::weeks"),
-		tag("duration::years"),
-	))(i)
-}
-
-fn function_geo(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("geo::area"),
-		tag("geo::bearing"),
-		tag("geo::centroid"),
-		tag("geo::distance"),
-		tag("geo::hash::decode"),
-		tag("geo::hash::encode"),
-	))(i)
-}
-
-fn function_http(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("http::head"),
-		tag("http::get"),
-		tag("http::put"),
-		tag("http::post"),
-		tag("http::patch"),
-		tag("http::delete"),
-	))(i)
-}
-
-fn function_is(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("is::alphanum"),
-		tag("is::alpha"),
-		tag("is::ascii"),
-		tag("is::datetime"),
-		tag("is::domain"),
-		tag("is::email"),
-		tag("is::hexadecimal"),
-		tag("is::latitude"),
-		tag("is::longitude"),
-		tag("is::numeric"),
-		tag("is::semver"),
-		tag("is::url"),
-		tag("is::uuid"),
-	))(i)
-}
-
-fn function_math(i: &str) -> IResult<&str, &str> {
-	alt((
-		alt((
-			tag("math::abs"),
-			tag("math::bottom"),
-			tag("math::ceil"),
-			tag("math::fixed"),
-			tag("math::floor"),
-			tag("math::interquartile"),
-		)),
-		alt((
-			tag("math::max"),
-			tag("math::mean"),
-			tag("math::median"),
-			tag("math::midhinge"),
-			tag("math::min"),
-			tag("math::mode"),
-		)),
-		alt((
-			tag("math::nearestrank"),
-			tag("math::percentile"),
-			tag("math::pow"),
-			tag("math::product"),
-			tag("math::round"),
-			tag("math::spread"),
-			tag("math::sqrt"),
-			tag("math::stddev"),
-			tag("math::sum"),
-			tag("math::top"),
-			tag("math::trimean"),
-			tag("math::variance"),
-		)),
-	))(i)
-}
-
-fn function_meta(i: &str) -> IResult<&str, &str> {
-	alt((tag("meta::id"), tag("meta::table"), tag("meta::tb")))(i)
-}
-
-fn function_not(i: &str) -> IResult<&str, &str> {
-	tag("not")(i)
-}
-
-fn function_sleep(i: &str) -> IResult<&str, &str> {
-	tag("sleep")(i)
-}
-
-fn function_parse(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("parse::email::host"),
-		tag("parse::email::user"),
-		tag("parse::url::domain"),
-		tag("parse::url::fragment"),
-		tag("parse::url::host"),
-		tag("parse::url::path"),
-		tag("parse::url::port"),
-		tag("parse::url::query"),
-		tag("parse::url::scheme"),
-	))(i)
-}
-
-fn function_rand(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("rand::bool"),
-		tag("rand::enum"),
-		tag("rand::float"),
-		tag("rand::guid"),
-		tag("rand::int"),
-		tag("rand::string"),
-		tag("rand::time"),
-		tag("rand::ulid"),
-		tag("rand::uuid::v4"),
-		tag("rand::uuid::v7"),
-		tag("rand::uuid"),
-		tag("rand"),
-	))(i)
-}
-
-fn function_session(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("session::db"),
-		tag("session::id"),
-		tag("session::ip"),
-		tag("session::ns"),
-		tag("session::origin"),
-		tag("session::sc"),
-		tag("session::sd"),
-		tag("session::token"),
-	))(i)
-}
-
-fn function_string(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("string::concat"),
-		tag("string::endsWith"),
-		tag("string::join"),
-		tag("string::len"),
-		tag("string::lowercase"),
-		tag("string::repeat"),
-		tag("string::replace"),
-		tag("string::reverse"),
-		tag("string::slice"),
-		tag("string::slug"),
-		tag("string::split"),
-		tag("string::startsWith"),
-		tag("string::trim"),
-		tag("string::uppercase"),
-		tag("string::words"),
-	))(i)
-}
-
-fn function_time(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("time::day"),
-		tag("time::floor"),
-		tag("time::format"),
-		tag("time::group"),
-		tag("time::hour"),
-		tag("time::minute"),
-		tag("time::month"),
-		tag("time::nano"),
-		tag("time::now"),
-		tag("time::round"),
-		tag("time::second"),
-		tag("time::timezone"),
-		tag("time::unix"),
-		tag("time::wday"),
-		tag("time::week"),
-		tag("time::yday"),
-		tag("time::year"),
-	))(i)
-}
-
-fn function_type(i: &str) -> IResult<&str, &str> {
-	alt((
-		tag("type::bool"),
-		tag("type::datetime"),
-		tag("type::decimal"),
-		tag("type::duration"),
-		tag("type::float"),
-		tag("type::int"),
-		tag("type::number"),
-		tag("type::point"),
-		tag("type::regex"),
-		tag("type::string"),
-		tag("type::table"),
-		tag("type::thing"),
+		tag("table"),
+		tag("thing"),
 	))(i)
 }
 
@@ -661,7 +594,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<int> 1.2345", format!("{}", out));
-		assert_eq!(out, Function::Cast(String::from("int"), 1.2345.into()));
+		assert_eq!(out, Function::Cast(Kind::Int, 1.2345.into()));
 	}
 
 	#[test]
@@ -671,7 +604,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("<string> 1.2345", format!("{}", out));
-		assert_eq!(out, Function::Cast(String::from("string"), 1.2345.into()));
+		assert_eq!(out, Function::Cast(Kind::String, 1.2345.into()));
 	}
 
 	#[test]

@@ -19,6 +19,14 @@ impl Deref for Query {
 	}
 }
 
+impl IntoIterator for Query {
+	type Item = Statement;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
+
 impl Display for Query {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(Pretty::from(f), "{}", &self.0)

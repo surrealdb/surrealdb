@@ -175,13 +175,11 @@ impl serde::ser::SerializeTuple for SerializeValueValueTuple {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn default() {
 		let stmt = IfelseStatement::default();
-		let value: IfelseStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: IfelseStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -191,8 +189,7 @@ mod tests {
 			exprs: vec![(Default::default(), Default::default())],
 			..Default::default()
 		};
-		let value: IfelseStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: IfelseStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -202,8 +199,7 @@ mod tests {
 			close: Some(Default::default()),
 			..Default::default()
 		};
-		let value: IfelseStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: IfelseStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 }

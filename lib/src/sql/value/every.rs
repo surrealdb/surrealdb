@@ -3,7 +3,7 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
-	pub fn every(&self, path: Option<&[Part]>, steps: bool, arrays: bool) -> Vec<Idiom> {
+	pub(crate) fn every(&self, path: Option<&[Part]>, steps: bool, arrays: bool) -> Vec<Idiom> {
 		match path {
 			Some(path) => self.pick(path)._every(steps, arrays, Idiom::from(path)),
 			None => self._every(steps, arrays, Idiom::default()),

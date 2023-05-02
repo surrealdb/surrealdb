@@ -8,6 +8,7 @@ use crate::sql::error::IResult;
 use crate::sql::escape::escape_rid;
 use crate::sql::ident::ident_raw;
 use crate::sql::number::integer;
+use crate::sql::number::Number;
 use crate::sql::object::{object, Object};
 use crate::sql::strand::Strand;
 use crate::sql::thing::Thing;
@@ -103,6 +104,16 @@ impl From<Vec<String>> for Id {
 impl From<Vec<Value>> for Id {
 	fn from(v: Vec<Value>) -> Self {
 		Id::Array(v.into())
+	}
+}
+
+impl From<Number> for Id {
+	fn from(v: Number) -> Self {
+		match v {
+			Number::Int(v) => v.into(),
+			Number::Float(v) => v.to_string().into(),
+			Number::Decimal(v) => v.to_string().into(),
+		}
 	}
 }
 

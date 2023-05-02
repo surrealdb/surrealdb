@@ -6,7 +6,7 @@ use crate::sql::error::IResult;
 use crate::sql::escape::escape_rid;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
-use crate::sql::serde::is_internal_serialization;
+use crate::sql::strand::Strand;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -14,16 +14,26 @@ use nom::bytes::complete::tag;
 use nom::character::complete::char;
 use nom::combinator::map;
 use nom::sequence::delimited;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Thing";
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Deserialize, Store, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Store, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Thing")]
 pub struct Thing {
 	pub tb: String,
 	pub id: Id,
+}
+
+impl From<(&str, Id)> for Thing {
+	fn from((tb, id): (&str, Id)) -> Self {
+		Self {
+			tb: tb.to_owned(),
+			id,
+		}
+	}
 }
 
 impl From<(String, Id)> for Thing {
@@ -44,6 +54,37 @@ impl From<(String, String)> for Thing {
 impl From<(&str, &str)> for Thing {
 	fn from((tb, id): (&str, &str)) -> Self {
 		Self::from((tb.to_owned(), Id::from(id)))
+	}
+}
+
+impl FromStr for Thing {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
+impl TryFrom<String> for Thing {
+	type Error = ();
+	fn try_from(v: String) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<Strand> for Thing {
+	type Error = ();
+	fn try_from(v: Strand) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<&str> for Thing {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match thing_raw(v) {
+			Ok((_, v)) => Ok(v),
+			_ => Err(()),
+		}
 	}
 }
 
@@ -72,23 +113,6 @@ impl Thing {
 			tb: self.tb.clone(),
 			id: self.id.compute(ctx, opt, txn, doc).await?,
 		}))
-	}
-}
-
-impl Serialize for Thing {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			let mut val = serializer.serialize_struct(TOKEN, 2)?;
-			val.serialize_field("tb", &self.tb)?;
-			val.serialize_field("id", &self.id)?;
-			val.end()
-		} else {
-			let output = self.to_string();
-			serializer.serialize_some(&output)
-		}
 	}
 }
 

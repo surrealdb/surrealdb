@@ -2,8 +2,7 @@ use crate::sql::common::take_u64;
 use crate::sql::datetime::Datetime;
 use crate::sql::ending::duration as ending;
 use crate::sql::error::IResult;
-use crate::sql::serde::is_internal_serialization;
-use crate::sql::value::Value;
+use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::multi::many1;
@@ -12,6 +11,7 @@ use std::fmt;
 use std::iter::Sum;
 use std::ops;
 use std::ops::Deref;
+use std::str::FromStr;
 use std::time;
 
 static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
@@ -20,10 +20,12 @@ static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
 static SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
 static SECONDS_PER_MINUTE: u64 = 60;
 static NANOSECONDS_PER_MILLISECOND: u32 = 1000000;
+static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Duration")]
 pub struct Duration(pub time::Duration);
 
 impl From<time::Duration> for Duration {
@@ -32,24 +34,40 @@ impl From<time::Duration> for Duration {
 	}
 }
 
-impl From<String> for Duration {
-	fn from(s: String) -> Self {
-		s.as_str().into()
-	}
-}
-
-impl From<&str> for Duration {
-	fn from(s: &str) -> Self {
-		match duration(s) {
-			Ok((_, v)) => v,
-			Err(_) => Self::default(),
-		}
-	}
-}
-
 impl From<Duration> for time::Duration {
 	fn from(s: Duration) -> Self {
 		s.0
+	}
+}
+
+impl FromStr for Duration {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
+impl TryFrom<String> for Duration {
+	type Error = ();
+	fn try_from(v: String) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<Strand> for Duration {
+	type Error = ();
+	fn try_from(v: Strand) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<&str> for Duration {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match duration(v) {
+			Ok((_, v)) => Ok(v),
+			_ => Err(()),
+		}
 	}
 }
 
@@ -65,39 +83,73 @@ impl Duration {
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}
+	/// Get the total number of nanoseconds
+	pub fn nanos(&self) -> u128 {
+		self.0.as_nanos()
+	}
+	/// Get the total number of microseconds
+	pub fn micros(&self) -> u128 {
+		self.0.as_micros()
+	}
+	/// Get the total number of milliseconds
+	pub fn millis(&self) -> u128 {
+		self.0.as_millis()
+	}
 	/// Get the total number of seconds
-	pub fn secs(&self) -> Value {
-		self.0.as_secs().into()
+	pub fn secs(&self) -> u64 {
+		self.0.as_secs()
 	}
 	/// Get the total number of minutes
-	pub fn mins(&self) -> Value {
-		let secs = self.0.as_secs();
-		let mins = secs / SECONDS_PER_MINUTE;
-		mins.into()
+	pub fn mins(&self) -> u64 {
+		self.0.as_secs() / SECONDS_PER_MINUTE
 	}
 	/// Get the total number of hours
-	pub fn hours(&self) -> Value {
-		let secs = self.0.as_secs();
-		let hours = secs / SECONDS_PER_HOUR;
-		hours.into()
+	pub fn hours(&self) -> u64 {
+		self.0.as_secs() / SECONDS_PER_HOUR
 	}
 	/// Get the total number of dats
-	pub fn days(&self) -> Value {
-		let secs = self.0.as_secs();
-		let days = secs / SECONDS_PER_DAY;
-		days.into()
+	pub fn days(&self) -> u64 {
+		self.0.as_secs() / SECONDS_PER_DAY
 	}
 	/// Get the total number of months
-	pub fn weeks(&self) -> Value {
-		let secs = self.0.as_secs();
-		let weeks = secs / SECONDS_PER_WEEK;
-		weeks.into()
+	pub fn weeks(&self) -> u64 {
+		self.0.as_secs() / SECONDS_PER_WEEK
 	}
 	/// Get the total number of years
-	pub fn years(&self) -> Value {
-		let secs = self.0.as_secs();
-		let years = secs / SECONDS_PER_YEAR;
-		years.into()
+	pub fn years(&self) -> u64 {
+		self.0.as_secs() / SECONDS_PER_YEAR
+	}
+	/// Create a duration from nanoseconds
+	pub fn from_nanos(nanos: u64) -> Duration {
+		time::Duration::from_nanos(nanos).into()
+	}
+	/// Create a duration from microseconds
+	pub fn from_micros(micros: u64) -> Duration {
+		time::Duration::from_micros(micros).into()
+	}
+	/// Create a duration from milliseconds
+	pub fn from_millis(millis: u64) -> Duration {
+		time::Duration::from_millis(millis).into()
+	}
+	/// Create a duration from seconds
+	pub fn from_secs(secs: u64) -> Duration {
+		time::Duration::from_secs(secs).into()
+	}
+	/// Create a duration from minutes
+	pub fn from_mins(mins: u64) -> Duration {
+		time::Duration::from_secs(mins * SECONDS_PER_MINUTE).into()
+	}
+	/// Create a duration from hours
+	pub fn from_hours(hours: u64) -> Duration {
+		time::Duration::from_secs(hours * SECONDS_PER_HOUR).into()
+	}
+	/// Create a duration from days
+	pub fn from_days(days: u64) -> Duration {
+		time::Duration::from_secs(days * SECONDS_PER_DAY).into()
+	}
+	/// Create a duration from weeks
+	pub fn from_weeks(days: u64) -> Duration {
+		time::Duration::from_secs(days * SECONDS_PER_WEEK).into()
 	}
 }
 
@@ -128,6 +180,9 @@ impl fmt::Display for Duration {
 		// Calculate the total millseconds
 		let msec = nano / NANOSECONDS_PER_MILLISECOND;
 		let nano = nano % NANOSECONDS_PER_MILLISECOND;
+		// Calculate the total microseconds
+		let usec = nano / NANOSECONDS_PER_MICROSECOND;
+		let nano = nano % NANOSECONDS_PER_MICROSECOND;
 		// Write the different parts
 		if year > 0 {
 			write!(f, "{year}y")?;
@@ -150,23 +205,13 @@ impl fmt::Display for Duration {
 		if msec > 0 {
 			write!(f, "{msec}ms")?;
 		}
+		if usec > 0 {
+			write!(f, "{usec}µs")?;
+		}
 		if nano > 0 {
 			write!(f, "{nano}ns")?;
 		}
 		Ok(())
-	}
-}
-
-impl Serialize for Duration {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			serializer.serialize_some(&self.to_string())
-		}
 	}
 }
 
@@ -257,22 +302,22 @@ pub fn duration(i: &str) -> IResult<&str, Duration> {
 fn duration_raw(i: &str) -> IResult<&str, Duration> {
 	let (i, v) = part(i)?;
 	let (i, u) = unit(i)?;
-	Ok((
-		i,
-		Duration(match u {
-			"ns" => time::Duration::from_nanos(v),
-			"µs" => time::Duration::from_micros(v),
-			"us" => time::Duration::from_micros(v),
-			"ms" => time::Duration::from_millis(v),
-			"s" => time::Duration::from_secs(v),
-			"m" => time::Duration::from_secs(v * SECONDS_PER_MINUTE),
-			"h" => time::Duration::from_secs(v * SECONDS_PER_HOUR),
-			"d" => time::Duration::from_secs(v * SECONDS_PER_DAY),
-			"w" => time::Duration::from_secs(v * SECONDS_PER_WEEK),
-			"y" => time::Duration::from_secs(v * SECONDS_PER_YEAR),
-			_ => time::Duration::ZERO,
-		}),
-	))
+
+	let std_duration = match u {
+		"ns" => Some(time::Duration::from_nanos(v)),
+		"µs" => Some(time::Duration::from_micros(v)),
+		"us" => Some(time::Duration::from_micros(v)),
+		"ms" => Some(time::Duration::from_millis(v)),
+		"s" => Some(time::Duration::from_secs(v)),
+		"m" => v.checked_mul(SECONDS_PER_MINUTE).map(time::Duration::from_secs),
+		"h" => v.checked_mul(SECONDS_PER_HOUR).map(time::Duration::from_secs),
+		"d" => v.checked_mul(SECONDS_PER_DAY).map(time::Duration::from_secs),
+		"w" => v.checked_mul(SECONDS_PER_WEEK).map(time::Duration::from_secs),
+		"y" => v.checked_mul(SECONDS_PER_YEAR).map(time::Duration::from_secs),
+		_ => unreachable!("shouldn't have parsed {u} as duration unit"),
+	};
+
+	std_duration.map(|d| (i, Duration(d))).ok_or(nom::Err::Error(crate::sql::Error::Parser(i)))
 }
 
 fn part(i: &str) -> IResult<&str, u64> {
@@ -388,5 +433,12 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("500ms", format!("{}", out));
 		assert_eq!(out.0, Duration::new(0, 500000000));
+	}
+
+	#[test]
+	fn duration_overflow() {
+		let sql = "10000000000000000d";
+		let res = duration(sql);
+		assert!(res.is_err());
 	}
 }

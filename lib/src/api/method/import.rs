@@ -12,6 +12,7 @@ use std::pin::Pin;
 
 /// An database import future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Import<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) file: PathBuf,
@@ -31,7 +32,7 @@ where
 				return Err(Error::BackupsNotSupported.into());
 			}
 			let mut conn = Client::new(Method::Import);
-			conn.execute(router, Param::file(self.file)).await
+			conn.execute_unit(router, Param::file(self.file)).await
 		})
 	}
 }

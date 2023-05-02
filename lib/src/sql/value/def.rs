@@ -7,7 +7,7 @@ use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 
 impl Value {
-	pub async fn def(
+	pub(crate) async fn def(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,

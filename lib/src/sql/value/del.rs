@@ -2,18 +2,18 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::exe::try_join_all_buffered;
 use crate::sql::array::Abolish;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
-use futures::future::try_join_all;
 use std::collections::HashSet;
 
 impl Value {
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub async fn del(
+	pub(crate) async fn del(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
@@ -47,7 +47,7 @@ impl Value {
 						_ => {
 							let path = path.next();
 							let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-							try_join_all(futs).await?;
+							try_join_all_buffered(futs).await?;
 							Ok(())
 						}
 					},
@@ -114,7 +114,7 @@ impl Value {
 					},
 					_ => {
 						let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-						try_join_all(futs).await?;
+						try_join_all_buffered(futs).await?;
 						Ok(())
 					}
 				},

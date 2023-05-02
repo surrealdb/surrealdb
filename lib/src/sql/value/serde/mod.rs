@@ -1,3 +1,3 @@
 mod ser;
 
-pub(crate) use ser::to_value;
+pub use ser::to_value;

@@ -113,27 +113,26 @@ impl serde::ser::SerializeTupleVariant for SerializeValueIdiomTuple {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use serde::Serialize;
 
 	#[test]
 	fn all() {
 		let field = Field::All;
-		let serialized = serialize_internal(|| field.serialize(Serializer.wrap())).unwrap();
+		let serialized = field.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(field, serialized);
 	}
 
 	#[test]
 	fn alone() {
 		let field = Field::Alone(Default::default());
-		let serialized = serialize_internal(|| field.serialize(Serializer.wrap())).unwrap();
+		let serialized = field.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(field, serialized);
 	}
 
 	#[test]
 	fn alias() {
 		let field = Field::Alias(Default::default(), Default::default());
-		let serialized = serialize_internal(|| field.serialize(Serializer.wrap())).unwrap();
+		let serialized = field.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(field, serialized);
 	}
 }

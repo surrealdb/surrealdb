@@ -11,6 +11,7 @@ use std::pin::Pin;
 
 /// A session invalidate future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Invalidate<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 }
@@ -29,7 +30,7 @@ where
 				return Err(Error::AuthNotSupported.into());
 			}
 			let mut conn = Client::new(Method::Invalidate);
-			conn.execute(router, Param::new(Vec::new())).await
+			conn.execute_unit(router, Param::new(Vec::new())).await
 		})
 	}
 }

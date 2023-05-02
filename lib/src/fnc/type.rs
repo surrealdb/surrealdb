@@ -1,83 +1,46 @@
 use crate::err::Error;
-use crate::sql::geometry::Geometry;
-use crate::sql::number::Number;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
-use crate::sql::Strand;
 
-pub fn bool((arg,): (Value,)) -> Result<Value, Error> {
-	Ok(arg.is_truthy().into())
+pub fn bool((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_bool().map(Value::from)
 }
 
-pub fn datetime((arg,): (Value,)) -> Result<Value, Error> {
-	Ok(match arg {
-		Value::Datetime(_) => arg,
-		_ => Value::Datetime(arg.as_datetime()),
-	})
+pub fn datetime((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_datetime().map(Value::from)
 }
 
-pub fn decimal((arg,): (Value,)) -> Result<Value, Error> {
-	Ok(match arg {
-		Value::Number(Number::Decimal(_)) => arg,
-		_ => Value::Number(Number::Decimal(arg.as_decimal())),
-	})
+pub fn decimal((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_decimal().map(Value::from)
 }
 
-pub fn duration((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Duration(_) => Ok(arg),
-		_ => Ok(Value::Duration(arg.as_duration())),
-	}
+pub fn duration((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_duration().map(Value::from)
 }
 
-pub fn float((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Number(Number::Float(_)) => Ok(arg),
-		_ => Ok(Value::Number(Number::Float(arg.as_float()))),
-	}
+pub fn float((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_float().map(Value::from)
 }
 
-pub fn int((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Number(Number::Int(_)) => Ok(arg),
-		_ => Ok(Value::Number(Number::Int(arg.as_int()))),
-	}
+pub fn int((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_int().map(Value::from)
 }
 
-pub fn number((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Number(_) => Ok(arg),
-		_ => Ok(Value::Number(arg.as_number())),
-	}
+pub fn number((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_number().map(Value::from)
 }
 
-pub fn point((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
-	Ok(if let Some(y) = arg2 {
-		let x = arg1;
-		(x.as_float(), y.as_float()).into()
-	} else {
-		match arg1 {
-			Value::Array(v) if v.len() == 2 => v.as_point().into(),
-			Value::Geometry(Geometry::Point(v)) => v.into(),
-			_ => Value::None,
-		}
-	})
+pub fn point((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_point().map(Value::from)
 }
 
-pub fn regex((arg,): (Value,)) -> Result<Value, Error> {
-	match arg {
-		Value::Strand(v) => Ok(Value::Regex(v.as_str().into())),
-		_ => Ok(Value::None),
-	}
+pub fn string((val,): (Value,)) -> Result<Value, Error> {
+	val.convert_to_strand().map(Value::from)
 }
 
-pub fn string((arg,): (Strand,)) -> Result<Value, Error> {
-	Ok(arg.into())
-}
-
-pub fn table((arg,): (Value,)) -> Result<Value, Error> {
-	Ok(Value::Table(Table(match arg {
+pub fn table((val,): (Value,)) -> Result<Value, Error> {
+	Ok(Value::Table(Table(match val {
 		Value::Thing(t) => t.tb,
 		v => v.as_string(),
 	})))
@@ -91,7 +54,7 @@ pub fn thing((arg1, arg2): (Value, Option<Value>)) -> Result<Value, Error> {
 				Value::Thing(v) => v.id,
 				Value::Array(v) => v.into(),
 				Value::Object(v) => v.into(),
-				Value::Number(Number::Int(v)) => v.into(),
+				Value::Number(v) => v.into(),
 				v => v.as_string().into(),
 			},
 		})

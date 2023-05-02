@@ -69,77 +69,76 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn value() {
 		let entry = Entry::Value(Default::default());
-		let serialized = serialize_internal(|| entry.serialize(Serializer.wrap())).unwrap();
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}
 
 	#[test]
 	fn set() {
 		let entry = Entry::Set(Default::default());
-		let serialized = serialize_internal(|| entry.serialize(Serializer.wrap())).unwrap();
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}
 
 	#[test]
 	fn ifelse() {
 		let entry = Entry::Ifelse(Default::default());
-		let serialized = serialize_internal(|| entry.serialize(Serializer.wrap())).unwrap();
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}
 
 	#[test]
 	fn select() {
 		let entry = Entry::Select(Default::default());
-		let serialized = serialize_internal(|| entry.serialize(Serializer.wrap())).unwrap();
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}
 
 	#[test]
 	fn create() {
 		let entry = Entry::Create(Default::default());
-		let serialized = serialize_internal(|| entry.serialize(Serializer.wrap())).unwrap();
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}
 
 	#[test]
 	fn update() {
 		let entry = Entry::Update(Default::default());
-		let serialized = serialize_internal(|| entry.serialize(Serializer.wrap())).unwrap();
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}
 
 	#[test]
 	fn delete() {
 		let entry = Entry::Delete(Default::default());
-		let serialized = serialize_internal(|| entry.serialize(Serializer.wrap())).unwrap();
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}
 
 	#[test]
 	fn relate() {
 		let entry = Entry::Relate(Default::default());
-		let serialized = serialize_internal(|| entry.serialize(Serializer.wrap())).unwrap();
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}
 
 	#[test]
 	fn insert() {
 		let entry = Entry::Insert(Default::default());
-		let serialized = serialize_internal(|| entry.serialize(Serializer.wrap())).unwrap();
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}
 
 	#[test]
 	fn output() {
 		let entry = Entry::Output(Default::default());
-		let serialized = serialize_internal(|| entry.serialize(Serializer.wrap())).unwrap();
+		let serialized = entry.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(entry, serialized);
 	}
 }

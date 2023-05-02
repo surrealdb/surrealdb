@@ -81,13 +81,12 @@ impl serde::ser::SerializeStruct for SerializeThing {
 mod tests {
 	use super::*;
 	use crate::sql;
-	use crate::sql::serde::serialize_internal;
 	use serde::Serialize;
 
 	#[test]
 	fn thing() {
 		let thing = sql::thing("foo:bar").unwrap();
-		let serialized = serialize_internal(|| thing.serialize(Serializer.wrap())).unwrap();
+		let serialized = thing.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(thing, serialized);
 	}
 }

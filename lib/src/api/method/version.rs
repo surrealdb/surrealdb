@@ -10,6 +10,7 @@ use std::pin::Pin;
 
 /// A version future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Version<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 }
@@ -24,7 +25,10 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async {
 			let mut conn = Client::new(Method::Version);
-			let version: String = conn.execute(self.router?, Param::new(Vec::new())).await?;
+			let version = conn
+				.execute_value(self.router?, Param::new(Vec::new()))
+				.await?
+				.convert_to_string()?;
 			let semantic = version.trim_start_matches("surrealdb-");
 			semantic.parse().map_err(|_| Error::InvalidSemanticVersion(semantic.to_string()).into())
 		})

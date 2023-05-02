@@ -336,12 +336,11 @@ impl serde::ser::SerializeTuple for SerializeIdiomValueTuple {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn empty_expression() {
 		let data = Data::EmptyExpression;
-		let serialized = serialize_internal(|| data.serialize(Serializer.wrap())).unwrap();
+		let serialized = data.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(data, serialized);
 	}
 
@@ -349,49 +348,49 @@ mod tests {
 	fn set_expression() {
 		let data =
 			Data::SetExpression(vec![(Default::default(), Default::default(), Default::default())]);
-		let serialized = serialize_internal(|| data.serialize(Serializer.wrap())).unwrap();
+		let serialized = data.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(data, serialized);
 	}
 
 	#[test]
 	fn patch_expression() {
 		let data = Data::PatchExpression(Default::default());
-		let serialized = serialize_internal(|| data.serialize(Serializer.wrap())).unwrap();
+		let serialized = data.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(data, serialized);
 	}
 
 	#[test]
 	fn merge_expression() {
 		let data = Data::MergeExpression(Default::default());
-		let serialized = serialize_internal(|| data.serialize(Serializer.wrap())).unwrap();
+		let serialized = data.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(data, serialized);
 	}
 
 	#[test]
 	fn replace_expression() {
 		let data = Data::ReplaceExpression(Default::default());
-		let serialized = serialize_internal(|| data.serialize(Serializer.wrap())).unwrap();
+		let serialized = data.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(data, serialized);
 	}
 
 	#[test]
 	fn content_expression() {
 		let data = Data::ContentExpression(Default::default());
-		let serialized = serialize_internal(|| data.serialize(Serializer.wrap())).unwrap();
+		let serialized = data.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(data, serialized);
 	}
 
 	#[test]
 	fn single_expression() {
 		let data = Data::SingleExpression(Default::default());
-		let serialized = serialize_internal(|| data.serialize(Serializer.wrap())).unwrap();
+		let serialized = data.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(data, serialized);
 	}
 
 	#[test]
 	fn values_expression() {
 		let data = Data::ValuesExpression(vec![vec![(Default::default(), Default::default())]]);
-		let serialized = serialize_internal(|| data.serialize(Serializer.wrap())).unwrap();
+		let serialized = data.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(data, serialized);
 	}
 
@@ -402,7 +401,7 @@ mod tests {
 			Default::default(),
 			Default::default(),
 		)]);
-		let serialized = serialize_internal(|| data.serialize(Serializer.wrap())).unwrap();
+		let serialized = data.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(data, serialized);
 	}
 }

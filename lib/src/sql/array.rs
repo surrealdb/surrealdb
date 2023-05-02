@@ -8,13 +8,10 @@ use crate::sql::error::IResult;
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::number::Number;
 use crate::sql::operation::Operation;
-use crate::sql::serde::is_internal_serialization;
-use crate::sql::strand::Strand;
 use crate::sql::value::{value, Value};
 use nom::character::complete::char;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
-use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter, Write};
@@ -24,7 +21,8 @@ use std::ops::DerefMut;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Array";
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Array")]
 pub struct Array(pub Vec<Value>);
 
 impl From<Value> for Array {
@@ -75,6 +73,12 @@ impl From<Array> for Vec<Value> {
 	}
 }
 
+impl FromIterator<Value> for Array {
+	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
+		Array(iter.into_iter().collect())
+	}
+}
+
 impl Deref for Array {
 	type Target = Vec<Value>;
 	fn deref(&self) -> &Self::Target {
@@ -103,30 +107,6 @@ impl Array {
 
 	pub fn with_capacity(len: usize) -> Self {
 		Self(Vec::with_capacity(len))
-	}
-
-	pub fn as_ints(self) -> Vec<i64> {
-		self.0.into_iter().map(|v| v.as_int()).collect()
-	}
-
-	pub fn as_floats(self) -> Vec<f64> {
-		self.0.into_iter().map(|v| v.as_float()).collect()
-	}
-
-	pub fn as_numbers(self) -> Vec<Number> {
-		self.0.into_iter().map(|v| v.as_number()).collect()
-	}
-
-	pub fn as_strands(self) -> Vec<Strand> {
-		self.0.into_iter().map(|v| v.as_strand()).collect()
-	}
-
-	pub fn as_point(mut self) -> [f64; 2] {
-		match self.len() {
-			0 => [0.0, 0.0],
-			1 => [self.0.remove(0).as_float(), 0.0],
-			_ => [self.0.remove(0).as_float(), self.0.remove(0).as_float()],
-		}
 	}
 }
 
@@ -159,23 +139,6 @@ impl Display for Array {
 			drop(indent);
 		}
 		f.write_char(']')
-	}
-}
-
-impl Serialize for Array {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			let mut arr = serializer.serialize_seq(Some(self.len()))?;
-			for v in &self.0 {
-				arr.serialize_element(v)?;
-			}
-			arr.end()
-		}
 	}
 }
 
@@ -247,7 +210,7 @@ impl<T> Abolish<T> for Vec<T> {
 
 // ------------------------------
 
-pub trait Combine<T> {
+pub(crate) trait Combine<T> {
 	fn combine(self, other: T) -> T;
 }
 
@@ -265,7 +228,7 @@ impl Combine<Array> for Array {
 
 // ------------------------------
 
-pub trait Complement<T> {
+pub(crate) trait Complement<T> {
 	fn complement(self, other: T) -> T;
 }
 
@@ -283,7 +246,7 @@ impl Complement<Array> for Array {
 
 // ------------------------------
 
-pub trait Concat<T> {
+pub(crate) trait Concat<T> {
 	fn concat(self, other: T) -> T;
 }
 
@@ -296,7 +259,7 @@ impl Concat<Array> for Array {
 
 // ------------------------------
 
-pub trait Difference<T> {
+pub(crate) trait Difference<T> {
 	fn difference(self, other: T) -> T;
 }
 
@@ -317,7 +280,7 @@ impl Difference<Array> for Array {
 
 // ------------------------------
 
-pub trait Flatten<T> {
+pub(crate) trait Flatten<T> {
 	fn flatten(self) -> T;
 }
 
@@ -336,7 +299,7 @@ impl Flatten<Array> for Array {
 
 // ------------------------------
 
-pub trait Intersect<T> {
+pub(crate) trait Intersect<T> {
 	fn intersect(self, other: T) -> T;
 }
 
@@ -355,7 +318,7 @@ impl Intersect<Self> for Array {
 
 // ------------------------------
 
-pub trait Union<T> {
+pub(crate) trait Union<T> {
 	fn union(self, other: T) -> T;
 }
 
@@ -368,7 +331,7 @@ impl Union<Self> for Array {
 
 // ------------------------------
 
-pub trait Uniq<T> {
+pub(crate) trait Uniq<T> {
 	fn uniq(self) -> T;
 }
 
@@ -393,17 +356,12 @@ impl Uniq<Array> for Array {
 pub fn array(i: &str) -> IResult<&str, Array> {
 	let (i, _) = char('[')(i)?;
 	let (i, _) = mightbespace(i)?;
-	let (i, v) = separated_list0(commas, item)(i)?;
+	let (i, v) = separated_list0(commas, value)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(']')(i)?;
 	Ok((i, Array(v)))
-}
-
-fn item(i: &str) -> IResult<&str, Value> {
-	let (i, v) = value(i)?;
-	Ok((i, v))
 }
 
 #[cfg(test)]

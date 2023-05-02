@@ -1,15 +1,16 @@
 use crate::err::Error;
 use crate::sql::ending::number as ending;
+use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
-use crate::sql::serde::is_internal_serialization;
+use crate::sql::strand::Strand;
 use bigdecimal::num_traits::Pow;
 use bigdecimal::BigDecimal;
 use bigdecimal::FromPrimitive;
 use bigdecimal::ToPrimitive;
 use nom::branch::alt;
 use nom::character::complete::i64;
-use nom::combinator::map;
 use nom::number::complete::recognize_float;
+use nom::Err::Failure;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
@@ -21,11 +22,13 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename = "$surrealdb::private::sql::Number")]
 pub enum Number {
 	Int(i64),
 	Float(f64),
 	Decimal(BigDecimal),
+	// Add new variants here
 }
 
 impl Default for Number {
@@ -34,65 +37,19 @@ impl Default for Number {
 	}
 }
 
-impl From<i8> for Number {
-	fn from(i: i8) -> Self {
-		Self::Int(i as i64)
-	}
+macro_rules! from_prim_ints {
+	($($int: ty),*) => {
+		$(
+			impl From<$int> for Number {
+				fn from(i: $int) -> Self {
+					Self::Int(i as i64)
+				}
+			}
+		)*
+	};
 }
 
-impl From<i16> for Number {
-	fn from(i: i16) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<i32> for Number {
-	fn from(i: i32) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<i64> for Number {
-	fn from(i: i64) -> Self {
-		Self::Int(i)
-	}
-}
-
-impl From<isize> for Number {
-	fn from(i: isize) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<u8> for Number {
-	fn from(i: u8) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<u16> for Number {
-	fn from(i: u16) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<u32> for Number {
-	fn from(i: u32) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<u64> for Number {
-	fn from(i: u64) -> Self {
-		Self::Int(i as i64)
-	}
-}
-
-impl From<usize> for Number {
-	fn from(i: usize) -> Self {
-		Self::Int(i as i64)
-	}
-}
+from_prim_ints!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 
 impl From<f32> for Number {
 	fn from(f: f32) -> Self {
@@ -106,56 +63,97 @@ impl From<f64> for Number {
 	}
 }
 
-impl From<&str> for Number {
-	fn from(s: &str) -> Self {
-		// Attempt to parse as i64
-		match s.parse::<i64>() {
-			// Store it as an i64
-			Ok(v) => Self::Int(v),
-			// It wasn't parsed as a i64 so store as a decimal
-			_ => Self::Decimal(BigDecimal::from_str(s).unwrap_or_default()),
-		}
-	}
-}
-
-impl From<String> for Number {
-	fn from(s: String) -> Self {
-		Self::from(s.as_str())
-	}
-}
-
 impl From<BigDecimal> for Number {
 	fn from(v: BigDecimal) -> Self {
 		Self::Decimal(v)
 	}
 }
 
-impl TryFrom<Number> for i64 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Int(x) => Ok(x),
-			_ => Err(Error::TryFromError(value.to_string(), "i64")),
+impl FromStr for Number {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
+impl TryFrom<String> for Number {
+	type Error = ();
+	fn try_from(v: String) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<Strand> for Number {
+	type Error = ();
+	fn try_from(v: Strand) -> Result<Self, Self::Error> {
+		Self::try_from(v.as_str())
+	}
+}
+
+impl TryFrom<&str> for Number {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		// Attempt to parse as i64
+		match v.parse::<i64>() {
+			// Store it as an i64
+			Ok(v) => Ok(Self::Int(v)),
+			// It wasn't parsed as a i64 so parse as a decimal
+			_ => match BigDecimal::from_str(v) {
+				// Store it as a BigDecimal
+				Ok(v) => Ok(Self::Decimal(v)),
+				// It wasn't parsed as a number
+				_ => Err(()),
+			},
 		}
 	}
 }
 
-impl TryFrom<Number> for f64 {
-	type Error = Error;
-	fn try_from(value: Number) -> Result<Self, Self::Error> {
-		match value {
-			Number::Float(x) => Ok(x),
-			_ => Err(Error::TryFromError(value.to_string(), "f64")),
-		}
-	}
+macro_rules! try_into_prim {
+	// TODO: switch to one argument per int once https://github.com/rust-lang/rust/issues/29599 is stable
+	($($int: ty => $to_int: ident),*) => {
+		$(
+			impl TryFrom<Number> for $int {
+				type Error = Error;
+				fn try_from(value: Number) -> Result<Self, Self::Error> {
+					match value {
+						Number::Int(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
+						},
+						Number::Float(v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
+						},
+						Number::Decimal(ref v) => match v.$to_int() {
+							Some(v) => Ok(v),
+							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
+						},
+					}
+				}
+			}
+		)*
+	};
 }
+
+try_into_prim!(
+	i8 => to_i8, i16 => to_i16, i32 => to_i32, i64 => to_i64, i128 => to_i128,
+	u8 => to_u8, u16 => to_u16, u32 => to_u32, u64 => to_u64, u128 => to_u128,
+	f32 => to_f32, f64 => to_f64
+);
 
 impl TryFrom<Number> for BigDecimal {
 	type Error = Error;
 	fn try_from(value: Number) -> Result<Self, Self::Error> {
 		match value {
+			Number::Int(v) => match BigDecimal::from_i64(v) {
+				Some(v) => Ok(v),
+				None => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
+			},
+			Number::Float(v) => match BigDecimal::from_f64(v) {
+				Some(v) => Ok(v),
+				None => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
+			},
 			Number::Decimal(x) => Ok(x),
-			_ => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
 		}
 	}
 }
@@ -170,27 +168,6 @@ impl Display for Number {
 	}
 }
 
-impl Serialize for Number {
-	fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			match self {
-				Number::Int(v) => s.serialize_newtype_variant(TOKEN, 0, "Int", v),
-				Number::Float(v) => s.serialize_newtype_variant(TOKEN, 1, "Float", v),
-				Number::Decimal(v) => s.serialize_newtype_variant(TOKEN, 2, "Decimal", v),
-			}
-		} else {
-			match self {
-				Number::Int(v) => s.serialize_i64(*v),
-				Number::Float(v) => s.serialize_f64(*v),
-				Number::Decimal(v) => s.serialize_some(v),
-			}
-		}
-	}
-}
-
 impl Number {
 	// -----------------------------------
 	// Constants
@@ -201,6 +178,10 @@ impl Number {
 	// -----------------------------------
 	// Simple number detection
 	// -----------------------------------
+
+	pub fn is_nan(&self) -> bool {
+		matches!(self, Number::Float(v) if v.is_nan())
+	}
 
 	pub fn is_int(&self) -> bool {
 		matches!(self, Number::Int(_))
@@ -234,7 +215,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v > &0,
 			Number::Float(v) => v > &0.0,
-			Number::Decimal(v) => v > &BigDecimal::from(0),
+			Number::Decimal(v) => v > &BigDecimal::default(),
 		}
 	}
 
@@ -242,7 +223,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v < &0,
 			Number::Float(v) => v < &0.0,
-			Number::Decimal(v) => v < &BigDecimal::from(0),
+			Number::Decimal(v) => v < &BigDecimal::default(),
 		}
 	}
 
@@ -250,7 +231,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v >= &0,
 			Number::Float(v) => v >= &0.0,
-			Number::Decimal(v) => v >= &BigDecimal::from(0),
+			Number::Decimal(v) => v >= &BigDecimal::default(),
 		}
 	}
 
@@ -258,7 +239,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v <= &0,
 			Number::Float(v) => v <= &0.0,
-			Number::Decimal(v) => v <= &BigDecimal::from(0),
+			Number::Decimal(v) => v <= &BigDecimal::default(),
 		}
 	}
 
@@ -393,9 +374,9 @@ impl Number {
 
 	pub fn fixed(self, precision: usize) -> Number {
 		match self {
-			Number::Int(v) => format!("{v:.precision$}").into(),
-			Number::Float(v) => format!("{v:.precision$}").into(),
-			Number::Decimal(v) => format!("{v:.precision$}").into(),
+			Number::Int(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
+			Number::Float(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
+			Number::Decimal(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
 		}
 	}
 
@@ -651,7 +632,7 @@ impl Sort for Vec<Number> {
 }
 
 pub fn number(i: &str) -> IResult<&str, Number> {
-	alt((map(decimal, Number::from), map(integer, Number::from)))(i)
+	alt((int, decimal))(i)
 }
 
 pub fn integer(i: &str) -> IResult<&str, i64> {
@@ -660,10 +641,16 @@ pub fn integer(i: &str) -> IResult<&str, i64> {
 	Ok((i, v))
 }
 
-pub fn decimal(i: &str) -> IResult<&str, &str> {
+fn int(i: &str) -> IResult<&str, Number> {
+	let (i, v) = i64(i)?;
+	let (i, _) = ending(i)?;
+	Ok((i, Number::from(v)))
+}
+
+fn decimal(i: &str) -> IResult<&str, Number> {
 	let (i, v) = recognize_float(i)?;
 	let (i, _) = ending(i)?;
-	Ok((i, v))
+	Ok((i, Number::try_from(v).map_err(|_| Failure(Parser(i)))?))
 }
 
 #[cfg(test)]
@@ -672,43 +659,43 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn number_integer() {
+	fn number_int() {
 		let sql = "123";
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("123", format!("{}", out));
-		assert_eq!(out, Number::from(123));
+		assert_eq!(out, Number::Int(123));
 	}
 
 	#[test]
-	fn number_integer_neg() {
+	fn number_int_neg() {
 		let sql = "-123";
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("-123", format!("{}", out));
-		assert_eq!(out, Number::from(-123));
+		assert_eq!(out, Number::Int(-123));
 	}
 
 	#[test]
-	fn number_decimal() {
+	fn number_float() {
 		let sql = "123.45";
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("123.45", format!("{}", out));
-		assert_eq!(out, Number::from(123.45));
+		assert_eq!(out, Number::Float(123.45));
 	}
 
 	#[test]
-	fn number_decimal_neg() {
+	fn number_float_neg() {
 		let sql = "-123.45";
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("-123.45", format!("{}", out));
-		assert_eq!(out, Number::from(-123.45));
+		assert_eq!(out, Number::Float(-123.45));
 	}
 
 	#[test]
@@ -718,7 +705,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("1234.5", format!("{}", out));
-		assert_eq!(out, Number::from(1234.5));
+		assert_eq!(out, Number::Float(1234.5));
 	}
 
 	#[test]
@@ -728,7 +715,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("-1234.5", format!("{}", out));
-		assert_eq!(out, Number::from(-1234.5));
+		assert_eq!(out, Number::Float(-1234.5));
 	}
 
 	#[test]
@@ -738,7 +725,7 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("123.45", format!("{}", out));
-		assert_eq!(out, Number::from(123.45));
+		assert_eq!(out, Number::Float(123.45));
 	}
 
 	#[test]
@@ -748,74 +735,72 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("-123.45", format!("{}", out));
-		assert_eq!(out, Number::from(-123.45));
+		assert_eq!(out, Number::Float(-123.45));
+	}
+
+	#[test]
+	fn number_float_keeps_precision() {
+		let sql = "13.571938471938472";
+		let res = number(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("13.571938471938472", format!("{}", out));
+		assert_eq!(out, Number::try_from("13.571938471938472").unwrap());
+	}
+
+	#[test]
+	fn number_decimal_keeps_precision() {
+		let sql = "13.571938471938471938563985639413947693775636";
+		let res = number(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("13.571938471938471938563985639413947693775636", format!("{}", out));
+		assert_eq!(out, Number::try_from("13.571938471938471938563985639413947693775636").unwrap());
 	}
 
 	#[test]
 	fn number_pow_int() {
-		let res = number("3");
-		assert!(res.is_ok());
-		let res = res.unwrap().1;
-
-		let power = number("4");
-		assert!(power.is_ok());
-		let power = power.unwrap().1;
-
-		assert_eq!(res.pow(power), Number::from(81));
+		let res = Number::Int(3).pow(Number::Int(4));
+		assert_eq!(res, Number::Int(81));
 	}
 
 	#[test]
-	fn number_pow_negatives() {
-		let res = number("4");
-		assert!(res.is_ok());
-		let res = res.unwrap().1;
-
-		let power = number("-0.5");
-		assert!(power.is_ok());
-		let power = power.unwrap().1;
-
-		assert_eq!(res.pow(power), Number::from(0.5));
+	fn number_pow_int_negative() {
+		let res = Number::Int(4).pow(Number::Float(-0.5));
+		assert_eq!(res, Number::Float(0.5));
 	}
 
 	#[test]
 	fn number_pow_float() {
-		let res = number("2.5");
-		assert!(res.is_ok());
-		let res = res.unwrap().1;
-
-		let power = number("2");
-		assert!(power.is_ok());
-		let power = power.unwrap().1;
-
-		assert_eq!(res.pow(power), Number::from(6.25));
+		let res = Number::Float(2.5).pow(Number::Int(2));
+		assert_eq!(res, Number::Float(6.25));
 	}
 
 	#[test]
-	fn number_pow_bigdecimal_one() {
-		let res = number("13.5719384719384719385639856394139476937756394756");
-		assert!(res.is_ok());
-		let res = res.unwrap().1;
+	fn number_pow_float_negative() {
+		let res = Number::Int(4).pow(Number::Float(-0.5));
+		assert_eq!(res, Number::Float(0.5));
+	}
 
-		let power = number("1");
-		assert!(power.is_ok());
-		let power = power.unwrap().1;
-
+	#[test]
+	fn number_pow_decimal_one() {
+		let res = Number::try_from("13.5719384719384719385639856394139476937756394756")
+			.unwrap()
+			.pow(Number::Int(1));
 		assert_eq!(
-			res.pow(power),
-			Number::from("13.5719384719384719385639856394139476937756394756")
+			res,
+			Number::try_from("13.5719384719384719385639856394139476937756394756").unwrap()
 		);
 	}
 
 	#[test]
-	fn number_pow_bigdecimal_int() {
-		let res = number("13.5719384719384719385639856394139476937756394756");
-		assert!(res.is_ok());
-		let res = res.unwrap().1;
-
-		let power = number("2");
-		assert!(power.is_ok());
-		let power = power.unwrap().1;
-
-		assert_eq!(res.pow(power), Number::from("184.19751388608358465578173996877942643463869043732548087725588482334195240945031617770904299536"));
+	fn number_pow_decimal_two() {
+		let res = Number::try_from("13.5719384719384719385639856394139476937756394756")
+			.unwrap()
+			.pow(Number::Int(2));
+		assert_eq!(
+			res,
+			Number::try_from("184.19751388608358465578173996877942643463869043732548087725588482334195240945031617770904299536").unwrap()
+		);
 	}
 }

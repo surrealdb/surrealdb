@@ -10,6 +10,7 @@ use std::pin::Pin;
 
 /// A set future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Set<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) key: String,
@@ -26,7 +27,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let mut conn = Client::new(Method::Set);
-			conn.execute(self.router?, Param::new(vec![self.key.into(), self.value?])).await
+			conn.execute_unit(self.router?, Param::new(vec![self.key.into(), self.value?])).await
 		})
 	}
 }

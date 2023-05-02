@@ -6,6 +6,7 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::sql::Id;
+use crate::sql::Value;
 use serde::de::DeserializeOwned;
 use std::future::Future;
 use std::future::IntoFuture;
@@ -14,6 +15,7 @@ use std::pin::Pin;
 
 /// A select future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Select<'r, C: Connection, R> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) resource: Result<Resource>,
@@ -21,47 +23,67 @@ pub struct Select<'r, C: Connection, R> {
 	pub(super) response_type: PhantomData<R>,
 }
 
-impl<'r, Client, R> Select<'r, Client, R>
+macro_rules! into_future {
+	($method:ident) => {
+		fn into_future(self) -> Self::IntoFuture {
+			let Select {
+				router,
+				resource,
+				range,
+				..
+			} = self;
+			Box::pin(async move {
+				let param = match range {
+					Some(range) => resource?.with_range(range)?,
+					None => resource?.into(),
+				};
+				let mut conn = Client::new(Method::Select);
+				conn.$method(router?, Param::new(vec![param])).await
+			})
+		}
+	};
+}
+
+impl<'r, Client> IntoFuture for Select<'r, Client, Value>
 where
 	Client: Connection,
 {
-	async fn execute<T>(self) -> Result<T>
-	where
-		T: DeserializeOwned,
-	{
-		let resource = self.resource?;
-		let param = match self.range {
-			Some(range) => resource.with_range(range)?,
-			None => resource.into(),
-		};
-		let mut conn = Client::new(Method::Select);
-		conn.execute(self.router?, Param::new(vec![param])).await
-	}
+	type Output = Result<Value>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+
+	into_future! {execute_value}
 }
 
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned + Send + Sync + 'r,
+	R: DeserializeOwned,
 {
-	type Output = Result<R>;
+	type Output = Result<Option<R>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	fn into_future(self) -> Self::IntoFuture {
-		Box::pin(self.execute())
-	}
+	into_future! {execute_opt}
 }
 
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned + Send + Sync + 'r,
+	R: DeserializeOwned,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	fn into_future(self) -> Self::IntoFuture {
-		Box::pin(self.execute())
+	into_future! {execute_vec}
+}
+
+impl<C> Select<'_, C, Value>
+where
+	C: Connection,
+{
+	/// Restricts the records selected to those in the specified range
+	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
+		self.range = Some(bounds.into());
+		self
 	}
 }
 
