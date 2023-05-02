@@ -10,6 +10,11 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value, Error> {
 	Ok(val.ends_with(&chr).into())
 }
 
+pub fn fuzzy_score((a, b): (Value, Value)) -> Result<Value, Error> {
+	let score = a.fuzzy_score(&b);
+	Ok(score.into())
+}
+
 pub fn join(args: Vec<Value>) -> Result<Value, Error> {
 	let mut args = args.into_iter().map(Value::as_string);
 	let chr = args.next().ok_or_else(|| Error::InvalidArguments {

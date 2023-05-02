@@ -20,6 +20,7 @@ impl ModuleDef for Package {
 		module.add("default")?;
 		module.add("concat")?;
 		module.add("endsWith")?;
+		module.add("fuzzyScore")?;
 		module.add("join")?;
 		module.add("len")?;
 		module.add("lowercase")?;
@@ -40,6 +41,7 @@ impl ModuleDef for Package {
 		// Set specific exports
 		module.set("concat", Func::from(|v: Any| run("string::concat", v.0)))?;
 		module.set("endsWith", Func::from(|v: Any| run("string::endsWith", v.0)))?;
+		module.set("fuzzyScore", Func::from(|v: Any| run("string::fuzzyScore", v.0)))?;
 		module.set("join", Func::from(|v: Any| run("string::join", v.0)))?;
 		module.set("len", Func::from(|v: Any| run("string::len", v.0)))?;
 		module.set("lowercase", Func::from(|v: Any| run("string::lowercase", v.0)))?;
@@ -57,6 +59,7 @@ impl ModuleDef for Package {
 		let default = Object::new(ctx)?;
 		default.set("concat", Func::from(|v: Any| run("string::concat", v.0)))?;
 		default.set("endsWith", Func::from(|v: Any| run("string::endsWith", v.0)))?;
+		default.set("fuzzyScore", Func::from(|v: Any| run("string::fuzzyScore", v.0)))?;
 		default.set("join", Func::from(|v: Any| run("string::join", v.0)))?;
 		default.set("len", Func::from(|v: Any| run("string::len", v.0)))?;
 		default.set("lowercase", Func::from(|v: Any| run("string::lowercase", v.0)))?;

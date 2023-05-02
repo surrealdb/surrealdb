@@ -275,6 +275,7 @@
 "string"
 "string::concat("
 "string::endsWith("
+"string::fuzzyScore("
 "string::join("
 "string::len("
 "string::lowercase("

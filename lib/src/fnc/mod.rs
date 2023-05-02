@@ -202,6 +202,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		//
 		"string::concat" => string::concat,
 		"string::endsWith" => string::ends_with,
+		"string::fuzzyScore" => string::fuzzy_score,
 		"string::join" => string::join,
 		"string::len" => string::len,
 		"string::lowercase" => string::lowercase,

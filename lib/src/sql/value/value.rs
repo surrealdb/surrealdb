@@ -1777,6 +1777,22 @@ impl Value {
 		}
 	}
 
+	/// Retrieve the fuzzy score of this Value compared to another Value
+	pub fn fuzzy_score(&self, other: &Value) -> i64 {
+		match self {
+			Value::Uuid(v) => match other {
+				Value::Strand(w) => MATCHER.fuzzy_match(v.to_raw().as_str(), w.as_str()),
+				_ => None,
+			},
+			Value::Strand(v) => match other {
+				Value::Strand(w) => MATCHER.fuzzy_match(v.as_str(), w.as_str()),
+				_ => None,
+			},
+			_ => None,
+		}
+		.unwrap_or(0)
+	}
+
 	/// Fuzzy check if this Value is equal to another Value
 	pub fn fuzzy(&self, other: &Value) -> bool {
 		match self {
