@@ -164,7 +164,7 @@ where
 	async fn visit(
 		&mut self,
 		tx: &mut Transaction,
-		key: Key,
+		key: &Key,
 		payload: Payload,
 	) -> Result<(), Error> {
 		let posting_key: Bf = key.into();
@@ -182,7 +182,7 @@ impl KeyVisitor for PostingsDocCount {
 	async fn visit(
 		&mut self,
 		_tx: &mut Transaction,
-		_key: Key,
+		_key: &Key,
 		_payload: Payload,
 	) -> Result<(), Error> {
 		self.doc_count += 1;

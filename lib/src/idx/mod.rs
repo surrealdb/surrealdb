@@ -41,45 +41,65 @@ impl IndexKeyBase {
 	}
 
 	fn new_bd_key(&self, node_id: Option<NodeId>) -> Key {
-		Bd::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), node_id).into()
+		Bd::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), node_id)
+			.into()
 	}
 
 	fn new_bi_key(&self, doc_id: DocId) -> Key {
-		Bi::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), doc_id).into()
+		Bi::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), doc_id)
+			.into()
 	}
 
 	fn new_bk_key(&self, doc_id: DocId) -> Key {
-		Bk::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), doc_id).into()
+		Bk::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), doc_id)
+			.into()
 	}
 
 	fn new_bl_key(&self, node_id: Option<NodeId>) -> Key {
-		Bl::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), node_id).into()
+		Bl::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), node_id)
+			.into()
 	}
 
 	fn new_bp_key(&self, node_id: Option<NodeId>) -> Key {
-		Bp::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), node_id).into()
+		Bp::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), node_id)
+			.into()
 	}
 
 	fn new_bf_key(&self, term_id: TermId, doc_id: DocId) -> Key {
-		Bf::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), term_id, doc_id)
-			.into()
+		Bf::new(
+			self.ns.as_str(),
+			self.db.as_str(),
+			self.tb.as_str(),
+			self.ix.as_str(),
+			term_id,
+			doc_id,
+		)
+		.into()
 	}
 
 	fn new_bf_prefix_key(&self, term_id: TermId) -> Key {
-		BfPrefix::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), term_id)
-			.into()
+		BfPrefix::new(
+			self.ns.as_str(),
+			self.db.as_str(),
+			self.tb.as_str(),
+			self.ix.as_str(),
+			term_id,
+		)
+		.into()
 	}
 
 	fn new_bt_key(&self, node_id: Option<NodeId>) -> Key {
-		Bt::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), node_id).into()
+		Bt::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), node_id)
+			.into()
 	}
 
 	fn new_bs_key(&self) -> Key {
-		Bs::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone()).into()
+		Bs::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str()).into()
 	}
 
 	fn new_bu_key(&self, term_id: TermId) -> Key {
-		Bu::new(self.ns.clone(), self.db.clone(), self.tb.clone(), self.ix.clone(), term_id).into()
+		Bu::new(self.ns.as_str(), self.db.as_str(), self.tb.as_str(), self.ix.as_str(), term_id)
+			.into()
 	}
 }
 
@@ -118,10 +138,10 @@ mod tests {
 		async fn visit(
 			&mut self,
 			_tx: &mut Transaction,
-			key: Key,
+			key: &Key,
 			payload: Payload,
 		) -> Result<(), Error> {
-			self.map.insert(key, payload);
+			self.map.insert(key.clone(), payload);
 			Ok(())
 		}
 	}

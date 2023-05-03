@@ -14,7 +14,7 @@ pub(super) trait KeyVisitor {
 	async fn visit(
 		&mut self,
 		tx: &mut Transaction,
-		key: Key,
+		key: &Key,
 		payload: Payload,
 	) -> Result<(), Error>;
 }
@@ -421,7 +421,7 @@ impl BKeys for TrieKeys {
 				if let Some(node_key) = node.key() {
 					if node_key.starts_with(prefix) {
 						found = true;
-						visitor.visit(tx, node_key.clone(), *value).await?;
+						visitor.visit(tx, node_key, *value).await?;
 					}
 				}
 			}

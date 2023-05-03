@@ -3,25 +3,25 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Bk {
+pub struct Bk<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: String,
+	pub db: &'a str,
 	_c: u8,
-	pub tb: String,
+	pub tb: &'a str,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ix: String,
+	pub ix: &'a str,
 	_g: u8,
 	pub doc_id: DocId,
 }
 
-impl Bk {
-	pub fn new(ns: String, db: String, tb: String, ix: String, doc_id: DocId) -> Bk {
-		Bk {
+impl<'a> Bk<'a> {
+	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, doc_id: DocId) -> Self {
+		Self {
 			__: 0x2f, // /
 			_a: 0x2a, // *
 			ns,
@@ -46,10 +46,10 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Bk::new(
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
+			"test",
+			"test",
 			7
 		);
 		let enc = Bk::encode(&val).unwrap();
