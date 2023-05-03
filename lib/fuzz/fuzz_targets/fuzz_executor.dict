@@ -168,6 +168,7 @@
 "array::push("
 "array::remove("
 "array::reverse("
+"array::slice("
 "array::sort("
 "array::sort::asc("
 "array::sort::desc("
