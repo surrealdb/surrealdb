@@ -51,13 +51,13 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 3);
-	//
+	// Analyzer is defined
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
-	//
+	// Analyzer is removed
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok());
-	//
+	// Check infos output
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{

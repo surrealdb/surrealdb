@@ -1252,7 +1252,9 @@ impl Transaction {
 		az: &str,
 	) -> Result<DefineAnalyzerStatement, Error> {
 		let key = crate::key::az::new(ns, db, az);
-		let val = self.get(key).await?.ok_or(Error::AzNotFound)?;
+		let val = self.get(key).await?.ok_or(Error::AzNotFound {
+			value: az.to_owned(),
+		})?;
 		Ok(val.into())
 	}
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
