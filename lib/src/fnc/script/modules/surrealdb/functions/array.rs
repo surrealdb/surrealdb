@@ -28,6 +28,7 @@ impl ModuleDef for Package {
 		module.add("insert")?;
 		module.add("intersect")?;
 		module.add("len")?;
+		module.add("slice")?;
 		module.add("sort")?;
 		module.add("union")?;
 		Ok(())
@@ -45,6 +46,7 @@ impl ModuleDef for Package {
 		module.set("insert", Func::from(|v: Any| run("array::insert", v.0)))?;
 		module.set("intersect", Func::from(|v: Any| run("array::intersect", v.0)))?;
 		module.set("len", Func::from(|v: Any| run("array::len", v.0)))?;
+		module.set("slice", Func::from(|v: Any| run("array::slice", v.0)))?;
 		module.set("sort", Func::from(|v: Any| run("array::sort", v.0)))?;
 		module.set("union", Func::from(|v: Any| run("array::union", v.0)))?;
 		// Set default exports
@@ -59,6 +61,7 @@ impl ModuleDef for Package {
 		default.set("insert", Func::from(|v: Any| run("array::insert", v.0)))?;
 		default.set("intersect", Func::from(|v: Any| run("array::intersect", v.0)))?;
 		default.set("len", Func::from(|v: Any| run("array::len", v.0)))?;
+		default.set("slice", Func::from(|v: Any| run("array::slice", v.0)))?;
 		default.set("sort", Func::from(|v: Any| run("array::sort", v.0)))?;
 		default.set("union", Func::from(|v: Any| run("array::union", v.0)))?;
 		module.set("default", default)?;
