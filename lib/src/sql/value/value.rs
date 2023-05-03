@@ -1923,7 +1923,7 @@ impl fmt::Display for Value {
 			Value::Function(v) => write!(f, "{v}"),
 			Value::Subquery(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
-			Value::Bytes(_) => write!(f, "<bytes>"),
+			Value::Bytes(v) => write!(f, "{v}"),
 		}
 	}
 }
