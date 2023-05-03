@@ -201,6 +201,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"session::token" => session::token(ctx),
 		//
 		"string::concat" => string::concat,
+		"string::contains" => string::contains,
 		"string::endsWith" => string::ends_with,
 		"string::join" => string::join,
 		"string::len" => string::len,

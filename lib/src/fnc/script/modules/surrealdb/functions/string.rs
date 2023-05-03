@@ -19,6 +19,7 @@ impl ModuleDef for Package {
 	fn load<'js>(_ctx: Ctx<'js>, module: &Module<'js, Created>) -> Result<()> {
 		module.add("default")?;
 		module.add("concat")?;
+		module.add("contains")?;
 		module.add("endsWith")?;
 		module.add("join")?;
 		module.add("len")?;
@@ -39,6 +40,7 @@ impl ModuleDef for Package {
 	fn eval<'js>(ctx: Ctx<'js>, module: &Module<'js, Loaded<Native>>) -> Result<()> {
 		// Set specific exports
 		module.set("concat", Func::from(|v: Any| run("string::concat", v.0)))?;
+		module.set("contains", Func::from(|v: Any| run("string::contains", v.0)))?;
 		module.set("endsWith", Func::from(|v: Any| run("string::endsWith", v.0)))?;
 		module.set("join", Func::from(|v: Any| run("string::join", v.0)))?;
 		module.set("len", Func::from(|v: Any| run("string::len", v.0)))?;
@@ -56,6 +58,7 @@ impl ModuleDef for Package {
 		// Set default export
 		let default = Object::new(ctx)?;
 		default.set("concat", Func::from(|v: Any| run("string::concat", v.0)))?;
+		default.set("contains", Func::from(|v: Any| run("string::contains", v.0)))?;
 		default.set("endsWith", Func::from(|v: Any| run("string::endsWith", v.0)))?;
 		default.set("join", Func::from(|v: Any| run("string::join", v.0)))?;
 		default.set("len", Func::from(|v: Any| run("string::len", v.0)))?;
