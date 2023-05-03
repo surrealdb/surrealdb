@@ -4067,3 +4067,125 @@ async fn function_type_thing() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn function_vector_cosine_similarity() -> Result<(), Error> {
+	let sql = r#"
+		RETURN vector::cosine_similarity([1, 2, 3], [1, 2, 3]);
+		RETURN vector::cosine_similarity([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::cosine_similarity([1, 2, 3], [4, 5]);
+		RETURN vector::cosine_similarity([1, 2], [4, 5, 5]);
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(1.0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(-1.0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_euclidean_distance() -> Result<(), Error> {
+	let sql = r#"
+		RETURN vector::euclidean_distance([1, 2, 3], [1, 2, 3]);
+		RETURN vector::euclidean_distance([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::euclidean_distance([1, 2, 3], [4, 5]);
+		RETURN vector::euclidean_distance([1, 2], [4, 5, 5]);
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(7.483314773547883);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_dot() -> Result<(), Error> {
+	let sql = r#"
+		RETURN vector::dot([1, 2, 3], [1, 2, 3]);
+		RETURN vector::dot([1, 2, 3], [-1, -2, -3]);
+		RETURN vector::dot([1, 2, 3], [4, 5]);
+		RETURN vector::dot([1, 2], [4, 5, 5]);
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(14);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(-14);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_err());
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_vector_magnitude() -> Result<(), Error> {
+	let sql = r#"
+		RETURN vector::magnitude([]);
+		RETURN vector::magnitude([1]);
+		RETURN vector::magnitude([5]);
+		RETURN vector::magnitude([1,2,3,3,3,4,5]);
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(0);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(1);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(5);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from(8.54400374531753);
+	assert_eq!(tmp, val);
+	Ok(())
+}
