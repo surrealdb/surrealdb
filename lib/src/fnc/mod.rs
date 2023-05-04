@@ -339,10 +339,11 @@ mod tests {
 		}
 
 		if !problems.is_empty() {
+			eprintln!("Functions not fully implemented:");
 			for problem in problems {
 				eprintln!(" - {problem}");
 			}
-			panic!("functions not fully implemented (see above)");
+			panic!("ensure functions can be parsed in lib/src/sql/function.rs and are exported to JS in lib/src/fnc/script/modules/surrealdb");
 		}
 	}
 }
