@@ -31,21 +31,9 @@ enum Content<T> {
 }
 
 impl<T: Serialize> Response<T> {
-	fn json(self) -> Response<Json> {
-		let Response {
-			id,
-			content,
-		} = self;
-		let content = match content {
-			Content::Success(response) => {
-				Content::Success(Json::from(sql::to_value(response).unwrap()))
-			}
-			Content::Failure(failure) => Content::Failure(failure),
-		};
-		Response {
-			id,
-			content,
-		}
+	#[inline]
+	fn json(self) -> Json {
+		sql::to_value(self).unwrap().into()
 	}
 
 	/// Send the response to the channel
