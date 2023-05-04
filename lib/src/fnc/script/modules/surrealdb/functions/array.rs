@@ -1,13 +1,8 @@
-use super::pkg;
 use super::run;
 use crate::fnc::script::modules::impl_module_def;
-use crate::sql::value::Value;
-use js::{Created, Ctx, Func, Loaded, Module, ModuleDef, Native, Object, Rest, Result};
 
 mod sort;
 pub struct Package;
-
-type Any = Rest<Value>;
 
 impl_module_def!(
 	Package,

@@ -1,9 +1,8 @@
-use super::pkg;
 use crate::ctx::Context;
 use crate::fnc;
 use crate::fnc::script::modules::impl_module_def;
-use crate::sql::value::Value;
-use js::{Async, Created, Ctx, Func, Loaded, Module, ModuleDef, Native, Object, Rest, Result};
+use crate::sql::Value;
+use js::{Async, Result};
 
 mod array;
 mod crypto;
@@ -21,8 +20,6 @@ mod time;
 mod r#type;
 
 pub struct Package;
-
-type Any = Rest<Value>;
 
 impl_module_def!(
 	Package,

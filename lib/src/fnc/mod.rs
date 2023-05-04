@@ -296,8 +296,6 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 
 #[cfg(test)]
 mod tests {
-	use crate::sql::Value;
-
 	#[test]
 	fn implementations_are_present() {
 		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
@@ -322,6 +320,8 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			futures::executor::block_on(async {
+				use crate::sql::Value;
+
 				let name = name.replace("::", ".");
 				let sql =
 					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");

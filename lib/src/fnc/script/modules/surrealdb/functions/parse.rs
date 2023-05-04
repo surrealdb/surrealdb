@@ -1,6 +1,4 @@
-use super::super::pkg;
 use crate::fnc::script::modules::impl_module_def;
-use js::{Created, Ctx, Func, Loaded, Module, ModuleDef, Native, Object, Rest, Result};
 
 mod email;
 mod url;
