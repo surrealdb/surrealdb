@@ -25,7 +25,7 @@ pub struct Datastore {
 	// The diff_patch_stream is the receiving channel of live query updates. It is part of the Datastore API, but we may want to put it behind a function.
 	pub diff_patch_stream: Arc<flume::Receiver<Vec<Response>>>,
 	// The live_query_sender is a channel through which the db can send live query updates
-	live_query_sender: Arc<flume::Sender<Vec<Response>>>,
+	pub live_query_sender: Arc<flume::Sender<Vec<Response>>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -302,7 +302,7 @@ impl Datastore {
 		// Create a new query options
 		let mut opt = Options::default();
 		// Create a new query executor
-		let mut exe = Executor::new(self);
+		let mut exe = Executor::new(self, self.live_query_sender.clone());
 		// Create a default context
 		let ctx = Context::default();
 		// Start an execution context
@@ -355,7 +355,7 @@ impl Datastore {
 		// Create a new query options
 		let mut opt = Options::default();
 		// Create a new query executor
-		let mut exe = Executor::new(self);
+		let mut exe = Executor::new(self, self.live_query_sender.clone());
 		// Create a default context
 		let ctx = Context::default();
 		// Start an execution context

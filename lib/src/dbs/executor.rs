@@ -14,10 +14,12 @@ use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
 use crate::sql::Statement::Live;
-use channel::{Receiver, Sender};
+use channel::Receiver;
+use flume::Sender;
 use futures::lock::Mutex;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 use tracing::instrument;
 use trice::Instant;
 use uuid::Uuid;
@@ -28,16 +30,20 @@ pub(crate) struct Executor<'a> {
 	err: bool,
 	kvs: &'a Datastore,
 	txn: Option<Transaction>,
-	live_queries: RwLock<BTreeMap<LiveQueryID, Sender<Response>>>,
+	// The channel to send live query responses to. These will be updates related to listened_lq queries.
+	lq_sender: Arc<Sender<Vec<Response>>>,
+	// The list of live query IDs that are being listened to by this node.
+	listened_lq: Vec<LiveQueryID>,
 }
 
 impl<'a> Executor<'a> {
-	pub fn new(kvs: &'a Datastore) -> Executor<'a> {
+	pub fn new(kvs: &'a Datastore, lq_sender: Arc<Sender<Vec<Response>>>) -> Executor<'a> {
 		Executor {
 			kvs,
 			txn: None,
 			err: false,
-			live_queries: RwLock::new(BTreeMap::new()),
+			lq_sender,
+			listened_lq: Vec::new(),
 		}
 	}
 
@@ -136,8 +142,11 @@ impl<'a> Executor<'a> {
 		mut opt: Options,
 		qry: Query,
 	) -> Result<(Vec<Response>, Option<Receiver<Response>>), Error> {
-		let lqs = &self.live_queries;
-		trace!(target: LOG, "Have access to these LQs: {lqs:?}");
+		trace!(target: LOG, "Have access to these LQs: {:?}", self.listened_lq);
+		self.kvs.live_query_sender.send(vec![Response {
+			time: Duration::from_secs(1),
+			result: Ok(Value::from("Hello, world!")),
+		}]);
 		// Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
@@ -316,16 +325,9 @@ impl<'a> Executor<'a> {
 												Live(live_statement) => {
 													// We now create an async channel to send updates to
 													// when operations are performed that affect the LQ
-													let lqid = live_statement.id.0.clone();
-													let (sender, recvr): (
-														Sender<Response>,
-														Receiver<Response>,
-													) = channel::unbounded();
-													receiver = Some(recvr);
-													self.live_queries
-														.write()
-														.unwrap()
-														.insert(lqid, sender);
+													let lqid: LiveQueryID =
+														live_statement.id.0.clone();
+													self.listened_lq.push(lqid);
 												}
 												_ => {}
 											}
