@@ -98,7 +98,7 @@ pub fn intersect((array, other): (Array, Array)) -> Result<Value, Error> {
 }
 
 pub fn join((arr, sep): (Array, String)) -> Result<Value, Error> {
-	Ok(arr.into_iter().map(|s| s.to_raw_string()).collect::<Vec<_>>().join(&sep).into())
+	Ok(arr.into_iter().map(Value::as_raw_string).collect::<Vec<_>>().join(&sep).into())
 }
 
 pub fn len((array,): (Array,)) -> Result<Value, Error> {
