@@ -20,6 +20,7 @@ impl_module_def!(
 	"group" => run,
 	"insert" => run,
 	"intersect" => run,
+	"join" => run,
 	"len" => run,
 	"max" => run,
 	"min" => run,
