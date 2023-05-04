@@ -103,7 +103,7 @@ jobs:
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Run cargo test
-        run: cargo test --locked --no-default-features --features storage-mem --workspace -- --skip api_integration
+        run: cargo test --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration
 
   ws-engine:
     name: WebSocket engine
