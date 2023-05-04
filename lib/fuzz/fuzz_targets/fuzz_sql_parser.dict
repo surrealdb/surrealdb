@@ -160,6 +160,7 @@
 "array::group("
 "array::insert("
 "array::intersect("
+"array::join("
 "array::len("
 "array::max("
 "array::min("
