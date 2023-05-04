@@ -97,6 +97,10 @@ pub fn intersect((array, other): (Array, Array)) -> Result<Value, Error> {
 	Ok(array.intersect(other).into())
 }
 
+pub fn join((arr, sep): (Array, String)) -> Result<Value, Error> {
+	Ok(arr.into_iter().map(|s| s.to_raw_string()).collect::<Vec<_>>().join(&sep).into())
+}
+
 pub fn len((array,): (Array,)) -> Result<Value, Error> {
 	Ok(array.len().into())
 }
@@ -217,7 +221,7 @@ pub mod sort {
 
 #[cfg(test)]
 mod tests {
-	use super::slice;
+	use super::{join, slice};
 	use crate::sql::{Array, Value};
 
 	#[test]
@@ -238,5 +242,19 @@ mod tests {
 		test(array, Some(-2), None, &[b'f', b'g']);
 		test(array, Some(-4), Some(2), &[b'd', b'e']);
 		test(array, Some(-4), Some(-1), &[b'd', b'e', b'f']);
+	}
+
+	#[test]
+	fn array_join() {
+		fn test(arr: Array, sep: &str,expected: &str) {
+			assert_eq!(join((arr, sep.to_string())).unwrap(), expected.into());
+		}
+
+		test(Vec::<Value>::new().into(), ",", "");
+		test(vec!["hello"].into(), ",", "hello");
+		test(vec!["hello", "world"].into(), ",", "hello,world");
+		test(vec!["again"; 512].into(), " and ", &vec!["again"; 512].join(" and "));
+		test(vec![Value::from(true), Value::from(false), Value::from(true)].into(), " is ", "true is false is true");
+		test(vec![Value::from(3.14), Value::from(2.72), Value::from(1.61)].into(), " is not ", "3.14 is not 2.72 is not 1.61");
 	}
 }

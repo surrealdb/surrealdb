@@ -1,7 +1,6 @@
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::sql::value::Value;
-use crate::sql::Array;
 
 pub fn concat(args: Vec<Value>) -> Result<Value, Error> {
 	Ok(args.into_iter().map(|x| x.as_string()).collect::<Vec<_>>().concat().into())
@@ -25,10 +24,6 @@ pub fn join(args: Vec<Value>) -> Result<Value, Error> {
 	// https://github.com/rust-lang/rust/issues/79524
 	let val = args.collect::<Vec<_>>().join(&chr);
 	Ok(val.into())
-}
-
-pub fn join_array((arr, sep): (Array, String)) -> Result<Value, Error> {
-	Ok(arr.into_iter().map(|s| s.to_raw_string()).collect::<Vec<_>>().join(&sep).into())
 }
 
 pub fn len((string,): (String,)) -> Result<Value, Error> {
@@ -116,8 +111,8 @@ pub fn words((string,): (String,)) -> Result<Value, Error> {
 
 #[cfg(test)]
 mod tests {
-	use super::{contains, join_array, slice};
-	use crate::sql::{Array, Value};
+	use super::{contains, slice};
+	use crate::sql::Value;
 
 	#[test]
 	fn string_slice() {
@@ -157,17 +152,5 @@ mod tests {
 		test("abcde", "cbcd", false);
 		test("好世界", "世", true);
 		test("好世界", "你好", false);
-	}
-
-	#[test]
-	fn string_join_arr() {
-		fn test(sep: &str, arr: Array, expected: Value) {
-			assert_eq!(join_array((arr, sep.to_string())).unwrap(), expected);
-		}
-
-		test(",", Vec::<Value>::new().into(), "".into());
-		test(",", vec!["hello"].into(), "hello".into());
-		test(",", vec!["hello", "world"].into(), "hello,world".into());
-		test(" and ", vec!["again"; 512].into(), vec!["again"; 512].join(" and ").into());
 	}
 }
