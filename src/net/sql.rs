@@ -7,7 +7,10 @@ use crate::net::params::Params;
 use crate::net::session;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
+use serde_json::Value as Json;
+use surrealdb::dbs::Response;
 use surrealdb::dbs::Session;
+use surrealdb::sql;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 
@@ -37,6 +40,10 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 	opts.or(post).or(sock)
 }
 
+fn json(res: Vec<Response>) -> Json {
+	sql::to_value(res).unwrap().into()
+}
+
 async fn handler(
 	output: String,
 	sql: Bytes,
@@ -54,9 +61,9 @@ async fn handler(
 		// Convert the response to JSON
 		Ok(res) => match output.as_ref() {
 			// Simple serialization
-			"application/json" => Ok(output::json(&res)),
-			"application/cbor" => Ok(output::cbor(&res)),
-			"application/pack" => Ok(output::pack(&res)),
+			"application/json" => Ok(output::json(&json(res))),
+			"application/cbor" => Ok(output::cbor(&json(res))),
+			"application/pack" => Ok(output::pack(&json(res))),
 			// Internal serialization
 			"application/bung" => Ok(output::full(&res)),
 			// An incorrect content-type was requested

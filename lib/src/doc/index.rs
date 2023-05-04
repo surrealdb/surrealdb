@@ -13,7 +13,6 @@ use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Ident, Number, Thing, Value};
 use crate::{key, kvs};
-use futures::lock::MutexGuard;
 
 impl<'a> Document<'a> {
 	pub async fn index(
@@ -48,15 +47,15 @@ impl<'a> Document<'a> {
 			// Update the index entries
 			if opt.force || o != n {
 				// Claim transaction
-				let run = txn.lock().await;
+				let mut run = txn.lock().await;
 
 				// Store all the variable and parameters required by the index operation
-				let mut ic = IndexOperation::new(run, opt, ix, o, n, rid);
+				let mut ic = IndexOperation::new(opt, ix, o, n, rid);
 
 				// Index operation dispatching
 				match &ix.index {
-					Index::Uniq => ic.index_unique().await?,
-					Index::Idx => ic.index_non_unique().await?,
+					Index::Uniq => ic.index_unique(&mut run).await?,
+					Index::Idx => ic.index_non_unique(&mut run).await?,
 					Index::Search {
 						az,
 						sc,
@@ -66,7 +65,7 @@ impl<'a> Document<'a> {
 							k1,
 							b,
 							order,
-						} => ic.index_best_matching_search(az, k1, b, order, *hl).await?,
+						} => ic.index_best_matching_search(&mut run, az, k1, b, order, *hl).await?,
 						Scoring::Vs => ic.index_vector_search(az, *hl).await?,
 					},
 				};
@@ -96,7 +95,6 @@ impl<'a> Document<'a> {
 }
 
 struct IndexOperation<'a> {
-	run: MutexGuard<'a, kvs::Transaction>,
 	opt: &'a Options,
 	ix: &'a DefineIndexStatement,
 	/// The old value (if existing)
@@ -108,7 +106,6 @@ struct IndexOperation<'a> {
 
 impl<'a> IndexOperation<'a> {
 	fn new(
-		run: MutexGuard<'a, kvs::Transaction>,
 		opt: &'a Options,
 		ix: &'a DefineIndexStatement,
 		o: Option<Array>,
@@ -116,7 +113,6 @@ impl<'a> IndexOperation<'a> {
 		rid: &'a Thing,
 	) -> Self {
 		Self {
-			run,
 			opt,
 			ix,
 			o,
@@ -136,16 +132,16 @@ impl<'a> IndexOperation<'a> {
 		)
 	}
 
-	async fn index_non_unique(&mut self) -> Result<(), Error> {
+	async fn index_non_unique(&self, run: &mut kvs::Transaction) -> Result<(), Error> {
 		// Delete the old index data
 		if let Some(o) = &self.o {
 			let key = self.get_non_unique_index_key(o);
-			let _ = self.run.delc(key, Some(self.rid)).await; // Ignore this error
+			let _ = run.delc(key, Some(self.rid)).await; // Ignore this error
 		}
 		// Create the new index data
 		if let Some(n) = &self.n {
 			let key = self.get_non_unique_index_key(n);
-			if self.run.putc(key, self.rid, None).await.is_err() {
+			if run.putc(key, self.rid, None).await.is_err() {
 				return self.err_index_exists(n);
 			}
 		}
@@ -156,16 +152,16 @@ impl<'a> IndexOperation<'a> {
 		key::index::new(self.opt.ns(), self.opt.db(), &self.ix.what, &self.ix.name, v, None)
 	}
 
-	async fn index_unique(&mut self) -> Result<(), Error> {
+	async fn index_unique(&self, run: &mut kvs::Transaction) -> Result<(), Error> {
 		// Delete the old index data
 		if let Some(o) = &self.o {
 			let key = self.get_unique_index_key(o);
-			let _ = self.run.delc(key, Some(self.rid)).await; // Ignore this error
+			let _ = run.delc(key, Some(self.rid)).await; // Ignore this error
 		}
 		// Create the new index data
 		if let Some(n) = &self.n {
 			let key = self.get_unique_index_key(n);
-			if self.run.putc(key, self.rid, None).await.is_err() {
+			if run.putc(key, self.rid, None).await.is_err() {
 				return self.err_index_exists(n);
 			}
 		}
@@ -184,7 +180,8 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_best_matching_search(
-		&mut self,
+		&self,
+		run: &mut kvs::Transaction,
 		_az: &Ident,
 		_k1: &Number,
 		_b: &Number,
@@ -192,13 +189,13 @@ impl<'a> IndexOperation<'a> {
 		_hl: bool,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
-		let mut ft = FtIndex::new(&mut self.run, ikb, order.to_usize()).await?;
+		let mut ft = FtIndex::new(run, ikb, order.to_usize()).await?;
 		let doc_key = self.rid.into();
 		if let Some(n) = &self.n {
 			// TODO: Apply the analyzer
-			ft.index_document(&mut self.run, doc_key, &n.to_string()).await
+			ft.index_document(run, doc_key, &n.to_string()).await
 		} else {
-			ft.remove_document(&mut self.run, doc_key).await
+			ft.remove_document(run, doc_key).await
 		}
 	}
 

@@ -5,6 +5,7 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
+use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -87,19 +88,29 @@ pub(crate) fn router(
 	tokio::spawn(async move {
 		let url = address.endpoint;
 
-		let path = match url.scheme() {
-			"mem" => "memory",
-			_ => url.as_str(),
-		};
+		let kvs = {
+			let path = match url.scheme() {
+				"mem" => "memory".to_owned(),
+				"fdb" | "rocksdb" | "file" => match url.to_file_path() {
+					Ok(path) => format!("{}://{}", url.scheme(), path.display()),
+					Err(_) => {
+						let error = Error::InvalidUrl(url.as_str().to_owned());
+						let _ = conn_tx.into_send_async(Err(error.into())).await;
+						return;
+					}
+				},
+				_ => url.as_str().to_owned(),
+			};
 
-		let kvs = match Datastore::new(path).await {
-			Ok(kvs) => {
-				let _ = conn_tx.into_send_async(Ok(())).await;
-				kvs
-			}
-			Err(error) => {
-				let _ = conn_tx.into_send_async(Err(error.into())).await;
-				return;
+			match Datastore::new(&path).await {
+				Ok(kvs) => {
+					let _ = conn_tx.into_send_async(Ok(())).await;
+					kvs
+				}
+				Err(error) => {
+					let _ = conn_tx.into_send_async(Err(error.into())).await;
+					return;
+				}
 			}
 		};
 

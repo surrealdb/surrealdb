@@ -6,7 +6,6 @@ use crate::err::Error;
 use crate::sql;
 use crate::sql::array::Array;
 use crate::sql::object::Object;
-use crate::sql::serde::serialize_internal;
 use crate::sql::value::serde::ser;
 use crate::sql::value::Value;
 use crate::sql::Block;
@@ -39,11 +38,11 @@ use storekey::encode::Error as EncodeError;
 use vec::SerializeValueVec;
 
 /// Convert a `T` into `surrealdb::sql::Value` which is an enum that can represent any valid SQL data.
-pub(crate) fn to_value<T>(value: T) -> Result<Value, Error>
+pub fn to_value<T>(value: T) -> Result<Value, Error>
 where
 	T: Serialize,
 {
-	serialize_internal(|| value.serialize(Serializer.wrap()))
+	value.serialize(Serializer.wrap())
 }
 
 impl serde::ser::Error for Error {
@@ -183,8 +182,6 @@ impl ser::Serializer for Serializer {
 			sql::value::TOKEN => match variant {
 				"None" => Ok(Value::None),
 				"Null" => Ok(Value::Null),
-				"False" => Ok(Value::False),
-				"True" => Ok(Value::True),
 				variant => Err(Error::custom(format!("unknown unit variant `Value::{variant}`"))),
 			},
 			_ => self.serialize_str(variant),
@@ -578,14 +575,14 @@ mod tests {
 
 	#[test]
 	fn r#false() {
-		let expected = Value::False;
+		let expected = Value::Bool(false);
 		assert_eq!(expected, to_value(&false).unwrap());
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}
 
 	#[test]
 	fn r#true() {
-		let expected = Value::True;
+		let expected = Value::Bool(true);
 		assert_eq!(expected, to_value(&true).unwrap());
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}

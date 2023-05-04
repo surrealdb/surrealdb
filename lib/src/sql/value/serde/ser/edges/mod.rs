@@ -82,7 +82,6 @@ impl serde::ser::SerializeStruct for SerializeEdges {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use crate::sql::thing;
 	use serde::Serialize;
 
@@ -93,7 +92,7 @@ mod tests {
 			from: thing("foo:bar").unwrap(),
 			what: Tables(Vec::new()),
 		};
-		let serialized = serialize_internal(|| edges.serialize(Serializer.wrap())).unwrap();
+		let serialized = edges.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(edges, serialized);
 	}
 }

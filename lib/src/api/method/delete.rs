@@ -6,6 +6,7 @@ use crate::api::opt::Resource;
 use crate::api::Connection;
 use crate::api::Result;
 use crate::sql::Id;
+use crate::sql::Value;
 use serde::de::DeserializeOwned;
 use std::future::Future;
 use std::future::IntoFuture;
@@ -23,7 +24,7 @@ pub struct Delete<'r, C: Connection, R> {
 }
 
 macro_rules! into_future {
-	() => {
+	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Delete {
 				router,
@@ -37,10 +38,20 @@ macro_rules! into_future {
 					None => resource?.into(),
 				};
 				let mut conn = Client::new(Method::Delete);
-				conn.execute(router?, Param::new(vec![param])).await
+				conn.$method(router?, Param::new(vec![param])).await
 			})
 		}
 	};
+}
+
+impl<'r, Client> IntoFuture for Delete<'r, Client, Value>
+where
+	Client: Connection,
+{
+	type Output = Result<Value>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+
+	into_future! {execute_value}
 }
 
 impl<'r, Client, R> IntoFuture for Delete<'r, Client, Option<R>>
@@ -48,10 +59,10 @@ where
 	Client: Connection,
 	R: DeserializeOwned,
 {
-	type Output = Result<R>;
+	type Output = Result<Option<R>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	into_future! {}
+	into_future! {execute_opt}
 }
 
 impl<'r, Client, R> IntoFuture for Delete<'r, Client, Vec<R>>
@@ -62,7 +73,18 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
 
-	into_future! {}
+	into_future! {execute_vec}
+}
+
+impl<C> Delete<'_, C, Value>
+where
+	C: Connection,
+{
+	/// Restricts a range of records to delete
+	pub fn range(mut self, bounds: impl Into<Range<Id>>) -> Self {
+		self.range = Some(bounds.into());
+		self
+	}
 }
 
 impl<C, R> Delete<'_, C, Vec<R>>

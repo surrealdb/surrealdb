@@ -60,20 +60,19 @@ impl serde::ser::SerializeSeq for SerializeLineStringVec {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use geo::Coord;
 
 	#[test]
 	fn empty() {
 		let vec: Vec<LineString<f64>> = Vec::new();
-		let serialized = serialize_internal(|| vec.serialize(Serializer.wrap())).unwrap();
+		let serialized = vec.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(vec, serialized);
 	}
 
 	#[test]
 	fn vec() {
 		let vec = vec![LineString(vec![Coord::default()])];
-		let serialized = serialize_internal(|| vec.serialize(Serializer.wrap())).unwrap();
+		let serialized = vec.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(vec, serialized);
 	}
 }

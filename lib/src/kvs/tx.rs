@@ -1252,7 +1252,9 @@ impl Transaction {
 		az: &str,
 	) -> Result<DefineAnalyzerStatement, Error> {
 		let key = crate::key::az::new(ns, db, az);
-		let val = self.get(key).await?.ok_or(Error::AzNotFound)?;
+		let val = self.get(key).await?.ok_or(Error::AzNotFound {
+			value: az.to_owned(),
+		})?;
 		Ok(val.into())
 	}
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
@@ -1748,7 +1750,7 @@ impl Transaction {
 								// Check if this is a graph edge
 								match (v.pick(&*EDGE), v.pick(&*IN), v.pick(&*OUT)) {
 									// This is a graph edge record
-									(Value::True, Value::Thing(l), Value::Thing(r)) => {
+									(Value::Bool(true), Value::Thing(l), Value::Thing(r)) => {
 										let sql = format!("RELATE {l} -> {t} -> {r} CONTENT {v};",);
 										chn.send(bytes!(sql)).await?;
 									}

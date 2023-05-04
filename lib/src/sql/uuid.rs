@@ -1,7 +1,6 @@
 use crate::sql::common::is_hex;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::take_while_m_n;
@@ -17,7 +16,8 @@ use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Uuid";
 
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Uuid")]
 pub struct Uuid(pub uuid::Uuid);
 
 impl From<uuid::Uuid> for Uuid {
@@ -100,19 +100,6 @@ impl Uuid {
 impl Display for Uuid {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&escape_str(&self.0.to_string()), f)
-	}
-}
-
-impl Serialize for Uuid {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			serializer.serialize_some(&self.0)
-		}
 	}
 }
 

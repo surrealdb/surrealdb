@@ -47,14 +47,13 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn now() {
 		let dt = Utc::now();
-		let serialized = serialize_internal(|| dt.serialize(Serializer.wrap())).unwrap();
+		let serialized = dt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(dt, serialized);
 	}
 }

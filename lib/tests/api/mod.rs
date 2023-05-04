@@ -97,22 +97,32 @@ async fn query_chaining() {
 async fn create_record_no_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-	let _: RecordId = db.create("user").await.unwrap();
+	let _: Vec<RecordId> = db.create("user").await.unwrap();
+	let _: Value = db.create(Resource::from("user")).await.unwrap();
 }
 
 #[tokio::test]
 async fn create_record_with_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-	let _: RecordId = db.create(("user", "john")).await.unwrap();
+	let _: Option<RecordId> = db.create(("user", "jane")).await.unwrap();
+	let _: Value = db.create(Resource::from(("user", "john"))).await.unwrap();
+	let _: Value = db.create(Resource::from("user:doe")).await.unwrap();
 }
 
 #[tokio::test]
 async fn create_record_no_id_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-	let _: RecordId = db
+	let _: Vec<RecordId> = db
 		.create("user")
+		.content(Record {
+			name: "John Doe",
+		})
+		.await
+		.unwrap();
+	let _: Value = db
+		.create(Resource::from("user"))
 		.content(Record {
 			name: "John Doe",
 		})
@@ -124,14 +134,22 @@ async fn create_record_no_id_with_content() {
 async fn create_record_with_id_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
-	let record: RecordId = db
+	let record: Option<RecordId> = db
 		.create(("user", "john"))
 		.content(Record {
 			name: "John Doe",
 		})
 		.await
 		.unwrap();
-	assert_eq!(record.id, thing("user:john").unwrap());
+	assert_eq!(record.unwrap().id, thing("user:john").unwrap());
+	let value: Value = db
+		.create(Resource::from("user:jane"))
+		.content(Record {
+			name: "Jane Doe",
+		})
+		.await
+		.unwrap();
+	assert_eq!(value.record(), thing("user:jane").ok());
 }
 
 #[tokio::test]
@@ -139,9 +157,9 @@ async fn select_table() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let table = "user";
-	let _: RecordId = db.create(table).await.unwrap();
-	let _: RecordId = db.create(table).await.unwrap();
-	let _: RecordId = db.create(table).await.unwrap();
+	let _: Vec<RecordId> = db.create(table).await.unwrap();
+	let _: Vec<RecordId> = db.create(table).await.unwrap();
+	let _: Value = db.create(Resource::from(table)).await.unwrap();
 	let users: Vec<RecordId> = db.select(table).await.unwrap();
     assert_eq!(users.len(), 3);
 }
@@ -151,11 +169,13 @@ async fn select_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let record_id = ("user", "john");
-	let _: RecordId = db.create(record_id).await.unwrap();
+	let _: Option<RecordId> = db.create(record_id).await.unwrap();
 	let Some(record): Option<RecordId> = db.select(record_id).await.unwrap() else {
         panic!("record not found");
     };
     assert_eq!(record.id, thing("user:john").unwrap());
+	let value: Value = db.select(Resource::from(record_id)).await.unwrap();
+    assert_eq!(value.record(), thing("user:john").ok());
 }
 
 #[tokio::test]
@@ -163,10 +183,10 @@ async fn select_record_ranges() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let table = "user";
-	let _: RecordId = db.create((table, "amos")).await.unwrap();
-	let _: RecordId = db.create((table, "jane")).await.unwrap();
-	let _: RecordId = db.create((table, "john")).await.unwrap();
-	let _: RecordId = db.create((table, "zoey")).await.unwrap();
+	let _: Option<RecordId> = db.create((table, "amos")).await.unwrap();
+	let _: Option<RecordId> = db.create((table, "jane")).await.unwrap();
+	let _: Option<RecordId> = db.create((table, "john")).await.unwrap();
+	let _: Value = db.create(Resource::from((table, "zoey"))).await.unwrap();
 	let convert = |users: Vec<RecordId>| -> Vec<String> {
 		users
 			.into_iter()
@@ -185,6 +205,10 @@ async fn select_record_ranges() {
 	assert_eq!(convert(users), vec!["jane"]);
 	let users: Vec<RecordId> = db.select(table).range("jane"..="john").await.unwrap();
 	assert_eq!(convert(users), vec!["jane", "john"]);
+	let Value::Array(array): Value = db.select(Resource::from(table)).range("jane"..="john").await.unwrap() else {
+        unreachable!();
+    };
+	assert_eq!(array.len(), 2);
 	let users: Vec<RecordId> =
 		db.select(table).range((Bound::Excluded("jane"), Bound::Included("john"))).await.unwrap();
 	assert_eq!(convert(users), vec!["john"]);
@@ -195,8 +219,9 @@ async fn update_table() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
     let table = "user";
-    let _: RecordId = db.create(table).await.unwrap();
-    let _: RecordId = db.create(table).await.unwrap();
+    let _: Vec<RecordId> = db.create(table).await.unwrap();
+    let _: Vec<RecordId> = db.create(table).await.unwrap();
+	let _: Value = db.update(Resource::from(table)).await.unwrap();
 	let users: Vec<RecordId> = db.update(table).await.unwrap();
     assert_eq!(users.len(), 2);
 }
@@ -206,8 +231,8 @@ async fn update_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
     let table = "user";
-    let _: RecordId = db.create((table, "john")).await.unwrap();
-    let _: RecordId = db.create((table, "jane")).await.unwrap();
+    let _: Option<RecordId> = db.create((table, "john")).await.unwrap();
+    let _: Option<RecordId> = db.create((table, "jane")).await.unwrap();
 	let users: Vec<RecordId> = db.update(table).await.unwrap();
     assert_eq!(users.len(), 2);
 }
@@ -324,27 +349,27 @@ async fn update_record_id_with_content() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
 	let record_id = ("user", "john");
-	let user: RecordName = db
+	let user: Option<RecordName> = db
 		.create(record_id)
 		.content(Record {
 			name: "Jane Doe",
 		})
 		.await
 		.unwrap();
-    assert_eq!(user.name, "Jane Doe");
-	let user: RecordName = db
+    assert_eq!(user.unwrap().name, "Jane Doe");
+	let user: Option<RecordName> = db
 		.update(record_id)
 		.content(Record {
 			name: "John Doe",
 		})
 		.await
 		.unwrap();
-    assert_eq!(user.name, "John Doe");
-	let user: RecordName = db
+    assert_eq!(user.unwrap().name, "John Doe");
+	let user: Option<RecordName> = db
 		.select(record_id)
 		.await
 		.unwrap();
-    assert_eq!(user.name, "John Doe");
+    assert_eq!(user.unwrap().name, "John Doe");
 }
 
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
@@ -367,7 +392,7 @@ async fn merge_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
     let record_id = ("person", "jaime");
-    let mut jaime: Person = db
+    let mut jaime: Option<Person> = db
         .create(record_id)
         .content(Person {
             id: None,
@@ -380,15 +405,15 @@ async fn merge_record_id() {
         })
         .await
         .unwrap();
-    assert_eq!(jaime.id.unwrap(), thing("person:jaime").unwrap());
+    assert_eq!(jaime.unwrap().id.unwrap(), thing("person:jaime").unwrap());
     jaime = db
         .update(record_id)
         .merge(json!({ "marketing": true }))
         .await
         .unwrap();
-    assert!(jaime.marketing);
+    assert!(jaime.as_ref().unwrap().marketing);
     jaime = db.select(record_id).await.unwrap();
-    assert_eq!(jaime, Person {
+    assert_eq!(jaime.unwrap(), Person {
         id: Some(thing("person:jaime").unwrap()),
         title: "Founder & COO".into(),
         name: Name {
@@ -422,11 +447,11 @@ async fn patch_record_id() {
 	let value: Option<serde_json::Value> = db.select(("user", id)).await.unwrap();
 	assert_eq!(
 		value,
-		Some(serialize_internal(|| json!({
+		Some(json!({
 			"id": thing(&format!("user:{id}")).unwrap(),
 			"baz": "boo",
 			"hello": ["world"]
-		})))
+		}))
 	);
 }
 
@@ -435,9 +460,9 @@ async fn delete_table() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
     let table = "user";
-	let _: RecordId = db.create(table).await.unwrap();
-	let _: RecordId = db.create(table).await.unwrap();
-	let _: RecordId = db.create(table).await.unwrap();
+	let _: Vec<RecordId> = db.create(table).await.unwrap();
+	let _: Vec<RecordId> = db.create(table).await.unwrap();
+	let _: Vec<RecordId> = db.create(table).await.unwrap();
     let users: Vec<RecordId> = db.select(table).await.unwrap();
     assert_eq!(users.len(), 3);
 	let users: Vec<RecordId> = db.delete(table).await.unwrap();
@@ -451,12 +476,17 @@ async fn delete_record_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
     let record_id = ("user", "john");
-	let _: RecordId = db.create(record_id).await.unwrap();
-    let _: RecordId = db.select(record_id).await.unwrap();
+	let _: Option<RecordId> = db.create(record_id).await.unwrap();
+    let _: Option<RecordId> = db.select(record_id).await.unwrap();
 	let john: Option<RecordId> = db.delete(record_id).await.unwrap();
     assert!(john.is_some());
     let john: Option<RecordId> = db.select(record_id).await.unwrap();
     assert!(john.is_none());
+    // non-existing user
+	let jane: Option<RecordId> = db.delete(("user", "jane")).await.unwrap();
+    assert!(jane.is_none());
+	let value = db.delete(Resource::from(("user", "jane"))).await.unwrap();
+    assert_eq!(value, Value::None);
 }
 
 #[tokio::test]
@@ -534,4 +564,7 @@ async fn return_bool() {
         panic!("record not found");
     };
     assert!(boolean);
+	let mut response = db.query("RETURN false").await.unwrap();
+    let value: Value = response.take(0).unwrap();
+    assert_eq!(value, vec![Value::Bool(false)].into());
 }

@@ -13,31 +13,31 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Options {
-	// Currently selected NS
+	/// Currently selected NS
 	pub ns: Option<Arc<str>>,
-	// Currently selected DB
+	/// Currently selected DB
 	pub db: Option<Arc<str>>,
-	// Connection authentication data
+	/// Connection authentication data
 	pub auth: Arc<Auth>,
-	// Approximately how large is the current call stack?
+	/// Approximately how large is the current call stack?
 	dive: u8,
-	// Whether live queries are allowed?
+	/// Whether live queries are allowed?
 	pub live: bool,
-	// Should we force tables/events to re-run?
+	/// Should we force tables/events to re-run?
 	pub force: bool,
-	// Should we run permissions checks?
+	/// Should we run permissions checks?
 	pub perms: bool,
-	// Should we error if tables don't exist?
+	/// Should we error if tables don't exist?
 	pub strict: bool,
-	// Should we process field queries?
+	/// Should we process field queries?
 	pub fields: bool,
-	// Should we process event queries?
+	/// Should we process event queries?
 	pub events: bool,
-	// Should we process table queries?
+	/// Should we process table queries?
 	pub tables: bool,
-	// Should we process index queries?
+	/// Should we process index queries?
 	pub indexes: bool,
-	// Should we process function futures?
+	/// Should we process function futures?
 	pub futures: bool,
 }
 

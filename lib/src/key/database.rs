@@ -2,21 +2,21 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Database {
+pub struct Database<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: String,
+	pub db: &'a str,
 }
 
-pub fn new(ns: &str, db: &str) -> Database {
-	Database::new(ns.to_string(), db.to_string())
+pub fn new<'a>(ns: &'a str, db: &'a str) -> Database<'a> {
+	Database::new(ns, db)
 }
 
-impl Database {
-	pub fn new(ns: String, db: String) -> Database {
-		Database {
+impl<'a> Database<'a> {
+	pub fn new(ns: &'a str, db: &'a str) -> Self {
+		Self {
 			__: 0x2f, // /
 			_a: 0x2a, // *
 			ns,
@@ -33,8 +33,8 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Database::new(
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
 		);
 		let enc = Database::encode(&val).unwrap();
 		let dec = Database::decode(&enc).unwrap();

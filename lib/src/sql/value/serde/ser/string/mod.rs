@@ -51,7 +51,6 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 	use std::borrow::Cow;
@@ -59,21 +58,21 @@ mod tests {
 	#[test]
 	fn string() {
 		let duration = "foo".to_owned();
-		let serialized = serialize_internal(|| duration.serialize(Serializer.wrap())).unwrap();
+		let serialized = duration.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(duration, serialized);
 	}
 
 	#[test]
 	fn str() {
 		let duration = "bar";
-		let serialized = serialize_internal(|| duration.serialize(Serializer.wrap())).unwrap();
+		let serialized = duration.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(duration, serialized);
 	}
 
 	#[test]
 	fn cow() {
 		let duration = Cow::from("bar");
-		let serialized = serialize_internal(|| duration.serialize(Serializer.wrap())).unwrap();
+		let serialized = duration.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(duration, serialized);
 	}
 }

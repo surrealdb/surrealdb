@@ -36,20 +36,19 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 
 	#[test]
 	fn none() {
 		let option: Option<u64> = None;
-		let serialized = serialize_internal(|| option.serialize(Serializer.wrap())).unwrap();
+		let serialized = option.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(option, serialized);
 	}
 
 	#[test]
 	fn some() {
 		let option = Some(u64::default());
-		let serialized = serialize_internal(|| option.serialize(Serializer.wrap())).unwrap();
+		let serialized = option.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(option, serialized);
 	}
 }

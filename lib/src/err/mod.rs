@@ -238,8 +238,10 @@ pub enum Error {
 	},
 
 	/// The requested analyzer does not exist
-	#[error("The analyzer does not exist")]
-	AzNotFound,
+	#[error("The analyzer '{value}' does not exist")]
+	AzNotFound {
+		value: String,
+	},
 
 	/// Unable to perform the realtime query
 	#[error("Unable to perform the realtime query")]
@@ -395,6 +397,10 @@ pub enum Error {
 	/// Represents an error when decoding a key-value entry
 	#[error("Index is corrupted")]
 	CorruptedIndex,
+
+	/// Represents an error when analyzing a value
+	#[error("A string can't be analyzed: {0}")]
+	AnalyzerError(String),
 
 	/// Represents an underlying error with Bincode serializing / deserializing
 	#[error("Bincode error: {0}")]
