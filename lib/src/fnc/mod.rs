@@ -204,6 +204,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::contains" => string::contains,
 		"string::endsWith" => string::ends_with,
 		"string::join" => string::join,
+		"string::joinArray" => string::join_array,
 		"string::len" => string::len,
 		"string::lowercase" => string::lowercase,
 		"string::repeat" => string::repeat,

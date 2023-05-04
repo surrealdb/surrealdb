@@ -3089,6 +3089,35 @@ async fn function_string_join() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn function_string_join_arr() -> Result<(), Error> {
+	let sql = r#"
+		RETURN string::joinArray([1, 2, 3], ", ");
+	"#;
+	// let sql = r#"
+	// 	RETURN string::endsWith("bla", "a");
+	// "#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::from("hello, world");
+	// let val = Value::from(true);
+	assert_eq!(tmp, val);
+	//
+	// let tmp = res.remove(0).result?;
+	// let val = Value::from("");
+	// assert_eq!(tmp, val);
+	// //
+	// let tmp = res.remove(0).result?;
+	// let val = Value::from("this is a test");
+	// assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_string_len() -> Result<(), Error> {
 	let sql = r#"
 		RETURN string::len("");

@@ -488,6 +488,7 @@ fn function_string(i: &str) -> IResult<&str, &str> {
 		tag("contains"),
 		tag("endsWith"),
 		tag("join"),
+		tag("joinArray"),
 		tag("len"),
 		tag("lowercase"),
 		tag("repeat"),

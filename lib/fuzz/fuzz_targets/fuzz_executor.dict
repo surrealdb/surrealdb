@@ -277,6 +277,7 @@
 "string::contains("
 "string::endsWith("
 "string::join("
+"string::joinArray("
 "string::len("
 "string::lowercase("
 "string::repeat("
