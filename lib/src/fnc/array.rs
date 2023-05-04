@@ -246,7 +246,7 @@ mod tests {
 
 	#[test]
 	fn array_join() {
-		fn test(arr: Array, sep: &str,expected: &str) {
+		fn test(arr: Array, sep: &str, expected: &str) {
 			assert_eq!(join((arr, sep.to_string())).unwrap(), expected.into());
 		}
 
@@ -254,7 +254,15 @@ mod tests {
 		test(vec!["hello"].into(), ",", "hello");
 		test(vec!["hello", "world"].into(), ",", "hello,world");
 		test(vec!["again"; 512].into(), " and ", &vec!["again"; 512].join(" and "));
-		test(vec![Value::from(true), Value::from(false), Value::from(true)].into(), " is ", "true is false is true");
-		test(vec![Value::from(3.14), Value::from(2.72), Value::from(1.61)].into(), " is not ", "3.14 is not 2.72 is not 1.61");
+		test(
+			vec![Value::from(true), Value::from(false), Value::from(true)].into(),
+			" is ",
+			"true is false is true",
+		);
+		test(
+			vec![Value::from(3.14), Value::from(2.72), Value::from(1.61)].into(),
+			" is not ",
+			"3.14 is not 2.72 is not 1.61",
+		);
 	}
 }
