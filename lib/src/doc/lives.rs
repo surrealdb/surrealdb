@@ -20,7 +20,6 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let _ = self.id.as_ref().unwrap();
 		// Loop through all index statements
-		txn.clone().lock().await.
 		for lv in self.lv(opt, txn).await?.iter() {
 			// Create a new statement
 			let stm = Statement::from(lv);
@@ -29,8 +28,8 @@ impl<'a> Document<'a> {
 			if self.check(ctx, opt, txn, &stm).await.is_err() {
 				continue;
 			}
-			let lq_opt = get_context_from_disk();
-			if self.allow(ctx, lq_opt, txn, &lq).await.is_err() {
+			let lq_opt = Options::default(); // TODO resolve actual auth scope from KV
+			if self.allow(ctx, &lq_opt, txn, &stm).await.is_err() {
 				// Not allowed to view this document
 			}
 			// Check what type of data change this is
@@ -38,11 +37,11 @@ impl<'a> Document<'a> {
 				// Send a DELETE notification to the WebSocket
 			} else if self.is_new() {
 				// Process the CREATE notification to send
-				let _ = self.pluck(ctx, lq_opt, txn, &lq).await?; // TODO the value based on the LQ. Diff vs fields
-				// 1. Queue CREATE notification
+				let _ = self.pluck(ctx, &lq_opt, txn, &stm).await?; // TODO the value based on the LQ. Diff vs fields
+				                                    // 1. Queue CREATE notification
 			} else {
 				// Process the CREATE notification to send
-				let _ = self.pluck(ctx, lq_opt, txn, &lq).await?;
+				let _ = self.pluck(ctx, &lq_opt, txn, &stm).await?;
 			};
 		}
 		// Carry on

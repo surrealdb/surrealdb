@@ -1,6 +1,10 @@
 use crate::cli::CF;
 use crate::err::Error;
+use dbs::Response;
+use flume::{Receiver, Sender};
 use once_cell::sync::OnceCell;
+use std::sync::Arc;
+use surrealdb::dbs;
 use surrealdb::kvs::Datastore;
 
 pub static DB: OnceCell<Datastore> = OnceCell::new();
@@ -15,8 +19,11 @@ pub async fn init() -> Result<(), Error> {
 		true => info!(target: LOG, "Database strict mode is enabled"),
 		false => info!(target: LOG, "Database strict mode is disabled"),
 	};
+
 	// Parse and setup the desired kv datastore
 	let dbs = Datastore::new(&opt.path).await?; // TODO this is where the lq init stored channels should be
+
+	// Store database instance
 	let _ = DB.set(dbs);
 	// All ok
 	Ok(())

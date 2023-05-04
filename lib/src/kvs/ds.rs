@@ -22,7 +22,10 @@ use tracing::instrument;
 #[allow(dead_code)]
 pub struct Datastore {
 	pub(super) inner: Inner,
-	pub diff_patch_stream: Arc<flume::Sender<Vec<Response>>>,
+	// The diff_patch_stream is the receiving channel of live query updates. It is part of the Datastore API, but we may want to put it behind a function.
+	pub diff_patch_stream: Arc<flume::Receiver<Vec<Response>>>,
+	// The live_query_sender is a channel through which the db can send live query updates
+	live_query_sender: Arc<flume::Sender<Vec<Response>>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -97,10 +100,8 @@ impl Datastore {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub async fn new(
-		path: &str,
-		live_stream: Arc<flume::Sender<Vec<Response>>>,
-	) -> Result<Datastore, Error> {
+	pub async fn new(path: &str) -> Result<Datastore, Error> {
+		let (sender, receiver) = flume::unbounded();
 		match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
@@ -108,7 +109,8 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(|v| Datastore {
 						inner: Inner::Mem(v),
-						diff_patch_stream: live_stream,
+						diff_patch_stream: Arc::new(receiver),
+						live_query_sender: Arc::new(sender),
 					});
 					info!(target: LOG, "Started kvs store in {}", path);
 					v
@@ -126,7 +128,8 @@ impl Datastore {
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
 						inner: Inner::RocksDB(v),
-						diff_patch_stream: live_stream,
+						diff_patch_stream: Arc::new(receiver),
+						live_query_sender: Arc::new(sender),
 					});
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
@@ -144,6 +147,8 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
 						inner: Inner::RocksDB(v),
+						diff_patch_stream: Arc::new(receiver),
+						live_query_sender: Arc::new(sender),
 					});
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
@@ -161,6 +166,8 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(|v| Datastore {
 						inner: Inner::IndxDB(v),
+						diff_patch_stream: Arc::new(receiver),
+						live_query_sender: Arc::new(sender),
 					});
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
@@ -178,6 +185,8 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(|v| Datastore {
 						inner: Inner::TiKV(v),
+						diff_patch_stream: Arc::new(receiver),
+						live_query_sender: Arc::new(sender),
 					});
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
@@ -195,6 +204,8 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(|v| Datastore {
 						inner: Inner::FDB(v),
+						diff_patch_stream: Arc::new(receiver),
+						live_query_sender: Arc::new(sender),
 					});
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v

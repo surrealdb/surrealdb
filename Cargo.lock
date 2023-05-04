@@ -3913,6 +3913,7 @@ dependencies = [
  "chrono",
  "clap",
  "fern",
+ "flume",
  "futures 0.3.28",
  "http",
  "hyper",

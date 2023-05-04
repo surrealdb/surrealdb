@@ -126,9 +126,10 @@ impl Rpc {
 			}
 		});
 		// Handle inbound diff patch from live queries
-		let mut diff_stream = DB.get()?.diff_patch_stream.clone();
+		let mut diff_stream = DB.get().unwrap().diff_patch_stream.clone();
 		tokio::task::spawn(async move {
-			while let response_vec = diff_stream.next().await {
+			while let response_vec = diff_stream.clone().recv() {
+				// TODO this is synchronous and must change
 				println!("Received diff update response vec {response_vec:?}")
 				// TODO filter for cluster or this connected WS instance
 			}
@@ -732,15 +733,13 @@ impl Rpc {
 
 #[cfg(test)]
 mod tests {
-	use warp::ws::WebSocket;
 	use crate::net::rpc::Rpc;
 	use surrealdb::dbs::Session;
+	use warp::ws::WebSocket;
 
 	#[test]
 	fn connecting_registers_websocket() {
 		let session = Session::default();
 		let rpc = Rpc::new(session);
-		let ws = WebSocket{}
-		RPC::serve()
 	}
 }

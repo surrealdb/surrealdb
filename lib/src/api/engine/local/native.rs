@@ -10,6 +10,7 @@ use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
+use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use flume::Receiver;
