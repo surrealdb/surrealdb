@@ -3,17 +3,7 @@ use crate::ctx::Context;
 use crate::fnc;
 use crate::fnc::script::modules::impl_module_def;
 use crate::sql::value::Value;
-use js::Async;
-use js::Created;
-use js::Ctx;
-use js::Func;
-use js::Loaded;
-use js::Module;
-use js::ModuleDef;
-use js::Native;
-use js::Object;
-use js::Rest;
-use js::Result;
+use js::{Async, Created, Ctx, Func, Loaded, Module, ModuleDef, Native, Object, Rest, Result};
 
 mod array;
 mod crypto;
