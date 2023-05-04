@@ -268,7 +268,7 @@ fn cast(i: &str) -> IResult<&str, Function> {
 	Ok((i, Function::Cast(k, v)))
 }
 
-fn function_names(i: &str) -> IResult<&str, &str> {
+pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 	recognize(alt((
 		preceded(tag("array::"), function_array),
 		preceded(tag("crypto::"), function_crypto),
