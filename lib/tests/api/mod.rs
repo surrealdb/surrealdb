@@ -10,15 +10,23 @@ async fn connect() {
 async fn yuse() {
 	let db = new_db().await;
     let item = Ulid::new().to_string();
-    let error = db.create::<Vec<()>>(item.as_str()).await.unwrap_err();
-    match error {
+    match db.create(Resource::from(item.as_str())).await.unwrap_err() {
         // Local engines return this error
         Error::Db(DbError::NsEmpty) => {}
         // Remote engines return this error
         Error::Api(ApiError::Query(error)) if error.contains("Specify a namespace to use") => {}
         error => panic!("{:?}", error),
     }
-	db.use_ns(NS).use_db(item).await.unwrap();
+	db.use_ns(NS).await.unwrap();
+    match db.create(Resource::from(item.as_str())).await.unwrap_err() {
+        // Local engines return this error
+        Error::Db(DbError::DbEmpty) => {}
+        // Remote engines return this error
+        Error::Api(ApiError::Query(error)) if error.contains("Specify a database to use") => {}
+        error => panic!("{:?}", error),
+    }
+    db.use_db(item.as_str()).await.unwrap();
+    db.create(Resource::from(item)).await.unwrap();
 }
 
 #[tokio::test]
