@@ -294,45 +294,50 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 	)
 }
 
-#[test]
-#[cfg(unix)]
-fn implementations_are_present() {
-	// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
-	let mut problems = Vec::new();
+#[cfg(test)]
+mod tests {
+	#[test]
+	fn implementations_are_present() {
+		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
+		let mut problems = Vec::new();
 
-	// Read the source code of this file
-	let fnc_mod = include_str!("mod.rs");
-	for line in fnc_mod.lines() {
-		if !(line.contains("=>") && (line.trim().starts_with('"') || line.trim().ends_with(','))) {
-			// This line does not define a function name.
-			continue;
-		}
-
-		let (quote, _) = line.split_once("=>").unwrap();
-		let name = quote.trim().trim_matches('"');
-
-		if crate::sql::function::function_names(&name).is_err() {
-			problems.push(format!("couldn't parse {name} function"));
-		}
-
-		#[cfg(all(feature = "scripting", feature = "kv-mem"))]
-		futures::executor::block_on(async {
-			let name = name.replace("::", ".");
-			let sql = format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
-			let dbs = crate::kvs::Datastore::new("memory").await.unwrap();
-			let ses = crate::dbs::Session::for_kv().with_ns("test").with_db("test");
-			let res = &mut dbs.execute(&sql, &ses, None, false).await.unwrap();
-			let tmp = res.remove(0).result;
-			if tmp.as_ref().ok() != Some(&Value::from("function")) {
-				problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
+		// Read the source code of this file
+		let fnc_mod = include_str!("mod.rs");
+		for line in fnc_mod.lines() {
+			if !(line.contains("=>")
+				&& (line.trim().starts_with('"') || line.trim().ends_with(',')))
+			{
+				// This line does not define a function name.
+				continue;
 			}
-		});
-	}
 
-	if !problems.is_empty() {
-		for problem in problems {
-			eprintln!(" - {problem}");
+			let (quote, _) = line.split_once("=>").unwrap();
+			let name = quote.trim().trim_matches('"');
+
+			if crate::sql::function::function_names(&name).is_err() {
+				problems.push(format!("couldn't parse {name} function"));
+			}
+
+			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
+			futures::executor::block_on(async {
+				let name = name.replace("::", ".");
+				let sql =
+					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
+				let dbs = crate::kvs::Datastore::new("memory").await.unwrap();
+				let ses = crate::dbs::Session::for_kv().with_ns("test").with_db("test");
+				let res = &mut dbs.execute(&sql, &ses, None, false).await.unwrap();
+				let tmp = res.remove(0).result;
+				if tmp.as_ref().ok() != Some(&Value::from("function")) {
+					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
+				}
+			});
 		}
-		panic!("functions not fully implemented (see above)");
+
+		if !problems.is_empty() {
+			for problem in problems {
+				eprintln!(" - {problem}");
+			}
+			panic!("functions not fully implemented (see above)");
+		}
 	}
 }

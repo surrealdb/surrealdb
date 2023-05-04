@@ -29,5 +29,6 @@ impl_module_def!(
 	"int" => run,
 	"string" => run,
 	"time" => run,
+	"ulid" => run,
 	"uuid" => (uuid::Package)
 );
