@@ -20,6 +20,7 @@ impl_module_def!(
 	Package,
 	"string",
 	"concat" => run,
+	"contains" => run,
 	"endsWith" => run,
 	"join" => run,
 	"len" => run,

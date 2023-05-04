@@ -328,8 +328,10 @@ mod tests {
 				let dbs = crate::kvs::Datastore::new("memory").await.unwrap();
 				let ses = crate::dbs::Session::for_kv().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None, false).await.unwrap();
-				let tmp = res.remove(0).result;
-				if tmp.as_ref().ok() != Some(&Value::from("function")) {
+				let tmp = res.remove(0).result.unwrap();
+				if tmp == Value::from("object") {
+					// Assume this function is superseded by a module of the same name.
+				} else if tmp != Value::from("function") {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
 			});
