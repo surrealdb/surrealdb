@@ -485,6 +485,7 @@ fn function_session(i: &str) -> IResult<&str, &str> {
 fn function_string(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("concat"),
+		tag("contains"),
 		tag("endsWith"),
 		tag("join"),
 		tag("len"),
