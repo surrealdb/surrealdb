@@ -15,6 +15,7 @@ use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
 
 impl Value {
+	/// Asynchronous method for getting a local or remote field from a `Value`
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn get(
