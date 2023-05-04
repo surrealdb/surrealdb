@@ -31,12 +31,12 @@ enum Content<T> {
 }
 
 impl<T: Serialize> Response<T> {
+	/// Convert and simplify the value into JSON
 	#[inline]
 	fn json(self) -> Json {
 		sql::to_value(self).unwrap().into()
 	}
-
-	/// Send the response to the channel
+	/// Send the response to the WebSocket channel
 	pub async fn send(self, out: Output, chn: Sender<Message>) {
 		match out {
 			Output::Json => {
