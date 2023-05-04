@@ -1,4 +1,4 @@
-use super::super::run;
+use super::run;
 use crate::fnc::script::modules::impl_module_def;
 use crate::sql::value::Value;
 use js::{Created, Ctx, Func, Loaded, Module, ModuleDef, Native, Object, Rest, Result};
@@ -9,7 +9,7 @@ type Any = Rest<Value>;
 
 impl_module_def!(
 	Package,
-	"crypto::pbkdf2",
-	"compare" => run,
-	"generate" => run
+	"array::sort",
+	"asc" => run,
+	"desc" => run
 );

@@ -9,7 +9,14 @@ type Any = Rest<Value>;
 
 impl_module_def!(
 	Package,
-	"crypto::pbkdf2",
-	"compare" => run,
-	"generate" => run
+	"duration::from",
+	"days" => run,
+	"hours" => run,
+	"micros" => run,
+	"millis" => run,
+	"mins" => run,
+	"nanos" => run,
+	"secs" => run,
+	"weeks" => run,
+	"years" => run
 );
