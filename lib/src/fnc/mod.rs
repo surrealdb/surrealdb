@@ -77,6 +77,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::group" => array::group,
 		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
+		"array::join" => array::join,
 		"array::len" => array::len,
 		"array::max" => array::max,
 		"array::min" => array::min,

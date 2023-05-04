@@ -309,6 +309,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 		)),
 		alt((
 			tag("intersect"),
+			tag("join"),
 			tag("len"),
 			tag("max"),
 			tag("min"),

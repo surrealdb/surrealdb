@@ -53,6 +53,26 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(warp::query())
 		.and(session::build())
 		.and_then(create_all);
+	// Set update method
+	let update = warp::any()
+		.and(warp::put())
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
+		.and(path!("key" / Param).and(warp::path::end()))
+		.and(warp::body::content_length_limit(MAX))
+		.and(warp::body::bytes())
+		.and(warp::query())
+		.and(session::build())
+		.and_then(update_all);
+	// Set modify method
+	let modify = warp::any()
+		.and(warp::patch())
+		.and(warp::header::<String>(http::header::ACCEPT.as_str()))
+		.and(path!("key" / Param).and(warp::path::end()))
+		.and(warp::body::content_length_limit(MAX))
+		.and(warp::body::bytes())
+		.and(warp::query())
+		.and(session::build())
+		.and_then(modify_all);
 	// Set delete method
 	let delete = warp::any()
 		.and(warp::delete())
@@ -62,7 +82,7 @@ pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejecti
 		.and(session::build())
 		.and_then(delete_all);
 	// Specify route
-	let all = select.or(create).or(delete);
+	let all = select.or(create).or(update).or(modify).or(delete);
 
 	// ------------------------------
 	// Routes for a thing
@@ -183,6 +203,94 @@ async fn create_all(
 		Ok(data) => {
 			// Specify the request statement
 			let sql = "CREATE type::table($table) CONTENT $data";
+			// Specify the request variables
+			let vars = map! {
+				String::from("table") => Value::from(table),
+				String::from("data") => data,
+				=> params.parse()
+			};
+			// Execute the query and return the result
+			match db.execute(sql, &session, Some(vars), opt.strict).await {
+				Ok(res) => match output.as_ref() {
+					// Simple serialization
+					"application/json" => Ok(output::json(&res)),
+					"application/cbor" => Ok(output::cbor(&res)),
+					"application/pack" => Ok(output::pack(&res)),
+					// Internal serialization
+					"application/bung" => Ok(output::full(&res)),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
+				},
+				// There was an error when executing the query
+				Err(err) => Err(warp::reject::custom(Error::from(err))),
+			}
+		}
+		Err(_) => Err(warp::reject::custom(Error::Request)),
+	}
+}
+
+async fn update_all(
+	output: String,
+	table: Param,
+	body: Bytes,
+	params: Params,
+	session: Session,
+) -> Result<impl warp::Reply, warp::Rejection> {
+	// Get the datastore reference
+	let db = DB.get().unwrap();
+	// Get local copy of options
+	let opt = CF.get().unwrap();
+	// Convert the HTTP request body
+	let data = bytes_to_utf8(&body)?;
+	// Parse the request body as JSON
+	match surrealdb::sql::value(data) {
+		Ok(data) => {
+			// Specify the request statement
+			let sql = "UPDATE type::table($table) CONTENT $data";
+			// Specify the request variables
+			let vars = map! {
+				String::from("table") => Value::from(table),
+				String::from("data") => data,
+				=> params.parse()
+			};
+			// Execute the query and return the result
+			match db.execute(sql, &session, Some(vars), opt.strict).await {
+				Ok(res) => match output.as_ref() {
+					// Simple serialization
+					"application/json" => Ok(output::json(&res)),
+					"application/cbor" => Ok(output::cbor(&res)),
+					"application/pack" => Ok(output::pack(&res)),
+					// Internal serialization
+					"application/bung" => Ok(output::full(&res)),
+					// An incorrect content-type was requested
+					_ => Err(warp::reject::custom(Error::InvalidType)),
+				},
+				// There was an error when executing the query
+				Err(err) => Err(warp::reject::custom(Error::from(err))),
+			}
+		}
+		Err(_) => Err(warp::reject::custom(Error::Request)),
+	}
+}
+
+async fn modify_all(
+	output: String,
+	table: Param,
+	body: Bytes,
+	params: Params,
+	session: Session,
+) -> Result<impl warp::Reply, warp::Rejection> {
+	// Get the datastore reference
+	let db = DB.get().unwrap();
+	// Get local copy of options
+	let opt = CF.get().unwrap();
+	// Convert the HTTP request body
+	let data = bytes_to_utf8(&body)?;
+	// Parse the request body as JSON
+	match surrealdb::sql::value(data) {
+		Ok(data) => {
+			// Specify the request statement
+			let sql = "UPDATE type::table($table) MERGE $data";
 			// Specify the request variables
 			let vars = map! {
 				String::from("table") => Value::from(table),
