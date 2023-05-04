@@ -260,18 +260,12 @@ impl Surreal<Any> {
 	/// # }
 	/// ```
 	pub fn connect(&'static self, address: impl IntoEndpoint) -> Connect<Any, ()> {
-		let (sender, receiver): (
-			async_channel::Sender<Vec<db::Response>>,
-			async_channel::Receiver<Vec<db::Response>>,
-		) = channel();
 		Connect {
 			router: Some(&self.router),
 			address: address.into_endpoint(),
 			capacity: 0,
 			client: PhantomData,
 			response_type: PhantomData,
-			live_stream_receiver: Arc::new(receiver),
-			live_stream_sender: Arc::new(sender),
 		}
 	}
 }
@@ -315,17 +309,11 @@ impl Surreal<Any> {
 /// # }
 /// ```
 pub fn connect(address: impl IntoEndpoint) -> Connect<'static, Any, Surreal<Any>> {
-	let (sender, receiver): (
-		async_channel::Sender<Vec<db::Response>>,
-		async_channel::Receiver<Vec<db::Response>>,
-	) = channel();
 	Connect {
 		router: None,
 		address: address.into_endpoint(),
 		capacity: 0,
 		client: PhantomData,
 		response_type: PhantomData,
-		live_stream_sender: sender,
-		live_stream_receiver: receiver,
 	}
 }

@@ -16,8 +16,7 @@ pub async fn init() -> Result<(), Error> {
 		false => info!(target: LOG, "Database strict mode is disabled"),
 	};
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new(&opt.path).await?;
-	// Store database instance
+	let dbs = Datastore::new(&opt.path).await?; // TODO this is where the lq init stored channels should be
 	let _ = DB.set(dbs);
 	// All ok
 	Ok(())

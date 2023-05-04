@@ -24,6 +24,7 @@ use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::mpsc::channel;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
@@ -48,8 +49,6 @@ pub struct Connect<'r, C: Connection, Response> {
 	capacity: usize,
 	client: PhantomData<C>,
 	response_type: PhantomData<Response>,
-	live_stream_receiver: Arc<Receiver<Vec<Response>>>,
-	live_stream_sender: Arc<Sender<Vec<Response>>>,
 }
 
 impl<C, R> Connect<'_, C, R>
@@ -97,7 +96,11 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let lsr: Arc<Receiver<Vec<db::Response>>> = self.live_stream_receiver;
+			let (response_sender, response_receiver): (
+				Sender<Vec<DbResponse>>,
+				Receiver<Vec<DbResponse>>,
+			) = flume::unbounded();
+			let lsr: Arc<Sender<Vec<DbResponse>>> = Arc::new(response_sender);
 			let client = Client::connect(self.address?, self.capacity, lsr).await?;
 			client.check_server_version();
 			Ok(client)
@@ -116,7 +119,12 @@ where
 		Box::pin(async move {
 			match self.router {
 				Some(router) => {
-					let lsr: Arc<Receiver<Vec<()>>> = self.live_stream_receiver; // This must be () because the IntoFuture is for a Connect<(), ()>
+					// TODO this seems wrong
+					let (response_sender, response_receiver): (
+						Sender<Vec<DbResponse>>,
+						Receiver<Vec<DbResponse>>,
+					) = flume::unbounded();
+					let lsr: Arc<Sender<Vec<DbResponse>>> = Arc::new(response_sender);
 					let option = Client::connect(self.address?, self.capacity, lsr)
 						.await?
 						.router

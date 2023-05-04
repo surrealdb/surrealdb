@@ -7,6 +7,7 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
+use crate::key::db;
 use crate::kvs::LOG;
 use crate::sql;
 use crate::sql::Query;
@@ -21,7 +22,7 @@ use tracing::instrument;
 #[allow(dead_code)]
 pub struct Datastore {
 	pub(super) inner: Inner,
-	pub diff_patch_stream: Arc<Receiver<Vec<Response>>>,
+	pub diff_patch_stream: Arc<flume::Sender<Vec<Response>>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -98,7 +99,7 @@ impl Datastore {
 	/// ```
 	pub async fn new(
 		path: &str,
-		live_stream: Arc<Receiver<Vec<Response>>>,
+		live_stream: Arc<flume::Sender<Vec<Response>>>,
 	) -> Result<Datastore, Error> {
 		match path {
 			"memory" => {
@@ -125,6 +126,7 @@ impl Datastore {
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
 						inner: Inner::RocksDB(v),
+						diff_patch_stream: live_stream,
 					});
 					info!(target: LOG, "Started kvs store at {}", path);
 					v

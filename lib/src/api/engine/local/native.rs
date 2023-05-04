@@ -13,8 +13,7 @@ use crate::api::Surreal;
 use crate::dbs::{Response, Session};
 use crate::key::db;
 use crate::kvs::Datastore;
-use flume::Receiver;
-use flume::Sender;
+use flume::{Receiver, RecvError, Sender};
 use futures::StreamExt;
 use once_cell::sync::OnceCell;
 use std::collections::BTreeMap;
@@ -37,7 +36,7 @@ impl Connection for Db {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
-		live_stream: Arc<Receiver<Vec<db::Response>>>,
+		live_stream: Arc<Sender<Vec<DbResponse>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
@@ -71,10 +70,10 @@ impl Connection for Db {
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
 		Box::pin(async move {
-			let (sender, receiver) = flume::bounded(1);
+			let (sender, receiver) = flume::bounded(1); // TODO: we actually dont want to create in the 'send' method, it needs to be stored in constructor somewhere
 			let route = Route {
 				request: (0, self.method, param),
-				response: sender,
+				response: sender, // TODO this is also problematic
 			};
 			router.sender.send_async(Some(route)).await?;
 			Ok(receiver)
@@ -86,7 +85,7 @@ pub(crate) fn router(
 	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Option<Route>>,
-	live_stream: Arc<async_channel::Receiver<Vec<Response>>>,
+	live_stream: Arc<Sender<Vec<DbResponse>>>,
 ) {
 	tokio::spawn(async move {
 		let url = address.endpoint;
@@ -105,7 +104,22 @@ pub(crate) fn router(
 				_ => url.as_str().to_owned(),
 			};
 
-			match Datastore::new(&path, live_stream).await {
+			let (resp_sender, resp_receiver): (Sender<Vec<Response>>, Receiver<Vec<Response>>) =
+				flume::bounded(1); // TODO change cap
+			tokio::spawn(async move {
+				loop {
+					match resp_receiver.recv() {
+						Ok(resp) => {
+							let _ = live_stream.send(resp.into());
+						}
+						Err(_) => {
+							let _ = conn_tx.into_send_async(Err(error.into())).await;
+						}
+					}
+				}
+			});
+
+			match Datastore::new(&path, Arc::new(resp_sender)).await {
 				Ok(kvs) => {
 					let _ = conn_tx.into_send_async(Ok(())).await;
 					kvs

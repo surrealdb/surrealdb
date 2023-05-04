@@ -5,7 +5,6 @@ use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Response;
 use crate::opt::from_value;
 use crate::sql::Query;
 use crate::sql::Value;
@@ -158,7 +157,7 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
-		live_stream: Arc<Receiver<Vec<Response>>>,
+		live_stream: Arc<Sender<Vec<DbResponse>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>>
 	where
 		Self: api::Connection;

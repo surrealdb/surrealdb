@@ -12,7 +12,8 @@ use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::key::db;
-use flume::Receiver;
+use crate::method::query;
+use flume::{Receiver, Sender};
 use futures::StreamExt;
 use indexmap::IndexMap;
 use once_cell::sync::OnceCell;
@@ -38,7 +39,7 @@ impl Connection for Client {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
-		live_stream: Arc<Receiver<Vec<db::Response>>>,
+		live_stream: Arc<Sender<Vec<DbResponse>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
 			let headers = super::default_headers();

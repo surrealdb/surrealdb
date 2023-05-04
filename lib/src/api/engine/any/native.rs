@@ -21,7 +21,8 @@ use crate::api::Surreal;
 use crate::dbs::Response;
 use crate::error::Db as DbError;
 use crate::key::db;
-use flume::Receiver;
+use crate::method::query;
+use flume::{Receiver, Sender};
 use once_cell::sync::OnceCell;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
@@ -51,7 +52,7 @@ impl Connection for Any {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
-		live_stream: Arc<Receiver<Vec<db::Response>>>,
+		live_stream: Arc<Sender<Vec<DbResponse>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
