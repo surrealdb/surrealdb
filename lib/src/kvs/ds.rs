@@ -1,5 +1,6 @@
 use super::tx::Transaction;
 use crate::ctx::Context;
+use crate::dbs::liveresponse::LiveQueryResponse;
 use crate::dbs::Attach;
 use crate::dbs::Executor;
 use crate::dbs::Options;
@@ -23,9 +24,9 @@ use tracing::instrument;
 pub struct Datastore {
 	pub(super) inner: Inner,
 	// The diff_patch_stream is the receiving channel of live query updates. It is part of the Datastore API, but we may want to put it behind a function.
-	pub diff_patch_stream: Arc<flume::Receiver<Vec<Response>>>,
+	pub diff_patch_stream: Arc<flume::Receiver<Vec<LiveQueryResponse>>>,
 	// The live_query_sender is a channel through which the db can send live query updates
-	pub live_query_sender: Arc<flume::Sender<Vec<Response>>>,
+	pub live_query_sender: Arc<flume::Sender<Vec<LiveQueryResponse>>>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -101,7 +102,10 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
-		let (sender, receiver) = flume::unbounded();
+		let (sender, receiver): (
+			flume::Sender<Vec<LiveQueryResponse>>,
+			flume::Receiver<Vec<LiveQueryResponse>>,
+		) = flume::unbounded();
 		match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]

@@ -1,5 +1,8 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
+use crate::dbs::liveresponse::EventType;
+use crate::dbs::liveresponse::LiveQueryID;
+use crate::dbs::liveresponse::LiveQueryResponse;
 use crate::dbs::response::Response;
 use crate::dbs::Auth;
 use crate::dbs::Level;
@@ -24,20 +27,18 @@ use tracing::instrument;
 use trice::Instant;
 use uuid::Uuid;
 
-type LiveQueryID = Uuid;
-
 pub(crate) struct Executor<'a> {
 	err: bool,
 	kvs: &'a Datastore,
 	txn: Option<Transaction>,
 	// The channel to send live query responses to. These will be updates related to listened_lq queries.
-	lq_sender: Arc<Sender<Vec<Response>>>,
+	lq_sender: Arc<Sender<Vec<LiveQueryResponse>>>,
 	// The list of live query IDs that are being listened to by this node.
 	listened_lq: Vec<LiveQueryID>,
 }
 
 impl<'a> Executor<'a> {
-	pub fn new(kvs: &'a Datastore, lq_sender: Arc<Sender<Vec<Response>>>) -> Executor<'a> {
+	pub fn new(kvs: &'a Datastore, lq_sender: Arc<Sender<Vec<LiveQueryResponse>>>) -> Executor<'a> {
 		Executor {
 			kvs,
 			txn: None,
@@ -58,6 +59,7 @@ impl<'a> Executor<'a> {
 		match self.txn.as_ref() {
 			Some(_) => false,
 			None => match self.kvs.transaction(write, false).await {
+				// TODO: check buffering
 				Ok(v) => {
 					self.txn = Some(Arc::new(Mutex::new(v)));
 					true
@@ -141,18 +143,20 @@ impl<'a> Executor<'a> {
 		mut ctx: Context<'_>,
 		mut opt: Options,
 		qry: Query,
-	) -> Result<(Vec<Response>, Option<Receiver<Response>>), Error> {
+	) -> Result<(Vec<Response>, Option<Receiver<LiveQueryResponse>>), Error> {
 		trace!(target: LOG, "Have access to these LQs: {:?}", self.listened_lq);
-		self.kvs.live_query_sender.send(vec![Response {
-			time: Duration::from_secs(1),
-			result: Ok(Value::from("Hello, world!")),
+		self.kvs.live_query_sender.send(vec![LiveQueryResponse {
+			lqid: Default::default(),
+			result: Default::default(),
+			node_id: "".to_string(),
+			event_type: EventType::CREATE,
 		}]);
 		// Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
 		// Initialise live query callback channel
-		let mut receiver: Option<Receiver<Response>> = Option::None;
+		let mut receiver: Option<Receiver<LiveQueryResponse>> = Option::None;
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement

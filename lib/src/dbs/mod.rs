@@ -2,6 +2,7 @@ mod auth;
 mod executor;
 mod iterate;
 mod iterator;
+pub(crate) mod liveresponse;
 mod options;
 mod response;
 mod session;
@@ -13,6 +14,7 @@ pub use self::auth::*;
 pub use self::options::*;
 pub use self::response::*;
 pub use self::session::*;
+use crate::sql::Value;
 
 pub(crate) use self::executor::*;
 pub(crate) use self::iterator::*;

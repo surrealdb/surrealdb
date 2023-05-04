@@ -130,7 +130,7 @@ impl Rpc {
 		tokio::task::spawn(async move {
 			while let response_vec = diff_stream.clone().recv() {
 				// TODO this is synchronous and must change
-				println!("Received diff update response vec {response_vec:?}")
+				println!("Received diff update response vec {:?}", response_vec);
 				// TODO filter for cluster or this connected WS instance
 			}
 		});
