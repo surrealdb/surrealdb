@@ -45,7 +45,6 @@ use crate::api::Surreal;
 use crate::channel;
 use crate::dbs::Response;
 use crate::dbs::Session;
-use crate::key::db;
 use crate::kvs::Datastore;
 use crate::opt::IntoEndpoint;
 use crate::sql::Array;
@@ -60,7 +59,6 @@ use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-use std::sync::mpsc::channel;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]

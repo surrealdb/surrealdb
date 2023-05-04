@@ -10,10 +10,10 @@ use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::{Response, Session};
-use crate::key::db;
+use crate::dbs::Session;
 use crate::kvs::Datastore;
-use flume::{Receiver, RecvError, Sender};
+use flume::Receiver;
+use flume::Sender;
 use futures::StreamExt;
 use once_cell::sync::OnceCell;
 use std::collections::BTreeMap;
@@ -36,7 +36,6 @@ impl Connection for Db {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
-		live_stream: Arc<Sender<Vec<DbResponse>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
@@ -46,7 +45,7 @@ impl Connection for Db {
 
 			let (conn_tx, conn_rx) = flume::bounded(1);
 
-			router(address, conn_tx, route_rx, live_stream);
+			router(address, conn_tx, route_rx);
 
 			conn_rx.into_recv_async().await??;
 
@@ -70,10 +69,10 @@ impl Connection for Db {
 		param: Param,
 	) -> Pin<Box<dyn Future<Output = Result<Receiver<Result<DbResponse>>>> + Send + Sync + 'r>> {
 		Box::pin(async move {
-			let (sender, receiver) = flume::bounded(1); // TODO: we actually dont want to create in the 'send' method, it needs to be stored in constructor somewhere
+			let (sender, receiver) = flume::bounded(1);
 			let route = Route {
 				request: (0, self.method, param),
-				response: sender, // TODO this is also problematic
+				response: sender,
 			};
 			router.sender.send_async(Some(route)).await?;
 			Ok(receiver)
@@ -85,7 +84,6 @@ pub(crate) fn router(
 	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Option<Route>>,
-	live_stream: Arc<Sender<Vec<DbResponse>>>,
 ) {
 	tokio::spawn(async move {
 		let url = address.endpoint;
@@ -104,22 +102,7 @@ pub(crate) fn router(
 				_ => url.as_str().to_owned(),
 			};
 
-			let (resp_sender, resp_receiver): (Sender<Vec<Response>>, Receiver<Vec<Response>>) =
-				flume::bounded(1); // TODO change cap
-			tokio::spawn(async move {
-				loop {
-					match resp_receiver.recv() {
-						Ok(resp) => {
-							let _ = live_stream.send(resp.into());
-						}
-						Err(_) => {
-							let _ = conn_tx.into_send_async(Err(error.into())).await;
-						}
-					}
-				}
-			});
-
-			match Datastore::new(&path, Arc::new(resp_sender)).await {
+			match Datastore::new(&path).await {
 				Ok(kvs) => {
 					let _ = conn_tx.into_send_async(Ok(())).await;
 					kvs

@@ -104,10 +104,7 @@ use crate::api::opt::Tls;
 use crate::api::Connect;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::key::db;
 use std::marker::PhantomData;
-use std::sync::mpsc::channel;
-use std::sync::Arc;
 use url::Url;
 
 /// A trait for converting inputs to a server address object

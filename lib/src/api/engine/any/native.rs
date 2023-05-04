@@ -18,11 +18,8 @@ use crate::api::DbResponse;
 use crate::api::ExtraFeatures;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::dbs::Response;
 use crate::error::Db as DbError;
-use crate::key::db;
-use crate::method::query;
-use flume::{Receiver, Sender};
+use flume::Receiver;
 use once_cell::sync::OnceCell;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
@@ -52,7 +49,6 @@ impl Connection for Any {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
-		live_stream: Arc<Sender<Vec<DbResponse>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
@@ -82,7 +78,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::Backup);
-						engine::local::native::router(address, conn_tx, route_rx, live_stream);
+						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
 
@@ -96,7 +92,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::Backup);
-						engine::local::native::router(address, conn_tx, route_rx, live_stream);
+						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
 
@@ -111,7 +107,7 @@ impl Connection for Any {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::Backup);
-						engine::local::native::router(address, conn_tx, route_rx, live_stream);
+						engine::local::native::router(address, conn_tx, route_rx);
 						conn_rx.into_recv_async().await??
 					}
 

@@ -20,7 +20,6 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 #[derive(Debug)]
 #[allow(dead_code)] // used by the embedded and remote connections
@@ -157,7 +156,6 @@ pub trait Connection: Sized + Send + Sync + 'static {
 	fn connect(
 		address: Endpoint,
 		capacity: usize,
-		live_stream: Arc<Sender<Vec<DbResponse>>>,
 	) -> Pin<Box<dyn Future<Output = Result<Surreal<Self>>> + Send + Sync + 'static>>
 	where
 		Self: api::Connection;

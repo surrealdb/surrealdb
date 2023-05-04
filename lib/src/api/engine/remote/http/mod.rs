@@ -22,7 +22,6 @@ use crate::api::Connect;
 use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
-use crate::key::db;
 use crate::opt::IntoEndpoint;
 use crate::sql::Array;
 use crate::sql::Strand;
@@ -42,7 +41,6 @@ use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-use std::sync::mpsc::channel;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]

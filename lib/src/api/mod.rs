@@ -9,13 +9,10 @@ mod conn;
 
 pub use method::query::Response;
 
-use crate::api;
 use crate::api::conn::DbResponse;
 use crate::api::conn::Router;
 use crate::api::err::Error;
 use crate::api::opt::Endpoint;
-use crate::key::db;
-use flume::{Receiver, Sender};
 use once_cell::sync::OnceCell;
 use semver::BuildMetadata;
 use semver::VersionReq;
@@ -24,7 +21,6 @@ use std::future::Future;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::mpsc::channel;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::spawn;
@@ -96,12 +92,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			let (response_sender, response_receiver): (
-				Sender<Vec<DbResponse>>,
-				Receiver<Vec<DbResponse>>,
-			) = flume::unbounded();
-			let lsr: Arc<Sender<Vec<DbResponse>>> = Arc::new(response_sender);
-			let client = Client::connect(self.address?, self.capacity, lsr).await?;
+			let client = Client::connect(self.address?, self.capacity).await?;
 			client.check_server_version();
 			Ok(client)
 		})
@@ -119,16 +110,8 @@ where
 		Box::pin(async move {
 			match self.router {
 				Some(router) => {
-					// TODO this seems wrong
-					let (response_sender, response_receiver): (
-						Sender<Vec<DbResponse>>,
-						Receiver<Vec<DbResponse>>,
-					) = flume::unbounded();
-					let lsr: Arc<Sender<Vec<DbResponse>>> = Arc::new(response_sender);
-					let option = Client::connect(self.address?, self.capacity, lsr)
-						.await?
-						.router
-						.into_inner();
+					let option =
+						Client::connect(self.address?, self.capacity).await?.router.into_inner();
 					match option {
 						Some(client) => {
 							let _res = router.set(client);
