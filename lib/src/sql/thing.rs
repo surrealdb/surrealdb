@@ -93,6 +93,10 @@ impl Thing {
 	pub fn to_raw(&self) -> String {
 		self.to_string()
 	}
+
+	pub fn empty() -> Self {
+		Self::from(("",""))
+	}
 }
 
 impl fmt::Display for Thing {
