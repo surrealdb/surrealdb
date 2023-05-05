@@ -368,7 +368,7 @@ async fn select_one(
 	// Specify the request statement
 	let sql = "SELECT * FROM type::thing($table, $id)";
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::value(&id) {
+	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
@@ -409,7 +409,7 @@ async fn create_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::value(&id) {
+	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
@@ -460,7 +460,7 @@ async fn update_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::value(&id) {
+	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
@@ -511,7 +511,7 @@ async fn modify_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::value(&id) {
+	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
@@ -561,7 +561,7 @@ async fn delete_one(
 	// Specify the request statement
 	let sql = "DELETE type::thing($table, $id) RETURN BEFORE";
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::value(&id) {
+	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
