@@ -1,6 +1,7 @@
 mod bkeys;
 pub(crate) mod btree;
 pub(crate) mod ft;
+pub(crate) mod planner;
 
 use crate::dbs::Options;
 use crate::err::Error;

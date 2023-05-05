@@ -6,6 +6,7 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::idx::planner::QueryPlanner;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
@@ -83,11 +84,15 @@ impl SelectStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored
 		let opt = &opt.futures(false);
+		// Get a query planner
+		let planner = QueryPlanner::new(opt, &self.cond);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
 			let v = w.compute(ctx, opt, txn, doc).await?;
 			match v {
-				Value::Table(v) => i.ingest(Iterable::Table(v)),
+				Value::Table(v) => {
+					i.ingest(planner.get_iterable(txn, v).await?);
+				}
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
 				Value::Range(v) => i.ingest(Iterable::Range(*v)),
 				Value::Edges(v) => i.ingest(Iterable::Edges(*v)),

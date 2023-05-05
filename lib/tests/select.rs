@@ -64,3 +64,34 @@ async fn select_field_value() -> Result<(), Error> {
 	//
 	Ok(())
 }
+
+#[tokio::test]
+async fn select_where_or() -> Result<(), Error> {
+	let sql = "
+		CREATE person:tobie SET name = 'Tobie';
+		DEFINE INDEX person_name ON TABLE person COLUMNS name;
+		CREATE activity:piano SET name = 'Piano';
+		SELECT name FROM person,activity WHERE name = 'Tobie' OR name = 'Piano';";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	let _ = res.remove(0).result?;
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"[
+			{
+				name: 'Tobie'
+			},
+			{
+				name: 'Piano'
+			}
+		]",
+	);
+	assert_eq!(tmp, val);
+	Ok(())
+}
