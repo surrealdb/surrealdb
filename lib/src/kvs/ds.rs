@@ -10,6 +10,7 @@ use crate::dbs::Variables;
 use crate::err::Error;
 use crate::key::hb::Hb;
 use crate::key::lq;
+use crate::key::lq::Lq;
 use crate::key::lv::Lv;
 use crate::sql;
 use crate::sql::Query;
@@ -411,6 +412,39 @@ impl Datastore {
 		Ok(())
 	}
 
+	// Garbage collection task to run when a client disconnects from a surrealdb node
+	// i.e. we know the node, we are not performing a full wipe on the node
+	// and the wipe must be fully performed by this node
+	pub async fn garbage_collect_dead_session(&self, live_queries: &[Uuid]) -> Result<(), Error> {
+		let mut tx = self.transaction(true, false).await?;
+
+		// Find all the LQs we own, so that we can get the ns/ds from provided uuids
+		// We may improve this in future by tracking in web layer
+		let lqs = tx.scan_lq(&self.id, 1000).await?;
+		let mut hits = vec![];
+		for lq_value in lqs {
+			if live_queries.contains(&lq_value.lq) {
+				hits.push(lq_value.clone());
+				let lq = Lq::new(
+					lq_value.cl.clone(),
+					lq_value.ns.as_str(),
+					lq_value.db.as_str(),
+					lq_value.lq.clone(),
+				);
+				tx.del(lq).await?;
+				trace!("Deleted lq {:?} as part of session garbage collection", lq_value.clone());
+			}
+		}
+
+		// Now delete the table entries for the live queries
+		for lq in hits {
+			let lv = Lv::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), self.id);
+			tx.del(lv.clone()).await?;
+			trace!("Deleted lv {:?} as part of session garbage collection", lv);
+		}
+		tx.commit().await
+	}
+
 	// Returns a list of live query IDs
 	pub async fn archive_lv_for_node(
 		&self,
@@ -448,7 +482,6 @@ impl Datastore {
 
 	// Creates a heartbeat entry for the member indicating to the cluster
 	// that the node is alive.
-	// This is the preferred way of creating heartbeats inside the database, so try to use this.
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
 		let timestamp = tx.clock();
@@ -458,8 +491,6 @@ impl Datastore {
 
 	// Creates a heartbeat entry for the member indicating to the cluster
 	// that the node is alive. Intended for testing.
-	// This includes all dependencies that are hard to control and is done in such a way for testing.
-	// Inside the database, try to use the heartbeat() function instead.
 	pub async fn heartbeat_full(
 		&self,
 		tx: &mut Transaction,

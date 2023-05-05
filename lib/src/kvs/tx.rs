@@ -8,7 +8,7 @@ use crate::err::Error;
 use crate::key::hb::Hb;
 use crate::key::lq::Lq;
 use crate::key::lv::Lv;
-use crate::key::{lq, thing};
+use crate::key::{lq, lv, thing};
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::kvs::LqValue;
@@ -999,6 +999,38 @@ impl Transaction {
 				db: lq.db.to_string(),
 				tb,
 				lq: lq.lq,
+			});
+		}
+		Ok(res)
+	}
+
+	pub async fn scan_lv<'a>(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		limit: u32,
+	) -> Result<Vec<LqValue>, Error> {
+		let pref = lv::prefix(ns, db, tb);
+		let suff = lv::suffix(ns, db, tb);
+		trace!(
+			"Scanning range from pref={}, suff={}",
+			crate::key::debug::sprint_key(&pref),
+			crate::key::debug::sprint_key(&suff),
+		);
+		let rng = pref..suff;
+		let scanned = self.scan(rng, limit).await?;
+		let mut res: Vec<LqValue> = vec![];
+		for (key, value) in scanned {
+			trace!("scan_lv: key={:?} value={:?}", &key, &value);
+			let val: LiveStatement = value.into();
+			let lv = Lv::decode(key.as_slice())?;
+			res.push(LqValue {
+				cl: val.node.clone(),
+				ns: lv.ns.to_string(),
+				db: lv.db.to_string(),
+				tb: lv.tb.to_string(),
+				lq: val.id.0.clone(),
 			});
 		}
 		Ok(res)

@@ -196,13 +196,21 @@ impl Rpc {
 		// Remove this WebSocket from the list of WebSockets
 		WEBSOCKETS.write().await.remove(&id);
 		// Remove all live queries
+		let mut live_queries = vec![];
 		LIVE_QUERIES.write().await.retain(|key, value| {
 			if value == &id {
 				trace!("Removing live query: {}", key);
+				live_queries.push(key.clone());
 				return false;
 			}
 			true
 		});
+		// Garbage collect Live Query
+		if let Err(e) =
+			DB.get().unwrap().garbage_collect_dead_session(live_queries.as_slice()).await
+		{
+			error!("Failed to garbage collect dead sessions: {:?}", e);
+		}
 	}
 
 	/// Call RPC methods from the WebSocket

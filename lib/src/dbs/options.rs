@@ -112,6 +112,7 @@ impl Options {
 		self
 	}
 
+	/// Get currently selected NS
 	/// Specify the authentication options for subsequent
 	/// code which uses this `Options`, with chaining.
 	pub fn with_auth(mut self, auth: Arc<Auth>) -> Self {
