@@ -378,14 +378,19 @@ async fn router(
 
 	match method {
 		Method::Use => {
-			let (ns, db) = match &mut params[..] {
+			match &mut params[..] {
 				[Value::Strand(Strand(ns)), Value::Strand(Strand(db))] => {
-					(mem::take(ns), mem::take(db))
+					session.ns = Some(mem::take(ns));
+					session.db = Some(mem::take(db));
+				}
+				[Value::Strand(Strand(ns)), Value::None] => {
+					session.ns = Some(mem::take(ns));
+				}
+				[Value::None, Value::Strand(Strand(db))] => {
+					session.db = Some(mem::take(db));
 				}
 				_ => unreachable!(),
-			};
-			session.ns = Some(ns);
-			session.db = Some(db);
+			}
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Signin | Method::Signup | Method::Authenticate | Method::Invalidate => {
