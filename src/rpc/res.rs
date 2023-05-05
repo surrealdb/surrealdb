@@ -33,24 +33,24 @@ enum Content<T> {
 impl<T: Serialize> Response<T> {
 	/// Convert and simplify the value into JSON
 	#[inline]
-	fn json(self) -> Json {
+	fn simplify(self) -> Json {
 		sql::to_value(self).unwrap().into()
 	}
 	/// Send the response to the WebSocket channel
 	pub async fn send(self, out: Output, chn: Sender<Message>) {
 		match out {
 			Output::Json => {
-				let res = serde_json::to_string(&self.json()).unwrap();
+				let res = serde_json::to_string(&self.simplify()).unwrap();
 				let res = Message::text(res);
 				let _ = chn.send(res).await;
 			}
 			Output::Cbor => {
-				let res = serde_cbor::to_vec(&self.json()).unwrap();
+				let res = serde_cbor::to_vec(&self.simplify()).unwrap();
 				let res = Message::binary(res);
 				let _ = chn.send(res).await;
 			}
 			Output::Pack => {
-				let res = serde_pack::to_vec(&self.json()).unwrap();
+				let res = serde_pack::to_vec(&self.simplify()).unwrap();
 				let res = Message::binary(res);
 				let _ = chn.send(res).await;
 			}
