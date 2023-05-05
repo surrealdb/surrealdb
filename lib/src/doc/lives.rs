@@ -1,4 +1,6 @@
 use crate::ctx::Context;
+use crate::dbs::liveresponse::LiveQueryID;
+use crate::dbs::liveresponse::{Action, LiveQueryID, Notification};
 use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
@@ -36,8 +38,13 @@ impl<'a> Document<'a> {
 				// Send a DELETE notification to the WebSocket
 			} else if self.is_new() {
 				// Process the CREATE notification to send
-				let _ = self.pluck(ctx, &opt, txn, &stm).await?; // TODO the value based on the LQ. Diff vs fields
-				                                 // 1. Queue CREATE notification
+				let res = self.pluck(ctx, &opt, txn, &stm).await?; // TODO the value based on the LQ. Diff vs fields
+				opt.sender.unwrap().send(Notification::new(
+					LiveQueryID(lv.id),
+					res,
+					Action::Create,
+				));
+			// 1. Queue CREATE notification
 			} else {
 				// Process the CREATE notification to send
 				let _ = self.pluck(ctx, &opt, txn, &stm).await?;

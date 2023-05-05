@@ -13,7 +13,7 @@ use std::sync::Arc;
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Options {
 	/// Currently selected NS
 	pub ns: Option<Arc<str>>,
@@ -21,7 +21,7 @@ pub struct Options {
 	pub db: Option<Arc<str>>,
 	/// Connection authentication data
 	pub auth: Arc<Auth>,
-	pub sender: Option<Sender<Notification>>,
+	pub sender: Arc<Option<Sender<Notification>>>,
 	/// Approximately how large is the current call stack?
 	dive: u8,
 	/// Whether live queries are allowed?
@@ -67,7 +67,7 @@ impl Options {
 			indexes: true,
 			futures: false,
 			auth: Arc::new(auth),
-			sender: None,
+			sender: Arc::new(None),
 		}
 	}
 
@@ -100,14 +100,14 @@ impl Options {
 			Err(Error::ComputationDepthExceeded)
 		}
 	}
-	
+
 	pub fn sender(&self, v: Sender<Notification>) -> Options {
 		Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			sender: Some(v),
+			sender: Arc::new(Some(v)),
 			..*self
 		}
 	}

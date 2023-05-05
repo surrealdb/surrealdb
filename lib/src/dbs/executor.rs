@@ -1,7 +1,6 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::liveresponse::LiveQueryID;
-use crate::dbs::liveresponse::Noti;
 use crate::dbs::liveresponse::{Action, Notification};
 use crate::dbs::response::Response;
 use crate::dbs::Auth;
@@ -33,11 +32,11 @@ pub(crate) struct Executor<'a> {
 	kvs: &'a Datastore,
 	txn: Option<Transaction>,
 	// The channel to send live query responses to. These will be updates related to listened_lq queries.
-	lq_sender: Arc<Sender<Vec<Noti>>>,
+	lq_sender: Arc<Sender<Notification>>,
 }
 
 impl<'a> Executor<'a> {
-	pub fn new(kvs: &'a Datastore, lq_sender: Arc<Sender<Vec<Noti>>>) -> Executor<'a> {
+	pub fn new(kvs: &'a Datastore, lq_sender: Arc<Sender<Notification>>) -> Executor<'a> {
 		Executor {
 			kvs,
 			txn: None,
@@ -142,7 +141,8 @@ impl<'a> Executor<'a> {
 		mut opt: Options,
 		qry: Query,
 	) -> Result<(Vec<Response>, Option<Receiver<Notification>>), Error> {
-		let datastore_sender = opt.sender?;
+		let datastore_sender = opt.sender.unwrap();
+		// Internal needs to be unbounded because we can't guarantee limits
 		let (buf_sender, buf_receiver) = flume::unbounded();
 		opt = opt.sender(buf_sender); // opt is cloned, so not modifying
 							  // Initialise buffer of responses
@@ -150,7 +150,7 @@ impl<'a> Executor<'a> {
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
 		// Initialise live query callback channel
-		let mut receiver: Option<Receiver<Noti>> = Option::None;
+		let mut receiver: Option<Receiver<Notification>> = Option::None;
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement
@@ -321,7 +321,7 @@ impl<'a> Executor<'a> {
 										match stm.writeable() {
 											true => {
 												trace!("Flushing live query updates to datastore channel");
-												while let rec = buf_receiver.recv().await.is_ok() {
+												while let Ok(rec) = buf_receiver.recv() {
 													datastore_sender.send(rec).await.unwrap();
 												}
 												self.commit(loc).await
@@ -356,7 +356,10 @@ impl<'a> Executor<'a> {
 				}
 				buf.push(res);
 			} else {
-				out.push(res)
+				out.push(res);
+				while let Ok(rec) = buf_receiver.recv() {
+					datastore_sender.send(rec);
+				}
 			}
 		}
 		// Return responses
