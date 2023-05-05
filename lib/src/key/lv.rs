@@ -1,6 +1,6 @@
-use crate::sql::uuid::Uuid;
 use derive::Key;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 pub struct Lv<'a> {
