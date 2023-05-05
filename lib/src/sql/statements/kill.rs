@@ -35,16 +35,16 @@ impl KillStatement {
 		// Claim transaction
 		let mut run = txn.lock().await;
 		// Fetch the live query key
-		let key = crate::key::lq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
+		let key = crate::key::nd::nq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
 		// Fetch the live query key if it exists
 		match run.get(key).await? {
 			Some(val) => match std::str::from_utf8(&val) {
 				Ok(tb) => {
 					// Delete the node live query
-					let key = crate::key::lq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
+					let key = crate::key::nd::nq::new(opt.id()?, opt.ns(), opt.db(), self.id.0);
 					run.del(key).await?;
 					// Delete the table live query
-					let key = crate::key::lv::new(opt.ns(), opt.db(), tb, self.id.0);
+					let key = crate::key::ns::lv::new(opt.ns(), opt.db(), tb, self.id.0);
 					run.del(key).await?;
 				}
 				_ => {

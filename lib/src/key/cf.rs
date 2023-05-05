@@ -1,3 +1,4 @@
+/// Stores change feeds
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +31,7 @@ pub fn new<'a>(ns: &'a str, db: &'a str, ts: u64, tb: &'a str) -> Cf<'a> {
 
 #[allow(unused)]
 pub fn versionstamped_key_prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::database::new(ns, db).encode().unwrap();
+	let mut k = super::ns::database::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'c', b'f']);
 	k
 }
@@ -49,7 +50,7 @@ pub fn versionstamped_key_suffix(tb: &str) -> Vec<u8> {
 /// specified versionstamp.
 #[allow(unused)]
 pub fn ts_prefix(ns: &str, db: &str, vs: vs::Versionstamp) -> Vec<u8> {
-	let mut k = super::database::new(ns, db).encode().unwrap();
+	let mut k = super::ns::database::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'c', b'f']);
 	k.extend_from_slice(&vs);
 	k
@@ -58,7 +59,7 @@ pub fn ts_prefix(ns: &str, db: &str, vs: vs::Versionstamp) -> Vec<u8> {
 /// Returns the prefix for the whole database change feeds
 #[allow(unused)]
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::database::new(ns, db).encode().unwrap();
+	let mut k = super::ns::database::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'c', b'f', 0x00]);
 	k
 }
@@ -66,7 +67,7 @@ pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 /// Returns the suffix for the whole database change feeds
 #[allow(unused)]
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
-	let mut k = super::database::new(ns, db).encode().unwrap();
+	let mut k = super::ns::database::new(ns, db).encode().unwrap();
 	k.extend_from_slice(&[b'!', b'c', b'f', 0xff]);
 	k
 }

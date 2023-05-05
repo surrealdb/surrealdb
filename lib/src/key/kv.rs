@@ -1,3 +1,4 @@
+/// Stores the key prefix for all keys
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
