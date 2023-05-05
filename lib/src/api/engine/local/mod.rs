@@ -312,10 +312,7 @@ pub struct Db {
 
 impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
-	pub fn connect<P>(
-		&'static self,
-		address: impl IntoEndpoint<P, Client = Db>,
-	) -> Connect<Db, ()> {
+	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
 			router: Some(&self.router),
 			address: address.into_endpoint(),

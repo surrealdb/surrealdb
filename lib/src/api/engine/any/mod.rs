@@ -256,7 +256,7 @@ impl Surreal<Any> {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn connect(&'static self, address: impl IntoEndpoint) -> Connect<Any, ()> {
+	pub fn connect(&self, address: impl IntoEndpoint) -> Connect<Any, ()> {
 		Connect {
 			router: Some(&self.router),
 			address: address.into_endpoint(),
