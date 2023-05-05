@@ -17,12 +17,24 @@ pub struct Cl {
 impl Cl {
 	pub fn new(nd: Uuid) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x21, // !
-			_b: 0x63, // c
-			_c: 0x6c, // l
+			__: b'/',
+			_a: b'!',
+			_b: b'c',
+			_c: b'l',
 			nd,
 		}
+	}
+
+	pub fn prefix() -> Vec<u8> {
+		let mut k = super::kv::new().encode().unwrap();
+		k.extend_from_slice(&[b'!', b'h', b'b', 0x00]);
+		k
+	}
+
+	pub fn suffix() -> Vec<u8> {
+		let mut k = super::kv::new().encode().unwrap();
+		k.extend_from_slice(&[b'!', b'h', b'b', 0xff]);
+		k
 	}
 }
 
