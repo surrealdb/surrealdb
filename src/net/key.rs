@@ -172,9 +172,9 @@ async fn select_all(
 	match db.execute(sql.as_str(), &session, Some(vars), opt.strict).await {
 		Ok(ref res) => match output.as_ref() {
 			// Simple serialization
-			"application/json" => Ok(output::json(&res)),
-			"application/cbor" => Ok(output::cbor(&res)),
-			"application/pack" => Ok(output::pack(&res)),
+			"application/json" => Ok(output::json(&output::simplify(res))),
+			"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+			"application/pack" => Ok(output::pack(&output::simplify(res))),
 			// Internal serialization
 			"application/bung" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
@@ -213,9 +213,9 @@ async fn create_all(
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
-					"application/json" => Ok(output::json(&res)),
-					"application/cbor" => Ok(output::cbor(&res)),
-					"application/pack" => Ok(output::pack(&res)),
+					"application/json" => Ok(output::json(&output::simplify(res))),
+					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
 					"application/bung" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -257,9 +257,9 @@ async fn update_all(
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
-					"application/json" => Ok(output::json(&res)),
-					"application/cbor" => Ok(output::cbor(&res)),
-					"application/pack" => Ok(output::pack(&res)),
+					"application/json" => Ok(output::json(&output::simplify(res))),
+					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
 					"application/bung" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -301,9 +301,9 @@ async fn modify_all(
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
-					"application/json" => Ok(output::json(&res)),
-					"application/cbor" => Ok(output::cbor(&res)),
-					"application/pack" => Ok(output::pack(&res)),
+					"application/json" => Ok(output::json(&output::simplify(res))),
+					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
 					"application/bung" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -338,9 +338,9 @@ async fn delete_all(
 	match db.execute(sql, &session, Some(vars), opt.strict).await {
 		Ok(res) => match output.as_ref() {
 			// Simple serialization
-			"application/json" => Ok(output::json(&res)),
-			"application/cbor" => Ok(output::cbor(&res)),
-			"application/pack" => Ok(output::pack(&res)),
+			"application/json" => Ok(output::json(&output::simplify(res))),
+			"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+			"application/pack" => Ok(output::pack(&output::simplify(res))),
 			// Internal serialization
 			"application/bung" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
@@ -368,7 +368,7 @@ async fn select_one(
 	// Specify the request statement
 	let sql = "SELECT * FROM type::thing($table, $id)";
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::value(&id) {
+	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
@@ -381,9 +381,9 @@ async fn select_one(
 	match db.execute(sql, &session, Some(vars), opt.strict).await {
 		Ok(res) => match output.as_ref() {
 			// Simple serialization
-			"application/json" => Ok(output::json(&res)),
-			"application/cbor" => Ok(output::cbor(&res)),
-			"application/pack" => Ok(output::pack(&res)),
+			"application/json" => Ok(output::json(&output::simplify(res))),
+			"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+			"application/pack" => Ok(output::pack(&output::simplify(res))),
 			// Internal serialization
 			"application/bung" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
@@ -409,7 +409,7 @@ async fn create_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::value(&id) {
+	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
@@ -429,9 +429,9 @@ async fn create_one(
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
-					"application/json" => Ok(output::json(&res)),
-					"application/cbor" => Ok(output::cbor(&res)),
-					"application/pack" => Ok(output::pack(&res)),
+					"application/json" => Ok(output::json(&output::simplify(res))),
+					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
 					"application/bung" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -460,7 +460,7 @@ async fn update_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::value(&id) {
+	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
@@ -480,9 +480,9 @@ async fn update_one(
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
-					"application/json" => Ok(output::json(&res)),
-					"application/cbor" => Ok(output::cbor(&res)),
-					"application/pack" => Ok(output::pack(&res)),
+					"application/json" => Ok(output::json(&output::simplify(res))),
+					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
 					"application/bung" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -511,7 +511,7 @@ async fn modify_one(
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body)?;
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::value(&id) {
+	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
@@ -531,9 +531,9 @@ async fn modify_one(
 			match db.execute(sql, &session, Some(vars), opt.strict).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
-					"application/json" => Ok(output::json(&res)),
-					"application/cbor" => Ok(output::cbor(&res)),
-					"application/pack" => Ok(output::pack(&res)),
+					"application/json" => Ok(output::json(&output::simplify(res))),
+					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
 					"application/bung" => Ok(output::full(&res)),
 					// An incorrect content-type was requested
@@ -561,7 +561,7 @@ async fn delete_one(
 	// Specify the request statement
 	let sql = "DELETE type::thing($table, $id) RETURN BEFORE";
 	// Parse the Record ID as a SurrealQL value
-	let rid = match surrealdb::sql::value(&id) {
+	let rid = match surrealdb::sql::json(&id) {
 		Ok(id) => id,
 		Err(_) => Value::from(id),
 	};
@@ -575,9 +575,9 @@ async fn delete_one(
 	match db.execute(sql, &session, Some(vars), opt.strict).await {
 		Ok(res) => match output.as_ref() {
 			// Simple serialization
-			"application/json" => Ok(output::json(&res)),
-			"application/cbor" => Ok(output::cbor(&res)),
-			"application/pack" => Ok(output::pack(&res)),
+			"application/json" => Ok(output::json(&output::simplify(res))),
+			"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+			"application/pack" => Ok(output::pack(&output::simplify(res))),
 			// Internal serialization
 			"application/bung" => Ok(output::full(&res)),
 			// An incorrect content-type was requested
