@@ -32,16 +32,14 @@ pub(crate) struct Executor<'a> {
 	kvs: &'a Datastore,
 	txn: Option<Transaction>,
 	// The channel to send live query responses to. These will be updates related to listened_lq queries.
-	lq_sender: Arc<Sender<Notification>>,
 }
 
 impl<'a> Executor<'a> {
-	pub fn new(kvs: &'a Datastore, lq_sender: Arc<Sender<Notification>>) -> Executor<'a> {
+	pub fn new(kvs: &'a Datastore) -> Executor<'a> {
 		Executor {
 			kvs,
 			txn: None,
 			err: false,
-			lq_sender,
 		}
 	}
 
@@ -144,8 +142,8 @@ impl<'a> Executor<'a> {
 		let datastore_sender = opt.sender.unwrap();
 		// Internal needs to be unbounded because we can't guarantee limits
 		let (buf_sender, buf_receiver) = flume::unbounded();
-		opt = opt.sender(buf_sender); // opt is cloned, so not modifying
-							  // Initialise buffer of responses
+		opt = opt.sender(Arc::new(Ok(buf_sender))); // opt is cloned, so not modifying
+											// Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
@@ -322,7 +320,12 @@ impl<'a> Executor<'a> {
 											true => {
 												trace!("Flushing live query updates to datastore channel");
 												while let Ok(rec) = buf_receiver.recv() {
-													datastore_sender.send(rec).await.unwrap();
+													match datastore_sender.send(rec) {
+														Err(e) => {
+															error!(target: LOG, "Failed to receive live query update: {}", e);
+														}
+														_ => {}
+													}
 												}
 												self.commit(loc).await
 											}

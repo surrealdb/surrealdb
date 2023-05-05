@@ -1,10 +1,9 @@
-use crate::sql::Value;
+use crate::sql::{Uuid, Value};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // LiveQueryID is a unique identifier for a live query
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct LiveQueryID(Uuid);
+pub struct LiveQueryID(pub Uuid);
 
 // LiveQueryResponse is a response sent to listeners of live queries
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -101,13 +101,13 @@ impl Options {
 		}
 	}
 
-	pub fn sender(&self, v: Sender<Notification>) -> Options {
+	pub fn sender(&self, v: Arc<Option<Sender<Notification>>>) -> Options {
 		Options {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			sender: Arc::new(Some(v)),
+			sender: v,
 			..*self
 		}
 	}

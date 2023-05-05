@@ -1,5 +1,4 @@
 use crate::ctx::Context;
-use crate::dbs::liveresponse::LiveQueryID;
 use crate::dbs::liveresponse::{Action, LiveQueryID, Notification};
 use crate::dbs::Options;
 use crate::dbs::Statement;
@@ -39,11 +38,12 @@ impl<'a> Document<'a> {
 			} else if self.is_new() {
 				// Process the CREATE notification to send
 				let res = self.pluck(ctx, &opt, txn, &stm).await?; // TODO the value based on the LQ. Diff vs fields
-				opt.sender.unwrap().send(Notification::new(
-					LiveQueryID(lv.id),
-					res,
-					Action::Create,
-				));
+				opt.sender.as_ref().map(|sender| {
+					sender
+						.send(Notification::new(LiveQueryID(lv.id.clone()), res, Action::Create))
+						.unwrap()
+				})?
+
 			// 1. Queue CREATE notification
 			} else {
 				// Process the CREATE notification to send

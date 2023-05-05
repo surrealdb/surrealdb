@@ -365,8 +365,9 @@ impl Datastore {
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
 		let mut opt = Options::default();
+		opt = opt.sender(self.send.clone());
 		// Create a new query executor
-		let mut exe = Executor::new(self, self.send.clone());
+		let mut exe = Executor::new(self);
 		// Create a default context
 		let ctx = Context::default();
 		// Start an execution context
@@ -383,7 +384,7 @@ impl Datastore {
 		// Set strict config
 		opt.strict = strict;
 		// Process all statements
-		match exe.execute(ctx, opt, ast, &self.live_query_ids).await {
+		match exe.execute(ctx, opt, ast).await {
 			Ok((vec, _)) => Ok(vec),
 			Err(e) => Err(e),
 		}
