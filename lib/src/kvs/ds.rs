@@ -2,6 +2,7 @@ use super::tx::Transaction;
 use crate::ctx::Context;
 use crate::dbs::Attach;
 use crate::dbs::Executor;
+use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
@@ -11,16 +12,21 @@ use crate::kvs::LOG;
 use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
+use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
 use tracing::instrument;
+use uuid::Uuid;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 pub struct Datastore {
+	pub(super) id: Arc<Uuid>,
 	pub(super) inner: Inner,
+	pub(super) send: Sender<Notification>,
+	pub(super) recv: Receiver<Notification>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -96,18 +102,23 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
+		// Create a live query notification channel
+		let (send, recv) = channel::bounded(100);
+		// Initiate the desired datastore
 		match path {
 			"memory" => {
 				#[cfg(feature = "kv-mem")]
 				{
 					info!(target: LOG, "Starting kvs store in {}", path);
 					let v = super::mem::Datastore::new().await.map(|v| Datastore {
+						id: Arc::new(Uuid::new_v4()),
 						inner: Inner::Mem(v),
+						send,
+						recv,
 					});
 					info!(target: LOG, "Started kvs store in {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-mem"))]
 				return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -119,12 +130,14 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
+						id: Arc::new(Uuid::new_v4()),
 						inner: Inner::RocksDB(v),
+						send,
+						recv,
 					});
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-rocksdb"))]
 				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -136,12 +149,14 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
+						id: Arc::new(Uuid::new_v4()),
 						inner: Inner::RocksDB(v),
+						send,
+						recv,
 					});
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-rocksdb"))]
 				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -153,12 +168,14 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
 					let v = super::indxdb::Datastore::new(s).await.map(|v| Datastore {
+						id: Arc::new(Uuid::new_v4()),
 						inner: Inner::IndxDB(v),
+						send,
+						recv,
 					});
 					info!(target: LOG, "Started kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-indxdb"))]
 				return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -170,12 +187,14 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
 					let v = super::tikv::Datastore::new(s).await.map(|v| Datastore {
+						id: Arc::new(Uuid::new_v4()),
 						inner: Inner::TiKV(v),
+						send,
+						recv,
 					});
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-tikv"))]
 				return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -187,12 +206,14 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
 					let v = super::fdb::Datastore::new(s).await.map(|v| Datastore {
+						id: Arc::new(Uuid::new_v4()),
 						inner: Inner::FDB(v),
+						send,
+						recv,
 					});
 					info!(target: LOG, "Connected to kvs store at {}", path);
 					v
 				}
-
 				#[cfg(not(feature = "kv-fdb"))]
 				return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
@@ -282,7 +303,7 @@ impl Datastore {
 		strict: bool,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
-		let mut opt = Options::default();
+		let mut opt = Options::new(self.id.clone(), self.send.clone());
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -293,6 +314,8 @@ impl Datastore {
 		let ctx = vars.attach(ctx)?;
 		// Parse the SQL query text
 		let ast = sql::parse(txt)?;
+		// Setup the notification channel
+		opt.sender = self.send.clone();
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Setup the live options
@@ -332,7 +355,7 @@ impl Datastore {
 		strict: bool,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
-		let mut opt = Options::default();
+		let mut opt = Options::new(self.id.clone(), self.send.clone());
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -341,6 +364,8 @@ impl Datastore {
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
+		// Setup the notification channel
+		opt.sender = self.send.clone();
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Setup the live options
@@ -380,18 +405,20 @@ impl Datastore {
 		vars: Variables,
 		strict: bool,
 	) -> Result<Value, Error> {
+		// Create a new query options
+		let mut opt = Options::new(self.id.clone(), self.send.clone());
 		// Start a new transaction
 		let txn = self.transaction(val.writeable(), false).await?;
 		//
 		let txn = Arc::new(Mutex::new(txn));
-		// Create a new query options
-		let mut opt = Options::default();
 		// Create a default context
 		let ctx = Context::default();
 		// Start an execution context
 		let ctx = sess.context(ctx);
 		// Store the query variables
 		let ctx = vars.attach(ctx)?;
+		// Setup the notification channel
+		opt.sender = self.send.clone();
 		// Setup the auth options
 		opt.auth = sess.au.clone();
 		// Set current NS and DB
@@ -408,6 +435,28 @@ impl Datastore {
 		};
 		// Return result
 		Ok(res)
+	}
+
+	/// Subscribe to live notifications
+	///
+	/// ```rust,no_run
+	/// use surrealdb::kvs::Datastore;
+	/// use surrealdb::err::Error;
+	/// use surrealdb::dbs::Session;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(), Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::for_kv();
+	///     while let Ok(v) = ds.notifications().recv().await {
+	///         println!("Received notification: {v}");
+	///     }
+	///     Ok(())
+	/// }
+	/// ```
+	#[instrument(skip_all)]
+	pub fn notifications(&self) -> Receiver<Notification> {
+		self.recv.clone()
 	}
 
 	/// Performs a full database export as SQL

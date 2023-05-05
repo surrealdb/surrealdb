@@ -2,6 +2,7 @@ mod auth;
 mod executor;
 mod iterate;
 mod iterator;
+mod notification;
 mod options;
 mod response;
 mod session;
@@ -16,6 +17,7 @@ pub use self::session::*;
 
 pub(crate) use self::executor::*;
 pub(crate) use self::iterator::*;
+pub(crate) use self::notification::*;
 pub(crate) use self::statement::*;
 pub(crate) use self::transaction::*;
 pub(crate) use self::variables::*;

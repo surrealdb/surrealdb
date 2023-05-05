@@ -3,6 +3,7 @@ use crate::ctx::Context;
 use crate::dbs::response::Response;
 use crate::dbs::Auth;
 use crate::dbs::Level;
+use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::dbs::LOG;
@@ -13,6 +14,7 @@ use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::value::Value;
+use channel::{Receiver, Sender};
 use futures::lock::Mutex;
 use std::sync::Arc;
 use tracing::instrument;
@@ -107,6 +109,18 @@ impl<'a> Executor<'a> {
 		}
 	}
 
+	async fn clear(&self, _: Sender<Notification>, rcv: Receiver<Notification>) {
+		while rcv.try_recv().is_ok() {
+			// Ignore notification
+		}
+	}
+
+	async fn flush(&self, chn: Sender<Notification>, rcv: Receiver<Notification>) {
+		while let Ok(v) = rcv.try_recv() {
+			let _ = chn.send(v).await;
+		}
+	}
+
 	async fn set_ns(&self, ctx: &mut Context<'_>, opt: &mut Options, ns: &str) {
 		let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 		session.put(NS.as_ref(), ns.to_owned().into());
@@ -125,9 +139,15 @@ impl<'a> Executor<'a> {
 	pub async fn execute(
 		&mut self,
 		mut ctx: Context<'_>,
-		mut opt: Options,
+		opt: Options,
 		qry: Query,
 	) -> Result<Vec<Response>, Error> {
+		// Take the notification channel
+		let chn = opt.sender.clone();
+		// Create a notification channel
+		let (send, recv) = channel::unbounded();
+		// Swap the notification channel
+		let mut opt = opt.sender(send);
 		// Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
@@ -174,6 +194,7 @@ impl<'a> Executor<'a> {
 				// Cancel a running transaction
 				Statement::Cancel(_) => {
 					self.cancel(true).await;
+					self.clear(chn.clone(), recv.clone()).await;
 					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
 					out.append(&mut buf);
 					self.txn = None;
@@ -182,6 +203,7 @@ impl<'a> Executor<'a> {
 				// Commit a running transaction
 				Statement::Commit(_) => {
 					self.commit(true).await;
+					self.flush(chn.clone(), recv.clone()).await;
 					buf = buf.into_iter().map(|v| self.buf_commit(v)).collect();
 					out.append(&mut buf);
 					self.txn = None;
@@ -248,8 +270,14 @@ impl<'a> Executor<'a> {
 									ctx.add_value(stm.name, val);
 									// Finalise transaction
 									match writeable {
-										true => self.commit(loc).await,
-										false => self.cancel(loc).await,
+										true => {
+											self.commit(loc).await;
+											self.flush(chn.clone(), recv.clone()).await;
+										}
+										false => {
+											self.cancel(loc).await;
+											self.clear(chn.clone(), recv.clone()).await;
+										}
 									}
 									// Return nothing
 									Ok(Value::None)
@@ -299,8 +327,10 @@ impl<'a> Executor<'a> {
 								// Finalise transaction
 								if res.is_ok() && stm.writeable() {
 									self.commit(loc).await;
+									self.flush(chn.clone(), recv.clone()).await;
 								} else {
 									self.cancel(loc).await;
+									self.clear(chn.clone(), recv.clone()).await;
 								}
 								// Return the result
 								res

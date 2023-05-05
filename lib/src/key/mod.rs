@@ -1,5 +1,11 @@
 ///
 /// KV              /
+///
+/// ND              /!nd{nd}
+/// LQ              /!nd{nd}*{ns}*{db}!lq{lq}
+///
+/// HB              /!hb{ts}/{nd}
+///
 /// NS              /!ns{ns}
 ///
 /// Namespace       /*{ns}
@@ -13,7 +19,6 @@
 /// PA              /*{ns}*{db}!pa{pa}
 /// SC              /*{ns}*{db}!sc{sc}
 /// TB              /*{ns}*{db}!tb{tb}
-/// LQ              /*{ns}*{db}!lq{lq}
 ///
 /// Scope           /*{ns}*{db}±{sc}
 /// ST              /*{ns}*{db}±{sc}!st{tk}

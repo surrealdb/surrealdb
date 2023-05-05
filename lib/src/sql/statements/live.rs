@@ -10,7 +10,6 @@ use crate::sql::fetch::{fetch, Fetchs};
 use crate::sql::field::{fields, Fields};
 use crate::sql::param::param;
 use crate::sql::table::table;
-use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
@@ -20,10 +19,12 @@ use nom::combinator::opt;
 use nom::sequence::preceded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 pub struct LiveStatement {
 	pub id: Uuid,
+	pub node: Uuid,
 	pub expr: Fields,
 	pub what: Value,
 	pub cond: Option<Cond>,
@@ -51,12 +52,16 @@ impl LiveStatement {
 		// Process the live query table
 		match self.what.compute(ctx, opt, txn, doc).await? {
 			Value::Table(tb) => {
-				// Insert the live query
-				let key = crate::key::lq::new(opt.ns(), opt.db(), &self.id);
+				// Clone the current statement
+				let mut stm = self.clone();
+				// Store the current Node ID
+				stm.node = *opt.id;
+				// Insert the node live query
+				let key = crate::key::lq::new(opt.id(), opt.ns(), opt.db(), &self.id);
 				run.putc(key, tb.as_str(), None).await?;
 				// Insert the table live query
 				let key = crate::key::lv::new(opt.ns(), opt.db(), &tb, &self.id);
-				run.putc(key, self.clone(), None).await?;
+				run.putc(key, stm, None).await?;
 			}
 			v => {
 				return Err(Error::LiveStatement {
@@ -65,7 +70,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(self.id.clone().into())
+		Ok(self.id.into())
 	}
 }
 
@@ -95,7 +100,8 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 	Ok((
 		i,
 		LiveStatement {
-			id: Uuid::new(),
+			id: Uuid::new_v4(),
+			node: Uuid::default(),
 			expr,
 			what,
 			cond,

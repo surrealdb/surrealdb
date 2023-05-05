@@ -118,6 +118,12 @@ impl Rpc {
 				}
 			}
 		});
+		// Send notifications to the client
+		tokio::task::spawn(async move {
+			while let Ok(v) = DB.get().unwrap().notifications().recv().await {
+				trace!(target: LOG, "Received notification: {:?}", v);
+			}
+		});
 		// Get messages from the client
 		while let Some(msg) = wrx.next().await {
 			match msg {
