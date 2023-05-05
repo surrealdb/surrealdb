@@ -1,8 +1,8 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
-use crate::dbs::liveresponse::EventType;
 use crate::dbs::liveresponse::LiveQueryID;
-use crate::dbs::liveresponse::LiveQueryResponse;
+use crate::dbs::liveresponse::Noti;
+use crate::dbs::liveresponse::{Action, Notification};
 use crate::dbs::response::Response;
 use crate::dbs::Auth;
 use crate::dbs::Level;
@@ -20,6 +20,7 @@ use crate::sql::Statement::Live;
 use channel::Receiver;
 use flume::Sender;
 use futures::lock::Mutex;
+use futures::SinkExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -32,19 +33,16 @@ pub(crate) struct Executor<'a> {
 	kvs: &'a Datastore,
 	txn: Option<Transaction>,
 	// The channel to send live query responses to. These will be updates related to listened_lq queries.
-	lq_sender: Arc<Sender<Vec<LiveQueryResponse>>>,
-	// The list of live query IDs that are being listened to by this node.
-	listened_lq: Vec<LiveQueryID>,
+	lq_sender: Arc<Sender<Vec<Noti>>>,
 }
 
 impl<'a> Executor<'a> {
-	pub fn new(kvs: &'a Datastore, lq_sender: Arc<Sender<Vec<LiveQueryResponse>>>) -> Executor<'a> {
+	pub fn new(kvs: &'a Datastore, lq_sender: Arc<Sender<Vec<Noti>>>) -> Executor<'a> {
 		Executor {
 			kvs,
 			txn: None,
 			err: false,
 			lq_sender,
-			listened_lq: Vec::new(),
 		}
 	}
 
@@ -143,20 +141,16 @@ impl<'a> Executor<'a> {
 		mut ctx: Context<'_>,
 		mut opt: Options,
 		qry: Query,
-	) -> Result<(Vec<Response>, Option<Receiver<LiveQueryResponse>>), Error> {
-		trace!(target: LOG, "Have access to these LQs: {:?}", self.listened_lq);
-		self.kvs.live_query_sender.send(vec![LiveQueryResponse {
-			lqid: Default::default(),
-			result: Default::default(),
-			node_id: "".to_string(),
-			event_type: EventType::CREATE,
-		}]);
-		// Initialise buffer of responses
+	) -> Result<(Vec<Response>, Option<Receiver<Notification>>), Error> {
+		let datastore_sender = opt.sender?;
+		let (buf_sender, buf_receiver) = flume::unbounded();
+		opt = opt.sender(buf_sender); // opt is cloned, so not modifying
+							  // Initialise buffer of responses
 		let mut buf: Vec<Response> = vec![];
 		// Initialise array of responses
 		let mut out: Vec<Response> = vec![];
 		// Initialise live query callback channel
-		let mut receiver: Option<Receiver<LiveQueryResponse>> = Option::None;
+		let mut receiver: Option<Receiver<Noti>> = Option::None;
 		// Process all statements in query
 		for stm in qry.into_iter() {
 			// Log the statement
@@ -174,18 +168,18 @@ impl<'a> Executor<'a> {
 				// Specify runtime options
 				Statement::Option(mut stm) => {
 					// Selected DB?
-					opt.needs(Level::Db)?;
+					opt_out.needs(Level::Db)?;
 					// Allowed to run?
-					opt.check(Level::Db)?;
+					opt_out.check(Level::Db)?;
 					// Convert to uppercase
 					stm.name.0.make_ascii_uppercase();
 					// Process the option
-					opt = match stm.name.0.as_str() {
-						"FIELDS" => opt.fields(stm.what),
-						"EVENTS" => opt.events(stm.what),
-						"TABLES" => opt.tables(stm.what),
-						"IMPORT" => opt.import(stm.what),
-						"FORCE" => opt.force(stm.what),
+					opt_out = match stm.name.0.as_str() {
+						"FIELDS" => opt_out.fields(stm.what),
+						"EVENTS" => opt_out.events(stm.what),
+						"TABLES" => opt_out.tables(stm.what),
+						"IMPORT" => opt_out.import(stm.what),
+						"FORCE" => opt_out.force(stm.what),
 						_ => break,
 					};
 					// Continue
@@ -323,22 +317,18 @@ impl<'a> Executor<'a> {
 								};
 								// Finalise transaction
 								match &res {
-									Ok(_) => match stm.writeable() {
-										true => {
-											match stm {
-												Live(live_statement) => {
-													// We now create an async channel to send updates to
-													// when operations are performed that affect the LQ
-													let lqid: LiveQueryID =
-														live_statement.id.0.clone();
-													self.listened_lq.push(lqid);
+									Ok(_) => {
+										match stm.writeable() {
+											true => {
+												trace!("Flushing live query updates to datastore channel");
+												while let rec = buf_receiver.recv().await.is_ok() {
+													datastore_sender.send(rec).await.unwrap();
 												}
-												_ => {}
+												self.commit(loc).await
 											}
-											self.commit(loc).await
+											false => self.cancel(loc).await,
 										}
-										false => self.cancel(loc).await,
-									},
+									}
 									Err(_) => self.cancel(loc).await,
 								};
 								// Return the result

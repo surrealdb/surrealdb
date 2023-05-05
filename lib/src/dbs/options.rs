@@ -1,7 +1,9 @@
 use crate::cnf;
+use crate::dbs::liveresponse::Notification;
 use crate::dbs::Auth;
 use crate::dbs::Level;
 use crate::err::Error;
+use flume::Sender;
 use std::sync::Arc;
 
 /// An Options is passed around when processing a set of query
@@ -19,6 +21,7 @@ pub struct Options {
 	pub db: Option<Arc<str>>,
 	/// Connection authentication data
 	pub auth: Arc<Auth>,
+	pub sender: Option<Sender<Notification>>,
 	/// Approximately how large is the current call stack?
 	dive: u8,
 	/// Whether live queries are allowed?
@@ -64,6 +67,7 @@ impl Options {
 			indexes: true,
 			futures: false,
 			auth: Arc::new(auth),
+			sender: None,
 		}
 	}
 
@@ -89,10 +93,22 @@ impl Options {
 				ns: self.ns.clone(),
 				db: self.db.clone(),
 				dive,
+				sender: self.sender.clone(),
 				..*self
 			})
 		} else {
 			Err(Error::ComputationDepthExceeded)
+		}
+	}
+	
+	pub fn sender(&self, v: Sender<Notification>) -> Options {
+		Options {
+			auth: self.auth.clone(),
+			ns: self.ns.clone(),
+			db: self.db.clone(),
+			force: self.force.clone(),
+			sender: Some(v),
+			..*self
 		}
 	}
 
@@ -103,6 +119,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: v,
+			sender: self.sender.clone(),
 			..*self
 		}
 	}
@@ -114,6 +131,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			perms: v,
+			sender: self.sender.clone(),
 			..*self
 		}
 	}
@@ -125,6 +143,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			fields: v,
+			sender: self.sender.clone(),
 			..*self
 		}
 	}
@@ -136,6 +155,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			events: v,
+			sender: self.sender.clone(),
 			..*self
 		}
 	}
@@ -147,6 +167,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			tables: v,
+			sender: self.sender.clone(),
 			..*self
 		}
 	}
@@ -158,6 +179,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			indexes: v,
+			sender: self.sender.clone(),
 			..*self
 		}
 	}
@@ -171,6 +193,7 @@ impl Options {
 			fields: !v,
 			events: !v,
 			tables: !v,
+			sender: self.sender.clone(),
 			..*self
 		}
 	}
@@ -182,6 +205,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			strict: v,
+			sender: self.sender.clone(),
 			..*self
 		}
 	}
@@ -193,6 +217,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			futures: v,
+			sender: self.sender.clone(),
 			..*self
 		}
 	}

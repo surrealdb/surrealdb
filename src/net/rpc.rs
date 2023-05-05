@@ -126,12 +126,13 @@ impl Rpc {
 			}
 		});
 		// Handle inbound diff patch from live queries
-		let mut diff_stream = DB.get().unwrap().diff_patch_stream.clone();
+		let mut diff_stream = DB.get().unwrap().recv.clone();
 		tokio::task::spawn(async move {
 			while let response_vec = diff_stream.clone().recv() {
 				// TODO this is synchronous and must change
 				println!("Received diff update response vec {:?}", response_vec);
 				// TODO filter for cluster or this connected WS instance
+				// We need to map live query ID to websocket ID as datastore is tracking total live queries
 			}
 		});
 		// Get messages from the client
