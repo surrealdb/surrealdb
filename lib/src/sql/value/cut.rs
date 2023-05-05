@@ -36,7 +36,7 @@ impl Value {
 					},
 					Part::First => match path.len() {
 						1 => {
-							if v.len().gt(&0) {
+							if !v.is_empty() {
 								let i = 0;
 								v.remove(i);
 							}
@@ -49,7 +49,7 @@ impl Value {
 					},
 					Part::Last => match path.len() {
 						1 => {
-							if v.len().gt(&0) {
+							if !v.is_empty() {
 								let i = v.len() - 1;
 								v.remove(i);
 							}
