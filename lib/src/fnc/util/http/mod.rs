@@ -26,8 +26,9 @@ pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Re
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {
+		#[cfg(not(target_arch = "wasm32"))]
 		Some(d) => req.timeout(d).send().await?,
-		None => req.send().await?,
+		_ => req.send().await?,
 	};
 	// Check the response status
 	match res.status() {
@@ -51,8 +52,9 @@ pub async fn get(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Res
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {
+		#[cfg(not(target_arch = "wasm32"))]
 		Some(d) => req.timeout(d).send().await?,
-		None => req.send().await?,
+		_ => req.send().await?,
 	};
 	// Check the response status
 	match res.status() {
@@ -100,8 +102,9 @@ pub async fn put(
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {
+		#[cfg(not(target_arch = "wasm32"))]
 		Some(d) => req.timeout(d).send().await?,
-		None => req.send().await?,
+		_ => req.send().await?,
 	};
 	// Check the response status
 	match res.status() {
@@ -149,8 +152,9 @@ pub async fn post(
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {
+		#[cfg(not(target_arch = "wasm32"))]
 		Some(d) => req.timeout(d).send().await?,
-		None => req.send().await?,
+		_ => req.send().await?,
 	};
 	// Check the response status
 	match res.status() {
@@ -198,8 +202,9 @@ pub async fn patch(
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {
+		#[cfg(not(target_arch = "wasm32"))]
 		Some(d) => req.timeout(d).send().await?,
-		None => req.send().await?,
+		_ => req.send().await?,
 	};
 	// Check the response status
 	match res.status() {
@@ -242,8 +247,9 @@ pub async fn delete(
 	}
 	// Send the request and wait
 	let res = match ctx.timeout() {
+		#[cfg(not(target_arch = "wasm32"))]
 		Some(d) => req.timeout(d).send().await?,
-		None => req.send().await?,
+		_ => req.send().await?,
 	};
 	// Check the response status
 	match res.status() {
