@@ -81,7 +81,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -103,7 +103,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -125,7 +125,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -147,7 +147,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -169,7 +169,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -191,7 +191,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
