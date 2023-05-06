@@ -94,7 +94,7 @@ impl Value {
 								.compute(ctx, opt, txn, None)
 								.await?
 								.all()
-								.get(ctx, opt, txn, path.next())
+								.get(ctx, opt, txn, None, path.next())
 								.await?
 								.flatten()
 								.ok()?;
