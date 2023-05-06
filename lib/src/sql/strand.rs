@@ -330,8 +330,15 @@ mod tests {
 	}
 
 	#[test]
+	fn strand_nul_byte() {
+		assert!(strand("'a\0b'").is_err());
+		assert!(strand("'a\\u0000b'").is_err());
+		assert!(strand("'a\\u{0}b'").is_err());
+	}
+
+	#[test]
 	fn strand_fuzz_escape() {
-		for n in (0..=char::MAX as u32).step_by(101) {
+		for n in (1..=char::MAX as u32).step_by(101) {
 			if let Some(c) = char::from_u32(n) {
 				let expected = format!("a{c}b");
 
