@@ -17,14 +17,14 @@ impl<'a> Document<'a> {
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
 		// Set default field values
-		self.current.to_mut().def(ctx, opt, txn, rid).await?;
+		self.current.to_mut().def(rid);
 		// This is an INSERT statement
 		if let Workable::Insert(v) = &self.extras {
 			let v = v.compute(ctx, opt, txn, Some(&self.current)).await?;
-			self.current.to_mut().merge(ctx, opt, txn, v).await?;
+			self.current.to_mut().merge(v)?;
 		}
 		// Set default field values
-		self.current.to_mut().def(ctx, opt, txn, rid).await?;
+		self.current.to_mut().def(rid);
 		// Carry on
 		Ok(())
 	}

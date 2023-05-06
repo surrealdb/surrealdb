@@ -7,6 +7,7 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
+	/// Asynchronous method for incrementing a field in a `Value`
 	pub(crate) async fn increment(
 		&mut self,
 		ctx: &Context<'_>,
