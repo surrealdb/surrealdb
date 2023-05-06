@@ -62,10 +62,10 @@ impl<'a> Document<'a> {
 				if let Some(expr) = &fd.value {
 					// Configure the context
 					let mut ctx = Context::new(ctx);
-					ctx.add_value("input".into(), &inp);
-					ctx.add_value("value".into(), &val);
-					ctx.add_value("after".into(), &val);
-					ctx.add_value("before".into(), &old);
+					ctx.add_value("input", &inp);
+					ctx.add_value("value", &val);
+					ctx.add_value("after", &val);
+					ctx.add_value("before", &old);
 					// Process the VALUE clause
 					val = expr.compute(&ctx, opt, txn, Some(&self.current)).await?;
 				}
@@ -90,10 +90,10 @@ impl<'a> Document<'a> {
 				if let Some(expr) = &fd.assert {
 					// Configure the context
 					let mut ctx = Context::new(ctx);
-					ctx.add_value("input".into(), &inp);
-					ctx.add_value("value".into(), &val);
-					ctx.add_value("after".into(), &val);
-					ctx.add_value("before".into(), &old);
+					ctx.add_value("input", &inp);
+					ctx.add_value("value", &val);
+					ctx.add_value("after", &val);
+					ctx.add_value("before", &old);
 					// Process the ASSERT clause
 					if !expr.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 						return Err(Error::FieldValue {
@@ -121,10 +121,10 @@ impl<'a> Document<'a> {
 							let opt = &opt.perms(false);
 							// Configure the context
 							let mut ctx = Context::new(ctx);
-							ctx.add_value("input".into(), &inp);
-							ctx.add_value("value".into(), &val);
-							ctx.add_value("after".into(), &val);
-							ctx.add_value("before".into(), &old);
+							ctx.add_value("input", &inp);
+							ctx.add_value("value", &val);
+							ctx.add_value("after", &val);
+							ctx.add_value("before", &old);
 							// Process the PERMISSION clause
 							if !e.compute(&ctx, opt, txn, Some(&self.current)).await?.is_truthy() {
 								val = old
