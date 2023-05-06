@@ -16,7 +16,13 @@ impl<'js> FromJs<'js> for Value {
 			val if val.type_name() == "undefined" => Ok(Value::None),
 			val if val.is_bool() => Ok(val.as_bool().unwrap().into()),
 			val if val.is_string() => match val.into_string().unwrap().to_string() {
-				Ok(v) => Ok(Value::from(v)),
+				Ok(v) => {
+					if v.contains('\0') {
+						Err(Error::InvalidString(std::ffi::CString::new(v).unwrap_err()))
+					} else {
+						Ok(Value::from(v))
+					}
+				}
 				Err(e) => Err(e),
 			},
 			val if val.is_int() => Ok(val.as_int().unwrap().into()),
@@ -95,6 +101,9 @@ impl<'js> FromJs<'js> for Value {
 				for i in v.props() {
 					let (k, v) = i?;
 					let k = String::from_atom(k)?;
+					if k.contains('\0') {
+						return Err(Error::InvalidString(std::ffi::CString::new(k).unwrap_err()));
+					}
 					let v = Value::from_js(ctx, v)?;
 					x.insert(k, v);
 				}

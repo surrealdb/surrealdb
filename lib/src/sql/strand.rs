@@ -8,6 +8,7 @@ use nom::combinator::value;
 use nom::sequence::preceded;
 use nom::Err::Failure;
 use serde::{Deserialize, Serialize};
+use std::borrow::Borrow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::ops::{self, RangeInclusive};
@@ -16,26 +17,29 @@ use std::str;
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Strand";
 
 const SINGLE: char = '\'';
-const SINGLE_ESC: &str = r#"\'"#;
+const SINGLE_ESC_NUL: &str = "'\\\0";
 
 const DOUBLE: char = '"';
-const DOUBLE_ESC: &str = r#"\""#;
+const DOUBLE_ESC_NUL: &str = "\"\\\0";
 
 const LEADING_SURROGATES: RangeInclusive<u16> = 0xD800..=0xDBFF;
 const TRAILING_SURROGATES: RangeInclusive<u16> = 0xDC00..=0xDFFF;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+/// A string that doesn't contain NUL bytes.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Strand")]
-pub struct Strand(pub String);
+pub struct Strand(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Strand {
 	fn from(s: String) -> Self {
+		debug_assert!(!s.contains('\0'));
 		Strand(s)
 	}
 }
 
 impl From<&str> for Strand {
 	fn from(s: &str) -> Self {
+		debug_assert!(!s.contains('\0'));
 		Self::from(String::from(s))
 	}
 }
@@ -44,6 +48,12 @@ impl Deref for Strand {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {
 		&self.0
+	}
+}
+
+impl Borrow<str> for Strand {
+	fn borrow(&self) -> &str {
+		self.as_str()
 	}
 }
 
@@ -76,8 +86,9 @@ impl Display for Strand {
 
 impl ops::Add for Strand {
 	type Output = Self;
-	fn add(self, other: Self) -> Self {
-		Strand::from(self.0 + &other.0)
+	fn add(mut self, other: Self) -> Self {
+		self.0.push_str(other.as_str());
+		self
 	}
 }
 
@@ -108,7 +119,7 @@ fn strand_blank(i: &str) -> IResult<&str, String> {
 fn strand_single(i: &str) -> IResult<&str, String> {
 	let (i, _) = char(SINGLE)(i)?;
 	let (i, v) = escaped_transform(
-		is_not(SINGLE_ESC),
+		is_not(SINGLE_ESC_NUL),
 		'\\',
 		alt((
 			char_unicode,
@@ -129,7 +140,7 @@ fn strand_single(i: &str) -> IResult<&str, String> {
 fn strand_double(i: &str) -> IResult<&str, String> {
 	let (i, _) = char(DOUBLE)(i)?;
 	let (i, v) = escaped_transform(
-		is_not(DOUBLE_ESC),
+		is_not(DOUBLE_ESC_NUL),
 		'\\',
 		alt((
 			char_unicode,
@@ -182,7 +193,7 @@ fn char_unicode_bare(i: &str) -> IResult<&str, char> {
 		Ok((i, v))
 	} else {
 		// We can convert this to char or error in the case of invalid Unicode character
-		let v = char::from_u32(v as u32).ok_or(Failure(Parser(i)))?;
+		let v = char::from_u32(v as u32).filter(|c| *c != 0 as char).ok_or(Failure(Parser(i)))?;
 		// Return the char
 		Ok((i, v))
 	}
@@ -197,11 +208,67 @@ fn char_unicode_bracketed(i: &str) -> IResult<&str, char> {
 	// We can convert this to u32 as the max is 0xffffff
 	let v = u32::from_str_radix(v, 16).unwrap();
 	// We can convert this to char or error in the case of invalid Unicode character
-	let v = char::from_u32(v).ok_or(Failure(Parser(i)))?;
+	let v = char::from_u32(v).filter(|c| *c != 0 as char).ok_or(Failure(Parser(i)))?;
 	// Read the } character
 	let (i, _) = char('}')(i)?;
 	// Return the char
 	Ok((i, v))
+}
+
+// serde(with = no_nul_bytes) will (de)serialize with no NUL bytes.
+pub(crate) mod no_nul_bytes {
+	use serde::{
+		de::{self, Visitor},
+		Deserializer, Serializer,
+	};
+	use std::fmt;
+
+	pub(crate) fn serialize<S>(s: &String, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: Serializer,
+	{
+		debug_assert!(!s.contains('\0'));
+		serializer.serialize_str(s)
+	}
+
+	pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<String, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		struct NoNulBytesVisitor;
+
+		impl<'de> Visitor<'de> for NoNulBytesVisitor {
+			type Value = String;
+
+			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+				formatter.write_str("a string without any NUL bytes")
+			}
+
+			fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+			where
+				E: de::Error,
+			{
+				if value.contains('\0') {
+					Err(de::Error::custom("contained NUL byte"))
+				} else {
+					Ok(value.to_owned())
+				}
+			}
+
+			fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+			where
+				E: de::Error,
+			{
+				if value.contains('\0') {
+					Err(de::Error::custom("contained NUL byte"))
+				} else {
+					Ok(value)
+				}
+			}
+		}
+
+		deserializer.deserialize_string(NoNulBytesVisitor)
+	}
 }
 
 #[cfg(test)]

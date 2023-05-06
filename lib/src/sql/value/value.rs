@@ -402,13 +402,13 @@ impl From<BigDecimal> for Value {
 
 impl From<String> for Value {
 	fn from(v: String) -> Self {
-		Value::Strand(Strand::from(v))
+		Self::Strand(Strand::from(v))
 	}
 }
 
 impl From<&str> for Value {
 	fn from(v: &str) -> Self {
-		Value::Strand(Strand::from(v))
+		Self::Strand(Strand::from(v))
 	}
 }
 
