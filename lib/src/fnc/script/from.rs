@@ -3,11 +3,20 @@ use crate::sql::array::Array;
 use crate::sql::datetime::Datetime;
 use crate::sql::object::Object;
 use crate::sql::value::Value;
+use crate::sql::Id;
 use chrono::{TimeZone, Utc};
 use js::Ctx;
 use js::Error;
 use js::FromAtom;
 use js::FromJs;
+
+fn check_nul(s: &str) -> Result<(), Error> {
+	if s.contains('\0') {
+		Err(Error::InvalidString(std::ffi::CString::new(v).unwrap_err()))
+	} else {
+		Ok(())
+	}
+}
 
 impl<'js> FromJs<'js> for Value {
 	fn from_js(ctx: Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
@@ -17,11 +26,8 @@ impl<'js> FromJs<'js> for Value {
 			val if val.is_bool() => Ok(val.as_bool().unwrap().into()),
 			val if val.is_string() => match val.into_string().unwrap().to_string() {
 				Ok(v) => {
-					if v.contains('\0') {
-						Err(Error::InvalidString(std::ffi::CString::new(v).unwrap_err()))
-					} else {
-						Ok(Value::from(v))
-					}
+					check_nul(&v)?;
+					Ok(Value::from(v))
 				}
 				Err(e) => Err(e),
 			},
@@ -54,6 +60,10 @@ impl<'js> FromJs<'js> for Value {
 				if (v).instance_of::<classes::record::record::Record>() {
 					let v = v.into_instance::<classes::record::record::Record>().unwrap();
 					let v: &classes::record::record::Record = v.as_ref();
+					check_nul(&v.value.tb)?;
+					if let Id::String(s) = &v.value.id {
+						check_nul(&s)?;
+					}
 					return Ok(v.value.clone().into());
 				}
 				// Check to see if this object is a duration
@@ -101,9 +111,7 @@ impl<'js> FromJs<'js> for Value {
 				for i in v.props() {
 					let (k, v) = i?;
 					let k = String::from_atom(k)?;
-					if k.contains('\0') {
-						return Err(Error::InvalidString(std::ffi::CString::new(k).unwrap_err()));
-					}
+					check_nul(&k)?;
 					let v = Value::from_js(ctx, v)?;
 					x.insert(k, v);
 				}
