@@ -8,7 +8,6 @@ use nom::combinator::value;
 use nom::sequence::preceded;
 use nom::Err::Failure;
 use serde::{Deserialize, Serialize};
-use std::borrow::Borrow;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::ops::{self, RangeInclusive};
@@ -48,12 +47,6 @@ impl Deref for Strand {
 	type Target = String;
 	fn deref(&self) -> &Self::Target {
 		&self.0
-	}
-}
-
-impl Borrow<str> for Strand {
-	fn borrow(&self) -> &str {
-		self.as_str()
 	}
 }
 

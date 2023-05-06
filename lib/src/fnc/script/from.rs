@@ -12,7 +12,7 @@ use js::FromJs;
 
 fn check_nul(s: &str) -> Result<(), Error> {
 	if s.contains('\0') {
-		Err(Error::InvalidString(std::ffi::CString::new(v).unwrap_err()))
+		Err(Error::InvalidString(std::ffi::CString::new(s).unwrap_err()))
 	} else {
 		Ok(())
 	}
