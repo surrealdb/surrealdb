@@ -9,6 +9,18 @@ use std::ops::Deref;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Bytes(pub(crate) Vec<u8>);
 
+impl Bytes {
+	pub fn into_inner(self) -> Vec<u8> {
+		self.0
+	}
+}
+
+impl From<Vec<u8>> for Bytes {
+	fn from(v: Vec<u8>) -> Self {
+		Self(v)
+	}
+}
+
 impl Deref for Bytes {
 	type Target = Vec<u8>;
 
