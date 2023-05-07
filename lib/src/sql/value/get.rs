@@ -15,6 +15,7 @@ use crate::sql::value::{Value, Values};
 use async_recursion::async_recursion;
 
 impl Value {
+	/// Asynchronous method for getting a local or remote field from a `Value`
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn get(
@@ -22,6 +23,7 @@ impl Value {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
+		doc: Option<&'async_recursion Value>,
 		path: &[Part],
 	) -> Result<Self, Error> {
 		match path.first() {
@@ -38,9 +40,9 @@ impl Value {
 							// Ensure the future is processed
 							let fut = &opt.futures(true);
 							// Get the future return value
-							let val = v.compute(ctx, fut, txn, None).await?;
+							let val = v.compute(ctx, fut, txn, doc).await?;
 							// Fetch the embedded field
-							val.get(ctx, opt, txn, path).await
+							val.get(ctx, opt, txn, doc, path).await
 						}
 					}
 				}
@@ -51,42 +53,42 @@ impl Value {
 						Some(Value::Thing(Thing {
 							id: Id::Object(v),
 							..
-						})) => Value::Object(v.clone()).get(ctx, opt, txn, path.next()).await,
+						})) => Value::Object(v.clone()).get(ctx, opt, txn, doc, path.next()).await,
 						Some(Value::Thing(Thing {
 							id: Id::Array(v),
 							..
-						})) => Value::Array(v.clone()).get(ctx, opt, txn, path.next()).await,
-						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						})) => Value::Array(v.clone()).get(ctx, opt, txn, doc, path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Graph(_) => match v.rid() {
-						Some(v) => Value::Thing(v).get(ctx, opt, txn, path).await,
+						Some(v) => Value::Thing(v).get(ctx, opt, txn, doc, path).await,
 						None => Ok(Value::None),
 					},
 					Part::Field(f) => match v.get(f as &str) {
-						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
 						None => Ok(Value::None),
 					},
-					Part::All => self.get(ctx, opt, txn, path.next()).await,
+					Part::All => self.get(ctx, opt, txn, doc, path.next()).await,
 					_ => Ok(Value::None),
 				},
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => {
 						let path = path.next();
-						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
+						let futs = v.iter().map(|v| v.get(ctx, opt, txn, doc, path));
 						try_join_all_buffered(futs).await.map(Into::into)
 					}
 					Part::First => match v.first() {
-						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Last => match v.last() {
-						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Index(i) => match v.get(i.to_usize()) {
-						Some(v) => v.get(ctx, opt, txn, path.next()).await,
+						Some(v) => v.get(ctx, opt, txn, doc, path.next()).await,
 						None => Ok(Value::None),
 					},
 					Part::Where(w) => {
@@ -94,13 +96,13 @@ impl Value {
 						let mut a = Vec::new();
 						for v in v.iter() {
 							if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
-								a.push(v.get(ctx, opt, txn, path).await?)
+								a.push(v.get(ctx, opt, txn, doc, path).await?)
 							}
 						}
 						Ok(a.into())
 					}
 					_ => {
-						let futs = v.iter().map(|v| v.get(ctx, opt, txn, path));
+						let futs = v.iter().map(|v| v.get(ctx, opt, txn, doc, path));
 						try_join_all_buffered(futs).await.map(Into::into)
 					}
 				},
@@ -122,7 +124,7 @@ impl Value {
 							stm.compute(ctx, opt, txn, None)
 								.await?
 								.first()
-								.get(ctx, opt, txn, path)
+								.get(ctx, opt, txn, None, path)
 								.await
 						}
 					}
@@ -154,7 +156,7 @@ impl Value {
 										.compute(ctx, opt, txn, None)
 										.await?
 										.all()
-										.get(ctx, opt, txn, ID.as_ref())
+										.get(ctx, opt, txn, None, ID.as_ref())
 										.await?
 										.flatten()
 										.ok(),
@@ -162,7 +164,7 @@ impl Value {
 										.compute(ctx, opt, txn, None)
 										.await?
 										.all()
-										.get(ctx, opt, txn, path.next())
+										.get(ctx, opt, txn, None, path.next())
 										.await?
 										.flatten()
 										.ok(),
@@ -178,7 +180,7 @@ impl Value {
 								stm.compute(ctx, opt, txn, None)
 									.await?
 									.first()
-									.get(ctx, opt, txn, path)
+									.get(ctx, opt, txn, None, path)
 									.await
 							}
 						},
@@ -208,7 +210,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::default();
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -217,7 +219,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something");
 		let val = Value::parse("{ test: { other: null, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(123));
 	}
 
@@ -226,7 +228,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.other");
 		let val = Value::parse("{ test: { other: test:tobie, something: 123 } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -241,7 +243,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [123, 456, 789] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(456));
 	}
 
@@ -250,7 +252,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1]");
 		let val = Value::parse("{ test: { something: [test:tobie, test:jaime] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(Thing {
@@ -265,7 +267,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[1].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(36));
 	}
 
@@ -274,7 +276,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[*].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
@@ -283,7 +285,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something.age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![34, 36]));
 	}
 
@@ -292,7 +294,7 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35].age");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
 		assert_eq!(res, Value::from(vec![36]));
 	}
 
@@ -301,7 +303,36 @@ mod tests {
 		let (ctx, opt, txn) = mock().await;
 		let idi = Idiom::parse("test.something[WHERE age > 35]");
 		let val = Value::parse("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = val.get(&ctx, &opt, &txn, &idi).await.unwrap();
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		assert_eq!(
+			res,
+			Value::from(vec![Value::from(map! {
+				"age".to_string() => Value::from(36),
+			})])
+		);
+	}
+
+	#[tokio::test]
+	async fn get_future_embedded_field() {
+		let (ctx, opt, txn) = mock().await;
+		let idi = Idiom::parse("test.something[WHERE age > 35]");
+		let val = Value::parse("{ test: <future> { { something: [{ age: 34 }, { age: 36 }] } } }");
+		let res = val.get(&ctx, &opt, &txn, None, &idi).await.unwrap();
+		assert_eq!(
+			res,
+			Value::from(vec![Value::from(map! {
+				"age".to_string() => Value::from(36),
+			})])
+		);
+	}
+
+	#[tokio::test]
+	async fn get_future_embedded_field_with_reference() {
+		let (ctx, opt, txn) = mock().await;
+		let doc = Value::parse("{ name: 'Tobie', something: [{ age: 34 }, { age: 36 }] }");
+		let idi = Idiom::parse("test.something[WHERE age > 35]");
+		let val = Value::parse("{ test: <future> { { something: something } } }");
+		let res = val.get(&ctx, &opt, &txn, Some(&doc), &idi).await.unwrap();
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {

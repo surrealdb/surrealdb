@@ -1,13 +1,11 @@
-use super::run;
+use super::super::run;
 use crate::fnc::script::modules::impl_module_def;
-
-mod from;
 
 pub struct Package;
 
 impl_module_def!(
 	Package,
-	"duration",
+	"duration::from",
 	"days" => run,
 	"hours" => run,
 	"micros" => run,
@@ -16,6 +14,5 @@ impl_module_def!(
 	"nanos" => run,
 	"secs" => run,
 	"weeks" => run,
-	"years" => run,
-	"from" => (from::Package)
+	"years" => run
 );

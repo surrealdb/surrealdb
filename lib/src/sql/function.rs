@@ -268,7 +268,7 @@ fn cast(i: &str) -> IResult<&str, Function> {
 	Ok((i, Function::Cast(k, v)))
 }
 
-fn function_names(i: &str) -> IResult<&str, &str> {
+pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 	recognize(alt((
 		preceded(tag("array::"), function_array),
 		preceded(tag("bytes::"), function_bytes),
@@ -311,6 +311,7 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 		)),
 		alt((
 			tag("intersect"),
+			tag("join"),
 			tag("len"),
 			tag("max"),
 			tag("min"),
@@ -495,6 +496,7 @@ fn function_session(i: &str) -> IResult<&str, &str> {
 fn function_string(i: &str) -> IResult<&str, &str> {
 	alt((
 		tag("concat"),
+		tag("contains"),
 		tag("endsWith"),
 		tag("join"),
 		tag("len"),
