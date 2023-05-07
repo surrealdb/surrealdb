@@ -88,7 +88,7 @@ impl<'de> Deserialize<'de> for Bytes {
 				}
 			}
 
-			deserializer.deserialize_bytes(RawBytesVisitor)
+			deserializer.deserialize_byte_buf(RawBytesVisitor)
 		}
 	}
 }
