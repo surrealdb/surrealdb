@@ -1,14 +1,48 @@
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::sql::json;
 use crate::sql::object::Object;
 use crate::sql::strand::Strand;
 use crate::sql::value::Value;
+use crate::sql::{json, Bytes};
 use reqwest::header::CONTENT_TYPE;
-use reqwest::Client;
+use reqwest::{Client, RequestBuilder, Response};
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()
+}
+
+fn encode_body(req: RequestBuilder, body: Value) -> RequestBuilder {
+	match body {
+		Value::Bytes(bytes) => req.header(CONTENT_TYPE, "application/octet-stream").body(bytes.0),
+		_ if body.is_some() => req.json(&body),
+		_ => req,
+	}
+}
+
+async fn decode_response(res: Response) -> Result<Value, Error> {
+	match res.status() {
+		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
+			Some(mime) => match mime.to_str() {
+				Ok(v) if v.starts_with("application/json") => {
+					let txt = res.text().await?;
+					let val = json(&txt)?;
+					Ok(val)
+				}
+				Ok(v) if v.starts_with("application/octet-stream") => {
+					let bytes = res.bytes().await?;
+					Ok(Value::Bytes(Bytes(bytes.into())))
+				}
+				Ok(v) if v.starts_with("text") => {
+					let txt = res.text().await?;
+					let val = txt.into();
+					Ok(val)
+				}
+				_ => Ok(Value::None),
+			},
+			_ => Ok(Value::None),
+		},
+		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
+	}
 }
 
 pub async fn head(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Result<Value, Error> {
@@ -54,26 +88,8 @@ pub async fn get(ctx: &Context<'_>, uri: Strand, opts: impl Into<Object>) -> Res
 		Some(d) => req.timeout(d).send().await?,
 		None => req.send().await?,
 	};
-	// Check the response status
-	match res.status() {
-		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
-			Some(mime) => match mime.to_str() {
-				Ok(v) if v.starts_with("application/json") => {
-					let txt = res.text().await?;
-					let val = json(&txt)?;
-					Ok(val)
-				}
-				Ok(v) if v.starts_with("text") => {
-					let txt = res.text().await?;
-					let val = txt.into();
-					Ok(val)
-				}
-				_ => Ok(Value::None),
-			},
-			_ => Ok(Value::None),
-		},
-		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
-	}
+	// Receive the response as a value
+	decode_response(res).await
 }
 
 pub async fn put(
@@ -95,34 +111,14 @@ pub async fn put(
 		req = req.header(k.as_str(), v.to_raw_string());
 	}
 	// Submit the request body
-	if body.is_some() {
-		req = req.json(&body);
-	}
+	req = encode_body(req, body);
 	// Send the request and wait
 	let res = match ctx.timeout() {
 		Some(d) => req.timeout(d).send().await?,
 		None => req.send().await?,
 	};
-	// Check the response status
-	match res.status() {
-		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
-			Some(mime) => match mime.to_str() {
-				Ok(v) if v.starts_with("application/json") => {
-					let txt = res.text().await?;
-					let val = json(&txt)?;
-					Ok(val)
-				}
-				Ok(v) if v.starts_with("text") => {
-					let txt = res.text().await?;
-					let val = txt.into();
-					Ok(val)
-				}
-				_ => Ok(Value::None),
-			},
-			_ => Ok(Value::None),
-		},
-		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
-	}
+	// Receive the response as a value
+	decode_response(res).await
 }
 
 pub async fn post(
@@ -144,34 +140,14 @@ pub async fn post(
 		req = req.header(k.as_str(), v.to_raw_string());
 	}
 	// Submit the request body
-	if body.is_some() {
-		req = req.json(&body);
-	}
+	req = encode_body(req, body);
 	// Send the request and wait
 	let res = match ctx.timeout() {
 		Some(d) => req.timeout(d).send().await?,
 		None => req.send().await?,
 	};
-	// Check the response status
-	match res.status() {
-		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
-			Some(mime) => match mime.to_str() {
-				Ok(v) if v.starts_with("application/json") => {
-					let txt = res.text().await?;
-					let val = json(&txt)?;
-					Ok(val)
-				}
-				Ok(v) if v.starts_with("text") => {
-					let txt = res.text().await?;
-					let val = txt.into();
-					Ok(val)
-				}
-				_ => Ok(Value::None),
-			},
-			_ => Ok(Value::None),
-		},
-		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
-	}
+	// Receive the response as a value
+	decode_response(res).await
 }
 
 pub async fn patch(
@@ -193,34 +169,14 @@ pub async fn patch(
 		req = req.header(k.as_str(), v.to_raw_string());
 	}
 	// Submit the request body
-	if body.is_some() {
-		req = req.json(&body);
-	}
+	req = encode_body(req, body);
 	// Send the request and wait
 	let res = match ctx.timeout() {
 		Some(d) => req.timeout(d).send().await?,
 		None => req.send().await?,
 	};
-	// Check the response status
-	match res.status() {
-		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
-			Some(mime) => match mime.to_str() {
-				Ok(v) if v.starts_with("application/json") => {
-					let txt = res.text().await?;
-					let val = json(&txt)?;
-					Ok(val)
-				}
-				Ok(v) if v.starts_with("text") => {
-					let txt = res.text().await?;
-					let val = txt.into();
-					Ok(val)
-				}
-				_ => Ok(Value::None),
-			},
-			_ => Ok(Value::None),
-		},
-		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
-	}
+	// Receive the response as a value
+	decode_response(res).await
 }
 
 pub async fn delete(
@@ -245,24 +201,6 @@ pub async fn delete(
 		Some(d) => req.timeout(d).send().await?,
 		None => req.send().await?,
 	};
-	// Check the response status
-	match res.status() {
-		s if s.is_success() => match res.headers().get(CONTENT_TYPE) {
-			Some(mime) => match mime.to_str() {
-				Ok(v) if v.starts_with("application/json") => {
-					let txt = res.text().await?;
-					let val = json(&txt)?;
-					Ok(val)
-				}
-				Ok(v) if v.starts_with("text") => {
-					let txt = res.text().await?;
-					let val = txt.into();
-					Ok(val)
-				}
-				_ => Ok(Value::None),
-			},
-			_ => Ok(Value::None),
-		},
-		s => Err(Error::Http(s.canonical_reason().unwrap_or_default().to_owned())),
-	}
+	// Receive the response as a value
+	decode_response(res).await
 }
