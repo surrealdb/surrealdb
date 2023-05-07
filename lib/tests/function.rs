@@ -824,6 +824,44 @@ async fn function_array_union() -> Result<(), Error> {
 }
 
 // --------------------------------------------------
+// bytes
+// --------------------------------------------------
+
+#[tokio::test]
+async fn function_bytes_len() -> Result<(), Error> {
+	let sql = r#"
+		RETURN bytes::len(<bytes>"");
+		RETURN bytes::len(true);
+		RETURN bytes::len(<bytes>"abc");
+		RETURN bytes::len("abc");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 4);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("0");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(matches!(
+		tmp.err(),
+		Some(e) if e.to_string() == "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected a bytes but failed to convert true into a bytes"
+	));
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("4");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("4");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+// --------------------------------------------------
 // count
 // --------------------------------------------------
 
@@ -1354,6 +1392,54 @@ async fn function_duration_from_weeks() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("1y7w6d");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+// --------------------------------------------------
+// encoding
+// --------------------------------------------------
+
+#[tokio::test]
+async fn function_encoding_base64_encode() -> Result<(), Error> {
+	let sql = r#"
+		RETURN encoding::base64::encode("");
+		RETURN encoding::base64::encode("hello");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("''");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'aGVsbG8'");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn function_encoding_base64_encode() -> Result<(), Error> {
+	let sql = r#"
+		RETURN encoding::base64::decode("");
+		RETURN encoding::base64::decode("aGVsbG8");
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 2);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("''");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'hello'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())
