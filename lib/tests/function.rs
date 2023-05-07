@@ -1437,7 +1437,7 @@ async fn function_duration_from_weeks() -> Result<(), Error> {
 async fn function_encoding_base64_decode() -> Result<(), Error> {
 	let sql = r#"
 		RETURN encoding::base64::decode("");
-		RETURN encoding::base64::decode("aGVsbG8");
+		RETURN encoding::base64::decode("aGVsbG8") = <bytes>"hello";
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -1449,7 +1449,7 @@ async fn function_encoding_base64_decode() -> Result<(), Error> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("'hello'");
+	let val = Value::from(true);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
