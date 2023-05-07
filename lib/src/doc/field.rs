@@ -4,7 +4,6 @@ use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::doc::Document;
 use crate::err::Error;
-use crate::sql::data::Data;
 use crate::sql::permission::Permission;
 use crate::sql::value::Value;
 
@@ -14,7 +13,7 @@ impl<'a> Document<'a> {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
-		stm: &Statement<'_>,
+		_stm: &Statement<'_>,
 	) -> Result<(), Error> {
 		// Check fields
 		if !opt.fields {
@@ -22,6 +21,8 @@ impl<'a> Document<'a> {
 		}
 		// Get the record id
 		let rid = self.id.as_ref().unwrap();
+		// Get the user applied input
+		let inp = self.initial.changed(self.current.as_ref());
 		// Loop through all field statements
 		for fd in self.fd(opt, txn).await?.iter() {
 			// Loop over each field in document
@@ -29,16 +30,7 @@ impl<'a> Document<'a> {
 				// Get the initial value
 				let old = self.initial.pick(&k);
 				// Get the input value
-				let inp = match stm.data() {
-					Some(Data::MergeExpression(v)) => v.pick(&k),
-					Some(Data::ContentExpression(v)) => v.pick(&k),
-					Some(Data::ReplaceExpression(v)) => v.pick(&k),
-					Some(Data::SetExpression(v)) => match v.iter().find(|f| f.0.eq(&k)) {
-						Some((_, _, v)) => v.to_owned(),
-						_ => Value::None,
-					},
-					_ => Value::None,
-				};
+				let inp = inp.pick(&k);
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
 					if !val.is_none() {

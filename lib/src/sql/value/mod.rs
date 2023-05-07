@@ -6,6 +6,7 @@ pub(super) mod serde;
 mod value;
 
 mod all;
+mod changed;
 mod clear;
 mod compare;
 mod cut;
