@@ -864,8 +864,8 @@ async fn function_bytes_len() -> Result<(), Error> {
 	let sql = r#"
 		RETURN bytes::len(<bytes>"");
 		RETURN bytes::len(true);
-		RETURN bytes::len(<bytes>"abc");
-		RETURN bytes::len("abc");
+		RETURN bytes::len(<bytes>"π");
+		RETURN bytes::len("ππ");
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -883,7 +883,7 @@ async fn function_bytes_len() -> Result<(), Error> {
 	));
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("4");
+	let val = Value::parse("2");
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -1445,7 +1445,7 @@ async fn function_encoding_base64_decode() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("''");
+	let val = Value::Bytes(Vec::new().into());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
