@@ -4,7 +4,9 @@
 pub const MAX_CONCURRENT_TASKS: usize = 64;
 
 /// Specifies how deep various forms of computation will go before the query fails.
-pub const MAX_COMPUTATION_DEPTH: u8 = 30;
+///
+/// For reference, use ~15 per MiB of stack in release mode.
+pub const MAX_COMPUTATION_DEPTH: u8 = 120;
 
 /// Specifies the names of parameters which can not be specified in a query.
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["auth", "scope", "token", "session"];
