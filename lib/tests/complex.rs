@@ -212,6 +212,13 @@ fn with_enough_stack(
 	#[allow(unused_mut)]
 	let mut builder = Builder::new();
 
+	// Roughly how much stack is allocated for surreal server workers in release mode
+	#[cfg(not(debug_assertions))]
+	{
+		builder = builder.stack_size(8_000_000);
+	}
+
+	// Same for debug mode
 	#[cfg(debug_assertions)]
 	{
 		builder = builder.stack_size(16_000_000);
