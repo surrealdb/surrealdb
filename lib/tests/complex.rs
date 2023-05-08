@@ -184,7 +184,7 @@ fn excessive_cast_chain_depth() -> Result<(), Error> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		// Run a casting query which will fail
-		let mut res = run_queries(&cast_chain(35)).await?;
+		let mut res = run_queries(&cast_chain(125)).await?;
 		//
 		assert_eq!(res.len(), 1);
 		//
