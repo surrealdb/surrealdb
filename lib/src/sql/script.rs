@@ -1,5 +1,6 @@
 use crate::sql::comment::{block, slash};
 use crate::sql::error::IResult;
+use crate::sql::strand::no_nul_bytes;
 use nom::branch::alt;
 use nom::bytes::complete::escaped;
 use nom::bytes::complete::is_not;
@@ -16,19 +17,19 @@ use std::ops::Deref;
 use std::str;
 
 const SINGLE: char = '\'';
-const SINGLE_ESC: &str = r#"\'"#;
+const SINGLE_ESC_NUL: &str = "'\\\0";
 
 const DOUBLE: char = '"';
-const DOUBLE_ESC: &str = r#"\""#;
+const DOUBLE_ESC_NUL: &str = "\"\\\0";
 
 const BACKTICK: char = '`';
-const BACKTICK_ESC: &str = r#"\`"#;
+const BACKTICK_ESC_NUL: &str = "`\\\0";
 
 const OBJECT_BEG: char = '{';
 const OBJECT_END: char = '}';
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-pub struct Script(pub String);
+pub struct Script(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Script {
 	fn from(s: String) -> Self {
@@ -100,19 +101,19 @@ fn script_string(i: &str) -> IResult<&str, &str> {
 		},
 		|i| {
 			let (i, _) = char(SINGLE)(i)?;
-			let (i, v) = escaped(is_not(SINGLE_ESC), '\\', char(SINGLE))(i)?;
+			let (i, v) = escaped(is_not(SINGLE_ESC_NUL), '\\', char(SINGLE))(i)?;
 			let (i, _) = char(SINGLE)(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, _) = char(DOUBLE)(i)?;
-			let (i, v) = escaped(is_not(DOUBLE_ESC), '\\', char(DOUBLE))(i)?;
+			let (i, v) = escaped(is_not(DOUBLE_ESC_NUL), '\\', char(DOUBLE))(i)?;
 			let (i, _) = char(DOUBLE)(i)?;
 			Ok((i, v))
 		},
 		|i| {
 			let (i, _) = char(BACKTICK)(i)?;
-			let (i, v) = escaped(is_not(BACKTICK_ESC), '\\', char(BACKTICK))(i)?;
+			let (i, v) = escaped(is_not(BACKTICK_ESC_NUL), '\\', char(BACKTICK))(i)?;
 			let (i, _) = char(BACKTICK)(i)?;
 			Ok((i, v))
 		},

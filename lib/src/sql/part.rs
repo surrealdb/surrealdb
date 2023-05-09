@@ -6,6 +6,7 @@ use crate::sql::graph::{self, Graph};
 use crate::sql::ident::{self, Ident};
 use crate::sql::idiom::Idiom;
 use crate::sql::number::{number, Number};
+use crate::sql::strand::no_nul_bytes;
 use crate::sql::value::{self, Value};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -27,7 +28,7 @@ pub enum Part {
 	Where(Value),
 	Graph(Graph),
 	Value(Value),
-	Method(String, Vec<Value>),
+	Method(#[serde(with = "no_nul_bytes")] String, Vec<Value>),
 }
 
 impl From<i32> for Part {

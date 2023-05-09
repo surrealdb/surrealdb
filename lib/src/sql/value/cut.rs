@@ -13,10 +13,10 @@ impl Value {
 					if let Part::Field(f) = p {
 						match path.len() {
 							1 => {
-								v.remove(f as &str);
+								v.remove(f.as_str());
 							}
 							_ => {
-								if let Some(v) = v.get_mut(f as &str) {
+								if let Some(v) = v.get_mut(f.as_str()) {
 									v.cut(path.next())
 								}
 							}
