@@ -48,17 +48,6 @@ impl Mul<CardinalDirection> for f64 {
 	}
 }
 
-impl fmt::Display for CardinalDirection {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		match self {
-			CardinalDirection::North => write!(f, "N"),
-			CardinalDirection::South => write!(f, "S"),
-			CardinalDirection::East => write!(f, "E"),
-			CardinalDirection::West => write!(f, "W"),
-		}
-	}
-}
-
 /// Represents a degree of latitude or longitude and an associated
 /// [`CardinalDirection`]. For example "N 40.446°" and "W 79.982°"
 /// are both representable by this type.
@@ -79,13 +68,6 @@ impl From<(f64, f64, f64, CardinalDirection)> for CardinalDegree {
 	fn from(value: (f64, f64, f64, CardinalDirection)) -> Self {
 		let (degrees, minutes, seconds, direction) = value;
 		CardinalDegree(direction, degrees + minutes / 60.0 + seconds / 3600.0)
-	}
-}
-
-impl fmt::Display for CardinalDegree {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		// todo: precision?
-		write!(f, "{:.2}°{}", self.1, self.0)
 	}
 }
 
@@ -111,12 +93,6 @@ impl Into<Point> for DecimalDegrees {
 	/// the direction of each degree.
 	fn into(self) -> Point {
 		Point::new(self.lng.value() * self.lng.direction(), self.lat.value() * self.lat.direction())
-	}
-}
-
-impl fmt::Display for DecimalDegrees {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		write!(f, "{} {}", self.lat, self.lng)
 	}
 }
 
@@ -221,6 +197,30 @@ pub(crate) fn dms(i: &str) -> IResult<&str, DecimalDegrees> {
 #[cfg(test)]
 mod tests {
 	use crate::sql::latlng::*;
+
+	impl fmt::Display for CardinalDirection {
+		fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+			match self {
+				CardinalDirection::North => write!(f, "N"),
+				CardinalDirection::South => write!(f, "S"),
+				CardinalDirection::East => write!(f, "E"),
+				CardinalDirection::West => write!(f, "W"),
+			}
+		}
+	}
+
+	impl fmt::Display for CardinalDegree {
+		fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+			// todo: precision?
+			write!(f, "{:.2}°{}", self.1, self.0)
+		}
+	}
+
+	impl fmt::Display for DecimalDegrees {
+		fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+			write!(f, "{} {}", self.lat, self.lng)
+		}
+	}
 
 	fn example_dd() -> DecimalDegrees {
 		DecimalDegrees {
