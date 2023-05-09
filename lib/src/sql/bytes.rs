@@ -84,9 +84,9 @@ mod tests {
 	#[test]
 	fn serialize() {
 		let val = Value::Bytes(Bytes(vec![1, 2, 3, 5]));
-		let serialized: Vec<u8> = val.into();
+		let serialized: Vec<u8> = val.clone().into();
 		println!("{serialized:?}");
 		let deserialized = Value::from(serialized);
-		println!("{deserialized:?}");
+		assert_eq!(val, deserialized);
 	}
 }
