@@ -2,6 +2,8 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// Represents cluster information, and the corresponding value is {{
+// in the future, this could also include broadcast addresses and other information
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
 pub struct Cl {
 	__: u8,

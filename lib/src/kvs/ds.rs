@@ -17,6 +17,7 @@ use channel::Sender;
 use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
+use time::Instant;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -224,6 +225,17 @@ impl Datastore {
 			}
 		}
 	}
+
+	// Adds entries to the KV store indicating membership information
+	pub async fn register_membership(&self) -> Result<(), Error> {
+		let mut tx = self.transaction(true, false).await?;
+		tx.clr(self.id);
+		tx.commit().await?;
+	}
+
+	// Creates a heartbeat entry for the member indicating to the cluster
+	// that the node is alive
+	pub async fn heartbeat(&self, ts: Instant) -> Result<(), Error> {}
 
 	/// Create a new transaction on this datastore
 	///
