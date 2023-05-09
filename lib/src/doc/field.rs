@@ -34,7 +34,7 @@ impl<'a> Document<'a> {
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
 					if !val.is_none() {
-						val = val.convert_to(kind).map_err(|e| match e {
+						val = val.coerce_to(kind).map_err(|e| match e {
 							// There was a conversion error
 							Error::ConvertTo {
 								from,
@@ -63,7 +63,7 @@ impl<'a> Document<'a> {
 				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
-					val = val.convert_to(kind).map_err(|e| match e {
+					val = val.coerce_to(kind).map_err(|e| match e {
 						// There was a conversion error
 						Error::ConvertTo {
 							from,

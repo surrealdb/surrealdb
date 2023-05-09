@@ -49,6 +49,13 @@ impl Kind {
 	}
 }
 
+impl From<&Kind> for Box<Kind> {
+	#[inline]
+	fn from(v: &Kind) -> Self {
+		Box::new(v.clone())
+	}
+}
+
 impl Display for Kind {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {

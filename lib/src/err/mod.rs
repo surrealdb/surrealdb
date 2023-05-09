@@ -361,8 +361,15 @@ pub enum Error {
 		value: String,
 	},
 
-	/// The requested function does not exist
-	#[error("Expected a {into} but failed to convert {from} into a {into}")]
+	/// Unable to coerce to a value to another value
+	#[error("Expected a {into} but found {from}")]
+	CoerceTo {
+		from: Value,
+		into: Cow<'static, str>,
+	},
+
+	/// Unable to convert a value to another value
+	#[error("Expected a {into} but cannot convert from {from} into a {into}")]
 	ConvertTo {
 		from: Value,
 		into: Cow<'static, str>,
