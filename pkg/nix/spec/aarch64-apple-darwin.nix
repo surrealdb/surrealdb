@@ -6,7 +6,7 @@
   features = with util.features; [ default storage-tikv ];
 
   buildSpec = with pkgs; {
-    depsBuildBuild = [ clang protobuf perl ];
+    depsBuildBuild = [ cmake clang protobuf perl ];
 
     nativeBuildInputs = [ pkg-config ];
 
