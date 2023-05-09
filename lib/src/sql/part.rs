@@ -89,6 +89,15 @@ impl From<&str> for Part {
 }
 
 impl Part {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		match self {
+			Part::Where(v) => v.writeable(),
+			Part::Value(v) => v.writeable(),
+			Part::Method(_, v) => v.iter().any(Value::writeable),
+			_ => false,
+		}
+	}
 	/// Returns a yield if an alias is specified
 	pub(crate) fn alias(&self) -> Option<&Idiom> {
 		match self {

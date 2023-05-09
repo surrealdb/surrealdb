@@ -1942,9 +1942,11 @@ impl fmt::Display for Value {
 }
 
 impl Value {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Value::Block(v) => v.writeable(),
+			Value::Idiom(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
 			Value::Function(v) => v.is_custom() || v.args().iter().any(Value::writeable),
@@ -1953,7 +1955,7 @@ impl Value {
 			_ => false,
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(

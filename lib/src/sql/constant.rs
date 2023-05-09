@@ -63,7 +63,7 @@ impl Constant {
 			Self::MathTau => std::f64::consts::TAU,
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,

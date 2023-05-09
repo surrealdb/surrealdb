@@ -57,6 +57,7 @@ pub enum DefineStatement {
 }
 
 impl DefineStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -125,6 +126,7 @@ pub struct DefineNamespaceStatement {
 }
 
 impl DefineNamespaceStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -175,6 +177,7 @@ pub struct DefineDatabaseStatement {
 }
 
 impl DefineDatabaseStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -232,6 +235,7 @@ pub struct DefineFunctionStatement {
 }
 
 impl DefineFunctionStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -318,6 +322,7 @@ pub struct DefineLoginStatement {
 }
 
 impl DefineLoginStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -442,6 +447,7 @@ pub struct DefineTokenStatement {
 }
 
 impl DefineTokenStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -563,6 +569,7 @@ pub struct DefineScopeStatement {
 }
 
 impl DefineScopeStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -683,6 +690,7 @@ pub struct DefineParamStatement {
 }
 
 impl DefineParamStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -933,6 +941,7 @@ pub struct DefineEventStatement {
 }
 
 impl DefineEventStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -1019,6 +1028,7 @@ pub struct DefineFieldStatement {
 }
 
 impl DefineFieldStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -1181,6 +1191,7 @@ pub struct DefineIndexStatement {
 }
 
 impl DefineIndexStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

@@ -97,6 +97,7 @@ pub enum Statement {
 }
 
 impl Statement {
+	/// Get the statement timeout duration, if any
 	pub fn timeout(&self) -> Option<Duration> {
 		match self {
 			Self::Create(v) => v.timeout.as_ref().map(|v| *v.0),
@@ -108,7 +109,7 @@ impl Statement {
 			_ => None,
 		}
 	}
-
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Create(v) => v.writeable(),
@@ -131,7 +132,7 @@ impl Statement {
 			_ => unreachable!(),
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
