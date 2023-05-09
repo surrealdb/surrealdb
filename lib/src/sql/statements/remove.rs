@@ -38,6 +38,7 @@ pub enum RemoveStatement {
 }
 
 impl RemoveStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -106,6 +107,7 @@ pub struct RemoveNamespaceStatement {
 }
 
 impl RemoveNamespaceStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -163,6 +165,7 @@ pub struct RemoveDatabaseStatement {
 }
 
 impl RemoveDatabaseStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -220,6 +223,7 @@ pub struct RemoveFunctionStatement {
 }
 
 impl RemoveFunctionStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -283,6 +287,7 @@ pub struct RemoveLoginStatement {
 }
 
 impl RemoveLoginStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -363,6 +368,7 @@ pub struct RemoveTokenStatement {
 }
 
 impl RemoveTokenStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -457,6 +463,7 @@ pub struct RemoveScopeStatement {
 }
 
 impl RemoveScopeStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -514,6 +521,7 @@ pub struct RemoveParamStatement {
 }
 
 impl RemoveParamStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -569,6 +577,7 @@ pub struct RemoveTableStatement {
 }
 
 impl RemoveTableStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -627,6 +636,7 @@ pub struct RemoveEventStatement {
 }
 
 impl RemoveEventStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -691,6 +701,7 @@ pub struct RemoveFieldStatement {
 }
 
 impl RemoveFieldStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -756,6 +767,7 @@ pub struct RemoveIndexStatement {
 }
 
 impl RemoveIndexStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,

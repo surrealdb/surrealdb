@@ -46,6 +46,7 @@ impl PartialOrd for Subquery {
 }
 
 impl Subquery {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Value(v) => v.writeable(),
@@ -59,7 +60,7 @@ impl Subquery {
 			Self::Insert(v) => v.writeable(),
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
