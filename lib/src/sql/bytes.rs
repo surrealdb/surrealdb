@@ -40,11 +40,7 @@ impl Serialize for Bytes {
 	where
 		S: serde::Serializer,
 	{
-		if serializer.is_human_readable() {
-			serializer.serialize_str(&STANDARD_NO_PAD.encode(&self.0))
-		} else {
-			serializer.serialize_bytes(&self.0)
-		}
+		serializer.serialize_bytes(&self.0)
 	}
 }
 
@@ -53,55 +49,31 @@ impl<'de> Deserialize<'de> for Bytes {
 	where
 		D: serde::Deserializer<'de>,
 	{
-		if deserializer.is_human_readable() {
-			struct Base64BytesVisitor;
+		struct RawBytesVisitor;
 
-			impl<'de> Visitor<'de> for Base64BytesVisitor {
-				type Value = Bytes;
+		impl<'de> Visitor<'de> for RawBytesVisitor {
+			type Value = Bytes;
 
-				fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-					formatter.write_str("a base64 str")
-				}
-
-				fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-				where
-					E: de::Error,
-				{
-					STANDARD_NO_PAD
-						.decode(&value)
-						.map(Bytes)
-						.map_err(|_| de::Error::custom("invalid base64"))
-				}
+			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+				formatter.write_str("bytes")
 			}
 
-			deserializer.deserialize_str(Base64BytesVisitor)
-		} else {
-			struct RawBytesVisitor;
-
-			impl<'de> Visitor<'de> for RawBytesVisitor {
-				type Value = Bytes;
-
-				fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-					formatter.write_str("bytes")
-				}
-
-				fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
-				where
-					E: de::Error,
-				{
-					Ok(Bytes(v))
-				}
-
-				fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-				where
-					E: de::Error,
-				{
-					Ok(Bytes(v.to_owned()))
-				}
+			fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+			where
+				E: de::Error,
+			{
+				Ok(Bytes(v))
 			}
 
-			deserializer.deserialize_byte_buf(RawBytesVisitor)
+			fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+			where
+				E: de::Error,
+			{
+				Ok(Bytes(v.to_owned()))
+			}
 		}
+
+		deserializer.deserialize_byte_buf(RawBytesVisitor)
 	}
 }
 
