@@ -118,7 +118,7 @@ impl Fields {
 							};
 							// Continue fetching the next idiom part
 							let x = x
-								.get(ctx, opt, txn, v)
+								.get(ctx, opt, txn, Some(doc), v)
 								.await?
 								.compute(ctx, opt, txn, Some(doc))
 								.await?
@@ -174,7 +174,7 @@ impl Fields {
 							};
 							// Continue fetching the next idiom part
 							let x = x
-								.get(ctx, opt, txn, v)
+								.get(ctx, opt, txn, Some(doc), v)
 								.await?
 								.compute(ctx, opt, txn, Some(doc))
 								.await?

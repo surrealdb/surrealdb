@@ -107,6 +107,13 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[format(Named)]
 pub enum Value {
+	// These value types are simple values which
+	// can be used in query responses sent to
+	// the client. They typically do not need to
+	// be computed, unless an un-computed value
+	// is present inside an Array or Object type.
+	// These types can also be used within indexes
+	// and sort according to their order below.
 	#[default]
 	None,
 	Null,
@@ -120,11 +127,17 @@ pub enum Value {
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
-	// ---
+	Thing(Thing),
+	// These Value types are un-computed values
+	// and are not used in query responses sent
+	// to the client. These types need to be
+	// computed, in order to convert them into
+	// one of the simple types listed above.
+	// These types are first computed into a
+	// simple type before being used in indexes.
 	Param(Param),
 	Idiom(Idiom),
 	Table(Table),
-	Thing(Thing),
 	Model(Model),
 	Regex(Regex),
 	Block(Box<Block>),
@@ -389,13 +402,13 @@ impl From<BigDecimal> for Value {
 
 impl From<String> for Value {
 	fn from(v: String) -> Self {
-		Value::Strand(Strand::from(v))
+		Self::Strand(Strand::from(v))
 	}
 }
 
 impl From<&str> for Value {
 	fn from(v: &str) -> Self {
-		Value::Strand(Strand::from(v))
+		Self::Strand(Strand::from(v))
 	}
 }
 
@@ -1480,6 +1493,8 @@ impl Value {
 		match self {
 			// Bytes are allowed
 			Value::Bytes(v) => Ok(v),
+			// Strings can be converted to bytes
+			Value::Strand(s) => Ok(Bytes(s.0.into_bytes())),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -1921,7 +1936,7 @@ impl fmt::Display for Value {
 			Value::Function(v) => write!(f, "{v}"),
 			Value::Subquery(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
-			Value::Bytes(_) => write!(f, "<bytes>"),
+			Value::Bytes(v) => write!(f, "{v}"),
 		}
 	}
 }

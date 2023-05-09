@@ -91,7 +91,7 @@ impl Options {
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
 	pub fn dive(&self, cost: u8) -> Result<Options, Error> {
 		let dive = self.dive.saturating_add(cost);
-		if dive <= cnf::MAX_COMPUTATION_DEPTH {
+		if dive <= *cnf::MAX_COMPUTATION_DEPTH {
 			Ok(Options {
 				sender: self.sender.clone(),
 				auth: self.auth.clone(),

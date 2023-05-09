@@ -1,55 +1,37 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
-use crate::err::Error;
-use crate::exe::try_join_all_buffered;
-use crate::sql::array::Abolish;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
-use async_recursion::async_recursion;
-use std::collections::HashSet;
 
 impl Value {
-	/// Asynchronous method for deleting a field from a `Value`
-	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
-	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub(crate) async fn del(
-		&mut self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		path: &[Part],
-	) -> Result<(), Error> {
-		match path.first() {
+	/// Synchronous method for deleting a field from a `Value`
+	pub(crate) fn cut(&mut self, path: &[Part]) {
+		if let Some(p) = path.first() {
 			// Get the current path part
-			Some(p) => match self {
+			match self {
 				// Current path part is an object
-				Value::Object(v) => match p {
-					Part::Field(f) => match path.len() {
-						1 => {
-							v.remove(f.as_str());
-							Ok(())
+				Value::Object(v) => {
+					if let Part::Field(f) = p {
+						match path.len() {
+							1 => {
+								v.remove(f.as_str());
+							}
+							_ => {
+								if let Some(v) = v.get_mut(f.as_str()) {
+									v.cut(path.next())
+								}
+							}
 						}
-						_ => match v.get_mut(f.as_str()) {
-							Some(v) if v.is_some() => v.del(ctx, opt, txn, path.next()).await,
-							_ => Ok(()),
-						},
-					},
-					_ => Ok(()),
-				},
+					}
+				}
 				// Current path part is an array
 				Value::Array(v) => match p {
 					Part::All => match path.len() {
 						1 => {
 							v.clear();
-							Ok(())
 						}
 						_ => {
 							let path = path.next();
-							let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-							try_join_all_buffered(futs).await?;
-							Ok(())
+							v.iter_mut().for_each(|v| v.cut(path));
 						}
 					},
 					Part::First => match path.len() {
@@ -58,12 +40,12 @@ impl Value {
 								let i = 0;
 								v.remove(i);
 							}
-							Ok(())
 						}
-						_ => match v.first_mut() {
-							Some(v) => v.del(ctx, opt, txn, path.next()).await,
-							None => Ok(()),
-						},
+						_ => {
+							if let Some(v) = v.first_mut() {
+								v.cut(path.next())
+							}
+						}
 					},
 					Part::Last => match path.len() {
 						1 => {
@@ -71,59 +53,32 @@ impl Value {
 								let i = v.len() - 1;
 								v.remove(i);
 							}
-							Ok(())
 						}
-						_ => match v.last_mut() {
-							Some(v) => v.del(ctx, opt, txn, path.next()).await,
-							None => Ok(()),
-						},
+						_ => {
+							if let Some(v) = v.last_mut() {
+								v.cut(path.next())
+							}
+						}
 					},
 					Part::Index(i) => match path.len() {
 						1 => {
 							if v.len().gt(&i.to_usize()) {
 								v.remove(i.to_usize());
 							}
-							Ok(())
-						}
-						_ => match v.get_mut(i.to_usize()) {
-							Some(v) => v.del(ctx, opt, txn, path.next()).await,
-							None => Ok(()),
-						},
-					},
-					Part::Where(w) => match path.len() {
-						1 => {
-							// TODO: If further optimization is desired, push indices to a vec,
-							// iterate in reverse, and call swap_remove
-							let mut m = HashSet::new();
-							for (i, v) in v.iter().enumerate() {
-								if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
-									m.insert(i);
-								};
-							}
-							v.abolish(|i| m.contains(&i));
-							Ok(())
 						}
 						_ => {
-							let path = path.next();
-							for v in v.iter_mut() {
-								if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
-									v.del(ctx, opt, txn, path).await?;
-								}
+							if let Some(v) = v.get_mut(i.to_usize()) {
+								v.cut(path.next())
 							}
-							Ok(())
 						}
 					},
 					_ => {
-						let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-						try_join_all_buffered(futs).await?;
-						Ok(())
+						v.iter_mut().for_each(|v| v.cut(path));
 					}
 				},
 				// Ignore everything else
-				_ => Ok(()),
-			},
-			// We are done
-			None => Ok(()),
+				_ => (),
+			}
 		}
 	}
 }

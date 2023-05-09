@@ -28,7 +28,7 @@ pub struct Context<'a> {
 	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
-	values: HashMap<String, Cow<'a, Value>>,
+	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
 }
 
 impl<'a> Default for Context<'a> {
@@ -93,11 +93,12 @@ impl<'a> Context<'a> {
 
 	/// Add a value to the context. It overwrites any previously set values
 	/// with the same key.
-	pub fn add_value<V>(&mut self, key: String, value: V)
+	pub fn add_value<K, V>(&mut self, key: K, value: V)
 	where
+		K: Into<Cow<'static, str>>,
 		V: Into<Cow<'a, Value>>,
 	{
-		self.values.insert(key, value.into());
+		self.values.insert(key.into(), value.into());
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for
