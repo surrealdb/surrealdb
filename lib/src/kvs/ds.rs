@@ -121,7 +121,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-mem"))]
-				return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an File database
 			s if s.starts_with("file:") => {
@@ -140,7 +140,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an RocksDB database
 			s if s.starts_with("rocksdb:") => {
@@ -159,7 +159,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
 			s if s.starts_with("indxdb:") => {
@@ -178,7 +178,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
-				return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a TiKV database
 			s if s.starts_with("tikv:") => {
@@ -197,7 +197,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-tikv"))]
-				return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a FoundationDB database
 			s if s.starts_with("fdb:") => {
@@ -216,7 +216,7 @@ impl Datastore {
 					v
 				}
 				#[cfg(not(feature = "kv-fdb"))]
-				return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+                return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// The datastore path is not valid
 			_ => {
@@ -227,15 +227,22 @@ impl Datastore {
 	}
 
 	// Adds entries to the KV store indicating membership information
-	pub async fn register_membership(&self) -> Result<(), Error> {
+	pub async fn register_membership(&self, ts: Instant) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
-		tx.clr(self.id);
+		tx.set_cl(sql::Uuid::from(*self.id.as_ref()), ts);
+		tx.set_hb(sql::Uuid::from(*self.id.as_ref()), ts);
 		tx.commit().await?;
+		Ok(())
 	}
 
 	// Creates a heartbeat entry for the member indicating to the cluster
 	// that the node is alive
-	pub async fn heartbeat(&self, ts: Instant) -> Result<(), Error> {}
+	pub async fn heartbeat(&self, ts: Instant) -> Result<(), Error> {
+		let mut tx = self.transaction(true, false).await?;
+		tx.set_hb(sql::Uuid::from(*self.id.as_ref()), ts);
+		tx.commit().await?;
+		Ok(())
+	}
 
 	/// Create a new transaction on this datastore
 	///

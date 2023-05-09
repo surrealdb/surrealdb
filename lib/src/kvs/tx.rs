@@ -3,18 +3,19 @@ use super::kv::Convert;
 use super::Key;
 use super::Val;
 use crate::err::Error;
-use crate::error::Db::ClAlreadyExists;
 use crate::key::thing;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::sql;
+use crate::sql::cluster::ClusterMembership;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
-use crate::sql::statements::cluster::ClusterMembership;
 use crate::sql::thing::Thing;
+use crate::sql::Value::{Datetime, Strand};
 use crate::sql::{Uuid, Value};
 use channel::Sender;
+use chrono::{DateTime, Utc};
 use sql::permission::Permissions;
 use sql::statements::DefineDatabaseStatement;
 use sql::statements::DefineEventStatement;
@@ -32,6 +33,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+use time::{Instant, PrimitiveDateTime};
 
 #[cfg(debug_assertions)]
 const LOG: &str = "surrealdb::txn";
@@ -734,10 +736,10 @@ impl Transaction {
 	// Register cluster membership
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
-	pub async fn set_cl(&mut self, id: Uuid, now: time::Instant) -> Result<(), ClAlreadyExists> {
+	pub async fn set_cl(&mut self, id: Uuid, now: Instant) -> Result<(), Error> {
 		let key = crate::key::cl::Cl::new(id.0);
 		match self.get_cl(id.clone()).await? {
-			Some(_) => Err(ClAlreadyExists {
+			Some(_) => Err(Error::ClAlreadyExists {
 				value: id.0.to_string(),
 			}),
 			None => {
@@ -752,10 +754,7 @@ impl Transaction {
 	}
 
 	// Retrieve cluster information
-	pub async fn get_cl(
-		&mut self,
-		id: Uuid,
-	) -> Result<Option<ClusterMembership>, Error::ClNotFound> {
+	pub async fn get_cl(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
 		let key = crate::key::cl::Cl::new(id.0);
 		let val = self.get(key).await?.ok_or(Error::ClNotFound {
 			value: id.to_string(),
@@ -764,6 +763,20 @@ impl Transaction {
 			Err(e) => Err(e),
 			Ok(v) => Ok(Some::<ClusterMembership>(v.into())),
 		}
+	}
+
+	// Set heartbeat
+	pub async fn set_hb(&mut self, id: Uuid, ts: Instant) -> Result<(), Error> {
+		let key = crate::key::cl::Hb::new(id.0, ts);
+		// We do not need to do a read, we always want to overwrite
+		self.put(
+			key,
+			ClusterMembership {
+				name: id.0.to_string(),
+				heartbeat: ts.clone(),
+			},
+		);
+		Ok(())
 	}
 
 	/// Retrieve all namespace definitions in a datastore.

@@ -8,6 +8,7 @@ use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
 use crate::sql::bytes::Bytes;
+use crate::sql::cluster::ClusterMembership;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::constant::{constant, Constant};
@@ -31,7 +32,6 @@ use crate::sql::param::{param, Param};
 use crate::sql::part::Part;
 use crate::sql::range::{range, Range};
 use crate::sql::regex::{regex, Regex};
-use crate::sql::statements::cluster::ClusterMembership;
 use crate::sql::strand::{strand, Strand};
 use crate::sql::subquery::{subquery, Subquery};
 use crate::sql::table::{table, Table};
@@ -149,7 +149,6 @@ pub enum Value {
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
-	ClusterMembership(Box<ClusterMembership>),
 	// Add new variants here
 }
 
