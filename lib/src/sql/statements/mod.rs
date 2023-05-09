@@ -1,6 +1,5 @@
 pub(crate) mod begin;
 pub(crate) mod cancel;
-pub(crate) mod cluster;
 pub(crate) mod commit;
 pub(crate) mod create;
 pub(crate) mod define;

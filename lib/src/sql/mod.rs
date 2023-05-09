@@ -64,6 +64,7 @@ pub(crate) mod view;
 #[cfg(test)]
 pub(crate) mod test;
 
+pub(crate) mod cluster;
 pub mod statements;
 
 pub use self::parser::*;
