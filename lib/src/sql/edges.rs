@@ -1,4 +1,4 @@
-use crate::sql::common::{closeparenthese, openparenthese};
+use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::dir::{dir, Dir};
 use crate::sql::error::IResult;
 use crate::sql::table::{table, tables, Tables};
@@ -48,9 +48,9 @@ fn simple(i: &str) -> IResult<&str, Tables> {
 }
 
 fn custom(i: &str) -> IResult<&str, Tables> {
-	let (i, _) = openparenthese(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, w) = alt((any, tables))(i)?;
-	let (i, _) = closeparenthese(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, w))
 }
 

@@ -8,6 +8,7 @@
 /// DB              /*{ns}!db{db}
 ///
 /// Database        /*{ns}*{db}
+/// AZ              /*{ns}*{db}!az{az}
 /// DL              /*{ns}*{db}!dl{us}
 /// DT              /*{ns}*{db}!dt{tk}
 /// PA              /*{ns}*{db}!pa{pa}
@@ -17,8 +18,6 @@
 ///
 /// Scope           /*{ns}*{db}±{sc}
 /// ST              /*{ns}*{db}±{sc}!st{tk}
-///
-/// AZ              /*{ns}*{db}!az{az}
 ///
 /// Table           /*{ns}*{db}*{tb}
 /// EV              /*{ns}*{db}*{tb}!ev{ev}

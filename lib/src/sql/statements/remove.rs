@@ -27,6 +27,7 @@ pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
 	Function(RemoveFunctionStatement),
+	Analyzer(RemoveAnalyzerStatement),
 	Login(RemoveLoginStatement),
 	Token(RemoveTokenStatement),
 	Scope(RemoveScopeStatement),
@@ -35,7 +36,6 @@ pub enum RemoveStatement {
 	Event(RemoveEventStatement),
 	Field(RemoveFieldStatement),
 	Index(RemoveIndexStatement),
-	Analyzer(RemoveAnalyzerStatement),
 }
 
 impl RemoveStatement {
@@ -270,6 +270,60 @@ fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 	Ok((
 		i,
 		RemoveFunctionStatement {
+			name,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub struct RemoveAnalyzerStatement {
+	pub name: Ident,
+}
+
+impl RemoveAnalyzerStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// TODO Check that the analyzer is not used in any schema
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl Display for RemoveAnalyzerStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "REMOVE ANALYZER {}", self.name)
+	}
+}
+
+fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
+	let (i, _) = tag_no_case("REMOVE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ANALYZER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	Ok((
+		i,
+		RemoveAnalyzerStatement {
 			name,
 		},
 	))
@@ -812,60 +866,6 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 		RemoveIndexStatement {
 			name,
 			what,
-		},
-	))
-}
-
-// --------------------------------------------------
-// --------------------------------------------------
-// --------------------------------------------------
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-pub struct RemoveAnalyzerStatement {
-	pub name: Ident,
-}
-
-impl RemoveAnalyzerStatement {
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
-		// Allowed to run?
-		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
-		// Claim transaction
-		let mut run = run.lock().await;
-		// Delete the definition
-		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
-		run.del(key).await?;
-		// TODO Check that the analyzer is not used in any schema
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
-impl Display for RemoveAnalyzerStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE ANALYZER {}", self.name)
-	}
-}
-
-fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
-	let (i, _) = tag_no_case("REMOVE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ANALYZER")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
-	Ok((
-		i,
-		RemoveAnalyzerStatement {
-			name,
 		},
 	))
 }

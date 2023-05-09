@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::sql::common::{closeparenthese, openparenthese};
+use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::ending::subquery as ending;
 use crate::sql::error::IResult;
 use crate::sql::statements::create::{create, CreateStatement};
@@ -235,18 +235,18 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 }
 
 fn subquery_value(i: &str) -> IResult<&str, Subquery> {
-	let (i, _) = openparenthese(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, v) = map(value, Subquery::Value)(i)?;
-	let (i, _) = closeparenthese(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, v))
 }
 
 fn subquery_other(i: &str) -> IResult<&str, Subquery> {
 	alt((
 		|i| {
-			let (i, _) = openparenthese(i)?;
+			let (i, _) = openparentheses(i)?;
 			let (i, v) = subquery_inner(i)?;
-			let (i, _) = closeparenthese(i)?;
+			let (i, _) = closeparentheses(i)?;
 			Ok((i, v))
 		},
 		|i| {
