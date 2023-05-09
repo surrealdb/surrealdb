@@ -95,6 +95,7 @@ sha2 = "0.10.6"
 storekey = "0.5.0"
 thiserror = "1.0.40"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }
+time = "0.2.25" # Brought in for Instant, but we might need our own (TSO logical+physical clock)
 tokio-util = { version = "0.7.7", optional = true, features = ["compat"] }
 tracing = "0.1.37"
 trice = "0.3.1"

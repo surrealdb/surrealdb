@@ -10,6 +10,7 @@ use crate::dbs::Variables;
 use crate::err::Error;
 use crate::kvs::LOG;
 use crate::sql;
+use crate::sql::cluster_timestamp::Timestamp;
 use crate::sql::Query;
 use crate::sql::Value;
 use channel::Receiver;
@@ -118,7 +119,11 @@ impl Datastore {
 						recv,
 					});
 					info!(target: LOG, "Started kvs store in {}", path);
-					v
+					v.map(|ds| {
+						ds.register_membership();
+						trace!(target: LOG, "Registered membership for {}", ds.id);
+						ds
+					})
 				}
 				#[cfg(not(feature = "kv-mem"))]
                 return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -137,7 +142,11 @@ impl Datastore {
 						recv,
 					});
 					info!(target: LOG, "Started kvs store at {}", path);
-					v
+					v.map(|ds| {
+						ds.register_membership();
+						trace!(target: LOG, "Registered membership for {}", ds.id);
+						ds
+					})
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -156,7 +165,11 @@ impl Datastore {
 						recv,
 					});
 					info!(target: LOG, "Started kvs store at {}", path);
-					v
+					v.map(|ds| {
+						ds.register_membership();
+						trace!(target: LOG, "Registered membership for {}", ds.id);
+						ds
+					})
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -175,7 +188,11 @@ impl Datastore {
 						recv,
 					});
 					info!(target: LOG, "Started kvs store at {}", path);
-					v
+					v.map(|ds| {
+						ds.register_membership();
+						trace!(target: LOG, "Registered membership for {}", ds.id);
+						ds
+					})
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
                 return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -194,7 +211,11 @@ impl Datastore {
 						recv,
 					});
 					info!(target: LOG, "Connected to kvs store at {}", path);
-					v
+					v.map(|ds| {
+						ds.register_membership();
+						trace!(target: LOG, "Registered membership for {}", ds.id);
+						ds
+					})
 				}
 				#[cfg(not(feature = "kv-tikv"))]
                 return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -213,7 +234,11 @@ impl Datastore {
 						recv,
 					});
 					info!(target: LOG, "Connected to kvs store at {}", path);
-					v
+					v.map(|ds| {
+						ds.register_membership();
+						trace!(target: LOG, "Registered membership for {}", ds.id);
+						ds
+					})
 				}
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -227,19 +252,19 @@ impl Datastore {
 	}
 
 	// Adds entries to the KV store indicating membership information
-	pub async fn register_membership(&self, ts: Instant) -> Result<(), Error> {
+	pub async fn register_membership(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
-		tx.set_cl(sql::Uuid::from(*self.id.as_ref()), ts);
-		tx.set_hb(sql::Uuid::from(*self.id.as_ref()), ts);
+		tx.set_cl(sql::Uuid::from(*self.id.as_ref()));
+		tx.set_hb(sql::Uuid::from(*self.id.as_ref()));
 		tx.commit().await?;
 		Ok(())
 	}
 
 	// Creates a heartbeat entry for the member indicating to the cluster
 	// that the node is alive
-	pub async fn heartbeat(&self, ts: Instant) -> Result<(), Error> {
+	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
-		tx.set_hb(sql::Uuid::from(*self.id.as_ref()), ts);
+		tx.set_hb(sql::Uuid::from(*self.id.as_ref()));
 		tx.commit().await?;
 		Ok(())
 	}

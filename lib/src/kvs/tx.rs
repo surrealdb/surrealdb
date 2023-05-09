@@ -8,6 +8,7 @@ use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
 use crate::sql;
 use crate::sql::cluster::ClusterMembership;
+use crate::sql::cluster_timestamp::Timestamp;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
@@ -33,6 +34,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use time::{Instant, PrimitiveDateTime};
 
 #[cfg(debug_assertions)]
@@ -736,7 +738,7 @@ impl Transaction {
 	// Register cluster membership
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
-	pub async fn set_cl(&mut self, id: Uuid, now: Instant) -> Result<(), Error> {
+	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
 		let key = crate::key::cl::Cl::new(id.0);
 		match self.get_cl(id.clone()).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
@@ -745,7 +747,7 @@ impl Transaction {
 			None => {
 				let value = ClusterMembership {
 					name: id.0.to_string(),
-					heartbeat: now,
+					heartbeat: self.clock(),
 				};
 				self.put(key, value);
 				Ok(())
@@ -765,15 +767,24 @@ impl Transaction {
 		}
 	}
 
+	fn clock(&self) -> Timestamp {
+		// Use a timestamp oracle if available
+		let now: u128 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+		return Timestamp {
+			value: now as u64,
+		};
+	}
+
 	// Set heartbeat
-	pub async fn set_hb(&mut self, id: Uuid, ts: Instant) -> Result<(), Error> {
-		let key = crate::key::cl::Hb::new(id.0, ts);
+	pub async fn set_hb(&mut self, id: Uuid) -> Result<(), Error> {
+		let now = self.clock();
+		let key = crate::key::hb::Hb::new(now.clone(), id.0);
 		// We do not need to do a read, we always want to overwrite
 		self.put(
 			key,
 			ClusterMembership {
 				name: id.0.to_string(),
-				heartbeat: ts.clone(),
+				heartbeat: now,
 			},
 		);
 		Ok(())

@@ -65,6 +65,7 @@ pub(crate) mod view;
 pub(crate) mod test;
 
 pub(crate) mod cluster;
+pub(crate) mod cluster_timestamp;
 pub mod statements;
 
 pub use self::parser::*;
