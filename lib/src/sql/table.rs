@@ -4,6 +4,7 @@ use crate::sql::escape::escape_ident;
 use crate::sql::fmt::Fmt;
 use crate::sql::id::Id;
 use crate::sql::ident::{ident_raw, Ident};
+use crate::sql::strand::no_nul_bytes;
 use crate::sql::thing::Thing;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
@@ -42,7 +43,7 @@ pub fn tables(i: &str) -> IResult<&str, Tables> {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Table")]
-pub struct Table(pub String);
+pub struct Table(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Table {
 	fn from(v: String) -> Self {

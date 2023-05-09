@@ -72,7 +72,7 @@ impl<'a> Document<'a> {
 								let val = self.current.pick(k);
 								// Configure the context
 								let mut ctx = Context::new(ctx);
-								ctx.add_value("value".into(), &val);
+								ctx.add_value("value", &val);
 								// Process the PERMISSION clause
 								if !e
 									.compute(&ctx, opt, txn, Some(&self.current))

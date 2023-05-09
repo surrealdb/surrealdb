@@ -5,8 +5,10 @@ use crate::sql::Value;
 use js::{Async, Result};
 
 mod array;
+mod bytes;
 mod crypto;
 mod duration;
+mod encoding;
 mod geo;
 mod http;
 mod is;
@@ -25,9 +27,11 @@ impl_module_def!(
 	Package,
 	"", // root path
 	"array" => (array::Package),
+	"bytes" => (bytes::Package),
 	"count" => run,
 	"crypto" => (crypto::Package),
 	"duration" => (duration::Package),
+	"encoding" => (encoding::Package),
 	"geo" => (geo::Package),
 	"http" => (http::Package),
 	"is" => (is::Package),
