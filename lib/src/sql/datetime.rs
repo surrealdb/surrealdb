@@ -3,8 +3,10 @@ use crate::sql::duration::Duration;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_str;
 use crate::sql::strand::Strand;
-use chrono::{DateTime, FixedOffset, Offset, SecondsFormat, TimeZone, Utc};
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{
+	serde::ts_nanoseconds, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset,
+	SecondsFormat, TimeZone, Utc,
+};
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
@@ -22,7 +24,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Datetime";
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Datetime")]
-pub struct Datetime(pub DateTime<Utc>);
+pub struct Datetime(#[serde(with = "ts_nanoseconds")] pub DateTime<Utc>);
 
 impl Default for Datetime {
 	fn default() -> Self {
@@ -84,6 +86,10 @@ impl Datetime {
 	/// Convert the Datetime to a raw String
 	pub fn to_raw(&self) -> String {
 		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+	}
+
+	pub(crate) fn from_nanos(nanos: i64) -> Option<Self> {
+		Utc.timestamp_opt(nanos / 1_000_000_000, (nanos % 1_000_000_000) as u32).single().map(Self)
 	}
 }
 

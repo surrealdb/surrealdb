@@ -1,11 +1,11 @@
 use crate::err::Error;
 use crate::sql::value::serde::ser;
+use crate::sql::Datetime;
 use chrono::offset::Utc;
 use chrono::DateTime;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
 use serde::Serialize;
-use std::fmt::Display;
 
 pub(super) struct Serializer;
 
@@ -23,12 +23,10 @@ impl ser::Serializer for Serializer {
 
 	const EXPECTED: &'static str = "a struct `DateTime<Utc>`";
 
-	#[inline]
-	fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
-	where
-		T: Display,
-	{
-		value.to_string().parse().map_err(Error::custom)
+	fn serialize_i64(self, value: i64) -> Result<Self::Ok, Self::Error> {
+		Datetime::from_nanos(value)
+			.map(|d| d.0)
+			.ok_or_else(|| Error::custom("invalid datetime nanos"))
 	}
 
 	#[inline]
