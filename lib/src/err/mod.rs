@@ -419,6 +419,10 @@ pub enum Error {
 	FeatureNotYetImplemented {
 		feature: &'static str,
 	},
+
+	#[doc(hidden)]
+	#[error("Bypass the query planner")]
+	BypassQueryPlanner,
 }
 
 impl From<Error> for String {
