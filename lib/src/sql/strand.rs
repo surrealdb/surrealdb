@@ -216,7 +216,7 @@ pub(crate) mod no_nul_bytes {
 	};
 	use std::fmt;
 
-	pub(crate) fn serialize<S>(s: &String, serializer: S) -> Result<S::Ok, S::Error>
+	pub(crate) fn serialize<S>(s: &str, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
