@@ -133,6 +133,12 @@ impl InfoStatement {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("tb".to_owned(), tmp.into());
+				// Process the analyzers
+				let mut tmp = Object::default();
+				for v in run.all_az(opt.ns(), opt.db()).await?.iter() {
+					tmp.insert(v.name.to_string(), v.to_string().into());
+				}
+				res.insert("az".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}

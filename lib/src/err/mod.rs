@@ -234,6 +234,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested analyzer does not exist
+	#[error("The analyzer '{value}' does not exist")]
+	AzNotFound {
+		value: String,
+	},
+
 	/// Unable to perform the realtime query
 	#[error("Unable to perform the realtime query")]
 	RealtimeDisabled,

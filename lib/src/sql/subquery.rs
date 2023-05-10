@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::sql::comment::mightbespace;
+use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::ending::subquery as ending;
 use crate::sql::error::IResult;
 use crate::sql::statements::create::{create, CreateStatement};
@@ -15,7 +15,6 @@ use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
-use nom::character::complete::char;
 use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -237,22 +236,18 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 }
 
 fn subquery_value(i: &str) -> IResult<&str, Subquery> {
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, v) = map(value, Subquery::Value)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, v))
 }
 
 fn subquery_other(i: &str) -> IResult<&str, Subquery> {
 	alt((
 		|i| {
-			let (i, _) = char('(')(i)?;
-			let (i, _) = mightbespace(i)?;
+			let (i, _) = openparentheses(i)?;
 			let (i, v) = subquery_inner(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = char(')')(i)?;
+			let (i, _) = closeparentheses(i)?;
 			Ok((i, v))
 		},
 		|i| {

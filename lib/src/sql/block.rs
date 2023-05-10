@@ -4,7 +4,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
-use crate::sql::common::colons;
+use crate::sql::common::{closebraces, colons, openbraces};
 use crate::sql::error::IResult;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
 use crate::sql::statements::create::{create, CreateStatement};
@@ -18,7 +18,6 @@ use crate::sql::statements::set::{set, SetStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
-use nom::character::complete::char;
 use nom::combinator::map;
 use nom::multi::many0;
 use nom::multi::separated_list1;
@@ -159,12 +158,10 @@ impl Display for Block {
 }
 
 pub fn block(i: &str) -> IResult<&str, Block> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbraces(i)?;
 	let (i, v) = separated_list1(colons, entry)(i)?;
 	let (i, _) = many0(alt((colons, comment)))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
+	let (i, _) = closebraces(i)?;
 	Ok((i, Block(v)))
 }
 
