@@ -62,7 +62,7 @@ impl<'js> FromJs<'js> for Value {
 					let v: &classes::record::record::Record = v.as_ref();
 					check_nul(&v.value.tb)?;
 					if let Id::String(s) = &v.value.id {
-						check_nul(&s)?;
+						check_nul(s)?;
 					}
 					return Ok(v.value.clone().into());
 				}

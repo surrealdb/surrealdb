@@ -8,7 +8,7 @@ pub const MAX_CONCURRENT_TASKS: usize = 64;
 /// Specifies how deep various forms of computation will go before the query fails.
 ///
 /// For reference, use ~15 per MiB of stack in release mode.
-pub const MAX_COMPUTATION_DEPTH: Lazy<u8> = Lazy::new(|| {
+pub static MAX_COMPUTATION_DEPTH: Lazy<u8> = Lazy::new(|| {
 	option_env!("SURREAL_MAX_COMPUTATION_DEPTH").and_then(|s| s.parse::<u8>().ok()).unwrap_or(120)
 });
 
