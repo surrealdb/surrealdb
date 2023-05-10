@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::sql::common::{closeparenthese, openparenthese};
+use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::ending::subquery as ending;
 use crate::sql::error::IResult;
 use crate::sql::statements::create::{create, CreateStatement};
@@ -45,6 +45,7 @@ impl PartialOrd for Subquery {
 }
 
 impl Subquery {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Value(v) => v.writeable(),
@@ -58,7 +59,7 @@ impl Subquery {
 			Self::Insert(v) => v.writeable(),
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -80,7 +81,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -102,7 +103,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -124,7 +125,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -146,7 +147,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -168,7 +169,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -190,7 +191,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -235,18 +236,18 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 }
 
 fn subquery_value(i: &str) -> IResult<&str, Subquery> {
-	let (i, _) = openparenthese(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, v) = map(value, Subquery::Value)(i)?;
-	let (i, _) = closeparenthese(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, v))
 }
 
 fn subquery_other(i: &str) -> IResult<&str, Subquery> {
 	alt((
 		|i| {
-			let (i, _) = openparenthese(i)?;
+			let (i, _) = openparentheses(i)?;
 			let (i, v) = subquery_inner(i)?;
-			let (i, _) = closeparenthese(i)?;
+			let (i, _) = closeparentheses(i)?;
 			Ok((i, v))
 		},
 		|i| {

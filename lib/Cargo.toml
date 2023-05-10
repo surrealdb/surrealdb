@@ -35,7 +35,7 @@ kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
 native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
-rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls"]
+rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
 # Private features
 kv-fdb = ["foundationdb"]
 
@@ -55,6 +55,7 @@ argon2 = "0.5.0"
 ascii = { version = "0.3.2", package = "any_ascii" }
 async-trait = "0.1.68"
 async-recursion = "1.0.4"
+base64_lib = { version = "0.21.0", package = "base64" }
 bcrypt = "0.14.0"
 bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
 bung = "0.1.0"

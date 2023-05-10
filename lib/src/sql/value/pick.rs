@@ -3,6 +3,7 @@ use crate::sql::part::Part;
 use crate::sql::value::Value;
 
 impl Value {
+	/// Synchronous method for getting a field from a `Value`
 	pub fn pick(&self, path: &[Part]) -> Self {
 		match path.first() {
 			// Get the current path part

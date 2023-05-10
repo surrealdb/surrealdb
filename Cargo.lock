@@ -4000,6 +4000,7 @@ dependencies = [
  "async-executor",
  "async-recursion",
  "async-trait",
+ "base64 0.21.0",
  "bcrypt",
  "bigdecimal",
  "bincode",
@@ -4427,6 +4428,7 @@ dependencies = [
  "tokio-rustls",
  "tungstenite",
  "webpki",
+ "webpki-roots",
 ]
 
 [[package]]

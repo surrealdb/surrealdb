@@ -1,4 +1,4 @@
-use crate::sql::common::{closeparenthese, commas, openparenthese};
+use crate::sql::common::{closeparentheses, commas, openparentheses};
 use crate::sql::error::IResult;
 use crate::sql::number::number;
 use crate::sql::Number;
@@ -44,13 +44,13 @@ impl fmt::Display for Scoring {
 pub fn scoring(i: &str) -> IResult<&str, Scoring> {
 	alt((map(tag_no_case("VS"), |_| Scoring::Vs), |i| {
 		let (i, _) = tag_no_case("BM25")(i)?;
-		let (i, _) = openparenthese(i)?;
+		let (i, _) = openparentheses(i)?;
 		let (i, k1) = number(i)?;
 		let (i, _) = commas(i)?;
 		let (i, b) = number(i)?;
 		let (i, _) = commas(i)?;
 		let (i, order) = number(i)?;
-		let (i, _) = closeparenthese(i)?;
+		let (i, _) = closeparentheses(i)?;
 		Ok((
 			i,
 			Scoring::Bm {

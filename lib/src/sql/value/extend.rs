@@ -15,7 +15,7 @@ impl Value {
 		path: &[Part],
 		val: Value,
 	) -> Result<(), Error> {
-		match self.get(ctx, opt, txn, path).await? {
+		match self.get(ctx, opt, txn, None, path).await? {
 			Value::Array(v) => match val {
 				Value::Array(x) => self.set(ctx, opt, txn, path, Value::from((v + x).uniq())).await,
 				x => self.set(ctx, opt, txn, path, Value::from((v + x).uniq())).await,

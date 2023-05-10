@@ -111,6 +111,7 @@ impl Array {
 }
 
 impl Array {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

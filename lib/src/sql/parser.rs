@@ -29,7 +29,7 @@ pub fn value(input: &str) -> Result<Value, Error> {
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(name = "parser", skip_all, fields(length = input.len()))]
 pub fn json(input: &str) -> Result<Value, Error> {
-	parse_impl(input, super::value::json)
+	parse_impl(input.trim(), super::value::json)
 }
 
 fn parse_impl<O>(input: &str, parser: impl Fn(&str) -> IResult<&str, O>) -> Result<O, Error> {

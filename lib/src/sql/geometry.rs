@@ -1,7 +1,7 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
 use crate::sql::comment::mightbespace;
-use crate::sql::common::{closebracket, closeparenthese, commas, openbracket, openparenthese};
+use crate::sql::common::{closebracket, closeparentheses, commas, openbracket, openparentheses};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use geo::algorithm::contains::Contains;
@@ -538,11 +538,11 @@ pub fn geometry(i: &str) -> IResult<&str, Geometry> {
 }
 
 fn simple(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = openparenthese(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, x) = double(i)?;
 	let (i, _) = commas(i)?;
 	let (i, y) = double(i)?;
-	let (i, _) = closeparenthese(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, Geometry::Point((x, y).into())))
 }
 

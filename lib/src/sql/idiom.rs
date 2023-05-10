@@ -123,6 +123,11 @@ impl Idiom {
 }
 
 impl Idiom {
+	/// Check if we require a writeable transaction
+	pub(crate) fn writeable(&self) -> bool {
+		self.0.iter().any(|v| v.writeable())
+	}
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -135,7 +140,7 @@ impl Idiom {
 			Some(Part::Value(v)) => {
 				v.compute(ctx, opt, txn, doc)
 					.await?
-					.get(ctx, opt, txn, self.as_ref().next())
+					.get(ctx, opt, txn, doc, self.as_ref().next())
 					.await?
 					.compute(ctx, opt, txn, doc)
 					.await
@@ -143,7 +148,7 @@ impl Idiom {
 			// Otherwise use the current document
 			_ => match doc {
 				// There is a current document
-				Some(v) => v.get(ctx, opt, txn, self).await?.compute(ctx, opt, txn, doc).await,
+				Some(v) => v.get(ctx, opt, txn, doc, self).await?.compute(ctx, opt, txn, doc).await,
 				// There isn't any document
 				None => Ok(Value::None),
 			},

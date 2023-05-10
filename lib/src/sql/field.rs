@@ -70,6 +70,7 @@ impl Display for Fields {
 }
 
 impl Fields {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -118,7 +119,7 @@ impl Fields {
 							};
 							// Continue fetching the next idiom part
 							let x = x
-								.get(ctx, opt, txn, v)
+								.get(ctx, opt, txn, Some(doc), v)
 								.await?
 								.compute(ctx, opt, txn, Some(doc))
 								.await?
@@ -174,7 +175,7 @@ impl Fields {
 							};
 							// Continue fetching the next idiom part
 							let x = x
-								.get(ctx, opt, txn, v)
+								.get(ctx, opt, txn, Some(doc), v)
 								.await?
 								.compute(ctx, opt, txn, Some(doc))
 								.await?

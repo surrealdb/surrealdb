@@ -66,6 +66,49 @@ async fn select_field_value() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn select_writeable_subqueries() -> Result<(), Error> {
+	let sql = "
+		LET $id = (UPDATE tester:test);
+		RETURN $id;
+		LET $id = (UPDATE tester:test).id;
+		RETURN $id;
+		LET $id = (SELECT VALUE id FROM (UPDATE tester:test))[0];
+		RETURN $id;
+	";
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 6);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			id: tester:test
+		}",
+	);
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("tester:test");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result;
+	assert!(tmp.is_ok());
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("tester:test");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn select_where_or() -> Result<(), Error> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie';

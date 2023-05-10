@@ -49,6 +49,7 @@ pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
 	Function(DefineFunctionStatement),
+	Analyzer(DefineAnalyzerStatement),
 	Login(DefineLoginStatement),
 	Token(DefineTokenStatement),
 	Scope(DefineScopeStatement),
@@ -57,10 +58,10 @@ pub enum DefineStatement {
 	Event(DefineEventStatement),
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
-	Analyzer(DefineAnalyzerStatement),
 }
 
 impl DefineStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -132,6 +133,7 @@ pub struct DefineNamespaceStatement {
 }
 
 impl DefineNamespaceStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -182,6 +184,7 @@ pub struct DefineDatabaseStatement {
 }
 
 impl DefineDatabaseStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -239,6 +242,7 @@ pub struct DefineFunctionStatement {
 }
 
 impl DefineFunctionStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -316,6 +320,80 @@ fn function(i: &str) -> IResult<&str, DefineFunctionStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub struct DefineAnalyzerStatement {
+	pub name: Ident,
+	pub tokenizers: Option<Vec<Tokenizer>>,
+	pub filters: Option<Vec<Filter>>,
+}
+
+impl DefineAnalyzerStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Process the statement
+		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
+		run.add_ns(opt.ns(), opt.strict).await?;
+		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
+		run.set(key, self).await?;
+		// Release the transaction
+		drop(run);
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl Display for DefineAnalyzerStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFINE ANALYZER {}", self.name)?;
+		if let Some(tokenizers) = &self.tokenizers {
+			let tokens: Vec<String> = tokenizers.iter().map(|f| f.to_string()).collect();
+			write!(f, " TOKENIZERS {}", tokens.join(","))?;
+		}
+		if let Some(filters) = &self.filters {
+			let tokens: Vec<String> = filters.iter().map(|f| f.to_string()).collect();
+			write!(f, " FILTERS {}", tokens.join(","))?;
+		}
+		Ok(())
+	}
+}
+
+fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
+	let (i, _) = tag_no_case("DEFINE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ANALYZER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, tokenizers) = opt(tokenizers)(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, filters) = opt(filters)(i)?;
+	Ok((
+		i,
+		DefineAnalyzerStatement {
+			name,
+			tokenizers,
+			filters,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 #[format(Named)]
 pub struct DefineLoginStatement {
 	pub name: Ident,
@@ -325,6 +403,7 @@ pub struct DefineLoginStatement {
 }
 
 impl DefineLoginStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -449,6 +528,7 @@ pub struct DefineTokenStatement {
 }
 
 impl DefineTokenStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -570,6 +650,7 @@ pub struct DefineScopeStatement {
 }
 
 impl DefineScopeStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -690,6 +771,7 @@ pub struct DefineParamStatement {
 }
 
 impl DefineParamStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -940,6 +1022,7 @@ pub struct DefineEventStatement {
 }
 
 impl DefineEventStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -1026,6 +1109,7 @@ pub struct DefineFieldStatement {
 }
 
 impl DefineFieldStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -1188,6 +1272,7 @@ pub struct DefineIndexStatement {
 }
 
 impl DefineIndexStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -1271,76 +1356,6 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 			what,
 			cols,
 			index,
-		},
-	))
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-pub struct DefineAnalyzerStatement {
-	pub name: Ident,
-	pub tokenizers: Option<Vec<Tokenizer>>,
-	pub filters: Option<Vec<Filter>>,
-}
-
-impl DefineAnalyzerStatement {
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
-		// Allowed to run?
-		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
-		// Claim transaction
-		let mut run = run.lock().await;
-		// Process the statement
-		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
-		run.add_ns(opt.ns(), opt.strict).await?;
-		run.add_db(opt.ns(), opt.db(), opt.strict).await?;
-		run.set(key, self).await?;
-		// Release the transaction
-		drop(run);
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
-impl Display for DefineAnalyzerStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ANALYZER {}", self.name)?;
-		if let Some(tokenizers) = &self.tokenizers {
-			let tokens: Vec<String> = tokenizers.iter().map(|f| f.to_string()).collect();
-			write!(f, " TOKENIZERS {}", tokens.join(","))?;
-		}
-		if let Some(filters) = &self.filters {
-			let tokens: Vec<String> = filters.iter().map(|f| f.to_string()).collect();
-			write!(f, " FILTERS {}", tokens.join(","))?;
-		}
-		Ok(())
-	}
-}
-
-fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
-	let (i, _) = tag_no_case("DEFINE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ANALYZER")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, tokenizers) = opt(tokenizers)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, filters) = opt(filters)(i)?;
-	Ok((
-		i,
-		DefineAnalyzerStatement {
-			name,
-			tokenizers,
-			filters,
 		},
 	))
 }
