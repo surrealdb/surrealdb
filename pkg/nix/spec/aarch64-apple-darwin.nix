@@ -12,8 +12,11 @@
 
     buildInputs = [ openssl libiconv darwin.apple_sdk.frameworks.Security ];
 
-    PROTOC = "${protobuf}/bin/protoc";
-    PROTOC_INCLUDE = "${protobuf}/include";
+    # From https://github.com/NixOS/nixpkgs/blob/master/pkgs/development/libraries/rocksdb/default.nix#LL43C7-L52C6
+    NIX_CFLAGS_COMPILE = toString ([
+      "-Wno-error=unused-private-field"
+      "-faligned-allocation"
+    ]);
 
     CARGO_BUILD_TARGET = target;
   };
