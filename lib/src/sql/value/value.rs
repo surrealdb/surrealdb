@@ -8,7 +8,6 @@ use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
 use crate::sql::bytes::Bytes;
-use crate::sql::cluster::ClusterMembership;
 use crate::sql::comment::mightbespace;
 use crate::sql::common::commas;
 use crate::sql::constant::{constant, Constant};

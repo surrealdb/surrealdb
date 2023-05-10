@@ -1,8 +1,6 @@
 use crate::sql::cluster_timestamp::Timestamp;
-use crate::sql::{Datetime, Strand};
 use derive::Store;
 use serde::{Deserialize, Serialize};
-use std::fmt::Formatter;
 
 // NOTE: This is not a statement, but as per layering, keeping it here till we
 // have a better structure.

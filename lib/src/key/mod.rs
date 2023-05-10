@@ -1,4 +1,3 @@
-pub(crate) mod cl;
 ///
 /// KV              /
 ///
@@ -37,6 +36,7 @@ pub(crate) mod cl;
 ///
 /// Index           /*{ns}*{db}*{tb}¤{ix}{fd}{id}
 ///
+pub mod cl;
 pub mod database; // Stores the key prefix for all keys under a database
 pub mod db; // Stores a DEFINE DATABASE config definition
 pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition
@@ -46,7 +46,7 @@ pub mod fc; // Stores a DEFINE FUNCTION config definition
 pub mod fd; // Stores a DEFINE FIELD config definition
 pub mod ft; // Stores a DEFINE TABLE AS config definition
 pub mod graph; // Stores a graph edge pointer
-pub(crate) mod hb; // Stores a record id
+pub mod hb;
 pub mod index; // Stores an index entry
 pub mod ix; // Stores a DEFINE INDEX config definition
 pub mod kv; // Stores the key prefix for all keys
@@ -62,4 +62,4 @@ pub mod scope; // Stores the key prefix for all keys under a scope
 pub mod st; // Stores a DEFINE TOKEN ON SCOPE config definition
 pub mod table; // Stores the key prefix for all keys under a table
 pub mod tb; // Stores a DEFINE TABLE config definition
-pub mod thing; // Stores cluster membership information
+pub mod thing; // Stores cluster membership information // Stores a record id

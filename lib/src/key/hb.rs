@@ -1,7 +1,6 @@
 use crate::sql::cluster_timestamp::Timestamp;
 use derive::Key;
 use serde::{Deserialize, Serialize};
-use time::Instant;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
@@ -15,7 +14,7 @@ pub struct Hb {
 	pub nd: Uuid,
 }
 
-pub fn new<'a>(hb: Timestamp, nd: &Uuid) -> Hb {
+pub fn new(hb: Timestamp, nd: &Uuid) -> Hb {
 	Hb::new(hb, nd.to_owned())
 }
 

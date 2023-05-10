@@ -13,10 +13,8 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
-use crate::sql::Value::{Datetime, Strand};
 use crate::sql::{Uuid, Value};
 use channel::Sender;
-use chrono::{DateTime, Utc};
 use sql::permission::Permissions;
 use sql::statements::DefineDatabaseStatement;
 use sql::statements::DefineEventStatement;
@@ -35,7 +33,6 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use time::{Instant, PrimitiveDateTime};
 
 #[cfg(debug_assertions)]
 const LOG: &str = "surrealdb::txn";
@@ -749,7 +746,7 @@ impl Transaction {
 					name: id.0.to_string(),
 					heartbeat: self.clock(),
 				};
-				self.put(key, value);
+				self.put(key, value).await?;
 				Ok(())
 			}
 		}
@@ -786,7 +783,8 @@ impl Transaction {
 				name: id.0.to_string(),
 				heartbeat: now,
 			},
-		);
+		)
+		.await?;
 		Ok(())
 	}
 
