@@ -53,6 +53,7 @@ use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as Json;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -1018,6 +1019,14 @@ impl Value {
 				message: String::from("Operations must be an array"),
 			}),
 		}
+	}
+
+	/// Converts a `surrealdb::sq::Value` into a `serde_json::Value`
+	///
+	/// This converts certain types like `Thing` into their simpler formats
+	/// instead of the format used internally by SurrealDB.
+	pub fn into_json(self) -> Json {
+		self.into()
 	}
 
 	// -----------------------------------
