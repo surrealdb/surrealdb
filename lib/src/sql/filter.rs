@@ -1,5 +1,5 @@
 use crate::sql::comment::shouldbespace;
-use crate::sql::common::{closeparenthese, commas, openparenthese};
+use crate::sql::common::{closeparentheses, commas, openparentheses};
 use crate::sql::error::IResult;
 use crate::sql::language::{language, Language};
 use crate::sql::number::number;
@@ -30,19 +30,19 @@ impl Display for Filter {
 
 fn edgengram(i: &str) -> IResult<&str, Filter> {
 	let (i, _) = tag_no_case("EDGENGRAM")(i)?;
-	let (i, _) = openparenthese(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, min) = number(i)?;
 	let (i, _) = commas(i)?;
 	let (i, max) = number(i)?;
-	let (i, _) = closeparenthese(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, Filter::EdgeNgram(min, max)))
 }
 
 fn snowball(i: &str) -> IResult<&str, Filter> {
 	let (i, _) = tag_no_case("SNOWBALL")(i)?;
-	let (i, _) = openparenthese(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, language) = language(i)?;
-	let (i, _) = closeparenthese(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, Filter::Snowball(language)))
 }
 

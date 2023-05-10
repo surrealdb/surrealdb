@@ -36,13 +36,13 @@ pub fn commasorspace(i: &str) -> IResult<&str, ()> {
 	alt((commas, shouldbespace))(i)
 }
 
-pub fn openparenthese(i: &str) -> IResult<&str, ()> {
+pub fn openparentheses(i: &str) -> IResult<&str, ()> {
 	let (i, _) = char('(')(i)?;
 	let (i, _) = mightbespace(i)?;
 	Ok((i, ()))
 }
 
-pub fn closeparenthese(i: &str) -> IResult<&str, ()> {
+pub fn closeparentheses(i: &str) -> IResult<&str, ()> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(')')(i)?;
 	Ok((i, ()))

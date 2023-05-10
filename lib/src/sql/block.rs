@@ -47,10 +47,11 @@ impl From<Value> for Block {
 }
 
 impl Block {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		self.iter().any(Entry::writeable)
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -186,6 +187,7 @@ impl PartialOrd for Entry {
 }
 
 impl Entry {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Set(v) => v.writeable(),

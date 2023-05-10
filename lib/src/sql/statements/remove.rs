@@ -27,6 +27,7 @@ pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
 	Function(RemoveFunctionStatement),
+	Analyzer(RemoveAnalyzerStatement),
 	Login(RemoveLoginStatement),
 	Token(RemoveTokenStatement),
 	Scope(RemoveScopeStatement),
@@ -35,10 +36,10 @@ pub enum RemoveStatement {
 	Event(RemoveEventStatement),
 	Field(RemoveFieldStatement),
 	Index(RemoveIndexStatement),
-	Analyzer(RemoveAnalyzerStatement),
 }
 
 impl RemoveStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -110,6 +111,7 @@ pub struct RemoveNamespaceStatement {
 }
 
 impl RemoveNamespaceStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -167,6 +169,7 @@ pub struct RemoveDatabaseStatement {
 }
 
 impl RemoveDatabaseStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -224,6 +227,7 @@ pub struct RemoveFunctionStatement {
 }
 
 impl RemoveFunctionStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -280,6 +284,60 @@ fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub struct RemoveAnalyzerStatement {
+	pub name: Ident,
+}
+
+impl RemoveAnalyzerStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// TODO Check that the analyzer is not used in any schema
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl Display for RemoveAnalyzerStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "REMOVE ANALYZER {}", self.name)
+	}
+}
+
+fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
+	let (i, _) = tag_no_case("REMOVE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ANALYZER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	Ok((
+		i,
+		RemoveAnalyzerStatement {
+			name,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 #[format(Named)]
 pub struct RemoveLoginStatement {
 	pub name: Ident,
@@ -287,6 +345,7 @@ pub struct RemoveLoginStatement {
 }
 
 impl RemoveLoginStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -367,6 +426,7 @@ pub struct RemoveTokenStatement {
 }
 
 impl RemoveTokenStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -461,6 +521,7 @@ pub struct RemoveScopeStatement {
 }
 
 impl RemoveScopeStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -518,6 +579,7 @@ pub struct RemoveParamStatement {
 }
 
 impl RemoveParamStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -573,6 +635,7 @@ pub struct RemoveTableStatement {
 }
 
 impl RemoveTableStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -631,6 +694,7 @@ pub struct RemoveEventStatement {
 }
 
 impl RemoveEventStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -695,6 +759,7 @@ pub struct RemoveFieldStatement {
 }
 
 impl RemoveFieldStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -760,6 +825,7 @@ pub struct RemoveIndexStatement {
 }
 
 impl RemoveIndexStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -812,60 +878,6 @@ fn index(i: &str) -> IResult<&str, RemoveIndexStatement> {
 		RemoveIndexStatement {
 			name,
 			what,
-		},
-	))
-}
-
-// --------------------------------------------------
-// --------------------------------------------------
-// --------------------------------------------------
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
-pub struct RemoveAnalyzerStatement {
-	pub name: Ident,
-}
-
-impl RemoveAnalyzerStatement {
-	pub(crate) async fn compute(
-		&self,
-		_ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		_doc: Option<&Value>,
-	) -> Result<Value, Error> {
-		// Selected DB?
-		opt.needs(Level::Db)?;
-		// Allowed to run?
-		opt.check(Level::Db)?;
-		// Clone transaction
-		let run = txn.clone();
-		// Claim transaction
-		let mut run = run.lock().await;
-		// Delete the definition
-		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
-		run.del(key).await?;
-		// TODO Check that the analyzer is not used in any schema
-		// Ok all good
-		Ok(Value::None)
-	}
-}
-
-impl Display for RemoveAnalyzerStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE ANALYZER {}", self.name)
-	}
-}
-
-fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
-	let (i, _) = tag_no_case("REMOVE")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, _) = tag_no_case("ANALYZER")(i)?;
-	let (i, _) = shouldbespace(i)?;
-	let (i, name) = ident(i)?;
-	Ok((
-		i,
-		RemoveAnalyzerStatement {
-			name,
 		},
 	))
 }

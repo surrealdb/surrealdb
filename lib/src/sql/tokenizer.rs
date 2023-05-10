@@ -13,6 +13,7 @@ use std::fmt::Display;
 pub enum Tokenizer {
 	Case,
 	Space,
+	// Add new variants here
 }
 
 impl Display for Tokenizer {

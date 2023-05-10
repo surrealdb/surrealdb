@@ -47,13 +47,28 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Loop over each command-line input
 	loop {
 		// Use namespace / database if specified
-		if let (Some(namespace), Some(database)) = (&ns, &db) {
-			match client.use_ns(namespace).use_db(database).await {
+		match (&ns, &db) {
+			(Some(namespace), Some(database)) => {
+				match client.use_ns(namespace).use_db(database).await {
+					Ok(()) => {
+						prompt = format!("{namespace}/{database}> ");
+					}
+					Err(error) => eprintln!("{error}"),
+				}
+			}
+			(Some(namespace), None) => match client.use_ns(namespace).await {
 				Ok(()) => {
-					prompt = format!("{namespace}/{database}> ");
+					prompt = format!("{namespace}> ");
 				}
 				Err(error) => eprintln!("{error}"),
-			}
+			},
+			(None, Some(database)) => match client.use_db(database).await {
+				Ok(()) => {
+					prompt = format!("/{database}> ");
+				}
+				Err(error) => eprintln!("{error}"),
+			},
+			(None, None) => {}
 		}
 		// Prompt the user to input SQL
 		let readline = rl.readline(&prompt);

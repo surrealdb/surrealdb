@@ -44,7 +44,7 @@ pub struct Client {
 
 impl Surreal<Client> {
 	pub fn connect<P>(
-		&'static self,
+		&self,
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {

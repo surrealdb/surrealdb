@@ -23,6 +23,7 @@ mod signin;
 mod signup;
 mod unset;
 mod update;
+mod use_db;
 mod use_ns;
 mod version;
 
@@ -58,8 +59,8 @@ pub use signin::Signin;
 pub use signup::Signup;
 pub use unset::Unset;
 pub use update::Update;
+pub use use_db::UseDb;
 pub use use_ns::UseNs;
-pub use use_ns::UseNsDb;
 pub use version::Version;
 
 use crate::api::conn::Method;
@@ -74,6 +75,7 @@ use crate::api::ExtractRouter;
 use crate::api::Surreal;
 use crate::sql::to_value;
 use crate::sql::Uuid;
+use crate::sql::Value;
 use once_cell::sync::OnceCell;
 use serde::Serialize;
 use std::marker::PhantomData;
@@ -252,7 +254,7 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// db.use_ns("namespace").use_db("database").await?;
+	/// db.use_ns("namespace").await?;
 	/// # Ok(())
 	/// # }
 	/// ```
@@ -260,6 +262,26 @@ where
 		UseNs {
 			router: self.router.extract(),
 			ns: ns.into(),
+		}
+	}
+
+	/// Switch to a specific database
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// db.use_db("database").await?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn use_db(&self, db: impl Into<String>) -> UseDb<C> {
+		UseDb {
+			router: self.router.extract(),
+			ns: Value::None,
+			db: db.into(),
 		}
 	}
 
