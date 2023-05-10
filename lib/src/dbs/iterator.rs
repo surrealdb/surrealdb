@@ -6,6 +6,7 @@ use crate::dbs::Transaction;
 use crate::dbs::LOG;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::idx::planner::plan::Plan;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
@@ -26,6 +27,7 @@ pub(crate) enum Iterable {
 	Edges(Edges),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),
+	Index(Plan),
 }
 
 pub(crate) enum Operable {

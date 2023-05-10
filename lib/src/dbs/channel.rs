@@ -351,6 +351,9 @@ impl Iterable {
 						}
 					}
 				}
+				Iterable::Index(p) => {
+					todo!()
+				}
 			}
 		}
 		Ok(())

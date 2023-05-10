@@ -109,12 +109,11 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_or() -> Result<(), Error> {
+async fn select_where_and() -> Result<(), Error> {
 	let sql = "
-		CREATE person:tobie SET name = 'Tobie';
+		CREATE person:tobie SET name = 'Tobie', genre='m';
 		DEFINE INDEX person_name ON TABLE person COLUMNS name;
-		CREATE activity:piano SET name = 'Piano';
-		SELECT name FROM person,activity WHERE name = 'Tobie' OR name = 'Piano';";
+		SELECT name FROM person WHERE name = 'Tobie' AND genre = 'm';";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
@@ -129,9 +128,6 @@ async fn select_where_or() -> Result<(), Error> {
 		"[
 			{
 				name: 'Tobie'
-			},
-			{
-				name: 'Piano'
 			}
 		]",
 	);
