@@ -34,9 +34,9 @@ chrono = { version = "0.4.24", features = ["serde"] }
 clap = { version = "4.2.1", features = ["env", "derive", "wrap_help", "unicode"] }
 clap_complete = "4.2.0"
 fern = { version = "0.6.2", features = ["colored"] }
-futures = "0.3.27"
+futures = "0.3.28"
 http = "0.2.9"
-hyper = "0.14.25"
+hyper = "0.14.26"
 ipnet = "2.7.2"
 jsonwebtoken = "8.3.0"
 log = "0.4.17"
@@ -47,10 +47,10 @@ path-absolutize = "3.0.14"
 rand = "0.8.5"
 reqwest = { version = "0.11.16", features = ["blocking"] }
 rustyline = "11.0.0"
-serde = { version = "1.0.159", features = ["derive"] }
+serde = { version = "1.0.160", features = ["derive"] }
 serde_cbor = "0.11.2"
-serde_json = "1.0.95"
 serde_pack = { version = "1.1.1", package = "rmp-serde" }
+serde_json = "1.0.96"
 surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"] }
 sysinfo = "0.28.4"
 thiserror = "1.0.40"
@@ -61,7 +61,7 @@ tracing-futures = "0.2.5"
 tracing-opentelemetry = "0.18.0"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 urlencoding = "2.1.2"
-warp = { version = "0.3.3", features = ["compression", "tls", "websocket"] }
+warp = { version = "0.3.4", features = ["compression", "tls", "websocket"] }
 
 [dev-dependencies]
 tonic = "0.8.3"

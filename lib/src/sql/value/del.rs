@@ -2,18 +2,19 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::exe::try_join_all_buffered;
 use crate::sql::array::Abolish;
 use crate::sql::part::Next;
 use crate::sql::part::Part;
 use crate::sql::value::Value;
 use async_recursion::async_recursion;
-use futures::future::try_join_all;
 use std::collections::HashSet;
 
 impl Value {
+	/// Asynchronous method for deleting a field from a `Value`
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
-	pub async fn del(
+	pub(crate) async fn del(
 		&mut self,
 		ctx: &Context<'_>,
 		opt: &Options,
@@ -27,10 +28,10 @@ impl Value {
 				Value::Object(v) => match p {
 					Part::Field(f) => match path.len() {
 						1 => {
-							v.remove(f as &str);
+							v.remove(f.as_str());
 							Ok(())
 						}
-						_ => match v.get_mut(f as &str) {
+						_ => match v.get_mut(f.as_str()) {
 							Some(v) if v.is_some() => v.del(ctx, opt, txn, path.next()).await,
 							_ => Ok(()),
 						},
@@ -47,13 +48,13 @@ impl Value {
 						_ => {
 							let path = path.next();
 							let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-							try_join_all(futs).await?;
+							try_join_all_buffered(futs).await?;
 							Ok(())
 						}
 					},
 					Part::First => match path.len() {
 						1 => {
-							if v.len().gt(&0) {
+							if !v.is_empty() {
 								let i = 0;
 								v.remove(i);
 							}
@@ -66,7 +67,7 @@ impl Value {
 					},
 					Part::Last => match path.len() {
 						1 => {
-							if v.len().gt(&0) {
+							if !v.is_empty() {
 								let i = v.len() - 1;
 								v.remove(i);
 							}
@@ -114,7 +115,7 @@ impl Value {
 					},
 					_ => {
 						let futs = v.iter_mut().map(|v| v.del(ctx, opt, txn, path));
-						try_join_all(futs).await?;
+						try_join_all_buffered(futs).await?;
 						Ok(())
 					}
 				},

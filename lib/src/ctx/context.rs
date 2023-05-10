@@ -1,10 +1,9 @@
-use crate::ctx::cancellation::Cancellation;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 use crate::sql::value::Value;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +20,6 @@ impl<'a> From<&'a Value> for Cow<'a, Value> {
 		Cow::Borrowed(v)
 	}
 }
-
 pub struct Context<'a> {
 	// An optional parent context.
 	parent: Option<&'a Context<'a>>,
@@ -30,12 +28,23 @@ pub struct Context<'a> {
 	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
-	values: HashMap<String, Cow<'a, Value>>,
+	values: HashMap<Cow<'static, str>, Cow<'a, Value>>,
 }
 
 impl<'a> Default for Context<'a> {
 	fn default() -> Self {
 		Context::background()
+	}
+}
+
+impl<'a> Debug for Context<'a> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.debug_struct("Context")
+			.field("parent", &self.parent)
+			.field("deadline", &self.deadline)
+			.field("cancelled", &self.cancelled)
+			.field("values", &self.values)
+			.finish()
 	}
 }
 
@@ -67,16 +76,6 @@ impl<'a> Context<'a> {
 		Canceller::new(cancelled)
 	}
 
-	/// Get a 'static view into the cancellation status.
-	pub fn cancellation(&self) -> Cancellation {
-		Cancellation::new(
-			self.deadline,
-			std::iter::successors(Some(self), |ctx| ctx.parent)
-				.map(|ctx| ctx.cancelled.clone())
-				.collect(),
-		)
-	}
-
 	/// Add a deadline to the context. If the current deadline is sooner than
 	/// the provided deadline, this method does nothing.
 	pub fn add_deadline(&mut self, deadline: Instant) {
@@ -94,17 +93,12 @@ impl<'a> Context<'a> {
 
 	/// Add a value to the context. It overwrites any previously set values
 	/// with the same key.
-	pub fn add_value<V>(&mut self, key: String, value: V)
+	pub fn add_value<K, V>(&mut self, key: K, value: V)
 	where
+		K: Into<Cow<'static, str>>,
 		V: Into<Cow<'a, Value>>,
 	{
-		self.values.insert(key, value.into());
-	}
-
-	/// Get the deadline for this operation, if any. This is useful for
-	/// checking if a long job should be started or not.
-	pub fn deadline(&self) -> Option<Instant> {
-		self.deadline
+		self.values.insert(key.into(), value.into());
 	}
 
 	/// Get the timeout for this operation, if any. This is useful for
@@ -132,11 +126,6 @@ impl<'a> Context<'a> {
 	}
 
 	/// Check if the context is not ok to continue.
-	pub fn is_err(&self) -> bool {
-		self.done().is_some()
-	}
-
-	/// Check if the context is not ok to continue.
 	pub fn is_done(&self) -> bool {
 		self.done().is_some()
 	}
@@ -144,20 +133,6 @@ impl<'a> Context<'a> {
 	/// Check if the context is not ok to continue, because it timed out.
 	pub fn is_timedout(&self) -> bool {
 		matches!(self.done(), Some(Reason::Timedout))
-	}
-
-	/// Check if the context is not ok to continue, because it was cancelled.
-	pub fn is_cancelled(&self) -> bool {
-		matches!(self.done(), Some(Reason::Canceled))
-	}
-
-	/// Check if the status of the context. This will return a Result, with an Ok
-	/// if the operation may proceed, and an Error if it should be stopped.
-	pub fn check(&self) -> Result<(), Reason> {
-		match self.done() {
-			Some(reason) => Err(reason),
-			None => Ok(()),
-		}
 	}
 
 	/// Get a value from the context. If no value is stored under the
@@ -174,15 +149,15 @@ impl<'a> Context<'a> {
 			},
 		}
 	}
-}
 
-impl<'a> fmt::Debug for Context<'a> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.debug_struct("Context")
-			.field("parent", &self.parent)
-			.field("deadline", &self.deadline)
-			.field("cancelled", &self.cancelled)
-			.field("values", &self.values)
-			.finish()
+	/// Get a 'static view into the cancellation status.
+	#[cfg(feature = "scripting")]
+	pub fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {
+		crate::ctx::cancellation::Cancellation::new(
+			self.deadline,
+			std::iter::successors(Some(self), |ctx| ctx.parent)
+				.map(|ctx| ctx.cancelled.clone())
+				.collect(),
+		)
 	}
 }

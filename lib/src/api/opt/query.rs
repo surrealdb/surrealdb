@@ -184,6 +184,15 @@ where
 	fn query_result(self, response: &mut QueryResponse) -> Result<Response>;
 }
 
+impl QueryResult<Value> for usize {
+	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Value> {
+		match map.remove(&self) {
+			Some(result) => Ok(result?.into()),
+			None => Ok(Value::None),
+		}
+	}
+}
+
 impl<T> QueryResult<Option<T>> for usize
 where
 	T: DeserializeOwned,
@@ -212,6 +221,34 @@ where
 		};
 		map.remove(&self);
 		result
+	}
+}
+
+impl QueryResult<Value> for (usize, &str) {
+	fn query_result(self, QueryResponse(map): &mut QueryResponse) -> Result<Value> {
+		let (index, key) = self;
+		let response = match map.get_mut(&index) {
+			Some(result) => match result {
+				Ok(vec) => vec,
+				Err(error) => {
+					let error = mem::replace(error, Error::ConnectionUninitialised.into());
+					map.remove(&index);
+					return Err(error);
+				}
+			},
+			None => {
+				return Ok(Value::None);
+			}
+		};
+		let mut vec = Vec::with_capacity(response.len());
+		for value in response.iter_mut() {
+			if let Value::Object(Object(object)) = value {
+				if let Some(value) = object.remove(key) {
+					vec.push(value);
+				}
+			}
+		}
+		Ok(vec.into())
 	}
 }
 
@@ -307,6 +344,12 @@ where
 			}
 		}
 		from_value(vec.into()).map_err(Into::into)
+	}
+}
+
+impl QueryResult<Value> for &str {
+	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
+		(0, self).query_result(response)
 	}
 }
 

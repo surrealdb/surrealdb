@@ -40,7 +40,7 @@ impl<'a> Document<'a> {
 		run.del(key).await?;
 		// Purge the record edges
 		match (self.initial.pick(&*EDGE), self.initial.pick(&*IN), self.initial.pick(&*OUT)) {
-			(Value::True, Value::Thing(ref l), Value::Thing(ref r)) => {
+			(Value::Bool(true), Value::Thing(ref l), Value::Thing(ref r)) => {
 				// Get temporary edge references
 				let (ref o, ref i) = (Dir::Out, Dir::In);
 				// Purge the left pointer edge

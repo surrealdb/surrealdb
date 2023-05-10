@@ -33,14 +33,13 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn from_i32() {
 		let decimal = BigDecimal::from(25);
-		let serialized = serialize_internal(|| decimal.serialize(Serializer.wrap())).unwrap();
+		let serialized = decimal.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(decimal, serialized);
 	}
 }

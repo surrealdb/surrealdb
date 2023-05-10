@@ -97,74 +97,104 @@ impl Datastore {
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
 		match path {
-			#[cfg(feature = "kv-mem")]
 			"memory" => {
-				info!(target: LOG, "Starting kvs store in {}", path);
-				let v = super::mem::Datastore::new().await.map(|v| Datastore {
-					inner: Inner::Mem(v),
-				});
-				info!(target: LOG, "Started kvs store in {}", path);
-				v
+				#[cfg(feature = "kv-mem")]
+				{
+					info!(target: LOG, "Starting kvs store in {}", path);
+					let v = super::mem::Datastore::new().await.map(|v| Datastore {
+						inner: Inner::Mem(v),
+					});
+					info!(target: LOG, "Started kvs store in {}", path);
+					v
+				}
+
+				#[cfg(not(feature = "kv-mem"))]
+				return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an File database
-			#[cfg(feature = "kv-rocksdb")]
 			s if s.starts_with("file:") => {
-				info!(target: LOG, "Starting kvs store at {}", path);
-				let s = s.trim_start_matches("file://");
-				let s = s.trim_start_matches("file:");
-				let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::RocksDB(v),
-				});
-				info!(target: LOG, "Started kvs store at {}", path);
-				v
+				#[cfg(feature = "kv-rocksdb")]
+				{
+					info!(target: LOG, "Starting kvs store at {}", path);
+					let s = s.trim_start_matches("file://");
+					let s = s.trim_start_matches("file:");
+					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
+						inner: Inner::RocksDB(v),
+					});
+					info!(target: LOG, "Started kvs store at {}", path);
+					v
+				}
+
+				#[cfg(not(feature = "kv-rocksdb"))]
+				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an RocksDB database
-			#[cfg(feature = "kv-rocksdb")]
 			s if s.starts_with("rocksdb:") => {
-				info!(target: LOG, "Starting kvs store at {}", path);
-				let s = s.trim_start_matches("rocksdb://");
-				let s = s.trim_start_matches("rocksdb:");
-				let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::RocksDB(v),
-				});
-				info!(target: LOG, "Started kvs store at {}", path);
-				v
+				#[cfg(feature = "kv-rocksdb")]
+				{
+					info!(target: LOG, "Starting kvs store at {}", path);
+					let s = s.trim_start_matches("rocksdb://");
+					let s = s.trim_start_matches("rocksdb:");
+					let v = super::rocksdb::Datastore::new(s).await.map(|v| Datastore {
+						inner: Inner::RocksDB(v),
+					});
+					info!(target: LOG, "Started kvs store at {}", path);
+					v
+				}
+
+				#[cfg(not(feature = "kv-rocksdb"))]
+				return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate an IndxDB database
-			#[cfg(feature = "kv-indxdb")]
 			s if s.starts_with("indxdb:") => {
-				info!(target: LOG, "Starting kvs store at {}", path);
-				let s = s.trim_start_matches("indxdb://");
-				let s = s.trim_start_matches("indxdb:");
-				let v = super::indxdb::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::IndxDB(v),
-				});
-				info!(target: LOG, "Started kvs store at {}", path);
-				v
+				#[cfg(feature = "kv-indxdb")]
+				{
+					info!(target: LOG, "Starting kvs store at {}", path);
+					let s = s.trim_start_matches("indxdb://");
+					let s = s.trim_start_matches("indxdb:");
+					let v = super::indxdb::Datastore::new(s).await.map(|v| Datastore {
+						inner: Inner::IndxDB(v),
+					});
+					info!(target: LOG, "Started kvs store at {}", path);
+					v
+				}
+
+				#[cfg(not(feature = "kv-indxdb"))]
+				return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a TiKV database
-			#[cfg(feature = "kv-tikv")]
 			s if s.starts_with("tikv:") => {
-				info!(target: LOG, "Connecting to kvs store at {}", path);
-				let s = s.trim_start_matches("tikv://");
-				let s = s.trim_start_matches("tikv:");
-				let v = super::tikv::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::TiKV(v),
-				});
-				info!(target: LOG, "Connected to kvs store at {}", path);
-				v
+				#[cfg(feature = "kv-tikv")]
+				{
+					info!(target: LOG, "Connecting to kvs store at {}", path);
+					let s = s.trim_start_matches("tikv://");
+					let s = s.trim_start_matches("tikv:");
+					let v = super::tikv::Datastore::new(s).await.map(|v| Datastore {
+						inner: Inner::TiKV(v),
+					});
+					info!(target: LOG, "Connected to kvs store at {}", path);
+					v
+				}
+
+				#[cfg(not(feature = "kv-tikv"))]
+				return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// Parse and initiate a FoundationDB database
-			#[cfg(feature = "kv-fdb")]
 			s if s.starts_with("fdb:") => {
-				info!(target: LOG, "Connecting to kvs store at {}", path);
-				let s = s.trim_start_matches("fdb://");
-				let s = s.trim_start_matches("fdb:");
-				let v = super::fdb::Datastore::new(s).await.map(|v| Datastore {
-					inner: Inner::FDB(v),
-				});
-				info!(target: LOG, "Connected to kvs store at {}", path);
-				v
+				#[cfg(feature = "kv-fdb")]
+				{
+					info!(target: LOG, "Connecting to kvs store at {}", path);
+					let s = s.trim_start_matches("fdb://");
+					let s = s.trim_start_matches("fdb:");
+					let v = super::fdb::Datastore::new(s).await.map(|v| Datastore {
+						inner: Inner::FDB(v),
+					});
+					info!(target: LOG, "Connected to kvs store at {}", path);
+					v
+				}
+
+				#[cfg(not(feature = "kv-fdb"))]
+				return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
 			// The datastore path is not valid
 			_ => {
@@ -190,50 +220,41 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: bool, lock: bool) -> Result<Transaction, Error> {
 		#![allow(unused_variables)]
-		match &self.inner {
+		let inner = match &self.inner {
 			#[cfg(feature = "kv-mem")]
 			Inner::Mem(v) => {
 				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::Mem(tx),
-					cache: super::cache::Cache::default(),
-				})
+				super::tx::Inner::Mem(tx)
 			}
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::RocksDB(tx),
-					cache: super::cache::Cache::default(),
-				})
+				super::tx::Inner::RocksDB(tx)
 			}
 			#[cfg(feature = "kv-indxdb")]
 			Inner::IndxDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::IndxDB(tx),
-					cache: super::cache::Cache::default(),
-				})
+				super::tx::Inner::IndxDB(tx)
 			}
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(v) => {
 				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::TiKV(tx),
-					cache: super::cache::Cache::default(),
-				})
+				super::tx::Inner::TiKV(tx)
 			}
 			#[cfg(feature = "kv-fdb")]
 			Inner::FDB(v) => {
 				let tx = v.transaction(write, lock).await?;
-				Ok(Transaction {
-					inner: super::tx::Inner::FDB(tx),
-					cache: super::cache::Cache::default(),
-				})
+				super::tx::Inner::FDB(tx)
 			}
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
-		}
+		};
+
+		#[allow(unreachable_code)]
+		Ok(Transaction {
+			inner,
+			cache: super::cache::Cache::default(),
+		})
 	}
 
 	/// Parse and execute an SQL query
@@ -346,7 +367,7 @@ impl Datastore {
 	/// async fn main() -> Result<(), Error> {
 	///     let ds = Datastore::new("memory").await?;
 	///     let ses = Session::for_kv();
-	///     let val = Value::Future(Box::new(Future::from(Value::True)));
+	///     let val = Value::Future(Box::new(Future::from(Value::Bool(true))));
 	///     let res = ds.compute(val, &ses, None, false).await?;
 	///     Ok(())
 	/// }

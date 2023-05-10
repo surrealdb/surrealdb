@@ -20,6 +20,7 @@ pub(crate) mod escape;
 pub(crate) mod expression;
 pub(crate) mod fetch;
 pub(crate) mod field;
+pub(crate) mod filter;
 pub(crate) mod fmt;
 pub(crate) mod function;
 pub(crate) mod future;
@@ -30,6 +31,7 @@ pub(crate) mod id;
 pub(crate) mod ident;
 pub(crate) mod idiom;
 pub(crate) mod kind;
+pub(crate) mod language;
 pub(crate) mod limit;
 pub(crate) mod model;
 pub(crate) mod number;
@@ -56,6 +58,7 @@ pub(crate) mod subquery;
 pub(crate) mod table;
 pub(crate) mod thing;
 pub(crate) mod timeout;
+pub(crate) mod tokenizer;
 pub(crate) mod uuid;
 pub(crate) mod value;
 pub(crate) mod version;
@@ -64,7 +67,6 @@ pub(crate) mod view;
 #[cfg(test)]
 pub(crate) mod test;
 
-pub mod serde;
 pub mod statements;
 
 pub use self::parser::*;
@@ -132,4 +134,4 @@ pub use self::value::Values;
 pub use self::version::Version;
 pub use self::view::View;
 
-pub(crate) use self::value::serde::to_value;
+pub use self::value::serde::to_value;

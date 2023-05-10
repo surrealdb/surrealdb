@@ -8,6 +8,7 @@ use crate::sql::error::IResult;
 use crate::sql::escape::escape_rid;
 use crate::sql::ident::ident_raw;
 use crate::sql::number::integer;
+use crate::sql::number::Number;
 use crate::sql::object::{object, Object};
 use crate::sql::strand::Strand;
 use crate::sql::thing::Thing;
@@ -23,6 +24,7 @@ use ulid::Ulid;
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Id {
 	Number(i64),
+	/// Invariant: Doesn't contain NUL bytes.
 	String(String),
 	Array(Array),
 	Object(Object),
@@ -106,6 +108,16 @@ impl From<Vec<Value>> for Id {
 	}
 }
 
+impl From<Number> for Id {
+	fn from(v: Number) -> Self {
+		match v {
+			Number::Int(v) => v.into(),
+			Number::Float(v) => v.to_string().into(),
+			Number::Decimal(v) => v.to_string().into(),
+		}
+	}
+}
+
 impl From<Thing> for Id {
 	fn from(v: Thing) -> Self {
 		v.id
@@ -154,6 +166,7 @@ impl Display for Id {
 }
 
 impl Id {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

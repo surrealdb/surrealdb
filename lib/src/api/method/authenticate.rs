@@ -12,6 +12,7 @@ use std::pin::Pin;
 
 /// An authentication future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Authenticate<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) token: Jwt,
@@ -31,7 +32,7 @@ where
 				return Err(Error::AuthNotSupported.into());
 			}
 			let mut conn = Client::new(Method::Authenticate);
-			conn.execute(router, Param::new(vec![self.token.into()])).await
+			conn.execute_unit(router, Param::new(vec![self.token.into()])).await
 		})
 	}
 }

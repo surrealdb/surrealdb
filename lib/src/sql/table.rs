@@ -4,7 +4,7 @@ use crate::sql::escape::escape_ident;
 use crate::sql::fmt::Fmt;
 use crate::sql::id::Id;
 use crate::sql::ident::{ident_raw, Ident};
-use crate::sql::serde::is_internal_serialization;
+use crate::sql::strand::no_nul_bytes;
 use crate::sql::thing::Thing;
 use nom::multi::separated_list1;
 use serde::{Deserialize, Serialize};
@@ -41,8 +41,9 @@ pub fn tables(i: &str) -> IResult<&str, Tables> {
 	Ok((i, Tables(v)))
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
-pub struct Table(pub String);
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Table")]
+pub struct Table(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Table {
 	fn from(v: String) -> Self {
@@ -81,19 +82,6 @@ impl Table {
 impl Display for Table {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&escape_ident(&self.0), f)
-	}
-}
-
-impl Serialize for Table {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			serializer.serialize_none()
-		}
 	}
 }
 

@@ -11,6 +11,7 @@ use std::pin::Pin;
 
 /// A beginning of a transaction
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Begin<C: Connection> {
 	pub(super) client: Surreal<C>,
 }
@@ -34,6 +35,7 @@ where
 
 /// An ongoing transaction
 #[derive(Debug)]
+#[must_use = "transactions must be committed or cancelled to complete them"]
 pub struct Transaction<C: Connection> {
 	client: Surreal<C>,
 }

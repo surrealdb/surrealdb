@@ -41,9 +41,9 @@ async fn handler(
 			match db.execute(sql, &session, None, opt.strict).await {
 				Ok(res) => match output.as_ref() {
 					// Simple serialization
-					"application/json" => Ok(output::json(&res)),
-					"application/cbor" => Ok(output::cbor(&res)),
-					"application/pack" => Ok(output::pack(&res)),
+					"application/json" => Ok(output::json(&output::simplify(res))),
+					"application/cbor" => Ok(output::cbor(&output::simplify(res))),
+					"application/pack" => Ok(output::pack(&output::simplify(res))),
 					// Internal serialization
 					"application/bung" => Ok(output::full(&res)),
 					// Return nothing

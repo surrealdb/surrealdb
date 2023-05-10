@@ -25,6 +25,7 @@ async fn define_global_param() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
+			az: {},
 			dl: {},
 			dt: {},
 			fc: {},

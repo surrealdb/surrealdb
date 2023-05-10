@@ -60,20 +60,19 @@ impl serde::ser::SerializeSeq for SerializePolygonVec {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use geo::LineString;
 
 	#[test]
 	fn empty() {
 		let vec: Vec<Polygon<f64>> = Vec::new();
-		let serialized = serialize_internal(|| vec.serialize(Serializer.wrap())).unwrap();
+		let serialized = vec.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(vec, serialized);
 	}
 
 	#[test]
 	fn vec() {
 		let vec = vec![Polygon::new(LineString(Vec::new()), Vec::new())];
-		let serialized = serialize_internal(|| vec.serialize(Serializer.wrap())).unwrap();
+		let serialized = vec.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(vec, serialized);
 	}
 }

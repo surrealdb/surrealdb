@@ -1,19 +1,18 @@
-use crate::sql::comment::mightbespace;
+use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::dir::{dir, Dir};
 use crate::sql::error::IResult;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::table::{table, tables, Tables};
 use crate::sql::thing::{thing, Thing};
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Edges";
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Edges")]
 pub struct Edges {
 	pub dir: Dir,
 	pub from: Thing,
@@ -26,23 +25,6 @@ impl fmt::Display for Edges {
 			0 => write!(f, "{}{}?", self.from, self.dir,),
 			1 => write!(f, "{}{}{}", self.from, self.dir, self.what),
 			_ => write!(f, "{}{}({})", self.from, self.dir, self.what),
-		}
-	}
-}
-
-impl Serialize for Edges {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			let mut val = serializer.serialize_struct(TOKEN, 3)?;
-			val.serialize_field("dir", &self.dir)?;
-			val.serialize_field("from", &self.from)?;
-			val.serialize_field("what", &self.what)?;
-			val.end()
-		} else {
-			serializer.serialize_none()
 		}
 	}
 }
@@ -66,11 +48,9 @@ fn simple(i: &str) -> IResult<&str, Tables> {
 }
 
 fn custom(i: &str) -> IResult<&str, Tables> {
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, w) = alt((any, tables))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, w))
 }
 

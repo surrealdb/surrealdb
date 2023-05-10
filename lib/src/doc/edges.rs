@@ -14,7 +14,7 @@ use crate::sql::Dir;
 impl<'a> Document<'a> {
 	pub async fn edges(
 		&mut self,
-		ctx: &Context<'_>,
+		_ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
 		_stm: &Statement<'_>,
@@ -46,9 +46,9 @@ impl<'a> Document<'a> {
 			let key = crate::key::graph::new(opt.ns(), opt.db(), &r.tb, &r.id, i, rid);
 			run.set(key, vec![]).await?;
 			// Store the edges on the record
-			self.current.to_mut().set(ctx, opt, txn, &*EDGE, Value::True).await?;
-			self.current.to_mut().set(ctx, opt, txn, &*IN, l.clone().into()).await?;
-			self.current.to_mut().set(ctx, opt, txn, &*OUT, r.clone().into()).await?;
+			self.current.to_mut().put(&*EDGE, Value::Bool(true));
+			self.current.to_mut().put(&*IN, l.clone().into());
+			self.current.to_mut().put(&*OUT, r.clone().into());
 		}
 		// Carry on
 		Ok(())

@@ -18,6 +18,7 @@ pub struct SleepStatement {
 }
 
 impl SleepStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -35,6 +36,9 @@ impl SleepStatement {
 			(_, d) => d,
 		};
 		// Sleep for the specified time
+		#[cfg(target_arch = "wasm32")]
+		wasmtimer::tokio::sleep(dur).await;
+		#[cfg(not(target_arch = "wasm32"))]
 		tokio::time::sleep(dur).await;
 		// Ok all good
 		Ok(Value::None)

@@ -27,6 +27,7 @@ pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
 	Function(RemoveFunctionStatement),
+	Analyzer(RemoveAnalyzerStatement),
 	Login(RemoveLoginStatement),
 	Token(RemoveTokenStatement),
 	Scope(RemoveScopeStatement),
@@ -38,6 +39,7 @@ pub enum RemoveStatement {
 }
 
 impl RemoveStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -57,6 +59,7 @@ impl RemoveStatement {
 			Self::Event(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Field(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Index(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Analyzer(ref v) => v.compute(ctx, opt, txn, doc).await,
 		}
 	}
 }
@@ -75,6 +78,7 @@ impl Display for RemoveStatement {
 			Self::Event(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
 			Self::Index(v) => Display::fmt(v, f),
+			Self::Analyzer(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -92,6 +96,7 @@ pub fn remove(i: &str) -> IResult<&str, RemoveStatement> {
 		map(event, RemoveStatement::Event),
 		map(field, RemoveStatement::Field),
 		map(index, RemoveStatement::Index),
+		map(analyzer, RemoveStatement::Analyzer),
 	))(i)
 }
 
@@ -106,6 +111,7 @@ pub struct RemoveNamespaceStatement {
 }
 
 impl RemoveNamespaceStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -132,8 +138,8 @@ impl RemoveNamespaceStatement {
 	}
 }
 
-impl fmt::Display for RemoveNamespaceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveNamespaceStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE NAMESPACE {}", self.name)
 	}
 }
@@ -163,6 +169,7 @@ pub struct RemoveDatabaseStatement {
 }
 
 impl RemoveDatabaseStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -189,8 +196,8 @@ impl RemoveDatabaseStatement {
 	}
 }
 
-impl fmt::Display for RemoveDatabaseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveDatabaseStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE DATABASE {}", self.name)
 	}
 }
@@ -220,6 +227,7 @@ pub struct RemoveFunctionStatement {
 }
 
 impl RemoveFunctionStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -276,6 +284,60 @@ fn function(i: &str) -> IResult<&str, RemoveFunctionStatement> {
 // --------------------------------------------------
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
+pub struct RemoveAnalyzerStatement {
+	pub name: Ident,
+}
+
+impl RemoveAnalyzerStatement {
+	pub(crate) async fn compute(
+		&self,
+		_ctx: &Context<'_>,
+		opt: &Options,
+		txn: &Transaction,
+		_doc: Option<&Value>,
+	) -> Result<Value, Error> {
+		// Selected DB?
+		opt.needs(Level::Db)?;
+		// Allowed to run?
+		opt.check(Level::Db)?;
+		// Clone transaction
+		let run = txn.clone();
+		// Claim transaction
+		let mut run = run.lock().await;
+		// Delete the definition
+		let key = crate::key::az::new(opt.ns(), opt.db(), &self.name);
+		run.del(key).await?;
+		// TODO Check that the analyzer is not used in any schema
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl Display for RemoveAnalyzerStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "REMOVE ANALYZER {}", self.name)
+	}
+}
+
+fn analyzer(i: &str) -> IResult<&str, RemoveAnalyzerStatement> {
+	let (i, _) = tag_no_case("REMOVE")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, _) = tag_no_case("ANALYZER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, name) = ident(i)?;
+	Ok((
+		i,
+		RemoveAnalyzerStatement {
+			name,
+		},
+	))
+}
+
+// --------------------------------------------------
+// --------------------------------------------------
+// --------------------------------------------------
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Store, Hash)]
 #[format(Named)]
 pub struct RemoveLoginStatement {
 	pub name: Ident,
@@ -283,6 +345,7 @@ pub struct RemoveLoginStatement {
 }
 
 impl RemoveLoginStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -326,8 +389,8 @@ impl RemoveLoginStatement {
 	}
 }
 
-impl fmt::Display for RemoveLoginStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveLoginStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE LOGIN {} ON {}", self.name, self.base)
 	}
 }
@@ -363,6 +426,7 @@ pub struct RemoveTokenStatement {
 }
 
 impl RemoveTokenStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -421,8 +485,8 @@ impl RemoveTokenStatement {
 	}
 }
 
-impl fmt::Display for RemoveTokenStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveTokenStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE TOKEN {} ON {}", self.name, self.base)
 	}
 }
@@ -457,6 +521,7 @@ pub struct RemoveScopeStatement {
 }
 
 impl RemoveScopeStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -483,8 +548,8 @@ impl RemoveScopeStatement {
 	}
 }
 
-impl fmt::Display for RemoveScopeStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveScopeStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE SCOPE {}", self.name)
 	}
 }
@@ -514,6 +579,7 @@ pub struct RemoveParamStatement {
 }
 
 impl RemoveParamStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -537,8 +603,8 @@ impl RemoveParamStatement {
 	}
 }
 
-impl fmt::Display for RemoveParamStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveParamStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE PARAM {}", self.name)
 	}
 }
@@ -569,6 +635,7 @@ pub struct RemoveTableStatement {
 }
 
 impl RemoveTableStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -595,8 +662,8 @@ impl RemoveTableStatement {
 	}
 }
 
-impl fmt::Display for RemoveTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveTableStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE TABLE {}", self.name)
 	}
 }
@@ -627,6 +694,7 @@ pub struct RemoveEventStatement {
 }
 
 impl RemoveEventStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -653,8 +721,8 @@ impl RemoveEventStatement {
 	}
 }
 
-impl fmt::Display for RemoveEventStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveEventStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE EVENT {} ON {}", self.name, self.what)
 	}
 }
@@ -691,6 +759,7 @@ pub struct RemoveFieldStatement {
 }
 
 impl RemoveFieldStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -707,7 +776,8 @@ impl RemoveFieldStatement {
 		// Claim transaction
 		let mut run = run.lock().await;
 		// Delete the definition
-		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &self.name.to_string());
+		let fd = self.name.to_string();
+		let key = crate::key::fd::new(opt.ns(), opt.db(), &self.what, &fd);
 		run.del(key).await?;
 		// Clear the cache
 		let key = crate::key::fd::prefix(opt.ns(), opt.db(), &self.what);
@@ -717,8 +787,8 @@ impl RemoveFieldStatement {
 	}
 }
 
-impl fmt::Display for RemoveFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveFieldStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE FIELD {} ON {}", self.name, self.what)
 	}
 }
@@ -755,6 +825,7 @@ pub struct RemoveIndexStatement {
 }
 
 impl RemoveIndexStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		_ctx: &Context<'_>,
@@ -785,8 +856,8 @@ impl RemoveIndexStatement {
 	}
 }
 
-impl fmt::Display for RemoveIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for RemoveIndexStatement {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "REMOVE INDEX {} ON {}", self.name, self.what)
 	}
 }

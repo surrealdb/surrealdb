@@ -1,12 +1,16 @@
 use crate::sql::common::val_char;
 use crate::sql::error::IResult;
 use crate::sql::escape::escape_ident;
+use crate::sql::strand::no_nul_bytes;
 use nom::branch::alt;
 use nom::bytes::complete::escaped_transform;
 use nom::bytes::complete::is_not;
+use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::char;
+use nom::combinator::recognize;
 use nom::combinator::value;
+use nom::multi::separated_list1;
 use nom::sequence::delimited;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -15,13 +19,13 @@ use std::str;
 
 const BRACKET_L: char = '⟨';
 const BRACKET_R: char = '⟩';
-const BRACKET_END: &str = r#"⟩"#;
+const BRACKET_END_NUL: &str = "⟩\0";
 
 const BACKTICK: char = '`';
-const BACKTICK_ESC: &str = r#"\`"#;
+const BACKTICK_ESC_NUL: &str = "`\\\0";
 
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-pub struct Ident(pub String);
+pub struct Ident(#[serde(with = "no_nul_bytes")] pub String);
 
 impl From<String> for Ident {
 	fn from(v: String) -> Self {
@@ -65,7 +69,12 @@ pub fn ident(i: &str) -> IResult<&str, Ident> {
 }
 
 pub fn plain(i: &str) -> IResult<&str, Ident> {
-	let (i, v) = ident_default(i)?;
+	let (i, v) = take_while1(val_char)(i)?;
+	Ok((i, Ident::from(v)))
+}
+
+pub fn multi(i: &str) -> IResult<&str, Ident> {
+	let (i, v) = recognize(separated_list1(tag("::"), take_while1(val_char)))(i)?;
 	Ok((i, Ident::from(v)))
 }
 
@@ -82,7 +91,7 @@ fn ident_default(i: &str) -> IResult<&str, String> {
 fn ident_backtick(i: &str) -> IResult<&str, String> {
 	let (i, _) = char(BACKTICK)(i)?;
 	let (i, v) = escaped_transform(
-		is_not(BACKTICK_ESC),
+		is_not(BACKTICK_ESC_NUL),
 		'\\',
 		alt((
 			value('\u{5c}', char('\\')),
@@ -100,7 +109,7 @@ fn ident_backtick(i: &str) -> IResult<&str, String> {
 }
 
 fn ident_brackets(i: &str) -> IResult<&str, String> {
-	let (i, v) = delimited(char(BRACKET_L), is_not(BRACKET_END), char(BRACKET_R))(i)?;
+	let (i, v) = delimited(char(BRACKET_L), is_not(BRACKET_END_NUL), char(BRACKET_R))(i)?;
 	Ok((i, String::from(v)))
 }
 

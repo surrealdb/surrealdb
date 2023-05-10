@@ -19,9 +19,7 @@ pub async fn init(
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("error").init();
 	// Connect to the database engine
-	let client = connect(endpoint).await?;
-	// Check if the database engine is healthy
-	client.health().await?;
+	connect(endpoint).await?;
 	println!("OK");
 	Ok(())
 }

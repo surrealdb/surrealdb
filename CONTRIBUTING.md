@@ -35,19 +35,19 @@ cargo run -- help
 To run the SurrealDB database server, use the following command:
 
 ```bash
-cargo run -- start --log trace --user root --pass root memory
+cargo run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root memory
 ```
 
 To listen to code changes as you develop, use the following command:
 
 ```bash
-cargo watch -x 'run -- start --log trace --user root --pass root memory'
+cargo watch -x 'run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root memory'
 ```
 
 SurrealDB runs by default on port 8000. To change the default port, use the following command:
 
 ```bash
-cargo run -- start --log trace --user root --pass root --bind 0.0.0.0:9000 memory
+cargo run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root --bind 0.0.0.0:9000 memory
 ```
 
 To run all tests manually, use the SurrealDB command-line from your terminal:
@@ -185,5 +185,5 @@ Join our growing community around the world, for help, ideas, and discussions re
 - Follow us on [Twitter](https://twitter.com/surrealdb)
 - Connect with us on [LinkedIn](https://www.linkedin.com/company/surrealdb/)
 - Join our [Dev community](https://dev.to/surrealdb)
-- Chat live with us on [Discord](https://discord.gg/GSeTUeA)
+- Chat live with us on [Discord](https://discord.gg/surrealdb)
 - Questions tagged #surrealdb on [StackOverflow](https://stackoverflow.com/questions/tagged/surrealdb)

@@ -76,13 +76,11 @@ impl serde::ser::SerializeStruct for SerializeOutputStatement {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn default() {
 		let stmt = OutputStatement::default();
-		let value: OutputStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: OutputStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -92,8 +90,7 @@ mod tests {
 			fetch: Some(Default::default()),
 			..Default::default()
 		};
-		let value: OutputStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: OutputStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 }

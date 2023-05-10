@@ -40,7 +40,7 @@ mod tests {
 		let res = timeout(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!(out, Timeout(Duration::from("5s")));
 		assert_eq!("TIMEOUT 5s", format!("{}", out));
+		assert_eq!(out, Timeout(Duration::try_from("5s").unwrap()));
 	}
 }

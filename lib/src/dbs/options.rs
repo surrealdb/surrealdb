@@ -13,31 +13,31 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Options {
-	// Currently selected NS
+	/// Currently selected NS
 	pub ns: Option<Arc<str>>,
-	// Currently selected DB
+	/// Currently selected DB
 	pub db: Option<Arc<str>>,
-	// Connection authentication data
+	/// Connection authentication data
 	pub auth: Arc<Auth>,
-	// Approximately how large is the current call stack?
+	/// Approximately how large is the current call stack?
 	dive: u8,
-	// Whether live queries are allowed?
+	/// Whether live queries are allowed?
 	pub live: bool,
-	// Should we force tables/events to re-run?
+	/// Should we force tables/events to re-run?
 	pub force: bool,
-	// Should we run permissions checks?
+	/// Should we run permissions checks?
 	pub perms: bool,
-	// Should we error if tables don't exist?
+	/// Should we error if tables don't exist?
 	pub strict: bool,
-	// Should we process field queries?
+	/// Should we process field queries?
 	pub fields: bool,
-	// Should we process event queries?
+	/// Should we process event queries?
 	pub events: bool,
-	// Should we process table queries?
+	/// Should we process table queries?
 	pub tables: bool,
-	// Should we process index queries?
+	/// Should we process index queries?
 	pub indexes: bool,
-	// Should we process function futures?
+	/// Should we process function futures?
 	pub futures: bool,
 }
 
@@ -83,7 +83,7 @@ impl Options {
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
 	pub fn dive(&self, cost: u8) -> Result<Options, Error> {
 		let dive = self.dive.saturating_add(cost);
-		if dive <= cnf::MAX_COMPUTATION_DEPTH {
+		if dive <= *cnf::MAX_COMPUTATION_DEPTH {
 			Ok(Options {
 				auth: self.auth.clone(),
 				ns: self.ns.clone(),

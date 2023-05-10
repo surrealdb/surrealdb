@@ -9,6 +9,7 @@ use std::pin::Pin;
 
 /// A health check future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Health<'r, C: Connection> {
 	pub(super) router: Result<&'r Router<C>>,
 }
@@ -23,7 +24,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async {
 			let mut conn = Client::new(Method::Health);
-			conn.execute(self.router?, Param::new(Vec::new())).await
+			conn.execute_unit(self.router?, Param::new(Vec::new())).await
 		})
 	}
 }
