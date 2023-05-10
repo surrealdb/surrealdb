@@ -4074,6 +4074,7 @@ dependencies = [
  "async-channel",
  "async-executor",
  "async-recursion",
+ "base64 0.21.0",
  "bcrypt",
  "bigdecimal",
  "bung",

@@ -403,13 +403,13 @@ impl From<BigDecimal> for Value {
 
 impl From<String> for Value {
 	fn from(v: String) -> Self {
-		Value::Strand(Strand::from(v))
+		Self::Strand(Strand::from(v))
 	}
 }
 
 impl From<&str> for Value {
 	fn from(v: &str) -> Self {
-		Value::Strand(Strand::from(v))
+		Self::Strand(Strand::from(v))
 	}
 }
 
@@ -1494,6 +1494,8 @@ impl Value {
 		match self {
 			// Bytes are allowed
 			Value::Bytes(v) => Ok(v),
+			// Strings can be converted to bytes
+			Value::Strand(s) => Ok(Bytes(s.0.into_bytes())),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -1935,7 +1937,7 @@ impl fmt::Display for Value {
 			Value::Function(v) => write!(f, "{v}"),
 			Value::Subquery(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
-			Value::Bytes(_) => write!(f, "<bytes>"),
+			Value::Bytes(v) => write!(f, "{v}"),
 		}
 	}
 }

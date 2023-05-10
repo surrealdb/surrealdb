@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::id::{id, Id};
 use crate::sql::ident::ident_raw;
+use crate::sql::strand::no_nul_bytes;
 use crate::sql::value::Value;
 use nom::branch::alt;
 use nom::character::complete::char;
@@ -22,6 +23,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Range")]
 pub struct Range {
+	#[serde(with = "no_nul_bytes")]
 	pub tb: String,
 	pub beg: Bound<Id>,
 	pub end: Bound<Id>,
