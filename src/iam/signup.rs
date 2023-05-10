@@ -20,9 +20,9 @@ pub async fn signup(session: &mut Session, vars: Object) -> Result<Option<String
 	match (ns, db, sc) {
 		(Some(ns), Some(db), Some(sc)) => {
 			// Process the provided values
-			let ns = ns.to_strand().as_string();
-			let db = db.to_strand().as_string();
-			let sc = sc.to_strand().as_string();
+			let ns = ns.to_raw_string();
+			let db = db.to_raw_string();
+			let sc = sc.to_raw_string();
 			// Attempt to signin to specified scope
 			super::signup::sc(session, ns, db, sc, vars).await
 		}

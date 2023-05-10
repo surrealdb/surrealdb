@@ -2,18 +2,18 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Nt {
+pub struct Nt<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub tk: String,
+	pub tk: &'a str,
 }
 
-pub fn new(ns: &str, tk: &str) -> Nt {
-	Nt::new(ns.to_string(), tk.to_string())
+pub fn new<'a>(ns: &'a str, tk: &'a str) -> Nt<'a> {
+	Nt::new(ns, tk)
 }
 
 pub fn prefix(ns: &str) -> Vec<u8> {
@@ -28,9 +28,9 @@ pub fn suffix(ns: &str) -> Vec<u8> {
 	k
 }
 
-impl Nt {
-	pub fn new(ns: String, tk: String) -> Nt {
-		Nt {
+impl<'a> Nt<'a> {
+	pub fn new(ns: &'a str, tk: &'a str) -> Self {
+		Self {
 			__: 0x2f, // /
 			_a: 0x2a, // *
 			ns,
@@ -49,8 +49,8 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = Nt::new(
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
 		);
 		let enc = Nt::encode(&val).unwrap();
 		let dec = Nt::decode(&enc).unwrap();

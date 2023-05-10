@@ -4,7 +4,6 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::value::Value;
 use nom::character::complete::char;
 use serde::{Deserialize, Serialize};
@@ -14,7 +13,8 @@ use std::str;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Param")]
 pub struct Param(pub Ident);
 
 impl From<Ident> for Param {
@@ -43,6 +43,7 @@ impl Deref for Param {
 }
 
 impl Param {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -87,19 +88,6 @@ impl Param {
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "${}", &self.0)
-	}
-}
-
-impl Serialize for Param {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			serializer.serialize_none()
-		}
 	}
 }
 

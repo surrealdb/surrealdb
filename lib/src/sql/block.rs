@@ -4,10 +4,9 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::{comment, mightbespace};
-use crate::sql::common::colons;
+use crate::sql::common::{closebraces, colons, openbraces};
 use crate::sql::error::IResult;
 use crate::sql::fmt::{is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
@@ -19,7 +18,6 @@ use crate::sql::statements::set::{set, SetStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
-use nom::character::complete::char;
 use nom::combinator::map;
 use nom::multi::many0;
 use nom::multi::separated_list1;
@@ -31,7 +29,8 @@ use std::ops::Deref;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Block";
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Block")]
 pub struct Block(pub Vec<Entry>);
 
 impl Deref for Block {
@@ -48,10 +47,11 @@ impl From<Value> for Block {
 }
 
 impl Block {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		self.iter().any(Entry::writeable)
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -157,26 +157,11 @@ impl Display for Block {
 	}
 }
 
-impl Serialize for Block {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			serializer.serialize_newtype_struct(TOKEN, &self.0)
-		} else {
-			serializer.serialize_none()
-		}
-	}
-}
-
 pub fn block(i: &str) -> IResult<&str, Block> {
-	let (i, _) = char('{')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbraces(i)?;
 	let (i, v) = separated_list1(colons, entry)(i)?;
 	let (i, _) = many0(alt((colons, comment)))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char('}')(i)?;
+	let (i, _) = closebraces(i)?;
 	Ok((i, Block(v)))
 }
 
@@ -202,6 +187,7 @@ impl PartialOrd for Entry {
 }
 
 impl Entry {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Set(v) => v.writeable(),

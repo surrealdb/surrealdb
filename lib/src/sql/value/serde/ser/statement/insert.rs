@@ -103,13 +103,11 @@ impl serde::ser::SerializeStruct for SerializeInsertStatement {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 
 	#[test]
 	fn default() {
 		let stmt = InsertStatement::default();
-		let value: InsertStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: InsertStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -119,8 +117,7 @@ mod tests {
 			update: Some(Default::default()),
 			..Default::default()
 		};
-		let value: InsertStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: InsertStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -130,8 +127,7 @@ mod tests {
 			output: Some(Default::default()),
 			..Default::default()
 		};
-		let value: InsertStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: InsertStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 
@@ -141,8 +137,7 @@ mod tests {
 			timeout: Some(Default::default()),
 			..Default::default()
 		};
-		let value: InsertStatement =
-			serialize_internal(|| stmt.serialize(Serializer.wrap())).unwrap();
+		let value: InsertStatement = stmt.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(value, stmt);
 	}
 }

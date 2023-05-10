@@ -5,10 +5,9 @@ use crate::api::conn::Param;
 use crate::api::conn::Route;
 use crate::api::conn::Router;
 use crate::api::engine::local::Db;
-use crate::api::opt::from_value;
+use crate::api::err::Error;
 use crate::api::opt::Endpoint;
 use crate::api::ExtraFeatures;
-use crate::api::Response as QueryResponse;
 use crate::api::Result;
 use crate::api::Surreal;
 use crate::dbs::Session;
@@ -17,7 +16,6 @@ use flume::Receiver;
 use flume::Sender;
 use futures::StreamExt;
 use once_cell::sync::OnceCell;
-use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
@@ -80,35 +78,6 @@ impl Connection for Db {
 			Ok(receiver)
 		})
 	}
-
-	fn recv<R>(
-		&mut self,
-		rx: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<R>> + Send + Sync + '_>>
-	where
-		R: DeserializeOwned,
-	{
-		Box::pin(async move {
-			let response = rx.into_recv_async().await?;
-			match response? {
-				DbResponse::Other(value) => from_value(value).map_err(Into::into),
-				DbResponse::Query(..) => unreachable!(),
-			}
-		})
-	}
-
-	fn recv_query(
-		&mut self,
-		rx: Receiver<Result<DbResponse>>,
-	) -> Pin<Box<dyn Future<Output = Result<QueryResponse>> + Send + Sync + '_>> {
-		Box::pin(async move {
-			let response = rx.into_recv_async().await?;
-			match response? {
-				DbResponse::Query(results) => Ok(results),
-				DbResponse::Other(..) => unreachable!(),
-			}
-		})
-	}
 }
 
 pub(crate) fn router(
@@ -119,19 +88,29 @@ pub(crate) fn router(
 	tokio::spawn(async move {
 		let url = address.endpoint;
 
-		let path = match url.scheme() {
-			"mem" => "memory",
-			_ => url.as_str(),
-		};
+		let kvs = {
+			let path = match url.scheme() {
+				"mem" => "memory".to_owned(),
+				"fdb" | "rocksdb" | "file" => match url.to_file_path() {
+					Ok(path) => format!("{}://{}", url.scheme(), path.display()),
+					Err(_) => {
+						let error = Error::InvalidUrl(url.as_str().to_owned());
+						let _ = conn_tx.into_send_async(Err(error.into())).await;
+						return;
+					}
+				},
+				_ => url.as_str().to_owned(),
+			};
 
-		let kvs = match Datastore::new(path).await {
-			Ok(kvs) => {
-				let _ = conn_tx.into_send_async(Ok(())).await;
-				kvs
-			}
-			Err(error) => {
-				let _ = conn_tx.into_send_async(Err(error.into())).await;
-				return;
+			match Datastore::new(&path).await {
+				Ok(kvs) => {
+					let _ = conn_tx.into_send_async(Ok(())).await;
+					kvs
+				}
+				Err(error) => {
+					let _ = conn_tx.into_send_async(Err(error.into())).await;
+					return;
+				}
 			}
 		};
 

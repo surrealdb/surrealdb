@@ -18,12 +18,72 @@ use std::result::Result as StdResult;
 
 /// A patch future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Patch<'r, C: Connection, R> {
 	pub(super) router: Result<&'r Router<C>>,
 	pub(super) resource: Result<Resource>,
 	pub(super) range: Option<Range<Id>>,
 	pub(super) patches: Vec<StdResult<Value, crate::err::Error>>,
 	pub(super) response_type: PhantomData<R>,
+}
+
+macro_rules! into_future {
+	($method:ident) => {
+		fn into_future(self) -> Self::IntoFuture {
+			let Patch {
+				router,
+				resource,
+				range,
+				patches,
+				..
+			} = self;
+			Box::pin(async move {
+				let param = match range {
+					Some(range) => resource?.with_range(range)?,
+					None => resource?.into(),
+				};
+				let mut vec = Vec::with_capacity(patches.len());
+				for result in patches {
+					vec.push(result?);
+				}
+				let patches = Value::Array(Array(vec));
+				let mut conn = Client::new(Method::Patch);
+				conn.$method(router?, Param::new(vec![param, patches])).await
+			})
+		}
+	};
+}
+
+impl<'r, Client> IntoFuture for Patch<'r, Client, Value>
+where
+	Client: Connection,
+{
+	type Output = Result<Value>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+
+	into_future! {execute_value}
+}
+
+impl<'r, Client, R> IntoFuture for Patch<'r, Client, Option<R>>
+where
+	Client: Connection,
+	R: DeserializeOwned,
+{
+	type Output = Result<Option<R>>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+
+	into_future! {execute_opt}
+}
+
+impl<'r, Client, R> IntoFuture for Patch<'r, Client, Vec<R>>
+where
+	Client: Connection,
+	R: DeserializeOwned,
+{
+	type Output = Result<Vec<R>>;
+	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
+
+	into_future! {execute_vec}
 }
 
 impl<'r, C, R> Patch<'r, C, R>
@@ -34,31 +94,5 @@ where
 	pub fn patch(mut self, PatchOp(patch): PatchOp) -> Patch<'r, C, R> {
 		self.patches.push(patch);
 		self
-	}
-}
-
-impl<'r, Client, R> IntoFuture for Patch<'r, Client, R>
-where
-	Client: Connection,
-	R: DeserializeOwned + Send + Sync,
-{
-	type Output = Result<R>;
-	type IntoFuture = Pin<Box<dyn Future<Output = Self::Output> + Send + Sync + 'r>>;
-
-	fn into_future(self) -> Self::IntoFuture {
-		Box::pin(async move {
-			let resource = self.resource?;
-			let param = match self.range {
-				Some(range) => resource.with_range(range)?,
-				None => resource.into(),
-			};
-			let mut patches = Vec::with_capacity(self.patches.len());
-			for result in self.patches {
-				patches.push(result?);
-			}
-			let patches = Value::Array(Array(patches));
-			let mut conn = Client::new(Method::Patch);
-			conn.execute(self.router?, Param::new(vec![param, patches])).await
-		})
 	}
 }

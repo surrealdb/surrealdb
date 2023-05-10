@@ -2,22 +2,22 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct St {
+pub struct St<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: String,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: String,
+	pub db: &'a str,
 	_c: u8,
-	pub sc: String,
+	pub sc: &'a str,
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub tk: String,
+	pub tk: &'a str,
 }
 
-pub fn new(ns: &str, db: &str, sc: &str, tk: &str) -> St {
-	St::new(ns.to_string(), db.to_string(), sc.to_string(), tk.to_string())
+pub fn new<'a>(ns: &'a str, db: &'a str, sc: &'a str, tk: &'a str) -> St<'a> {
+	St::new(ns, db, sc, tk)
 }
 
 pub fn prefix(ns: &str, db: &str, sc: &str) -> Vec<u8> {
@@ -32,9 +32,9 @@ pub fn suffix(ns: &str, db: &str, sc: &str) -> Vec<u8> {
 	k
 }
 
-impl St {
-	pub fn new(ns: String, db: String, sc: String, tk: String) -> St {
-		St {
+impl<'a> St<'a> {
+	pub fn new(ns: &'a str, db: &'a str, sc: &'a str, tk: &'a str) -> Self {
+		Self {
 			__: 0x2f, // /
 			_a: 0x2a, // *
 			ns,
@@ -57,10 +57,10 @@ mod tests {
 		use super::*;
 		#[rustfmt::skip]
 		let val = St::new(
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
-			"test".to_string(),
+			"test",
+			"test",
+			"test",
+			"test",
 		);
 		let enc = St::encode(&val).unwrap();
 		let dec = St::decode(&enc).unwrap();

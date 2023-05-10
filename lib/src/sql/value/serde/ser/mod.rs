@@ -16,6 +16,7 @@ mod geometry;
 mod graph;
 mod group;
 mod id;
+mod kind;
 mod limit;
 mod model;
 mod number;
@@ -48,7 +49,7 @@ use serde::ser::SerializeTupleStruct;
 use serde::ser::SerializeTupleVariant;
 use std::fmt::Display;
 
-pub(crate) use value::to_value;
+pub use value::to_value;
 
 trait Serializer: Sized {
 	type Ok;

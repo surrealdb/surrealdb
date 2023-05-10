@@ -6,7 +6,6 @@ use crate::err::Error;
 use crate::sql;
 use crate::sql::array::Array;
 use crate::sql::object::Object;
-use crate::sql::serde::serialize_internal;
 use crate::sql::value::serde::ser;
 use crate::sql::value::Value;
 use crate::sql::Block;
@@ -17,7 +16,6 @@ use crate::sql::Future;
 use crate::sql::Ident;
 use crate::sql::Idiom;
 use crate::sql::Param;
-use crate::sql::Regex;
 use crate::sql::Strand;
 use crate::sql::Table;
 use crate::sql::Uuid;
@@ -40,11 +38,11 @@ use storekey::encode::Error as EncodeError;
 use vec::SerializeValueVec;
 
 /// Convert a `T` into `surrealdb::sql::Value` which is an enum that can represent any valid SQL data.
-pub(crate) fn to_value<T>(value: T) -> Result<Value, Error>
+pub fn to_value<T>(value: T) -> Result<Value, Error>
 where
 	T: Serialize,
 {
-	serialize_internal(|| value.serialize(Serializer.wrap()))
+	value.serialize(Serializer.wrap())
 }
 
 impl serde::ser::Error for Error {
@@ -100,7 +98,7 @@ impl ser::Serializer for Serializer {
 	fn serialize_i128(self, value: i128) -> Result<Self::Ok, Error> {
 		match BigDecimal::from_i128(value) {
 			Some(decimal) => Ok(decimal.into()),
-			None => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
+			None => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
 		}
 	}
 
@@ -127,7 +125,7 @@ impl ser::Serializer for Serializer {
 	fn serialize_u128(self, value: u128) -> Result<Self::Ok, Error> {
 		match BigDecimal::from_u128(value) {
 			Some(decimal) => Ok(decimal.into()),
-			None => Err(Error::TryFromError(value.to_string(), "BigDecimal")),
+			None => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
 		}
 	}
 
@@ -184,8 +182,6 @@ impl ser::Serializer for Serializer {
 			sql::value::TOKEN => match variant {
 				"None" => Ok(Value::None),
 				"Null" => Ok(Value::Null),
-				"False" => Ok(Value::False),
-				"True" => Ok(Value::True),
 				variant => Err(Error::custom(format!("unknown unit variant `Value::{variant}`"))),
 			},
 			_ => self.serialize_str(variant),
@@ -211,7 +207,7 @@ impl ser::Serializer for Serializer {
 				value.serialize(ser::block::entry::vec::Serializer.wrap())?,
 			))))),
 			sql::regex::TOKEN => {
-				Ok(Value::Regex(Regex(value.serialize(ser::string::Serializer.wrap())?)))
+				Ok(Value::Regex(value.serialize(ser::string::Serializer.wrap())?.parse().unwrap()))
 			}
 			sql::table::TOKEN => {
 				Ok(Value::Table(Table(value.serialize(ser::string::Serializer.wrap())?)))
@@ -579,14 +575,14 @@ mod tests {
 
 	#[test]
 	fn r#false() {
-		let expected = Value::False;
+		let expected = Value::Bool(false);
 		assert_eq!(expected, to_value(&false).unwrap());
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}
 
 	#[test]
 	fn r#true() {
-		let expected = Value::True;
+		let expected = Value::Bool(true);
 		assert_eq!(expected, to_value(&true).unwrap());
 		assert_eq!(expected, to_value(&expected).unwrap());
 	}
@@ -743,7 +739,7 @@ mod tests {
 
 	#[test]
 	fn regex() {
-		let regex = Regex::default();
+		let regex = "abc".parse().unwrap();
 		let value = to_value(&regex).unwrap();
 		let expected = Value::Regex(regex);
 		assert_eq!(value, expected);
@@ -811,7 +807,7 @@ mod tests {
 
 	#[test]
 	fn function() {
-		let function = Box::new(Function::Cast("foo".to_owned(), Default::default()));
+		let function = Box::new(Function::Cast(Default::default(), Default::default()));
 		let value = to_value(&function).unwrap();
 		let expected = Value::Function(function);
 		assert_eq!(value, expected);

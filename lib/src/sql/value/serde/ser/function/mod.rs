@@ -1,6 +1,7 @@
 use crate::err::Error;
 use crate::sql::value::serde::ser;
 use crate::sql::Function;
+use crate::sql::Kind;
 use crate::sql::Script;
 use crate::sql::Value;
 use ser::Serializer as _;
@@ -53,7 +54,7 @@ pub(super) struct SerializeFunction {
 }
 
 enum Inner {
-	Cast(Option<String>, Option<Value>),
+	Cast(Option<Kind>, Option<Value>),
 	Normal(Option<String>, Option<Vec<Value>>),
 	Custom(Option<String>, Option<Vec<Value>>),
 	Script(Option<Script>, Option<Vec<Value>>),
@@ -68,16 +69,14 @@ impl serde::ser::SerializeTupleVariant for SerializeFunction {
 		T: Serialize + ?Sized,
 	{
 		match (self.index, &mut self.inner) {
-			(
-				0,
-				Inner::Cast(ref mut var, _)
-				| Inner::Normal(ref mut var, _)
-				| Inner::Custom(ref mut var, _),
-			) => {
+			(0, Inner::Normal(ref mut var, _) | Inner::Custom(ref mut var, _)) => {
 				*var = Some(value.serialize(ser::string::Serializer.wrap())?);
 			}
 			(0, Inner::Script(ref mut var, _)) => {
 				*var = Some(Script(value.serialize(ser::string::Serializer.wrap())?));
+			}
+			(0, Inner::Cast(ref mut var, _)) => {
+				*var = Some(value.serialize(ser::kind::Serializer.wrap())?);
 			}
 			(1, Inner::Cast(_, ref mut var)) => {
 				*var = Some(value.serialize(ser::value::Serializer.wrap())?);
@@ -120,34 +119,33 @@ impl serde::ser::SerializeTupleVariant for SerializeFunction {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use serde::Serialize;
 
 	#[test]
 	fn cast() {
 		let function = Function::Cast(Default::default(), Default::default());
-		let serialized = serialize_internal(|| function.serialize(Serializer.wrap())).unwrap();
+		let serialized = function.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(function, serialized);
 	}
 
 	#[test]
 	fn normal() {
 		let function = Function::Normal(Default::default(), vec![Default::default()]);
-		let serialized = serialize_internal(|| function.serialize(Serializer.wrap())).unwrap();
+		let serialized = function.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(function, serialized);
 	}
 
 	#[test]
 	fn custom() {
 		let function = Function::Custom(Default::default(), vec![Default::default()]);
-		let serialized = serialize_internal(|| function.serialize(Serializer.wrap())).unwrap();
+		let serialized = function.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(function, serialized);
 	}
 
 	#[test]
 	fn script() {
 		let function = Function::Script(Default::default(), vec![Default::default()]);
-		let serialized = serialize_internal(|| function.serialize(Serializer.wrap())).unwrap();
+		let serialized = function.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(function, serialized);
 	}
 }

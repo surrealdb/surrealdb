@@ -2,10 +2,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::sql::comment::mightbespace;
+use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::ending::subquery as ending;
 use crate::sql::error::IResult;
-use crate::sql::serde::is_internal_serialization;
 use crate::sql::statements::create::{create, CreateStatement};
 use crate::sql::statements::delete::{delete, DeleteStatement};
 use crate::sql::statements::ifelse::{ifelse, IfelseStatement};
@@ -16,7 +15,6 @@ use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
 use nom::branch::alt;
-use nom::character::complete::char;
 use nom::combinator::map;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -24,7 +22,8 @@ use std::fmt::{self, Display, Formatter};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[serde(rename = "$surrealdb::private::sql::Subquery")]
 pub enum Subquery {
 	Value(Value),
 	Ifelse(IfelseStatement),
@@ -35,6 +34,7 @@ pub enum Subquery {
 	Delete(DeleteStatement),
 	Relate(RelateStatement),
 	Insert(InsertStatement),
+	// Add new variants here
 }
 
 impl PartialOrd for Subquery {
@@ -45,6 +45,7 @@ impl PartialOrd for Subquery {
 }
 
 impl Subquery {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Self::Value(v) => v.writeable(),
@@ -58,7 +59,7 @@ impl Subquery {
 			Self::Insert(v) => v.writeable(),
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -80,7 +81,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -102,7 +103,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -124,7 +125,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -146,7 +147,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -168,7 +169,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -190,7 +191,7 @@ impl Subquery {
 				let mut ctx = Context::new(ctx);
 				// Add parent document
 				if let Some(doc) = doc {
-					ctx.add_value("parent".into(), doc);
+					ctx.add_value("parent", doc);
 				}
 				// Process subquery
 				match v.compute(&ctx, opt, txn, doc).await? {
@@ -225,29 +226,6 @@ impl Display for Subquery {
 	}
 }
 
-impl Serialize for Subquery {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		if is_internal_serialization() {
-			match self {
-				Self::Value(v) => serializer.serialize_newtype_variant(TOKEN, 0, "Value", v),
-				Self::Ifelse(v) => serializer.serialize_newtype_variant(TOKEN, 1, "Ifelse", v),
-				Self::Output(v) => serializer.serialize_newtype_variant(TOKEN, 2, "Output", v),
-				Self::Select(v) => serializer.serialize_newtype_variant(TOKEN, 3, "Select", v),
-				Self::Create(v) => serializer.serialize_newtype_variant(TOKEN, 4, "Create", v),
-				Self::Update(v) => serializer.serialize_newtype_variant(TOKEN, 5, "Update", v),
-				Self::Delete(v) => serializer.serialize_newtype_variant(TOKEN, 6, "Delete", v),
-				Self::Relate(v) => serializer.serialize_newtype_variant(TOKEN, 7, "Relate", v),
-				Self::Insert(v) => serializer.serialize_newtype_variant(TOKEN, 8, "Insert", v),
-			}
-		} else {
-			serializer.serialize_none()
-		}
-	}
-}
-
 pub fn subquery(i: &str) -> IResult<&str, Subquery> {
 	alt((subquery_ifelse, subquery_other, subquery_value))(i)
 }
@@ -258,22 +236,18 @@ fn subquery_ifelse(i: &str) -> IResult<&str, Subquery> {
 }
 
 fn subquery_value(i: &str) -> IResult<&str, Subquery> {
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, v) = map(value, Subquery::Value)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, v))
 }
 
 fn subquery_other(i: &str) -> IResult<&str, Subquery> {
 	alt((
 		|i| {
-			let (i, _) = char('(')(i)?;
-			let (i, _) = mightbespace(i)?;
+			let (i, _) = openparentheses(i)?;
 			let (i, v) = subquery_inner(i)?;
-			let (i, _) = mightbespace(i)?;
-			let (i, _) = char(')')(i)?;
+			let (i, _) = closeparentheses(i)?;
 			Ok((i, v))
 		},
 		|i| {

@@ -83,7 +83,6 @@ impl serde::ser::SerializeStruct for SerializeRange {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use serde::Serialize;
 
 	#[test]
@@ -93,7 +92,7 @@ mod tests {
 			beg: Bound::Included("bar".into()),
 			end: Bound::Excluded("foo".into()),
 		};
-		let serialized = serialize_internal(|| range.serialize(Serializer.wrap())).unwrap();
+		let serialized = range.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(range, serialized);
 	}
 }

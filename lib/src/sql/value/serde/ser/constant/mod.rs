@@ -55,140 +55,139 @@ impl ser::Serializer for Serializer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use ser::Serializer as _;
 	use serde::Serialize;
 
 	#[test]
 	fn math_e() {
 		let constant = Constant::MathE;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_frac_1pi() {
 		let constant = Constant::MathFrac1Pi;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_frac_1sqrt2() {
 		let constant = Constant::MathFrac1Sqrt2;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_frac_2pi() {
 		let constant = Constant::MathFrac2Pi;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_frac_2sqrt_pi() {
 		let constant = Constant::MathFrac2SqrtPi;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_frac_pi2() {
 		let constant = Constant::MathFracPi2;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_frac_pi3() {
 		let constant = Constant::MathFracPi3;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_frac_pi4() {
 		let constant = Constant::MathFracPi4;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_frac_pi6() {
 		let constant = Constant::MathFracPi6;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_frac_pi8() {
 		let constant = Constant::MathFracPi8;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_ln10() {
 		let constant = Constant::MathLn10;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_ln2() {
 		let constant = Constant::MathLn2;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_log102() {
 		let constant = Constant::MathLog102;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_log10_e() {
 		let constant = Constant::MathLog10E;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_log210() {
 		let constant = Constant::MathLog210;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_log2_e() {
 		let constant = Constant::MathLog2E;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_pi() {
 		let constant = Constant::MathPi;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_sqrt2() {
 		let constant = Constant::MathSqrt2;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 
 	#[test]
 	fn math_tau() {
 		let constant = Constant::MathTau;
-		let serialized = serialize_internal(|| constant.serialize(Serializer.wrap())).unwrap();
+		let serialized = constant.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(constant, serialized);
 	}
 }

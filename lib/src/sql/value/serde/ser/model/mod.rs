@@ -97,20 +97,19 @@ impl serde::ser::SerializeTupleVariant for SerializeModel {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::sql::serde::serialize_internal;
 	use serde::Serialize;
 
 	#[test]
 	fn count() {
 		let model = Model::Count(Default::default(), Default::default());
-		let serialized = serialize_internal(|| model.serialize(Serializer.wrap())).unwrap();
+		let serialized = model.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(model, serialized);
 	}
 
 	#[test]
 	fn range() {
 		let model = Model::Range(Default::default(), 1, 2);
-		let serialized = serialize_internal(|| model.serialize(Serializer.wrap())).unwrap();
+		let serialized = model.serialize(Serializer.wrap()).unwrap();
 		assert_eq!(model, serialized);
 	}
 }

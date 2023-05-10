@@ -1,29 +1,17 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::value::Value;
 
 impl Value {
-	pub async fn merge(
-		&mut self,
-		ctx: &Context<'_>,
-		opt: &Options,
-		txn: &Transaction,
-		val: Value,
-	) -> Result<(), Error> {
-		match val {
-			v if v.is_object() => {
-				for k in v.every(None, false, false).iter() {
-					match v.get(ctx, opt, txn, &k.0).await? {
-						Value::None => self.del(ctx, opt, txn, &k.0).await?,
-						v => self.set(ctx, opt, txn, &k.0, v).await?,
-					}
+	pub(crate) fn merge(&mut self, val: Value) -> Result<(), Error> {
+		if val.is_object() {
+			for k in val.every(None, false, false).iter() {
+				match val.pick(&k.0) {
+					Value::None => self.cut(&k.0),
+					v => self.put(&k.0, v),
 				}
-				Ok(())
 			}
-			_ => Ok(()),
 		}
+		Ok(())
 	}
 }
 
@@ -31,12 +19,10 @@ impl Value {
 mod tests {
 
 	use super::*;
-	use crate::dbs::test::mock;
 	use crate::sql::test::Parse;
 
 	#[tokio::test]
 	async fn merge_none() {
-		let (ctx, opt, txn) = mock().await;
 		let mut res = Value::parse(
 			"{
 				name: {
@@ -56,13 +42,12 @@ mod tests {
 				},
 			}",
 		);
-		res.merge(&ctx, &opt, &txn, mrg).await.unwrap();
+		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn merge_basic() {
-		let (ctx, opt, txn) = mock().await;
 		let mut res = Value::parse(
 			"{
 				name: {
@@ -91,7 +76,7 @@ mod tests {
 				tags: ['Rust', 'Golang', 'JavaScript'],
 			}",
 		);
-		res.merge(&ctx, &opt, &txn, mrg).await.unwrap();
+		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}
 }

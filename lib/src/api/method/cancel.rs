@@ -8,6 +8,7 @@ use std::pin::Pin;
 
 /// A transaction cancellation future
 #[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Cancel<C: Connection> {
 	pub(crate) client: Surreal<C>,
 }

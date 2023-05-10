@@ -58,6 +58,8 @@ use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::mem;
 #[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io;
@@ -68,6 +70,7 @@ use tokio::io::AsyncWrite;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
+#[cfg(not(target_arch = "wasm32"))]
 const LOG: &str = "surrealdb::api::engine::local";
 
 /// In-memory database
@@ -345,10 +348,7 @@ pub struct Db {
 
 impl Surreal<Db> {
 	/// Connects to a specific database endpoint, saving the connection on the static client
-	pub fn connect<P>(
-		&'static self,
-		address: impl IntoEndpoint<P, Client = Db>,
-	) -> Connect<Db, ()> {
+	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
 			router: Some(&self.router),
 			address: address.into_endpoint(),
@@ -411,14 +411,19 @@ async fn router(
 
 	match method {
 		Method::Use => {
-			let (ns, db) = match &mut params[..] {
+			match &mut params[..] {
 				[Value::Strand(Strand(ns)), Value::Strand(Strand(db))] => {
-					(mem::take(ns), mem::take(db))
+					session.ns = Some(mem::take(ns));
+					session.db = Some(mem::take(db));
+				}
+				[Value::Strand(Strand(ns)), Value::None] => {
+					session.ns = Some(mem::take(ns));
+				}
+				[Value::None, Value::Strand(Strand(db))] => {
+					session.db = Some(mem::take(db));
 				}
 				_ => unreachable!(),
-			};
-			session.ns = Some(ns);
-			session.db = Some(db);
+			}
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Signin | Method::Signup | Method::Authenticate | Method::Invalidate => {
@@ -486,18 +491,36 @@ async fn router(
 			let ns = session.ns.clone().unwrap_or_default();
 			let db = session.db.clone().unwrap_or_default();
 			let (mut writer, mut reader) = io::duplex(10_240);
-			tokio::spawn(async move {
+
+			// Write to channel.
+			async fn export_with_err(
+				kvs: &Datastore,
+				ns: String,
+				db: String,
+				chn: channel::Sender<Vec<u8>>,
+			) -> std::result::Result<(), crate::Error> {
+				kvs.export(ns, db, chn).await.map_err(|error| {
+					error!(target: LOG, "{error}");
+					crate::Error::Db(error)
+				})
+			}
+
+			let export = export_with_err(kvs, ns, db, tx);
+
+			// Read from channel and write to pipe.
+			let bridge = async move {
 				while let Ok(value) = rx.recv().await {
-					if let Err(error) = writer.write_all(&value).await {
-						error!(target: LOG, "{error}");
+					if writer.write_all(&value).await.is_err() {
+						// Broken pipe. Let either side's error be propagated.
+						break;
 					}
 				}
-			});
-			if let Err(error) = kvs.export(ns, db, tx).await {
-				error!(target: LOG, "{error}");
-			}
+				Ok(())
+			};
+
+			// Output to stdout or file.
 			let path = param.file.expect("file to export into");
-			let mut writer: Box<dyn AsyncWrite + Unpin + Send> = match path.to_str().unwrap() {
+			let mut output: Box<dyn AsyncWrite + Unpin + Send> = match path.to_str().unwrap() {
 				"-" => Box::new(io::stdout()),
 				_ => {
 					let file = match OpenOptions::new()
@@ -519,14 +542,28 @@ async fn router(
 					Box::new(file)
 				}
 			};
-			if let Err(error) = io::copy(&mut reader, &mut writer).await {
-				return Err(Error::FileRead {
-					path,
-					error,
-				}
-				.into());
-			};
-			Ok(DbResponse::Other(Value::None))
+
+			// Copy from pipe to output.
+			async fn copy_with_err<'a, R, W>(
+				path: PathBuf,
+				reader: &'a mut R,
+				writer: &'a mut W,
+			) -> std::result::Result<(), crate::Error>
+			where
+				R: tokio::io::AsyncRead + Unpin + ?Sized,
+				W: tokio::io::AsyncWrite + Unpin + ?Sized,
+			{
+				io::copy(reader, writer).await.map(|_| ()).map_err(|error| {
+					crate::Error::Api(crate::error::Api::FileRead {
+						path,
+						error,
+					})
+				})
+			}
+
+			let copy = copy_with_err(path, &mut reader, &mut output);
+
+			tokio::try_join!(export, bridge, copy).map(|_| DbResponse::Other(Value::None))
 		}
 		#[cfg(not(target_arch = "wasm32"))]
 		Method::Import => {
