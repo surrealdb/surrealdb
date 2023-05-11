@@ -27,7 +27,7 @@ pub(crate) enum Iterable {
 	Edges(Edges),
 	Mergeable(Thing, Value),
 	Relatable(Thing, Thing, Thing),
-	Index(Plan),
+	Index(Table, Plan),
 }
 
 pub(crate) enum Operable {

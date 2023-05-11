@@ -3,10 +3,8 @@ mod tree;
 
 use crate::dbs::{Iterable, Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::plan::Plan;
+use crate::idx::planner::plan::{IndexOption, Plan, PlanBuilder};
 use crate::idx::planner::tree::{Node, TreeBuilder};
-use crate::sql::index::Index;
-use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Cond, Operator, Table};
 
 pub(crate) struct QueryPlanner<'a> {
@@ -29,7 +27,7 @@ impl<'a> QueryPlanner<'a> {
 	) -> Result<Iterable, Error> {
 		if let Some(node) = TreeBuilder::parse(self.opt, txn, &t, self.cond).await? {
 			if let Some(plan) = AllAndStrategy::build(&node)? {
-				return Ok(Iterable::Index(plan));
+				return Ok(Iterable::Index(t, plan));
 			}
 		}
 		Ok(Iterable::Table(t))
@@ -37,7 +35,7 @@ impl<'a> QueryPlanner<'a> {
 }
 
 struct AllAndStrategy {
-	plan: Plan,
+	b: PlanBuilder,
 }
 
 /// Successful if every boolean operators are AND
@@ -45,10 +43,10 @@ struct AllAndStrategy {
 impl AllAndStrategy {
 	fn build(node: &Node) -> Result<Option<Plan>, Error> {
 		let mut s = AllAndStrategy {
-			plan: Plan::new(),
+			b: PlanBuilder::new(),
 		};
 		match s.eval_node(node) {
-			Ok(_) => Ok(Some(s.plan)),
+			Ok(_) => Ok(Some(s.b.build()?)),
 			Err(Error::BypassQueryPlanner) => Ok(None),
 			Err(e) => Err(e),
 		}
@@ -71,14 +69,14 @@ impl AllAndStrategy {
 			return Err(Error::BypassQueryPlanner);
 		}
 		if let Some(ix) = left.is_indexed_field() {
-			if right.is_scalar() && Self::index_supported_operator(&ix, op) {
-				self.plan.add(ix.clone(), right.clone(), op.clone());
+			if let Some(index_option) = IndexOption::found(ix, op, right) {
+				self.b.add(index_option);
 				return Ok(());
 			}
 			self.eval_node(right)?;
 		} else if let Some(ix) = right.is_indexed_field() {
-			if left.is_scalar() && Self::index_supported_operator(&ix, op) {
-				self.plan.add(ix.clone(), left.clone(), op.clone());
+			if let Some(index_option) = IndexOption::found(ix, op, left) {
+				self.b.add(index_option);
 				return Ok(());
 			}
 			self.eval_node(left)?;
@@ -87,21 +85,5 @@ impl AllAndStrategy {
 			self.eval_node(right)?;
 		}
 		Ok(())
-	}
-
-	fn index_supported_operator(ix: &DefineIndexStatement, op: &Operator) -> bool {
-		match ix.index {
-			Index::Idx => Operator::Equal.eq(op),
-			Index::Uniq => Operator::Equal.eq(op),
-			Index::Search {
-				..
-			} => {
-				if let Operator::Matches(_) = op {
-					true
-				} else {
-					false
-				}
-			}
-		}
 	}
 }

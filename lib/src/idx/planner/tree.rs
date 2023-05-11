@@ -35,9 +35,9 @@ impl Node {
 		}
 	}
 
-	pub(super) fn is_indexed_field(&self) -> Option<DefineIndexStatement> {
+	pub(super) fn is_indexed_field(&self) -> Option<&DefineIndexStatement> {
 		if let Node::IndexedField(index) = self {
-			Some(index.clone())
+			Some(index)
 		} else {
 			None
 		}

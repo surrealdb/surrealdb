@@ -44,6 +44,7 @@ pub struct SelectStatement {
 	pub version: Option<Version>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
+	pub explain: bool,
 }
 
 impl SelectStatement {
@@ -185,6 +186,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 	let (i, version) = opt(preceded(shouldbespace, version))(i)?;
 	let (i, timeout) = opt(preceded(shouldbespace, timeout))(i)?;
 	let (i, parallel) = opt(preceded(shouldbespace, tag_no_case("PARALLEL")))(i)?;
+	let (i, explain) = opt(preceded(shouldbespace, tag_no_case("EXPLAIN")))(i)?;
 	Ok((
 		i,
 		SelectStatement {
@@ -200,6 +202,7 @@ pub fn select(i: &str) -> IResult<&str, SelectStatement> {
 			version,
 			timeout,
 			parallel: parallel.is_some(),
+			explain: explain.is_some(),
 		},
 	))
 }
