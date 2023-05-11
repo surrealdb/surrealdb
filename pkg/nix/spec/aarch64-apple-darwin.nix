@@ -6,9 +6,9 @@
   features = with util.features; [ default storage-tikv ];
 
   buildSpec = with pkgs; {
-    depsBuildBuild = [ cmake clang protobuf perl ];
+    depsBuildBuild = [ clang protobuf perl ];
 
-    nativeBuildInputs = [ pkg-config ];
+    nativeBuildInputs = [ cmake pkg-config ];
 
     buildInputs = [ openssl libiconv darwin.apple_sdk.frameworks.Security ];
 

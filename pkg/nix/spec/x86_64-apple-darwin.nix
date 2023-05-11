@@ -8,7 +8,7 @@
   buildSpec = with pkgs; {
     depsBuildBuild = [ clang protobuf perl ];
 
-    nativeBuildInputs = [ pkg-config ];
+    nativeBuildInputs = [ cmake pkg-config ];
 
     buildInputs = [ openssl libiconv darwin.apple_sdk.frameworks.Security ];
 
