@@ -4,8 +4,8 @@ use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
 use crate::sql::comment::mightbespace;
-use crate::sql::common::commas;
 use crate::sql::common::val_char;
+use crate::sql::common::{closeparentheses, commas, openparentheses};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
@@ -133,6 +133,7 @@ impl Function {
 }
 
 impl Function {
+	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(
@@ -228,11 +229,9 @@ pub fn function(i: &str) -> IResult<&str, Function> {
 
 pub fn normal(i: &str) -> IResult<&str, Function> {
 	let (i, s) = function_names(i)?;
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, Function::Normal(s.to_string(), a)))
 }
 
@@ -249,11 +248,10 @@ pub fn custom(i: &str) -> IResult<&str, Function> {
 
 fn script(i: &str) -> IResult<&str, Function> {
 	let (i, _) = tag("function")(i)?;
-	let (i, _) = tag("(")(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, a) = separated_list0(commas, value)(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = tag(")")(i)?;
+	let (i, _) = closeparentheses(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char('{')(i)?;
 	let (i, v) = func(i)?;
@@ -271,8 +269,10 @@ fn cast(i: &str) -> IResult<&str, Function> {
 pub(crate) fn function_names(i: &str) -> IResult<&str, &str> {
 	recognize(alt((
 		preceded(tag("array::"), function_array),
+		preceded(tag("bytes::"), function_bytes),
 		preceded(tag("crypto::"), function_crypto),
 		preceded(tag("duration::"), function_duration),
+		preceded(tag("encoding::"), function_encoding),
 		preceded(tag("geo::"), function_geo),
 		preceded(tag("http::"), function_http),
 		preceded(tag("is::"), function_is),
@@ -327,6 +327,10 @@ fn function_array(i: &str) -> IResult<&str, &str> {
 	))(i)
 }
 
+fn function_bytes(i: &str) -> IResult<&str, &str> {
+	alt((tag("len"),))(i)
+}
+
 fn function_crypto(i: &str) -> IResult<&str, &str> {
 	alt((
 		preceded(tag("argon2::"), alt((tag("compare"), tag("generate")))),
@@ -365,6 +369,10 @@ fn function_duration(i: &str) -> IResult<&str, &str> {
 			)),
 		),
 	))(i)
+}
+
+fn function_encoding(i: &str) -> IResult<&str, &str> {
+	alt((preceded(tag("base64::"), alt((tag("decode"), tag("encode")))),))(i)
 }
 
 fn function_geo(i: &str) -> IResult<&str, &str> {

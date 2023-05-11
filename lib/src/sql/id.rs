@@ -24,6 +24,7 @@ use ulid::Ulid;
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Id {
 	Number(i64),
+	/// Invariant: Doesn't contain NUL bytes.
 	String(String),
 	Array(Array),
 	Object(Object),
@@ -165,6 +166,7 @@ impl Display for Id {
 }
 
 impl Id {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::sql::comment::mightbespace;
-use crate::sql::common::commas;
+use crate::sql::common::{closebracket, commas, openbracket};
 use crate::sql::error::IResult;
 use crate::sql::fmt::{pretty_indent, Fmt, Pretty};
 use crate::sql::number::Number;
@@ -111,6 +111,7 @@ impl Array {
 }
 
 impl Array {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
@@ -354,13 +355,11 @@ impl Uniq<Array> for Array {
 // ------------------------------
 
 pub fn array(i: &str) -> IResult<&str, Array> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list0(commas, value)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, Array(v)))
 }
 
