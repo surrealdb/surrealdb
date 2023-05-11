@@ -89,7 +89,7 @@ impl Surreal<Client> {
 	/// # }
 	/// ```
 	pub fn connect<P>(
-		&'static self,
+		&self,
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
@@ -354,34 +354,47 @@ async fn router(
 	match method {
 		Method::Use => {
 			let path = base_url.join(SQL_PATH)?;
+			let mut request = client.post(path).headers(headers.clone());
 			let (ns, db) = match &mut params[..] {
 				[Value::Strand(Strand(ns)), Value::Strand(Strand(db))] => {
-					(mem::take(ns), mem::take(db))
+					(Some(mem::take(ns)), Some(mem::take(db)))
 				}
+				[Value::Strand(Strand(ns)), Value::None] => (Some(mem::take(ns)), None),
+				[Value::None, Value::Strand(Strand(db))] => (None, Some(mem::take(db))),
 				_ => unreachable!(),
 			};
-			let ns = match HeaderValue::try_from(&ns) {
-				Ok(ns) => ns,
-				Err(_) => {
-					return Err(Error::InvalidNsName(ns).into());
-				}
+			let ns = match ns {
+				Some(ns) => match HeaderValue::try_from(&ns) {
+					Ok(ns) => {
+						request = request.header("NS", &ns);
+						Some(ns)
+					}
+					Err(_) => {
+						return Err(Error::InvalidNsName(ns).into());
+					}
+				},
+				None => None,
 			};
-			let db = match HeaderValue::try_from(&db) {
-				Ok(db) => db,
-				Err(_) => {
-					return Err(Error::InvalidDbName(db).into());
-				}
+			let db = match db {
+				Some(db) => match HeaderValue::try_from(&db) {
+					Ok(db) => {
+						request = request.header("DB", &db);
+						Some(db)
+					}
+					Err(_) => {
+						return Err(Error::InvalidDbName(db).into());
+					}
+				},
+				None => None,
 			};
-			let request = client
-				.post(path)
-				.headers(headers.clone())
-				.header("NS", &ns)
-				.header("DB", &db)
-				.auth(auth)
-				.body("RETURN true");
+			request = request.auth(auth).body("RETURN true");
 			take(true, request).await?;
-			headers.insert("NS", ns);
-			headers.insert("DB", db);
+			if let Some(ns) = ns {
+				headers.insert("NS", ns);
+			}
+			if let Some(db) = db {
+				headers.insert("DB", db);
+			}
 			Ok(DbResponse::Other(Value::None))
 		}
 		Method::Signin => {

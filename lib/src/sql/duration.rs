@@ -20,6 +20,7 @@ static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
 static SECONDS_PER_HOUR: u64 = 60 * SECONDS_PER_MINUTE;
 static SECONDS_PER_MINUTE: u64 = 60;
 static NANOSECONDS_PER_MILLISECOND: u32 = 1000000;
+static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Duration";
 
@@ -179,6 +180,9 @@ impl fmt::Display for Duration {
 		// Calculate the total millseconds
 		let msec = nano / NANOSECONDS_PER_MILLISECOND;
 		let nano = nano % NANOSECONDS_PER_MILLISECOND;
+		// Calculate the total microseconds
+		let usec = nano / NANOSECONDS_PER_MICROSECOND;
+		let nano = nano % NANOSECONDS_PER_MICROSECOND;
 		// Write the different parts
 		if year > 0 {
 			write!(f, "{year}y")?;
@@ -200,6 +204,9 @@ impl fmt::Display for Duration {
 		}
 		if msec > 0 {
 			write!(f, "{msec}ms")?;
+		}
+		if usec > 0 {
+			write!(f, "{usec}µs")?;
 		}
 		if nano > 0 {
 			write!(f, "{nano}ns")?;

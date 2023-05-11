@@ -29,10 +29,11 @@ pub struct CreateStatement {
 }
 
 impl CreateStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-
+	/// Check if this statement is for a single record
 	pub(crate) fn single(&self) -> bool {
 		match self.what.len() {
 			1 if self.what[0].is_object() => true,
@@ -41,7 +42,7 @@ impl CreateStatement {
 			_ => false,
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

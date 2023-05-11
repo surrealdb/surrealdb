@@ -1,7 +1,7 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
 use crate::sql::comment::mightbespace;
-use crate::sql::common::commas;
+use crate::sql::common::{closebracket, closeparentheses, commas, openbracket, openparentheses};
 use crate::sql::error::IResult;
 use crate::sql::fmt::Fmt;
 use crate::sql::latlng::{decimal_degree, dms};
@@ -540,13 +540,11 @@ pub fn geometry(i: &str) -> IResult<&str, Geometry> {
 }
 
 fn simple(i: &str) -> IResult<&str, Geometry> {
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, x) = double(i)?;
 	let (i, _) = commas(i)?;
 	let (i, y) = double(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, Geometry::Point((x, y).into())))
 }
 
@@ -705,78 +703,64 @@ fn point_vals(i: &str) -> IResult<&str, Point<f64>> {
 }
 
 fn line_vals(i: &str) -> IResult<&str, LineString<f64>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list1(commas, coordinate)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, v.into()))
 }
 
 fn polygon_vals(i: &str) -> IResult<&str, Polygon<f64>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, e) = line_vals(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	let (i, v) = separated_list0(commas, |i| {
-		let (i, _) = char('[')(i)?;
-		let (i, _) = mightbespace(i)?;
+		let (i, _) = openbracket(i)?;
 		let (i, v) = line_vals(i)?;
 		let (i, _) = mightbespace(i)?;
 		let (i, _) = opt(char(','))(i)?;
-		let (i, _) = mightbespace(i)?;
-		let (i, _) = char(']')(i)?;
+		let (i, _) = closebracket(i)?;
 		Ok((i, v))
 	})(i)?;
 	Ok((i, Polygon::new(e, v)))
 }
 
 fn multipoint_vals(i: &str) -> IResult<&str, Vec<Point<f64>>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list1(commas, point_vals)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, v))
 }
 
 fn multiline_vals(i: &str) -> IResult<&str, Vec<LineString<f64>>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list1(commas, line_vals)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, v))
 }
 
 fn multipolygon_vals(i: &str) -> IResult<&str, Vec<Polygon<f64>>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list1(commas, polygon_vals)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, v))
 }
 
 fn collection_vals(i: &str) -> IResult<&str, Vec<Geometry>> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, v) = separated_list1(commas, geometry)(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = opt(char(','))(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, v))
 }
 
@@ -785,15 +769,13 @@ fn collection_vals(i: &str) -> IResult<&str, Vec<Geometry>> {
 //
 
 fn coordinate(i: &str) -> IResult<&str, (f64, f64)> {
-	let (i, _) = char('[')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openbracket(i)?;
 	let (i, x) = double(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = char(',')(i)?;
 	let (i, _) = mightbespace(i)?;
 	let (i, y) = double(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(']')(i)?;
+	let (i, _) = closebracket(i)?;
 	Ok((i, (x, y)))
 }
 

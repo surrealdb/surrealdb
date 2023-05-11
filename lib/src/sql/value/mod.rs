@@ -6,8 +6,10 @@ pub(super) mod serde;
 mod value;
 
 mod all;
+mod changed;
 mod clear;
 mod compare;
+mod cut;
 mod decrement;
 mod def;
 mod del;
@@ -20,6 +22,7 @@ mod first;
 mod flatten;
 mod generate;
 mod get;
+mod inc;
 mod increment;
 mod last;
 mod merge;

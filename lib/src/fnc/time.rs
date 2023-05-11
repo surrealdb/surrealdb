@@ -91,8 +91,8 @@ pub fn minute((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 
 pub fn month((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
-		Some(v) => v.minute().into(),
-		None => Datetime::default().minute().into(),
+		Some(v) => v.month().into(),
+		None => Datetime::default().month().into(),
 	})
 }
 

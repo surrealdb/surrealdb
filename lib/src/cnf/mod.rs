@@ -1,10 +1,16 @@
+use once_cell::sync::Lazy;
+
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 /// Specifies how many concurrent jobs can be buffered in the worker channel.
 pub const MAX_CONCURRENT_TASKS: usize = 64;
 
 /// Specifies how deep various forms of computation will go before the query fails.
-pub const MAX_COMPUTATION_DEPTH: u8 = 30;
+///
+/// For reference, use ~15 per MiB of stack in release mode.
+pub static MAX_COMPUTATION_DEPTH: Lazy<u8> = Lazy::new(|| {
+	option_env!("SURREAL_MAX_COMPUTATION_DEPTH").and_then(|s| s.parse::<u8>().ok()).unwrap_or(120)
+});
 
 /// Specifies the names of parameters which can not be specified in a query.
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["auth", "scope", "token", "session"];

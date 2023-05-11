@@ -53,6 +53,7 @@ use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as Json;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -107,6 +108,13 @@ pub fn whats(i: &str) -> IResult<&str, Values> {
 #[serde(rename = "$surrealdb::private::sql::Value")]
 #[format(Named)]
 pub enum Value {
+	// These value types are simple values which
+	// can be used in query responses sent to
+	// the client. They typically do not need to
+	// be computed, unless an un-computed value
+	// is present inside an Array or Object type.
+	// These types can also be used within indexes
+	// and sort according to their order below.
 	#[default]
 	None,
 	Null,
@@ -120,11 +128,17 @@ pub enum Value {
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
-	// ---
+	Thing(Thing),
+	// These Value types are un-computed values
+	// and are not used in query responses sent
+	// to the client. These types need to be
+	// computed, in order to convert them into
+	// one of the simple types listed above.
+	// These types are first computed into a
+	// simple type before being used in indexes.
 	Param(Param),
 	Idiom(Idiom),
 	Table(Table),
-	Thing(Thing),
 	Model(Model),
 	Regex(Regex),
 	Block(Box<Block>),
@@ -389,13 +403,13 @@ impl From<BigDecimal> for Value {
 
 impl From<String> for Value {
 	fn from(v: String) -> Self {
-		Value::Strand(Strand::from(v))
+		Self::Strand(Strand::from(v))
 	}
 }
 
 impl From<&str> for Value {
 	fn from(v: &str) -> Self {
-		Value::Strand(Strand::from(v))
+		Self::Strand(Strand::from(v))
 	}
 }
 
@@ -872,6 +886,11 @@ impl Value {
 		matches!(self, Value::Number(Number::Decimal(_)))
 	}
 
+	/// Check if this Value is a Number but is a NAN
+	pub fn is_nan(&self) -> bool {
+		matches!(self, Value::Number(v) if v.is_nan())
+	}
+
 	/// Check if this Value is a Number and is an integer
 	pub fn is_integer(&self) -> bool {
 		matches!(self, Value::Number(v) if v.is_integer())
@@ -1000,6 +1019,14 @@ impl Value {
 				message: String::from("Operations must be an array"),
 			}),
 		}
+	}
+
+	/// Converts a `surrealdb::sq::Value` into a `serde_json::Value`
+	///
+	/// This converts certain types like `Thing` into their simpler formats
+	/// instead of the format used internally by SurrealDB.
+	pub fn into_json(self) -> Json {
+		self.into()
 	}
 
 	// -----------------------------------
@@ -1195,6 +1222,16 @@ impl Value {
 		match self {
 			// Allow any boolean value
 			Value::Bool(boolean) => Ok(boolean),
+			// Attempt to convert a string value
+			Value::Strand(ref v) => match v.parse::<bool>() {
+				// The string can be represented as a Float
+				Ok(v) => Ok(v),
+				// Ths string is not a float
+				_ => Err(Error::ConvertTo {
+					from: self,
+					into: "bool".into(),
+				}),
+			},
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -1465,6 +1502,8 @@ impl Value {
 		match self {
 			// Bytes are allowed
 			Value::Bytes(v) => Ok(v),
+			// Strings can be converted to bytes
+			Value::Strand(s) => Ok(Bytes(s.0.into_bytes())),
 			// Anything else raises an error
 			_ => Err(Error::ConvertTo {
 				from: self,
@@ -1906,15 +1945,17 @@ impl fmt::Display for Value {
 			Value::Function(v) => write!(f, "{v}"),
 			Value::Subquery(v) => write!(f, "{v}"),
 			Value::Expression(v) => write!(f, "{v}"),
-			Value::Bytes(_) => write!(f, "<bytes>"),
+			Value::Bytes(v) => write!(f, "{v}"),
 		}
 	}
 }
 
 impl Value {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Value::Block(v) => v.writeable(),
+			Value::Idiom(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
 			Value::Function(v) => v.is_custom() || v.args().iter().any(Value::writeable),
@@ -1923,7 +1964,7 @@ impl Value {
 			_ => false,
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(

@@ -36,6 +36,54 @@ pub fn commasorspace(i: &str) -> IResult<&str, ()> {
 	alt((commas, shouldbespace))(i)
 }
 
+pub fn openparentheses(i: &str) -> IResult<&str, ()> {
+	let (i, _) = char('(')(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, ()))
+}
+
+pub fn closeparentheses(i: &str) -> IResult<&str, ()> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char(')')(i)?;
+	Ok((i, ()))
+}
+
+pub fn openbraces(i: &str) -> IResult<&str, ()> {
+	let (i, _) = char('{')(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, ()))
+}
+
+pub fn closebraces(i: &str) -> IResult<&str, ()> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('}')(i)?;
+	Ok((i, ()))
+}
+
+pub fn openbracket(i: &str) -> IResult<&str, ()> {
+	let (i, _) = char('[')(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, ()))
+}
+
+pub fn closebracket(i: &str) -> IResult<&str, ()> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char(']')(i)?;
+	Ok((i, ()))
+}
+
+pub fn openchevron(i: &str) -> IResult<&str, ()> {
+	let (i, _) = char('<')(i)?;
+	let (i, _) = mightbespace(i)?;
+	Ok((i, ()))
+}
+
+pub fn closechevron(i: &str) -> IResult<&str, ()> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = char('>')(i)?;
+	Ok((i, ()))
+}
+
 #[inline]
 pub fn is_hex(chr: char) -> bool {
 	chr.is_ascii_hexdigit()

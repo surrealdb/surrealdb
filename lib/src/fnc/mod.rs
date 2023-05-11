@@ -4,9 +4,11 @@ use crate::sql::value::Value;
 
 pub mod args;
 pub mod array;
+pub mod bytes;
 pub mod count;
 pub mod crypto;
 pub mod duration;
+pub mod encoding;
 pub mod geo;
 pub mod http;
 pub mod is;
@@ -77,6 +79,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::group" => array::group,
 		"array::insert" => array::insert,
 		"array::intersect" => array::intersect,
+		"array::join" => array::join,
 		"array::len" => array::len,
 		"array::max" => array::max,
 		"array::min" => array::min,
@@ -90,6 +93,8 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"array::union" => array::union,
 		"array::sort::asc" => array::sort::asc,
 		"array::sort::desc" => array::sort::desc,
+		//
+		"bytes::len" => bytes::len,
 		//
 		"count" => count::count,
 		//
@@ -115,6 +120,9 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"duration::from::nanos" => duration::from::nanos,
 		"duration::from::secs" => duration::from::secs,
 		"duration::from::weeks" => duration::from::weeks,
+		//
+		"encoding::base64::decode" => encoding::base64::decode,
+		"encoding::base64::encode" => encoding::base64::encode,
 		//
 		"geo::area" => geo::area,
 		"geo::bearing" => geo::bearing,
@@ -178,6 +186,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"parse::url::query" => parse::url::query,
 		"parse::url::scheme" => parse::url::scheme,
 		//
+		"rand" => rand::rand,
 		"rand::bool" => rand::bool,
 		"rand::enum" => rand::r#enum,
 		"rand::float" => rand::float,
@@ -189,7 +198,6 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"rand::uuid::v4" => rand::uuid::v4,
 		"rand::uuid::v7" => rand::uuid::v7,
 		"rand::uuid" => rand::uuid,
-		"rand" => rand::rand,
 		//
 		"session::db" => session::db(ctx),
 		"session::id" => session::id(ctx),
@@ -201,6 +209,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"session::token" => session::token(ctx),
 		//
 		"string::concat" => string::concat,
+		"string::contains" => string::contains,
 		"string::endsWith" => string::ends_with,
 		"string::join" => string::join,
 		"string::len" => string::len,
@@ -291,4 +300,57 @@ pub async fn asynchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Re
 		//
 		"sleep" => sleep::sleep(ctx).await,
 	)
+}
+
+#[cfg(test)]
+mod tests {
+	#[test]
+	fn implementations_are_present() {
+		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
+		let mut problems = Vec::new();
+
+		// Read the source code of this file
+		let fnc_mod = include_str!("mod.rs");
+		for line in fnc_mod.lines() {
+			if !(line.contains("=>")
+				&& (line.trim().starts_with('"') || line.trim().ends_with(',')))
+			{
+				// This line does not define a function name.
+				continue;
+			}
+
+			let (quote, _) = line.split_once("=>").unwrap();
+			let name = quote.trim().trim_matches('"');
+
+			if crate::sql::function::function_names(&name).is_err() {
+				problems.push(format!("couldn't parse {name} function"));
+			}
+
+			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
+			futures::executor::block_on(async {
+				use crate::sql::Value;
+
+				let name = name.replace("::", ".");
+				let sql =
+					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
+				let dbs = crate::kvs::Datastore::new("memory").await.unwrap();
+				let ses = crate::dbs::Session::for_kv().with_ns("test").with_db("test");
+				let res = &mut dbs.execute(&sql, &ses, None, false).await.unwrap();
+				let tmp = res.remove(0).result.unwrap();
+				if tmp == Value::from("object") {
+					// Assume this function is superseded by a module of the same name.
+				} else if tmp != Value::from("function") {
+					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
+				}
+			});
+		}
+
+		if !problems.is_empty() {
+			eprintln!("Functions not fully implemented:");
+			for problem in problems {
+				eprintln!(" - {problem}");
+			}
+			panic!("ensure functions can be parsed in lib/src/sql/function.rs and are exported to JS in lib/src/fnc/script/modules/surrealdb");
+		}
+	}
 }

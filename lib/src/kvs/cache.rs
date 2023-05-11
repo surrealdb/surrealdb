@@ -1,4 +1,5 @@
 use crate::kvs::kv::Key;
+use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::statements::DefineDatabaseStatement;
 use crate::sql::statements::DefineEventStatement;
 use crate::sql::statements::DefineFieldStatement;
@@ -21,6 +22,7 @@ pub enum Entry {
 	Ns(Arc<DefineNamespaceStatement>),
 	Tb(Arc<DefineTableStatement>),
 	// Multi definitions
+	Azs(Arc<[DefineAnalyzerStatement]>),
 	Dbs(Arc<[DefineDatabaseStatement]>),
 	Dls(Arc<[DefineLoginStatement]>),
 	Dts(Arc<[DefineTokenStatement]>),

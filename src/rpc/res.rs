@@ -31,38 +31,26 @@ enum Content<T> {
 }
 
 impl<T: Serialize> Response<T> {
-	fn json(self) -> Response<Json> {
-		let Response {
-			id,
-			content,
-		} = self;
-		let content = match content {
-			Content::Success(response) => {
-				Content::Success(Json::from(sql::to_value(response).unwrap()))
-			}
-			Content::Failure(failure) => Content::Failure(failure),
-		};
-		Response {
-			id,
-			content,
-		}
+	/// Convert and simplify the value into JSON
+	#[inline]
+	fn simplify(self) -> Json {
+		sql::to_value(self).unwrap().into()
 	}
-
-	/// Send the response to the channel
+	/// Send the response to the WebSocket channel
 	pub async fn send(self, out: Output, chn: Sender<Message>) {
 		match out {
 			Output::Json => {
-				let res = serde_json::to_string(&self.json()).unwrap();
+				let res = serde_json::to_string(&self.simplify()).unwrap();
 				let res = Message::text(res);
 				let _ = chn.send(res).await;
 			}
 			Output::Cbor => {
-				let res = serde_cbor::to_vec(&self.json()).unwrap();
+				let res = serde_cbor::to_vec(&self.simplify()).unwrap();
 				let res = Message::binary(res);
 				let _ = chn.send(res).await;
 			}
 			Output::Pack => {
-				let res = serde_pack::to_vec(&self.json()).unwrap();
+				let res = serde_pack::to_vec(&self.simplify()).unwrap();
 				let res = Message::binary(res);
 				let _ = chn.send(res).await;
 			}
