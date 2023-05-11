@@ -1,6 +1,6 @@
 use derive::Store;
 use serde::{Deserialize, Serialize};
-use std::ops::Sub;
+use std::ops::{Add, Sub};
 use std::time::Duration;
 use time::ext::NumericalStdDuration;
 
@@ -10,6 +10,15 @@ use time::ext::NumericalStdDuration;
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Store)]
 pub struct Timestamp {
 	pub value: u64,
+}
+
+impl Add<Duration> for Timestamp {
+	type Output = Timestamp;
+	fn add(self, rhs: Duration) -> Timestamp {
+		Timestamp {
+			value: self.value + rhs.as_secs() as u64,
+		}
+	}
 }
 
 impl Sub for Timestamp {

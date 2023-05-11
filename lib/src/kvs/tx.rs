@@ -3,6 +3,7 @@ use super::kv::Convert;
 use super::Key;
 use super::Val;
 use crate::err::Error;
+use crate::key::hb::Hb;
 use crate::key::thing;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
@@ -12,9 +13,11 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
+use crate::sql::Kind::Bytes;
 use crate::sql::{Uuid, Value};
 use crate::{opt, sql};
 use channel::Sender;
+use chrono::format::Numeric::Timestamp;
 use md5::digest::typenum::tarr;
 use sql::permission::Permissions;
 use sql::statements::DefineDatabaseStatement;
@@ -33,7 +36,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::{Bound, Range};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(debug_assertions)]
 const LOG: &str = "surrealdb::txn";
@@ -799,13 +802,23 @@ impl Transaction {
 
 	// Delete a range of keys from the heartbeat space
 	// The limit is required in case a commit comes in that is after the max read value
-	pub async fn delr_hb(&mut self, rng: Timestamp, limit: u32) -> Result<(), Error> {
+	pub async fn delr_hb(&mut self, ts: Timestamp, limit: u32) -> Result<(), Error> {
+		// The provided timestamp can have several entries for nodes, so we want to be
+		// exclusive on the next timestamp value
+		// Ex, 12:00-node-1, 12:00-node-2 for TS=12:00
+		// We can capture all of them by scanning exclusive to 12:00:00.0001
+		let upper = ts + Duration::from_millis(1);
 		let rng = opt::Range {
-			start: Bound::Unbounded,
-			end: Bound::Included(rng),
+			start: Bound::Included(
+				Timestamp {
+					value: 0,
+				}
+				.into(),
+			),
+			end: Bound::Excluded(upper.into()),
 		};
 		trace!(target: LOG, "delr_hb: {:?}", rng);
-		Err(Error::Unimplemented("delr_hb".to_string()))
+		Ok(())
 	}
 
 	/// Retrieve all namespace definitions in a datastore.

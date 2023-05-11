@@ -32,6 +32,19 @@ impl Hb {
 	}
 }
 
+impl From<Timestamp> for Hb {
+	fn from(ts: Timestamp) -> Self {
+		let empty_uuid = uuid::Uuid::nil();
+			Hb::new(
+				Timestamp {
+					value: 0, // We want to delete everything from start
+				},
+				empty_uuid,
+			)
+		Self::new(ts, Uuid::new_v4())
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	#[test]
