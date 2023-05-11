@@ -9,6 +9,22 @@ use chrono::Local;
 use chrono::Timelike;
 use chrono::Utc;
 
+pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
+	match chrono::Duration::from_std(*duration) {
+		Ok(d) => match val.duration_trunc(d).ok().and_then(|floor| floor.checked_add_signed(d)) {
+			Some(v) => Ok(v.into()),
+			_ => Err(Error::InvalidArguments {
+				name: String::from("time::ceil"),
+				message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+			}),
+		},
+		_ => Err(Error::InvalidArguments {
+			name: String::from("time::ceil"),
+			message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+		}),
+	}
+}
+
 pub fn day((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 	Ok(match val {
 		Some(v) => v.day().into(),
@@ -18,7 +34,7 @@ pub fn day((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 
 pub fn floor((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 	match chrono::Duration::from_std(*duration) {
-		Ok(d) => match val.duration_trunc(d) {
+		Ok(d) => match val.duration_trunc(d){
 			Ok(v) => Ok(v.into()),
 			_ => Err(Error::InvalidArguments {
 				name: String::from("time::floor"),
