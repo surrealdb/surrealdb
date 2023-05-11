@@ -755,12 +755,10 @@ impl Transaction {
 	// Retrieve cluster information
 	pub async fn get_cl(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
 		let key = crate::key::cl::Cl::new(id.0);
-		let val = self.get(key).await?.ok_or(Error::ClNotFound {
-			value: id.to_string(),
-		});
+		let val = self.get(key).await?;
 		match val {
-			Err(e) => Err(e),
-			Ok(v) => Ok(Some::<ClusterMembership>(v.into())),
+			Some(v) => Ok(Some::<ClusterMembership>(v.into())),
+			None => Ok(None),
 		}
 	}
 

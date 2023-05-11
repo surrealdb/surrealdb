@@ -217,7 +217,7 @@ pub enum Error {
 	},
 
 	// The cluster node already exists
-	#[error("The node '{value}' does not exist")]
+	#[error("The node '{value}' already exists")]
 	ClAlreadyExists {
 		value: String,
 	},

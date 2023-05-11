@@ -110,28 +110,16 @@ impl Datastore {
 				#[cfg(feature = "kv-mem")]
 				{
 					info!(target: LOG, "Starting kvs store in {}", path);
-					let v = super::mem::Datastore::new()
-						.await
-						.map(|v| Datastore {
-							id: Arc::new(Uuid::new_v4()),
-							inner: Inner::Mem(v),
-							send,
-							recv,
-						})
-						.map(|ds| async {
-							trace!(target: LOG, "Registered membership for {}", ds.id);
-							ds.register_membership().await?;
-							ds
-						});
-					let d = match v {
-						Ok(d) => d.await?,
-						Err(e) => {
-							error!(target: LOG, "Failed to create datastore: {}", e);
-							return Err(e);
-						}
+					let ds = Datastore {
+						id: Arc::new(Uuid::new_v4()),
+						inner: Inner::Mem(super::mem::Datastore::new().await?),
+						send,
+						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					d
+					ds.register_membership().await?;
+					trace!(target: LOG, "Registered membership for {}", ds.id);
+					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-mem"))]
                 return Err(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -143,20 +131,16 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
-					let v = super::rocksdb::Datastore::new(s)
-						.await
-						.map(|v| Datastore {
-							id: Arc::new(Uuid::new_v4()),
-							inner: Inner::RocksDB(v),
-							send,
-							recv,
-						})
-						.map(|ds| async {
-							trace!(target: LOG, "Registered membership for {}", ds.id);
-							ds.register_membership().await?;
-						});
+					let ds = Datastore {
+						id: Arc::new(Uuid::new_v4()),
+						inner: Inner::RocksDB(super::rocksdb::Datastore::new(s).await?),
+						send,
+						recv,
+					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					v
+					ds.register_membership().await?;
+					trace!(target: LOG, "Registered membership for {}", ds.id);
+					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -168,20 +152,16 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
-					let v = super::rocksdb::Datastore::new(s)
-						.await
-						.map(|v| Datastore {
-							id: Arc::new(Uuid::new_v4()),
-							inner: Inner::RocksDB(v),
-							send,
-							recv,
-						})
-						.map(|ds| async {
-							trace!(target: LOG, "Registered membership for {}", ds.id);
-							ds.register_membership().await?;
-						});
+					let ds = Datastore {
+						id: Arc::new(Uuid::new_v4()),
+						inner: Inner::RocksDB(super::rocksdb::Datastore::new(s).await?),
+						send,
+						recv,
+					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					v
+					ds.register_membership().await?;
+					trace!(target: LOG, "Registered membership for {}", ds.id);
+					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
                 return Err(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -193,20 +173,16 @@ impl Datastore {
 					info!(target: LOG, "Starting kvs store at {}", path);
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
-					let v = super::indxdb::Datastore::new(s)
-						.await
-						.map(|v| Datastore {
-							id: Arc::new(Uuid::new_v4()),
-							inner: Inner::IndxDB(v),
-							send,
-							recv,
-						})
-						.map(|ds| async {
-							trace!(target: LOG, "Registered membership for {}", ds.id);
-							ds.register_membership().await?;
-						});
+					let ds = Datastore {
+						id: Arc::new(Uuid::new_v4()),
+						inner: Inner::IndxDB(super::indxdb::Datastore::new(s).await?),
+						send,
+						recv,
+					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					v
+					ds.register_membership().await?;
+					trace!(target: LOG, "Registered membership for {}", ds.id);
+					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
                 return Err(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -218,20 +194,16 @@ impl Datastore {
 					info!(target: LOG, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
-					let v = super::tikv::Datastore::new(s)
-						.await
-						.map(|v| Datastore {
-							id: Arc::new(Uuid::new_v4()),
-							inner: Inner::TiKV(v),
-							send,
-							recv,
-						})
-						.map(|ds| async {
-							trace!(target: LOG, "Registered membership for {}", ds.id);
-							ds.register_membership().await?;
-						});
+					let ds = Datastore {
+						id: Arc::new(Uuid::new_v4()),
+						inner: Inner::TiKV(super::tikv::Datastore::new(s).await?),
+						send,
+						recv,
+					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					v
+					ds.register_membership().await?;
+					trace!(target: LOG, "Registered membership for {}", ds.id);
+					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-tikv"))]
                 return Err(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -243,20 +215,16 @@ impl Datastore {
 					info!(target: LOG, "Connecting to kvs store at {}", path);
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
-					let v = super::fdb::Datastore::new(s)
-						.await
-						.map(|v| Datastore {
-							id: Arc::new(Uuid::new_v4()),
-							inner: Inner::FDB(v),
-							send,
-							recv,
-						})
-						.map(|ds| async {
-							trace!(target: LOG, "Registered membership for {}", ds.id);
-							ds.register_membership().await?;
-						});
+					let ds = Datastore {
+						id: Arc::new(Uuid::new_v4()),
+						inner: Inner::FDB(super::fdb::Datastore::new(s).await?),
+						send,
+						recv,
+					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					v
+					ds.register_membership().await?;
+					trace!(target: LOG, "Registered membership for {}", ds.id);
+					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-fdb"))]
                 return Err(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
