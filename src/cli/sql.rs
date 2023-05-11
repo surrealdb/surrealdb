@@ -44,36 +44,41 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let _ = rl.load_history("history.txt");
 	// Configure the prompt
 	let mut prompt = "> ".to_owned();
+	// Accumulate input over \'s
+	let mut accumulator = String::new();
 	// Loop over each command-line input
 	loop {
-		// Use namespace / database if specified
-		match (&ns, &db) {
-			(Some(namespace), Some(database)) => {
-				match client.use_ns(namespace).use_db(database).await {
+		if !accumulator.is_empty() {
+			prompt.clear();
+		} else {
+			// Use namespace / database if specified
+			match (&ns, &db) {
+				(Some(namespace), Some(database)) => {
+					match client.use_ns(namespace).use_db(database).await {
+						Ok(()) => {
+							prompt = format!("{namespace}/{database}> ");
+						}
+						Err(error) => eprintln!("{error}"),
+					}
+				}
+				(Some(namespace), None) => match client.use_ns(namespace).await {
 					Ok(()) => {
-						prompt = format!("{namespace}/{database}> ");
+						prompt = format!("{namespace}> ");
 					}
 					Err(error) => eprintln!("{error}"),
-				}
+				},
+				(None, Some(database)) => match client.use_db(database).await {
+					Ok(()) => {
+						prompt = format!("/{database}> ");
+					}
+					Err(error) => eprintln!("{error}"),
+				},
+				(None, None) => {}
 			}
-			(Some(namespace), None) => match client.use_ns(namespace).await {
-				Ok(()) => {
-					prompt = format!("{namespace}> ");
-				}
-				Err(error) => eprintln!("{error}"),
-			},
-			(None, Some(database)) => match client.use_db(database).await {
-				Ok(()) => {
-					prompt = format!("/{database}> ");
-				}
-				Err(error) => eprintln!("{error}"),
-			},
-			(None, None) => {}
 		}
-		// Prompt the user to input SQL
-		let readline = rl.readline(&prompt);
-		// Check the user input
-		match readline {
+
+		// Prompt the user to input SQL and check the input.
+		let line = match rl.readline(&prompt) {
 			// The user typed a query
 			Ok(line) => {
 				// Ignore all empty lines
@@ -84,55 +89,64 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				if let Err(e) = rl.add_history_entry(line.as_str()) {
 					eprintln!("{e}");
 				}
-				// Complete the request
-				match sql::parse(&line) {
-					Ok(query) => {
-						for statement in query.iter() {
-							match statement {
-								Statement::Use(stmt) => {
-									if let Some(namespace) = &stmt.ns {
-										ns = Some(namespace.clone());
-									}
-									if let Some(database) = &stmt.db {
-										db = Some(database.clone());
-									}
-								}
-								Statement::Set(stmt) => {
-									if let Err(e) = client.set(&stmt.name, &stmt.what).await {
-										eprintln!("{e}\n");
-									}
-								}
-								_ => {}
-							}
-						}
-						let res = client.query(query).await;
-						// Get the request response
-						match process(pretty, res) {
-							Ok(v) => {
-								println!("{v}\n");
-							}
-							Err(e) => {
-								eprintln!("{e}\n");
-							}
-						}
-					}
-					Err(e) => {
-						eprintln!("{e}\n");
-					}
-				}
+				line
 			}
-			// The user types CTRL-C
-			Err(ReadlineError::Interrupted) => {
-				break;
-			}
-			// The user typed CTRL-D
-			Err(ReadlineError::Eof) => {
+			// The user typed CTRL-C or CTRL-D
+			Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
 				break;
 			}
 			// There was en error
 			Err(e) => {
 				eprintln!("Error: {e:?}");
 				break;
+			}
+		};
+
+		if let Some(literal) = line.strip_suffix('\\') {
+			// Accumulate text before the \
+			accumulator.push_str(literal);
+
+			// Read more lines
+			continue;
+		} else {
+			// Run the query, including any part that was previously accumulated
+			accumulator.push_str(&line);
+		}
+
+		// Complete the request
+		match sql::parse(&std::mem::take(&mut accumulator)) {
+			Ok(query) => {
+				for statement in query.iter() {
+					match statement {
+						Statement::Use(stmt) => {
+							if let Some(namespace) = &stmt.ns {
+								ns = Some(namespace.clone());
+							}
+							if let Some(database) = &stmt.db {
+								db = Some(database.clone());
+							}
+						}
+						Statement::Set(stmt) => {
+							if let Err(e) = client.set(&stmt.name, &stmt.what).await {
+								eprintln!("{e}\n");
+							}
+						}
+						_ => {}
+					}
+				}
+				let res = client.query(query).await;
+				// Get the request response
+				match process(pretty, res) {
+					Ok(v) => {
+						println!("{v}\n");
+					}
+					Err(e) => {
+						eprintln!("{e}\n");
+					}
+				}
+			}
+			Err(e) => {
+				eprintln!("{e}\n");
 			}
 		}
 	}
