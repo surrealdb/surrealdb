@@ -10,13 +10,16 @@ use crate::dbs::Variables;
 use crate::err::Error;
 use crate::kvs::LOG;
 use crate::sql;
+use crate::sql::cluster::ClusterMembership;
 use crate::sql::Query;
 use crate::sql::Value;
 use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
 use std::fmt;
+use std::ops::Range;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -117,6 +120,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
+					ds.cluster_healthcheck().await?;
 					ds.register_membership().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
@@ -138,6 +142,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
+					ds.cluster_healthcheck().await?;
 					ds.register_membership().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
@@ -159,6 +164,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
+					ds.cluster_healthcheck().await?;
 					ds.register_membership().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
@@ -180,6 +186,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
+					ds.cluster_healthcheck().await?;
 					ds.register_membership().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
@@ -201,6 +208,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
+					ds.cluster_healthcheck().await?;
 					ds.register_membership().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
@@ -222,6 +230,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
+					ds.cluster_healthcheck().await?;
 					ds.register_membership().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
@@ -235,6 +244,18 @@ impl Datastore {
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		}
+	}
+
+	pub async fn cluster_healthcheck(&self) -> Result<Vec<ClusterMembership>, Error> {
+		let mut tx = self.transaction(true, false).await?;
+		let now = tx.clock();
+		let deadline = now - Duration::from_secs(1);
+		let dead = tx.scan_hb(&deadline).await?;
+		tx.delr_hb(deadline, dead.len() as u32).await?;
+		for dead_node in dead.clone() {
+			tx.del_cl(dead_node).await?;
+		}
+		Ok(dead)
 	}
 
 	// Adds entries to the KV store indicating membership information

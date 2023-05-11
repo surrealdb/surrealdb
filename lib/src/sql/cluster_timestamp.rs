@@ -1,5 +1,8 @@
 use derive::Store;
 use serde::{Deserialize, Serialize};
+use std::ops::Sub;
+use std::time::Duration;
+use time::ext::NumericalStdDuration;
 
 // This struct is meant to represent a timestamp that can be used to partially order
 // events in a cluster. It should be derived from a timestamp oracle, such as the
@@ -8,3 +11,21 @@ use serde::{Deserialize, Serialize};
 pub struct Timestamp {
 	pub value: u64,
 }
+
+impl Sub for Timestamp {
+	type Output = Duration;
+	fn sub(self, rhs: Timestamp) -> Duration {
+		Duration::from_millis(self.value - rhs.value)
+	}
+}
+
+impl Sub<Duration> for Timestamp {
+	type Output = Timestamp;
+	fn sub(self, rhs: Duration) -> Timestamp {
+		Timestamp {
+			value: self.value - (rhs.as_millis() as u64),
+		}
+	}
+}
+
+// TODO test

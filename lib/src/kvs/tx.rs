@@ -6,7 +6,6 @@ use crate::err::Error;
 use crate::key::thing;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
-use crate::sql;
 use crate::sql::cluster::ClusterMembership;
 use crate::sql::cluster_timestamp::Timestamp;
 use crate::sql::paths::EDGE;
@@ -14,7 +13,9 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
 use crate::sql::{Uuid, Value};
+use crate::{opt, sql};
 use channel::Sender;
+use md5::digest::typenum::tarr;
 use sql::permission::Permissions;
 use sql::statements::DefineDatabaseStatement;
 use sql::statements::DefineEventStatement;
@@ -30,7 +31,7 @@ use sql::statements::DefineTokenStatement;
 use sql::statements::LiveStatement;
 use std::fmt;
 use std::fmt::Debug;
-use std::ops::Range;
+use std::ops::{Bound, Range};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -752,6 +753,11 @@ impl Transaction {
 		}
 	}
 
+	// Delete a cluster registration entry
+	pub async fn del_cl(&self, node: ClusterMembership) -> Result<(), Error> {
+		Err(Error::Unimplemented("del_cl".to_string()))
+	}
+
 	// Retrieve cluster information
 	pub async fn get_cl(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
 		let key = crate::key::cl::Cl::new(id.0);
@@ -762,7 +768,7 @@ impl Transaction {
 		}
 	}
 
-	fn clock(&self) -> Timestamp {
+	pub fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		let now: u128 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
 		return Timestamp {
@@ -784,6 +790,22 @@ impl Transaction {
 		)
 		.await?;
 		Ok(())
+	}
+
+	// Scans up until the heartbeat timestamp and returns the discovered nodes
+	pub async fn scan_hb(&self, time_to: &Timestamp) -> Result<Vec<ClusterMembership>, Error> {
+		Err(Error::Unimplemented("scan_hb".to_string()))
+	}
+
+	// Delete a range of keys from the heartbeat space
+	// The limit is required in case a commit comes in that is after the max read value
+	pub async fn delr_hb(&mut self, rng: Timestamp, limit: u32) -> Result<(), Error> {
+		let rng = opt::Range {
+			start: Bound::Unbounded,
+			end: Bound::Included(rng),
+		};
+		trace!(target: LOG, "delr_hb: {:?}", rng);
+		Err(Error::Unimplemented("delr_hb".to_string()))
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
