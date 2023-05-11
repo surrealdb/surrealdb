@@ -3,20 +3,31 @@ use crate::sql::datetime::Datetime;
 use crate::sql::duration::Duration;
 use crate::sql::value::Value;
 use chrono::offset::TimeZone;
-use chrono::Datelike;
-use chrono::DurationRound;
-use chrono::Local;
-use chrono::Timelike;
-use chrono::Utc;
+use chrono::{DateTime, Datelike, DurationRound, Local, Timelike, Utc};
 
 pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 	match chrono::Duration::from_std(*duration) {
-		Ok(d) => match val.duration_trunc(d).ok().and_then(|floor| floor.checked_add_signed(d)) {
-			Some(v) => Ok(v.into()),
-			_ => Err(Error::InvalidArguments {
-				name: String::from("time::ceil"),
-				message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-			}),
+		Ok(d) => {
+			let floor_to_ceil = |floor: DateTime<Utc>| -> Option<DateTime<Utc>> {
+				if floor == *val {
+					Some(floor)
+				} else {
+					floor.checked_add_signed(d)
+				}
+			};
+
+			let result = val
+				.duration_trunc(d)
+				.ok()
+				.and_then(floor_to_ceil);
+
+			match result {
+				Some(v) => Ok(v.into()),
+				_ => Err(Error::InvalidArguments {
+					name: String::from("time::ceil"),
+					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+				}),
+			}
 		},
 		_ => Err(Error::InvalidArguments {
 			name: String::from("time::ceil"),
