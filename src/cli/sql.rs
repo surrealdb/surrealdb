@@ -72,16 +72,12 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 			},
 			(None, None) => {}
 		}
-
 		// Prompt the user to input SQL and check the input.
 		let line = match rl.readline(&prompt) {
 			// The user typed a query
 			Ok(line) => {
+				// Filter out all new lines
 				let line = filter_line_continuations(&line);
-				// Ignore all empty lines
-				if line.is_empty() {
-					continue;
-				}
 				// Add the entry to the history
 				if let Err(e) = rl.add_history_entry(line.as_str()) {
 					eprintln!("{e}");
@@ -98,7 +94,6 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 				break;
 			}
 		};
-
 		// Complete the request
 		match sql::parse(&line) {
 			Ok(query) => {
@@ -172,20 +167,27 @@ struct InputValidator {
 	multi: bool,
 }
 
+#[allow(clippy::if_same_then_else)]
 impl Validator for InputValidator {
 	fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
 		use ValidationResult::{Incomplete, Invalid, Valid};
+		// Filter out all new line characters
 		let input = filter_line_continuations(ctx.input());
-		let result = if (self.multi && !input.trim().ends_with(';'))
-			|| input.ends_with('\\')
-			|| input.is_empty()
-		{
-			Incomplete
-		} else if let Err(e) = sql::parse(&input) {
+		// Trim all whitespace from the user input
+		let input = input.trim();
+		// Process the input to check if we can send the query
+		let result = if self.multi && !input.ends_with(';') {
+			Incomplete // The line ends with a ; and we are in multi mode
+		} else if self.multi && input.is_empty() {
+			Incomplete // The line was empty and we are in multi mode
+		} else if input.ends_with('\\') {
+			Incomplete // The line ends with a backslash
+		} else if let Err(e) = sql::parse(input) {
 			Invalid(Some(format!(" --< {e}")))
 		} else {
 			Valid(None)
 		};
+		// Validation complete
 		Ok(result)
 	}
 }
