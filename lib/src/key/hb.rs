@@ -21,15 +21,29 @@ pub fn new(hb: Timestamp, nd: &Uuid) -> Hb {
 impl Hb {
 	pub fn new(hb: Timestamp, nd: Uuid) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x21, // !
-			_b: 0x68, // h
-			_c: 0x62, // b
+			__: b'/',
+			_a: b'!',
+			_b: b'h',
+			_c: b'b',
 			hb,
-			_d: 0x2f, // /
+			_d: b'/',
 			nd,
 		}
 	}
+
+	pub fn prefix() -> Vec<u8> {
+		let mut k = super::kv::new().encode().unwrap();
+		k.extend_from_slice(&[b'!', b'h', b'b', 0x00]);
+		k
+	}
+
+	pub fn suffix(ts: &Timestamp) -> Vec<u8> {
+		let mut k = super::kv::new().encode().unwrap();
+		k.extend_from_slice(&[b'!', b'h', b'b']);
+		k.extend_from_slice(ts.encode().unwrap().as_ref());
+		k
+	}
+
 }
 
 impl From<Timestamp> for Hb {

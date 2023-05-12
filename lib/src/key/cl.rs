@@ -20,10 +20,10 @@ pub fn new(nd: &Uuid) -> Cl {
 impl Cl {
 	pub fn new(nd: Uuid) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x21, // !
-			_b: 0x63, // c
-			_c: 0x6c, // l
+			__: b'/',
+			_a: b'!',
+			_b: b'c',
+			_c: b'l',
 			nd,
 		}
 	}

@@ -796,18 +796,53 @@ impl Transaction {
 	}
 
 	// Scans up until the heartbeat timestamp and returns the discovered nodes
-	pub async fn scan_hb(&self, time_to: &Timestamp) -> Result<Vec<ClusterMembership>, Error> {
-		let upper = ts + Duration::from_millis(1);
-		let rng = opt::Range {
-			start: Bound::Included(
-				Timestamp {
-					value: 0,
+	pub async fn scan_hb(
+		&mut self,
+		time_to: &Timestamp,
+		limit: u32,
+	) -> Result<Vec<ClusterMembership>, Error> {
+		let beg = crate::key::hb::Hb::prefix();
+		let end = crate::key::hb::Hb::suffix(time_to);
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		let mut out: Vec<(Key, Val)> = vec![];
+		// Start processing
+		while num > 0 {
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
 				}
-					.into(),
-			),
-			end: Bound::Excluded(upper.into()),
-		};
-		self.scan(rng, 1000).await
+				Some(ref mut beg) => {
+					beg.push(0x00);
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+			};
+			// Get total results
+			let n = res.len();
+			// Exit when settled
+			if n == 0 {
+				break;
+			}
+			// Loop over results
+			for (i, (k, v)) in res.into_iter().enumerate() {
+				// Ready the next
+				if n == i + 1 {
+					nxt = Some(k.clone());
+				}
+				// Delete
+				out.push((k, v));
+				// Count
+				num -= 1;
+			}
+		}
+		trace!("scan_hb: {:?}", out);
 		Err(Error::Unimplemented("scan_hb".to_string()))
 	}
 
