@@ -26,18 +26,18 @@ pub fn new<'a>(nd: &Uuid, ns: &'a str, db: &'a str, lq: &Uuid) -> Lq<'a> {
 impl<'a> Lq<'a> {
 	pub fn new(nd: Uuid, ns: &'a str, db: &'a str, lq: Uuid) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x21, // !
-			_b: 0x6e, // n
-			_c: 0x64, // d
+			__: b'/', // /
+			_a: b'!', // !
+			_b: b'n', // n
+			_c: b'd', // d
 			nd,
-			_d: 0x2a, // *
+			_d: b'*', // *
 			ns,
-			_e: 0x2a, // *
+			_e: b'*', // *
 			db,
-			_f: 0x21, // !
-			_g: 0x6c, // l
-			_h: 0x71, // v
+			_f: b'!', // !
+			_g: b'l', // l
+			_h: b'v', // v
 			lq,
 		}
 	}

@@ -31,12 +31,12 @@ pub fn suffix(ns: &str) -> Vec<u8> {
 impl<'a> Db<'a> {
 	pub fn new(ns: &'a str, db: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x21, // !
-			_c: 0x64, // d
-			_d: 0x62, // b
+			_b: b'!',
+			_c: b'd',
+			_d: b'b',
 			db,
 		}
 	}

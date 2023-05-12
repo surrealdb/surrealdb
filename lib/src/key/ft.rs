@@ -35,16 +35,16 @@ pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 impl<'a> Ft<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ft: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x21, // !
-			_e: 0x66, // f
-			_f: 0x74, // t
+			_d: b'!',
+			_e: b'f',
+			_f: b't',
 			ft,
 		}
 	}

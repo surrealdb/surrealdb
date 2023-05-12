@@ -20,14 +20,14 @@ struct Prefix<'a> {
 impl<'a> Prefix<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x7e, // ~
+			_d: b'~',
 			id: id.to_owned(),
 		}
 	}

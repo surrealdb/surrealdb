@@ -33,14 +33,14 @@ pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 impl<'a> Dt<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tk: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x21, // !
-			_d: 0x64, // d
-			_e: 0x74, // t
+			_c: b'!',
+			_d: b'd',
+			_e: b't',
 			tk,
 		}
 	}
