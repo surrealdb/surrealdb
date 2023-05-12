@@ -167,6 +167,7 @@ struct InputValidator {
 	multi: bool,
 }
 
+#[allow(clippy::if_same_then_else)]
 impl Validator for InputValidator {
 	fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
 		use ValidationResult::{Incomplete, Invalid, Valid};
@@ -176,19 +177,14 @@ impl Validator for InputValidator {
 		let input = input.trim();
 		// Process the input to check if we can send the query
 		let result = if self.multi && !input.ends_with(';') {
-			// The line ends with a ; and we are in multi mode
-			Incomplete
+			Incomplete // The line ends with a ; and we are in multi mode
 		} else if self.multi && input.is_empty() {
-			// The line was empty and we are in multi mode
-			Incomplete
+			Incomplete // The line was empty and we are in multi mode
 		} else if input.ends_with('\\') {
-			// The line ends with a backslash
-			Incomplete
-		} else if let Err(e) = sql::parse(&input) {
-			// Let's display an inline error
+			Incomplete // The line ends with a backslash
+		} else if let Err(e) = sql::parse(input) {
 			Invalid(Some(format!(" --< {e}")))
 		} else {
-			// This query can be submitted
 			Valid(None)
 		};
 		// Validation complete
