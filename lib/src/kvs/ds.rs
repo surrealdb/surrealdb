@@ -249,9 +249,11 @@ impl Datastore {
 	pub async fn cluster_healthcheck(&self) -> Result<Vec<ClusterMembership>, Error> {
 		let mut tx = self.transaction(true, false).await?;
 		let now = tx.clock();
-		let deadline = now - Duration::from_secs(1);
+		// node timeout should be configurable, just trying to get this to work
+		let timeout = Duration::from_secs(1);
+		let deadline = now - timeout;
 		let dead = tx.scan_hb(&deadline).await?;
-		tx.delr_hb(deadline, dead.len() as u32).await?;
+		tx.delr_hb(dead, 1000).await?;
 		for dead_node in dead.clone() {
 			tx.del_cl(dead_node).await?;
 		}

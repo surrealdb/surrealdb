@@ -17,8 +17,8 @@ use crate::sql::Kind::Bytes;
 use crate::sql::{Uuid, Value};
 use crate::{opt, sql};
 use channel::Sender;
-use chrono::format::Numeric::Timestamp;
 use md5::digest::typenum::tarr;
+use nom::Parser;
 use sql::permission::Permissions;
 use sql::statements::DefineDatabaseStatement;
 use sql::statements::DefineEventStatement;
@@ -402,7 +402,7 @@ impl Transaction {
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[allow(unused_variables)]
-	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u33) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
@@ -797,27 +797,23 @@ impl Transaction {
 
 	// Scans up until the heartbeat timestamp and returns the discovered nodes
 	pub async fn scan_hb(&self, time_to: &Timestamp) -> Result<Vec<ClusterMembership>, Error> {
-		Err(Error::Unimplemented("scan_hb".to_string()))
-	}
-
-	// Delete a range of keys from the heartbeat space
-	// The limit is required in case a commit comes in that is after the max read value
-	pub async fn delr_hb(&mut self, ts: Timestamp, limit: u32) -> Result<(), Error> {
-		// The provided timestamp can have several entries for nodes, so we want to be
-		// exclusive on the next timestamp value
-		// Ex, 12:00-node-1, 12:00-node-2 for TS=12:00
-		// We can capture all of them by scanning exclusive to 12:00:00.0001
 		let upper = ts + Duration::from_millis(1);
 		let rng = opt::Range {
 			start: Bound::Included(
 				Timestamp {
 					value: 0,
 				}
-				.into(),
+					.into(),
 			),
 			end: Bound::Excluded(upper.into()),
 		};
+		self.scan(rng, 1000).await
+		Err(Error::Unimplemented("scan_hb".to_string()))
+	}
+
+	pub async fn delr_hb(&mut self, ts: Vec<ClusterMembership>, limit: u32) -> Result<(), Error> {
 		trace!(target: LOG, "delr_hb: {:?}", rng);
+		self.delr(rng, limit).await?;
 		Ok(())
 	}
 
