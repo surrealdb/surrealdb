@@ -1,7 +1,7 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Cond, Expression, Idiom, Number, Operator, Strand, Subquery, Table, Value};
+use crate::sql::{Array, Cond, Expression, Idiom, Operator, Subquery, Table, Value};
 use async_recursion::async_recursion;
 use std::sync::Arc;
 
@@ -14,24 +14,16 @@ pub(super) enum Node {
 	},
 	IndexedField(DefineIndexStatement),
 	NonIndexedField,
-	Strand(Strand),
-	Number(Number),
-	Bool(bool),
+	Scalar(Value),
 	Unsupported,
 }
 
 impl Node {
 	pub(super) fn is_scalar(&self) -> bool {
-		match self {
-			Node::Expression {
-				..
-			} => false,
-			Node::IndexedField(_) => false,
-			Node::NonIndexedField => false,
-			Node::Strand(_) => true,
-			Node::Number(_) => true,
-			Node::Bool(_) => true,
-			Node::Unsupported => false,
+		if let Node::Scalar(_) = self {
+			true
+		} else {
+			false
 		}
 	}
 
@@ -41,6 +33,14 @@ impl Node {
 		} else {
 			None
 		}
+	}
+
+	pub(super) fn to_array(&self) -> Result<Array, Error> {
+		let mut a = Array::with_capacity(1);
+		if let Node::Scalar(v) = self {
+			a.push(v.to_owned());
+		}
+		Ok(a)
 	}
 }
 
@@ -99,9 +99,9 @@ impl<'a> TreeBuilder<'a> {
 		Ok(match v {
 			Value::Expression(e) => self.eval_expression(e).await?,
 			Value::Idiom(i) => self.eval_idiom(i).await?,
-			Value::Strand(s) => Node::Strand(s.clone()),
-			Value::Number(n) => Node::Number(n.clone()),
-			Value::Bool(b) => Node::Bool(b.clone()),
+			Value::Strand(_) => Node::Scalar(v.to_owned()),
+			Value::Number(_) => Node::Scalar(v.to_owned()),
+			Value::Bool(_) => Node::Scalar(v.to_owned()),
 			Value::Subquery(s) => self.eval_subquery(s).await?,
 			_ => {
 				println!("UNSUPPORTED VALUE {:?}", v);

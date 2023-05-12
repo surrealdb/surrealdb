@@ -75,6 +75,10 @@ impl<'a> Document<'a> {
 		Ok(())
 	}
 
+	/// Extract from the given document, the values required by the index and put then in an array.
+	/// Eg. IF the index is composed of the columns `name` and `instrument`
+	/// Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie" }
+	/// It will return: ["Tobie", "piano"]
 	async fn build_opt_array(
 		ctx: &Context<'_>,
 		txn: &Transaction,

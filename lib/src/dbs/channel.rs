@@ -351,7 +351,7 @@ impl Iterable {
 						}
 					}
 				}
-				Iterable::Index(t, p) => {
+				Iterable::Index(_t, _p) => {
 					todo!()
 				}
 			}

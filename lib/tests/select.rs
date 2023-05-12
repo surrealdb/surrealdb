@@ -109,9 +109,10 @@ async fn select_writeable_subqueries() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn select_where_and() -> Result<(), Error> {
+async fn select_where_and_with_index() -> Result<(), Error> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie', genre='m';
+		CREATE person:jaime SET name = 'Jaime', genre='m';
 		DEFINE INDEX person_name ON TABLE person COLUMNS name;
 		SELECT name FROM person WHERE name = 'Tobie' AND genre = 'm';";
 	let dbs = Datastore::new("memory").await?;

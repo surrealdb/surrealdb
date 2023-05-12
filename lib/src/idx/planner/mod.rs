@@ -34,6 +34,7 @@ impl<'a> QueryPlanner<'a> {
 	}
 }
 
+#[derive(Default)]
 struct AllAndStrategy {
 	b: PlanBuilder,
 }
@@ -42,9 +43,7 @@ struct AllAndStrategy {
 /// and there is at least one condition covered by an index
 impl AllAndStrategy {
 	fn build(node: &Node) -> Result<Option<Plan>, Error> {
-		let mut s = AllAndStrategy {
-			b: PlanBuilder::new(),
-		};
+		let mut s = AllAndStrategy::default();
 		match s.eval_node(node) {
 			Ok(_) => Ok(Some(s.b.build()?)),
 			Err(Error::BypassQueryPlanner) => Ok(None),

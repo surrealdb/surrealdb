@@ -428,27 +428,45 @@ impl Iterable {
 		txn: &Transaction,
 		stm: &Statement<'_>,
 		table: Table,
-		mut plan: Plan,
+		plan: Plan,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
-		while let Some(id) = plan.next()? {
+		let mut iterator = plan.new_iterator(opt)?;
+		let mut things = iterator.next_batch(txn, 1000).await?;
+		while !things.is_empty() {
 			// Check if the context is finished
 			if ctx.is_done() {
 				break;
 			}
-			// Fetch the data from the store
-			let key = thing::new(opt.ns(), opt.db(), &table.0, &id);
-			let val = txn.clone().lock().await.get(key.clone()).await?;
-			let rid = Thing::from((key.tb, key.id));
-			// Parse the data from the store
-			let val = Operable::Value(match val {
-				Some(v) => Value::from(v),
-				None => Value::None,
-			});
-			// Process the document record
-			ite.process(ctx, opt, txn, stm, Some(rid), val).await;
+
+			for thing in things {
+				// Check the context
+				if ctx.is_done() {
+					break;
+				}
+
+				// If the record is from another table we can skip
+				if !thing.tb.eq(table.as_str()) {
+					continue;
+				}
+
+				// Fetch the data from the store
+				let key = thing::new(opt.ns(), opt.db(), &table.0, &thing.id);
+				let val = txn.clone().lock().await.get(key.clone()).await?;
+				let rid = Thing::from((key.tb, key.id));
+				// Parse the data from the store
+				let val = Operable::Value(match val {
+					Some(v) => Value::from(v),
+					None => Value::None,
+				});
+				// Process the document record
+				ite.process(ctx, opt, txn, stm, Some(rid), val).await;
+			}
+
+			// Collect the next batch of ids
+			things = iterator.next_batch(txn, 1000).await?;
 		}
 		Ok(())
 	}
