@@ -13,7 +13,6 @@ fuzz_target!(|commands: Vec<&str>| {
 
 	tokio::runtime::Builder::new_current_thread()
 		.enable_all()
-		.thread_stack_size(8 * 1024 * 1024)
 		.build()
 		.unwrap()
 		.block_on(async {
