@@ -22,29 +22,29 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Ix<'a> {
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::table::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x69, 0x78, 0x00]);
+	k.extend_from_slice(&[b'!', b'i', b'x', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::table::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x69, 0x78, 0xff]);
+	k.extend_from_slice(&[b'!', b'i', b'x', 0xff]);
 	k
 }
 
 impl<'a> Ix<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x21, // !
-			_e: 0x69, // i
-			_f: 0x78, // x
+			_d: b'!',
+			_e: b'i',
+			_f: b'x',
 			ix,
 		}
 	}

@@ -1,3 +1,4 @@
+use crate::key::CHAR_INDEX;
 use crate::sql::array::Array;
 use crate::sql::id::Id;
 use derive::Key;
@@ -19,14 +20,14 @@ struct Prefix<'a> {
 impl<'a> Prefix<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0xa4, // ¤
+			_d: CHAR_INDEX,
 			ix,
 		}
 	}

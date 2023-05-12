@@ -1,3 +1,4 @@
+use crate::key::CHAR_PATH;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 
@@ -22,29 +23,29 @@ pub fn new<'a>(ns: &'a str, db: &'a str, sc: &'a str, tk: &'a str) -> St<'a> {
 
 pub fn prefix(ns: &str, db: &str, sc: &str) -> Vec<u8> {
 	let mut k = super::scope::new(ns, db, sc).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x73, 0x74, 0x00]);
+	k.extend_from_slice(&[b'!', b's', b't', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, sc: &str) -> Vec<u8> {
 	let mut k = super::scope::new(ns, db, sc).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x73, 0x74, 0xff]);
+	k.extend_from_slice(&[b'!', b's', b't', 0xff]);
 	k
 }
 
 impl<'a> St<'a> {
 	pub fn new(ns: &'a str, db: &'a str, sc: &'a str, tk: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0xb1, // ±
+			_c: CHAR_PATH,
 			sc,
-			_d: 0x21, // !
-			_e: 0x73, // s
-			_f: 0x74, // t
+			_d: b'!',
+			_e: b's',
+			_f: b't',
 			tk,
 		}
 	}

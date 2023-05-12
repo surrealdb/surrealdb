@@ -56,3 +56,6 @@ pub mod st; // Stores a DEFINE TOKEN ON SCOPE config definition
 pub mod table; // Stores the key prefix for all keys under a table
 pub mod tb; // Stores a DEFINE TABLE config definition
 pub mod thing; // Stores a record id
+
+const CHAR_PATH: u8 = 0xb1; // ±
+const CHAR_INDEX: u8 = 0xa4; // ¤
