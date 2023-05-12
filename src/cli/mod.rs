@@ -473,6 +473,13 @@ pub fn init() -> ExitCode {
 					.help("Database authentication username to use when connecting"),
 			)
 			.arg(
+				Arg::new("multi")
+					.long("multi")
+					.required(false)
+					.takes_value(false)
+					.help("Whether omitting semicolon causes a newline"),
+			)
+			.arg(
 				Arg::new("pass")
 					.short('p')
 					.long("pass")

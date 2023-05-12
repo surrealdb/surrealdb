@@ -1,14 +1,12 @@
 use crate::err::Error;
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::validate::{ValidationContext, ValidationResult, Validator};
+use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
-use surrealdb::sql;
-use surrealdb::sql::Statement;
-use surrealdb::sql::Value;
-use surrealdb::Error as SurrealError;
-use surrealdb::Response;
+use surrealdb::sql::{self, Statement, Value};
+use surrealdb::{Error as SurrealError, Response};
 
 #[tokio::main]
 pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
@@ -20,8 +18,10 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let endpoint = matches.value_of("conn").unwrap();
 	let mut ns = matches.value_of("ns").map(str::to_string);
 	let mut db = matches.value_of("db").map(str::to_string);
+	let mut ns_db_dirty = true;
 	// If we should pretty-print responses
 	let pretty = matches.is_present("pretty");
+	// If omitting semicolon causes a newline
 	// Connect to the database engine
 	let client = connect(endpoint).await?;
 	// Sign in to the server if the specified database engine supports it
@@ -39,18 +39,18 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 		}
 	}
 	// Create a new terminal REPL
-	let mut rl = DefaultEditor::new().unwrap();
+	let mut rl = Editor::new().unwrap();
+	// Set custom input validation
+	rl.set_helper(Some(InputValidator {
+		multi: matches.is_present("multi"),
+	}));
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
 	// Configure the prompt
 	let mut prompt = "> ".to_owned();
-	// Accumulate input over \'s
-	let mut accumulator = String::new();
 	// Loop over each command-line input
 	loop {
-		if !accumulator.is_empty() {
-			prompt.clear();
-		} else {
+		if ns_db_dirty {
 			// Use namespace / database if specified
 			match (&ns, &db) {
 				(Some(namespace), Some(database)) => {
@@ -81,6 +81,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 		let line = match rl.readline(&prompt) {
 			// The user typed a query
 			Ok(line) => {
+				let line = filter_line_continuations(&line);
 				// Ignore all empty lines
 				if line.is_empty() {
 					continue;
@@ -102,19 +103,8 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 			}
 		};
 
-		if let Some(literal) = line.strip_suffix('\\') {
-			// Accumulate text before the \
-			accumulator.push_str(literal);
-
-			// Read more lines
-			continue;
-		} else {
-			// Run the query, including any part that was previously accumulated
-			accumulator.push_str(&line);
-		}
-
 		// Complete the request
-		match sql::parse(&std::mem::take(&mut accumulator)) {
+		match sql::parse(&line) {
 			Ok(query) => {
 				for statement in query.iter() {
 					match statement {
@@ -125,6 +115,7 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 							if let Some(database) = &stmt.db {
 								db = Some(database.clone());
 							}
+							ns_db_dirty = true;
 						}
 						Statement::Set(stmt) => {
 							if let Err(e) = client.set(&stmt.name, &stmt.what).await {
@@ -178,4 +169,32 @@ fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Err
 		// Yes prettify the response
 		true => format!("{value:#}"),
 	})
+}
+
+#[derive(Completer, Helper, Highlighter, Hinter)]
+struct InputValidator {
+	/// If omitting semicolon causes newline.
+	multi: bool,
+}
+
+impl Validator for InputValidator {
+	fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
+		use ValidationResult::{Incomplete, Invalid, Valid};
+		let input = filter_line_continuations(ctx.input());
+		let result = if (self.multi && !input.trim().ends_with(';'))
+			|| input.ends_with('\\')
+			|| input.is_empty()
+		{
+			Incomplete
+		} else if let Err(e) = sql::parse(&input) {
+			Invalid(Some(format!(" --< {e}")))
+		} else {
+			Valid(None)
+		};
+		Ok(result)
+	}
+}
+
+fn filter_line_continuations(line: &str) -> String {
+	line.replace("\\\n", "").replace("\\\r\n", "")
 }
