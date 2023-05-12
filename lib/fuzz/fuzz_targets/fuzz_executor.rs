@@ -11,19 +11,24 @@ fuzz_target!(|commands: Vec<&str>| {
 		return;
 	}
 
-	futures::executor::block_on(async {
-		let dbs = Datastore::new("memory").await.unwrap();
-		let ses = Session::for_kv().with_ns("test").with_db("test");
-		for command in commands.iter() {
-			for blacklisted_string in blacklisted_command_strings.iter() {
-				if command.contains(blacklisted_string) {
-					return;
+	tokio::runtime::Builder::new_current_thread()
+		.enable_all()
+		.thread_stack_size(8 * 1024 * 1024)
+		.build()
+		.unwrap()
+		.block_on(async {
+			let dbs = Datastore::new("memory").await.unwrap();
+			let ses = Session::for_kv().with_ns("test").with_db("test");
+			for command in commands.iter() {
+				for blacklisted_string in blacklisted_command_strings.iter() {
+					if command.contains(blacklisted_string) {
+						return;
+					}
 				}
+				let _ignore_the_result = dbs.execute(command, &ses, None, false).await;
+	
+				// TODO: Add some async timeout and `tokio::select!` between it and the query
+				// Alternatively, wrap future in `tokio::time::Timeout`.
 			}
-			let _ignore_the_result = dbs.execute(command, &ses, None, false).await;
-
-			// TODO: Add some async timeout and `tokio::select!` between it and the query
-			// Alternatively, wrap future in `tokio::time::Timeout`.
-		}
-	});
+		})
 });

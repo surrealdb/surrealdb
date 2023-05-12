@@ -11,6 +11,7 @@ cargo-fuzz = true
 libfuzzer-sys = { version= "0.4", features = ["arbitrary-derive"] }
 arbitrary = { version = "1", features = ["derive"] }
 futures = "0.3.28"
+tokio = "1.27.0"
 
 [dependencies.surrealdb]
 path = ".."
