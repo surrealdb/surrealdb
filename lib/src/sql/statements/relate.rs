@@ -41,10 +41,11 @@ pub struct RelateStatement {
 }
 
 impl RelateStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-
+	/// Check if this statement is for a single record
 	pub(crate) fn single(&self) -> bool {
 		match (&self.from, &self.with) {
 			(v, w) if v.is_object() && w.is_object() => true,
@@ -54,7 +55,7 @@ impl RelateStatement {
 			_ => false,
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,
