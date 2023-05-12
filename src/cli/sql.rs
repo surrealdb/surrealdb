@@ -18,7 +18,6 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let endpoint = matches.value_of("conn").unwrap();
 	let mut ns = matches.value_of("ns").map(str::to_string);
 	let mut db = matches.value_of("db").map(str::to_string);
-	let mut ns_db_dirty = true;
 	// If we should pretty-print responses
 	let pretty = matches.is_present("pretty");
 	// If omitting semicolon causes a newline
@@ -50,31 +49,29 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let mut prompt = "> ".to_owned();
 	// Loop over each command-line input
 	loop {
-		if ns_db_dirty {
-			// Use namespace / database if specified
-			match (&ns, &db) {
-				(Some(namespace), Some(database)) => {
-					match client.use_ns(namespace).use_db(database).await {
-						Ok(()) => {
-							prompt = format!("{namespace}/{database}> ");
-						}
-						Err(error) => eprintln!("{error}"),
+		// Use namespace / database if specified
+		match (&ns, &db) {
+			(Some(namespace), Some(database)) => {
+				match client.use_ns(namespace).use_db(database).await {
+					Ok(()) => {
+						prompt = format!("{namespace}/{database}> ");
 					}
+					Err(error) => eprintln!("{error}"),
 				}
-				(Some(namespace), None) => match client.use_ns(namespace).await {
-					Ok(()) => {
-						prompt = format!("{namespace}> ");
-					}
-					Err(error) => eprintln!("{error}"),
-				},
-				(None, Some(database)) => match client.use_db(database).await {
-					Ok(()) => {
-						prompt = format!("/{database}> ");
-					}
-					Err(error) => eprintln!("{error}"),
-				},
-				(None, None) => {}
 			}
+			(Some(namespace), None) => match client.use_ns(namespace).await {
+				Ok(()) => {
+					prompt = format!("{namespace}> ");
+				}
+				Err(error) => eprintln!("{error}"),
+			},
+			(None, Some(database)) => match client.use_db(database).await {
+				Ok(()) => {
+					prompt = format!("/{database}> ");
+				}
+				Err(error) => eprintln!("{error}"),
+			},
+			(None, None) => {}
 		}
 
 		// Prompt the user to input SQL and check the input.
@@ -115,7 +112,6 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 							if let Some(database) = &stmt.db {
 								db = Some(database.clone());
 							}
-							ns_db_dirty = true;
 						}
 						Statement::Set(stmt) => {
 							if let Err(e) = client.set(&stmt.name, &stmt.what).await {
