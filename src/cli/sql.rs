@@ -20,7 +20,6 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let mut db = matches.value_of("db").map(str::to_string);
 	// If we should pretty-print responses
 	let pretty = matches.is_present("pretty");
-	// If omitting semicolon causes a newline
 	// Connect to the database engine
 	let client = connect(endpoint).await?;
 	// Sign in to the server if the specified database engine supports it
