@@ -22,13 +22,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str, ev: &'a str) -> Ev<'a> {
 
 pub fn prefix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::table::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x65, 0x76, 0x00]);
+	k.extend_from_slice(&[b'!', b'e', b'v', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str, db: &str, tb: &str) -> Vec<u8> {
 	let mut k = super::table::new(ns, db, tb).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x65, 0x76, 0xff]);
+	k.extend_from_slice(&[b'!', b'e', b'v', 0xff]);
 	k
 }
 

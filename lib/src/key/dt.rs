@@ -20,13 +20,13 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Dt<'a> {
 
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::database::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x64, 0x74, 0x00]);
+	k.extend_from_slice(&[b'!', b'd', b't', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::database::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x64, 0x74, 0xff]);
+	k.extend_from_slice(&[b'!', b'd', b't', 0xff]);
 	k
 }
 

@@ -81,14 +81,14 @@ impl<'a> Index<'a> {
 		id: Option<Id>,
 	) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0xa4, // ¤
+			_d: CHAR_INDEX,
 			ix,
 			fd,
 			id,
