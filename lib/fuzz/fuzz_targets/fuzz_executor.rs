@@ -3,7 +3,7 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|commands: Vec<&str>| {
-	let blacklisted_command_strings = ["sleep"];
+	let blacklisted_command_strings = ["sleep", "SLEEP"];
 
 	use surrealdb::{dbs::Session, kvs::Datastore};
 	let max_commands = 500;
