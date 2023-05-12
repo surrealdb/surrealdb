@@ -3607,7 +3607,7 @@ async fn function_time_floor() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::floor("1987-06-22T08:30:45Z", 1w);
 		RETURN time::floor("1987-06-22T08:30:45Z", 1y);
-		RETURN time::ceil("2023-05-11T03:09:00Z", 1s);
+		RETURN time::floor("2023-05-11T03:09:00Z", 1s);
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
