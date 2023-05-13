@@ -56,7 +56,6 @@ ascii = { version = "0.3.2", package = "any_ascii" }
 async-recursion = "1.0.4"
 base64_lib = { version = "0.21.0", package = "base64" }
 bcrypt = "0.14.0"
-bigdecimal = { version = "0.3.0", features = ["serde", "string-only"] }
 bung = "0.1.0"
 channel = { version = "1.8.0", package = "async-channel" }
 chrono = { version = "0.4.24", features = ["serde"] }
@@ -86,6 +85,7 @@ rand = "0.8.5"
 regex = "1.7.3"
 reqwest = { version = "0.11.16", default-features = false, features = ["json", "stream"], optional = true }
 rocksdb = { version = "0.20.1", optional = true }
+rust_decimal = { version = "1.29.1", features = [ "maths" ] }
 rustls = { version = "0.20.8", optional = true }
 scrypt = "0.11.0"
 semver = { version = "1.0.17", features = ["serde"] }

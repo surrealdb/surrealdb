@@ -3,14 +3,11 @@ use crate::sql::ending::number as ending;
 use crate::sql::error::Error::Parser;
 use crate::sql::error::IResult;
 use crate::sql::strand::Strand;
-use bigdecimal::num_traits::Pow;
-use bigdecimal::BigDecimal;
-use bigdecimal::FromPrimitive;
-use bigdecimal::ToPrimitive;
 use nom::branch::alt;
 use nom::character::complete::i64;
 use nom::number::complete::recognize_float;
 use nom::Err::Failure;
+use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
@@ -27,7 +24,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Number";
 pub enum Number {
 	Int(i64),
 	Float(f64),
-	Decimal(BigDecimal),
+	Decimal(Decimal),
 	// Add new variants here
 }
 
@@ -63,8 +60,8 @@ impl From<f64> for Number {
 	}
 }
 
-impl From<BigDecimal> for Number {
-	fn from(v: BigDecimal) -> Self {
+impl From<Decimal> for Number {
+	fn from(v: Decimal) -> Self {
 		Self::Decimal(v)
 	}
 }
@@ -98,8 +95,8 @@ impl TryFrom<&str> for Number {
 			// Store it as an i64
 			Ok(v) => Ok(Self::Int(v)),
 			// It wasn't parsed as a i64 so parse as a decimal
-			_ => match BigDecimal::from_str(v) {
-				// Store it as a BigDecimal
+			_ => match Decimal::from_str(v) {
+				// Store it as a decimal
 				Ok(v) => Ok(Self::Decimal(v)),
 				// It wasn't parsed as a number
 				_ => Err(()),
@@ -141,17 +138,17 @@ try_into_prim!(
 	f32 => to_f32, f64 => to_f64
 );
 
-impl TryFrom<Number> for BigDecimal {
+impl TryFrom<Number> for Decimal {
 	type Error = Error;
 	fn try_from(value: Number) -> Result<Self, Self::Error> {
 		match value {
-			Number::Int(v) => match BigDecimal::from_i64(v) {
+			Number::Int(v) => match Decimal::from_i64(v) {
 				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
+				None => Err(Error::TryFrom(value.to_string(), "Decimal")),
 			},
-			Number::Float(v) => match BigDecimal::from_f64(v) {
-				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "BigDecimal")),
+			Number::Float(v) => match Decimal::try_from(v) {
+				Ok(v) => Ok(v),
+				_ => Err(Error::TryFrom(value.to_string(), "Decimal")),
 			},
 			Number::Decimal(x) => Ok(x),
 		}
@@ -198,8 +195,8 @@ impl Number {
 	pub fn is_integer(&self) -> bool {
 		match self {
 			Number::Int(_) => true,
-			Number::Float(_) => false,
-			Number::Decimal(v) => v.is_integer(),
+			Number::Float(v) => v.fract() == 0.0,
+			Number::Decimal(v) => v.scale() == 0,
 		}
 	}
 
@@ -207,7 +204,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v != &0,
 			Number::Float(v) => v != &0.0,
-			Number::Decimal(v) => v != &BigDecimal::default(),
+			Number::Decimal(v) => v != &Decimal::ZERO,
 		}
 	}
 
@@ -215,7 +212,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v > &0,
 			Number::Float(v) => v > &0.0,
-			Number::Decimal(v) => v > &BigDecimal::default(),
+			Number::Decimal(v) => v > &Decimal::ZERO,
 		}
 	}
 
@@ -223,7 +220,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v < &0,
 			Number::Float(v) => v < &0.0,
-			Number::Decimal(v) => v < &BigDecimal::default(),
+			Number::Decimal(v) => v < &Decimal::ZERO,
 		}
 	}
 
@@ -231,7 +228,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v >= &0,
 			Number::Float(v) => v >= &0.0,
-			Number::Decimal(v) => v >= &BigDecimal::default(),
+			Number::Decimal(v) => v >= &Decimal::ZERO,
 		}
 	}
 
@@ -239,7 +236,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v <= &0,
 			Number::Float(v) => v <= &0.0,
-			Number::Decimal(v) => v <= &BigDecimal::default(),
+			Number::Decimal(v) => v <= &Decimal::ZERO,
 		}
 	}
 
@@ -251,7 +248,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v as usize,
 			Number::Float(v) => v as usize,
-			Number::Decimal(v) => v.to_usize().unwrap_or_default(),
+			Number::Decimal(v) => v.try_into().unwrap_or_default(),
 		}
 	}
 
@@ -259,7 +256,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v,
 			Number::Float(v) => v as i64,
-			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
+			Number::Decimal(v) => v.try_into().unwrap_or_default(),
 		}
 	}
 
@@ -271,10 +268,10 @@ impl Number {
 		}
 	}
 
-	pub fn as_decimal(self) -> BigDecimal {
+	pub fn as_decimal(self) -> Decimal {
 		match self {
-			Number::Int(v) => BigDecimal::from_i64(v).unwrap_or_default(),
-			Number::Float(v) => BigDecimal::from_f64(v).unwrap_or_default(),
+			Number::Int(v) => Decimal::from(v),
+			Number::Float(v) => Decimal::try_from(v).unwrap_or_default(),
 			Number::Decimal(v) => v,
 		}
 	}
@@ -307,10 +304,10 @@ impl Number {
 		}
 	}
 
-	pub fn to_decimal(&self) -> BigDecimal {
+	pub fn to_decimal(&self) -> Decimal {
 		match self {
-			Number::Int(v) => BigDecimal::from_i64(*v).unwrap_or_default(),
-			Number::Float(v) => BigDecimal::from_f64(*v).unwrap_or_default(),
+			Number::Int(v) => Decimal::try_from(*v).unwrap_or_default(),
+			Number::Float(v) => Decimal::try_from(*v).unwrap_or_default(),
 			Number::Decimal(v) => v.clone(),
 		}
 	}
@@ -331,14 +328,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.ceil().into(),
-			Number::Decimal(v) => {
-				if v.digits() > 16 {
-					let v = (v.to_f64().unwrap_or_default() + 0.5).round();
-					BigDecimal::from_f64(v).unwrap_or_default().into()
-				} else {
-					(v + BigDecimal::from_f32(0.5).unwrap()).round(0).into()
-				}
-			}
+			Number::Decimal(v) => v.ceil().into(),
 		}
 	}
 
@@ -346,14 +336,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.floor().into(),
-			Number::Decimal(v) => {
-				if v.digits() > 16 {
-					let v = (v.to_f64().unwrap_or_default() - 0.5).round();
-					BigDecimal::from_f64(v).unwrap_or_default().into()
-				} else {
-					(v - BigDecimal::from_f32(0.5).unwrap()).round(0).into()
-				}
-			}
+			Number::Decimal(v) => v.floor().into(),
 		}
 	}
 
@@ -361,14 +344,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v.into(),
 			Number::Float(v) => v.round().into(),
-			Number::Decimal(v) => {
-				if v.digits() > 16 {
-					let v = v.to_f64().unwrap_or_default().round();
-					BigDecimal::from_f64(v).unwrap_or_default().into()
-				} else {
-					v.round(0).into()
-				}
-			}
+			Number::Decimal(v) => v.round().into(),
 		}
 	}
 
@@ -376,7 +352,7 @@ impl Number {
 		match self {
 			Number::Int(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
 			Number::Float(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
-			Number::Decimal(v) => format!("{v:.precision$}").try_into().unwrap_or_default(),
+			Number::Decimal(v) => v.round_dp(precision as u32).into(),
 		}
 	}
 
@@ -390,16 +366,11 @@ impl Number {
 
 	pub fn pow(self, power: Number) -> Number {
 		match (self, power) {
-			(Number::Int(v), Number::Int(p)) if p >= 0 && p < u32::MAX as i64 => {
-				Number::Int(v.pow(p as u32))
-			}
-			(Number::Decimal(v), Number::Int(p)) if p >= 0 && p < u32::MAX as i64 => {
-				let (as_int, scale) = v.as_bigint_and_exponent();
-				Number::Decimal(BigDecimal::new(as_int.pow(p as u32), scale * p))
-			}
+			(Number::Int(v), Number::Int(p)) => Number::Int(v.pow(p as u32)),
+			(Number::Decimal(v), Number::Int(p)) => v.powi(p).into(),
 			// TODO: (Number::Decimal(v), Number::Float(p)) => todo!(),
 			// TODO: (Number::Decimal(v), Number::Decimal(p)) => todo!(),
-			(v, p) => Number::Float(v.as_float().pow(p.as_float())),
+			(v, p) => v.as_float().powf(p.as_float()).into(),
 		}
 	}
 }
@@ -432,14 +403,14 @@ impl PartialEq for Number {
 			(Number::Int(v), Number::Float(w)) => (*v as f64).eq(w),
 			(Number::Float(v), Number::Int(w)) => v.eq(&(*w as f64)),
 			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => BigDecimal::from(*v).eq(w),
-			(Number::Decimal(v), Number::Int(w)) => v.eq(&BigDecimal::from(*w)),
+			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).eq(w),
+			(Number::Decimal(v), Number::Int(w)) => v.eq(&Decimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				BigDecimal::from_f64(*v).unwrap_or_default().eq(w)
+				Decimal::from_f64_retain(*v).unwrap_or_default().eq(w)
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
-				v.eq(&BigDecimal::from_f64(*w).unwrap_or_default())
+				v.eq(&Decimal::from_f64_retain(*w).unwrap_or_default())
 			}
 		}
 	}
@@ -455,14 +426,14 @@ impl PartialOrd for Number {
 			(Number::Int(v), Number::Float(w)) => (*v as f64).partial_cmp(w),
 			(Number::Float(v), Number::Int(w)) => v.partial_cmp(&(*w as f64)),
 			// ------------------------------
-			(Number::Int(v), Number::Decimal(w)) => BigDecimal::from(*v).partial_cmp(w),
-			(Number::Decimal(v), Number::Int(w)) => v.partial_cmp(&BigDecimal::from(*w)),
+			(Number::Int(v), Number::Decimal(w)) => Decimal::from(*v).partial_cmp(w),
+			(Number::Decimal(v), Number::Int(w)) => v.partial_cmp(&Decimal::from(*w)),
 			// ------------------------------
 			(Number::Float(v), Number::Decimal(w)) => {
-				BigDecimal::from_f64(*v).unwrap_or_default().partial_cmp(w)
+				Decimal::from_f64_retain(*v).unwrap_or_default().partial_cmp(w)
 			}
 			(Number::Decimal(v), Number::Float(w)) => {
-				v.partial_cmp(&BigDecimal::from_f64(*w).unwrap_or_default())
+				v.partial_cmp(&Decimal::from_f64_retain(*w).unwrap_or_default())
 			}
 		}
 	}
