@@ -264,7 +264,7 @@ impl Number {
 		match self {
 			Number::Int(v) => v as f64,
 			Number::Float(v) => v,
-			Number::Decimal(v) => v.to_f64().unwrap_or_default(),
+			Number::Decimal(v) => v.try_into().unwrap_or_default(),
 		}
 	}
 
@@ -300,7 +300,7 @@ impl Number {
 		match self {
 			Number::Int(v) => *v as f64,
 			Number::Float(v) => *v,
-			Number::Decimal(v) => v.to_f64().unwrap_or_default(),
+			&Number::Decimal(v) => v.try_into().unwrap_or_default(),
 		}
 	}
 

@@ -2087,6 +2087,7 @@ impl TryDiv for Value {
 			(Value::Number(v), Value::Number(w)) => match (v, w) {
 				(_, w) if w == Number::Int(0) => Ok(Value::None),
 				(Number::Decimal(v), Number::Decimal(w)) if v.checked_div(w).is_none() => {
+					// Divided a large number by a small number, got an overflowing number
 					Err(Error::TryDiv(v.to_string(), w.to_string()))
 				}
 				(v, w) => Ok(Value::Number(v / w)),
