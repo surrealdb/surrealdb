@@ -2008,6 +2008,12 @@ impl TryAdd for Value {
 				(Number::Decimal(v), Number::Decimal(w)) if v.checked_add(w).is_none() => {
 					Err(Error::TryAdd(v.to_string(), w.to_string()))
 				}
+				(Number::Decimal(v), w) if v.checked_add(w.to_decimal()).is_none() => {
+					Err(Error::TryAdd(v.to_string(), w.to_string()))
+				}
+				(v, Number::Decimal(w)) if v.to_decimal().checked_add(w).is_none() => {
+					Err(Error::TryAdd(v.to_string(), w.to_string()))
+				}
 				(v, w) => Ok(Value::Number(v + w)),
 			},
 			(Value::Strand(v), Value::Strand(w)) => Ok(Value::Strand(v + w)),
@@ -2037,6 +2043,12 @@ impl TrySub for Value {
 				(Number::Decimal(v), Number::Decimal(w)) if v.checked_sub(w).is_none() => {
 					Err(Error::TrySub(v.to_string(), w.to_string()))
 				}
+				(Number::Decimal(v), w) if v.checked_sub(w.to_decimal()).is_none() => {
+					Err(Error::TrySub(v.to_string(), w.to_string()))
+				}
+				(v, Number::Decimal(w)) if v.to_decimal().checked_sub(w).is_none() => {
+					Err(Error::TrySub(v.to_string(), w.to_string()))
+				}
 				(v, w) => Ok(Value::Number(v - w)),
 			},
 			(Value::Datetime(v), Value::Datetime(w)) => Ok(Value::Duration(v - w)),
@@ -2064,6 +2076,12 @@ impl TryMul for Value {
 					Err(Error::TryMul(v.to_string(), w.to_string()))
 				}
 				(Number::Decimal(v), Number::Decimal(w)) if v.checked_mul(w).is_none() => {
+					Err(Error::TryMul(v.to_string(), w.to_string()))
+				}
+				(Number::Decimal(v), w) if v.checked_mul(w.to_decimal()).is_none() => {
+					Err(Error::TryMul(v.to_string(), w.to_string()))
+				}
+				(v, Number::Decimal(w)) if v.to_decimal().checked_mul(w).is_none() => {
 					Err(Error::TryMul(v.to_string(), w.to_string()))
 				}
 				(v, w) => Ok(Value::Number(v * w)),
