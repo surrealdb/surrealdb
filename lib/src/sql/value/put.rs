@@ -26,6 +26,14 @@ impl Value {
 							v.insert(f.to_raw(), obj);
 						}
 					},
+					Part::Index(i) => match v.get_mut(&i.to_string()) {
+						Some(v) if v.is_some() => v.put(path.next(), val),
+						_ => {
+							let mut obj = Value::base();
+							obj.put(path.next(), val);
+							v.insert(i.to_string(), obj);
+						}
+					},
 					_ => (),
 				},
 				// Current path part is an array
