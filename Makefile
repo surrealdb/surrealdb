@@ -34,7 +34,7 @@ serve:
 
 .PHONY: sql
 sql:
-	cargo run $(DEV_FEATURES) -- sql --conn ws://0.0.0.0:8000 --user root --pass root --ns test --db test --pretty
+	cargo run $(DEV_FEATURES) -- sql --conn ws://0.0.0.0:8000 --user root --pass root --ns test --db test --multi --pretty
 
 .PHONY: quick
 quick:

@@ -2,7 +2,7 @@ use derive::Key;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
-pub struct Dt<'a> {
+pub struct Az<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: &'a str,
@@ -11,37 +11,37 @@ pub struct Dt<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub tk: &'a str,
+	pub az: &'a str,
 }
 
-pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Dt<'a> {
-	Dt::new(ns, db, tb)
+pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Az<'a> {
+	Az::new(ns, db, tb)
 }
 
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::database::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'd', b't', 0x00]);
+	k.extend_from_slice(&[b'!', b'a', b'z', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::database::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[b'!', b'd', b't', 0xff]);
+	k.extend_from_slice(&[b'!', b'a', b'z', 0xff]);
 	k
 }
 
-impl<'a> Dt<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tk: &'a str) -> Self {
+impl<'a> Az<'a> {
+	pub fn new(ns: &'a str, db: &'a str, az: &'a str) -> Self {
 		Self {
-			__: b'/',
-			_a: b'*',
+			__: b'/', // /
+			_a: b'*', // *
 			ns,
-			_b: b'*',
+			_b: b'*', // *
 			db,
-			_c: b'!',
-			_d: b'd',
-			_e: b't',
-			tk,
+			_c: b'!', // !
+			_d: b'a', // a
+			_e: b'z', // z
+			az,
 		}
 	}
 }
@@ -52,13 +52,13 @@ mod tests {
 	fn key() {
 		use super::*;
 		#[rustfmt::skip]
-		let val = Dt::new(
-			"test",
-			"test",
-			"test",
-		);
-		let enc = Dt::encode(&val).unwrap();
-		let dec = Dt::decode(&enc).unwrap();
+            let val = Az::new(
+            "ns",
+            "db",
+            "test",
+        );
+		let enc = Az::encode(&val).unwrap();
+		let dec = Az::decode(&enc).unwrap();
 		assert_eq!(val, dec);
 	}
 }

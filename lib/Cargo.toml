@@ -35,7 +35,7 @@ kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
 native-tls = ["dep:native-tls", "reqwest?/native-tls", "tokio-tungstenite?/native-tls"]
-rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/__rustls-tls"]
+rustls = ["dep:rustls", "reqwest?/rustls-tls", "tokio-tungstenite?/rustls-tls-webpki-roots"]
 # Private features
 kv-fdb = ["foundationdb"]
 

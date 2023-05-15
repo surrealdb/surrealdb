@@ -70,6 +70,7 @@ impl Display for Fields {
 }
 
 impl Fields {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

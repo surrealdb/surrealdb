@@ -20,6 +20,7 @@ pub struct IfelseStatement {
 }
 
 impl IfelseStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		for (cond, then) in self.exprs.iter() {
 			if cond.writeable() || then.writeable() {
@@ -28,7 +29,7 @@ impl IfelseStatement {
 		}
 		self.close.as_ref().map_or(false, |v| v.writeable())
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

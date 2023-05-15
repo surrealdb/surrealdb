@@ -50,14 +50,14 @@ struct PrefixEg<'a> {
 impl<'a> PrefixEg<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, eg: &Dir) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x7e, // ~
+			_d: b'~',
 			id: id.to_owned(),
 			eg: eg.to_owned(),
 		}
@@ -82,14 +82,14 @@ struct PrefixFt<'a> {
 impl<'a> PrefixFt<'a> {
 	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, eg: &Dir, ft: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x7e, // ~
+			_d: b'~',
 			id: id.to_owned(),
 			eg: eg.to_owned(),
 			ft,
@@ -163,14 +163,14 @@ pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Ve
 impl<'a> Graph<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id, eg: Dir, fk: &'a Thing) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
-			_d: 0x7e, // ~
+			_d: b'~',
 			id,
 			eg,
 			ft: &fk.tb,
