@@ -33,10 +33,11 @@ pub struct InsertStatement {
 }
 
 impl InsertStatement {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		true
 	}
-
+	/// Check if this statement is for a single record
 	pub(crate) fn single(&self) -> bool {
 		match &self.data {
 			Data::SingleExpression(v) if v.is_object() => true,
@@ -44,7 +45,7 @@ impl InsertStatement {
 			_ => false,
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

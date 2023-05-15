@@ -12,6 +12,7 @@ pub use config::CF;
 use crate::cnf::LOGO;
 use clap::{Arg, Command};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::process::ExitCode;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
@@ -46,6 +47,17 @@ fn file_valid(v: &str) -> Result<(), String> {
 		v if !v.is_empty() => Ok(()),
 		_ => Err(String::from("Provide a valid path to a SQL file")),
 	}
+}
+
+fn file_exists(file: &str) -> Result<(), String> {
+	let path = Path::new(file);
+	if !*path.try_exists().as_ref().map_err(ToString::to_string)? {
+		return Err(String::from("Ensure the file exists"));
+	}
+	if !path.is_file() {
+		return Err(String::from("Ensure the path is a file"));
+	}
+	Ok(())
 }
 
 fn bind_valid(v: &str) -> Result<(), String> {
@@ -197,6 +209,7 @@ pub fn init() -> ExitCode {
 					.long("kvs-ca")
 					.takes_value(true)
 					.forbid_empty_values(true)
+					.validator(file_exists)
 					.help("Path to the CA file used when connecting to the remote KV store"),
 			)
 			.arg(
@@ -205,6 +218,7 @@ pub fn init() -> ExitCode {
 					.long("kvs-crt")
 					.takes_value(true)
 					.forbid_empty_values(true)
+					.validator(file_exists)
 					.help(
 						"Path to the certificate file used when connecting to the remote KV store",
 					),
@@ -215,6 +229,7 @@ pub fn init() -> ExitCode {
 					.long("kvs-key")
 					.takes_value(true)
 					.forbid_empty_values(true)
+					.validator(file_exists)
 					.help(
 						"Path to the private key file used when connecting to the remote KV store",
 					),
@@ -225,6 +240,7 @@ pub fn init() -> ExitCode {
 					.long("web-crt")
 					.takes_value(true)
 					.forbid_empty_values(true)
+					.validator(file_exists)
 					.help("Path to the certificate file for encrypted client connections"),
 			)
 			.arg(
@@ -233,6 +249,7 @@ pub fn init() -> ExitCode {
 					.long("web-key")
 					.takes_value(true)
 					.forbid_empty_values(true)
+					.validator(file_exists)
 					.help("Path to the private key file for encrypted client connections"),
 			)
 			.arg(
@@ -454,6 +471,13 @@ pub fn init() -> ExitCode {
 					.forbid_empty_values(true)
 					.default_value("root")
 					.help("Database authentication username to use when connecting"),
+			)
+			.arg(
+				Arg::new("multi")
+					.long("multi")
+					.required(false)
+					.takes_value(false)
+					.help("Whether omitting semicolon causes a newline"),
 			)
 			.arg(
 				Arg::new("pass")

@@ -14,6 +14,7 @@
 /// DB              /*{ns}!db{db}
 ///
 /// Database        /*{ns}*{db}
+/// AZ              /*{ns}*{db}!az{az}
 /// DL              /*{ns}*{db}!dl{us}
 /// DT              /*{ns}*{db}!dt{tk}
 /// PA              /*{ns}*{db}!pa{pa}
@@ -36,6 +37,7 @@
 ///
 /// Index           /*{ns}*{db}*{tb}¤{ix}{fd}{id}
 ///
+pub mod az; // Stores a DEFINE ANALYZER config definition
 pub mod cl; // Stores cluster membership information
 pub mod database; // Stores the key prefix for all keys under a database
 pub mod db; // Stores a DEFINE DATABASE config definition
@@ -63,3 +65,6 @@ pub mod st; // Stores a DEFINE TOKEN ON SCOPE config definition
 pub mod table; // Stores the key prefix for all keys under a table
 pub mod tb; // Stores a DEFINE TABLE config definition
 pub mod thing; // Stores a record id
+
+const CHAR_PATH: u8 = 0xb1; // ±
+const CHAR_INDEX: u8 = 0xa4; // ¤
