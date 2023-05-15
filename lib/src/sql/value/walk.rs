@@ -17,6 +17,10 @@ impl Value {
 						Some(v) => v._walk(path.next(), prev.push(p.clone())),
 						None => Value::None._walk(path.next(), prev.push(p.clone())),
 					},
+					Part::Index(i) => match v.get(&i.to_string()) {
+						Some(v) => v._walk(path.next(), prev.push(p.clone())),
+						None => Value::None._walk(path.next(), prev.push(p.clone())),
+					},
 					Part::All => self._walk(path.next(), prev.push(p.clone())),
 					_ => vec![],
 				},

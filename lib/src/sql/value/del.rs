@@ -36,6 +36,16 @@ impl Value {
 							_ => Ok(()),
 						},
 					},
+					Part::Index(i) => match path.len() {
+						1 => {
+							v.remove(&i.to_string());
+							Ok(())
+						}
+						_ => match v.get_mut(&i.to_string()) {
+							Some(v) if v.is_some() => v.del(ctx, opt, txn, path.next()).await,
+							_ => Ok(()),
+						},
+					},
 					_ => Ok(()),
 				},
 				// Current path part is an array
