@@ -37,6 +37,12 @@ impl From<BTreeMap<String, Value>> for Object {
 	}
 }
 
+impl From<HashMap<&str, Value>> for Object {
+	fn from(v: HashMap<&str, Value>) -> Self {
+		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect())
+	}
+}
+
 impl From<HashMap<String, Value>> for Object {
 	fn from(v: HashMap<String, Value>) -> Self {
 		Self(v.into_iter().collect())

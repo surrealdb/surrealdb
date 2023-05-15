@@ -114,7 +114,7 @@ async fn select_where_and_with_index() -> Result<(), Error> {
 		CREATE person:tobie SET name = 'Tobie', genre='m';
 		CREATE person:jaime SET name = 'Jaime', genre='m';
 		DEFINE INDEX person_name ON TABLE person COLUMNS name;
-		SELECT name FROM person WHERE name = 'Tobie' AND genre = 'm';";
+		SELECT name FROM person WHERE name = 'Tobie' AND genre = 'm' EXPLAIN;";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
@@ -129,6 +129,22 @@ async fn select_where_and_with_index() -> Result<(), Error> {
 		"[
 			{
 				name: 'Tobie'
+			},
+			{
+				explain:
+				[
+					{
+						detail: {
+							plan: {
+								index: 'person_name',
+								operator: '=',
+								value: 'Tobie'
+							},
+							table: 'person',
+						},
+						operation: 'Iterate Index'
+					}
+				]
 			}
 		]",
 	);

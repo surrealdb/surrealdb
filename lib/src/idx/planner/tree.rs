@@ -42,6 +42,18 @@ impl Node {
 		}
 		Ok(a)
 	}
+
+	pub(super) fn explain(&self) -> Value {
+		match &self {
+			Node::Expression {
+				..
+			} => Value::from("Expression"),
+			Node::IndexedField(_) => Value::from("Indexed Field"),
+			Node::NonIndexedField => Value::from("Non indexed Field"),
+			Node::Scalar(v) => v.to_owned(),
+			Node::Unsupported => Value::from("Not supported"),
+		}
+	}
 }
 
 pub(super) struct TreeBuilder<'a> {
@@ -58,7 +70,6 @@ impl<'a> TreeBuilder<'a> {
 		table: &'a Table,
 		cond: &Option<Cond>,
 	) -> Result<Option<Node>, Error> {
-		println!("parse {:?}", table);
 		let mut builder = TreeBuilder {
 			opt,
 			txn,
@@ -86,7 +97,6 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(indexes) = &self.indexes {
 			for ix in indexes.as_ref() {
 				if ix.cols.len() == 1 && ix.cols[0].eq(i) {
-					println!("INDEX FOUND: {:?}", ix.name);
 					return Ok(Some(ix.clone()));
 				}
 			}
@@ -103,15 +113,11 @@ impl<'a> TreeBuilder<'a> {
 			Value::Number(_) => Node::Scalar(v.to_owned()),
 			Value::Bool(_) => Node::Scalar(v.to_owned()),
 			Value::Subquery(s) => self.eval_subquery(s).await?,
-			_ => {
-				println!("UNSUPPORTED VALUE {:?}", v);
-				Node::Unsupported
-			}
+			_ => Node::Unsupported,
 		})
 	}
 
 	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
-		println!("eval_idiom {:?}", i);
 		Ok(if let Some(index) = self.find_index(i).await? {
 			Node::IndexedField(index)
 		} else {
@@ -120,7 +126,6 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn eval_expression(&mut self, e: &Expression) -> Result<Node, Error> {
-		println!("eval_expression {:?}", e.o);
 		let left = self.eval_value(&e.l).await?;
 		let right = self.eval_value(&e.r).await?;
 		Ok(Node::Expression {
@@ -133,10 +138,7 @@ impl<'a> TreeBuilder<'a> {
 	async fn eval_subquery(&mut self, s: &Subquery) -> Result<Node, Error> {
 		Ok(match s {
 			Subquery::Value(v) => self.eval_value(v).await?,
-			_ => {
-				println!("UNSUPPORTED SUBQUERY {:?}", s);
-				Node::Unsupported
-			}
+			_ => Node::Unsupported,
 		})
 	}
 }

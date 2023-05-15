@@ -200,4 +200,12 @@ impl<'a> Statement<'a> {
 			_ => false,
 		}
 	}
+	/// Returns any EXPLAIN clause if specified
+	#[inline]
+	pub fn explain(&self) -> bool {
+		match self {
+			Statement::Select(v) => v.explain,
+			_ => false,
+		}
+	}
 }

@@ -4,8 +4,9 @@ use crate::idx::planner::tree::Node;
 use crate::key;
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Operator, Thing};
+use crate::sql::{Object, Operator, Thing, Value};
 use async_trait::async_trait;
+use std::collections::HashMap;
 
 pub(super) struct IndexOption {
 	ix: DefineIndexStatement,
@@ -91,6 +92,20 @@ pub(crate) struct Plan {
 impl Plan {
 	pub(crate) fn new_iterator(&self, opt: &Options) -> Result<Box<dyn ThingIterator>, Error> {
 		self.i.new_iterator(opt)
+	}
+
+	pub(crate) fn explain(&self) -> Value {
+		match &self.i {
+			IndexOption {
+				ix,
+				v,
+				op,
+			} => Value::Object(Object::from(HashMap::from([
+				("index", Value::from(ix.name.0.to_owned())),
+				("operator", Value::from(op.to_string())),
+				("value", v.explain()),
+			]))),
+		}
 	}
 }
 

@@ -14,9 +14,10 @@ use crate::sql::range::Range;
 use crate::sql::table::Table;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
+use crate::sql::Object;
 use async_recursion::async_recursion;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::mem;
 
 pub(crate) enum Iterable {
@@ -86,6 +87,8 @@ impl Iterator {
 		self.setup_limit(&run, opt, txn, stm).await?;
 		// Process the query START clause
 		self.setup_start(&run, opt, txn, stm).await?;
+		// Process any EXPLAIN clause
+		let explanation = self.output_explain(&run, opt, txn, stm)?;
 		// Process prepared values
 		self.iterate(&run, opt, txn, stm).await?;
 		// Return any document errors
@@ -104,6 +107,10 @@ impl Iterator {
 		self.output_limit(ctx, opt, txn, stm).await?;
 		// Process any FETCH clause
 		self.output_fetch(ctx, opt, txn, stm).await?;
+		// Add the EXPLAIN clause to the result
+		if let Some(e) = explanation {
+			self.results.push(e);
+		}
 		// Output the results
 		Ok(mem::take(&mut self.results).into())
 	}
@@ -348,6 +355,63 @@ impl Iterator {
 			}
 		}
 		Ok(())
+	}
+
+	#[inline]
+	fn output_explain(
+		&mut self,
+		_ctx: &Context<'_>,
+		_opt: &Options,
+		_txn: &Transaction,
+		stm: &Statement<'_>,
+	) -> Result<Option<Value>, Error> {
+		Ok(if stm.explain() {
+			let mut explains = Vec::with_capacity(self.entries.len());
+			for iter in &self.entries {
+				let (operation, detail) = match iter {
+					Iterable::Value(v) => ("Iterate Value", vec![("value", v.to_owned())]),
+					Iterable::Table(t) => {
+						("Iterate Table", vec![("table", Value::from(t.0.to_owned()))])
+					}
+					Iterable::Thing(t) => {
+						("Iterate Thing", vec![("thing", Value::Thing(t.to_owned()))])
+					}
+					Iterable::Range(r) => {
+						("Iterate Range", vec![("table", Value::from(r.tb.to_owned()))])
+					}
+					Iterable::Edges(e) => {
+						("Iterate Edges", vec![("from", Value::Thing(e.from.to_owned()))])
+					}
+					Iterable::Mergeable(t, v) => (
+						"Iterate Mergeable",
+						vec![("thing", Value::Thing(t.to_owned())), ("value", v.to_owned())],
+					),
+					Iterable::Relatable(t1, t2, t3) => (
+						"Iterate Relatable",
+						vec![
+							("thing-1", Value::Thing(t1.to_owned())),
+							("thing-2", Value::Thing(t2.to_owned())),
+							("thing-3", Value::Thing(t3.to_owned())),
+						],
+					),
+					Iterable::Index(t, p) => (
+						"Iterate Index",
+						vec![("table", Value::from(t.0.to_owned())), ("plan", p.explain())],
+					),
+				};
+				let explain = Object::from(HashMap::from([
+					("operation", Value::from(operation)),
+					("detail", Value::Object(Object::from(HashMap::from_iter(detail)))),
+				]));
+				explains.push(Value::Object(explain));
+			}
+			Some(Value::Object(Object::from(HashMap::from([(
+				"explain",
+				Value::Array(Array::from(explains)),
+			)]))))
+		} else {
+			None
+		})
 	}
 
 	#[cfg(target_arch = "wasm32")]
