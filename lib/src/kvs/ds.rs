@@ -9,10 +9,11 @@ use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
 use crate::err::Error;
+use crate::key::hb::Hb;
 use crate::kvs::LOG;
-use crate::sql;
 use crate::sql::Query;
 use crate::sql::Value;
+use crate::{dbs, sql};
 use channel::Receiver;
 use channel::Sender;
 use futures::lock::Mutex;
@@ -258,7 +259,7 @@ impl Datastore {
 		for dead_node in dead.clone() {
 			tx.del_cl(dead_node.nd).await?;
 		}
-		Ok(dead)
+		Ok::<Vec<Hb>, Error>(dead)
 	}
 
 	// Adds entries to the KV store indicating membership information

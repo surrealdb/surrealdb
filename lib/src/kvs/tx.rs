@@ -757,9 +757,9 @@ impl Transaction {
 	}
 
 	// Delete a cluster registration entry
-	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
-		let key = crate::key::cl::Cl::new(node.0);
-		self.del(key)
+	pub async fn del_cl(&mut self, node: uuid::Uuid) -> Result<(), Error> {
+		let key = crate::key::cl::Cl::new(node);
+		self.del(key).await
 	}
 
 	// Retrieve cluster information
@@ -844,9 +844,10 @@ impl Transaction {
 
 	pub async fn delr_hb(&mut self, ts: Vec<Hb>, limit: u32) -> Result<(), Error> {
 		trace!(target: LOG, "delr_hb: ts={:?} limit={:?}", ts, limit);
-		// self.delr(rng, limit).await?;
-		// Ok(())
-		Err(Error::Unimplemented("delr_hb".to_string()))
+		for hb in ts.into_iter() {
+			self.del(hb).await?;
+		}
+		Ok(())
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
