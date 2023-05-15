@@ -18,7 +18,6 @@ use crate::sql::{Uuid, Value};
 use crate::{opt, sql};
 use channel::Sender;
 use md5::digest::typenum::tarr;
-use nom::Parser;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
 use sql::statements::DefineDatabaseStatement;
@@ -758,8 +757,9 @@ impl Transaction {
 	}
 
 	// Delete a cluster registration entry
-	pub async fn del_cl(&self, node: ClusterMembership) -> Result<(), Error> {
-		Err(Error::Unimplemented("del_cl".to_string()))
+	pub async fn del_cl(&mut self, node: Uuid) -> Result<(), Error> {
+		let key = crate::key::cl::Cl::new(node.0);
+		self.del(key)
 	}
 
 	// Retrieve cluster information
@@ -797,16 +797,12 @@ impl Transaction {
 	}
 
 	// Scans up until the heartbeat timestamp and returns the discovered nodes
-	pub async fn scan_hb(
-		&mut self,
-		time_to: &Timestamp,
-		limit: u32,
-	) -> Result<Vec<ClusterMembership>, Error> {
+	pub async fn scan_hb(&mut self, time_to: &Timestamp, limit: u32) -> Result<Vec<Hb>, Error> {
 		let beg = crate::key::hb::Hb::prefix();
 		let end = crate::key::hb::Hb::suffix(time_to);
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
-		let mut out: Vec<(Key, Val)> = vec![];
+		let mut out: Vec<Hb> = vec![];
 		// Start processing
 		while num > 0 {
 			// Get records batch
@@ -837,17 +833,16 @@ impl Transaction {
 				if n == i + 1 {
 					nxt = Some(k.clone());
 				}
-				// Delete
-				out.push((k, v));
+				out.push(Hb::decode(k.as_slice())?);
 				// Count
 				num -= 1;
 			}
 		}
 		trace!("scan_hb: {:?}", out);
-		Err(Error::Unimplemented("scan_hb".to_string()))
+		Ok(out)
 	}
 
-	pub async fn delr_hb(&mut self, ts: Vec<ClusterMembership>, limit: u32) -> Result<(), Error> {
+	pub async fn delr_hb(&mut self, ts: Vec<Hb>, limit: u32) -> Result<(), Error> {
 		trace!(target: LOG, "delr_hb: ts={:?} limit={:?}", ts, limit);
 		// self.delr(rng, limit).await?;
 		// Ok(())

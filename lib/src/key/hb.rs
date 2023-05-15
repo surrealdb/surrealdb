@@ -39,9 +39,13 @@ impl Hb {
 	}
 
 	pub fn suffix(ts: &Timestamp) -> Vec<u8> {
+		// Add one to timestmap so we get a complete range inclusive of provided timestamp
+		// Also convert type
+		let tskey: KeyTimestamp = KeyTimestamp {
+			value: ts.value + 1,
+		};
 		let mut k = super::kv::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'h', b'b']);
-		let tskey: KeyTimestamp = ts.into();
 		k.extend_from_slice(tskey.encode().unwrap().as_ref());
 		k
 	}
@@ -56,6 +60,8 @@ impl From<Timestamp> for Hb {
 
 #[cfg(test)]
 mod tests {
+	use time::format_description::well_known::iso8601::FormattedComponents::Time;
+
 	#[test]
 	fn key() {
 		use super::*;
@@ -67,5 +73,22 @@ mod tests {
 		let enc = Hb::encode(&val).unwrap();
 		let dec = Hb::decode(&enc).unwrap();
 		assert_eq!(val, dec);
+	}
+
+	fn prefix() {
+		use super::*;
+		let actual = Hb::prefix();
+		let expected = vec![b'/', b'!', b'h', b'b', 0];
+		assert_eq!(actual, expected)
+	}
+
+	fn suffix() {
+		use super::*;
+		ts: Timestamp = Timestamp {
+			value: 456,
+		};
+		let actual = Hb::suffix(ts);
+		let expected = vec![b'/', b'!', b'h', b'b', 0];
+		assert_eq!(actual, expected)
 	}
 }
