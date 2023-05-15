@@ -225,6 +225,7 @@ pub fn synchronous(ctx: &Context<'_>, name: &str, args: Vec<Value>) -> Result<Va
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
 		//
+		"time::ceil" => time::ceil,
 		"time::day" => time::day,
 		"time::floor" => time::floor,
 		"time::format" => time::format,

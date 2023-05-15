@@ -17,10 +17,10 @@ pub fn new<'a>(ns: &'a str, db: &'a str) -> Database<'a> {
 impl<'a> Database<'a> {
 	pub fn new(ns: &'a str, db: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/', // /
+			_a: b'*', // *
 			ns,
-			_b: 0x2a, // *
+			_b: b'*', // *
 			db,
 		}
 	}

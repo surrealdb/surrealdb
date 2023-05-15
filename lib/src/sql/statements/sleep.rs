@@ -18,6 +18,7 @@ pub struct SleepStatement {
 }
 
 impl SleepStatement {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

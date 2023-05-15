@@ -53,6 +53,7 @@ use nom::multi::separated_list0;
 use nom::multi::separated_list1;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as Json;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -1020,6 +1021,14 @@ impl Value {
 		}
 	}
 
+	/// Converts a `surrealdb::sq::Value` into a `serde_json::Value`
+	///
+	/// This converts certain types like `Thing` into their simpler formats
+	/// instead of the format used internally by SurrealDB.
+	pub fn into_json(self) -> Json {
+		self.into()
+	}
+
 	// -----------------------------------
 	// Simple conversion of value
 	// -----------------------------------
@@ -1942,9 +1951,11 @@ impl fmt::Display for Value {
 }
 
 impl Value {
+	/// Check if we require a writeable transaction
 	pub(crate) fn writeable(&self) -> bool {
 		match self {
 			Value::Block(v) => v.writeable(),
+			Value::Idiom(v) => v.writeable(),
 			Value::Array(v) => v.iter().any(Value::writeable),
 			Value::Object(v) => v.iter().any(|(_, v)| v.writeable()),
 			Value::Function(v) => v.is_custom() || v.args().iter().any(Value::writeable),
@@ -1953,7 +1964,7 @@ impl Value {
 			_ => false,
 		}
 	}
-
+	/// Process this type returning a computed simple Value
 	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
 	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	pub(crate) async fn compute(
@@ -1992,7 +2003,12 @@ impl TryAdd for Value {
 	type Output = Self;
 	fn try_add(self, other: Self) -> Result<Self, Error> {
 		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => Ok(Value::Number(v + w)),
+			(Value::Number(v), Value::Number(w)) => match (v, w) {
+				(Number::Int(v), Number::Int(w)) if v.checked_add(w).is_none() => {
+					Err(Error::TryAdd(v.to_string(), w.to_string()))
+				}
+				(v, w) => Ok(Value::Number(v + w)),
+			},
 			(Value::Strand(v), Value::Strand(w)) => Ok(Value::Strand(v + w)),
 			(Value::Datetime(v), Value::Duration(w)) => Ok(Value::Datetime(w + v)),
 			(Value::Duration(v), Value::Datetime(w)) => Ok(Value::Datetime(v + w)),
@@ -2013,7 +2029,12 @@ impl TrySub for Value {
 	type Output = Self;
 	fn try_sub(self, other: Self) -> Result<Self, Error> {
 		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => Ok(Value::Number(v - w)),
+			(Value::Number(v), Value::Number(w)) => match (v, w) {
+				(Number::Int(v), Number::Int(w)) if v.checked_sub(w).is_none() => {
+					Err(Error::TrySub(v.to_string(), w.to_string()))
+				}
+				(v, w) => Ok(Value::Number(v - w)),
+			},
 			(Value::Datetime(v), Value::Datetime(w)) => Ok(Value::Duration(v - w)),
 			(Value::Datetime(v), Value::Duration(w)) => Ok(Value::Datetime(w - v)),
 			(Value::Duration(v), Value::Datetime(w)) => Ok(Value::Datetime(v - w)),
@@ -2034,7 +2055,12 @@ impl TryMul for Value {
 	type Output = Self;
 	fn try_mul(self, other: Self) -> Result<Self, Error> {
 		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => Ok(Value::Number(v * w)),
+			(Value::Number(v), Value::Number(w)) => match (v, w) {
+				(Number::Int(v), Number::Int(w)) if v.checked_mul(w).is_none() => {
+					Err(Error::TryMul(v.to_string(), w.to_string()))
+				}
+				(v, w) => Ok(Value::Number(v * w)),
+			},
 			(v, w) => Err(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
 		}
 	}
@@ -2071,7 +2097,14 @@ impl TryPow for Value {
 	type Output = Self;
 	fn try_pow(self, other: Self) -> Result<Self, Error> {
 		match (self, other) {
-			(Value::Number(v), Value::Number(w)) => Ok(Value::Number(v.pow(w))),
+			(Value::Number(v), Value::Number(w)) => match (v, w) {
+				(Number::Int(v), Number::Int(w))
+					if w.try_into().ok().and_then(|w| v.checked_pow(w)).is_none() =>
+				{
+					Err(Error::TryPow(v.to_string(), w.to_string()))
+				}
+				(v, w) => Ok(Value::Number(v.pow(w))),
+			},
 			(v, w) => Err(Error::TryPow(v.to_raw_string(), w.to_raw_string())),
 		}
 	}

@@ -166,6 +166,7 @@ impl Display for Id {
 }
 
 impl Id {
+	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context<'_>,

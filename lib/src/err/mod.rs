@@ -234,6 +234,12 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested analyzer does not exist
+	#[error("The analyzer '{value}' does not exist")]
+	AzNotFound {
+		value: String,
+	},
+
 	/// Unable to perform the realtime query
 	#[error("Unable to perform the realtime query")]
 	RealtimeDisabled,
@@ -341,23 +347,23 @@ pub enum Error {
 		into: Cow<'static, str>,
 	},
 
-	/// The requested function does not exist
+	/// Cannot perform addition
 	#[error("Cannot perform addition with '{0}' and '{1}'")]
 	TryAdd(String, String),
 
-	/// The requested function does not exist
+	/// Cannot perform subtraction
 	#[error("Cannot perform subtraction with '{0}' and '{1}'")]
 	TrySub(String, String),
 
-	/// The requested function does not exist
+	/// Cannot perform multiplication
 	#[error("Cannot perform multiplication with '{0}' and '{1}'")]
 	TryMul(String, String),
 
-	/// The requested function does not exist
+	/// Cannot perform division
 	#[error("Cannot perform division with '{0}' and '{1}'")]
 	TryDiv(String, String),
 
-	/// The requested function does not exist
+	/// Cannot perform power
 	#[error("Cannot raise the value '{0}' with '{1}'")]
 	TryPow(String, String),
 
