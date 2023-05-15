@@ -17,6 +17,10 @@ pub fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	// Try to parse the specified output file
 	let into = matches.value_of("into").unwrap();
 	// Process the source->destination response
+	if from.ends_with(".db") && into.ends_with(""){
+	
+	backup_file_to_file(matches, to, into)
+	}
 	if from.ends_with(".db") && into.ends_with(".db") {
 		backup_file_to_file(matches, from, into)
 	} else if from.ends_with(".db") {
