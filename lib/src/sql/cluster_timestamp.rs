@@ -12,6 +12,21 @@ pub struct Timestamp {
 	pub value: u64,
 }
 
+// This struct is to be used only when storing keys as the macro currently
+// conflicts when you have Store and Key derive macros.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Key)]
+pub struct KeyTimestamp {
+	pub value: u64,
+}
+
+impl From<&Timestamp> for KeyTimestamp {
+	fn from(ts: &Timestamp) -> Self {
+		KeyTimestamp {
+			value: ts.value,
+		}
+	}
+}
+
 impl Add<Duration> for Timestamp {
 	type Output = Timestamp;
 	fn add(self, rhs: Duration) -> Timestamp {

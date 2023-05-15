@@ -1,6 +1,7 @@
-use crate::sql::cluster_timestamp::Timestamp;
+use crate::sql::cluster_timestamp::{KeyTimestamp, Timestamp};
 use derive::Key;
 use serde::{Deserialize, Serialize};
+use std::io::empty;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
@@ -40,22 +41,16 @@ impl Hb {
 	pub fn suffix(ts: &Timestamp) -> Vec<u8> {
 		let mut k = super::kv::new().encode().unwrap();
 		k.extend_from_slice(&[b'!', b'h', b'b']);
-		k.extend_from_slice(ts.encode().unwrap().as_ref());
+		let tskey: KeyTimestamp = ts.into();
+		k.extend_from_slice(tskey.encode().unwrap().as_ref());
 		k
 	}
-
 }
 
 impl From<Timestamp> for Hb {
 	fn from(ts: Timestamp) -> Self {
 		let empty_uuid = uuid::Uuid::nil();
-			Hb::new(
-				Timestamp {
-					value: 0, // We want to delete everything from start
-				},
-				empty_uuid,
-			)
-		Self::new(ts, Uuid::new_v4())
+		Self::new(ts, empty_uuid)
 	}
 }
 

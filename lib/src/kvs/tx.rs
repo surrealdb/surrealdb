@@ -8,7 +8,6 @@ use crate::key::hb::Hb;
 use crate::key::thing;
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
-use crate::sql::cluster::ClusterMembership;
 use crate::sql::cluster_timestamp::Timestamp;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
@@ -404,7 +403,7 @@ impl Transaction {
 	///
 	/// This function fetches the full range of key-value pairs, in a single request to the underlying datastore.
 	#[allow(unused_variables)]
-	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u33) -> Result<Vec<(Key, Val)>, Error>
+	pub async fn scan<K>(&mut self, rng: Range<K>, limit: u32) -> Result<Vec<(Key, Val)>, Error>
 	where
 		K: Into<Key> + Debug,
 	{
@@ -849,9 +848,10 @@ impl Transaction {
 	}
 
 	pub async fn delr_hb(&mut self, ts: Vec<ClusterMembership>, limit: u32) -> Result<(), Error> {
-		trace!(target: LOG, "delr_hb: {:?}", rng);
-		self.delr(rng, limit).await?;
-		Ok(())
+		trace!(target: LOG, "delr_hb: ts={:?} limit={:?}", ts, limit);
+		// self.delr(rng, limit).await?;
+		// Ok(())
+		Err(Error::Unimplemented("delr_hb".to_string()))
 	}
 
 	/// Retrieve all namespace definitions in a datastore.

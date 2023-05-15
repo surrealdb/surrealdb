@@ -1,5 +1,6 @@
 use super::tx::Transaction;
 use crate::ctx::Context;
+use crate::dbs::cluster::ClusterMembership;
 use crate::dbs::Attach;
 use crate::dbs::Executor;
 use crate::dbs::Notification;
@@ -10,7 +11,6 @@ use crate::dbs::Variables;
 use crate::err::Error;
 use crate::kvs::LOG;
 use crate::sql;
-use crate::sql::cluster::ClusterMembership;
 use crate::sql::Query;
 use crate::sql::Value;
 use channel::Receiver;
@@ -252,8 +252,9 @@ impl Datastore {
 		// node timeout should be configurable, just trying to get this to work
 		let timeout = Duration::from_secs(1);
 		let deadline = now - timeout;
-		let dead = tx.scan_hb(&deadline).await?;
-		tx.delr_hb(dead, 1000).await?;
+		let limit = 1000;
+		let dead = tx.scan_hb(&deadline, limit).await?;
+		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
 			tx.del_cl(dead_node).await?;
 		}
