@@ -20,27 +20,27 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Tb<'a> {
 
 pub fn prefix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::database::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x74, 0x62, 0x00]);
+	k.extend_from_slice(&[b'!', b't', b'b', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str, db: &str) -> Vec<u8> {
 	let mut k = super::database::new(ns, db).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x74, 0x62, 0xff]);
+	k.extend_from_slice(&[b'!', b't', b'b', 0xff]);
 	k
 }
 
 impl<'a> Tb<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x21, // !
-			_d: 0x74, // t
-			_e: 0x62, // b
+			_c: b'!',
+			_d: b't',
+			_e: b'b',
 			tb,
 		}
 	}

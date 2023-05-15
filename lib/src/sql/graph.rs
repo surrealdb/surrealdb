@@ -1,5 +1,5 @@
-use crate::sql::comment::mightbespace;
 use crate::sql::comment::shouldbespace;
+use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::cond::{cond, Cond};
 use crate::sql::dir::{dir, Dir};
 use crate::sql::error::IResult;
@@ -106,8 +106,7 @@ fn simple(i: &str) -> IResult<&str, (Tables, Option<Cond>, Option<Idiom>)> {
 }
 
 fn custom(i: &str) -> IResult<&str, (Tables, Option<Cond>, Option<Idiom>)> {
-	let (i, _) = char('(')(i)?;
-	let (i, _) = mightbespace(i)?;
+	let (i, _) = openparentheses(i)?;
 	let (i, w) = alt((any, tables))(i)?;
 	let (i, c) = opt(|i| {
 		let (i, _) = shouldbespace(i)?;
@@ -121,8 +120,7 @@ fn custom(i: &str) -> IResult<&str, (Tables, Option<Cond>, Option<Idiom>)> {
 		let (i, v) = idiom(i)?;
 		Ok((i, v))
 	})(i)?;
-	let (i, _) = mightbespace(i)?;
-	let (i, _) = char(')')(i)?;
+	let (i, _) = closeparentheses(i)?;
 	Ok((i, (w, c, a)))
 }
 
