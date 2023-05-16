@@ -21,6 +21,7 @@ use std::fmt::{self, Display, Formatter};
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Data {
 	EmptyExpression,
+	UnsetExpression(Vec<Idiom>),
 	SetExpression(Vec<(Idiom, Operator, Value)>),
 	PatchExpression(Value),
 	MergeExpression(Value),
@@ -67,6 +68,15 @@ impl Data {
 				// This SET expression had no 'id' field
 				_ => Ok(tb.generate()),
 			},
+			Self::UnsetExpression(v) => match v.iter().find(|f| f.is_id()) {
+				Some(v) => {
+					println!("Id");
+					// This SET expression has an 'id' field
+					v.compute(ctx, opt, txn, None).await?.generate(tb, false)
+				}
+				// This SET expression had no 'id' field
+				_ => Ok(tb.generate()),
+			},
 			// Generate a random id for all other data clauses
 			_ => Ok(tb.generate()),
 		}
@@ -83,6 +93,11 @@ impl Display for Data {
 				Fmt::comma_separated(
 					v.iter().map(|args| Fmt::new(args, |(l, o, r), f| write!(f, "{l} {o} {r}",)))
 				)
+			),
+			Self::UnsetExpression(v) => write!(
+				f,
+				"UNSET {}",
+				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |l, f| write!(f, "{l}",))))
 			),
 			Self::PatchExpression(v) => write!(f, "PATCH {v}"),
 			Self::MergeExpression(v) => write!(f, "MERGE {v}"),
@@ -111,7 +126,7 @@ impl Display for Data {
 }
 
 pub fn data(i: &str) -> IResult<&str, Data> {
-	alt((set, patch, merge, replace, content))(i)
+	alt((set, unset, patch, merge, replace, content))(i)
 }
 
 fn set(i: &str) -> IResult<&str, Data> {
@@ -126,6 +141,13 @@ fn set(i: &str) -> IResult<&str, Data> {
 		Ok((i, (l, o, r)))
 	})(i)?;
 	Ok((i, Data::SetExpression(v)))
+}
+
+fn unset(i: &str) -> IResult<&str, Data> {
+	let (i, _) = tag_no_case("UNSET")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, v) = separated_list1(commas, idiom)(i)?;
+	Ok((i, Data::UnsetExpression(v)))
 }
 
 fn patch(i: &str) -> IResult<&str, Data> {
