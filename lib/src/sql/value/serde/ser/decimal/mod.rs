@@ -39,7 +39,7 @@ mod tests {
 	#[test]
 	fn from_i32() {
 		let decimal = Decimal::from(25);
-		let serialized = decimal.serialize(Serializer.wrap()).unwrap();
+		let serialized = Serialize::serialize(&decimal, Serializer.wrap()).unwrap();
 		assert_eq!(decimal, serialized);
 	}
 }
