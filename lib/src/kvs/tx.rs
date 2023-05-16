@@ -2,6 +2,8 @@ use super::kv::Add;
 use super::kv::Convert;
 use super::Key;
 use super::Val;
+use crate::dbs::cl::ClusterMembership;
+use crate::dbs::cl::Timestamp;
 use crate::err::Error;
 use crate::key::thing;
 use crate::kvs::cache::Cache;
@@ -11,7 +13,7 @@ use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
-use crate::sql::Value;
+use crate::sql::{Uuid, Value};
 use channel::Sender;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
@@ -31,6 +33,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(debug_assertions)]
 const LOG: &str = "surrealdb::txn";
@@ -727,6 +730,60 @@ impl Transaction {
 	{
 		let key: Key = key.into();
 		self.cache.del(&key);
+		Ok(())
+	}
+
+	// Register cluster membership
+	// NOTE: Setting cluster membership sets the heartbeat
+	// Remember to set the heartbeat as well
+	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
+		let key = crate::key::cl::Cl::new(id.0);
+		match self.get_cl(id.clone()).await? {
+			Some(_) => Err(Error::ClAlreadyExists {
+				value: id.0.to_string(),
+			}),
+			None => {
+				let value = ClusterMembership {
+					name: id.0.to_string(),
+					heartbeat: self.clock(),
+				};
+				self.put(key, value).await?;
+				Ok(())
+			}
+		}
+	}
+
+	// Retrieve cluster information
+	pub async fn get_cl(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
+		let key = crate::key::cl::Cl::new(id.0);
+		let val = self.get(key).await?;
+		match val {
+			Some(v) => Ok(Some::<ClusterMembership>(v.into())),
+			None => Ok(None),
+		}
+	}
+
+	fn clock(&self) -> Timestamp {
+		// Use a timestamp oracle if available
+		let now: u128 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+		return Timestamp {
+			value: now as u64,
+		};
+	}
+
+	// Set heartbeat
+	pub async fn set_hb(&mut self, id: Uuid) -> Result<(), Error> {
+		let now = self.clock();
+		let key = crate::key::hb::Hb::new(now.clone(), id.0);
+		// We do not need to do a read, we always want to overwrite
+		self.put(
+			key,
+			ClusterMembership {
+				name: id.0.to_string(),
+				heartbeat: now,
+			},
+		)
+		.await?;
 		Ok(())
 	}
 
