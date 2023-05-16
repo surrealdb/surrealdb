@@ -2,6 +2,7 @@ use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::planner::tree::Node;
 use crate::key;
+use crate::kvs::Key;
 use crate::sql::index::Index;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Object, Operator, Thing, Value};
@@ -53,9 +54,12 @@ impl IndexOption {
 				}
 				_ => Err(Error::BypassQueryPlanner),
 			},
-			Index::Uniq => {
-				todo!()
-			}
+			Index::Uniq => match self.op {
+				Operator::Equal => {
+					Ok(Box::new(UniqueEqualThingIterator::new(opt, &self.ix, &self.v)?))
+				}
+				_ => Err(Error::BypassQueryPlanner),
+			},
 			Index::Search {
 				..
 			} => {
@@ -151,5 +155,33 @@ impl ThingIterator for NonUniqueEqualThingIterator {
 		}
 		let res = res.iter().map(|(_, val)| val.into()).collect();
 		Ok(res)
+	}
+}
+
+struct UniqueEqualThingIterator {
+	key: Option<Key>,
+}
+
+impl UniqueEqualThingIterator {
+	fn new(opt: &Options, ix: &DefineIndexStatement, v: &Node) -> Result<Self, Error> {
+		let v = v.to_array()?;
+		let key = key::index::new(opt.ns(), opt.db(), &ix.what, &ix.name, &v, None).into();
+		Ok(Self {
+			key: Some(key),
+		})
+	}
+}
+
+#[async_trait]
+impl ThingIterator for UniqueEqualThingIterator {
+	async fn next_batch(&mut self, txn: &Transaction, limit: u32) -> Result<Vec<Thing>, Error> {
+		if limit > 0 {
+			if let Some(key) = self.key.take() {
+				if let Some(val) = txn.lock().await.get(key).await? {
+					return Ok(vec![val.into()]);
+				}
+			}
+		}
+		Ok(vec![])
 	}
 }
