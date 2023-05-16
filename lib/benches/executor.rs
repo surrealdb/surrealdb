@@ -1,4 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use pprof::criterion::{Output, PProfProfiler};
 use surrealdb::{dbs::Session, kvs::Datastore};
 
 macro_rules! query {
@@ -48,5 +49,9 @@ fn bench_executor(c: &mut Criterion) {
 	c.finish();
 }
 
-criterion_group!(benches, bench_executor);
+criterion_group!(
+	name = benches;
+	config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+	targets = bench_executor
+);
 criterion_main!(benches);
