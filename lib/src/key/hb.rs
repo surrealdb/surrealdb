@@ -1,4 +1,4 @@
-use crate::sql::cluster_timestamp::Timestamp;
+use crate::dbs::cl::Timestamp;
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
