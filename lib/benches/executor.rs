@@ -1,3 +1,5 @@
+use std::fs::File;
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use pprof::criterion::{Output, PProfProfiler};
 use surrealdb::{dbs::Session, kvs::Datastore};
@@ -51,7 +53,7 @@ fn bench_executor(c: &mut Criterion) {
 
 criterion_group!(
 	name = benches;
-	config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+	config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
 	targets = bench_executor
 );
 criterion_main!(benches);
