@@ -514,6 +514,7 @@ fn function_string(i: &str) -> IResult<&str, &str> {
 
 fn function_time(i: &str) -> IResult<&str, &str> {
 	alt((
+		tag("ceil"),
 		tag("day"),
 		tag("floor"),
 		tag("format"),

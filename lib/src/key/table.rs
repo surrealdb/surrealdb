@@ -19,12 +19,12 @@ pub fn new<'a>(ns: &'a str, db: &'a str, tb: &'a str) -> Table<'a> {
 impl<'a> Table<'a> {
 	pub fn new(ns: &'a str, db: &'a str, tb: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x2a, // *
+			_b: b'*',
 			db,
-			_c: 0x2a, // *
+			_c: b'*',
 			tb,
 		}
 	}

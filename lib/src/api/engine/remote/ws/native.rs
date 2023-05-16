@@ -306,7 +306,8 @@ pub(crate) fn router(
 										}
 									}
 									Err(_error) => {
-										trace!(target: LOG, "Failed to deserialise message");
+										// Unfortunately, we don't know which response failed to deserialize
+										warn!(target: LOG, "Failed to deserialise message");
 									}
 								},
 								Err(error) => {

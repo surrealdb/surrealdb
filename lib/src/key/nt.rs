@@ -18,25 +18,25 @@ pub fn new<'a>(ns: &'a str, tk: &'a str) -> Nt<'a> {
 
 pub fn prefix(ns: &str) -> Vec<u8> {
 	let mut k = super::namespace::new(ns).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x6e, 0x74, 0x00]);
+	k.extend_from_slice(&[b'!', b'n', b't', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str) -> Vec<u8> {
 	let mut k = super::namespace::new(ns).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x6e, 0x74, 0xff]);
+	k.extend_from_slice(&[b'!', b'n', b't', 0xff]);
 	k
 }
 
 impl<'a> Nt<'a> {
 	pub fn new(ns: &'a str, tk: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x21, // !
-			_c: 0x6e, // n
-			_d: 0x74, // t
+			_b: b'!',
+			_c: b'n',
+			_d: b't',
 			tk,
 		}
 	}
