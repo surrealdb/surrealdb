@@ -46,6 +46,14 @@ fn bench_executor(c: &mut Criterion) {
 		"CREATE person:one SET friend = person:two; CREATE person:two SET age = 30;",
 		"SELECT * FROM person:one.friend.age;"
 	);
+	#[cfg(feature = "scripting")]
+	query!(c, javascript_simple, "RETURN function() { return 1 + 1; };");
+	#[cfg(feature = "scripting")]
+	query!(
+		c,
+		javascript_function,
+		"RETURN function() { return surrealdb::functions::count([1, 2, 3]); };"
+	);
 	c.finish();
 }
 
