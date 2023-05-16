@@ -1,5 +1,3 @@
-use std::fs::File;
-
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use pprof::criterion::{Output, PProfProfiler};
 use surrealdb::{dbs::Session, kvs::Datastore};
