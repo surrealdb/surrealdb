@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Bound;
+use std::str::FromStr;
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Range";
 
@@ -27,6 +28,23 @@ pub struct Range {
 	pub tb: String,
 	pub beg: Bound<Id>,
 	pub end: Bound<Id>,
+}
+
+impl FromStr for Range {
+	type Err = ();
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::try_from(s)
+	}
+}
+
+impl TryFrom<&str> for Range {
+	type Error = ();
+	fn try_from(v: &str) -> Result<Self, Self::Error> {
+		match range(v) {
+			Ok((_, v)) => Ok(v),
+			_ => Err(()),
+		}
+	}
 }
 
 impl Range {

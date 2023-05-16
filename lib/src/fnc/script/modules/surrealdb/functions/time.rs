@@ -8,6 +8,7 @@ pub struct Package;
 impl_module_def!(
 	Package,
 	"time",
+	"ceil" => run,
 	"day" => run,
 	"floor" => run,
 	"format" => run,
