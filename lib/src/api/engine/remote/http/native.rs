@@ -107,7 +107,7 @@ pub(crate) fn router(base_url: Url, client: reqwest::Client, route_rx: Receiver<
 		let mut stream = route_rx.into_stream();
 
 		while let Some(Some(route)) = stream.next().await {
-			match super::router(
+			let result = super::router(
 				route.request,
 				&base_url,
 				&client,
@@ -115,15 +115,8 @@ pub(crate) fn router(base_url: Url, client: reqwest::Client, route_rx: Receiver<
 				&mut vars,
 				&mut auth,
 			)
-			.await
-			{
-				Ok(value) => {
-					let _ = route.response.into_send_async(Ok(value)).await;
-				}
-				Err(error) => {
-					let _ = route.response.into_send_async(Err(error)).await;
-				}
-			}
+			.await;
+			let _ = route.response.into_send_async(result).await;
 		}
 	});
 }
