@@ -139,8 +139,6 @@ For guidance on installation, development, deployment, and administration, see o
 
 <h2><img height="20" src="/img/installation.svg">&nbsp;&nbsp;Installation</h2>
 
-Sure, here is the paragraph converted into a point-wise format:
-
 - SurrealDB is designed to be easy to install and use with just one command from your terminal.
 - The traditional installation process is available for those who prefer it.
 - SurrealDB can also be installed and run using HomeBrew, Docker, or other container orchestration tools such as Docker Compose, Docker Swarm, Rancher, or Kubernetes. 
