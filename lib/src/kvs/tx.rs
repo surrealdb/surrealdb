@@ -802,6 +802,8 @@ impl Transaction {
 	pub async fn scan_hb(&mut self, time_to: &Timestamp, limit: u32) -> Result<Vec<Hb>, Error> {
 		let beg = crate::key::hb::Hb::prefix();
 		let end = crate::key::hb::Hb::suffix(time_to);
+		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
+		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
 		let mut nxt: Option<Key> = None;
 		let mut num = limit;
 		let mut out: Vec<Hb> = vec![];

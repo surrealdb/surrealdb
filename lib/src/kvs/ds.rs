@@ -121,8 +121,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.cluster_healthcheck().await?;
-					ds.register_membership().await?;
+					ds.cluster_init().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
@@ -143,8 +142,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.cluster_healthcheck().await?;
-					ds.register_membership().await?;
+					ds.cluster_init().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
@@ -165,8 +163,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.cluster_healthcheck().await?;
-					ds.register_membership().await?;
+					ds.cluster_init().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
@@ -187,8 +184,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.cluster_healthcheck().await?;
-					ds.register_membership().await?;
+					ds.cluster_init().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
@@ -209,8 +205,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.cluster_healthcheck().await?;
-					ds.register_membership().await?;
+					ds.cluster_init().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
@@ -231,8 +226,7 @@ impl Datastore {
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.cluster_healthcheck().await?;
-					ds.register_membership().await?;
+					ds.cluster_init().await?;
 					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
@@ -245,6 +239,16 @@ impl Datastore {
 				Err(Error::Ds("Unable to load the specified datastore".into()))
 			}
 		}
+	}
+
+	pub async fn cluster_init(&self) -> Result<(), Error> {
+		trace!("First register");
+		self.register_membership().await?;
+		trace!("Healthcheck");
+		self.cluster_healthcheck().await?;
+		trace!("Second register");
+		self.register_membership().await?;
+		Ok(())
 	}
 
 	pub async fn cluster_healthcheck(&self) -> Result<Vec<Hb>, Error> {
