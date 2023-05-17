@@ -43,6 +43,14 @@ impl Node {
 		Ok(a)
 	}
 
+	pub(super) fn to_string(&self) -> Result<String, Error> {
+		if let Node::Scalar(v) = self {
+			Ok(v.to_string())
+		} else {
+			Err(Error::BypassQueryPlanner)
+		}
+	}
+
 	pub(super) fn explain(&self) -> Value {
 		match &self {
 			Node::Expression {

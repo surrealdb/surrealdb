@@ -7,12 +7,11 @@ use crate::err::Error;
 use crate::error::Db::AnalyzerError;
 use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::doclength::{DocLength, DocLengths};
-use crate::idx::ft::postings::{Postings, PostingsVisitor, TermFrequency};
-use crate::idx::ft::terms::Terms;
+use crate::idx::ft::postings::{Postings, PostingsIterator, TermFrequency};
+use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use crate::sql::error::IResult;
-use async_trait::async_trait;
 use nom::bytes::complete::take_while;
 use nom::character::complete::multispace0;
 use roaring::RoaringTreemap;
@@ -250,35 +249,30 @@ impl FtIndex {
 		take_while(|c| c != ' ' && c != '\n' && c != '\t')(i)
 	}
 
-	pub(super) async fn search<V>(
+	pub(super) async fn search(
 		&self,
 		tx: &mut Transaction,
 		term: &str,
-		visitor: &mut V,
-	) -> Result<(), Error>
-	where
-		V: HitVisitor + Send,
-	{
+	) -> Result<HitsIterator, Error> {
 		let terms = self.terms(tx).await?;
 		if let Some(term_id) = terms.get_term_id(tx, term).await? {
 			let postings = self.postings(tx).await?;
-			let term_doc_count = postings.get_doc_count(tx, term_id).await?;
+			let term_doc_count = postings.count_postings(tx, term_id).await?;
 			let doc_lengths = self.doc_lengths(tx).await?;
-			let doc_ids = self.doc_ids(tx).await?;
 			if term_doc_count > 0 {
-				let mut scorer = BM25Scorer::new(
-					visitor,
+				// TODO: Score can be optional
+				let scorer = BM25Scorer::new(
 					doc_lengths,
-					doc_ids,
 					self.state.total_docs_lengths,
 					self.state.doc_count,
-					term_doc_count,
+					term_doc_count as u64,
 					self.bm25.clone(),
 				);
-				postings.collect_postings(tx, term_id, &mut scorer).await?;
+				let doc_ids = self.doc_ids(tx).await?;
+				return Ok(HitsIterator::new(Some((doc_ids, postings, term_id)), Some(scorer)));
 			}
 		}
-		Ok(())
+		Ok(HitsIterator::new(None, None))
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
@@ -292,65 +286,80 @@ impl FtIndex {
 	}
 }
 
-struct BM25Scorer<'a, V>
-where
-	V: HitVisitor,
-{
-	visitor: &'a mut V,
+pub(crate) struct HitsIterator<'a> {
+	docs: Option<(DocIds, PostingsIterator<'a>)>,
+	scorer: Option<BM25Scorer>,
+}
+
+impl<'a> HitsIterator<'a> {
+	fn new(ft: Option<(DocIds, Postings, TermId)>, scorer: Option<BM25Scorer>) -> Self {
+		if let Some((doc_ids, postings, term_id)) = ft {
+			let postings = postings.collect_postings(term_id);
+			Self {
+				docs: Some((doc_ids, postings)),
+				scorer,
+			}
+		} else {
+			Self {
+				docs: None,
+				scorer,
+			}
+		}
+	}
+
+	pub(crate) async fn next(
+		&mut self,
+		tx: &mut Transaction,
+	) -> Result<Option<(Key, Option<Score>)>, Error> {
+		if let Some((doc_ids, postings)) = &mut self.docs {
+			if let Some((doc_id, term_freq)) = postings.next(tx).await? {
+				if let Some(doc_key) = doc_ids.get_doc_key(tx, doc_id).await? {
+					let score = if let Some(scorer) = &self.scorer {
+						Some(scorer.score(tx, doc_id, term_freq).await?)
+					} else {
+						None
+					};
+					return Ok(Some((doc_key, score)));
+				}
+			}
+		}
+		Ok(None)
+	}
+}
+
+struct BM25Scorer {
 	doc_lengths: DocLengths,
-	doc_ids: DocIds,
 	average_doc_length: f32,
 	doc_count: f32,
 	term_doc_count: f32,
 	bm25: Bm25Params,
 }
 
-#[async_trait]
-impl<'a, V> PostingsVisitor for BM25Scorer<'a, V>
-where
-	V: HitVisitor + Send,
-{
-	async fn visit(
-		&mut self,
-		tx: &mut Transaction,
-		doc_id: DocId,
-		term_frequency: TermFrequency,
-	) -> Result<(), Error> {
-		if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
-			let doc_length = self.doc_lengths.get_doc_length(tx, doc_id).await?.unwrap_or(0);
-			let bm25_score = self.compute_bm25_score(
-				term_frequency as f32,
-				self.term_doc_count,
-				doc_length as f32,
-			);
-			self.visitor.visit(tx, doc_key, bm25_score);
-		}
-		Ok(())
-	}
-}
-
-impl<'a, V> BM25Scorer<'a, V>
-where
-	V: HitVisitor,
-{
+impl BM25Scorer {
 	fn new(
-		visitor: &'a mut V,
 		doc_lengths: DocLengths,
-		doc_ids: DocIds,
 		total_docs_length: u128,
 		doc_count: u64,
 		term_doc_count: u64,
 		bm25: Bm25Params,
 	) -> Self {
 		Self {
-			visitor,
 			doc_lengths,
-			doc_ids,
 			average_doc_length: (total_docs_length as f32) / (doc_count as f32),
 			doc_count: doc_count as f32,
 			term_doc_count: term_doc_count as f32,
 			bm25,
 		}
+	}
+
+	async fn score(
+		&self,
+		tx: &mut Transaction,
+		doc_id: DocId,
+		term_frequency: TermFrequency,
+	) -> Result<Score, Error> {
+		let doc_length = self.doc_lengths.get_doc_length(tx, doc_id).await?.unwrap_or(0);
+		Ok(self.compute_bm25_score(term_frequency as f32, self.term_doc_count, doc_length as f32))
 	}
 
 	// https://en.wikipedia.org/wiki/Okapi_BM25

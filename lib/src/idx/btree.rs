@@ -1,5 +1,5 @@
 use crate::err::Error;
-use crate::idx::bkeys::{BKeys, KeyVisitor};
+use crate::idx::bkeys::{BKeys, KeysIterator};
 use crate::idx::SerdeState;
 use crate::kvs::{Key, Transaction};
 use serde::de::DeserializeOwned;
@@ -87,7 +87,7 @@ where
 		Ok(size)
 	}
 
-	fn keys(&self) -> &BK {
+	fn keys<'a>(&'a self) -> &'a BK {
 		match self {
 			Node::Internal(keys, _) => keys,
 			Node::Leaf(keys) => keys,
@@ -187,39 +187,14 @@ where
 		Ok(None)
 	}
 
-	pub(super) async fn search_by_prefix<BK, V>(
-		&self,
-		tx: &mut Transaction,
-		prefix_key: &Key,
-		visitor: &mut V,
-	) -> Result<(), Error>
+	pub(super) fn search_by_prefix<'a, BK>(
+		&'a self,
+		prefix_key: &'a Key,
+	) -> BTreeIterator<'a, K, BK>
 	where
-		BK: BKeys + Serialize + DeserializeOwned,
-		V: KeyVisitor + Send,
+		BK: BKeys + Serialize + DeserializeOwned + 'a,
 	{
-		let mut node_queue = VecDeque::new();
-		if let Some(node_id) = self.state.root {
-			node_queue.push_front((node_id, Arc::new(AtomicBool::new(false))));
-		}
-		while let Some((node_id, matches_found)) = node_queue.pop_front() {
-			let current = self.load_node::<BK>(tx, node_id).await?;
-			if current.node.keys().collect_with_prefix(tx, prefix_key, visitor).await? {
-				matches_found.fetch_and(true, Ordering::Relaxed);
-			} else if matches_found.load(Ordering::Relaxed) {
-				// If we have found matches in previous (lower) nodes,
-				// but we don't find matches anymore, there is no chance we can find new matches
-				// in upper child nodes, therefore we can stop the traversal.
-				break;
-			}
-			if let Node::Internal(keys, children) = current.node {
-				let same_level_matches_found = Arc::new(AtomicBool::new(false));
-				let child_idx = keys.get_child_idx(prefix_key);
-				for i in child_idx..children.len() {
-					node_queue.push_front((children[i], same_level_matches_found.clone()));
-				}
-			}
-		}
-		Ok(())
+		BTreeIterator::new(&self, prefix_key, self.state.root)
 	}
 
 	pub(super) async fn insert<BK>(
@@ -756,6 +731,113 @@ where
 			key,
 			size,
 		})
+	}
+}
+
+struct CurrentNode<'a, BK>
+where
+	BK: BKeys + Serialize + DeserializeOwned + 'a,
+{
+	node: Node<BK>,
+	keys: &'a BK,
+	iterator: KeysIterator<'a>,
+	matches_found: bool,
+	level_matches_found: Arc<AtomicBool>,
+}
+
+impl<'a, BK> CurrentNode<'a, BK>
+where
+	BK: BKeys + Serialize + DeserializeOwned + 'a,
+{
+	fn new(node: Node<BK>, prefix_key: &Key, level_matches_found: Arc<AtomicBool>) -> Self {
+		let keys = node.keys();
+		let iterator = keys.collect_with_prefix(prefix_key);
+		Self {
+			node,
+			keys,
+			iterator,
+			matches_found: false,
+			level_matches_found,
+		}
+	}
+}
+
+pub(super) struct BTreeIterator<'a, K, BK>
+where
+	K: KeyProvider,
+	BK: BKeys + Serialize + DeserializeOwned + 'a,
+{
+	btree: &'a BTree<K>,
+	prefix_key: &'a Key,
+	node_queue: VecDeque<(NodeId, Arc<AtomicBool>)>,
+	current_node: Option<CurrentNode<'a, BK>>,
+}
+
+impl<'a, K, BK> BTreeIterator<'a, K, BK>
+where
+	K: KeyProvider,
+	BK: BKeys + Serialize + DeserializeOwned + 'a,
+{
+	fn new(btree: &'a BTree<K>, prefix_key: &'a Key, start_node: Option<NodeId>) -> Self {
+		let mut node_queue = VecDeque::new();
+		if let Some(node_id) = start_node {
+			node_queue.push_front((node_id, Arc::new(AtomicBool::new(false))))
+		}
+		Self {
+			btree,
+			prefix_key,
+			node_queue,
+			current_node: None,
+		}
+	}
+
+	async fn set_current_node(
+		&mut self,
+		tx: &mut Transaction,
+		node_id: NodeId,
+		level_matches_found: Arc<AtomicBool>,
+	) -> Result<(), Error> {
+		let st: StoredNode<BK> = self.btree.load_node::<BK>(tx, node_id).await?;
+		let node = st.node;
+		if let Node::Internal(keys, children) = &node {
+			let same_level_matches_found = Arc::new(AtomicBool::new(false));
+			let child_idx = keys.get_child_idx(self.prefix_key);
+			for i in child_idx..children.len() {
+				self.node_queue.push_front((children[i], same_level_matches_found.clone()));
+			}
+		}
+		let current = CurrentNode::new(node, self.prefix_key, level_matches_found);
+		self.current_node = Some(current);
+		Ok(())
+	}
+
+	pub(super) async fn next(
+		&mut self,
+		tx: &mut Transaction,
+	) -> Result<Option<(Key, Payload)>, Error> {
+		loop {
+			if let Some(current) = &mut self.current_node {
+				if let Some((key, payload)) = current.iterator.next() {
+					current.level_matches_found.fetch_and(true, Ordering::Relaxed);
+					current.matches_found = true;
+					return Ok(Some((key.clone(), payload)));
+				} else if !current.matches_found
+					&& current.level_matches_found.load(Ordering::Relaxed)
+				{
+					// If we have found matches in previous (lower) nodes,
+					// but we don't find matches anymore, there is no chance we can find new matches
+					// in upper child nodes, therefore we can stop the traversal.
+					break;
+				}
+			} else {
+				if let Some((node_id, level_matches_found)) = self.node_queue.pop_front() {
+					self.set_current_node(tx, node_id, level_matches_found);
+				} else {
+					break;
+				}
+			}
+		}
+		Ok(None)
 	}
 }
 

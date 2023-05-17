@@ -1,12 +1,11 @@
 use crate::err::Error;
-use crate::idx::bkeys::{KeyVisitor, TrieKeys};
-use crate::idx::btree::{BTree, KeyProvider, NodeId, Payload, Statistics};
+use crate::idx::bkeys::TrieKeys;
+use crate::idx::btree::{BTree, BTreeIterator, KeyProvider, NodeId, Payload, Statistics};
 use crate::idx::ft::docids::DocId;
 use crate::idx::ft::terms::TermId;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::key::bf::Bf;
 use crate::kvs::{Key, Transaction};
-use async_trait::async_trait;
 
 pub(super) type TermFrequency = u64;
 
@@ -14,16 +13,6 @@ pub(super) struct Postings {
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	btree: BTree<PostingsKeyProvider>,
-}
-
-#[async_trait]
-pub(super) trait PostingsVisitor {
-	async fn visit(
-		&mut self,
-		tx: &mut Transaction,
-		doc_id: DocId,
-		term_frequency: TermFrequency,
-	) -> Result<(), Error>;
 }
 
 impl Postings {
@@ -69,31 +58,10 @@ impl Postings {
 		self.btree.delete::<TrieKeys>(tx, key).await
 	}
 
-	pub(super) async fn get_doc_count(
-		&self,
-		tx: &mut Transaction,
-		term_id: TermId,
-	) -> Result<u64, Error> {
+	pub(super) fn collect_postings(&self, term_id: TermId) -> PostingsIterator {
 		let prefix_key = self.index_key_base.new_bf_prefix_key(term_id);
-		let mut counter = PostingsDocCount::default();
-		self.btree.search_by_prefix::<TrieKeys, _>(tx, &prefix_key, &mut counter).await?;
-		Ok(counter.doc_count)
-	}
-
-	pub(super) async fn collect_postings<V>(
-		&self,
-		tx: &mut Transaction,
-		term_id: TermId,
-		visitor: &mut V,
-	) -> Result<(), Error>
-	where
-		V: PostingsVisitor + Send,
-	{
-		let prefix_key = self.index_key_base.new_bf_prefix_key(term_id);
-		let mut key_visitor = PostingsAdapter {
-			visitor,
-		};
-		self.btree.search_by_prefix::<TrieKeys, _>(tx, &prefix_key, &mut key_visitor).await
+		let i = self.btree.search_by_prefix(&prefix_key);
+		PostingsIterator::new(i)
 	}
 
 	pub(super) async fn count_postings(
@@ -101,9 +69,12 @@ impl Postings {
 		tx: &mut Transaction,
 		term_id: TermId,
 	) -> Result<usize, Error> {
-		let mut counter = PostingCounter::default();
-		self.collect_postings(tx, term_id, &mut counter).await?;
-		Ok(counter.count)
+		let mut count = 0;
+		let mut i = self.collect_postings(term_id);
+		while i.next(tx).await?.is_some() {
+			count += 1;
+		}
+		Ok(count)
 	}
 
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
@@ -118,25 +89,7 @@ impl Postings {
 	}
 }
 
-#[derive(Default)]
-struct PostingCounter {
-	count: usize,
-}
-
-#[async_trait]
-impl PostingsVisitor for PostingCounter {
-	async fn visit(
-		&mut self,
-		_tx: &mut Transaction,
-		_doc_id: DocId,
-		_term_frequency: TermFrequency,
-	) -> Result<(), Error> {
-		self.count += 1;
-		Ok(())
-	}
-}
-
-struct PostingsKeyProvider {
+pub(super) struct PostingsKeyProvider {
 	index_key_base: IndexKeyBase,
 }
 
@@ -149,44 +102,25 @@ impl KeyProvider for PostingsKeyProvider {
 	}
 }
 
-struct PostingsAdapter<'a, V>
-where
-	V: PostingsVisitor,
-{
-	visitor: &'a mut V,
+pub(super) struct PostingsIterator<'a> {
+	btree_iterator: BTreeIterator<'a, PostingsKeyProvider, TrieKeys>,
 }
 
-#[async_trait]
-impl<'a, V> KeyVisitor for PostingsAdapter<'a, V>
-where
-	V: PostingsVisitor + Send,
-{
-	async fn visit(
+impl<'a> PostingsIterator<'a> {
+	fn new(btree_iterator: BTreeIterator<'a, PostingsKeyProvider, TrieKeys>) -> Self {
+		Self {
+			btree_iterator,
+		}
+	}
+
+	pub(super) async fn next(
 		&mut self,
 		tx: &mut Transaction,
-		key: &Key,
-		payload: Payload,
-	) -> Result<(), Error> {
-		let posting_key: Bf = key.into();
-		self.visitor.visit(tx, posting_key.doc_id, payload).await
-	}
-}
-
-#[derive(Default)]
-struct PostingsDocCount {
-	doc_count: u64,
-}
-
-#[async_trait]
-impl KeyVisitor for PostingsDocCount {
-	async fn visit(
-		&mut self,
-		_tx: &mut Transaction,
-		_key: &Key,
-		_payload: Payload,
-	) -> Result<(), Error> {
-		self.doc_count += 1;
-		Ok(())
+	) -> Result<Option<(DocId, Payload)>, Error> {
+		Ok(self.btree_iterator.next(tx).await?.map(|(k, p)| {
+			let posting_key: Bf = (&k).into();
+			(posting_key.doc_id, p)
+		}))
 	}
 }
 

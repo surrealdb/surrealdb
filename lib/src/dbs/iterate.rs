@@ -433,7 +433,7 @@ impl Iterable {
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
-		let mut iterator = plan.new_iterator(opt)?;
+		let mut iterator = plan.new_iterator(opt, txn).await?;
 		let mut things = iterator.next_batch(txn, 1000).await?;
 		while !things.is_empty() {
 			// Check if the context is finished

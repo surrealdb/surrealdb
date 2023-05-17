@@ -1,11 +1,14 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
+use crate::idx::ft::FtIndex;
 use crate::idx::planner::tree::Node;
+use crate::idx::IndexKeyBase;
 use crate::key;
 use crate::kvs::Key;
 use crate::sql::index::Index;
+use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Object, Operator, Thing, Value};
+use crate::sql::{Ident, Object, Operator, Thing, Value};
 use async_trait::async_trait;
 use std::collections::HashMap;
 
@@ -46,8 +49,12 @@ impl IndexOption {
 		}
 	}
 
-	fn new_iterator(&self, opt: &Options) -> Result<Box<dyn ThingIterator>, Error> {
-		match self.ix.index {
+	async fn new_iterator(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Box<dyn ThingIterator>, Error> {
+		match &self.ix.index {
 			Index::Idx => match self.op {
 				Operator::Equal => {
 					Ok(Box::new(NonUniqueEqualThingIterator::new(opt, &self.ix, &self.v)?))
@@ -61,10 +68,15 @@ impl IndexOption {
 				_ => Err(Error::BypassQueryPlanner),
 			},
 			Index::Search {
-				..
-			} => {
-				todo!()
-			}
+				az,
+				hl,
+				sc,
+			} => match self.op {
+				Operator::Matches(_) => Ok(Box::new(
+					MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, &sc, &self.v).await?,
+				)),
+				_ => Err(Error::BypassQueryPlanner),
+			},
 		}
 	}
 }
@@ -94,8 +106,12 @@ pub(crate) struct Plan {
 }
 
 impl Plan {
-	pub(crate) fn new_iterator(&self, opt: &Options) -> Result<Box<dyn ThingIterator>, Error> {
-		self.i.new_iterator(opt)
+	pub(crate) async fn new_iterator(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+	) -> Result<Box<dyn ThingIterator>, Error> {
+		self.i.new_iterator(opt, txn).await
 	}
 
 	pub(crate) fn explain(&self) -> Value {
@@ -175,13 +191,58 @@ impl UniqueEqualThingIterator {
 #[async_trait]
 impl ThingIterator for UniqueEqualThingIterator {
 	async fn next_batch(&mut self, txn: &Transaction, limit: u32) -> Result<Vec<Thing>, Error> {
-		if limit > 0 {
-			if let Some(key) = self.key.take() {
-				if let Some(val) = txn.lock().await.get(key).await? {
-					return Ok(vec![val.into()]);
-				}
+		if let Some(key) = self.key.take() {
+			if let Some(val) = txn.lock().await.get(key).await? {
+				return Ok(vec![val.into()]);
 			}
 		}
+		Ok(vec![])
+	}
+}
+
+struct MatchesThingIterator {
+	fti: FtIndex,
+	q: String,
+}
+
+impl MatchesThingIterator {
+	async fn new(
+		opt: &Options,
+		txn: &Transaction,
+		ix: &DefineIndexStatement,
+		_az: &Ident,
+		_hl: bool,
+		sc: &Scoring,
+		v: &Node,
+	) -> Result<Self, Error> {
+		let ikb = IndexKeyBase::new(opt, ix);
+		let mut run = txn.lock().await;
+		if let Scoring::Bm {
+			k1,
+			b,
+			order,
+		} = sc
+		{
+			let fti = FtIndex::new(&mut run, ikb, b.to_usize()).await?;
+			let q = v.to_string()?;
+			Ok(Self {
+				fti,
+				q,
+			})
+		} else {
+			Err(Error::FeatureNotYetImplemented {
+				feature: "Vector Search",
+			})
+		}
+	}
+}
+
+#[async_trait]
+impl ThingIterator for MatchesThingIterator {
+	async fn next_batch(&mut self, txn: &Transaction, limit: u32) -> Result<Vec<Thing>, Error> {
+		todo!();
+		// let mut run = txn.lock().await;
+		// self.fti.search(&mut run, &self.q)
 		Ok(vec![])
 	}
 }
