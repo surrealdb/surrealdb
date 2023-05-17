@@ -21,8 +21,8 @@ use std::fmt::{self, Display, Formatter};
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum Data {
 	EmptyExpression,
-	UnsetExpression(Vec<Idiom>),
 	SetExpression(Vec<(Idiom, Operator, Value)>),
+	UnsetExpression(Vec<Idiom>),
 	PatchExpression(Value),
 	MergeExpression(Value),
 	ReplaceExpression(Value),
