@@ -28,7 +28,8 @@ mod channel;
 #[cfg(not(target_arch = "wasm32"))]
 pub use self::channel::*;
 
-pub(crate) mod cluster;
+pub mod cl;
+
 #[cfg(test)]
 pub(crate) mod test;
 

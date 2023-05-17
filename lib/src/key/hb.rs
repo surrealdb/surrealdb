@@ -1,4 +1,4 @@
-use crate::sql::cluster_timestamp::{KeyTimestamp, Timestamp};
+use crate::dbs::cl::{KeyTimestamp, Timestamp};
 use derive::Key;
 use serde::{Deserialize, Serialize};
 use std::io::empty;

@@ -1,6 +1,6 @@
 use super::tx::Transaction;
 use crate::ctx::Context;
-use crate::dbs::cluster::ClusterMembership;
+use crate::dbs::cl::ClusterMembership;
 use crate::dbs::Attach;
 use crate::dbs::Executor;
 use crate::dbs::Notification;

@@ -4,6 +4,15 @@ use std::ops::{Add, Sub};
 use std::time::Duration;
 use time::ext::NumericalStdDuration;
 
+// NOTE: This is not a statement, but as per layering, keeping it here till we
+// have a better structure.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Store)]
+pub struct ClusterMembership {
+	pub name: String,
+	// TiKV = TiKV TSO Timestamp as u64
+	// not TiKV = local nanos as u64
+	pub heartbeat: Timestamp,
+}
 // This struct is meant to represent a timestamp that can be used to partially order
 // events in a cluster. It should be derived from a timestamp oracle, such as the
 // one available in TiKV via the client `TimestampExt` implementation.
@@ -11,7 +20,6 @@ use time::ext::NumericalStdDuration;
 pub struct Timestamp {
 	pub value: u64,
 }
-
 // This struct is to be used only when storing keys as the macro currently
 // conflicts when you have Store and Key derive macros.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, PartialOrd, Hash, Key)]
