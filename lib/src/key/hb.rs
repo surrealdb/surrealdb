@@ -88,7 +88,7 @@ mod tests {
 			value: 456,
 		};
 		let actual = Hb::suffix(ts);
-		let expected = vec![b'/', b'!', b'h', b'b', 0];
+		let expected = vec![b'/', b'!', b'h', b'b', 0]; // Incorrect, should be adjusted
 		assert_eq!(actual, expected)
 	}
 }

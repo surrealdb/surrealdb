@@ -784,6 +784,8 @@ impl Transaction {
 	pub async fn set_hb(&mut self, id: Uuid) -> Result<(), Error> {
 		let now = self.clock();
 		let key = crate::key::hb::Hb::new(now.clone(), id.0);
+		let debug = crate::key::hb::Hb::encode(&key).unwrap();
+		trace!("Setting heartbeat {} ({:?})", String::from_utf8_lossy(&debug).to_string(), &debug);
 		// We do not need to do a read, we always want to overwrite
 		self.put(
 			key,
