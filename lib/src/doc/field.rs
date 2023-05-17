@@ -31,6 +31,17 @@ impl<'a> Document<'a> {
 				let old = self.initial.pick(&k);
 				// Get the input value
 				let inp = inp.pick(&k);
+				// Check for a VALUE clause
+				if let Some(expr) = &fd.value {
+					// Configure the context
+					let mut ctx = Context::new(ctx);
+					ctx.add_value("input", &inp);
+					ctx.add_value("value", &val);
+					ctx.add_value("after", &val);
+					ctx.add_value("before", &old);
+					// Process the VALUE clause
+					val = expr.compute(&ctx, opt, txn, Some(&self.current)).await?;
+				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
 					if !val.is_none() {
@@ -49,34 +60,6 @@ impl<'a> Document<'a> {
 							e => e,
 						})?;
 					}
-				}
-				// Check for a VALUE clause
-				if let Some(expr) = &fd.value {
-					// Configure the context
-					let mut ctx = Context::new(ctx);
-					ctx.add_value("input", &inp);
-					ctx.add_value("value", &val);
-					ctx.add_value("after", &val);
-					ctx.add_value("before", &old);
-					// Process the VALUE clause
-					val = expr.compute(&ctx, opt, txn, Some(&self.current)).await?;
-				}
-				// Check for a TYPE clause
-				if let Some(kind) = &fd.kind {
-					val = val.convert_to(kind).map_err(|e| match e {
-						// There was a conversion error
-						Error::ConvertTo {
-							from,
-							..
-						} => Error::FieldCheck {
-							thing: rid.to_string(),
-							field: fd.name.clone(),
-							value: from.to_string(),
-							check: kind.to_string(),
-						},
-						// There was a different error
-						e => e,
-					})?;
 				}
 				// Check for a ASSERT clause
 				if let Some(expr) = &fd.assert {
