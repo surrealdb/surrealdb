@@ -68,15 +68,6 @@ impl Data {
 				// This SET expression had no 'id' field
 				_ => Ok(tb.generate()),
 			},
-			Self::UnsetExpression(v) => match v.iter().find(|f| f.is_id()) {
-				Some(v) => {
-					println!("Id");
-					// This SET expression has an 'id' field
-					v.compute(ctx, opt, txn, None).await?.generate(tb, false)
-				}
-				// This SET expression had no 'id' field
-				_ => Ok(tb.generate()),
-			},
 			// Generate a random id for all other data clauses
 			_ => Ok(tb.generate()),
 		}
@@ -242,6 +233,24 @@ mod tests {
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
 		assert_eq!("SET field = true, other.field = false", format!("{}", out));
+	}
+
+	#[test]
+	fn unset_statement() {
+		let sql = "UNSET field";
+		let res = data(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("UNSET field", format!("{}", out));
+	}
+
+	#[test]
+	fn unset_statement_multiple_fields() {
+		let sql = "UNSET field, other.field";
+		let res = data(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("UNSET field, other.field", format!("{}", out));
 	}
 
 	#[test]
