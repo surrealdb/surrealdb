@@ -1232,7 +1232,7 @@ dependencies = [
 [[package]]
 name = "dmp"
 version = "0.1.3"
-source = "git+https://github.com/finnbear/surrealdb_dmp?branch=bugfix_cleanup#fbe830eb408f613c388ef60309daf824433c7253"
+source = "git+https://github.com/finnbear/surrealdb_dmp?branch=bugfix_cleanup#0d4ae203f010af41bd697f64e4ad57f5fa1012c2"
 dependencies = [
  "urlencoding",
 ]
