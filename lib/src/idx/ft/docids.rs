@@ -169,6 +169,7 @@ impl Resolved {
 	}
 }
 
+#[derive(Clone)]
 struct DocIdsKeyProvider {
 	index_key_base: IndexKeyBase,
 }

@@ -153,6 +153,7 @@ impl State {
 	}
 }
 
+#[derive(Clone)]
 struct TermsKeyProvider {
 	index_key_base: IndexKeyBase,
 }

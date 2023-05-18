@@ -60,7 +60,7 @@ impl Postings {
 
 	pub(super) fn collect_postings(&self, term_id: TermId) -> PostingsIterator {
 		let prefix_key = self.index_key_base.new_bf_prefix_key(term_id);
-		let i = self.btree.search_by_prefix(&prefix_key);
+		let i = self.btree.search_by_prefix(prefix_key);
 		PostingsIterator::new(i)
 	}
 
@@ -89,6 +89,7 @@ impl Postings {
 	}
 }
 
+#[derive(Clone)]
 pub(super) struct PostingsKeyProvider {
 	index_key_base: IndexKeyBase,
 }
@@ -102,12 +103,12 @@ impl KeyProvider for PostingsKeyProvider {
 	}
 }
 
-pub(super) struct PostingsIterator<'a> {
-	btree_iterator: BTreeIterator<'a, PostingsKeyProvider, TrieKeys>,
+pub(super) struct PostingsIterator {
+	btree_iterator: BTreeIterator<PostingsKeyProvider>,
 }
 
-impl<'a> PostingsIterator<'a> {
-	fn new(btree_iterator: BTreeIterator<'a, PostingsKeyProvider, TrieKeys>) -> Self {
+impl PostingsIterator {
+	fn new(btree_iterator: BTreeIterator<PostingsKeyProvider>) -> Self {
 		Self {
 			btree_iterator,
 		}
@@ -117,7 +118,7 @@ impl<'a> PostingsIterator<'a> {
 		&mut self,
 		tx: &mut Transaction,
 	) -> Result<Option<(DocId, Payload)>, Error> {
-		Ok(self.btree_iterator.next(tx).await?.map(|(k, p)| {
+		Ok(self.btree_iterator.next::<TrieKeys>(tx).await?.map(|(k, p)| {
 			let posting_key: Bf = (&k).into();
 			(posting_key.doc_id, p)
 		}))
@@ -126,14 +127,28 @@ impl<'a> PostingsIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::err::Error;
+	use crate::idx::btree::Payload;
 	use crate::idx::ft::docids::DocId;
-	use crate::idx::ft::postings::{Postings, PostingsVisitor, TermFrequency};
+	use crate::idx::ft::postings::{Postings, PostingsIterator};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Transaction};
-	use async_trait::async_trait;
 	use std::collections::HashMap;
 	use test_log::test;
+
+	async fn check_postings(
+		mut i: PostingsIterator,
+		tx: &mut Transaction,
+		e: Vec<(DocId, Payload)>,
+	) {
+		let mut map = HashMap::new();
+		while let Some((d, p)) = i.next(tx).await.unwrap() {
+			map.insert(d, p);
+		}
+		assert_eq!(map.len(), e.len());
+		for (k, p) in e {
+			assert_eq!(map.get(&k), Some(&p));
+		}
+	}
 
 	#[test(tokio::test)]
 	async fn test_postings() {
@@ -159,10 +174,8 @@ mod tests {
 			Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER).await.unwrap();
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 2);
 
-		let mut v = TestPostingVisitor::default();
-		p.collect_postings(&mut tx, 1, &mut v).await.unwrap();
-		v.check_len(2, "Postings");
-		v.check(vec![(2, 3), (4, 5)], "Postings");
+		let i = p.collect_postings(1);
+		check_postings(i, &mut tx, vec![(2, 3), (4, 5)]).await;
 
 		// Check removal of doc 2
 		assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), Some(3));
@@ -176,35 +189,5 @@ mod tests {
 
 		// The underlying b-tree should be empty now
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);
-	}
-
-	#[derive(Default)]
-	pub(super) struct TestPostingVisitor {
-		map: HashMap<DocId, TermFrequency>,
-	}
-
-	#[async_trait]
-	impl PostingsVisitor for TestPostingVisitor {
-		async fn visit(
-			&mut self,
-			_tx: &mut Transaction,
-			doc_id: DocId,
-			term_frequency: TermFrequency,
-		) -> Result<(), Error> {
-			assert_eq!(self.map.insert(doc_id, term_frequency), None);
-			Ok(())
-		}
-	}
-
-	impl TestPostingVisitor {
-		pub(super) fn check_len(&self, len: usize, info: &str) {
-			assert_eq!(self.map.len(), len, "len issue: {}", info);
-		}
-		pub(super) fn check(&self, res: Vec<(DocId, TermFrequency)>, info: &str) {
-			self.check_len(res.len(), info);
-			for (d, f) in res {
-				assert_eq!(self.map.get(&d), Some(&f));
-			}
-		}
 	}
 }

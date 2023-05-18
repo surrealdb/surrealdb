@@ -27,10 +27,6 @@ pub(crate) struct FtIndex {
 	btree_default_order: usize,
 }
 
-pub(crate) trait HitVisitor {
-	fn visit(&mut self, tx: &mut Transaction, doc_key: Key, score: Score);
-}
-
 #[derive(Clone)]
 struct Bm25Params {
 	k1: f32,
@@ -286,12 +282,12 @@ impl FtIndex {
 	}
 }
 
-pub(crate) struct HitsIterator<'a> {
-	docs: Option<(DocIds, PostingsIterator<'a>)>,
+pub(crate) struct HitsIterator {
+	docs: Option<(DocIds, PostingsIterator)>,
 	scorer: Option<BM25Scorer>,
 }
 
-impl<'a> HitsIterator<'a> {
+impl HitsIterator {
 	fn new(ft: Option<(DocIds, Postings, TermId)>, scorer: Option<BM25Scorer>) -> Self {
 		if let Some((doc_ids, postings, term_id)) = ft {
 			let postings = postings.collect_postings(term_id);
@@ -385,11 +381,22 @@ impl BM25Scorer {
 
 #[cfg(test)]
 mod tests {
-	use crate::idx::ft::{FtIndex, HitVisitor, Score};
+	use crate::idx::ft::{FtIndex, HitsIterator, Score};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Key, Transaction};
 	use std::collections::HashMap;
 	use test_log::test;
+
+	async fn check_hits(mut i: HitsIterator, tx: &mut Transaction, e: Vec<(Key, Option<Score>)>) {
+		let mut map = HashMap::new();
+		while let Some((k, s)) = i.next(tx).await.unwrap() {
+			map.insert(k, s);
+		}
+		assert_eq!(map.len(), e.len());
+		for (k, p) in e {
+			assert_eq!(map.get(&k), Some(&p));
+		}
+	}
 
 	#[test(tokio::test)]
 	async fn test_ft_index() {
@@ -429,29 +436,24 @@ mod tests {
 			assert_eq!(statistics.doc_lengths.keys_count, 3);
 
 			// Search & score
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "hello", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
+			let i = fti.search(&mut tx, "hello").await.unwrap();
+			check_hits(i, &mut tx, vec![("doc1".into(), Some(0.0)), ("doc2".into(), Some(0.0))])
+				.await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "world", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc1".into(), 0.4859746)]);
+			let i = fti.search(&mut tx, "world").await.unwrap();
+			check_hits(i, &mut tx, vec![("doc1".into(), Some(0.4859746))]).await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "yellow", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc2".into(), 0.4859746)]);
+			let i = fti.search(&mut tx, "yellow").await.unwrap();
+			check_hits(i, &mut tx, vec![("doc2".into(), Some(0.4859746))]).await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".into(), 0.56902087)]);
+			let i = fti.search(&mut tx, "foo").await.unwrap();
+			check_hits(i, &mut tx, vec![("doc3".into(), Some(0.56902087))]).await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "bar", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".into(), 0.56902087)]);
+			let i = fti.search(&mut tx, "bar").await.unwrap();
+			check_hits(i, &mut tx, vec![("doc3".into(), Some(0.56902087))]).await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "dummy", &mut visitor).await.unwrap();
-			visitor.check(Vec::<(Key, f32)>::new());
+			let i = fti.search(&mut tx, "dummy").await.unwrap();
+			check_hits(i, &mut tx, vec![]).await;
 		}
 
 		{
@@ -464,19 +466,16 @@ mod tests {
 
 			// We can still find 'foo'
 			let mut tx = ds.transaction(false, false).await.unwrap();
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".into(), 0.56902087)]);
+			let i = fti.search(&mut tx, "foo").await.unwrap();
+			check_hits(i, &mut tx, vec![("doc3".into(), Some(0.56902087))]).await;
 
 			// We can't anymore find 'bar'
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "bar", &mut visitor).await.unwrap();
-			visitor.check(vec![]);
+			let i = fti.search(&mut tx, "bar").await.unwrap();
+			check_hits(i, &mut tx, vec![]).await;
 
 			// We can now find 'nobar'
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "nobar", &mut visitor).await.unwrap();
-			visitor.check(vec![("doc3".into(), 0.56902087)]);
+			let i = fti.search(&mut tx, "nobar").await.unwrap();
+			check_hits(i, &mut tx, vec![("doc3".into(), Some(0.56902087))]).await;
 		}
 
 		{
@@ -490,13 +489,11 @@ mod tests {
 			tx.commit().await.unwrap();
 
 			let mut tx = ds.transaction(false, false).await.unwrap();
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "hello", &mut visitor).await.unwrap();
-			visitor.check(vec![]);
+			let i = fti.search(&mut tx, "hello").await.unwrap();
+			check_hits(i, &mut tx, vec![]).await;
 
-			let mut visitor = HashHitVisitor::default();
-			fti.search(&mut tx, "foo", &mut visitor).await.unwrap();
-			visitor.check(vec![]);
+			let i = fti.search(&mut tx, "foo").await.unwrap();
+			check_hits(i, &mut tx, vec![]).await;
 		}
 	}
 
@@ -546,70 +543,71 @@ mod tests {
 				assert_eq!(statistics.doc_ids.keys_count, 4);
 				assert_eq!(statistics.doc_lengths.keys_count, 4);
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "the", &mut visitor).await.unwrap();
-				visitor.check(vec![
-					("doc1".into(), 0.0),
-					("doc2".into(), 0.0),
-					("doc3".into(), 0.0),
-					("doc4".into(), 0.0),
-				]);
+				let i = fti.search(&mut tx, "the").await.unwrap();
+				check_hits(
+					i,
+					&mut tx,
+					vec![
+						("doc1".into(), Some(0.0)),
+						("doc2".into(), Some(0.0)),
+						("doc3".into(), Some(0.0)),
+						("doc4".into(), Some(0.0)),
+					],
+				)
+				.await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "dog", &mut visitor).await.unwrap();
-				visitor.check(vec![
-					("doc1".into(), 0.0),
-					("doc2".into(), 0.0),
-					("doc3".into(), 0.0),
-				]);
+				let i = fti.search(&mut tx, "dog").await.unwrap();
+				check_hits(
+					i,
+					&mut tx,
+					vec![
+						("doc1".into(), Some(0.0)),
+						("doc2".into(), Some(0.0)),
+						("doc3".into(), Some(0.0)),
+					],
+				)
+				.await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "fox", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
+				let i = fti.search(&mut tx, "fox").await.unwrap();
+				check_hits(
+					i,
+					&mut tx,
+					vec![("doc1".into(), Some(0.0)), ("doc2".into(), Some(0.0))],
+				)
+				.await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "over", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
+				let i = fti.search(&mut tx, "over").await.unwrap();
+				check_hits(
+					i,
+					&mut tx,
+					vec![("doc1".into(), Some(0.0)), ("doc2".into(), Some(0.0))],
+				)
+				.await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "lazy", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
+				let i = fti.search(&mut tx, "lazy").await.unwrap();
+				check_hits(
+					i,
+					&mut tx,
+					vec![("doc1".into(), Some(0.0)), ("doc2".into(), Some(0.0))],
+				)
+				.await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "jumped", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc1".into(), 0.0), ("doc2".into(), 0.0)]);
+				let i = fti.search(&mut tx, "jumped").await.unwrap();
+				check_hits(
+					i,
+					&mut tx,
+					vec![("doc1".into(), Some(0.0)), ("doc2".into(), Some(0.0))],
+				)
+				.await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "nothing", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc3".into(), 0.87105393)]);
+				let i = fti.search(&mut tx, "nothing").await.unwrap();
+				check_hits(i, &mut tx, vec![("doc3".into(), Some(0.87105393))]).await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "animals", &mut visitor).await.unwrap();
-				visitor.check(vec![("doc4".into(), 0.92279965)]);
+				let i = fti.search(&mut tx, "animals").await.unwrap();
+				check_hits(i, &mut tx, vec![("doc4".into(), Some(0.92279965))]).await;
 
-				let mut visitor = HashHitVisitor::default();
-				fti.search(&mut tx, "dummy", &mut visitor).await.unwrap();
-				visitor.check(Vec::<(Key, f32)>::new());
-			}
-		}
-	}
-
-	#[derive(Default)]
-	pub(super) struct HashHitVisitor {
-		map: HashMap<Key, Score>,
-	}
-
-	impl HitVisitor for HashHitVisitor {
-		fn visit(&mut self, _tx: &mut Transaction, doc_key: Key, score: Score) {
-			self.map.insert(doc_key, score);
-		}
-	}
-
-	impl HashHitVisitor {
-		pub(super) fn check(&self, res: Vec<(Key, Score)>) {
-			assert_eq!(res.len(), self.map.len(), "{:?}", self.map);
-			for (k, p) in res {
-				assert_eq!(self.map.get(&k), Some(&p));
+				let i = fti.search(&mut tx, "dummy").await.unwrap();
+				check_hits(i, &mut tx, vec![]).await;
 			}
 		}
 	}

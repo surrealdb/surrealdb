@@ -190,7 +190,7 @@ impl UniqueEqualThingIterator {
 
 #[async_trait]
 impl ThingIterator for UniqueEqualThingIterator {
-	async fn next_batch(&mut self, txn: &Transaction, limit: u32) -> Result<Vec<Thing>, Error> {
+	async fn next_batch(&mut self, txn: &Transaction, _limit: u32) -> Result<Vec<Thing>, Error> {
 		if let Some(key) = self.key.take() {
 			if let Some(val) = txn.lock().await.get(key).await? {
 				return Ok(vec![val.into()]);
@@ -201,8 +201,8 @@ impl ThingIterator for UniqueEqualThingIterator {
 }
 
 struct MatchesThingIterator {
-	fti: FtIndex,
-	q: String,
+	_fti: FtIndex,
+	_q: String,
 }
 
 impl MatchesThingIterator {
@@ -218,16 +218,15 @@ impl MatchesThingIterator {
 		let ikb = IndexKeyBase::new(opt, ix);
 		let mut run = txn.lock().await;
 		if let Scoring::Bm {
-			k1,
 			b,
-			order,
+			..
 		} = sc
 		{
-			let fti = FtIndex::new(&mut run, ikb, b.to_usize()).await?;
-			let q = v.to_string()?;
+			let _fti = FtIndex::new(&mut run, ikb, b.to_usize()).await?;
+			let _q = v.to_string()?;
 			Ok(Self {
-				fti,
-				q,
+				_fti,
+				_q,
 			})
 		} else {
 			Err(Error::FeatureNotYetImplemented {
@@ -239,10 +238,10 @@ impl MatchesThingIterator {
 
 #[async_trait]
 impl ThingIterator for MatchesThingIterator {
-	async fn next_batch(&mut self, txn: &Transaction, limit: u32) -> Result<Vec<Thing>, Error> {
+	async fn next_batch(&mut self, _txn: &Transaction, _limit: u32) -> Result<Vec<Thing>, Error> {
 		todo!();
 		// let mut run = txn.lock().await;
 		// self.fti.search(&mut run, &self.q)
-		Ok(vec![])
+		// Ok(vec![])
 	}
 }

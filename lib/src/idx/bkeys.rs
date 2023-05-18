@@ -13,7 +13,11 @@ pub(super) trait BKeys: Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
 	fn len(&self) -> usize;
 	fn get(&self, key: &Key) -> Option<Payload>;
-	fn collect_with_prefix(&self, prefix_key: &Key) -> KeysIterator;
+	// It is okay to return a owned Vec rather than an iterator,
+	// because BKeys are intended to be stored as Node in the BTree.
+	// The size of the Node should be small, therefore one instance of
+	// BKeys would never be store a large volume of keys.
+	fn collect_with_prefix(&self, prefix_key: &Key) -> VecDeque<(Key, Payload)>;
 	fn insert(&mut self, key: Key, payload: Payload);
 	fn append(&mut self, keys: Self);
 	fn remove(&mut self, key: &Key) -> Option<Payload>;
@@ -66,7 +70,7 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	fn collect_with_prefix(&self, _prefix_key: &Key) -> KeysIterator {
+	fn collect_with_prefix(&self, _prefix_key: &Key) -> VecDeque<(Key, Payload)> {
 		panic!("Not supported!")
 	}
 
@@ -375,9 +379,13 @@ impl BKeys for TrieKeys {
 		self.keys.get(key).copied()
 	}
 
-	fn collect_with_prefix(&self, prefix: &Key) -> KeysIterator {
-		let start_node = self.keys.get_raw_descendant(prefix);
-		KeysIterator::new(prefix.clone(), start_node)
+	fn collect_with_prefix(&self, prefix: &Key) -> VecDeque<(Key, Payload)> {
+		let mut i = KeysIterator::new(prefix, &self.keys);
+		let mut r = VecDeque::new();
+		while let Some((k, p)) = i.next() {
+			r.push_back((k.clone(), p))
+		}
+		r
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
@@ -469,22 +477,23 @@ impl BKeys for TrieKeys {
 	}
 }
 
-impl From<Trie<Vec<u8>, u64>> for TrieKeys {
-	fn from(keys: Trie<Vec<u8>, u64>) -> Self {
+impl From<Trie<Key, Payload>> for TrieKeys {
+	fn from(keys: Trie<Key, Payload>) -> Self {
 		Self {
 			keys,
 		}
 	}
 }
 
-pub(super) struct KeysIterator<'a> {
-	prefix: Key,
+struct KeysIterator<'a> {
+	prefix: &'a Key,
 	node_queue: VecDeque<SubTrie<'a, Key, Payload>>,
 	current_node: Option<SubTrie<'a, Key, Payload>>,
 }
 
 impl<'a> KeysIterator<'a> {
-	fn new(prefix: Key, start_node: Option<SubTrie<'a, Key, Payload>>) -> Self {
+	fn new(prefix: &'a Key, keys: &'a Trie<Key, Payload>) -> Self {
+		let start_node = keys.get_raw_descendant(prefix);
 		Self {
 			prefix,
 			node_queue: VecDeque::new(),
@@ -492,7 +501,7 @@ impl<'a> KeysIterator<'a> {
 		}
 	}
 
-	pub(super) fn next(&mut self) -> Option<(&Key, Payload)> {
+	fn next(&mut self) -> Option<(&Key, Payload)> {
 		loop {
 			if let Some(node) = self.current_node.take() {
 				for children in node.children() {
@@ -500,7 +509,7 @@ impl<'a> KeysIterator<'a> {
 				}
 				if let Some(value) = node.value() {
 					if let Some(node_key) = node.key() {
-						if node_key.starts_with(&self.prefix) {
+						if node_key.starts_with(self.prefix) {
 							return Some((node_key, *value));
 						}
 					}
@@ -518,9 +527,9 @@ impl<'a> KeysIterator<'a> {
 #[cfg(test)]
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::tests::HashVisitor;
-	use crate::kvs::{Datastore, Key};
-	use std::collections::HashSet;
+	use crate::idx::btree::Payload;
+	use crate::kvs::Key;
+	use std::collections::{HashMap, HashSet, VecDeque};
 
 	#[test]
 	fn test_fst_keys_serde() {
@@ -595,6 +604,17 @@ mod tests {
 		test_keys_deletions(TrieKeys::default())
 	}
 
+	fn check_keys(r: VecDeque<(Key, Payload)>, e: Vec<(Key, Payload)>) {
+		let mut map = HashMap::new();
+		for (k, p) in r {
+			map.insert(k, p);
+		}
+		assert_eq!(map.len(), e.len());
+		for (k, p) in e {
+			assert_eq!(map.get(&k), Some(&p));
+		}
+	}
+
 	#[tokio::test]
 	async fn test_tries_keys_collect_with_prefix() {
 		let mut keys = TrieKeys::default();
@@ -612,40 +632,41 @@ mod tests {
 		keys.insert("there".into(), 10);
 
 		{
-			let mut i = keys.collect_with_prefix(&"appli".into());
-			assert_eq!(i.next(), Some(("applicant".into(), 2)));
-			assert_eq!(i.next(), Some(("application".into(), 3)));
-			assert_eq!(i.next(), Some(("applicative".into(), 4)));
-			assert_eq!(i.next(), Some(("applicant".into(), 2)));
-			assert_eq!(i.next(), None);
+			let r = keys.collect_with_prefix(&"appli".into());
+			check_keys(
+				r,
+				vec![("applicant".into(), 2), ("application".into(), 3), ("applicative".into(), 4)],
+			);
 		}
 
 		{
-			let mut i = keys.collect_with_prefix(&"the".into());
-			assert_eq!(i.next(), Some(("the".into(), 7)));
-			assert_eq!(i.next(), Some(("their".into(), 8)));
-			assert_eq!(i.next(), Some(("theirs".into(), 9)));
-			assert_eq!(i.next(), Some(("there".into(), 10)));
-			assert_eq!(i.next(), Some(("these".into(), 11)));
-			assert_eq!(i.next(), Some(("theses".into(), 12)));
-			assert_eq!(i.next(), None);
+			let r = keys.collect_with_prefix(&"the".into());
+			check_keys(
+				r,
+				vec![
+					("the".into(), 7),
+					("their".into(), 8),
+					("theirs".into(), 9),
+					("there".into(), 10),
+					("these".into(), 11),
+					("theses".into(), 12),
+				],
+			);
 		}
 
 		{
-			let mut i = keys.collect_with_prefix(&"blue".into());
-			assert_eq!(i.next(), Some(("blueberry".into(), 6)));
-			assert_eq!(i.next(), None);
+			let r = keys.collect_with_prefix(&"blue".into());
+			check_keys(r, vec![("blueberry".into(), 6)]);
 		}
 
 		{
-			let mut i = keys.collect_with_prefix(&"apple".into());
-			assert_eq!(i.next(), Some(("apple".into(), 1)));
-			assert_eq!(i.next(), None);
+			let r = keys.collect_with_prefix(&"apple".into());
+			check_keys(r, vec![("apple".into(), 1)]);
 		}
 
 		{
-			let mut i = keys.collect_with_prefix(&"zz".into()).await.unwrap();
-			assert_eq!(i.next(), None);
+			let r = keys.collect_with_prefix(&"zz".into());
+			check_keys(r, vec![]);
 		}
 	}
 
