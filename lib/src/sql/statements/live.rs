@@ -56,7 +56,7 @@ impl LiveStatement {
 				// Clone the current statement
 				let mut stm = self.clone();
 				// Store the current Node ID
-				stm.node = *opt.id;
+				stm.node = opt.id.0;
 				// Insert the node live query
 				let key = crate::key::lq::new(opt.id(), opt.ns(), opt.db(), &self.id);
 				run.putc(key, tb.as_str(), None).await?;

@@ -1,6 +1,6 @@
 use super::tx::Transaction;
 use crate::ctx::Context;
-use crate::dbs::cl::ClusterMembership;
+use crate::dbs::cl::{ClusterMembership, Timestamp};
 use crate::dbs::Attach;
 use crate::dbs::Executor;
 use crate::dbs::Notification;
@@ -11,8 +11,8 @@ use crate::dbs::Variables;
 use crate::err::Error;
 use crate::key::hb::Hb;
 use crate::kvs::LOG;
-use crate::sql::Query;
 use crate::sql::Value;
+use crate::sql::{Query, Uuid};
 use crate::{dbs, sql};
 use channel::Receiver;
 use channel::Sender;
@@ -22,7 +22,6 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::instrument;
-use uuid::Uuid;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -241,25 +240,31 @@ impl Datastore {
 		}
 	}
 
+	// -----
+	// Cluster helpers here
+	// -----
 	pub async fn cluster_init(&self) -> Result<(), Error> {
 		trace!("First register");
-		self.register_membership().await?;
+		let timestamp = self.register_membership().await?;
 		trace!("Healthcheck");
-		self.cluster_healthcheck().await?;
+		let mut tx = self.transaction(true, false).await?;
+		// node timeout should be configurable, just trying to get this to work
+		// let timeout = Duration::from_secs(1);
+		// let deadline = now - timeout;
+		let deadline = timestamp;
+		let dead_heartbeats = self.delete_dead_nodes(deadline).await?;
+		for hb in dead_heartbeats {
+			tx.del_cl(hb.nd).await?;
+		}
 		trace!("Second register");
 		self.register_membership().await?;
 		Ok(())
 	}
 
-	pub async fn cluster_healthcheck(&self) -> Result<Vec<Hb>, Error> {
+	pub async fn delete_dead_nodes(&self, ts: Timestamp) -> Result<Vec<Hb>, Error> {
 		let mut tx = self.transaction(true, false).await?;
-		let now = tx.clock();
-		// node timeout should be configurable, just trying to get this to work
-		// let timeout = Duration::from_secs(1);
-		// let deadline = now - timeout;
-		let deadline = now;
 		let limit = 1000;
-		let dead = tx.scan_hb(&deadline, limit).await?;
+		let dead = tx.scan_hb(&ts, limit).await?;
 		tx.delr_hb(dead.clone(), 1000).await?;
 		for dead_node in dead.clone() {
 			tx.del_cl(dead_node.nd).await?;
@@ -268,22 +273,29 @@ impl Datastore {
 	}
 
 	// Adds entries to the KV store indicating membership information
-	pub async fn register_membership(&self) -> Result<(), Error> {
+	pub async fn register_membership(&self) -> Result<Timestamp, Error> {
 		let mut tx = self.transaction(true, false).await?;
-		tx.set_cl(sql::Uuid::from(*self.id.as_ref())).await?;
-		tx.set_hb(sql::Uuid::from(*self.id.as_ref())).await?;
+		let timestamp = tx.clock();
+		let sql_node_id = Uuid::from(self.id.clone().0);
+		tx.set_cl(sql_node_id.clone()).await?;
+		tx.set_hb(timestamp.clone(), sql_node_id).await?;
 		tx.commit().await?;
-		Ok(())
+		Ok(timestamp)
 	}
 
 	// Creates a heartbeat entry for the member indicating to the cluster
 	// that the node is alive
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
-		tx.set_hb(sql::Uuid::from(*self.id.as_ref())).await?;
+		let now = tx.clock();
+		tx.set_hb(now, sql::Uuid::from(self.id.clone().0)).await?;
 		tx.commit().await?;
 		Ok(())
 	}
+
+	// -----
+	// End cluster helpers, storage functions here
+	// -----
 
 	/// Create a new transaction on this datastore
 	///
@@ -363,7 +375,7 @@ impl Datastore {
 		strict: bool,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
-		let mut opt = Options::new(self.id.clone(), self.send.clone());
+		let mut opt = Options::new(self.id.clone().0, self.send.clone());
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -415,7 +427,7 @@ impl Datastore {
 		strict: bool,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
-		let mut opt = Options::new(self.id.clone(), self.send.clone());
+		let mut opt = Options::new(self.id.clone().0, self.send.clone());
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -466,10 +478,10 @@ impl Datastore {
 		strict: bool,
 	) -> Result<Value, Error> {
 		// Create a new query options
-		let mut opt = Options::new(self.id.clone(), self.send.clone());
+		let mut opt = Options::new(self.id.clone().to_owned().0, self.send.clone());
 		// Start a new transaction
 		let txn = self.transaction(val.writeable(), false).await?;
-		//
+		// Wrap transaction safely
 		let txn = Arc::new(Mutex::new(txn));
 		// Create a default context
 		let ctx = Context::default();

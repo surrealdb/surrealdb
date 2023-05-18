@@ -84,10 +84,10 @@ mod tests {
 
 	fn suffix() {
 		use super::*;
-		ts: Timestamp = Timestamp {
+		let ts: Timestamp = Timestamp {
 			value: 456,
 		};
-		let actual = Hb::suffix(ts);
+		let actual = Hb::suffix(&ts);
 		let expected = vec![b'/', b'!', b'h', b'b', 0]; // Incorrect, should be adjusted
 		assert_eq!(actual, expected)
 	}

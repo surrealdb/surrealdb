@@ -32,7 +32,7 @@ impl<'a> Document<'a> {
 			// Check what type of data change this is
 			if stm.is_delete() {
 				// Send a DELETE notification
-				if opt.id() == &lv.node {
+				if &opt.id().0 == &lv.node {
 					opt.sender
 						.send(Notification {
 							id: lv.id,
@@ -45,7 +45,7 @@ impl<'a> Document<'a> {
 				}
 			} else if self.is_new() {
 				// Send a CREATE notification
-				if opt.id() == &lv.node {
+				if &opt.id().0 == &lv.node {
 					opt.sender
 						.send(Notification {
 							id: lv.id,
@@ -58,7 +58,7 @@ impl<'a> Document<'a> {
 				}
 			} else {
 				// Send a UPDATE notification
-				if opt.id() == &lv.node {
+				if &opt.id().0 == &lv.node {
 					opt.sender
 						.send(Notification {
 							id: lv.id,

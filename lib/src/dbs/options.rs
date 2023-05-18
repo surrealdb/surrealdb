@@ -3,9 +3,9 @@ use crate::dbs::Auth;
 use crate::dbs::Level;
 use crate::dbs::Notification;
 use crate::err::Error;
+use crate::sql::Uuid;
 use channel::Sender;
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
 /// statements. An Options contains specific information for how
@@ -50,9 +50,10 @@ pub struct Options {
 
 impl Options {
 	/// Create a new Options object
-	pub fn new(id: Arc<Uuid>, send: Sender<Notification>) -> Options {
+	pub fn new(id: uuid::Uuid, send: Sender<Notification>) -> Options {
+		let sqluuid = Uuid::from(id);
 		Options {
-			id,
+			id: Arc::new(sqluuid),
 			ns: None,
 			db: None,
 			dive: 0,
