@@ -1,23 +1,10 @@
-use super::kv::Add;
-use super::kv::Convert;
-use super::Key;
-use super::Val;
-use crate::dbs::cl::ClusterMembership;
-use crate::dbs::cl::Timestamp;
-use crate::err::Error;
-use crate::key::hb::Hb;
-use crate::key::thing;
-use crate::kvs::cache::Cache;
-use crate::kvs::cache::Entry;
-use crate::sql::paths::EDGE;
-use crate::sql::paths::IN;
-use crate::sql::paths::OUT;
-use crate::sql::thing::Thing;
-use crate::sql::Kind::Bytes;
-use crate::sql::{Uuid, Value};
-use crate::{opt, sql};
+use std::fmt;
+use std::fmt::Debug;
+use std::ops::{Bound, Range};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use channel::Sender;
-use md5::digest::typenum::tarr;
 use sql::permission::Permissions;
 use sql::statements::DefineAnalyzerStatement;
 use sql::statements::DefineDatabaseStatement;
@@ -32,11 +19,25 @@ use sql::statements::DefineScopeStatement;
 use sql::statements::DefineTableStatement;
 use sql::statements::DefineTokenStatement;
 use sql::statements::LiveStatement;
-use std::fmt;
-use std::fmt::Debug;
-use std::ops::{Bound, Range};
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::dbs::cl::ClusterMembership;
+use crate::dbs::cl::Timestamp;
+use crate::err::Error;
+use crate::key::hb::Hb;
+use crate::key::thing;
+use crate::kvs::cache::Cache;
+use crate::kvs::cache::Entry;
+use crate::sql;
+use crate::sql::paths::EDGE;
+use crate::sql::paths::IN;
+use crate::sql::paths::OUT;
+use crate::sql::thing::Thing;
+use crate::sql::{Uuid, Value};
+
+use super::kv::Add;
+use super::kv::Convert;
+use super::Key;
+use super::Val;
 
 #[cfg(debug_assertions)]
 const LOG: &str = "surrealdb::txn";
@@ -836,7 +837,7 @@ impl Transaction {
 				break;
 			}
 			// Loop over results
-			for (i, (k, v)) in res.into_iter().enumerate() {
+			for (i, (k, _)) in res.into_iter().enumerate() {
 				// Ready the next
 				if n == i + 1 {
 					nxt = Some(k.clone());

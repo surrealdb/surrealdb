@@ -15,10 +15,6 @@ pub struct Hb {
 	pub nd: Uuid,
 }
 
-pub fn new(hb: Timestamp, nd: &Uuid) -> Hb {
-	Hb::new(hb, nd.to_owned())
-}
-
 impl Hb {
 	pub fn new(hb: Timestamp, nd: Uuid) -> Self {
 		Self {

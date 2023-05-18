@@ -1,6 +1,15 @@
-use super::tx::Transaction;
+use std::fmt;
+use std::ops::Range;
+use std::sync::Arc;
+use std::time::Duration;
+
+use channel::Receiver;
+use channel::Sender;
+use futures::lock::Mutex;
+use tracing::instrument;
+
 use crate::ctx::Context;
-use crate::dbs::cl::{ClusterMembership, Timestamp};
+use crate::dbs::cl::Timestamp;
 use crate::dbs::Attach;
 use crate::dbs::Executor;
 use crate::dbs::Notification;
@@ -14,14 +23,8 @@ use crate::kvs::LOG;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
 use crate::{dbs, sql};
-use channel::Receiver;
-use channel::Sender;
-use futures::lock::Mutex;
-use std::fmt;
-use std::ops::Range;
-use std::sync::Arc;
-use std::time::Duration;
-use tracing::instrument;
+
+use super::tx::Transaction;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -244,25 +247,36 @@ impl Datastore {
 	// Cluster helpers here
 	// -----
 	pub async fn cluster_init(&self) -> Result<(), Error> {
-		trace!("First register");
+		trace!("First register to prove cluster registration works");
 		let timestamp = self.register_membership().await?;
-		trace!("Healthcheck");
-		let mut tx = self.transaction(true, false).await?;
+		trace!("Healthcheck to perform garbage collection");
 		// node timeout should be configurable, just trying to get this to work
 		// let timeout = Duration::from_secs(1);
 		// let deadline = now - timeout;
-		let deadline = timestamp;
-		let dead_heartbeats = self.delete_dead_nodes(deadline).await?;
-		for hb in dead_heartbeats {
-			tx.del_cl(hb.nd).await?;
-		}
-		trace!("Second register");
+		let watermark = timestamp;
+		self.garbage_collect(watermark).await?;
+		trace!("Second register to prove removal worked and there is no conflict");
 		self.register_membership().await?;
 		Ok(())
 	}
 
-	pub async fn delete_dead_nodes(&self, ts: Timestamp) -> Result<Vec<Hb>, Error> {
+	pub async fn garbage_collect(&self, watermark: Timestamp) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
+		let dead_heartbeats = self.delete_dead_heartbeats(&mut tx, watermark).await?;
+		trace!("Found dead hbs: {:?}", dead_heartbeats);
+		for hb in dead_heartbeats {
+			tx.del_cl(hb.nd).await?;
+			trace!("Deleted node {}", hb.nd);
+		}
+		tx.commit().await?;
+		Ok(())
+	}
+
+	pub async fn delete_dead_heartbeats(
+		&self,
+		tx: &mut Transaction,
+		ts: Timestamp,
+	) -> Result<Vec<Hb>, Error> {
 		let limit = 1000;
 		let dead = tx.scan_hb(&ts, limit).await?;
 		tx.delr_hb(dead.clone(), 1000).await?;
