@@ -44,22 +44,20 @@ impl<'a> Document<'a> {
 				}
 				// Check for a TYPE clause
 				if let Some(kind) = &fd.kind {
-					if !val.is_none() {
-						val = val.convert_to(kind).map_err(|e| match e {
-							// There was a conversion error
-							Error::ConvertTo {
-								from,
-								..
-							} => Error::FieldCheck {
-								thing: rid.to_string(),
-								field: fd.name.clone(),
-								value: from.to_string(),
-								check: kind.to_string(),
-							},
-							// There was a different error
-							e => e,
-						})?;
-					}
+					val = val.convert_to(kind).map_err(|e| match e {
+						// There was a conversion error
+						Error::ConvertTo {
+							from,
+							..
+						} => Error::FieldCheck {
+							thing: rid.to_string(),
+							field: fd.name.clone(),
+							value: from.to_string(),
+							check: kind.to_string(),
+						},
+						// There was a different error
+						e => e,
+					})?;
 				}
 				// Check for a ASSERT clause
 				if let Some(expr) = &fd.assert {
