@@ -15,9 +15,17 @@ impl Value {
 				Op::Change => {
 					if let Value::Strand(p) = o.value {
 						if let Value::Strand(v) = self.pick(&o.path) {
-							let mut dmp = dmp::new();
-							let mut pch = dmp.patch_from_text(p.as_string());
-							let (txt, _) = dmp.patch_apply(&mut pch, v.as_str());
+							let dmp = dmp::new();
+							let mut pch = dmp.patch_from_text(p.as_string()).map_err(|e| {
+								Error::InvalidPatch {
+									message: format!("{e:?}"),
+								}
+							})?;
+							let (txt, _) = dmp.patch_apply(&mut pch, v.as_str()).map_err(|e| {
+								Error::InvalidPatch {
+									message: format!("{e:?}"),
+								}
+							})?;
 							let txt = txt.into_iter().collect::<String>();
 							self.put(&o.path, Value::from(txt));
 						}
@@ -110,5 +118,13 @@ mod tests {
 		let res = Value::parse("{ test: { other: 'text', something: 123 }, temp: true }");
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_change_invalid() {
+		// See https://github.com/surrealdb/surrealdb/issues/2001
+		let mut val = Value::parse("{ test: { other: 'test', something: 123 }, temp: true }");
+		let ops = Value::parse("[{ op: 'change', path: '/test/other', value: 'text' }]");
+		assert!(val.patch(ops).is_err());
 	}
 }
