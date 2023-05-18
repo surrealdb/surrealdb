@@ -1,7 +1,5 @@
 use std::fmt;
-use std::ops::Range;
 use std::sync::Arc;
-use std::time::Duration;
 
 use channel::Receiver;
 use channel::Sender;
@@ -20,9 +18,9 @@ use crate::dbs::Variables;
 use crate::err::Error;
 use crate::key::hb::Hb;
 use crate::kvs::LOG;
+use crate::sql;
 use crate::sql::Value;
 use crate::sql::{Query, Uuid};
-use crate::{dbs, sql};
 
 use super::tx::Transaction;
 

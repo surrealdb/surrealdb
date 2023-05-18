@@ -1,7 +1,6 @@
 use crate::dbs::cl::{KeyTimestamp, Timestamp};
 use derive::Key;
 use serde::{Deserialize, Serialize};
-use std::io::empty;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Key)]
