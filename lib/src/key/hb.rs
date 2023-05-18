@@ -10,8 +10,8 @@ pub struct Hb {
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	_d: u8,
 	pub hb: Timestamp,
+	_d: u8,
 	pub nd: Uuid,
 }
 

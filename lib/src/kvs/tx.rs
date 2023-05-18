@@ -785,7 +785,12 @@ impl Transaction {
 		let now = self.clock();
 		let key = crate::key::hb::Hb::new(now.clone(), id.0);
 		let debug = crate::key::hb::Hb::encode(&key).unwrap();
-		trace!("Setting heartbeat {} ({:?})", String::from_utf8_lossy(&debug).to_string(), &debug);
+		trace!(
+			"Setting heartbeat {} ({:?}) ({:?})",
+			String::from_utf8_lossy(&debug).to_string(),
+			&debug,
+			key
+		);
 		// We do not need to do a read, we always want to overwrite
 		self.put(
 			key,
@@ -847,7 +852,7 @@ impl Transaction {
 	}
 
 	pub async fn delr_hb(&mut self, ts: Vec<Hb>, limit: u32) -> Result<(), Error> {
-		trace!(target: LOG, "delr_hb: ts={:?} limit={:?}", ts, limit);
+		trace!("delr_hb: ts={:?} limit={:?}", ts, limit);
 		for hb in ts.into_iter() {
 			self.del(hb).await?;
 		}

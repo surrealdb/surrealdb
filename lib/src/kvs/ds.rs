@@ -255,8 +255,9 @@ impl Datastore {
 		let mut tx = self.transaction(true, false).await?;
 		let now = tx.clock();
 		// node timeout should be configurable, just trying to get this to work
-		let timeout = Duration::from_secs(1);
-		let deadline = now - timeout;
+		// let timeout = Duration::from_secs(1);
+		// let deadline = now - timeout;
+		let deadline = now;
 		let limit = 1000;
 		let dead = tx.scan_hb(&deadline, limit).await?;
 		tx.delr_hb(dead.clone(), 1000).await?;
