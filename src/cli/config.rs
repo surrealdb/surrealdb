@@ -36,7 +36,7 @@ impl Config {
 			// Intended to block incorrect credentials in constant time
 			// to avoid a timing side-channel.
 			if hash(&self.user, p) == hash(user, pass) {
-				p == pass & user == self.user
+				p == pass && user == self.user
 			} else {
 				// Hash(es) didn't match
 				false
@@ -76,11 +76,11 @@ pub fn init(matches: &clap::ArgMatches) {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+	use super::Config;
 
 	#[test]
 	fn verify_root() {
-		let mut cfg = Config{
+		let mut cfg = Config {
 			user: "root".to_owned(),
 			..Default::default()
 		};
