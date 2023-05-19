@@ -2,16 +2,6 @@ use std::path::{Path, PathBuf};
 
 pub(crate) mod parser;
 
-pub(crate) fn split_endpoint(v: &str) -> (&str, &str) {
-	match v {
-		"memory" => ("mem", ""),
-		v => match v.split_once("://") {
-			Some(parts) => parts,
-			None => v.split_once(':').unwrap_or_default(),
-		},
-	}
-}
-
 pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 	match v {
 		"memory" => Ok(v.to_string()),
@@ -35,6 +25,16 @@ pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn conn_valid(v: &str) -> Result<String, String> {
+	fn split_endpoint(v: &str) -> (&str, &str) {
+		match v {
+			"memory" => ("mem", ""),
+			v => match v.split_once("://") {
+				Some(parts) => parts,
+				None => v.split_once(':').unwrap_or_default(),
+			},
+		}
+	}
+
 	let scheme = split_endpoint(v).0;
 	match scheme {
 		"http" | "https" | "ws" | "wss" | "fdb" | "mem" | "rocksdb" | "file" | "tikv" => {

@@ -53,9 +53,9 @@ pub struct StartCommandArguments {
 	#[arg(value_parser = CustomEnvFilterParser::new())]
 	log: CustomEnvFilter,
 	#[arg(help = "Whether to show the startup banner")]
-	#[arg(env = "SURREAL_BANNER", long = "banner")]
-	#[arg(default_value_t = true)]
-	banner: bool,
+	#[arg(env = "SURREAL_NO_BANNER", long)]
+	#[arg(default_value_t = false)]
+	no_banner: bool,
 }
 
 #[derive(Args, Debug)]
@@ -92,7 +92,7 @@ pub async fn init(
 		web,
 		strict,
 		log: CustomEnvFilter(log),
-		banner,
+		no_banner,
 		..
 	}: StartCommandArguments,
 ) -> Result<(), Error> {
@@ -100,7 +100,7 @@ pub async fn init(
 	crate::o11y::builder().with_filter(log).init();
 
 	// Check if a banner should be outputted
-	if banner {
+	if !no_banner {
 		// Output SurrealDB logo
 		println!("{LOGO}");
 	}
