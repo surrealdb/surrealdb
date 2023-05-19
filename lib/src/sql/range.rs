@@ -159,7 +159,7 @@ fn range_double(i: &str) -> IResult<&str, Range> {
 	delimited(char('\"'), range_raw, char('\"'))(i)
 }
 
-pub fn range_raw(i: &str) -> IResult<&str, Range> {
+fn range_raw(i: &str) -> IResult<&str, Range> {
 	let (i, tb) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, beg) =
