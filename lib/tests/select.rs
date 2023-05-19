@@ -203,7 +203,6 @@ async fn select_where_and_with_fulltext_index() -> Result<(), Error> {
 		CREATE person:jaime SET name = 'Jaime', genre='m';
 		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
 		DEFINE INDEX ft_name ON TABLE person COLUMNS name SEARCH english BM25(1.2,0.75,1000);
-		DEFINE INDEX person_name ON TABLE person COLUMNS name UNIQUE;
 		SELECT name FROM person WHERE name @@ 'Jaime' AND genre = 'm' EXPLAIN;";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
@@ -227,8 +226,8 @@ async fn select_where_and_with_fulltext_index() -> Result<(), Error> {
 					{
 						detail: {
 							plan: {
-								index: 'person_name',
-								operator: '=',
+								index: 'ft_name',
+								operator: '@@',
 								value: 'Jaime'
 							},
 							table: 'person',

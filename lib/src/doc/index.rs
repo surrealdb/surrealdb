@@ -197,7 +197,7 @@ impl<'a> IndexOperation<'a> {
 		let doc_key = self.rid.into();
 		if let Some(n) = &self.n {
 			// TODO: Apply the analyzer
-			ft.index_document(run, doc_key, &n.to_string()).await
+			ft.index_document(run, doc_key, n).await
 		} else {
 			ft.remove_document(run, doc_key).await
 		}

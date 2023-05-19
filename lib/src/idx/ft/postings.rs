@@ -58,7 +58,7 @@ impl Postings {
 		self.btree.delete::<TrieKeys>(tx, key).await
 	}
 
-	pub(super) fn collect_postings(&self, term_id: TermId) -> PostingsIterator {
+	pub(super) fn new_postings_iterator(&self, term_id: TermId) -> PostingsIterator {
 		let prefix_key = self.index_key_base.new_bf_prefix_key(term_id);
 		let i = self.btree.search_by_prefix(prefix_key);
 		PostingsIterator::new(i)
@@ -70,7 +70,7 @@ impl Postings {
 		term_id: TermId,
 	) -> Result<usize, Error> {
 		let mut count = 0;
-		let mut i = self.collect_postings(term_id);
+		let mut i = self.new_postings_iterator(term_id);
 		while i.next(tx).await?.is_some() {
 			count += 1;
 		}
@@ -174,7 +174,7 @@ mod tests {
 			Postings::new(&mut tx, IndexKeyBase::default(), DEFAULT_BTREE_ORDER).await.unwrap();
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 2);
 
-		let i = p.collect_postings(1);
+		let i = p.new_postings_iterator(1);
 		check_postings(i, &mut tx, vec![(2, 3), (4, 5)]).await;
 
 		// Check removal of doc 2

@@ -154,6 +154,14 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(a.intersects(b).into())
 }
 
+pub fn matches(_a: &Value, _b: &Value) -> Result<Value, Error> {
+	trace!("TODO");
+	// TODO Temporary we always return true
+	// What should be done here:
+	// Check against the FullText capabilities if it contains the term
+	Ok(Value::Bool(true))
+}
+
 #[cfg(test)]
 mod tests {
 

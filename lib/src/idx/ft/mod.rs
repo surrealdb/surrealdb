@@ -1,23 +1,20 @@
+mod analyzer;
 pub(crate) mod docids;
 mod doclength;
 mod postings;
 pub(crate) mod terms;
 
 use crate::err::Error;
-use crate::error::Db::AnalyzerError;
+use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::docids::{DocId, DocIds};
-use crate::idx::ft::doclength::{DocLength, DocLengths};
+use crate::idx::ft::doclength::DocLengths;
 use crate::idx::ft::postings::{Postings, PostingsIterator, TermFrequency};
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
-use crate::sql::error::IResult;
-use nom::bytes::complete::take_while;
-use nom::character::complete::multispace0;
+use crate::sql::Array;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
 
 pub(crate) struct FtIndex {
 	state_key: Key,
@@ -139,7 +136,7 @@ impl FtIndex {
 		&mut self,
 		tx: &mut Transaction,
 		doc_key: Key,
-		field_content: &str,
+		field_content: &Array,
 	) -> Result<(), Error> {
 		// Resolve the doc_id
 		let mut d = self.doc_ids(tx).await?;
@@ -149,7 +146,7 @@ impl FtIndex {
 		// Extract the doc_lengths, terms en frequencies
 		let mut t = self.terms(tx).await?;
 		let (doc_length, terms_and_frequencies) =
-			Self::extract_sorted_terms_with_frequencies(field_content)?;
+			Analyzer::extract_terms_with_frequencies(&mut t, tx, field_content).await?;
 
 		// Set the doc length
 		let mut l = self.doc_lengths(tx).await?;
@@ -169,10 +166,9 @@ impl FtIndex {
 		};
 
 		// Set the terms postings
-		let terms = t.resolve_term_ids(tx, terms_and_frequencies).await?;
 		let mut terms_ids = RoaringTreemap::default();
 		let mut p = self.postings(tx).await?;
-		for (term_id, term_freq) in terms {
+		for (term_id, term_freq) in terms_and_frequencies {
 			p.update_posting(tx, term_id, doc_id, term_freq).await?;
 			if let Some(old_term_ids) = &mut old_term_ids {
 				old_term_ids.remove(term_id);
@@ -207,42 +203,6 @@ impl FtIndex {
 		p.finish(tx).await?;
 		t.finish(tx).await?;
 		Ok(())
-	}
-
-	// TODO: This is currently a place holder. It has to be replaced by the analyzer/token/filter logic.
-	fn extract_sorted_terms_with_frequencies(
-		input: &str,
-	) -> Result<(DocLength, HashMap<&str, TermFrequency>), Error> {
-		let mut doc_length = 0;
-		let mut terms = HashMap::new();
-		let mut rest = input;
-		while !rest.is_empty() {
-			// Extract the next token
-			match Self::next_token(rest) {
-				Ok((remaining_input, token)) => {
-					if !input.is_empty() {
-						doc_length += 1;
-						match terms.entry(token) {
-							Entry::Vacant(e) => {
-								e.insert(1);
-							}
-							Entry::Occupied(mut e) => {
-								e.insert(*e.get() + 1);
-							}
-						}
-					}
-					rest = remaining_input;
-				}
-				Err(e) => return Err(AnalyzerError(e.to_string())),
-			}
-		}
-		Ok((doc_length, terms))
-	}
-
-	/// Extracting the next token. The string is left trimmed first.
-	fn next_token(i: &str) -> IResult<&str, &str> {
-		let (i, _) = multispace0(i)?;
-		take_while(|c| c != ' ' && c != '\n' && c != '\t')(i)
 	}
 
 	pub(super) async fn search(
@@ -290,7 +250,7 @@ pub(crate) struct HitsIterator {
 impl HitsIterator {
 	fn new(ft: Option<(DocIds, Postings, TermId)>, scorer: Option<BM25Scorer>) -> Self {
 		if let Some((doc_ids, postings, term_id)) = ft {
-			let postings = postings.collect_postings(term_id);
+			let postings = postings.new_postings_iterator(term_id);
 			Self {
 				docs: Some((doc_ids, postings)),
 				scorer,
@@ -384,6 +344,7 @@ mod tests {
 	use crate::idx::ft::{FtIndex, HitsIterator, Score};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Key, Transaction};
+	use crate::sql::Array;
 	use std::collections::HashMap;
 	use test_log::test;
 
@@ -409,7 +370,9 @@ mod tests {
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
 				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.index_document(&mut tx, "doc1".into(), "hello the world").await.unwrap();
+			fti.index_document(&mut tx, "doc1".into(), &Array::from(vec!["hello the world"]))
+				.await
+				.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -418,8 +381,12 @@ mod tests {
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
 				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.index_document(&mut tx, "doc2".into(), "a yellow hello").await.unwrap();
-			fti.index_document(&mut tx, "doc3".into(), "foo bar").await.unwrap();
+			fti.index_document(&mut tx, "doc2".into(), &Array::from(vec!["a yellow hello"]))
+				.await
+				.unwrap();
+			fti.index_document(&mut tx, "doc3".into(), &Array::from(vec!["foo bar"]))
+				.await
+				.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -461,7 +428,9 @@ mod tests {
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
 				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
-			fti.index_document(&mut tx, "doc3".into(), "nobar foo").await.unwrap();
+			fti.index_document(&mut tx, "doc3".into(), &Array::from(vec!["nobar foo"]))
+				.await
+				.unwrap();
 			tx.commit().await.unwrap();
 
 			// We can still find 'foo'
@@ -515,19 +484,31 @@ mod tests {
 				fti.index_document(
 					&mut tx,
 					"doc1".into(),
-					"the quick brown fox jumped over the lazy dog",
+					&Array::from(vec!["the quick brown fox jumped over the lazy dog"]),
 				)
 				.await
 				.unwrap();
-				fti.index_document(&mut tx, "doc2".into(), "the fast fox jumped over the lazy dog")
-					.await
-					.unwrap();
-				fti.index_document(&mut tx, "doc3".into(), "the dog sat there and did nothing")
-					.await
-					.unwrap();
-				fti.index_document(&mut tx, "doc4".into(), "the other animals sat there watching")
-					.await
-					.unwrap();
+				fti.index_document(
+					&mut tx,
+					"doc2".into(),
+					&Array::from(vec!["the fast fox jumped over the lazy dog"]),
+				)
+				.await
+				.unwrap();
+				fti.index_document(
+					&mut tx,
+					"doc3".into(),
+					&Array::from(vec!["the dog sat there and did nothing"]),
+				)
+				.await
+				.unwrap();
+				fti.index_document(
+					&mut tx,
+					"doc4".into(),
+					&Array::from(vec!["the other animals sat there watching"]),
+				)
+				.await
+				.unwrap();
 				tx.commit().await.unwrap();
 			}
 

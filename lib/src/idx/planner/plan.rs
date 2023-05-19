@@ -1,6 +1,6 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
-use crate::idx::ft::FtIndex;
+use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::tree::Node;
 use crate::idx::IndexKeyBase;
 use crate::key;
@@ -35,11 +35,7 @@ impl IndexOption {
 				Index::Search {
 					..
 				} => {
-					if let Operator::Matches(_) = op {
-						true
-					} else {
-						false
-					}
+					matches!(op, Operator::Matches(_))
 				}
 			};
 		if supported {
@@ -73,7 +69,7 @@ impl IndexOption {
 				sc,
 			} => match self.op {
 				Operator::Matches(_) => Ok(Box::new(
-					MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, &sc, &self.v).await?,
+					MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, sc, &self.v).await?,
 				)),
 				_ => Err(Error::BypassQueryPlanner),
 			},
@@ -201,8 +197,7 @@ impl ThingIterator for UniqueEqualThingIterator {
 }
 
 struct MatchesThingIterator {
-	_fti: FtIndex,
-	_q: String,
+	hits: HitsIterator,
 }
 
 impl MatchesThingIterator {
@@ -222,11 +217,11 @@ impl MatchesThingIterator {
 			..
 		} = sc
 		{
-			let _fti = FtIndex::new(&mut run, ikb, b.to_usize()).await?;
-			let _q = v.to_string()?;
+			let query_string = v.to_string()?;
+			let fti = FtIndex::new(&mut run, ikb, b.to_usize()).await?;
+			let hits = fti.search(&mut run, &query_string).await?;
 			Ok(Self {
-				_fti,
-				_q,
+				hits,
 			})
 		} else {
 			Err(Error::FeatureNotYetImplemented {
@@ -238,10 +233,18 @@ impl MatchesThingIterator {
 
 #[async_trait]
 impl ThingIterator for MatchesThingIterator {
-	async fn next_batch(&mut self, _txn: &Transaction, _limit: u32) -> Result<Vec<Thing>, Error> {
-		todo!();
-		// let mut run = txn.lock().await;
-		// self.fti.search(&mut run, &self.q)
-		// Ok(vec![])
+	async fn next_batch(&mut self, txn: &Transaction, mut limit: u32) -> Result<Vec<Thing>, Error> {
+		let mut run = txn.lock().await;
+		let mut res = vec![];
+		while limit > 0 {
+			if let Some((hit, _)) = self.hits.next(&mut run).await? {
+				let rid: Thing = hit.into();
+				res.push(rid);
+			} else {
+				break;
+			}
+			limit -= 1;
+		}
+		Ok(res)
 	}
 }
