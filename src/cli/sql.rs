@@ -4,15 +4,13 @@ use crate::cli::abstraction::{
 use crate::err::Error;
 use clap::Args;
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::validate::{ValidationContext, ValidationResult, Validator};
+use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
-use surrealdb::sql;
-use surrealdb::sql::Statement;
-use surrealdb::sql::Value;
-use surrealdb::Error as SurrealError;
-use surrealdb::Response;
+use surrealdb::sql::{self, Statement, Value};
+use surrealdb::{Error as SurrealError, Response};
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -22,10 +20,12 @@ pub struct SqlCommandArguments {
 	auth: AuthArguments,
 	#[command(flatten)]
 	sel: DatabaseSelectionArguments,
-	#[arg(help = "Whether database responses should be pretty printed")]
-	#[arg(long = "pretty")]
-	#[arg(default_value_t = false)]
+	/// Whether database responses should be pretty printed
+	#[arg(long)]
 	pretty: bool,
+	/// Whether omitting semicolon causes a newline
+	#[arg(long)]
+	multi: bool,
 }
 
 pub async fn init(
@@ -38,10 +38,11 @@ pub async fn init(
 			connection_url: endpoint,
 		},
 		sel: DatabaseSelectionArguments {
-			namespace: mut ns,
-			database: mut db,
+			namespace,
+			database,
 		},
 		pretty,
+		multi,
 		..
 	}: SqlCommandArguments,
 ) -> Result<(), Error> {
@@ -65,9 +66,16 @@ pub async fn init(
 		}
 	}
 	// Create a new terminal REPL
-	let mut rl = DefaultEditor::new().unwrap();
+	let mut rl = Editor::new().unwrap();
+	// Set custom input validation
+	rl.set_helper(Some(InputValidator {
+		multi,
+	}));
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
+	// Keep track of current namespace/database.
+	let mut ns = Some(namespace);
+	let mut db = Some(database);
 	// Configure the prompt
 	let mut prompt = "> ".to_owned();
 	// Loop over each command-line input
@@ -96,69 +104,63 @@ pub async fn init(
 			},
 			(None, None) => {}
 		}
-		// Prompt the user to input SQL
-		let readline = rl.readline(&prompt);
-		// Check the user input
-		match readline {
+		// Prompt the user to input SQL and check the input.
+		let line = match rl.readline(&prompt) {
 			// The user typed a query
 			Ok(line) => {
-				// Ignore all empty lines
-				if line.is_empty() {
-					continue;
-				}
+				// Filter out all new lines
+				let line = filter_line_continuations(&line);
 				// Add the entry to the history
 				if let Err(e) = rl.add_history_entry(line.as_str()) {
 					eprintln!("{e}");
 				}
-				// Complete the request
-				match sql::parse(&line) {
-					Ok(query) => {
-						for statement in query.iter() {
-							match statement {
-								Statement::Use(stmt) => {
-									if let Some(namespace) = &stmt.ns {
-										ns = namespace.clone();
-									}
-									if let Some(database) = &stmt.db {
-										db = database.clone();
-									}
-								}
-								Statement::Set(stmt) => {
-									if let Err(e) = client.set(&stmt.name, &stmt.what).await {
-										eprintln!("{e}\n");
-									}
-								}
-								_ => {}
-							}
-						}
-						let res = client.query(query).await;
-						// Get the request response
-						match process(pretty, res) {
-							Ok(v) => {
-								println!("{v}\n");
-							}
-							Err(e) => {
-								eprintln!("{e}\n");
-							}
-						}
-					}
-					Err(e) => {
-						eprintln!("{e}\n");
-					}
-				}
+				line
 			}
-			// The user types CTRL-C
-			Err(ReadlineError::Interrupted) => {
-				break;
-			}
-			// The user typed CTRL-D
-			Err(ReadlineError::Eof) => {
+			// The user typed CTRL-C or CTRL-D
+			Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
 				break;
 			}
 			// There was en error
 			Err(e) => {
 				eprintln!("Error: {e:?}");
 				break;
+			}
+		};
+		// Complete the request
+		match sql::parse(&line) {
+			Ok(query) => {
+				for statement in query.iter() {
+					match statement {
+						Statement::Use(stmt) => {
+							if let Some(namespace) = &stmt.ns {
+								ns = Some(namespace.clone());
+								db = None;
+							}
+							if let Some(database) = &stmt.db {
+								db = Some(database.clone());
+							}
+						}
+						Statement::Set(stmt) => {
+							if let Err(e) = client.set(&stmt.name, &stmt.what).await {
+								eprintln!("{e}\n");
+							}
+						}
+						_ => {}
+					}
+				}
+				let res = client.query(query).await;
+				// Get the request response
+				match process(pretty, res) {
+					Ok(v) => {
+						println!("{v}\n");
+					}
+					Err(e) => {
+						eprintln!("{e}\n");
+					}
+				}
+			}
+			Err(e) => {
+				eprintln!("{e}\n");
 			}
 		}
 	}
@@ -190,4 +192,39 @@ fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Err
 		// Yes prettify the response
 		true => format!("{value:#}"),
 	})
+}
+
+#[derive(Completer, Helper, Highlighter, Hinter)]
+struct InputValidator {
+	/// If omitting semicolon causes newline.
+	multi: bool,
+}
+
+#[allow(clippy::if_same_then_else)]
+impl Validator for InputValidator {
+	fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
+		use ValidationResult::{Incomplete, Invalid, Valid};
+		// Filter out all new line characters
+		let input = filter_line_continuations(ctx.input());
+		// Trim all whitespace from the user input
+		let input = input.trim();
+		// Process the input to check if we can send the query
+		let result = if self.multi && !input.ends_with(';') {
+			Incomplete // The line ends with a ; and we are in multi mode
+		} else if self.multi && input.is_empty() {
+			Incomplete // The line was empty and we are in multi mode
+		} else if input.ends_with('\\') {
+			Incomplete // The line ends with a backslash
+		} else if let Err(e) = sql::parse(input) {
+			Invalid(Some(format!(" --< {e}")))
+		} else {
+			Valid(None)
+		};
+		// Validation complete
+		Ok(result)
+	}
+}
+
+fn filter_line_continuations(line: &str) -> String {
+	line.replace("\\\n", "").replace("\\\r\n", "")
 }

@@ -12,7 +12,7 @@ use clap::Args;
 use ipnet::IpNet;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use futures::Future;
+
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
 	#[arg(help = "Database path used for storing data")]
@@ -125,20 +125,4 @@ pub async fn init(
 	net::init().await?;
 	// All ok
 	Ok(())
-}
-
-/// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.
-fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
-	let stack_size = 8 * 1024 * 1024;
-
-	// Stack frames are generally larger in debug mode.
-	#[cfg(debug_assertions)]
-	let stack_size = stack_size * 2;
-
-	tokio::runtime::Builder::new_multi_thread()
-		.enable_all()
-		.thread_stack_size(stack_size)
-		.build()
-		.unwrap()
-		.block_on(fut)
 }

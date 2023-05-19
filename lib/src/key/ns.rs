@@ -16,23 +16,23 @@ pub fn new(ns: &str) -> Ns<'_> {
 
 pub fn prefix() -> Vec<u8> {
 	let mut k = super::kv::new().encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x6e, 0x73, 0x00]);
+	k.extend_from_slice(&[b'!', b'n', b's', 0x00]);
 	k
 }
 
 pub fn suffix() -> Vec<u8> {
 	let mut k = super::kv::new().encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x6e, 0x73, 0xff]);
+	k.extend_from_slice(&[b'!', b'n', b's', 0xff]);
 	k
 }
 
 impl<'a> Ns<'a> {
 	pub fn new(ns: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x21, // !
-			_b: 0x6e, // n
-			_c: 0x73, // s
+			__: b'/',
+			_a: b'!',
+			_b: b'n',
+			_c: b's',
 			ns,
 		}
 	}

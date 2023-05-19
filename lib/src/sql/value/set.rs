@@ -43,6 +43,15 @@ impl Value {
 							Ok(())
 						}
 					},
+					Part::Index(i) => match v.get_mut(&i.to_string()) {
+						Some(v) if v.is_some() => v.set(ctx, opt, txn, path.next(), val).await,
+						_ => {
+							let mut obj = Value::base();
+							obj.set(ctx, opt, txn, path.next(), val).await?;
+							v.insert(i.to_string(), obj);
+							Ok(())
+						}
+					},
 					_ => Ok(()),
 				},
 				// Current path part is an array

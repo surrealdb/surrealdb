@@ -70,7 +70,6 @@ enum Commands {
 	ShellCompletion(ShellCompletionArguments),
 }
 
-#[tokio::main]
 pub async fn init() -> ExitCode {
 	let args = Cli::parse();
 	let output = match args.command {
@@ -85,7 +84,8 @@ pub async fn init() -> ExitCode {
 	};
 	if let Err(e) = output {
 		error!(target: LOG, "{}", e);
-		return ExitCode::FAILURE;
+		ExitCode::FAILURE
+	} else {
+		ExitCode::SUCCESS
 	}
-	ExitCode::SUCCESS
 }

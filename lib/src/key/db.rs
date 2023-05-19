@@ -18,25 +18,25 @@ pub fn new<'a>(ns: &'a str, db: &'a str) -> Db<'a> {
 
 pub fn prefix(ns: &str) -> Vec<u8> {
 	let mut k = super::namespace::new(ns).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x64, 0x62, 0x00]);
+	k.extend_from_slice(&[b'!', b'd', b'b', 0x00]);
 	k
 }
 
 pub fn suffix(ns: &str) -> Vec<u8> {
 	let mut k = super::namespace::new(ns).encode().unwrap();
-	k.extend_from_slice(&[0x21, 0x64, 0x62, 0xff]);
+	k.extend_from_slice(&[b'!', b'd', b'b', 0xff]);
 	k
 }
 
 impl<'a> Db<'a> {
 	pub fn new(ns: &'a str, db: &'a str) -> Self {
 		Self {
-			__: 0x2f, // /
-			_a: 0x2a, // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: 0x21, // !
-			_c: 0x64, // d
-			_d: 0x62, // b
+			_b: b'!',
+			_c: b'd',
+			_d: b'b',
 			db,
 		}
 	}
