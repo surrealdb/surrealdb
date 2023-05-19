@@ -290,10 +290,16 @@ impl Rpc {
 			// Kill a live query using a query id
 			"kill" => match params.needs_one() {
 				Ok(Value::Uuid(v)) => match rpc.read().await.kill(Value::Uuid(v.clone())).await {
-					Ok(val) => {
-						LIVE_QUERIES.write().await.remove(&v.0);
-						Ok(val)
-					}
+					Ok(val) => match LIVE_QUERIES.write().await.remove(&v.0) {
+						Some(_) => Ok(val),
+						None => {
+							warn!(
+								target: LOG,
+								"Unknown live query to unregister from websocket: {:?}", v.0
+							);
+							Ok(val)
+						}
+					},
 					Err(e) => Err(e),
 				},
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
@@ -301,14 +307,24 @@ impl Rpc {
 			// Setup a live query on a specific table
 			"live" => match params.needs_one() {
 				Ok(v) if v.is_table() || v.is_strand() => {
+					trace!(target: LOG, "Setting up live query on table: {:?}", v);
 					let ws_id = rpc.read().await.uuid.clone();
 					match rpc.read().await.live(v).await {
 						Ok(value) => {
 							let lqid = Uuid::parse_str(value.to_string().as_str()).unwrap();
 							LIVE_QUERIES.write().await.insert(lqid, ws_id);
+							trace!(
+								target: LOG,
+								"Registered live query {} on websocket {}",
+								lqid,
+								ws_id
+							);
 							Ok(value)
 						}
-						Err(e) => Err(e),
+						Err(e) => {
+							error!(target: LOG, "Live query was not registered: {:?}", e);
+							Err(e)
+						}
 					}
 				}
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
