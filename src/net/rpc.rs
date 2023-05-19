@@ -21,19 +21,23 @@ use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
 use surrealdb::dbs::Session;
+use surrealdb::sql;
 use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
-use surrealdb::sql::Uuid;
 use surrealdb::sql::Value;
 use tokio::sync::RwLock;
 use tracing::instrument;
+use uuid::Uuid;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 
 type WebSockets = RwLock<HashMap<Uuid, Sender<Message>>>;
+// Mapping of LiveQueryID to WebSocketID
+type LiveQueries = RwLock<HashMap<Uuid, Uuid>>;
 
 static WEBSOCKETS: Lazy<WebSockets> = Lazy::new(WebSockets::default);
+static LIVE_QUERIES: Lazy<LiveQueries> = Lazy::new(LiveQueries::default);
 
 #[allow(opaque_hidden_inferred_bound)]
 pub fn config() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
@@ -122,6 +126,24 @@ impl Rpc {
 		tokio::task::spawn(async move {
 			while let Ok(v) = DB.get().unwrap().notifications().recv().await {
 				trace!(target: LOG, "Received notification: {:?}", v);
+				// Find which websocket the notification belongs to
+				match LIVE_QUERIES.read().await.get(&v.id) {
+					Some(websocket_id) => {
+						// Send the notification to the client
+						let msg_text = serde_json::to_string(&v).unwrap();
+						WEBSOCKETS
+							.write()
+							.await
+							.get_mut(websocket_id)
+							.unwrap()
+							.send(Message::text(msg_text))
+							.await
+							.unwrap()
+					}
+					None => {
+						error!(target: LOG, "Unknown websocket for live query: {:?}", v.id);
+					}
+				}
 			}
 		});
 		// Get messages from the client
@@ -267,13 +289,28 @@ impl Rpc {
 			},
 			// Kill a live query using a query id
 			"kill" => match params.needs_one() {
-				Ok(v) if v.is_uuid() => rpc.read().await.kill(v).await,
+				Ok(Value::Uuid(v)) => match rpc.read().await.kill(Value::Uuid(v.clone())).await {
+					Ok(val) => {
+						LIVE_QUERIES.write().await.remove(&v.0);
+						Ok(val)
+					}
+					Err(e) => Err(e),
+				},
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Setup a live query on a specific table
 			"live" => match params.needs_one() {
-				Ok(v) if v.is_table() => rpc.read().await.live(v).await,
-				Ok(v) if v.is_strand() => rpc.read().await.live(v).await,
+				Ok(v) if v.is_table() || v.is_strand() => {
+					let ws_id = rpc.read().await.uuid.clone();
+					match rpc.read().await.live(v).await {
+						Ok(value) => {
+							let lqid = Uuid::parse_str(value.to_string().as_str()).unwrap();
+							LIVE_QUERIES.write().await.insert(lqid, ws_id);
+							Ok(value)
+						}
+						Err(e) => Err(e),
+					}
+				}
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Specify a connection-wide parameter
@@ -374,7 +411,7 @@ impl Rpc {
 		Ok(Value::None)
 	}
 
-	#[instrument(skip_all, name = "rpc use", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc use", fields(websocket=self.uuid.to_string()))]
 	async fn yuse(&mut self, ns: Value, db: Value) -> Result<Value, Error> {
 		if let Value::Strand(ns) = ns {
 			self.session.ns = Some(ns.0);
@@ -385,7 +422,7 @@ impl Rpc {
 		Ok(Value::None)
 	}
 
-	#[instrument(skip_all, name = "rpc signup", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc signup", fields(websocket=self.uuid.to_string()))]
 	async fn signup(&mut self, vars: Object) -> Result<Value, Error> {
 		crate::iam::signup::signup(&mut self.session, vars)
 			.await
@@ -393,20 +430,20 @@ impl Rpc {
 			.map_err(Into::into)
 	}
 
-	#[instrument(skip_all, name = "rpc signin", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc signin", fields(websocket=self.uuid.to_string()))]
 	async fn signin(&mut self, vars: Object) -> Result<Value, Error> {
 		crate::iam::signin::signin(&mut self.session, vars)
 			.await
 			.map(Into::into)
 			.map_err(Into::into)
 	}
-	#[instrument(skip_all, name = "rpc invalidate", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc invalidate", fields(websocket=self.uuid.to_string()))]
 	async fn invalidate(&mut self) -> Result<Value, Error> {
 		crate::iam::clear::clear(&mut self.session).await?;
 		Ok(Value::None)
 	}
 
-	#[instrument(skip_all, name = "rpc auth", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc auth", fields(websocket=self.uuid.to_string()))]
 	async fn authenticate(&mut self, token: Strand) -> Result<Value, Error> {
 		crate::iam::verify::token(&mut self.session, token.0).await?;
 		Ok(Value::None)
@@ -416,7 +453,7 @@ impl Rpc {
 	// Methods for identification
 	// ------------------------------
 
-	#[instrument(skip_all, name = "rpc info", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc info", fields(websocket=self.uuid.to_string()))]
 	async fn info(&self) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
@@ -436,7 +473,7 @@ impl Rpc {
 	// Methods for setting variables
 	// ------------------------------
 
-	#[instrument(skip_all, name = "rpc set", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc set", fields(websocket=self.uuid.to_string()))]
 	async fn set(&mut self, key: Strand, val: Value) -> Result<Value, Error> {
 		match val {
 			// Remove the variable if undefined
@@ -447,7 +484,7 @@ impl Rpc {
 		Ok(Value::Null)
 	}
 
-	#[instrument(skip_all, name = "rpc unset", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc unset", fields(websocket=self.uuid.to_string()))]
 	async fn unset(&mut self, key: Strand) -> Result<Value, Error> {
 		self.vars.remove(&key.0);
 		Ok(Value::Null)
@@ -457,7 +494,7 @@ impl Rpc {
 	// Methods for live queries
 	// ------------------------------
 
-	#[instrument(skip_all, name = "rpc kill", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc kill", fields(websocket=self.uuid.to_string()))]
 	async fn kill(&self, id: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
@@ -478,7 +515,7 @@ impl Rpc {
 		Ok(res)
 	}
 
-	#[instrument(skip_all, name = "rpc live", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc live", fields(websocket=self.uuid.to_string()))]
 	async fn live(&self, tb: Value) -> Result<Value, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
@@ -503,7 +540,7 @@ impl Rpc {
 	// Methods for selecting
 	// ------------------------------
 
-	#[instrument(skip_all, name = "rpc select", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc select", fields(websocket=self.uuid.to_string()))]
 	async fn select(&self, what: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -533,7 +570,7 @@ impl Rpc {
 	// Methods for creating
 	// ------------------------------
 
-	#[instrument(skip_all, name = "rpc create", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc create", fields(websocket=self.uuid.to_string()))]
 	async fn create(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -564,7 +601,7 @@ impl Rpc {
 	// Methods for updating
 	// ------------------------------
 
-	#[instrument(skip_all, name = "rpc update", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc update", fields(websocket=self.uuid.to_string()))]
 	async fn update(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -595,7 +632,7 @@ impl Rpc {
 	// Methods for changing
 	// ------------------------------
 
-	#[instrument(skip_all, name = "rpc change", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc change", fields(websocket=self.uuid.to_string()))]
 	async fn change(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -626,7 +663,7 @@ impl Rpc {
 	// Methods for modifying
 	// ------------------------------
 
-	#[instrument(skip_all, name = "rpc modify", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc modify", fields(websocket=self.uuid.to_string()))]
 	async fn modify(&self, what: Value, data: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -657,7 +694,7 @@ impl Rpc {
 	// Methods for deleting
 	// ------------------------------
 
-	#[instrument(skip_all, name = "rpc delete", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc delete", fields(websocket=self.uuid.to_string()))]
 	async fn delete(&self, what: Value) -> Result<Value, Error> {
 		// Return a single result?
 		let one = what.is_thing();
@@ -687,7 +724,7 @@ impl Rpc {
 	// Methods for querying
 	// ------------------------------
 
-	#[instrument(skip_all, name = "rpc query", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc query", fields(websocket=self.uuid.to_string()))]
 	async fn query(&self, sql: Strand) -> Result<impl Serialize, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
@@ -701,7 +738,7 @@ impl Rpc {
 		Ok(res)
 	}
 
-	#[instrument(skip_all, name = "rpc query_with", fields(websocket=self.uuid.to_raw()))]
+	#[instrument(skip_all, name = "rpc query_with", fields(websocket=self.uuid.to_string()))]
 	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<impl Serialize, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
