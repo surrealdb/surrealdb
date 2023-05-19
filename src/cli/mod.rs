@@ -4,7 +4,6 @@ mod config;
 mod export;
 mod import;
 mod isready;
-mod shell_completion;
 mod sql;
 mod start;
 pub(crate) mod validator;
@@ -12,7 +11,6 @@ mod version;
 
 pub use config::CF;
 
-use crate::cli::shell_completion::ShellCompletionArguments;
 use crate::cnf::LOGO;
 use backup::BackupCommandArguments;
 use clap::{Parser, Subcommand};
@@ -66,8 +64,6 @@ enum Commands {
 		visible_alias = "isready"
 	)]
 	IsReady(IsReadyCommandArguments),
-	#[command(about = "Generate shell completion script", visible_alias = "shell")]
-	ShellCompletion(ShellCompletionArguments),
 }
 
 pub async fn init() -> ExitCode {
@@ -80,7 +76,6 @@ pub async fn init() -> ExitCode {
 		Commands::Version => version::init(),
 		Commands::Sql(args) => sql::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
-		Commands::ShellCompletion(args) => shell_completion::init(args).await,
 	};
 	if let Err(e) = output {
 		error!(target: LOG, "{}", e);
