@@ -71,7 +71,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(self.id.into())
+		Ok(Value::LiveQueryID(self.id.into()))
 	}
 }
 

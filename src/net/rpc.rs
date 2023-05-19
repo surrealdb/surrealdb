@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
-use surrealdb::dbs::Session;
+use surrealdb::dbs::{Response, Session};
 use surrealdb::sql;
 use surrealdb::sql::Array;
 use surrealdb::sql::Object;
@@ -128,17 +128,18 @@ impl Rpc {
 				trace!(target: LOG, "Received notification: {:?}", v);
 				// Find which websocket the notification belongs to
 				match LIVE_QUERIES.read().await.get(&v.id) {
-					Some(websocket_id) => {
+					Some(live_id) => {
 						// Send the notification to the client
 						let msg_text = serde_json::to_string(&v).unwrap();
-						WEBSOCKETS
-							.write()
-							.await
-							.get_mut(websocket_id)
-							.unwrap()
-							.send(Message::text(msg_text))
-							.await
-							.unwrap()
+						let mut ws_write = WEBSOCKETS.write().await;
+						match ws_write.get_mut(live_id) {
+							None => {
+								error!(target: LOG, "WebSocket not found for lq: {:?}", live_id);
+							}
+							Some(ref mut websocket_id) => {
+								ws.send(Message::text(msg_text)).await.unwrap()
+							}
+						}
 					}
 					None => {
 						error!(target: LOG, "Unknown websocket for live query: {:?}", v.id);
@@ -312,13 +313,7 @@ impl Rpc {
 					match rpc.read().await.live(v).await {
 						Ok(value) => {
 							let lqid = Uuid::parse_str(value.to_string().as_str()).unwrap();
-							LIVE_QUERIES.write().await.insert(lqid, ws_id);
-							trace!(
-								target: LOG,
-								"Registered live query {} on websocket {}",
-								lqid,
-								ws_id
-							);
+							// TODO DELETE THIS BRANCH OF METHOD HANDLING
 							Ok(value)
 						}
 						Err(e) => {
@@ -387,6 +382,7 @@ impl Rpc {
 			// Run a full SurrealQL query against the database
 			"query" => match params.needs_one_or_two() {
 				Ok((Value::Strand(s), o)) if o.is_none_or_null() => {
+					trace!("Executing first match block strand={:?}, o={:?}", s, o);
 					return match rpc.read().await.query(s).await {
 						Ok(v) => res::success(id, v).send(out, chn).await,
 						Err(e) => {
@@ -395,8 +391,29 @@ impl Rpc {
 					};
 				}
 				Ok((Value::Strand(s), Value::Object(o))) => {
+					trace!("Executing second match block strand={:?}, object={:?}", s, o);
+					let ws_id = rpc.read().await.uuid.clone();
 					return match rpc.read().await.query_with(s, o).await {
-						Ok(v) => res::success(id, v).send(out, chn).await,
+						Ok(v) => {
+							trace!("Query result: {:?}", &v);
+							// Processing results in case we need to (un)register live queries
+							for res in &v {
+								match &res.result {
+									Ok(Value::LiveQueryID(lqid)) => {
+										LIVE_QUERIES.write().await.insert(lqid.0, ws_id);
+										trace!(
+											target: LOG,
+											"Registered live query {} on websocket {}",
+											lqid,
+											ws_id
+										);
+									}
+									// TODO need to handle kill as well
+									_ => {}
+								}
+							}
+							res::success(id, v).send(out, chn).await
+						}
 						Err(e) => {
 							res::failure(id, Failure::custom(e.to_string())).send(out, chn).await
 						}
@@ -755,7 +772,7 @@ impl Rpc {
 	}
 
 	#[instrument(skip_all, name = "rpc query_with", fields(websocket=self.uuid.to_string()))]
-	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<impl Serialize, Error> {
+	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<Vec<Response>, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
