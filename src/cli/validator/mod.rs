@@ -59,6 +59,6 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 		16 => Ok(v.to_string()),
 		24 => Ok(v.to_string()),
 		32 => Ok(v.to_string()),
-		_ => Err(String::from("Ensure your database encryption key is 16, 24, or 32 bits long")),
+		_ => Err(String::from("Ensure your database encryption key is 16, 24, or 32 bytes long")),
 	}
 }
