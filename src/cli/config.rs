@@ -77,12 +77,18 @@ pub fn init(matches: &clap::ArgMatches) {
 #[cfg(test)]
 mod tests {
 	use super::Config;
+	use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 	#[test]
 	fn verify_root() {
 		let mut cfg = Config {
 			user: "root".to_owned(),
-			..Default::default()
+			pass: None,
+			strict: Default::default(),
+			bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+			path: Default::default(),
+			crt: Default::default(),
+			key: Default::default(),
 		};
 
 		assert!(!cfg.verify_root("root", "any"));
@@ -91,6 +97,6 @@ mod tests {
 
 		assert!(!cfg.verify_root("admin", "secret"));
 		assert!(!cfg.verify_root("root", "12345"));
-		assert!(cfg.verify_root("root", "root"));
+		assert!(cfg.verify_root("root", "secret"));
 	}
 }
