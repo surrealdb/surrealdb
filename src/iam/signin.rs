@@ -290,11 +290,9 @@ pub async fn su(
 	// Get the config options
 	let opts = CF.get().unwrap();
 	// Attempt to verify the root user
-	if let Some(root) = &opts.pass {
-		if user == opts.user && &pass == root {
-			session.au = Arc::new(Auth::Kv);
-			return Ok(None);
-		}
+	if opts.verify_root(&user, &pass) {
+		session.au = Arc::new(Auth::Kv);
+		return Ok(None);
 	}
 	// The specified user login does not exist
 	Err(Error::InvalidAuth)

@@ -104,14 +104,12 @@ pub async fn basic(session: &mut Session, auth: String) -> Result<(), Error> {
 			return Err(Error::InvalidAuth);
 		}
 		// Check if this is root authentication
-		if let Some(root) = &opts.pass {
-			if user == opts.user && pass == root {
-				// Log the authentication type
-				debug!(target: LOG, "Authenticated as super user");
-				// Store the authentication data
-				session.au = Arc::new(Auth::Kv);
-				return Ok(());
-			}
+		if opts.verify_root(user, pass) {
+			// Log the authentication type
+			debug!(target: LOG, "Authenticated as super user");
+			// Store the authentication data
+			session.au = Arc::new(Auth::Kv);
+			return Ok(());
 		}
 		// Check if this is NS authentication
 		if let Some(ns) = &session.ns {
