@@ -11,6 +11,7 @@ use nom::branch::alt;
 use nom::character::complete::char;
 use nom::combinator::map;
 use nom::combinator::opt;
+use nom::sequence::delimited;
 use nom::sequence::preceded;
 use nom::sequence::terminated;
 use serde::{Deserialize, Serialize};
@@ -147,6 +148,18 @@ impl fmt::Display for Range {
 }
 
 pub fn range(i: &str) -> IResult<&str, Range> {
+	alt((range_raw, range_single, range_double))(i)
+}
+
+fn range_single(i: &str) -> IResult<&str, Range> {
+	delimited(char('\''), range_raw, char('\''))(i)
+}
+
+fn range_double(i: &str) -> IResult<&str, Range> {
+	delimited(char('\"'), range_raw, char('\"'))(i)
+}
+
+pub fn range_raw(i: &str) -> IResult<&str, Range> {
 	let (i, tb) = ident_raw(i)?;
 	let (i, _) = char(':')(i)?;
 	let (i, beg) =
