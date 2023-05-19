@@ -52,7 +52,7 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "info")]
 	#[arg(value_parser = CustomEnvFilterParser::new())]
 	log: CustomEnvFilter,
-	#[arg(help = "Whether to show the startup banner")]
+	#[arg(help = "Whether to hide the startup banner")]
 	#[arg(env = "SURREAL_NO_BANNER", long)]
 	#[arg(default_value_t = false)]
 	no_banner: bool,
