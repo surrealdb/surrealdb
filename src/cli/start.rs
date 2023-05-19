@@ -62,13 +62,13 @@ pub struct StartCommandArguments {
 #[group(requires_all = ["kvs_ca", "kvs_crt", "kvs_key"], multiple = true)]
 struct StartCommandRemoteTlsOptions {
 	#[arg(help = "Path to the CA file used when connecting to the remote KV store")]
-	#[arg(env = "SURREAL_KVS_CA", long = "kvs-ca")]
+	#[arg(env = "SURREAL_KVS_CA", long = "kvs-ca", value_parser = super::validator::file_exists)]
 	kvs_ca: Option<PathBuf>,
 	#[arg(help = "Path to the certificate file used when connecting to the remote KV store")]
-	#[arg(env = "SURREAL_KVS_CRT", long = "kvs-crt")]
+	#[arg(env = "SURREAL_KVS_CRT", long = "kvs-crt", value_parser = super::validator::file_exists)]
 	kvs_crt: Option<PathBuf>,
 	#[arg(help = "Path to the private key file used when connecting to the remote KV store")]
-	#[arg(env = "SURREAL_KVS_KEY", long = "kvs-key")]
+	#[arg(env = "SURREAL_KVS_KEY", long = "kvs-key", value_parser = super::validator::file_exists)]
 	kvs_key: Option<PathBuf>,
 }
 
@@ -76,10 +76,10 @@ struct StartCommandRemoteTlsOptions {
 #[group(requires_all = ["web_crt", "web_key"], multiple = true)]
 struct StartCommandWebTlsOptions {
 	#[arg(help = "Path to the certificate file for encrypted client connections")]
-	#[arg(env = "SURREAL_WEB_CRT", long = "web-crt")]
+	#[arg(env = "SURREAL_WEB_CRT", long = "web-crt", value_parser = super::validator::file_exists)]
 	web_crt: Option<PathBuf>,
 	#[arg(help = "Path to the private key file for encrypted client connections")]
-	#[arg(env = "SURREAL_WEB_KEY", long = "web-key")]
+	#[arg(env = "SURREAL_WEB_KEY", long = "web-key", value_parser = super::validator::file_exists)]
 	web_key: Option<PathBuf>,
 }
 
@@ -105,15 +105,14 @@ pub async fn init(
 		println!("{LOGO}");
 	}
 	// Setup the cli options
-	let path_to_string = |x: PathBuf| x.into_os_string().into_string().unwrap();
 	let _ = config::CF.set(Config {
 		strict,
 		bind: listen_addresses.first().cloned().unwrap(),
 		path,
 		user,
 		pass,
-		crt: web.as_ref().and_then(|x| x.web_crt.clone().map(path_to_string)),
-		key: web.as_ref().and_then(|x| x.web_key.clone().map(path_to_string)),
+		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
+		key: web.as_ref().and_then(|x| x.web_key.clone()),
 	});
 	// Initiate environment
 	env::init().await?;

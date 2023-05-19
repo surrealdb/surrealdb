@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 pub(crate) mod parser;
 
 pub(crate) fn split_endpoint(v: &str) -> (&str, &str) {
@@ -19,6 +21,17 @@ pub(crate) fn path_valid(v: &str) -> Result<String, String> {
 		v if v.starts_with("fdb:") => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database path parameter")),
 	}
+}
+
+pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
+	let path = Path::new(path);
+	if !*path.try_exists().as_ref().map_err(ToString::to_string)? {
+		return Err(String::from("Ensure the file exists"));
+	}
+	if !path.is_file() {
+		return Err(String::from("Ensure the path is a file"));
+	}
+	Ok(path.to_owned())
 }
 
 pub(crate) fn conn_valid(v: &str) -> Result<String, String> {

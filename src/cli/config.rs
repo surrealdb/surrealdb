@@ -1,5 +1,5 @@
 use once_cell::sync::OnceCell;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 pub static CF: OnceCell<Config> = OnceCell::new();
 
@@ -10,6 +10,6 @@ pub struct Config {
 	pub path: String,
 	pub user: String,
 	pub pass: Option<String>,
-	pub crt: Option<String>,
-	pub key: Option<String>,
+	pub crt: Option<PathBuf>,
+	pub key: Option<PathBuf>,
 }
