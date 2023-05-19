@@ -1,4 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use pprof::criterion::{Output, PProfProfiler};
 use surrealdb::{dbs::Session, kvs::Datastore};
 
 macro_rules! query {
@@ -45,8 +46,20 @@ fn bench_executor(c: &mut Criterion) {
 		"CREATE person:one SET friend = person:two; CREATE person:two SET age = 30;",
 		"SELECT * FROM person:one.friend.age;"
 	);
+	#[cfg(feature = "scripting")]
+	query!(c, javascript_simple, "RETURN function() { return 1 + 1; };");
+	#[cfg(feature = "scripting")]
+	query!(
+		c,
+		javascript_function,
+		"RETURN function() { return surrealdb::functions::count([1, 2, 3]); };"
+	);
 	c.finish();
 }
 
-criterion_group!(benches, bench_executor);
+criterion_group!(
+	name = benches;
+	config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
+	targets = bench_executor
+);
 criterion_main!(benches);
