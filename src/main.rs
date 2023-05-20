@@ -34,9 +34,11 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod cli_integration {
-	// cargo test --package surreal --bin surreal --no-default-features --features storage-mem -- --nocapture
+	// cargo test --package surreal --bin surreal --no-default-features --features storage-mem -- cli_integration --nocapture
 
 	use rand::{thread_rng, Rng};
+	use std::fs;
+	use std::path::Path;
 	use std::process::{Command, Stdio};
 
 	/// Child is a (maybe running) CLI process. It can be killed by dropping it
@@ -50,6 +52,11 @@ mod cli_integration {
 			let stdin = self.inner.as_mut().unwrap().stdin.as_mut().unwrap();
 			use std::io::Write;
 			stdin.write_all(input.as_bytes()).unwrap();
+			self
+		}
+
+		fn kill(mut self) -> Self {
+			self.inner.as_mut().unwrap().kill().unwrap();
 			self
 		}
 
@@ -120,12 +127,33 @@ mod cli_integration {
 	}
 
 	#[test]
+	fn crt() {
+		let crt_path = Path::new(env!("OUT_DIR")).join("crt.crt");
+		let key_path = Path::new(env!("OUT_DIR")).join("key.pem");
+
+		let crt_path = crt_path.to_string_lossy().into_owned();
+		let key_path = key_path.to_string_lossy().into_owned();
+
+		let cert = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
+		fs::write(&crt_path, cert.serialize_pem().unwrap()).unwrap();
+		fs::write(&key_path, cert.serialize_private_key_pem().into_bytes()).unwrap();
+	}
+
+	#[test]
 	fn start() {
-		let port: u16 = thread_rng().gen_range(13000..14000);
+		let mut rng = thread_rng();
+
+		let port: u16 = rng.gen_range(13000..14000);
 		let addr = format!("127.0.0.1:{port}");
-		let _server = run(&format!(
-			"start --bind {addr} --user root --pass root memory --no-banner --log warn"
-		));
+
+		let pass = rng.gen::<u64>().to_string();
+
+		let start_args =
+			format!("start --bind {addr} --user root --pass {pass} memory --no-banner --log info");
+
+		println!("starting server with args: {start_args}");
+
+		let _server = run(&start_args);
 
 		std::thread::sleep(std::time::Duration::from_millis(10));
 
@@ -133,7 +161,7 @@ mod cli_integration {
 
 		assert_eq!(
 			run(&format!(
-				"sql --conn http://{addr} --user root --pass root --ns test --db test --multi"
+				"sql --conn http://{addr} --user root --pass {pass} --ns N --db D --multi"
 			))
 			.input("CREATE thing:one;\n")
 			.output(),
@@ -142,12 +170,46 @@ mod cli_integration {
 
 		{
 			let output = run(&format!(
-				"export --conn http://{addr} --user root --pass root --ns test --db test -"
+				"export --conn http://{addr} --user root --pass {pass} --ns N --db D -"
 			))
 			.output()
 			.unwrap();
 			assert!(output.contains("DEFINE TABLE thing SCHEMALESS PERMISSIONS NONE;"));
 			assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
 		}
+	}
+
+	#[test]
+	fn start_tls() {
+		let mut rng = thread_rng();
+
+		let port: u16 = rng.gen_range(13000..14000);
+		let addr = format!("127.0.0.1:{port}");
+
+		let pass = rng.gen::<u128>().to_string();
+
+		// Test the crt/key args but the keys are self signed so don't actually connect.
+		let crt_path = Path::new(env!("OUT_DIR")).join("crt.crt");
+		let key_path = Path::new(env!("OUT_DIR")).join("key.pem");
+
+		let crt_path = crt_path.to_string_lossy().into_owned();
+		let key_path = key_path.to_string_lossy().into_owned();
+
+		let cert = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
+		fs::write(&crt_path, cert.serialize_pem().unwrap()).unwrap();
+		fs::write(&key_path, cert.serialize_private_key_pem().into_bytes()).unwrap();
+
+		let start_args = format!(
+			"start --bind {addr} --user root --pass {pass} memory --log info --web-crt {crt_path} --web-key {key_path}"
+		);
+
+		println!("starting server with args: {start_args}");
+
+		let server = run(&start_args);
+
+		std::thread::sleep(std::time::Duration::from_millis(50));
+
+		let output = server.kill().output().unwrap_err();
+		assert!(output.contains("Started web server"));
 	}
 }
