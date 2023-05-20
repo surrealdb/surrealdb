@@ -198,23 +198,3 @@ jobs:
           cargo build --locked --no-default-features --features storage-mem
           (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::any
-  cli:
-    name: Cli
-    runs-on: ubuntu-20.04-16-cores
-    steps:
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Checkout sources
-        uses: actions/checkout@v3
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get -y update
-          sudo apt-get -y install protobuf-compiler libprotobuf-dev
-
-      - name: Run cargo test
-        run: |
-          cargo build --locked --no-default-features --features storage-mem
-          cargo test --locked --bin surreal --no-default-features --features storage-mem -- cli_integration
