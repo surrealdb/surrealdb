@@ -33,10 +33,9 @@ fn main() -> ExitCode {
 }
 
 #[cfg(test)]
-mod tests {
+mod cli_integration {
 	// cargo test --package surreal --bin surreal --no-default-features --features storage-mem -- --nocapture
 
-	use assert_cmd::prelude::*;
 	use rand::{thread_rng, Rng};
 	use std::process::{Command, Stdio};
 
@@ -80,7 +79,17 @@ mod tests {
 
 	/// Run the CLI with the given args
 	fn run(args: &str) -> Child {
-		let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME")).unwrap();
+		let mut path = std::env::current_exe().unwrap();
+		assert!(path.pop());
+		if path.ends_with("deps") {
+			assert!(path.pop());
+		}
+
+		// Note: Cargo would automatically build this binary for integration tests but
+		// the CI builds it manually such that the following works in a unit test.
+		path.push(format!("{}{}", env!("CARGO_PKG_NAME"), std::env::consts::EXE_SUFFIX));
+
+		let mut cmd = Command::new(path);
 		cmd.stdin(Stdio::piped());
 		cmd.stdout(Stdio::piped());
 		cmd.stderr(Stdio::piped());
