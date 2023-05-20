@@ -126,7 +126,7 @@ mod cli_integration {
 			);
 		}
 
-		// Export to stdout.
+		// Export to stdout
 		{
 			let args =
 				format!("export --conn http://{addr} --user root --pass {pass} --ns N --db D -");
@@ -153,14 +153,14 @@ mod cli_integration {
 			run(&args).output().expect("failed to run import: {args}");
 		}
 
-		// Query from the import
+		// Query from the import (pretty-printed this time)
 		{
 			let args = format!(
-				"sql --conn http://{addr} --user root --pass {pass} --ns N --db D2 --multi"
+				"sql --conn http://{addr} --user root --pass {pass} --ns N --db D2 --pretty"
 			);
 			assert_eq!(
 				run(&args).input("SELECT * FROM thing;\n").output(),
-				Ok("[{ id: thing:one }]\n\n".to_owned()),
+				Ok("[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n".to_owned()),
 				"failed to send sql: {args}"
 			);
 		}
