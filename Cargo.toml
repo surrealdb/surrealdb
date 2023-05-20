@@ -62,6 +62,7 @@ urlencoding = "2.1.2"
 warp = { version = "0.3.4", features = ["compression", "tls", "websocket"] }
 
 [dev-dependencies]
+assert_cmd = "2.0.11"
 tonic = "0.8.3"
 opentelemetry-proto = {version = "0.1.0", features = ["gen-tonic", "traces", "build-server"] }
 tokio-stream = { version = "0.1", features = ["net"] }

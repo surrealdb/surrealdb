@@ -31,3 +31,92 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
 	cli::init() // Initiate the command line
 }
+
+#[cfg(test)]
+mod tests {
+	use assert_cmd::prelude::*;
+	use rand::{thread_rng, Rng};
+	use std::process::{Command, Stdio};
+	struct Child {
+		inner: Option<std::process::Child>,
+	}
+
+	impl Child {
+		fn input(mut self, input: &str) -> Self {
+			let stdin = self.inner.as_mut().unwrap().stdin.as_mut().unwrap();
+			use std::io::Write;
+			stdin.write_all(input.as_bytes()).unwrap();
+			self
+		}
+
+		fn output(mut self) -> Result<String, String> {
+			let output = self.inner.take().unwrap().wait_with_output().unwrap();
+
+			let mut buf = String::from_utf8(output.stdout).unwrap();
+			buf.push_str(&String::from_utf8(output.stderr).unwrap());
+
+			if output.status.success() {
+				Ok(buf)
+			} else {
+				Err(buf)
+			}
+		}
+	}
+
+	impl Drop for Child {
+		fn drop(&mut self) {
+			if let Some(inner) = self.inner.as_mut() {
+				let _ = inner.kill();
+			}
+		}
+	}
+
+	fn run(args: &str) -> Child {
+		let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME")).unwrap();
+		cmd.stdin(Stdio::piped());
+		cmd.stdout(Stdio::piped());
+		cmd.stderr(Stdio::piped());
+		cmd.args(args.split_ascii_whitespace());
+		Child {
+			inner: Some(cmd.spawn().unwrap()),
+		}
+	}
+
+	#[test]
+	fn version() {
+		assert!(run("version").output().is_ok());
+	}
+
+	#[test]
+	fn help() {
+		assert!(run("help").output().is_ok());
+	}
+
+	#[test]
+	fn start() {
+		let port: u16 = thread_rng().gen_range(13000..14000);
+		let addr = format!("127.0.0.1:{port}");
+		let _server = run(&format!("start --bind {addr} --user root --pass root memory"));
+
+		std::thread::sleep(std::time::Duration::from_millis(10));
+
+		assert!(run(&format!("isready --conn http://{addr}")).output().is_ok());
+
+		assert_eq!(
+			run(&format!("sql --conn http://{addr} --user root --pass root --ns test --db test"))
+				.input("CREATE thing:one;\n")
+				.output(),
+			Ok("[{ id: thing:one }]\n\n".to_owned())
+		);
+
+		{
+			let output = run(&format!(
+				"export --conn http://{addr} --user root --pass root --ns test --db test -"
+			))
+			.output()
+			.unwrap();
+			assert!(output.contains("DEFINE TABLE thing SCHEMALESS PERMISSIONS NONE;"));
+			assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
+		}
+	}
+}
