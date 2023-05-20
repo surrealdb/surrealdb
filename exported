@@ -1,0 +1,30 @@
+-- ------------------------------
+-- OPTION
+-- ------------------------------
+
+OPTION IMPORT;
+
+-- ------------------------------
+-- TABLE: thing
+-- ------------------------------
+
+DEFINE TABLE thing SCHEMALESS PERMISSIONS NONE;
+
+-- ------------------------------
+-- TRANSACTION
+-- ------------------------------
+
+BEGIN TRANSACTION;
+
+-- ------------------------------
+-- TABLE DATA: thing
+-- ------------------------------
+
+UPDATE thing:one CONTENT { id: thing:one };
+
+-- ------------------------------
+-- TRANSACTION
+-- ------------------------------
+
+COMMIT TRANSACTION;
+

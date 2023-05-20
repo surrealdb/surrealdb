@@ -70,6 +70,11 @@ mod cli_integration {
 		}
 	}
 
+	fn tmp_file(name: &str) -> String {
+		let path = Path::new(env!("OUT_DIR")).join(name);
+		path.to_string_lossy().into_owned()
+	}
+
 	#[test]
 	fn version() {
 		assert!(run("version").output().is_ok());
@@ -88,19 +93,6 @@ mod cli_integration {
 	#[test]
 	fn nonexistent_option() {
 		assert!(run("version --turbo").output().is_err());
-	}
-
-	#[test]
-	fn crt() {
-		let crt_path = Path::new(env!("OUT_DIR")).join("crt.crt");
-		let key_path = Path::new(env!("OUT_DIR")).join("key.pem");
-
-		let crt_path = crt_path.to_string_lossy().into_owned();
-		let key_path = key_path.to_string_lossy().into_owned();
-
-		let cert = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
-		fs::write(&crt_path, cert.serialize_pem().unwrap()).unwrap();
-		fs::write(&key_path, cert.serialize_private_key_pem().into_bytes()).unwrap();
 	}
 
 	#[test]
@@ -123,23 +115,64 @@ mod cli_integration {
 
 		assert!(run(&format!("isready --conn http://{addr}")).output().is_ok());
 
-		assert_eq!(
-			run(&format!(
-				"sql --conn http://{addr} --user root --pass {pass} --ns N --db D --multi"
-			))
-			.input("CREATE thing:one;\n")
-			.output(),
-			Ok("[{ id: thing:one }]\n\n".to_owned())
-		);
-
+		// Create a record
 		{
-			let output = run(&format!(
-				"export --conn http://{addr} --user root --pass {pass} --ns N --db D -"
-			))
-			.output()
-			.unwrap();
+			let args =
+				format!("sql --conn http://{addr} --user root --pass {pass} --ns N --db D --multi");
+			assert_eq!(
+				run(&args).input("CREATE thing:one;\n").output(),
+				Ok("[{ id: thing:one }]\n\n".to_owned()),
+				"failed to send sql: {args}"
+			);
+		}
+
+		// Export to stdout.
+		{
+			let args =
+				format!("export --conn http://{addr} --user root --pass {pass} --ns N --db D -");
+			let output = run(&args).output().expect("failed to run stdout export: {args}");
 			assert!(output.contains("DEFINE TABLE thing SCHEMALESS PERMISSIONS NONE;"));
 			assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
+		}
+
+		// Export to file
+		let exported = {
+			let exported = tmp_file("exported.surql");
+			let args = format!(
+				"export --conn http://{addr} --user root --pass {pass} --ns N --db D {exported}"
+			);
+			run(&args).output().expect("failed to run file export: {args}");
+			exported
+		};
+
+		// Import the exported file
+		{
+			let args = format!(
+				"import --conn http://{addr} --user root --pass {pass} --ns N --db D2 {exported}"
+			);
+			run(&args).output().expect("failed to run import: {args}");
+		}
+
+		// Query from the import
+		{
+			let args = format!(
+				"sql --conn http://{addr} --user root --pass {pass} --ns N --db D2 --multi"
+			);
+			assert_eq!(
+				run(&args).input("SELECT * FROM thing;\n").output(),
+				Ok("[{ id: thing:one }]\n\n".to_owned()),
+				"failed to send sql: {args}"
+			);
+		}
+
+		// Unfinished backup CLI
+		{
+			let file = tmp_file("backup.db");
+			let args = format!("backup --user root --pass {pass} http://{addr} {file}");
+			run(&args).output().expect("failed to run backup: {args}");
+
+			// TODO: Once backups are functional, update this test.
+			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
 		}
 	}
 
@@ -153,11 +186,8 @@ mod cli_integration {
 		let pass = rng.gen::<u128>().to_string();
 
 		// Test the crt/key args but the keys are self signed so don't actually connect.
-		let crt_path = Path::new(env!("OUT_DIR")).join("crt.crt");
-		let key_path = Path::new(env!("OUT_DIR")).join("key.pem");
-
-		let crt_path = crt_path.to_string_lossy().into_owned();
-		let key_path = key_path.to_string_lossy().into_owned();
+		let crt_path = tmp_file("crt.crt");
+		let key_path = tmp_file("key.pem");
 
 		let cert = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
 		fs::write(&crt_path, cert.serialize_pem().unwrap()).unwrap();
