@@ -1,0 +1,46 @@
+CREATE company:surrealdb SET name = 'SurrealDB';
+CREATE article:`8424486b-85b3-4448-ac8d-5d51083391c7` SET time = time::now(), author = person:tobie;
+CREATE article:⟨8424486b-85b3-4448-ac8d-5d51083391c7⟩ SET time = time::now(), author = person:tobie;
+CREATE temperature:17493 SET time = time::now(), celsius = 37.5;
+// Set a new parameter
+LET $now = time::now();
+// Create a record with a complex ID using an object
+CREATE temperature:{ location: 'London', date: $now } SET
+	location = 'London',
+	date = $now,
+	temperature = 23.7
+;
+// Set a new parameter
+LET $now = time::now();
+// Create a record with a complex ID using an object
+CREATE temperature:{ location: 'London', date: $now } SET
+	location = 'London',
+	date = $now,
+	temperature = 23.7
+;
+// Set a new parameter
+LET $now = time::now();
+// Create a record with a complex ID using an array
+CREATE temperature:['London', $now] SET
+	location = 'London',
+	date = $now,
+	temperature = 23.7
+;
+
+// Generate a random Record ID
+CREATE temperature:rand() SET time = time::now(), celsius = 37.5;
+// Generate a ULID-based Record ID
+CREATE temperature:ulid() SET time = time::now(), celsius = 37.5;
+// Generate a UUIDv7-based Record ID
+CREATE temperature:uuid() SET time = time::now(), celsius = 37.5;
+
+-- Select all person records with IDs between the given range
+SELECT * FROM person:1..1000;
+-- Select all records for a particular location, inclusive
+SELECT * FROM temperature:['London', NONE]..=['London', time::now()];
+-- Select all temperature records with IDs less than a maximum value
+SELECT * FROM temperature:..['London', '2022-08-29T08:09:31'];
+-- Select all temperature records with IDs greater than a minimum value
+SELECT * FROM temperature:['London', '2022-08-29T08:03:39']..;
+-- Select all temperature records with IDs between the specified range
+SELECT * FROM temperature:['London', '2022-08-29T08:03:39']..['London', '2022-08-29T08:09:31'];

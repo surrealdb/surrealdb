@@ -1,0 +1,17 @@
+SELECT * FROM rand();
+SELECT * FROM rand::bool();
+SELECT * FROM rand::enum('one', 'two', 3, 4.15385, 'five', true);
+SELECT * FROM rand::float();
+SELECT * FROM rand::float(10, 15);
+SELECT * FROM rand::guid();
+SELECT * FROM rand::guid(10);
+SELECT * FROM rand::int();
+SELECT * FROM rand::int(10, 15);
+SELECT * FROM rand::string();
+SELECT * FROM rand::string(15);
+SELECT * FROM rand::string(10, 15);
+SELECT * FROM rand::time();
+SELECT * FROM rand::time(198371, 1223138713);
+SELECT * FROM rand::uuid();
+SELECT * FROM rand::uuid::v4();
+SELECT * FROM rand::uuid::v7();

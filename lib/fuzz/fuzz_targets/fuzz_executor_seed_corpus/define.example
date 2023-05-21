@@ -1,0 +1,261 @@
+-- Namepace for Abcum Ltd.
+DEFINE NAMESPACE abcum;
+
+-- Specify the namespace for the database
+USE NS abcum;
+-- Define database
+DEFINE DATABASE app_vitalsense;
+
+-- Specify the namespace
+USE NS abcum;
+-- Create the user
+DEFINE LOGIN username ON NAMESPACE PASSWORD '123456';
+
+-- Specify the namespace and database for the user
+USE NS abcum DB app_vitalsense;
+-- Create the user
+DEFINE LOGIN username ON DATABASE PASSWORD '123456';
+
+-- Specify the namespace and database for the token
+USE NS abcum DB app_vitalsense;
+
+-- Set the name of the token
+DEFINE TOKEN token_name
+  -- Use this OAuth provider for database authorization
+  ON DATABASE
+  -- Specify the cryptographic signature algorithm used to sign the token
+  TYPE HS512
+  -- Specify the public key so we can verify the authenticity of the token
+  VALUE "sNSYneezcr8kqphfOC6NwwraUHJCVAt0XjsRSNmssBaBRh3WyMa9TRfq8ST7fsU2H2kGiOpU4GbAF1bCiXmM1b3JGgleBzz7rsrz6VvYEM4q3CLkcO8CMBIlhwhzWmy8"
+;
+
+-- Specify the namespace for the token
+USE NS abcum;
+
+-- Set the name of the token
+DEFINE TOKEN token_name
+  -- Use this OAuth provider for namespace authorization
+  ON NAMESPACE
+  -- Specify the cryptographic signature algorithm used to sign the token
+  TYPE HS512
+  -- Specify the public key so we can verify the authenticity of the token
+  VALUE "sNSYneezcr8kqphfOC6NwwraUHJCVAt0XjsRSNmssBaBRh3WyMa9TRfq8ST7fsU2H2kGiOpU4GbAF1bCiXmM1b3JGgleBzz7rsrz6VvYEM4q3CLkcO8CMBIlhwhzWmy8"
+;
+
+-- Specify the namespace and database for the token
+USE NS abcum DB app_vitalsense;
+
+-- Set the name of the token
+DEFINE TOKEN token_name
+  -- Use this OAuth provider for database authorization
+  ON DATABASE
+  -- Specify the cryptographic signature algorithm used to sign the token
+  TYPE HS512
+  -- Specify the public key so we can verify the authenticity of the token
+  VALUE "sNSYneezcr8kqphfOC6NwwraUHJCVAt0XjsRSNmssBaBRh3WyMa9TRfq8ST7fsU2H2kGiOpU4GbAF1bCiXmM1b3JGgleBzz7rsrz6VvYEM4q3CLkcO8CMBIlhwhzWmy8"
+;
+
+-- Specify the namespace for the token
+USE NS abcum DB app_vitalsense;
+
+-- Define the scope
+DEFINE SCOPE account;
+
+-- Set the name of the token
+DEFINE TOKEN token_name
+  -- Use this OAuth provider for scope authorization
+  ON SCOPE account
+  -- Specify the cryptographic signature algorithm used to sign the token
+  TYPE HS512
+  -- Specify the public key so we can verify the authenticity of the token
+  VALUE "sNSYneezcr8kqphfOC6NwwraUHJCVAt0XjsRSNmssBaBRh3WyMa9TRfq8ST7fsU2H2kGiOpU4GbAF1bCiXmM1b3JGgleBzz7rsrz6VvYEM4q3CLkcO8CMBIlhwhzWmy8"
+;
+
+
+-- Enable scope authentication directly in SurrealDB
+DEFINE SCOPE account SESSION 24h
+	SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+	SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+;
+
+-- Declare the name of a table.
+DEFINE TABLE reading;
+
+-- Drop the table if it exists and create a new one with the same name.
+DEFINE TABLE reading DROP;
+
+-- Create schemafull user table.
+DEFINE TABLE user SCHEMAFULL;
+
+-- Define some fields.
+DEFINE FIELD firstName ON TABLE user TYPE string
+  ASSERT $value != NONE;
+DEFINE FIELD lastName ON TABLE user TYPE string
+  ASSERT $value != NONE;
+DEFINE FIELD email ON TABLE user TYPE string
+  ASSERT $value != NONE AND is::email($value);
+DEFINE INDEX userEmailIndex ON TABLE user COLUMNS email UNIQUE;
+
+-- SEE IT IN ACTION
+-- 1: Add a user with all required fields and an undefined one.
+CREATE user SET firstName = 'Tobie', lastName = 'Hitchcock', email = 'Tobie.Hitchcock@surrealdb.com', photoURI = 'photo/yxCFi22Jw2.webp';
+-- 2: Statement will fail because photoURI is not a defined field.
+
+-- Create schemaless user table.
+DEFINE TABLE user SCHEMALESS;
+
+-- Define some fields.
+DEFINE FIELD firstName ON TABLE user TYPE string
+  ASSERT $value != NONE;
+DEFINE FIELD lastName ON TABLE user TYPE string
+  ASSERT $value != NONE;
+DEFINE FIELD email ON TABLE user TYPE string
+  ASSERT $value != NONE AND is::email($value);
+DEFINE INDEX userEmailIndex ON TABLE user COLUMNS email UNIQUE;
+
+-- SEE IT IN ACTION - Example 1
+-- 1: Add a user with all required fields and an undefined one.
+CREATE user SET firstName = 'Tobie', lastName = 'Hitchcock', email = 'Tobie.Hitchcock@surrealdb.com', photoURI = 'photo/yxCFi22Jw2.webp';
+-- 2: Statement will succeed because user is a SCHEMALESS table.
+
+-- SEE IT IN ACTION - Example 2
+-- 1: Add a user with an invalid email address and include a new field that was never defined.
+CREATE user SET firstName = 'Jamie', lastName = 'Hitchcock', email = 'Jamie.Hitchcock', photoURI = 'photo/yxCFi22Jw2.webp';
+-- 2: Statement will fail because the value for email was not valid.
+
+-- Define a table as a view which aggregates data from the reading table
+DEFINE TABLE temperatures_by_month AS
+	SELECT
+		count() AS total,
+		time::month(recorded_at) AS month,
+		math::mean(temperature) AS average_temp
+	FROM reading
+	GROUP BY city
+;
+
+-- SEE IT IN ACTION
+-- 1: Add a new temperature reading with some basic attributes
+CREATE reading SET
+	temperature = 27.4,
+	recorded_at = time::now(),
+	city = 'London',
+	location = (-0.118092, 51.509865)
+;
+
+-- 2: Query the projection
+SELECT * FROM temperatures_by_month;
+
+
+-- Specify access permissions for the 'post' table
+DEFINE TABLE post SCHEMALESS
+	PERMISSIONS
+		FOR select
+			-- Published posts can be selected
+			WHERE published = true
+			-- A user can select all their own posts
+			OR user = $auth.id
+		FOR create, update
+			-- A user can create or update their own posts
+			WHERE user = $auth.id
+		FOR delete
+			-- A user can delete their own posts
+			WHERE user = $auth.id
+			-- Or an admin can delete any posts
+			OR $auth.admin = true
+;
+
+
+-- Create a new event whenever a user changes their email address
+DEFINE EVENT email ON TABLE user WHEN $before.email != $after.email THEN (
+	CREATE event SET user = $value.id, time = time::now(), value = $after.email, action = 'email_changed'
+);
+
+
+-- It is necessary to prefix the name of your function with "fn::"
+-- This indicates that it's a custom function
+DEFINE FUNCTION fn::greet($name: string) {
+	RETURN "Hello, " + $name + "!";
+}
+
+-- Returns: "Hello, Tobie!"
+RETURN fn::greet("Tobie");
+
+DEFINE FUNCTION fn::relation_exists(
+	$in: record(),
+	$tb: string,
+	$out: record()
+) {
+	LET $results = SELECT VALUE id FROM type::table($tb) WHERE in = $in AND out = $out;
+    RETURN array::len($results) > 0;
+};
+
+-- Declare the name of a field.
+DEFINE FIELD email ON TABLE user;
+
+-- Set a field to have the string data type
+DEFINE FIELD email ON TABLE user TYPE string;
+
+-- Set a field to have the datetime data type
+DEFINE FIELD created ON TABLE user TYPE datetime;
+
+-- Set a field to have the object data type
+DEFINE FIELD metadata ON TABLE user TYPE object;
+
+-- Set a field to have the bool data type
+DEFINE FIELD locked ON TABLE user TYPE bool;
+
+-- Set a field to have the array data type
+DEFINE FIELD roles ON TABLE user TYPE array;
+-- Set the contents of the array to only support a string data type
+DEFINE FIELD roles.* ON TABLE user TYPE string;
+
+-- Set a field to have the array data type
+DEFINE FIELD posts ON TABLE user TYPE array;
+-- Set the contents of the array to only support a record data type
+DEFINE FIELD posts.* ON TABLE user TYPE record;
+
+-- A user is not locked by default.
+DEFINE FIELD locked ON TABLE user TYPE bool
+  -- Set a default value if empty
+  VALUE $value OR false;
+
+-- Give the user table an email field. Store it in a string
+DEFINE FIELD email ON TABLE user TYPE string
+  -- Make this field required
+  ASSERT $value != NONE
+  -- Check if the value is a properly formatted email address
+  AND is::email($value);
+
+DEFINE FIELD resource on acl TYPE record 
+  ASSERT $value != NONE;
+DEFINE FIELD user ON TABLE acl TYPE record (user)
+  ASSERT $value != NONE;
+
+-- A user can have multiple permissions on a acl
+DEFINE FIELD permission ON TABLE acl TYPE array
+  -- The array must not be empty because at least one permission is required
+  ASSERT array::len($value) > 0;
+
+-- Assigned permissions are identified by strings
+DEFINE FIELD type.* ON TABLE resource TYPE string
+  -- Allow only these values in the array
+  ASSERT $value INSIDE ["create", "read", "write", "delete"];
+
+-- Specify a field on the user table
+DEFINE FIELD countrycode ON user TYPE string
+	-- Ensure country code is ISO-3166
+	ASSERT $value != NONE AND $value = /[A-Z]{3}/
+	-- Set a default value if empty
+	VALUE $value OR 'GBR'
+;
+
+-- Define a field with a single type
+DEFINE FIELD location ON TABLE restaurant TYPE geometry (point);
+-- Define a field with any geometric type
+DEFINE FIELD area ON TABLE restaurant TYPE geometry (feature);
+-- Define a field with specific geometric types
+DEFINE FIELD area ON TABLE restaurant TYPE geometry (polygon, multipolygon, collection);
+
+-- Make sure that email addresses in the user table are always unique
+DEFINE INDEX userEmailIndex ON TABLE user COLUMNS email UNIQUE;
+

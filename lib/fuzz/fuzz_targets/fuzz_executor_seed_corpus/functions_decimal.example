@@ -1,0 +1,16 @@
+SELECT * FROM type::bool(12345);
+SELECT * FROM type::datetime("2022-04-27T18:12:27+00:00");
+SELECT * FROM type::decimal("12345");
+SELECT * FROM type::duration("4h");
+SELECT * FROM type::float("12345");
+SELECT * FROM type::int("12345");
+SELECT * FROM type::number("12345");
+SELECT * FROM type::point(51.509865, -0.118092);
+SELECT * FROM type::point([51.509865, -0.118092]);
+SELECT * FROM type::regex("/[A-Z]{3}/");
+SELECT * FROM type::string(12345);
+LET $table = "person";
+SELECT * FROM type::table($table);
+LET $tb = "person";
+LET $id = "tobie";
+SELECT * FROM type::thing($tb, $id);

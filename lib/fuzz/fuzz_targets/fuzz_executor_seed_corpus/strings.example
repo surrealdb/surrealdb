@@ -1,0 +1,8 @@
+CREATE person SET text = 'Lorem ipsum dolor sit amet';
+CREATE person SET text = "Lorem ipsum dolor sit amet";
+CREATE person SET text = "I ❤️ SurrealDB";
+CREATE person SET text = "This
+is
+over
+multiple
+lines";

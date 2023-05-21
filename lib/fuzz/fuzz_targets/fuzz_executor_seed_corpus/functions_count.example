@@ -1,0 +1,17 @@
+SELECT * FROM count();
+SELECT * FROM count(true);
+SELECT * FROM count(10 > 15);
+SELECT * FROM count([1, 2, 3, null, 0, false, (15 > 10), rand::uuid()]);
+SELECT count() FROM [{ age: 33 }, { age: 45 }, { age: 39 }] GROUP ALL;
+SELECT count(age > 35) FROM [{ age: 33 }, { age: 45 }, { age: 39 }] GROUP ALL;
+SELECT
+	country,
+	count(age > 30) AS total
+FROM [
+	{ age: 33, country: 'GBR' },
+	{ age: 45, country: 'GBR' },
+	{ age: 39, country: 'USA' },
+	{ age: 29, country: 'GBR' },
+	{ age: 43, country: 'USA' }
+]
+GROUP BY country;

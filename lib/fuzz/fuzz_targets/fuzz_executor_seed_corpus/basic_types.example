@@ -1,0 +1,6 @@
+CREATE person SET children = NONE;
+CREATE person SET children = NONE, siblings = none;
+CREATE person SET children = NULL;
+CREATE person SET children = NULL, siblings = null;
+CREATE person SET newsletter = false, interested = true;
+CREATE person SET newsletter = FALSE, interested = True;

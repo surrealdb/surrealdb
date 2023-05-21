@@ -1,0 +1,2 @@
+SELECT * FROM meta::id(person:tobie);
+SELECT * FROM meta::tb(person:tobie);

@@ -1,0 +1,6 @@
+SELECT * FROM session::db();
+SELECT * FROM session::id();
+SELECT * FROM session::ip();
+SELECT * FROM session::ns();
+SELECT * FROM session::origin();
+SELECT * FROM session::sc();

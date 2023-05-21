@@ -1,0 +1,39 @@
+SELECT * FROM http::head('https://surrealdb.com');
+SELECT * FROM http::head('https://surrealdb.com', {
+	'x-my-header': 'some unique string'
+});
+SELECT * FROM http::get('https://surrealdb.com');
+SELECT * FROM http::get('https://surrealdb.com', {
+	'x-my-header': 'some unique string'
+});
+SELECT * FROM http::put('https://dummyjson.com/comments', {
+  "id": 1,
+  "body": "This is some awesome thinking!",
+  "postId": 100,
+  "user": {
+    "id": 63,
+    "username": "eburras1q"
+  }
+});
+SELECT * FROM http::post('https://dummyjson.com/comments/1', {
+  "id": 1,
+  "body": "This is some awesome thinking!",
+  "postId": 100,
+  "user": {
+    "id": 63,
+    "username": "eburras1q"
+  }
+});
+SELECT * FROM http::patch('https://dummyjson.com/comments/1', {
+  "id": 1,
+  "body": "This is some awesome thinking!",
+  "postId": 100,
+  "user": {
+    "id": 63,
+    "username": "eburras1q"
+  }
+});
+SELECT * FROM http::delete('https://dummyjson.com/comments/1');
+SELECT * FROM http::delete('https://dummyjson.com/comments/1', {
+	'x-my-header': 'some unique string'
+});

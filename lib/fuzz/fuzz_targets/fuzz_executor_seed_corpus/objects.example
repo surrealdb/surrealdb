@@ -1,0 +1,17 @@
+CREATE person SET metadata = {
+	interest_level: 83.67,
+	information: {
+		age: 23,
+		gender: 'm',
+	},
+	marketing: true,
+	activities: [
+		"clicked link",
+		"contac form",
+		"read email",
+		"viewed website",
+		"viewed website",
+		"viewed website",
+		"read email",
+	]
+};

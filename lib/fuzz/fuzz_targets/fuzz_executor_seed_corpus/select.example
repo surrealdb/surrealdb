@@ -1,0 +1,94 @@
+SELECT age, name, email FROM user;
+-- Use an expression as an alias
+SELECT age >= 18 AS adult FROM user;
+
+-- Select nested array values only
+SELECT *, tags.*.value AS tags FROM article;
+
+-- Select filtered nested array values
+SELECT addresses[WHERE active = true] FROM customer;
+
+-- Select a remote field from connected out graph edges
+SELECT ->like->friend.name AS friends FROM person:tobie;
+
+-- Use mathematical calculations in a select expression
+SELECT ( ( celsius * 2 ) + 30 ) AS fahrenheit FROM temperatue;
+
+-- Select manually generated object structure
+SELECT { weekly: false, monthly: true } AS `marketing settings` FROM user;
+
+-- Use the result of a subquery as a returned field
+SELECT *, (SELECT * FROM events WHERE type = 'activity' LIMIT 5) AS history FROM user;
+
+-- Use the parent instance's field in a subquery
+SELECT *, (SELECT * FROM events WHERE host == $parent.id) AS self_hosted FROM user;
+
+-- Select from multiple tables
+SELECT * FROM user, admin;
+
+-- Select data from a parameter
+SELECT * FROM $parameter WHERE admin = true;
+
+-- Select from multiple specific records
+SELECT * FROM user:tobie, user:jaime, company:surrealdb;
+
+-- Select from an array of values and records
+SELECT * FROM [3648937, "test", person:lrym5gur8hzws72ux5fa, person:4luro9170uwcv1xrfvby];
+
+-- Select from an object with nested values
+SELECT * FROM { person: person:lrym5gur8hzws72ux5fa, embedded: true };
+
+-- Select and filter records from a subquery
+SELECT * FROM (SELECT age >= 18 AS adult FROM user) WHERE adult = true;
+
+-- Simple conditional filtering
+SELECT * FROM article WHERE published = true;
+
+-- Conditional filtering based on graph edges
+SELECT * FROM profile WHERE count(->experience->organisation) > 3;
+
+-- Conditional filtering with boolean logic
+SELECT * FROM user WHERE (admin AND active) OR owner = true;
+
+-- Split the results by each value in an array
+SELECT * FROM user SPLIT emails;
+
+-- Split the results by each value in a nested array
+SELECT * FROM country SPLIT locations.cities;
+
+-- Group records by a single field
+SELECT country FROM user GROUP BY country;
+
+-- Group results by a nested field
+SELECT settings.published FROM article GROUP BY settings.published;
+
+-- Group results by multiple fields
+SELECT gender, country, city FROM person GROUP BY gender, country, city;
+
+-- Group results with aggregate functions
+SELECT count() AS total, math::sum(age), gender, country FROM person GROUP BY gender, country;
+
+-- Order records randomly
+SELECT * FROM user ORDER BY RAND();
+
+-- Order records descending by a single field
+SELECT * FROM song ORDER BY rating DESC;
+
+-- Order records by multiple fields independently
+SELECT * FROM song ORDER BY artist ASC, rating DESC;
+
+-- Order text fields with unicode collation
+SELECT * FROM article ORDER BY title COLLATE ASC;
+
+-- Order text fields with which include numeric values
+SELECT * FROM article ORDER BY title NUMERIC ASC;
+
+SELECT * FROM user LIMIT 50;
+
+SELECT * FROM user LIMIT 50 START 50;
+
+SELECT * FROM user:tobie FETCH account, account.users;
+
+SELECT * FROM person WHERE ->knows->person->(knows WHERE influencer = true) TIMEOUT 5s;
+
+SELECT ->purchased->product<-purchased<-person->purchased->product FROM person:tobie PARALLEL;

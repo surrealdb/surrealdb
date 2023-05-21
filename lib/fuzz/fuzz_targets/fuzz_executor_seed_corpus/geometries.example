@@ -1,0 +1,75 @@
+UPDATE city:london SET centre = (-0.118092, 51.509865);
+UPDATE city:london SET centre = {
+    type: "Point",
+    coordinates: [-0.118092, 51.509865],
+};
+CREATE journey SET route = {
+	type: "LineString",
+	coordinates: [
+		[10.0, 11.2], [10.5, 11.9]
+	]
+};
+UPDATE city:london SET boundary = {
+	type: "Polygon",
+	coordinates: [[
+		[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+		[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+		[-0.38314819, 51.37692386]
+	]]
+};
+UPDATE person:tobie SET locations = {
+	type: "MultiPoint",
+	coordinates: [
+		[10.0, 11.2],
+		[10.5, 11.9]
+	],
+};
+UPDATE travel:yellowstone SET routes = {
+	type: "MultiLinestring",
+	coordinates: [
+		[ [10.0, 11.2], [10.5, 11.9] ],
+		[ [11.0, 12.2], [11.5, 12.9], [12.0, 13.0] ]
+	]
+};
+UPDATE university:oxford SET locations = {
+	type: "MultiPolygon",
+	coordinates: [
+		[
+			[ [10.0, 11.2], [10.5, 11.9], [10.8, 12.0], [10.0, 11.2] ]
+		],
+		[
+			[ [9.0, 11.2], [10.5, 11.9], [10.3, 13.0], [9.0, 11.2] ]
+		]
+	]
+};
+UPDATE university:oxford SET buildings = {
+	type: "GeometryCollection",
+	geometries: [
+		{
+			type: "MultiPoint",
+			coordinates: [
+				[10.0, 11.2],
+				[10.5, 11.9]
+			],
+		},
+		{
+			type: "Polygon",
+			coordinates: [[
+				[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+				[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+				[-0.38314819, 51.37692386]
+			]]
+		},
+		{
+			type: "MultiPolygon",
+			coordinates: [
+				[
+					[ [10.0, 11.2], [10.5, 11.9], [10.8, 12.0], [10.0, 11.2] ]
+				],
+				[
+					[ [9.0, 11.2], [10.5, 11.9], [10.3, 13.0], [9.0, 11.2] ]
+				]
+			]
+		}
+	]
+};

@@ -1,0 +1,38 @@
+CREATE person SET scores = function() {
+	return [1,2,3].map(v => v * 10);
+};
+CREATE film SET
+	ratings = [
+		{ rating: 6, user: user:bt8e39uh1ouhfm8ko8s0 },
+		{ rating: 8, user: user:bsilfhu88j04rgs0ga70 },
+	],
+	featured = function() {
+		return this.ratings.filter(r => {
+			return r.rating >= 7;
+		}).map(r => {
+			return { ...r, rating: r.rating * 10 };
+		});
+	}
+;
+-- Create a new parameter
+LET $value = "SurrealDB";
+-- Create a new parameter
+LET $words = ["awesome", "advanced", "cool"];
+-- Pass the parameter values into the function
+CREATE article SET summary = function($value, $words) {
+	return `${arguments[0]} is ${arguments[1].join(', ')}`;
+};
+CREATE user:test SET created_at = function() {
+	return new Date();
+};
+CREATE user:test SET
+	session_timeout = function() {
+		return new Duration('1w');
+	},
+	best_friend = function() {
+		return new Record('user', 'joanna');
+	},
+	identifier = function() {
+		return new Uuid('03412258-988f-47cd-82db-549902cdaffe');
+	}
+;

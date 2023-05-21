@@ -1,0 +1,16 @@
+CREATE event SET year = 2022;
+CREATE event SET temperature = 41.5;
+SELECT * FROM <float> 13.5719384719384719385639856394139476937756394756;
+CREATE event SET
+	year = <int> 2022,
+	temperature = <float> 41.5,
+	horizon = <decimal> 13.5719384719384719385639856394139476937756394756
+;
+SELECT * FROM <float> 13.5719384719384719385639856394139476937756394756;
+SELECT * FROM <float> 0.3 + <float> 0.3 + <float> 0.3 + <float> 0.1;
+SELECT * FROM 0.3 + 0.3 + 0.3 + 0.1;
+SELECT * FROM <float> 13.5719384719384719385639856394139476937756394756;
+SELECT * FROM <float> 0.3 + <float> 0.3 + <float> 0.3 + <float> 0.1;
+SELECT * FROM <float> 0.3 + <float> 0.3 + <float> 0.3 + <float> 0.1;
+SELECT * FROM 0.3 + 0.3 + 0.3 + 0.1;
+CREATE circle SET radius = circumference / ( 2 * MATH::PI );

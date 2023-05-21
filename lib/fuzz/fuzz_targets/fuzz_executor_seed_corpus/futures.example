@@ -1,0 +1,10 @@
+CREATE person SET accessed_date = <future> { time::now() };
+CREATE person SET
+	birthday = "2007-06-22",
+	can_drive = <future> { time::now() > birthday + 18y }
+;
+CREATE person SET
+	name = 'Jason',
+	friends = [person:tobie, person:jaime],
+	adult_friends = <future> { friends[WHERE age > 18].name }
+;

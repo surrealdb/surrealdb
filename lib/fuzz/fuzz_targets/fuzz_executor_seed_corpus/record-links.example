@@ -1,0 +1,8 @@
+CREATE person SET name = 'Tobie';
+CREATE person:tester SET name = 'Tobie';
+CREATE person:jaime SET name = 'Jaime', friends = [person:tobie, person:simon];
+CREATE person:tobie SET name = 'Tobie', friends = [person:simon, person:marcus];
+CREATE person:simon SET name = 'Simon', friends = [person:jaime, person:tobie];
+CREATE person:marcus SET name = 'Marcus', friends = [person:tobie];
+SELECT friends.name FROM person:tobie;
+SELECT friends.friends.friends.name FROM person:tobie;

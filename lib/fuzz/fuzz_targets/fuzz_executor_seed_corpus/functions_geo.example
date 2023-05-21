@@ -1,0 +1,27 @@
+SELECT * FROM geo::area({
+	type: "Polygon",
+	coordinates: [[
+		[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+		[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+		[-0.38314819, 51.37692386]
+	]]
+});
+SELECT * FROM geo::area(12345);
+SELECT * FROM geo::bearing( (51.509865, -0.118092), (-0.118092, 51.509865) );
+SELECT * FROM geo::bearing(12345, true);
+SELECT * FROM geo::centroid({
+	type: "Polygon",
+	coordinates: [[
+		[-0.38314819, 51.37692386], [0.1785278, 51.37692386],
+		[0.1785278, 51.61460570], [-0.38314819, 51.61460570],
+		[-0.38314819, 51.37692386]
+	]]
+});
+SELECT * FROM geo::centroid(12345);
+SELECT * FROM geo::distance( (51.509865, -0.118092), (-0.118092, 51.509865) );
+SELECT * FROM geo::distance(12345, true);
+SELECT * FROM geo::hash::decode("mpuxk4s24f51");
+SELECT * FROM geo::hash::decode(12345);
+SELECT * FROM geo::hash::encode( (51.509865, -0.118092) );
+SELECT * FROM geo::hash::encode( (51.509865, -0.118092), 5 );
+SELECT * FROM geo::hash::encode(12345);
