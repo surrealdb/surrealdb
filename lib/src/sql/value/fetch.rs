@@ -34,6 +34,10 @@ impl Value {
 						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
 						None => Ok(()),
 					},
+					Part::Index(i) => match v.get_mut(&i.to_string()) {
+						Some(v) => v.fetch(ctx, opt, txn, path.next()).await,
+						None => Ok(()),
+					},
 					Part::All => self.fetch(ctx, opt, txn, path.next()).await,
 					_ => Ok(()),
 				},
