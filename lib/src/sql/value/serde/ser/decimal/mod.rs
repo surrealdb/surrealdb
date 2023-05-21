@@ -3,7 +3,6 @@ use crate::sql::value::serde::ser;
 use rust_decimal::Decimal;
 use serde::ser::Error as _;
 use serde::ser::Impossible;
-use std::fmt::Display;
 
 pub(super) struct Serializer;
 
@@ -22,11 +21,8 @@ impl ser::Serializer for Serializer {
 	const EXPECTED: &'static str = "a struct `Decimal`";
 
 	#[inline]
-	fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
-	where
-		T: Display,
-	{
-		value.to_string().parse::<Decimal>().map_err(Error::custom)
+	fn serialize_str(self, value: &str) -> Result<Self::Ok, Self::Error> {
+		value.parse::<Decimal>().map_err(Error::custom)
 	}
 }
 

@@ -2384,7 +2384,7 @@ mod tests {
 		assert_eq!(64, std::mem::size_of::<Value>());
 		assert_eq!(104, std::mem::size_of::<Error>());
 		assert_eq!(104, std::mem::size_of::<Result<Value, Error>>());
-		assert_eq!(40, std::mem::size_of::<crate::sql::number::Number>());
+		assert_eq!(24, std::mem::size_of::<crate::sql::number::Number>());
 		assert_eq!(24, std::mem::size_of::<crate::sql::strand::Strand>());
 		assert_eq!(16, std::mem::size_of::<crate::sql::duration::Duration>());
 		assert_eq!(12, std::mem::size_of::<crate::sql::datetime::Datetime>());
