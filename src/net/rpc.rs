@@ -200,6 +200,17 @@ impl Rpc {
 		trace!(target: LOG, "WebSocket {} disconnected", id);
 		// Remove this WebSocket from the list of WebSockets
 		WEBSOCKETS.write().await.remove(&id);
+		// Remove all live queries
+		let mut locked_lq_map = LIVE_QUERIES.write().await;
+		let mut live_query_to_gc: Vec<Uuid> = vec![];
+		for (key, value) in locked_lq_map.iter() {
+			if value == &id {
+				live_query_to_gc.push(key.clone());
+			}
+		}
+		for key in live_query_to_gc {
+			locked_lq_map.remove(&key);
+		}
 	}
 
 	/// Call RPC methods from the WebSocket
