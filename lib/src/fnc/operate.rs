@@ -1,4 +1,5 @@
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::TryAdd;
 use crate::sql::value::TryDiv;
 use crate::sql::value::TryMul;
@@ -154,7 +155,11 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(a.intersects(b).into())
 }
 
-pub fn matches(_a: &Value, _b: &Value) -> Result<Value, Error> {
+pub(crate) fn matches(
+	_exe: &Option<QueryExecutor>,
+	_a: &Value,
+	_b: &Value,
+) -> Result<Value, Error> {
 	trace!("TODO");
 	// TODO Temporary we always return true
 	// What should be done here:

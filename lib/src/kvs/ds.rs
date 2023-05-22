@@ -400,7 +400,7 @@ impl Datastore {
 		// Set strict config
 		opt.strict = strict;
 		// Compute the value
-		let res = val.compute(&ctx, &opt, &txn, None).await?;
+		let res = val.compute(&ctx, &opt, &txn, None, &None).await?;
 		// Store any data
 		match val.writeable() {
 			true => txn.lock().await.commit().await?,

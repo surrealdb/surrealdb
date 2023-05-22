@@ -3,94 +3,44 @@ use crate::err::Error;
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Cond, Expression, Idiom, Operator, Subquery, Table, Value};
 use async_recursion::async_recursion;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
-pub(super) enum Node {
-	Expression {
-		left: Box<Node>,
-		right: Box<Node>,
-		operator: Operator,
-	},
-	IndexedField(DefineIndexStatement),
-	NonIndexedField,
-	Scalar(Value),
-	Unsupported,
-}
+pub(super) struct Tree {}
 
-impl Node {
-	pub(super) fn is_scalar(&self) -> bool {
-		if let Node::Scalar(_) = self {
-			true
-		} else {
-			false
-		}
-	}
+pub(super) type IndexMap = HashMap<Idiom, DefineIndexStatement>;
 
-	pub(super) fn is_indexed_field(&self) -> Option<&DefineIndexStatement> {
-		if let Node::IndexedField(index) = self {
-			Some(index)
-		} else {
-			None
-		}
-	}
-
-	pub(super) fn to_array(&self) -> Result<Array, Error> {
-		let mut a = Array::with_capacity(1);
-		if let Node::Scalar(v) = self {
-			a.push(v.to_owned());
-		}
-		Ok(a)
-	}
-
-	pub(super) fn to_string(&self) -> Result<String, Error> {
-		if let Node::Scalar(v) = self {
-			Ok(v.clone().convert_to_string()?)
-		} else {
-			Err(Error::BypassQueryPlanner)
-		}
-	}
-
-	pub(super) fn explain(&self) -> Value {
-		match &self {
-			Node::Expression {
-				..
-			} => Value::from("Expression"),
-			Node::IndexedField(_) => Value::from("Indexed Field"),
-			Node::NonIndexedField => Value::from("Non indexed Field"),
-			Node::Scalar(v) => v.to_owned(),
-			Node::Unsupported => Value::from("Not supported"),
-		}
-	}
-}
-
-pub(super) struct TreeBuilder<'a> {
-	opt: &'a Options,
-	txn: &'a Transaction,
-	table: &'a Table,
-	indexes: Option<Arc<[DefineIndexStatement]>>,
-}
-
-impl<'a> TreeBuilder<'a> {
-	pub(super) async fn parse(
+impl Tree {
+	pub(super) async fn build<'a>(
 		opt: &'a Options,
 		txn: &'a Transaction,
 		table: &'a Table,
 		cond: &Option<Cond>,
-	) -> Result<Option<Node>, Error> {
+	) -> Result<(Option<Node>, IndexMap), Error> {
 		let mut builder = TreeBuilder {
 			opt,
 			txn,
 			table,
 			indexes: None,
+			index_map: HashMap::new(),
 		};
 		let mut root = None;
 		if let Some(cond) = cond {
 			root = Some(builder.eval_value(&cond.0).await?);
 		}
-		Ok(root)
+		Ok((root, builder.index_map))
 	}
+}
 
+struct TreeBuilder<'a> {
+	opt: &'a Options,
+	txn: &'a Transaction,
+	table: &'a Table,
+	indexes: Option<Arc<[DefineIndexStatement]>>,
+	index_map: HashMap<Idiom, DefineIndexStatement>,
+}
+
+impl<'a> TreeBuilder<'a> {
 	async fn find_index(&mut self, i: &Idiom) -> Result<Option<DefineIndexStatement>, Error> {
 		if self.indexes.is_none() {
 			let indexes = self
@@ -127,7 +77,8 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn eval_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
 		Ok(if let Some(index) = self.find_index(i).await? {
-			Node::IndexedField(index)
+			self.index_map.insert(i.clone(), index.clone());
+			Node::IndexedField(i.clone())
 		} else {
 			Node::NonIndexedField
 		})
@@ -148,5 +99,64 @@ impl<'a> TreeBuilder<'a> {
 			Subquery::Value(v) => self.eval_value(v).await?,
 			_ => Node::Unsupported,
 		})
+	}
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum Node {
+	Expression {
+		left: Box<Node>,
+		right: Box<Node>,
+		operator: Operator,
+	},
+	IndexedField(Idiom),
+	NonIndexedField,
+	Scalar(Value),
+	Unsupported,
+}
+
+impl Node {
+	pub(super) fn is_scalar(&self) -> bool {
+		if let Node::Scalar(_) = self {
+			true
+		} else {
+			false
+		}
+	}
+
+	pub(super) fn is_indexed_field(&self) -> Option<&Idiom> {
+		if let Node::IndexedField(idiom) = self {
+			Some(idiom)
+		} else {
+			None
+		}
+	}
+
+	pub(super) fn to_array(&self) -> Result<Array, Error> {
+		let mut a = Array::with_capacity(1);
+		if let Node::Scalar(v) = self {
+			a.push(v.to_owned());
+		}
+		Ok(a)
+	}
+
+	pub(super) fn to_string(&self) -> Result<String, Error> {
+		if let Node::Scalar(v) = self {
+			Ok(v.clone().convert_to_string()?)
+		} else {
+			Err(Error::BypassQueryPlanner)
+		}
+	}
+
+	pub(super) fn explain(&self) -> Value {
+		match &self {
+			Node::Expression {
+				..
+			} => Value::from("Expression"),
+			Node::IndexedField(_) => Value::from("Indexed Field"),
+			Node::NonIndexedField => Value::from("Non indexed Field"),
+			Node::Scalar(v) => v.to_owned(),
+			Node::Unsupported => Value::from("Not supported"),
+		}
 	}
 }

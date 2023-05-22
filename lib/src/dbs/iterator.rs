@@ -6,6 +6,7 @@ use crate::dbs::Transaction;
 use crate::dbs::LOG;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::plan::Plan;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
@@ -77,6 +78,7 @@ impl Iterator {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 	) -> Result<Value, Error> {
 		// Log the statement
 		trace!(target: LOG, "Iterating: {}", stm);
@@ -90,7 +92,7 @@ impl Iterator {
 		// Process any EXPLAIN clause
 		let explanation = self.output_explain(&run, opt, txn, stm)?;
 		// Process prepared values
-		self.iterate(&run, opt, txn, stm).await?;
+		self.iterate(&run, opt, txn, stm, exe).await?;
 		// Return any document errors
 		if let Some(e) = self.error.take() {
 			return Err(e);
@@ -241,7 +243,7 @@ impl Iterator {
 								}
 								_ => {
 									let x = vals.first();
-									let x = v.compute(ctx, opt, txn, Some(&x)).await?;
+									let x = v.compute(ctx, opt, txn, Some(&x), &None).await?;
 									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 								}
 							}
@@ -441,6 +443,7 @@ impl Iterator {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
@@ -450,7 +453,7 @@ impl Iterator {
 			false => {
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(ctx, opt, txn, stm, self).await?;
+					v.iterate(ctx, opt, txn, stm, exe, self).await?;
 				}
 				// Everything processed ok
 				Ok(())
@@ -458,7 +461,7 @@ impl Iterator {
 			// Run statements in parallel
 			true => {
 				// Create a new executor
-				let exe = executor::Executor::new();
+				let e = executor::Executor::new();
 				// Take all of the iterator values
 				let vals = mem::take(&mut self.entries);
 				// Create a channel to shutdown
@@ -469,7 +472,7 @@ impl Iterator {
 				let adocs = async {
 					// Process all prepared values
 					for v in vals {
-						exe.spawn(v.channel(ctx, opt, txn, stm, chn.clone()))
+						e.spawn(v.channel(ctx, opt, txn, stm, chn.clone()))
 							// Ensure we detach the spawned task
 							.detach();
 					}
@@ -482,7 +485,7 @@ impl Iterator {
 				let avals = async {
 					// Process all received values
 					while let Ok((k, v)) = docs.recv().await {
-						exe.spawn(Document::compute(ctx, opt, txn, stm, chn.clone(), k, v))
+						e.spawn(Document::compute(ctx, opt, txn, stm, exe, chn.clone(), k, v))
 							// Ensure we detach the spawned task
 							.detach();
 					}
@@ -499,7 +502,7 @@ impl Iterator {
 					let _ = end.send(()).await;
 				};
 				// Run all executor tasks
-				let fut = exe.run(exit.recv());
+				let fut = e.run(exit.recv());
 				// Wait for all closures
 				let res = futures::join!(adocs, avals, aproc, fut);
 				// Consume executor error
@@ -517,6 +520,7 @@ impl Iterator {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		thg: Option<Thing>,
 		val: Operable,
 	) {
@@ -534,7 +538,7 @@ impl Iterator {
 		let mut doc = Document::new(thg, &val.0, val.1);
 		// Process the document
 		let res = match stm {
-			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,
+			Statement::Select(_) => doc.select(ctx, opt, txn, stm, exe).await,
 			Statement::Create(_) => doc.create(ctx, opt, txn, stm).await,
 			Statement::Update(_) => doc.update(ctx, opt, txn, stm).await,
 			Statement::Relate(_) => doc.relate(ctx, opt, txn, stm).await,

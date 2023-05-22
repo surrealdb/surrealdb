@@ -23,7 +23,7 @@ impl Start {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<usize, Error> {
-		match self.0.compute(ctx, opt, txn, doc).await {
+		match self.0.compute(ctx, opt, txn, doc, &None).await {
 			// This is a valid starting number
 			Ok(Value::Number(Number::Int(v))) if v >= 0 => Ok(v as usize),
 			// An invalid value was specified

@@ -74,7 +74,7 @@ impl RelateStatement {
 		// Loop over the from targets
 		let from = {
 			let mut out = Vec::new();
-			match self.from.compute(ctx, opt, txn, doc).await? {
+			match self.from.compute(ctx, opt, txn, doc, &None).await? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -116,7 +116,7 @@ impl RelateStatement {
 		// Loop over the with targets
 		let with = {
 			let mut out = Vec::new();
-			match self.with.compute(ctx, opt, txn, doc).await? {
+			match self.with.compute(ctx, opt, txn, doc, &None).await? {
 				Value::Thing(v) => out.push(v),
 				Value::Array(v) => {
 					for v in v {
@@ -182,7 +182,7 @@ impl RelateStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn, &stm).await
+		i.output(ctx, opt, txn, &stm, &None).await
 	}
 }
 

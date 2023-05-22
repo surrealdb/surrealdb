@@ -42,11 +42,11 @@ impl<'a> Document<'a> {
 			ctx.add_value("after", self.current.deref());
 			ctx.add_value("before", self.initial.deref());
 			// Process conditional clause
-			let val = ev.when.compute(&ctx, opt, txn, Some(&self.current)).await?;
+			let val = ev.when.compute(&ctx, opt, txn, Some(&self.current), &None).await?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					v.compute(&ctx, opt, txn, Some(&self.current)).await?;
+					v.compute(&ctx, opt, txn, Some(&self.current), &None).await?;
 				}
 			}
 		}

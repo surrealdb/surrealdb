@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::fnc;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::error::IResult;
 use crate::sql::operator::{operator, Operator};
 use crate::sql::value::{single, value, Value};
@@ -67,8 +68,9 @@ impl Expression {
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&Value>,
+		exe: &Option<QueryExecutor>,
 	) -> Result<Value, Error> {
-		let l = self.l.compute(ctx, opt, txn, doc).await?;
+		let l = self.l.compute(ctx, opt, txn, doc, exe).await?;
 		match self.o {
 			Operator::Or => {
 				if let true = l.is_truthy() {
@@ -92,7 +94,7 @@ impl Expression {
 			}
 			_ => {} // Continue
 		}
-		let r = self.r.compute(ctx, opt, txn, doc).await?;
+		let r = self.r.compute(ctx, opt, txn, doc, exe).await?;
 		match self.o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
@@ -128,7 +130,7 @@ impl Expression {
 			Operator::NoneInside => fnc::operate::inside_none(&l, &r),
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
-			Operator::Matches(_) => fnc::operate::matches(&l, &r),
+			Operator::Matches(_) => fnc::operate::matches(exe, &l, &r),
 			_ => unreachable!(),
 		}
 	}

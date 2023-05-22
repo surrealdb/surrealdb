@@ -4,6 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::array::Uniq;
 use crate::sql::array::{array, Array};
 use crate::sql::block::{block, Block};
@@ -1973,6 +1974,7 @@ impl Value {
 		opt: &Options,
 		txn: &Transaction,
 		doc: Option<&'async_recursion Value>,
+		exe: &'async_recursion Option<QueryExecutor>,
 	) -> Result<Value, Error> {
 		match self {
 			Value::Thing(v) => v.compute(ctx, opt, txn, doc).await,
@@ -1986,7 +1988,7 @@ impl Value {
 			Value::Constant(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Function(v) => v.compute(ctx, opt, txn, doc).await,
 			Value::Subquery(v) => v.compute(ctx, opt, txn, doc).await,
-			Value::Expression(v) => v.compute(ctx, opt, txn, doc).await,
+			Value::Expression(v) => v.compute(ctx, opt, txn, doc, exe).await,
 			_ => Ok(self.to_owned()),
 		}
 	}

@@ -71,7 +71,7 @@ impl Subquery {
 		let opt = &opt.dive(2)?;
 		// Process the subquery
 		match self {
-			Self::Value(ref v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Value(ref v) => v.compute(ctx, opt, txn, doc, &None).await,
 			Self::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Output(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Select(ref v) => {

@@ -6,6 +6,7 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::plan::Plan;
 use crate::key::graph;
 use crate::key::thing;
@@ -22,23 +23,24 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match self {
-				Iterable::Value(v) => Self::iterate_value(ctx, opt, txn, stm, v, ite).await,
-				Iterable::Thing(v) => Self::iterate_thing(ctx, opt, txn, stm, v, ite).await?,
+				Iterable::Value(v) => Self::iterate_value(ctx, opt, txn, stm, exe, v, ite).await,
+				Iterable::Thing(v) => Self::iterate_thing(ctx, opt, txn, stm, exe, v, ite).await?,
 				Iterable::Mergeable(v, o) => {
-					Self::iterate_mergeable(ctx, opt, txn, stm, v, o, ite).await?;
+					Self::iterate_mergeable(ctx, opt, txn, stm, exe, v, o, ite).await?;
 				}
 				Iterable::Relatable(f, v, w) => {
-					Self::iterate_relatable(ctx, opt, txn, stm, f, v, w, ite).await?
+					Self::iterate_relatable(ctx, opt, txn, stm, exe, f, v, w, ite).await?
 				}
-				Iterable::Table(v) => Self::iterate_table(ctx, opt, txn, stm, v, ite).await?,
-				Iterable::Range(v) => Self::iterate_range(ctx, opt, txn, stm, v, ite).await?,
-				Iterable::Edges(e) => Self::iterate_edge(ctx, opt, txn, stm, e, ite).await?,
+				Iterable::Table(v) => Self::iterate_table(ctx, opt, txn, stm, exe, v, ite).await?,
+				Iterable::Range(v) => Self::iterate_range(ctx, opt, txn, stm, exe, v, ite).await?,
+				Iterable::Edges(e) => Self::iterate_edge(ctx, opt, txn, stm, exe, e, ite).await?,
 				Iterable::Index(t, p) => {
-					Self::iterate_index(ctx, opt, txn, stm, t, p, ite).await?;
+					Self::iterate_index(ctx, opt, txn, stm, exe, t, p, ite).await?;
 				}
 			}
 		}
@@ -50,13 +52,14 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		v: Value,
 		ite: &mut Iterator,
 	) {
 		// Pass the value through
 		let val = Operable::Value(v);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, None, val).await;
+		ite.process(ctx, opt, txn, stm, exe, None, val).await;
 	}
 
 	async fn iterate_thing(
@@ -64,6 +67,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		v: Thing,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -78,7 +82,7 @@ impl Iterable {
 			None => Value::None,
 		});
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, Some(v), val).await;
+		ite.process(ctx, opt, txn, stm, exe, Some(v), val).await;
 		Ok(())
 	}
 
@@ -87,6 +91,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		v: Thing,
 		o: Value,
 		ite: &mut Iterator,
@@ -104,7 +109,7 @@ impl Iterable {
 		// Create a new operable value
 		let val = Operable::Mergeable(x, o);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, Some(v), val).await;
+		ite.process(ctx, opt, txn, stm, exe, Some(v), val).await;
 		Ok(())
 	}
 
@@ -113,6 +118,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		f: Thing,
 		v: Thing,
 		w: Thing,
@@ -131,7 +137,7 @@ impl Iterable {
 		// Create a new operable value
 		let val = Operable::Relatable(f, x, w);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, Some(v), val).await;
+		ite.process(ctx, opt, txn, stm, exe, Some(v), val).await;
 		Ok(())
 	}
 
@@ -140,6 +146,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		v: Table,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -191,7 +198,7 @@ impl Iterable {
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					ite.process(ctx, opt, txn, stm, Some(rid), val).await;
+					ite.process(ctx, opt, txn, stm, exe, Some(rid), val).await;
 				}
 				continue;
 			}
@@ -205,6 +212,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		v: Range,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -273,7 +281,7 @@ impl Iterable {
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					ite.process(ctx, opt, txn, stm, Some(rid), val).await;
+					ite.process(ctx, opt, txn, stm, exe, Some(rid), val).await;
 				}
 				continue;
 			}
@@ -287,6 +295,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		e: Edges,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -412,7 +421,7 @@ impl Iterable {
 							None => Value::None,
 						});
 						// Process the record
-						ite.process(ctx, opt, txn, stm, Some(rid), val).await;
+						ite.process(ctx, opt, txn, stm, exe, Some(rid), val).await;
 					}
 					continue;
 				}
@@ -427,6 +436,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		table: Table,
 		plan: Plan,
 		ite: &mut Iterator,
@@ -462,7 +472,7 @@ impl Iterable {
 					None => Value::None,
 				});
 				// Process the document record
-				ite.process(ctx, opt, txn, stm, Some(rid), val).await;
+				ite.process(ctx, opt, txn, stm, exe, Some(rid), val).await;
 			}
 
 			// Collect the next batch of ids

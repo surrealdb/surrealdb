@@ -91,7 +91,7 @@ impl<'a> Document<'a> {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, Some(&self.current)).await? {
+							match cond.compute(ctx, opt, txn, Some(&self.current), &None).await? {
 								v if v.is_truthy() => {
 									if !opt.force && act != Action::Create {
 										// Delete the old value
@@ -182,7 +182,7 @@ impl<'a> Document<'a> {
 					match &tb.cond {
 						// There is a WHERE clause specified
 						Some(cond) => {
-							match cond.compute(ctx, opt, txn, doc).await? {
+							match cond.compute(ctx, opt, txn, doc, &None).await? {
 								v if v.is_truthy() => {
 									// Define the statement
 									let stm = match act {
@@ -270,25 +270,25 @@ impl<'a> Document<'a> {
 							self.chg(&mut ops, &act, v.to_idiom(), val);
 						}
 						"math::sum" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc, &None).await?;
 							self.chg(&mut ops, &act, v.to_idiom(), val);
 						}
 						"math::min" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc, &None).await?;
 							self.min(&mut ops, &act, v.to_idiom(), val);
 						}
 						"math::max" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc, &None).await?;
 							self.max(&mut ops, &act, v.to_idiom(), val);
 						}
 						"math::mean" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc, &None).await?;
 							self.mean(&mut ops, &act, v.to_idiom(), val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = v.compute(ctx, opt, txn, doc).await?;
+						let val = v.compute(ctx, opt, txn, doc, &None).await?;
 						self.set(&mut ops, v.to_idiom(), val);
 					}
 				}
@@ -302,25 +302,25 @@ impl<'a> Document<'a> {
 							self.chg(&mut ops, &act, i.to_owned(), val);
 						}
 						"math::sum" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc, &None).await?;
 							self.chg(&mut ops, &act, i.to_owned(), val);
 						}
 						"math::min" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc, &None).await?;
 							self.min(&mut ops, &act, i.to_owned(), val);
 						}
 						"math::max" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc, &None).await?;
 							self.max(&mut ops, &act, i.to_owned(), val);
 						}
 						"math::mean" => {
-							let val = f.args()[0].compute(ctx, opt, txn, doc).await?;
+							let val = f.args()[0].compute(ctx, opt, txn, doc, &None).await?;
 							self.mean(&mut ops, &act, i.to_owned(), val);
 						}
 						_ => unreachable!(),
 					},
 					_ => {
-						let val = v.compute(ctx, opt, txn, doc).await?;
+						let val = v.compute(ctx, opt, txn, doc, &None).await?;
 						self.set(&mut ops, i.to_owned(), val);
 					}
 				}

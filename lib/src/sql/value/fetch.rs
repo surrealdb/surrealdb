@@ -64,7 +64,7 @@ impl Value {
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							if w.compute(ctx, opt, txn, Some(v)).await?.is_truthy() {
+							if w.compute(ctx, opt, txn, Some(v), &None).await?.is_truthy() {
 								v.fetch(ctx, opt, txn, path).await?;
 							}
 						}

@@ -6,6 +6,7 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -87,10 +88,10 @@ impl SelectStatement {
 		// Ensure futures are stored
 		let opt = &opt.futures(false);
 		// Get a query planner
-		let planner = QueryPlanner::new(opt, &self.cond);
+		let mut planner = QueryPlanner::new(opt, &self.cond);
 		// Loop over the select targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc).await?;
+			let v = w.compute(ctx, opt, txn, doc, &None).await?;
 			match v {
 				Value::Table(v) => {
 					i.ingest(planner.get_iterable(txn, v).await?);
@@ -121,10 +122,12 @@ impl SelectStatement {
 				v => i.ingest(Iterable::Value(v)),
 			};
 		}
+		// Assign the query executor
+		let exe: QueryExecutor = planner.into();
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn, &stm).await
+		i.output(ctx, opt, txn, &stm, &Some(exe)).await
 	}
 }
 

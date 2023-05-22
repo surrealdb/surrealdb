@@ -151,13 +151,14 @@ impl Function {
 		match self {
 			Self::Cast(k, x) => {
 				// Compute the value to be cast
-				let a = x.compute(ctx, opt, txn, doc).await?;
+				let a = x.compute(ctx, opt, txn, doc, &None).await?;
 				// Run the cast function
 				a.convert_to(k)
 			}
 			Self::Normal(s, x) => {
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+				let a =
+					try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc, &None))).await?;
 				// Run the normal function
 				fnc::run(ctx, s, a).await
 			}
@@ -182,7 +183,8 @@ impl Function {
 					});
 				}
 				// Compute the function arguments
-				let a = try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc))).await?;
+				let a =
+					try_join_all(x.iter().map(|v| v.compute(ctx, opt, txn, doc, &None))).await?;
 				// Duplicate context
 				let mut ctx = Context::new(ctx);
 				// Process the function arguments

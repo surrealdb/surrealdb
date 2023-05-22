@@ -60,7 +60,7 @@ impl CreateStatement {
 		let opt = &opt.futures(false);
 		// Loop over the create targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc).await?;
+			let v = w.compute(ctx, opt, txn, doc, &None).await?;
 			match v {
 				Value::Table(v) => match &self.data {
 					// There is a data clause so check for a record id
@@ -123,7 +123,7 @@ impl CreateStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn, &stm).await
+		i.output(ctx, opt, txn, &stm, &None).await
 	}
 }
 

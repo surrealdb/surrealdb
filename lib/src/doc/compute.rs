@@ -6,6 +6,7 @@ use crate::dbs::Transaction;
 use crate::dbs::Workable;
 use crate::doc::Document;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::thing::Thing;
 use crate::sql::value::Value;
 use channel::Sender;
@@ -17,6 +18,7 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
+		exe: &Option<QueryExecutor>,
 		chn: Sender<Result<Value, Error>>,
 		thg: Option<Thing>,
 		val: Operable,
@@ -31,7 +33,7 @@ impl<'a> Document<'a> {
 		let mut doc = Document::new(thg, &ins.0, ins.1);
 		// Process the statement
 		let res = match stm {
-			Statement::Select(_) => doc.select(ctx, opt, txn, stm).await,
+			Statement::Select(_) => doc.select(ctx, opt, txn, stm, exe).await,
 			Statement::Create(_) => doc.create(ctx, opt, txn, stm).await,
 			Statement::Update(_) => doc.update(ctx, opt, txn, stm).await,
 			Statement::Relate(_) => doc.relate(ctx, opt, txn, stm).await,
