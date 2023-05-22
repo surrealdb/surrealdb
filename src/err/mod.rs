@@ -29,6 +29,9 @@ pub enum Error {
 	#[error("There was a problem connecting with the storage engine")]
 	InvalidStorage,
 
+	#[error("The operation is unsupported")]
+	OperationUnsupported,
+
 	#[error("There was a problem with the database: {0}")]
 	Db(#[from] SurrealError),
 
