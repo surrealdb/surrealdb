@@ -558,6 +558,7 @@ impl ops::Div for Number {
 	type Output = Self;
 	fn div(self, other: Self) -> Self {
 		match (self, other) {
+			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v / w),
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v / w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 / w),
@@ -571,6 +572,7 @@ impl<'a, 'b> ops::Div<&'b Number> for &'a Number {
 	type Output = Number;
 	fn div(self, other: &'b Number) -> Number {
 		match (self, other) {
+			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v / w),
 			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v / w),
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 / w),
@@ -659,6 +661,7 @@ fn decimal(i: &str) -> IResult<&str, Number> {
 mod tests {
 
 	use super::*;
+	use std::ops::Div;
 
 	#[test]
 	fn number_int() {
@@ -758,6 +761,12 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!("13.571938471938471938563985639413947693775636", format!("{}", out));
 		assert_eq!(out, Number::try_from("13.571938471938471938563985639413947693775636").unwrap());
+	}
+
+	#[test]
+	fn number_div_int() {
+		let res = Number::Int(3).div(Number::Int(2));
+		assert_eq!(res, Number::Int(1));
 	}
 
 	#[test]
