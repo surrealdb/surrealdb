@@ -123,7 +123,7 @@ impl Rpc {
 			}
 		});
 		// Send notifications to the client
-		tokio::task::spawn(async move {
+		tokio::task::spawn(async {
 			while let Ok(v) = DB.get().unwrap().notifications().recv().await {
 				trace!(target: LOG, "Received notification: {:?}", v);
 				// Find which websocket the notification belongs to
@@ -136,8 +136,9 @@ impl Rpc {
 							None => {
 								error!(target: LOG, "WebSocket not found for lq: {:?}", live_id);
 							}
-							Some(ref mut websocket_id) => {
-								ws.send(Message::text(msg_text)).await.unwrap()
+							Some(ref mut ws_sender) => {
+								ws_sender.send(Message::text(msg_text)).await.unwrap();
+								trace!(target: LOG, "Sent notification to lq: {:?}", live_id);
 							}
 						}
 					}
@@ -289,40 +290,14 @@ impl Rpc {
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Kill a live query using a query id
-			"kill" => match params.needs_one() {
-				Ok(Value::Uuid(v)) => match rpc.read().await.kill(Value::Uuid(v.clone())).await {
-					Ok(val) => match LIVE_QUERIES.write().await.remove(&v.0) {
-						Some(_) => Ok(val),
-						None => {
-							warn!(
-								target: LOG,
-								"Unknown live query to unregister from websocket: {:?}", v.0
-							);
-							Ok(val)
-						}
-					},
-					Err(e) => Err(e),
-				},
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+			"kill" =>  {
+				// Use 'query' method instead. Kill statements can be in statement block
+				return res::failure(id, Failure::METHOD_NOT_FOUND).send(out, chn).await,
 			},
 			// Setup a live query on a specific table
-			"live" => match params.needs_one() {
-				Ok(v) if v.is_table() || v.is_strand() => {
-					trace!(target: LOG, "Setting up live query on table: {:?}", v);
-					let ws_id = rpc.read().await.uuid.clone();
-					match rpc.read().await.live(v).await {
-						Ok(value) => {
-							let lqid = Uuid::parse_str(value.to_string().as_str()).unwrap();
-							// TODO DELETE THIS BRANCH OF METHOD HANDLING
-							Ok(value)
-						}
-						Err(e) => {
-							error!(target: LOG, "Live query was not registered: {:?}", e);
-							Err(e)
-						}
-					}
-				}
-				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+			"live" =>  {
+				// Use the query method instead. 'LIVE SELECT' can be part of statement blocks
+				return res::failure(id, Failure::METHOD_NOT_FOUND).send(out, chn).await,
 			},
 			// Specify a connection-wide parameter
 			"let" => match params.needs_one_or_two() {
