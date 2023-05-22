@@ -4,24 +4,41 @@ mod tree;
 
 use crate::dbs::{Iterable, Options, Transaction};
 use crate::err::Error;
-use crate::idx::planner::plan::{IndexOption, Plan, PlanBuilder};
-use crate::idx::planner::tree::{IndexMap, Node, Tree};
+use crate::idx::planner::executor::QueryExecutor;
+use crate::idx::planner::plan::{Plan, PlanBuilder};
+use crate::idx::planner::tree::{Node, Tree};
 use crate::sql::{Cond, Operator, Table};
 use std::collections::HashMap;
 
 pub(crate) struct QueryPlanner<'a> {
 	opt: &'a Options,
 	cond: &'a Option<Cond>,
-	indexes: HashMap<Table, IndexMap>,
+	executors: HashMap<String, QueryExecutor>,
 }
 
 impl<'a> QueryPlanner<'a> {
+	#[inline]
+	pub(crate) fn get_opt_query_executor(
+		pla: &Option<QueryPlanner<'_>>,
+		tb: &str,
+	) -> Option<QueryExecutor> {
+		if let Some(p) = pla {
+			p.get_query_executor(tb)
+		} else {
+			None
+		}
+	}
+
 	pub(crate) fn new(opt: &'a Options, cond: &'a Option<Cond>) -> Self {
 		Self {
 			opt,
 			cond,
-			indexes: HashMap::default(),
+			executors: HashMap::default(),
 		}
+	}
+
+	pub(crate) fn get_query_executor(&self, tb: &str) -> Option<QueryExecutor> {
+		self.executors.get(tb).cloned()
 	}
 
 	pub(crate) async fn get_iterable(
@@ -29,31 +46,27 @@ impl<'a> QueryPlanner<'a> {
 		txn: &Transaction,
 		t: Table,
 	) -> Result<Iterable, Error> {
-		let (root, indexes) = Tree::build(self.opt, txn, &t, self.cond).await?;
-		if !indexes.is_empty() {
-			if let Some(node) = root {
-				if let Some(plan) = AllAndStrategy::build(&node, &indexes)? {
-					self.indexes.insert(t.clone(), indexes);
-					return Ok(Iterable::Index(t, plan));
-				}
+		let res = Tree::build(self.opt, txn, &t, self.cond).await?;
+		if let Some((node, index_map)) = res {
+			if let Some(plan) = AllAndStrategy::build(&node)? {
+				self.executors.insert(t.0.clone(), plan.i.new_query_executor(index_map));
+				return Ok(Iterable::Index(t, plan));
 			}
-			self.indexes.insert(t.clone(), indexes);
+			self.executors.insert(t.0.clone(), QueryExecutor::new(index_map, None));
 		}
 		Ok(Iterable::Table(t))
 	}
 }
 
-struct AllAndStrategy<'a> {
-	i: &'a IndexMap,
+struct AllAndStrategy {
 	b: PlanBuilder,
 }
 
 /// Successful if every boolean operators are AND
 /// and there is at least one condition covered by an index
-impl<'a> AllAndStrategy<'a> {
-	fn build(node: &Node, i: &IndexMap) -> Result<Option<Plan>, Error> {
+impl AllAndStrategy {
+	fn build(node: &Node) -> Result<Option<Plan>, Error> {
 		let mut s = AllAndStrategy {
-			i,
 			b: PlanBuilder::default(),
 		};
 		match s.eval_node(node) {
@@ -66,10 +79,16 @@ impl<'a> AllAndStrategy<'a> {
 	fn eval_node(&mut self, node: &Node) -> Result<(), Error> {
 		match node {
 			Node::Expression {
+				index_option,
 				left,
 				right,
 				operator,
-			} => self.eval_expression(left, right, operator),
+			} => {
+				if let Some(io) = index_option {
+					self.b.add(io.clone());
+				}
+				self.eval_expression(left, right, operator)
+			}
 			Node::Unsupported => Err(Error::BypassQueryPlanner),
 			_ => Ok(()),
 		}
@@ -79,26 +98,8 @@ impl<'a> AllAndStrategy<'a> {
 		if op.eq(&Operator::Or) {
 			return Err(Error::BypassQueryPlanner);
 		}
-		if let Some(idiom) = left.is_indexed_field() {
-			if let Some(ix) = self.i.get(idiom) {
-				if let Some(index_option) = IndexOption::found(ix, op, right) {
-					self.b.add(index_option);
-					return Ok(());
-				}
-			}
-			self.eval_node(right)?;
-		} else if let Some(idiom) = right.is_indexed_field() {
-			if let Some(ix) = self.i.get(idiom) {
-				if let Some(index_option) = IndexOption::found(ix, op, left) {
-					self.b.add(index_option);
-					return Ok(());
-				}
-			}
-			self.eval_node(left)?;
-		} else {
-			self.eval_node(left)?;
-			self.eval_node(right)?;
-		}
+		self.eval_node(left)?;
+		self.eval_node(right)?;
 		Ok(())
 	}
 }

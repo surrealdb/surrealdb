@@ -8,6 +8,7 @@ use crate::doc::Document;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::plan::Plan;
+use crate::idx::planner::QueryPlanner;
 use crate::sql::array::Array;
 use crate::sql::edges::Edges;
 use crate::sql::field::Field;
@@ -78,7 +79,7 @@ impl Iterator {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		pla: &Option<QueryPlanner<'_>>,
 	) -> Result<Value, Error> {
 		// Log the statement
 		trace!(target: LOG, "Iterating: {}", stm);
@@ -92,7 +93,7 @@ impl Iterator {
 		// Process any EXPLAIN clause
 		let explanation = self.output_explain(&run, opt, txn, stm)?;
 		// Process prepared values
-		self.iterate(&run, opt, txn, stm, exe).await?;
+		self.iterate(&run, opt, txn, stm, pla).await?;
 		// Return any document errors
 		if let Some(e) = self.error.take() {
 			return Err(e);
@@ -443,7 +444,7 @@ impl Iterator {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		pla: &Option<QueryPlanner<'_>>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
@@ -453,7 +454,7 @@ impl Iterator {
 			false => {
 				// Process all prepared values
 				for v in mem::take(&mut self.entries) {
-					v.iterate(ctx, opt, txn, stm, exe, self).await?;
+					v.iterate(ctx, opt, txn, stm, pla, self).await?;
 				}
 				// Everything processed ok
 				Ok(())
@@ -485,7 +486,7 @@ impl Iterator {
 				let avals = async {
 					// Process all received values
 					while let Ok((k, v)) = docs.recv().await {
-						e.spawn(Document::compute(ctx, opt, txn, stm, exe, chn.clone(), k, v))
+						e.spawn(Document::compute(ctx, opt, txn, stm, pla, chn.clone(), k, v))
 							// Ensure we detach the spawned task
 							.detach();
 					}

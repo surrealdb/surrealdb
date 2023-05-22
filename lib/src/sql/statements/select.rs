@@ -6,7 +6,6 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::QueryPlanner;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
@@ -122,12 +121,10 @@ impl SelectStatement {
 				v => i.ingest(Iterable::Value(v)),
 			};
 		}
-		// Assign the query executor
-		let exe: QueryExecutor = planner.into();
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn, &stm, &Some(exe)).await
+		i.output(ctx, opt, txn, &stm, &Some(planner)).await
 	}
 }
 

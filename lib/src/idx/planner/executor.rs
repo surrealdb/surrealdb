@@ -1,16 +1,35 @@
+use crate::err::Error;
 use crate::idx::planner::tree::IndexMap;
-use crate::idx::planner::QueryPlanner;
-use crate::sql::Table;
-use std::collections::HashMap;
+use crate::sql::{Expression, Value};
+use std::sync::Arc;
 
+#[derive(Clone)]
 pub(crate) struct QueryExecutor {
-	indexes: HashMap<Table, IndexMap>,
+	inner: Arc<Inner>,
 }
 
-impl<'a> From<QueryPlanner<'a>> for QueryExecutor {
-	fn from(value: QueryPlanner<'a>) -> Self {
+struct Inner {
+	index_map: IndexMap,
+	pre_match: Option<Expression>,
+}
+
+impl QueryExecutor {
+	pub(super) fn new(index_map: IndexMap, pre_match: Option<Expression>) -> Self {
 		Self {
-			indexes: value.indexes,
+			inner: Arc::new(Inner {
+				index_map,
+				pre_match,
+			}),
 		}
+	}
+
+	pub(crate) fn matches(&self, exp: &Expression) -> Result<Value, Error> {
+		if let Some(pre_match) = &self.inner.pre_match {
+			if pre_match.eq(exp) {
+				return Ok(Value::Bool(true));
+			}
+		}
+		// TODO - check with index
+		todo!()
 	}
 }

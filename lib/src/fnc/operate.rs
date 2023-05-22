@@ -6,6 +6,7 @@ use crate::sql::value::TryMul;
 use crate::sql::value::TryPow;
 use crate::sql::value::TrySub;
 use crate::sql::value::Value;
+use crate::sql::Expression;
 
 pub fn or(a: Value, b: Value) -> Result<Value, Error> {
 	Ok(match a.is_truthy() {
@@ -155,16 +156,12 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(a.intersects(b).into())
 }
 
-pub(crate) fn matches(
-	_exe: &Option<QueryExecutor>,
-	_a: &Value,
-	_b: &Value,
-) -> Result<Value, Error> {
-	trace!("TODO");
-	// TODO Temporary we always return true
-	// What should be done here:
-	// Check against the FullText capabilities if it contains the term
-	Ok(Value::Bool(true))
+pub(crate) fn matches(exe: &Option<QueryExecutor>, e: &Expression) -> Result<Value, Error> {
+	if let Some(exe) = exe {
+		exe.matches(e)
+	} else {
+		Ok(Value::Bool(false))
+	}
 }
 
 #[cfg(test)]

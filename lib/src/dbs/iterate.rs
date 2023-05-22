@@ -6,8 +6,8 @@ use crate::dbs::Options;
 use crate::dbs::Statement;
 use crate::dbs::Transaction;
 use crate::err::Error;
-use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::plan::Plan;
+use crate::idx::planner::QueryPlanner;
 use crate::key::graph;
 use crate::key::thing;
 use crate::sql::dir::Dir;
@@ -23,24 +23,24 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		pla: &Option<QueryPlanner<'_>>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
 			match self {
-				Iterable::Value(v) => Self::iterate_value(ctx, opt, txn, stm, exe, v, ite).await,
-				Iterable::Thing(v) => Self::iterate_thing(ctx, opt, txn, stm, exe, v, ite).await?,
+				Iterable::Value(v) => Self::iterate_value(ctx, opt, txn, stm, v, ite).await,
+				Iterable::Thing(v) => Self::iterate_thing(ctx, opt, txn, stm, pla, v, ite).await?,
 				Iterable::Mergeable(v, o) => {
-					Self::iterate_mergeable(ctx, opt, txn, stm, exe, v, o, ite).await?;
+					Self::iterate_mergeable(ctx, opt, txn, stm, pla, v, o, ite).await?;
 				}
 				Iterable::Relatable(f, v, w) => {
-					Self::iterate_relatable(ctx, opt, txn, stm, exe, f, v, w, ite).await?
+					Self::iterate_relatable(ctx, opt, txn, stm, pla, f, v, w, ite).await?
 				}
-				Iterable::Table(v) => Self::iterate_table(ctx, opt, txn, stm, exe, v, ite).await?,
-				Iterable::Range(v) => Self::iterate_range(ctx, opt, txn, stm, exe, v, ite).await?,
-				Iterable::Edges(e) => Self::iterate_edge(ctx, opt, txn, stm, exe, e, ite).await?,
+				Iterable::Table(v) => Self::iterate_table(ctx, opt, txn, stm, pla, v, ite).await?,
+				Iterable::Range(v) => Self::iterate_range(ctx, opt, txn, stm, pla, v, ite).await?,
+				Iterable::Edges(e) => Self::iterate_edge(ctx, opt, txn, stm, pla, e, ite).await?,
 				Iterable::Index(t, p) => {
-					Self::iterate_index(ctx, opt, txn, stm, exe, t, p, ite).await?;
+					Self::iterate_index(ctx, opt, txn, stm, pla, t, p, ite).await?;
 				}
 			}
 		}
@@ -52,14 +52,13 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
 		v: Value,
 		ite: &mut Iterator,
 	) {
 		// Pass the value through
 		let val = Operable::Value(v);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, exe, None, val).await;
+		ite.process(ctx, opt, txn, stm, &None, None, val).await;
 	}
 
 	async fn iterate_thing(
@@ -67,7 +66,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		pla: &Option<QueryPlanner<'_>>,
 		v: Thing,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -81,8 +80,10 @@ impl Iterable {
 			Some(v) => Value::from(v),
 			None => Value::None,
 		});
+		// Get the optional query executor
+		let exe = QueryPlanner::get_opt_query_executor(pla, &v.tb);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, exe, Some(v), val).await;
+		ite.process(ctx, opt, txn, stm, &exe, Some(v), val).await;
 		Ok(())
 	}
 
@@ -91,7 +92,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		pla: &Option<QueryPlanner<'_>>,
 		v: Thing,
 		o: Value,
 		ite: &mut Iterator,
@@ -108,8 +109,10 @@ impl Iterable {
 		};
 		// Create a new operable value
 		let val = Operable::Mergeable(x, o);
+		// Get the optional query executor
+		let exe = QueryPlanner::get_opt_query_executor(pla, &v.tb);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, exe, Some(v), val).await;
+		ite.process(ctx, opt, txn, stm, &exe, Some(v), val).await;
 		Ok(())
 	}
 
@@ -118,7 +121,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		pla: &Option<QueryPlanner<'_>>,
 		f: Thing,
 		v: Thing,
 		w: Thing,
@@ -136,8 +139,10 @@ impl Iterable {
 		};
 		// Create a new operable value
 		let val = Operable::Relatable(f, x, w);
+		// Get the optional query executor
+		let exe = QueryPlanner::get_opt_query_executor(pla, &v.tb);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, exe, Some(v), val).await;
+		ite.process(ctx, opt, txn, stm, &exe, Some(v), val).await;
 		Ok(())
 	}
 
@@ -146,12 +151,14 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		pla: &Option<QueryPlanner<'_>>,
 		v: Table,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &v, opt.strict).await?;
+		// Get the optional query executor
+		let exe = QueryPlanner::get_opt_query_executor(pla, &v.0);
 		// Prepare the start and end keys
 		let beg = thing::prefix(opt.ns(), opt.db(), &v);
 		let end = thing::suffix(opt.ns(), opt.db(), &v);
@@ -198,7 +205,7 @@ impl Iterable {
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					ite.process(ctx, opt, txn, stm, exe, Some(rid), val).await;
+					ite.process(ctx, opt, txn, stm, &exe, Some(rid), val).await;
 				}
 				continue;
 			}
@@ -212,7 +219,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		pla: &Option<QueryPlanner<'_>>,
 		v: Range,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -240,6 +247,8 @@ impl Iterable {
 		};
 		// Prepare the next holder key
 		let mut nxt: Option<Vec<u8>> = None;
+		// Get the optional query executor
+		let exe = QueryPlanner::get_opt_query_executor(pla, &v.tb);
 		// Loop until no more keys
 		loop {
 			// Check if the context is finished
@@ -281,7 +290,7 @@ impl Iterable {
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					ite.process(ctx, opt, txn, stm, exe, Some(rid), val).await;
+					ite.process(ctx, opt, txn, stm, &exe, Some(rid), val).await;
 				}
 				continue;
 			}
@@ -295,7 +304,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		pla: &Option<QueryPlanner<'_>>,
 		e: Edges,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -420,8 +429,10 @@ impl Iterable {
 							Some(v) => Value::from(v),
 							None => Value::None,
 						});
+						// Get the optional query executor
+						let exe = QueryPlanner::get_opt_query_executor(pla, gra.ft);
 						// Process the record
-						ite.process(ctx, opt, txn, stm, exe, Some(rid), val).await;
+						ite.process(ctx, opt, txn, stm, &exe, Some(rid), val).await;
 					}
 					continue;
 				}
@@ -436,13 +447,14 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		pla: &Option<QueryPlanner<'_>>,
 		table: Table,
 		plan: Plan,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		// Check that the table exists
 		txn.lock().await.check_ns_db_tb(opt.ns(), opt.db(), &table.0, opt.strict).await?;
+		let exe = QueryPlanner::get_opt_query_executor(pla, &table.0);
 		let mut iterator = plan.new_iterator(opt, txn).await?;
 		let mut things = iterator.next_batch(txn, 1000).await?;
 		while !things.is_empty() {
@@ -472,7 +484,7 @@ impl Iterable {
 					None => Value::None,
 				});
 				// Process the document record
-				ite.process(ctx, opt, txn, stm, exe, Some(rid), val).await;
+				ite.process(ctx, opt, txn, stm, &exe, Some(rid), val).await;
 			}
 
 			// Collect the next batch of ids

@@ -33,7 +33,7 @@ impl Default for Expression {
 
 impl Expression {
 	/// Create a new expression
-	fn new(l: Value, o: Operator, r: Value) -> Self {
+	pub(crate) fn new(l: Value, o: Operator, r: Value) -> Self {
 		Self {
 			l,
 			o,
@@ -130,7 +130,7 @@ impl Expression {
 			Operator::NoneInside => fnc::operate::inside_none(&l, &r),
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
-			Operator::Matches(_) => fnc::operate::matches(exe, &l, &r),
+			Operator::Matches(_) => fnc::operate::matches(exe, self),
 			_ => unreachable!(),
 		}
 	}
