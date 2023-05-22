@@ -356,7 +356,6 @@ impl Rpc {
 			// Run a full SurrealQL query against the database
 			"query" => match params.needs_one_or_two() {
 				Ok((Value::Strand(s), o)) if o.is_none_or_null() => {
-					trace!("Executing first match block strand={:?}, o={:?}", s, o);
 					return match rpc.read().await.query(s).await {
 						Ok(v) => res::success(id, v).send(out, chn).await,
 						Err(e) => {
@@ -365,7 +364,6 @@ impl Rpc {
 					};
 				}
 				Ok((Value::Strand(s), Value::Object(o))) => {
-					trace!("Executing second match block strand={:?}, object={:?}", s, o);
 					let ws_id = rpc.read().await.uuid.clone();
 					return match rpc.read().await.query_with(s, o).await {
 						Ok(v) => {
