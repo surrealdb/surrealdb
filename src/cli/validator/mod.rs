@@ -24,7 +24,7 @@ pub(crate) fn file_exists(path: &str) -> Result<PathBuf, String> {
 	Ok(path.to_owned())
 }
 
-pub(crate) fn conn_valid(v: &str) -> Result<String, String> {
+pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 	fn split_endpoint(v: &str) -> (&str, &str) {
 		match v {
 			"memory" => ("mem", ""),

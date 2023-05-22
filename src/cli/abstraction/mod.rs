@@ -25,8 +25,8 @@ pub struct DatabaseSelectionArguments {
 #[derive(Args, Debug)]
 pub struct DatabaseConnectionArguments {
 	#[arg(help = "Remote database server url to connect to")]
-	#[arg(short = 'c', long = "connection-url", visible_aliases = ["host", "conn"])]
+	#[arg(short = 'e', long = "endpoint", visible_aliases = ["conn"])]
 	#[arg(default_value = "https://cloud.surrealdb.com")]
-	#[arg(value_parser = super::validator::conn_valid)]
+	#[arg(value_parser = super::validator::endpoint_valid)]
 	pub(crate) connection_url: String,
 }
