@@ -412,6 +412,8 @@ impl Ord for Number {
 	}
 }
 
+// Warning: Equal numbers may have different hashes, which violates
+// the invariants of certain collections!
 impl hash::Hash for Number {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
 		match self {
