@@ -380,7 +380,17 @@ impl Rpc {
 											ws_id
 										);
 									}
-									// TODO need to handle kill as well
+									Ok(Value::KillQueryID(lqid)) => {
+										let ws_id = LIVE_QUERIES.write().await.remove(&lqid.0);
+										if let Some(ws_id) = ws_id {
+											trace!(
+												target: LOG,
+												"Unregistered live query {} on websocket {}",
+												lqid,
+												ws_id
+											);
+										}
+									}
 									_ => {}
 								}
 							}

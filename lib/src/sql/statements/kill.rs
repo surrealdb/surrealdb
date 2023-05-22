@@ -62,7 +62,7 @@ impl KillStatement {
 			}
 		}
 		// Return the query id
-		Ok(Value::None)
+		Ok(Value::KillQueryID(self.id.clone()))
 	}
 }
 

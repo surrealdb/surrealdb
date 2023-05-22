@@ -350,6 +350,7 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		Value::Datetime(d) => json!(d),
 		Value::Uuid(uuid) => json!(uuid),
 		Value::LiveQueryID(uuid) => json!(uuid),
+		Value::KillQueryID(uuid) => json!(uuid),
 		Value::Array(arr) => JsonValue::Array(Array::from((arr, simplify)).0),
 		Value::Object(obj) => JsonValue::Object(Object::from((obj, simplify)).0),
 		Value::Geometry(geo) => match simplify {
