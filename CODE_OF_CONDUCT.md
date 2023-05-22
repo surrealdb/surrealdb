@@ -1,4 +1,4 @@
-<h1><img height="25" src="/img/love.svg">&nbsp;&nbsp;Contributor Covenant Code of Conduct</h1>
+<h1><img height="25" src="./img/love.svg">&nbsp;&nbsp;Contributor Covenant Code of Conduct</h1>
 
 ## Our Pledge
 
