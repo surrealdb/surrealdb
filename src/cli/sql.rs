@@ -134,7 +134,6 @@ pub async fn init(
 						Statement::Use(stmt) => {
 							if let Some(namespace) = &stmt.ns {
 								ns = Some(namespace.clone());
-								db = None;
 							}
 							if let Some(database) = &stmt.db {
 								db = Some(database.clone());
