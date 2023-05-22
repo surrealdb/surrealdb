@@ -5,7 +5,7 @@ use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
-use surrealdb::sql::{self, Query, Statement, Statements, Value};
+use surrealdb::sql::{self, Statement, Value};
 use surrealdb::{Error as SurrealError, Response};
 
 #[tokio::main]

@@ -48,9 +48,7 @@ where
 			let query = sql::Query(Statements(statements));
 			let param = Param::query(query, self.bindings?);
 			let mut conn = Client::new(Method::Query);
-			let res = conn.execute_query(self.router?, param).await;
-			trace!("Query response: {:?}", res);
-			res
+			conn.execute_query(self.router?, param).await
 		})
 	}
 }
