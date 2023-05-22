@@ -290,15 +290,15 @@ impl Rpc {
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Kill a live query using a query id
-			"kill" =>  {
+			"kill" => {
 				// Use 'query' method instead. Kill statements can be in statement block
-				return res::failure(id, Failure::METHOD_NOT_FOUND).send(out, chn).await,
-			},
+				return res::failure(id, Failure::METHOD_NOT_FOUND).send(out, chn).await;
+			}
 			// Setup a live query on a specific table
-			"live" =>  {
+			"live" => {
 				// Use the query method instead. 'LIVE SELECT' can be part of statement blocks
-				return res::failure(id, Failure::METHOD_NOT_FOUND).send(out, chn).await,
-			},
+				return res::failure(id, Failure::METHOD_NOT_FOUND).send(out, chn).await;
+			}
 			// Specify a connection-wide parameter
 			"let" => match params.needs_one_or_two() {
 				Ok((Value::Strand(s), v)) => rpc.write().await.set(s, v).await,
