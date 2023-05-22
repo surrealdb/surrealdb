@@ -28,5 +28,5 @@ pub struct DatabaseConnectionArguments {
 	#[arg(short = 'e', long = "endpoint", visible_aliases = ["conn"])]
 	#[arg(default_value = "https://cloud.surrealdb.com")]
 	#[arg(value_parser = super::validator::endpoint_valid)]
-	pub(crate) connection_url: String,
+	pub(crate) endpoint: String,
 }

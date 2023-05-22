@@ -35,7 +35,7 @@ pub async fn init(
 			password,
 		},
 		conn: DatabaseConnectionArguments {
-			connection_url: endpoint,
+			endpoint,
 		},
 		sel: DatabaseSelectionArguments {
 			namespace,

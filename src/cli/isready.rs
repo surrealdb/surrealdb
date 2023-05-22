@@ -12,7 +12,7 @@ pub struct IsReadyCommandArguments {
 pub async fn init(
 	IsReadyCommandArguments {
 		conn: DatabaseConnectionArguments {
-			connection_url: endpoint,
+			endpoint,
 		},
 	}: IsReadyCommandArguments,
 ) -> Result<(), Error> {

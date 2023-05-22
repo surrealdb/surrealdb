@@ -28,7 +28,7 @@ pub async fn init(
 	ExportCommandArguments {
 		file,
 		conn: DatabaseConnectionArguments {
-			connection_url: endpoint,
+			endpoint,
 		},
 		auth: AuthArguments {
 			username,

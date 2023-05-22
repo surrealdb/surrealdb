@@ -26,7 +26,7 @@ pub async fn init(
 	ImportCommandArguments {
 		file,
 		conn: DatabaseConnectionArguments {
-			connection_url: endpoint,
+			endpoint,
 		},
 		auth: AuthArguments {
 			username,
