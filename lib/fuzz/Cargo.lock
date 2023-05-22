@@ -442,11 +442,10 @@ dependencies = [
 
 [[package]]
 name = "dmp"
-version = "0.1.3"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1796e147190351ab441586c68b74494b18a70b0e39fb9bf8e84e38635bf4c92a"
+checksum = "bfaa1135a34d26e5cc5b4927a8935af887d4f30a5653a797c33b9a4222beb6d9"
 dependencies = [
- "regex",
  "urlencoding",
 ]
 
