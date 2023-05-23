@@ -14,7 +14,7 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		exe: Option<&QueryExecutor>,
 	) -> Result<Value, Error> {
 		// Check if record exists
 		self.empty(ctx, opt, txn, stm).await?;

@@ -152,7 +152,7 @@ impl Statement {
 			Self::Output(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Relate(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Remove(v) => v.compute(ctx, opt, txn, doc).await,
-			Self::Select(v) => v.compute(ctx, opt, txn, doc).await,
+			Self::Select(v) => v.compute(ctx, opt, txn, None, doc, None).await,
 			Self::Set(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Sleep(v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Update(v) => v.compute(ctx, opt, txn, doc).await,

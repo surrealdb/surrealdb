@@ -27,10 +27,10 @@ impl<'a> Document<'a> {
 				Output::Null => Ok(Value::Null),
 				Output::Diff => Ok(self.initial.diff(&self.current, Idiom::default()).into()),
 				Output::After => {
-					self.current.compute(ctx, opt, txn, Some(&self.current), &None).await
+					self.current.compute(ctx, opt, txn, None, Some(&self.current), None).await
 				}
 				Output::Before => {
-					self.initial.compute(ctx, opt, txn, Some(&self.initial), &None).await
+					self.initial.compute(ctx, opt, txn, None, Some(&self.initial), None).await
 				}
 				Output::Fields(v) => v.compute(ctx, opt, txn, Some(&self.current), false).await,
 			},
@@ -43,16 +43,16 @@ impl<'a> Document<'a> {
 					s.expr.compute(ctx, opt, txn, Some(&self.current), s.group.is_some()).await
 				}
 				Statement::Create(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current), &None).await
+					self.current.compute(ctx, opt, txn, None, Some(&self.current), None).await
 				}
 				Statement::Update(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current), &None).await
+					self.current.compute(ctx, opt, txn, None, Some(&self.current), None).await
 				}
 				Statement::Relate(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current), &None).await
+					self.current.compute(ctx, opt, txn, None, Some(&self.current), None).await
 				}
 				Statement::Insert(_) => {
-					self.current.compute(ctx, opt, txn, Some(&self.current), &None).await
+					self.current.compute(ctx, opt, txn, None, Some(&self.current), None).await
 				}
 				_ => Err(Error::Ignore),
 			},
@@ -79,7 +79,7 @@ impl<'a> Document<'a> {
 								ctx.add_value("value", &val);
 								// Process the PERMISSION clause
 								if !e
-									.compute(&ctx, opt, txn, Some(&self.current), &None)
+									.compute(&ctx, opt, txn, None, Some(&self.current), None)
 									.await?
 									.is_truthy()
 								{

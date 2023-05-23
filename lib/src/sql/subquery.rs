@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::common::{closeparentheses, openparentheses};
 use crate::sql::ending::subquery as ending;
 use crate::sql::error::IResult;
@@ -14,6 +15,7 @@ use crate::sql::statements::relate::{relate, RelateStatement};
 use crate::sql::statements::select::{select, SelectStatement};
 use crate::sql::statements::update::{update, UpdateStatement};
 use crate::sql::value::{value, Value};
+use crate::sql::Thing;
 use nom::branch::alt;
 use nom::combinator::map;
 use serde::{Deserialize, Serialize};
@@ -65,13 +67,15 @@ impl Subquery {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
+		thg: Option<&Thing>,
 		doc: Option<&Value>,
+		exe: Option<&QueryExecutor>,
 	) -> Result<Value, Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(2)?;
 		// Process the subquery
 		match self {
-			Self::Value(ref v) => v.compute(ctx, opt, txn, doc, &None).await,
+			Self::Value(ref v) => v.compute(ctx, opt, txn, thg, doc, exe).await,
 			Self::Ifelse(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Output(ref v) => v.compute(ctx, opt, txn, doc).await,
 			Self::Select(ref v) => {
@@ -84,7 +88,7 @@ impl Subquery {
 					ctx.add_value("parent", doc);
 				}
 				// Process subquery
-				match v.compute(&ctx, opt, txn, doc).await? {
+				match v.compute(&ctx, opt, txn, thg, doc, exe).await? {
 					// This is a single record result
 					Value::Array(mut a) if one => match a.len() {
 						// There was at least one result

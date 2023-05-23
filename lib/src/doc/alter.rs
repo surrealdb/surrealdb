@@ -25,24 +25,24 @@ impl<'a> Document<'a> {
 		if let Some(v) = stm.data() {
 			match v {
 				Data::PatchExpression(data) => {
-					let data = data.compute(ctx, opt, txn, Some(&self.current), &None).await?;
+					let data = data.compute(ctx, opt, txn, None, Some(&self.current), None).await?;
 					self.current.to_mut().patch(data)?
 				}
 				Data::MergeExpression(data) => {
-					let data = data.compute(ctx, opt, txn, Some(&self.current), &None).await?;
+					let data = data.compute(ctx, opt, txn, None, Some(&self.current), None).await?;
 					self.current.to_mut().merge(data)?
 				}
 				Data::ReplaceExpression(data) => {
-					let data = data.compute(ctx, opt, txn, Some(&self.current), &None).await?;
+					let data = data.compute(ctx, opt, txn, None, Some(&self.current), None).await?;
 					self.current.to_mut().replace(data)?
 				}
 				Data::ContentExpression(data) => {
-					let data = data.compute(ctx, opt, txn, Some(&self.current), &None).await?;
+					let data = data.compute(ctx, opt, txn, None, Some(&self.current), None).await?;
 					self.current.to_mut().replace(data)?
 				}
 				Data::SetExpression(x) => {
 					for x in x.iter() {
-						let v = x.2.compute(ctx, opt, txn, Some(&self.current), &None).await?;
+						let v = x.2.compute(ctx, opt, txn, None, Some(&self.current), None).await?;
 						match x.1 {
 							Operator::Equal => match v {
 								Value::None => {
@@ -77,7 +77,8 @@ impl<'a> Document<'a> {
 					}
 					// Process ON DUPLICATE KEY clause
 					for x in x.iter() {
-						let v = x.2.compute(&ctx, opt, txn, Some(&self.current), &None).await?;
+						let v =
+							x.2.compute(&ctx, opt, txn, None, Some(&self.current), None).await?;
 						match x.1 {
 							Operator::Equal => match v {
 								Value::None => {

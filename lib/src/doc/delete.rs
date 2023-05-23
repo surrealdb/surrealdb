@@ -15,7 +15,7 @@ impl<'a> Document<'a> {
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
 		// Check where clause
-		self.check(ctx, opt, txn, stm, &None).await?;
+		self.check(ctx, opt, txn, stm, None).await?;
 		// Check if allowed
 		self.allow(ctx, opt, txn, stm).await?;
 		// Erase document

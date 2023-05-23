@@ -64,7 +64,7 @@ impl Value {
 					Part::Where(w) => {
 						let path = path.next();
 						for v in v.iter_mut() {
-							if w.compute(ctx, opt, txn, Some(v), &None).await?.is_truthy() {
+							if w.compute(ctx, opt, txn, None, Some(v), None).await?.is_truthy() {
 								v.fetch(ctx, opt, txn, path).await?;
 							}
 						}
@@ -95,7 +95,7 @@ impl Value {
 								..SelectStatement::default()
 							};
 							*self = stm
-								.compute(ctx, opt, txn, None)
+								.compute(ctx, opt, txn, None, None, None)
 								.await?
 								.all()
 								.get(ctx, opt, txn, None, path.next())
@@ -111,7 +111,7 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							*self = stm.compute(ctx, opt, txn, None).await?.first();
+							*self = stm.compute(ctx, opt, txn, None, None, None).await?.first();
 							Ok(())
 						}
 					}
@@ -137,7 +137,7 @@ impl Value {
 						what: Values(vec![Value::from(val)]),
 						..SelectStatement::default()
 					};
-					*self = stm.compute(ctx, opt, txn, None).await?.first();
+					*self = stm.compute(ctx, opt, txn, None, None, None).await?.first();
 					Ok(())
 				}
 				// Ignore everything else

@@ -13,12 +13,16 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		exe: Option<&QueryExecutor>,
 	) -> Result<(), Error> {
 		// Check where condition
 		if let Some(cond) = stm.conds() {
 			// Check if the expression is truthy
-			if !cond.compute(ctx, opt, txn, Some(&self.current), exe).await?.is_truthy() {
+			if !cond
+				.compute(ctx, opt, txn, self.id.as_ref(), Some(&self.current), exe)
+				.await?
+				.is_truthy()
+			{
 				// Ignore this document
 				return Err(Error::Ignore);
 			}

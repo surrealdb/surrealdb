@@ -72,7 +72,7 @@ impl From<IndexOption> for Plan {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub(super) struct IndexOption {
-	ix: DefineIndexStatement,
+	pub(super) ix: DefineIndexStatement,
 	v: Value,
 	op: Operator,
 	ep: Expression,
@@ -88,8 +88,13 @@ impl IndexOption {
 		}
 	}
 
-	pub(super) fn new_query_executor(&self, i: IndexMap) -> QueryExecutor {
-		QueryExecutor::new(i, Some(self.ep.clone()))
+	pub(super) async fn new_query_executor(
+		&self,
+		opt: &Options,
+		txn: &Transaction,
+		i: IndexMap,
+	) -> Result<QueryExecutor, Error> {
+		QueryExecutor::new(opt, txn, i, Some(self.ep.clone())).await
 	}
 
 	pub(super) fn found(
@@ -136,9 +141,20 @@ impl IndexOption {
 				az,
 				hl,
 				sc,
+				order,
 			} => match self.op {
 				Operator::Matches(_) => Ok(Box::new(
-					MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, sc, &self.v).await?,
+					MatchesThingIterator::new(
+						opt,
+						txn,
+						&self.ix,
+						az,
+						*hl,
+						sc,
+						order.to_usize(),
+						&self.v,
+					)
+					.await?,
 				)),
 				_ => Err(Error::BypassQueryPlanner),
 			},
@@ -221,17 +237,17 @@ impl MatchesThingIterator {
 		_az: &Ident,
 		_hl: bool,
 		sc: &Scoring,
+		order: usize,
 		v: &Value,
 	) -> Result<Self, Error> {
 		let ikb = IndexKeyBase::new(opt, ix);
 		let mut run = txn.lock().await;
 		if let Scoring::Bm {
-			b,
 			..
 		} = sc
 		{
 			let query_string = v.clone().convert_to_string()?;
-			let fti = FtIndex::new(&mut run, ikb, b.to_usize()).await?;
+			let fti = FtIndex::new(&mut run, ikb, order).await?;
 			let hits = fti.search(&mut run, &query_string).await?;
 			Ok(Self {
 				hits,

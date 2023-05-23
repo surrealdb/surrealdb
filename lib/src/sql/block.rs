@@ -83,7 +83,7 @@ impl Block {
 					v.compute(&ctx, opt, txn, doc).await?;
 				}
 				Entry::Select(v) => {
-					v.compute(&ctx, opt, txn, doc).await?;
+					v.compute(&ctx, opt, txn, None, doc, None).await?;
 				}
 				Entry::Create(v) => {
 					v.compute(&ctx, opt, txn, doc).await?;
@@ -104,7 +104,7 @@ impl Block {
 					return v.compute(&ctx, opt, txn, doc).await;
 				}
 				Entry::Value(v) => {
-					return v.compute(&ctx, opt, txn, doc, &None).await;
+					return v.compute(&ctx, opt, txn, None, doc, None).await;
 				}
 			}
 		}

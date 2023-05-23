@@ -95,7 +95,7 @@ impl Value {
 						let path = path.next();
 						let mut a = Vec::new();
 						for v in v.iter() {
-							if w.compute(ctx, opt, txn, Some(v), &None).await?.is_truthy() {
+							if w.compute(ctx, opt, txn, None, Some(v), None).await?.is_truthy() {
 								a.push(v.get(ctx, opt, txn, doc, path).await?)
 							}
 						}
@@ -121,7 +121,7 @@ impl Value {
 								what: Values(vec![Value::from(val)]),
 								..SelectStatement::default()
 							};
-							stm.compute(ctx, opt, txn, None)
+							stm.compute(ctx, opt, txn, None, None, None)
 								.await?
 								.first()
 								.get(ctx, opt, txn, None, path)
@@ -153,7 +153,7 @@ impl Value {
 								};
 								match path.len() {
 									1 => stm
-										.compute(ctx, opt, txn, None)
+										.compute(ctx, opt, txn, None, None, None)
 										.await?
 										.all()
 										.get(ctx, opt, txn, None, ID.as_ref())
@@ -161,7 +161,7 @@ impl Value {
 										.flatten()
 										.ok(),
 									_ => stm
-										.compute(ctx, opt, txn, None)
+										.compute(ctx, opt, txn, None, None, None)
 										.await?
 										.all()
 										.get(ctx, opt, txn, None, path.next())
@@ -177,7 +177,7 @@ impl Value {
 									what: Values(vec![Value::from(val)]),
 									..SelectStatement::default()
 								};
-								stm.compute(ctx, opt, txn, None)
+								stm.compute(ctx, opt, txn, None, None, None)
 									.await?
 									.first()
 									.get(ctx, opt, txn, None, path)

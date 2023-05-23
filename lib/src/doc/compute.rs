@@ -18,7 +18,7 @@ impl<'a> Document<'a> {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 		chn: Sender<Result<Value, Error>>,
 		thg: Option<Thing>,
 		val: Operable,
@@ -38,7 +38,7 @@ impl<'a> Document<'a> {
 		let mut doc = Document::new(thg, &ins.0, ins.1);
 		// Process the statement
 		let res = match stm {
-			Statement::Select(_) => doc.select(ctx, opt, txn, stm, &exe).await,
+			Statement::Select(_) => doc.select(ctx, opt, txn, stm, exe.as_ref()).await,
 			Statement::Create(_) => doc.create(ctx, opt, txn, stm).await,
 			Statement::Update(_) => doc.update(ctx, opt, txn, stm).await,
 			Statement::Relate(_) => doc.relate(ctx, opt, txn, stm).await,

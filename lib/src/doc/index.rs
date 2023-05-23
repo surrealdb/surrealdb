@@ -60,11 +60,11 @@ impl<'a> Document<'a> {
 						az,
 						sc,
 						hl,
+						order,
 					} => match sc {
 						Scoring::Bm {
 							k1,
 							b,
-							order,
 						} => ic.index_best_matching_search(&mut run, az, k1, b, order, *hl).await?,
 						Scoring::Vs => ic.index_vector_search(az, *hl).await?,
 					},

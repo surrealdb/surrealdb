@@ -33,7 +33,7 @@ impl SetStatement {
 		txn: &Transaction,
 		doc: Option<&Value>,
 	) -> Result<Value, Error> {
-		self.what.compute(ctx, opt, txn, doc, &None).await
+		self.what.compute(ctx, opt, txn, None, doc, None).await
 	}
 }
 

@@ -394,9 +394,15 @@ pub enum Error {
 	#[error("Key decoding error: {0}")]
 	Decode(#[from] DecodeError),
 
-	/// Represents an error when decoding a key-value entry
+	/// The index has been found to be inconsistent
 	#[error("Index is corrupted")]
 	CorruptedIndex,
+
+	/// The query planner did not find an index able to support the match @@ operator on a given expression
+	#[error("There was no suitable full-text index supporting the expression '{value}'")]
+	NoIndexFoundOnMatch {
+		value: String,
+	},
 
 	/// Represents an error when analyzing a value
 	#[error("A string can't be analyzed: {0}")]

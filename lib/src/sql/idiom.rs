@@ -138,18 +138,21 @@ impl Idiom {
 		match self.first() {
 			// The starting part is a value
 			Some(Part::Value(v)) => {
-				v.compute(ctx, opt, txn, doc, &None)
+				v.compute(ctx, opt, txn, None, doc, None)
 					.await?
 					.get(ctx, opt, txn, doc, self.as_ref().next())
 					.await?
-					.compute(ctx, opt, txn, doc, &None)
+					.compute(ctx, opt, txn, None, doc, None)
 					.await
 			}
 			// Otherwise use the current document
 			_ => match doc {
 				// There is a current document
 				Some(v) => {
-					v.get(ctx, opt, txn, doc, self).await?.compute(ctx, opt, txn, doc, &None).await
+					v.get(ctx, opt, txn, doc, self)
+						.await?
+						.compute(ctx, opt, txn, None, doc, None)
+						.await
 				}
 				// There isn't any document
 				None => Ok(Value::None),

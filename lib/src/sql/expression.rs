@@ -7,6 +7,7 @@ use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::error::IResult;
 use crate::sql::operator::{operator, Operator};
 use crate::sql::value::{single, value, Value};
+use crate::sql::Thing;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str;
@@ -67,10 +68,11 @@ impl Expression {
 		ctx: &Context<'_>,
 		opt: &Options,
 		txn: &Transaction,
+		thg: Option<&Thing>,
 		doc: Option<&Value>,
-		exe: &Option<QueryExecutor>,
+		exe: Option<&QueryExecutor>,
 	) -> Result<Value, Error> {
-		let l = self.l.compute(ctx, opt, txn, doc, exe).await?;
+		let l = self.l.compute(ctx, opt, txn, thg, doc, exe).await?;
 		match self.o {
 			Operator::Or => {
 				if let true = l.is_truthy() {
@@ -94,7 +96,7 @@ impl Expression {
 			}
 			_ => {} // Continue
 		}
-		let r = self.r.compute(ctx, opt, txn, doc, exe).await?;
+		let r = self.r.compute(ctx, opt, txn, thg, doc, exe).await?;
 		match self.o {
 			Operator::Or => fnc::operate::or(l, r),
 			Operator::And => fnc::operate::and(l, r),
@@ -130,7 +132,7 @@ impl Expression {
 			Operator::NoneInside => fnc::operate::inside_none(&l, &r),
 			Operator::Outside => fnc::operate::outside(&l, &r),
 			Operator::Intersects => fnc::operate::intersects(&l, &r),
-			Operator::Matches(_) => fnc::operate::matches(exe, self),
+			Operator::Matches(_) => fnc::operate::matches(exe, thg, self),
 			_ => unreachable!(),
 		}
 	}

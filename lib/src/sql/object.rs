@@ -134,7 +134,7 @@ impl Object {
 	) -> Result<Value, Error> {
 		let mut x = BTreeMap::new();
 		for (k, v) in self.iter() {
-			match v.compute(ctx, opt, txn, doc, &None).await {
+			match v.compute(ctx, opt, txn, None, doc, None).await {
 				Ok(v) => x.insert(k.clone(), v),
 				Err(e) => return Err(e),
 			};

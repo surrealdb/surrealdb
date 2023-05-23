@@ -19,7 +19,7 @@ pub(crate) struct QueryPlanner<'a> {
 impl<'a> QueryPlanner<'a> {
 	#[inline]
 	pub(crate) fn get_opt_query_executor(
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 		tb: &str,
 	) -> Option<QueryExecutor> {
 		if let Some(p) = pla {
@@ -43,16 +43,19 @@ impl<'a> QueryPlanner<'a> {
 
 	pub(crate) async fn get_iterable(
 		&mut self,
+		opt: &Options,
 		txn: &Transaction,
 		t: Table,
 	) -> Result<Iterable, Error> {
 		let res = Tree::build(self.opt, txn, &t, self.cond).await?;
 		if let Some((node, index_map)) = res {
 			if let Some(plan) = AllAndStrategy::build(&node)? {
-				self.executors.insert(t.0.clone(), plan.i.new_query_executor(index_map));
+				let e = plan.i.new_query_executor(opt, txn, index_map).await?;
+				self.executors.insert(t.0.clone(), e);
 				return Ok(Iterable::Index(t, plan));
 			}
-			self.executors.insert(t.0.clone(), QueryExecutor::new(index_map, None));
+			let e = QueryExecutor::new(opt, txn, index_map, None).await?;
+			self.executors.insert(t.0.clone(), e);
 		}
 		Ok(Iterable::Table(t))
 	}

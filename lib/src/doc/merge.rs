@@ -20,7 +20,7 @@ impl<'a> Document<'a> {
 		self.current.to_mut().def(rid);
 		// This is an INSERT statement
 		if let Workable::Insert(v) = &self.extras {
-			let v = v.compute(ctx, opt, txn, Some(&self.current), &None).await?;
+			let v = v.compute(ctx, opt, txn, None, Some(&self.current), None).await?;
 			self.current.to_mut().merge(v)?;
 		}
 		// Set default field values

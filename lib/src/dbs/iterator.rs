@@ -79,7 +79,7 @@ impl Iterator {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 	) -> Result<Value, Error> {
 		// Log the statement
 		trace!(target: LOG, "Iterating: {}", stm);
@@ -244,7 +244,7 @@ impl Iterator {
 								}
 								_ => {
 									let x = vals.first();
-									let x = v.compute(ctx, opt, txn, Some(&x), &None).await?;
+									let x = v.compute(ctx, opt, txn, None, Some(&x), None).await?;
 									obj.set(ctx, opt, txn, v.to_idiom().as_ref(), x).await?;
 								}
 							}
@@ -444,7 +444,7 @@ impl Iterator {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&'async_recursion QueryPlanner<'_>>,
 	) -> Result<(), Error> {
 		// Prevent deep recursion
 		let opt = &opt.dive(4)?;
@@ -521,7 +521,7 @@ impl Iterator {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		exe: &Option<QueryExecutor>,
+		exe: Option<&QueryExecutor>,
 		thg: Option<Thing>,
 		val: Operable,
 	) {

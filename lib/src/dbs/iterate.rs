@@ -23,7 +23,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
 		if ctx.is_ok() {
@@ -58,7 +58,7 @@ impl Iterable {
 		// Pass the value through
 		let val = Operable::Value(v);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, &None, None, val).await;
+		ite.process(ctx, opt, txn, stm, None, None, val).await;
 	}
 
 	async fn iterate_thing(
@@ -66,7 +66,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 		v: Thing,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -83,7 +83,7 @@ impl Iterable {
 		// Get the optional query executor
 		let exe = QueryPlanner::get_opt_query_executor(pla, &v.tb);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, &exe, Some(v), val).await;
+		ite.process(ctx, opt, txn, stm, exe.as_ref(), Some(v), val).await;
 		Ok(())
 	}
 
@@ -92,7 +92,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 		v: Thing,
 		o: Value,
 		ite: &mut Iterator,
@@ -112,7 +112,7 @@ impl Iterable {
 		// Get the optional query executor
 		let exe = QueryPlanner::get_opt_query_executor(pla, &v.tb);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, &exe, Some(v), val).await;
+		ite.process(ctx, opt, txn, stm, exe.as_ref(), Some(v), val).await;
 		Ok(())
 	}
 
@@ -121,7 +121,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 		f: Thing,
 		v: Thing,
 		w: Thing,
@@ -142,7 +142,7 @@ impl Iterable {
 		// Get the optional query executor
 		let exe = QueryPlanner::get_opt_query_executor(pla, &v.tb);
 		// Process the document record
-		ite.process(ctx, opt, txn, stm, &exe, Some(v), val).await;
+		ite.process(ctx, opt, txn, stm, exe.as_ref(), Some(v), val).await;
 		Ok(())
 	}
 
@@ -151,7 +151,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 		v: Table,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -205,7 +205,7 @@ impl Iterable {
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					ite.process(ctx, opt, txn, stm, &exe, Some(rid), val).await;
+					ite.process(ctx, opt, txn, stm, exe.as_ref(), Some(rid), val).await;
 				}
 				continue;
 			}
@@ -219,7 +219,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 		v: Range,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -290,7 +290,7 @@ impl Iterable {
 					// Create a new operable value
 					let val = Operable::Value(val);
 					// Process the record
-					ite.process(ctx, opt, txn, stm, &exe, Some(rid), val).await;
+					ite.process(ctx, opt, txn, stm, exe.as_ref(), Some(rid), val).await;
 				}
 				continue;
 			}
@@ -304,7 +304,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 		e: Edges,
 		ite: &mut Iterator,
 	) -> Result<(), Error> {
@@ -432,7 +432,7 @@ impl Iterable {
 						// Get the optional query executor
 						let exe = QueryPlanner::get_opt_query_executor(pla, gra.ft);
 						// Process the record
-						ite.process(ctx, opt, txn, stm, &exe, Some(rid), val).await;
+						ite.process(ctx, opt, txn, stm, exe.as_ref(), Some(rid), val).await;
 					}
 					continue;
 				}
@@ -447,7 +447,7 @@ impl Iterable {
 		opt: &Options,
 		txn: &Transaction,
 		stm: &Statement<'_>,
-		pla: &Option<QueryPlanner<'_>>,
+		pla: Option<&QueryPlanner<'_>>,
 		table: Table,
 		plan: Plan,
 		ite: &mut Iterator,
@@ -484,7 +484,7 @@ impl Iterable {
 					None => Value::None,
 				});
 				// Process the document record
-				ite.process(ctx, opt, txn, stm, &exe, Some(rid), val).await;
+				ite.process(ctx, opt, txn, stm, exe.as_ref(), Some(rid), val).await;
 			}
 
 			// Collect the next batch of ids

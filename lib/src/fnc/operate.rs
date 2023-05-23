@@ -6,7 +6,7 @@ use crate::sql::value::TryMul;
 use crate::sql::value::TryPow;
 use crate::sql::value::TrySub;
 use crate::sql::value::Value;
-use crate::sql::Expression;
+use crate::sql::{Expression, Thing};
 
 pub fn or(a: Value, b: Value) -> Result<Value, Error> {
 	Ok(match a.is_truthy() {
@@ -156,9 +156,13 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(a.intersects(b).into())
 }
 
-pub(crate) fn matches(exe: &Option<QueryExecutor>, e: &Expression) -> Result<Value, Error> {
+pub(crate) fn matches(
+	exe: Option<&QueryExecutor>,
+	thg: Option<&Thing>,
+	e: &Expression,
+) -> Result<Value, Error> {
 	if let Some(exe) = exe {
-		exe.matches(e)
+		exe.matches(thg, e)
 	} else {
 		Ok(Value::Bool(false))
 	}

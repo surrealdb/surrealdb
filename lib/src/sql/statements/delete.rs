@@ -60,7 +60,7 @@ impl DeleteStatement {
 		let opt = &opt.futures(false);
 		// Loop over the delete targets
 		for w in self.what.0.iter() {
-			let v = w.compute(ctx, opt, txn, doc, &None).await?;
+			let v = w.compute(ctx, opt, txn, None, doc, None).await?;
 			match v {
 				Value::Table(v) => i.ingest(Iterable::Table(v)),
 				Value::Thing(v) => i.ingest(Iterable::Thing(v)),
@@ -116,7 +116,7 @@ impl DeleteStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn, &stm, &None).await
+		i.output(ctx, opt, txn, &stm, None).await
 	}
 }
 

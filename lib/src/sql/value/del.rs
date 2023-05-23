@@ -106,7 +106,8 @@ impl Value {
 							// iterate in reverse, and call swap_remove
 							let mut m = HashSet::new();
 							for (i, v) in v.iter().enumerate() {
-								if w.compute(ctx, opt, txn, Some(v), &None).await?.is_truthy() {
+								if w.compute(ctx, opt, txn, None, Some(v), None).await?.is_truthy()
+								{
 									m.insert(i);
 								};
 							}
@@ -116,7 +117,8 @@ impl Value {
 						_ => {
 							let path = path.next();
 							for v in v.iter_mut() {
-								if w.compute(ctx, opt, txn, Some(v), &None).await?.is_truthy() {
+								if w.compute(ctx, opt, txn, None, Some(v), None).await?.is_truthy()
+								{
 									v.del(ctx, opt, txn, path).await?;
 								}
 							}

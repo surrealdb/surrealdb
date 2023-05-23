@@ -70,7 +70,7 @@ impl InsertStatement {
 					let mut o = Value::base();
 					// Set each field from the expression
 					for (k, v) in v.iter() {
-						let v = v.compute(ctx, opt, txn, None, &None).await?;
+						let v = v.compute(ctx, opt, txn, None, None, None).await?;
 						o.set(ctx, opt, txn, k, v).await?;
 					}
 					// Specify the new table record id
@@ -81,7 +81,7 @@ impl InsertStatement {
 			}
 			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
-				let v = v.compute(ctx, opt, txn, doc, &None).await?;
+				let v = v.compute(ctx, opt, txn, None, doc, None).await?;
 				match v {
 					Value::Array(v) => {
 						for v in v {
@@ -109,7 +109,7 @@ impl InsertStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Output the results
-		i.output(ctx, opt, txn, &stm, &None).await
+		i.output(ctx, opt, txn, &stm, None).await
 	}
 }
 

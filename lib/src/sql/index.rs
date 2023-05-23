@@ -1,10 +1,12 @@
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
+use crate::sql::number::number;
 use crate::sql::scoring::{scoring, Scoring};
+use crate::sql::Number;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
-use nom::combinator::map;
+use nom::combinator::{map, opt};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -19,6 +21,7 @@ pub enum Index {
 		az: Ident,
 		hl: bool,
 		sc: Scoring,
+		order: Number,
 	},
 }
 
@@ -37,8 +40,9 @@ impl fmt::Display for Index {
 				az,
 				hl,
 				sc,
+				order,
 			} => {
-				write!(f, "SEARCH {} {}", az, sc)?;
+				write!(f, "SEARCH {} {} ORDER {}", az, sc, order)?;
 				if *hl {
 					f.write_str(" HIGHLIGHTS")?
 				}
@@ -62,6 +66,14 @@ pub fn unique(i: &str) -> IResult<&str, Index> {
 	Ok((i, Index::Uniq))
 }
 
+pub fn order(i: &str) -> IResult<&str, Number> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = tag_no_case("ORDER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, order) = number(i)?;
+	Ok((i, order))
+}
+
 pub fn highlights(i: &str) -> IResult<&str, bool> {
 	let (i, _) = mightbespace(i)?;
 	alt((map(tag("HIGHLIGHTS"), |_| true), map(tag(""), |_| false)))(i)
@@ -73,6 +85,7 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 	let (i, az) = ident(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, sc) = scoring(i)?;
+	let (i, o) = opt(order)(i)?;
 	let (i, hl) = highlights(i)?;
 	Ok((
 		i,
@@ -80,6 +93,7 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 			az,
 			sc,
 			hl,
+			order: o.unwrap_or(Number::Int(100)),
 		},
 	))
 }

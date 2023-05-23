@@ -35,7 +35,7 @@ impl OutputStatement {
 		// Ensure futures are processed
 		let opt = &opt.futures(true);
 		// Process the output value
-		let mut val = self.what.compute(ctx, opt, txn, doc, &None).await?;
+		let mut val = self.what.compute(ctx, opt, txn, None, doc, None).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
 			for fetch in fetchs.iter() {

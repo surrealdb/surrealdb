@@ -1408,7 +1408,7 @@ mod tests {
 
 	#[test]
 	fn check_create_search_index_with_highlights() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH my_analyzer BM25(1.2,0.75,1000) HIGHLIGHTS";
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -1422,12 +1422,12 @@ mod tests {
 					sc: Scoring::Bm {
 						k1: Number::Float(1.2),
 						b: Number::Float(0.75),
-						order: Number::Int(1000)
 					},
+					order: Number::Int(1000)
 				},
 			}
 		);
-		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer BM25(1.2,0.75,1000) HIGHLIGHTS");
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS");
 	}
 
 	#[test]
@@ -1444,12 +1444,13 @@ mod tests {
 					az: Ident("my_analyzer".to_string()),
 					hl: false,
 					sc: Scoring::Vs,
+					order: Number::Int(1000)
 				},
 			}
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer VS"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer VS ORDER 1000"
 		);
 	}
 }
