@@ -127,17 +127,25 @@ impl Rpc {
 				trace!(target: LOG, "Received notification: {:?}", v);
 				// Find which websocket the notification belongs to
 				match LIVE_QUERIES.read().await.get(&v.id) {
-					Some(live_id) => {
+					Some(ws_id) => {
 						// Send the notification to the client
 						let msg_text = serde_json::to_string(&v).unwrap();
 						let mut ws_write = WEBSOCKETS.write().await;
-						match ws_write.get_mut(live_id) {
+						match ws_write.get_mut(ws_id) {
 							None => {
-								error!(target: LOG, "WebSocket not found for lq: {:?}", live_id);
+								error!(
+									target: LOG,
+									"Tracked WebSocket {:?} not found for lq: {:?}", ws_id, &v.id
+								);
 							}
 							Some(ref mut ws_sender) => {
 								ws_sender.send(Message::text(msg_text)).await.unwrap();
-								trace!(target: LOG, "Sent notification to lq: {:?}", live_id);
+								trace!(
+									target: LOG,
+									"Sent notification to WebSocket {:?} for lq: {:?}",
+									ws_id,
+									&v.id
+								);
 							}
 						}
 					}
