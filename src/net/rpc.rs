@@ -309,15 +309,25 @@ impl Rpc {
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Kill a live query using a query id
-			"kill" => {
-				// Use 'query' method instead. Kill statements can be in statement block
-				return res::failure(id, Failure::METHOD_NOT_FOUND).send(out, chn).await;
-			}
+			"kill" => match params.needs_one() {
+				Ok(v) if v.is_uuid() => {
+					let result = rpc.read().await.kill(v).await
+					let response = match result {
+						Ok(v) => v,
+                        Err(e) => return res::failure(id, e).send(out, chn).await,
+					};
+					let ws_id = rpc.read().await.uuid.clone();
+					Self::handle_live_query_results(response, ws_id).await;
+					Ok(response.result.clone())
+				},
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+			},
 			// Setup a live query on a specific table
-			"live" => {
-				// Use the query method instead. 'LIVE SELECT' can be part of statement blocks
-				return res::failure(id, Failure::METHOD_NOT_FOUND).send(out, chn).await;
-			}
+			"live" => match params.needs_one() {
+				Ok(v) if v.is_table() => rpc.read().await.live(v).await,
+				Ok(v) if v.is_strand() => rpc.read().await.live(v).await,
+				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
+			},
 			// Specify a connection-wide parameter
 			"let" => match params.needs_one_or_two() {
 				Ok((Value::Strand(s), v)) => rpc.write().await.set(s, v).await,
@@ -542,7 +552,7 @@ impl Rpc {
 	// ------------------------------
 
 	#[instrument(skip_all, name = "rpc kill", fields(websocket=self.uuid.to_string()))]
-	async fn kill(&self, id: Value) -> Result<Value, Error> {
+	async fn kill(&self, id: Value) -> Result<Response, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -557,13 +567,11 @@ impl Rpc {
 		// Execute the query on the database
 		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		// Return the result to the client
-		Ok(res)
+		Ok(res.remove(0))
 	}
 
 	#[instrument(skip_all, name = "rpc live", fields(websocket=self.uuid.to_string()))]
-	async fn live(&self, tb: Value) -> Result<Value, Error> {
+	async fn live(&self, tb: Value) -> Result<Response, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -578,9 +586,7 @@ impl Rpc {
 		// Execute the query on the database
 		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		// Return the result to the client
-		Ok(res)
+		Ok(res.remove(0))
 	}
 
 	// ------------------------------
