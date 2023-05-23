@@ -1,5 +1,6 @@
 use crate::err::Error;
 use crate::sql::value::Value;
+use crate::sql::Statement;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use std::time::Duration;
@@ -11,6 +12,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 pub struct Response {
 	pub time: Duration,
 	pub result: Result<Value, Error>,
+	pub query: Statement,
 }
 
 impl Response {

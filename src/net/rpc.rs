@@ -21,10 +21,10 @@ use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
 use surrealdb::dbs::{Response, Session};
-use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
 use surrealdb::sql::Value;
+use surrealdb::sql::{Array, Statement};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use uuid::Uuid;
@@ -139,7 +139,7 @@ impl Rpc {
 								);
 							}
 							Some(ref mut ws_sender) => {
-								ws_sender.send(Message::text(msg_text)).await.unwrap();
+								ws_sender.send(Message::binary(msg_text)).await.unwrap();
 								trace!(
 									target: LOG,
 									"Sent notification to WebSocket {:?} for lq: {:?}",
@@ -213,6 +213,7 @@ impl Rpc {
 		let mut live_query_to_gc: Vec<Uuid> = vec![];
 		for (key, value) in locked_lq_map.iter() {
 			if value == &id {
+				trace!(target: LOG, "Removing live query: {}", key);
 				live_query_to_gc.push(key.clone());
 			}
 		}
@@ -389,27 +390,35 @@ impl Rpc {
 							trace!("Query result: {:?}", &v);
 							// Processing results in case we need to (un)register live queries
 							for res in &v {
-								match &res.result {
-									Ok(Value::LiveQueryID(lqid)) => {
-										LIVE_QUERIES.write().await.insert(lqid.0, ws_id);
-										trace!(
-											target: LOG,
-											"Registered live query {} on websocket {}",
-											lqid,
-											ws_id
-										);
-									}
-									Ok(Value::KillQueryID(lqid)) => {
-										let ws_id = LIVE_QUERIES.write().await.remove(&lqid.0);
-										if let Some(ws_id) = ws_id {
+								match &res.query {
+									Statement::Live(_) => match &res.result {
+										Ok(Value::Uuid(lqid)) => {
+											// Match on Uuid type
+											LIVE_QUERIES.write().await.insert(lqid.0, ws_id);
 											trace!(
 												target: LOG,
-												"Unregistered live query {} on websocket {}",
+												"Registered live query {} on websocket {}",
 												lqid,
 												ws_id
 											);
 										}
-									}
+										_ => {}
+									},
+									Statement::Kill(kill) => match &res.result {
+										Ok(_) => {
+											let ws_id =
+												LIVE_QUERIES.write().await.remove(&kill.id.0);
+											if let Some(ws_id) = ws_id {
+												trace!(
+													target: LOG,
+													"Unregistered live query {} on websocket {}",
+													&kill.id,
+													ws_id
+												);
+											}
+										}
+										_ => {}
+									},
 									_ => {}
 								}
 							}

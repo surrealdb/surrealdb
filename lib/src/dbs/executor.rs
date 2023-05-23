@@ -89,14 +89,15 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	fn buf_cancel(&self, v: Response) -> Response {
+	fn buf_cancel(&self, stm: Statement, v: Response) -> Response {
 		Response {
 			time: v.time,
 			result: Err(Error::QueryCancelled),
+			query: stm,
 		}
 	}
 
-	fn buf_commit(&self, v: Response) -> Response {
+	fn buf_commit(&self, stm: Statement, v: Response) -> Response {
 		match &self.err {
 			true => Response {
 				time: v.time,
@@ -104,6 +105,7 @@ impl<'a> Executor<'a> {
 					Ok(_) => Err(Error::QueryNotExecuted),
 					Err(e) => Err(e),
 				},
+				query: stm,
 			},
 			_ => v,
 		}
@@ -165,7 +167,7 @@ impl<'a> Executor<'a> {
 			// Check if this is a RETURN statement
 			let clr = matches!(stm, Statement::Output(_));
 			// Process a single statement
-			let res = match stm {
+			let res = match stm.clone() {
 				// Specify runtime options
 				Statement::Option(mut stm) => {
 					// Selected DB?
@@ -192,19 +194,25 @@ impl<'a> Executor<'a> {
 					continue;
 				}
 				// Cancel a running transaction
-				Statement::Cancel(_) => {
+				Statement::Cancel(c) => {
 					self.cancel(true).await;
 					self.clear(chn.clone(), recv.clone()).await;
-					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
+					buf = buf
+						.into_iter()
+						.map(|v| self.buf_cancel(Statement::Cancel(c.clone()), v))
+						.collect();
 					out.append(&mut buf);
 					self.txn = None;
 					continue;
 				}
 				// Commit a running transaction
-				Statement::Commit(_) => {
+				Statement::Commit(c) => {
 					self.commit(true).await;
 					self.flush(chn.clone(), recv.clone()).await;
-					buf = buf.into_iter().map(|v| self.buf_commit(v)).collect();
+					buf = buf
+						.into_iter()
+						.map(|v| self.buf_commit(Statement::Commit(c.clone()), v))
+						.collect();
 					out.append(&mut buf);
 					self.txn = None;
 					continue;
@@ -349,6 +357,7 @@ impl<'a> Executor<'a> {
 					self.err = true;
 					e
 				}),
+				query: stm.clone(),
 			};
 			// Output the response
 			if self.txn.is_some() {
