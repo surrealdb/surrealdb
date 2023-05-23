@@ -1,4 +1,8 @@
+use crate::cli::abstraction::{
+	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
+};
 use crate::err::Error;
+use clap::Args;
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
@@ -8,24 +12,49 @@ use surrealdb::opt::auth::Root;
 use surrealdb::sql::{self, Statement, Value};
 use surrealdb::{Error as SurrealError, Response};
 
-#[tokio::main]
-pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+#[derive(Args, Debug)]
+pub struct SqlCommandArguments {
+	#[command(flatten)]
+	conn: DatabaseConnectionArguments,
+	#[command(flatten)]
+	auth: AuthArguments,
+	#[command(flatten)]
+	sel: DatabaseSelectionArguments,
+	/// Whether database responses should be pretty printed
+	#[arg(long)]
+	pretty: bool,
+	/// Whether omitting semicolon causes a newline
+	#[arg(long)]
+	multi: bool,
+}
+
+pub async fn init(
+	SqlCommandArguments {
+		auth: AuthArguments {
+			username,
+			password,
+		},
+		conn: DatabaseConnectionArguments {
+			endpoint,
+		},
+		sel: DatabaseSelectionArguments {
+			namespace,
+			database,
+		},
+		pretty,
+		multi,
+		..
+	}: SqlCommandArguments,
+) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("warn").init();
-	// Parse all other cli arguments
-	let username = matches.value_of("user").unwrap();
-	let password = matches.value_of("pass").unwrap();
-	let endpoint = matches.value_of("conn").unwrap();
-	let mut ns = matches.value_of("ns").map(str::to_string);
-	let mut db = matches.value_of("db").map(str::to_string);
-	// If we should pretty-print responses
-	let pretty = matches.is_present("pretty");
+
 	// Connect to the database engine
 	let client = connect(endpoint).await?;
 	// Sign in to the server if the specified database engine supports it
 	let root = Root {
-		username,
-		password,
+		username: &username,
+		password: &password,
 	};
 	if let Err(error) = client.signin(root).await {
 		match error {
@@ -40,10 +69,13 @@ pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
 	let mut rl = Editor::new().unwrap();
 	// Set custom input validation
 	rl.set_helper(Some(InputValidator {
-		multi: matches.is_present("multi"),
+		multi,
 	}));
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
+	// Keep track of current namespace/database.
+	let mut ns = Some(namespace);
+	let mut db = Some(database);
 	// Configure the prompt
 	let mut prompt = "> ".to_owned();
 	// Loop over each command-line input
