@@ -212,7 +212,7 @@ impl Validator for InputValidator {
 		let input = input.trim();
 		// Process the input to check if we can send the query
 		let result = if self.multi && !input.ends_with(';') {
-			Incomplete // The line ends with a ; and we are in multi mode
+			Incomplete // The line doesn't end with a ; and we are in multi mode
 		} else if self.multi && input.is_empty() {
 			Incomplete // The line was empty and we are in multi mode
 		} else if input.ends_with('\\') {
