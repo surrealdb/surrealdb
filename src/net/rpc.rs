@@ -377,7 +377,13 @@ impl Rpc {
 			"query" => match params.needs_one_or_two() {
 				Ok((Value::Strand(s), o)) if o.is_none_or_null() => {
 					return match rpc.read().await.query(s).await {
-						Ok(v) => res::success(id, v).send(out, chn).await,
+						Ok(v) => {
+							let ws_id = rpc.read().await.uuid.clone();
+							for res in &v {
+								Self::handle_live_query_results(res, ws_id).await;
+							}
+							res::success(id, v).send(out, chn).await
+						}
 						Err(e) => {
 							res::failure(id, Failure::custom(e.to_string())).send(out, chn).await
 						}
@@ -387,9 +393,9 @@ impl Rpc {
 					return match rpc.read().await.query_with(s, o).await {
 						Ok(v) => {
 							trace!("Query result: {:?}", &v);
+							let ws_id = rpc.read().await.uuid.clone();
 							// Processing results in case we need to (un)register live queries
 							for res in &v {
-								let ws_id = rpc.read().await.uuid.clone();
 								Self::handle_live_query_results(res, ws_id).await;
 							}
 							res::success(id, v).send(out, chn).await
@@ -766,7 +772,7 @@ impl Rpc {
 	// ------------------------------
 
 	#[instrument(skip_all, name = "rpc query", fields(websocket=self.uuid.to_string()))]
-	async fn query(&self, sql: Strand) -> Result<impl Serialize, Error> {
+	async fn query(&self, sql: Strand) -> Result<Vec<Response>, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
