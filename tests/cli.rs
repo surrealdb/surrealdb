@@ -174,6 +174,57 @@ mod cli_integration {
 			// TODO: Once backups are functional, update this test.
 			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
 		}
+
+		// Multi-statement (and multi-line) query including error(s) over WS
+		{
+			let args = format!(
+				"sql --conn ws://{addr} --user root --pass {pass} --ns N3 --db D3 --multi --pretty"
+			);
+			let output = run(&args)
+				.input(
+					r#"CREATE thing:success; \
+				CREATE thing:fail SET bad=rand('evil'); \
+				SELECT * FROM sleep(10ms) TIMEOUT 1ms; \
+				CREATE thing:also_success;
+				"#,
+				)
+				.output()
+				.unwrap();
+
+			assert!(output.contains("thing:success"), "missing success in {output:?}");
+			assert!(output.contains("rgument"), "missing argument error in {output:?}");
+			assert!(
+				output.contains("time") && output.contains("out"),
+				"missing timeout error in {output:?}"
+			);
+			assert!(output.contains("thing:also_success"), "missing also_success in {output:?}")
+		}
+
+		// Multi-statement (and multi-line) transaction including error(s) over WS
+		{
+			let args = format!(
+				"sql --conn ws://{addr} --user root --pass {pass} --ns N4 --db D4 --multi --pretty"
+			);
+			let output = run(&args)
+				.input(
+					r#"BEGIN; \
+				CREATE thing:success; \
+				CREATE thing:fail SET bad=rand('evil'); \
+				SELECT * FROM sleep(10ms) TIMEOUT 1ms; \
+				CREATE thing:also_success; \
+				COMMIT;
+				"#,
+				)
+				.output()
+				.unwrap();
+
+			assert_eq!(
+				output.lines().filter(|s| s.contains("transaction")).count(),
+				3,
+				"missing failed txn errors in {output:?}"
+			);
+			assert!(output.contains("rgument"), "missing argument error in {output:?}");
+		}
 	}
 
 	#[test]

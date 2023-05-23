@@ -178,7 +178,10 @@ fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Err
 	let value = if num_statements > 1 {
 		let mut output = Vec::<Value>::with_capacity(num_statements);
 		for index in 0..num_statements {
-			output.push(response.take(index)?);
+			output.push(match response.take(index) {
+				Ok(v) => v,
+				Err(e) => e.to_string().into(),
+			});
 		}
 		Value::from(output)
 	} else {
@@ -209,7 +212,7 @@ impl Validator for InputValidator {
 		let input = input.trim();
 		// Process the input to check if we can send the query
 		let result = if self.multi && !input.ends_with(';') {
-			Incomplete // The line ends with a ; and we are in multi mode
+			Incomplete // The line doesn't end with a ; and we are in multi mode
 		} else if self.multi && input.is_empty() {
 			Incomplete // The line was empty and we are in multi mode
 		} else if input.ends_with('\\') {
