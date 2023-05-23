@@ -28,6 +28,10 @@ check:
 clean:
 	cargo clean
 
+.PHONY: bench
+bench:
+	cargo bench --package surrealdb --no-default-features --features kv-mem,http,scripting
+
 .PHONY: serve
 serve:
 	cargo run $(DEV_FEATURES) -- start --log trace --user root --pass root memory
