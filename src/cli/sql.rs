@@ -178,7 +178,10 @@ fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Err
 	let value = if num_statements > 1 {
 		let mut output = Vec::<Value>::with_capacity(num_statements);
 		for index in 0..num_statements {
-			output.push(response.take(index)?);
+			output.push(match response.take(index) {
+				Ok(v) => v,
+				Err(e) => e.to_string().into(),
+			});
 		}
 		Value::from(output)
 	} else {
