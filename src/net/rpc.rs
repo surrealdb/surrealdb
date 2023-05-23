@@ -384,43 +384,13 @@ impl Rpc {
 					};
 				}
 				Ok((Value::Strand(s), Value::Object(o))) => {
-					let ws_id = rpc.read().await.uuid.clone();
 					return match rpc.read().await.query_with(s, o).await {
 						Ok(v) => {
 							trace!("Query result: {:?}", &v);
 							// Processing results in case we need to (un)register live queries
 							for res in &v {
-								match &res.query {
-									Statement::Live(_) => match &res.result {
-										Ok(Value::Uuid(lqid)) => {
-											// Match on Uuid type
-											LIVE_QUERIES.write().await.insert(lqid.0, ws_id);
-											trace!(
-												target: LOG,
-												"Registered live query {} on websocket {}",
-												lqid,
-												ws_id
-											);
-										}
-										_ => {}
-									},
-									Statement::Kill(kill) => match &res.result {
-										Ok(_) => {
-											let ws_id =
-												LIVE_QUERIES.write().await.remove(&kill.id.0);
-											if let Some(ws_id) = ws_id {
-												trace!(
-													target: LOG,
-													"Unregistered live query {} on websocket {}",
-													&kill.id,
-													ws_id
-												);
-											}
-										}
-										_ => {}
-									},
-									_ => {}
-								}
+								let ws_id = rpc.read().await.uuid.clone();
+								Self::handle_live_query_results(res, ws_id).await;
 							}
 							res::success(id, v).send(out, chn).await
 						}
@@ -437,6 +407,34 @@ impl Rpc {
 		match res {
 			Ok(v) => res::success(id, v).send(out, chn).await,
 			Err(e) => res::failure(id, Failure::custom(e.to_string())).send(out, chn).await,
+		}
+	}
+
+	async fn handle_live_query_results(res: &Response, ws_id: Uuid) {
+		match &res.query {
+			Statement::Live(_) => match &res.result {
+				Ok(Value::Uuid(lqid)) => {
+					// Match on Uuid type
+					LIVE_QUERIES.write().await.insert(lqid.0, ws_id);
+					trace!(target: LOG, "Registered live query {} on websocket {}", lqid, ws_id);
+				}
+				_ => {}
+			},
+			Statement::Kill(kill) => match &res.result {
+				Ok(_) => {
+					let ws_id = LIVE_QUERIES.write().await.remove(&kill.id.0);
+					if let Some(ws_id) = ws_id {
+						trace!(
+							target: LOG,
+							"Unregistered live query {} on websocket {}",
+							&kill.id,
+							ws_id
+						);
+					}
+				}
+				_ => {}
+			},
+			_ => {}
 		}
 	}
 
