@@ -3,7 +3,7 @@ use std::{
 	collections::hash_map::DefaultHasher,
 	hash::{Hash, Hasher},
 	net::SocketAddr,
-  path::PathBuf,
+	path::PathBuf,
 };
 
 pub static CF: OnceCell<Config> = OnceCell::new();
