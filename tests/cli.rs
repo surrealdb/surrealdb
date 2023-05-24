@@ -75,10 +75,6 @@ mod cli_integration {
 		path.to_string_lossy().into_owned()
 	}
 
-	fn is_ci() -> bool {
-		option_env!("GITHUB_ACTIONS").is_some()
-	}
-
 	#[test]
 	fn version() {
 		assert!(run("version").output().is_ok());
@@ -100,12 +96,8 @@ mod cli_integration {
 	}
 
 	#[test]
+	#[ignore = "only runs in CI"]
 	fn start() {
-		if !is_ci() {
-			println!("Skipping outside of CI");
-			return;
-		}
-
 		let mut rng = thread_rng();
 
 		let port: u16 = rng.gen_range(13000..14000);
@@ -237,12 +229,8 @@ mod cli_integration {
 	}
 
 	#[test]
+	#[ignore = "only runs in CI"]
 	fn start_tls() {
-		if !is_ci() {
-			println!("Skipping outside of CI");
-			return;
-		}
-
 		let mut rng = thread_rng();
 
 		let port: u16 = rng.gen_range(13000..14000);
