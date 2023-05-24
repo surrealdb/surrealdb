@@ -122,24 +122,29 @@ impl Rpc {
 			}
 		});
 		// Send notifications to the client
-		tokio::task::spawn(async {
+		let moved_rpc = rpc.clone();
+		tokio::task::spawn(async move {
+			let rpc = moved_rpc;
 			while let Ok(v) = DB.get().unwrap().notifications().recv().await {
 				trace!(target: LOG, "Received notification: {:?}", v);
 				// Find which websocket the notification belongs to
 				match LIVE_QUERIES.read().await.get(&v.id) {
 					Some(ws_id) => {
 						// Send the notification to the client
-						let msg_text = serde_json::to_string(&v).unwrap();
-						let mut ws_write = WEBSOCKETS.write().await;
-						match ws_write.get_mut(ws_id) {
+						let msg_text = res::success(None, v.clone());
+						let ws_write = WEBSOCKETS.write().await;
+						match ws_write.get(ws_id) {
 							None => {
 								error!(
 									target: LOG,
 									"Tracked WebSocket {:?} not found for lq: {:?}", ws_id, &v.id
 								);
 							}
-							Some(ref mut ws_sender) => {
-								ws_sender.send(Message::binary(msg_text)).await.unwrap();
+							Some(ws_sender) => {
+								msg_text
+									.send(rpc.read().await.format.clone(), ws_sender.clone().into())
+									.await;
+								// ws_sender.send(msg_text).await.unwrap();
 								trace!(
 									target: LOG,
 									"Sent notification to WebSocket {:?} for lq: {:?}",
