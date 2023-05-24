@@ -14,17 +14,17 @@ use crate::rpc::res::Failure;
 use crate::rpc::res::Output;
 use futures::{SinkExt, StreamExt};
 use once_cell::sync::Lazy;
-use serde::Serialize;
+
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use surrealdb::channel;
 use surrealdb::channel::Sender;
-use surrealdb::dbs::{Response, Session};
+use surrealdb::dbs::{QueryType, Response, Session};
+use surrealdb::sql::Array;
 use surrealdb::sql::Object;
 use surrealdb::sql::Strand;
 use surrealdb::sql::Value;
-use surrealdb::sql::{Array, Statement};
 use tokio::sync::RwLock;
 use tracing::instrument;
 use uuid::Uuid;
@@ -310,22 +310,12 @@ impl Rpc {
 			},
 			// Kill a live query using a query id
 			"kill" => match params.needs_one() {
-				Ok(v) if v.is_uuid() => {
-					let result = rpc.read().await.kill(v).await
-					let response = match result {
-						Ok(v) => v,
-                        Err(e) => return res::failure(id, e).send(out, chn).await,
-					};
-					let ws_id = rpc.read().await.uuid.clone();
-					Self::handle_live_query_results(response, ws_id).await;
-					Ok(response.result.clone())
-				},
+				Ok(v) if v.is_uuid() => rpc.read().await.kill(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Setup a live query on a specific table
 			"live" => match params.needs_one() {
 				Ok(v) if v.is_table() => rpc.read().await.live(v).await,
-				Ok(v) if v.is_strand() => rpc.read().await.live(v).await,
 				_ => return res::failure(id, Failure::INVALID_PARAMS).send(out, chn).await,
 			},
 			// Specify a connection-wide parameter
@@ -387,13 +377,7 @@ impl Rpc {
 			"query" => match params.needs_one_or_two() {
 				Ok((Value::Strand(s), o)) if o.is_none_or_null() => {
 					return match rpc.read().await.query(s).await {
-						Ok(v) => {
-							let ws_id = rpc.read().await.uuid.clone();
-							for res in &v {
-								Self::handle_live_query_results(res, ws_id).await;
-							}
-							res::success(id, v).send(out, chn).await
-						}
+						Ok(v) => res::success(id, v).send(out, chn).await,
 						Err(e) => {
 							res::failure(id, Failure::custom(e.to_string())).send(out, chn).await
 						}
@@ -401,15 +385,7 @@ impl Rpc {
 				}
 				Ok((Value::Strand(s), Value::Object(o))) => {
 					return match rpc.read().await.query_with(s, o).await {
-						Ok(v) => {
-							trace!("Query result: {:?}", &v);
-							let ws_id = rpc.read().await.uuid.clone();
-							// Processing results in case we need to (un)register live queries
-							for res in &v {
-								Self::handle_live_query_results(res, ws_id).await;
-							}
-							res::success(id, v).send(out, chn).await
-						}
+						Ok(v) => res::success(id, v).send(out, chn).await,
 						Err(e) => {
 							res::failure(id, Failure::custom(e.to_string())).send(out, chn).await
 						}
@@ -423,34 +399,6 @@ impl Rpc {
 		match res {
 			Ok(v) => res::success(id, v).send(out, chn).await,
 			Err(e) => res::failure(id, Failure::custom(e.to_string())).send(out, chn).await,
-		}
-	}
-
-	async fn handle_live_query_results(res: &Response, ws_id: Uuid) {
-		match &res.query {
-			Statement::Live(_) => match &res.result {
-				Ok(Value::Uuid(lqid)) => {
-					// Match on Uuid type
-					LIVE_QUERIES.write().await.insert(lqid.0, ws_id);
-					trace!(target: LOG, "Registered live query {} on websocket {}", lqid, ws_id);
-				}
-				_ => {}
-			},
-			Statement::Kill(kill) => match &res.result {
-				Ok(_) => {
-					let ws_id = LIVE_QUERIES.write().await.remove(&kill.id.0);
-					if let Some(ws_id) = ws_id {
-						trace!(
-							target: LOG,
-							"Unregistered live query {} on websocket {}",
-							&kill.id,
-							ws_id
-						);
-					}
-				}
-				_ => {}
-			},
-			_ => {}
 		}
 	}
 
@@ -552,41 +500,41 @@ impl Rpc {
 	// ------------------------------
 
 	#[instrument(skip_all, name = "rpc kill", fields(websocket=self.uuid.to_string()))]
-	async fn kill(&self, id: Value) -> Result<Response, Error> {
-		// Get a database reference
-		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
+	async fn kill(&self, id: Value) -> Result<Value, Error> {
 		// Specify the SQL query string
 		let sql = "KILL $id";
 		// Specify the query parameters
-		let var = Some(map! {
+		let var = map! {
 			String::from("id") => id,
 			=> &self.vars
-		});
+		};
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = self.query_with(Strand::from(sql), Object::from(var)).await?;
 		// Extract the first query result
-		Ok(res.remove(0))
+		let response = res.remove(0);
+		match response.result {
+			Ok(v) => Ok(v),
+			Err(e) => Err(Error::from(e)),
+		}
 	}
 
 	#[instrument(skip_all, name = "rpc live", fields(websocket=self.uuid.to_string()))]
-	async fn live(&self, tb: Value) -> Result<Response, Error> {
-		// Get a database reference
-		let kvs = DB.get().unwrap();
-		// Get local copy of options
-		let opt = CF.get().unwrap();
+	async fn live(&self, tb: Value) -> Result<Value, Error> {
 		// Specify the SQL query string
 		let sql = "LIVE SELECT * FROM $tb";
 		// Specify the query parameters
-		let var = Some(map! {
+		let var = map! {
 			String::from("tb") => tb.could_be_table(),
 			=> &self.vars
-		});
+		};
 		// Execute the query on the database
-		let mut res = kvs.execute(sql, &self.session, var, opt.strict).await?;
+		let mut res = self.query_with(Strand::from(sql), Object::from(var)).await?;
 		// Extract the first query result
-		Ok(res.remove(0))
+		let response = res.remove(0);
+		match response.result {
+			Ok(v) => Ok(v),
+			Err(e) => Err(Error::from(e)),
+		}
 	}
 
 	// ------------------------------
@@ -773,6 +721,39 @@ impl Rpc {
 		Ok(res)
 	}
 
+	async fn handle_live_query_results(&self, res: &Response) {
+		match &res.query_type {
+			QueryType::Live => match &res.result {
+				Ok(Value::Uuid(lqid)) => {
+					// Match on Uuid type
+					LIVE_QUERIES.write().await.insert(lqid.0, self.uuid);
+					trace!(
+						target: LOG,
+						"Registered live query {} on websocket {}",
+						lqid,
+						self.uuid
+					);
+				}
+				_ => {}
+			},
+			QueryType::Kill => match &res.result {
+				Ok(Value::Uuid(lqid)) => {
+					let ws_id = LIVE_QUERIES.write().await.remove(lqid);
+					if let Some(ws_id) = ws_id {
+						trace!(
+							target: LOG,
+							"Unregistered live query {} on websocket {}",
+							lqid,
+							ws_id
+						);
+					}
+				}
+				_ => {}
+			},
+			_ => {}
+		}
+	}
+
 	// ------------------------------
 	// Methods for querying
 	// ------------------------------
@@ -787,6 +768,10 @@ impl Rpc {
 		let var = Some(self.vars.clone());
 		// Execute the query on the database
 		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
+		// Post-profcess hooks for web layer
+		for response in &res {
+			self.handle_live_query_results(response).await;
+		}
 		// Return the result to the client
 		Ok(res)
 	}
@@ -801,6 +786,10 @@ impl Rpc {
 		let var = Some(mrg! { vars.0, &self.vars });
 		// Execute the query on the database
 		let res = kvs.execute(&sql, &self.session, var, opt.strict).await?;
+		// Post-process hooks for web layer
+		for response in &res {
+			self.handle_live_query_results(response).await;
+		}
 		// Return the result to the client
 		Ok(res)
 	}

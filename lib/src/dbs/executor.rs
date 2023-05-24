@@ -1,12 +1,12 @@
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::dbs::response::Response;
-use crate::dbs::Auth;
 use crate::dbs::Level;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::dbs::LOG;
+use crate::dbs::{Auth, QueryType};
 use crate::err::Error;
 use crate::kvs::Datastore;
 use crate::sql::paths::DB;
@@ -89,15 +89,15 @@ impl<'a> Executor<'a> {
 		}
 	}
 
-	fn buf_cancel(&self, stm: Statement, v: Response) -> Response {
+	fn buf_cancel(&self, v: Response) -> Response {
 		Response {
 			time: v.time,
 			result: Err(Error::QueryCancelled),
-			query: stm,
+			query_type: QueryType::Other,
 		}
 	}
 
-	fn buf_commit(&self, stm: Statement, v: Response) -> Response {
+	fn buf_commit(&self, v: Response) -> Response {
 		match &self.err {
 			true => Response {
 				time: v.time,
@@ -105,7 +105,7 @@ impl<'a> Executor<'a> {
 					Ok(_) => Err(Error::QueryNotExecuted),
 					Err(e) => Err(e),
 				},
-				query: stm,
+				query_type: QueryType::Other,
 			},
 			_ => v,
 		}
@@ -194,25 +194,19 @@ impl<'a> Executor<'a> {
 					continue;
 				}
 				// Cancel a running transaction
-				Statement::Cancel(c) => {
+				Statement::Cancel(_) => {
 					self.cancel(true).await;
 					self.clear(chn.clone(), recv.clone()).await;
-					buf = buf
-						.into_iter()
-						.map(|v| self.buf_cancel(Statement::Cancel(c.clone()), v))
-						.collect();
+					buf = buf.into_iter().map(|v| self.buf_cancel(v)).collect();
 					out.append(&mut buf);
 					self.txn = None;
 					continue;
 				}
 				// Commit a running transaction
-				Statement::Commit(c) => {
+				Statement::Commit(_) => {
 					self.commit(true).await;
 					self.flush(chn.clone(), recv.clone()).await;
-					buf = buf
-						.into_iter()
-						.map(|v| self.buf_commit(Statement::Commit(c.clone()), v))
-						.collect();
+					buf = buf.into_iter().map(|v| self.buf_commit(v)).collect();
 					out.append(&mut buf);
 					self.txn = None;
 					continue;
@@ -357,7 +351,11 @@ impl<'a> Executor<'a> {
 					self.err = true;
 					e
 				}),
-				query: stm.clone(),
+				query_type: match stm {
+					Statement::Live(_) => QueryType::Live,
+					Statement::Kill(_) => QueryType::Kill,
+					_ => QueryType::Other,
+				},
 			};
 			// Output the response
 			if self.txn.is_some() {
