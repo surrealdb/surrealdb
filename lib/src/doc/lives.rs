@@ -32,10 +32,10 @@ impl<'a> Document<'a> {
 			// Check what type of data change this is
 			if stm.is_delete() {
 				// Send a DELETE notification
-				if opt.id() == &lv.node {
+				if opt.id() == &lv.node.0 {
 					opt.sender
 						.send(Notification {
-							id: lv.id,
+							id: lv.id.clone(),
 							action: Action::Delete,
 							result: id.clone().into(),
 						})
@@ -45,10 +45,10 @@ impl<'a> Document<'a> {
 				}
 			} else if self.is_new() {
 				// Send a CREATE notification
-				if opt.id() == &lv.node {
+				if opt.id() == &lv.node.0 {
 					opt.sender
 						.send(Notification {
-							id: lv.id,
+							id: lv.id.clone(),
 							action: Action::Create,
 							result: self.pluck(ctx, opt, txn, &lq).await?,
 						})
@@ -58,10 +58,10 @@ impl<'a> Document<'a> {
 				}
 			} else {
 				// Send a UPDATE notification
-				if opt.id() == &lv.node {
+				if opt.id() == &lv.node.0 {
 					opt.sender
 						.send(Notification {
-							id: lv.id,
+							id: lv.id.clone(),
 							action: Action::Update,
 							result: self.pluck(ctx, opt, txn, &lq).await?,
 						})
