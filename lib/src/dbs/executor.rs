@@ -296,14 +296,22 @@ impl<'a> Executor<'a> {
 									// There is no timeout clause
 									None => stm.compute(&ctx, &opt, &self.txn(), None).await,
 								};
-								// Finalise transaction
+								// Finalise transaction and return the result.
 								if res.is_ok() && stm.writeable() {
 									self.commit(loc).await;
+									if self.err {
+										// The commit failed
+										Err(Error::QueryNotExecuted)
+									} else {
+										// Successful, committed result
+										res
+									}
 								} else {
 									self.cancel(loc).await;
+
+									// An error
+									res
 								}
-								// Return the result
-								res
 							}
 						}
 					}
