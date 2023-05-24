@@ -262,11 +262,44 @@ impl Datastore {
 		let mut tx = self.transaction(true, false).await?;
 		let dead_heartbeats = self.delete_dead_heartbeats(&mut tx, watermark).await?;
 		trace!("Found dead hbs: {:?}", dead_heartbeats);
+		let mut archived: Vec<Uuid> = vec![];
 		for hb in dead_heartbeats {
 			tx.del_cl(hb.nd).await?;
 			trace!("Deleted node {}", hb.nd);
+			let new_archived = self.archive_lv_for_node(Uuid(hb.nd)).await?;
+			archived.extend(new_archived);
 		}
 		tx.commit().await?;
+		// Start and async task to cleanup archived lq
+		match self.transaction(false, true).await {
+			Ok(tx) => {
+				for lq in archived {
+					trace!("Archiving live query {}", &lq);
+					self.delete_lv(lq);
+				}
+				trace!("Finished archiving lq");
+			}
+			Err(e) => {
+				error!(target: LOG, "Error archiving lq: {}", e);
+			}
+		}
+		Ok(())
+	}
+
+	// Returns a list of live query IDs
+	pub async fn archive_lv_for_node(&self, nd: Uuid) -> Result<Vec<Uuid>, Error> {
+		// ... in same tx ...
+		// mark nodes as archived
+		Ok(vec![])
+	}
+
+	// Accepts a lqid, deletes parent entry and notifications
+	pub async fn delete_lv(&self, lq: Uuid) -> Result<(), Error> {
+		// open tx
+		// find the live queries for node id
+		// mark the live queries as archived
+		// close tx
+		// open tx
 		Ok(())
 	}
 
