@@ -52,7 +52,7 @@ impl LiveStatement {
 		// Process the live query table
 		match self.what.compute(ctx, opt, txn, doc).await? {
 			Value::Table(tb) => {
-				// Insert the live query
+				// Insert the node live query
 				let key = crate::key::lq::new(opt.ns(), opt.db(), &self.id);
 				run.putc(key, tb.as_str(), None).await?;
 				// Insert the table live query
@@ -66,7 +66,7 @@ impl LiveStatement {
 			}
 		};
 		// Return the query id
-		Ok(self.id.clone().into())
+		Ok(Value::Uuid(self.id.clone()))
 	}
 }
 
