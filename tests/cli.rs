@@ -75,6 +75,10 @@ mod cli_integration {
 		path.to_string_lossy().into_owned()
 	}
 
+	fn is_ci() -> bool {
+		option_env!("GITHUB_ACTIONS").is_some()
+	}
+
 	#[test]
 	fn version() {
 		assert!(run("version").output().is_ok());
@@ -97,6 +101,11 @@ mod cli_integration {
 
 	#[test]
 	fn start() {
+		if !is_ci() {
+			println!("Skipping outside of CI");
+			return;
+		}
+
 		let mut rng = thread_rng();
 
 		let port: u16 = rng.gen_range(13000..14000);
@@ -229,6 +238,11 @@ mod cli_integration {
 
 	#[test]
 	fn start_tls() {
+		if !is_ci() {
+			println!("Skipping outside of CI");
+			return;
+		}
+
 		let mut rng = thread_rng();
 
 		let port: u16 = rng.gen_range(13000..14000);
@@ -255,6 +269,6 @@ mod cli_integration {
 		std::thread::sleep(std::time::Duration::from_millis(50));
 
 		let output = server.kill().output().unwrap_err();
-		assert!(output.contains("Started web server"));
+		assert!(output.contains("Started web server"), "couldn't start web server: {output}");
 	}
 }
