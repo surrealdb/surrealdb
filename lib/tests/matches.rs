@@ -10,7 +10,7 @@ async fn select_where_matches_using_index() -> Result<(), Error> {
 	let sql = r"
 		CREATE blog:1 SET title = 'Hello World!';
 		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75,100);
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75);
 		SELECT id,title FROM blog WHERE title @@ 'Hello' EXPLAIN;
 	";
 	let dbs = Datastore::new("memory").await?;

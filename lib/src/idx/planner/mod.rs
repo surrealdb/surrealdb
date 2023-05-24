@@ -48,13 +48,13 @@ impl<'a> QueryPlanner<'a> {
 		t: Table,
 	) -> Result<Iterable, Error> {
 		let res = Tree::build(self.opt, txn, &t, self.cond).await?;
-		if let Some((node, index_map)) = res {
+		if let Some((node, im)) = res {
 			if let Some(plan) = AllAndStrategy::build(&node)? {
-				let e = plan.i.new_query_executor(opt, txn, index_map).await?;
+				let e = plan.i.new_query_executor(opt, txn, &t, im).await?;
 				self.executors.insert(t.0.clone(), e);
 				return Ok(Iterable::Index(t, plan));
 			}
-			let e = QueryExecutor::new(opt, txn, index_map, None).await?;
+			let e = QueryExecutor::new(opt, txn, &t, im, None).await?;
 			self.executors.insert(t.0.clone(), e);
 		}
 		Ok(Iterable::Table(t))

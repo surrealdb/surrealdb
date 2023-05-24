@@ -1,11 +1,10 @@
 use crate::dbs::{Options, Transaction};
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
-use crate::idx::planner::plan::IndexOption;
 use crate::idx::planner::tree::IndexMap;
 use crate::idx::IndexKeyBase;
 use crate::sql::index::Index;
-use crate::sql::{Expression, Thing, Value};
+use crate::sql::{Expression, Table, Thing, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -15,6 +14,7 @@ pub(crate) struct QueryExecutor {
 }
 
 struct Inner {
+	table: String,
 	index_map: IndexMap,
 	pre_match: Option<Expression>,
 	ft_map: HashMap<String, FtIndex>,
@@ -24,6 +24,7 @@ impl QueryExecutor {
 	pub(super) async fn new(
 		opt: &Options,
 		txn: &Transaction,
+		table: &Table,
 		index_map: IndexMap,
 		pre_match: Option<Expression>,
 	) -> Result<Self, Error> {
@@ -46,6 +47,7 @@ impl QueryExecutor {
 		}
 		Ok(Self {
 			inner: Arc::new(Inner {
+				table: table.0.clone(),
 				index_map,
 				pre_match,
 				ft_map,
@@ -53,7 +55,12 @@ impl QueryExecutor {
 		})
 	}
 
-	pub(crate) fn matches(&self, rid: Option<&Thing>, exp: &Expression) -> Result<Value, Error> {
+	pub(crate) async fn matches(
+		&self,
+		txn: &Transaction,
+		rid: Option<&Thing>,
+		exp: &Expression,
+	) -> Result<Value, Error> {
 		// If we find the expression in `pre_match`,
 		// it means that we are using an Iterator::Index
 		// and we are iterating over document that already matches the expression.
@@ -62,24 +69,29 @@ impl QueryExecutor {
 				return Ok(Value::Bool(true));
 			}
 		}
+
 		// Otherwise, we look for the first possible index options, and evaluate the expression
-		if let Some(ios) = self.inner.index_map.get(exp) {
-			for io in ios {
-				return Ok(Value::Bool(self.matches_index(io, rid)));
+		if let Some(rid) = rid {
+			// Does the record id match this executor's table?
+			if rid.tb.eq(&self.inner.table) {
+				if let Some(ios) = self.inner.index_map.get(exp) {
+					for io in ios {
+						if let Some(fti) = self.inner.ft_map.get(&io.ix.name.0) {
+							let mut run = txn.lock().await;
+							// TODO The query string could be extracted when IndexOptions are created
+							let query_string = io.v.clone().convert_to_string()?;
+							return Ok(Value::Bool(
+								fti.match_id_value(&mut run, &rid, &query_string).await?,
+							));
+						}
+					}
+				}
 			}
 		}
-		// If not previous case were successful, we end up with a user error
-		Err(Error::NoIndexFoundOnMatch {
+
+		// If no previous case were successful, we end up with a user error
+		Err(Error::NoIndexFoundForMatch {
 			value: exp.to_string(),
 		})
-	}
-
-	fn matches_index(&self, _io: &IndexOption, rid: Option<&Thing>) -> bool {
-		if let Some(rid) = rid {
-			if let Some(_fti) = self.inner.ft_map.get(&rid.tb) {
-				todo!()
-			}
-		}
-		false
 	}
 }

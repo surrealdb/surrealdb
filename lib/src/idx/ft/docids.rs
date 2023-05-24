@@ -59,6 +59,14 @@ impl DocIds {
 		doc_id
 	}
 
+	pub(super) async fn get_doc_id(
+		&self,
+		tx: &mut Transaction,
+		doc_key: Key,
+	) -> Result<Option<DocId>, Error> {
+		self.btree.search::<TrieKeys>(tx, &doc_key).await
+	}
+
 	/// Returns the doc_id for the given doc_key.
 	/// If the doc_id does not exists, a new one is created, and associated to the given key.
 	pub(super) async fn resolve_doc_id(

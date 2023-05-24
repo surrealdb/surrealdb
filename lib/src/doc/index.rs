@@ -194,12 +194,11 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let mut ft = FtIndex::new(run, ikb, order.to_usize()).await?;
-		let doc_key = self.rid.into();
 		if let Some(n) = &self.n {
 			// TODO: Apply the analyzer
-			ft.index_document(run, doc_key, n).await
+			ft.index_document(run, self.rid, n).await
 		} else {
-			ft.remove_document(run, doc_key).await
+			ft.remove_document(run, self.rid).await
 		}
 	}
 

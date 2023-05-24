@@ -1,3 +1,4 @@
+use crate::dbs::Transaction;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::sql::value::TryAdd;
@@ -156,13 +157,14 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value, Error> {
 	Ok(a.intersects(b).into())
 }
 
-pub(crate) fn matches(
+pub(crate) async fn matches(
+	txn: &Transaction,
 	exe: Option<&QueryExecutor>,
-	thg: Option<&Thing>,
+	rid: Option<&Thing>,
 	e: &Expression,
 ) -> Result<Value, Error> {
 	if let Some(exe) = exe {
-		exe.matches(thg, e)
+		exe.matches(txn, rid, e).await
 	} else {
 		Ok(Value::Bool(false))
 	}

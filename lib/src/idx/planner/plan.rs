@@ -9,7 +9,7 @@ use crate::kvs::Key;
 use crate::sql::index::Index;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Array, Expression, Ident, Object, Operator, Thing, Value};
+use crate::sql::{Array, Expression, Ident, Object, Operator, Table, Thing, Value};
 use async_trait::async_trait;
 use std::collections::HashMap;
 
@@ -73,8 +73,8 @@ impl From<IndexOption> for Plan {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub(super) struct IndexOption {
 	pub(super) ix: DefineIndexStatement,
-	v: Value,
-	op: Operator,
+	pub(super) v: Value,
+	pub(super) op: Operator,
 	ep: Expression,
 }
 
@@ -92,9 +92,10 @@ impl IndexOption {
 		&self,
 		opt: &Options,
 		txn: &Transaction,
+		t: &Table,
 		i: IndexMap,
 	) -> Result<QueryExecutor, Error> {
-		QueryExecutor::new(opt, txn, i, Some(self.ep.clone())).await
+		QueryExecutor::new(opt, txn, t, i, Some(self.ep.clone())).await
 	}
 
 	pub(super) fn found(

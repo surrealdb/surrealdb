@@ -48,6 +48,16 @@ impl Postings {
 		self.btree.insert::<TrieKeys>(tx, key, term_freq).await
 	}
 
+	pub(super) async fn get_term_frequency(
+		&self,
+		tx: &mut Transaction,
+		term_id: TermId,
+		doc_id: DocId,
+	) -> Result<Option<TermFrequency>, Error> {
+		let key = self.index_key_base.new_bf_key(term_id, doc_id);
+		self.btree.search::<TrieKeys>(tx, &key).await
+	}
+
 	pub(super) async fn remove_posting(
 		&mut self,
 		tx: &mut Transaction,

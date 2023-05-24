@@ -400,7 +400,7 @@ pub enum Error {
 
 	/// The query planner did not find an index able to support the match @@ operator on a given expression
 	#[error("There was no suitable full-text index supporting the expression '{value}'")]
-	NoIndexFoundOnMatch {
+	NoIndexFoundForMatch {
 		value: String,
 	},
 
