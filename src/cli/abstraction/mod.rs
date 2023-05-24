@@ -23,6 +23,21 @@ pub struct DatabaseSelectionArguments {
 }
 
 #[derive(Args, Debug)]
+pub struct DatabaseSelectionOptionalArguments {
+	#[arg(help = "The namespace selected for the operation")]
+	#[arg(env = "SURREAL_NAMESPACE", long = "namespace", visible_alias = "ns")]
+	pub(crate) namespace: Option<String>,
+	#[arg(help = "The database selected for the operation")]
+	#[arg(
+		env = "SURREAL_DATABASE",
+		long = "database",
+		visible_alias = "db",
+		requires = "namespace"
+	)]
+	pub(crate) database: Option<String>,
+}
+
+#[derive(Args, Debug)]
 pub struct DatabaseConnectionArguments {
 	#[arg(help = "Remote database server url to connect to")]
 	#[arg(short = 'e', long = "endpoint", visible_aliases = ["conn"])]
