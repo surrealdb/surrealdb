@@ -429,6 +429,14 @@ impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
+			tikv::Error::KeyError(tikv_client_proto::kvrpcpb::KeyError {
+				abort,
+				..
+			}) if abort.contains("KeyTooLarge") => Error::Tx("key too large".to_owned()),
+			tikv::Error::RegionError(tikv_client_proto::errorpb::Error {
+				raft_entry_too_large,
+				..
+			}) if raft_entry_too_large.is_some() => Error::Tx("txn too large".to_owned()),
 			_ => Error::Tx(e.to_string()),
 		}
 	}
