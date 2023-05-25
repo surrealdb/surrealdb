@@ -34,7 +34,7 @@ impl<'a> Executor<'a> {
 	}
 
 	fn txn(&self) -> Transaction {
-		self.txn.clone().unwrap()
+		self.txn.clone().expect("unreachable: txn was None after successful begin")
 	}
 
 	/// # Return
