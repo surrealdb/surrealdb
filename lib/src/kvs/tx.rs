@@ -763,6 +763,16 @@ impl Transaction {
 		self.del(key).await
 	}
 
+	// Delete the live query notification registry on the table
+	// Return the Table ID
+	pub async fn del_cllv(&mut self, cl: &Uuid) -> Result<Uuid, Error> {
+		// This isn't implemented because it is covered by del_cl
+		// Will add later for remote node kill
+		Err(Error::ClNotFound {
+			value: format!("Missing cluster {:?}", cl),
+		})
+	}
+
 	// Retrieve cluster information
 	pub async fn get_cl(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
 		let key = crate::key::cl::Cl::new(id.0);
@@ -857,6 +867,13 @@ impl Transaction {
 			self.del(hb).await?;
 		}
 		Ok(())
+	}
+
+	pub async fn delr_tblv(&mut self, tb: &Uuid, lv: &Uuid) -> Result<(), Error> {
+		trace!("delr_tblv: tb={:?} lv={:?}", tb, lv);
+		Err(Error::TbNotFound {
+			value: format!("Missing table {:?} live query {:?}", tb, lv),
+		})
 	}
 
 	/// Retrieve all namespace definitions in a datastore.

@@ -271,13 +271,17 @@ impl Datastore {
 		}
 		tx.commit().await?;
 		// Start and async task to cleanup archived lq
-		match self.transaction(false, true).await {
-			Ok(tx) => {
+		match self.transaction(true, true).await {
+			Ok(mut tx) => {
 				for lq in archived {
 					trace!("Archiving live query {}", &lq);
-					self.delete_lv(lq);
+					// Delete the parent archived LQ
+					let tb = tx.del_cllv(&lq).await?;
+					// Delete notification range TODO this needs to be a loop
+					tx.delr_tblv(&tb, &lq);
 				}
 				trace!("Finished archiving lq");
+				tx.commit().await?;
 			}
 			Err(e) => {
 				error!(target: LOG, "Error archiving lq: {}", e);
