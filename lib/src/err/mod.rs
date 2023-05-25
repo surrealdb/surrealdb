@@ -152,6 +152,12 @@ pub enum Error {
 	#[error("The query was not executed due to a failed transaction")]
 	QueryNotExecuted,
 
+	/// The query did not execute, because the transaction has failed (with a message)
+	#[error("The query was not executed due to a failed transaction. {message}")]
+	QueryNotExecutedDetail {
+		message: String,
+	},
+
 	/// The permissions do not allow for performing the specified query
 	#[error("You don't have permission to perform this query type")]
 	QueryPermissions,
