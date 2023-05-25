@@ -1,4 +1,4 @@
-mod analyzer;
+pub(crate) mod analyzer;
 pub(crate) mod docids;
 mod doclength;
 mod postings;
@@ -14,11 +14,13 @@ use crate::idx::ft::scorer::{BM25Scorer, Score};
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
+use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::{Array, Thing};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 pub(crate) struct FtIndex {
+	analyzer: Analyzer,
 	state_key: Key,
 	index_key_base: IndexKeyBase,
 	state: State,
@@ -59,6 +61,7 @@ impl SerdeState for State {}
 impl FtIndex {
 	pub(crate) async fn new(
 		tx: &mut Transaction,
+		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
 		btree_default_order: usize,
 	) -> Result<Self, Error> {
@@ -74,6 +77,7 @@ impl FtIndex {
 			index_key_base,
 			bm25: Bm25Params::default(),
 			btree_default_order,
+			analyzer: az.into(),
 		})
 	}
 
@@ -146,7 +150,7 @@ impl FtIndex {
 		// Extract the doc_lengths, terms en frequencies
 		let mut t = self.terms(tx).await?;
 		let (doc_length, terms_and_frequencies) =
-			Analyzer::extract_terms_with_frequencies(&mut t, tx, field_content).await?;
+			self.analyzer.extract_terms_with_frequencies(&mut t, tx, field_content).await?;
 
 		// Set the doc length
 		let mut l = self.doc_lengths(tx).await?;
@@ -310,6 +314,7 @@ mod tests {
 	use crate::idx::ft::{FtIndex, HitsIterator, Score};
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Transaction};
+	use crate::sql::statements::define::analyzer;
 	use crate::sql::{Array, Thing};
 	use std::collections::HashMap;
 	use test_log::test;
@@ -332,6 +337,7 @@ mod tests {
 	#[test(tokio::test)]
 	async fn test_ft_index() {
 		let ds = Datastore::new("memory").await.unwrap();
+		let (_, az) = analyzer("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 
 		let default_btree_order = 5;
 
@@ -343,7 +349,9 @@ mod tests {
 			// Add one document
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
-				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
+				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+					.await
+					.unwrap();
 			fti.index_document(&mut tx, &doc1, &Array::from(vec!["hello the world"]))
 				.await
 				.unwrap();
@@ -354,7 +362,9 @@ mod tests {
 			// Add two documents
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
-				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
+				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+					.await
+					.unwrap();
 			fti.index_document(&mut tx, &doc2, &Array::from(vec!["a yellow hello"])).await.unwrap();
 			fti.index_document(&mut tx, &doc3, &Array::from(vec!["foo bar"])).await.unwrap();
 			tx.commit().await.unwrap();
@@ -363,7 +373,9 @@ mod tests {
 		{
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let fti =
-				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
+				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+					.await
+					.unwrap();
 
 			// Check the statistics
 			let statistics = fti.statistics(&mut tx).await.unwrap();
@@ -396,7 +408,9 @@ mod tests {
 			// Reindex one document
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
-				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
+				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+					.await
+					.unwrap();
 			fti.index_document(&mut tx, &doc3, &Array::from(vec!["nobar foo"])).await.unwrap();
 			tx.commit().await.unwrap();
 
@@ -418,7 +432,9 @@ mod tests {
 			// Remove documents
 			let mut tx = ds.transaction(true, false).await.unwrap();
 			let mut fti =
-				FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order).await.unwrap();
+				FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+					.await
+					.unwrap();
 			fti.remove_document(&mut tx, &doc1).await.unwrap();
 			fti.remove_document(&mut tx, &doc2).await.unwrap();
 			fti.remove_document(&mut tx, &doc3).await.unwrap();
@@ -441,6 +457,7 @@ mod tests {
 		// Therefore it makes sense to do multiple runs.
 		for _ in 0..10 {
 			let ds = Datastore::new("memory").await.unwrap();
+			let (_, az) = analyzer("DEFINE ANALYZER test TOKENIZERS blank;").unwrap();
 
 			let doc1: Thing = ("t", "doc1").into();
 			let doc2: Thing = ("t", "doc2").into();
@@ -450,9 +467,10 @@ mod tests {
 			let default_btree_order = 5;
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
-				let mut fti = FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order)
-					.await
-					.unwrap();
+				let mut fti =
+					FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+						.await
+						.unwrap();
 				fti.index_document(
 					&mut tx,
 					&doc1,
@@ -486,9 +504,10 @@ mod tests {
 
 			{
 				let mut tx = ds.transaction(true, false).await.unwrap();
-				let fti = FtIndex::new(&mut tx, IndexKeyBase::default(), default_btree_order)
-					.await
-					.unwrap();
+				let fti =
+					FtIndex::new(&mut tx, az.clone(), IndexKeyBase::default(), default_btree_order)
+						.await
+						.unwrap();
 
 				let statistics = fti.statistics(&mut tx).await.unwrap();
 				assert_eq!(statistics.terms.keys_count, 17);

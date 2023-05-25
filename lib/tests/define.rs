@@ -925,7 +925,7 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 #[tokio::test]
 async fn define_statement_analyzer() -> Result<(), Error> {
 	let sql = "
-		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
+		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
 		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
 		INFO FOR DB;
 	";
@@ -946,7 +946,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 		"{
 			az: {
 				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
-				english: 'DEFINE ANALYZER english TOKENIZERS SPACE,CASE FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
+				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
 			},
 			dl: {},
 			dt: {},
@@ -965,8 +965,8 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	let sql = r#"
 		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
 		CREATE blog:3 SET title = 'This blog is going to be deleted';
-		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75) HIGHLIGHTS;
+		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER english BM25(1.2,0.75) HIGHLIGHTS;
 		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
 		DELETE blog:3;
 		INFO FOR TABLE blog;
@@ -988,7 +988,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			ev: {},
 			fd: {},
 			ft: {},
-			ix: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75) HIGHLIGHTS' },
+			ix: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER english BM25(1.2,0.75) HIGHLIGHTS' },
 		}",
 	);
 	assert_eq!(tmp, val);

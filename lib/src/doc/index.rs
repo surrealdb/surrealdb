@@ -186,14 +186,15 @@ impl<'a> IndexOperation<'a> {
 	async fn index_best_matching_search(
 		&self,
 		run: &mut kvs::Transaction,
-		_az: &Ident,
+		az: &Ident,
 		_k1: &Number,
 		_b: &Number,
 		order: &Number,
 		_hl: bool,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
-		let mut ft = FtIndex::new(run, ikb, order.to_usize()).await?;
+		let az = run.get_az(self.opt.ns(), self.opt.db(), az.as_str()).await?;
+		let mut ft = FtIndex::new(run, az, ikb, order.to_usize()).await?;
 		if let Some(n) = &self.n {
 			// TODO: Apply the analyzer
 			ft.index_document(run, self.rid, n).await

@@ -9,8 +9,8 @@ use surrealdb::sql::Value;
 async fn select_where_matches_using_index() -> Result<(), Error> {
 	let sql = r"
 		CREATE blog:1 SET title = 'Hello World!';
-		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75);
+		DEFINE ANALYZER english TOKENIZERS blank,class;
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER english BM25(1.2,0.75);
 		SELECT id,title FROM blog WHERE title @@ 'Hello' EXPLAIN;
 	";
 	let dbs = Datastore::new("memory").await?;
@@ -55,8 +55,8 @@ async fn select_where_matches_without_using_index_iterator() -> Result<(), Error
 	let sql = r"
 		CREATE blog:1 SET title = 'Hello World!';
 		CREATE blog:2 SET title = 'Foo Bar!';
-		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75);
+		DEFINE ANALYZER english TOKENIZERS blank,class;
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER english BM25(1.2,0.75);
 		SELECT id,title FROM blog WHERE (title @@ 'Hello' AND id>0) OR (title @@ 'World' AND id<99) EXPLAIN;
 	";
 	let dbs = Datastore::new("memory").await?;

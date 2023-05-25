@@ -369,7 +369,7 @@ impl Display for DefineAnalyzerStatement {
 	}
 }
 
-fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
+pub(crate) fn analyzer(i: &str) -> IResult<&str, DefineAnalyzerStatement> {
 	let (i, _) = tag_no_case("DEFINE")(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("ANALYZER")(i)?;
@@ -1408,7 +1408,7 @@ mod tests {
 
 	#[test]
 	fn check_create_search_index_with_highlights() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS";
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -1427,12 +1427,13 @@ mod tests {
 				},
 			}
 		);
-		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS");
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer BM25(1.2,0.75) ORDER 1000 HIGHLIGHTS");
 	}
 
 	#[test]
 	fn check_create_search_index() {
-		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH my_analyzer VS";
+		let sql =
+			"DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH ANALYZER my_analyzer VS";
 		let (_, idx) = index(sql).unwrap();
 		assert_eq!(
 			idx,
@@ -1450,7 +1451,7 @@ mod tests {
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer VS ORDER 1000"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS ORDER 1000"
 		);
 	}
 }

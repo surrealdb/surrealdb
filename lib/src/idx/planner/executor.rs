@@ -33,13 +33,15 @@ impl QueryExecutor {
 		for (_, ios) in &index_map {
 			for io in ios {
 				if let Index::Search {
+					az,
 					order,
 					..
 				} = &io.ix.index
 				{
 					if !ft_map.contains_key(&io.ix.name.0) {
 						let ikb = IndexKeyBase::new(opt, &io.ix);
-						let ft = FtIndex::new(&mut run, ikb, order.to_usize()).await?;
+						let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
+						let ft = FtIndex::new(&mut run, az, ikb, order.to_usize()).await?;
 						ft_map.insert(io.ix.name.0.clone(), ft);
 					}
 				}

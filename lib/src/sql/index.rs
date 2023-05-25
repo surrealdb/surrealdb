@@ -1,3 +1,4 @@
+use crate::idx::ft::analyzer::Analyzers;
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
@@ -42,7 +43,7 @@ impl fmt::Display for Index {
 				sc,
 				order,
 			} => {
-				write!(f, "SEARCH {} {} ORDER {}", az, sc, order)?;
+				write!(f, "SEARCH  ANALYZER {} {} ORDER {}", az, sc, order)?;
 				if *hl {
 					f.write_str(" HIGHLIGHTS")?
 				}
@@ -66,6 +67,14 @@ pub fn unique(i: &str) -> IResult<&str, Index> {
 	Ok((i, Index::Uniq))
 }
 
+pub fn analyzer(i: &str) -> IResult<&str, Ident> {
+	let (i, _) = mightbespace(i)?;
+	let (i, _) = tag_no_case("ANALYZER")(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, analyzer) = ident(i)?;
+	Ok((i, analyzer))
+}
+
 pub fn order(i: &str) -> IResult<&str, Number> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case("ORDER")(i)?;
@@ -82,7 +91,7 @@ pub fn highlights(i: &str) -> IResult<&str, bool> {
 pub fn search(i: &str) -> IResult<&str, Index> {
 	let (i, _) = tag_no_case("SEARCH")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, az) = ident(i)?;
+	let (i, az) = opt(analyzer)(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, sc) = scoring(i)?;
 	let (i, o) = opt(order)(i)?;
@@ -90,7 +99,7 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 	Ok((
 		i,
 		Index::Search {
-			az,
+			az: az.unwrap_or_else(|| Ident::from(Analyzers::LIKE)),
 			sc,
 			hl,
 			order: o.unwrap_or(Number::Int(100)),

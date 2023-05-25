@@ -43,7 +43,7 @@ async fn remove_statement_table() -> Result<(), Error> {
 #[tokio::test]
 async fn remove_statement_analyzer() -> Result<(), Error> {
 	let sql = "
-		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
+		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
 		REMOVE ANALYZER english;
 		INFO FOR DB;
 	";
