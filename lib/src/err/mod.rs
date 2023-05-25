@@ -44,6 +44,18 @@ pub enum Error {
 	#[error("The key being inserted already exists")]
 	TxKeyAlreadyExists,
 
+	/// The key exceeds a limit set by the KV store
+	#[error("Record id or key is too large")]
+	TxKeyTooLarge,
+
+	/// The value exceeds a limit set by the KV store
+	#[error("Record or value is too large")]
+	TxValueTooLarge,
+
+	/// The transaction writes too much data for the KV store
+	#[error("Transaction is too large")]
+	TxTooLarge,
+
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
 	NsEmpty,
@@ -432,11 +444,11 @@ impl From<tikv::Error> for Error {
 			tikv::Error::KeyError(tikv_client_proto::kvrpcpb::KeyError {
 				abort,
 				..
-			}) if abort.contains("KeyTooLarge") => Error::Tx("key too large".to_owned()),
+			}) if abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(tikv_client_proto::errorpb::Error {
 				raft_entry_too_large,
 				..
-			}) if raft_entry_too_large.is_some() => Error::Tx("txn too large".to_owned()),
+			}) if raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
 		}
 	}
