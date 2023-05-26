@@ -96,6 +96,7 @@ mod cli_integration {
 	}
 
 	#[test]
+	#[ignore = "only runs in CI"]
 	fn start() {
 		let mut rng = thread_rng();
 
@@ -191,13 +192,13 @@ mod cli_integration {
 				.output()
 				.unwrap();
 
-			assert!(output.contains("thing:success"), "missing success in {output:?}");
-			assert!(output.contains("rgument"), "missing argument error in {output:?}");
+			assert!(output.contains("thing:success"), "missing success in {output}");
+			assert!(output.contains("rgument"), "missing argument error in {output}");
 			assert!(
 				output.contains("time") && output.contains("out"),
-				"missing timeout error in {output:?}"
+				"missing timeout error in {output}"
 			);
-			assert!(output.contains("thing:also_success"), "missing also_success in {output:?}")
+			assert!(output.contains("thing:also_success"), "missing also_success in {output}")
 		}
 
 		// Multi-statement (and multi-line) transaction including error(s) over WS
@@ -223,11 +224,38 @@ mod cli_integration {
 				3,
 				"missing failed txn errors in {output:?}"
 			);
-			assert!(output.contains("rgument"), "missing argument error in {output:?}");
+			assert!(output.contains("rgument"), "missing argument error in {output}");
+		}
+
+		// Pass neither ns nor db
+		{
+			let args = format!("sql --conn http://{addr} --user root --pass {pass}");
+			let output = run(&args)
+				.input("USE NS N5 DB D5; CREATE thing:one;\n")
+				.output()
+				.expect("neither ns nor db");
+			assert!(output.contains("thing:one"), "missing thing:one in {output}");
+		}
+
+		// Pass only ns
+		{
+			let args = format!("sql --conn http://{addr} --user root --pass {pass} --ns N5");
+			let output = run(&args)
+				.input("USE DB D5; SELECT * FROM thing:one;\n")
+				.output()
+				.expect("only ns");
+			assert!(output.contains("thing:one"), "missing thing:one in {output}");
+		}
+
+		// Pass only db and expect an error
+		{
+			let args = format!("sql --conn http://{addr} --user root --pass {pass} --db D5");
+			run(&args).output().expect_err("only db");
 		}
 	}
 
 	#[test]
+	#[ignore = "only runs in CI"]
 	fn start_tls() {
 		let mut rng = thread_rng();
 
@@ -255,6 +283,6 @@ mod cli_integration {
 		std::thread::sleep(std::time::Duration::from_millis(50));
 
 		let output = server.kill().output().unwrap_err();
-		assert!(output.contains("Started web server"));
+		assert!(output.contains("Started web server"), "couldn't start web server: {output}");
 	}
 }

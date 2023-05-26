@@ -102,6 +102,16 @@ async fn query_chaining() {
 }
 
 #[tokio::test]
+async fn mixed_results_query() {
+	let db = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+    let sql = "CREATE bar SET baz = rand('a'); CREATE foo;";
+    let mut response = db.query(sql).await.unwrap();
+    response.take::<Value>(0).unwrap_err();
+    let _: Option<RecordId> = response.take(1).unwrap();
+}
+
+#[tokio::test]
 async fn create_record_no_id() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
