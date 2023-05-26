@@ -139,15 +139,13 @@ impl Authenticate for RequestBuilder {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct HttpQueryResponse {
-	time: String,
-	status: Status,
-	#[serde(default)]
-	result: Value,
-	#[serde(default)]
-	detail: String,
+#[serde(untagged)]
+enum HttpValue {
+	Value(Value),
+	String(String),
 }
+
+type HttpQueryResponse = (String, Status, HttpValue);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Root {
@@ -179,44 +177,32 @@ async fn query(request: RequestBuilder) -> Result<QueryResponse> {
 	info!(target: LOG, "{request:?}");
 	let response = request.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
-	let responses = match bung::from_slice::<Vec<HttpQueryResponse>>(&bytes) {
-		Ok(responses) => responses,
-		Err(_) => {
-			let vec =
-				bung::from_slice::<Vec<(String, Status, String)>>(&bytes).map_err(|error| {
-					Error::ResponseFromBinary {
-						binary: bytes.to_vec(),
-						error,
-					}
-				})?;
-			let mut responses = Vec::with_capacity(vec.len());
-			for (time, status, data) in vec {
-				let (result, detail) = match status {
-					Status::Ok => (Value::from(data), String::new()),
-					Status::Err => (Value::None, data),
-				};
-				responses.push(HttpQueryResponse {
-					time,
-					status,
-					result,
-					detail,
-				});
-			}
-			responses
+	let responses = bung::from_slice::<Vec<HttpQueryResponse>>(&bytes).map_err(|error| {
+		Error::ResponseFromBinary {
+			binary: bytes.to_vec(),
+			error,
 		}
-	};
+	})?;
 	let mut map = IndexMap::<usize, QueryResult>::with_capacity(responses.len());
-	for (index, response) in responses.into_iter().enumerate() {
-		match response.status {
+	for (index, (_time, status, value)) in responses.into_iter().enumerate() {
+		match status {
 			Status::Ok => {
-				match response.result {
+				let value = match value {
+					HttpValue::Value(value) => value,
+					HttpValue::String(value) => value.into(),
+				};
+				match value {
 					Value::Array(Array(array)) => map.insert(index, Ok(array)),
 					Value::None | Value::Null => map.insert(index, Ok(vec![])),
 					value => map.insert(index, Ok(vec![value])),
 				};
 			}
 			Status::Err => {
-				map.insert(index, Err(Error::Query(response.detail).into()));
+				let error = match value {
+					HttpValue::String(message) => message,
+					HttpValue::Value(value) => value.to_string(),
+				};
+				map.insert(index, Err(Error::Query(error).into()));
 			}
 		}
 	}
