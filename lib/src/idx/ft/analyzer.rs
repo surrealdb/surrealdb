@@ -8,8 +8,7 @@ use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::Array;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::str::Chars;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) struct Analyzers {}
 
@@ -32,22 +31,53 @@ impl From<DefineAnalyzerStatement> for Analyzer {
 }
 
 impl Analyzer {
-	// TODO: This is currently a place holder. It has to be replaced by the full analyzer/token/filter logic.
+	pub(super) async fn extract_terms(
+		&self,
+		t: &Terms,
+		tx: &mut Transaction,
+		query_string: String,
+	) -> Result<Vec<Option<TermId>>, Error> {
+		let mut tokens = Tokens::new(query_string);
+		self.walk(&mut tokens);
+		// We first collect every unique terms
+		// as it can contains duplicates
+		let mut terms = HashSet::new();
+		for token in &tokens.t {
+			terms.insert(token);
+		}
+		// Now we can extract the term ids
+		let mut res = Vec::with_capacity(terms.len());
+		for term in terms {
+			let term_id = t.get_term_id(tx, tokens.get_token_string(term)).await?;
+			res.push(term_id);
+		}
+		Ok(res)
+	}
+
+	/// This method is used for indexing.
+	/// It will create new term ids for non already existing terms.
 	pub(super) async fn extract_terms_with_frequencies(
 		&self,
-		terms: &mut Terms,
+		t: &mut Terms,
 		tx: &mut Transaction,
 		field_content: &Array,
-	) -> Result<(DocLength, HashMap<TermId, TermFrequency>), Error> {
+	) -> Result<(DocLength, Vec<(TermId, TermFrequency)>), Error> {
 		let mut doc_length = 0;
-		let mut terms_map = HashMap::new();
+		// Let's first collect all the inputs, and collect the tokens.
+		// We need to store them because everything after is zero-copy
+		let mut inputs = Vec::with_capacity(field_content.0.len());
 		for v in &field_content.0 {
-			let input = v.clone().convert_to_string()?;
-			let tokens = self.walk(&input);
-			for token in tokens.t {
-				let term_id = terms.resolve_term_id(tx, token.as_ref()).await?;
+			let input = v.to_owned().convert_to_string()?;
+			let mut input = Tokens::new(input);
+			self.walk(&mut input);
+			inputs.push(input);
+		}
+		// We then collect every unique terms and count the frequency
+		let mut terms = HashMap::new();
+		for tokens in &inputs {
+			for token in &tokens.t {
 				doc_length += 1;
-				match terms_map.entry(term_id) {
+				match terms.entry(tokens.get_token_string(&token)) {
 					Entry::Vacant(e) => {
 						e.insert(1);
 					}
@@ -57,36 +87,31 @@ impl Analyzer {
 				}
 			}
 		}
-		Ok((doc_length, terms_map))
+		// Now we can extract the term ids
+		let mut res = Vec::with_capacity(terms.len());
+		for (term, freq) in terms {
+			res.push((t.resolve_term_id(tx, term).await?, freq));
+		}
+		Ok((doc_length, res))
 	}
 
-	pub(super) fn walk<'a>(&'a self, i: &'a str) -> Tokens<'a> {
-		let mut tokens = Tokens::new(i, &self.f);
+	fn walk<'a>(&self, input: &mut Tokens) {
 		if let Some(t) = &self.t {
 			if !t.is_empty() {
-				tokens = Walker::new(t, tokens).walk();
+				Walker::walk(t, &self.f, input);
 			}
 		}
-		tokens
 	}
 }
 
-struct Walker<'a> {
+struct Walker {
 	splitters: Vec<Splitter>,
-	chars: Chars<'a>,
-	tokens: Tokens<'a>,
-	last_pos: usize,
-	current_pos: usize,
 }
 
-impl<'a> Walker<'a> {
-	fn new(t: &Vec<Tokenizer>, tokens: Tokens<'a>) -> Self {
+impl Walker {
+	fn new(t: &Vec<Tokenizer>) -> Self {
 		Self {
 			splitters: t.iter().map(|t| t.into()).collect(),
-			chars: tokens.i.chars(),
-			last_pos: 0,
-			current_pos: 0,
-			tokens,
 		}
 	}
 
@@ -104,52 +129,56 @@ impl<'a> Walker<'a> {
 		res
 	}
 
-	fn walk(mut self) -> Tokens<'a> {
-		while let Some(c) = self.chars.next() {
+	fn walk<'a>(t: &Vec<Tokenizer>, f: &Option<Vec<Filter>>, input: &mut Tokens) {
+		let mut w = Walker::new(t);
+		let mut last_pos = 0;
+		let mut current_pos = 0;
+		let mut tks = Vec::new();
+		for c in input.i.chars() {
 			let is_valid = Self::is_valid(c);
-			let should_split = self.should_split(c);
+			let should_split = w.should_split(c);
 			if should_split || !is_valid {
 				// The last pos may be more advanced due to the is_valid process
-				if self.last_pos < self.current_pos {
-					self.tokens.add(self.last_pos, self.current_pos);
+				if last_pos < current_pos {
+					tks.push((last_pos, current_pos));
 				}
-				self.last_pos = self.current_pos;
+				last_pos = current_pos;
 				// If the character is not valid for indexing (space, control...)
 				// Then we increase the last position to the next character
 				if !is_valid {
-					self.last_pos += 1;
+					last_pos += 1;
 				}
 			}
-			self.current_pos += c.len_utf8();
+			current_pos += c.len_utf8();
 		}
-		if self.current_pos != self.last_pos {
-			self.tokens.add(self.last_pos, self.current_pos);
+		if current_pos != last_pos {
+			tks.push((last_pos, current_pos));
 		}
-		self.tokens
+
+		for (s, e) in tks {
+			input.add(f, s, e);
+		}
 	}
 }
 
-pub(super) struct Tokens<'a> {
+pub(super) struct Tokens {
 	/// Then input string
-	i: &'a str,
-	/// The possible filters
-	f: &'a Option<Vec<Filter>>,
+	i: String,
 	/// The final list of tokens
-	t: Vec<Token<'a>>,
+	t: Vec<Token>,
 }
 
-impl<'a> Tokens<'a> {
-	fn new(i: &'a str, f: &'a Option<Vec<Filter>>) -> Self {
+impl Tokens {
+	fn new(i: String) -> Self {
 		Self {
-			f,
 			i,
-			t: vec![],
+			t: Vec::new(),
 		}
 	}
 
-	fn add(&mut self, s: usize, e: usize) {
-		let mut t = (&self.i[s..e]).into();
-		if let Some(f) = self.f {
+	fn add(&mut self, f: &Option<Vec<Filter>>, s: usize, e: usize) {
+		let mut t = Token::Ref(s, e);
+		if let Some(f) = f {
 			for f in f {
 				t = self.filter(f, t);
 			}
@@ -157,50 +186,37 @@ impl<'a> Tokens<'a> {
 		self.t.push(t);
 	}
 
-	fn filter(&mut self, f: &'a Filter, t: Token<'a>) -> Token<'a> {
-		let s: Token = match f {
+	fn get_token_string<'a>(&'a self, t: &'a Token) -> &str {
+		match t {
+			Token::Ref(s, e) => &self.i[*s..*e],
+			Token::String(s) => &s,
+		}
+	}
+
+	fn filter(&self, f: &Filter, t: Token) -> Token {
+		let c = self.get_token_string(&t);
+		let s: String = match f {
 			Filter::EdgeNgram(_, _) => {
 				todo!()
 			}
-			Filter::Lowercase => t.as_ref().to_lowercase().into(),
+			Filter::Lowercase => c.to_lowercase(),
 			Filter::Snowball(_) => {
 				todo!()
 			}
 		};
 		// If the new token is equal to the old one, we keep the old one
-		if t.as_ref().eq(s.as_ref()) {
+		if s.eq(c) {
 			t
 		} else {
-			s
+			Token::String(s)
 		}
 	}
 }
 
 #[derive(Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
-enum Token<'a> {
-	Ref(&'a str),
+enum Token {
+	Ref(usize, usize),
 	String(String),
-}
-
-impl<'a> From<&'a str> for Token<'a> {
-	fn from(s: &'a str) -> Self {
-		Self::Ref(s)
-	}
-}
-
-impl<'a> From<String> for Token<'a> {
-	fn from(s: String) -> Self {
-		Self::String(s)
-	}
-}
-
-impl<'a> AsRef<str> for Token<'a> {
-	fn as_ref(&self) -> &str {
-		match self {
-			Token::Ref(s) => s.as_ref(),
-			Token::String(s) => s.as_ref(),
-		}
-	}
 }
 
 struct Splitter {
@@ -272,6 +288,7 @@ impl Splitter {
 #[cfg(test)]
 mod tests {
 	use super::Analyzer;
+	use crate::idx::ft::analyzer::Tokens;
 	use crate::sql::statements::define::analyzer;
 
 	#[test]
@@ -281,33 +298,21 @@ mod tests {
 				.unwrap();
 		let a: Analyzer = az.into();
 
-		let tokens = a.walk("Abc12345xYZ DL1809 item123456 978-3-16-148410-0 1HGCM82633A123456");
+		let mut tokens = Tokens::new(
+			"Abc12345xYZ DL1809 item123456 978-3-16-148410-0 1HGCM82633A123456".to_string(),
+		);
+		a.walk(&mut tokens);
+		let mut res = vec![];
+		for t in &tokens.t {
+			res.push(tokens.get_token_string(t));
+		}
 		assert_eq!(
-			tokens.t,
+			res,
 			vec![
-				"abc".to_string().into(),
-				"12345".into(),
-				"xyz".to_string().into(),
-				"dl".to_string().into(),
-				"1809".into(),
-				"item".into(),
-				"123456".into(),
-				"978".into(),
-				"-".into(),
-				"3".into(),
-				"-".into(),
-				"16".into(),
-				"-".into(),
-				"148410".into(),
-				"-".into(),
-				"0".into(),
-				"1".into(),
-				"hgcm".to_string().into(),
-				"82633".into(),
-				"a".to_string().into(),
-				"123456".into()
+				"abc", "12345", "xyz", "dl", "1809", "item", "123456", "978", "-", "3", "-", "16",
+				"-", "148410", "-", "0", "1", "hgcm", "82633", "a", "123456"
 			],
-			"{} => {:?}",
+			"{:?} => {:?}",
 			tokens.i,
 			tokens.t
 		);

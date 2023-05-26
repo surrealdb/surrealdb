@@ -74,19 +74,6 @@ impl Postings {
 		PostingsIterator::new(i)
 	}
 
-	pub(super) async fn count_postings(
-		&self,
-		tx: &mut Transaction,
-		term_id: TermId,
-	) -> Result<usize, Error> {
-		let mut count = 0;
-		let mut i = self.new_postings_iterator(term_id);
-		while i.next(tx).await?.is_some() {
-			count += 1;
-		}
-		Ok(count)
-	}
-
 	pub(super) async fn statistics(&self, tx: &mut Transaction) -> Result<Statistics, Error> {
 		self.btree.statistics::<TrieKeys>(tx).await
 	}
@@ -189,13 +176,10 @@ mod tests {
 
 		// Check removal of doc 2
 		assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), Some(3));
-		assert_eq!(p.count_postings(&mut tx, 1).await.unwrap(), 1);
 		// Again the same
 		assert_eq!(p.remove_posting(&mut tx, 1, 2).await.unwrap(), None);
-		assert_eq!(p.count_postings(&mut tx, 1).await.unwrap(), 1);
 		// Remove doc 4
 		assert_eq!(p.remove_posting(&mut tx, 1, 4).await.unwrap(), Some(5));
-		assert_eq!(p.count_postings(&mut tx, 1).await.unwrap(), 0);
 
 		// The underlying b-tree should be empty now
 		assert_eq!(p.statistics(&mut tx).await.unwrap().keys_count, 0);

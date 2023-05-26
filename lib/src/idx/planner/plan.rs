@@ -227,7 +227,7 @@ impl ThingIterator for UniqueEqualThingIterator {
 }
 
 struct MatchesThingIterator {
-	hits: HitsIterator,
+	hits: Option<HitsIterator>,
 }
 
 impl MatchesThingIterator {
@@ -250,7 +250,7 @@ impl MatchesThingIterator {
 			let query_string = v.clone().convert_to_string()?;
 			let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
 			let fti = FtIndex::new(&mut run, az, ikb, order).await?;
-			let hits = fti.search(&mut run, &query_string).await?;
+			let hits = fti.search(&mut run, query_string).await?;
 			Ok(Self {
 				hits,
 			})
@@ -265,16 +265,18 @@ impl MatchesThingIterator {
 #[async_trait]
 impl ThingIterator for MatchesThingIterator {
 	async fn next_batch(&mut self, txn: &Transaction, mut limit: u32) -> Result<Vec<Thing>, Error> {
-		let mut run = txn.lock().await;
 		let mut res = vec![];
-		while limit > 0 {
-			if let Some((hit, _)) = self.hits.next(&mut run).await? {
-				let rid: Thing = hit.into();
-				res.push(rid);
-			} else {
-				break;
+		if let Some(hits) = &mut self.hits {
+			let mut run = txn.lock().await;
+			while limit > 0 {
+				if let Some((hit, _)) = hits.next(&mut run).await? {
+					let rid: Thing = hit.into();
+					res.push(rid);
+				} else {
+					break;
+				}
+				limit -= 1;
 			}
-			limit -= 1;
 		}
 		Ok(res)
 	}

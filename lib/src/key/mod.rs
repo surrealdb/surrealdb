@@ -39,6 +39,7 @@
 /// BP              /*{ns}*{db}*{tb}¤{ix}{bp}{id}
 /// BT              /*{ns}*{db}*{tb}¤{ix}{bt}{id}
 pub mod az; // Stores a DEFINE ANALYZER config definition
+pub mod bc; // Stores Doc list for each term
 pub mod bd; // Stores BTree nodes for doc ids
 pub mod bf; // Stores Term/Doc frequency
 pub mod bi; // Stores doc keys for doc_ids
