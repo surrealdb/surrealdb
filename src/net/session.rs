@@ -3,7 +3,8 @@ use crate::iam::verify::{basic, token};
 use crate::iam::BASIC;
 use crate::iam::TOKEN;
 use std::net::SocketAddr;
-use surrealdb::dbs::Session;
+use std::sync::Arc;
+use surrealdb::dbs::{Session, Auth};
 use warp::Filter;
 
 pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + Clone {
@@ -35,6 +36,13 @@ async fn process(
 	ns: Option<String>,
 	db: Option<String>,
 ) -> Result<Session, warp::Rejection> {
+	// TODO(sgirones): ns and db allow the invalid value Some("").
+	// Once we introduce namespaces/databases/scope as resources, we can properly parse the values and reject them if necessary.
+	// For now, reject the request if the value is Some("").
+	if ns == Some(String::new()) || db == Some(String::new()) {
+		Err(Error::InvalidAuth)?
+	}
+
 	// Create session
 	#[rustfmt::skip]
 	let mut session = Session { ip, or, id, ns, db, ..Default::default() };
@@ -47,7 +55,13 @@ async fn process(
 		// Wrong authentication data was supplied
 		Some(_) => Err(Error::InvalidAuth),
 		// No authentication data was supplied
-		None => Ok(()),
+		None => {
+			// If auth is disabled, grant access to all
+			if !Auth::is_enabled() {
+				session.au = Arc::new(Auth::Kv);
+			}
+			Ok(())
+		},
 	}?;
 	// Pass the authenticated session through
 	Ok(session)

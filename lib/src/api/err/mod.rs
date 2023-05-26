@@ -18,11 +18,11 @@ pub enum Error {
 	Query(String),
 
 	/// There was an error processing a remote HTTP request
-	#[error("There was an error processing a remote HTTP request")]
+	#[error("There was an error processing a remote HTTP request: {0}")]
 	Http(String),
 
 	/// There was an error processing a remote WS request
-	#[error("There was an error processing a remote WS request")]
+	#[error("There was an error processing a remote WS request: {0}")]
 	Ws(String),
 
 	/// The specified scheme does not match any supported protocol or storage engine

@@ -3,8 +3,6 @@ use crate::cnf::SERVER_NAME;
 use crate::dbs::DB;
 use crate::err::Error;
 use crate::iam::token::{Claims, HEADER};
-use argon2::password_hash::{PasswordHash, PasswordVerifier};
-use argon2::Argon2;
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey};
 use std::sync::Arc;
@@ -13,6 +11,8 @@ use surrealdb::dbs::Session;
 use surrealdb::sql::Object;
 use surrealdb::sql::Value;
 
+use super::verify::verify_creds;
+
 pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String>, Error> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns"));
@@ -20,6 +20,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 	let sc = vars.get("SC").or_else(|| vars.get("sc"));
 	// Check if the parameters exist
 	match (ns, db, sc) {
+		// SCOPE signin
 		(Some(ns), Some(db), Some(sc)) => {
 			// Process the provided values
 			let ns = ns.to_raw_string();
@@ -28,6 +29,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 			// Attempt to signin to specified scope
 			super::signin::sc(session, ns, db, sc, vars).await
 		}
+		// DB signin
 		(Some(ns), Some(db), None) => {
 			// Get the provided user and pass
 			let user = vars.get("user");
@@ -48,6 +50,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 				_ => Err(Error::InvalidAuth),
 			}
 		}
+		// NS signin
 		(Some(ns), None, None) => {
 			// Get the provided user and pass
 			let user = vars.get("user");
@@ -67,6 +70,7 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 				_ => Err(Error::InvalidAuth),
 			}
 		}
+		// KV signin
 		(None, None, None) => {
 			// Get the provided user and pass
 			let user = vars.get("user");
@@ -78,8 +82,8 @@ pub async fn signin(session: &mut Session, vars: Object) -> Result<Option<String
 					// Process the provided values
 					let user = user.to_raw_string();
 					let pass = pass.to_raw_string();
-					// Attempt to signin to namespace
-					super::signin::su(session, user, pass).await
+					// Attempt to signin to KV
+					super::signin::kv(session, user, pass).await
 				}
 				// There is no username or password
 				_ => Err(Error::InvalidAuth),
@@ -102,7 +106,7 @@ pub async fn sc(
 	let opt = CF.get().unwrap();
 	// Create a new readonly transaction
 	let mut tx = kvs.transaction(false, false).await?;
-	// Check if the supplied NS Login exists
+	// Check if the supplied DB Scope exists
 	match tx.get_sc(&ns, &db, &sc).await {
 		Ok(sv) => {
 			match sv.signin {
@@ -180,51 +184,37 @@ pub async fn db(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	// Get a database reference
-	let kvs = DB.get().unwrap();
-	// Create a new readonly transaction
-	let mut tx = kvs.transaction(false, false).await?;
-	// Check if the supplied DB Login exists
-	match tx.get_dl(&ns, &db, &user).await {
-		Ok(dl) => {
-			// Compute the hash and verify the password
-			let hash = PasswordHash::new(&dl.hash).unwrap();
-			// Attempt to verify the password using Argon2
-			match Argon2::default().verify_password(pass.as_ref(), &hash) {
-				Ok(_) => {
-					// Create the authentication key
-					let key = EncodingKey::from_secret(dl.code.as_ref());
-					// Create the authentication claim
-					let val = Claims {
-						iss: Some(SERVER_NAME.to_owned()),
-						iat: Some(Utc::now().timestamp()),
-						nbf: Some(Utc::now().timestamp()),
-						exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
-						ns: Some(ns.to_owned()),
-						db: Some(db.to_owned()),
-						id: Some(user),
-						..Claims::default()
-					};
-					// Create the authentication token
-					let enc = encode(&HEADER, &val, &key);
-					// Set the authentication on the session
-					session.tk = Some(val.into());
-					session.ns = Some(ns.to_owned());
-					session.db = Some(db.to_owned());
-					session.au = Arc::new(Auth::Db(ns, db));
-					// Check the authentication token
-					match enc {
-						// The auth token was created successfully
-						Ok(tk) => Ok(Some(tk)),
-						// There was an error creating the token
-						_ => Err(Error::InvalidAuth),
-					}
-				}
-				// The password did not verify
+	match verify_creds(DB.get().unwrap(), Some(&ns),Some(&db), &user, &pass).await {
+		Ok((au, u)) => {
+			// Create the authentication key
+			let key = EncodingKey::from_secret(u.code.as_ref());
+			// Create the authentication claim
+			let val = Claims {
+				iss: Some(SERVER_NAME.to_owned()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some(ns.to_owned()),
+				db: Some(db.to_owned()),
+				id: Some(user),
+				..Claims::default()
+			};
+			// Create the authentication token
+			let enc = encode(&HEADER, &val, &key);
+			// Set the authentication on the session
+			session.tk = Some(val.into());
+			session.ns = Some(ns.to_owned());
+			session.db = Some(db.to_owned());
+			session.au = Arc::new(au);
+			// Check the authentication token
+			match enc {
+				// The auth token was created successfully
+				Ok(tk) => Ok(Some(tk)),
+				// There was an error creating the token
 				_ => Err(Error::InvalidAuth),
 			}
 		}
-		// The specified user login does not exist
+		// The password did not verify
 		_ => Err(Error::InvalidAuth),
 	}
 }
@@ -235,67 +225,69 @@ pub async fn ns(
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	// Get a database reference
-	let kvs = DB.get().unwrap();
-	// Create a new readonly transaction
-	let mut tx = kvs.transaction(false, false).await?;
-	// Check if the supplied NS Login exists
-	match tx.get_nl(&ns, &user).await {
-		Ok(nl) => {
-			// Compute the hash and verify the password
-			let hash = PasswordHash::new(&nl.hash).unwrap();
-			// Attempt to verify the password using Argon2
-			match Argon2::default().verify_password(pass.as_ref(), &hash) {
-				Ok(_) => {
-					// Create the authentication key
-					let key = EncodingKey::from_secret(nl.code.as_ref());
-					// Create the authentication claim
-					let val = Claims {
-						iss: Some(SERVER_NAME.to_owned()),
-						iat: Some(Utc::now().timestamp()),
-						nbf: Some(Utc::now().timestamp()),
-						exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
-						ns: Some(ns.to_owned()),
-						id: Some(user),
-						..Claims::default()
-					};
-					// Create the authentication token
-					let enc = encode(&HEADER, &val, &key);
-					// Set the authentication on the session
-					session.tk = Some(val.into());
-					session.ns = Some(ns.to_owned());
-					session.au = Arc::new(Auth::Ns(ns));
-					// Check the authentication token
-					match enc {
-						// The auth token was created successfully
-						Ok(tk) => Ok(Some(tk)),
-						// There was an error creating the token
-						_ => Err(Error::InvalidAuth),
-					}
-				}
-				// The password did not verify
+	match verify_creds(DB.get().unwrap(), Some(&ns), None, &user, &pass).await {
+		Ok((au, u)) => {
+			// Create the authentication key
+			let key = EncodingKey::from_secret(u.code.as_ref());
+			// Create the authentication claim
+			let val = Claims {
+				iss: Some(SERVER_NAME.to_owned()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some(ns.to_owned()),
+				id: Some(user),
+				..Claims::default()
+			};
+			// Create the authentication token
+			let enc = encode(&HEADER, &val, &key);
+			// Set the authentication on the session
+			session.tk = Some(val.into());
+			session.ns = Some(ns.to_owned());
+			session.au = Arc::new(au);
+			// Check the authentication token
+			match enc {
+				// The auth token was created successfully
+				Ok(tk) => Ok(Some(tk)),
+				// There was an error creating the token
 				_ => Err(Error::InvalidAuth),
 			}
 		}
-		// The specified user login does not exist
-		_ => Err(Error::InvalidAuth),
+		Err(e) => Err(e),
 	}
 }
 
-pub async fn su(
+pub async fn kv(
 	session: &mut Session,
 	user: String,
 	pass: String,
 ) -> Result<Option<String>, Error> {
-	// Get the config options
-	let opts = CF.get().unwrap();
-	// Attempt to verify the root user
-	if let Some(root) = &opts.pass {
-		if user == opts.user && &pass == root {
-			session.au = Arc::new(Auth::Kv);
-			return Ok(None);
+	match verify_creds(DB.get().unwrap(), None, None, &user, &pass).await {
+		Ok((au, u)) => {
+			// Create the authentication key
+			let key = EncodingKey::from_secret(u.code.as_ref());
+			// Create the authentication claim
+			let val = Claims {
+				iss: Some(SERVER_NAME.to_owned()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				id: Some(user),
+				..Claims::default()
+			};
+			// Create the authentication token
+			let enc = encode(&HEADER, &val, &key);
+			// Set the authentication on the session
+			session.tk = Some(val.into());
+			session.au = Arc::new(au);
+			// Check the authentication token
+			match enc {
+				// The auth token was created successfully
+				Ok(tk) => Ok(Some(tk)),
+				// There was an error creating the token
+				_ => Err(Error::InvalidAuth),
+			}
 		}
+		Err(e) => Err(e),
 	}
-	// The specified user login does not exist
-	Err(Error::InvalidAuth)
 }

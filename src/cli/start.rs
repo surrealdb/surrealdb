@@ -20,13 +20,9 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "memory")]
 	#[arg(value_parser = super::validator::path_valid)]
 	path: String,
-	#[arg(help = "The master username for the database")]
-	#[arg(env = "SURREAL_USER", short = 'u', long = "username", visible_alias = "user")]
-	#[arg(default_value = "root")]
-	username: String,
-	#[arg(help = "The master password for the database")]
-	#[arg(env = "SURREAL_PASS", short = 'p', long = "password", visible_alias = "pass")]
-	password: Option<String>,
+	#[arg(help = "Enable the authentication system")]
+	#[arg(env = "SURREAL_AUTH", long = "auth")]
+	auth: Option<bool>,
 	#[arg(help = "The allowed networks for master authentication")]
 	#[arg(env = "SURREAL_ADDR", long = "addr")]
 	#[arg(default_value = "127.0.0.1/32")]
@@ -86,8 +82,7 @@ struct StartCommandWebTlsOptions {
 pub async fn init(
 	StartCommandArguments {
 		path,
-		username: user,
-		password: pass,
+		auth,
 		listen_addresses,
 		web,
 		strict,
@@ -109,8 +104,7 @@ pub async fn init(
 		strict,
 		bind: listen_addresses.first().cloned().unwrap(),
 		path,
-		user,
-		pass,
+		auth: auth.unwrap_or(true), // Enable auth by default
 		crt: web.as_ref().and_then(|x| x.web_crt.clone()),
 		key: web.as_ref().and_then(|x| x.web_key.clone()),
 	});

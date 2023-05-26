@@ -44,6 +44,7 @@ pub use self::define::DefineFieldStatement;
 pub use self::define::DefineFunctionStatement;
 pub use self::define::DefineIndexStatement;
 pub use self::define::DefineLoginStatement;
+pub use self::define::DefineUserStatement;
 pub use self::define::DefineNamespaceStatement;
 pub use self::define::DefineParamStatement;
 pub use self::define::DefineScopeStatement;

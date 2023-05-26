@@ -39,6 +39,23 @@ async fn signup_scope() {
 }
 
 #[tokio::test]
+async fn signin_kv() {
+	let db = new_db().await;
+	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	let user = Ulid::new().to_string();
+	let pass = "password123";
+	let sql = format!("DEFINE LOGIN {user} ON KV PASSWORD '{pass}'");
+	let response = db.query(sql).await.unwrap();
+	response.check().unwrap();
+	db.signin(Root {
+		username: &user,
+		password: pass,
+	})
+	.await
+	.unwrap();
+}
+
+#[tokio::test]
 async fn signin_ns() {
 	let db = new_db().await;
 	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();

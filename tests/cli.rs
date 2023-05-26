@@ -2,6 +2,8 @@ mod cli_integration {
 	// cargo test --package surreal --bin surreal --no-default-features --features storage-mem --test cli -- cli_integration --nocapture
 
 	use rand::{thread_rng, Rng};
+	use tokio::time;
+	use std::error::Error;
 	use std::fs;
 	use std::path::Path;
 	use std::process::{Command, Stdio};
@@ -75,6 +77,54 @@ mod cli_integration {
 		path.to_string_lossy().into_owned()
 	}
 
+	async fn start_server(auth: bool, tls: bool, wait_is_ready: bool) -> Result<(String, Child), Box<dyn Error>> {
+		let mut rng = thread_rng();
+
+		let port: u16 = rng.gen_range(13000..14000);
+		let addr = format!("127.0.0.1:{port}");
+
+
+		let mut extra_args = String::default();
+		if tls {
+			// Test the crt/key args but the keys are self signed so don't actually connect.
+			let crt_path = tmp_file("crt.crt");
+			let key_path = tmp_file("key.pem");
+
+			let cert = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
+			fs::write(&crt_path, cert.serialize_pem().unwrap()).unwrap();
+			fs::write(&key_path, cert.serialize_private_key_pem().into_bytes()).unwrap();
+
+			extra_args.push_str(format!("--web-crt {crt_path} --web-key {key_path}").as_str());
+		}
+
+		let start_args =
+			format!("start --bind {addr} memory --auth={auth} --no-banner --log info {extra_args}");
+
+		println!("starting server with args: {start_args}");
+
+		let server = run(&start_args);
+
+		if !wait_is_ready {
+			return Ok((addr, server));
+		}
+
+		// Wait 5 seconds for the server to start
+		let mut interval = time::interval(time::Duration::from_millis(500));
+		println!("Waiting for server to start...");
+		for _i in 0..10 {
+			interval.tick().await;
+			
+			if run(&format!("isready --conn http://{addr}")).output().is_ok() {
+				println!("Server ready!");
+				return Ok((addr, server));
+			}
+		}
+		
+		let server_out = server.kill().output().err().unwrap();
+		println!("server output: {server_out}");
+		Err("server failed to start".into())
+	}
+
 	#[test]
 	fn version() {
 		assert!(run("version").output().is_ok());
@@ -95,31 +145,15 @@ mod cli_integration {
 		assert!(run("version --turbo").output().is_err());
 	}
 
-	#[test]
+	#[tokio::test]
 	#[ignore = "only runs in CI"]
-	fn start() {
-		let mut rng = thread_rng();
-
-		let port: u16 = rng.gen_range(13000..14000);
-		let addr = format!("127.0.0.1:{port}");
-
-		let pass = rng.gen::<u64>().to_string();
-
-		let start_args =
-			format!("start --bind {addr} --user root --pass {pass} memory --no-banner --log info");
-
-		println!("starting server with args: {start_args}");
-
-		let _server = run(&start_args);
-
-		std::thread::sleep(std::time::Duration::from_millis(500));
-
-		assert!(run(&format!("isready --conn http://{addr}")).output().is_ok());
+	async fn all_commands() {
+		let (addr, _server) = start_server(false, false, true).await.unwrap();
 
 		// Create a record
 		{
 			let args =
-				format!("sql --conn http://{addr} --user root --pass {pass} --ns N --db D --multi");
+				format!("sql --conn http://{addr} --ns N --db D --multi");
 			assert_eq!(
 				run(&args).input("CREATE thing:one;\n").output(),
 				Ok("[{ id: thing:one }]\n\n".to_owned()),
@@ -130,7 +164,7 @@ mod cli_integration {
 		// Export to stdout
 		{
 			let args =
-				format!("export --conn http://{addr} --user root --pass {pass} --ns N --db D -");
+				format!("export --conn http://{addr} --ns N --db D -");
 			let output = run(&args).output().expect("failed to run stdout export: {args}");
 			assert!(output.contains("DEFINE TABLE thing SCHEMALESS PERMISSIONS NONE;"));
 			assert!(output.contains("UPDATE thing:one CONTENT { id: thing:one };"));
@@ -140,7 +174,7 @@ mod cli_integration {
 		let exported = {
 			let exported = tmp_file("exported.surql");
 			let args = format!(
-				"export --conn http://{addr} --user root --pass {pass} --ns N --db D {exported}"
+				"export --conn http://{addr} --ns N --db D {exported}"
 			);
 			run(&args).output().expect("failed to run file export: {args}");
 			exported
@@ -149,7 +183,7 @@ mod cli_integration {
 		// Import the exported file
 		{
 			let args = format!(
-				"import --conn http://{addr} --user root --pass {pass} --ns N --db D2 {exported}"
+				"import --conn http://{addr} --ns N --db D2 {exported}"
 			);
 			run(&args).output().expect("failed to run import: {args}");
 		}
@@ -157,7 +191,7 @@ mod cli_integration {
 		// Query from the import (pretty-printed this time)
 		{
 			let args = format!(
-				"sql --conn http://{addr} --user root --pass {pass} --ns N --db D2 --pretty"
+				"sql --conn http://{addr} --ns N --db D2 --pretty"
 			);
 			assert_eq!(
 				run(&args).input("SELECT * FROM thing;\n").output(),
@@ -169,7 +203,7 @@ mod cli_integration {
 		// Unfinished backup CLI
 		{
 			let file = tmp_file("backup.db");
-			let args = format!("backup --user root --pass {pass} http://{addr} {file}");
+			let args = format!("backup http://{addr} {file}");
 			run(&args).output().expect("failed to run backup: {args}");
 
 			// TODO: Once backups are functional, update this test.
@@ -179,7 +213,7 @@ mod cli_integration {
 		// Multi-statement (and multi-line) query including error(s) over WS
 		{
 			let args = format!(
-				"sql --conn ws://{addr} --user root --pass {pass} --ns N3 --db D3 --multi --pretty"
+				"sql --conn ws://{addr} --ns N3 --db D3 --multi --pretty"
 			);
 			let output = run(&args)
 				.input(
@@ -204,7 +238,7 @@ mod cli_integration {
 		// Multi-statement (and multi-line) transaction including error(s) over WS
 		{
 			let args = format!(
-				"sql --conn ws://{addr} --user root --pass {pass} --ns N4 --db D4 --multi --pretty"
+				"sql --conn ws://{addr} --ns N4 --db D4 --multi --pretty"
 			);
 			let output = run(&args)
 				.input(
@@ -229,7 +263,7 @@ mod cli_integration {
 
 		// Pass neither ns nor db
 		{
-			let args = format!("sql --conn http://{addr} --user root --pass {pass}");
+			let args = format!("sql --conn http://{addr}");
 			let output = run(&args)
 				.input("USE NS N5 DB D5; CREATE thing:one;\n")
 				.output()
@@ -239,7 +273,7 @@ mod cli_integration {
 
 		// Pass only ns
 		{
-			let args = format!("sql --conn http://{addr} --user root --pass {pass} --ns N5");
+			let args = format!("sql --conn http://{addr} --ns N5");
 			let output = run(&args)
 				.input("USE DB D5; SELECT * FROM thing:one;\n")
 				.output()
@@ -249,40 +283,123 @@ mod cli_integration {
 
 		// Pass only db and expect an error
 		{
-			let args = format!("sql --conn http://{addr} --user root --pass {pass} --db D5");
+			let args = format!("sql --conn http://{addr} --db D5");
 			run(&args).output().expect_err("only db");
 		}
 	}
 
-	#[test]
+	#[tokio::test]
 	#[ignore = "only runs in CI"]
-	fn start_tls() {
-		let mut rng = thread_rng();
-
-		let port: u16 = rng.gen_range(13000..14000);
-		let addr = format!("127.0.0.1:{port}");
-
-		let pass = rng.gen::<u128>().to_string();
+	async fn start_tls() {
+		let (_, server) = start_server(false, true, false).await.unwrap();
+		
+		std::thread::sleep(std::time::Duration::from_millis(2000));
+		let output = server.kill().output().err().unwrap();
 
 		// Test the crt/key args but the keys are self signed so don't actually connect.
-		let crt_path = tmp_file("crt.crt");
-		let key_path = tmp_file("key.pem");
-
-		let cert = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
-		fs::write(&crt_path, cert.serialize_pem().unwrap()).unwrap();
-		fs::write(&key_path, cert.serialize_private_key_pem().into_bytes()).unwrap();
-
-		let start_args = format!(
-			"start --bind {addr} --user root --pass {pass} memory --log info --web-crt {crt_path} --web-key {key_path}"
-		);
-
-		println!("starting server with args: {start_args}");
-
-		let server = run(&start_args);
-
-		std::thread::sleep(std::time::Duration::from_millis(750));
-
-		let output = server.kill().output().unwrap_err();
 		assert!(output.contains("Started web server"), "couldn't start web server: {output}");
+	}
+
+	#[tokio::test]
+	#[ignore = "only runs in CI"]
+	async fn with_kv_auth() {
+		let (addr, _server) = start_server(true, false, true).await.unwrap();
+		let creds = format!("--user root --pass surrealdb");
+		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
+
+		// Can query /sql over HTTP
+		{
+			let args = format!("{sql_args} {creds}");
+			let input = "INFO FOR KV;";
+			let output = run(&args).input(input).output();
+			assert!(
+				output.is_ok(),
+				"failed to query over HTTP: {}", output.err().unwrap()
+			);
+		}
+
+		// Can query /sql over WS
+		{
+			let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
+			let input = "INFO FOR KV;";
+			let output = run(&args).input(input).output();
+			assert!(
+				output.is_ok(),
+				"failed to query over WS: {}", output.err().unwrap()
+			);
+		}
+
+		// KV user can do exports
+		let exported = {
+			let exported = tmp_file("exported.surql");
+			let args = format!("export --conn http://{addr} {creds} --ns N --db D {exported}");
+
+			run(&args).output().expect(format!("failed to run export: {args}").as_str());
+			exported
+		};
+
+		// KV user can do imports
+		{
+			let args = format!(
+				"import --conn http://{addr} {creds} --ns N --db D2 {exported}"
+			);
+			run(&args).output().expect(format!("failed to run import: {args}").as_str());
+		}
+
+		// KV user can do backups
+		{
+			let file = tmp_file("backup.db");
+			let args = format!("backup {creds} http://{addr} {file}");
+			run(&args).output().expect(format!("failed to run backup: {args}").as_str());
+
+			// TODO: Once backups are functional, update this test.
+			assert_eq!(fs::read_to_string(file).unwrap(), "Save");
+		}
+	}
+
+	#[tokio::test]
+	#[ignore = "only runs in CI"]
+	async fn with_anon_auth() {
+		let (addr, _server) = start_server(true, false, true).await.unwrap();
+		let creds = ""; // Anonymous user
+		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
+
+
+		// Can query /sql over HTTP
+		{
+			let args = format!("{sql_args} {creds}");
+			let input = "";
+			assert!(run(&args).input(input).output().is_ok(), "anonymous user should be able to query");
+		}
+
+		// Can query /sql over HTTP
+		{
+			let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
+			let input = "";
+			assert!(run(&args).input(input).output().is_ok(), "anonymous user should be able to query");
+		}
+
+		// Can't do exports
+		{
+			let args = format!("export --conn http://{addr} {creds} --ns N --db D -");
+
+			assert!(run(&args).output().err().unwrap().contains("Forbidden"), "anonymous user shouldn't be able to export");
+		}
+
+		// Can't do imports
+		{
+			let tmp_file = tmp_file("exported.surql");
+			let args = format!("import --conn http://{addr} {creds} --ns N --db D2 {tmp_file}");
+
+			assert!(run(&args).output().err().unwrap().contains("Forbidden"), "anonymous user shouldn't be able to import");
+		}
+
+		// Can't do backups
+		{
+			let args = format!("backup {creds} http://{addr}");
+			// TODO(sgirones): Once backups are functional, update this test.
+			// assert!(run(&args).output().err().unwrap().contains("Forbidden"), "anonymous user shouldn't be able to backup");
+			assert!(run(&args).output().is_ok(), "anonymous user can do backups");
+		}
 	}
 }

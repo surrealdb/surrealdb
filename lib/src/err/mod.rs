@@ -19,6 +19,10 @@ pub enum Error {
 	#[error("Conditional clause is not truthy")]
 	Ignore,
 
+	/// Statement has been deprecated
+	#[error("{0}")]
+	Deprecated(String),
+
 	/// There was a problem with the underlying datastore
 	#[error("There was a problem with the underlying datastore: {0}")]
 	Ds(String),
@@ -261,6 +265,27 @@ pub enum Error {
 		value: String,
 	},
 
+	/// The requested root user does not exist
+	#[error("The root user '{value}' does not exist")]
+	UserKvNotFound {
+		value: String,
+	},
+
+	/// The requested namespace user does not exist
+	#[error("The user '{value}' does not exist in the namespace '{ns}'")]
+	UserNsNotFound {
+		value: String,
+		ns: String,
+	},
+
+	/// The requested database user does not exist
+	#[error("The user '{value}' does not exist in the database '{db}'")]
+	UserDbNotFound {
+		value: String,
+		ns: String,
+		db: String,
+	},
+
 	/// Unable to perform the realtime query
 	#[error("Unable to perform the realtime query")]
 	RealtimeDisabled,
@@ -393,11 +418,11 @@ pub enum Error {
 	TryFrom(String, &'static str),
 
 	/// There was an error processing a remote HTTP request
-	#[error("There was an error processing a remote HTTP request")]
+	#[error("There was an error processing a remote HTTP request: {0}")]
 	Http(String),
 
 	/// There was an error processing a value in parallel
-	#[error("There was an error processing a value in parallel")]
+	#[error("There was an error processing a value in parallel: {0}")]
 	Channel(String),
 
 	/// Represents an underlying error with Serde encoding / decoding
@@ -436,6 +461,12 @@ pub enum Error {
 	#[error("Feature not yet implemented: {feature}")]
 	FeatureNotYetImplemented {
 		feature: &'static str,
+	},
+
+	/// Invalid level
+	#[error("Invalid level: {level}")]
+	InvalidLevel {
+		level: String,
 	},
 }
 

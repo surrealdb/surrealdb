@@ -45,20 +45,25 @@ pub async fn init(
 
 	// Connect to the database engine
 	let client = connect(endpoint).await?;
+
 	// Sign in to the server if the specified database engine supports it
-	let root = Root {
-		username: &username,
-		password: &password,
-	};
-	if let Err(error) = client.signin(root).await {
-		match error {
-			// Authentication not supported by this engine, we can safely continue
-			SurrealError::Api(ApiError::AuthNotSupported) => {}
-			error => {
-				return Err(error.into());
+	if let Some(username) = username {
+		let root = Root {
+			username: &username,
+			password: &password.expect("empty password not allowed"),
+		};
+
+		if let Err(error) = client.signin(root).await {
+			match error {
+				// Authentication not supported by this engine, we can safely continue
+				SurrealError::Api(ApiError::AuthNotSupported) => {}
+				error => {
+					return Err(error.into());
+				}
 			}
 		}
 	}
+
 	// Use the specified namespace / database
 	client.use_ns(ns).use_db(db).await?;
 	// Export the data from the database

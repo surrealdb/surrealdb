@@ -10,6 +10,7 @@ use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
+use crate::sql::statements::DefineUserStatement;
 use crate::sql::thing::Thing;
 use crate::sql::Value;
 use channel::Sender;
@@ -827,6 +828,15 @@ impl Transaction {
 		})
 	}
 
+	/// Retrieve all namespace user definitions for a specific namespace.
+	pub async fn all_ns_users(&mut self, ns: &str) -> Result<Arc<[DefineUserStatement]>, Error> {
+		let beg = crate::key::nu::prefix(ns);
+		let end = crate::key::nu::suffix(ns);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		let val = val.convert().into();
+		Ok(val)
+	}
+
 	/// Retrieve all namespace token definitions for a specific namespace.
 	pub async fn all_nt(&mut self, ns: &str) -> Result<Arc<[DefineTokenStatement]>, Error> {
 		let key = crate::key::nt::prefix(ns);
@@ -886,6 +896,19 @@ impl Transaction {
 			self.cache.set(key, Entry::Dls(Arc::clone(&val)));
 			val
 		})
+	}
+
+	/// Retrieve all database user definitions for a specific database.
+	pub async fn all_db_users(
+		&mut self,
+		ns: &str,
+		db: &str,
+	) -> Result<Arc<[DefineUserStatement]>, Error> {
+		let beg = crate::key::du::prefix(ns, db);
+		let end = crate::key::du::suffix(ns, db);
+		let val = self.getr(beg..end, u32::MAX).await?;
+		let val = val.convert().into();
+		Ok(val)
 	}
 
 	/// Retrieve all database token definitions for a specific database.
@@ -981,7 +1004,7 @@ impl Transaction {
 		})
 	}
 
-	/// Retrieve all scope definitions for a specific database.
+	/// Retrieve all param definitions for a specific database.
 	pub async fn all_pa(
 		&mut self,
 		ns: &str,
@@ -1169,6 +1192,18 @@ impl Transaction {
 		})
 	}
 
+	/// Retrieve all KV users.
+	pub async fn all_kv_users(
+		&mut self,
+	) -> Result<Arc<[DefineUserStatement]>, Error> {
+		let beg = crate::key::ku::prefix();
+		let end = crate::key::ku::suffix();
+		
+		let val = self.getr(beg..end, u32::MAX).await?;
+		let val = val.convert().into();
+		Ok(val)
+	}
+
 	/// Retrieve a specific namespace definition.
 	pub async fn get_ns(&mut self, ns: &str) -> Result<DefineNamespaceStatement, Error> {
 		let key = crate::key::ns::new(ns);
@@ -1316,6 +1351,49 @@ impl Transaction {
 		})?;
 		Ok(val.into())
 	}
+
+	/// Retrieve a specific user definition from KV.
+	pub async fn get_kv_user(
+		&mut self,
+		user: &str,
+	) -> Result<DefineUserStatement, Error> {
+		let key = crate::key::ku::new(user);
+		let val = self.get(key).await?.ok_or(Error::UserKvNotFound {
+			value: user.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific user definition from a namespace.
+	pub async fn get_ns_user(
+		&mut self,
+		ns: &str,
+		user: &str,
+	) -> Result<DefineUserStatement, Error> {
+		let key = crate::key::nu::new(ns, user);
+		let val = self.get(key).await?.ok_or(Error::UserNsNotFound {
+			value: user.to_owned(),
+			ns: ns.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Retrieve a specific user definition from a database.
+	pub async fn get_db_user(
+		&mut self,
+		ns: &str,
+		db: &str,
+		user: &str,
+	) -> Result<DefineUserStatement, Error> {
+		let key = crate::key::du::new(ns, db, user);
+		let val = self.get(key).await?.ok_or(Error::UserDbNotFound {
+			value: user.to_owned(),
+			ns: ns.to_owned(),
+			db: db.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
 	/// Add a namespace with a default configuration, only if we are in dynamic mode.
 	pub async fn add_ns(
 		&mut self,
@@ -1838,4 +1916,154 @@ impl Transaction {
 		// Everything exported
 		Ok(())
 	}
+}
+
+
+#[cfg(test)]
+mod tests {
+	use crate::{kvs::Datastore, sql::{statements::DefineUserStatement, Base}};
+
+	#[tokio::test]
+	async fn test_get_kv_user() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// Retrieve non-existent KV user
+		let res = txn.get_kv_user("nonexistent").await;
+		assert_eq!(res.err().unwrap().to_string(), "The root user 'nonexistent' does not exist");
+
+		// Create KV user and retrieve it
+		let data = DefineUserStatement{
+			name: "user".into(),
+			base: Base::Kv,
+			..Default::default()
+		};
+		let key = crate::key::ku::new("user");
+		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		let res = txn.get_kv_user("user").await.unwrap();
+		assert_eq!(res, data);
+	}
+
+	#[tokio::test]
+	async fn test_get_ns_user() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// Retrieve non-existent NS user
+		let res = txn.get_ns_user("ns", "nonexistent").await;
+		assert_eq!(res.err().unwrap().to_string(), "The user 'nonexistent' does not exist in the namespace 'ns'");
+
+		// Create NS user and retrieve it
+		let data = DefineUserStatement{
+			name: "user".into(),
+			base: Base::Ns,
+			..Default::default()
+		};
+
+		let key = crate::key::nu::new("ns", "user");
+		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		let res = txn.get_ns_user("ns", "user").await.unwrap();
+		assert_eq!(res, data);
+	}
+
+	#[tokio::test]
+	async fn test_get_db_user() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// Retrieve non-existent DB user
+		let res = txn.get_db_user("ns", "db", "nonexistent").await;
+		assert_eq!(res.err().unwrap().to_string(), "The user 'nonexistent' does not exist in the database 'db'");
+
+		// Create DB user and retrieve it
+		let data = DefineUserStatement{
+			name: "user".into(),
+			base: Base::Db,
+			..Default::default()
+		};
+
+		let key = crate::key::du::new("ns", "db", "user");
+		let _ = txn.set(key, data.to_owned()).await.unwrap();
+		let res = txn.get_db_user("ns", "db", "user").await.unwrap();
+		assert_eq!(res, data);
+	}
+
+	#[tokio::test]
+	async fn test_all_kv_users() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// When there are no users
+		let res = txn.all_kv_users().await.unwrap();
+		assert_eq!(res.len(), 0);
+
+		// When there are users
+		let data = DefineUserStatement{
+			name: "user".into(),
+			base: Base::Kv,
+			..Default::default()
+		};
+
+		let key1 = crate::key::ku::new("user1");
+		let key2 = crate::key::ku::new("user2");
+		let _ = txn.set(key1, data.to_owned()).await.unwrap();
+		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		let res = txn.all_kv_users().await.unwrap();
+
+		assert_eq!(res.len(), 2);
+		assert_eq!(res[0], data);
+	}
+
+	#[tokio::test]
+	async fn test_all_ns_users() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// When there are no users
+		let res = txn.all_ns_users("ns").await.unwrap();
+		assert_eq!(res.len(), 0);
+
+		// When there are users
+		let data = DefineUserStatement{
+			name: "user".into(),
+			base: Base::Ns,
+			..Default::default()
+		};
+
+		let key1 = crate::key::nu::new("ns", "user1");
+		let key2 = crate::key::nu::new("ns", "user2");
+		let _ = txn.set(key1, data.to_owned()).await.unwrap();
+		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		let res = txn.all_ns_users("ns").await.unwrap();
+
+		assert_eq!(res.len(), 2);
+		assert_eq!(res[0], data);
+	}
+
+	#[tokio::test]
+	async fn test_db_users() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut txn = ds.transaction(true, false).await.unwrap();
+
+		// When there are no users
+		let res = txn.all_db_users("ns", "db").await.unwrap();
+		assert_eq!(res.len(), 0);
+
+		// When there are users
+		let data = DefineUserStatement{
+			name: "user".into(),
+			base: Base::Db,
+			..Default::default()
+		};
+
+		let key1 = crate::key::du::new("ns", "db", "user1");
+		let key2 = crate::key::du::new("ns", "db", "user2");
+		let _ = txn.set(key1, data.to_owned()).await.unwrap();
+		let _ = txn.set(key2, data.to_owned()).await.unwrap();
+		let res = txn.all_db_users("ns", "db").await.unwrap();
+
+		assert_eq!(res.len(), 2);
+		assert_eq!(res[0], data);
+	}
+
 }

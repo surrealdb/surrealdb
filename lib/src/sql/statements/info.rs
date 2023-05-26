@@ -3,6 +3,8 @@ use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::sql::Base;
+use crate::sql::base::base;
 use crate::sql::comment::shouldbespace;
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
@@ -11,6 +13,7 @@ use crate::sql::value::Value;
 use derive::Store;
 use nom::branch::alt;
 use nom::bytes::complete::tag_no_case;
+use nom::combinator::opt;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -21,6 +24,7 @@ pub enum InfoStatement {
 	Db,
 	Sc(Ident),
 	Tb(Ident),
+	User(Ident, Option<Base>),
 }
 
 impl InfoStatement {
@@ -45,12 +49,18 @@ impl InfoStatement {
 				let mut run = run.lock().await;
 				// Create the result set
 				let mut res = Object::default();
-				// Process the statement
+				// Process the namespaces
 				let mut tmp = Object::default();
 				for v in run.all_ns().await?.iter() {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("namespaces".to_owned(), tmp.into());
+				// Process the users
+				let mut tmp = Object::default();
+				for v in run.all_kv_users().await?.iter() {
+					tmp.insert(v.name.to_string(), v.to_string().into());
+				}
+				res.insert("users".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
 			}
@@ -77,6 +87,12 @@ impl InfoStatement {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("logins".to_owned(), tmp.into());
+				// Process the users
+				let mut tmp = Object::default();
+				for v in run.all_ns_users(opt.ns()).await?.iter() {
+					tmp.insert(v.name.to_string(), v.to_string().into());
+				}
+				res.insert("users".to_owned(), tmp.into());
 				// Process the tokens
 				let mut tmp = Object::default();
 				for v in run.all_nt(opt.ns()).await?.iter() {
@@ -103,6 +119,12 @@ impl InfoStatement {
 					tmp.insert(v.name.to_string(), v.to_string().into());
 				}
 				res.insert("logins".to_owned(), tmp.into());
+				// Process the users
+				let mut tmp = Object::default();
+				for v in run.all_db_users(opt.ns(), opt.db()).await?.iter() {
+					tmp.insert(v.name.to_string(), v.to_string().into());
+				}
+				res.insert("users".to_owned(), tmp.into());
 				// Process the tokens
 				let mut tmp = Object::default();
 				for v in run.all_dt(opt.ns(), opt.db()).await?.iter() {
@@ -199,6 +221,33 @@ impl InfoStatement {
 				res.insert("indexes".to_owned(), tmp.into());
 				// Ok all good
 				Value::from(res).ok()
+			},
+			InfoStatement::User(user, base) => {
+				let level = match base {
+					// Get the level from the provided user statement
+					Some(val) => val.to_level(),
+					// If no level is provided, use the current selected level
+					None => opt.current_level(),
+				};
+
+				// Check if all the necessary options are set for the given level
+				opt.needs(level.to_owned())?;
+				// Check if the user is allowed to run the statement on the given level
+				opt.check(level.to_owned())?;
+
+				// Clone transaction
+				let run = txn.clone();
+				// Claim transaction
+				let mut run = run.lock().await;
+				// Process the user
+				let res = match level {
+					Level::Kv => run.get_kv_user(user).await?,
+					Level::Ns => run.get_ns_user(opt.ns(), user).await?,
+					Level::Db => run.get_db_user(opt.ns(), opt.db(), user).await?,
+					_ => return Err(Error::QueryPermissions),
+				};
+				// Ok all good
+				Value::from(res.to_string()).ok()
 			}
 		}
 	}
@@ -212,6 +261,12 @@ impl fmt::Display for InfoStatement {
 			Self::Db => f.write_str("INFO FOR DATABASE"),
 			Self::Sc(ref s) => write!(f, "INFO FOR SCOPE {s}"),
 			Self::Tb(ref t) => write!(f, "INFO FOR TABLE {t}"),
+			Self::User(ref u, ref b) => {
+				match b {
+					Some(ref b) => write!(f, "INFO FOR USER {u} ON {b}"),
+					None => write!(f, "INFO FOR USER {u}"),
+				}
+			},
 		}
 	}
 }
@@ -221,7 +276,7 @@ pub fn info(i: &str) -> IResult<&str, InfoStatement> {
 	let (i, _) = shouldbespace(i)?;
 	let (i, _) = tag_no_case("FOR")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	alt((kv, ns, db, sc, tb))(i)
+	alt((kv, ns, db, sc, tb, user))(i)
 }
 
 fn kv(i: &str) -> IResult<&str, InfoStatement> {
@@ -253,10 +308,35 @@ fn tb(i: &str) -> IResult<&str, InfoStatement> {
 	Ok((i, InfoStatement::Tb(table)))
 }
 
+fn user(i: &str) -> IResult<&str, InfoStatement> {
+	let (i, _) = alt((tag_no_case("USER"), tag_no_case("US")))(i)?;
+	let (i, _) = shouldbespace(i)?;
+	let (i, user) = ident(i)?;
+	let (i, base) = opt(|i| {
+		let (i, _) = shouldbespace(i)?;
+		let (i, _) = tag_no_case("ON")(i)?;
+		let (i, _) = shouldbespace(i)?;
+		let (i, base) = base(i)?;
+		Ok((i, base))
+	})(i)?;
+
+	Ok((i, InfoStatement::User(user, base)))
+}
+
 #[cfg(test)]
 mod tests {
 
 	use super::*;
+
+	#[test]
+	fn info_query_kv() {
+		let sql = "INFO FOR KV";
+		let res = info(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(out, InfoStatement::Kv);
+		assert_eq!("INFO FOR KV", format!("{}", out));
+	}
 
 	#[test]
 	fn info_query_ns() {
@@ -296,5 +376,36 @@ mod tests {
 		let out = res.unwrap().1;
 		assert_eq!(out, InfoStatement::Tb(Ident::from("test")));
 		assert_eq!("INFO FOR TABLE test", format!("{}", out));
+	}
+
+	#[test]
+	fn info_query_user() {
+		let sql = "INFO FOR USER test ON KV";
+		let res = info(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Kv)));
+		assert_eq!("INFO FOR USER test ON KV", format!("{}", out));
+
+		let sql = "INFO FOR USER test ON NS";
+		let res = info(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Ns)));
+		assert_eq!("INFO FOR USER test ON NAMESPACE", format!("{}", out));
+
+		let sql = "INFO FOR USER test ON DB";
+		let res = info(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(out, InfoStatement::User(Ident::from("test"), Some(Base::Db)));
+		assert_eq!("INFO FOR USER test ON DATABASE", format!("{}", out));
+
+		let sql = "INFO FOR USER test";
+		let res = info(sql);
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!(out, InfoStatement::User(Ident::from("test"), None));
+		assert_eq!("INFO FOR USER test", format!("{}", out));
 	}
 }

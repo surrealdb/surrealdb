@@ -50,8 +50,9 @@ pub mod bt; // Stores BTree nodes for terms
 pub mod bu; // Stores terms for term_ids
 pub mod database; // Stores the key prefix for all keys under a database
 pub mod db; // Stores a DEFINE DATABASE config definition
-pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition
-pub mod dt; // Stores a DEFINE LOGIN ON DATABASE config definition
+pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition (DEPRECATED)
+pub mod du; // Stores a DEFINE USER ON DATABASE config definition
+pub mod dt; // Stores a DEFINE TOKEN ON DATABASE config definition
 pub mod ev; // Stores a DEFINE EVENT config definition
 pub mod fc; // Stores a DEFINE FUNCTION config definition
 pub mod fd; // Stores a DEFINE FIELD config definition
@@ -63,7 +64,8 @@ pub mod kv; // Stores the key prefix for all keys
 pub mod lq; // Stores a LIVE SELECT query definition on the database
 pub mod lv; // Stores a LIVE SELECT query definition on the table
 pub mod namespace; // Stores the key prefix for all keys under a namespace
-pub mod nl; // Stores a DEFINE LOGIN ON NAMESPACE config definition
+pub mod nl; // Stores a DEFINE LOGIN ON NAMESPACE config definition (DEPRECATED)
+pub mod nu; // Stores a DEFINE USER ON NAMESPACE config definition
 pub mod ns; // Stores a DEFINE NAMESPACE config definition
 pub mod nt; // Stores a DEFINE TOKEN ON NAMESPACE config definition
 pub mod pa; // Stores a DEFINE PARAM config definition
@@ -73,6 +75,7 @@ pub mod st; // Stores a DEFINE TOKEN ON SCOPE config definition
 pub mod table; // Stores the key prefix for all keys under a table
 pub mod tb; // Stores a DEFINE TABLE config definition
 pub mod thing;
+pub mod ku; // Stores a DEFINE USER ON KV config definition
 
 const CHAR_PATH: u8 = 0xb1; // ±
 const CHAR_INDEX: u8 = 0xa4; // ¤
