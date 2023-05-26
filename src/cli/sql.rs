@@ -1,5 +1,5 @@
 use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
+	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionOptionalArguments,
 };
 use crate::err::Error;
 use clap::Args;
@@ -19,7 +19,7 @@ pub struct SqlCommandArguments {
 	#[command(flatten)]
 	auth: AuthArguments,
 	#[command(flatten)]
-	sel: DatabaseSelectionArguments,
+	sel: Option<DatabaseSelectionOptionalArguments>,
 	/// Whether database responses should be pretty printed
 	#[arg(long)]
 	pretty: bool,
@@ -37,10 +37,7 @@ pub async fn init(
 		conn: DatabaseConnectionArguments {
 			endpoint,
 		},
-		sel: DatabaseSelectionArguments {
-			namespace,
-			database,
-		},
+		sel,
 		pretty,
 		multi,
 		..
@@ -74,8 +71,15 @@ pub async fn init(
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
 	// Keep track of current namespace/database.
-	let mut ns = Some(namespace);
-	let mut db = Some(database);
+	let (mut ns, mut db) = if let Some(DatabaseSelectionOptionalArguments {
+		namespace,
+		database,
+	}) = sel
+	{
+		(namespace, database)
+	} else {
+		(None, None)
+	};
 	// Configure the prompt
 	let mut prompt = "> ".to_owned();
 	// Loop over each command-line input
