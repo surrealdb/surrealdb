@@ -201,8 +201,8 @@ async fn select_where_and_with_fulltext_index() -> Result<(), Error> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie', genre='m';
 		CREATE person:jaime SET name = 'Jaime', genre='m';
-		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
-		DEFINE INDEX ft_name ON TABLE person COLUMNS name SEARCH ANALYZER english BM25(1.2,0.75);
+		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+		DEFINE INDEX ft_name ON TABLE person COLUMNS name SEARCH ANALYZER simple BM25(1.2,0.75);
 		SELECT name FROM person WHERE name @@ 'Jaime' AND genre = 'm' EXPLAIN;";
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");

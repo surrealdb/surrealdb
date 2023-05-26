@@ -43,7 +43,7 @@ impl fmt::Display for Index {
 				sc,
 				order,
 			} => {
-				write!(f, "SEARCH  ANALYZER {} {} ORDER {}", az, sc, order)?;
+				write!(f, "SEARCH ANALYZER {} {} ORDER {}", az, sc, order)?;
 				if *hl {
 					f.write_str(" HIGHLIGHTS")?
 				}

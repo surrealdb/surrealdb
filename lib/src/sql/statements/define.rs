@@ -1445,13 +1445,13 @@ mod tests {
 					az: Ident("my_analyzer".to_string()),
 					hl: false,
 					sc: Scoring::Vs,
-					order: Number::Int(1000)
+					order: Number::Int(100)
 				},
 			}
 		);
 		assert_eq!(
 			idx.to_string(),
-			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS ORDER 1000"
+			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH ANALYZER my_analyzer VS ORDER 100"
 		);
 	}
 }

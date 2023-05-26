@@ -965,8 +965,8 @@ async fn define_statement_search_index() -> Result<(), Error> {
 	let sql = r#"
 		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
 		CREATE blog:3 SET title = 'This blog is going to be deleted';
-		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
-		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER english BM25(1.2,0.75) HIGHLIGHTS;
+		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
 		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
 		DELETE blog:3;
 		INFO FOR TABLE blog;
@@ -988,7 +988,7 @@ async fn define_statement_search_index() -> Result<(), Error> {
 			ev: {},
 			fd: {},
 			ft: {},
-			ix: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER english BM25(1.2,0.75) HIGHLIGHTS' },
+			ix: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) ORDER 100 HIGHLIGHTS' },
 		}",
 	);
 	assert_eq!(tmp, val);
