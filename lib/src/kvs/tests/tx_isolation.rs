@@ -8,7 +8,6 @@ pub(crate) mod transaction {
 	use std::sync::{Arc, Barrier};
 	use std::time::SystemTime;
 	use ulid::Ulid;
-	use uuid::Uuid;
 
 	// The first transaction increments value by 1.
 	// This transaction uses sleep to be sure it runs longer than transaction2.
@@ -78,15 +77,9 @@ pub(crate) mod transaction {
 		async fn clone(&self) -> Self {
 			let ds = match &self.ds.inner {
 				#[cfg(feature = "kv-rocksdb")]
-				Inner::RocksDB(ds) => {
-					let (send, recv) = channel::bounded(100);
-					Datastore {
-						id: Arc::new(Uuid::default()),
-						inner: Inner::RocksDB(ds.clone()),
-						send,
-						recv,
-					}
-				}
+				Inner::RocksDB(ds) => Datastore {
+					inner: Inner::RocksDB(ds.clone()),
+				},
 				#[cfg(feature = "kv-tikv")]
 				Inner::TiKV(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				#[cfg(feature = "kv-fdb")]

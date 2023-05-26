@@ -106,6 +106,12 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
+		let id = Uuid::new_v4();
+		new_full(id, path).await
+	}
+
+	// For testing
+	pub async fn new_full(path: &str, node_id: Uuid) -> Result<Datastore, Error> {
 		// Create a live query notification channel
 		let (send, recv) = channel::bounded(100);
 		// Initiate the desired datastore
@@ -115,7 +121,7 @@ impl Datastore {
 				{
 					info!(target: LOG, "Starting kvs store in {}", path);
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Arc::new(node_id),
 						inner: Inner::Mem(super::mem::Datastore::new().await?),
 						send,
 						recv,
@@ -136,7 +142,7 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Arc::new(node_id),
 						inner: Inner::RocksDB(super::rocksdb::Datastore::new(s).await?),
 						send,
 						recv,
@@ -157,7 +163,7 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Arc::new(node_id),
 						inner: Inner::RocksDB(super::rocksdb::Datastore::new(s).await?),
 						send,
 						recv,
@@ -178,7 +184,7 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Arc::new(node_id),
 						inner: Inner::IndxDB(super::indxdb::Datastore::new(s).await?),
 						send,
 						recv,
@@ -199,7 +205,7 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Arc::new(node_id),
 						inner: Inner::TiKV(super::tikv::Datastore::new(s).await?),
 						send,
 						recv,
@@ -220,7 +226,7 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Arc::new(node_id),
 						inner: Inner::FDB(super::fdb::Datastore::new(s).await?),
 						send,
 						recv,
@@ -244,22 +250,56 @@ impl Datastore {
 	// -----
 	// Cluster helpers here
 	// -----
+
+	/// To be invoked after the Datastore is constructed
 	pub async fn cluster_init(&self) -> Result<(), Error> {
-		trace!("First register to prove cluster registration works");
-		let timestamp = self.register_membership().await?;
-		trace!("Healthcheck to perform garbage collection");
+		// Stage 1: Fast init and gc
+		let mut tx = self.transaction(true, false).await?;
+		let timestamp = tx.clock();
+		self.register_remove_and_archive(&tx, &timestamp).await?;
+		tx.commit();
+
+		// Stage 2: Longer gc tasks
+		let mut tx = self.transaction(true, false).await?;
+		self.clean_archived(&tx).await?;
+		tx.commit()
+	}
+
+	/// Register self in cluster
+	/// Remove dead cluster nodes
+	/// Archive related live queries
+	pub async fn register_remove_and_archive(
+		&self,
+		tx: &Transaction,
+		timestamp: &Timestamp,
+	) -> Result<(), Error> {
+		trace!("Registering node");
+		self.register_membership(tx, timestamp).await?;
 		// node timeout should be configurable, just trying to get this to work
 		// let timeout = Duration::from_secs(1);
 		// let deadline = now - timeout;
 		let watermark = timestamp;
-		self.garbage_collect(watermark).await?;
-		trace!("Second register to prove removal worked and there is no conflict");
-		self.register_membership().await?;
+		self.garbage_collect(tx, watermark).await?;
+		trace!("Healthcheck to perform garbage collection");
 		Ok(())
 	}
 
-	pub async fn garbage_collect(&self, watermark: Timestamp) -> Result<(), Error> {
-		let mut tx = self.transaction(true, false).await?;
+	pub async fn clean_archived(&self, mut tx: &Transaction) -> Result<(), Error> {
+		for lq in archived {
+			trace!("Deleting archived live query {}", &lq);
+			// Delete the parent archived LQ
+			let tb = tx.del_cllv(&lq).await?;
+			// Delete notification range TODO this needs to be a loop
+			tx.delr_tblv(&tb, &lq);
+		}
+		trace!("Finished archiving lq");
+	}
+
+	pub async fn garbage_collect(
+		&self,
+		mut tx: &Transaction,
+		watermark: &Timestamp,
+	) -> Result<(), Error> {
 		let dead_heartbeats = self.delete_dead_heartbeats(&mut tx, watermark).await?;
 		trace!("Found dead hbs: {:?}", dead_heartbeats);
 		let mut archived: Vec<Uuid> = vec![];
@@ -268,24 +308,6 @@ impl Datastore {
 			trace!("Deleted node {}", hb.nd);
 			let new_archived = self.archive_lv_for_node(Uuid(hb.nd)).await?;
 			archived.extend(new_archived);
-		}
-		tx.commit().await?;
-		// Start and async task to cleanup archived lq
-		match self.transaction(true, true).await {
-			Ok(mut tx) => {
-				for lq in archived {
-					trace!("Archiving live query {}", &lq);
-					// Delete the parent archived LQ
-					let tb = tx.del_cllv(&lq).await?;
-					// Delete notification range TODO this needs to be a loop
-					tx.delr_tblv(&tb, &lq);
-				}
-				trace!("Finished archiving lq");
-				tx.commit().await?;
-			}
-			Err(e) => {
-				error!(target: LOG, "Error archiving lq: {}", e);
-			}
 		}
 		Ok(())
 	}
@@ -310,7 +332,7 @@ impl Datastore {
 	pub async fn delete_dead_heartbeats(
 		&self,
 		tx: &mut Transaction,
-		ts: Timestamp,
+		ts: &Timestamp,
 	) -> Result<Vec<Hb>, Error> {
 		let limit = 1000;
 		let dead = tx.scan_hb(&ts, limit).await?;
@@ -322,14 +344,15 @@ impl Datastore {
 	}
 
 	// Adds entries to the KV store indicating membership information
-	pub async fn register_membership(&self) -> Result<Timestamp, Error> {
-		let mut tx = self.transaction(true, false).await?;
-		let timestamp = tx.clock();
+	pub async fn register_membership(
+		&self,
+		mut tx: &Transaction,
+		timestamp: &Timestamp,
+	) -> Result<(), Error> {
 		let sql_node_id = Uuid::from(self.id.clone().0);
 		tx.set_cl(sql_node_id.clone()).await?;
 		tx.set_hb(timestamp.clone(), sql_node_id).await?;
-		tx.commit().await?;
-		Ok(timestamp)
+		Ok(())
 	}
 
 	// Creates a heartbeat entry for the member indicating to the cluster
