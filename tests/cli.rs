@@ -96,6 +96,7 @@ mod cli_integration {
 	}
 
 	#[test]
+	#[ignore = "only runs in CI"]
 	fn start() {
 		let mut rng = thread_rng();
 
@@ -228,6 +229,7 @@ mod cli_integration {
 	}
 
 	#[test]
+	#[ignore = "only runs in CI"]
 	fn start_tls() {
 		let mut rng = thread_rng();
 
@@ -255,6 +257,6 @@ mod cli_integration {
 		std::thread::sleep(std::time::Duration::from_millis(50));
 
 		let output = server.kill().output().unwrap_err();
-		assert!(output.contains("Started web server"));
+		assert!(output.contains("Started web server"), "couldn't start web server: {output}");
 	}
 }
