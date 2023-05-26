@@ -59,7 +59,7 @@ pub(crate) mod table {
 	}
 
 	#[tokio::test]
-	async fn created_tables_can_be_deleted() {
+	async fn table_definitions_can_be_deleted() {
 		// Setup
 		let test = match init().await {
 			Ok(ctx) => ctx,
