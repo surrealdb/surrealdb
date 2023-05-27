@@ -725,14 +725,13 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore = "awaiting hypothetical big-decimal re-integration"]
 	fn number_decimal_keeps_precision() {
-		let sql = "13.571938471938471938563985639413947693775636";
+		let sql = "13.571938471938472";
 		let res = number(sql);
 		assert!(res.is_ok());
 		let out = res.unwrap().1;
-		assert_eq!("13.571938471938471938563985639413947693775636", format!("{}", out));
-		assert_eq!(out, Number::try_from("13.571938471938471938563985639413947693775636").unwrap());
+		assert_eq!("13.571938471938472", format!("{}", out));
+		assert_eq!(out, Number::try_from("13.571938471938472").unwrap());
 	}
 
 	#[test]
