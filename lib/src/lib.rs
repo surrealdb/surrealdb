@@ -157,7 +157,7 @@ pub mod error {
 }
 
 /// An error originating from the SurrealDB client library
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum Error {
 	/// An error with an embedded storage engine
 	#[error("{0}")]
