@@ -6,6 +6,7 @@ mod import;
 mod index;
 mod input;
 mod key;
+mod limiter;
 mod log;
 mod output;
 mod params;
@@ -18,7 +19,6 @@ mod sql;
 mod status;
 mod sync;
 mod version;
-mod limiter;
 
 use crate::cli::CF;
 use crate::err::Error;
