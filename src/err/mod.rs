@@ -24,6 +24,9 @@ pub enum Error {
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
 
+	#[error("Too many requests")]
+	TooManyRequests,
+
 	#[error("The specified media type is unsupported")]
 	InvalidType,
 

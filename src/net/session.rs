@@ -6,6 +6,8 @@ use std::net::SocketAddr;
 use surrealdb::dbs::Session;
 use warp::Filter;
 
+use super::limiter::LIM;
+
 pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + Clone {
 	// Enable on any path
 	let conf = warp::any();
@@ -49,6 +51,10 @@ async fn process(
 		// No authentication data was supplied
 		None => Ok(()),
 	}?;
-	// Pass the authenticated session through
-	Ok(session)
+	if LIM.get().unwrap().should_allow(&session) {
+		// Pass the authenticated session through
+		Ok(session)
+	} else {
+		Err(Error::TooManyRequests)
+	}
 }
