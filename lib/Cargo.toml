@@ -22,6 +22,7 @@ protocol-http = ["dep:reqwest", "dep:tokio-util"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 kv-mem = ["dep:echodb", "tokio/time"]
 kv-indxdb = ["dep:indxdb"]
+kv-speedb = ["dep:speedb", "tokio/time"]
 kv-rocksdb = ["dep:rocksdb", "tokio/time"]
 kv-tikv = ["dep:tikv", "dep:tikv-client-proto"]
 kv-fdb-5_1 = ["foundationdb/fdb-5_1", "kv-fdb"]
@@ -99,6 +100,7 @@ serde = { version = "1.0.163", features = ["derive"] }
 serde_json = "1.0.96"
 sha-1 = "0.10.1"
 sha2 = "0.10.6"
+speedb = { version = "0.0.2", optional = true }
 storekey = "0.5.0"
 thiserror = "1.0.40"
 tikv = { version = "0.1.0", package = "tikv-client", optional = true }

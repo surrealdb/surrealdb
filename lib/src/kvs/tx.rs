@@ -48,6 +48,8 @@ pub(super) enum Inner {
 	Mem(super::mem::Transaction),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(super::rocksdb::Transaction),
+	#[cfg(feature = "kv-speedb")]
+	SpeeDB(super::speedb::Transaction),
 	#[cfg(feature = "kv-indxdb")]
 	IndxDB(super::indxdb::Transaction),
 	#[cfg(feature = "kv-tikv")]
@@ -64,8 +66,10 @@ impl fmt::Display for Transaction {
 			Inner::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
 			Inner::RocksDB(_) => write!(f, "rocksdb"),
+			#[cfg(feature = "kv-speedb")]
+			Inner::SpeeDB(_) => write!(f, "speedb"),
 			#[cfg(feature = "kv-indxdb")]
-			Inner::IndxDB(_) => write!(f, "indexdb"),
+			Inner::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
 			Inner::TiKV(_) => write!(f, "tikv"),
 			#[cfg(feature = "kv-fdb")]
@@ -99,6 +103,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.closed(),
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.closed(),
 			#[cfg(feature = "kv-indxdb")]
@@ -138,6 +147,11 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.cancel().await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
+				..
+			} => v.cancel().await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -173,6 +187,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.commit().await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.commit().await,
 			#[cfg(feature = "kv-indxdb")]
@@ -214,6 +233,11 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.del(key).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
+				..
+			} => v.del(key).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -253,6 +277,11 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.exi(key).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
+				..
+			} => v.exi(key).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -290,6 +319,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.get(key).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.get(key).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -332,6 +366,11 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.set(key, val).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
+				..
+			} => v.set(key, val).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -370,6 +409,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.put(key, val).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.put(key, val).await,
 			#[cfg(feature = "kv-indxdb")]
@@ -413,6 +457,11 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.scan(rng, limit).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
+				..
+			} => v.scan(rng, limit).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -453,6 +502,11 @@ impl Transaction {
 				inner: Inner::RocksDB(v),
 				..
 			} => v.putc(key, val, chk).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
+				..
+			} => v.putc(key, val, chk).await,
 			#[cfg(feature = "kv-indxdb")]
 			Transaction {
 				inner: Inner::IndxDB(v),
@@ -491,6 +545,11 @@ impl Transaction {
 			#[cfg(feature = "kv-rocksdb")]
 			Transaction {
 				inner: Inner::RocksDB(v),
+				..
+			} => v.delc(key, chk).await,
+			#[cfg(feature = "kv-speedb")]
+			Transaction {
+				inner: Inner::SpeeDB(v),
 				..
 			} => v.delc(key, chk).await,
 			#[cfg(feature = "kv-indxdb")]
