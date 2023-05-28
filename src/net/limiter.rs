@@ -13,8 +13,6 @@ use surrealdb::dbs::{Auth, Session};
 
 pub static LIM: OnceCell<Limiter> = OnceCell::new();
 
-const RATE_LIMIT_DURATION_PER_REQ: Duration = Duration::from_nanos(1_000_000_000 / RATE_LIMIT);
-
 pub fn init() -> Result<(), Error> {
 	#[cfg(test)]
 	let _ = LIM.set(Limiter {
@@ -114,6 +112,9 @@ impl Limiter {
 			burst_used: 0,
 		});
 
+		const RATE_LIMIT_DURATION_PER_REQ: Duration =
+			Duration::from_nanos(1_000_000_000 / RATE_LIMIT);
+
 		let ok = if now > limits.rate_limited_until {
 			// Limit has fully expired
 			limits.burst_used = 0;
@@ -184,7 +185,7 @@ mod tests {
 		};
 
 		for ten_times_rate in
-			(RATE_LIMIT.saturating_sub(10) + 1) * 10..=(RATE_LIMIT.saturating_add(10) * 10)
+			(RATE_LIMIT.saturating_sub(10) + 1) * 10..=RATE_LIMIT.saturating_add(10) * 10
 		{
 			let rate = ten_times_rate as f64 * 0.1;
 			assert_eq!(is_allowed(rate), rate <= RATE_LIMIT as f64, "rate: {:.1}", rate);
