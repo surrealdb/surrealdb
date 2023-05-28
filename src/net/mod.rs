@@ -18,6 +18,7 @@ mod sql;
 mod status;
 mod sync;
 mod version;
+mod limiter;
 
 use crate::cli::CF;
 use crate::err::Error;
