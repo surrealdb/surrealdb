@@ -28,6 +28,12 @@ pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 /// How many concurrent tasks can be handled in a WebSocket
 pub const MAX_CONCURRENT_CALLS: usize = 24;
 
+/// Rate limit for new connections and requests (per second per anon IP or authed NS).
+pub const RATE_LIMIT: u64 = 2;
+
+/// Maximum burst above the rate limit.
+pub const RATE_LIMIT_BURST: usize = 5;
+
 /// Specifies the frequency with which ping messages should be sent to the client
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 

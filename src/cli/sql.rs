@@ -1,5 +1,5 @@
 use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionOptionalArguments,
+	AuthOptionalArguments, DatabaseConnectionArguments, DatabaseSelectionOptionalArguments,
 };
 use crate::err::Error;
 use clap::Args;
@@ -17,7 +17,7 @@ pub struct SqlCommandArguments {
 	#[command(flatten)]
 	conn: DatabaseConnectionArguments,
 	#[command(flatten)]
-	auth: AuthArguments,
+	auth: Option<AuthOptionalArguments>,
 	#[command(flatten)]
 	sel: Option<DatabaseSelectionOptionalArguments>,
 	/// Whether database responses should be pretty printed
@@ -30,10 +30,7 @@ pub struct SqlCommandArguments {
 
 pub async fn init(
 	SqlCommandArguments {
-		auth: AuthArguments {
-			username,
-			password,
-		},
+		auth,
 		conn: DatabaseConnectionArguments {
 			endpoint,
 		},
@@ -48,17 +45,23 @@ pub async fn init(
 
 	// Connect to the database engine
 	let client = connect(endpoint).await?;
-	// Sign in to the server if the specified database engine supports it
-	let root = Root {
-		username: &username,
-		password: &password,
-	};
-	if let Err(error) = client.signin(root).await {
-		match error {
-			// Authentication not supported by this engine, we can safely continue
-			SurrealError::Api(ApiError::AuthNotSupported) => {}
-			error => {
-				return Err(error.into());
+	if let Some(AuthOptionalArguments {
+		username: Some(username),
+		password: Some(password),
+	}) = auth
+	{
+		// Sign in to the server if the specified database engine supports it
+		let root = Root {
+			username: &username,
+			password: &password,
+		};
+		if let Err(error) = client.signin(root).await {
+			match error {
+				// Authentication not supported by this engine, we can safely continue
+				SurrealError::Api(ApiError::AuthNotSupported) => {}
+				error => {
+					return Err(error.into());
+				}
 			}
 		}
 	}

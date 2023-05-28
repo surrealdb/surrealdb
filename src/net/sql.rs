@@ -11,6 +11,8 @@ use surrealdb::dbs::Session;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
 
+use super::limiter::LIM;
+
 const MAX: u64 = 1024 * 1024; // 1 MiB
 
 #[allow(opaque_hidden_inferred_bound)]
@@ -70,14 +72,20 @@ async fn handler(
 async fn socket(ws: WebSocket, session: Session) {
 	// Split the WebSocket connection
 	let (mut tx, mut rx) = ws.split();
+	// Store a local reference to the limiter
+	let lim = LIM.get().unwrap();
+	// Get a database reference
+	let db = DB.get().unwrap();
+	// Get local copy of options
+	let opt = CF.get().unwrap();
 	// Wait to receive the next message
 	while let Some(res) = rx.next().await {
 		if let Ok(msg) = res {
 			if let Ok(sql) = msg.to_str() {
-				// Get a database reference
-				let db = DB.get().unwrap();
-				// Get local copy of options
-				let opt = CF.get().unwrap();
+				if !lim.should_allow(&session) {
+					let _ = tx.send(Message::text(Error::TooManyRequests)).await;
+					continue;
+				}
 				// Execute the received sql query
 				let _ = match db.execute(sql, &session, None, opt.strict).await {
 					// Convert the response to JSON

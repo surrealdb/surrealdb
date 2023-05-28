@@ -5,6 +5,7 @@ use crate::cnf::PKG_VERSION;
 use crate::cnf::WEBSOCKET_PING_FREQUENCY;
 use crate::dbs::DB;
 use crate::err::Error;
+use crate::net::limiter::LIM;
 use crate::net::session;
 use crate::net::LOG;
 use crate::rpc::args::Take;
@@ -203,8 +204,6 @@ impl Rpc {
 			// Unsupported message type
 			_ => return res::failure(None, Failure::INTERNAL_ERROR).send(out, chn).await,
 		};
-		// Log the received request
-		trace!(target: LOG, "RPC Received: {}", req);
 		// Fetch the 'id' argument
 		let id = match req.pick(&*ID) {
 			v if v.is_none() => None,
@@ -215,6 +214,20 @@ impl Rpc {
 			v if v.is_datetime() => Some(v),
 			_ => return res::failure(None, Failure::INVALID_REQUEST).send(out, chn).await,
 		};
+
+		// Check rate limiter
+		{
+			let rpc = rpc.read().await;
+
+			// Check rate limit.
+			if !LIM.get().unwrap().should_allow(&rpc.session) {
+				return res::failure(id, Failure::custom("Too many requests")).send(out, chn).await;
+			}
+		}
+
+		// Log the received request
+		trace!(target: LOG, "RPC Received: {}", req);
+
 		// Fetch the 'method' argument
 		let method = match req.pick(&*METHOD) {
 			Value::Strand(v) => v.to_raw(),

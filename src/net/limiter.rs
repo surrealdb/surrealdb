@@ -1,4 +1,7 @@
-use crate::err::Error;
+use crate::{
+	cnf::{RATE_LIMIT, RATE_LIMIT_BURST},
+	err::Error,
+};
 use once_cell::sync::OnceCell;
 use std::{
 	collections::HashMap,
@@ -10,12 +13,15 @@ use surrealdb::dbs::{Auth, Session};
 
 pub static LIM: OnceCell<Limiter> = OnceCell::new();
 
-// TODO: Make configurable.
-const RATE_LIMIT: Duration = Duration::from_secs(5);
-const BURST: usize = 2;
+const RATE_LIMIT_DURATION_PER_REQ: Duration = Duration::from_nanos(1_000_000_000 / RATE_LIMIT);
 
 pub fn init() -> Result<(), Error> {
-	let _ = LIM.set(Default::default());
+	let _ = LIM.set(Limiter {
+		inner: Mutex::new(Inner {
+			limits: Default::default(),
+			last_prune: Instant::now(),
+		}),
+	});
 	// All ok
 	Ok(())
 }
@@ -39,10 +45,13 @@ struct Limits {
 	//total_concurrency: usize,
 }
 
-#[derive(Default)]
 pub struct Limiter {
-	// TODO: Prune ocasionally
-	limits: Mutex<HashMap<BlockableUnit, Limits>>,
+	inner: Mutex<Inner>,
+}
+
+struct Inner {
+	limits: HashMap<BlockableUnit, Limits>,
+	last_prune: Instant,
 }
 
 impl Limiter {
@@ -79,10 +88,8 @@ impl Limiter {
 
 		let now = Instant::now();
 
-		print!("{blockable_unit:?}");
-
-		let mut limits = self.limits.lock().unwrap();
-		let limits = limits.entry(blockable_unit).or_insert(Limits {
+		let mut inner = self.inner.lock().unwrap();
+		let limits = inner.limits.entry(blockable_unit).or_insert(Limits {
 			rate_limited_until: now,
 			burst_used: 0,
 		});
@@ -90,23 +97,31 @@ impl Limiter {
 		let ok = if now > limits.rate_limited_until {
 			// Limit has fully expired
 			limits.burst_used = 0;
+			limits.rate_limited_until = now;
 			true
-		} else if limits.burst_used < BURST {
+		} else if limits.burst_used < RATE_LIMIT_BURST {
 			// Allowable burst
 			limits.burst_used += 1;
+			limits.rate_limited_until += RATE_LIMIT_DURATION_PER_REQ;
 			true
 		} else {
 			// Excessive burst
 			false
 		};
 
-		if ok {
-			limits.rate_limited_until += RATE_LIMIT;
-		}
-
 		// TODO: Check concurrent connections
 
-		println!(" => {ok}");
+		// See if we can prune some elements.
+		const PRUNE_INTERVAL: Duration = Duration::from_nanos(
+			(RATE_LIMIT_DURATION_PER_REQ.as_nanos() as u64)
+				.saturating_mul(1 + RATE_LIMIT_BURST as u64),
+		);
+		if (now - inner.last_prune) > PRUNE_INTERVAL {
+			inner.last_prune = now;
+			inner.limits.retain(|_, l| l.rate_limited_until > now);
+		}
+
+		println!("len = {}", inner.limits.len());
 
 		ok
 	}
