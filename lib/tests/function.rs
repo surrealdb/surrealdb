@@ -3,7 +3,7 @@ use parse::Parse;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::kvs::Datastore;
-use surrealdb::sql::Value;
+use surrealdb::sql::{Value, Number};
 
 // --------------------------------------------------
 // array
@@ -4069,7 +4069,7 @@ async fn function_type_decimal() -> Result<(), Error> {
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("13.1043784018");
+	let val = Value::Number(Number::Decimal("13.1043784018".parse().unwrap()));
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
