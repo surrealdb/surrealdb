@@ -1,3 +1,4 @@
+use super::limiter::LIM;
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
@@ -10,8 +11,6 @@ use futures::{SinkExt, StreamExt};
 use surrealdb::dbs::Session;
 use warp::ws::{Message, WebSocket, Ws};
 use warp::Filter;
-
-use super::limiter::LIM;
 
 const MAX: u64 = 1024 * 1024; // 1 MiB
 

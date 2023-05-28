@@ -14,11 +14,6 @@ use surrealdb::dbs::{Auth, Session};
 pub static LIM: OnceCell<Limiter> = OnceCell::new();
 
 pub fn init() -> Result<(), Error> {
-	#[cfg(test)]
-	let _ = LIM.set(Limiter {
-		inner: None,
-	});
-	#[cfg(not(test))]
 	let _ = LIM.set(Default::default());
 	// All ok
 	Ok(())
@@ -44,17 +39,14 @@ struct Limits {
 }
 
 pub struct Limiter {
-	inner: Option<Mutex<Inner>>,
+	inner: Mutex<Inner>,
+	dur_per_req: Duration,
+	prune_interval: Duration,
 }
 
 impl Default for Limiter {
 	fn default() -> Self {
-		Self {
-			inner: Some(Mutex::new(Inner {
-				limits: Default::default(),
-				last_prune: Instant::now(),
-			})),
-		}
+		Self::new(*RATE_LIMIT, *RATE_LIMIT_BURST)
 	}
 }
 
@@ -64,6 +56,20 @@ struct Inner {
 }
 
 impl Limiter {
+	fn new(rate_limit: u64, burst: usize) -> Self {
+		let dur_per_req = Duration::from_nanos(1_000_000_000 / rate_limit);
+		Self {
+			inner: Mutex::new(Inner {
+				limits: Default::default(),
+				last_prune: Instant::now(),
+			}),
+			dur_per_req,
+			prune_interval: Duration::from_nanos(
+				(dur_per_req.as_nanos() as u64).saturating_mul(1 + burst as u64),
+			),
+		}
+	}
+
 	/// Returns whether a new connection by this
 	/// session should be blocked
 	pub fn should_allow(&self, session: &Session) -> bool {
@@ -100,30 +106,22 @@ impl Limiter {
 
 		// TODO: asynchronously consult the KVs for heavy-hitters.
 
-		let mut inner = if let Some(inner) = &self.inner {
-			inner.lock().unwrap()
-		} else {
-			// Rate limiting disabled e.g. during tests.
-			return true;
-		};
+		let mut inner = self.inner.lock().unwrap();
 
 		let limits = inner.limits.entry(blockable_unit).or_insert(Limits {
 			rate_limited_until: now,
 			burst_used: 0,
 		});
 
-		const RATE_LIMIT_DURATION_PER_REQ: Duration =
-			Duration::from_nanos(1_000_000_000 / RATE_LIMIT);
-
 		let ok = if now > limits.rate_limited_until {
 			// Limit has fully expired
 			limits.burst_used = 0;
 			limits.rate_limited_until = now;
 			true
-		} else if limits.burst_used <= RATE_LIMIT_BURST {
+		} else if limits.burst_used <= *RATE_LIMIT_BURST {
 			// Allowable burst
 			limits.burst_used += 1;
-			limits.rate_limited_until += RATE_LIMIT_DURATION_PER_REQ;
+			limits.rate_limited_until += self.dur_per_req;
 			true
 		} else {
 			// Excessive burst
@@ -133,35 +131,31 @@ impl Limiter {
 		// TODO: Check concurrent connections
 
 		// See if we can prune some elements.
-		const PRUNE_INTERVAL: Duration = Duration::from_nanos(
-			(RATE_LIMIT_DURATION_PER_REQ.as_nanos() as u64)
-				.saturating_mul(1 + RATE_LIMIT_BURST as u64),
-		);
-		if (now - inner.last_prune) > PRUNE_INTERVAL {
+		if (now - inner.last_prune) > self.prune_interval {
 			inner.last_prune = now;
 			inner.limits.retain(|_, l| l.rate_limited_until > now);
 		}
 
 		ok
 	}
-
-	/// Returns number of tracked blockable units
-	#[cfg(test)]
-	fn len(&self) -> usize {
-		self.inner.as_ref().map(|inner| inner.lock().unwrap().limits.len()).unwrap_or(0)
-	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::Limiter;
-	use crate::cnf::{RATE_LIMIT, RATE_LIMIT_BURST};
 	use rand::{thread_rng, Rng};
 	use std::{
 		net::Ipv4Addr,
 		time::{Duration, Instant},
 	};
 	use surrealdb::dbs::Session;
+
+	const RATE_LIMIT: u64 = 3;
+	const RATE_LIMIT_BURST: usize = 5;
+
+	fn limiter() -> Limiter {
+		Limiter::new(RATE_LIMIT, RATE_LIMIT_BURST)
+	}
 
 	#[test]
 	fn rate() {
@@ -172,7 +166,7 @@ mod tests {
 
 		// Returns true iff requests at this rate are all allowed
 		let is_allowed = |rate: f64| {
-			let limiter = Limiter::default();
+			let limiter = limiter();
 			let mut now = Instant::now();
 
 			for _ in 0..RATE_LIMIT_BURST * 1000 {
@@ -194,7 +188,7 @@ mod tests {
 
 	#[test]
 	fn burst() {
-		let limiter = Limiter::default();
+		let limiter = limiter();
 		let mut now = Instant::now();
 
 		let session = Session {
@@ -211,7 +205,7 @@ mod tests {
 
 	#[test]
 	fn expiry() {
-		let limiter = Limiter::default();
+		let limiter = limiter();
 
 		let mut rng = thread_rng();
 		let mut now = Instant::now();
@@ -226,9 +220,8 @@ mod tests {
 
 			now += Duration::from_secs(1);
 
-			assert!(limiter.len() < 100, "{}", limiter.len());
+			let len = limiter.inner.lock().unwrap().limits.len();
+			assert!(len < 100, "{}", len);
 		}
-
-		println!("blockable units remaining: {}", limiter.len());
 	}
 }

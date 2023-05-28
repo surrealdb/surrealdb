@@ -1,3 +1,4 @@
+use super::limiter::LIM;
 use crate::err::Error;
 use crate::iam::verify::{basic, token};
 use crate::iam::BASIC;
@@ -5,8 +6,6 @@ use crate::iam::TOKEN;
 use std::net::SocketAddr;
 use surrealdb::dbs::Session;
 use warp::Filter;
-
-use super::limiter::LIM;
 
 pub fn build() -> impl Filter<Extract = (Session,), Error = warp::Rejection> + Clone {
 	// Enable on any path
