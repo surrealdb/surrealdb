@@ -55,6 +55,6 @@ async fn process(
 		// Pass the authenticated session through
 		Ok(session)
 	} else {
-		Err(Error::TooManyRequests)
+		Err(Error::TooManyRequests.into())
 	}
 }

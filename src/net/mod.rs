@@ -27,6 +27,8 @@ use warp::Filter;
 const LOG: &str = "surrealdb::net";
 
 pub async fn init() -> Result<(), Error> {
+	limiter::init()?;
+
 	// Setup web routes
 	let net = index::config()
 		// Version endpoint
