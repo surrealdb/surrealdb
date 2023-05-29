@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+	num::NonZeroU16,
+	path::{Path, PathBuf},
+};
 
 pub(crate) mod parser;
 
@@ -60,5 +63,15 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 		24 => Ok(v.to_string()),
 		32 => Ok(v.to_string()),
 		_ => Err(String::from("Ensure your database encryption key is 16, 24, or 32 bytes long")),
+	}
+}
+
+pub(crate) fn rate_limit(v: &str) -> Result<Option<NonZeroU16>, String> {
+	if let Ok(rate_limit) = v.parse::<NonZeroU16>() {
+		Ok(Some(rate_limit))
+	} else if v == "none" {
+		Ok(None)
+	} else {
+		Err(String::from("Rate limit must be a number from 1 to 65535 or 'none'"))
 	}
 }

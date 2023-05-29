@@ -1,4 +1,4 @@
-use super::limiter::LIM;
+use super::limiter;
 use crate::cli::CF;
 use crate::dbs::DB;
 use crate::err::Error;
@@ -71,8 +71,6 @@ async fn handler(
 async fn socket(ws: WebSocket, session: Session) {
 	// Split the WebSocket connection
 	let (mut tx, mut rx) = ws.split();
-	// Store a local reference to the limiter
-	let lim = LIM.get().unwrap();
 	// Get a database reference
 	let db = DB.get().unwrap();
 	// Get local copy of options
@@ -81,7 +79,7 @@ async fn socket(ws: WebSocket, session: Session) {
 	while let Some(res) = rx.next().await {
 		if let Ok(msg) = res {
 			if let Ok(sql) = msg.to_str() {
-				if !lim.should_allow(&session) {
+				if !limiter::should_allow(&session) {
 					let _ = tx.send(Message::text(Error::TooManyRequests)).await;
 					continue;
 				}

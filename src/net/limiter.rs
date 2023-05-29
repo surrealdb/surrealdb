@@ -1,20 +1,25 @@
-use crate::{
-	cnf::{RATE_LIMIT, RATE_LIMIT_BURST},
-	err::Error,
-};
+use crate::err::Error;
 use once_cell::sync::OnceCell;
 use std::{
 	collections::HashMap,
 	net::Ipv6Addr,
+	num::NonZeroU16,
 	sync::Mutex,
 	time::{Duration, Instant},
 };
 use surrealdb::dbs::{Auth, Session};
 
-pub static LIM: OnceCell<Limiter> = OnceCell::new();
+static IP_LIM: OnceCell<Limiter> = OnceCell::new();
+static NS_LIM: OnceCell<Limiter> = OnceCell::new();
 
-pub fn init() -> Result<(), Error> {
-	let _ = LIM.set(Default::default());
+pub fn init(
+	rate_limit_ip: Option<NonZeroU16>,
+	rate_limit_ns: Option<NonZeroU16>,
+	burst_limit_ip: u16,
+	burst_limit_ns: u16,
+) -> Result<(), Error> {
+	let _ = IP_LIM.set(Limiter::new(rate_limit_ip, burst_limit_ip));
+	let _ = NS_LIM.set(Limiter::new(rate_limit_ns, burst_limit_ns));
 	// All ok
 	Ok(())
 }
@@ -24,7 +29,7 @@ struct Limits {
 	/// How long previous request(s) are counted against the client
 	rate_limited_until: Instant,
 	/// How many extra requests have been allowed (counted towards a limit)
-	burst_used: usize,
+	burst_used: u16,
 	// TODO: Concurrent connections to this particular server
 	//local_concurrency: usize,
 	// TODO: Concurrent connections to all servers (reported by KVS)
@@ -36,28 +41,81 @@ pub struct Limiter {
 	inner: Mutex<Inner>,
 	dur_per_req: Duration,
 	prune_interval: Duration,
+	burst_limit: u16,
 }
 
-impl Default for Limiter {
-	fn default() -> Self {
-		Self::new(*RATE_LIMIT, *RATE_LIMIT_BURST)
+/// Returns whether a new connection by this
+/// session should be blocked
+pub fn should_allow(session: &Session) -> bool {
+	if let Some((blockable_unit, is_ns)) = blockable_unit(session) {
+		let lim = if is_ns {
+			&NS_LIM
+		} else {
+			&IP_LIM
+		};
+
+		let lim = lim.get().unwrap();
+
+		lim.should_allow(blockable_unit)
+	} else {
+		true
+	}
+}
+
+/// # Return
+/// - IPv4 address e.g. 1.2.3.4
+/// - IPv6 /48 prefixes e.g. 5629:1e38:8843::
+/// - Namespace name (which never contain '.' or ':'
+///   so they don't overlap with the above)
+/// - `None` if should not be blocked
+///
+/// The `bool` is `true` iff the string is a namespace
+fn blockable_unit(session: &Session) -> Option<(BoxCowStr, bool)> {
+	match (&*session.au, session.ip.as_deref()) {
+		(Auth::Kv, _) => {
+			// If you have the root password, you are never rate-limited
+			None
+		}
+		(Auth::Ns(ns) | Auth::Db(ns, _) | Auth::Sc(ns, _, _), _) => {
+			Some((BoxCowStr::Borrowed(ns.as_str()), true))
+		}
+		(Auth::No, Some(ip_port)) => {
+			let ip = ip_port
+				.rsplit_once(':')
+				.map(|(ip, _port)| ip.trim_start_matches('[').trim_end_matches(']'))
+				.unwrap_or(ip_port);
+			let string = if let Ok(ipv6) = ip.parse::<Ipv6Addr>() {
+				let mut octets = ipv6.octets();
+				// Ignore parts of the address that are easily spoofed
+				octets[6..].iter_mut().for_each(|o| *o = 0);
+				BoxCowStr::Owned(Ipv6Addr::from(octets).to_string().into_boxed_str())
+			} else {
+				BoxCowStr::Borrowed(ip)
+			};
+			Some((string, false))
+		}
+		(Auth::No, None) => {
+			// It's fine not to have auth but lack of IP means something
+			// wrong involving warp
+			debug_assert!(false, "no IP in session");
+			None
+		}
 	}
 }
 
 #[derive(Debug)]
 struct Inner {
-	/// Keys may be:
-	/// - IPv4 address e.g. 1.2.3.4
-	/// - IPv6 /48 prefixes e.g. 5629:1e38:8843::
-	/// - Namespace name (which never contain '.' or ':'
-	///   so they don't overlap with the above)
 	limits: HashMap<Box<str>, Limits>,
 	last_prune: Instant,
 }
 
 impl Limiter {
-	fn new(rate_limit: u64, burst: usize) -> Self {
-		let dur_per_req = Duration::from_nanos(1_000_000_000 / rate_limit);
+	fn new(rate_limit: Option<NonZeroU16>, burst_limit: u16) -> Self {
+		let dur_per_req = if let Some(rate_limit) = rate_limit {
+			Duration::from_nanos(1_000_000_000 / rate_limit.get() as u64)
+		} else {
+			Duration::ZERO
+		};
 		Self {
 			inner: Mutex::new(Inner {
 				limits: Default::default(),
@@ -65,49 +123,19 @@ impl Limiter {
 			}),
 			dur_per_req,
 			prune_interval: Duration::from_nanos(
-				(dur_per_req.as_nanos() as u64).saturating_mul(1 + burst as u64),
+				(dur_per_req.as_nanos() as u64).saturating_mul(1 + burst_limit as u64),
 			),
+			burst_limit,
 		}
 	}
 
-	/// Returns whether a new connection by this
-	/// session should be blocked
-	pub fn should_allow(&self, session: &Session) -> bool {
-		self.should_allow_at(session, Instant::now())
+	/// Returns whether a new connection by this blockable unit should be allowed
+	fn should_allow(&self, blockable_unit: BoxCowStr) -> bool {
+		self.should_allow_at(blockable_unit, Instant::now())
 	}
 
 	/// Allows mocking the time in a test
-	fn should_allow_at(&self, session: &Session, now: Instant) -> bool {
-		let blockable_unit = match (&*session.au, session.ip.as_deref()) {
-			(Auth::Kv, _) => {
-				// If you have the root password, you are never rate-limited
-				return true;
-			}
-			(Auth::Ns(ns) | Auth::Db(ns, _) | Auth::Sc(ns, _, _), _) => {
-				BoxCowStr::Borrowed(ns.as_str())
-			}
-			(Auth::No, Some(ip_port)) => {
-				let ip = ip_port
-					.rsplit_once(':')
-					.map(|(ip, _port)| ip.trim_start_matches('[').trim_end_matches(']'))
-					.unwrap_or(ip_port);
-				if let Ok(ipv6) = ip.parse::<Ipv6Addr>() {
-					let mut octets = ipv6.octets();
-					// Ignore parts of the address that are easily spoofed
-					octets[6..].iter_mut().for_each(|o| *o = 0);
-					BoxCowStr::Owned(Ipv6Addr::from(octets).to_string().into_boxed_str())
-				} else {
-					BoxCowStr::Borrowed(ip)
-				}
-			}
-			(Auth::No, None) => {
-				// It's fine not to have auth but lack of IP means something
-				// wrong involving warp
-				debug_assert!(false, "no IP in session");
-				return true;
-			}
-		};
-
+	fn should_allow_at(&self, blockable_unit: BoxCowStr, now: Instant) -> bool {
 		// TODO: asynchronously consult the KVs for heavy-hitters.
 
 		let mut inner = self.inner.lock().unwrap();
@@ -136,7 +164,7 @@ impl Limiter {
 			limits.burst_used = 0;
 			limits.rate_limited_until = now;
 			true
-		} else if limits.burst_used <= *RATE_LIMIT_BURST {
+		} else if limits.burst_used <= self.burst_limit {
 			// Allowable burst
 			limits.burst_used += 1;
 			limits.rate_limited_until += self.dur_per_req;

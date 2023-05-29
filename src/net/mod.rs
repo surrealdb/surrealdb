@@ -6,7 +6,7 @@ mod import;
 mod index;
 mod input;
 mod key;
-mod limiter;
+pub mod limiter;
 mod log;
 mod output;
 mod params;
@@ -27,8 +27,6 @@ use warp::Filter;
 const LOG: &str = "surrealdb::net";
 
 pub async fn init() -> Result<(), Error> {
-	limiter::init()?;
-
 	// Setup web routes
 	let net = index::config()
 		// Version endpoint

@@ -1,4 +1,4 @@
-use super::limiter::LIM;
+use super::limiter;
 use crate::err::Error;
 use crate::iam::verify::{basic, token};
 use crate::iam::BASIC;
@@ -50,7 +50,7 @@ async fn process(
 		// No authentication data was supplied
 		None => Ok(()),
 	}?;
-	if LIM.get().unwrap().should_allow(&session) {
+	if limiter::should_allow(&session) {
 		// Pass the authenticated session through
 		Ok(session)
 	} else {

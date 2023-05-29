@@ -5,7 +5,7 @@ use crate::cnf::PKG_VERSION;
 use crate::cnf::WEBSOCKET_PING_FREQUENCY;
 use crate::dbs::DB;
 use crate::err::Error;
-use crate::net::limiter::LIM;
+use crate::net::limiter;
 use crate::net::session;
 use crate::net::LOG;
 use crate::rpc::args::Take;
@@ -220,7 +220,7 @@ impl Rpc {
 			let rpc = rpc.read().await;
 
 			// Check rate limit.
-			if !LIM.get().unwrap().should_allow(&rpc.session) {
+			if !limiter::should_allow(&rpc.session) {
 				return res::failure(id, Failure::custom("Too many requests")).send(out, chn).await;
 			}
 		}

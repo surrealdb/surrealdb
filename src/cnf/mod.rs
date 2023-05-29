@@ -28,16 +28,6 @@ pub const APP_ENDPOINT: &str = "https://surrealdb.com/app";
 /// How many concurrent tasks can be handled in a WebSocket
 pub const MAX_CONCURRENT_CALLS: usize = 24;
 
-/// Rate limit for new connections and requests (per second per anon IP or authed NS).
-pub static RATE_LIMIT: Lazy<u64> = Lazy::new(|| {
-	option_env!("SURREAL_RATE_LIMIT").map(|s| s.parse::<u64>().unwrap_or(u64::MAX)).unwrap_or(5)
-});
-
-/// Maximum burst above the rate limit.
-pub static RATE_LIMIT_BURST: Lazy<usize> = Lazy::new(|| {
-	option_env!("SURREAL_RATE_LIMIT_BURST").and_then(|s| s.parse::<usize>().ok()).unwrap_or(5)
-});
-
 /// Specifies the frequency with which ping messages should be sent to the client
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
