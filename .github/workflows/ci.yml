@@ -103,7 +103,7 @@ jobs:
           sudo apt-get -y install protobuf-compiler libprotobuf-dev
 
       - name: Run cargo test
-        run: SURREAL_RATE_LIMIT=none cargo test --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --include-ignored
+        run: cargo test --locked --no-default-features --features storage-mem,scripting,http --workspace -- --skip api_integration --include-ignored
 
   ws-engine:
     name: WebSocket engine
@@ -123,8 +123,8 @@ jobs:
 
       - name: Run cargo test
         run: |
-          SURREAL_RATE_LIMIT=none cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-mem
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory --rate-limit-ip none --rate-limit-ns none &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-ws --test api api_integration::ws
 
   http-engine:
@@ -145,8 +145,8 @@ jobs:
 
       - name: Run cargo test
         run: |
-          SURREAL_RATE_LIMIT=none cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-mem
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory --rate-limit-ip none --rate-limit-ns none &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::http
 
   mem-engine:
@@ -195,6 +195,6 @@ jobs:
 
       - name: Run cargo test
         run: |
-          SURREAL_RATE_LIMIT=none cargo build --locked --no-default-features --features storage-mem
-          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory &)
+          cargo build --locked --no-default-features --features storage-mem
+          (&>/dev/null ./target/debug/surreal start --log trace --user root --pass root memory --rate-limit-ip none --rate-limit-ns none &)
           cargo test --locked --package surrealdb --no-default-features --features protocol-http --test api api_integration::any
