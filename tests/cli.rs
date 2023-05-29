@@ -106,7 +106,7 @@ mod cli_integration {
 		let pass = rng.gen::<u64>().to_string();
 
 		let start_args =
-			format!("start --bind {addr} --user root --pass {pass} memory --no-banner --log info");
+			format!("start --bind {addr} --user root --pass {pass} memory --no-banner --log info --burst-limit-ip 32 --burst-limit-ns 16");
 
 		println!("starting server with args: {start_args}");
 
