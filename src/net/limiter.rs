@@ -19,14 +19,6 @@ pub fn init() -> Result<(), Error> {
 	Ok(())
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
-enum BlockableUnit {
-	/// IPv4 address or IPv6 /48 prefixes
-	Ip(Box<str>),
-	/// Authed access to a namespace
-	Namespace(Box<str>),
-}
-
 struct Limits {
 	/// How long previous request(s) are counted against the client
 	rate_limited_until: Instant,
@@ -51,7 +43,11 @@ impl Default for Limiter {
 }
 
 struct Inner {
-	limits: HashMap<BlockableUnit, Limits>,
+	/// Keys may be:
+	/// - IPv4 address or IPv6 /48 prefixes
+	/// - Authed access to a namespace (which never
+	///   contain '.' or ':' so they don't overlap with IPs)
+	limits: HashMap<Box<str>, Limits>,
 	last_prune: Instant,
 }
 
@@ -83,21 +79,22 @@ impl Limiter {
 				// If you have the root password, you are never rate-limited
 				return true;
 			}
-			(Auth::Ns(ns) | Auth::Db(ns, _), _) => BlockableUnit::Namespace(Box::from(ns.as_str())),
-			(_, Some(ip_port)) => {
+			(Auth::Ns(ns) | Auth::Db(ns, _) | Auth::Sc(ns, _, _), _) => {
+				BoxCowStr::Borrowed(ns.as_str())
+			}
+			(Auth::No, Some(ip_port)) => {
 				let ip = ip_port.rsplit_once(':').map(|(ip, _port)| ip).unwrap_or(ip_port);
-				let ip = if let Ok(ipv6) = ip.parse::<Ipv6Addr>() {
+				if let Ok(ipv6) = ip.parse::<Ipv6Addr>() {
 					let mut octets = ipv6.octets();
 					// Ignore parts of the address that are easily spoofed
 					octets[6..].iter_mut().for_each(|o| *o = 0);
-					Ipv6Addr::from(octets).to_string().into_boxed_str()
+					BoxCowStr::Owned(Ipv6Addr::from(octets).to_string().into_boxed_str())
 				} else {
-					Box::from(ip)
-				};
-				BlockableUnit::Ip(ip)
+					BoxCowStr::Borrowed(ip)
+				}
 			}
-			_ => {
-				// It's fine not to have namespace auth but lack of IP means something
+			(Auth::No, None) => {
+				// It's fine not to have auth but lack of IP means something
 				// wrong involving warp
 				debug_assert!(false, "no IP in session");
 				return true;
@@ -108,10 +105,24 @@ impl Limiter {
 
 		let mut inner = self.inner.lock().unwrap();
 
-		let limits = inner.limits.entry(blockable_unit).or_insert(Limits {
-			rate_limited_until: now,
-			burst_used: 0,
-		});
+		let limits = loop {
+			// Best case this does one hashmap lookup and noallocation
+			//
+			// TODO: Once stable, use the `raw_entry` API to only do one lookup and no reallocation
+			// in the worst case (See https://github.com/rust-lang/rust/issues/56167).
+			if let Some(ret) = inner.limits.get_mut(blockable_unit.as_ref()) {
+				break ret;
+			} else {
+				let old = inner.limits.insert(
+					Box::from(blockable_unit.as_ref()),
+					Limits {
+						rate_limited_until: now,
+						burst_used: 0,
+					},
+				);
+				debug_assert!(old.is_none(), "get_mut should have found blockable unit");
+			}
+		};
 
 		let ok = if now > limits.rate_limited_until {
 			// Limit has fully expired
@@ -137,6 +148,21 @@ impl Limiter {
 		}
 
 		ok
+	}
+}
+
+// Like `Cow<'a, str>` but `Box<str>` instead of `String` for size efficiency.
+enum BoxCowStr<'a> {
+	Owned(Box<str>),
+	Borrowed(&'a str),
+}
+
+impl<'a> AsRef<str> for BoxCowStr<'a> {
+	fn as_ref(&self) -> &str {
+		match self {
+			Self::Owned(owned) => &*owned,
+			Self::Borrowed(borrowed) => borrowed,
+		}
 	}
 }
 
