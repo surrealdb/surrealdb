@@ -136,6 +136,10 @@ impl Limiter {
 
 	/// Allows mocking the time in a test
 	fn should_allow_at(&self, blockable_unit: BoxCowStr, now: Instant) -> bool {
+		if self.dur_per_req == Duration::ZERO {
+			return true;
+		}
+
 		// TODO: asynchronously consult the KVs for heavy-hitters.
 
 		let mut inner = self.inner.lock().unwrap();
@@ -203,64 +207,106 @@ impl<'a> AsRef<str> for BoxCowStr<'a> {
 
 #[cfg(test)]
 mod tests {
-	use super::Limiter;
+	use super::{blockable_unit, Limiter};
 	use rand::{thread_rng, Rng};
 	use std::{
 		net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+		num::NonZeroU16,
+		sync::Arc,
 		time::{Duration, Instant},
 	};
-	use surrealdb::dbs::Session;
+	use surrealdb::dbs::{Auth, Session};
 
 	const RATE_LIMIT: u64 = 3;
 	const RATE_LIMIT_BURST: usize = 5;
 
 	fn limiter() -> Limiter {
-		Limiter::new(RATE_LIMIT, RATE_LIMIT_BURST)
+		Limiter::new(NonZeroU16::new(RATE_LIMIT as u16), RATE_LIMIT_BURST as u16)
+	}
+
+	fn example_sessions() -> Vec<Session> {
+		vec![
+			Session {
+				ip: Some("0.0.0.0".to_owned()),
+				..Default::default()
+			},
+			Session {
+				au: Arc::new(Auth::Ns("ns".to_owned())),
+				..Default::default()
+			},
+			Session {
+				au: Arc::new(Auth::Db("ns".to_owned(), "db".to_owned())),
+				..Default::default()
+			},
+			Session {
+				au: Arc::new(Auth::Sc("ns".to_owned(), "db".to_owned(), "sc".to_owned())),
+				..Default::default()
+			},
+		]
+	}
+
+	#[test]
+	fn disabled() {
+		for session in example_sessions() {
+			let limiter = Limiter::new(None, thread_rng().gen());
+			let now = Instant::now();
+
+			for _ in 0..10000 {
+				assert!(limiter.should_allow_at(blockable_unit(&session).unwrap().0, now));
+			}
+		}
+	}
+
+	#[test]
+	fn root() {
+		assert!(blockable_unit(&Session {
+			au: Arc::new(Auth::Kv),
+			..Default::default()
+		})
+		.is_none());
 	}
 
 	#[test]
 	fn rate() {
-		let session = Session {
-			ip: Some("0.0.0.0".to_owned()),
-			..Default::default()
-		};
+		for session in example_sessions() {
+			// Returns true iff requests at this rate are all allowed
+			let is_allowed = |rate: f64| {
+				let limiter = limiter();
+				let mut now = Instant::now();
 
-		// Returns true iff requests at this rate are all allowed
-		let is_allowed = |rate: f64| {
-			let limiter = limiter();
-			let mut now = Instant::now();
-
-			for _ in 0..RATE_LIMIT_BURST * 1000 {
-				if !limiter.should_allow_at(&session, now) {
-					return false;
+				for _ in 0..RATE_LIMIT_BURST * 1000 {
+					if !limiter.should_allow_at(blockable_unit(&session).unwrap().0, now) {
+						return false;
+					}
+					now += Duration::from_nanos(1 + (1_000_000_000 as f64 / rate) as u64)
 				}
-				now += Duration::from_nanos(1 + (1_000_000_000 as f64 / rate) as u64)
-			}
-			true
-		};
+				true
+			};
 
-		for ten_times_rate in
-			(RATE_LIMIT.saturating_sub(10) + 1) * 10..=RATE_LIMIT.saturating_add(10) * 10
-		{
-			let rate = ten_times_rate as f64 * 0.1;
-			assert_eq!(is_allowed(rate), rate <= RATE_LIMIT as f64, "rate: {:.1}", rate);
+			for ten_times_rate in
+				(RATE_LIMIT.saturating_sub(10) + 1) * 10..=RATE_LIMIT.saturating_add(10) * 10
+			{
+				let rate = ten_times_rate as f64 * 0.1;
+				assert_eq!(is_allowed(rate), rate <= RATE_LIMIT as f64, "rate: {:.1}", rate);
+			}
 		}
 	}
 
 	#[test]
 	fn burst() {
-		let limiter = limiter();
-		let mut now = Instant::now();
+		for session in example_sessions() {
+			let limiter = limiter();
+			let mut now = Instant::now();
 
-		let session = Session {
-			ip: Some("0.0.0.0".to_owned()),
-			..Default::default()
-		};
-
-		for i in 0..RATE_LIMIT_BURST * 1000 {
-			// Essentially zero time has passed
-			assert_eq!(limiter.should_allow_at(&session, now), i <= RATE_LIMIT_BURST, "{i}");
-			now += Duration::from_nanos(1);
+			for i in 0..RATE_LIMIT_BURST * 1000 {
+				// Essentially zero time has passed
+				assert_eq!(
+					limiter.should_allow_at(blockable_unit(&session).unwrap().0, now),
+					i <= RATE_LIMIT_BURST,
+					"{i}"
+				);
+				now += Duration::from_nanos(1);
+			}
 		}
 	}
 
@@ -281,7 +327,7 @@ mod tests {
 				..Default::default()
 			};
 
-			assert!(limiter.should_allow_at(&session, now));
+			assert!(limiter.should_allow_at(blockable_unit(&session).unwrap().0, now));
 
 			now += Duration::from_secs(1);
 
@@ -304,7 +350,7 @@ mod tests {
 				..Default::default()
 			};
 
-			limiter.should_allow_at(&session, now);
+			limiter.should_allow_at(blockable_unit(&session).unwrap().0, now);
 		};
 
 		let mut octets = rng.gen::<[u8; 16]>();
