@@ -19,6 +19,7 @@ pub fn init() -> Result<(), Error> {
 	Ok(())
 }
 
+#[derive(Debug)]
 struct Limits {
 	/// How long previous request(s) are counted against the client
 	rate_limited_until: Instant,
@@ -30,6 +31,7 @@ struct Limits {
 	//total_concurrency: usize,
 }
 
+#[derive(Debug)]
 pub struct Limiter {
 	inner: Mutex<Inner>,
 	dur_per_req: Duration,
@@ -42,6 +44,7 @@ impl Default for Limiter {
 	}
 }
 
+#[derive(Debug)]
 struct Inner {
 	/// Keys may be:
 	/// - IPv4 address or IPv6 /48 prefixes
@@ -83,7 +86,10 @@ impl Limiter {
 				BoxCowStr::Borrowed(ns.as_str())
 			}
 			(Auth::No, Some(ip_port)) => {
-				let ip = ip_port.rsplit_once(':').map(|(ip, _port)| ip).unwrap_or(ip_port);
+				let ip = ip_port
+					.rsplit_once(':')
+					.map(|(ip, _port)| ip.trim_start_matches('[').trim_end_matches(']'))
+					.unwrap_or(ip_port);
 				if let Ok(ipv6) = ip.parse::<Ipv6Addr>() {
 					let mut octets = ipv6.octets();
 					// Ignore parts of the address that are easily spoofed
@@ -171,7 +177,7 @@ mod tests {
 	use super::Limiter;
 	use rand::{thread_rng, Rng};
 	use std::{
-		net::Ipv4Addr,
+		net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
 		time::{Duration, Instant},
 	};
 	use surrealdb::dbs::Session;
@@ -237,8 +243,12 @@ mod tests {
 		let mut now = Instant::now();
 
 		for _ in 0..1000 {
+			let sock_addr = SocketAddrV4::new(
+				Ipv4Addr::new(rng.gen(), rng.gen(), rng.gen(), rng.gen()),
+				rng.gen(),
+			);
 			let session = Session {
-				ip: Some(Ipv4Addr::new(rng.gen(), rng.gen(), rng.gen(), rng.gen()).to_string()),
+				ip: Some(sock_addr.to_string()),
 				..Default::default()
 			};
 
@@ -249,5 +259,43 @@ mod tests {
 			let len = limiter.inner.lock().unwrap().limits.len();
 			assert!(len < 100, "{}", len);
 		}
+	}
+
+	#[test]
+	fn ipv6() {
+		let limiter = limiter();
+
+		let mut rng = thread_rng();
+		let now = Instant::now();
+
+		let insert = |ipv6: Ipv6Addr| {
+			let sock_addr = SocketAddrV6::new(ipv6, thread_rng().gen(), 0, 0);
+			let session = Session {
+				ip: Some(sock_addr.to_string()),
+				..Default::default()
+			};
+
+			limiter.should_allow_at(&session, now);
+		};
+
+		let mut octets = rng.gen::<[u8; 16]>();
+		insert(Ipv6Addr::from(octets));
+
+		assert_eq!(limiter.inner.lock().unwrap().limits.len(), 1);
+
+		// Same /48 so doesn't make a new entry
+		octets[12] = octets[12].wrapping_add(1);
+		insert(Ipv6Addr::from(octets));
+
+		let inner = limiter.inner.lock().unwrap();
+		assert_eq!(inner.limits.len(), 1, "{inner:?}");
+		drop(inner);
+
+		// Different /48 so does make a new entry
+		octets[3] = octets[3].wrapping_add(1);
+		insert(Ipv6Addr::from(octets));
+
+		let inner = limiter.inner.lock().unwrap();
+		assert_eq!(inner.limits.len(), 2, "{inner:?}");
 	}
 }
