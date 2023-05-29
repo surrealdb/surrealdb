@@ -45,11 +45,11 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "10", value_parser = super::validator::rate_limit)]
 	rate_limit_ns: core::option::Option<NonZeroU16>,
 	#[arg(help = "Rate limit burst for new connections and requests per anonymous IP")]
-	#[arg(env = "SURREAL_RATE_BURST_LIMIT_IP", long)]
+	#[arg(env = "SURREAL_BURST_LIMIT_IP", long)]
 	#[arg(default_value = "5")]
 	burst_limit_ip: u16,
 	#[arg(help = "Rate limit burst for new connections and requests per namespace")]
-	#[arg(env = "SURREAL_RATE_BURST_LIMIT_NS", long)]
+	#[arg(env = "SURREAL_BURST_LIMIT_NS", long)]
 	#[arg(default_value = "5")]
 	burst_limit_ns: u16,
 	#[arg(help = "The hostname or ip address to listen for connections on")]
