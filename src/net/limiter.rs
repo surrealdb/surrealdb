@@ -1,4 +1,5 @@
 use crate::err::Error;
+use clap::Args;
 use once_cell::sync::OnceCell;
 use std::{
 	collections::HashMap,
@@ -12,16 +13,60 @@ use surrealdb::dbs::{Auth, Session};
 static IP_LIM: OnceCell<Limiter> = OnceCell::new();
 static NS_LIM: OnceCell<Limiter> = OnceCell::new();
 
-pub fn init(
-	rate_limit_ip: Option<NonZeroU16>,
-	rate_limit_ns: Option<NonZeroU16>,
+#[derive(Args, Debug)]
+pub struct LimiterOptions {
+	#[arg(
+		help = "Rate limit for new connections and requests per second per anonymous IP (or 'none')"
+	)]
+	#[arg(env = "SURREAL_RATE_LIMIT_IP", long)]
+	#[arg(default_value = "5", value_parser = crate::cli::validator::rate_limit)]
+	rate_limit_ip: core::option::Option<NonZeroU16>,
+	#[arg(
+		help = "Rate limit for new connections and requests per second per namespace (or 'none')"
+	)]
+	#[arg(env = "SURREAL_RATE_LIMIT_NS", long)]
+	#[arg(default_value = "10", value_parser = crate::cli::validator::rate_limit)]
+	rate_limit_ns: core::option::Option<NonZeroU16>,
+	#[arg(help = "Rate limit burst for new connections and requests per anonymous IP")]
+	#[arg(env = "SURREAL_BURST_LIMIT_IP", long)]
+	#[arg(default_value = "5")]
 	burst_limit_ip: u16,
+	#[arg(help = "Rate limit burst for new connections and requests per namespace")]
+	#[arg(env = "SURREAL_BURST_LIMIT_NS", long)]
+	#[arg(default_value = "5")]
 	burst_limit_ns: u16,
+}
+
+pub fn init(
+	LimiterOptions {
+		rate_limit_ip,
+		burst_limit_ip,
+		rate_limit_ns,
+		burst_limit_ns,
+	}: LimiterOptions,
 ) -> Result<(), Error> {
 	let _ = IP_LIM.set(Limiter::new(rate_limit_ip, burst_limit_ip));
 	let _ = NS_LIM.set(Limiter::new(rate_limit_ns, burst_limit_ns));
 	// All ok
 	Ok(())
+}
+
+/// Returns whether a new connection by this
+/// session should be blocked
+pub fn should_allow(session: &Session) -> bool {
+	if let Some((blockable_unit, is_ns)) = blockable_unit(session) {
+		let lim = if is_ns {
+			&NS_LIM
+		} else {
+			&IP_LIM
+		};
+
+		let lim = lim.get().unwrap();
+
+		lim.should_allow(blockable_unit)
+	} else {
+		true
+	}
 }
 
 #[derive(Debug)]
@@ -42,24 +87,6 @@ pub struct Limiter {
 	dur_per_req: Duration,
 	prune_interval: Duration,
 	burst_limit: u16,
-}
-
-/// Returns whether a new connection by this
-/// session should be blocked
-pub fn should_allow(session: &Session) -> bool {
-	if let Some((blockable_unit, is_ns)) = blockable_unit(session) {
-		let lim = if is_ns {
-			&NS_LIM
-		} else {
-			&IP_LIM
-		};
-
-		let lim = lim.get().unwrap();
-
-		lim.should_allow(blockable_unit)
-	} else {
-		true
-	}
 }
 
 /// # Return

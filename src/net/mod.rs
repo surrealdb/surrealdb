@@ -6,7 +6,7 @@ mod import;
 mod index;
 mod input;
 mod key;
-pub mod limiter;
+mod limiter;
 mod log;
 mod output;
 mod params;
@@ -20,13 +20,28 @@ mod status;
 mod sync;
 mod version;
 
+use self::limiter::LimiterOptions;
 use crate::cli::CF;
 use crate::err::Error;
+use clap::Args;
 use warp::Filter;
 
 const LOG: &str = "surrealdb::net";
 
-pub async fn init() -> Result<(), Error> {
+#[derive(Args, Debug)]
+pub struct NetOptions {
+	#[command(flatten)]
+	limiter: LimiterOptions,
+}
+
+pub async fn init(
+	NetOptions {
+		limiter,
+	}: NetOptions,
+) -> Result<(), Error> {
+	// Configure rate limiting
+	limiter::init(limiter)?;
+
 	// Setup web routes
 	let net = index::config()
 		// Version endpoint

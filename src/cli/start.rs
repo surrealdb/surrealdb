@@ -8,10 +8,10 @@ use crate::env;
 use crate::err::Error;
 use crate::iam;
 use crate::net;
+use crate::net::NetOptions;
 use clap::Args;
 use ipnet::IpNet;
 use std::net::SocketAddr;
-use std::num::NonZeroU16;
 use std::path::PathBuf;
 
 #[derive(Args, Debug)]
@@ -32,26 +32,8 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_ADDR", long = "addr")]
 	#[arg(default_value = "127.0.0.1/32")]
 	allowed_networks: Vec<IpNet>,
-	#[arg(
-		help = "Rate limit for new connections and requests per second per anonymous IP (or 'none')"
-	)]
-	#[arg(env = "SURREAL_RATE_LIMIT_IP", long)]
-	#[arg(default_value = "5", value_parser = super::validator::rate_limit)]
-	rate_limit_ip: core::option::Option<NonZeroU16>,
-	#[arg(
-		help = "Rate limit for new connections and requests per second per namespace (or 'none')"
-	)]
-	#[arg(env = "SURREAL_RATE_LIMIT_NS", long)]
-	#[arg(default_value = "10", value_parser = super::validator::rate_limit)]
-	rate_limit_ns: core::option::Option<NonZeroU16>,
-	#[arg(help = "Rate limit burst for new connections and requests per anonymous IP")]
-	#[arg(env = "SURREAL_BURST_LIMIT_IP", long)]
-	#[arg(default_value = "5")]
-	burst_limit_ip: u16,
-	#[arg(help = "Rate limit burst for new connections and requests per namespace")]
-	#[arg(env = "SURREAL_BURST_LIMIT_NS", long)]
-	#[arg(default_value = "5")]
-	burst_limit_ns: u16,
+	#[command(flatten)]
+	net: NetOptions,
 	#[arg(help = "The hostname or ip address to listen for connections on")]
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "0.0.0.0:8000")]
@@ -110,10 +92,7 @@ pub async fn init(
 		username: user,
 		password: pass,
 		listen_addresses,
-		rate_limit_ip,
-		rate_limit_ns,
-		burst_limit_ip,
-		burst_limit_ns,
+		net,
 		web,
 		strict,
 		log: CustomEnvFilter(log),
@@ -145,10 +124,8 @@ pub async fn init(
 	iam::init().await?;
 	// Start the kvs server
 	dbs::init().await?;
-	// Configure rate limiting
-	net::limiter::init(rate_limit_ip, rate_limit_ns, burst_limit_ip, burst_limit_ns)?;
 	// Start the web server
-	net::init().await?;
+	net::init(net).await?;
 	// All ok
 	Ok(())
 }
