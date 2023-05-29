@@ -47,9 +47,10 @@ impl Default for Limiter {
 #[derive(Debug)]
 struct Inner {
 	/// Keys may be:
-	/// - IPv4 address or IPv6 /48 prefixes
-	/// - Authed access to a namespace (which never
-	///   contain '.' or ':' so they don't overlap with IPs)
+	/// - IPv4 address e.g. 1.2.3.4
+	/// - IPv6 /48 prefixes e.g. 5629:1e38:8843::
+	/// - Namespace name (which never contain '.' or ':'
+	///   so they don't overlap with the above)
 	limits: HashMap<Box<str>, Limits>,
 	last_prune: Instant,
 }
