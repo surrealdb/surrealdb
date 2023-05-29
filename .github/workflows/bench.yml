@@ -2,10 +2,7 @@ name: Benchmark
 
 on:
   push:
-    branches:
-      - main
   pull_request:
-    types: [ labeled ]
 
 defaults:
   run:
@@ -14,8 +11,7 @@ defaults:
 jobs:
   bench:
     name: Bench library
-    if: ${{ github.event.label.name == 'performance' }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
