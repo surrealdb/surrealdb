@@ -632,6 +632,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bindgen"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1600,6 +1609,12 @@ checksum = "3eb26eee771096794dbee1a2a9defa455443a2c150a810386331aa0d6603d356"
 dependencies = [
  "bindgen 0.60.1",
 ]
+
+[[package]]
+name = "fst"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ab85b9b05e3978cc9a9cf8fea7f01b494e1a09ed3037e16ba39edc7a29eb61a"
 
 [[package]]
 name = "funty"
@@ -3358,6 +3373,7 @@ checksum = "c069c179fcdc6a2fe24d8d18305cf085fdbd4f922c041943e203685d6a1c58fd"
 dependencies = [
  "endian-type",
  "nibble_vec",
+ "serde",
 ]
 
 [[package]]
@@ -3586,6 +3602,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "retain_mut"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c31b5c4033f8fdde8700e4657be2c497e7288f01515be52168c631e2e4d4086"
+
+[[package]]
 name = "rexie"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3643,6 +3665,18 @@ checksum = "c5b13be192e0220b8afb7222aa5813cb62cc269ebb5cac346ca6487681d2913e"
 dependencies = [
  "byteorder",
  "rmp",
+ "serde",
+]
+
+[[package]]
+name = "roaring"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef0fb5e826a8bde011ecae6a8539dd333884335c57ff0f003fbe27c25bbe8f71"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "retain_mut",
  "serde",
 ]
 
@@ -4102,6 +4136,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
 
 [[package]]
+name = "snap"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e9f0ab6ef7eb7353d9119c170a436d1bf248eea575ac42d19d12f4e34130831"
+
+[[package]]
 name = "socket2"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4228,9 +4268,11 @@ dependencies = [
  "async-channel",
  "async-executor",
  "async-recursion",
+ "async-trait",
  "base64 0.21.1",
  "bcrypt",
  "bigdecimal",
+ "bincode",
  "bung",
  "chrono",
  "criterion",
@@ -4239,6 +4281,7 @@ dependencies = [
  "env_logger 0.10.0",
  "flume",
  "foundationdb",
+ "fst",
  "futures 0.3.28",
  "futures-concurrency",
  "fuzzy-matcher",
@@ -4256,9 +4299,11 @@ dependencies = [
  "pharos",
  "pin-project-lite",
  "pprof",
+ "radix_trie",
  "rand 0.8.5",
  "regex",
  "reqwest",
+ "roaring",
  "rocksdb",
  "rquickjs",
  "rustls 0.20.8",
@@ -4268,9 +4313,11 @@ dependencies = [
  "serde_json",
  "sha-1",
  "sha2",
+ "snap",
  "storekey",
  "surrealdb-derive",
  "temp-dir",
+ "test-log",
  "thiserror",
  "tikv-client",
  "time 0.3.21",
@@ -4399,6 +4446,17 @@ checksum = "8e6bf6f19e9f8ed8d4048dc22981458ebcf406d67e94cd422e5ecd73d63b3237"
 dependencies = [
  "rustix",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "test-log"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38f0c854faeb68a048f0f2dc410c5ddae3bf83854ef0e4977d58306a5edef50e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
