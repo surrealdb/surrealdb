@@ -15,7 +15,10 @@ pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 					floor.checked_add_signed(d)
 				}
 			};
-
+			// Check for zero duration.
+			if d.is_zero() {
+				return Ok(Value::Datetime(val));
+			}
 			let result = val
 				.duration_trunc(d)
 				.ok()
@@ -45,12 +48,18 @@ pub fn day((val,): (Option<Datetime>,)) -> Result<Value, Error> {
 
 pub fn floor((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 	match chrono::Duration::from_std(*duration) {
-		Ok(d) => match val.duration_trunc(d){
-			Ok(v) => Ok(v.into()),
-			_ => Err(Error::InvalidArguments {
-				name: String::from("time::floor"),
-				message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-			}),
+		Ok(d) => {
+			// Check for zero duration
+			if d.is_zero() {
+				return Ok(Value::Datetime(val));
+			}
+			match val.duration_trunc(d){
+				Ok(v) => Ok(v.into()),
+				_ => Err(Error::InvalidArguments {
+					name: String::from("time::floor"),
+					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+				}),
+			}
 		},
 		_ => Err(Error::InvalidArguments {
 			name: String::from("time::floor"),
@@ -136,12 +145,18 @@ pub fn now(_: ()) -> Result<Value, Error> {
 
 pub fn round((val, duration): (Datetime, Duration)) -> Result<Value, Error> {
 	match chrono::Duration::from_std(*duration) {
-		Ok(d) => match val.duration_round(d) {
-			Ok(v) => Ok(v.into()),
-			_ => Err(Error::InvalidArguments {
-				name: String::from("time::round"),
-				message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
-			}),
+		Ok(d) => {
+			// Check for zero duration
+			if d.is_zero() {
+				return Ok(Value::Datetime(val));
+			}
+			match val.duration_round(d) {
+				Ok(v) => Ok(v.into()),
+				_ => Err(Error::InvalidArguments {
+					name: String::from("time::round"),
+					message: String::from("The second argument must be a duration, and must be able to be represented as nanoseconds."),
+				}),
+			}
 		},
 		_ => Err(Error::InvalidArguments {
 			name: String::from("time::round"),

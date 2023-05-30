@@ -9,6 +9,7 @@ mod strict;
 mod tls;
 
 use crate::api::err::Error;
+use crate::sql::constant::ConstantValue;
 use crate::sql::to_value;
 use crate::sql::Thing;
 use crate::sql::Value;
@@ -370,7 +371,10 @@ fn into_json(value: Value, simplify: bool) -> JsonValue {
 		Value::Edges(edges) => json!(edges),
 		Value::Future(future) => json!(future),
 		Value::Constant(constant) => match simplify {
-			true => constant.as_f64().into(),
+			true => match constant.value() {
+				ConstantValue::Datetime(d) => json!(d),
+				ConstantValue::Float(f) => f.into(),
+			},
 			false => json!(constant),
 		},
 		Value::Function(function) => json!(function),

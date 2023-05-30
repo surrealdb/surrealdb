@@ -1,8 +1,11 @@
 use crate::sql::idiom::Idiom;
 use crate::sql::value::Value;
+use bincode::Error as BincodeError;
 use bung::encode::Error as SerdeError;
+use fst::Error as FstError;
 use serde::Serialize;
 use std::borrow::Cow;
+use std::string::FromUtf8Error;
 use storekey::decode::Error as DecodeError;
 use storekey::encode::Error as EncodeError;
 use thiserror::Error;
@@ -390,6 +393,32 @@ pub enum Error {
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
 	Decode(#[from] DecodeError),
+
+	/// Represents an error when decoding a key-value entry
+	#[error("Index is corrupted")]
+	CorruptedIndex,
+
+	/// Represents an error when analyzing a value
+	#[error("A string can't be analyzed: {0}")]
+	AnalyzerError(String),
+
+	/// Represents an underlying error with Bincode serializing / deserializing
+	#[error("Bincode error: {0}")]
+	Bincode(#[from] BincodeError),
+
+	/// Represents an underlying error with FST
+	#[error("FstError error: {0}")]
+	FstError(#[from] FstError),
+
+	/// Represents an underlying error while reading UTF8 characters
+	#[error("Utf8 error: {0}")]
+	Utf8Error(#[from] FromUtf8Error),
+
+	/// The feature has not yet being implemented
+	#[error("Feature not yet implemented: {feature}")]
+	FeatureNotYetImplemented {
+		feature: &'static str,
+	},
 }
 
 impl From<Error> for String {

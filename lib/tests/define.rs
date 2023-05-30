@@ -844,14 +844,10 @@ async fn define_statement_index_single_unique_existing() -> Result<(), Error> {
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 6);
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	for _ in 0..3 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
@@ -895,17 +891,10 @@ async fn define_statement_index_multiple_unique_existing() -> Result<(), Error> 
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
 	assert_eq!(res.len(), 7);
 	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_ok());
+	for _ in 0..4 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
@@ -965,6 +954,41 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			pa: {},
 			sc: {},
 			tb: {}
+		}",
+	);
+	assert_eq!(tmp, val);
+	Ok(())
+}
+
+#[tokio::test]
+async fn define_statement_search_index() -> Result<(), Error> {
+	let sql = r#"
+		CREATE blog:1 SET title = 'Understanding SurrealQL and how it is different from PostgreSQL';
+		CREATE blog:3 SET title = 'This blog is going to be deleted';
+		DEFINE ANALYZER english TOKENIZERS space,case FILTERS lowercase,snowball(english);
+		DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75,100) HIGHLIGHTS;
+		CREATE blog:2 SET title = 'Behind the scenes of the exciting beta 9 release';
+		DELETE blog:3;
+		INFO FOR TABLE blog;
+	"#;
+
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 7);
+	//
+	for _ in 0..6 {
+		let tmp = res.remove(0).result;
+		assert!(tmp.is_ok());
+	}
+
+	let tmp = res.remove(0).result?;
+	let val = Value::parse(
+		"{
+			ev: {},
+			fd: {},
+			ft: {},
+			ix: { blog_title: 'DEFINE INDEX blog_title ON blog FIELDS title SEARCH english BM25(1.2,0.75,100) HIGHLIGHTS' },
 		}",
 	);
 	assert_eq!(tmp, val);

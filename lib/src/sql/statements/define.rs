@@ -14,10 +14,10 @@ use crate::sql::escape::escape_str;
 use crate::sql::filter::{filters, Filter};
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
-use crate::sql::ident;
 use crate::sql::ident::{ident, Ident};
 use crate::sql::idiom;
 use crate::sql::idiom::{Idiom, Idioms};
+use crate::sql::index::Index;
 use crate::sql::kind::{kind, Kind};
 use crate::sql::permission::{permissions, Permissions};
 use crate::sql::statements::UpdateStatement;
@@ -25,6 +25,7 @@ use crate::sql::strand::strand_raw;
 use crate::sql::tokenizer::{tokenizers, Tokenizer};
 use crate::sql::value::{value, values, Value, Values};
 use crate::sql::view::{view, View};
+use crate::sql::{ident, index};
 use argon2::password_hash::{PasswordHasher, SaltString};
 use argon2::Argon2;
 use derive::Store;
@@ -1267,7 +1268,7 @@ pub struct DefineIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
 	pub cols: Idioms,
-	pub uniq: bool,
+	pub index: Index,
 }
 
 impl DefineIndexStatement {
@@ -1324,8 +1325,8 @@ impl DefineIndexStatement {
 impl Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE INDEX {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
-		if self.uniq {
-			write!(f, " UNIQUE")?
+		if Index::Idx != self.index {
+			write!(f, " {}", self.index)?;
 		}
 		Ok(())
 	}
@@ -1346,22 +1347,24 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 	let (i, _) = alt((tag_no_case("COLUMNS"), tag_no_case("FIELDS")))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	let (i, cols) = idiom::locals(i)?;
-	let (i, uniq) = opt(tuple((shouldbespace, tag_no_case("UNIQUE"))))(i)?;
+	let (i, _) = mightbespace(i)?;
+	let (i, index) = index::index(i)?;
 	Ok((
 		i,
 		DefineIndexStatement {
 			name,
 			what,
 			cols,
-			uniq: uniq.is_some(),
+			index,
 		},
 	))
 }
 
 #[cfg(test)]
 mod tests {
-
 	use super::*;
+	use crate::sql::scoring::Scoring;
+	use crate::sql::{Number, Part};
 
 	#[test]
 	fn check_define_serialize() {
@@ -1369,5 +1372,84 @@ mod tests {
 			name: Ident::from("test"),
 		});
 		assert_eq!(22, stm.to_vec().len());
+	}
+
+	#[test]
+	fn check_create_non_unique_index() {
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::Idx,
+			}
+		);
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col");
+	}
+
+	#[test]
+	fn check_create_unique_index() {
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col UNIQUE";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::Uniq,
+			}
+		);
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col UNIQUE");
+	}
+
+	#[test]
+	fn check_create_search_index_with_highlights() {
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH my_analyzer BM25(1.2,0.75,1000) HIGHLIGHTS";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::Search {
+					az: Ident("my_analyzer".to_string()),
+					hl: true,
+					sc: Scoring::Bm {
+						k1: Number::Float(1.2),
+						b: Number::Float(0.75),
+						order: Number::Int(1000)
+					},
+				},
+			}
+		);
+		assert_eq!(idx.to_string(), "DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer BM25(1.2,0.75,1000) HIGHLIGHTS");
+	}
+
+	#[test]
+	fn check_create_search_index() {
+		let sql = "DEFINE INDEX my_index ON TABLE my_table COLUMNS my_col SEARCH my_analyzer VS";
+		let (_, idx) = index(sql).unwrap();
+		assert_eq!(
+			idx,
+			DefineIndexStatement {
+				name: Ident("my_index".to_string()),
+				what: Ident("my_table".to_string()),
+				cols: Idioms(vec![Idiom(vec![Part::Field(Ident("my_col".to_string()))])]),
+				index: Index::Search {
+					az: Ident("my_analyzer".to_string()),
+					hl: false,
+					sc: Scoring::Vs,
+				},
+			}
+		);
+		assert_eq!(
+			idx.to_string(),
+			"DEFINE INDEX my_index ON my_table FIELDS my_col SEARCH my_analyzer VS"
+		);
 	}
 }
