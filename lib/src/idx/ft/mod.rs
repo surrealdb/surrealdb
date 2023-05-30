@@ -7,12 +7,11 @@ use crate::err::Error;
 use crate::error::Db::AnalyzerError;
 use crate::idx::ft::docids::{DocId, DocIds};
 use crate::idx::ft::doclength::{DocLength, DocLengths};
-use crate::idx::ft::postings::{Postings, PostingsVisitor, TermFrequency};
+use crate::idx::ft::postings::{Postings, TermFrequency};
 use crate::idx::ft::terms::Terms;
 use crate::idx::{btree, IndexKeyBase, SerdeState};
 use crate::kvs::{Key, Transaction};
 use crate::sql::error::IResult;
-use async_trait::async_trait;
 use nom::bytes::complete::take_while;
 use nom::character::complete::multispace0;
 use roaring::RoaringTreemap;
@@ -127,7 +126,7 @@ impl FtIndex {
 				for term_id in term_list {
 					p.remove_posting(tx, term_id, doc_id).await?;
 					// if the term is not present in any document in the index, we can remove it
-					if p.count_postings(tx, term_id).await? == 0 {
+					if p.get_doc_count(tx, term_id).await? == 0 {
 						t.remove_term_id(tx, term_id).await?;
 					}
 				}
@@ -190,7 +189,7 @@ impl FtIndex {
 			for old_term_id in old_term_ids {
 				p.remove_posting(tx, old_term_id, doc_id).await?;
 				// if the term does not have anymore postings, we can remove the term
-				if p.count_postings(tx, old_term_id).await? == 0 {
+				if p.get_doc_count(tx, old_term_id).await? == 0 {
 					t.remove_term_id(tx, old_term_id).await?;
 				}
 			}
@@ -272,10 +271,13 @@ impl FtIndex {
 					doc_ids,
 					self.state.total_docs_lengths,
 					self.state.doc_count,
-					term_doc_count,
+					term_doc_count as u64,
 					self.bm25.clone(),
 				);
-				postings.collect_postings(tx, term_id, &mut scorer).await?;
+				let mut it = postings.new_postings_iterator(term_id);
+				while let Some((doc_id, term_freq)) = it.next(tx).await? {
+					scorer.visit(tx, doc_id, term_freq).await?;
+				}
 			}
 		}
 		Ok(())
@@ -303,30 +305,6 @@ where
 	doc_count: f32,
 	term_doc_count: f32,
 	bm25: Bm25Params,
-}
-
-#[async_trait]
-impl<'a, V> PostingsVisitor for BM25Scorer<'a, V>
-where
-	V: HitVisitor + Send,
-{
-	async fn visit(
-		&mut self,
-		tx: &mut Transaction,
-		doc_id: DocId,
-		term_frequency: TermFrequency,
-	) -> Result<(), Error> {
-		if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
-			let doc_length = self.doc_lengths.get_doc_length(tx, doc_id).await?.unwrap_or(0);
-			let bm25_score = self.compute_bm25_score(
-				term_frequency as f32,
-				self.term_doc_count,
-				doc_length as f32,
-			);
-			self.visitor.visit(tx, doc_key, bm25_score);
-		}
-		Ok(())
-	}
 }
 
 impl<'a, V> BM25Scorer<'a, V>
@@ -371,6 +349,24 @@ where
 		let denominator = 1.0 - self.bm25.b + self.bm25.b * (doc_length / self.average_doc_length);
 		// numerator / (k1 * denominator + 1)
 		numerator / (self.bm25.k1 * denominator + 1.0)
+	}
+
+	async fn visit(
+		&mut self,
+		tx: &mut Transaction,
+		doc_id: DocId,
+		term_frequency: TermFrequency,
+	) -> Result<(), Error> {
+		if let Some(doc_key) = self.doc_ids.get_doc_key(tx, doc_id).await? {
+			let doc_length = self.doc_lengths.get_doc_length(tx, doc_id).await?.unwrap_or(0);
+			let bm25_score = self.compute_bm25_score(
+				term_frequency as f32,
+				self.term_doc_count,
+				doc_length as f32,
+			);
+			self.visitor.visit(tx, doc_key, bm25_score);
+		}
+		Ok(())
 	}
 }
 
