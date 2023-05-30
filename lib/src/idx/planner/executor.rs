@@ -30,7 +30,7 @@ impl QueryExecutor {
 	) -> Result<Self, Error> {
 		let mut run = txn.lock().await;
 		let mut ft_map = HashMap::new();
-		for (_, ios) in &index_map {
+		for ios in index_map.values() {
 			for io in ios {
 				if let Index::Search {
 					az,
@@ -83,7 +83,7 @@ impl QueryExecutor {
 							// TODO The query string could be extracted when IndexOptions are created
 							let query_string = io.v.clone().convert_to_string()?;
 							return Ok(Value::Bool(
-								fti.match_id_value(&mut run, &rid, &query_string).await?,
+								fti.match_id_value(&mut run, rid, &query_string).await?,
 							));
 						}
 					}

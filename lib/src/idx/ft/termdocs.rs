@@ -23,7 +23,7 @@ impl TermDocs {
 		term_id: TermId,
 		doc_id: DocId,
 	) -> Result<(), Error> {
-		let mut docs = self.get_docs(tx, term_id).await?.unwrap_or_else(|| RoaringTreemap::new());
+		let mut docs = self.get_docs(tx, term_id).await?.unwrap_or_else(RoaringTreemap::new);
 		if docs.insert(doc_id) {
 			let key = self.index_key_base.new_bc_key(term_id);
 			tx.set(key, docs.try_to_val()?).await?;

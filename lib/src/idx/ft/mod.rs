@@ -472,7 +472,7 @@ mod tests {
 			// We can still find 'foo'
 			let mut tx = ds.transaction(false, false).await.unwrap();
 			let i = fti.search(&mut tx, "foo".to_string()).await.unwrap();
-			check_hits(i, &mut tx, vec![((&doc3).into(), Some(0.56902087))]).await;
+			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
 
 			// We can't anymore find 'bar'
 			let i = fti.search(&mut tx, "bar".to_string()).await.unwrap();
@@ -480,7 +480,7 @@ mod tests {
 
 			// We can now find 'nobar'
 			let i = fti.search(&mut tx, "nobar".to_string()).await.unwrap();
-			check_hits(i, &mut tx, vec![((&doc3).into(), Some(0.56902087))]).await;
+			check_hits(i, &mut tx, vec![(&doc3, Some(0.56902087))]).await;
 		}
 
 		{

@@ -77,7 +77,7 @@ impl Analyzer {
 		for tokens in &inputs {
 			for token in &tokens.t {
 				doc_length += 1;
-				match terms.entry(tokens.get_token_string(&token)) {
+				match terms.entry(tokens.get_token_string(token)) {
 					Entry::Vacant(e) => {
 						e.insert(1);
 					}
@@ -95,7 +95,7 @@ impl Analyzer {
 		Ok((doc_length, res))
 	}
 
-	fn walk<'a>(&self, input: &mut Tokens) {
+	fn walk(&self, input: &mut Tokens) {
 		if let Some(t) = &self.t {
 			if !t.is_empty() {
 				Walker::walk(t, &self.f, input);
@@ -109,7 +109,7 @@ struct Walker {
 }
 
 impl Walker {
-	fn new(t: &Vec<Tokenizer>) -> Self {
+	fn new(t: &[Tokenizer]) -> Self {
 		Self {
 			splitters: t.iter().map(|t| t.into()).collect(),
 		}
@@ -129,7 +129,7 @@ impl Walker {
 		res
 	}
 
-	fn walk<'a>(t: &Vec<Tokenizer>, f: &Option<Vec<Filter>>, input: &mut Tokens) {
+	fn walk(t: &Vec<Tokenizer>, f: &Option<Vec<Filter>>, input: &mut Tokens) {
 		let mut w = Walker::new(t);
 		let mut last_pos = 0;
 		let mut current_pos = 0;
@@ -189,7 +189,7 @@ impl Tokens {
 	fn get_token_string<'a>(&'a self, t: &'a Token) -> &str {
 		match t {
 			Token::Ref(s, e) => &self.i[*s..*e],
-			Token::String(s) => &s,
+			Token::String(s) => s,
 		}
 	}
 

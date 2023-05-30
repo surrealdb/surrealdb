@@ -270,8 +270,7 @@ impl ThingIterator for MatchesThingIterator {
 			let mut run = txn.lock().await;
 			while limit > 0 {
 				if let Some((hit, _)) = hits.next(&mut run).await? {
-					let rid: Thing = hit.into();
-					res.push(rid);
+					res.push(hit);
 				} else {
 					break;
 				}
