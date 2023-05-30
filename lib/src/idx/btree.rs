@@ -1,7 +1,8 @@
 use crate::err::Error;
-use crate::idx::bkeys::{BKeys, KeyVisitor};
+use crate::idx::bkeys::BKeys;
 use crate::idx::SerdeState;
 use crate::kvs::{Key, Transaction};
+use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -12,16 +13,31 @@ use std::sync::Arc;
 pub(crate) type NodeId = u64;
 pub(super) type Payload = u64;
 
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub(super) trait KeyProvider {
 	fn get_node_key(&self, node_id: NodeId) -> Key;
 	fn get_state_key(&self) -> Key {
 		panic!("Not supported")
 	}
+	async fn load_node<BK>(&self, tx: &mut Transaction, id: NodeId) -> Result<StoredNode<BK>, Error>
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		let key = self.get_node_key(id);
+		let (node, size) = Node::<BK>::read(tx, key.clone()).await?;
+		Ok(StoredNode {
+			node,
+			id,
+			key,
+			size,
+		})
+	}
 }
 
 pub(super) struct BTree<K>
 where
-	K: KeyProvider,
+	K: KeyProvider + Clone,
 {
 	keys: K,
 	state: State,
@@ -66,9 +82,9 @@ where
 	Leaf(BK),
 }
 
-impl<BK> Node<BK>
+impl<'a, BK> Node<BK>
 where
-	BK: BKeys + Serialize + DeserializeOwned,
+	BK: BKeys + Serialize + DeserializeOwned + 'a,
 {
 	async fn read(tx: &mut Transaction, key: Key) -> Result<(Self, usize), Error> {
 		if let Some(val) = tx.get(key).await? {
@@ -154,7 +170,7 @@ where
 
 impl<K> BTree<K>
 where
-	K: KeyProvider,
+	K: KeyProvider + Clone + Sync,
 {
 	pub(super) fn new(keys: K, state: State) -> Self {
 		Self {
@@ -175,7 +191,7 @@ where
 	{
 		let mut next_node = self.state.root;
 		while let Some(node_id) = next_node.take() {
-			let current = self.load_node::<BK>(tx, node_id).await?;
+			let current = self.keys.load_node::<BK>(tx, node_id).await?;
 			if let Some(payload) = current.node.keys().get(searched_key) {
 				return Ok(Some(payload));
 			}
@@ -187,39 +203,8 @@ where
 		Ok(None)
 	}
 
-	pub(super) async fn search_by_prefix<BK, V>(
-		&self,
-		tx: &mut Transaction,
-		prefix_key: &Key,
-		visitor: &mut V,
-	) -> Result<(), Error>
-	where
-		BK: BKeys + Serialize + DeserializeOwned,
-		V: KeyVisitor + Send,
-	{
-		let mut node_queue = VecDeque::new();
-		if let Some(node_id) = self.state.root {
-			node_queue.push_front((node_id, Arc::new(AtomicBool::new(false))));
-		}
-		while let Some((node_id, matches_found)) = node_queue.pop_front() {
-			let current = self.load_node::<BK>(tx, node_id).await?;
-			if current.node.keys().collect_with_prefix(tx, prefix_key, visitor).await? {
-				matches_found.fetch_and(true, Ordering::Relaxed);
-			} else if matches_found.load(Ordering::Relaxed) {
-				// If we have found matches in previous (lower) nodes,
-				// but we don't find matches anymore, there is no chance we can find new matches
-				// in upper child nodes, therefore we can stop the traversal.
-				break;
-			}
-			if let Node::Internal(keys, children) = current.node {
-				let same_level_matches_found = Arc::new(AtomicBool::new(false));
-				let child_idx = keys.get_child_idx(prefix_key);
-				for i in child_idx..children.len() {
-					node_queue.push_front((children[i], same_level_matches_found.clone()));
-				}
-			}
-		}
-		Ok(())
+	pub(super) fn search_by_prefix(&self, prefix_key: Key) -> BTreeIterator<K> {
+		BTreeIterator::new(self.keys.clone(), prefix_key, self.state.root)
 	}
 
 	pub(super) async fn insert<BK>(
@@ -232,7 +217,7 @@ where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
 		if let Some(root_id) = self.state.root {
-			let root = self.load_node::<BK>(tx, root_id).await?;
+			let root = self.keys.load_node::<BK>(tx, root_id).await?;
 			if root.node.keys().len() == self.full_size {
 				let new_root_id = self.new_node_id();
 				let new_root =
@@ -278,7 +263,7 @@ where
 						return Ok(());
 					}
 					let child_idx = keys.get_child_idx(&key);
-					let child = self.load_node::<BK>(tx, children[child_idx]).await?;
+					let child = self.keys.load_node::<BK>(tx, children[child_idx]).await?;
 					let next = if child.node.keys().len() == self.full_size {
 						let split_result =
 							self.split_child::<BK>(tx, node, child_idx, child).await?;
@@ -379,7 +364,7 @@ where
 		let mut deleted_payload = None;
 
 		if let Some(root_id) = self.state.root {
-			let node = self.load_node::<BK>(tx, root_id).await?;
+			let node = self.keys.load_node::<BK>(tx, root_id).await?;
 			let mut next_node = Some((true, key_to_delete, node));
 
 			while let Some((is_main_key, key_to_delete, mut node)) = next_node.take() {
@@ -453,7 +438,7 @@ where
 	{
 		let left_idx = keys.get_child_idx(&key_to_delete);
 		let left_id = children[left_idx];
-		let mut left_node = self.load_node::<BK>(tx, left_id).await?;
+		let mut left_node = self.keys.load_node::<BK>(tx, left_id).await?;
 		if left_node.node.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2a -> left_node is named `y` in the book
 			if let Some((key_prim, payload_prim)) = left_node.node.keys().get_last_key() {
@@ -464,7 +449,7 @@ where
 		}
 
 		let right_idx = left_idx + 1;
-		let right_node = self.load_node::<BK>(tx, children[right_idx]).await?;
+		let right_node = self.keys.load_node::<BK>(tx, children[right_idx]).await?;
 		if right_node.node.keys().len() >= self.state.minimum_degree {
 			// CLRS: 2b -> right_node is name `z` in the book
 			if let Some((key_prim, payload_prim)) = right_node.node.keys().get_first_key() {
@@ -498,7 +483,7 @@ where
 	{
 		// CLRS 3a
 		let child_idx = keys.get_child_idx(&key_to_delete);
-		let child_stored_node = self.load_node::<BK>(tx, children[child_idx]).await?;
+		let child_stored_node = self.keys.load_node::<BK>(tx, children[child_idx]).await?;
 		// TODO: Remove once everything is stable
 		// debug!("** delete_traversal");
 		// child_stored_node.node.keys().debug(|k| Ok(String::from_utf8(k)?))?;
@@ -506,7 +491,7 @@ where
 			// right child (successor)
 			if child_idx < children.len() - 1 {
 				let right_child_id = children[child_idx + 1];
-				let right_child_stored_node = self.load_node::<BK>(tx, right_child_id).await?;
+				let right_child_stored_node = self.keys.load_node::<BK>(tx, right_child_id).await?;
 				return if right_child_stored_node.node.keys().len() >= self.state.minimum_degree {
 					Self::delete_adjust_successor(
 						tx,
@@ -538,7 +523,7 @@ where
 			if child_idx > 0 {
 				let child_idx = child_idx - 1;
 				let left_child_id = children[child_idx];
-				let left_child_stored_node = self.load_node::<BK>(tx, left_child_id).await?;
+				let left_child_stored_node = self.keys.load_node::<BK>(tx, left_child_id).await?;
 				return if left_child_stored_node.node.keys().len() >= self.state.minimum_degree {
 					Self::delete_adjust_predecessor(
 						tx,
@@ -684,7 +669,7 @@ where
 		}
 		let mut count = 0;
 		while let Some((node_id, depth)) = node_queue.pop_front() {
-			let stored_node = self.load_node::<BK>(tx, node_id).await?;
+			let stored_node = self.keys.load_node::<BK>(tx, node_id).await?;
 			if let Node::Internal(_, children) = &stored_node.node {
 				let depth = depth + 1;
 				for child_id in children {
@@ -707,7 +692,7 @@ where
 			node_queue.push_front((node_id, 1));
 		}
 		while let Some((node_id, depth)) = node_queue.pop_front() {
-			let stored = self.load_node::<BK>(tx, node_id).await?;
+			let stored = self.keys.load_node::<BK>(tx, node_id).await?;
 			stats.keys_count += stored.node.keys().len();
 			if depth > stats.max_depth {
 				stats.max_depth = depth;
@@ -743,23 +728,97 @@ where
 			size: 0,
 		}
 	}
+}
 
-	async fn load_node<BK>(&self, tx: &mut Transaction, id: NodeId) -> Result<StoredNode<BK>, Error>
+struct CurrentNode {
+	keys: VecDeque<(Key, Payload)>,
+	matches_found: bool,
+	level_matches_found: Arc<AtomicBool>,
+}
+
+pub(super) struct BTreeIterator<K>
+where
+	K: KeyProvider,
+{
+	key_provider: K,
+	prefix_key: Key,
+	node_queue: VecDeque<(NodeId, Arc<AtomicBool>)>,
+	current_node: Option<CurrentNode>,
+}
+
+impl<K> BTreeIterator<K>
+where
+	K: KeyProvider + Sync,
+{
+	fn new(key_provider: K, prefix_key: Key, start_node: Option<NodeId>) -> Self {
+		let mut node_queue = VecDeque::new();
+		if let Some(node_id) = start_node {
+			node_queue.push_front((node_id, Arc::new(AtomicBool::new(false))))
+		}
+		Self {
+			key_provider,
+			prefix_key,
+			node_queue,
+			current_node: None,
+		}
+	}
+
+	fn set_current_node<BK>(&mut self, node: Node<BK>, level_matches_found: Arc<AtomicBool>)
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
-		let key = self.keys.get_node_key(id);
-		let (node, size) = Node::<BK>::read(tx, key.clone()).await?;
-		Ok(StoredNode {
-			node,
-			id,
-			key,
-			size,
-		})
+		if let Node::Internal(keys, children) = &node {
+			let same_level_matches_found = Arc::new(AtomicBool::new(false));
+			let child_idx = keys.get_child_idx(&self.prefix_key);
+			for i in child_idx..children.len() {
+				self.node_queue.push_front((children[i], same_level_matches_found.clone()));
+			}
+		}
+		let keys = node.keys().collect_with_prefix(&self.prefix_key);
+		let matches_found = !keys.is_empty();
+		if matches_found {
+			level_matches_found.fetch_and(true, Ordering::Relaxed);
+		}
+		self.current_node = Some(CurrentNode {
+			keys,
+			matches_found,
+			level_matches_found,
+		});
+	}
+
+	pub(super) async fn next<BK>(
+		&mut self,
+		tx: &mut Transaction,
+	) -> Result<Option<(Key, Payload)>, Error>
+	where
+		BK: BKeys + Serialize + DeserializeOwned,
+	{
+		loop {
+			if let Some(current) = &mut self.current_node {
+				if let Some((key, payload)) = current.keys.pop_front() {
+					return Ok(Some((key, payload)));
+				} else {
+					if !current.matches_found && current.level_matches_found.load(Ordering::Relaxed)
+					{
+						// If we have found matches in previous (lower) nodes,
+						// but we don't find matches anymore, there is no chance we can find new matches
+						// in upper child nodes, therefore we can stop the traversal.
+						break;
+					}
+					self.current_node = None;
+				}
+			} else if let Some((node_id, level_matches_found)) = self.node_queue.pop_front() {
+				let st = self.key_provider.load_node::<BK>(tx, node_id).await?;
+				self.set_current_node(st.node, level_matches_found);
+			} else {
+				break;
+			}
+		}
+		Ok(None)
 	}
 }
 
-struct StoredNode<BK>
+pub(super) struct StoredNode<BK>
 where
 	BK: BKeys,
 {
@@ -782,8 +841,9 @@ where
 #[cfg(test)]
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::btree::{BTree, KeyProvider, Node, NodeId, Payload, State, Statistics};
-	use crate::idx::tests::HashVisitor;
+	use crate::idx::btree::{
+		BTree, BTreeIterator, KeyProvider, Node, NodeId, Payload, State, Statistics,
+	};
 	use crate::idx::SerdeState;
 	use crate::kvs::{Datastore, Key, Transaction};
 	use rand::prelude::{SliceRandom, ThreadRng};
@@ -793,6 +853,7 @@ mod tests {
 	use std::collections::HashMap;
 	use test_log::test;
 
+	#[derive(Clone)]
 	struct TestKeyProvider {}
 
 	impl KeyProvider for TestKeyProvider {
@@ -836,7 +897,7 @@ mod tests {
 	) where
 		F: Fn(usize) -> (Key, Payload),
 		BK: BKeys + Serialize + DeserializeOwned + Default,
-		K: KeyProvider,
+		K: KeyProvider + Clone + Sync,
 	{
 		for i in 0..samples_size {
 			let (key, payload) = sample_provider(i);
@@ -1058,6 +1119,21 @@ mod tests {
 		(t, s)
 	}
 
+	async fn check_results(
+		mut i: BTreeIterator<TestKeyProvider>,
+		tx: &mut Transaction,
+		e: Vec<(Key, Payload)>,
+	) {
+		let mut map = HashMap::new();
+		while let Some((k, p)) = i.next::<TrieKeys>(tx).await.unwrap() {
+			map.insert(k, p);
+		}
+		assert_eq!(map.len(), e.len());
+		for (k, p) in e {
+			assert_eq!(map.get(&k), Some(&p));
+		}
+	}
+
 	#[test(tokio::test)]
 	async fn test_btree_trie_keys_search_by_prefix() {
 		for _ in 0..50 {
@@ -1086,17 +1162,18 @@ mod tests {
 			let mut tx = ds.transaction(false, false).await.unwrap();
 
 			// We should find all the keys prefixed with "bb"
-			let mut visitor = HashVisitor::default();
-			t.search_by_prefix::<TrieKeys, _>(&mut tx, &"bb".into(), &mut visitor).await.unwrap();
-			visitor.check(
+			let i = t.search_by_prefix("bb".into());
+			check_results(
+				i,
+				&mut tx,
 				vec![
 					("bb1".into(), 21),
 					("bb2".into(), 22),
 					("bb3".into(), 23),
 					("bb4".into(), 24),
 				],
-				"bb",
-			);
+			)
+			.await;
 		}
 	}
 
@@ -1164,11 +1241,11 @@ mod tests {
 				("animals", 1),
 				("watching", 1),
 			] {
-				let mut visitor = HashVisitor::default();
-				t.search_by_prefix::<TrieKeys, _>(&mut tx, &prefix.into(), &mut visitor)
-					.await
-					.unwrap();
-				visitor.check_len(count, prefix);
+				let mut i = t.search_by_prefix(prefix.into());
+				for _ in 0..count {
+					assert!(i.next::<TrieKeys>(&mut tx).await.unwrap().is_some());
+				}
+				assert_eq!(i.next::<TrieKeys>(&mut tx).await.unwrap(), None);
 			}
 		}
 	}
@@ -1460,7 +1537,7 @@ mod tests {
 
 	async fn print_tree<BK, K>(tx: &mut Transaction, t: &BTree<K>)
 	where
-		K: KeyProvider,
+		K: KeyProvider + Clone + Sync,
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
 		debug!("----------------------------------");
