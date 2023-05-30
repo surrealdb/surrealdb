@@ -5,9 +5,11 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
-use nom::combinator::map;
+use nom::character::complete::u8 as uint8;
+use nom::combinator::{map, opt};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Write;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub enum Operator {
@@ -32,10 +34,11 @@ pub enum Operator {
 	AllEqual, // *=
 	AnyEqual, // ?=
 	//
-	Like,    // ~
-	NotLike, // !~
-	AllLike, // *~
-	AnyLike, // ?~
+	Like,                // ~
+	NotLike,             // !~
+	AllLike,             // *~
+	AnyLike,             // ?~
+	Matches(Option<u8>), // @{ref}@
 	//
 	LessThan,        // <
 	LessThanOrEqual, // <=
@@ -82,45 +85,52 @@ impl Operator {
 
 impl fmt::Display for Operator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str(match self {
-			Self::Or => "OR",
-			Self::And => "AND",
-			Self::Tco => "?:",
-			Self::Nco => "??",
-			Self::Add => "+",
-			Self::Sub => "-",
-			Self::Mul => "*",
-			Self::Div => "/",
-			Self::Pow => "**",
-			Self::Inc => "+=",
-			Self::Dec => "-=",
-			Self::Ext => "+?=",
-			Self::Equal => "=",
-			Self::Exact => "==",
-			Self::NotEqual => "!=",
-			Self::AllEqual => "*=",
-			Self::AnyEqual => "?=",
-			Self::Like => "~",
-			Self::NotLike => "!~",
-			Self::AllLike => "*~",
-			Self::AnyLike => "?~",
-			Self::LessThan => "<",
-			Self::LessThanOrEqual => "<=",
-			Self::MoreThan => ">",
-			Self::MoreThanOrEqual => ">=",
-			Self::Contain => "CONTAINS",
-			Self::NotContain => "CONTAINSNOT",
-			Self::ContainAll => "CONTAINSALL",
-			Self::ContainAny => "CONTAINSANY",
-			Self::ContainNone => "CONTAINSNONE",
-			Self::Inside => "INSIDE",
-			Self::NotInside => "NOTINSIDE",
-			Self::AllInside => "ALLINSIDE",
-			Self::AnyInside => "ANYINSIDE",
-			Self::NoneInside => "NONEINSIDE",
-			Self::Outside => "OUTSIDE",
-			Self::Intersects => "INTERSECTS",
-		})
+		match self {
+			Self::Or => f.write_str("OR"),
+			Self::And => f.write_str("AND"),
+			Self::Tco => f.write_str("?:"),
+			Self::Nco => f.write_str("??"),
+			Self::Add => f.write_str("+"),
+			Self::Sub => f.write_char('-'),
+			Self::Mul => f.write_char('*'),
+			Self::Div => f.write_char('/'),
+			Self::Pow => f.write_str("**"),
+			Self::Inc => f.write_str("+="),
+			Self::Dec => f.write_str("-="),
+			Self::Ext => f.write_str("+?="),
+			Self::Equal => f.write_char('='),
+			Self::Exact => f.write_str("=="),
+			Self::NotEqual => f.write_str("!="),
+			Self::AllEqual => f.write_str("*="),
+			Self::AnyEqual => f.write_str("?="),
+			Self::Like => f.write_char('~'),
+			Self::NotLike => f.write_str("!~"),
+			Self::AllLike => f.write_str("*~"),
+			Self::AnyLike => f.write_str("?~"),
+			Self::LessThan => f.write_char('<'),
+			Self::LessThanOrEqual => f.write_str("<="),
+			Self::MoreThan => f.write_char('>'),
+			Self::MoreThanOrEqual => f.write_str(">="),
+			Self::Contain => f.write_str("CONTAINS"),
+			Self::NotContain => f.write_str("CONTAINSNOT"),
+			Self::ContainAll => f.write_str("CONTAINSALL"),
+			Self::ContainAny => f.write_str("CONTAINSANY"),
+			Self::ContainNone => f.write_str("CONTAINSNONE"),
+			Self::Inside => f.write_str("INSIDE"),
+			Self::NotInside => f.write_str("NOTINSIDE"),
+			Self::AllInside => f.write_str("ALLINSIDE"),
+			Self::AnyInside => f.write_str("ANYINSIDE"),
+			Self::NoneInside => f.write_str("NONEINSIDE"),
+			Self::Outside => f.write_str("OUTSIDE"),
+			Self::Intersects => f.write_str("INTERSECTS"),
+			Self::Matches(reference) => {
+				if let Some(r) = reference {
+					write!(f, "@{}@", r)
+				} else {
+					f.write_str("@@")
+				}
+			}
+		}
 	}
 }
 
@@ -158,6 +168,7 @@ pub fn symbols(i: &str) -> IResult<&str, Operator> {
 			map(tag("*~"), |_| Operator::AllLike),
 			map(tag("?~"), |_| Operator::AnyLike),
 			map(char('~'), |_| Operator::Like),
+			matches,
 		)),
 		alt((
 			map(tag("<="), |_| Operator::LessThanOrEqual),
@@ -220,4 +231,40 @@ pub fn phrases(i: &str) -> IResult<&str, Operator> {
 	))(i)?;
 	let (i, _) = shouldbespace(i)?;
 	Ok((i, v))
+}
+
+pub fn matches(i: &str) -> IResult<&str, Operator> {
+	let (i, _) = char('@')(i)?;
+	let (i, reference) = opt(|i| uint8(i))(i)?;
+	let (i, _) = char('@')(i)?;
+	Ok((i, Operator::Matches(reference)))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn matches_without_reference() {
+		let res = matches("@@");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("@@", format!("{}", out));
+		assert_eq!(out, Operator::Matches(None));
+	}
+
+	#[test]
+	fn matches_with_reference() {
+		let res = matches("@12@");
+		assert!(res.is_ok());
+		let out = res.unwrap().1;
+		assert_eq!("@12@", format!("{}", out));
+		assert_eq!(out, Operator::Matches(Some(12u8)));
+	}
+
+	#[test]
+	fn matches_with_invalid_reference() {
+		let res = matches("@256@");
+		assert!(res.is_err());
+	}
 }

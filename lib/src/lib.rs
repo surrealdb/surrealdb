@@ -123,6 +123,8 @@ pub mod env;
 #[doc(hidden)]
 pub mod err;
 #[doc(hidden)]
+pub mod idx;
+#[doc(hidden)]
 pub mod kvs;
 
 #[doc(inline)]
