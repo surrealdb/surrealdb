@@ -807,11 +807,11 @@ where
 					self.current_node = None;
 				}
 			} else if let Some((node_id, level_matches_found)) = self.node_queue.pop_front() {
-   					let st = self.key_provider.load_node::<BK>(tx, node_id).await?;
-   					self.set_current_node(st.node, level_matches_found);
-   				} else {
-   					break;
-   				}
+				let st = self.key_provider.load_node::<BK>(tx, node_id).await?;
+				self.set_current_node(st.node, level_matches_found);
+			} else {
+				break;
+			}
 		}
 		Ok(None)
 	}
