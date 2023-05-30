@@ -70,6 +70,7 @@ impl DocLengths {
 	}
 }
 
+#[derive(Clone)]
 struct DocLengthsKeyProvider {
 	index_key_base: IndexKeyBase,
 }

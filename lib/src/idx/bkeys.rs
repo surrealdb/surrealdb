@@ -1,37 +1,23 @@
 use crate::err::Error;
 use crate::idx::btree::Payload;
-use crate::kvs::{Key, Transaction};
+use crate::kvs::Key;
 use async_trait::async_trait;
 use fst::{IntoStreamer, Map, MapBuilder, Streamer};
-use radix_trie::{Trie, TrieCommon};
+use radix_trie::{SubTrie, Trie, TrieCommon};
 use serde::{de, ser, Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt::{Display, Formatter};
 use std::io;
 
-#[async_trait]
-pub(super) trait KeyVisitor {
-	async fn visit(
-		&mut self,
-		tx: &mut Transaction,
-		key: &Key,
-		payload: Payload,
-	) -> Result<(), Error>;
-}
-
-#[async_trait]
 pub(super) trait BKeys: Display + Sized {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error>;
 	fn len(&self) -> usize;
 	fn get(&self, key: &Key) -> Option<Payload>;
-	async fn collect_with_prefix<V>(
-		&self,
-		tx: &mut Transaction,
-		prefix_key: &Key,
-		visitor: &mut V,
-	) -> Result<bool, Error>
-	where
-		V: KeyVisitor + Send;
+	// It is okay to return a owned Vec rather than an iterator,
+	// because BKeys are intended to be stored as Node in the BTree.
+	// The size of the Node should be small, therefore one instance of
+	// BKeys would never be store a large volume of keys.
+	fn collect_with_prefix(&self, prefix_key: &Key) -> VecDeque<(Key, Payload)>;
 	fn insert(&mut self, key: Key, payload: Payload);
 	fn append(&mut self, keys: Self);
 	fn remove(&mut self, key: &Key) -> Option<Payload>;
@@ -65,7 +51,6 @@ pub(super) struct FstKeys {
 	len: usize,
 }
 
-#[async_trait]
 impl BKeys for FstKeys {
 	fn with_key_val(key: Key, payload: Payload) -> Result<Self, Error> {
 		let mut builder = MapBuilder::memory();
@@ -85,15 +70,7 @@ impl BKeys for FstKeys {
 		}
 	}
 
-	async fn collect_with_prefix<V>(
-		&self,
-		_tx: &mut Transaction,
-		_prefix_key: &Key,
-		_visitor: &mut V,
-	) -> Result<bool, Error>
-	where
-		V: KeyVisitor,
-	{
+	fn collect_with_prefix(&self, _prefix_key: &Key) -> VecDeque<(Key, Payload)> {
 		panic!("Not supported!")
 	}
 
@@ -402,34 +379,13 @@ impl BKeys for TrieKeys {
 		self.keys.get(key).copied()
 	}
 
-	async fn collect_with_prefix<V>(
-		&self,
-		tx: &mut Transaction,
-		prefix: &Key,
-		visitor: &mut V,
-	) -> Result<bool, Error>
-	where
-		V: KeyVisitor + Send,
-	{
-		let mut node_queue = VecDeque::new();
-		if let Some(node) = self.keys.get_raw_descendant(prefix) {
-			node_queue.push_front(node);
+	fn collect_with_prefix(&self, prefix: &Key) -> VecDeque<(Key, Payload)> {
+		let mut i = KeysIterator::new(prefix, &self.keys);
+		let mut r = VecDeque::new();
+		while let Some((k, p)) = i.next() {
+			r.push_back((k.clone(), p))
 		}
-		let mut found = false;
-		while let Some(node) = node_queue.pop_front() {
-			if let Some(value) = node.value() {
-				if let Some(node_key) = node.key() {
-					if node_key.starts_with(prefix) {
-						found = true;
-						visitor.visit(tx, node_key, *value).await?;
-					}
-				}
-			}
-			for children in node.children() {
-				node_queue.push_front(children);
-			}
-		}
-		Ok(found)
+		r
 	}
 
 	fn insert(&mut self, key: Key, payload: Payload) {
@@ -521,10 +477,49 @@ impl BKeys for TrieKeys {
 	}
 }
 
-impl From<Trie<Vec<u8>, u64>> for TrieKeys {
-	fn from(keys: Trie<Vec<u8>, u64>) -> Self {
+impl From<Trie<Key, Payload>> for TrieKeys {
+	fn from(keys: Trie<Key, Payload>) -> Self {
 		Self {
 			keys,
+		}
+	}
+}
+
+struct KeysIterator<'a> {
+	prefix: &'a Key,
+	node_queue: VecDeque<SubTrie<'a, Key, Payload>>,
+	current_node: Option<SubTrie<'a, Key, Payload>>,
+}
+
+impl<'a> KeysIterator<'a> {
+	fn new(prefix: &'a Key, keys: &'a Trie<Key, Payload>) -> Self {
+		let start_node = keys.get_raw_descendant(prefix);
+		Self {
+			prefix,
+			node_queue: VecDeque::new(),
+			current_node: start_node,
+		}
+	}
+
+	fn next(&mut self) -> Option<(&Key, Payload)> {
+		loop {
+			if let Some(node) = self.current_node.take() {
+				for children in node.children() {
+					self.node_queue.push_front(children);
+				}
+				if let Some(value) = node.value() {
+					if let Some(node_key) = node.key() {
+						if node_key.starts_with(self.prefix) {
+							return Some((node_key, *value));
+						}
+					}
+				}
+			} else {
+				self.current_node = self.node_queue.pop_front();
+				if self.current_node.is_none() {
+					return None;
+				}
+			}
 		}
 	}
 }
@@ -532,9 +527,9 @@ impl From<Trie<Vec<u8>, u64>> for TrieKeys {
 #[cfg(test)]
 mod tests {
 	use crate::idx::bkeys::{BKeys, FstKeys, TrieKeys};
-	use crate::idx::tests::HashVisitor;
-	use crate::kvs::{Datastore, Key};
-	use std::collections::HashSet;
+	use crate::idx::btree::Payload;
+	use crate::kvs::Key;
+	use std::collections::{HashMap, HashSet, VecDeque};
 
 	#[test]
 	fn test_fst_keys_serde() {
@@ -609,11 +604,19 @@ mod tests {
 		test_keys_deletions(TrieKeys::default())
 	}
 
+	fn check_keys(r: VecDeque<(Key, Payload)>, e: Vec<(Key, Payload)>) {
+		let mut map = HashMap::new();
+		for (k, p) in r {
+			map.insert(k, p);
+		}
+		assert_eq!(map.len(), e.len());
+		for (k, p) in e {
+			assert_eq!(map.get(&k), Some(&p));
+		}
+	}
+
 	#[tokio::test]
 	async fn test_tries_keys_collect_with_prefix() {
-		let ds = Datastore::new("memory").await.unwrap();
-		let mut tx = ds.transaction(true, false).await.unwrap();
-
 		let mut keys = TrieKeys::default();
 		keys.insert("apple".into(), 1);
 		keys.insert("applicant".into(), 2);
@@ -629,18 +632,17 @@ mod tests {
 		keys.insert("there".into(), 10);
 
 		{
-			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&mut tx, &"appli".into(), &mut visitor).await.unwrap();
-			visitor.check(
+			let r = keys.collect_with_prefix(&"appli".into());
+			check_keys(
+				r,
 				vec![("applicant".into(), 2), ("application".into(), 3), ("applicative".into(), 4)],
-				"appli",
 			);
 		}
 
 		{
-			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&mut tx, &"the".into(), &mut visitor).await.unwrap();
-			visitor.check(
+			let r = keys.collect_with_prefix(&"the".into());
+			check_keys(
+				r,
 				vec![
 					("the".into(), 7),
 					("their".into(), 8),
@@ -649,26 +651,22 @@ mod tests {
 					("these".into(), 11),
 					("theses".into(), 12),
 				],
-				"the",
 			);
 		}
 
 		{
-			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&mut tx, &"blue".into(), &mut visitor).await.unwrap();
-			visitor.check(vec![("blueberry".into(), 6)], "blue");
+			let r = keys.collect_with_prefix(&"blue".into());
+			check_keys(r, vec![("blueberry".into(), 6)]);
 		}
 
 		{
-			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&mut tx, &"apple".into(), &mut visitor).await.unwrap();
-			visitor.check(vec![("apple".into(), 1)], "apple");
+			let r = keys.collect_with_prefix(&"apple".into());
+			check_keys(r, vec![("apple".into(), 1)]);
 		}
 
 		{
-			let mut visitor = HashVisitor::default();
-			keys.collect_with_prefix(&mut tx, &"zz".into(), &mut visitor).await.unwrap();
-			visitor.check(vec![], "zz");
+			let r = keys.collect_with_prefix(&"zz".into());
+			check_keys(r, vec![]);
 		}
 	}
 
