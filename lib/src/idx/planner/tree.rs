@@ -64,7 +64,8 @@ impl<'a> TreeBuilder<'a> {
 		Ok(None)
 	}
 
-	#[async_recursion]
+	#[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
+	#[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
 	async fn eval_value(&mut self, v: &Value) -> Result<Node, Error> {
 		Ok(match v {
 			Value::Expression(e) => self.eval_expression(e).await?,

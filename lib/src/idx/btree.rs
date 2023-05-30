@@ -13,7 +13,8 @@ use std::sync::Arc;
 pub(crate) type NodeId = u64;
 pub(super) type Payload = u64;
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub(super) trait KeyProvider {
 	fn get_node_key(&self, node_id: NodeId) -> Key;
 	fn get_state_key(&self) -> Key {

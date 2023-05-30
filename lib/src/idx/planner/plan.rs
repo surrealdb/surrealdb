@@ -163,7 +163,8 @@ impl IndexOption {
 	}
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 pub(crate) trait ThingIterator: Send {
 	async fn next_batch(&mut self, tx: &Transaction, size: u32) -> Result<Vec<Thing>, Error>;
 }
@@ -185,7 +186,8 @@ impl NonUniqueEqualThingIterator {
 	}
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ThingIterator for NonUniqueEqualThingIterator {
 	async fn next_batch(&mut self, txn: &Transaction, limit: u32) -> Result<Vec<Thing>, Error> {
 		let min = self.beg.clone();
@@ -214,7 +216,8 @@ impl UniqueEqualThingIterator {
 	}
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ThingIterator for UniqueEqualThingIterator {
 	async fn next_batch(&mut self, txn: &Transaction, _limit: u32) -> Result<Vec<Thing>, Error> {
 		if let Some(key) = self.key.take() {
@@ -262,7 +265,8 @@ impl MatchesThingIterator {
 	}
 }
 
-#[async_trait]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl ThingIterator for MatchesThingIterator {
 	async fn next_batch(&mut self, txn: &Transaction, mut limit: u32) -> Result<Vec<Thing>, Error> {
 		let mut res = vec![];
