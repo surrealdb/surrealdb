@@ -12,19 +12,11 @@ impl Nearestrank for Sorted<&Vec<Number>> {
 			return Number::NAN;
 		}
 		// If an invalid percentile, then return NaN
-		if (perc <= Number::from(0)) | (perc > Number::from(100)) {
+		let perc = perc.as_float();
+		if !(0.0..=100.0).contains(&perc) {
 			return Number::NAN;
 		}
-		// If 100%, then get the last value in the set
-		if perc == Number::from(100) {
-			return self.0.get(self.0.len()).unwrap_or(&Number::NAN).clone();
-		}
-		// Get the index of the specified percentile
-		let n_percent_idx = Number::from(self.0.len()) * perc / Number::from(100);
-		// Return the closest extant record for the index
-		match n_percent_idx.as_float().ceil() as usize {
-			0 => self.0.get(0).unwrap_or(&Number::NAN).clone(),
-			idx => self.0.get(idx - 1).unwrap_or(&Number::NAN).clone(),
-		}
+		let idx = self.0.len() as f64 * (perc * (1.0 / 100.0));
+		self.0[(idx as usize).min(self.0.len() - 1)].clone()
 	}
 }
