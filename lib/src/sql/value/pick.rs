@@ -14,6 +14,10 @@ impl Value {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
+					Part::Index(i) => match v.get(&i.to_string()) {
+						Some(v) => v.pick(path.next()),
+						None => Value::None,
+					},
 					Part::All => self.pick(path.next()),
 					_ => Value::None,
 				},

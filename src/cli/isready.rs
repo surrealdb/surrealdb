@@ -1,12 +1,23 @@
+use crate::cli::abstraction::DatabaseConnectionArguments;
 use crate::err::Error;
+use clap::Args;
 use surrealdb::engine::any::connect;
 
-#[tokio::main]
-pub async fn init(matches: &clap::ArgMatches) -> Result<(), Error> {
+#[derive(Args, Debug)]
+pub struct IsReadyCommandArguments {
+	#[command(flatten)]
+	conn: DatabaseConnectionArguments,
+}
+
+pub async fn init(
+	IsReadyCommandArguments {
+		conn: DatabaseConnectionArguments {
+			endpoint,
+		},
+	}: IsReadyCommandArguments,
+) -> Result<(), Error> {
 	// Initialize opentelemetry and logging
 	crate::o11y::builder().with_log_level("error").init();
-	// Parse all other cli arguments
-	let endpoint = matches.value_of("conn").unwrap();
 	// Connect to the database engine
 	connect(endpoint).await?;
 	println!("OK");
