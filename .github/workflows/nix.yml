@@ -1,6 +1,9 @@
 name: Nix
 
-on: push
+on:
+  push:
+    branches:
+      - main
 
 # Setting the shell option, it will run 'bash --noprofile --norc -eo pipefail {0}'
 defaults:

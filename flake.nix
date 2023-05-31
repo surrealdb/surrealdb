@@ -29,7 +29,7 @@
     # are used to express the output but not themselves paths in the output.
     let
 
-      nativeSystems = [ aarch64-linux x86_64-darwin x86_64-linux ];
+      nativeSystems = [ aarch64-darwin aarch64-linux x86_64-darwin x86_64-linux ];
 
       # Build the output set for each default system and map system sets into
       # attributes, resulting in paths such as:

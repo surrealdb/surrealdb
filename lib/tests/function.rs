@@ -2073,11 +2073,11 @@ async fn function_math_interquartile() -> Result<(), Error> {
 	assert!(tmp.is_nan());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from(207.5);
+	let val = Value::from(56.0);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from(208.0);
+	let val = Value::from(56.0);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2179,11 +2179,11 @@ async fn function_math_midhinge() -> Result<(), Error> {
 	assert!(tmp.is_nan());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from(103.75);
+	let val = Value::from(179.5);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from(104.0);
+	let val = Value::from(180);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2284,11 +2284,11 @@ async fn function_math_percentile() -> Result<(), Error> {
 	assert!(tmp.is_nan());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from(207.5);
+	let val = Value::from(212.78);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from(208.0);
+	let val = Value::from(213.28);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2429,11 +2429,11 @@ async fn function_math_stddev() -> Result<(), Error> {
 	assert!(tmp.is_nan());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("61.73329733620260786466504830446900810163706056134726969779498735043443723773086343343420617365104296");
+	let val = Value::from(61.73329733620261);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::parse("61.73329733620260786466504830446900810163706056134726969779498735043443723773086343343420617365104296");
+	let val = Value::from(61.73329733620261);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -2511,11 +2511,11 @@ async fn function_math_trimean() -> Result<(), Error> {
 	assert!(tmp.is_nan());
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from(152.875);
+	let val = Value::from(190.75);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from(153.25);
+	let val = Value::from(191.25);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3555,6 +3555,33 @@ async fn function_string_words() -> Result<(), Error> {
 // --------------------------------------------------
 
 #[tokio::test]
+async fn function_time_ceil() -> Result<(), Error> {
+	let sql = r#"
+		RETURN time::ceil("1987-06-22T08:30:45Z", 1w);
+		RETURN time::ceil("1987-06-22T08:30:45Z", 1y);
+		RETURN time::ceil("2023-05-11T03:09:00Z", 1s);
+	"#;
+	let dbs = Datastore::new("memory").await?;
+	let ses = Session::for_kv().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
+	assert_eq!(res.len(), 3);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'1987-06-25T00:00:00Z'");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'1987-12-28T00:00:00Z'");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'2023-05-11T03:09:00Z'");
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_time_day() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::day();
@@ -3580,11 +3607,12 @@ async fn function_time_floor() -> Result<(), Error> {
 	let sql = r#"
 		RETURN time::floor("1987-06-22T08:30:45Z", 1w);
 		RETURN time::floor("1987-06-22T08:30:45Z", 1y);
+		RETURN time::floor("2023-05-11T03:09:00Z", 1s);
 	"#;
 	let dbs = Datastore::new("memory").await?;
 	let ses = Session::for_kv().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None, false).await?;
-	assert_eq!(res.len(), 2);
+	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("'1987-06-18T00:00:00Z'");
@@ -3592,6 +3620,10 @@ async fn function_time_floor() -> Result<(), Error> {
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::parse("'1986-12-28T00:00:00Z'");
+	assert_eq!(tmp, val);
+	//
+	let tmp = res.remove(0).result?;
+	let val = Value::parse("'2023-05-11T03:09:00Z'");
 	assert_eq!(tmp, val);
 	//
 	Ok(())

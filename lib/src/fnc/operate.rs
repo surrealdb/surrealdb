@@ -310,9 +310,19 @@ mod tests {
 	}
 
 	#[test]
-	fn div_basic() {
+	fn div_int() {
 		let one = Value::from(5);
 		let two = Value::from(4);
+		let res = div(one, two);
+		assert!(res.is_ok());
+		let out = res.unwrap();
+		assert_eq!("1", format!("{}", out));
+	}
+
+	#[test]
+	fn div_float() {
+		let one = Value::from(5.0);
+		let two = Value::from(4.0);
 		let res = div(one, two);
 		assert!(res.is_ok());
 		let out = res.unwrap();

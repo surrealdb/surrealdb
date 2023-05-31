@@ -657,9 +657,6 @@ where
 	///
 	/// // Select a specific record from a table
 	/// let person: Option<Person> = db.select(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
-	///
-	/// // You can skip an unnecessary option if you know the record already exists
-	/// let person: Option<Person> = db.select(("person", "h5wxrf2ewk8xjxosxtyc")).await?;
 	/// #
 	/// # Ok(())
 	/// # }

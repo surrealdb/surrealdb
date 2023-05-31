@@ -19,6 +19,8 @@
 /// Scope           /*{ns}*{db}±{sc}
 /// ST              /*{ns}*{db}±{sc}!st{tk}
 ///
+/// AZ              /*{ns}*{db}!az{az}
+///
 /// Table           /*{ns}*{db}*{tb}
 /// EV              /*{ns}*{db}*{tb}!ev{ev}
 /// FD              /*{ns}*{db}*{tb}!fd{fd}
@@ -32,7 +34,20 @@
 ///
 /// Index           /*{ns}*{db}*{tb}¤{ix}{fd}{id}
 ///
+/// BD              /*{ns}*{db}*{tb}¤{ix}{bd}{id}
+/// BL              /*{ns}*{db}*{tb}¤{ix}{bl}{id}
+/// BP              /*{ns}*{db}*{tb}¤{ix}{bp}{id}
+/// BT              /*{ns}*{db}*{tb}¤{ix}{bt}{id}
 pub mod az; // Stores a DEFINE ANALYZER config definition
+pub mod bd; // Stores BTree nodes for doc ids
+pub mod bf; // Stores Term/Doc frequency
+pub mod bi; // Stores doc keys for doc_ids
+pub mod bk; // Stores the term list for doc_ids
+pub mod bl; // Stores BTree nodes for doc lengths
+pub mod bp; // Stores BTree nodes for postings
+pub mod bs; // Stores FullText index states
+pub mod bt; // Stores BTree nodes for terms
+pub mod bu; // Stores terms for term_ids
 pub mod database; // Stores the key prefix for all keys under a database
 pub mod db; // Stores a DEFINE DATABASE config definition
 pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition
@@ -57,4 +72,7 @@ pub mod scope; // Stores the key prefix for all keys under a scope
 pub mod st; // Stores a DEFINE TOKEN ON SCOPE config definition
 pub mod table; // Stores the key prefix for all keys under a table
 pub mod tb; // Stores a DEFINE TABLE config definition
-pub mod thing; // Stores a record id
+pub mod thing;
+
+const CHAR_PATH: u8 = 0xb1; // ±
+const CHAR_INDEX: u8 = 0xa4; // ¤

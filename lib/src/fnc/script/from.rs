@@ -31,8 +31,7 @@ impl<'js> FromJs<'js> for Value {
 				}
 				Err(e) => Err(e),
 			},
-			val if val.is_int() => Ok(val.as_int().unwrap().into()),
-			val if val.is_float() => Ok(val.as_float().unwrap().into()),
+			val if val.is_number() => Ok(val.as_number().unwrap().into()),
 			val if val.is_array() => {
 				let v = val.as_array().unwrap();
 				let mut x = Array::with_capacity(v.len());
@@ -62,7 +61,7 @@ impl<'js> FromJs<'js> for Value {
 					let v: &classes::record::record::Record = v.as_ref();
 					check_nul(&v.value.tb)?;
 					if let Id::String(s) = &v.value.id {
-						check_nul(&s)?;
+						check_nul(s)?;
 					}
 					return Ok(v.value.clone().into());
 				}
