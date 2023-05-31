@@ -682,7 +682,7 @@ impl Rpc {
 	// ------------------------------
 
 	#[instrument(skip_all, name = "rpc query", fields(websocket=self.uuid.to_string()))]
-	async fn query(&self, sql: Strand) -> Result<Vec<Response>, Error> {
+	async fn query(&self, sql: Strand) -> Result<impl Serialize, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
@@ -696,7 +696,7 @@ impl Rpc {
 	}
 
 	#[instrument(skip_all, name = "rpc query_with", fields(websocket=self.uuid.to_string()))]
-	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<Vec<Response>, Error> {
+	async fn query_with(&self, sql: Strand, mut vars: Object) -> Result<impl Serialize, Error> {
 		// Get a database reference
 		let kvs = DB.get().unwrap();
 		// Get local copy of options
