@@ -265,7 +265,7 @@ pub(crate) fn router(
 							Ok(option) => {
 								if let Some(response) = option {
 									trace!(target: LOG, "{response:?}");
-									if let Some(Ok(id)) = response.id.map(Value::cast_to_i64) {
+									if let Some(Ok(id)) = response.id.map(Value::coerce_to_i64) {
 										if let Some((method, sender)) = routes.remove(&id) {
 											let _ = sender
 												.into_send_async(DbResponse::from((
