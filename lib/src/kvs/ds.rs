@@ -257,12 +257,12 @@ impl Datastore {
 		let mut tx = self.transaction(true, false).await?;
 		let timestamp = tx.clock();
 		self.register_remove_and_archive(&tx, &timestamp).await?;
-		tx.commit();
+		tx.commit().await?;
 
 		// Stage 2: Longer gc tasks
 		let mut tx = self.transaction(true, false).await?;
 		self.clean_archived(&tx).await?;
-		tx.commit()
+		tx.commit().await
 	}
 
 	/// Register self in cluster
