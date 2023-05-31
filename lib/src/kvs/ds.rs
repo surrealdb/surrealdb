@@ -107,7 +107,7 @@ impl Datastore {
 	/// ```
 	pub async fn new(path: &str) -> Result<Datastore, Error> {
 		let id = Uuid::new_v4();
-		new_full(id, path).await
+		Self::new_full(path, id).await
 	}
 
 	// For testing
@@ -256,12 +256,12 @@ impl Datastore {
 		// Stage 1: Fast init and gc
 		let mut tx = self.transaction(true, false).await?;
 		let timestamp = tx.clock();
-		self.register_remove_and_archive(&tx, &timestamp).await?;
+		self.register_remove_and_archive(&mut tx, &timestamp).await?;
 		tx.commit().await?;
 
 		// Stage 2: Longer gc tasks
 		let mut tx = self.transaction(true, false).await?;
-		self.clean_archived(&tx).await?;
+		self.clean_archived(&mut tx).await?;
 		tx.commit().await
 	}
 
@@ -270,7 +270,7 @@ impl Datastore {
 	/// Archive related live queries
 	pub async fn register_remove_and_archive(
 		&self,
-		tx: &Transaction,
+		tx: &mut Transaction,
 		timestamp: &Timestamp,
 	) -> Result<(), Error> {
 		trace!("Registering node");
@@ -284,7 +284,8 @@ impl Datastore {
 		Ok(())
 	}
 
-	pub async fn clean_archived(&self, mut tx: &Transaction) -> Result<(), Error> {
+	pub async fn clean_archived(&self, tx: &mut Transaction) -> Result<(), Error> {
+		let archived = vec![];
 		for lq in archived {
 			trace!("Deleting archived live query {}", &lq);
 			// Delete the parent archived LQ
@@ -293,14 +294,15 @@ impl Datastore {
 			tx.delr_tblv(&tb, &lq);
 		}
 		trace!("Finished archiving lq");
+		Ok(())
 	}
 
 	pub async fn garbage_collect(
 		&self,
-		mut tx: &Transaction,
+		tx: &mut Transaction,
 		watermark: &Timestamp,
 	) -> Result<(), Error> {
-		let dead_heartbeats = self.delete_dead_heartbeats(&mut tx, watermark).await?;
+		let dead_heartbeats = self.delete_dead_heartbeats(tx, watermark).await?;
 		trace!("Found dead hbs: {:?}", dead_heartbeats);
 		let mut archived: Vec<Uuid> = vec![];
 		for hb in dead_heartbeats {
@@ -346,7 +348,7 @@ impl Datastore {
 	// Adds entries to the KV store indicating membership information
 	pub async fn register_membership(
 		&self,
-		mut tx: &Transaction,
+		tx: &mut Transaction,
 		timestamp: &Timestamp,
 	) -> Result<(), Error> {
 		let sql_node_id = Uuid::from(self.id.clone().0);
