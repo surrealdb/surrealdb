@@ -6,6 +6,8 @@ use clap::Args;
 use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
+use serde::Serialize;
+use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::connect;
 use surrealdb::error::Api as ApiError;
 use surrealdb::opt::auth::Root;
@@ -23,6 +25,9 @@ pub struct SqlCommandArguments {
 	/// Whether database responses should be pretty printed
 	#[arg(long)]
 	pretty: bool,
+	/// Whether to emit results in JSON
+	#[arg(long)]
+	json: bool,
 	/// Whether omitting semicolon causes a newline
 	#[arg(long)]
 	multi: bool,
@@ -39,6 +44,7 @@ pub async fn init(
 		},
 		sel,
 		pretty,
+		json,
 		multi,
 		..
 	}: SqlCommandArguments,
@@ -153,7 +159,7 @@ pub async fn init(
 				}
 				let res = client.query(query).await;
 				// Get the request response
-				match process(pretty, res) {
+				match process(pretty, json, res) {
 					Ok(v) => {
 						println!("{v}\n");
 					}
@@ -173,7 +179,7 @@ pub async fn init(
 	Ok(())
 }
 
-fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
+fn process(pretty: bool, json: bool, res: surrealdb::Result<Response>) -> Result<String, Error> {
 	// Check query response for an error
 	let mut response = res?;
 	// Get the number of statements the query contained
@@ -191,12 +197,24 @@ fn process(pretty: bool, res: surrealdb::Result<Response>) -> Result<String, Err
 	} else {
 		response.take(0)?
 	};
-	// Check if we should prettify
-	Ok(match pretty {
-		// Don't prettify the response
-		false => value.to_string(),
-		// Yes prettify the response
-		true => format!("{value:#}"),
+	// Check if we should emit JSON and/or prettify
+	Ok(match (json, pretty) {
+		// Don't prettify the SurrealQL response
+		(false, false) => value.to_string(),
+		// Yes prettify the SurrealQL response
+		(false, true) => format!("{value:#}"),
+		// Don't pretty print the JSON response
+		(true, false) => serde_json::to_string(&value.into_json()).unwrap(),
+		// Yes prettify the JSON response
+		(true, true) => {
+			let mut buf = Vec::new();
+			let mut serializer = serde_json::Serializer::with_formatter(
+				&mut buf,
+				PrettyFormatter::with_indent(b"\t"),
+			);
+			value.into_json().serialize(&mut serializer).unwrap();
+			String::from_utf8(buf).unwrap()
+		}
 	})
 }
 
