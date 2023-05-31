@@ -1,6 +1,6 @@
 use crate::sql::common::is_hex;
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_str;
+use crate::sql::escape::quote_str;
 use crate::sql::strand::Strand;
 use nom::branch::alt;
 use nom::bytes::complete::take_while_m_n;
@@ -99,7 +99,7 @@ impl Uuid {
 
 impl Display for Uuid {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&escape_str(&self.0.to_string()), f)
+		Display::fmt(&quote_str(&self.0.to_string()), f)
 	}
 }
 

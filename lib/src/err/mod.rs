@@ -47,6 +47,18 @@ pub enum Error {
 	#[error("The key being inserted already exists")]
 	TxKeyAlreadyExists,
 
+	/// The key exceeds a limit set by the KV store
+	#[error("Record id or key is too large")]
+	TxKeyTooLarge,
+
+	/// The value exceeds a limit set by the KV store
+	#[error("Record or value is too large")]
+	TxValueTooLarge,
+
+	/// The transaction writes too much data for the KV store
+	#[error("Transaction is too large")]
+	TxTooLarge,
+
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
 	NsEmpty,
@@ -154,6 +166,12 @@ pub enum Error {
 	/// The query did not execute, because the transaction has failed
 	#[error("The query was not executed due to a failed transaction")]
 	QueryNotExecuted,
+
+	/// The query did not execute, because the transaction has failed (with a message)
+	#[error("The query was not executed due to a failed transaction. {message}")]
+	QueryNotExecutedDetail {
+		message: String,
+	},
 
 	/// The permissions do not allow for performing the specified query
 	#[error("You don't have permission to perform this query type")]
@@ -462,6 +480,14 @@ impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
+			tikv::Error::KeyError(tikv_client_proto::kvrpcpb::KeyError {
+				abort,
+				..
+			}) if abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
+			tikv::Error::RegionError(tikv_client_proto::errorpb::Error {
+				raft_entry_too_large,
+				..
+			}) if raft_entry_too_large.is_some() => Error::TxTooLarge,
 			_ => Error::Tx(e.to_string()),
 		}
 	}
