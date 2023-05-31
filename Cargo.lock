@@ -684,6 +684,26 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
+version = "0.64.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4243e6031260db77ede97ad86c27e501d646a27ab57b59a574f725d98ab1fb4"
+dependencies = [
+ "bitflags",
+ "cexpr 0.6.0",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
+ "peeking_take_while",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex 1.1.0",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "bindgen"
 version = "0.65.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfdf7b466f9a4903edc73f95d6d2bcd5baf8ae620638762244d3f60143643cc5"
@@ -2384,6 +2404,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3386f101bcb4bd252d8e9d2fb41ec3b0862a15a62b478c355b2982efa469e3e"
 dependencies = [
  "bindgen 0.65.1",
+ "bzip2-sys",
+ "cc",
+ "glob",
+ "libc",
+ "libz-sys",
+ "lz4-sys",
+ "zstd-sys",
+]
+
+[[package]]
+name = "libspeedb-sys"
+version = "0.0.2+2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f7e94ee8f7d5494e100d1671955d6a752578589548da04031be4c8e9928fb69"
+dependencies = [
+ "bindgen 0.64.0",
  "bzip2-sys",
  "cc",
  "glob",
@@ -4152,6 +4188,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "speedb"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7f0dc39279433ab6e2f63203b220c56b7f4042a773ba902f94755cc6ebf6a51"
+dependencies = [
+ "libc",
+ "libspeedb-sys",
+]
+
+[[package]]
 name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4314,6 +4360,7 @@ dependencies = [
  "sha-1",
  "sha2",
  "snap",
+ "speedb",
  "storekey",
  "surrealdb-derive",
  "temp-dir",

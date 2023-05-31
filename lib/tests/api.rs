@@ -132,6 +132,36 @@ mod api_integration {
 		include!("api/backup.rs");
 	}
 
+	#[cfg(feature = "kv-rocksdb")]
+	mod rocksdb {
+		use super::*;
+		use surrealdb::engine::local::Db;
+		use surrealdb::engine::local::RocksDb;
+
+		async fn new_db() -> Surreal<Db> {
+			let path = format!("/tmp/{}.db", Ulid::new());
+			Surreal::new::<RocksDb>(path.as_str()).await.unwrap()
+		}
+
+		include!("api/mod.rs");
+		include!("api/backup.rs");
+	}
+
+	#[cfg(feature = "kv-speedb")]
+	mod speedb {
+		use super::*;
+		use surrealdb::engine::local::Db;
+		use surrealdb::engine::local::SpeeDb;
+
+		async fn new_db() -> Surreal<Db> {
+			let path = format!("/tmp/{}.db", Ulid::new());
+			Surreal::new::<SpeeDb>(path.as_str()).await.unwrap()
+		}
+
+		include!("api/mod.rs");
+		include!("api/backup.rs");
+	}
+
 	#[cfg(feature = "kv-tikv")]
 	mod tikv {
 		use super::*;
