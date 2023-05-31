@@ -1,9 +1,9 @@
 use crate::err::Error;
 use crate::idx::ft::doclength::DocLength;
+use crate::idx::ft::filter::Filter;
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::kvs::Transaction;
-use crate::sql::filter::Filter;
 use crate::sql::statements::DefineAnalyzerStatement;
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::Array;
@@ -25,7 +25,7 @@ impl From<DefineAnalyzerStatement> for Analyzer {
 	fn from(az: DefineAnalyzerStatement) -> Self {
 		Self {
 			t: az.tokenizers,
-			f: az.filters,
+			f: Filter::from(az.filters),
 		}
 	}
 }
@@ -180,7 +180,14 @@ impl Tokens {
 		let mut t = Token::Ref(s, e);
 		if let Some(f) = f {
 			for f in f {
-				t = self.filter(f, t);
+				let c = self.get_token_string(&t);
+				let s = f.filter(c);
+				// If the new token is equal to the old one, we keep the old one
+				t = if s.eq(c) {
+					t
+				} else {
+					Token::String(s.into())
+				}
 			}
 		}
 		self.t.push(t);
@@ -192,29 +199,10 @@ impl Tokens {
 			Token::String(s) => s,
 		}
 	}
-
-	fn filter(&self, f: &Filter, t: Token) -> Token {
-		let c = self.get_token_string(&t);
-		let s: String = match f {
-			Filter::EdgeNgram(_, _) => {
-				todo!()
-			}
-			Filter::Lowercase => c.to_lowercase(),
-			Filter::Snowball(_) => {
-				todo!()
-			}
-		};
-		// If the new token is equal to the old one, we keep the old one
-		if s.eq(c) {
-			t
-		} else {
-			Token::String(s)
-		}
-	}
 }
 
 #[derive(Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
-enum Token {
+pub(super) enum Token {
 	Ref(usize, usize),
 	String(String),
 }
