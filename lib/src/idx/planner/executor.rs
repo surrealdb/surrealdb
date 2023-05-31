@@ -41,7 +41,7 @@ impl QueryExecutor {
 					if !ft_map.contains_key(&io.ix.name.0) {
 						let ikb = IndexKeyBase::new(opt, &io.ix);
 						let az = run.get_az(opt.ns(), opt.db(), az.as_str()).await?;
-						let ft = FtIndex::new(&mut run, az, ikb, order.to_usize()).await?;
+						let ft = FtIndex::new(&mut run, az, ikb, *order).await?;
 						ft_map.insert(io.ix.name.0.clone(), ft);
 					}
 				}

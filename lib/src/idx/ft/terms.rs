@@ -21,7 +21,7 @@ impl Terms {
 	pub(super) async fn new(
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
-		default_btree_order: usize,
+		default_btree_order: u32,
 	) -> Result<Self, Error> {
 		let keys = TermsKeyProvider {
 			index_key_base: index_key_base.clone(),
@@ -134,7 +134,7 @@ struct State {
 impl SerdeState for State {}
 
 impl State {
-	fn new(default_btree_order: usize) -> Self {
+	fn new(default_btree_order: u32) -> Self {
 		Self {
 			btree: btree::State::new(default_btree_order),
 			available_ids: None,
@@ -184,7 +184,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_resolve_terms() {
-		const BTREE_ORDER: usize = 7;
+		const BTREE_ORDER: u32 = 7;
 
 		let idx = IndexKeyBase::default();
 
@@ -236,7 +236,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_deletion() {
-		const BTREE_ORDER: usize = 7;
+		const BTREE_ORDER: u32 = 7;
 
 		let idx = IndexKeyBase::default();
 

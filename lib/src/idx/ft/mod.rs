@@ -29,7 +29,7 @@ pub(crate) struct FtIndex {
 	index_key_base: IndexKeyBase,
 	state: State,
 	bm25: Bm25Params,
-	btree_default_order: usize,
+	btree_default_order: u32,
 }
 
 #[derive(Clone)]
@@ -67,7 +67,7 @@ impl FtIndex {
 		tx: &mut Transaction,
 		az: DefineAnalyzerStatement,
 		index_key_base: IndexKeyBase,
-		btree_default_order: usize,
+		btree_default_order: u32,
 	) -> Result<Self, Error> {
 		let state_key: Key = index_key_base.new_bs_key();
 		let state: State = if let Some(val) = tx.get(state_key.clone()).await? {

@@ -145,17 +145,8 @@ impl IndexOption {
 				order,
 			} => match self.op {
 				Operator::Matches(_) => Ok(Box::new(
-					MatchesThingIterator::new(
-						opt,
-						txn,
-						&self.ix,
-						az,
-						*hl,
-						sc,
-						order.to_usize(),
-						&self.v,
-					)
-					.await?,
+					MatchesThingIterator::new(opt, txn, &self.ix, az, *hl, sc, *order, &self.v)
+						.await?,
 				)),
 				_ => Err(Error::BypassQueryPlanner),
 			},
@@ -241,7 +232,7 @@ impl MatchesThingIterator {
 		az: &Ident,
 		_hl: bool,
 		sc: &Scoring,
-		order: usize,
+		order: u32,
 		v: &Value,
 	) -> Result<Self, Error> {
 		let ikb = IndexKeyBase::new(opt, ix);

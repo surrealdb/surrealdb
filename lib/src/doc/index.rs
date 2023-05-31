@@ -11,7 +11,7 @@ use crate::sql::array::Array;
 use crate::sql::index::Index;
 use crate::sql::scoring::Scoring;
 use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Ident, Number, Thing, Value};
+use crate::sql::{Ident, Thing, Value};
 use crate::{key, kvs};
 
 impl<'a> Document<'a> {
@@ -63,9 +63,8 @@ impl<'a> Document<'a> {
 						order,
 					} => match sc {
 						Scoring::Bm {
-							k1,
-							b,
-						} => ic.index_best_matching_search(&mut run, az, k1, b, order, *hl).await?,
+							..
+						} => ic.index_best_matching_search(&mut run, az, *order, *hl).await?,
 						Scoring::Vs => ic.index_vector_search(az, *hl).await?,
 					},
 				};
@@ -187,14 +186,12 @@ impl<'a> IndexOperation<'a> {
 		&self,
 		run: &mut kvs::Transaction,
 		az: &Ident,
-		_k1: &Number,
-		_b: &Number,
-		order: &Number,
+		order: u32,
 		_hl: bool,
 	) -> Result<(), Error> {
 		let ikb = IndexKeyBase::new(self.opt, self.ix);
 		let az = run.get_az(self.opt.ns(), self.opt.db(), az.as_str()).await?;
-		let mut ft = FtIndex::new(run, az, ikb, order.to_usize()).await?;
+		let mut ft = FtIndex::new(run, az, ikb, order).await?;
 		if let Some(n) = &self.n {
 			// TODO: Apply the analyzer
 			ft.index_document(run, self.rid, n).await

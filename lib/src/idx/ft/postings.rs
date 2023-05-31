@@ -19,7 +19,7 @@ impl Postings {
 	pub(super) async fn new(
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
-		default_btree_order: usize,
+		default_btree_order: u32,
 	) -> Result<Self, Error> {
 		let keys = PostingsKeyProvider {
 			index_key_base: index_key_base.clone(),
@@ -149,7 +149,7 @@ mod tests {
 
 	#[test(tokio::test)]
 	async fn test_postings() {
-		const DEFAULT_BTREE_ORDER: usize = 5;
+		const DEFAULT_BTREE_ORDER: u32 = 5;
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut tx = ds.transaction(true, false).await.unwrap();

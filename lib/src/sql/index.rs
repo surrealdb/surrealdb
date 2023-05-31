@@ -2,11 +2,10 @@ use crate::idx::ft::analyzer::Analyzers;
 use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::error::IResult;
 use crate::sql::ident::{ident, Ident};
-use crate::sql::number::number;
 use crate::sql::scoring::{scoring, Scoring};
-use crate::sql::Number;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, tag_no_case};
+use nom::character::complete::u32;
 use nom::combinator::{map, opt};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -22,7 +21,7 @@ pub enum Index {
 		az: Ident,
 		hl: bool,
 		sc: Scoring,
-		order: Number,
+		order: u32,
 	},
 }
 
@@ -75,11 +74,11 @@ pub fn analyzer(i: &str) -> IResult<&str, Ident> {
 	Ok((i, analyzer))
 }
 
-pub fn order(i: &str) -> IResult<&str, Number> {
+pub fn order(i: &str) -> IResult<&str, u32> {
 	let (i, _) = mightbespace(i)?;
 	let (i, _) = tag_no_case("ORDER")(i)?;
 	let (i, _) = shouldbespace(i)?;
-	let (i, order) = number(i)?;
+	let (i, order) = u32(i)?;
 	Ok((i, order))
 }
 
@@ -102,7 +101,7 @@ pub fn search(i: &str) -> IResult<&str, Index> {
 			az: az.unwrap_or_else(|| Ident::from(Analyzers::LIKE)),
 			sc,
 			hl,
-			order: o.unwrap_or(Number::Int(100)),
+			order: o.unwrap_or(100),
 		},
 	))
 }

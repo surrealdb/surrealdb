@@ -16,7 +16,7 @@ impl DocLengths {
 	pub(super) async fn new(
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
-		default_btree_order: usize,
+		default_btree_order: u32,
 	) -> Result<Self, Error> {
 		let keys = DocLengthsKeyProvider {
 			index_key_base,
@@ -93,7 +93,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_doc_lengths() {
-		const BTREE_ORDER: usize = 7;
+		const BTREE_ORDER: u32 = 7;
 
 		let ds = Datastore::new("memory").await.unwrap();
 

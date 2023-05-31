@@ -21,7 +21,7 @@ impl DocIds {
 	pub(super) async fn new(
 		tx: &mut Transaction,
 		index_key_base: IndexKeyBase,
-		default_btree_order: usize,
+		default_btree_order: u32,
 	) -> Result<Self, Error> {
 		let keys = DocIdsKeyProvider {
 			index_key_base: index_key_base.clone(),
@@ -146,7 +146,7 @@ struct State {
 impl SerdeState for State {}
 
 impl State {
-	fn new(default_btree_order: usize) -> Self {
+	fn new(default_btree_order: u32) -> Self {
 		Self {
 			btree: btree::State::new(default_btree_order),
 			available_ids: None,
@@ -197,7 +197,7 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::kvs::{Datastore, Transaction};
 
-	const BTREE_ORDER: usize = 7;
+	const BTREE_ORDER: u32 = 7;
 
 	async fn get_doc_ids(ds: &Datastore) -> (Transaction, DocIds) {
 		let mut tx = ds.transaction(true, false).await.unwrap();

@@ -41,13 +41,13 @@ where
 {
 	keys: K,
 	state: State,
-	full_size: usize,
+	full_size: u32,
 	updated: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct State {
-	minimum_degree: usize,
+	minimum_degree: u32,
 	root: Option<NodeId>,
 	next_node_id: NodeId,
 }
@@ -55,7 +55,7 @@ pub(super) struct State {
 impl SerdeState for State {}
 
 impl State {
-	pub(super) fn new(minimum_degree: usize) -> Self {
+	pub(super) fn new(minimum_degree: u32) -> Self {
 		assert!(minimum_degree >= 2, "Minimum degree should be >= 2");
 		Self {
 			minimum_degree,
@@ -67,10 +67,10 @@ impl State {
 
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct Statistics {
-	pub(super) keys_count: usize,
-	pub(super) max_depth: usize,
-	pub(super) nodes_count: usize,
-	pub(super) total_size: usize,
+	pub(super) keys_count: u64,
+	pub(super) max_depth: u32,
+	pub(super) nodes_count: u32,
+	pub(super) total_size: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -86,21 +86,21 @@ impl<'a, BK> Node<BK>
 where
 	BK: BKeys + Serialize + DeserializeOwned + 'a,
 {
-	async fn read(tx: &mut Transaction, key: Key) -> Result<(Self, usize), Error> {
+	async fn read(tx: &mut Transaction, key: Key) -> Result<(Self, u32), Error> {
 		if let Some(val) = tx.get(key).await? {
-			let size = val.len();
+			let size = val.len() as u32;
 			Ok((Node::try_from_val(val)?, size))
 		} else {
 			Err(Error::CorruptedIndex)
 		}
 	}
 
-	async fn write(&mut self, tx: &mut Transaction, key: Key) -> Result<usize, Error> {
+	async fn write(&mut self, tx: &mut Transaction, key: Key) -> Result<u32, Error> {
 		self.keys_mut().compile();
 		let val = self.try_to_val()?;
 		let size = val.len();
 		tx.set(key, val).await?;
-		Ok(size)
+		Ok(size as u32)
 	}
 
 	fn keys(&self) -> &BK {
@@ -218,7 +218,7 @@ where
 	{
 		if let Some(root_id) = self.state.root {
 			let root = self.keys.load_node::<BK>(tx, root_id).await?;
-			if root.node.keys().len() == self.full_size {
+			if root.node.keys().len() as u32 == self.full_size {
 				let new_root_id = self.new_node_id();
 				let new_root =
 					self.new_node(new_root_id, Node::Internal(BK::default(), vec![root_id]));
@@ -264,7 +264,7 @@ where
 					}
 					let child_idx = keys.get_child_idx(&key);
 					let child = self.keys.load_node::<BK>(tx, children[child_idx]).await?;
-					let next = if child.node.keys().len() == self.full_size {
+					let next = if child.node.keys().len() as u32 == self.full_size {
 						let split_result =
 							self.split_child::<BK>(tx, node, child_idx, child).await?;
 						if key.gt(&split_result.median_key) {
@@ -439,7 +439,7 @@ where
 		let left_idx = keys.get_child_idx(&key_to_delete);
 		let left_id = children[left_idx];
 		let mut left_node = self.keys.load_node::<BK>(tx, left_id).await?;
-		if left_node.node.keys().len() >= self.state.minimum_degree {
+		if left_node.node.keys().len() as u32 >= self.state.minimum_degree {
 			// CLRS: 2a -> left_node is named `y` in the book
 			if let Some((key_prim, payload_prim)) = left_node.node.keys().get_last_key() {
 				keys.remove(&key_to_delete);
@@ -693,12 +693,12 @@ where
 		}
 		while let Some((node_id, depth)) = node_queue.pop_front() {
 			let stored = self.keys.load_node::<BK>(tx, node_id).await?;
-			stats.keys_count += stored.node.keys().len();
+			stats.keys_count += stored.node.keys().len() as u64;
 			if depth > stats.max_depth {
 				stats.max_depth = depth;
 			}
 			stats.nodes_count += 1;
-			stats.total_size += stored.size;
+			stats.total_size += stored.size as u64;
 			if let Node::Internal(_, children) = stored.node {
 				let depth = depth + 1;
 				for child_id in &children {
@@ -825,7 +825,7 @@ where
 	node: Node<BK>,
 	id: NodeId,
 	key: Key,
-	size: usize,
+	size: u32,
 }
 
 impl<BK> StoredNode<BK>
@@ -1025,7 +1025,7 @@ mod tests {
 		"nothing", "the", "other", "animals", "sat", "there", "watching",
 	];
 
-	async fn test_btree_read_world_insertions<BK>(default_minimum_degree: usize) -> Statistics
+	async fn test_btree_read_world_insertions<BK>(default_minimum_degree: u32) -> Statistics
 	where
 		BK: BKeys + Serialize + DeserializeOwned + Default,
 	{
@@ -1099,7 +1099,7 @@ mod tests {
 
 	async fn test_btree_search_by_prefix(
 		ds: &Datastore,
-		minimum_degree: usize,
+		minimum_degree: u32,
 		shuffle: bool,
 		mut samples: Vec<(&str, Payload)>,
 	) -> (BTree<TestKeyProvider>, Statistics) {
@@ -1115,7 +1115,7 @@ mod tests {
 		tx.commit().await.unwrap();
 		let mut tx = ds.transaction(false, false).await.unwrap();
 		let s = t.statistics::<TrieKeys>(&mut tx).await.unwrap();
-		assert_eq!(s.keys_count, samples_len);
+		assert_eq!(s.keys_count, samples_len as u64);
 		(t, s)
 	}
 
@@ -1554,7 +1554,7 @@ mod tests {
 	where
 		BK: BKeys + Serialize + DeserializeOwned,
 	{
-		assert_eq!(keys.len(), expected_keys.len(), "The number of keys does not match");
+		assert_eq!(keys.len() as usize, expected_keys.len(), "The number of keys does not match");
 		for (key, payload) in expected_keys {
 			assert_eq!(
 				keys.get(&key.into()),

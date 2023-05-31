@@ -1364,7 +1364,7 @@ fn index(i: &str) -> IResult<&str, DefineIndexStatement> {
 mod tests {
 	use super::*;
 	use crate::sql::scoring::Scoring;
-	use crate::sql::{Number, Part};
+	use crate::sql::Part;
 
 	#[test]
 	fn check_define_serialize() {
@@ -1420,10 +1420,10 @@ mod tests {
 					az: Ident("my_analyzer".to_string()),
 					hl: true,
 					sc: Scoring::Bm {
-						k1: Number::Float(1.2),
-						b: Number::Float(0.75),
+						k1: 1.2,
+						b: 0.75,
 					},
-					order: Number::Int(1000)
+					order: 1000
 				},
 			}
 		);
@@ -1445,7 +1445,7 @@ mod tests {
 					az: Ident("my_analyzer".to_string()),
 					hl: false,
 					sc: Scoring::Vs,
-					order: Number::Int(100)
+					order: 100
 				},
 			}
 		);
