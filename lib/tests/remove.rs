@@ -27,13 +27,13 @@ async fn remove_statement_table() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			az: {},
-			dl: {},
-			dt: {},
-			fc: {},
-			pa: {},
-			sc: {},
-			tb: {}
+			analyzers: {},
+			logins: {},
+			tokens: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: {}
 		}",
 	);
 	assert_eq!(tmp, val);
@@ -61,13 +61,13 @@ async fn remove_statement_analyzer() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		"{
-			az: {},
-			dl: {},
-			dt: {},
-			fc: {},
-			pa: {},
-			sc: {},
-			tb: {}
+			analyzers: {},
+			logins: {},
+			tokens: {},
+			functions: {},
+			params: {},
+			scopes: {},
+			tables: {}
 		}",
 	);
 	assert_eq!(tmp, val);
