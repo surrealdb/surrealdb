@@ -116,7 +116,7 @@ impl Walker {
 	}
 
 	fn is_valid(c: char) -> bool {
-		c.is_ascii_alphanumeric() || c.is_ascii_punctuation()
+		c.is_alphanumeric() || c.is_ascii_punctuation()
 	}
 
 	fn should_split(&mut self, c: char) -> bool {
@@ -146,7 +146,7 @@ impl Walker {
 				// If the character is not valid for indexing (space, control...)
 				// Then we increase the last position to the next character
 				if !is_valid {
-					last_pos += 1;
+					last_pos += c.len_utf8();
 				}
 			}
 			current_pos += c.len_utf8();
@@ -279,30 +279,37 @@ mod tests {
 	use crate::idx::ft::analyzer::Tokens;
 	use crate::sql::statements::define::analyzer;
 
-	#[test]
-	fn test_split() {
-		let (_, az) =
-			analyzer("DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,ascii;")
-				.unwrap();
+	fn test_analyser(def: &str, input: &str, expected: Vec<&str>) {
+		let (_, az) = analyzer(def).unwrap();
 		let a: Analyzer = az.into();
 
-		let mut tokens = Tokens::new(
-			"Abc12345xYZ DL1809 item123456 978-3-16-148410-0 1HGCM82633A123456".to_string(),
-		);
+		let mut tokens = Tokens::new(input.to_string());
 		a.walk(&mut tokens);
 		let mut res = vec![];
 		for t in &tokens.t {
 			res.push(tokens.get_token_string(t));
 		}
-		assert_eq!(
-			res,
+		assert_eq!(res, expected, "{:?} => {:?}", tokens.i, tokens.t);
+	}
+
+	#[test]
+	fn test_split() {
+		test_analyser(
+			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase",
+			"Abc12345xYZ DL1809 item123456 978-3-16-148410-0 1HGCM82633A123456",
 			vec![
 				"abc", "12345", "xyz", "dl", "1809", "item", "123456", "978", "-", "3", "-", "16",
-				"-", "148410", "-", "0", "1", "hgcm", "82633", "a", "123456"
+				"-", "148410", "-", "0", "1", "hgcm", "82633", "a", "123456",
 			],
-			"{:?} => {:?}",
-			tokens.i,
-			tokens.t
 		);
+	}
+
+	#[test]
+	fn test_stemmer() {
+		test_analyser("DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(french);",
+					  "Les chiens adorent courir dans le parc, mais mon petit chien aime plutôt se blottir sur le canapé que de courir",vec![
+			"le", "chien", "adorent", "cour", "dan", "le", "parc", ",", "mais", "mon", "pet",
+			"chien", "aim", "plutôt", "se", "blott", "sur", "le", "canap", "que", "de", "cour"
+		]);
 	}
 }
