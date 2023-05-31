@@ -56,6 +56,7 @@ surrealdb = { path = "lib", features = ["protocol-http", "protocol-ws", "rustls"
 thiserror = "1.0.40"
 tokio = { version = "1.28.1", features = ["macros", "signal"] }
 tokio-util = { version = "0.7.8", features = ["io"] }
+uuid = { version = "1.3.1", features = ["serde", "js", "v4", "v7"] }
 tracing = "0.1"
 tracing-futures = "0.2.5"
 tracing-opentelemetry = "0.18.0"
