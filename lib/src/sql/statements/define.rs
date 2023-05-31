@@ -10,7 +10,7 @@ use crate::sql::comment::{mightbespace, shouldbespace};
 use crate::sql::common::commas;
 use crate::sql::duration::{duration, Duration};
 use crate::sql::error::IResult;
-use crate::sql::escape::escape_str;
+use crate::sql::escape::quote_str;
 use crate::sql::filter::{filters, Filter};
 use crate::sql::fmt::is_pretty;
 use crate::sql::fmt::pretty_indent;
@@ -452,7 +452,7 @@ impl DefineLoginStatement {
 
 impl Display for DefineLoginStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, escape_str(&self.hash))
+		write!(f, "DEFINE LOGIN {} ON {} PASSHASH {}", self.name, self.base, quote_str(&self.hash))
 	}
 }
 
@@ -601,7 +601,7 @@ impl Display for DefineTokenStatement {
 			self.name,
 			self.base,
 			self.kind,
-			escape_str(&self.code)
+			quote_str(&self.code)
 		)
 	}
 }
