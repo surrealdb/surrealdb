@@ -4320,6 +4320,7 @@ dependencies = [
  "test-log",
  "thiserror",
  "tikv-client",
+ "tikv-client-proto",
  "time 0.3.21",
  "tokio",
  "tokio-tungstenite",
