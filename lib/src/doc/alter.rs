@@ -63,6 +63,11 @@ impl<'a> Document<'a> {
 						}
 					}
 				}
+				Data::UnsetExpression(i) => {
+					for i in i.iter() {
+						self.current.to_mut().del(ctx, opt, txn, &i).await?
+					}
+				}
 				Data::UpdateExpression(x) => {
 					// Duplicate context
 					let mut ctx = Context::new(ctx);
