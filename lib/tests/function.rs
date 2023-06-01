@@ -31,7 +31,7 @@ async fn function_array_add() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -71,7 +71,7 @@ async fn function_array_all() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but cannot convert from 'some text' into a array"
 		),
 		"{tmp:?}"
 	);
@@ -103,7 +103,7 @@ async fn function_array_any() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::any(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::any(). Argument 1 was the wrong type. Expected a array but cannot convert from 'some text' into a array"
 		),
 		"{tmp:?}"
 	);
@@ -135,7 +135,7 @@ async fn function_array_append() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -167,7 +167,7 @@ async fn function_array_combine() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::combine(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::combine(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -199,7 +199,7 @@ async fn function_array_complement() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::complement(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::complement(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -231,7 +231,7 @@ async fn function_array_concat() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -263,7 +263,7 @@ async fn function_array_difference() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::difference(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::difference(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -294,7 +294,7 @@ async fn function_array_distinct() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::distinct(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::distinct(). Argument 1 was the wrong type. Expected a array but cannot convert from 'some text' into a array"
 		),
 		"{tmp:?}"
 	);
@@ -327,7 +327,7 @@ async fn function_array_flatten() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::flatten(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::flatten(). Argument 1 was the wrong type. Expected a array but cannot convert from 'some text' into a array"
 		),
 		"{tmp:?}"
 	);
@@ -363,7 +363,7 @@ async fn function_array_group() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::group(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::group(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -427,7 +427,7 @@ async fn function_array_intersect() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::intersect(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::intersect(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -491,7 +491,7 @@ async fn function_array_len() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::len(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::len(). Argument 1 was the wrong type. Expected a array but cannot convert from 'some text' into a array"
 		),
 		"{tmp:?}"
 	);
@@ -523,7 +523,7 @@ async fn function_array_max() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::max(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::max(). Argument 1 was the wrong type. Expected a array but cannot convert from 'some text' into a array"
 		),
 		"{tmp:?}"
 	);
@@ -555,7 +555,7 @@ async fn function_array_min() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::min(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::min(). Argument 1 was the wrong type. Expected a array but cannot convert from 'some text' into a array"
 		),
 		"{tmp:?}"
 	);
@@ -587,7 +587,7 @@ async fn function_array_pop() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::pop(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::pop(). Argument 1 was the wrong type. Expected a array but cannot convert from 'some text' into a array"
 		),
 		"{tmp:?}"
 	);
@@ -619,7 +619,7 @@ async fn function_array_prepend() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::prepend(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::prepend(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -651,7 +651,7 @@ async fn function_array_push() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::push(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::push(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -715,7 +715,7 @@ async fn function_array_reverse() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::reverse(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::reverse(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -751,7 +751,7 @@ async fn function_array_slice() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::slice(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::slice(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -803,7 +803,7 @@ async fn function_array_sort() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::sort(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::sort(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -851,7 +851,7 @@ async fn function_array_sort_asc() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::sort::asc(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::sort::asc(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -883,7 +883,7 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::sort::desc(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
+			Err(e) if e.to_string() == "Incorrect arguments for function array::sort::desc(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array"
 		),
 		"{tmp:?}"
 	);
@@ -915,7 +915,7 @@ async fn function_array_union() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function array::union(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array",
+			Err(e) if e.to_string() == "Incorrect arguments for function array::union(). Argument 1 was the wrong type. Expected a array but cannot convert from 3 into a array",
 		),
 		"{tmp:?}"
 	);
@@ -952,7 +952,7 @@ async fn function_bytes_len() -> Result<(), Error> {
 	assert!(
 		matches!(
 			&tmp,
-			Err(e) if e.to_string() == "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected a bytes but failed to convert true into a bytes"
+			Err(e) if e.to_string() == "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected a bytes but cannot convert from true into a bytes"
 		),
 		"{tmp:?}"
 	);
