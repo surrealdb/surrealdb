@@ -256,12 +256,12 @@ impl Datastore {
 		// Stage 1: Fast init and gc
 		let mut tx = self.transaction(true, false).await?;
 		let timestamp = tx.clock();
-		self.register_remove_and_archive(&mut tx, &timestamp).await?;
+		let archived = self.register_remove_and_archive(&mut tx, &timestamp).await?;
 		tx.commit().await?;
 
 		// Stage 2: Longer gc tasks
 		let mut tx = self.transaction(true, false).await?;
-		self.clean_archived(&mut tx).await?;
+		self.clean_archived(&mut tx, archived).await?;
 		tx.commit().await
 	}
 
@@ -272,7 +272,7 @@ impl Datastore {
 		&self,
 		tx: &mut Transaction,
 		timestamp: &Timestamp,
-	) -> Result<(), Error> {
+	) -> Result<Vec<Uuid>, Error> {
 		trace!("Registering node");
 		self.register_membership(tx, timestamp).await?;
 		// node timeout should be configurable, just trying to get this to work
@@ -281,11 +281,14 @@ impl Datastore {
 		let watermark = timestamp;
 		self.garbage_collect(tx, watermark).await?;
 		trace!("Healthcheck to perform garbage collection");
-		Ok(())
+		Ok(vec![])
 	}
 
-	pub async fn clean_archived(&self, tx: &mut Transaction) -> Result<(), Error> {
-		let archived = vec![];
+	pub async fn clean_archived(
+		&self,
+		tx: &mut Transaction,
+		archived: Vec<Uuid>,
+	) -> Result<(), Error> {
 		for lq in archived {
 			trace!("Deleting archived live query {}", &lq);
 			// Delete the parent archived LQ
