@@ -30,7 +30,7 @@ async fn function_array_add() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::add(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -70,7 +70,7 @@ async fn function_array_all() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::all(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
 		),
 		"{tmp:?}"
@@ -102,7 +102,7 @@ async fn function_array_any() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::any(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
 		),
 		"{tmp:?}"
@@ -134,7 +134,7 @@ async fn function_array_append() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::append(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -166,7 +166,7 @@ async fn function_array_combine() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::combine(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -198,7 +198,7 @@ async fn function_array_complement() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::complement(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -230,7 +230,7 @@ async fn function_array_concat() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::concat(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -262,7 +262,7 @@ async fn function_array_difference() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::difference(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -293,7 +293,7 @@ async fn function_array_distinct() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::distinct(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
 		),
 		"{tmp:?}"
@@ -326,7 +326,7 @@ async fn function_array_flatten() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::flatten(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
 		),
 		"{tmp:?}"
@@ -362,7 +362,7 @@ async fn function_array_group() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::group(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -426,7 +426,7 @@ async fn function_array_intersect() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::intersect(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -490,7 +490,7 @@ async fn function_array_len() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::len(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
 		),
 		"{tmp:?}"
@@ -522,7 +522,7 @@ async fn function_array_max() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::max(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
 		),
 		"{tmp:?}"
@@ -554,7 +554,7 @@ async fn function_array_min() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::min(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
 		),
 		"{tmp:?}"
@@ -586,7 +586,7 @@ async fn function_array_pop() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::pop(). Argument 1 was the wrong type. Expected a array but failed to convert 'some text' into a array"
 		),
 		"{tmp:?}"
@@ -618,7 +618,7 @@ async fn function_array_prepend() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::prepend(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -650,7 +650,7 @@ async fn function_array_push() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::push(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -714,7 +714,7 @@ async fn function_array_reverse() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::reverse(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -750,7 +750,7 @@ async fn function_array_slice() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::slice(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -802,7 +802,7 @@ async fn function_array_sort() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::sort(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -850,7 +850,7 @@ async fn function_array_sort_asc() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::sort::asc(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
@@ -914,7 +914,7 @@ async fn function_array_union() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::union(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array",
 		),
 		"{tmp:?}"
@@ -951,7 +951,7 @@ async fn function_bytes_len() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function bytes::len(). Argument 1 was the wrong type. Expected a bytes but failed to convert true into a bytes"
 		),
 		"{tmp:?}"
@@ -2045,7 +2045,7 @@ async fn function_math_bottom() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function math::bottom(). The second argument must be an integer greater than 0."
 		),
 		"{tmp:?}"
@@ -2099,7 +2099,7 @@ async fn function_math_fixed() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function math::fixed(). The second argument must be an integer greater than 0."
 		),
 		"{tmp:?}"
@@ -2562,7 +2562,7 @@ async fn function_math_top() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function math::top(). The second argument must be an integer greater than 0."
 		),
 		"{tmp:?}"
