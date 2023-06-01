@@ -65,7 +65,7 @@ impl<'a> Document<'a> {
 				if let Some(kind) = &fd.kind {
 					val = val.coerce_to(kind).map_err(|e| match e {
 						// There was a conversion error
-						Error::ConvertTo {
+						Error::CoerceTo {
 							from,
 							..
 						} => Error::FieldCheck {
