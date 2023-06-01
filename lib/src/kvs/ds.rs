@@ -1,5 +1,6 @@
 use super::tx::Transaction;
 use crate::ctx::Context;
+use crate::dbs::cl::Timestamp;
 use crate::dbs::Attach;
 use crate::dbs::Executor;
 use crate::dbs::Notification;
@@ -17,13 +18,14 @@ use channel::Sender;
 use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
+use tracing::callsite::register;
 use tracing::instrument;
 use uuid::Uuid;
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
 pub struct Datastore {
-	pub(super) id: Arc<Uuid>,
+	pub(super) id: Uuid,
 	pub(super) inner: Inner,
 	pub(super) send: Sender<Notification>,
 	pub(super) recv: Receiver<Notification>,
@@ -111,14 +113,12 @@ impl Datastore {
 				{
 					info!(target: LOG, "Starting kvs store in {}", path);
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Uuid::new_v4(),
 						inner: Inner::Mem(super::mem::Datastore::new().await?),
 						send,
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-mem"))]
@@ -132,14 +132,12 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Uuid::new_v4(),
 						inner: Inner::RocksDB(super::rocksdb::Datastore::new(s).await?),
 						send,
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -153,14 +151,12 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Uuid::new_v4(),
 						inner: Inner::RocksDB(super::rocksdb::Datastore::new(s).await?),
 						send,
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
@@ -174,14 +170,12 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Uuid::new_v4(),
 						inner: Inner::IndxDB(super::indxdb::Datastore::new(s).await?),
 						send,
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
@@ -195,14 +189,12 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Uuid::new_v4(),
 						inner: Inner::TiKV(super::tikv::Datastore::new(s).await?),
 						send,
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-tikv"))]
@@ -216,14 +208,12 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
 					let ds = Datastore {
-						id: Arc::new(Uuid::new_v4()),
+						id: Uuid::new_v4(),
 						inner: Inner::FDB(super::fdb::Datastore::new(s).await?),
 						send,
 						recv,
 					};
 					info!(target: LOG, "Started kvs store at {}", path);
-					ds.register_membership().await?;
-					trace!(target: LOG, "Registered membership for {}", ds.id);
 					Ok(ds)
 				}
 				#[cfg(not(feature = "kv-fdb"))]
@@ -237,22 +227,98 @@ impl Datastore {
 		}
 	}
 
-	// Adds entries to the KV store indicating membership information
-	pub async fn register_membership(&self) -> Result<(), Error> {
+	/// Creates a new datastore instance
+	///
+	/// Use this for clustered environments.
+	pub async fn new_with_bootstrap(path: &str) -> Result<Datastore, Error> {
+		let ds = Datastore::new(path).await?;
+		ds.bootstrap().await?;
+		Ok(ds)
+	}
+
+	// Initialise bootstrap with implicit values intended for runtime
+	pub async fn bootstrap(&self) -> Result<(), Error> {
+		self.bootstrap_full(&self.id).await
+	}
+
+	// Initialise bootstrap with artificial values, intended for testing
+	pub async fn bootstrap_full(&self, node_id: &Uuid) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
-		tx.set_cl(sql::Uuid::from(*self.id.as_ref())).await?;
-		tx.set_hb(sql::Uuid::from(*self.id.as_ref())).await?;
+		let now = tx.clock();
+		let archived = self.register_remove_and_archive(&mut tx, node_id, now).await?;
 		tx.commit().await?;
+
+		let mut tx = self.transaction(true, false).await?;
+		self.remove_archived_lq(&mut tx, archived).await?;
+		Ok(tx.commit().await?)
+	}
+
+	// Node registration + "mark" stage of mark-and-sweep gc
+	pub async fn register_remove_and_archive(
+		&self,
+		tx: &mut Transaction,
+		node_id: &Uuid,
+		timestamp: Timestamp,
+	) -> Result<Vec<Uuid>, Error> {
+		self.register_membership(tx, node_id, timestamp).await?;
+		self.remove_dead_nodes(tx, node_id).await?;
+		Ok(self.archive_dead_lqs(tx, node_id).await?)
+	}
+
+	// Adds entries to the KV store indicating membership information
+	pub async fn register_membership(
+		&self,
+		tx: &mut Transaction,
+		node_id: &Uuid,
+		timestamp: Timestamp,
+	) -> Result<(), Error> {
+		tx.set_cl(sql::Uuid::from(node_id.clone())).await?;
+		tx.set_hb(timestamp, sql::Uuid::from(node_id.clone())).await?;
+		Ok(())
+	}
+
+	pub async fn remove_dead_nodes(
+		&self,
+		_tx: &mut Transaction,
+		_node_id: &Uuid,
+	) -> Result<(), Error> {
+		Ok(())
+	}
+
+	pub async fn archive_dead_lqs(
+		&self,
+		_tx: &mut Transaction,
+		_node_id: &Uuid,
+	) -> Result<Vec<Uuid>, Error> {
+		Ok(vec![])
+	}
+
+	pub async fn remove_archived_lq(
+		&self,
+		_tx: &mut Transaction,
+		_archived: Vec<Uuid>,
+	) -> Result<(), Error> {
 		Ok(())
 	}
 
 	// Creates a heartbeat entry for the member indicating to the cluster
-	// that the node is alive
+	// that the node is alive.
 	pub async fn heartbeat(&self) -> Result<(), Error> {
 		let mut tx = self.transaction(true, false).await?;
-		tx.set_hb(sql::Uuid::from(*self.id.as_ref())).await?;
-		tx.commit().await?;
-		Ok(())
+		let timestamp = tx.clock();
+		self.heartbeat_full(&mut tx, timestamp, &self.id).await?;
+		Ok(tx.commit().await?)
+	}
+
+	// Creates a heartbeat entry for the member indicating to the cluster
+	// that the node is alive. Intended for testing.
+	pub async fn heartbeat_full(
+		&self,
+		tx: &mut Transaction,
+		timestamp: Timestamp,
+		node_id: &Uuid,
+	) -> Result<(), Error> {
+		Ok(tx.set_hb(timestamp, sql::Uuid::from(node_id.clone())).await?)
 	}
 
 	/// Create a new transaction on this datastore

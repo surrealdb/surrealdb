@@ -763,7 +763,7 @@ impl Transaction {
 		}
 	}
 
-	fn clock(&self) -> Timestamp {
+	pub fn clock(&self) -> Timestamp {
 		// Use a timestamp oracle if available
 		let now: u128 = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
 		return Timestamp {
@@ -772,15 +772,14 @@ impl Transaction {
 	}
 
 	// Set heartbeat
-	pub async fn set_hb(&mut self, id: Uuid) -> Result<(), Error> {
-		let now = self.clock();
-		let key = crate::key::hb::Hb::new(now.clone(), id.0);
+	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
+		let key = crate::key::hb::Hb::new(timestamp.clone(), id.0);
 		// We do not need to do a read, we always want to overwrite
 		self.put(
 			key,
 			ClusterMembership {
 				name: id.0.to_string(),
-				heartbeat: now,
+				heartbeat: timestamp,
 			},
 		)
 		.await?;

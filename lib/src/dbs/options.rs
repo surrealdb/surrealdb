@@ -17,7 +17,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct Options {
 	/// Current Node ID
-	pub id: Arc<Uuid>,
+	pub id: Uuid,
 	/// Currently selected NS
 	pub ns: Option<Arc<str>>,
 	/// Currently selected DB
@@ -50,7 +50,7 @@ pub struct Options {
 
 impl Options {
 	/// Create a new Options object
-	pub fn new(id: Arc<Uuid>, send: Sender<Notification>) -> Options {
+	pub fn new(id: Uuid, send: Sender<Notification>) -> Options {
 		Options {
 			id,
 			ns: None,
@@ -72,7 +72,7 @@ impl Options {
 
 	/// Get current Node ID
 	pub fn id(&self) -> &Uuid {
-		self.id.as_ref()
+		&self.id
 	}
 
 	/// Get currently selected NS
