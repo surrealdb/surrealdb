@@ -18,7 +18,6 @@ use channel::Sender;
 use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
-use tracing::callsite::register;
 use tracing::instrument;
 use uuid::Uuid;
 
