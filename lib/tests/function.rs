@@ -882,7 +882,7 @@ async fn function_array_sort_desc() -> Result<(), Error> {
 	let tmp = res.remove(0).result;
 	assert!(
 		matches!(
-			tmp,
+			&tmp,
 			Err(e) if e.to_string() == "Incorrect arguments for function array::sort::desc(). Argument 1 was the wrong type. Expected a array but failed to convert 3 into a array"
 		),
 		"{tmp:?}"
