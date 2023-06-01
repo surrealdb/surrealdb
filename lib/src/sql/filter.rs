@@ -15,6 +15,7 @@ pub enum Filter {
 	Ascii,
 	EdgeNgram(u16, u16),
 	Lowercase,
+	Ngram(u16, u16),
 	Snowball(Language),
 	Uppercase,
 }
@@ -25,6 +26,7 @@ impl Display for Filter {
 			Self::Ascii => f.write_str("ASCII"),
 			Self::EdgeNgram(min, max) => write!(f, "EDGENGRAM({},{})", min, max),
 			Self::Lowercase => f.write_str("LOWERCASE"),
+			Self::Ngram(min, max) => write!(f, "NGRAM({},{})", min, max),
 			Self::Snowball(lang) => write!(f, "SNOWBALL({})", lang),
 			Self::Uppercase => f.write_str("UPPERCASE"),
 		}
@@ -46,6 +48,16 @@ fn edgengram(i: &str) -> IResult<&str, Filter> {
 	Ok((i, Filter::EdgeNgram(min, max)))
 }
 
+fn ngram(i: &str) -> IResult<&str, Filter> {
+	let (i, _) = tag_no_case("NGRAM")(i)?;
+	let (i, _) = openparentheses(i)?;
+	let (i, min) = u16(i)?;
+	let (i, _) = commas(i)?;
+	let (i, max) = u16(i)?;
+	let (i, _) = closeparentheses(i)?;
+	Ok((i, Filter::Ngram(min, max)))
+}
+
 fn lowercase(i: &str) -> IResult<&str, Filter> {
 	let (i, _) = tag_no_case("LOWERCASE")(i)?;
 	Ok((i, Filter::Lowercase))
@@ -65,7 +77,7 @@ fn uppercase(i: &str) -> IResult<&str, Filter> {
 }
 
 fn filter(i: &str) -> IResult<&str, Filter> {
-	alt((ascii, edgengram, lowercase, snowball, uppercase))(i)
+	alt((ascii, edgengram, lowercase, ngram, snowball, uppercase))(i)
 }
 
 pub(super) fn filters(i: &str) -> IResult<&str, Vec<Filter>> {

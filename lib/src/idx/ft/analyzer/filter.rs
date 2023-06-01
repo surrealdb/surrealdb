@@ -7,6 +7,7 @@ use rust_stemmers::{Algorithm, Stemmer};
 pub(super) enum Filter {
 	Stemmer(Stemmer),
 	Ascii,
+	Ngram(u16, u16),
 	EdgeNgram(u16, u16),
 	Lowercase,
 	Uppercase,
@@ -18,6 +19,7 @@ impl From<SqlFilter> for Filter {
 			SqlFilter::Ascii => Filter::Ascii,
 			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(min, max),
 			SqlFilter::Lowercase => Filter::Lowercase,
+			SqlFilter::Ngram(min, max) => Filter::Ngram(min, max),
 			SqlFilter::Snowball(l) => {
 				let a = match l {
 					Language::Arabic => Stemmer::create(Algorithm::Arabic),
@@ -69,10 +71,11 @@ impl Filter {
 
 	pub(super) fn apply_filter(&self, c: &str) -> FilterResult {
 		match self {
+			Filter::Ascii => Self::deunicode(c),
 			Filter::EdgeNgram(min, max) => Self::edgengram(c, *min, *max),
 			Filter::Lowercase => Self::lowercase(c),
+			Filter::Ngram(min, max) => Self::ngram(c, *min, *max),
 			Filter::Stemmer(s) => Self::stem(s, c),
-			Filter::Ascii => Self::deunicode(c),
 			Filter::Uppercase => Self::uppercase(c),
 		}
 	}
@@ -82,9 +85,9 @@ impl Filter {
 		if s.is_empty() {
 			FilterResult::Ignore
 		} else if s.eq(c) {
-			FilterResult::SameTerm
+			FilterResult::Term(Term::Unchanged)
 		} else {
-			FilterResult::NewTerm(s)
+			FilterResult::Term(Term::NewTerm(s))
 		}
 	}
 
@@ -109,16 +112,67 @@ impl Filter {
 	}
 
 	#[inline]
-	fn edgengram(_c: &str, _min: u16, _max: u16) -> FilterResult {
-		FilterResult::NewTerms(true, vec![])
+	fn ngram(c: &str, min: u16, max: u16) -> FilterResult {
+		let min = min as usize;
+		let l = c.len();
+		if l < min {
+			return FilterResult::Ignore;
+		}
+		let mut ng = vec![];
+		let r1 = 0..(l - min);
+		let max = max as usize;
+		for s in r1 {
+			let mut e = s + max;
+			if e > l {
+				e = l;
+			}
+			let r2 = (s + min)..(e + 1);
+			for p in r2 {
+				let n = &c[s..p];
+				if c.eq(n) {
+					ng.push(Term::Unchanged);
+				} else {
+					ng.push(Term::NewTerm(n.to_string()));
+				}
+			}
+		}
+		FilterResult::Terms(ng)
+	}
+
+	#[inline]
+	fn edgengram(c: &str, min: u16, max: u16) -> FilterResult {
+		let min = min as usize;
+		let l = c.len();
+		if l < min {
+			return FilterResult::Ignore;
+		}
+		let mut max = max as usize;
+		if max > l {
+			max = l;
+		}
+		let mut ng = vec![];
+		let r = min..(max + 1);
+		for p in r {
+			let n = &c[0..p];
+			if c.eq(n) {
+				ng.push(Term::Unchanged);
+			} else {
+				ng.push(Term::NewTerm(n.to_string()));
+			}
+		}
+		FilterResult::Terms(ng)
 	}
 }
 
 pub(super) enum FilterResult {
 	Ignore,
-	SameTerm,
+	Term(Term),
+	Terms(Vec<Term>),
+}
+
+pub(super) enum Term {
+	Unchanged,
 	NewTerm(String),
-	NewTerms(bool, Vec<String>),
 }
 
 #[cfg(test)]
@@ -657,12 +711,21 @@ mod tests {
 		);
 	}
 
-	// #[test]
-	// fn test_edgengram() {
-	// 	test_analyser(
-	// 		"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
-	// 		"Alea Jacta Est",
-	// 		&vec!["a", "al", "ale", "j", "ja", "jac", "e", "es", "est"],
-	// 	);
-	// }
+	#[test]
+	fn test_ngram() {
+		test_analyser(
+			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,ngram(2,3);",
+			"Alea Jacta Est",
+			&vec!["al", "ale", "le", "lea", "ja", "jac", "ac", "act", "ct", "cta", "es", "est"],
+		);
+	}
+
+	#[test]
+	fn test_edgengram() {
+		test_analyser(
+			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
+			"Alea Jacta Est",
+			&vec!["al", "ale", "ja", "jac", "es", "est"],
+		);
+	}
 }

@@ -1,4 +1,4 @@
-use crate::idx::ft::analyzer::filter::{Filter, FilterResult};
+use crate::idx::ft::analyzer::filter::{Filter, FilterResult, Term};
 use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 
 pub(super) struct Tokens {
@@ -31,12 +31,24 @@ impl Tokens {
 			let r = f.apply_filter(c);
 			res.push((t, r));
 		}
-		for (t, r) in res {
-			match r {
-				FilterResult::SameTerm => tks.push(t),
-				FilterResult::NewTerm(s) => tks.push(Token::String(s)),
-				FilterResult::NewTerms(_k, _v) => {
-					todo!()
+		for (tk, fr) in res {
+			match fr {
+				FilterResult::Term(t) => match t {
+					Term::Unchanged => tks.push(tk),
+					Term::NewTerm(s) => tks.push(Token::String(s)),
+				},
+				FilterResult::Terms(ts) => {
+					let mut tk = Some(tk);
+					for t in ts {
+						match t {
+							Term::Unchanged => {
+								if let Some(tk) = tk.take() {
+									tks.push(tk)
+								}
+							}
+							Term::NewTerm(s) => tks.push(Token::String(s)),
+						}
+					}
 				}
 				FilterResult::Ignore => {}
 			};
@@ -52,7 +64,7 @@ impl Tokens {
 	}
 }
 
-#[derive(Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
+#[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
 pub(super) enum Token {
 	Ref(usize, usize),
 	String(String),
@@ -66,7 +78,7 @@ impl Token {
 		}
 	}
 
-	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> &'a str {
+	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> &str {
 		match self {
 			Token::Ref(s, e) => &i[*s..*e],
 			Token::String(s) => s,
