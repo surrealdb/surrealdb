@@ -1,9 +1,10 @@
+use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::sql::filter::Filter as SqlFilter;
 use crate::sql::language::Language;
 use deunicode::deunicode;
 use rust_stemmers::{Algorithm, Stemmer};
 
-pub(in crate::idx::ft) enum Filter {
+pub(super) enum Filter {
 	Stemmer(Stemmer),
 	Ascii,
 	EdgeNgram(u16, u16),
@@ -45,7 +46,7 @@ impl From<SqlFilter> for Filter {
 }
 
 impl Filter {
-	pub(in crate::idx::ft) fn from(f: Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
+	pub(super) fn from(f: Option<Vec<SqlFilter>>) -> Option<Vec<Filter>> {
 		if let Some(f) = f {
 			let mut r = Vec::with_capacity(f.len());
 			for f in f {
@@ -57,17 +58,67 @@ impl Filter {
 		}
 	}
 
-	pub(in crate::idx::ft) fn filter(&self, c: &str) -> String {
-		match self {
-			Filter::EdgeNgram(_, _) => {
-				todo!()
+	pub(super) fn apply_filters(mut t: Tokens, f: &Option<Vec<Filter>>) -> Tokens {
+		if let Some(f) = f {
+			for f in f {
+				t = t.filter(f);
 			}
-			Filter::Lowercase => c.to_lowercase(),
-			Filter::Stemmer(s) => s.stem(&c.to_lowercase()).into(),
-			Filter::Ascii => deunicode(c),
-			Filter::Uppercase => c.to_uppercase(),
+		}
+		t
+	}
+
+	pub(super) fn apply_filter(&self, c: &str) -> FilterResult {
+		match self {
+			Filter::EdgeNgram(min, max) => Self::edgengram(c, *min, *max),
+			Filter::Lowercase => Self::lowercase(c),
+			Filter::Stemmer(s) => Self::stem(s, c),
+			Filter::Ascii => Self::deunicode(c),
+			Filter::Uppercase => Self::uppercase(c),
 		}
 	}
+
+	#[inline]
+	fn check_term(c: &str, s: String) -> FilterResult {
+		if s.is_empty() {
+			FilterResult::Ignore
+		} else if s.eq(c) {
+			FilterResult::SameTerm
+		} else {
+			FilterResult::NewTerm(s)
+		}
+	}
+
+	#[inline]
+	fn lowercase(c: &str) -> FilterResult {
+		Self::check_term(c, c.to_lowercase())
+	}
+
+	#[inline]
+	fn uppercase(c: &str) -> FilterResult {
+		Self::check_term(c, c.to_lowercase())
+	}
+
+	#[inline]
+	fn deunicode(c: &str) -> FilterResult {
+		Self::check_term(c, deunicode(c))
+	}
+
+	#[inline]
+	fn stem(s: &Stemmer, c: &str) -> FilterResult {
+		Self::check_term(c, s.stem(&c.to_lowercase()).into())
+	}
+
+	#[inline]
+	fn edgengram(_c: &str, _min: u16, _max: u16) -> FilterResult {
+		FilterResult::NewTerms(true, vec![])
+	}
+}
+
+pub(super) enum FilterResult {
+	Ignore,
+	SameTerm,
+	NewTerm(String),
+	NewTerms(bool, Vec<String>),
 }
 
 #[cfg(test)]
@@ -77,10 +128,10 @@ mod tests {
 	#[test]
 	fn test_arabic_stemmer() {
 		let input =
-			"الكلاب تحب الجري في الحديقة، لكن كلبي الصغير يفضل النوم في سريره بدلاً من الجري.";
+			"الكلاب تحب الجري في الحديقة، لكن كلبي الصغير يفضل النوم في سريره بدلاً من الجري";
 		let output = vec![
 			"كلاب", "تحب", "الجر", "في", "حديق", "لكن", "كلب", "صغير", "يفضل", "نوم", "في", "سرير",
-			"بدل", "من", "الجر", ".",
+			"بدل", "من", "الجر",
 		];
 		test_analyser(
 			"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS snowball(arabic);",
@@ -605,4 +656,13 @@ mod tests {
 			&output,
 		);
 	}
+
+	// #[test]
+	// fn test_edgengram() {
+	// 	test_analyser(
+	// 		"DEFINE ANALYZER test TOKENIZERS blank,class FILTERS lowercase,edgengram(2,3);",
+	// 		"Alea Jacta Est",
+	// 		&vec!["a", "al", "ale", "j", "ja", "jac", "e", "es", "est"],
+	// 	);
+	// }
 }

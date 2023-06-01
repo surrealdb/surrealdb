@@ -1,11 +1,11 @@
 use crate::err::Error;
-use crate::idx::ft::analyzer::tokenizer::{Tokens, Walker};
+use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::doclength::DocLength;
 use crate::idx::ft::postings::TermFrequency;
 use crate::idx::ft::terms::{TermId, Terms};
 use crate::kvs::Transaction;
 use crate::sql::statements::DefineAnalyzerStatement;
-use crate::sql::tokenizer::Tokenizer;
+use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 use crate::sql::Array;
 use filter::Filter;
 use std::collections::hash_map::Entry;
@@ -21,7 +21,7 @@ impl Analyzers {
 }
 
 pub(super) struct Analyzer {
-	t: Option<Vec<Tokenizer>>,
+	t: Option<Vec<SqlTokenizer>>,
 	f: Option<Vec<Filter>>,
 }
 
@@ -41,8 +41,7 @@ impl Analyzer {
 		tx: &mut Transaction,
 		query_string: String,
 	) -> Result<Vec<Option<TermId>>, Error> {
-		let mut tokens = Tokens::new(query_string);
-		self.walk(&mut tokens);
+		let tokens = self.analyse(query_string);
 		// We first collect every unique terms
 		// as it can contains duplicates
 		let mut terms = HashSet::new();
@@ -72,16 +71,15 @@ impl Analyzer {
 		let mut inputs = Vec::with_capacity(field_content.0.len());
 		for v in &field_content.0 {
 			let input = v.to_owned().convert_to_string()?;
-			let mut input = Tokens::new(input);
-			self.walk(&mut input);
-			inputs.push(input);
+			let tks = self.analyse(input);
+			inputs.push(tks);
 		}
 		// We then collect every unique terms and count the frequency
 		let mut terms = HashMap::new();
 		for tokens in &inputs {
 			for token in tokens.list() {
 				doc_length += 1;
-				match terms.entry(tokens.get_token_string(token)) {
+				match terms.entry(tokens.get_token_string(&token)) {
 					Entry::Vacant(e) => {
 						e.insert(1);
 					}
@@ -99,27 +97,27 @@ impl Analyzer {
 		Ok((doc_length, res))
 	}
 
-	fn walk(&self, input: &mut Tokens) {
+	fn analyse(&self, input: String) -> Tokens {
 		if let Some(t) = &self.t {
-			if !t.is_empty() {
-				Walker::walk(t, &self.f, input);
+			if !input.is_empty() {
+				let t = Tokenizer::tokenize(t, input);
+				return Filter::apply_filters(t, &self.f);
 			}
 		}
+		Tokens::new(input)
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::Analyzer;
-	use crate::idx::ft::analyzer::tokenizer::Tokens;
 	use crate::sql::statements::define::analyzer;
 
 	pub(super) fn test_analyser(def: &str, input: &str, expected: &[&str]) {
 		let (_, az) = analyzer(def).unwrap();
 		let a: Analyzer = az.into();
 
-		let mut tokens = Tokens::new(input.to_string());
-		a.walk(&mut tokens);
+		let tokens = a.analyse(input.to_string());
 		let mut res = vec![];
 		for t in tokens.list() {
 			res.push(tokens.get_token_string(t));

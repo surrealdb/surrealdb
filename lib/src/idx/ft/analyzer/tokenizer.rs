@@ -1,7 +1,7 @@
-use crate::idx::ft::analyzer::filter::Filter;
-use crate::sql::tokenizer::Tokenizer;
+use crate::idx::ft::analyzer::filter::{Filter, FilterResult};
+use crate::sql::tokenizer::Tokenizer as SqlTokenizer;
 
-pub(in crate::idx::ft) struct Tokens {
+pub(super) struct Tokens {
 	/// The input string
 	i: String,
 	/// The final list of tokens
@@ -9,49 +9,51 @@ pub(in crate::idx::ft) struct Tokens {
 }
 
 impl Tokens {
-	pub(in crate::idx::ft) fn new(i: String) -> Self {
+	pub(super) fn new(i: String) -> Self {
 		Self {
 			i,
 			t: Vec::new(),
 		}
 	}
 
-	pub(in crate::idx::ft) fn add(&mut self, f: &Option<Vec<Filter>>, s: usize, e: usize) {
-		let mut t = Token::Ref(s, e);
-		if let Some(f) = f {
-			for f in f {
-				let c = self.get_token_string(&t);
-				let s = f.filter(c);
-				if s.is_empty() {
-					break;
-				}
-				// If the new token is equal to the old one, we keep the old one
-				t = if s.eq(c) {
-					t
-				} else {
-					Token::String(s.into())
-				}
+	pub(super) fn get_token_string<'a>(&'a self, t: &'a Token) -> &str {
+		t.get_str(&self.i)
+	}
+
+	pub(super) fn filter(self, f: &Filter) -> Tokens {
+		let mut tks = Vec::new();
+		let mut res = vec![];
+		for t in self.t {
+			if t.is_empty() {
+				continue;
 			}
+			let c = t.get_str(&self.i);
+			let r = f.apply_filter(c);
+			res.push((t, r));
 		}
-		if !t.is_empty() {
-			self.t.push(t);
+		for (t, r) in res {
+			match r {
+				FilterResult::SameTerm => tks.push(t),
+				FilterResult::NewTerm(s) => tks.push(Token::String(s)),
+				FilterResult::NewTerms(_k, _v) => {
+					todo!()
+				}
+				FilterResult::Ignore => {}
+			};
+		}
+		Tokens {
+			i: self.i,
+			t: tks,
 		}
 	}
 
-	pub(in crate::idx::ft) fn get_token_string<'a>(&'a self, t: &'a Token) -> &str {
-		match t {
-			Token::Ref(s, e) => &self.i[*s..*e],
-			Token::String(s) => s,
-		}
-	}
-
-	pub(in crate::idx::ft) fn list(&self) -> &Vec<Token> {
+	pub(super) fn list(&self) -> &Vec<Token> {
 		&self.t
 	}
 }
 
 #[derive(Debug, PartialOrd, PartialEq, Eq, Ord, Hash)]
-pub(in crate::idx::ft) enum Token {
+pub(super) enum Token {
 	Ref(usize, usize),
 	String(String),
 }
@@ -63,14 +65,21 @@ impl Token {
 			Token::String(s) => s.is_empty(),
 		}
 	}
+
+	pub(super) fn get_str<'a>(&'a self, i: &'a str) -> &'a str {
+		match self {
+			Token::Ref(s, e) => &i[*s..*e],
+			Token::String(s) => s,
+		}
+	}
 }
 
-pub(in crate::idx::ft) struct Walker {
+pub(super) struct Tokenizer {
 	splitters: Vec<Splitter>,
 }
 
-impl Walker {
-	pub(in crate::idx::ft) fn new(t: &[Tokenizer]) -> Self {
+impl Tokenizer {
+	pub(in crate::idx::ft) fn new(t: &[SqlTokenizer]) -> Self {
 		Self {
 			splitters: t.iter().map(|t| t.into()).collect(),
 		}
@@ -90,22 +99,18 @@ impl Walker {
 		res
 	}
 
-	pub(in crate::idx::ft) fn walk(
-		t: &Vec<Tokenizer>,
-		f: &Option<Vec<Filter>>,
-		input: &mut Tokens,
-	) {
-		let mut w = Walker::new(t);
+	pub(super) fn tokenize(t: &Vec<SqlTokenizer>, i: String) -> Tokens {
+		let mut w = Tokenizer::new(t);
 		let mut last_pos = 0;
 		let mut current_pos = 0;
-		let mut tks = Vec::new();
-		for c in input.i.chars() {
+		let mut t = Vec::new();
+		for c in i.chars() {
 			let is_valid = Self::is_valid(c);
 			let should_split = w.should_split(c);
 			if should_split || !is_valid {
 				// The last pos may be more advanced due to the is_valid process
 				if last_pos < current_pos {
-					tks.push((last_pos, current_pos));
+					t.push(Token::Ref(last_pos, current_pos));
 				}
 				last_pos = current_pos;
 				// If the character is not valid for indexing (space, control...)
@@ -117,22 +122,22 @@ impl Walker {
 			current_pos += c.len_utf8();
 		}
 		if current_pos != last_pos {
-			tks.push((last_pos, current_pos));
+			t.push(Token::Ref(last_pos, current_pos));
 		}
-
-		for (s, e) in tks {
-			input.add(f, s, e);
+		Tokens {
+			i,
+			t,
 		}
 	}
 }
 
 struct Splitter {
-	t: Tokenizer,
+	t: SqlTokenizer,
 	state: u8,
 }
 
-impl From<&Tokenizer> for Splitter {
-	fn from(t: &Tokenizer) -> Self {
+impl From<&SqlTokenizer> for Splitter {
+	fn from(t: &SqlTokenizer) -> Self {
 		Self {
 			t: t.clone(),
 			state: 0,
@@ -143,9 +148,9 @@ impl From<&Tokenizer> for Splitter {
 impl Splitter {
 	fn should_split(&mut self, c: char) -> bool {
 		let new_state = match &self.t {
-			Tokenizer::Blank => Self::blank_state(c),
-			Tokenizer::Case => Self::case_state(c),
-			Tokenizer::Class => Self::class_state(c),
+			SqlTokenizer::Blank => Self::blank_state(c),
+			SqlTokenizer::Case => Self::case_state(c),
+			SqlTokenizer::Class => Self::class_state(c),
 		};
 		if new_state != self.state {
 			let res = self.state != 0;
