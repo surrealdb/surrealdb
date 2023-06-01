@@ -3,9 +3,9 @@ use crate::dbs::Auth;
 use crate::dbs::Level;
 use crate::dbs::Notification;
 use crate::err::Error;
-use crate::sql::Uuid;
 use channel::Sender;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
 /// statements. An Options contains specific information for how
@@ -17,7 +17,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct Options {
 	/// Current Node ID
-	pub id: Arc<Uuid>,
+	pub id: Uuid,
 	/// Currently selected NS
 	pub ns: Option<Arc<str>>,
 	/// Currently selected DB
@@ -50,10 +50,9 @@ pub struct Options {
 
 impl Options {
 	/// Create a new Options object
-	pub fn new(id: uuid::Uuid, send: Sender<Notification>) -> Options {
-		let sqluuid = Uuid::from(id);
+	pub fn new(id: Uuid, send: Sender<Notification>) -> Options {
 		Options {
-			id: Arc::new(sqluuid),
+			id,
 			ns: None,
 			db: None,
 			dive: 0,
@@ -73,7 +72,7 @@ impl Options {
 
 	/// Get current Node ID
 	pub fn id(&self) -> &Uuid {
-		self.id.as_ref()
+		&self.id
 	}
 
 	/// Get currently selected NS

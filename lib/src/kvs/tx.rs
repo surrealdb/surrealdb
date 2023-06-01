@@ -792,8 +792,8 @@ impl Transaction {
 	}
 
 	// Set heartbeat
-	pub async fn set_hb(&mut self, ts: Timestamp, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::hb::Hb::new(ts.clone(), id.0);
+	pub async fn set_hb(&mut self, timestamp: Timestamp, id: Uuid) -> Result<(), Error> {
+		let key = crate::key::hb::Hb::new(timestamp.clone(), id.0);
 		let debug = crate::key::hb::Hb::encode(&key).unwrap();
 		trace!(
 			"Setting heartbeat {} ({:?}) ({:?})",
@@ -806,7 +806,7 @@ impl Transaction {
 			key,
 			ClusterMembership {
 				name: id.0.to_string(),
-				heartbeat: ts,
+				heartbeat: timestamp,
 			},
 		)
 		.await?;
