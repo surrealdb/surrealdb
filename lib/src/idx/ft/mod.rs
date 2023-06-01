@@ -1,7 +1,6 @@
 pub(crate) mod analyzer;
 pub(crate) mod docids;
 mod doclength;
-mod filter;
 mod postings;
 mod scorer;
 mod termdocs;
