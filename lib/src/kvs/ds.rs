@@ -1,14 +1,16 @@
 use crate::ctx::Context;
 use crate::dbs::cl::Timestamp;
-use crate::dbs::Attach;
 use crate::dbs::Executor;
 use crate::dbs::Notification;
 use crate::dbs::Options;
 use crate::dbs::Response;
 use crate::dbs::Session;
 use crate::dbs::Variables;
+use crate::dbs::{Attach, Auth};
 use crate::err::Error;
 use crate::key::hb::Hb;
+use crate::key::lq;
+use crate::key::lv::Lv;
 use crate::kvs::LOG;
 use crate::sql;
 use crate::sql::Query;
@@ -19,9 +21,20 @@ use futures::lock::Mutex;
 use std::fmt;
 use std::sync::Arc;
 use tracing::instrument;
+use tracing::trace;
 use uuid::Uuid;
 
 use super::tx::Transaction;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+/// Used for cluster logic to move LQ data to LQ cleanup code
+pub struct LqValue {
+	pub cl: Uuid,
+	pub ns: String,
+	pub db: String,
+	pub tb: String,
+	pub lq: Uuid,
+}
 
 /// The underlying datastore instance which stores the dataset.
 #[allow(dead_code)]
@@ -120,7 +133,7 @@ impl Datastore {
 				{
 					info!(target: LOG, "Starting kvs store in {}", path);
 					let ds = Datastore {
-						id: Uuid::new_v4(),
+						id: node_id,
 						inner: Inner::Mem(super::mem::Datastore::new().await?),
 						send,
 						recv,
@@ -139,7 +152,7 @@ impl Datastore {
 					let s = s.trim_start_matches("file://");
 					let s = s.trim_start_matches("file:");
 					let ds = Datastore {
-						id: Uuid::new_v4(),
+						id: node_id,
 						inner: Inner::RocksDB(super::rocksdb::Datastore::new(s).await?),
 						send,
 						recv,
@@ -158,7 +171,7 @@ impl Datastore {
 					let s = s.trim_start_matches("rocksdb://");
 					let s = s.trim_start_matches("rocksdb:");
 					let ds = Datastore {
-						id: Uuid::new_v4(),
+						id: node_id,
 						inner: Inner::RocksDB(super::rocksdb::Datastore::new(s).await?),
 						send,
 						recv,
@@ -177,7 +190,7 @@ impl Datastore {
 					let s = s.trim_start_matches("indxdb://");
 					let s = s.trim_start_matches("indxdb:");
 					let ds = Datastore {
-						id: Uuid::new_v4(),
+						id: node_id,
 						inner: Inner::IndxDB(super::indxdb::Datastore::new(s).await?),
 						send,
 						recv,
@@ -196,7 +209,7 @@ impl Datastore {
 					let s = s.trim_start_matches("tikv://");
 					let s = s.trim_start_matches("tikv:");
 					let ds = Datastore {
-						id: Uuid::new_v4(),
+						id: node_id,
 						inner: Inner::TiKV(super::tikv::Datastore::new(s).await?),
 						send,
 						recv,
@@ -215,7 +228,7 @@ impl Datastore {
 					let s = s.trim_start_matches("fdb://");
 					let s = s.trim_start_matches("fdb:");
 					let ds = Datastore {
-						id: Uuid::new_v4(),
+						id: node_id,
 						inner: Inner::FDB(super::fdb::Datastore::new(s).await?),
 						send,
 						recv,
@@ -250,13 +263,14 @@ impl Datastore {
 
 	// Initialise bootstrap with artificial values, intended for testing
 	pub async fn bootstrap_full(&self, node_id: &Uuid) -> Result<(), Error> {
+		trace!(target: LOG, "Bootstrapping {}", self.id);
 		let mut tx = self.transaction(true, false).await?;
 		let now = tx.clock();
 		let archived = self.register_remove_and_archive(&mut tx, node_id, now).await?;
 		tx.commit().await?;
 
 		let mut tx = self.transaction(true, false).await?;
-		self.remove_archived_lq(&mut tx, archived).await?;
+		self.remove_archived(&mut tx, archived).await?;
 		Ok(tx.commit().await?)
 	}
 
@@ -266,10 +280,13 @@ impl Datastore {
 		tx: &mut Transaction,
 		node_id: &Uuid,
 		timestamp: Timestamp,
-	) -> Result<Vec<Uuid>, Error> {
-		self.register_membership(tx, node_id, timestamp).await?;
-		self.remove_dead_nodes(tx, node_id).await?;
-		Ok(self.archive_dead_lqs(tx, node_id).await?)
+	) -> Result<Vec<LqValue>, Error> {
+		trace!("Registering node {}", node_id);
+		self.register_membership(tx, node_id, &timestamp).await?;
+		// Determine the timeout for when a cluster node is expired
+		let ts_expired = (timestamp.clone() - std::time::Duration::from_secs(5))?;
+		let dead = self.remove_dead_nodes(tx, &ts_expired).await?;
+		Ok(self.archive_dead_lqs(tx, &dead, node_id).await?)
 	}
 
 	// Adds entries to the KV store indicating membership information
@@ -277,80 +294,117 @@ impl Datastore {
 		&self,
 		tx: &mut Transaction,
 		node_id: &Uuid,
-		timestamp: Timestamp,
+		timestamp: &Timestamp,
 	) -> Result<(), Error> {
-		tx.set_cl(sql::Uuid::from(node_id.clone())).await?;
-		tx.set_hb(timestamp, sql::Uuid::from(node_id.clone())).await?;
+		tx.set_cl(node_id.clone()).await?;
+		tx.set_hb(timestamp.clone(), sql::Uuid::from(node_id.clone())).await?;
 		Ok(())
 	}
 
+	/// Delete dead heartbeats and nodes
+	/// Returns node IDs
 	pub async fn remove_dead_nodes(
 		&self,
-		_tx: &mut Transaction,
-		_node_id: &Uuid,
-	) -> Result<(), Error> {
-		Ok(())
+		tx: &mut Transaction,
+		ts: &Timestamp,
+	) -> Result<Vec<Uuid>, Error> {
+		let hbs = self.delete_dead_heartbeats(tx, ts).await?;
+		let mut nodes = vec![];
+		for hb in hbs {
+			trace!("Deleting node {}", &hb.nd);
+			tx.del_cl(hb.nd.clone()).await?;
+			nodes.push(hb.nd);
+		}
+		Ok(nodes)
 	}
 
+	/// Accepts cluster IDs
+	/// Archives related live queries
+	/// Returns live query keys that can be used for deletes
+	///
+	/// The reason we archive first is to stop other nodes from picking it up for further updates
+	/// This means it will be easier to wipe the range in a subsequent transaction
 	pub async fn archive_dead_lqs(
 		&self,
-		_tx: &mut Transaction,
-		_node_id: &Uuid,
-	) -> Result<Vec<Uuid>, Error> {
-		Ok(vec![])
+		tx: &mut Transaction,
+		nodes: &Vec<Uuid>,
+		this_node_id: &Uuid,
+	) -> Result<Vec<LqValue>, Error> {
+		let mut archived = vec![];
+		for nd in nodes.iter() {
+			trace!("Archiving node {}", &nd);
+			// Scan on node prefix for LQ space
+			let node_lqs = tx.scan_lq(nd, 1000).await?;
+			trace!(target: LOG, "Found {} LQ entries for {:?}", node_lqs.len(), nd);
+			for lq in node_lqs {
+				trace!("Archiving query {:?}", &lq);
+				let node_archived_lqs = self.archive_lv_for_node(tx, &lq.cl, this_node_id).await?;
+				for lq_value in node_archived_lqs {
+					archived.push(lq_value);
+				}
+			}
+		}
+		Ok(archived)
 	}
 
-	pub async fn remove_archived_lq(
-		&self,
-		_tx: &mut Transaction,
-		_archived: Vec<Uuid>,
-	) -> Result<(), Error> {
-		Ok(())
-	}
-
-	pub async fn clean_archived(
+	pub async fn remove_archived(
 		&self,
 		tx: &mut Transaction,
-		archived: Vec<Uuid>,
+		archived: Vec<LqValue>,
 	) -> Result<(), Error> {
-		for lq in &archived {
-			trace!("Deleting archived live query {}", &lq);
-			// Delete the parent archived LQ
-			let squid = sql::uuid::Uuid::from(lq.clone());
-			let tb = tx.del_cllv(&squid).await?;
-			// Delete notification range TODO this needs to be a loop
-			tx.delr_tblv(&tb, &squid).await?;
+		for lq in archived {
+			// Delete the cluster key, used for finding LQ associated with a node
+			tx.del(lq::new(&lq.cl, lq.ns.as_str(), lq.db.as_str(), &lq.lq)).await?;
+			// Delete the table key, used for finding LQ associated with a table
+			tx.del(Lv::new(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), lq.lq)).await?;
 		}
-		trace!("Finished archiving lq");
 		Ok(())
 	}
 
 	pub async fn garbage_collect(
+		// TODO not invoked
+		// But this is garbage collection outside of bootstrap
 		&self,
 		tx: &mut Transaction,
 		watermark: &Timestamp,
+		this_node_id: &Uuid,
 	) -> Result<(), Error> {
 		let dead_heartbeats = self.delete_dead_heartbeats(tx, watermark).await?;
 		trace!("Found dead hbs: {:?}", dead_heartbeats);
-		let mut archived: Vec<Uuid> = vec![];
+		let mut archived: Vec<LqValue> = vec![];
 		for hb in dead_heartbeats {
+			let new_archived = self.archive_lv_for_node(tx, &hb.nd, this_node_id).await?;
 			tx.del_cl(hb.nd).await?;
 			trace!("Deleted node {}", hb.nd);
-			let new_archived = self.archive_lv_for_node(hb.nd).await?;
-			archived.extend(new_archived);
+			for lq_value in new_archived {
+				archived.push(lq_value);
+			}
 		}
 		Ok(())
 	}
 
 	// Returns a list of live query IDs
-	pub async fn archive_lv_for_node(&self, nd: Uuid) -> Result<Vec<Uuid>, Error> {
-		// ... in same tx ...
-		// mark nodes as archived
-		Ok(vec![])
+	pub async fn archive_lv_for_node(
+		&self,
+		tx: &mut Transaction,
+		nd: &Uuid,
+		this_node_id: &Uuid,
+	) -> Result<Vec<LqValue>, Error> {
+		let lqs = tx.all_lq(nd).await?;
+		trace!("Archiving lqs and found {} LQ entries for {}", lqs.len(), nd);
+		let mut ret = vec![];
+		for lq in lqs {
+			// let tb = tx.get_lq(&lq.cl, lq.ns.as_str(), lq.db.as_str(), l).await?;
+			let lvs = tx.get_lv(lq.ns.as_str(), lq.db.as_str(), lq.tb.as_str(), &lq.lq).await?;
+			let archived_lvs = lvs.clone().archive(this_node_id.clone());
+			tx.putc_lv(&lq.ns, &lq.db, &lq.tb, archived_lvs, Some(lvs)).await?;
+			ret.push(lq);
+		}
+		Ok(ret)
 	}
 
 	// Accepts a lqid, deletes parent entry and notifications
-	pub async fn delete_lv(&self, lq: Uuid) -> Result<(), Error> {
+	pub async fn delete_lv(&self, _lq: Uuid) -> Result<(), Error> {
 		// open tx
 		// find the live queries for node id
 		// mark the live queries as archived
@@ -475,7 +529,7 @@ impl Datastore {
 		strict: bool,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
-		let mut opt = Options::new(self.id.clone(), self.send.clone());
+		let mut opt = Options::new(self.id.clone(), self.send.clone(), Auth::No);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -527,7 +581,7 @@ impl Datastore {
 		strict: bool,
 	) -> Result<Vec<Response>, Error> {
 		// Create a new query options
-		let mut opt = Options::new(self.id.clone(), self.send.clone());
+		let mut opt = Options::new(self.id.clone(), self.send.clone(), Auth::No);
 		// Create a new query executor
 		let mut exe = Executor::new(self);
 		// Create a default context
@@ -578,7 +632,7 @@ impl Datastore {
 		strict: bool,
 	) -> Result<Value, Error> {
 		// Create a new query options
-		let mut opt = Options::new(self.id.clone(), self.send.clone());
+		let mut opt = Options::new(self.id.clone(), self.send.clone(), Auth::No);
 		// Start a new transaction
 		let txn = self.transaction(val.writeable(), false).await?;
 		// Wrap transaction safely

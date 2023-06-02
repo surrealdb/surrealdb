@@ -41,6 +41,7 @@ pub mod az; // Stores a DEFINE ANALYZER config definition
 pub mod cl; // Stores cluster membership information
 pub mod database; // Stores the key prefix for all keys under a database
 pub mod db; // Stores a DEFINE DATABASE config definition
+pub mod debug;
 pub mod dl; // Stores a DEFINE LOGIN ON DATABASE config definition
 pub mod dt; // Stores a DEFINE LOGIN ON DATABASE config definition
 pub mod ev; // Stores a DEFINE EVENT config definition

@@ -3,6 +3,8 @@ use crate::dbs::Level;
 use crate::dbs::Options;
 use crate::dbs::Transaction;
 use crate::err::Error;
+use crate::key::lq::Lq;
+use crate::key::lv::Lv;
 use crate::sql::comment::shouldbespace;
 use crate::sql::cond::{cond, Cond};
 use crate::sql::error::IResult;
@@ -29,6 +31,11 @@ pub struct LiveStatement {
 	pub what: Value,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
+
+	// Non-query properties
+
+	// When a live query is archived, this should be the node ID that archived the query.
+	pub archived: Option<Uuid>,
 }
 
 impl LiveStatement {
@@ -55,14 +62,19 @@ impl LiveStatement {
 			Value::Table(tb) => {
 				// Clone the current statement
 				let mut stm = self.clone();
+				trace!("The statement is: {:?}", stm);
 				// Store the current Node ID
 				stm.node = opt.id.clone();
 				// Insert the node live query
 				let key = crate::key::lq::new(opt.id(), opt.ns(), opt.db(), &self.id);
-				run.putc(key, tb.as_str(), None).await?;
+				let key_enc = Lq::encode(&key)?;
+				trace!("Inserting node live query: {}", crate::key::debug::sprint_key(&key_enc));
+				run.putc(key_enc, tb.as_str(), None).await?;
 				// Insert the table live query
 				let key = crate::key::lv::new(opt.ns(), opt.db(), &tb, &self.id);
-				run.putc(key, stm, None).await?;
+				let key_enc = Lv::encode(&key)?;
+				trace!("Inserting table live query: {:?}", crate::key::debug::sprint_key(&key_enc));
+				run.putc(key_enc, stm, None).await?;
 			}
 			v => {
 				return Err(Error::LiveStatement {
@@ -72,6 +84,18 @@ impl LiveStatement {
 		};
 		// Return the query id
 		Ok(self.id.into())
+	}
+
+	pub(crate) fn archive(self, node_id: Uuid) -> LiveStatement {
+		LiveStatement {
+			id: self.id,
+			node: self.node,
+			expr: self.expr,
+			what: self.what,
+			cond: self.cond,
+			fetch: self.fetch,
+			archived: Some(node_id),
+		}
 	}
 }
 
@@ -107,6 +131,7 @@ pub fn live(i: &str) -> IResult<&str, LiveStatement> {
 			what,
 			cond,
 			fetch,
+			archived: None,
 		},
 	))
 }

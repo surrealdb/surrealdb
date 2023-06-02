@@ -19,7 +19,6 @@ use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
-use std::path::Path;
 use std::process::ExitCode;
 
 pub const LOG: &str = "surrealdb::cli";

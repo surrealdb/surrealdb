@@ -314,7 +314,7 @@ impl Transaction {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::tests::transaction::verify_transaction_isolation;
+	use crate::kvs::tests::tx_isolation::transaction::verify_transaction_isolation;
 	use temp_dir::TempDir;
 
 	// https://github.com/surrealdb/surrealdb/issues/76

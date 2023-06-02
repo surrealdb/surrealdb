@@ -1,4 +1,4 @@
-#[cfg(feature = "kv-mem")]
+#[cfg(all(test, feature = "kv-mem"))]
 pub(crate) mod table {
 	use crate::err::Error;
 	use crate::key::tb;

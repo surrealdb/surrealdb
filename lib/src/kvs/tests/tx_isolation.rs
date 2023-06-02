@@ -1,4 +1,4 @@
-#[cfg(any(feature = "kv-tikv", feature = "kv-rocksdb", feature = "kv-fdb"))]
+#[cfg(all(test, any(feature = "kv-tikv", feature = "kv-rocksdb", feature = "kv-fdb")))]
 pub(crate) mod transaction {
 	use crate::dbs::{Response, Session};
 	use crate::kvs::ds::Inner;
@@ -77,9 +77,7 @@ pub(crate) mod transaction {
 		async fn clone(&self) -> Self {
 			let ds = match &self.ds.inner {
 				#[cfg(feature = "kv-rocksdb")]
-				Inner::RocksDB(ds) => Datastore {
-					inner: Inner::RocksDB(ds.clone()),
-				},
+				Inner::RocksDB(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				#[cfg(feature = "kv-tikv")]
 				Inner::TiKV(_) => Datastore::new(&self.ds_path).await.unwrap(),
 				#[cfg(feature = "kv-fdb")]

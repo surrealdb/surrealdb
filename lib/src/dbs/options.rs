@@ -50,7 +50,7 @@ pub struct Options {
 
 impl Options {
 	/// Create a new Options object
-	pub fn new(id: Uuid, send: Sender<Notification>) -> Options {
+	pub fn new(id: Uuid, send: Sender<Notification>, auth: Auth) -> Options {
 		Options {
 			id,
 			ns: None,
@@ -66,7 +66,7 @@ impl Options {
 			indexes: true,
 			futures: false,
 			sender: send,
-			auth: Arc::new(Auth::No),
+			auth: Arc::new(auth),
 		}
 	}
 

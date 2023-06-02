@@ -24,15 +24,18 @@ use crate::dbs::cl::ClusterMembership;
 use crate::dbs::cl::Timestamp;
 use crate::err::Error;
 use crate::key::hb::Hb;
-use crate::key::thing;
+use crate::key::lq::Lq;
+use crate::key::lv::Lv;
+use crate::key::{lq, thing};
 use crate::kvs::cache::Cache;
 use crate::kvs::cache::Entry;
+use crate::kvs::LqValue;
 use crate::sql;
 use crate::sql::paths::EDGE;
 use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::thing::Thing;
-use crate::sql::{Uuid, Value};
+use crate::sql::{Strand, Uuid, Value};
 
 use super::kv::Add;
 use super::kv::Convert;
@@ -740,15 +743,15 @@ impl Transaction {
 	// Register cluster membership
 	// NOTE: Setting cluster membership sets the heartbeat
 	// Remember to set the heartbeat as well
-	pub async fn set_cl(&mut self, id: Uuid) -> Result<(), Error> {
-		let key = crate::key::cl::Cl::new(id.0);
-		match self.get_cl(id.clone()).await? {
+	pub async fn set_cl(&mut self, id: uuid::Uuid) -> Result<(), Error> {
+		let key = crate::key::cl::Cl::new(id);
+		match self.get_cl(id).await? {
 			Some(_) => Err(Error::ClAlreadyExists {
-				value: id.0.to_string(),
+				value: id.to_string(),
 			}),
 			None => {
 				let value = ClusterMembership {
-					name: id.0.to_string(),
+					name: id.to_string(),
 					heartbeat: self.clock(),
 				};
 				self.put(key, value).await?;
@@ -774,8 +777,8 @@ impl Transaction {
 	}
 
 	// Retrieve cluster information
-	pub async fn get_cl(&mut self, id: Uuid) -> Result<Option<ClusterMembership>, Error> {
-		let key = crate::key::cl::Cl::new(id.0);
+	pub async fn get_cl(&mut self, id: uuid::Uuid) -> Result<Option<ClusterMembership>, Error> {
+		let key = crate::key::cl::Cl::new(id);
 		let val = self.get(key).await?;
 		match val {
 			Some(v) => Ok(Some::<ClusterMembership>(v.into())),
@@ -861,6 +864,53 @@ impl Transaction {
 		Ok(out)
 	}
 
+	pub async fn scan_cl(&mut self, limit: u32) -> Result<Vec<ClusterMembership>, Error> {
+		let beg = crate::key::cl::Cl::prefix();
+		let end = crate::key::cl::Cl::suffix();
+		trace!("Scan start: {} ({:?})", String::from_utf8_lossy(&beg).to_string(), &beg);
+		trace!("Scan end: {} ({:?})", String::from_utf8_lossy(&end).to_string(), &end);
+		let mut nxt: Option<Key> = None;
+		let mut num = limit;
+		let mut out: Vec<ClusterMembership> = vec![];
+		// Start processing
+		while num > 0 {
+			// Get records batch
+			let res = match nxt {
+				None => {
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+				Some(ref mut beg) => {
+					beg.push(0x00);
+					let min = beg.clone();
+					let max = end.clone();
+					let num = std::cmp::min(1000, num);
+					self.scan(min..max, num).await?
+				}
+			};
+			// Get total results
+			let n = res.len();
+			// Exit when settled
+			if n == 0 {
+				break;
+			}
+			// Loop over results
+			for (i, (k, v)) in res.into_iter().enumerate() {
+				// Ready the next
+				if n == i + 1 {
+					nxt = Some(k.clone());
+				}
+				out.push((&v).into());
+				// Count
+				num -= 1;
+			}
+		}
+		trace!("scan_hb: {:?}", out);
+		Ok(out)
+	}
+
 	pub async fn delr_hb(&mut self, ts: Vec<Hb>, limit: u32) -> Result<(), Error> {
 		trace!("delr_hb: ts={:?} limit={:?}", ts, limit);
 		for hb in ts.into_iter() {
@@ -869,11 +919,55 @@ impl Transaction {
 		Ok(())
 	}
 
-	pub async fn delr_tblv(&mut self, tb: &Uuid, lv: &Uuid) -> Result<(), Error> {
-		trace!("delr_tblv: tb={:?} lv={:?}", tb, lv);
-		Err(Error::TbNotFound {
-			value: format!("Missing table {:?} live query {:?}", tb, lv),
-		})
+	pub async fn del_lv(&mut self, ns: &str, db: &str, tb: &str, lv: &Uuid) -> Result<(), Error> {
+		trace!("del_lv: ns={:?} db={:?} tb={:?} lv={:?}", ns, db, tb, lv);
+		let key = crate::key::lv::new(ns, db, tb, lv);
+		self.cache.del(&key.clone().into());
+		self.del(key).await
+	}
+
+	pub async fn scan_lq<'a>(
+		&mut self,
+		node: &uuid::Uuid,
+		limit: u32,
+	) -> Result<Vec<LqValue>, Error> {
+		let pref = lq::prefix_nd(node);
+		let suff = lq::suffix_nd(node);
+		trace!(
+			"Scanning range from pref={}, suff={}",
+			crate::key::debug::sprint_key(&pref),
+			crate::key::debug::sprint_key(&suff),
+		);
+		let rng = pref..suff;
+		let scanned = self.scan(rng, limit).await?;
+		let mut res: Vec<LqValue> = vec![];
+		for (key, value) in scanned {
+			trace!("scan_lq: key={:?} value={:?}", &key, &value);
+			let lq = Lq::decode(key.as_slice())?;
+			let tb: String = String::from_utf8(value).unwrap();
+			res.push(LqValue {
+				cl: lq.nd,
+				ns: lq.ns.to_string(),
+				db: lq.db.to_string(),
+				tb,
+				lq: lq.lq,
+			});
+		}
+		Ok(res)
+	}
+
+	pub async fn putc_lv(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		live_stm: LiveStatement,
+		expected: Option<LiveStatement>,
+	) -> Result<(), Error> {
+		let key = crate::key::lv::new(ns, db, tb, &live_stm.id);
+		let key_enc = Lv::encode(&key)?;
+		trace!("putc_lv ({:?}): key={:?}", &live_stm.id, crate::key::debug::sprint_key(&key_enc));
+		self.putc(key_enc, live_stm, expected).await
 	}
 
 	/// Retrieve all namespace definitions in a datastore.
@@ -1233,6 +1327,30 @@ impl Transaction {
 			val
 		})
 	}
+
+	pub async fn all_lq(&mut self, nd: &uuid::Uuid) -> Result<Vec<LqValue>, Error> {
+		let beg = crate::key::lq::prefix_nd(nd);
+		let end = crate::key::lq::suffix_nd(nd);
+		let lq_pairs = self.getr(beg..end, u32::MAX).await?;
+		let mut lqs = vec![];
+		for (key, value) in lq_pairs {
+			let lq_key = Lq::decode(key.as_slice())?;
+			trace!("Value is {:?}", &value);
+			let lq_value = String::from_utf8(value).map_err(|e| {
+				Error::Internal(format!("Failed to decode a value while reading LQ: {}", e))
+			})?;
+			let lqv = LqValue {
+				cl: nd.clone(),
+				ns: lq_key.ns.clone().to_string(),
+				db: lq_key.db.clone().to_string(),
+				tb: lq_value,
+				lq: lq_key.lq.clone(),
+			};
+			lqs.push(lqv);
+		}
+		Ok(lqs)
+	}
+
 	/// Retrieve all analyzer definitions for a specific database.
 	pub async fn all_az(
 		&mut self,
@@ -1359,6 +1477,37 @@ impl Transaction {
 		let key = crate::key::fc::new(ns, db, fc);
 		let val = self.get(key).await?.ok_or(Error::FcNotFound {
 			value: fc.to_owned(),
+		})?;
+		Ok(val.into())
+	}
+
+	/// Return the table stored at the lq address
+	pub async fn get_lq(
+		&mut self,
+		nd: &uuid::Uuid,
+		ns: &str,
+		db: &str,
+		lq: &uuid::Uuid,
+	) -> Result<Strand, Error> {
+		let key = crate::key::lq::new(nd, ns, db, lq);
+		let val = self.get(key).await?.ok_or(Error::LqNotFound {
+			value: lq.to_string(),
+		})?;
+		Value::from(val).convert_to_strand()
+	}
+
+	pub async fn get_lv(
+		&mut self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		lv: &uuid::Uuid,
+	) -> Result<LiveStatement, Error> {
+		let key = crate::key::lv::new(ns, db, tb, lv);
+		let key_enc = Lv::encode(&key)?;
+		trace!("Getting lv ({:?}) {:?}", lv, crate::key::debug::sprint_key(&key_enc));
+		let val = self.get(key_enc).await?.ok_or(Error::LvNotFound {
+			value: lv.to_string(),
 		})?;
 		Ok(val.into())
 	}

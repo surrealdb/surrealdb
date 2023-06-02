@@ -1,3 +1,5 @@
+use crate::err::Error;
+use crate::err::Error::TimestampOverflow;
 use derive::{Key, Store};
 use serde::{Deserialize, Serialize};
 use std::ops::{Add, Sub};
@@ -43,19 +45,30 @@ impl Add<Duration> for Timestamp {
 	}
 }
 
-impl Sub for Timestamp {
-	type Output = Duration;
-	fn sub(self, rhs: Timestamp) -> Duration {
-		Duration::from_millis(self.value - rhs.value)
-	}
-}
+// impl Sub for Timestamp {
+// 	type Output = Duration;
+// 	fn sub(self, rhs: Timestamp) -> Duration {
+// 		if self.value <= rhs.value {
+// 			Duration::new(0, 0)
+// 		}
+// 		Duration::from_millis(self.value - rhs.value)
+// 	}
+// }
 
 impl Sub<Duration> for Timestamp {
-	type Output = Timestamp;
-	fn sub(self, rhs: Duration) -> Timestamp {
-		Timestamp {
-			value: self.value - (rhs.as_millis() as u64),
+	type Output = Result<Timestamp, Error>;
+	fn sub(self, rhs: Duration) -> Self::Output {
+		let millis = rhs.as_secs() as u64;
+		if self.value <= millis {
+			// Removing the duration from this timestamp will cause it to overflow
+			return Err(TimestampOverflow(format!(
+				"Failed to subtract {} from {}",
+				&millis, &self.value
+			)));
 		}
+		return Ok(Timestamp {
+			value: self.value - millis,
+		});
 	}
 }
 

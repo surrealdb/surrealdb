@@ -61,7 +61,7 @@ mod tests {
 			"test",
 			"test",
 			"test",
-			Uuid::default(),
+			Uuid::new_v4(),
 		);
 		let enc = Lv::encode(&val).unwrap();
 		let dec = Lv::decode(&enc).unwrap();

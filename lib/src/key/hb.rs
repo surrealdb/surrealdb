@@ -16,6 +16,9 @@ pub struct Hb {
 
 impl Hb {
 	pub fn new(hb: Timestamp, nd: Uuid) -> Self {
+		// lib setup has override for warning and prefix/suffix is technically dead code for some reason
+		// let _ = Hb::prefix();
+		// let _ = Hb::suffix(&hb);
 		Self {
 			__: b'/',
 			_a: b'!',
@@ -55,8 +58,6 @@ impl From<Timestamp> for Hb {
 
 #[cfg(test)]
 mod tests {
-	use time::format_description::well_known::iso8601::FormattedComponents::Time;
-
 	#[test]
 	fn key() {
 		use super::*;
@@ -70,20 +71,20 @@ mod tests {
 		assert_eq!(val, dec);
 	}
 
-	fn prefix() {
-		use super::*;
-		let actual = Hb::prefix();
-		let expected = vec![b'/', b'!', b'h', b'b', 0];
-		assert_eq!(actual, expected)
-	}
-
-	fn suffix() {
-		use super::*;
-		let ts: Timestamp = Timestamp {
-			value: 456,
-		};
-		let actual = Hb::suffix(&ts);
-		let expected = vec![b'/', b'!', b'h', b'b', 0]; // Incorrect, should be adjusted
-		assert_eq!(actual, expected)
-	}
+	// fn prefix() {
+	// 	use super::*;
+	// 	let actual = Hb::prefix();
+	// 	let expected = vec![b'/', b'!', b'h', b'b', 0];
+	// 	assert_eq!(actual, expected)
+	// }
+	//
+	// fn suffix() {
+	// 	use super::*;
+	// 	let ts: Timestamp = Timestamp {
+	// 		value: 456,
+	// 	};
+	// 	let actual = Hb::suffix(&ts);
+	// 	let expected = vec![b'/', b'!', b'h', b'b', 0]; // Incorrect, should be adjusted
+	// 	assert_eq!(actual, expected)
+	// }
 }

@@ -23,6 +23,18 @@ impl Cl {
 			nd,
 		}
 	}
+
+	pub fn prefix() -> Vec<u8> {
+		let mut k = super::kv::new().encode().unwrap();
+		k.extend_from_slice(&[b'!', b'h', b'b', 0x00]);
+		k
+	}
+
+	pub fn suffix() -> Vec<u8> {
+		let mut k = super::kv::new().encode().unwrap();
+		k.extend_from_slice(&[b'!', b'h', b'b', 0xff]);
+		k
+	}
 }
 
 #[cfg(test)]
